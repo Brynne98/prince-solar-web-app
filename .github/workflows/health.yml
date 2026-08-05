@@ -1,0 +1,59 @@
+# Alert if the dashboard stops logging.
+#
+# The poller runs every minute inside Supabase. If it stops — function erroring,
+# cron unscheduled, Vault secret rotated, project paused for inactivity — nothing
+# announces it; the dashboard just quietly shows older and older numbers. This
+# checks freshness and FAILS when data is stale, and GitHub emails you on a failed
+# workflow run by default.
+#
+# Caveats worth knowing rather than discovering:
+#   * GitHub's scheduled runs are best-effort and can be delayed by 10+ minutes at
+#     peak, so treat this as "you'll know within the hour", not a pager.
+#   * GitHub disables cron workflows in repos with no pushes for 60 days. It emails
+#     you first. Any commit re-arms it.
+#   * It only calls api_health(), which returns nothing but a staleness number.
+name: Check the logger is alive
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # every 30 minutes
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query freshness
+        env:
+          SUPABASE_URL: https://pmakzojwhouamawgszrc.supabase.co
+          # Publishable key: public by design, and api_health is the only thing it
+          # can call. Everything else needs an authenticated session.
+          SUPABASE_KEY: sb_publishable_PTYy9-EiqSFUVaFMLlCMnQ_DejfmixB
+        run: |
+          set -euo pipefail
+
+          code=$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 30 \
+            -X POST "$SUPABASE_URL/rest/v1/rpc/api_health" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H 'Content-Type: application/json' \
+            -d '{}') || true
+
+          echo "HTTP $code"
+          cat /tmp/health.json || true
+          echo
+
+          if [ "$code" != "200" ]; then
+            echo "::error::Supabase did not answer (HTTP $code). The project may be paused, or the key rotated."
+            exit 1
+          fi
+
+          stale=$(jq -r '.stale' /tmp/health.json)
+          age=$(jq -r '.ageSeconds // "null"' /tmp/health.json)
+
+          if [ "$stale" != "false" ]; then
+            mins=$([ "$age" = "null" ] && echo "?" || echo $(( age / 60 )))
+            echo "::error::Logger appears stopped — last row was ${mins} minutes ago. Check cron.job_run_details and net._http_response in the SQL editor."
+            exit 1
+          fi
+
+          echo "OK — last logged $(( age / 60 ))m $(( age % 60 ))s ago"
