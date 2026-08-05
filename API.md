@@ -13,7 +13,8 @@ app uses — *not* the official signed OpenAPI at `openapi.sunsynk.net`.
 ## Authentication
 
 > ⚠️ The old plaintext login (`POST /oauth/token`) was removed by SunSynk and now
-> 404s. The current flow (implemented in `server.js` → `login()`) is:
+> 404s. The current flow (implemented in
+> `supabase/functions/_shared/sunsynk.ts` → `login()`) is:
 
 1. **Fetch RSA public key**
    `GET /anonymous/publicKey?nonce={ms}&source=sunsynk&sign={md5}`
@@ -38,17 +39,46 @@ app uses — *not* the official signed OpenAPI at `openapi.sunsynk.net`.
 
 ---
 
-## This app's HTTP routes (what `server.js` serves)
+## This app's read API (Postgres functions)
 
-| Route | Returns |
-|-------|---------|
-| `GET /api/overview` | Aggregated + per-inverter live snapshot (see below) |
-| `GET /api/history?date=YYYY-MM-DD` | Per-plant 5-min day series (defaults to today). Logged days are a complete 5-min grid — `value: null` marks buckets with no data anywhere, `est: true` marks cloud-recovered buckets (`source='plantfeed'` rows), `gapMinutes` counts truly-missing minutes, `recoveredMinutes` counts cloud-recovered ones. Viewing a day with holes triggers recovery |
-| `GET /api/history/earliest` | `{ earliest: "YYYY-MM-DD" }` — first day with data (≈ commission date); lower bound for the day picker. Cached for the process lifetime |
-| `GET /api/db/stats` | Local history-log health: `{ rows, days, first, last }` |
-| `GET /api/trends/by-hour?days=N` | Avg power per hour-of-day (local time) from the local log: `pv_w / load_w / grid_w / soc / surplus_w`. Basis for geyser/load timing |
-| `GET /api/integrity?days=N` | Physics audit (DATA_PIPELINE.md §9A/§9B): per-day energy-balance residual, battery-sign-vs-SOC violations, gap minutes, and `flags`. Same engine as `npm run check` |
-| `GET /api/debug/:sn` | Raw passthrough of the 5 realtime endpoints for one inverter — use this to discover/verify fields |
+Every endpoint is a Postgres function called over PostgREST:
+
+```
+POST /rest/v1/rpc/<name>
+  apikey: <publishable key>
+  Authorization: Bearer <user session JWT>
+  {"p_days": 14}
+```
+
+EXECUTE is granted to `authenticated` only, so a signed-in session is required —
+the publishable key alone gets `42501 permission denied`. The JSON shapes are
+unchanged from the original Express routes, which is why `public/data.jsx` only
+needed its transport swapped.
+
+| RPC | Params | Returns |
+|-----|--------|---------|
+| `api_overview` | — | Aggregated + per-inverter snapshot from the newest logged minute (see below) |
+| `api_history` | `p_date` | Per-plant 5-min day series (defaults to today), re-gridded onto all 288 buckets. `value: null` marks buckets with no data anywhere, `est: true` marks cloud-recovered buckets (`source='plantfeed'`), `gapMinutes` counts truly-missing minutes, `recoveredMinutes` counts recovered ones |
+| `api_history_earliest` | — | `{ earliest }` — first day with data (≈ commission date); lower bound for the day picker |
+| `api_energy` | `p_period` | `week` / `month` / `year` / `lifetime` kWh rows from the cached plant totals |
+| `api_db_stats` | — | History-log health: rows, distinct days, first/last timestamps |
+| `api_trends_by_hour` | `p_days` | Avg power per hour-of-day from complete days only: `pv_w / load_w / baseline_load_w / grid_w / soc / surplus_w / spare_w` |
+| `api_trends_daily` | `p_days` | Last N days of plant kWh totals |
+| `api_trends_monthly` | — | Every month on record, tagged year + month |
+| `api_trends_compare` | — | Period-over-period totals, each compared against the same elapsed slice of the previous period |
+| `api_trends_segments` | `p_days` | Avg power per day-segment with load split by source (solar / battery / grid) |
+| `api_trends_potential` | `p_date` | Calibrated clear-sky potential curve: `{ scaleW, points[] }` |
+| `api_balance` | — | Bank desync signal (sustained 10-min SOC spread) plus battery temperature and time-at-full |
+
+Internal `q_*` primitives (the equivalent of the old `db.js` exports) are
+`service_role`-only except for the read-only ones the `api_*` wrappers call.
+
+**Not exposed:** the old `GET /api/debug/:sn` raw passthrough. It proxies live to
+SunSynk, so publishing it would let anyone burn the account's API quota. It still
+exists in `server.js` for local field discovery.
+
+Physics auditing (`integrityReport`, DATA_PIPELINE.md §9A/§9B) has no RPC — it is a
+CLI concern, run with `npm run check` against a local SQLite log.
 
 ## Underlying SunSynk endpoints used (per inverter, refresh ~1×/min)
 
@@ -145,18 +175,24 @@ Legend for **Used**: ✅ shown on dashboard · ⬜ fetched/available but not dis
 `sn`, `alias`, `model` (`equipModel`), `status` (online/offline), `plant.id` + `plant.name`,
 `softVer` / `hmiVer` (firmware), `gsn` (datalogger serial).
 
-### 📈 History — `/api/history`
+### 📈 History — `/plant/energy/{plantId}/day` (upstream)
 
 Per-plant, per-day, **5-minute resolution (~288 points/day)**. Series:
-**PV** (W), **Battery** (W), **SOC** (%), **Load** (W), **Grid** (W).
+**PV** (W), **Battery** (W), **SOC** (%), **Load** (W), **Grid** (W). This is the
+upstream feed `recover` reads to backfill logger-offline minutes — the dashboard's
+own day chart comes from `api_history`, built on our minute log.
 
 **How far back:** any date is accepted, but the cloud only has data from when the
 plant first reported — i.e. commissioning, **not** a fixed retention window. Dates
-before that return `HTTP 200` with an **empty** `infos` array (no error), so the UI
-treats "empty" as "no data for this day". On this account data begins **2026-05-26**
-(verified by walking the yearly/monthly energy endpoints — every earlier
-year/month comes back empty). The history window therefore grows by one day per
-day; it isn't trimmed from the back. `/api/history/earliest` reports the floor.
+before that return `HTTP 200` with an **empty** `infos` array (no error), so the
+caller treats "empty" as "no data for this day". On this account data begins
+**2026-05-26**. The history window therefore grows by one day per day; it isn't
+trimmed from the back. `api_history_earliest` reports the floor.
+
+Note the *5-minute detail* above is not retained indefinitely — roughly 1–2 weeks —
+which is why `recover` sweeps a rolling 14-day window and why keeping our own
+minute log matters at all. The daily/monthly **kWh totals** do go back to
+commissioning, and those are what `sync-plant-energy` caches.
 
 ---
 

@@ -1,97 +1,158 @@
 # SunSynk Live Dashboard
 
-A small local web app that logs into **SunSynk Connect** (the same account you use
-at [sunsynk.net](https://www.sunsynk.net) / the mobile app) and shows live data from
-**all inverters on your account** on one dashboard — solar generation, battery state
-of charge, grid import/export, home load, plus a live energy-flow diagram and a
-"today" chart.
+A dashboard for a **SunSynk Connect** solar install: live solar generation, battery
+state of charge, grid import/export, home load, an energy-flow diagram, day charts,
+and longer-run trends across **every inverter on the account**.
 
-It runs entirely on your own machine. Your credentials live in a local `.env` file
-and are only ever sent to `api.sunsynk.net` — nowhere else.
+It also keeps its own minute-by-minute history, which is the point of it. SunSynk's
+cloud drops detail after a week or two; this logs every minute permanently, so the
+trends, integrity checks and battery-health views have something real to work from.
 
-> Two inverters? No setup needed — the app discovers every inverter on the account
-> automatically and shows a combined summary plus a card per inverter.
-
----
-
-## Requirements
-
-- [Node.js](https://nodejs.org) **18 or newer** (check with `node --version`)
-- Your SunSynk Connect email + password
-
-## Setup
-
-```bash
-# 1. install dependencies
-npm install
-
-# 2. add your credentials
-cp .env.example .env
-#   then open .env and fill in SUNSYNK_USERNAME and SUNSYNK_PASSWORD
-
-# 3. start it
-npm start
-```
-
-Then open **http://localhost:3000** in your browser.
-
----
-
-## What you'll see
-
-- **Energy Flow** — animated diagram of power moving between solar, battery, grid and home.
-- **Summary tiles** — combined solar, battery SoC, grid, and load across both inverters.
-- **Today** — a chart of the day's PV / load / grid / battery, pulled from SunSynk.
-- **Inverters** — one card per inverter with its own live readings.
-
-Data auto-refreshes every 30 seconds (toggle it off with the **Auto** switch).
-Note that SunSynk's cloud itself only updates roughly once a minute, so that's the
-real ceiling on how "live" the numbers can be.
-
----
-
-## Tweaks & troubleshooting
-
-**Battery shows charging when it should be discharging (or vice-versa)**
-SunSynk firmware differs on this. In `.env`, set
-`BATTERY_POSITIVE_MEANS=charging` (or `discharging`) until it matches your app.
-
-**Login fails / nothing loads**
-- Double-check the email and password in `.env` (same as the SunSynk website).
-- Make sure your inverters have a working WiFi data-logger reporting to SunSynk Connect.
-- If you're in a region with a different endpoint, try setting `API_BASE` in `.env`.
-
-**Want to verify the raw numbers / field names for your hardware**
-Visit `http://localhost:3000/api/debug/<your-inverter-serial>` to see the raw API
-responses the app is reading from. Useful if a value looks off and you want to map it.
-
-**Change the port**
-Set `PORT=8080` (for example) in `.env`.
+> Two inverters? No setup needed — every inverter on the account is discovered
+> automatically and shown as a combined summary plus a card each.
 
 ---
 
 ## How it works
 
+The backend runs on Supabase. Nothing needs to stay switched on at home.
+
 ```
-browser ──> Node/Express server (this app) ──> api.sunsynk.net
-            • handles login + token refresh
-            • fetches grid/battery/PV/load/output per inverter
-            • aggregates totals, serves the dashboard
+                    ┌──────────────── Supabase ────────────────┐
+                    │                                          │
+   pg_cron ─ 1/min ─┼─> poll ──────────────> api.sunsynk.net   │
+   pg_cron ─ 6h ────┼─> recover ───────────> api.sunsynk.net   │
+   pg_cron ─ daily ─┼─> sync-plant-energy ─> api.sunsynk.net   │
+                    │        │                                 │
+                    │        v                                 │
+                    │    Postgres  <── api_* functions ────────┼──> browser
+                    │    (RLS, authenticated-only)             │    (GitHub Pages)
+                    └──────────────────────────────────────────┘
 ```
 
-The browser never talks to SunSynk directly — that's deliberate. It avoids the
-cross-origin (CORS) block SunSynk puts on browser requests, and keeps your password
-out of anything that runs client-side.
+- **poll** — every minute, reads all five realtime endpoints per inverter and stores
+  per-inverter readings, per-string PV, and a summed row on the aggregate spine.
+- **recover** — every 6 hours, backfills minutes the logger missed from SunSynk's
+  cloud, calibrated against that day's own data. Tagged `source='plantfeed'` and
+  fully reversible.
+- **sync-plant-energy** — daily, caches plant-level kWh totals that reach back to
+  commissioning, which predate the local history and can't be derived from it.
 
-## Files
+**The browser never talks to SunSynk.** It reads Postgres through `api_*` functions,
+nothing else. SunSynk credentials exist only as Edge Function secrets; the access
+token lives in a `private` schema that PostgREST does not expose, reachable only via
+`SECURITY DEFINER` accessors granted to `service_role`.
 
-| File | Purpose |
-|------|---------|
-| `server.js` | Backend: auth, token refresh, data fetch/aggregation, API routes |
-| `public/index.html` | Dashboard markup |
-| `public/styles.css` | Styling |
-| `public/app.js` | Frontend logic, flow diagram, chart, auto-refresh |
-| `.env` | Your credentials (you create this; never commit it) |
+The publishable key ships in this repo on purpose — it grants nothing by itself.
+Every table has RLS and every `api_*` function is granted to `authenticated` alone,
+so reading anything requires a signed-in session.
 
-Unofficial project — not affiliated with or endorsed by SunSynk. Endpoints are the
-same ones the SunSynk Connect web/app use and may change without notice.
+---
+
+## Local development
+
+Requires [Docker](https://docs.docker.com/get-docker/), the
+[Supabase CLI](https://supabase.com/docs/guides/cli), and Node 18+.
+
+```bash
+supabase start                 # local Postgres + auth + Edge Functions
+supabase db reset              # apply migrations and seed a dev user
+npx serve public -l 3003       # serve the frontend
+```
+
+Open **http://localhost:3003** and sign in with `dev@local.test` / `devpassword123`
+(created by `supabase/seed.sql`; local only).
+
+`public/config.js` switches on hostname, so a page served from localhost talks to the
+local stack automatically and production talks to production.
+
+To run an Edge Function locally, put your SunSynk credentials in
+`supabase/.env.local` (gitignored) and:
+
+```bash
+supabase functions serve poll --env-file supabase/.env.local --no-verify-jwt
+curl -X POST http://127.0.0.1:55321/functions/v1/poll -H "Authorization: Bearer <service key>"
+```
+
+`pg_cron` is not enabled locally, so nothing runs on a schedule — invoke functions by
+hand. Ports are shifted to the 553xx range so this can run alongside another local
+Supabase project.
+
+### Importing existing history
+
+`scripts/etl-sqlite-to-postgres.js` moves a legacy SQLite log into Postgres. It's
+re-runnable — every table stages into a temp table and upserts, so running it again
+only banks the delta.
+
+```bash
+node scripts/etl-sqlite-to-postgres.js --dry-run     # counts only
+node scripts/etl-sqlite-to-postgres.js               # -> local stack
+node scripts/etl-sqlite-to-postgres.js --url='postgresql://...'   # -> remote
+```
+
+---
+
+## Deploying
+
+```bash
+supabase link --project-ref <ref>
+supabase db push                                   # migrations
+supabase secrets set --env-file supabase/.env.local
+supabase functions deploy poll recover sync-plant-energy
+```
+
+Then, once, in the dashboard:
+
+1. **Database → Extensions** — enable `pg_cron` and `pg_net`
+2. **SQL editor** — `select vault.create_secret('<secret key>', 'service_role_key');`
+3. **Authentication → Users** — add the user you'll sign in as
+
+`supabase/migrations/0009_schedule.sql` registers the cron jobs. It no-ops anywhere
+`pg_cron` isn't enabled, which is how it stays harmless on the local stack.
+
+The frontend deploys itself: pushing to `main` triggers `.github/workflows/pages.yml`,
+which publishes `public/` to GitHub Pages. There's no build step — the `.jsx` is
+transpiled in the browser by Babel standalone.
+
+---
+
+## Configuration
+
+Solar-model constants live in the `app_config` table, not in code:
+
+| key | meaning |
+|---|---|
+| `LAT` | latitude for sun geometry |
+| `PANEL_TILT` | degrees from horizontal |
+| `PANEL_AZIMUTH` | compass degrees from north |
+| `SOLAR_DNI_BASE` | clear-sky beam attenuation |
+| `SYSTEM_KWP` | nameplate kWp, the calibration ceiling |
+| `SOLAR_CAL_PERCENTILE` | calibration percentile |
+| `SOLAR_CAL_CAP_MULT` | ceiling as a multiple of nameplate |
+
+These drive the clear-sky "potential" curve. Getting `PANEL_AZIMUTH` wrong visibly
+skews it, so they're data rather than constants.
+
+Battery sign convention is the `BATTERY_POSITIVE_MEANS` Edge Function secret
+(`charging` or `discharging`) — flip it if charge/discharge reads backwards versus
+the SunSynk app. Storage is normalised to `+ = charging` regardless.
+
+---
+
+## Legacy
+
+`server.js` and `db.js` are the original single-process version: Express serving the
+UI and API, polling into a local SQLite file. It's kept because it's the reference
+the Supabase port was verified against — every endpoint was diffed against it — and
+because it still reads a legacy `data/sunsynk.db`. It is no longer the way this runs.
+
+Two things were deliberately not ported:
+
+- **the `raw` table** — 46 MB of the old 96 MB file, gzipped API payloads with no
+  consumer, and a place account identifiers could hide
+- **`/api/debug/:sn`** — proxies live to SunSynk, so it must never be publicly callable
+
+---
+
+Unofficial project — not affiliated with or endorsed by SunSynk. The endpoints are
+the ones SunSynk Connect's own web app uses and may change without notice.

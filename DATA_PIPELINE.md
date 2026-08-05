@@ -20,24 +20,39 @@
 
 ## 2. Architecture
 
-In-browser React (Babel standalone, **no build step** — `.jsx` served raw and compiled client-side). Node/Express backend. `node:sqlite` (`DatabaseSync`) local store.
+In-browser React (Babel standalone, **no build step** — `.jsx` served raw and compiled client-side), on GitHub Pages. Backend is Supabase: Postgres, pg_cron, and Deno Edge Functions.
 
 ```
 SunSynk Connect cloud  ──5 realtime endpoints/inverter──┐
 (api.sunsynk.net,                                        │
  RSA PKCS#1 login)                                       ▼
-                                  server.js: getInverterSnapshot()  → /api/overview (LIVE)
-                                  server.js: collectAndLog()/min     → db (readings + agg_minute)
-                                                                       │
-  db.js (node:sqlite) ──────────────────────────────────────────────┤
-   tables: agg_minute (summed plant spine, 1/min)                     │
-           readings   (per-inverter, 1/min, all fields + counters)    │
-           strings, meta, raw(gzip)                                   ▼
-                                  server.js: getHistory() → /api/history → public/chart.jsx (day chart)
-                                  server.js: trends/segments/balance → public/trends.jsx, tabs.jsx
+                    pg_cron 1/min  → poll               → agg_minute + readings + strings
+                    pg_cron 6h     → recover            → agg_minute (source='plantfeed')
+                    pg_cron daily  → sync-plant-energy  → plant_energy
+                                                           │
+  Postgres ────────────────────────────────────────────────┤
+   public:  agg_minute (summed plant spine, 1/min)          │
+            readings   (per-inverter, 1/min, 30 columns)    │
+            strings, plant_energy, app_config               │
+   private: auth (SunSynk token), inverters, meta, gaps     ▼
+            (NOT exposed to PostgREST)      api_* functions → public/data.jsx → chart/trends/tabs
 ```
 
-**One acquisition path.** Both the live Overview (`getInverterSnapshot`) and the 1/min logger (`collectAndLog`) consume `fetchInverterRaw(sn)` + `extractReading(inv, raw)` — a single fetch path and a single field mapping, so they cannot drift apart. (They used to be two independent implementations that "had to agree"; unified 2026-06-10.)
+**One acquisition path.** `poll` and `recover` both consume `fetchInverterRaw(sn)` +
+`extractReading(inv, raw)` from `_shared/extract.ts` — a single fetch path and a
+single field mapping, so they cannot drift apart. (In the monolith these were two
+independent implementations that "had to agree"; unified 2026-06-10, and the split
+survived the Supabase port intact.)
+
+**Live overview is now a read, not a fetch.** The old `/api/overview` hit all five
+SunSynk endpoints per request; `api_overview()` reads the newest logged minute
+instead. Up to 60 s staler, and the reason the browser needs no SunSynk credential.
+
+**Credential isolation.** SunSynk username/password exist only as Edge Function
+secrets. The derived access token lives in `private.auth`, in a schema PostgREST
+does not expose, reachable only through `SECURITY DEFINER` accessors granted to
+`service_role`. The publishable key in the public frontend bundle has no route to
+any of it — verified by `42501`/`PGRST205` responses, not by assumption.
 
 The 5 per-inverter realtime endpoints (per SN):
 ```
@@ -97,7 +112,7 @@ The inverters integrate `etoday*`/`etotal*` (kWh) continuously on their own hard
 - **Grid counter exception:** the slave's grid counter reads 0 (no CT), so summing counters gives **master-only (~half)**. Grid energy cannot be made exact from counters; best gap-free estimate is `2 × master`. The live integral counts both but is gap-sensitive.
 
 ### 3.5 `localtime` and day boundaries are SAST
-Daily grouping/today-calcs use SQLite `'unixepoch','localtime'` (host TZ = SAST) or `Africa/Johannesburg`. An auditor on a different TZ must account for this when spot-checking "today".
+Daily grouping and today-calcs are anchored to `Africa/Johannesburg`, not the caller's timezone. In Postgres this is the `local_day(ts)` / `local_hour(ts)` / `local_ts(ts)` helpers — `IMMUTABLE`, so `agg_minute_day_idx` can be built on `local_day(ts)`. The legacy SQLite path used `strftime(..., 'unixepoch', 'localtime')`, which depended on the *host* timezone; pinning the zone explicitly was part of the port, and is why the two agree. An auditor in another timezone must account for this when spot-checking "today".
 
 ---
 
@@ -129,13 +144,15 @@ Daily grouping/today-calcs use SQLite `'unixepoch','localtime'` (host TZ = SAST)
 
 ## 5. Storage
 
-`db.js`, `node:sqlite` `DatabaseSync`, file `./data/sunsynk.db` (override `DB_PATH`). Tables: `agg_minute` (1/min summed, with `source` provenance column), `readings` (1/min per-inverter, PK `(ts,sn)`), `strings`, `meta`, `gaps` (logger-offline windows), `raw` (gzipped full payload). The chart reads `agg_minute` via `db.dayAgg(date)` (5-min buckets, `AVG` per bucket), re-gridded by `getHistory` onto the full 5-min day with `null` for missing buckets.
+Supabase Postgres. `public`: `agg_minute` (1/min summed, with `source` provenance column), `readings` (1/min per-inverter, PK `(ts,sn)`, 30 columns), `strings`, `plant_energy` (cached plant kWh totals), `app_config` (solar-model constants). `private`, not exposed to PostgREST: `auth` (SunSynk token), `inverters`, `meta`, `gaps` (logger-offline windows). The chart reads `agg_minute` via `q_day_agg(date)` (5-min buckets, `AVG` per bucket), re-gridded by `api_history` onto the full 5-min day with `null` for missing buckets.
 
-- Poller (`collectAndLog`) writes `readings` + `agg_minute` together every minute, stamping `agg_minute.source = 'poller'`. Provenance is now explicit in the row, not inferred by joining against `readings`.
-- **Backfill code is DELETED** (2026-06-10; it had been disabled-but-present). It used to seed `agg_minute` from the plant feed (§3.2) → half values + inverted battery sign, and re-filled poller gaps on every restart. See §7. The poller is the only writer.
-- **Gap tracking:** when a poll lands > 90 s after the previous row, the offline window is recorded in `gaps` (historical gaps were seeded once from `agg_minute` timestamp jumps). `db.dayGapMinutes(date)` powers the day chart's "missing" badge; `db.recentGaps()` feeds the integrity CLI.
-- **Cloud gap recovery (2026-06-10):** logger-offline minutes are banked from SunSynk's cloud feed into `agg_minute` tagged `source='plantfeed'` (`recoverDay()`: calibrated per §3.2, INSERT OR IGNORE so a poller row always wins, live edge of 10 min left to the poller). Runs on boot + every 6 h + opportunistically when a day with holes is viewed. Reversible: `DELETE FROM agg_minute WHERE source='plantfeed'` (backup at `data/sunsynk.db.bak-pre-recovery`). Recovered minutes are first-class history for metrics, render DOTTED in the chart, and are EXCLUDED from the §9 integrity audit (they're estimates, not pipeline measurements). First sweep recovered all 1,547 missing minutes; recovered-day PV integrals then matched the hardware counters within ~1% (§9E).
-- Local logging started **2026-05-30 16:44 SAST**. Earlier days are not stored (the chart shows them via the live approx fallback).
+- The `poll` Edge Function writes `readings` + `strings` + `agg_minute` together every minute, stamping `agg_minute.source = 'poller'`. Provenance is explicit in the row, not inferred by joining against `readings`.
+- **Backfill code is DELETED** (2026-06-10; it had been disabled-but-present). It used to seed `agg_minute` from the plant feed (§3.2) → half values + inverted battery sign, and re-filled poller gaps on every restart. See §7. The poller is the only writer of `source='poller'` rows.
+- **Gap tracking:** when a poll lands > 90 s after the previous row, the offline window is recorded in `private.gaps` (historical gaps were seeded once from `agg_minute` timestamp jumps). `q_day_gap_minutes(date)` powers the day chart's "missing" badge.
+- **Cloud gap recovery:** logger-offline minutes are banked from SunSynk's cloud feed into `agg_minute` tagged `source='plantfeed'` (calibrated per §3.2, `ON CONFLICT DO NOTHING` so a poller row always wins, live edge of 10 min left to the poller). Runs every 6 h. Reversible: `DELETE FROM agg_minute WHERE source='plantfeed'`. Recovered minutes are first-class history for metrics, render DOTTED in the chart, and are EXCLUDED from the §9 integrity audit (they're estimates, not pipeline measurements). First sweep recovered all 1,547 missing minutes; recovered-day PV integrals then matched the hardware counters within ~1% (§9E).
+  - **Changed in the Supabase port:** `recover` sweeps a rolling 14-day window rather than all history, because the cloud only retains ~1–2 weeks — scanning 60+ days spent API calls on days that can never return data. Days outside the window are reported in the response as `notScanned` rather than silently skipped. The opportunistic "recover when a day with holes is viewed" path is also gone: reads are now pure Postgres functions with no side effects, so recovery happens only on its schedule.
+- Local logging started **2026-05-30 16:44 SAST**. Earlier days are not stored; `api_history` returns `approx: true` with an empty series for them, and the day picker's lower bound comes from `api_history_earliest`.
+- **Not migrated from SQLite:** the `raw` table (gzipped full payloads). It was 46 MB of the old 96 MB file, had no consumer, and was a place account identifiers could hide. `api_db_stats` therefore reports its counters as 0.
 
 ---
 
