@@ -1,0 +1,58 @@
+# Publish the dashboard to GitHub Pages.
+#
+# There is no build step: the frontend is plain .jsx transpiled in the browser by
+# Babel standalone, so this is a file copy. The only reason a workflow exists at all
+# is that Pages serves the repo root, /docs, or a branch — never an arbitrary
+# subdirectory, and the dashboard lives in public/.
+#
+# Nothing secret is published. config.js carries the Supabase URL and the
+# publishable key, both public by design; every table is RLS-protected and every
+# api_* function requires an authenticated session. SunSynk credentials live only
+# in Edge Function secrets and never reach the browser.
+name: Deploy dashboard to Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'public/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it; these are quick.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard against publishing secrets
+        # Cheap backstop: the repo is public, so fail loudly if a Supabase secret
+        # key or a service_role JWT ever lands in the published folder.
+        run: |
+          if grep -rEl 'sb_secret_[A-Za-z0-9_-]+|service_role' public/; then
+            echo "::error::A secret-looking value is present in public/ — refusing to publish."
+            exit 1
+          fi
+          echo "public/ is clean"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

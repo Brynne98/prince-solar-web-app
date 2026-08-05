@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SunSynk · Live</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="grain"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="sun-mark" aria-hidden="true"></span>
+      <div>
+        <h1>SunSynk<span class="dot">·</span><em id="plant-name">Live</em></h1>
+        <p class="sub" id="updated">connecting…</p>
+      </div>
+    </div>
+    <div class="controls">
+      <label class="auto">
+        <input type="checkbox" id="auto" checked />
+        <span>Auto</span>
+      </label>
+      <button id="refresh" class="btn">Refresh</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <!-- Live energy flow -->
+      <div class="flow-card panel">
+        <h2 class="panel-title">Energy Flow</h2>
+        <svg id="flow" viewBox="0 0 600 460" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Live energy flow diagram">
+          <defs>
+            <linearGradient id="g-solar" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#ffd166"/><stop offset="1" stop-color="#f5a524"/>
+            </linearGradient>
+            <linearGradient id="g-batt" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#5be8a8"/><stop offset="1" stop-color="#23b07c"/>
+            </linearGradient>
+            <linearGradient id="g-grid" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#7cc7ff"/><stop offset="1" stop-color="#3a8ee6"/>
+            </linearGradient>
+            <linearGradient id="g-load" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#ff9d8a"/><stop offset="1" stop-color="#e5634d"/>
+            </linearGradient>
+          </defs>
+
+          <!-- connectors (drawn first, behind nodes) -->
+          <path class="link" id="link-solar" d="M300,118 L300,210" />
+          <path class="link" id="link-batt"  d="M196,250 L242,250" />
+          <path class="link" id="link-grid"  d="M358,250 L404,250" />
+          <path class="link" id="link-load"  d="M300,290 L300,360" />
+
+          <!-- center hub -->
+          <g class="node hub">
+            <circle cx="300" cy="250" r="58" />
+            <text class="node-label" x="300" y="244">SYSTEM</text>
+            <text class="node-val" id="hub-val" x="300" y="266">—</text>
+          </g>
+
+          <!-- solar -->
+          <g class="node solar" data-flow="solar">
+            <rect x="232" y="58" width="136" height="60" rx="14" />
+            <text class="node-label" x="300" y="82">SOLAR</text>
+            <text class="node-val" id="solar-val" x="300" y="104">—</text>
+          </g>
+
+          <!-- battery -->
+          <g class="node batt" data-flow="batt">
+            <rect x="60" y="220" width="136" height="60" rx="14" />
+            <text class="node-label" x="128" y="244">BATTERY <tspan id="batt-soc-inline">—</tspan></text>
+            <text class="node-val" id="batt-val" x="128" y="266">—</text>
+          </g>
+
+          <!-- grid -->
+          <g class="node grid" data-flow="grid">
+            <rect x="404" y="220" width="136" height="60" rx="14" />
+            <text class="node-label" x="472" y="244">GRID</text>
+            <text class="node-val" id="grid-val" x="472" y="266">—</text>
+          </g>
+
+          <!-- load -->
+          <g class="node load" data-flow="load">
+            <rect x="232" y="360" width="136" height="60" rx="14" />
+            <text class="node-label" x="300" y="384">HOME</text>
+            <text class="node-val" id="load-val" x="300" y="406">—</text>
+          </g>
+        </svg>
+      </div>
+
+      <!-- summary tiles -->
+      <div class="tiles">
+        <div class="tile panel solar">
+          <span class="tile-tag">Solar now</span>
+          <span class="tile-big" id="t-solar">—</span>
+          <span class="tile-foot"><b id="t-solar-today">—</b> generated today</span>
+        </div>
+        <div class="tile panel batt">
+          <span class="tile-tag">Battery</span>
+          <span class="tile-big" id="t-soc">—</span>
+          <span class="tile-foot"><b id="t-batt-status">—</b><span id="t-batt-power"></span></span>
+          <div class="soc-bar"><i id="soc-fill"></i></div>
+        </div>
+        <div class="tile panel grid">
+          <span class="tile-tag">Grid</span>
+          <span class="tile-big" id="t-grid">—</span>
+          <span class="tile-foot"><span id="t-grid-dir">—</span> · imp <b id="t-grid-imp">—</b> / exp <b id="t-grid-exp">—</b></span>
+        </div>
+        <div class="tile panel load">
+          <span class="tile-tag">Home load</span>
+          <span class="tile-big" id="t-load">—</span>
+          <span class="tile-foot">across all inverters</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel chart-card">
+      <div class="chart-head">
+        <h2 class="panel-title">Today</h2>
+        <span class="sub" id="chart-date"></span>
+      </div>
+      <canvas id="chart" height="120"></canvas>
+    </section>
+
+    <section class="inverters-wrap">
+      <h2 class="panel-title section">Inverters</h2>
+      <div id="inverters" class="inverters"></div>
+    </section>
+
+    <p class="err" id="error" hidden></p>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

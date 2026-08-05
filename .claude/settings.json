@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "permissions": {
+    "allow": [
+      "Bash(supabase db push:*)",
+      "Bash(supabase db pull:*)",
+      "Bash(supabase db diff:*)",
+      "Bash(supabase db reset:*)",
+      "Bash(supabase migration list:*)",
+      "Bash(supabase migration new:*)",
+      "Bash(supabase functions deploy:*)",
+      "Bash(supabase functions serve:*)",
+      "Bash(supabase functions list:*)",
+      "Bash(supabase secrets set:*)",
+      "Bash(supabase secrets list:*)",
+      "Bash(supabase projects list:*)",
+      "Bash(supabase status:*)",
+      "Bash(supabase start:*)",
+      "Bash(supabase stop:*)",
+      "Bash(supabase link:*)"
+    ],
+    "deny": [
+      "Bash(supabase db reset --linked:*)",
+      "Bash(supabase db reset --db-url:*)",
+      "Bash(supabase projects delete:*)",
+      "Bash(supabase branches delete:*)",
+      "Bash(supabase functions delete:*)",
+      "Bash(supabase secrets unset:*)"
+    ]
+  }
+}

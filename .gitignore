@@ -1,0 +1,12 @@
+node_modules/
+.env*
+*.log
+data/
+
+# Supabase local stack — never commit local secrets or generated state
+supabase/.branches/
+supabase/.temp/
+
+# editor / OS cruft
+.idea/
+.DS_Store

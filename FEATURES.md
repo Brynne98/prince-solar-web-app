@@ -1,0 +1,145 @@
+# SunSynk Dashboard — Feature Ideas
+
+A running backlog of everything this personal tool *could* become. Framing is
+**utility + enjoyment for my own two inverters**, not a product — so no auth/legal
+constraints, just "would I use it and have fun building it."
+
+See `API.md` for the field catalog this references.
+
+**Legend**
+- Effort: 🟢 small (hrs) · 🟡 medium (a weekend) · 🔴 large (multi-weekend / rabbit hole)
+- Data: ✅ already fetched · ⬜ available in SunSynk API, not yet used · 🆕 needs a new source
+
+---
+
+## 1. Quick wins — surface data already in hand
+
+| Feature | Data | Effort |
+|---------|:----:|:------:|
+| Grid **import/export kWh** tiles (today + lifetime) | ⬜ | 🟢 |
+| **Per-string PV** detail (V/A/W per string) on inverter cards | ⬜ | 🟢 |
+| **Battery throughput** today (charged / discharged kWh) | ⬜ | 🟢 |
+| **Lifetime PV** total + per-inverter yield | ⬜ | 🟢 |
+| Filter junk sensor values (e.g. `temp: -100°C`) before display | ✅ | 🟢 |
+| Power factor / grid + output frequency readouts | ⬜ | 🟢 |
+| Per-phase voltage/current (future-proof for 3-phase) | ⬜ | 🟢 |
+
+## 2. ⚡ Load-shedding intelligence *(the centrepiece)*
+
+| Feature | Data | Effort |
+|---------|:----:|:------:|
+| **Backup runtime estimate** — "4.2 hrs left at current load" from SoC + capacity + load | ✅ | 🟡 |
+| Pull my area's schedule from **EskomSePush API** (free tier) | 🆕 | 🟡 |
+| "**Covers tonight's Stage 4 slot** with 50 min to spare" (runtime vs next slot) | 🆕 | 🟡 |
+| Alert: *"battery won't outlast the 20:00 slot — shed load"* | 🆕 | 🟡 |
+| Alert: *"grid restored, charging resumed"* | ✅ | 🟢 |
+| **Pre-charge reminder** before an upcoming slot | 🆕 | 🟡 |
+| Countdown widget to next slot + reserve headroom | 🆕 | 🟡 |
+
+## 3. 📊 History warehouse & analytics
+
+| Feature | Data | Effort |
+|---------|:----:|:------:|
+| ~~**Log readings to SQLite** every poll (start banking history now)~~ **DONE** — `db.js`, 60s server-side poller + cloud backfill | ✅ | 🟢 |
+| Self-consumption % (PV used on-site vs exported) | ✅ | 🟡 |
+| Multi-day / month / year trend views | ✅⬜ | 🟡 |
+| "Best/worst solar day", streaks, records | ✅ | 🟢 |
+| Battery cycle counter & depth-of-discharge tracking | ⬜ | 🟡 |
+| Compare inverter A vs B performance over time | ✅ | 🟡 |
+| Export to **CSV** | ✅ | 🟢 |
+| Backfill history from SunSynk's `/day` endpoint on first run | ⬜ | 🟡 |
+
+## 4. 🔔 Alerts & notifications
+
+| Feature | Data | Effort |
+|---------|:----:|:------:|
+| Battery SoC below threshold | ✅ | 🟢 |
+| Sustained grid-import spike (unexpected load) | ✅ | 🟢 |
+| PV string drops out / underperforms vs its sibling | ⬜ | 🟡 |
+| Inverter offline / stopped reporting | ⬜ | 🟢 |
+| Battery temperature out of range | ✅ | 🟢 |
+| Delivery channels: push, email, Telegram/Discord bot, ntfy | 🆕 | 🟡 |
+
+## 5. 📱 Mobile & widgets *(iOS-dev wheelhouse)*
+
+| Feature | Data | Effort |
+|---------|:----:|:------:|
+| **Home/Lock-Screen widget** — live SoC + solar + load, glanceable | ✅ | 🟡 |
+| Native iOS app shell over the existing backend | ✅ | 🔴 |
+| Live Activity / Dynamic Island during a load-shedding slot | 🆕 | 🔴 |
+| Apple Watch complication (SoC %) | ✅ | 🔴 |
+| Responsive / installable PWA (cheaper than native) | ✅ | 🟡 |
+
+## 6. 🔋 Battery health & diagnostics
+
+| Feature | Data | Effort |
+|---------|:----:|:------:|
+| Charge/discharge current vs BMS limits gauge | ⬜ | 🟡 |
+| Target charge/discharge voltage display | ⬜ | 🟢 |
+| Capacity / state-of-health trend over months | ⬜ | 🔴 |
+| Per-pack breakdown if a second bank is ever added | ⬜ | 🟡 |
+
+## 7. ☀️ Solar / PV diagnostics
+
+| Feature | Data | Effort |
+|---------|:----:|:------:|
+| Per-string yield ranking + underperformance flag | ⬜ | 🟡 |
+| Shading/soiling detector (string A vs B divergence) | ⬜ | 🟡 |
+| Theoretical-vs-actual using a sun-position/irradiance model | 🆕 | 🔴 |
+
+## 8. 💰 Cost & tariff tracking
+
+| Feature | Data | Effort |
+|---------|:----:|:------:|
+| Enter my **tariff** (incl. City Power blocks/TOU) → daily savings in Rand | 🆕 | 🟡 |
+| Grid spend avoided vs solar+battery contribution | ✅🆕 | 🟡 |
+| Payback / ROI tracker for the install | 🆕 | 🟡 |
+| Feed-in credit estimate if exporting | ⬜🆕 | 🟡 |
+
+## 9. 🏠 Automations & integrations
+
+| Feature | Data | Effort |
+|---------|:----:|:------:|
+| **Home Assistant** entities (MQTT/REST) | ✅ | 🟡 |
+| Trigger loads when surplus solar (geyser, pool pump) | ✅🆕 | 🔴 |
+| Defer high loads when SoC low / slot imminent | ✅🆕 | 🔴 |
+| Webhooks / IFTTT-style rules engine | ✅ | 🔴 |
+
+## 10. 🔌 Data-source upgrades
+
+| Feature | Data | Effort |
+|---------|:----:|:------:|
+| **Local Modbus/RS485 read** — works during internet outages, ~1s refresh, no cloud dependency | 🆕 | 🔴 |
+| Hybrid: local when available, cloud fallback | 🆕 | 🔴 |
+| Token/refresh hardening + smarter rate-limit backoff | ✅ | 🟢 |
+| Multi-account support (if I ever monitor someone else's) | ✅ | 🟡 |
+
+## 11. 🎨 UI / UX polish
+
+| Feature | Data | Effort |
+|---------|:----:|:------:|
+| Light/dark theme toggle | — | 🟢 |
+| Configurable tile layout / drag-reorder | — | 🟡 |
+| Mobile-first responsive layout | — | 🟡 |
+| Richer energy-flow animation (battery fill, directional speed by power) | ✅ | 🟡 |
+| Per-inverter drill-down page | ✅ | 🟡 |
+
+## 12. 🌀 Wild ideas / someday
+
+- Daily "energy report" summary (push or email each morning).
+- Voice: "Hey Siri, how's my battery?" via Shortcuts + the API.
+- Weather-forecast-aware battery strategy ("cloudy tomorrow — hold charge").
+- Anomaly detection on consumption (fridge left open, geyser stuck on).
+- E-paper / Raspberry Pi wall display in "control-room" theme.
+- Public read-only share link for a single live tile.
+
+---
+
+## Suggested phasing
+
+1. **Quick wins (§1)** + **SQLite logger (§3)** — low effort, and the logger should run ASAP so history accumulates.
+2. **Load-shedding intelligence (§2)** — the centrepiece; most daily utility.
+3. **Alerts (§4)** — small additions once the data + thresholds exist.
+4. **Joy project:** pick the **iOS widget (§5)** *or* the **local Modbus rebuild (§10)**.
+5. Everything else as the mood strikes.
+</content>

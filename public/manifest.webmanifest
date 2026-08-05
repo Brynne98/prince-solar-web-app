@@ -1,0 +1,11 @@
+{
+  "name": "SynSynk Solar Dashboard",
+  "short_name": "SynSynk",
+  "description": "Live solar / battery / grid dashboard for SunSynk inverters",
+  "start_url": "/?tab=live",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#0a0d12",
+  "theme_color": "#0a0d12"
+}
