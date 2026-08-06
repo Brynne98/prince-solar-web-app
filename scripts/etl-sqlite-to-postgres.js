@@ -197,6 +197,26 @@ async function main() {
     console.log(` ${sent} rows in ${secs}s`);
   }
 
+  // The clear-sky calibration is derived from the rows we just loaded. Migrations
+  // run against an empty database, so whatever was computed then used the fallback.
+  // Refresh it now, or the potential line is drawn from a nameplate guess.
+  process.stdout.write('solar calibration: ');
+  try {
+    const child = spawn(psqlCmd[0], psqlCmd[1], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+    const done = new Promise((res, rej) => {
+      child.on('close', (c) => c === 0 ? res() : rej(new Error(err.trim() || `exit ${c}`)));
+      child.on('error', rej);
+    });
+    child.stdin.end('select public.q_recompute_solar_scale();\n');
+    await done;
+    console.log(out.replace(/\s+/g, ' ').trim() || 'ok');
+  } catch (e) {
+    console.log(`skipped (${e.message.split('\n')[0]})`);
+  }
+
   console.log('\ndone.');
 }
 
