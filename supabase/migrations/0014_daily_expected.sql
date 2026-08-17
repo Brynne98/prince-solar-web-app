@@ -1,5 +1,5 @@
 -- ============================================================================
--- Add `expected` to the daily energy rows — the dotted line on the Energy trend.
+-- Add `expected` to the daily energy rows — the dotted "Expected" line on the Energy trend.
 --
 -- Each day's stored hourly irradiance, integrated and scaled by forecast_k_day(), i.e.
 -- the same number the Solar Outlook card shows for the days ahead, computed backwards

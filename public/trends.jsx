@@ -343,14 +343,14 @@ function TrendsTab({ refreshKey, auto, settings }) {
   // Daily only. Monthly and seasonal would need irradiance summed across whole months,
   // and only ~120 days of it is kept, so those totals would be silently part-covered.
   const DAILY_SERIES = SERIES.concat([
-    { key: 'expected', label: 'Sun available', color: C.pv, dash: '2 4' },
+    { key: 'expected', label: 'Expected', color: C.pv, dash: '2 4' },
   ]);
   const genConsLegend = (
     <div className="trend-legend">
       <span className="tl-item"><span className="tl-dot" style={{ background: C.pv }} />Generated</span>
       <span className="tl-item"><span className="tl-dot" style={{ background: C.load }} />Consumed</span>
       <span className="tl-item"><span className="tl-dot" style={{ background: C.grid }} />From grid</span>
-      <span className="tl-item"><span className="tl-dash" style={{ borderColor: C.pv }} />Sun available</span>
+      <span className="tl-item"><span className="tl-dash" style={{ borderColor: C.pv }} />Expected</span>
     </div>
   );
 
@@ -402,7 +402,7 @@ function TrendsTab({ refreshKey, auto, settings }) {
                   <LineChart series={DAILY_SERIES} labelEvery={dailyDays > 30 ? 5 : dailyDays > 14 ? 3 : 1} bars={dailyBars} />
                 </>
               )}
-              <div className="hint-line">Solar generated, home consumption, and how much of it came off the grid, each day for the last {dailyDays} days. Hover for exact figures.</div>
+              <div className="hint-line">Solar generated, home consumption, and how much of it came off the grid, each day for the last {dailyDays} days. The dotted <b>Expected</b> line is what a typical day of yours converts from that day's sunshine — generation falls below it when the battery fills and the panels throttle, and rises above it on heavy-use days when nothing holds them back.</div>
             </>
           )}
           {gran === 'monthly' && (
