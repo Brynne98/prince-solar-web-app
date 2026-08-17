@@ -294,9 +294,13 @@ function HistoryView({ today, refreshKey }) {
     if (sel || drag || hover == null || !hasData) return null;  // range mode suppresses the point tooltip
     const p = pts[hover]; if (!p || p.pv == null) return null;
     const li = pts.length - 1; const px = m.l + (hover / li) * innerW;
-    // pin the tooltip to the side opposite the crosshair so a touching finger never covers it
-    const tipW = 190;
-    const left = px > width / 2 ? 8 : (width - tipW - 8);
+    // Sit beside the crosshair rather than in a far corner — on a wide screen the old
+    // fixed corner meant reading a value a whole screen-width from the point it
+    // described. Flips to the other side of the cursor near the right edge, and is
+    // clamped so it can never hang off either end.
+    const tipW = 190, gap = 16;
+    const left = Math.max(8, Math.min(width - tipW - 8,
+      px + gap + tipW <= width - 8 ? px + gap : px - gap - tipW));
     const rows = [
       ['Solar', p.pv, C.pv, 'W'],
       ...(hasPot ? [['Potential', potAt(p.t), C.pv, 'W']] : []), // dotted clear-sky line value
@@ -307,7 +311,9 @@ function HistoryView({ today, refreshKey }) {
     ];
     return (
       <div className="chart-tip" style={{ left, top: 24 }}>
-        <div className="tip-time">{HM(p.t)}{p.est ? ' · ≈ SunSynk estimate' : ''}</div>
+        {/* cloud-recovered points no longer announce themselves here; `p.est` still
+            marks them in the data if that ever wants surfacing again */}
+        <div className="tip-time">{HM(p.t)}</div>
         {rows.map(([l, v, c, u]) => (
           <div className="tip-row" key={l}><span className="tip-dot" style={{ background: c }} /><span className="tip-l">{l}</span>
             <span className="tip-v mono">{u === 'W' ? window.fmtPower(v) : v + ' ' + u}</span></div>
@@ -365,14 +371,8 @@ function HistoryView({ today, refreshKey }) {
           onClick={() => canNext && setDate(shiftDate(date, 1))}>›</button>
         <span className="hv-datelabel">{isToday ? 'Today' : niceDate(date)}</span>
         {dayData && dayData.approx && <span className="hv-approx" title="Before local logging began — this whole day comes from SunSynk's cloud feed (scaled to plant totals by calibration against logged days).">≈ estimated</span>}
-        {dayData && !dayData.approx && (dayData.gapMinutes + dayData.recoveredMinutes) > 0 && (() => {
-          const m = dayData.gapMinutes + dayData.recoveredMinutes; // all minutes the local logger missed
-          return (
-            <span className="hv-approx" title="Minutes the local logger missed (laptop asleep or server stopped). Where SunSynk's cloud still had the window, the data was recovered into the chart and totals (tagged source='plantfeed') — hover points to see which are cloud-sourced.">
-              {m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`} missing
-            </span>
-          );
-        })()}
+        {/* The "Xh Ym missing" chip was removed by choice. api_history still returns
+            gapMinutes/recoveredMinutes, so it can come back as a one-liner here. */}
         {!isToday && <button className="hv-today" onClick={() => setDate(todayStr)}>Today</button>}
       </div>
 

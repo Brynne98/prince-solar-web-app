@@ -12,6 +12,27 @@ See `API.md` for the field catalog this references.
 
 ---
 
+## ✅ Agreed roadmap — reviewed 14 Aug 2026
+
+Everything below survived a pass over what's *actually shipped* (tariff/savings, runtime
+estimate, self-sufficiency, clear-sky potential line, battery-balance banner, trends and
+wall-display mode are all done). These are the real remaining gaps, to be worked through
+**one at a time, in this order**.
+
+| # | Feature | Why it matters | Effort | Status |
+|:-:|---------|----------------|:------:|:------:|
+| 1 | ~~**Solar forecast for tomorrow**~~ **DONE** — `forecast` Edge Function + `api_forecast()`, outlook card under Trends → Energy, and a forward line on the day chart | Everything else is backwards-looking. This is the only feature that changes what you *do* tonight (hold charge or not). | 🟡 | ✅ |
+| 2 | **Alerts that reach your phone** (ntfy/Telegram, cron'd Edge Function) | Nothing tells you anything unless you're looking at the page. Covers bank drift, low SoC, hot battery, dead string, grid restored. | 🟡 | ⬜ |
+| 3 | **Outage log** — grid failures are already in `grid_w`, nothing new to fetch | "Off-grid 5 h 20 m this month across 7 outages, battery carried all of it." Turns the logging into a story. | 🟡 | ⬜ |
+| 4 | **CSV / JSON export** of the logged history | The whole premise is owning the history SunSynk throws away — and there's currently no way to get it out. | 🟢 | ⬜ |
+| 5 | **Records & streaks** — best solar day, longest fully-solar run, lowest-import week | Free from data already banked. Pure enjoyment. | 🟢 | ⬜ |
+| 6 | **Load anomaly detection** — flag a jump in the stable overnight baseline | Catches the geyser/pool pump stuck on, which is real money. | 🟡 | ⬜ |
+| 7 | **Battery health trend** — cumulative cycles + kWh delivered per cycle, by month | Exactly the question permanent logging exists to answer; only gets better with time. | 🟡 | ⬜ |
+| 8 | **String sibling comparison over time** — A vs B divergence across weeks | The Solar tab flags a *dead* string live; slow soiling/shading drift is invisible. | 🟡 | ⬜ |
+| 9 | **Service worker** — `manifest.webmanifest` exists but there's no `sw.js` | Installs but doesn't work offline and can't do web push; would make #2 land as a real phone notification. | 🟡 | ⬜ |
+
+---
+
 ## 1. Quick wins — surface data already in hand
 
 | Feature | Data | Effort |

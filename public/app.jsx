@@ -6,12 +6,12 @@
 const { useState, useEffect, useRef, useCallback } = React;
 
 const DEFAULT_SETTINGS = {
-  showSavings: true,
-  filterBadSensors: true,
   battPositive: 'discharge',
   reserve: 20,
   battCapacity: 26.5, // 5 × 5.3 kWh banks (SunSynk's API under-reports this)
-  tabs: { solar: true, battery: true, grid: true, inverters: true, trends: true },
+  // Off by default — the optional per-subject tabs are opt-in from Settings. Trends is
+  // no longer listed here: like Live and Settings it is always on, so it needs no flag.
+  tabs: { solar: false, battery: false, grid: false, inverters: false },
   tariff: { preset: 'custom', import: 3.40 },
 };
 
@@ -83,7 +83,7 @@ function App() {
     settings.tabs.battery && { id: 'battery', label: 'Battery' },
     settings.tabs.grid && { id: 'grid', label: 'Grid' },
     settings.tabs.inverters && { id: 'inverters', label: 'Inverters' },
-    settings.tabs.trends && { id: 'trends', label: 'Trends' },
+    { id: 'trends', label: 'Trends' },
     { id: 'settings', label: 'Settings' },
   ].filter(Boolean);
   useEffect(() => { if (!TABS.some(t => t.id === tab)) setTab('live'); }, [settings.tabs]);
@@ -154,6 +154,10 @@ function App() {
         {tab === 'trends' && <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} />}
         {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} />}
       </main>
+
+      <footer className="app-footer">
+        <span>SynSynk <span className="mono">{window.APP_VERSION}</span></span>
+      </footer>
     </div>
   );
 }

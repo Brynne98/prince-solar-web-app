@@ -63,12 +63,13 @@ needed its transport swapped.
 | `api_energy` | `p_period` | `week` / `month` / `year` / `lifetime` kWh rows from the cached plant totals |
 | `api_db_stats` | — | History-log health: rows, distinct days, first/last timestamps |
 | `api_trends_by_hour` | `p_days` | Avg power per hour-of-day from complete days only: `pv_w / load_w / baseline_load_w / grid_w / soc / surplus_w / spare_w` |
-| `api_trends_daily` | `p_days` | Last N days of plant kWh totals |
+| `api_trends_daily` | `p_days` | Last N days of plant kWh totals. Previous days come from the `plant_energy` cache; **today is computed live from `agg_minute`**, since the cache only refreshes on the daily cron (see migration 0013 for the source-mixing caveat) |
 | `api_trends_monthly` | — | Every month on record, tagged year + month |
 | `api_trends_compare` | — | Period-over-period totals, each compared against the same elapsed slice of the previous period |
 | `api_trends_segments` | `p_days` | Avg power per day-segment with load split by source (solar / battery / grid) |
 | `api_trends_potential` | `p_date` | Calibrated clear-sky potential curve: `{ scaleW, points[] }` |
 | `api_balance` | — | Bank desync signal (sustained 10-min SOC spread) plus battery temperature and time-at-full |
+| `api_forecast` | — | Three-day solar outlook: `{ k, kDay, calibrated, samples, updatedAt, days[], points[] }`. `days[]` carries `kwh` / `peakW` / `cloud` per day, plus `remainingKwh` on today; `points[]` is today's curve on the same 5-min grid as `api_trends_potential` |
 
 Internal `q_*` primitives (the equivalent of the old `db.js` exports) are
 `service_role`-only except for the read-only ones the `api_*` wrappers call.
@@ -79,6 +80,27 @@ exists in `server.js` for local field discovery.
 
 Physics auditing (`integrityReport`, DATA_PIPELINE.md §9A/§9B) has no RPC — it is a
 CLI concern, run with `npm run check` against a local SQLite log.
+
+### Weather (not SunSynk)
+
+The forecast is the one thing on the dashboard that doesn't come from SunSynk. It reads
+[Open-Meteo](https://open-meteo.com) — keyless, free for non-commercial use — through the
+`forecast` Edge Function, never from the browser.
+
+| | |
+|---|---|
+| Forecast | `api.open-meteo.com/v1/forecast` — `forecast_days=4` |
+| Archive | `archive-api.open-meteo.com/v1/archive` — historical, for calibration (trails ~3 days) |
+| Variables | `global_tilted_irradiance_instant`, `shortwave_radiation_instant`, `cloud_cover`, `temperature_2m` |
+| Geometry | `tilt` + `azimuth` from `app_config`, `timezone=Africa/Johannesburg` |
+
+Two conventions to keep straight, both verified against the live API and documented at
+length in `supabase/migrations/0012_solar_forecast.sql`:
+
+- **Azimuth is 0 = south, −90 = east, +90 = west.** `PANEL_AZIMUTH` is degrees from
+  *north*, so it converts as `((az − 180 + 540) mod 360) − 180` — here 340 → 160.
+- **Use the `_instant` variables.** The plain ones are means over the *preceding* hour,
+  which shifts the curve half an hour early and fakes an afternoon skew.
 
 ## Underlying SunSynk endpoints used (per inverter, refresh ~1×/min)
 

@@ -225,10 +225,11 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
             info="Share of your home’s energy that came from your own solar + battery rather than the grid. 100% = fully off-grid for the period." />
           <MiniStat label="Imported" value={window.fmtEnergySmart(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
             info="Energy drawn from the grid over the selected period." />
-          {settings.showSavings && <MiniStat label="Est. saved" value={window.fmtRandSmart(pSaved)} color={CC.batt}
-            info="Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your import rate. Set the rate in Settings." />}
+          <MiniStat label="Est. saved" value={window.fmtRandSmart(pSaved)} color={CC.batt}
+            info="Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your import rate. Set the rate in Settings." />
         </div>
       </div>
+
     </div>
   );
 }
@@ -404,17 +405,15 @@ function GridTab({ snap, settings }) {
             <Metric label="Status" value={a.gridPower > 0 ? 'importing' : 'grid-tied'} />
           </div>
         </Card>
-        {settings.showSavings && (
-          <Card accent={CC.batt}>
+        <Card accent={CC.batt}>
             <SectionTitle right={<span className="dim">{window.TARIFF_PRESETS[settings.tariff.preset].label}</span>}>COST & SAVINGS · TODAY</SectionTitle>
             <div className="savings-row">
               <div><div className="tp-label">Would've paid</div><div className="tp-val mono" style={{ color: CC.grid }}>{fmtRand(wouldPay)}</div></div>
               <div><div className="tp-label">Grid cost</div><div className="tp-val mono" style={{ color: CC.load }}>{fmtRand(cost)}</div></div>
               <div><div className="tp-label">Saved</div><div className="tp-val mono" style={{ color: CC.batt }}>{fmtRand(saved)}</div></div>
             </div>
-            <div className="hint-line">All {fmtKwh(a.loadToday)} you used today @ {fmtRand(rate)}/kWh would've cost <b>{fmtRand(wouldPay)}</b>; you only bought {fmtKwh(a.gridFromToday)} from the grid, so you saved the difference. (Battery charged from the grid nets out, since it shows as import.) Edit the rate in Settings.</div>
-          </Card>
-        )}
+          <div className="hint-line">All {fmtKwh(a.loadToday)} you used today @ {fmtRand(rate)}/kWh would've cost <b>{fmtRand(wouldPay)}</b>; you only bought {fmtKwh(a.gridFromToday)} from the grid, so you saved the difference. (Battery charged from the grid nets out, since it shows as import.) Edit the rate in Settings.</div>
+        </Card>
       </div>
     </div>
   );
@@ -486,9 +485,7 @@ function SettingsTab({ settings, setSettings }) {
 
       <Card>
         <SectionTitle>DISPLAY</SectionTitle>
-        <Toggle label="Cost & savings layer" hint="Show Rand values across the dashboard" checked={settings.showSavings} onChange={v => set({ showSavings: v })} />
-        <Toggle label="Filter bad sensor values" hint="Hide impossible readings (e.g. −100 °C battery temp)" checked={settings.filterBadSensors} onChange={v => set({ filterBadSensors: v })} />
-        <div className="field" style={{ marginTop: 14 }}>
+        <div className="field">
           <label>Battery sign convention</label>
           <Segmented options={[{ value: 'discharge', label: 'Positive = discharging' }, { value: 'charge', label: 'Positive = charging' }]}
             value={settings.battPositive} onChange={v => set({ battPositive: v })} />
@@ -509,8 +506,8 @@ function SettingsTab({ settings, setSettings }) {
 
       <Card>
         <SectionTitle>TABS</SectionTitle>
-        <div className="field-note" style={{ marginTop: 0, marginBottom: 10 }}>Hide tabs you don’t use. Live, History &amp; Settings always stay.</div>
-        {[['solar', 'Solar (PV strings)'], ['battery', 'Battery'], ['grid', 'Grid & savings'], ['inverters', 'Inverters'], ['trends', 'Trends (time-of-day)']].map(([k, l]) => (
+        <div className="field-note" style={{ marginTop: 0, marginBottom: 10 }}>Show the extra tabs you want. Live, History, Trends &amp; Settings always stay.</div>
+        {[['solar', 'Solar (PV strings)'], ['battery', 'Battery'], ['grid', 'Grid & savings'], ['inverters', 'Inverters']].map(([k, l]) => (
           <Toggle key={k} label={l} checked={settings.tabs[k]} onChange={v => set({ tabs: { ...settings.tabs, [k]: v } })} />
         ))}
       </Card>

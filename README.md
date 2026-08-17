@@ -23,6 +23,7 @@ The backend runs on Supabase. Nothing needs to stay switched on at home.
    pg_cron ─ 1/min ─┼─> poll ──────────────> api.sunsynk.net   │
    pg_cron ─ 6h ────┼─> recover ───────────> api.sunsynk.net   │
    pg_cron ─ daily ─┼─> sync-plant-energy ─> api.sunsynk.net   │
+   pg_cron ─ 6h ────┼─> forecast ──────────> api.open-meteo.com│
                     │        │                                 │
                     │        v                                 │
                     │    Postgres  <── api_* functions ────────┼──> browser
@@ -37,6 +38,11 @@ The backend runs on Supabase. Nothing needs to stay switched on at home.
   fully reversible.
 - **sync-plant-energy** — daily, caches plant-level kWh totals that reach back to
   commissioning, which predate the local history and can't be derived from it.
+- **forecast** — every 6 hours, pulls three days of plane-of-array irradiance from
+  Open-Meteo, which is what the Live tab's solar outlook and the chart's forward line
+  are drawn from. Weekly it also refits the two constants that turn W/m² into watts for
+  *this* array, against months of our own logged production — so the forecast calibrates
+  itself rather than trusting a datasheet. No API key: Open-Meteo needs none.
 
 **The browser never talks to SunSynk.** It reads Postgres through `api_*` functions,
 nothing else. SunSynk credentials exist only as Edge Function secrets; the access
@@ -74,6 +80,14 @@ supabase functions serve poll --env-file supabase/.env.local --no-verify-jwt
 curl -X POST http://127.0.0.1:55321/functions/v1/poll -H "Authorization: Bearer <service key>"
 ```
 
+`forecast` needs no credentials at all, so it runs locally as-is:
+
+```bash
+supabase functions serve forecast --no-verify-jwt
+curl -X POST 'http://127.0.0.1:55321/functions/v1/forecast'                # fetch 3 days
+curl -X POST 'http://127.0.0.1:55321/functions/v1/forecast?mode=calibrate' # refit the constants
+```
+
 `pg_cron` is not enabled locally, so nothing runs on a schedule — invoke functions by
 hand. Ports are shifted to the 553xx range so this can run alongside another local
 Supabase project.
@@ -98,7 +112,7 @@ node scripts/etl-sqlite-to-postgres.js --url='postgresql://...'   # -> remote
 supabase link --project-ref <ref>
 supabase db push                                   # migrations
 supabase secrets set --env-file supabase/.env.local
-supabase functions deploy poll recover sync-plant-energy
+supabase functions deploy poll recover sync-plant-energy forecast
 ```
 
 Then, once, in the dashboard:
@@ -123,6 +137,7 @@ Solar-model constants live in the `app_config` table, not in code:
 | key | meaning |
 |---|---|
 | `LAT` | latitude for sun geometry |
+| `LON` | longitude — only the weather forecast needs it |
 | `PANEL_TILT` | degrees from horizontal |
 | `PANEL_AZIMUTH` | compass degrees from north |
 | `SOLAR_DNI_BASE` | clear-sky beam attenuation |
@@ -130,8 +145,9 @@ Solar-model constants live in the `app_config` table, not in code:
 | `SOLAR_CAL_PERCENTILE` | calibration percentile |
 | `SOLAR_CAL_CAP_MULT` | ceiling as a multiple of nameplate |
 
-These drive the clear-sky "potential" curve. Getting `PANEL_AZIMUTH` wrong visibly
-skews it, so they're data rather than constants.
+These drive the clear-sky "potential" curve, and `PANEL_TILT` / `PANEL_AZIMUTH` are sent
+to Open-Meteo so the forecast is for this roof rather than a flat one. Getting
+`PANEL_AZIMUTH` wrong visibly skews both, so they're data rather than constants.
 
 Battery sign convention is the `BATTERY_POSITIVE_MEANS` Edge Function secret
 (`charging` or `discharging`) — flip it if charge/discharge reads backwards versus

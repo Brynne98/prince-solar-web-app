@@ -28,9 +28,24 @@ function niceCeil(v) {
   return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * mag;
 }
 
-// ---------- Reusable categorical bar chart — grouped series (daily / monthly / seasonal) ----------
-// bars: [{ label, full, [key]: value, ... }]   series: [{ key, label, color }]
-function BarChart({ bars, series, labelEvery = 1 }) {
+// Consumption splits into the part your own solar/battery covered and the part bought
+// from the grid. Clamped, because grid import can exceed household load on a day the
+// grid also charged the battery — without the clamp the "own" part would go negative.
+function splitLoad(load, imp) {
+  const l = Math.max(0, load || 0);
+  const gridPart = Math.min(Math.max(0, imp || 0), l);
+  return { own: l - gridPart, gridPart };
+}
+
+// ---------- Line chart for the Energy view ----------
+// This replaced a grouped bar chart: at 30-60 daily points the bars became a picket
+// fence, and lines show the shape of a run of dull days far better.
+//
+// Grid gets its own line rather than being stacked inside consumption: it rides near
+// zero most days and spikes where the house leaned on the grid. The split of consumption
+// into own-supply vs grid is shown on the Consumed stat card instead, where it can be
+// read as exact figures rather than estimated off a band's thickness.
+function LineChart({ bars, series, labelEvery = 1 }) {
   const [ref, width] = useWidth();
   const [hover, setHover] = React.useState(null);
   const fmtKwh = window.fmtKwh;
@@ -41,42 +56,68 @@ function BarChart({ bars, series, labelEvery = 1 }) {
   const innerW = Math.max(40, width - m.l - m.r);
   const innerH = height - m.t - m.b;
   const niceMax = niceCeil(Math.max(1, ...bars.flatMap((b) => series.map((s) => b[s.key] || 0))));
-  const slot = innerW / bars.length;
-  const groupW = Math.min(slot * 0.74, 30 * series.length);
-  const bw = Math.max(2, groupW / series.length - (series.length > 1 ? 2 : 0));
+  const n = bars.length;
+  // A single point has no span to divide by; park it in the middle rather than /0.
+  const x = (i) => n === 1 ? m.l + innerW / 2 : m.l + (i / (n - 1)) * innerW;
   const y = (v) => m.t + innerH - (Math.max(0, v) / niceMax) * innerH;
   const yticks = []; for (let i = 0; i <= 4; i++) yticks.push((niceMax / 4) * i);
 
+  const path = (key) => bars.map((b, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(b[key] || 0).toFixed(1)).join(' ');
+  const area = (key) => path(key) + ` L ${x(n - 1).toFixed(1)} ${y(0).toFixed(1)} L ${x(0).toFixed(1)} ${y(0).toFixed(1)} Z`;
+
+  const idxFromX = (clientX, el) => {
+    const mx = clientX - el.getBoundingClientRect().left;
+    return Math.max(0, Math.min(n - 1, Math.round(((mx - m.l) / innerW) * (n - 1))));
+  };
+
+  // Tooltip beside the cursor, flipping near the right edge — same rule as the day chart.
+  const tipW = 200, gap = 14;
+  const tipLeft = hover == null ? 0 : Math.max(6, Math.min(width - tipW - 6,
+    x(hover) + gap + tipW <= width - 6 ? x(hover) + gap : x(hover) - gap - tipW));
+
   return (
     <div className="trend-chart" ref={ref} style={{ position: 'relative', height }}>
-      <svg width={width} height={height} className="chart-svg" onMouseLeave={() => setHover(null)}>
+      <svg width={width} height={height} className="chart-svg" style={{ cursor: 'crosshair' }}
+           onMouseMove={(e) => setHover(idxFromX(e.clientX, e.currentTarget))}
+           onMouseLeave={() => setHover(null)}
+           onTouchStart={(e) => e.touches[0] && setHover(idxFromX(e.touches[0].clientX, e.currentTarget))}
+           onTouchMove={(e) => e.touches[0] && setHover(idxFromX(e.touches[0].clientX, e.currentTarget))}>
         {yticks.map((v, i) => (
           <g key={i}>
             <line x1={m.l} y1={y(v)} x2={m.l + innerW} y2={y(v)} stroke="rgba(255,255,255,0.06)" />
             <text x={m.l - 6} y={y(v) + 3} textAnchor="end" className="ax">{v >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v)}</text>
           </g>
         ))}
-        {bars.map((b, i) => {
-          const cx = m.l + slot * (i + 0.5);
-          const x0 = cx - groupW / 2;
-          const seg = groupW / series.length;
-          return (
-            <g key={i} onMouseEnter={() => setHover(i)}>
-              <rect x={cx - slot / 2} y={m.t} width={slot} height={innerH} fill="transparent" />
-              {series.map((s, si) => {
-                const top = y(b[s.key] || 0);
-                return <rect key={s.key} x={x0 + si * seg + (seg - bw) / 2} y={top} width={bw} height={Math.max(0, m.t + innerH - top)} rx="2" fill={s.color} fillOpacity={hover === i ? 0.95 : 0.72} />;
-              })}
-              {(i % labelEvery === 0 || i === bars.length - 1) && <text x={cx} y={height - 12} textAnchor="middle" className="ax">{b.label}</text>}
-            </g>
-          );
-        })}
+        {series.filter((s) => s.fill).map((s) => (
+          <path key={s.key + '-f'} d={area(s.key)} fill={s.color} fillOpacity="0.10" />
+        ))}
+        {series.map((s) => (
+          <path key={s.key} d={path(s.key)} fill="none" stroke={s.color} strokeWidth="1.8"
+                strokeLinejoin="round" strokeLinecap="round" />
+        ))}
+        {hover != null && (
+          <g>
+            <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + innerH} stroke="var(--line-2)" strokeWidth="1" />
+            {series.map((s) => (
+              <circle key={s.key} cx={x(hover)} cy={y(bars[hover][s.key] || 0)} r="3.5"
+                      fill="var(--panel)" stroke={s.color} strokeWidth="2" />
+            ))}
+          </g>
+        )}
+        {bars.map((b, i) => (
+          (i % labelEvery === 0 || i === n - 1)
+            ? <text key={i} x={x(i)} y={height - 12} textAnchor="middle" className="ax">{b.label}</text>
+            : null
+        ))}
       </svg>
       {hover != null && bars[hover] && (
-        <div className="trend-tip" style={{ left: hover > bars.length / 2 ? 8 : 'auto', right: hover > bars.length / 2 ? 'auto' : 8 }}>
+        <div className="trend-tip" style={{ left: tipLeft, width: tipW }}>
           <div className="tip-time">{bars[hover].full || bars[hover].label}</div>
           {series.map((s) => (
-            <div className="tip-row" key={s.key}><span className="tip-dot" style={{ background: s.color }} /><span className="tip-l">{s.label}</span><span className="tip-v mono">{fmtKwh(bars[hover][s.key])}</span></div>
+            <div className="tip-row" key={s.key}>
+              <span className="tip-dot" style={{ background: s.color }} /><span className="tip-l">{s.label}</span>
+              <span className="tip-v mono">{fmtKwh(bars[hover][s.key])}</span>
+            </div>
           ))}
           {bars[hover].sub && <div className="tip-row"><span className="tip-l">{bars[hover].sub}</span></div>}
         </div>
@@ -92,10 +133,30 @@ function TrendStats({ bars, unit }) {
   const sum = (k) => bars.reduce((a, b) => a + (b[k] || 0), 0);
   const pv = sum('pv'), load = sum('load'), imp = sum('imp');
   const suff = load > 0 ? Math.round(((load - imp) / load) * 100) : null;
+  // Where the consumed energy came from. Clamped the same way the chart is: import can
+  // exceed household load on a day the grid also charged the battery.
+  const { own, gridPart } = splitLoad(load, imp);
+  const ownPct = load > 0 ? (own / load) * 100 : 0;
   return (
     <div className="trend-stats">
       <div><div className="ts-l">Generated</div><div className="ts-v mono" style={{ color: C.pv }}>{f(pv)}</div><div className="ts-sub">avg {f(pv / n)}/{unit}</div></div>
-      <div><div className="ts-l">Consumed</div><div className="ts-v mono" style={{ color: C.load }}>{f(load)}</div><div className="ts-sub">avg {f(load / n)}/{unit}</div></div>
+      <div>
+        <div className="ts-l">Consumed</div>
+        <div className="ts-v mono" style={{ color: C.load }}>{f(load)}</div>
+        <div className="ts-sub">avg {f(load / n)}/{unit}</div>
+        {load > 0 && (
+          <>
+            <div className="ts-split" title={`${f(own)} came from your own solar and battery, ${f(gridPart)} was bought from the grid`}>
+              <span style={{ width: ownPct + '%', background: C.load }} />
+              <span style={{ width: (100 - ownPct) + '%', background: C.grid }} />
+            </div>
+            <div className="ts-split-key">
+              <span><i style={{ background: C.load }} />solar/battery <b className="mono">{f(own)}</b></span>
+              <span><i style={{ background: C.grid }} />grid <b className="mono">{f(gridPart)}</b></span>
+            </div>
+          </>
+        )}
+      </div>
       <div><div className="ts-l">Self-sufficiency</div><div className="ts-v mono" style={{ color: C.soc }}>{suff != null ? suff + '%' : '—'}</div></div>
     </div>
   );
@@ -204,6 +265,107 @@ const SEASONS = [
 ];
 const MONTHS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+// Solar outlook — how much sun the next three days will bring.
+//
+// That is the whole job: a weather icon and a kWh figure per day. An earlier version
+// also weighed the forecast against household consumption and advised whether to hold
+// charge overnight; it was dropped because it answered a question nobody asked. On this
+// system generation runs 46-52 kWh against a median day's use of ~13 kWh, so "will it
+// cover the house?" came back yes essentially every day — a constant dressed up as
+// insight, crowding out the number actually wanted.
+//
+// The figure is POTENTIAL generation, like the dotted line on the chart: on a day with
+// more sun than the house and battery can absorb, logged output lands under it, because
+// the inverter stops harvesting what it cannot place. See migration 0012.
+function SkyIcon({ cloud }) {
+  // Cloud cover is already in the response and was going unused. Four steps is as fine
+  // as a forecast this far out deserves.
+  const pv = window.COLORS.pv, grey = 'var(--muted)';
+  if (cloud == null || cloud < 15) return (                                  // clear
+    <svg viewBox="0 0 40 40" className="fc-icon" fill="none" stroke={pv} strokeWidth="2" strokeLinecap="round">
+      <circle cx="20" cy="20" r="7.5" />
+      <path d="M20 4v4M20 32v4M4 20h4M32 20h4M8.7 8.7l2.8 2.8M28.5 28.5l2.8 2.8M31.3 8.7l-2.8 2.8M11.5 28.5l-2.8 2.8" />
+    </svg>
+  );
+  if (cloud < 40) return (                                                   // sun, some cloud
+    <svg viewBox="0 0 40 40" className="fc-icon" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <g stroke={pv}>
+        <circle cx="15.5" cy="15" r="5.5" />
+        <path d="M15.5 3.5v3M4 15h3M7.4 6.9l2.1 2.1M23.6 6.9l-2.1 2.1" />
+      </g>
+      <path stroke={grey} d="M14 30.5a5 5 0 0 1 .9-9.9 7 7 0 0 1 13 1.6 4.2 4.2 0 0 1-.6 8.3H14Z" />
+    </svg>
+  );
+  if (cloud < 70) return (                                                   // cloudy
+    <svg viewBox="0 0 40 40" className="fc-icon" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <g stroke={pv} strokeOpacity="0.55">
+        <circle cx="14" cy="13" r="4.5" />
+        <path d="M14 3.5v2.5M4.5 13H7" />
+      </g>
+      <path stroke={grey} d="M13 31a5.4 5.4 0 0 1 1-10.7 7.5 7.5 0 0 1 14 1.7 4.5 4.5 0 0 1-.7 9H13Z" />
+    </svg>
+  );
+  return (                                                                   // overcast
+    <svg viewBox="0 0 40 40" className="fc-icon" fill="none" stroke={grey} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M11.5 26a4.6 4.6 0 0 1 .8-9.1 6.4 6.4 0 0 1 12-1.4" strokeOpacity="0.6" />
+      <path d="M13 33a5.4 5.4 0 0 1 1-10.7 7.5 7.5 0 0 1 14 1.7 4.5 4.5 0 0 1-.7 9H13Z" />
+    </svg>
+  );
+}
+
+function ForecastCard({ refreshKey }) {
+  const [f, setF] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    window.fetchForecast().then((d) => { if (alive) setF(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, [refreshKey]);
+
+  if (!f || !f.days || !f.days.length) return null;   // no forecast yet: stay out of the way
+
+  const days = f.days.slice(0, 3);
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const label = (d, i) => {
+    if (d.date === todayStr) return 'Today';
+    if (i === 0 || (i === 1 && days[0].date === todayStr)) return 'Tomorrow';
+    return new Date(d.date + 'T12:00').toLocaleDateString('en', { weekday: 'long' });
+  };
+  const sky = (c) => c == null ? '' : c < 15 ? 'Clear' : c < 40 ? 'Light cloud' : c < 70 ? 'Cloudy' : 'Overcast';
+
+  return (
+    <window.Card className="forecast-card">
+      <window.SectionTitle right={<span className="dim">next 3 days</span>}>SOLAR OUTLOOK</window.SectionTitle>
+      <div className="fc-days">
+        {days.map((d, i) => (
+          // Left-aligned label / value / detail, matching the Generated and Consumed
+          // stat cards above the chart. Centred text floating on the card background was
+          // what made this read as unfinished next to them.
+          <div className={'fc-day' + (d.remainingKwh != null ? ' is-today' : '')} key={d.date}>
+            <div className="fc-head">
+              <span className="fc-when">{label(d, i)}</span>
+              {/* the weather icon is the identity mark; the text beside it stays text */}
+              <SkyIcon cloud={d.cloud} />
+            </div>
+            <div className="fc-kwh mono" style={{ color: window.COLORS.pv }}>{window.fmtKwh(d.kwh)}</div>
+            <div className="fc-sub">
+              {sky(d.cloud)}
+              {d.peakW ? <span className="fc-dot"> · </span> : null}
+              {d.peakW ? <span>peak {(d.peakW / 1000).toFixed(1)} kW</span> : null}
+            </div>
+            {/* after sunset this rounds to zero, and "0.0 kWh still to come" is noise —
+                say the day is done instead */}
+            {d.remainingKwh != null && (
+              <div className="fc-left">
+                {d.remainingKwh >= 0.05 ? `${window.fmtKwh(d.remainingKwh)} still to come` : 'day complete'}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </window.Card>
+  );
+}
+
 function TrendsTab({ refreshKey, auto, settings }) {
   const C = window.COLORS;
   const { Card, SectionTitle, Segmented } = window;
@@ -244,11 +406,11 @@ function TrendsTab({ refreshKey, auto, settings }) {
     const rows = daily || [];
     let i = 0; // trim leading pre-commission zero days
     while (i < rows.length && (rows[i].pv || 0) === 0 && (rows[i].load || 0) === 0) i++;
-    return rows.slice(i).map((r) => ({ label: String(r.day), full: r.date, pv: r.pv, load: r.load, imp: r.imp }));
+    return rows.slice(i).map((r) => ({ label: String(r.day), full: r.date, pv: r.pv, load: r.load, imp: r.imp, ...splitLoad(r.load, r.imp) }));
   }, [daily]);
   const monthlyBars = React.useMemo(() => (monthly || []).map((r) => ({
     label: MONTHS[r.month] + (r.year !== new Date().getFullYear() ? " '" + String(r.year).slice(2) : ''),
-    full: MONTHS[r.month] + ' ' + r.year, pv: r.pv, load: r.load, imp: r.imp,
+    full: MONTHS[r.month] + ' ' + r.year, pv: r.pv, load: r.load, imp: r.imp, ...splitLoad(r.load, r.imp),
   })), [monthly]);
   const seasonBars = React.useMemo(() => {
     const acc = {};
@@ -257,14 +419,21 @@ function TrendsTab({ refreshKey, auto, settings }) {
       const a = acc[s.key] || (acc[s.key] = { pv: 0, load: 0, imp: 0, cnt: 0 });
       a.pv += r.pv; a.load += r.load; a.imp += (r.imp || 0); a.cnt += 1;
     });
-    return SEASONS.map((s) => { const a = acc[s.key] || { pv: 0, load: 0, imp: 0, cnt: 0 }; return { label: s.label, full: s.label, pv: a.pv, load: a.load, imp: a.imp, sub: a.cnt + ' month(s) of data' }; });
+    return SEASONS.map((s) => { const a = acc[s.key] || { pv: 0, load: 0, imp: 0, cnt: 0 }; return { label: s.label, full: s.label, pv: a.pv, load: a.load, imp: a.imp, ...splitLoad(a.load, a.imp), sub: a.cnt + ' month(s) of data' }; });
   }, [monthly]);
 
-  const SERIES = [{ key: 'pv', label: 'Generated', color: C.pv }, { key: 'load', label: 'Consumed', color: C.load }];
+  // Three plain lines. Consumption's split into own-supply vs grid lives on the Consumed
+  // stat card above the chart, not in the chart itself.
+  const SERIES = [
+    { key: 'pv', label: 'Generated', color: C.pv, fill: true },
+    { key: 'load', label: 'Consumed', color: C.load },
+    { key: 'gridPart', label: 'From grid', color: C.grid },
+  ];
   const genConsLegend = (
     <div className="trend-legend">
       <span className="tl-item"><span className="tl-dot" style={{ background: C.pv }} />Generated</span>
       <span className="tl-item"><span className="tl-dot" style={{ background: C.load }} />Consumed</span>
+      <span className="tl-item"><span className="tl-dot" style={{ background: C.grid }} />From grid</span>
     </div>
   );
 
@@ -313,21 +482,21 @@ function TrendsTab({ refreshKey, auto, settings }) {
               {loading && !daily ? <div className="trend-empty">Loading…</div> : (
                 <>
                   <TrendStats bars={dailyBars} unit="day" />
-                  <BarChart series={SERIES} labelEvery={dailyDays > 30 ? 5 : dailyDays > 14 ? 3 : 1} bars={dailyBars} />
+                  <LineChart series={SERIES} labelEvery={dailyDays > 30 ? 5 : dailyDays > 14 ? 3 : 1} bars={dailyBars} />
                 </>
               )}
-              <div className="hint-line">Solar generated vs home consumption each day (SunSynk's daily totals, last {dailyDays} days). Hover a bar for the exact figures.</div>
+              <div className="hint-line">Solar generated, home consumption, and how much of it came off the grid, each day for the last {dailyDays} days. Hover for exact figures.</div>
             </>
           )}
           {gran === 'monthly' && (
             <>
-              {loading && !monthly ? <div className="trend-empty">Loading…</div> : <><TrendStats bars={monthlyBars} unit="month" /><BarChart series={SERIES} bars={monthlyBars} /></>}
-              <div className="hint-line">Solar generated vs home consumption per month across every year on record. One new bar lands each month.</div>
+              {loading && !monthly ? <div className="trend-empty">Loading…</div> : <><TrendStats bars={monthlyBars} unit="month" /><LineChart series={SERIES} bars={monthlyBars} /></>}
+              <div className="hint-line">Solar generated vs home consumption per month across every year on record. One new point lands each month.</div>
             </>
           )}
           {gran === 'seasonal' && (
             <>
-              {loading && !monthly ? <div className="trend-empty">Loading…</div> : <BarChart series={SERIES} bars={seasonBars} />}
+              {loading && !monthly ? <div className="trend-empty">Loading…</div> : <LineChart series={SERIES} bars={seasonBars} />}
               <div className="hint-line">
                 Generation vs consumption rolled into SA seasons (Summer Dec–Feb · Autumn Mar–May · Winter Jun–Aug · Spring Sep–Nov).
                 <b> Sparse for now</b> — this only becomes meaningful with a full year of data, when winter-vs-summer solar (a big swing here) shows up. The logger is banking toward it.
@@ -336,6 +505,10 @@ function TrendsTab({ refreshKey, auto, settings }) {
           )}
         </Card>
       )}
+
+      {/* The outlook sits under the energy history: same subject, opposite direction —
+          everything above is what was generated, this is what is coming. */}
+      {view === 'energy' && <ForecastCard refreshKey={refreshKey} />}
     </div>
   );
 }

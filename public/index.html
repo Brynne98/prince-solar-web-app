@@ -80,6 +80,11 @@
   .refresh-btn:hover { background: var(--panel-2); border-color: var(--muted); }
   .refresh-btn.pulse { border-color: var(--ok); color: var(--ok); }
 
+  /* footer — quiet, and clear of the tab content above it */
+  .app-footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
+    display: flex; justify-content: center; font-size: 11.5px; color: var(--dim); letter-spacing: 0.04em; }
+  .app-footer .mono { color: var(--muted); }
+
   /* ---------- tab bar ---------- */
   .tabbar { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 26px; }
   .tab {
@@ -147,6 +152,22 @@
   .mini-value { font-size: 20px; font-weight: 600; margin-top: 8px; letter-spacing: -0.01em; }
   .mv-num { white-space: nowrap; }
   .mini-sub { font-size: 11.5px; color: var(--dim); margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Solar outlook — lives under the energy history in Trends. No `order` override: it
+     should fall where it sits in the DOM, directly beneath the chart it complements. */
+  .fc-days { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+  /* Each day is a real tile with its own surface, so the three read as a row of stats
+     rather than three columns of text floating on the card. */
+  .fc-day { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 15px 17px 16px; }
+  .fc-day.is-today { border-color: var(--line-2); }
+  .fc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .fc-when { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .fc-icon { width: 30px; height: 30px; flex: none; }
+  .fc-kwh { font-size: 27px; font-weight: 600; letter-spacing: -0.01em; margin-top: 10px; line-height: 1; }
+  .fc-sub { font-size: 11.5px; color: var(--muted); margin-top: 8px; }
+  .fc-dot { color: var(--dim); }
+  /* only today has a partial figure, so it gets the extra line and nothing else shifts */
+  .fc-left { font-size: 11.5px; color: var(--dim); margin-top: 4px; }
 
   /* ---------- flow svg ---------- */
   .flow-fs-wrap { width: 100%; }
@@ -252,6 +273,15 @@
   .seg-key b { color: var(--muted); font-weight: 600; }
   .trend-chart { width: 100%; min-width: 0; overflow: hidden; }
   .trend-empty { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 200px; color: var(--muted); font-size: 13px; }
+  /* keep a two-word source label on one line rather than wrapping mid-phrase */
+  .trend-tip .tip-l, .trend-tip .tip-v { white-space: nowrap; }
+  /* Consumed card: one bar split into own-supply vs grid, with the exact figures under it */
+  .ts-split { display: flex; height: 6px; border-radius: 4px; overflow: hidden; margin-top: 12px; background: rgba(255,255,255,0.07); cursor: help; }
+  .ts-split span { display: block; height: 100%; transition: width .5s ease; }
+  .ts-split-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+  .ts-split-key span { display: inline-flex; align-items: center; gap: 6px; }
+  .ts-split-key i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .ts-split-key b { color: var(--text); font-weight: 600; }
   .trend-tip { position: absolute; top: 12px; pointer-events: none; background: rgba(13,17,23,0.96); border: 1px solid var(--line-2);
     border-radius: 10px; padding: 10px 12px; min-width: 150px; box-shadow: 0 12px 30px rgba(0,0,0,0.5); z-index: 5; }
 
@@ -392,6 +422,21 @@
     border-radius: 9px; padding: 10px 12px; font-size: 14px; font-family: inherit; }
   .input { font-family: var(--mono); }
   .select:focus, .input:focus { outline: none; border-color: var(--grid); }
+  /* Autofilled fields, on every input in the app (login and Settings both sit on
+     --panel-2). Chrome paints its own near-white background for an autofilled field
+     and ignores `background`, so the only way to keep a dark field dark is to cover it
+     with a huge inset box-shadow. The absurd transition delay is the companion trick:
+     the background is animated, and a ~forever delay means it never arrives. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active,
+  select:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 1000px var(--panel-2) inset;
+    -webkit-text-fill-color: var(--text);
+    caret-color: var(--text);
+    transition: background-color 9999s ease-in-out 0s;
+  }
   .range { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 4px;
     background: rgba(255,255,255,0.1); outline: none; margin: 6px 0 2px; }
   .range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%;
@@ -510,12 +555,31 @@
     padding: 11px 13px; color: var(--text); font-family: var(--display); font-size: 14px;
   }
   .login-card input:focus { outline: none; border-color: var(--pv); }
+  /* password field + its reveal toggle. The input keeps its own border, so the
+     wrapper is purely for positioning the eye over the right-hand edge. */
+  .login-pw { position: relative; display: flex; }
+  .login-pw input { flex: 1; padding-right: 40px; min-width: 0; }
+  /* Specificity note: `.login-card button` above paints the green primary button, and
+     it outranks a lone `.login-eye`, so this has to match on both to win. */
+  .login-card .login-eye {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; padding: 0;
+    background: none; border: 0; border-radius: 8px;
+    color: var(--muted); cursor: pointer; transition: color .15s;
+  }
+  .login-card .login-eye:hover { color: var(--text); }
+  .login-card .login-eye:focus-visible { outline: 2px solid var(--pv); outline-offset: -2px; }
   .login-card button {
     background: var(--pv); color: #06210f; border: 0; border-radius: 10px; padding: 11px 13px;
     font-family: var(--display); font-size: 14px; font-weight: 600; cursor: pointer;
   }
   .login-card button:disabled { opacity: 0.6; cursor: default; }
-  .login-err { color: var(--load); font-size: 13px; }
+  /* min-height reserves exactly one line so the card is the same height empty or not
+     (see auth.jsx). Errors here are short — "Invalid login credentials" — so one line
+     covers them; a rare two-line message still nudges, which beats padding out the
+     card for a case that hardly happens. */
+  .login-err { color: var(--load); font-size: 13px; line-height: 1.3; min-height: 17px; }
 </style>
 </head>
 <body>
