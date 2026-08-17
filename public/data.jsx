@@ -205,6 +205,10 @@ async function fetchTrends(days) {
   ]);
   return { days, hours: byHour.hours || [], stats };
 }
+// Last N days of plant kWh totals. Today's row is computed live from agg_minute rather
+// than the daily-synced cache (migration 0013); `expected` is that day's irradiance
+// scaled by the fitted conversion ratio and drives the dotted line (migration 0014).
+// It is absent, not zero, on days with no irradiance on file, so the line breaks.
 async function fetchTrendDaily(days) {
   const api = await getJSON('/api/trends/daily?days=' + days);
   return api.rows || [];
