@@ -2,9 +2,14 @@
 // trends.jsx — <TrendsTab/> : grouped by purpose into two views.
 //   • Battery  — electricity used per day-segment (kWh), split by source (solar/
 //                battery/grid). From our own logged data.
-//   • Energy   — generated vs consumed, by Day / Month / Season (toggle). The sparse
-//                Month/Season views live here until a year banks.
-// Data: /api/trends/* (local log; daily/monthly from SunSynk).
+//   • Energy   — lines, by Day / Month / Season (toggle): generated, consumed, and how
+//                much of that consumption came off the grid. The Daily view adds a
+//                dotted `Expected` line — that day's irradiance times a median
+//                conversion ratio, so generation sits under it when the battery fills
+//                and above it on heavy-use days. The sparse Month/Season views live
+//                here until a year banks.
+// Data: /api/trends/* (local log; daily/monthly from SunSynk; irradiance from
+// solar_forecast, which the `forecast` Edge Function keeps topped up).
 // ============================================================================
 const kW = (w) => (w == null ? '—' : (w / 1000).toFixed(2) + ' kW');
 const hhmm = (h) => String(h).padStart(2, '0') + ':00';
