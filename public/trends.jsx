@@ -55,14 +55,25 @@ function LineChart({ bars, series, labelEvery = 1 }) {
   const m = { l: 42, r: 12, t: 16, b: 40 };
   const innerW = Math.max(40, width - m.l - m.r);
   const innerH = height - m.t - m.b;
-  const niceMax = niceCeil(Math.max(1, ...bars.flatMap((b) => series.map((s) => b[s.key] || 0))));
+  const niceMax = niceCeil(Math.max(1, ...bars.flatMap((b) => series.map((s) => b[s.key] || 0).filter(Number.isFinite))));
   const n = bars.length;
   // A single point has no span to divide by; park it in the middle rather than /0.
   const x = (i) => n === 1 ? m.l + innerW / 2 : m.l + (i / (n - 1)) * innerW;
   const y = (v) => m.t + innerH - (Math.max(0, v) / niceMax) * innerH;
   const yticks = []; for (let i = 0; i <= 4; i++) yticks.push((niceMax / 4) * i);
 
-  const path = (key) => bars.map((b, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(b[key] || 0).toFixed(1)).join(' ');
+  // Breaks at null rather than plotting it as zero — `expected` is absent on days with
+  // no irradiance on file, and a dive to the axis would read as "no sun that day".
+  const path = (key) => {
+    let d = '', pen = false;
+    bars.forEach((b, i) => {
+      const v = b[key];
+      if (v == null) { pen = false; return; }
+      d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1) + ' ';
+      pen = true;
+    });
+    return d;
+  };
   const area = (key) => path(key) + ` L ${x(n - 1).toFixed(1)} ${y(0).toFixed(1)} L ${x(0).toFixed(1)} ${y(0).toFixed(1)} Z`;
 
   const idxFromX = (clientX, el) => {
@@ -92,14 +103,15 @@ function LineChart({ bars, series, labelEvery = 1 }) {
           <path key={s.key + '-f'} d={area(s.key)} fill={s.color} fillOpacity="0.10" />
         ))}
         {series.map((s) => (
-          <path key={s.key} d={path(s.key)} fill="none" stroke={s.color} strokeWidth="1.8"
+          <path key={s.key} d={path(s.key)} fill="none" stroke={s.color}
+                strokeWidth={s.dash ? 1.5 : 1.8} strokeDasharray={s.dash} strokeOpacity={s.dash ? 0.85 : 1}
                 strokeLinejoin="round" strokeLinecap="round" />
         ))}
         {hover != null && (
           <g>
             <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + innerH} stroke="var(--line-2)" strokeWidth="1" />
-            {series.map((s) => (
-              <circle key={s.key} cx={x(hover)} cy={y(bars[hover][s.key] || 0)} r="3.5"
+            {series.filter((s) => bars[hover][s.key] != null).map((s) => (
+              <circle key={s.key} cx={x(hover)} cy={y(bars[hover][s.key])} r="3.5"
                       fill="var(--panel)" stroke={s.color} strokeWidth="2" />
             ))}
           </g>
@@ -406,7 +418,7 @@ function TrendsTab({ refreshKey, auto, settings }) {
     const rows = daily || [];
     let i = 0; // trim leading pre-commission zero days
     while (i < rows.length && (rows[i].pv || 0) === 0 && (rows[i].load || 0) === 0) i++;
-    return rows.slice(i).map((r) => ({ label: String(r.day), full: r.date, pv: r.pv, load: r.load, imp: r.imp, ...splitLoad(r.load, r.imp) }));
+    return rows.slice(i).map((r) => ({ label: String(r.day), full: r.date, pv: r.pv, load: r.load, imp: r.imp, expected: r.expected ?? null, ...splitLoad(r.load, r.imp) }));
   }, [daily]);
   const monthlyBars = React.useMemo(() => (monthly || []).map((r) => ({
     label: MONTHS[r.month] + (r.year !== new Date().getFullYear() ? " '" + String(r.year).slice(2) : ''),
@@ -429,11 +441,17 @@ function TrendsTab({ refreshKey, auto, settings }) {
     { key: 'load', label: 'Consumed', color: C.load },
     { key: 'gridPart', label: 'From grid', color: C.grid },
   ];
+  // Daily only. Monthly and seasonal would need irradiance summed across whole months,
+  // and only ~120 days of it is kept, so those totals would be silently part-covered.
+  const DAILY_SERIES = SERIES.concat([
+    { key: 'expected', label: 'Sun available', color: C.pv, dash: '2 4' },
+  ]);
   const genConsLegend = (
     <div className="trend-legend">
       <span className="tl-item"><span className="tl-dot" style={{ background: C.pv }} />Generated</span>
       <span className="tl-item"><span className="tl-dot" style={{ background: C.load }} />Consumed</span>
       <span className="tl-item"><span className="tl-dot" style={{ background: C.grid }} />From grid</span>
+      <span className="tl-item"><span className="tl-dash" style={{ borderColor: C.pv }} />Sun available</span>
     </div>
   );
 
@@ -482,7 +500,7 @@ function TrendsTab({ refreshKey, auto, settings }) {
               {loading && !daily ? <div className="trend-empty">Loading…</div> : (
                 <>
                   <TrendStats bars={dailyBars} unit="day" />
-                  <LineChart series={SERIES} labelEvery={dailyDays > 30 ? 5 : dailyDays > 14 ? 3 : 1} bars={dailyBars} />
+                  <LineChart series={DAILY_SERIES} labelEvery={dailyDays > 30 ? 5 : dailyDays > 14 ? 3 : 1} bars={dailyBars} />
                 </>
               )}
               <div className="hint-line">Solar generated, home consumption, and how much of it came off the grid, each day for the last {dailyDays} days. Hover for exact figures.</div>

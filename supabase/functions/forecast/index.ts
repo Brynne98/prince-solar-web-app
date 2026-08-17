@@ -28,6 +28,8 @@ const TZ = "Africa/Johannesburg";
 const FORECAST_DAYS = 4;        // today + 3; the RPC serves 3 and the extra covers rollover
 const CAL_WINDOW_DAYS = 120;    // fit window. Our own history starts 2026-05-30.
 const ARCHIVE_LAG_DAYS = 5;     // the archive trails real time by ~3 days; 5 is the margin
+const BACKFILL_PAST_DAYS = 7;   // every fetch also re-pulls the last week, closing the
+                                // gap between the archive window and today
 const RETAIN_DAYS = 400;        // keep a year+ of irradiance so the fit always has samples
 
 const json = (b: unknown, status = 200) =>
@@ -243,7 +245,14 @@ Deno.serve(async (req) => {
       return json({ ok: true, mode: "calibrate", ...result, elapsedMs: Date.now() - started });
     }
 
-    const rows = await fetchOpenMeteo(FORECAST_API, cfg, { forecast_days: String(FORECAST_DAYS) });
+    // past_days as well as forecast_days. The archive used by ?mode=calibrate trails
+    // real time by ~5 days, and the forecast starts today, which left a four-day hole
+    // between the two windows with no irradiance on file at all. Re-pulling the last
+    // week on every run closes it permanently and costs one API call either way.
+    const rows = await fetchOpenMeteo(FORECAST_API, cfg, {
+      forecast_days: String(FORECAST_DAYS),
+      past_days: String(BACKFILL_PAST_DAYS),
+    });
     const stored = await store(rows);
 
     // Keep the table from growing without bound. Old irradiance past the fit window is
