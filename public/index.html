@@ -153,21 +153,6 @@
   .mv-num { white-space: nowrap; }
   .mini-sub { font-size: 11.5px; color: var(--dim); margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  /* Solar outlook — lives under the energy history in Trends. No `order` override: it
-     should fall where it sits in the DOM, directly beneath the chart it complements. */
-  .fc-days { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
-  /* Each day is a real tile with its own surface, so the three read as a row of stats
-     rather than three columns of text floating on the card. */
-  .fc-day { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 15px 17px 16px; }
-  .fc-day.is-today { border-color: var(--line-2); }
-  .fc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .fc-when { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
-  .fc-icon { width: 30px; height: 30px; flex: none; }
-  .fc-kwh { font-size: 27px; font-weight: 600; letter-spacing: -0.01em; margin-top: 10px; line-height: 1; }
-  .fc-sub { font-size: 11.5px; color: var(--muted); margin-top: 8px; }
-  .fc-dot { color: var(--dim); }
-  /* only today has a partial figure, so it gets the extra line and nothing else shifts */
-  .fc-left { font-size: 11.5px; color: var(--dim); margin-top: 4px; }
 
   /* ---------- flow svg ---------- */
   .flow-fs-wrap { width: 100%; }

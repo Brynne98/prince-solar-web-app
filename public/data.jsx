@@ -31,7 +31,6 @@ const ROUTES = {
   '/api/trends/segments':  (q) => ['api_trends_segments', { p_days: Number(q.days) || 7 }],
   '/api/trends/potential': (q) => ['api_trends_potential', { p_date: q.date || null }],
   '/api/balance':          () => ['api_balance', {}],
-  '/api/forecast':         () => ['api_forecast', {}],
 };
 
 async function getJSON(url) {
@@ -227,13 +226,6 @@ async function fetchPotential(date) {
 async function fetchSegments(days) {
   return getJSON('/api/trends/segments?days=' + (days || 7)).catch(() => null);
 }
-// 3-day solar forecast: { k, kDay, calibrated, updatedAt, days:[{date,kwh,remainingKwh,peakW,cloud}], points:[{t,w}] }
-// `points` is today's curve on the same 5-minute grid as fetchPotential, so the chart
-// draws both the same way. Totals come from kDay, the curve from k — see migration 0012
-// for why those are two different constants.
-async function fetchForecast() {
-  return getJSON('/api/forecast').catch(() => null);
-}
 // battery balance + health: { banks:[{sn,soc,voltage,current}], socSpread, vSpread, status (sustained 10min), pending, max24h, max72h, stale, tempC, hrsAtFullToday, tempHot }
 async function fetchBalance() {
   return getJSON('/api/balance').catch(() => null);
@@ -252,5 +244,5 @@ const TARIFF_PRESETS = {
 };
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchEnergy, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance, fetchForecast, TARIFF_PRESETS, BATT_MAX_KW,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchEnergy, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance, TARIFF_PRESETS, BATT_MAX_KW,
 });

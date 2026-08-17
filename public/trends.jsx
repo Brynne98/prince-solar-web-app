@@ -277,107 +277,6 @@ const SEASONS = [
 ];
 const MONTHS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// Solar outlook — how much sun the next three days will bring.
-//
-// That is the whole job: a weather icon and a kWh figure per day. An earlier version
-// also weighed the forecast against household consumption and advised whether to hold
-// charge overnight; it was dropped because it answered a question nobody asked. On this
-// system generation runs 46-52 kWh against a median day's use of ~13 kWh, so "will it
-// cover the house?" came back yes essentially every day — a constant dressed up as
-// insight, crowding out the number actually wanted.
-//
-// The figure is POTENTIAL generation, like the dotted line on the chart: on a day with
-// more sun than the house and battery can absorb, logged output lands under it, because
-// the inverter stops harvesting what it cannot place. See migration 0012.
-function SkyIcon({ cloud }) {
-  // Cloud cover is already in the response and was going unused. Four steps is as fine
-  // as a forecast this far out deserves.
-  const pv = window.COLORS.pv, grey = 'var(--muted)';
-  if (cloud == null || cloud < 15) return (                                  // clear
-    <svg viewBox="0 0 40 40" className="fc-icon" fill="none" stroke={pv} strokeWidth="2" strokeLinecap="round">
-      <circle cx="20" cy="20" r="7.5" />
-      <path d="M20 4v4M20 32v4M4 20h4M32 20h4M8.7 8.7l2.8 2.8M28.5 28.5l2.8 2.8M31.3 8.7l-2.8 2.8M11.5 28.5l-2.8 2.8" />
-    </svg>
-  );
-  if (cloud < 40) return (                                                   // sun, some cloud
-    <svg viewBox="0 0 40 40" className="fc-icon" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <g stroke={pv}>
-        <circle cx="15.5" cy="15" r="5.5" />
-        <path d="M15.5 3.5v3M4 15h3M7.4 6.9l2.1 2.1M23.6 6.9l-2.1 2.1" />
-      </g>
-      <path stroke={grey} d="M14 30.5a5 5 0 0 1 .9-9.9 7 7 0 0 1 13 1.6 4.2 4.2 0 0 1-.6 8.3H14Z" />
-    </svg>
-  );
-  if (cloud < 70) return (                                                   // cloudy
-    <svg viewBox="0 0 40 40" className="fc-icon" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <g stroke={pv} strokeOpacity="0.55">
-        <circle cx="14" cy="13" r="4.5" />
-        <path d="M14 3.5v2.5M4.5 13H7" />
-      </g>
-      <path stroke={grey} d="M13 31a5.4 5.4 0 0 1 1-10.7 7.5 7.5 0 0 1 14 1.7 4.5 4.5 0 0 1-.7 9H13Z" />
-    </svg>
-  );
-  return (                                                                   // overcast
-    <svg viewBox="0 0 40 40" className="fc-icon" fill="none" stroke={grey} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M11.5 26a4.6 4.6 0 0 1 .8-9.1 6.4 6.4 0 0 1 12-1.4" strokeOpacity="0.6" />
-      <path d="M13 33a5.4 5.4 0 0 1 1-10.7 7.5 7.5 0 0 1 14 1.7 4.5 4.5 0 0 1-.7 9H13Z" />
-    </svg>
-  );
-}
-
-function ForecastCard({ refreshKey }) {
-  const [f, setF] = React.useState(null);
-  React.useEffect(() => {
-    let alive = true;
-    window.fetchForecast().then((d) => { if (alive) setF(d); }).catch(() => {});
-    return () => { alive = false; };
-  }, [refreshKey]);
-
-  if (!f || !f.days || !f.days.length) return null;   // no forecast yet: stay out of the way
-
-  const days = f.days.slice(0, 3);
-  const todayStr = new Date().toLocaleDateString('en-CA');
-  const label = (d, i) => {
-    if (d.date === todayStr) return 'Today';
-    if (i === 0 || (i === 1 && days[0].date === todayStr)) return 'Tomorrow';
-    return new Date(d.date + 'T12:00').toLocaleDateString('en', { weekday: 'long' });
-  };
-  const sky = (c) => c == null ? '' : c < 15 ? 'Clear' : c < 40 ? 'Light cloud' : c < 70 ? 'Cloudy' : 'Overcast';
-
-  return (
-    <window.Card className="forecast-card">
-      <window.SectionTitle right={<span className="dim">next 3 days</span>}>SOLAR OUTLOOK</window.SectionTitle>
-      <div className="fc-days">
-        {days.map((d, i) => (
-          // Left-aligned label / value / detail, matching the Generated and Consumed
-          // stat cards above the chart. Centred text floating on the card background was
-          // what made this read as unfinished next to them.
-          <div className={'fc-day' + (d.remainingKwh != null ? ' is-today' : '')} key={d.date}>
-            <div className="fc-head">
-              <span className="fc-when">{label(d, i)}</span>
-              {/* the weather icon is the identity mark; the text beside it stays text */}
-              <SkyIcon cloud={d.cloud} />
-            </div>
-            <div className="fc-kwh mono" style={{ color: window.COLORS.pv }}>{window.fmtKwh(d.kwh)}</div>
-            <div className="fc-sub">
-              {sky(d.cloud)}
-              {d.peakW ? <span className="fc-dot"> · </span> : null}
-              {d.peakW ? <span>peak {(d.peakW / 1000).toFixed(1)} kW</span> : null}
-            </div>
-            {/* after sunset this rounds to zero, and "0.0 kWh still to come" is noise —
-                say the day is done instead */}
-            {d.remainingKwh != null && (
-              <div className="fc-left">
-                {d.remainingKwh >= 0.05 ? `${window.fmtKwh(d.remainingKwh)} still to come` : 'day complete'}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </window.Card>
-  );
-}
-
 function TrendsTab({ refreshKey, auto, settings }) {
   const C = window.COLORS;
   const { Card, SectionTitle, Segmented } = window;
@@ -523,10 +422,6 @@ function TrendsTab({ refreshKey, auto, settings }) {
           )}
         </Card>
       )}
-
-      {/* The outlook sits under the energy history: same subject, opposite direction —
-          everything above is what was generated, this is what is coming. */}
-      {view === 'energy' && <ForecastCard refreshKey={refreshKey} />}
     </div>
   );
 }
