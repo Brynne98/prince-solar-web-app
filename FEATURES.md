@@ -22,7 +22,7 @@ wall-display mode are all done). These are the real remaining gaps, to be worked
 | # | Feature | Why it matters | Effort | Status |
 |:-:|---------|----------------|:------:|:------:|
 | 1 | ~~**Solar forecast for tomorrow**~~ **DONE** — `forecast` Edge Function + `api_forecast()`, outlook card under Trends → Energy, and a forward line on the day chart | Everything else is backwards-looking. This is the only feature that changes what you *do* tonight (hold charge or not). | 🟡 | ✅ |
-| 2 | **Alerts that reach your phone** (ntfy/Telegram, cron'd Edge Function) | Nothing tells you anything unless you're looking at the page. Covers bank drift, low SoC, hot battery, dead string, grid restored. | 🟡 | ⬜ |
+| 2 | **Alerts that reach your phone** — route through `prince-todo-app`, which is already a SunSynk client with a working Expo push pipeline. See **`ALERTS_HANDOFF.md`** | Nothing tells you anything unless you're looking at the page. Covers bank drift, low SoC, hot battery, dead string. Grid alerts blocked on the grid-presence question below. | 🟡 | ⬜ |
 | 3 | **Outage log** — ⚠ **blocked on verification, see below** | "Off-grid 5 h 20 m this month across 7 outages, battery carried all of it." Turns the logging into a story. | 🟡 | ⬜ |
 | 4 | **CSV / JSON export** of the logged history | The whole premise is owning the history SunSynk throws away — and there's currently no way to get it out. | 🟢 | ⬜ |
 | 5 | **Records & streaks** — best solar day, longest fully-solar run, lowest-import week | Free from data already banked. Pure enjoyment. | 🟢 | ⬜ |
