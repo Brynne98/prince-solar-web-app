@@ -6,10 +6,10 @@
 // api_* function is granted to `authenticated` only, so a signed-in session is
 // required to read anything. SunSynk credentials live in Edge Function secrets and
 // never reach the browser.
-// Shown in the footer. Semver: patch for fixes, minor for features, major for a
-// rewrite. It lives here rather than in the JSX so it sits next to the other
-// deploy-time config and loads before anything renders.
-window.APP_VERSION = 'v1.0.0';
+// Shown in Settings -> About. Bumped on every deploy; semver, so patch for fixes,
+// minor for features, major for a rewrite. Lives here rather than in the JSX so it sits
+// with the other deploy-time config and loads before anything renders.
+window.APP_VERSION = 'v1.0.1';
 
 window.SUNSYNK_CONFIG = (function () {
   var local = {

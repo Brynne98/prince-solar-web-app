@@ -468,6 +468,8 @@ function InvertersTab({ snap }) {
 // ---------------------------------------------------------------- SETTINGS
 function SettingsTab({ settings, setSettings }) {
   const set = (patch) => setSettings(s => ({ ...s, ...patch }));
+  // Settings only, and nothing but the number — no rule above it, no card around it.
+  const version = <div className="app-version mono">{window.APP_VERSION}</div>;
   const setTariff = (patch) => setSettings(s => ({ ...s, tariff: { ...s.tariff, ...patch } }));
   const presets = window.TARIFF_PRESETS;
   const applyPreset = (key) => {
@@ -475,6 +477,7 @@ function SettingsTab({ settings, setSettings }) {
     setTariff({ preset: key, import: p.import });
   };
   return (
+    <>
     <div className="settings-grid">
       <Card>
         <SectionTitle>TARIFF · SOUTH AFRICA</SectionTitle>
@@ -522,6 +525,8 @@ function SettingsTab({ settings, setSettings }) {
         ))}
       </Card>
     </div>
+    {version}
+    </>
   );
 }
 

@@ -155,9 +155,6 @@ function App() {
         {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} />}
       </main>
 
-      <footer className="app-footer">
-        <span>SynSynk <span className="mono">{window.APP_VERSION}</span></span>
-      </footer>
     </div>
   );
 }

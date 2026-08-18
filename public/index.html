@@ -53,7 +53,13 @@
   button { font-family: inherit; cursor: pointer; }
 
   /* ---------- shell ---------- */
-  .app { max-width: 1320px; margin: 0 auto; padding: 30px 34px 80px; }
+  /* Column layout so the tab content can grow and the version can be pushed to the
+     real bottom of the page. The old 80px bottom padding just left dead space. */
+  .app { max-width: 1320px; margin: 0 auto; padding: 30px 34px 22px;
+    min-height: 100dvh; display: flex; flex-direction: column; }
+  .content { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  /* > * so a tab whose root is a grid/stack still behaves as it did before */
+  .content > * { flex: none; }
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 26px; }
   .brand { display: flex; align-items: center; gap: 18px; }
   .sun {
@@ -80,10 +86,8 @@
   .refresh-btn:hover { background: var(--panel-2); border-color: var(--muted); }
   .refresh-btn.pulse { border-color: var(--ok); color: var(--ok); }
 
-  /* footer — quiet, and clear of the tab content above it */
-  .app-footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line);
-    display: flex; justify-content: center; font-size: 11.5px; color: var(--dim); letter-spacing: 0.04em; }
-  .app-footer .mono { color: var(--muted); }
+  /* version, bottom of the Settings page — no rule, no card, just the number */
+  .app-version { margin-top: auto; padding-top: 26px; text-align: center; font-size: 11.5px; color: var(--dim); }
 
   /* ---------- tab bar ---------- */
   .tabbar { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 26px; }
@@ -470,7 +474,7 @@
 
   /* ---------- phones ---------- */
   @media (max-width: 600px) {
-    .app { padding: 16px 12px 56px; }
+    .app { padding: 16px 12px 18px; }
 
     /* header wraps on narrow screens */
     .topbar { flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
