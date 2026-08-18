@@ -257,8 +257,27 @@ function HistoryView({ today, refreshKey }) {
         {band && (
           <g>
             <rect x={x(band[0])} y={m.t} width={Math.max(1, x(band[1]) - x(band[0]))} height={innerH} fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.4)" strokeDasharray="3 3" />
-            {pts[band[0]] && <text x={Math.max(m.l + 16, x(band[0]))} y={m.t - 5} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(pts[band[0]].t)}</text>}
-            {pts[band[1]] && band[1] !== band[0] && <text x={Math.min(m.l + innerW - 16, x(band[1]))} y={m.t - 5} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(pts[band[1]].t)}</text>}
+            {(() => {
+              const a = pts[band[0]], bEnd = pts[band[1]];
+              if (!a) return null;
+              if (!bEnd || band[1] === band[0]) {
+                return <text x={Math.max(m.l + 16, x(band[0]))} y={m.t - 5} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(a.t)}</text>;
+              }
+              // Two separate labels collide once the band is narrower than they are
+              // wide (~34px each). Below that, draw one "start – end" label centred on
+              // the band instead of letting the timestamps overlap into mush.
+              const x0 = x(band[0]), x1 = x(band[1]);
+              if (x1 - x0 < 78) {
+                const cx = Math.min(m.l + innerW - 44, Math.max(m.l + 44, (x0 + x1) / 2));
+                return <text x={cx} y={m.t - 5} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(a.t)} – {HM(bEnd.t)}</text>;
+              }
+              return (
+                <>
+                  <text x={Math.max(m.l + 16, x0)} y={m.t - 5} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(a.t)}</text>
+                  <text x={Math.min(m.l + innerW - 16, x1)} y={m.t - 5} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(bEnd.t)}</text>
+                </>
+              );
+            })()}
           </g>
         )}
 
@@ -370,7 +389,6 @@ function HistoryView({ today, refreshKey }) {
         <button className="hv-daynav" disabled={!canNext} aria-label="Next day"
           onClick={() => canNext && setDate(shiftDate(date, 1))}>›</button>
         <span className="hv-datelabel">{isToday ? 'Today' : niceDate(date)}</span>
-        {dayData && dayData.approx && <span className="hv-approx" title="Before local logging began — this whole day comes from SunSynk's cloud feed (scaled to plant totals by calibration against logged days).">≈ estimated</span>}
         {/* The "Xh Ym missing" chip was removed by choice. api_history still returns
             gapMinutes/recoveredMinutes, so it can come back as a one-liner here. */}
         {!isToday && <button className="hv-today" onClick={() => setDate(todayStr)}>Today</button>}
@@ -381,10 +399,13 @@ function HistoryView({ today, refreshKey }) {
       </div>
 
       <div className="chart-area" ref={ref} style={{ position: 'relative', height: height }}>
-        {hasData ? renderDay() : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: height, color: 'var(--muted)', fontSize: 13 }}>{emptyMsg}</div>}
+        {hasData ? renderDay()
+          : (loading || (isToday && !dayData))
+            // still fetching: hold the chart's shape rather than printing "Loading…"
+            ? <window.Skeleton h={height} r={12} />
+            : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: height, color: 'var(--muted)', fontSize: 13 }}>{emptyMsg}</div>}
         {tooltip()}
         {rangeSummary()}
-        {hasData && !sel && !drag && !mobile && <div className="chart-hint">drag to total a range</div>}
       </div>
     </div>
   );

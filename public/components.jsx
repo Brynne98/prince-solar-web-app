@@ -62,13 +62,15 @@ function Card({ accent, children, className = '', style = {}, ...rest }) {
 }
 
 // ---- Big number stat tile (the "4 tabs" the user liked) ---------------------
-function StatTile({ label, value, unit, accent, sub, bar }) {
+function StatTile({ label, value, unit, accent, sub, bar, loading }) {
   return (
     <Card accent={accent} className="stat-tile">
       <div className="stat-label">{label}</div>
-      <div className="stat-value" style={{ color: accent }}>
-        <span className="num">{value}</span>{unit && <span className="unit">{unit}</span>}
-      </div>
+      {loading
+        ? <div className="stat-value"><Skeleton w="65%" h={44} /></div>
+        : <div className="stat-value" style={{ color: accent }}>
+            <span className="num">{value}</span>{unit && <span className="unit">{unit}</span>}
+          </div>}
       {bar != null &&
       <div className="meter"><div className="meter-fill" style={{ width: Math.max(0, Math.min(100, bar)) + '%', background: accent }} /></div>
       }
@@ -169,6 +171,26 @@ function Sparkline({ data, color, width = 120, height = 32, fill = true }) {
 }
 
 // ---- Info tooltip dot -------------------------------------------------------
+// Skeleton placeholder. A shimmering block standing in for content that hasn't
+// arrived, so the page keeps its shape instead of collapsing to a spinner.
+function Skeleton({ w = '100%', h = 14, r = 7, style = {}, className = '' }) {
+  return <div className={'skel ' + className} style={{ width: w, height: h, borderRadius: r, ...style }} />;
+}
+
+// A stat tile's worth of skeleton — label line, value line, matching the real card so
+// nothing jumps when the data lands.
+// The LABEL is static text, so it renders for real — only the value shimmers. Heights
+// are measured off the live card (.mini-label 14px, .mini-value 26px) so the tile lands
+// at the same 95px either way and nothing shifts when the number arrives.
+function SkeletonTile({ label }) {
+  return (
+    <Card className="mini-stat">
+      <div className="mini-label">{label}</div>
+      <div className="mini-value"><Skeleton w="72%" h={26} /></div>
+    </Card>
+  );
+}
+
 function InfoDot({ text }) {
   return (
     <span className="info-dot" tabIndex={0} role="note">
@@ -195,5 +217,6 @@ function SectionTitle({ children, right }) {
 Object.assign(window, {
   COLORS, fmtPower, fmtPowerParts, fmtKwh, fmtRand, fmtTime, cleanTemp,
   Card, StatTile, Metric, Badge, Segmented, Toggle, LegendChip, Sparkline, SectionTitle, InfoDot,
+  Skeleton, SkeletonTile,
   fmtEnergySmart, fmtRandSmart, fmtEnergyParts
 });

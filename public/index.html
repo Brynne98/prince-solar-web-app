@@ -29,8 +29,11 @@
     --line: rgba(255,255,255,0.07);
     --line-2: rgba(255,255,255,0.12);
     --text: #e7ecf2;
-    --muted: #707d8c;
-    --dim: #4a5562;
+    /* Both meet WCAG AA (4.5:1) on all three surfaces, worst case --dim on --panel-2
+       at 4.51:1. The previous values were 4.17:1 and 2.30:1 there — the latter below
+       even the 3:1 large-text floor, which is why small grey text read as blurry. */
+    --muted: #8b96a4;
+    --dim: #738396;
     --pv: #3ddc84; --batt: #a78bfa; --grid: #facc15; --load: #f87171; --soc: #22d3ee;
     --ok: #3ddc84;
     --display: 'Space Grotesk', system-ui, sans-serif;
@@ -45,17 +48,53 @@
       var(--bg);
     color: var(--text);
     font-family: var(--display);
-    -webkit-font-smoothing: antialiased;
+    /* No -webkit-font-smoothing: antialiased. On a dark theme it renders light text
+       THINNER than the default and reads as soft; the browser default is crisper here. */
     min-height: 100vh;
   }
+  /* ---------- scrollbar ----------
+     The browser default is a light bar, which reads as a bright seam down a dark app.
+     Firefox takes the two standard properties; Chrome/Safari/Edge need the -webkit
+     pseudo-elements. The thumb is inset via a transparent border + background-clip so
+     it floats clear of the edge instead of butting against it.
+     Note: on macOS with "Show scroll bars: When scrolling", this only appears mid-scroll. */
+  /* The standard properties and the -webkit ones CONFLICT: if scrollbar-width is set,
+     Chrome uses standard sizing and ignores ::-webkit-scrollbar entirely, which rendered
+     a 2px sliver instead of the intended thumb. So the standard pair is scoped to
+     browsers that have no -webkit scrollbar support (Firefox), and Chrome/Safari get
+     the pseudo-elements. */
+  @supports not selector(::-webkit-scrollbar) {
+    * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.22) transparent; }
+  }
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.14); border-radius: 8px;
+    border: 3px solid transparent; background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.26); background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:active { background: rgba(255,255,255,0.34); background-clip: content-box; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+
   .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
   .dim { color: var(--muted); }
   button { font-family: inherit; cursor: pointer; }
 
+  /* ---------- skeletons ---------- */
+  .skel { position: relative; overflow: hidden; background: rgba(255,255,255,0.055); }
+  .skel::after {
+    content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), transparent);
+    animation: skel-sweep 1.5s ease-in-out infinite;
+  }
+  @keyframes skel-sweep { 100% { transform: translateX(100%); } }
+  /* a sweeping highlight is exactly the kind of motion this setting exists to stop */
+  @media (prefers-reduced-motion: reduce) { .skel::after { animation: none; } }
+
   /* ---------- shell ---------- */
   /* Column layout so the tab content can grow and the version can be pushed to the
      real bottom of the page. The old 80px bottom padding just left dead space. */
-  .app { max-width: 1320px; margin: 0 auto; padding: 30px 34px 22px;
+  .app { max-width: 1320px; margin: 0 auto; padding: 30px 20px 22px;
     min-height: 100dvh; display: flex; flex-direction: column; }
   .content { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   /* > * so a tab whose root is a grid/stack still behaves as it did before */
@@ -100,6 +139,8 @@
 
   /* ---------- cards ---------- */
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px; }
+  /* charts want the width more than they want the gutter */
+  .chart-card, .trend-chart-card { padding-left: 12px; padding-right: 12px; }
   .grow { flex: 1; } .stack { display: flex; flex-direction: column; gap: 20px; }
   .section-title { display: flex; align-items: center; justify-content: space-between;
     font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: var(--muted); text-transform: uppercase; margin-bottom: 18px; }
@@ -156,7 +197,9 @@
   .mini-value { font-size: 20px; font-weight: 600; margin-top: 8px; letter-spacing: -0.01em; }
   .mv-num { white-space: nowrap; }
   /* grid presence chip on the Imported card — green when the mains is live, red when down */
-  .grid-state { display: inline-flex; align-items: center; gap: 6px; cursor: help; }
+  /* padding-left leaves room for the dot's 3px glow ring: .mini-sub clips overflow for
+     its ellipsis, so a ring flush against x=0 loses its left edge. */
+  .grid-state { display: inline-flex; align-items: center; gap: 6px; cursor: help; padding-left: 3px; }
   .grid-state .gs-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
   .grid-state.on  { color: var(--muted); }
   .grid-state.on  .gs-dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(61,220,132,0.14); }
@@ -318,6 +361,15 @@
   .legend-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; }
   .legend-note { font-size: 11.5px; color: var(--dim); margin-left: 4px; }
   .legend-mode { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; }
+  /* Dragging across a chart otherwise text-selects the axis labels and tooltip, so the
+     plot fills with blue highlight while you're trying to read a range. Charts are
+     interactive surfaces, not prose — nothing here is worth selecting. */
+  svg.chart-svg, .chart-area, .hv-root, .trend-chart, .chart-tip, .trend-tip, .chart-legend, .seg-usage {
+    -webkit-user-select: none; user-select: none;
+  }
+  /* stops the long-press "copy/share" bubble on iOS while dragging the chart */
+  svg.chart-svg { -webkit-touch-callout: none; }
+
   .chart-tip { position: absolute; pointer-events: none; background: rgba(13,17,23,0.96); border: 1px solid var(--line-2);
     border-radius: 10px; padding: 10px 12px; min-width: 168px; white-space: nowrap; box-shadow: 0 12px 30px rgba(0,0,0,0.5); z-index: 5; }
   .tip-time { font: 600 12px var(--mono); color: var(--text); margin-bottom: 8px; }
@@ -334,7 +386,6 @@
   .cr-x { margin-left: auto; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
   .cr-x:hover { color: var(--text); }
   /* lives in the SVG's empty top margin — bottom-right overlapped the last x-axis label */
-  .chart-hint { position: absolute; right: 14px; top: 3px; font-size: 10.5px; color: var(--dim); pointer-events: none; opacity: 0.6; }
   .chart-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-top: 18px;
     border-top: 1px solid var(--line); padding-top: 18px; }
   .sum-cell { } .sum-label { font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
@@ -474,7 +525,7 @@
 
   /* ---------- phones ---------- */
   @media (max-width: 600px) {
-    .app { padding: 16px 12px 18px; }
+    .app { padding: 16px 8px 18px; }
 
     /* header wraps on narrow screens */
     .topbar { flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
@@ -523,7 +574,6 @@
        and selection UI just cover the plot on phones */
     .hv-datelabel { display: none; }
     .hv-approx { font-size: 10px; padding: 1px 6px; }
-    .chart-hint { display: none; }
 
     /* battery banner on phones: status on row 1, stats forced to their own row
        below via flex-basis:100% (margin-auto alone doesn't wrap reliably) */

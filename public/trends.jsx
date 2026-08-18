@@ -282,6 +282,29 @@ const SEASONS = [
 ];
 const MONTHS = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+// Chart-shaped placeholder: a stat row and a plot area at the real chart's height, so
+// the card doesn't resize when the data lands.
+function ChartSkeleton({ stats = true }) {
+  const S = window.Skeleton;
+  return (
+    <div>
+      {stats && (
+        <div className="trend-stats">
+          {/* labels are static; only the figures wait on data */}
+          {['Generated', 'Consumed', 'Self-sufficiency'].map(l => (
+            <div key={l}>
+              <div className="ts-l">{l}</div>
+              <div className="ts-v"><S w="70%" h={23} /></div>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* .trend-chart renders at 380px */}
+      <S h={380} r={12} style={{ marginTop: 14 }} />
+    </div>
+  );
+}
+
 function TrendsTab({ refreshKey, auto, settings }) {
   const C = window.COLORS;
   const { Card, SectionTitle, Segmented } = window;
@@ -379,7 +402,7 @@ function TrendsTab({ refreshKey, auto, settings }) {
               <Segmented size="sm" value={segDays} onChange={setSegDays} options={[{ value: 7, label: '7d' }, { value: 14, label: '14d' }, { value: 30, label: '30d' }]} />
             </div>
             <div className="seg-key"><b>Bar length</b> = units used (kWh) — longer = more · <b>colours</b> = where it came from</div>
-            {loading && !segData ? <div className="trend-empty">Loading…</div> : segData && segData.segments && segData.segments.length ? (
+            {loading && !segData ? <ChartSkeleton stats={false} /> : segData && segData.segments && segData.segments.length ? (
               <SegmentUsage data={segData.segments} />
             ) : <div className="trend-empty">No data yet.</div>}
             <div className="hint-line">
@@ -401,7 +424,7 @@ function TrendsTab({ refreshKey, auto, settings }) {
               <div className="trend-subnav" style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
                 <Segmented size="sm" value={dailyDays} onChange={setDailyDays} options={[{ value: 14, label: '14d' }, { value: 30, label: '30d' }, { value: 60, label: '60d' }]} />
               </div>
-              {loading && !daily ? <div className="trend-empty">Loading…</div> : (
+              {loading && !daily ? <ChartSkeleton /> : (
                 <>
                   <TrendStats bars={dailyBars} unit="day" />
                   <LineChart series={DAILY_SERIES} labelEvery={dailyDays > 30 ? 5 : dailyDays > 14 ? 3 : 1} bars={dailyBars} />
@@ -412,13 +435,13 @@ function TrendsTab({ refreshKey, auto, settings }) {
           )}
           {gran === 'monthly' && (
             <>
-              {loading && !monthly ? <div className="trend-empty">Loading…</div> : <><TrendStats bars={monthlyBars} unit="month" /><LineChart series={SERIES} bars={monthlyBars} /></>}
+              {loading && !monthly ? <ChartSkeleton /> : <><TrendStats bars={monthlyBars} unit="month" /><LineChart series={SERIES} bars={monthlyBars} /></>}
               <div className="hint-line">Solar generated vs home consumption per month across every year on record. One new point lands each month.</div>
             </>
           )}
           {gran === 'seasonal' && (
             <>
-              {loading && !monthly ? <div className="trend-empty">Loading…</div> : <LineChart series={SERIES} bars={seasonBars} />}
+              {loading && !monthly ? <ChartSkeleton stats={false} /> : <LineChart series={SERIES} bars={seasonBars} />}
               <div className="hint-line">
                 Generation vs consumption rolled into SA seasons (Summer Dec–Feb · Autumn Mar–May · Winter Jun–Aug · Spring Sep–Nov).
                 <b> Sparse for now</b> — this only becomes meaningful with a full year of data, when winter-vs-summer solar (a big swing here) shows up. The logger is banking toward it.

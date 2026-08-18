@@ -171,6 +171,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
   // which would otherwise drive this negative (and break the bar).
   const pSuff = (pLoad != null && pLoad > 0) ? Math.max(0, Math.min(100, Math.round(((pLoad - pImp) / pLoad) * 100))) : null;
   const pSaved = (pLoad != null) ? Math.max(0, pLoad - pImp) * rate : null;
+  const pending = isAgg && !energy[period];
   const periodWord = { today: 'today', week: 'this week', month: 'this month', year: 'this year', lifetime: 'all-time' }[period];
   // trend vs the same elapsed slice of the previous period. Suppress "today" until
   // midday — a partial morning vs a full yesterday reads as a misleading drop.
@@ -217,13 +218,13 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
             value={period} onChange={setPeriod} />
         </div>
         <div className="today-strip">
-          <MiniStat label="Generated" value={window.fmtEnergySmart(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord}
+          <MiniStat loading={pending} label="Generated" value={window.fmtEnergySmart(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord}
             info="Total solar energy your panels produced over the selected period." />
-          <MiniStat label="Consumed" value={window.fmtEnergySmart(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
+          <MiniStat loading={pending} label="Consumed" value={window.fmtEnergySmart(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
             info="Total energy your home used over the selected period, summed across all inverters." />
-          <MiniStat label="Self-sufficiency" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
+          <MiniStat loading={pending} label="Self-sufficiency" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
             info="Share of your home’s energy that came from your own solar + battery rather than the grid. 100% = fully off-grid for the period." />
-          <MiniStat label="Imported" value={window.fmtEnergySmart(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
+          <MiniStat loading={pending} label="Imported" value={window.fmtEnergySmart(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
             info="Energy drawn from the grid over the selected period."
             sub={a.gridPresent == null ? null : (
               // Presence, not usage: mains voltage is there even when you draw nothing
@@ -235,7 +236,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
                 <span className="gs-dot" />{a.gridPresent ? 'Grid on' : 'Grid off'}
               </span>
             )} />
-          <MiniStat label="Est. saved" value={window.fmtRandSmart(pSaved)} color={CC.batt}
+          <MiniStat loading={pending} label="Est. saved" value={window.fmtRandSmart(pSaved)} color={CC.batt}
             info="Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your import rate. Set the rate in Settings." />
         </div>
       </div>
@@ -261,12 +262,17 @@ function TrendBadge({ pct, unit = '%', invert, title, delta }) {
   }
   return <span className={'trend-badge ' + (good ? 'good' : 'bad')} title={title || 'vs previous period'}>{up ? '▲' : '▼'} {label}</span>;
 }
-function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendTitle, trendDelta }) {
+function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendTitle, trendDelta, loading }) {
   return (
     <Card className="mini-stat">
       <div className="mini-label">{label}{info && <window.InfoDot text={info} />}</div>
-      <div className="mini-value mono" style={{ color }}><span className="mv-num">{value}</span><TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} title={trendTitle} delta={trendDelta} /></div>
-      {bar != null && <div className="meter sm"><div className="meter-fill" style={{ width: Math.max(0, Math.min(100, bar)) + '%', background: color }} /></div>}
+      {/* a shimmer beats an em-dash: switching to Week/Month refetches, and "—" reads as
+          "no data" rather than "fetching" */}
+      {loading
+        ? <div className="mini-value"><window.Skeleton w="70%" h={26} /></div>
+        : <div className="mini-value mono" style={{ color }}><span className="mv-num">{value}</span><TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} title={trendTitle} delta={trendDelta} /></div>}
+      {bar != null && !loading && <div className="meter sm"><div className="meter-fill" style={{ width: Math.max(0, Math.min(100, bar)) + '%', background: color }} /></div>}
+      {bar != null && loading && <window.Skeleton h={5} r={4} style={{ marginTop: 8 }} />}
       {sub && <div className="mini-sub mono">{sub}</div>}
     </Card>
   );
@@ -280,7 +286,8 @@ function SolarTab({ snap, energy, onNeedEnergy }) {
   const sumPv = (rows) => (rows ? rows.reduce((s, d) => s + d.pv, 0) : null);
   const gen = { week: sumPv(energy.week), month: sumPv(energy.month), year: sumPv(energy.year), lifetime: sumPv(energy.lifetime) };
   const EP = window.fmtEnergyParts;
-  const card = (label, k) => { const [v, u] = EP(k); return <StatTile label={label} value={v} unit={u ? ' ' + u : ''} accent={CC.pv} />; };
+  // k is null until that period's rows arrive — shimmer instead of an em-dash
+  const card = (label, k) => { const [v, u] = EP(k); return <StatTile loading={k == null} label={label} value={v} unit={u ? ' ' + u : ''} accent={CC.pv} />; };
   return (
     <div className="stack">
       <div className="solar-stats">

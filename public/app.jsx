@@ -89,6 +89,10 @@ function App() {
   useEffect(() => { if (!TABS.some(t => t.id === tab)) setTab('live'); }, [settings.tabs]);
 
   // ---- not-yet-loaded gate ----
+  //
+  // Renders the whole shell — topbar, tabs, page layout — with skeletons where the data
+  // will go, rather than a bare "Loading…" card. The old gate withheld even the tab bar,
+  // so there was nothing to look at until the snapshot landed.
   if (!snap) {
     return (
       <div className="app">
@@ -100,12 +104,68 @@ function App() {
               <div className="brand-sub mono">{err ? 'connection error' : 'connecting to SunSynk…'}</div>
             </div>
           </div>
+          <div className="topbar-actions">
+            <label className="auto-toggle"><input type="checkbox" checked disabled /> Auto</label>
+            <button className="refresh-btn" disabled>Refresh</button>
+          </div>
         </header>
-        <div className="card" style={{ marginTop: 8 }}>
-          {err
-            ? <div style={{ color: 'var(--load)' }}>⚠ {err}<div className="dim" style={{ marginTop: 8, fontSize: 13 }}>Check your credentials in <span className="mono">.env</span> and that the server can reach api.sunsynk.net. Retrying every 60s.</div></div>
-            : <div className="dim">Loading live data…</div>}
-        </div>
+
+        {/* Tabs stay live while loading: there is no reason to trap someone on Live
+            just because the first snapshot hasn't landed. */}
+        <nav className="tabbar" role="tablist" aria-busy="true">
+          {TABS.map(t => (
+            <button key={t.id} className={'tab' + (tab === t.id ? ' active' : '')}
+                    onClick={() => setTab(t.id)} role="tab" aria-selected={tab === t.id}>{t.label}</button>
+          ))}
+        </nav>
+
+        {err && <div className="card" style={{ marginBottom: 20, borderColor: 'rgba(255,125,107,0.35)' }}>
+          <div style={{ color: 'var(--load)' }}>⚠ {err}<div className="dim" style={{ marginTop: 8, fontSize: 13 }}>Check your credentials in <span className="mono">.env</span> and that the server can reach api.sunsynk.net. Retrying every 60s.</div></div>
+        </div>}
+
+        <main className="content" aria-busy="true">
+          {/* Static chrome renders for real — titles, tab rows, segmented controls and
+              tile labels are not data and have no business shimmering. Only values and
+              plot areas get skeletons; control rows that can't be rendered yet get an
+              inert spacer of the right height so nothing jumps either. */}
+          {tab === 'trends' ? (
+            // Like Settings, Trends never touches the snapshot — it fetches its own
+            // aggregates. So render the real thing and let its own ChartSkeleton cover
+            // the wait. A hand-built copy here drifted immediately: it hardcoded the
+            // Energy view while TrendsTab actually defaults to Battery.
+            <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} />
+          ) : tab === 'settings' ? (
+            // Nothing to wait for: Settings is entirely localStorage-backed and never
+            // touches the snapshot, so it renders in full while the API is still
+            // answering. Showing it a loading state was pure theatre.
+            <window.SettingsTab settings={settings} setSettings={setSettings} />
+          ) : (
+            <div className="live-grid">
+              <div className="overview-section">
+                <div className="overview-head">
+                  <div className="section-title">OVERVIEW · <span style={{ color: 'var(--text)' }}>today</span></div>
+                  <window.Segmented size="sm" value="today" onChange={() => {}}
+                    options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }]} />
+                </div>
+                <div className="today-strip">
+                  {['Generated', 'Consumed', 'Self-sufficiency', 'Imported', 'Est. saved']
+                    .map(l => <window.SkeletonTile key={l} label={l} />)}
+                </div>
+              </div>
+              <div className="card flow-card">
+                <div className="section-title">POWER FLOW</div>
+                {/* .flow-wrap measures 577px with data in it */}
+                <window.Skeleton h={577} r={12} />
+              </div>
+              <div className="card chart-card">
+                {/* the day-picker row is static UI we can't populate yet: reserve its
+                    33px without shimmering, then skeleton the 620px plot area */}
+                <div style={{ height: 33 }} />
+                <window.Skeleton h={620} r={12} style={{ marginTop: 16 }} />
+              </div>
+            </div>
+          )}
+        </main>
       </div>
     );
   }
