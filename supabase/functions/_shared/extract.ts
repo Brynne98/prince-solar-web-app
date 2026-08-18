@@ -9,6 +9,16 @@
 export const num = (v: unknown): number =>
   v === null || v === undefined || v === "" ? 0 : Number(v) || 0;
 
+/**
+ * Like num(), but preserves "not reported" as null instead of collapsing it to 0.
+ *
+ * Used for grid voltage, where the difference matters: 0 V means the mains has failed,
+ * whereas a missing field means this firmware doesn't tell us. num() cannot express
+ * that difference, and storing 0 for an absent field would show GRID OFF forever.
+ */
+export const numOrNull = (v: unknown): number | null =>
+  v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? null : Number(v);
+
 /** first defined/non-null value among keys */
 export function pick(obj: any, ...keys: string[]): any {
   if (!obj) return undefined;
@@ -75,6 +85,10 @@ export function extractReading(inv: InverterInfo, raw: RawBundle): Record<string
   const battPowerRaw = num(pick(b, "power")); // signed per firmware
   const battSigned = BATTERY_POSITIVE_MEANS === "charging" ? battPowerRaw : -battPowerRaw;
   const outVip0 = (o && Array.isArray(o.vip) && o.vip[0]) || {};
+  // Grid voltage lives in the same per-phase shape as the output side. It is the only
+  // field that separates "mains failed" from "mains fine, we just aren't drawing" —
+  // see migration 0015.
+  const gridVip0 = (g && Array.isArray(g.vip) && g.vip[0]) || {};
   return {
     sn: inv.sn,
     status: typeof inv.status === "number" ? inv.status : num(inv.status),
@@ -98,6 +112,13 @@ export function extractReading(inv: InverterInfo, raw: RawBundle): Record<string
     grid_export_total_kwh: num(pick(g, "etotalTo")),
     grid_freq_hz: num(pick(g, "fac", "freq")),
     grid_pf: num(pick(g, "pf")),
+    // nullable on purpose: absent field must not read as 0 V / grid down
+    grid_volt_v: numOrNull(pick(gridVip0, "volt", "voltage")),
+    // "Realy" is SunSynk's typo, kept verbatim; the alternates cover a future fix
+    grid_relay_status: (() => {
+      const v = pick(g, "acRealyStatus", "acRelayStatus", "relayStatus");
+      return v === undefined || v === null || v === "" ? null : String(v);
+    })(),
     load_w: powerField(l, "pac", "totalPower"), // power only — 'totalUsed' is a kWh counter
     load_today_kwh: num(pick(l, "dailyUsed")),
     load_total_kwh: num(pick(l, "totalUsed")),

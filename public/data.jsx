@@ -115,6 +115,9 @@ function aggregate(invs, totals) {
     battChgTotal: r1(sum((x) => x.chgTotal)),
     battDischgTotal: r1(sum((x) => x.dischgTotal)),
     gridPower: totals.grid != null ? totals.grid : sum((x) => x.grid),
+    // true = mains seen, false = supply down, null/undefined = this firmware doesn't
+    // report grid voltage, so the UI says nothing rather than guessing (migration 0015)
+    gridPresent: totals.gridPresent,
     gridFromToday: r1(totals.todayGridImport != null ? totals.todayGridImport : sum((x) => x.gridFromToday)),
     gridFromTotal: r1(sum((x) => x.gridFromTotal)),
     gridFreq: gf ? gf.gridFreq : (invs[0] ? invs[0].gridFreq : 0),

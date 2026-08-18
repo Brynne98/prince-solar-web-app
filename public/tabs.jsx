@@ -224,7 +224,17 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
           <MiniStat label="Self-sufficiency" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
             info="Share of your home’s energy that came from your own solar + battery rather than the grid. 100% = fully off-grid for the period." />
           <MiniStat label="Imported" value={window.fmtEnergySmart(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
-            info="Energy drawn from the grid over the selected period." />
+            info="Energy drawn from the grid over the selected period."
+            sub={a.gridPresent == null ? null : (
+              // Presence, not usage: mains voltage is there even when you draw nothing
+              // from it, so this stays ON through a sunny self-powered afternoon.
+              <span className={'grid-state ' + (a.gridPresent ? 'on' : 'off')}
+                    title={a.gridPresent
+                      ? 'Mains voltage detected. This reads ON whenever the utility is live, even when you are drawing nothing from it.'
+                      : 'No mains voltage on any inverter — the utility supply is down.'}>
+                <span className="gs-dot" />{a.gridPresent ? 'Grid on' : 'Grid off'}
+              </span>
+            )} />
           <MiniStat label="Est. saved" value={window.fmtRandSmart(pSaved)} color={CC.batt}
             info="Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your import rate. Set the rate in Settings." />
         </div>
