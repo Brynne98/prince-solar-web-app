@@ -490,16 +490,18 @@ function TrendsTab({ refreshKey, auto, settings }) {
       {view === 'energy' && (
         <Card>
           <div style={{ marginBottom: 10 }}>{genConsLegend}</div>
-          <div className="trend-subnav">
+          {/* every control on this view sits right; .trend-subnav is space-between, so
+              they need wrapping in one box to travel together */}
+          <div className="trend-subnav" style={{ justifyContent: 'flex-end' }}>
             <div className="trend-ctl">
-              <Segmented size="sm" value={gran} onChange={setGran} options={GRAN} />
               <Segmented size="sm" value={kind} onChange={setKindSaved}
                 options={[{ value: 'line', label: 'Line' }, { value: 'bar', label: 'Bar' }]} />
+              <Segmented size="sm" value={gran} onChange={setGran} options={GRAN} />
             </div>
           </div>
           {gran === 'daily' && (
             <>
-              <div className="trend-subnav" style={{ marginBottom: 8 }}>
+              <div className="trend-subnav" style={{ marginBottom: 8, justifyContent: 'flex-end' }}>
                 <Segmented size="sm" value={dailyDays} onChange={setDailyDays} options={[{ value: 7, label: '7d' }, { value: 14, label: '14d' }, { value: 30, label: '30d' }]} />
               </div>
               {loading && !daily ? <ChartSkeleton /> : (
