@@ -42,6 +42,71 @@ function splitLoad(load, imp) {
   return { own: l - gridPart, gridPart };
 }
 
+// ---------- Bar chart for the Energy view ----------
+// The original. Kept alongside LineChart because at 14 days bars read better than a
+// line, and at 60 they become a picket fence — so it is a toggle, not a decision.
+// Dashed series (the Expected line) are skipped: a dotted bar means nothing.
+function BarChart({ bars, series, labelEvery = 1 }) {
+  const [ref, width] = useWidth();
+  const [hover, setHover] = React.useState(null);
+  const fmtKwh = window.fmtKwh;
+  if (!bars.length) return <div className="trend-chart" ref={ref}><div className="trend-empty">No data for this range yet.</div></div>;
+  const mobile = width < 560;
+  const height = mobile ? 300 : 380;
+  const m = { l: 42, r: 12, t: 16, b: 40 };
+  const innerW = Math.max(40, width - m.l - m.r);
+  const innerH = height - m.t - m.b;
+  const niceMax = niceCeil(Math.max(1, ...bars.flatMap((b) => series.map((s) => b[s.key] || 0))));
+  const slot = innerW / bars.length;
+  const groupW = Math.min(slot * 0.74, 30 * series.length);
+  const bw = Math.max(2, groupW / series.length - (series.length > 1 ? 2 : 0));
+  const y = (v) => m.t + innerH - (Math.max(0, v) / niceMax) * innerH;
+  const yticks = []; for (let i = 0; i <= 4; i++) yticks.push((niceMax / 4) * i);
+  // beside the hovered bar, not parked in a corner — same rule as the line chart
+  const tipW = 200, gap = 14;
+  const tipLeft = hover == null ? 0 : Math.max(6, Math.min(width - tipW - 6,
+    (m.l + slot * (hover + 0.5)) + gap + tipW <= width - 6
+      ? (m.l + slot * (hover + 0.5)) + gap
+      : (m.l + slot * (hover + 0.5)) - gap - tipW));
+
+  return (
+    <div className="trend-chart" ref={ref} style={{ position: 'relative', height }}>
+      <svg width={width} height={height} className="chart-svg" onMouseLeave={() => setHover(null)}>
+        {yticks.map((v, i) => (
+          <g key={i}>
+            <line x1={m.l} y1={y(v)} x2={m.l + innerW} y2={y(v)} stroke="rgba(255,255,255,0.06)" />
+            <text x={m.l - 6} y={y(v) + 3} textAnchor="end" className="ax">{v >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v)}</text>
+          </g>
+        ))}
+        {bars.map((b, i) => {
+          const cx = m.l + slot * (i + 0.5);
+          const x0 = cx - groupW / 2;
+          const seg = groupW / series.length;
+          return (
+            <g key={i} onMouseEnter={() => setHover(i)}>
+              <rect x={cx - slot / 2} y={m.t} width={slot} height={innerH} fill="transparent" />
+              {series.map((s, si) => {
+                const top = y(b[s.key] || 0);
+                return <rect key={s.key} x={x0 + si * seg + (seg - bw) / 2} y={top} width={bw} height={Math.max(0, m.t + innerH - top)} rx="2" fill={s.color} fillOpacity={hover === i ? 0.95 : 0.72} />;
+              })}
+              {(i % labelEvery === 0 || i === bars.length - 1) && <text x={cx} y={height - 12} textAnchor="middle" className="ax">{b.label}</text>}
+            </g>
+          );
+        })}
+      </svg>
+      {hover != null && bars[hover] && (
+        <div className="trend-tip" style={{ left: tipLeft, width: tipW }}>
+          <div className="tip-time">{bars[hover].full || bars[hover].label}</div>
+          {series.map((s) => (
+            <div className="tip-row" key={s.key}><span className="tip-dot" style={{ background: s.color }} /><span className="tip-l">{s.label}</span><span className="tip-v mono">{fmtKwh(bars[hover][s.key])}</span></div>
+          ))}
+          {bars[hover].sub && <div className="tip-row"><span className="tip-l">{bars[hover].sub}</span></div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- Line chart for the Energy view ----------
 // This replaced a grouped bar chart: at 30-60 daily points the bars became a picket
 // fence, and lines show the shape of a run of dull days far better.
@@ -309,7 +374,12 @@ function TrendsTab({ refreshKey, auto, settings }) {
   const C = window.COLORS;
   const { Card, SectionTitle, Segmented } = window;
   const [view, setView] = React.useState('battery');   // battery | energy
-  const [gran, setGran] = React.useState('daily');      // energy granularity: daily | monthly | seasonal
+  const [gran, setGran] = React.useState('daily');
+  // remembered, like the other view choices — it's a preference, not a session thing
+  const [kind, setKind] = React.useState(() => {
+    try { return localStorage.getItem('synsynk.trendChart') === 'bar' ? 'bar' : 'line'; } catch (e) { return 'line'; }
+  });
+  const setKindSaved = (v) => { setKind(v); try { localStorage.setItem('synsynk.trendChart', v); } catch (e) {} };      // energy granularity: daily | monthly | seasonal
   const [dailyDays, setDailyDays] = React.useState(30);
   const [daily, setDaily] = React.useState(null);
   const [monthly, setMonthly] = React.useState(null);
@@ -373,12 +443,16 @@ function TrendsTab({ refreshKey, auto, settings }) {
   const DAILY_SERIES = SERIES.concat([
     { key: 'expected', label: 'Expected', color: C.pv, dash: '2 4' },
   ]);
+  // Bars can't render a dashed reference, so Expected is line-only.
+  const Chart = kind === 'bar' ? BarChart : LineChart;
+  const seriesFor = (list) => kind === 'bar' ? list.filter((x) => !x.dash) : list;
   const genConsLegend = (
     <div className="trend-legend">
       <span className="tl-item"><span className="tl-dot" style={{ background: C.pv }} />Generated</span>
       <span className="tl-item"><span className="tl-dot" style={{ background: C.load }} />Consumed</span>
       <span className="tl-item"><span className="tl-dot" style={{ background: C.grid }} />From grid</span>
-      <span className="tl-item"><span className="tl-dash" style={{ borderColor: C.pv }} />Expected</span>
+      {/* line-only: bars can't carry a dashed reference, so don't advertise one */}
+      {kind !== 'bar' && <span className="tl-item"><span className="tl-dash" style={{ borderColor: C.pv }} />Expected</span>}
     </div>
   );
 
@@ -415,19 +489,23 @@ function TrendsTab({ refreshKey, auto, settings }) {
       {/* ---------- ENERGY: generated vs consumed, by day / month / season ---------- */}
       {view === 'energy' && (
         <Card>
+          <div style={{ marginBottom: 10 }}>{genConsLegend}</div>
           <div className="trend-subnav">
-            {genConsLegend}
-            <Segmented size="sm" value={gran} onChange={setGran} options={GRAN} />
+            <div className="trend-ctl">
+              <Segmented size="sm" value={gran} onChange={setGran} options={GRAN} />
+              <Segmented size="sm" value={kind} onChange={setKindSaved}
+                options={[{ value: 'line', label: 'Line' }, { value: 'bar', label: 'Bar' }]} />
+            </div>
           </div>
           {gran === 'daily' && (
             <>
-              <div className="trend-subnav" style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
-                <Segmented size="sm" value={dailyDays} onChange={setDailyDays} options={[{ value: 14, label: '14d' }, { value: 30, label: '30d' }, { value: 60, label: '60d' }]} />
+              <div className="trend-subnav" style={{ marginBottom: 8 }}>
+                <Segmented size="sm" value={dailyDays} onChange={setDailyDays} options={[{ value: 7, label: '7d' }, { value: 14, label: '14d' }, { value: 30, label: '30d' }]} />
               </div>
               {loading && !daily ? <ChartSkeleton /> : (
                 <>
                   <TrendStats bars={dailyBars} unit="day" />
-                  <LineChart series={DAILY_SERIES} labelEvery={dailyDays > 30 ? 5 : dailyDays > 14 ? 3 : 1} bars={dailyBars} />
+                  <Chart series={seriesFor(DAILY_SERIES)} labelEvery={dailyDays > 14 ? 3 : 1} bars={dailyBars} />
                 </>
               )}
               <div className="hint-line">Solar generated, home consumption, and how much of it came off the grid, each day for the last {dailyDays} days. The dotted <b>Expected</b> line is what a typical day of yours converts from that day's sunshine — generation falls below it when the battery fills and the panels throttle, and rises above it on heavy-use days when nothing holds them back.</div>
@@ -435,13 +513,13 @@ function TrendsTab({ refreshKey, auto, settings }) {
           )}
           {gran === 'monthly' && (
             <>
-              {loading && !monthly ? <ChartSkeleton /> : <><TrendStats bars={monthlyBars} unit="month" /><LineChart series={SERIES} bars={monthlyBars} /></>}
+              {loading && !monthly ? <ChartSkeleton /> : <><TrendStats bars={monthlyBars} unit="month" /><Chart series={seriesFor(SERIES)} bars={monthlyBars} /></>}
               <div className="hint-line">Solar generated vs home consumption per month across every year on record. One new point lands each month.</div>
             </>
           )}
           {gran === 'seasonal' && (
             <>
-              {loading && !monthly ? <ChartSkeleton stats={false} /> : <LineChart series={SERIES} bars={seasonBars} />}
+              {loading && !monthly ? <ChartSkeleton stats={false} /> : <Chart series={seriesFor(SERIES)} bars={seasonBars} />}
               <div className="hint-line">
                 Generation vs consumption rolled into SA seasons (Summer Dec–Feb · Autumn Mar–May · Winter Jun–Aug · Spring Sep–Nov).
                 <b> Sparse for now</b> — this only becomes meaningful with a full year of data, when winter-vs-summer solar (a big swing here) shows up. The logger is banking toward it.
