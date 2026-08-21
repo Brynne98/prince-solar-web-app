@@ -180,7 +180,18 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
   // consistent with the number AND moves on every refresh; "previous" comes from
   // the compare endpoint (same elapsed slice of the prior period).
   const prev = (showCmp && cmp && cmp[period]) ? cmp[period].prev : null;
-  const pct = (c, p) => (c == null || !(p > 0)) ? null : ((c - p) / p) * 100;
+  // A zero baseline is not the same as "nothing to compare". Zero then zero is a real
+  // result — no change — and dropping the badge made a steady 0.0 kWh import look like
+  // missing data. Zero then something has no meaningful percentage, so hand the badge
+  // Infinity and let it fall back to the absolute kWh change it already knows how to show.
+  const pct = (c, p) => {
+    if (c == null || p == null) return null;
+    // Zero then zero is a real result: no change. Zero then SOMETHING is ambiguous —
+    // the compare RPC reports a period with no logged data as 0 too, so "grew from
+    // nothing" and "we don't know" are indistinguishable. Say nothing in that case.
+    if (p === 0) return c === 0 ? 0 : null;
+    return ((c - p) / p) * 100;
+  };
   const tGen = prev ? pct(pPv, prev.pv) : null;
   const tCon = prev ? pct(pLoad, prev.load) : null;
   const tImp = prev ? pct(pImp, prev.imp) : null;
@@ -245,7 +256,9 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
   );
 }
 function TrendBadge({ pct, unit = '%', invert, title, delta }) {
-  if (pct == null || !Number.isFinite(pct)) return null; // only hide when there's no prior period to compare
+  if (pct == null) return null;                       // only hide when there is no prior period
+  const usable = Number.isFinite(delta);
+  if (!Number.isFinite(pct) && !usable) return null;  // grew from zero and no kWh figure to show
   const mag = Math.abs(pct);
   if (mag < 0.05) return <span className="trend-badge flat" title={(title || 'vs previous period') + ' — no change'}>0{unit}</span>; // dead flat: neutral, no arrow
   const up = pct >= 0;
@@ -254,7 +267,7 @@ function TrendBadge({ pct, unit = '%', invert, title, delta }) {
   // (0.1 → 4.9 kWh would read +4800%), fall back to the absolute kWh change, which
   // is always meaningful. Threshold ≥200% (a 3×+ jump).
   let label;
-  if (mag >= 200 && delta != null && Number.isFinite(delta)) {
+  if ((mag >= 200 || !Number.isFinite(mag)) && usable) {
     const d = Math.abs(delta);
     label = (d < 10 ? d.toFixed(1) : String(Math.round(d))) + ' kWh';
   } else {
