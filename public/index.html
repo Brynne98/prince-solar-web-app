@@ -194,7 +194,10 @@
   .mini-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; }
   .mini-stat { transition: border-color .15s; }
   .mini-stat:hover { border-color: var(--line-2); }
-  .mini-value { font-size: 20px; font-weight: 600; margin-top: 8px; letter-spacing: -0.01em; }
+  /* flex-end, not baseline: the value is mono and the badge is the display font, so
+     equal baselines still leave their descenders 2px apart. Align the boxes instead. */
+  .mini-value { font-size: 20px; font-weight: 600; margin-top: 8px; letter-spacing: -0.01em;
+    display: flex; align-items: flex-end; }
   .mv-num { white-space: nowrap; }
   /* grid presence chip on the Imported card — green when the mains is live, red when down */
   /* padding-left leaves room for the dot's 3px glow ring: .mini-sub clips overflow for
@@ -273,7 +276,7 @@
   .mflow-home-today { margin-left: auto; font-size: 12px; color: var(--dim); white-space: nowrap; padding-left: 10px; }
 
   /* ---------- trend arrows on overview cards ---------- */
-  .trend-badge { font-family: var(--display); font-size: 12px; font-weight: 600; margin-left: 9px; letter-spacing: 0; white-space: nowrap; vertical-align: 2px; }
+  .trend-badge { font-family: var(--display); font-size: 12px; font-weight: 600; margin-left: 9px; letter-spacing: 0; white-space: nowrap; }
   .trend-badge.good { color: #3ddc84; }
   .trend-badge.bad { color: #f87171; }
   .trend-badge.flat { color: var(--dim); font-weight: 500; }
