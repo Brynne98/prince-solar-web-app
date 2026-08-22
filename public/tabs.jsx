@@ -184,12 +184,18 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
   // result — no change — and dropping the badge made a steady 0.0 kWh import look like
   // missing data. Zero then something has no meaningful percentage, so hand the badge
   // Infinity and let it fall back to the absolute kWh change it already knows how to show.
+  // Did the previous period log anything at all? If it recorded generation or
+  // consumption then a zero import is a REAL zero, not a gap — which is the common
+  // case here, since plenty of days import nothing. Without this test both look
+  // identical and the badge has to stay silent.
+  const prevHasData = !!prev && ((prev.pv || 0) > 0 || (prev.load || 0) > 0);
   const pct = (c, p) => {
     if (c == null || p == null) return null;
-    // Zero then zero is a real result: no change. Zero then SOMETHING is ambiguous —
-    // the compare RPC reports a period with no logged data as 0 too, so "grew from
-    // nothing" and "we don't know" are indistinguishable. Say nothing in that case.
-    if (p === 0) return c === 0 ? 0 : null;
+    // Zero then zero is no change. Zero then something has no meaningful percentage,
+    // so hand the badge Infinity and let it fall back to the absolute kWh change —
+    // but only when the previous period actually logged data, otherwise a logger
+    // outage would read as a rise from nothing.
+    if (p === 0) return c === 0 ? 0 : (prevHasData ? Infinity : null);
     return ((c - p) / p) * 100;
   };
   const tGen = prev ? pct(pPv, prev.pv) : null;

@@ -194,10 +194,14 @@
   .mini-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; }
   .mini-stat { transition: border-color .15s; }
   .mini-stat:hover { border-color: var(--line-2); }
-  /* flex-end, not baseline: the value is mono and the badge is the display font, so
-     equal baselines still leave their descenders 2px apart. Align the boxes instead. */
+  /* baseline, not flex-end. Aligning the boxes lines up the two fonts' DESCENDER
+     space, and the mono face reserves more of it — so its glyphs ride higher and the
+     badge reads as sitting low. Baselines are where the glyphs actually rest. */
   .mini-value { font-size: 20px; font-weight: 600; margin-top: 8px; letter-spacing: -0.01em;
-    display: flex; align-items: flex-end; }
+    display: flex; align-items: baseline; }
+  /* Baseline alone sits the badge a touch high, box-bottom a touch low. 1px down off
+     the baseline is the middle, and it is a nudge rather than a different rule. */
+  .trend-badge { position: relative; top: 1px; }
   .mv-num { white-space: nowrap; }
   /* grid presence chip on the Imported card — green when the mains is live, red when down */
   /* padding-left leaves room for the dot's 3px glow ring: .mini-sub clips overflow for
