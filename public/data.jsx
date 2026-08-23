@@ -131,11 +131,14 @@ function aggregate(invs, totals) {
 async function fetchSnapshot() {
   const api = await getJSON('/api/overview');
   const inverters = (api.inverters || []).map(mapInverter);
-  // Note: battery capacity is a user setting (SunSynk under-reports Ah/V), not derived here.
+  // Battery capacity and reserve are not derived here (SunSynk under-reports Ah/V) —
+  // they come from app_config via api_overview, which is also what the phone alerts
+  // read. Pass them straight through; null until the first snapshot lands.
   return {
     updated: new Date(api.generatedAt || Date.now()),
     plant: api.plant || { id: null, name: 'Home · SunSynk' },
     aggregate: aggregate(inverters, api.totals || {}),
+    config: api.config || null,
     inverters,
   };
 }

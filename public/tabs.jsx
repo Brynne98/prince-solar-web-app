@@ -84,9 +84,11 @@ function BatteryBalanceBanner({ refreshKey }) {
 // ---------------------------------------------------------------- LIVE
 function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
   const a = snap.aggregate;
-  // ---- battery runtime estimate (at current draw, down to user-set reserve) ----
-  const RESERVE = settings.reserve ?? 20;
-  const cap = settings.battCapacity ?? 26.5;
+  // ---- battery runtime estimate (at current draw, down to the configured reserve) ----
+  // Pack figures come from app_config via the snapshot, so these agree with the
+  // phone alerts by construction. The literals are only a pre-first-fetch fallback.
+  const RESERVE = snap.config?.reserve ?? 20;
+  const cap = snap.config?.battCapacity ?? 26.5;
   const availKwh = Math.max(0, (a.battSoc - RESERVE) / 100 * cap);
   const headroomKwh = Math.max(0, (100 - a.battSoc) / 100 * cap);
   const fmtDur = (hrs) => { let h = Math.floor(hrs), m = Math.round((hrs - h) * 60); if (m === 60) { h++; m = 0; } return (h > 0 ? h + 'h ' : '') + String(m).padStart(h > 0 ? 2 : 1, '0') + 'm'; };
@@ -357,8 +359,8 @@ function SolarTab({ snap, energy, onNeedEnergy }) {
 // ---------------------------------------------------------------- BATTERY
 function BatteryTab({ snap, settings }) {
   const a = snap.aggregate;
-  const reserve = settings.reserve ?? 20;
-  const cap = settings.battCapacity ?? 26.5;
+  const reserve = snap.config?.reserve ?? 20;
+  const cap = snap.config?.battCapacity ?? 26.5;
   const banks = snap.inverters.filter(i => i.numberOfBatteries > 0).length;
   const modules = snap.inverters.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
   return (
@@ -492,8 +494,11 @@ function InvertersTab({ snap }) {
 }
 
 // ---------------------------------------------------------------- SETTINGS
-function SettingsTab({ settings, setSettings }) {
+function SettingsTab({ settings, setSettings, config }) {
   const set = (patch) => setSettings(s => ({ ...s, ...patch }));
+  // Read-only: app_config is authoritative, because the phone alerts read the same
+  // rows. A second editable copy here is exactly how the two used to drift.
+  const cap = config?.battCapacity, reserve = config?.reserve;
   // Settings only, and nothing but the number — no rule above it, no card around it.
   const version = <div className="app-version mono">{window.APP_VERSION}</div>;
   const setTariff = (patch) => setSettings(s => ({ ...s, tariff: { ...s.tariff, ...patch } }));
@@ -531,15 +536,13 @@ function SettingsTab({ settings, setSettings }) {
         </div>
         <div className="field" style={{ marginTop: 16 }}>
           <label>Battery capacity (kWh)</label>
-          <input className="input mono" type="number" step="0.1" min="0" value={settings.battCapacity}
-            onChange={e => set({ battCapacity: +e.target.value })} />
-          <div className="field-note">Total pack energy across all banks. SunSynk under-reports this, so set it manually — e.g. 5 batteries × 5.3 kWh = 26.5 kWh. Runtime &amp; cycle estimates use it.</div>
+          <div className="input mono" style={{ opacity: 0.75 }}>{cap ?? '—'}</div>
+          <div className="field-note">Total pack energy across all banks — e.g. 5 batteries × 5.3 kWh = 26.5 kWh. Runtime &amp; cycle estimates use it. Set in the database (<span className="mono">app_config.BATTERY_KWH</span>), which the phone alerts read too.</div>
         </div>
         <div className="field" style={{ marginTop: 16 }}>
-          <label>Battery stopping reserve — <span className="mono" style={{ color: 'var(--soc)' }}>{settings.reserve}%</span></label>
-          <input className="range" type="range" min="5" max="50" step="1" value={settings.reserve}
-            onChange={e => set({ reserve: +e.target.value })} />
-          <div className="field-note">The SOC your system stops discharging at. Runtime estimates and the battery reserve marker use this.</div>
+          <label>Battery stopping reserve — <span className="mono" style={{ color: 'var(--soc)' }}>{reserve ?? '—'}%</span></label>
+          <input className="range" type="range" min="5" max="50" step="1" value={reserve ?? 20} readOnly disabled />
+          <div className="field-note">The SOC your system stops discharging at. Runtime estimates and the battery reserve marker use it. Set in the database (<span className="mono">app_config.BATTERY_RESERVE_PCT</span>), which the phone alerts read too.</div>
         </div>
       </Card>
 

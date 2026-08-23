@@ -370,7 +370,7 @@ function ChartSkeleton({ stats = true }) {
   );
 }
 
-function TrendsTab({ refreshKey, auto, settings }) {
+function TrendsTab({ refreshKey, auto, settings, config }) {
   const C = window.COLORS;
   const { Card, SectionTitle, Segmented } = window;
   const [view, setView] = React.useState('battery');   // battery | energy
@@ -480,7 +480,7 @@ function TrendsTab({ refreshKey, auto, settings }) {
               <SegmentUsage data={segData.segments} />
             ) : <div className="trend-empty">No data yet.</div>}
             <div className="hint-line">
-              Typical units (kWh) used in each part of the day over the last {segData ? segData.days : segDays} days, coloured by what supplied them. The <b>kW avg</b> alongside is the intensity — how hard you pull (the geysers are short but fierce). <b>At night the split is battery vs grid</b> (with your 20% floor the grid carries the bit below it); by day it's mostly direct solar.
+              Typical units (kWh) used in each part of the day over the last {segData ? segData.days : segDays} days, coloured by what supplied them. The <b>kW avg</b> alongside is the intensity — how hard you pull (the geysers are short but fierce). <b>At night the split is battery vs grid</b> (with your {config?.reserve ?? 20}% floor the grid carries the bit below it); by day it's mostly direct solar.
             </div>
           </Card>
         </>

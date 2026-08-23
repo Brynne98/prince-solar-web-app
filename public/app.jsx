@@ -7,8 +7,10 @@ const { useState, useEffect, useRef, useCallback } = React;
 
 const DEFAULT_SETTINGS = {
   battPositive: 'discharge',
-  reserve: 20,
-  battCapacity: 26.5, // 5 × 5.3 kWh banks (SunSynk's API under-reports this)
+  // battCapacity and reserve used to live here. They are facts about the
+  // installation, not per-device preferences, so they now live in app_config and
+  // arrive on the snapshot as `config` — one editable copy, shared with the phone
+  // alerts, which read the same rows. See migration 0022.
   // Off by default — the optional per-subject tabs are opt-in from Settings. Trends is
   // no longer listed here: like Live and Settings it is always on, so it needs no flag.
   tabs: { solar: false, battery: false, grid: false, inverters: false },
@@ -133,12 +135,12 @@ function App() {
             // aggregates. So render the real thing and let its own ChartSkeleton cover
             // the wait. A hand-built copy here drifted immediately: it hardcoded the
             // Energy view while TrendsTab actually defaults to Battery.
-            <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} />
+            <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />
           ) : tab === 'settings' ? (
-            // Nothing to wait for: Settings is entirely localStorage-backed and never
-            // touches the snapshot, so it renders in full while the API is still
-            // answering. Showing it a loading state was pure theatre.
-            <window.SettingsTab settings={settings} setSettings={setSettings} />
+            // Still nothing to wait for: the pack figures come off the snapshot but
+            // render as '—' until it lands, so Settings draws in full while the API is
+            // still answering. Showing it a loading state was pure theatre.
+            <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} />
           ) : (
             <div className="live-grid">
               <div className="overview-section">
@@ -211,8 +213,8 @@ function App() {
         {tab === 'battery' && <window.BatteryTab snap={snap} settings={settings} />}
         {tab === 'grid' && <window.GridTab snap={snap} settings={settings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} />}
-        {tab === 'trends' && <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} />}
-        {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} />}
+        {tab === 'trends' && <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />}
+        {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} />}
       </main>
 
     </div>
