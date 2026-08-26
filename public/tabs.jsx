@@ -84,13 +84,14 @@ function BatteryBalanceBanner({ refreshKey }) {
 // ---------------------------------------------------------------- LIVE
 function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
   const a = snap.aggregate;
-  // Typical charge at this hour, from complete days over the last two weeks.
-  // Fetched on mount / manual refresh — the 24-hour profile barely moves, and
-  // the live snapshot tick (60s) is enough to roll the displayed hour at :00.
+  // Typical charge at this hour, from complete days over the last week
+  // (same default window as Trends). Fetched on mount / manual refresh —
+  // the 24-hour profile barely moves, and the live snapshot tick (60s) is
+  // enough to roll the displayed hour at :00.
   const [hourly, setHourly] = React.useState(null);
   React.useEffect(() => {
     let alive = true;
-    window.fetchHourly(14).then((d) => { if (alive) setHourly(d); }).catch(() => {});
+    window.fetchHourly().then((d) => { if (alive) setHourly(d); }).catch(() => {});
     return () => { alive = false; };
   }, [refreshKey]);
   const hourNow = (snap.updated instanceof Date ? snap.updated : new Date()).getHours();

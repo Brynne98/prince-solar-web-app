@@ -25,23 +25,19 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
   const gridImport = agg.gridPower > 0 ? agg.gridPower : 0;
   const kwhToday = v => (v != null ? v.toFixed(1) + ' kWh today' : null);
   const hh = (h) => String(h).padStart(2, '0') + ':00';
-  // One whisper under the live %. Typical is the new number; keep the ETA on the
-  // same line when both exist so the node doesn't grow. Time-of-day only when
-  // there's no ETA — otherwise the hour is "now" and the extra chars overflow.
-  let battSub = battInfo || null;
-  if (typicalSoc != null) {
-    const typical = 'usually ' + typicalSoc + '%';
-    battSub = battInfo ? typical + ' · ' + battInfo
-      : (typicalHour != null ? typical + ' at ' + hh(typicalHour) : typical);
-  }
+  // Typical used to share the ETA line and shoved "2h 0m to empty" off the node.
+  // They are separate whispers: usual charge (cyan) and runtime (muted). The node
+  // grows a little when both are present rather than concatenating them.
+  const typicalLabel = typicalSoc != null ? 'usually ' + typicalSoc + '%' : null;
+  const typicalTitle = typicalSoc != null
+    ? 'Typical charge at ' + (typicalHour != null ? hh(typicalHour) : 'this hour') + ' over complete days'
+    : null;
 
   const left = [
     { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun', tag: null, sub: kwhToday(agg.pvToday) },
     { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, icon: 'battery', soc: agg.battSoc, reverse: charging,
-      tag: agg.battPower > 5 ? (charging ? 'charging' : 'discharging') : 'idle', pct: agg.battSoc, sub: battSub,
-      typicalTitle: typicalSoc != null
-        ? 'Typical charge at ' + (typicalHour != null ? hh(typicalHour) : 'this hour') + ' over complete days'
-        : null },
+      tag: agg.battPower > 5 ? (charging ? 'charging' : 'discharging') : 'idle', pct: agg.battSoc,
+      sub: battInfo || null, usual: typicalLabel, typicalTitle },
     { key: 'grid', label: 'Grid', color: C.grid, w: gridImport, icon: 'bolt', tag: null, sub: kwhToday(agg.gridFromToday) },
   ];
   const home = { label: 'Home', color: C.load, w: agg.loadNow, sub: kwhToday(agg.loadToday) };
@@ -126,17 +122,26 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
 
     const sideNode = (n, i) => {
       const active = n.w > 5;
-      const ly = n.tag ? -24 : -16, vy = n.tag ? 1 : 7, sy2 = n.tag ? 37 : 28;
+      const both = !!(n.usual && n.sub);
+      // Two whispers (usual + ETA) need a taller battery node; other source
+      // cards stay the original 88×152 so the column still lines up.
+      const h = both ? 104 : 88, y0 = both ? -52 : -44;
+      const ly = n.tag ? (both ? -30 : -24) : -16;
+      const vy = n.tag ? (both ? -5 : 1) : 7;
+      const ty = n.tag ? (both ? 14 : 20) : null;
+      const usualY = both ? 32 : (n.tag ? 37 : 28);
+      const subY = both ? 46 : (n.tag ? 37 : 28);
       return (
         <g key={n.key} transform={`translate(${srcX},${sy[i]})`}>
-          {active && <rect x={-76} y={-44} width={152} height={88} rx={15} fill={n.color} opacity="0.07" />}
-          <rect x={-76} y={-44} width={152} height={88} rx={15} fill="rgba(255,255,255,0.015)"
+          {active && <rect x={-76} y={y0} width={152} height={h} rx={15} fill={n.color} opacity="0.07" />}
+          <rect x={-76} y={y0} width={152} height={h} rx={15} fill="rgba(255,255,255,0.015)"
             stroke={n.color} strokeOpacity={active ? 0.6 : 0.22} strokeWidth="1.3" filter={active ? 'url(#flglow)' : undefined} />
-          {icon(n.icon, -56, -4, n.color, active, n.soc)}
+          {icon(n.icon, -56, both ? -10 : -4, n.color, active, n.soc)}
           <text x={-36} y={ly} className="flow-node-label">{n.label.toUpperCase()}</text>
           <text x={-36} y={vy} className="flow-node-val" fill={active ? n.color : 'var(--muted)'} textAnchor="start">{valKW(n.w)}<tspan className="flow-node-unit"> kWh</tspan></text>
-          {n.tag && <text x={-36} y={20} className="flow-node-tag" textAnchor="start" fill={active ? n.color : 'var(--dim)'} fillOpacity="0.9">{n.tag}{n.pct != null && <tspan dx="6" className="flow-pct" fill={n.color}>{n.pct}%</tspan>}</text>}
-          {n.sub && <text x={-36} y={sy2} className="flow-sub">{n.typicalTitle && <title>{n.typicalTitle}</title>}{n.sub}</text>}
+          {n.tag && <text x={-36} y={ty} className="flow-node-tag" textAnchor="start" fill={active ? n.color : 'var(--dim)'} fillOpacity="0.9">{n.tag}{n.pct != null && <tspan dx="6" className="flow-pct" fill={n.color}>{n.pct}%</tspan>}</text>}
+          {n.usual && <text x={-36} y={usualY} className="flow-sub flow-usual">{n.typicalTitle && <title>{n.typicalTitle}</title>}{n.usual}</text>}
+          {n.sub && <text x={-36} y={subY} className="flow-sub">{n.sub}</text>}
         </g>
       );
     };
@@ -196,7 +201,8 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
           {n.key === 'bat'
             ? <>
                 <div className="mtile-state" style={{ color: active ? n.color : 'var(--dim)' }}>{n.tag}{n.pct != null ? ` · ${n.pct}%` : ''}</div>
-                {n.sub && <div className="mtile-sub" title={n.typicalTitle || undefined}>{n.sub}</div>}
+                {n.usual && <div className="mtile-sub mtile-usual" title={n.typicalTitle || undefined}>{n.usual}</div>}
+                {n.sub && <div className="mtile-sub">{n.sub}</div>}
               </>
             : (n.sub && <div className="mtile-sub">{n.sub}</div>)}
         </div>

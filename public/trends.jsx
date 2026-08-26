@@ -498,7 +498,7 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
     try { return localStorage.getItem('synsynk.trendChart') === 'bar' ? 'bar' : 'line'; } catch (e) { return 'line'; }
   });
   const setKindSaved = (v) => { setKind(v); try { localStorage.setItem('synsynk.trendChart', v); } catch (e) {} };      // energy granularity: daily | monthly | seasonal
-  const [dailyDays, setDailyDays] = React.useState(30);
+  const [dailyDays, setDailyDays] = React.useState(7);
   const [daily, setDaily] = React.useState(null);
   const [monthly, setMonthly] = React.useState(null);
   const [segData, setSegData] = React.useState(null);
@@ -617,7 +617,7 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
               <span className="tl-item"><span className="tl-dash" style={{ borderColor: C.soc }} />Charge</span>
             </div>
             <div className="hint-line">
-              What usually covers the house at each hour, over the last {hourData ? hourData.days : segDays} complete days. The cyan line is typical charge at that hour — the same number Live shows under the battery as <b>usually N%</b>.
+              What usually covers the house at each hour, over the last {hourData ? hourData.days : segDays} complete days. On 7d this is the same figure Live shows as <b>usually N%</b>.
             </div>
           </Card>
         </>

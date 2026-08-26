@@ -7,6 +7,7 @@
 // (Field names mirror API.md; the old mock generators were removed.)
 // ============================================================================
 
+const TYPICAL_DAYS = 7; // Live "usually N%" and the Trends hourly default.
 const BATT_MAX_KW = 5.0; // charge/discharge ceiling per inverter (display only)
 
 // ---- transport -------------------------------------------------------------
@@ -205,8 +206,9 @@ async function fetchEnergy(period) {
 
 // ---- /api/trends -> hour-of-day profile from the local log -----------------
 async function fetchHourly(days) {
-  const byHour = await getJSON('/api/trends/by-hour?days=' + (days || 14));
-  return { days: byHour.days || days || 14, hours: byHour.hours || [] };
+  const n = days || TYPICAL_DAYS;
+  const byHour = await getJSON('/api/trends/by-hour?days=' + n);
+  return { days: byHour.days || n, hours: byHour.hours || [] };
 }
 async function fetchTrends(days) {
   const [byHour, stats] = await Promise.all([
@@ -258,5 +260,5 @@ const TARIFF_PRESETS = {
 };
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance, TARIFF_PRESETS, BATT_MAX_KW,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance, TARIFF_PRESETS, BATT_MAX_KW, TYPICAL_DAYS,
 });
