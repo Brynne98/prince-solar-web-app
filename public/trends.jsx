@@ -617,7 +617,7 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
               <span className="tl-item"><span className="tl-dash" style={{ borderColor: C.soc }} />Charge</span>
             </div>
             <div className="hint-line">
-              What usually covers the house at each hour, over the last {hourData ? hourData.days : segDays} complete days. On 7d this is the same figure Live shows as <b>usually N%</b>.
+              What usually covers the house at each hour, over the last {hourData ? hourData.days : segDays} complete days. On 7d this is the same figure Live shows as <b>≈ N%</b> next to the live charge.
             </div>
           </Card>
         </>
