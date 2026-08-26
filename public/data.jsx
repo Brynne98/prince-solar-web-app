@@ -204,12 +204,16 @@ async function fetchEnergy(period) {
 }
 
 // ---- /api/trends -> hour-of-day profile from the local log -----------------
+async function fetchHourly(days) {
+  const byHour = await getJSON('/api/trends/by-hour?days=' + (days || 14));
+  return { days: byHour.days || days || 14, hours: byHour.hours || [] };
+}
 async function fetchTrends(days) {
   const [byHour, stats] = await Promise.all([
-    getJSON('/api/trends/by-hour?days=' + days),
+    fetchHourly(days),
     getJSON('/api/db/stats').catch(() => null),
   ]);
-  return { days, hours: byHour.hours || [], stats };
+  return { days: byHour.days, hours: byHour.hours, stats };
 }
 // Last N days of plant kWh totals. Today's row is computed live from agg_minute rather
 // than the daily-synced cache (migration 0013); `expected` is that day's irradiance
@@ -254,5 +258,5 @@ const TARIFF_PRESETS = {
 };
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchEnergy, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance, TARIFF_PRESETS, BATT_MAX_KW,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance, TARIFF_PRESETS, BATT_MAX_KW,
 });

@@ -84,6 +84,20 @@ function BatteryBalanceBanner({ refreshKey }) {
 // ---------------------------------------------------------------- LIVE
 function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
   const a = snap.aggregate;
+  // Typical charge at this hour, from complete days over the last two weeks.
+  // Fetched on mount / manual refresh — the 24-hour profile barely moves, and
+  // the live snapshot tick (60s) is enough to roll the displayed hour at :00.
+  const [hourly, setHourly] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    window.fetchHourly(14).then((d) => { if (alive) setHourly(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, [refreshKey]);
+  const hourNow = (snap.updated instanceof Date ? snap.updated : new Date()).getHours();
+  const typicalRow = (hourly && hourly.hours || []).find((h) => Number(h.hour) === hourNow);
+  const typicalSoc = typicalRow && typicalRow.soc != null && Number.isFinite(Number(typicalRow.soc))
+    ? Math.round(Number(typicalRow.soc)) : null;
+  const typicalHour = typicalSoc != null ? hourNow : null;
   // ---- battery runtime estimate (at current draw, down to the configured reserve) ----
   // Pack figures come from app_config via the snapshot, so these agree with the
   // phone alerts by construction. The literals are only a pre-first-fetch fallback.
@@ -221,7 +235,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
               {isFs ? <FsExitIcon /> : <FsEnterIcon />}<span>{isFs ? 'Exit' : 'Fullscreen'}</span>
             </button>
           }>POWER FLOW</SectionTitle>
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} />
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} typicalSoc={typicalSoc} typicalHour={typicalHour} />
         </Card>
       </div>
 

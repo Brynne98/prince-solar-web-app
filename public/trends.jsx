@@ -338,6 +338,124 @@ function SegmentUsage({ data }) {
 // (Removed 2026-06: PhaseUsage / the overnight "battery at midnight" card — the
 // per-segment usage card below now covers the overnight breakdown.)
 
+// 24 stacked bars: each hour's load split into solar / battery / grid as % of
+// that hour's load (so every bar is 100% tall — mix, not kWh). Charge rides on
+// the same 0–100 axis. Current hour is marked. This is the fine grain under the
+// five day-segments above: those answer "where the day's units went"; this one
+// answers "what 23:00 actually looks like".
+function HourMixChart({ hours, nowHour }) {
+  const C = window.COLORS;
+  const [ref, width] = useWidth();
+  const [hover, setHover] = React.useState(null);
+  const src = [
+    { k: 'solar', label: 'Solar', c: C.pv },
+    { k: 'batt', label: 'Battery', c: C.batt },
+    { k: 'grid', label: 'Grid', c: C.grid },
+  ];
+  const by = Object.fromEntries((hours || []).map((h) => [Number(h.hour), h]));
+  const rows = [];
+  for (let hour = 0; hour < 24; hour++) {
+    const h = by[hour];
+    const s = Number(h && h.solar_w) || 0;
+    const b = Number(h && h.batt_load_w) || 0;
+    const g = Number(h && h.grid_load_w) || 0;
+    const tot = s + b + g;
+    const soc = h && h.soc != null && Number.isFinite(Number(h.soc)) ? Math.round(Number(h.soc)) : null;
+    rows.push({
+      hour,
+      solar: tot > 0 ? s / tot * 100 : 0,
+      batt: tot > 0 ? b / tot * 100 : 0,
+      grid: tot > 0 ? g / tot * 100 : 0,
+      soc,
+      empty: tot <= 0,
+    });
+  }
+  if (!(hours || []).length) return <div className="trend-chart" ref={ref}><div className="trend-empty">No data yet.</div></div>;
+
+  const mobile = width < 560;
+  const height = mobile ? 200 : 240;
+  const m = { l: 36, r: 12, t: 14, b: 28 };
+  const innerW = Math.max(40, width - m.l - m.r);
+  const innerH = height - m.t - m.b;
+  const slot = innerW / 24;
+  const bw = Math.max(3, slot * 0.72);
+  const y = (v) => m.t + innerH - (Math.max(0, Math.min(100, v)) / 100) * innerH;
+  const x = (i) => m.l + slot * (i + 0.5);
+  const hh = (h) => String(h).padStart(2, '0') + ':00';
+  const tipW = 200, gap = 14;
+  const tipLeft = hover == null ? 0 : Math.max(6, Math.min(width - tipW - 6,
+    x(hover) + gap + tipW <= width - 6 ? x(hover) + gap : x(hover) - gap - tipW));
+
+  let socD = '';
+  let pen = false;
+  rows.forEach((r, i) => {
+    if (r.soc == null) { pen = false; return; }
+    socD += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(r.soc).toFixed(1) + ' ';
+    pen = true;
+  });
+
+  return (
+    <div className="trend-chart" ref={ref} style={{ position: 'relative', height }}>
+      <svg width={width} height={height} className="chart-svg" style={{ cursor: 'crosshair' }}
+           onMouseLeave={() => setHover(null)}>
+        {[0, 50, 100].map((v) => (
+          <g key={v}>
+            <line x1={m.l} y1={y(v)} x2={m.l + innerW} y2={y(v)} stroke="rgba(255,255,255,0.06)" />
+            <text x={m.l - 6} y={y(v) + 3} textAnchor="end" className="ax">{v}%</text>
+          </g>
+        ))}
+        {rows.map((r, i) => {
+          const cx = x(i);
+          const now = nowHour === r.hour;
+          let y0 = m.t + innerH;
+          const segs = src.map((s) => {
+            const hgt = (r[s.k] / 100) * innerH;
+            y0 -= hgt;
+            return { ...s, y: y0, h: hgt };
+          });
+          return (
+            <g key={r.hour} onMouseEnter={() => setHover(i)} onTouchStart={() => setHover(i)}>
+              <rect x={cx - slot / 2} y={m.t} width={slot} height={innerH} fill="transparent" />
+              {now && <rect x={cx - bw / 2 - 1.5} y={m.t} width={bw + 3} height={innerH} rx="3" fill="rgba(255,255,255,0.06)" />}
+              {segs.filter((s) => s.h > 0.4).map((s) => (
+                <rect key={s.k} x={cx - bw / 2} y={s.y} width={bw} height={s.h}
+                  fill={s.c} fillOpacity={now ? 0.95 : (hover === i ? 0.88 : 0.7)} />
+              ))}
+              {(r.hour % 6 === 0 || now) && (
+                <text x={cx} y={height - 8} textAnchor="middle" className={'ax' + (now ? ' ax-hi' : '')}>{hh(r.hour)}</text>
+              )}
+            </g>
+          );
+        })}
+        {socD && <path d={socD} fill="none" stroke={C.soc} strokeWidth="1.6" strokeOpacity="0.95" />}
+        {rows.map((r, i) => r.soc != null
+          ? <circle key={'s' + r.hour} cx={x(i)} cy={y(r.soc)} r={nowHour === r.hour || hover === i ? 3 : 0}
+              fill={C.soc} stroke="#0b0e12" strokeWidth="1.2" />
+          : null)}
+      </svg>
+      {hover != null && rows[hover] && !rows[hover].empty && (
+        <div className="chart-tip" style={{ left: tipLeft, top: 12, width: tipW }}>
+          <div className="tip-time">{hh(rows[hover].hour)}{nowHour === rows[hover].hour ? ' · now' : ''}</div>
+          {src.filter((s) => rows[hover][s.k] >= 0.5).map((s) => (
+            <div className="tip-row" key={s.k}>
+              <span className="tip-dot" style={{ background: s.c }} />
+              <span className="tip-l">{s.label}</span>
+              <span className="tip-v mono">{Math.round(rows[hover][s.k])}%</span>
+            </div>
+          ))}
+          {rows[hover].soc != null && (
+            <div className="tip-row">
+              <span className="tip-dot" style={{ background: C.soc }} />
+              <span className="tip-l">Charge</span>
+              <span className="tip-v mono">{rows[hover].soc}%</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // SA (southern-hemisphere) seasons
 const SEASONS = [
   { key: 'summer', label: 'Summer', months: [12, 1, 2] },
@@ -384,6 +502,7 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
   const [daily, setDaily] = React.useState(null);
   const [monthly, setMonthly] = React.useState(null);
   const [segData, setSegData] = React.useState(null);
+  const [hourData, setHourData] = React.useState(null);
   const [segDays, setSegDays] = React.useState(7);
   const [loading, setLoading] = React.useState(false);
   const [tick, setTick] = React.useState(0); // bumped by auto-refresh
@@ -405,8 +524,10 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
     if (view === 'energy') {
       if (gran === 'daily') window.fetchTrendDaily(dailyDays).then(done(setDaily)).catch(fail);
       else window.fetchTrendMonthly().then(done(setMonthly)).catch(fail); // monthly + seasonal share data
-    } else { // battery: per-segment usage split
-      window.fetchSegments(segDays).then(done(setSegData)).catch(fail);
+    } else { // battery: per-segment usage split + hour-of-day mix
+      Promise.all([window.fetchSegments(segDays), window.fetchHourly(segDays)])
+        .then(([seg, hour]) => { if (!alive) return; setSegData(seg); setHourData(hour); setLoading(false); })
+        .catch(fail);
     }
     return () => { alive = false; };
   }, [view, gran, dailyDays, segDays, refreshKey, tick]);
@@ -467,20 +588,36 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
         <Segmented size="sm" value={view} onChange={setView} options={VIEWS} />
       </div>
 
-      {/* ---------- BATTERY: per-segment usage split ---------- */}
+      {/* ---------- BATTERY: per-segment usage split + hour-of-day mix ---------- */}
       {view === 'battery' && (
         <>
+          <div className="trend-subnav">
+            <div className="trend-rec-label">Electricity used by time of day</div>
+            <Segmented size="sm" value={segDays} onChange={setSegDays} options={[{ value: 7, label: '7d' }, { value: 14, label: '14d' }, { value: 30, label: '30d' }]} />
+          </div>
           <Card>
-            <div className="trend-subnav">
-              <div className="trend-rec-label">Electricity used by time of day</div>
-              <Segmented size="sm" value={segDays} onChange={setSegDays} options={[{ value: 7, label: '7d' }, { value: 14, label: '14d' }, { value: 30, label: '30d' }]} />
-            </div>
             <div className="seg-key"><b>Bar length</b> = units used (kWh) — longer = more · <b>colours</b> = where it came from</div>
             {loading && !segData ? <ChartSkeleton stats={false} /> : segData && segData.segments && segData.segments.length ? (
               <SegmentUsage data={segData.segments} />
             ) : <div className="trend-empty">No data yet.</div>}
             <div className="hint-line">
               Typical units (kWh) used in each part of the day over the last {segData ? segData.days : segDays} days, coloured by what supplied them. The <b>kW avg</b> alongside is the intensity — how hard you pull (the geysers are short but fierce). <b>At night the split is battery vs grid</b> (with your {config?.reserve ?? 20}% floor the grid carries the bit below it); by day it's mostly direct solar.
+            </div>
+          </Card>
+          <Card>
+            <div className="trend-rec-label">Usual mix by hour</div>
+            <div className="seg-key" style={{ marginTop: 8 }}><b>Bar</b> = share of the house load · <b>line</b> = typical charge · highlighted = this hour</div>
+            {loading && !hourData ? <window.Skeleton h={240} r={12} style={{ marginTop: 14 }} /> : hourData && hourData.hours && hourData.hours.length ? (
+              <HourMixChart hours={hourData.hours} nowHour={new Date().getHours()} />
+            ) : <div className="trend-empty">No data yet.</div>}
+            <div className="trend-legend" style={{ marginTop: 12 }}>
+              <span className="tl-item"><span className="tl-dot" style={{ background: C.pv }} />Solar</span>
+              <span className="tl-item"><span className="tl-dot" style={{ background: C.batt }} />Battery</span>
+              <span className="tl-item"><span className="tl-dot" style={{ background: C.grid }} />Grid</span>
+              <span className="tl-item"><span className="tl-dash" style={{ borderColor: C.soc }} />Charge</span>
+            </div>
+            <div className="hint-line">
+              What usually covers the house at each hour, over the last {hourData ? hourData.days : segDays} complete days. The cyan line is typical charge at that hour — the same number Live shows under the battery as <b>usually N%</b>.
             </div>
           </Card>
         </>

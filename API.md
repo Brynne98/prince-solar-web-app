@@ -62,7 +62,7 @@ needed its transport swapped.
 | `api_history_earliest` | — | `{ earliest }` — first day with data (≈ commission date); lower bound for the day picker |
 | `api_energy` | `p_period` | `week` / `month` / `year` / `lifetime` kWh rows from the cached plant totals |
 | `api_db_stats` | — | History-log health: rows, distinct days, first/last timestamps |
-| `api_trends_by_hour` | `p_days` | Avg power per hour-of-day from complete days only: `pv_w / load_w / baseline_load_w / grid_w / soc / surplus_w / spare_w` |
+| `api_trends_by_hour` | `p_days` | Avg power per hour-of-day from complete days only: `pv_w / load_w / baseline_load_w / grid_w / soc / surplus_w / spare_w`, plus the house-mix split `solar_w / batt_load_w / grid_load_w` (same decomposition as `api_trends_segments`) |
 | `api_trends_daily` | `p_days` | Last N days of plant kWh totals. Previous days come from the `plant_energy` cache; **today is computed live from `agg_minute`**, since the cache only refreshes on the daily cron (see migration 0013 for the source-mixing caveat). Each row also carries **`expected`** — that day's stored irradiance scaled by `forecast_k_day()`, driving the dotted line on the Energy trend. Absent (not zero) where no irradiance is on file; it is a typical day's conversion, **not** a measure of wasted solar (migration 0014) |
 | `api_trends_monthly` | — | Every month on record, tagged year + month |
 | `api_trends_compare` | — | Period-over-period totals, each compared against the same elapsed slice of the previous period |

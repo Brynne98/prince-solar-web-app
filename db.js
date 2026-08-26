@@ -169,34 +169,52 @@ function getStats() {
 const HEAVY_LOAD_W = 1500;
 
 // Average power profile by hour-of-day (local) over the last `days`. Powers the
-// "peak solar / free solar" view:
+// "peak solar / free solar" view, plus the hour-of-day mix/typical-charge:
 //   pv_w           — solar generated (the free energy available)
 //   baseline_load_w— typical non-heavy load (avg of sub-HEAVY_LOAD_W minutes)
 //   spare_w        — pv − baseline = solar free to run heavy loads (NOT gamed by
 //                    when a heavy load actually ran)
 //   surplus_w      — pv − total load (for reference)
+//   soc            — typical charge at that hour
+//   solar_w / batt_load_w / grid_load_w — house mix (same split as segmentPower)
 function byHour(days = 14) {
   initDb();
   const since = Math.floor(Date.now() / 1000) - days * 86400;
   // Only average days with FULL 24-hour data (all 24 hours present). This drops
   // commission/partial/outage days and today (still in progress), which would
   // otherwise skew the hourly means toward whatever portion of the day they cover.
+  // solar_w / batt_load_w / grid_load_w are the same house-mix split as segmentPower.
   const rows = db.prepare(`
     WITH day_stats AS (
       SELECT strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') AS d,
              COUNT(DISTINCT CAST(strftime('%H', ts, 'unixepoch', 'localtime') AS INTEGER)) AS hours
       FROM agg_minute WHERE ts >= ? GROUP BY d
+    ),
+    d AS (
+      SELECT CAST(strftime('%H', ts, 'unixepoch', 'localtime') AS INTEGER) AS hour,
+             COALESCE(pv_w, 0) AS pv, COALESCE(load_w, 0) AS load,
+             COALESCE(batt_w, 0) AS batt, COALESCE(grid_w, 0) AS grid, soc,
+             MIN(COALESCE(pv_w, 0), COALESCE(load_w, 0)) AS s2l
+      FROM agg_minute
+      WHERE ts >= ?
+        AND strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') IN (SELECT d FROM day_stats WHERE hours >= 24)
+    ),
+    e AS (
+      SELECT hour, pv, load, batt, grid, soc, s2l, (load - s2l) AS rem,
+             CASE WHEN batt < 0 THEN MIN(-batt, load - s2l) ELSE 0 END AS b2l
+      FROM d
     )
-    SELECT CAST(strftime('%H', ts, 'unixepoch', 'localtime') AS INTEGER) AS hour,
-           ROUND(AVG(pv_w))   AS pv_w,
-           ROUND(AVG(load_w)) AS load_w,
-           ROUND(AVG(CASE WHEN load_w < ${HEAVY_LOAD_W} THEN load_w END)) AS baseline_load_w,
-           ROUND(AVG(grid_w)) AS grid_w,
-           ROUND(AVG(soc))    AS soc,
-           COUNT(*)           AS samples
-    FROM agg_minute
-    WHERE ts >= ?
-      AND strftime('%Y-%m-%d', ts, 'unixepoch', 'localtime') IN (SELECT d FROM day_stats WHERE hours >= 24)
+    SELECT hour,
+           ROUND(AVG(pv))   AS pv_w,
+           ROUND(AVG(load)) AS load_w,
+           ROUND(AVG(CASE WHEN load < ${HEAVY_LOAD_W} THEN load END)) AS baseline_load_w,
+           ROUND(AVG(grid)) AS grid_w,
+           ROUND(AVG(soc))  AS soc,
+           COUNT(*)         AS samples,
+           ROUND(AVG(s2l))  AS solar_w,
+           ROUND(AVG(b2l))  AS batt_load_w,
+           ROUND(AVG(rem - b2l)) AS grid_load_w
+    FROM e
     GROUP BY hour
     ORDER BY hour
   `).all(since, since);

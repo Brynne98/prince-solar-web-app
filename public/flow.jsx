@@ -18,17 +18,30 @@ function useFlowMobile(bp = 600) {
   return mobile;
 }
 
-function PowerFlow({ agg, inverters, battInfo }) {
+function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
   const C = window.COLORS;
   const mobile = useFlowMobile();
   const charging = agg.battState === 'charging';
   const gridImport = agg.gridPower > 0 ? agg.gridPower : 0;
   const kwhToday = v => (v != null ? v.toFixed(1) + ' kWh today' : null);
+  const hh = (h) => String(h).padStart(2, '0') + ':00';
+  // One whisper under the live %. Typical is the new number; keep the ETA on the
+  // same line when both exist so the node doesn't grow. Time-of-day only when
+  // there's no ETA — otherwise the hour is "now" and the extra chars overflow.
+  let battSub = battInfo || null;
+  if (typicalSoc != null) {
+    const typical = 'usually ' + typicalSoc + '%';
+    battSub = battInfo ? typical + ' · ' + battInfo
+      : (typicalHour != null ? typical + ' at ' + hh(typicalHour) : typical);
+  }
 
   const left = [
     { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun', tag: null, sub: kwhToday(agg.pvToday) },
     { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, icon: 'battery', soc: agg.battSoc, reverse: charging,
-      tag: agg.battPower > 5 ? (charging ? 'charging' : 'discharging') : 'idle', pct: agg.battSoc, sub: battInfo },
+      tag: agg.battPower > 5 ? (charging ? 'charging' : 'discharging') : 'idle', pct: agg.battSoc, sub: battSub,
+      typicalTitle: typicalSoc != null
+        ? 'Typical charge at ' + (typicalHour != null ? hh(typicalHour) : 'this hour') + ' over complete days'
+        : null },
     { key: 'grid', label: 'Grid', color: C.grid, w: gridImport, icon: 'bolt', tag: null, sub: kwhToday(agg.gridFromToday) },
   ];
   const home = { label: 'Home', color: C.load, w: agg.loadNow, sub: kwhToday(agg.loadToday) };
@@ -123,7 +136,7 @@ function PowerFlow({ agg, inverters, battInfo }) {
           <text x={-36} y={ly} className="flow-node-label">{n.label.toUpperCase()}</text>
           <text x={-36} y={vy} className="flow-node-val" fill={active ? n.color : 'var(--muted)'} textAnchor="start">{valKW(n.w)}<tspan className="flow-node-unit"> kWh</tspan></text>
           {n.tag && <text x={-36} y={20} className="flow-node-tag" textAnchor="start" fill={active ? n.color : 'var(--dim)'} fillOpacity="0.9">{n.tag}{n.pct != null && <tspan dx="6" className="flow-pct" fill={n.color}>{n.pct}%</tspan>}</text>}
-          {n.sub && <text x={-36} y={sy2} className="flow-sub">{n.sub}</text>}
+          {n.sub && <text x={-36} y={sy2} className="flow-sub">{n.typicalTitle && <title>{n.typicalTitle}</title>}{n.sub}</text>}
         </g>
       );
     };
@@ -183,7 +196,7 @@ function PowerFlow({ agg, inverters, battInfo }) {
           {n.key === 'bat'
             ? <>
                 <div className="mtile-state" style={{ color: active ? n.color : 'var(--dim)' }}>{n.tag}{n.pct != null ? ` · ${n.pct}%` : ''}</div>
-                {n.sub && <div className="mtile-sub">{n.sub}</div>}
+                {n.sub && <div className="mtile-sub" title={n.typicalTitle || undefined}>{n.sub}</div>}
               </>
             : (n.sub && <div className="mtile-sub">{n.sub}</div>)}
         </div>
