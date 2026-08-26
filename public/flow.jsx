@@ -26,8 +26,7 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
   const kwhToday = v => (v != null ? v.toFixed(1) + ' kWh today' : null);
   const hh = (h) => String(h).padStart(2, '0') + ':00';
   // Typical used to share the ETA line and shoved "2h 0m to empty" off the node.
-  // They are separate whispers: usual charge (cyan) and runtime (muted). The node
-  // grows a little when both are present rather than concatenating them.
+  // Separate muted whispers; the node grows down when both are present.
   const typicalLabel = typicalSoc != null ? 'usually ' + typicalSoc + '%' : null;
   const typicalTitle = typicalSoc != null
     ? 'Typical charge at ' + (typicalHour != null ? hh(typicalHour) : 'this hour') + ' over complete days'
@@ -123,24 +122,25 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
     const sideNode = (n, i) => {
       const active = n.w > 5;
       const both = !!(n.usual && n.sub);
-      // Two whispers (usual + ETA) need a taller battery node; other source
-      // cards stay the original 88×152 so the column still lines up.
-      const h = both ? 104 : 88, y0 = both ? -52 : -44;
-      const ly = n.tag ? (both ? -30 : -24) : -16;
-      const vy = n.tag ? (both ? -5 : 1) : 7;
-      const ty = n.tag ? (both ? 14 : 20) : null;
-      const usualY = both ? 32 : (n.tag ? 37 : 28);
-      const subY = both ? 46 : (n.tag ? 37 : 28);
+      // Extra whisper grows the card DOWN so label/value/% stay put. The live %
+      // is 13px and hangs below the tag baseline — "usually" has to clear it,
+      // then ETA gets the same visual gap, then a matching pad to the bottom.
+      const h = both ? 102 : 88, y0 = -44;
+      const ly = n.tag ? -24 : -16;
+      const vy = n.tag ? 1 : 7;
+      const ty = n.tag ? 20 : null;
+      const usualY = both ? 36 : (n.tag ? 37 : 28);
+      const subY = both ? 51 : (n.tag ? 37 : 28);
       return (
         <g key={n.key} transform={`translate(${srcX},${sy[i]})`}>
           {active && <rect x={-76} y={y0} width={152} height={h} rx={15} fill={n.color} opacity="0.07" />}
           <rect x={-76} y={y0} width={152} height={h} rx={15} fill="rgba(255,255,255,0.015)"
             stroke={n.color} strokeOpacity={active ? 0.6 : 0.22} strokeWidth="1.3" filter={active ? 'url(#flglow)' : undefined} />
-          {icon(n.icon, -56, both ? -10 : -4, n.color, active, n.soc)}
+          {icon(n.icon, -56, -4, n.color, active, n.soc)}
           <text x={-36} y={ly} className="flow-node-label">{n.label.toUpperCase()}</text>
           <text x={-36} y={vy} className="flow-node-val" fill={active ? n.color : 'var(--muted)'} textAnchor="start">{valKW(n.w)}<tspan className="flow-node-unit"> kWh</tspan></text>
           {n.tag && <text x={-36} y={ty} className="flow-node-tag" textAnchor="start" fill={active ? n.color : 'var(--dim)'} fillOpacity="0.9">{n.tag}{n.pct != null && <tspan dx="6" className="flow-pct" fill={n.color}>{n.pct}%</tspan>}</text>}
-          {n.usual && <text x={-36} y={usualY} className="flow-sub flow-usual">{n.typicalTitle && <title>{n.typicalTitle}</title>}{n.usual}</text>}
+          {n.usual && <text x={-36} y={usualY} className="flow-sub">{n.typicalTitle && <title>{n.typicalTitle}</title>}{n.usual}</text>}
           {n.sub && <text x={-36} y={subY} className="flow-sub">{n.sub}</text>}
         </g>
       );
