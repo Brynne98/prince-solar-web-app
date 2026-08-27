@@ -99,7 +99,7 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
     const W = 980, H = 436;
     const invX = 490, invY = H / 2;
     // Cards grow right so the left edge (and the SOURCES column) stay put.
-    const nodeW = 196, nodeH = 88, nx = -76, ny = -44;
+    const nodeW = 184, nodeH = 88, nx = -76, ny = -44;
     const srcX = 150, homeX = W - 150;
     const sy = [110, 218, 326];
     const srcRight = srcX + nx + nodeW;
