@@ -26,7 +26,6 @@ import {
   plantFeedForDay,
 } from "../_shared/plantfeed.ts";
 
-const TZ = "Africa/Johannesburg";
 const DEFAULT_WINDOW_DAYS = 14;
 // Leave headroom under the 150 s free-tier wall clock; a partial sweep is fine
 // because the next scheduled run picks up where this one stopped.
@@ -35,16 +34,29 @@ const TIME_BUDGET_MS = 110_000;
 const json = (b: unknown, status = 200) =>
   new Response(JSON.stringify(b), { status, headers: { "Content-Type": "application/json" } });
 
-/** YYYY-MM-DD in plant-local time. */
-function localDate(d = new Date()): string {
+/** YYYY-MM-DD in the plant's zone. */
+function localDate(tz: string, d = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
   }).format(d);
 }
-const addDays = (day: string, n: number) => {
+const addDays = (tz: string, day: string, n: number) => {
   const [y, m, d] = day.split("-").map(Number);
-  return localDate(new Date(Date.UTC(y, m - 1, d + n, 12)));
+  return localDate(tz, new Date(Date.UTC(y, m - 1, d + n, 12)));
 };
+/** Epoch of local midnight for a YYYY-MM-DD in the plant's zone. */
+function dayStartEpoch(tz: string, day: string): number {
+  // Find the UTC instant whose wall-clock in `tz` is 00:00 on `day`: start from
+  // noon UTC that date and subtract the zone's offset at that instant.
+  const [y, m, d] = day.split("-").map(Number);
+  const noonUtc = Date.UTC(y, m - 1, d, 12);
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour12: false, hour: "2-digit", minute: "2-digit" })
+    .formatToParts(new Date(noonUtc));
+  const hh = Number(parts.find((p) => p.type === "hour")?.value ?? "12") % 24;
+  const mm = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  const offsetMin = (hh * 60 + mm) - 12 * 60;      // zone is `offset` ahead of UTC
+  return Math.floor(noonUtc / 1000) - 12 * 3600 - offsetMin * 60;
+}
 
 async function rpc(fn: string, args: Record<string, unknown>) {
   const { data, error } = await db.rpc(fn, args);
@@ -54,12 +66,12 @@ async function rpc(fn: string, args: Record<string, unknown>) {
 
 /** Fallback scale for days with too little of our own data to calibrate against. */
 const scaleCache = new Map<number, FeedScale>();
-async function currentFeedScale(acc: Account, plantId: number): Promise<FeedScale> {
+async function currentFeedScale(acc: Account, plantId: number, tz: string): Promise<FeedScale> {
   const hit = scaleCache.get(plantId);
   if (hit) return hit;
   let scale: FeedScale = { pv: 1, batt: 1, grid: 1, load: 1 }; // feed is full-sum as of 2026-06-10
   try {
-    const today = localDate();
+    const today = localDate(tz);
     const agg = await rpc("q_day_agg", { p_plant: plantId, p_day: today, p_source: null });
     if ((agg?.length ?? 0) > 5) {
       const feed = await plantFeedForDay(acc, plantId, today);
@@ -70,7 +82,7 @@ async function currentFeedScale(acc: Account, plantId: number): Promise<FeedScal
   return scale;
 }
 
-async function recoverDay(acc: Account, plantId: number, day: string) {
+async function recoverDay(acc: Account, plantId: number, tz: string, day: string) {
   const missing = await rpc("q_missing_minutes", { p_plant: plantId, p_day: day });
   const gaps: number[] = (missing ?? []).map((r: any) => Number(r.ts ?? r));
   if (!gaps.length) return { day, banked: 0, reason: "no gaps" };
@@ -83,9 +95,9 @@ async function recoverDay(acc: Account, plantId: number, day: string) {
   const pollerAgg = await rpc("q_day_agg", { p_plant: plantId, p_day: day, p_source: "poller" });
   const scale = (pollerAgg?.length ?? 0) >= 36
     ? calibrateFeedScale(feed, bucketizeAgg(pollerAgg))
-    : await currentFeedScale(acc, plantId);
+    : await currentFeedScale(acc, plantId, tz);
 
-  const dayStart = Date.parse(`${day}T00:00:00+02:00`) / 1000;
+  const dayStart = dayStartEpoch(tz, day);
   const rows: Record<string, number | null>[] = [];
   for (const ts of gaps) {
     const bkt = Math.floor((ts - dayStart) / 300);
@@ -118,27 +130,27 @@ async function recoverDay(acc: Account, plantId: number, day: string) {
 }
 
 async function recoverPlant(job: PlantJob, windowDays: number, started: number) {
-  const { plantId, account } = job;
+  const { plantId, account, timezone: tz } = job;
   const stats = await rpc("q_stats", { p_plant: plantId });
   const row = Array.isArray(stats) ? stats[0] : stats;
   if (!row?.first_ts) return { plantId, banked: 0, reason: "no history yet" };
 
-  const today = localDate();
-  const firstLogged = localDate(new Date(Number(row.first_ts) * 1000));
-  let day = addDays(today, -(windowDays - 1));
+  const today = localDate(tz);
+  const firstLogged = localDate(tz, new Date(Number(row.first_ts) * 1000));
+  let day = addDays(tz, today, -(windowDays - 1));
   if (day < firstLogged) day = firstLogged;
 
   const results = [];
   let total = 0;
   let stoppedEarly: string | null = null;
 
-  for (; day <= today; day = addDays(day, 1)) {
+  for (; day <= today; day = addDays(tz, day, 1)) {
     if (Date.now() - started > TIME_BUDGET_MS) {
       stoppedEarly = `time budget reached at ${day}; remaining days will be picked up next run`;
       break;
     }
     try {
-      const r = await recoverDay(account, plantId, day);
+      const r = await recoverDay(account, plantId, tz, day);
       total += r.banked;
       if (r.banked > 0 || r.reason) results.push(r);
     } catch (e) {
@@ -149,10 +161,11 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
   return {
     plantId,
     banked: total,
-    scanned: `${addDays(today, -(windowDays - 1))} .. ${today}`,
+    timezone: tz,
+    scanned: `${addDays(tz, today, -(windowDays - 1))} .. ${today}`,
     // days older than the window are never scanned — the cloud has dropped them
-    notScanned: firstLogged < addDays(today, -(windowDays - 1))
-      ? `${firstLogged} .. ${addDays(today, -windowDays)} (outside window; cloud retains ~1-2 weeks)`
+    notScanned: firstLogged < addDays(tz, today, -(windowDays - 1))
+      ? `${firstLogged} .. ${addDays(tz, today, -windowDays)} (outside window; cloud retains ~1-2 weeks)`
       : null,
     stoppedEarly,
     days: results,

@@ -13,7 +13,6 @@
 import { db, type PlantJob, plantsToPoll } from "../_shared/sunsynk.ts";
 import { fetchMonthRows, fetchYearRows } from "../_shared/plantfeed.ts";
 
-const TZ = "Africa/Johannesburg";
 const DEFAULT_DAILY_MONTHS = 6;
 const MAX_YEARS_BACK = 10;
 const TIME_BUDGET_MS = 110_000;
@@ -21,16 +20,16 @@ const TIME_BUDGET_MS = 110_000;
 const json = (b: unknown, status = 200) =>
   new Response(JSON.stringify(b), { status, headers: { "Content-Type": "application/json" } });
 
-function localParts(d = new Date()) {
+function localParts(tz: string, d = new Date()) {
   const s = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
   }).format(d);
   const [y, m, day] = s.split("-").map(Number);
   return { y, m, day };
 }
 
 async function syncPlant(job: PlantJob, dailyMonths: number, started: number) {
-  const { plantId, account } = job;
+  const { plantId, account, timezone: tz } = job;
 
   // SunSynk counts grid import/export only on CT-bearing inverters (the slave has
   // no CT), while PV and load are already full-plant. Scale grid up so these rows
@@ -39,7 +38,7 @@ async function syncPlant(job: PlantJob, dailyMonths: number, started: number) {
   if (gmErr) throw new Error(`q_grid_feed_scale: ${gmErr.message}`);
   const gridMul = Number(gm ?? 1) || 1;
 
-  const now = localParts();
+  const now = localParts(tz);
   const upserts: any[] = [];
   const synced = { years: [] as number[], months: [] as string[] };
 

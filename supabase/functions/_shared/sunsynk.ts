@@ -322,7 +322,7 @@ export async function ensureBootstrapAccount(): Promise<boolean> {
 }
 
 /** Every plant that should be worked on, with the account that can read it. */
-export type PlantJob = { plantId: number; plantName: string | null; account: Account };
+export type PlantJob = { plantId: number; plantName: string | null; timezone: string; account: Account };
 
 export async function plantsToPoll(): Promise<PlantJob[]> {
   const accounts = await rpc<Account[]>("accounts_active", {});
@@ -332,6 +332,8 @@ export async function plantsToPoll(): Promise<PlantJob[]> {
     .from("plant_users").select("plant_id, plant_name, account_id")
     .in("account_id", [...byId.keys()]);
   if (error) throw new Error(`plant_users: ${error.message}`);
+  const { data: cfgRows } = await db.from("plant_config").select("plant_id, timezone");
+  const tzOf = new Map((cfgRows ?? []).map((c: any) => [Number(c.plant_id), String(c.timezone)]));
   // one job per plant even if several users share it
   const seen = new Set<number>();
   const jobs: PlantJob[] = [];
@@ -341,7 +343,7 @@ export async function plantsToPoll(): Promise<PlantJob[]> {
     const acc = byId.get(r.account_id);
     if (!acc) continue;
     seen.add(pid);
-    jobs.push({ plantId: pid, plantName: r.plant_name ?? null, account: acc });
+    jobs.push({ plantId: pid, plantName: r.plant_name ?? null, timezone: tzOf.get(pid) ?? "Africa/Johannesburg", account: acc });
   }
   return jobs;
 }
