@@ -1,0 +1,11 @@
+-- ============================================================================
+-- 0026 — api_health is callable by anon again.
+--
+-- 0010 granted api_health() to anon on purpose: the external half-hourly check in
+-- .github/workflows/health.yml calls it with nothing but the publishable key, and
+-- it returns only a staleness number. 0025 re-created the function with a plant
+-- parameter and re-granted it to authenticated + service_role only, which broke
+-- that check. Restore anon. The per-plant path still goes through my_plant(), which
+-- needs a session, so anon can only ever get the global answer.
+-- ============================================================================
+grant execute on function public.api_health(bigint) to anon;
