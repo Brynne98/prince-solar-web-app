@@ -89,7 +89,7 @@ function LinkForm({ relink, onLinked }) {
                autoComplete="off" onChange={(e) => setPassword(e.target.value)} required />
         <button type="button" className="login-eye" onClick={() => setShowPw(v => !v)}
                 title={showPw ? 'Hide password' : 'Show password'} aria-pressed={showPw}>
-          {showPw ? '🙈' : '👁'}
+          {showPw ? <window.EyeOffIcon /> : <window.EyeIcon />}
         </button>
       </div>
       <button type="submit" disabled={busy}>{busy ? 'Connecting…' : (relink ? 'Reconnect' : 'Connect')}</button>

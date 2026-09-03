@@ -509,6 +509,58 @@ function InvertersTab({ snap }) {
 }
 
 // ---------------------------------------------------------------- SETTINGS
+// The signed-in user's SunSynk link: what's connected, since when, and the one
+// revocation they have. Disconnect wipes the stored token; history stays. A reload
+// afterwards lands on the Connect screen, because there's no active link left.
+function SunSynkConnectionCard() {
+  const { useState } = React;
+  const { loading, accounts } = window.useLinkStatus(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const acc = accounts.find(a => a.status !== 'disabled');
+  const fmt = (iso) => iso ? new Date(iso).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+  const disconnect = async () => {
+    if (!acc) return;
+    if (!confirm(`Disconnect ${acc.sunsynk_username}? Logging for its plants stops until you connect again. Your history is kept.`)) return;
+    setBusy(true); setErr(null);
+    try { await window.disconnectSunsynk(acc.account_id); location.reload(); }
+    catch (e) { setErr(e.message); setBusy(false); }
+  };
+  return (
+    <Card>
+      <SectionTitle>SUNSYNK CONNECTION</SectionTitle>
+      {loading ? <div className="field-note">Loading…</div> : !acc ? (
+        <div className="field-note">No SunSynk account connected.</div>
+      ) : (
+        <>
+          <div className="field">
+            <label>Account</label>
+            <div className="input mono" style={{ opacity: 0.85 }}>{acc.sunsynk_username}</div>
+          </div>
+          <div className="field" style={{ marginTop: 12 }}>
+            <label>Status</label>
+            <div className="input mono" style={{ color: acc.status === 'active' ? 'var(--good, #7ee2a0)' : 'var(--warn, #f0b35a)' }}>
+              {acc.status === 'active' ? 'Connected' : 'Needs reconnecting'}
+              {acc.status === 'active' && acc.last_ok_at ? ` · last read ${fmt(acc.last_ok_at)}` : ''}
+            </div>
+          </div>
+          <div className="field-note">
+            Connected {fmt(acc.linked_at)} · {(acc.plants || []).map(p => p.plant_name || p.plant_id).join(', ') || 'no plants visible'}
+          </div>
+          <div className="field-note" style={{ marginTop: 10 }}>
+            Your SunSynk password was exchanged for a token and never stored. Disconnecting deletes that token.
+          </div>
+          <button type="button" className="ghost-btn" onClick={disconnect} disabled={busy}
+                  style={{ marginTop: 12, borderColor: 'var(--bad, #e06c75)', color: 'var(--bad, #e06c75)' }}>
+            {busy ? 'Disconnecting…' : 'Disconnect SunSynk'}
+          </button>
+          {err && <div className="field-note" style={{ color: 'var(--bad, #e06c75)' }}>{err}</div>}
+        </>
+      )}
+    </Card>
+  );
+}
+
 function SettingsTab({ settings, setSettings, config }) {
   const set = (patch) => setSettings(s => ({ ...s, ...patch }));
   // Read-only: app_config is authoritative, because the phone alerts read the same
@@ -560,6 +612,8 @@ function SettingsTab({ settings, setSettings, config }) {
           <div className="field-note">The SOC your system stops discharging at. Runtime estimates and the battery reserve marker use it. Set in the database (<span className="mono">app_config.BATTERY_RESERVE_PCT</span>), which the phone alerts read too.</div>
         </div>
       </Card>
+
+      <SunSynkConnectionCard />
 
       <Card>
         <SectionTitle>TABS</SectionTitle>

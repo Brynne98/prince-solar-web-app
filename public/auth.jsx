@@ -103,3 +103,5 @@ window.AuthGate = function AuthGate({ children }) {
 };
 
 window.signOut = () => window.sb.auth.signOut();
+// Shared with the Connect screen so the two password fields look the same.
+Object.assign(window, { EyeIcon, EyeOffIcon });
