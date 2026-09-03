@@ -76,26 +76,24 @@ function LinkForm({ relink, onLinked }) {
 
   return (
     <form className="login-card" onSubmit={submit}>
-      <div className="login-title">{relink ? 'Reconnect SunSynk' : 'Connect SunSynk'}</div>
+      <window.AuthBrand />
+      <div className="login-title">{relink ? 'Reconnect SunSynk' : 'Connect your SunSynk'}</div>
       <div className="login-sub">
         {relink
           ? 'Your SunSynk connection stopped working — usually a changed password. Sign in again to resume logging. Your history is intact.'
-          : 'Sign in with your SunSynk Connect login. We swap it for an access token and never keep the password.'}
+          : 'Sign in with your SunSynk Connect login. We exchange it for an access token and never keep the password.'}
       </div>
-      <input type="text" placeholder="SunSynk Connect email" value={username} autoComplete="off"
-             onChange={(e) => setUsername(e.target.value)} required />
-      <div className="login-pw">
-        <input type={showPw ? 'text' : 'password'} placeholder="SunSynk Connect password" value={password}
-               autoComplete="off" onChange={(e) => setPassword(e.target.value)} required />
-        <button type="button" className="login-eye" onClick={() => setShowPw(v => !v)}
-                title={showPw ? 'Hide password' : 'Show password'} aria-pressed={showPw}>
-          {showPw ? <window.EyeOffIcon /> : <window.EyeIcon />}
-        </button>
+      <div className="auth-field">
+        <label htmlFor="ss-user">SunSynk Connect email</label>
+        <input id="ss-user" type="text" placeholder="The login you use in the SunSynk app" value={username} autoComplete="off"
+               onChange={(e) => setUsername(e.target.value)} required />
       </div>
+      <window.PasswordField id="ss-pass" label="SunSynk Connect password" value={password} onChange={setPassword}
+                            placeholder="••••••••" autoComplete="off" />
       <button type="submit" disabled={busy}>{busy ? 'Connecting…' : (relink ? 'Reconnect' : 'Connect')}</button>
-      <div className="login-err" role="alert" aria-live="polite">{err || warn}</div>
-      <div className="login-sub" style={{ marginTop: 12, opacity: .7 }}>
-        This is the same login you use in the SunSynk Connect app. Signing in here does not sign you out there.
+      <div className={'login-err' + (warn && !err ? ' login-note' : '')} role="alert" aria-live="polite">{err || warn}</div>
+      <div className="login-links">
+        <span className="login-fine">Signing in here does not sign you out of the SunSynk app. Disconnect any time from Settings.</span>
       </div>
     </form>
   );

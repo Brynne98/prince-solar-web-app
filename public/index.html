@@ -598,29 +598,46 @@
     .trend-subnav { flex-direction: column; align-items: flex-start; gap: 8px; }
   }
   /* --- login gate ------------------------------------------------------- */
+  /* ---- auth + connect screens ------------------------------------------------
+     One card system shared by sign-in, sign-up, reset and Connect-SunSynk. The
+     ambient glow is the same warm sun as the header orb, so the sign-in page reads
+     as the front door of the same product rather than a generic form. */
   .login-wrap {
     min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px;
+    position: relative; isolation: isolate;
+  }
+  .login-wrap::before {
+    content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(520px 320px at 50% 38%, rgba(244,169,58,0.10), transparent 70%),
+      radial-gradient(900px 500px at 50% 110%, rgba(61,220,132,0.06), transparent 70%);
   }
   .login-card {
-    width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 12px;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 28px 24px;
-    color: var(--text); text-align: center;
+    width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 14px;
+    background: linear-gradient(180deg, var(--panel-2), var(--panel));
+    border: 1px solid var(--line-2); border-radius: 18px; padding: 30px 30px 26px;
+    color: var(--text); text-align: left;
+    box-shadow: 0 24px 60px -30px rgba(0,0,0,0.9), 0 0 0 1px rgba(0,0,0,0.25) inset;
   }
-  .login-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
-  .login-sub { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+  .auth-brand .sun { width: 30px; height: 30px; box-shadow: 0 0 0 4px rgba(244,169,58,0.10), 0 0 22px rgba(244,169,58,0.40); }
+  .auth-brand-name { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; line-height: 1; }
+  .auth-brand-tag { font-size: 12px; color: var(--dim); margin-top: 4px; letter-spacing: 0.01em; }
+  .login-title { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-top: 10px; }
+  .login-sub { font-size: 13.5px; color: var(--muted); line-height: 1.45; margin-top: -8px; margin-bottom: 4px; }
+  .auth-field { display: flex; flex-direction: column; gap: 6px; }
+  .auth-field > label { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
   .login-card input {
-    background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px;
-    padding: 11px 13px; color: var(--text); font-family: var(--display); font-size: 14px;
+    background: var(--bg); border: 1px solid var(--line-2); border-radius: 11px;
+    padding: 12px 14px; color: var(--text); font-family: var(--display); font-size: 14.5px;
+    transition: border-color .15s, box-shadow .15s;
   }
-  .login-card input:focus { outline: none; border-color: var(--pv); }
-  /* password field + its reveal toggle. The input keeps its own border, so the
-     wrapper is purely for positioning the eye over the right-hand edge. */
+  .login-card input::placeholder { color: var(--dim); }
+  .login-card input:focus { outline: none; border-color: var(--pv); box-shadow: 0 0 0 3px rgba(61,220,132,0.14); }
   .login-pw { position: relative; display: flex; }
-  .login-pw input { flex: 1; padding-right: 40px; min-width: 0; }
-  /* Specificity note: `.login-card button` above paints the green primary button, and
-     it outranks a lone `.login-eye`, so this has to match on both to win. */
+  .login-pw input { flex: 1; padding-right: 42px; min-width: 0; }
   .login-card .login-eye {
-    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
     display: flex; align-items: center; justify-content: center;
     width: 32px; height: 32px; padding: 0;
     background: none; border: 0; border-radius: 8px;
@@ -628,16 +645,32 @@
   }
   .login-card .login-eye:hover { color: var(--text); }
   .login-card .login-eye:focus-visible { outline: 2px solid var(--pv); outline-offset: -2px; }
-  .login-card button {
-    background: var(--pv); color: #06210f; border: 0; border-radius: 10px; padding: 11px 13px;
-    font-family: var(--display); font-size: 14px; font-weight: 600; cursor: pointer;
+  .login-card button[type="submit"] {
+    margin-top: 6px;
+    background: var(--pv); color: #06210f; border: 0; border-radius: 11px; padding: 13px 14px;
+    font-family: var(--display); font-size: 14.5px; font-weight: 700; letter-spacing: 0.005em; cursor: pointer;
+    box-shadow: 0 8px 22px -10px rgba(61,220,132,0.7);
+    transition: transform .12s, filter .12s;
   }
-  .login-card button:disabled { opacity: 0.6; cursor: default; }
-  /* min-height reserves exactly one line so the card is the same height empty or not
-     (see auth.jsx). Errors here are short — "Invalid login credentials" — so one line
-     covers them; a rare two-line message still nudges, which beats padding out the
-     card for a case that hardly happens. */
-  .login-err { color: var(--load); font-size: 13px; line-height: 1.3; min-height: 17px; }
+  .login-card button[type="submit"]:hover { filter: brightness(1.06); }
+  .login-card button[type="submit"]:active { transform: translateY(1px); }
+  .login-card button[type="submit"]:disabled { opacity: 0.6; cursor: default; box-shadow: none; }
+  /* one reserved line so the card doesn't jump when a message appears */
+  .login-err { color: var(--load); font-size: 13px; line-height: 1.35; min-height: 18px; }
+  .login-note { color: var(--muted); }
+  .login-links {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    margin-top: 6px; padding-top: 16px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--muted);
+  }
+  .login-card .login-link {
+    background: none; border: 0; padding: 0; margin: 0; width: auto; box-shadow: none;
+    color: var(--pv); font-family: var(--display); font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .login-card .login-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .login-card .login-link.quiet { color: var(--muted); font-weight: 500; }
+  .login-fine { font-size: 12px; color: var(--dim); line-height: 1.45; }
+  @media (max-width: 480px) { .login-card { padding: 26px 22px 22px; } }
 </style>
 </head>
 <body>
