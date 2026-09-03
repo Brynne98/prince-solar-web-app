@@ -51,6 +51,19 @@ would drag a Pages rebuild along for nothing.
 
 ## 3. Backend
 
+> **Releasing the official-API / multi-tenant change (migrations 0024–0025):**
+> set secrets **before** `db push`, because the first `poll` after the migration
+> bootstraps your plant from them. `0024` re-keys `agg_minute`, drops `private.auth`
+> and moves tokens into Vault — **there is no rollback short of a database restore.**
+> Take a backup first. `link-sunsynk` is new and must be deployed. `api_health()`
+> keeps its global no-argument behaviour, so the health workflow is unchanged.
+>
+> ```bash
+> supabase secrets set SUNSYNK_APP_KEY=… SUNSYNK_APP_SECRET=… BOOTSTRAP_USER_EMAIL=brynneprince98@gmail.com
+> supabase db push
+> supabase functions deploy poll link-sunsynk recover sync-plant-energy forecast alerts-due
+> ```
+
 ```bash
 supabase db push                                  # pending migrations
 supabase functions deploy poll                    # only what changed
@@ -81,14 +94,14 @@ a real change under `public/`.
 ## 5. Verify — do not assume
 
 ```bash
-until curl -s "https://brynne98.github.io/sunsynk-dashboard/config.js?v=$(date +%s)" \
+until curl -s "https://brynne98.github.io/prince-solar-web-app/config.js?v=$(date +%s)" \
   | grep -q "v1.2.3"; do sleep 20; done
 ```
 
 Typically 1–2 minutes. If it doesn't land, check the run:
 
 ```bash
-curl -s "https://api.github.com/repos/Brynne98/sunsynk-dashboard/actions/runs?per_page=5"
+curl -s "https://api.github.com/repos/Brynne98/prince-solar-web-app/actions/runs?per_page=5"
 ```
 
 Logs need authentication, so an unauthenticated fetch gets 403 — read the failure in the
@@ -130,4 +143,4 @@ onto today; that must stay local.
 | `.github/workflows/pages.yml` | the Pages deploy |
 | `.github/workflows/health.yml` | half-hourly logger check, emails on failure |
 
-Project ref `pmakzojwhouamawgszrc` · site https://brynne98.github.io/sunsynk-dashboard
+Project ref `pmakzojwhouamawgszrc` · site https://brynne98.github.io/prince-solar-web-app
