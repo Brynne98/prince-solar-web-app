@@ -670,7 +670,12 @@
   .login-card .login-link:hover { text-decoration: underline; text-underline-offset: 3px; }
   .login-card .login-link.quiet { color: var(--muted); font-weight: 500; }
   .login-fine { font-size: 12px; color: var(--dim); line-height: 1.45; }
-  @media (max-width: 480px) { .login-card { padding: 26px 22px 22px; } }
+  @media (max-width: 480px) {
+    .login-card { padding: 26px 22px 22px; }
+    /* the two footer actions share a line on wide cards; on a phone they stack
+       cleanly instead of one of them wrapping mid-phrase */
+    .login-links { flex-direction: column; align-items: flex-start; gap: 10px; }
+  }
   /* plant selector in the topbar */
   .plant-select { background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text); border-radius: 9px; padding: 7px 10px; font-family: var(--display); font-size: 13px; }
   /* sign-up consent */
