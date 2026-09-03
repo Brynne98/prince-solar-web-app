@@ -12,7 +12,7 @@
 // The gotchas (azimuth convention, `_instant` vs hour-averaged, W/m² needing a fitted
 // scale) are documented at length in migration 0012. Read that first if this looks
 // like it is doing something arbitrary.
-import { db } from "../_shared/sunsynk.ts";
+import { bootstrapPlantId, db } from "../_shared/sunsynk.ts";
 
 const FORECAST_API = "https://api.open-meteo.com/v1/forecast";
 const ARCHIVE_API = "https://archive-api.open-meteo.com/v1/archive";
@@ -168,8 +168,12 @@ async function calibrate(cfg: Cfg) {
   });
   const backfilled = await store(archive);
 
+  // Irradiance is single-site; production to fit it against comes from the plant the
+  // deployment was bootstrapped with (public.calibration_plant()).
+  const plant = await bootstrapPlantId();
+  if (plant == null) return { calibrated: false, backfilled, reason: "no plant linked yet" };
   const sorted = async (fn: string) => {
-    const { data, error } = await db.rpc(fn, { p_days: CAL_WINDOW_DAYS });
+    const { data, error } = await db.rpc(fn, { p_plant: plant, p_days: CAL_WINDOW_DAYS });
     if (error) throw new Error(`${fn}: ${error.message}`);
     return (data ?? [])
       .map((r: any) => Number(r.ratio ?? Number(r.pv_w) / Number(r.gti)))

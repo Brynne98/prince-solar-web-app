@@ -1,4 +1,4 @@
-// `recover` — bank logger-offline minutes from SunSynk's cloud.
+// `recover` — bank logger-offline minutes from SunSynk's cloud, per plant.
 //
 // Ported from recoverDay()/recoverAllGaps() in server.js. The inverters report to
 // SunSynk independently of our logger, so minutes we slept through still exist in
@@ -14,7 +14,11 @@
 // sweep all history: the cloud only holds recent days, so scanning 60+ days would
 // burn API calls on days that can never return data. Default window is 14 days;
 // override with ?days=N. Whatever is skipped is reported in the response.
-import { db } from "../_shared/sunsynk.ts";
+//
+// Multi-tenant: one pass per linked plant, read through the account that can see
+// it. The time budget is shared across plants; whatever is left over is picked up
+// next run.
+import { type Account, db, type PlantJob, plantsToPoll } from "../_shared/sunsynk.ts";
 import {
   bucketizeAgg,
   calibrateFeedScale,
@@ -42,37 +46,44 @@ const addDays = (day: string, n: number) => {
   return localDate(new Date(Date.UTC(y, m - 1, d + n, 12)));
 };
 
-/** Fallback scale for days with too little of our own data to calibrate against. */
-let currentScale: FeedScale | null = null;
-async function currentFeedScale(): Promise<FeedScale> {
-  if (currentScale) return currentScale;
-  currentScale = { pv: 1, batt: 1, grid: 1, load: 1 }; // feed is full-sum as of 2026-06-10
-  try {
-    const today = localDate();
-    const { data: agg } = await db.rpc("q_day_agg", { p_day: today, p_source: null });
-    if ((agg?.length ?? 0) > 5) {
-      const feed = await plantFeedForDay(today);
-      if (feed) currentScale = calibrateFeedScale(feed, bucketizeAgg(agg));
-    }
-  } catch { /* keep the default */ }
-  return currentScale;
+async function rpc(fn: string, args: Record<string, unknown>) {
+  const { data, error } = await db.rpc(fn, args);
+  if (error) throw new Error(`${fn}: ${error.message}`);
+  return data;
 }
 
-async function recoverDay(day: string) {
-  const { data: missing, error: mErr } = await db.rpc("q_missing_minutes", { p_day: day });
-  if (mErr) throw new Error(`q_missing_minutes(${day}): ${mErr.message}`);
+/** Fallback scale for days with too little of our own data to calibrate against. */
+const scaleCache = new Map<number, FeedScale>();
+async function currentFeedScale(acc: Account, plantId: number): Promise<FeedScale> {
+  const hit = scaleCache.get(plantId);
+  if (hit) return hit;
+  let scale: FeedScale = { pv: 1, batt: 1, grid: 1, load: 1 }; // feed is full-sum as of 2026-06-10
+  try {
+    const today = localDate();
+    const agg = await rpc("q_day_agg", { p_plant: plantId, p_day: today, p_source: null });
+    if ((agg?.length ?? 0) > 5) {
+      const feed = await plantFeedForDay(acc, plantId, today);
+      if (feed) scale = calibrateFeedScale(feed, bucketizeAgg(agg));
+    }
+  } catch { /* keep the default */ }
+  scaleCache.set(plantId, scale);
+  return scale;
+}
+
+async function recoverDay(acc: Account, plantId: number, day: string) {
+  const missing = await rpc("q_missing_minutes", { p_plant: plantId, p_day: day });
   const gaps: number[] = (missing ?? []).map((r: any) => Number(r.ts ?? r));
   if (!gaps.length) return { day, banked: 0, reason: "no gaps" };
 
-  const feed = await plantFeedForDay(day);
+  const feed = await plantFeedForDay(acc, plantId, day);
   if (!feed) return { day, banked: 0, missing: gaps.length, reason: "cloud no longer has this day" };
 
   // Calibrate against this day's own poller rows when there are enough of them
   // (>= 3 h); otherwise borrow the current scale.
-  const { data: pollerAgg } = await db.rpc("q_day_agg", { p_day: day, p_source: "poller" });
+  const pollerAgg = await rpc("q_day_agg", { p_plant: plantId, p_day: day, p_source: "poller" });
   const scale = (pollerAgg?.length ?? 0) >= 36
     ? calibrateFeedScale(feed, bucketizeAgg(pollerAgg))
-    : await currentFeedScale();
+    : await currentFeedScale(acc, plantId);
 
   const dayStart = Date.parse(`${day}T00:00:00+02:00`) / 1000;
   const rows: Record<string, number | null>[] = [];
@@ -92,8 +103,7 @@ async function recoverDay(day: string) {
   }
   if (!rows.length) return { day, banked: 0, missing: gaps.length, reason: "feed had no matching buckets" };
 
-  const { data: banked, error } = await db.rpc("q_insert_recovered", { p_rows: rows });
-  if (error) throw new Error(`q_insert_recovered(${day}): ${error.message}`);
+  const banked = await rpc("q_insert_recovered", { p_plant: plantId, p_rows: rows });
 
   return {
     day,
@@ -107,53 +117,74 @@ async function recoverDay(day: string) {
   };
 }
 
+async function recoverPlant(job: PlantJob, windowDays: number, started: number) {
+  const { plantId, account } = job;
+  const stats = await rpc("q_stats", { p_plant: plantId });
+  const row = Array.isArray(stats) ? stats[0] : stats;
+  if (!row?.first_ts) return { plantId, banked: 0, reason: "no history yet" };
+
+  const today = localDate();
+  const firstLogged = localDate(new Date(Number(row.first_ts) * 1000));
+  let day = addDays(today, -(windowDays - 1));
+  if (day < firstLogged) day = firstLogged;
+
+  const results = [];
+  let total = 0;
+  let stoppedEarly: string | null = null;
+
+  for (; day <= today; day = addDays(day, 1)) {
+    if (Date.now() - started > TIME_BUDGET_MS) {
+      stoppedEarly = `time budget reached at ${day}; remaining days will be picked up next run`;
+      break;
+    }
+    try {
+      const r = await recoverDay(account, plantId, day);
+      total += r.banked;
+      if (r.banked > 0 || r.reason) results.push(r);
+    } catch (e) {
+      results.push({ day, banked: 0, error: String(e instanceof Error ? e.message : e) });
+    }
+  }
+
+  return {
+    plantId,
+    banked: total,
+    scanned: `${addDays(today, -(windowDays - 1))} .. ${today}`,
+    // days older than the window are never scanned — the cloud has dropped them
+    notScanned: firstLogged < addDays(today, -(windowDays - 1))
+      ? `${firstLogged} .. ${addDays(today, -windowDays)} (outside window; cloud retains ~1-2 weeks)`
+      : null,
+    stoppedEarly,
+    days: results,
+  };
+}
+
 Deno.serve(async (req) => {
   const started = Date.now();
   try {
     const url = new URL(req.url);
     const windowDays = Math.max(1, Math.min(120, Number(url.searchParams.get("days")) || DEFAULT_WINDOW_DAYS));
 
-    const { data: stats, error: sErr } = await db.rpc("q_stats");
-    if (sErr) throw new Error(`q_stats: ${sErr.message}`);
-    const row = Array.isArray(stats) ? stats[0] : stats;
-    if (!row?.first_ts) return json({ ok: true, banked: 0, reason: "no history yet" });
+    const jobs = await plantsToPoll();
+    if (!jobs.length) return json({ ok: true, banked: 0, reason: "no linked plants" });
 
-    const today = localDate();
-    const firstLogged = localDate(new Date(Number(row.first_ts) * 1000));
-    let day = addDays(today, -(windowDays - 1));
-    if (day < firstLogged) day = firstLogged;
-
-    const results = [];
+    const plants = [];
     let total = 0;
-    let stoppedEarly: string | null = null;
-
-    for (; day <= today; day = addDays(day, 1)) {
+    for (const job of jobs) {
       if (Date.now() - started > TIME_BUDGET_MS) {
-        stoppedEarly = `time budget reached at ${day}; remaining days will be picked up next run`;
-        break;
+        plants.push({ plantId: job.plantId, banked: 0, reason: "time budget reached before this plant" });
+        continue;
       }
       try {
-        const r = await recoverDay(day);
+        const r = await recoverPlant(job, windowDays, started);
         total += r.banked;
-        if (r.banked > 0 || r.reason) results.push(r);
+        plants.push(r);
       } catch (e) {
-        results.push({ day, banked: 0, error: String(e instanceof Error ? e.message : e) });
+        plants.push({ plantId: job.plantId, banked: 0, error: String(e instanceof Error ? e.message : e) });
       }
     }
 
-    return json({
-      ok: true,
-      banked: total,
-      windowDays,
-      scanned: `${addDays(today, -(windowDays - 1))} .. ${today}`,
-      // days older than the window are never scanned — the cloud has dropped them
-      notScanned: firstLogged < addDays(today, -(windowDays - 1))
-        ? `${firstLogged} .. ${addDays(today, -windowDays)} (outside window; cloud retains ~1-2 weeks)`
-        : null,
-      stoppedEarly,
-      days: results,
-      elapsedMs: Date.now() - started,
-    });
+    return json({ ok: true, banked: total, windowDays, plants, elapsedMs: Date.now() - started });
   } catch (e) {
     console.error("recover failed:", e);
     return json({ error: String(e instanceof Error ? e.message : e) }, 500);

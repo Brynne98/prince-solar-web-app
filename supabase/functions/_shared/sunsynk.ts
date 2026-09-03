@@ -290,4 +290,38 @@ export async function ensureBootstrapAccount(): Promise<boolean> {
   return true;
 }
 
+/** Every plant that should be worked on, with the account that can read it. */
+export type PlantJob = { plantId: number; plantName: string | null; account: Account };
+
+export async function plantsToPoll(): Promise<PlantJob[]> {
+  const accounts = await rpc<Account[]>("accounts_active", {});
+  if (!accounts?.length) return [];
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  const { data, error } = await db
+    .from("plant_users").select("plant_id, plant_name, account_id")
+    .in("account_id", [...byId.keys()]);
+  if (error) throw new Error(`plant_users: ${error.message}`);
+  // one job per plant even if several users share it
+  const seen = new Set<number>();
+  const jobs: PlantJob[] = [];
+  for (const r of data ?? []) {
+    const pid = Number(r.plant_id);
+    if (seen.has(pid) || !r.account_id) continue;
+    const acc = byId.get(r.account_id);
+    if (!acc) continue;
+    seen.add(pid);
+    jobs.push({ plantId: pid, plantName: r.plant_name ?? null, account: acc });
+  }
+  return jobs;
+}
+
+/**
+ * The plant the single-site features (forecast calibration, phone alerts) are bound
+ * to: the first plant ever linked. Same rule as public.calibration_plant().
+ */
+export async function bootstrapPlantId(): Promise<number | null> {
+  const v = await rpc<number | null>("calibration_plant", {});
+  return v == null ? null : Number(v);
+}
+
 export { num, pick };
