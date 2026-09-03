@@ -108,6 +108,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [note, setNote] = useState(null);
+  const [agree, setAgree] = useState(false);
 
   const go = (m) => { setMode(m); setErr(null); setNote(null); setPassword(''); setPassword2(''); };
 
@@ -120,6 +121,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         if (error) throw error;
       } else if (mode === 'signup') {
         if (password !== password2) throw new Error('Passwords don’t match');
+        if (!agree) throw new Error('Please accept the Terms and Privacy Policy');
         const { data, error } = await window.sb.auth.signUp({ email, password, options: { emailRedirectTo: SITE_URL } });
         if (error) throw error;
         // With email confirmation on, signUp returns a user but no session.
@@ -176,6 +178,12 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
                          placeholder="Same again" autoComplete="new-password" />
         )}
 
+        {mode === 'signup' && (
+          <label className="auth-consent">
+            <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+            <span>I agree to the <a href="?page=terms" target="_blank" rel="noopener">Terms of Service</a> and <a href="?page=privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span>
+          </label>
+        )}
         <button type="submit" disabled={busy}>{busy ? '…' : copy.cta}</button>
 
         {/* Always rendered, even when empty: mounting it only on error grew the card by

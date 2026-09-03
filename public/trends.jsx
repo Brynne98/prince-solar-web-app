@@ -50,7 +50,7 @@ function BarChart({ bars, series, labelEvery = 1 }) {
   const [ref, width] = useWidth();
   const [hover, setHover] = React.useState(null);
   const fmtKwh = window.fmtKwh;
-  if (!bars.length) return <div className="trend-chart" ref={ref}><div className="trend-empty">No data for this range yet.</div></div>;
+  if (!bars.length) return <div className="trend-chart" ref={ref}><div className="trend-empty">{window.emptyText(window.PLANT_DAYS, 'No data for this range yet.')}</div></div>;
   const mobile = width < 560;
   const height = mobile ? 300 : 380;
   const m = { l: 42, r: 12, t: 16, b: 40 };
@@ -119,7 +119,7 @@ function LineChart({ bars, series, labelEvery = 1 }) {
   const [ref, width] = useWidth();
   const [hover, setHover] = React.useState(null);
   const fmtKwh = window.fmtKwh;
-  if (!bars.length) return <div className="trend-chart" ref={ref}><div className="trend-empty">No data for this range yet.</div></div>;
+  if (!bars.length) return <div className="trend-chart" ref={ref}><div className="trend-empty">{window.emptyText(window.PLANT_DAYS, 'No data for this range yet.')}</div></div>;
   const mobile = width < 560;
   const height = mobile ? 300 : 380;
   const m = { l: 42, r: 12, t: 16, b: 40 };
@@ -370,7 +370,7 @@ function HourMixChart({ hours, nowHour }) {
       empty: tot <= 0,
     });
   }
-  if (!(hours || []).length) return <div className="trend-chart" ref={ref}><div className="trend-empty">No data yet.</div></div>;
+  if (!(hours || []).length) return <div className="trend-chart" ref={ref}><div className="trend-empty">{window.emptyText(window.PLANT_DAYS, 'No data yet.')}</div></div>;
 
   const mobile = width < 560;
   const height = mobile ? 200 : 240;
@@ -599,7 +599,7 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
             <div className="seg-key"><b>Bar length</b> = units used (kWh) — longer = more · <b>colours</b> = where it came from</div>
             {loading && !segData ? <ChartSkeleton stats={false} /> : segData && segData.segments && segData.segments.length ? (
               <SegmentUsage data={segData.segments} />
-            ) : <div className="trend-empty">No data yet.</div>}
+            ) : <div className="trend-empty">{window.emptyText(window.PLANT_DAYS, 'No data yet.')}</div>}
             <div className="hint-line">
               Typical units (kWh) used in each part of the day over the last {segData ? segData.days : segDays} days, coloured by what supplied them. The <b>kW avg</b> alongside is the intensity — how hard you pull (the geysers are short but fierce). <b>At night the split is battery vs grid</b> (with your {config?.reserve ?? 20}% floor the grid carries the bit below it); by day it's mostly direct solar.
             </div>
@@ -609,7 +609,7 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
             <div className="seg-key" style={{ marginTop: 8 }}><b>Bar</b> = share of the house load · <b>line</b> = typical charge · highlighted = this hour</div>
             {loading && !hourData ? <window.Skeleton h={240} r={12} style={{ marginTop: 14 }} /> : hourData && hourData.hours && hourData.hours.length ? (
               <HourMixChart hours={hourData.hours} nowHour={new Date().getHours()} />
-            ) : <div className="trend-empty">No data yet.</div>}
+            ) : <div className="trend-empty">{window.emptyText(window.PLANT_DAYS, 'No data yet.')}</div>}
             <div className="trend-legend" style={{ marginTop: 12 }}>
               <span className="tl-item"><span className="tl-dot" style={{ background: C.pv }} />Solar</span>
               <span className="tl-item"><span className="tl-dot" style={{ background: C.batt }} />Battery</span>

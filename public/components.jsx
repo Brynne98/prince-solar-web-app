@@ -35,16 +35,40 @@ function fmtEnergyParts(k) {
   if (Math.abs(k) >= 1000) return [(k / 1000).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), 'MWh'];
   return [(Math.round(k * 10) / 10).toLocaleString('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 }), 'kWh'];
 }
-function fmtRand(v, dp = 2) {
-  if (v == null || isNaN(v)) return '—';
-  return 'R\u2009' + v.toLocaleString('en-ZA', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+// Money in the plant's currency. Intl handles symbol, placement and decimals for
+// any ISO code, so a UK plant shows £ and an Irish one € with nothing else changing.
+const _moneyFmt = {};
+// The currency's home locale, so R / £ / € / A$ render as their owners expect rather
+// than as "ZAR 12" in a browser set to another language.
+const CURRENCY_LOCALE = { ZAR: 'en-ZA', GBP: 'en-GB', EUR: 'en-IE', AUD: 'en-AU', NZD: 'en-NZ', USD: 'en-US', KES: 'en-KE', NGN: 'en-NG', ZMW: 'en-ZM', BWP: 'en-BW', NAD: 'en-NA', MZN: 'pt-MZ', INR: 'en-IN', PKR: 'en-PK', BRL: 'pt-BR' };
+function moneyFormatter(dp) {
+  const cur = window.PLANT_CURRENCY || 'ZAR';
+  const key = cur + ':' + dp;
+  if (!_moneyFmt[key]) {
+    try {
+      _moneyFmt[key] = new Intl.NumberFormat(CURRENCY_LOCALE[cur] || navigator.language || 'en', { style: 'currency', currency: cur, minimumFractionDigits: dp, maximumFractionDigits: dp });
+    } catch (e) {
+      _moneyFmt[key] = { format: (v) => cur + '\u2009' + v.toFixed(dp) };
+    }
+  }
+  return _moneyFmt[key];
 }
-// compact rand: switches to k above 10,000
-function fmtRandSmart(v) {
+function fmtMoney(v, dp = 2) {
   if (v == null || isNaN(v)) return '—';
-  if (Math.abs(v) >= 10000) return 'R\u2009' + (v / 1000).toFixed(1) + 'k';
-  return fmtRand(v, 0);
+  return moneyFormatter(dp).format(v);
 }
+// compact: switches to k above 10,000
+function fmtMoneySmart(v) {
+  if (v == null || isNaN(v)) return '—';
+  if (Math.abs(v) >= 10000) return moneyFormatter(1).format(v / 1000) + 'k';
+  return fmtMoney(v, 0);
+}
+// the symbol alone, for labels like "R/kWh"
+function moneySymbol() {
+  try { return moneyFormatter(0).formatToParts(0).find(p => p.type === 'currency')?.value || window.PLANT_CURRENCY; }
+  catch (e) { return window.PLANT_CURRENCY || ''; }
+}
+const fmtRand = fmtMoney, fmtRandSmart = fmtMoneySmart;
 function fmtTime(d) {
   return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
@@ -218,5 +242,5 @@ Object.assign(window, {
   COLORS, fmtPower, fmtPowerParts, fmtKwh, fmtRand, fmtTime, cleanTemp,
   Card, StatTile, Metric, Badge, Segmented, Toggle, LegendChip, Sparkline, SectionTitle, InfoDot,
   Skeleton, SkeletonTile,
-  fmtEnergySmart, fmtRandSmart, fmtEnergyParts
+  fmtEnergySmart, fmtRandSmart, fmtEnergyParts, fmtMoney, fmtMoneySmart, moneySymbol
 });

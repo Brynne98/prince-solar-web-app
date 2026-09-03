@@ -376,7 +376,7 @@ function HistoryView({ today, refreshKey }) {
 
   const canPrev = !earliest || date > earliest;
   const canNext = date < todayStr;
-  const emptyMsg = loading ? 'Loading…' : isToday ? 'Loading today’s data…' : 'No data for this day';
+  const emptyMsg = loading ? 'Loading…' : isToday ? window.emptyText(window.PLANT_DAYS, 'Loading today’s data…') : 'No data for this day';
 
   return (
     <div className="hv-root">

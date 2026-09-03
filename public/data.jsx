@@ -19,6 +19,16 @@ const BATT_MAX_KW = 5.0; // charge/discharge ceiling per inverter (display only)
 // The five plant-level endpoints (energy, daily, monthly, compare, earliest) read a
 // Postgres cache that sync-plant-energy refreshes daily, rather than calling SunSynk
 // per request. Same shapes; the browser just never touches the vendor API.
+//
+// Multi-plant: every RPC takes p_plant. null means "my only/first plant" server-side;
+// the header's plant selector sets window.CURRENT_PLANT and everything follows.
+window.CURRENT_PLANT = window.CURRENT_PLANT ?? null;
+window.PLANT_CURRENCY = window.PLANT_CURRENCY || 'ZAR';
+window.setCurrentPlant = (id, currency) => {
+  window.CURRENT_PLANT = id == null ? null : Number(id);
+  if (currency) window.PLANT_CURRENCY = currency;
+};
+
 const ROUTES = {
   '/api/overview':         () => ['api_overview', {}],
   '/api/history':          (q) => ['api_history', { p_date: q.date || null }],
@@ -42,7 +52,7 @@ async function getJSON(url) {
   if (!route) throw new Error('No RPC mapped for ' + path);
 
   const [fn, params] = route(q);
-  const { data, error } = await window.sb.rpc(fn, params);
+  const { data, error } = await window.sb.rpc(fn, { ...params, p_plant: window.CURRENT_PLANT });
   if (error) throw new Error(error.message || 'RPC ' + fn + ' failed');
   return data || {};
 }
@@ -135,9 +145,10 @@ async function fetchSnapshot() {
   // Battery capacity and reserve are not derived here (SunSynk under-reports Ah/V) —
   // they come from app_config via api_overview, which is also what the phone alerts
   // read. Pass them straight through; null until the first snapshot lands.
+  if (api.config && api.config.currency) window.PLANT_CURRENCY = api.config.currency;
   return {
     updated: new Date(api.generatedAt || Date.now()),
-    plant: api.plant || { id: null, name: 'Home · SunSynk' },
+    plant: api.plant || { id: null, name: 'My plant' },
     aggregate: aggregate(inverters, api.totals || {}),
     config: api.config || null,
     inverters,
@@ -247,18 +258,40 @@ async function fetchBalance() {
   return getJSON('/api/balance').catch(() => null);
 }
 
-// --- South African tariff presets (editable) --------------------------------
-// Import rates in Rand per kWh, incl VAT, indicative 2025/26. Verify on YOUR bill.
-const TARIFF_PRESETS = {
-  'eskom-homepower': { label: 'Eskom Homepower (flat)', import: 3.10, note: 'Flat residential rate for Eskom-direct customers.' },
-  'eskom-homeflex': { label: 'Eskom Homeflex (TOU avg)', import: 3.32, note: 'Time-of-use tariff; blended average import rate.' },
-  'capetown': { label: 'City of Cape Town', import: 3.35, note: 'Typical residential blended rate.' },
-  'joburg': { label: 'Joburg City Power', import: 3.62, note: 'Highest metro rates; fast solar payback.' },
-  'tshwane': { label: 'City of Tshwane', import: 3.05, note: 'Block tariff; most homes fall in block 2.' },
-  'ethekwini': { label: 'eThekwini (Durban)', import: 3.20, note: 'Typical residential blended rate.' },
-  'custom': { label: 'Custom', import: 3.40, note: 'Enter the exact import rate from your latest bill.' },
-};
+// ---- me: plan, preferences, plants -----------------------------------------
+// One call on load. `plants[].config` is plant_config (timezone, currency, tariff,
+// battery, roof). `prefs` is the per-user display state that used to live in
+// localStorage and therefore vanished on a new device.
+async function fetchMe() {
+  const { data, error } = await window.sb.rpc('api_me');
+  if (error) throw new Error(error.message);
+  return data || { plan: 'free', prefs: {}, plants: [] };
+}
+async function savePrefs(patch) {
+  const { data, error } = await window.sb.rpc('api_prefs_set', { p_prefs: patch });
+  if (error) throw new Error(error.message);
+  return data || {};
+}
+async function savePlantConfig(plantId, patch) {
+  const { data, error } = await window.sb.from('plant_config').update(patch).eq('plant_id', plantId).select().single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+async function deleteAccount() {
+  const { data, error } = await window.sb.rpc('api_account_delete');
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+// What an empty chart should say. A plant with under a day of history is new, and
+// "collecting your first day" is the honest message; anything older is a real gap.
+function emptyText(days, fallback) {
+  if (days != null && days < 1) return 'Collecting your first day of data — check back tomorrow.';
+  if (days != null && days < 3) return 'Only ' + days + ' day' + (days === 1 ? '' : 's') + ' logged so far — this fills in as history builds.';
+  return fallback || 'No data for this range yet.';
+}
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance, TARIFF_PRESETS, BATT_MAX_KW, TYPICAL_DAYS,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance,
+  fetchMe, savePrefs, savePlantConfig, deleteAccount, emptyText, BATT_MAX_KW, TYPICAL_DAYS,
 });

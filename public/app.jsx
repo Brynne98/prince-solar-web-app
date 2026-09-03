@@ -14,19 +14,33 @@ const DEFAULT_SETTINGS = {
   // Off by default — the optional per-subject tabs are opt-in from Settings. Trends is
   // no longer listed here: like Live and Settings it is always on, so it needs no flag.
   tabs: { solar: false, battery: false, grid: false, inverters: false },
-  tariff: { preset: 'custom', import: 3.40 },
 };
 
 function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem('synsynk.settings'));
-    if (s) return { ...DEFAULT_SETTINGS, ...s, tabs: { ...DEFAULT_SETTINGS.tabs, ...(s.tabs || {}) }, tariff: { ...DEFAULT_SETTINGS.tariff, ...(s.tariff || {}) } };
+    if (s) return { ...DEFAULT_SETTINGS, ...s, tabs: { ...DEFAULT_SETTINGS.tabs, ...(s.tabs || {}) } };
   } catch (e) {}
   return DEFAULT_SETTINGS;
 }
 
+function PlantSelect({ me, plantId, onChange }) {
+  const plants = me?.plants || [];
+  if (plants.length < 2) return null;
+  return (
+    <select className="plant-select" value={plantId ?? ''} onChange={e => onChange(e.target.value)} title="Switch plant" aria-label="Plant">
+      {plants.map(p => <option key={p.id} value={p.id}>{p.name || ('Plant ' + p.id)}</option>)}
+    </select>
+  );
+}
+
 function App() {
   const [settings, setSettings] = useState(loadSettings);
+  // plan, preferences and plants for the signed-in user (api_me). Preferences from
+  // the server win over the localStorage cache so a new device looks the same.
+  const [me, setMe] = useState(null);
+  const [plantId, setPlantId] = useState(null);
+  const prefsLoaded = useRef(false);
   const [tab, setTab] = useState(() => new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab') || 'live');
   const [auto, setAuto] = useState(true);
   const [snap, setSnap] = useState(null);
@@ -40,7 +54,12 @@ function App() {
   const inflight = useRef({});
   useEffect(() => { energyRef.current = energy; }, [energy]);
 
-  useEffect(() => { localStorage.setItem('synsynk.settings', JSON.stringify(settings)); }, [settings]);
+  useEffect(() => {
+    localStorage.setItem('synsynk.settings', JSON.stringify(settings));
+    if (!prefsLoaded.current) return;
+    const t = setTimeout(() => window.savePrefs({ battPositive: settings.battPositive, tabs: settings.tabs }).catch(() => {}), 600);
+    return () => clearTimeout(t);
+  }, [settings]);
   useEffect(() => { localStorage.setItem('synsynk.tab', tab); }, [tab]);
 
   const loadLive = useCallback(async () => {
@@ -67,8 +86,35 @@ function App() {
     });
   }, []);
 
-  // initial load
-  useEffect(() => { loadLive(); loadToday(); }, []);
+  const loadMe = useCallback(async () => {
+    try {
+      const m = await window.fetchMe();
+      setMe(m);
+      const ids = (m.plants || []).map(p => p.id);
+      const wanted = m.prefs && ids.includes(Number(m.prefs.lastPlant)) ? Number(m.prefs.lastPlant) : (ids[0] ?? null);
+      const cfg = (m.plants || []).find(p => p.id === wanted)?.config;
+      window.setCurrentPlant(wanted, cfg?.currency);
+      setPlantId(wanted);
+      if (m.prefs && (m.prefs.battPositive || m.prefs.tabs)) {
+        setSettings(s => ({ ...s, ...(m.prefs.battPositive ? { battPositive: m.prefs.battPositive } : {}), tabs: { ...s.tabs, ...(m.prefs.tabs || {}) } }));
+      }
+      prefsLoaded.current = true;
+      // how much history this plant has — drives the "collecting your first day" copy
+      window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
+    } catch (e) { setErr(e.message); }
+  }, []);
+  const switchPlant = (id) => {
+    const cfg = (me?.plants || []).find(p => p.id === Number(id))?.config;
+    window.setCurrentPlant(id, cfg?.currency);
+    setPlantId(Number(id));
+    window.savePrefs({ lastPlant: Number(id) }).catch(() => {});
+    setEnergy({}); energyRef.current = {}; setSnap(null); setToday(null);
+    loadLive(); loadToday(); setRefreshKey(k => k + 1);
+  };
+  const reloadPlantConfig = () => loadMe().then(loadLive);
+
+  // initial load: who am I and which plant, then the data
+  useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); }); }, []);
   // auto refresh: live every 60s (matches SunSynk's cadence), today every 5 min
   useEffect(() => {
     if (!auto) return;
@@ -107,6 +153,7 @@ function App() {
             </div>
           </div>
           <div className="topbar-actions">
+            <PlantSelect me={me} plantId={plantId} onChange={switchPlant} />
             <label className="auto-toggle"><input type="checkbox" checked disabled /> Auto</label>
             <button className="refresh-btn" disabled>Refresh</button>
           </div>
@@ -140,7 +187,7 @@ function App() {
             // Still nothing to wait for: the pack figures come off the snapshot but
             // render as '—' until it lands, so Settings draws in full while the API is
             // still answering. Showing it a loading state was pure theatre.
-            <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} />
+            <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} />
           ) : (
             <div className="live-grid">
               <div className="overview-section">
@@ -189,6 +236,7 @@ function App() {
           </div>
         </div>
         <div className="topbar-actions">
+          <PlantSelect me={me} plantId={plantId} onChange={switchPlant} />
           <label className="auto-toggle">
             <input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} />
             <span>Auto</span>
@@ -214,13 +262,16 @@ function App() {
         {tab === 'grid' && <window.GridTab snap={snap} settings={settings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} />}
         {tab === 'trends' && <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />}
-        {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} />}
+        {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} />}
       </main>
 
     </div>
   );
 }
 
+const legalPage = new URLSearchParams(location.search).get('page');
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <window.AuthGate><window.LinkGate><App /></window.LinkGate></window.AuthGate>
+  legalPage === 'terms' || legalPage === 'privacy'
+    ? <window.LegalPage which={legalPage} />
+    : <window.AuthGate><window.LinkGate><App /></window.LinkGate></window.AuthGate>
 );
