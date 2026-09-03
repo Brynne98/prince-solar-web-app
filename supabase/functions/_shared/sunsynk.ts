@@ -208,6 +208,24 @@ export async function getPlants(acc: Account): Promise<PlantInfo[]> {
   return list.map((p: any) => ({ id: Number(p.id), name: p.name ?? String(p.id) }));
 }
 
+export type PlantDetail = {
+  id: number; timezone: string | null; currency: string | null;
+  lat: number | null; lon: number | null; systemKwp: number | null;
+};
+
+/** What the API knows about a plant that belongs in plant_config. */
+export async function getPlantDetail(acc: Account, plantId: number): Promise<PlantDetail> {
+  const d = (await apiGet(`/plant/${plantId}?lan=en`, acc)) ?? {};
+  const n = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+  return {
+    id: plantId,
+    timezone: d?.timezone?.code ?? null,      // IANA, e.g. "Africa/Harare", "Europe/London"
+    currency: d?.currency?.code ?? null,      // ISO 4217, e.g. "ZAR", "GBP"
+    lat: n(d?.lat), lon: n(d?.lon),
+    systemKwp: n(d?.totalPower),
+  };
+}
+
 /** All inverters visible to this account. */
 export async function getInverters(acc: Account): Promise<InverterInfo[]> {
   const data = await apiGet("/inverters?page=1&limit=50&total=0&status=-1&type=-2", acc);
@@ -263,6 +281,19 @@ export async function linkAccount(userId: string, username: string, password: st
     p_user: userId, p_account: accountId,
     p_rows: plants.map((p) => ({ plant_id: p.id, plant_name: p.name })),
   });
+
+  // Seed plant_config from the API for any plant that has no row yet. Timezone and
+  // currency are SunSynk's own values for the site; lat/lon/kWp likewise. Never
+  // overwrites — a row the user has edited is theirs.
+  const details = await Promise.allSettled(plants.map((p) => getPlantDetail(acc, p.id)));
+  const rows = details
+    .filter((r): r is PromiseFulfilledResult<PlantDetail> => r.status === "fulfilled")
+    .map((r) => ({
+      plant_id: r.value.id, timezone: r.value.timezone, currency: r.value.currency,
+      lat: r.value.lat, lon: r.value.lon, system_kwp: r.value.systemKwp,
+    }));
+  if (rows.length) await rpc("plant_config_seed", { p_rows: rows });
+
   return { accountId, plants };
 }
 
