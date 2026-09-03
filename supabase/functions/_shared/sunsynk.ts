@@ -1,118 +1,216 @@
-// SunSynk Connect auth + fetch, ported from server.js.
+// SunSynk official API (openapi.sunsynk.net) — auth + fetch, per linked account.
 //
-// Two changes vs the monolith, both forced by Edge Functions being stateless:
-//   * the token moves from an in-memory tokenCache to a Postgres row
-//   * that row lives in the `private` schema, which PostgREST does not expose, so it
-//     is reached through the SECURITY DEFINER accessors in migration 0002 rather
-//     than a .from() call. The anon key in the public frontend bundle has no route
-//     to it — not the table, not the schema, not these functions.
+// Replaces the private-API flow (RSA-encrypted password → /oauth/token/new on
+// api.sunsynk.net). The official gateway is Alibaba Cloud API Gateway: every request
+// is HMAC-SHA256 signed with an app secret, then carries a per-user bearer token.
 //
-// The login crypto is unchanged: RSA PKCS#1 v1.5, which Web Crypto cannot do at all
-// but node:crypto can. Verified working on supabase-edge-runtime-1.74.0 (Deno 2.1.4).
+// Two auth layers, two jobs:
+//   * app key + signature   — identifies the application to the gateway
+//   * bearer token          — identifies which SunSynk user's plants to return
+//
+// Multi-tenant: one row in private.sunsynk_accounts per linked SunSynk login. The
+// refresh token lives in Vault; the access token (a 7-day JWT) is cached on the row.
+// The user's password is never stored — linkAccount() exchanges it and drops it.
+//
+// Verified behaviour (3 Sep 2026):
+//   * a wrong secret and a wrong key both return "Invalid AppKey" — indistinguishable
+//   * x-ca-key must NOT be listed in X-Ca-Signature-Headers, or signing fails
+//   * refresh returns the SAME refresh token (static, reusable, not rotating)
+//   * a password change kills the refresh token, but the failure is silent:
+//     HTTP 200, msg "Success", empty data. Check data.access_token, never msg.
+//   * the access token (stateless JWT) keeps working until its own expiry
+//   * there is no read-only scope; every token is scope=all
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { Buffer } from "node:buffer";
-import { constants, createHash, publicEncrypt } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { type InverterInfo, num, pick, type RawBundle, realtimePaths } from "./extract.ts";
 
-const API_BASE = Deno.env.get("API_BASE") ?? "https://api.sunsynk.net";
-const SOURCE = "sunsynk";
-const USERNAME = Deno.env.get("SUNSYNK_USERNAME")!;
-const PASSWORD = Deno.env.get("SUNSYNK_PASSWORD")!;
+const API_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? "https://openapi.sunsynk.net";
+const APP_KEY = Deno.env.get("SUNSYNK_APP_KEY") ?? "";
+const APP_SECRET = Deno.env.get("SUNSYNK_APP_SECRET") ?? "";
+const CLIENT_ID = "openapi";
+// Refresh the access token this many seconds before SunSynk says it expires.
+const EXPIRY_MARGIN_S = 300;
+
+if (!APP_KEY || !APP_SECRET) {
+  console.warn("SUNSYNK_APP_KEY / SUNSYNK_APP_SECRET not set — every request will fail");
+}
 
 export const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
-const md5Hex = (v: string) => createHash("md5").update(v, "utf8").digest("hex");
-const nonce = () => Date.now();
+export type Account = {
+  id: string;
+  user_id: string;
+  sunsynk_username: string;
+  access_token: string | null;
+  access_expires_at: number | null;
+};
 
-function rsaEncryptPkcs1(rawKey: string, plaintext: string): string {
-  const pem = `-----BEGIN PUBLIC KEY-----\n${rawKey.replace(/(.{64})/g, "$1\n")}\n-----END PUBLIC KEY-----`;
-  const ct = publicEncrypt({ key: pem, padding: constants.RSA_PKCS1_PADDING }, Buffer.from(plaintext, "utf8"));
-  return ct.toString("base64");
-}
+export type TokenSet = { access_token: string; refresh_token: string; expires_in: number };
 
-async function fetchPublicKey(): Promise<string> {
-  const n = nonce();
-  const sign = md5Hex(`nonce=${n}&source=${SOURCE}POWER_VIEW`);
-  const res = await fetch(
-    `${API_BASE}/anonymous/publicKey?nonce=${n}&source=${SOURCE}&sign=${sign}`,
-    { headers: { "Content-Type": "application/json", Accept: "application/json" } },
-  );
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok || !body.success || !body.data) throw new Error(`login key: ${body?.msg ?? res.status}`);
-  return body.data;
-}
-
-async function login(): Promise<string> {
-  const rawKey = await fetchPublicKey();
-  const encryptedPassword = rsaEncryptPkcs1(rawKey, PASSWORD);
-  const n = nonce();
-  const sign = md5Hex(`nonce=${n}&source=${SOURCE}${rawKey.slice(0, 10)}`);
-  const res = await fetch(`${API_BASE}/oauth/token/new`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      username: USERNAME, password: encryptedPassword, grant_type: "password",
-      client_id: "csp-web", source: SOURCE, nonce: n, sign,
-    }),
-  });
-  const body = await res.json().catch(() => ({}));
-  const data = body?.data;
-  if (!res.ok || !body.success || !data?.access_token) {
-    throw new Error(`login failed: ${body?.msg ?? res.status}`);
+/** Thrown when an account's refresh token is dead; the poller marks it needs_relink. */
+export class RelinkNeeded extends Error {
+  constructor(public accountId: string, reason: string) {
+    super(`account ${accountId} needs re-link: ${reason}`);
   }
-  const { error } = await db.rpc("auth_token_set", {
-    p_access: data.access_token,
-    p_refresh: data.refresh_token ?? null,
-    p_expires: Date.now() + (Number(data.expires_in ?? 3600) - 60) * 1000,
-  });
-  if (error) throw new Error(`persisting token: ${error.message}`);
-  return data.access_token;
 }
 
-async function getToken(): Promise<string> {
-  const { data, error } = await db.rpc("auth_token_get");
-  if (error) throw new Error(`reading token: ${error.message}`);
-  const row = Array.isArray(data) ? data[0] : data;
-  if (row?.access_token && Date.now() < Number(row.expires_at)) return row.access_token;
-  return login();
+// ---------------------------------------------------------------------------
+// Gateway signing (Alibaba Cloud API Gateway, HMAC-SHA256)
+// ---------------------------------------------------------------------------
+
+/** Path with its query string sorted by key — the gateway canonicalises the same way. */
+function canonicalUrl(pathWithQuery: string): string {
+  const [path, qs] = pathWithQuery.split("?");
+  if (!qs) return path;
+  const pairs = [...new URLSearchParams(qs).entries()].sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  return `${path}?${pairs.map(([k, v]) => `${k}=${v}`).join("&")}`;
+}
+
+function signedHeaders(method: string, pathWithQuery: string, body?: string, bearer?: string): Record<string, string> {
+  const accept = "application/json";
+  const contentType = body ? "application/json" : "";
+  const contentMd5 = body ? createHash("md5").update(body, "utf8").digest("base64") : "";
+
+  // Only nonce + timestamp are folded into the signature. Adding x-ca-key here
+  // makes the gateway reject the request as "Invalid AppKey".
+  const signed: Record<string, string> = {
+    "x-ca-nonce": crypto.randomUUID(),
+    "x-ca-timestamp": String(Date.now()),
+  };
+  const keys = Object.keys(signed).sort();
+  const stringToSign =
+    `${method}\n${accept}\n${contentMd5}\n${contentType}\n\n` +
+    keys.map((k) => `${k}:${signed[k]}`).join("\n") + "\n" +
+    canonicalUrl(pathWithQuery);
+
+  const h: Record<string, string> = {
+    Accept: accept,
+    ...(body ? { "Content-Type": contentType, "Content-MD5": contentMd5 } : {}),
+    ...signed,
+    "X-Ca-Key": APP_KEY,
+    "X-Ca-Signature": createHmac("sha256", APP_SECRET).update(stringToSign, "utf8").digest("base64"),
+    "X-Ca-Signature-Headers": keys.join(","),
+  };
+  if (bearer) h.Authorization = `Bearer ${bearer}`;
+  return h;
+}
+
+// ---------------------------------------------------------------------------
+// Token endpoints
+// ---------------------------------------------------------------------------
+
+async function postToken(payload: Record<string, string>): Promise<any> {
+  const body = JSON.stringify(payload);
+  const res = await fetch(`${API_BASE}/oauth/token`, {
+    method: "POST",
+    headers: signedHeaders("POST", "/oauth/token", body),
+    body,
+  });
+  const gatewayErr = res.headers.get("x-ca-error-message");
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`token endpoint HTTP ${res.status}: ${gatewayErr ?? json?.msg ?? ""}`);
+  return json;
 }
 
 /**
- * GET a SunSynk endpoint and return `body.data` — the same unwrapping server.js does,
- * so extractReading() sees the shape it expects.
- *
- * NOTE: the monolith keeps an in-memory cooldown after a 429/403 and escalates the
- * backoff across polls. Edge Functions are stateless, so a 429 here simply fails this
- * tick; the next cron minute retries. Losing one minute is acceptable — gap recovery
- * backfills it from the cloud later.
+ * Exchange a SunSynk username + password for tokens. The password exists only in
+ * this call's arguments and the outbound request body; it is not logged, stored
+ * or returned.
  */
-export async function apiGet(pathname: string): Promise<any> {
-  let token = await getToken();
-  const doFetch = (t: string) =>
-    fetch(`${API_BASE}${pathname}`, {
-      headers: { Authorization: `Bearer ${t}`, Accept: "application/json" },
-    });
-
-  let res = await doFetch(token);
-  if (res.status === 401) {
-    await db.rpc("auth_token_expire");
-    token = await login();
-    res = await doFetch(token);
+export async function tokenLogin(username: string, password: string): Promise<TokenSet> {
+  const json = await postToken({ username, password, grant_type: "password", client_id: CLIENT_ID });
+  const d = json?.data;
+  if (!d?.access_token || !d?.refresh_token) {
+    // Bad credentials come back as a non-Success msg; surface it without echoing input.
+    throw new Error(`login rejected: ${json?.msg ?? "no token in response"}`);
   }
+  return { access_token: d.access_token, refresh_token: d.refresh_token, expires_in: Number(d.expires_in ?? 604800) };
+}
+
+/**
+ * Refresh. Returns null when the refresh token is dead — which SunSynk reports as
+ * HTTP 200 / msg "Success" / empty data, not as an error.
+ */
+export async function tokenRefresh(refreshToken: string): Promise<TokenSet | null> {
+  const json = await postToken({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: CLIENT_ID });
+  const d = json?.data;
+  if (!d?.access_token) return null;
+  return {
+    access_token: d.access_token,
+    refresh_token: d.refresh_token ?? refreshToken,
+    expires_in: Number(d.expires_in ?? 604800),
+  };
+}
+
+const expiresAt = (expiresIn: number) => Date.now() + Math.max(60, expiresIn - EXPIRY_MARGIN_S) * 1000;
+
+// ---------------------------------------------------------------------------
+// Per-account token management
+// ---------------------------------------------------------------------------
+
+async function rpc<T = any>(fn: string, args: Record<string, unknown>): Promise<T> {
+  const { data, error } = await db.rpc(fn, args);
+  if (error) throw new Error(`${fn}: ${error.message}`);
+  return data as T;
+}
+
+/** A valid access token for this account, refreshing if needed. Throws RelinkNeeded. */
+async function accessTokenFor(acc: Account, force = false): Promise<string> {
+  if (!force && acc.access_token && acc.access_expires_at && Date.now() < Number(acc.access_expires_at)) {
+    return acc.access_token;
+  }
+  const refresh = await rpc<string | null>("account_refresh_get", { p_account: acc.id });
+  if (!refresh) throw new RelinkNeeded(acc.id, "no refresh token stored");
+
+  const t = await tokenRefresh(refresh);
+  if (!t) throw new RelinkNeeded(acc.id, "refresh token rejected (password changed or revoked)");
+
+  const exp = expiresAt(t.expires_in);
+  await rpc("account_access_set", { p_account: acc.id, p_access: t.access_token, p_expires: exp });
+  if (t.refresh_token !== refresh) {
+    await rpc("account_refresh_set", { p_account: acc.id, p_refresh: t.refresh_token });
+  }
+  acc.access_token = t.access_token;
+  acc.access_expires_at = exp;
+  return t.access_token;
+}
+
+/** GET a resource for one account and return body.data. */
+export async function apiGet(pathname: string, acc: Account): Promise<any> {
+  const doFetch = async (tok: string) =>
+    fetch(`${API_BASE}${pathname}`, { headers: signedHeaders("GET", pathname, undefined, tok) });
+
+  let res = await doFetch(await accessTokenFor(acc));
+  if (res.status === 401) res = await doFetch(await accessTokenFor(acc, true));
+
   if (res.status === 429 || res.status === 403) {
     throw new Error(`API ${pathname} -> HTTP ${res.status} (rate-limited)`);
   }
+  const gatewayErr = res.headers.get("x-ca-error-message");
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`API ${pathname} -> HTTP ${res.status} ${body?.msg ?? ""}`);
+  if (!res.ok) throw new Error(`API ${pathname} -> HTTP ${res.status} ${gatewayErr ?? body?.msg ?? ""}`);
   return body?.data;
 }
 
-/** All inverters on the account (server.js getInverters). */
-export async function getInverters(): Promise<InverterInfo[]> {
-  const data = await apiGet("/api/v1/inverters?page=1&limit=20&total=0&status=-1&type=-2");
+// ---------------------------------------------------------------------------
+// Resources
+// ---------------------------------------------------------------------------
+
+export type PlantInfo = { id: number; name: string };
+
+/** Plants visible to this account — owned or shared to it. */
+export async function getPlants(acc: Account): Promise<PlantInfo[]> {
+  const data = await apiGet("/plants?page=1&limit=50", acc);
+  const list = (data && (data.infos || data.records)) || [];
+  return list.map((p: any) => ({ id: Number(p.id), name: p.name ?? String(p.id) }));
+}
+
+/** All inverters visible to this account. */
+export async function getInverters(acc: Account): Promise<InverterInfo[]> {
+  const data = await apiGet("/inverters?page=1&limit=50&total=0&status=-1&type=-2", acc);
   const list = (data && (data.infos || data.records)) || [];
   return list.map((i: any) => ({
     sn: i.sn,
@@ -129,15 +227,67 @@ export async function getInverters(): Promise<InverterInfo[]> {
 }
 
 /** All 5 raw payloads for one inverter; failed endpoints come back null. */
-export async function fetchInverterRaw(sn: string): Promise<RawBundle> {
+export async function fetchInverterRaw(sn: string, acc: Account): Promise<RawBundle> {
   const paths = realtimePaths(sn);
   const keys = Object.keys(paths) as (keyof RawBundle)[];
-  const settled = await Promise.allSettled(keys.map((k) => apiGet(paths[k])));
+  const settled = await Promise.allSettled(keys.map((k) => apiGet(paths[k], acc)));
   const raw = {} as RawBundle;
   keys.forEach((k, i) => {
     raw[k] = settled[i].status === "fulfilled" ? (settled[i] as PromiseFulfilledResult<any>).value : null;
   });
   return raw;
+}
+
+// ---------------------------------------------------------------------------
+// Linking
+// ---------------------------------------------------------------------------
+
+/**
+ * Link a SunSynk login to a dashboard user. Exchanges the password for tokens,
+ * stores the refresh token in Vault, records the plants the account can see.
+ * Returns the account id and its plants. The password is dropped on return.
+ */
+export async function linkAccount(userId: string, username: string, password: string) {
+  const t = await tokenLogin(username, password);
+  const accountId = await rpc<string>("account_upsert", {
+    p_user: userId, p_username: username, p_access: t.access_token, p_expires: expiresAt(t.expires_in),
+  });
+  await rpc("account_refresh_set", { p_account: accountId, p_refresh: t.refresh_token });
+
+  const acc: Account = {
+    id: accountId, user_id: userId, sunsynk_username: username,
+    access_token: t.access_token, access_expires_at: expiresAt(t.expires_in),
+  };
+  const plants = await getPlants(acc);
+  await rpc("plant_users_upsert", {
+    p_user: userId, p_account: accountId,
+    p_rows: plants.map((p) => ({ plant_id: p.id, plant_name: p.name })),
+  });
+  return { accountId, plants };
+}
+
+/**
+ * One-time bootstrap so a deployment that used to run on env credentials keeps
+ * logging without anyone visiting the Connect screen. Needs SUNSYNK_USERNAME,
+ * SUNSYNK_PASSWORD and BOOTSTRAP_USER_EMAIL. No-op if that login is already linked.
+ */
+export async function ensureBootstrapAccount(): Promise<boolean> {
+  const username = Deno.env.get("SUNSYNK_USERNAME");
+  const password = Deno.env.get("SUNSYNK_PASSWORD");
+  const email = Deno.env.get("BOOTSTRAP_USER_EMAIL");
+  if (!username || !password || !email) return false;
+
+  const existing = await rpc<any[]>("account_by_username", { p_username: username });
+  if (Array.isArray(existing) && existing.length) return false;
+
+  const { data, error } = await db.auth.admin.listUsers({ perPage: 1000 });
+  if (error) throw new Error(`listUsers: ${error.message}`);
+  const user = data.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+  if (!user) throw new Error(`bootstrap: no auth user with email ${email}`);
+
+  await linkAccount(user.id, username, password);
+  console.log(`bootstrap: linked ${username} to ${email}`);
+  return true;
 }
 
 export { num, pick };

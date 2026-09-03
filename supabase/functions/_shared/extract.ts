@@ -72,11 +72,11 @@ export interface InverterInfo {
 
 /** The 5 realtime endpoints every acquisition path reads (per inverter SN). */
 export const realtimePaths = (sn: string) => ({
-  grid: `/api/v1/inverter/grid/${sn}/realtime?sn=${sn}`,
-  battery: `/api/v1/inverter/battery/${sn}/realtime?sn=${sn}&lan=en`,
-  input: `/api/v1/inverter/${sn}/realtime/input`,
-  load: `/api/v1/inverter/load/${sn}/realtime?sn=${sn}`,
-  output: `/api/v1/inverter/${sn}/realtime/output`,
+  grid: `/inverter/grid/${sn}/realtime?sn=${sn}`,
+  battery: `/inverter/battery/${sn}/realtime?sn=${sn}&lan=en`,
+  input: `/inverter/${sn}/realtime/input`,
+  load: `/inverter/load/${sn}/realtime?sn=${sn}`,
+  output: `/inverter/${sn}/realtime/output`,
 });
 
 /** Pull the typed per-inverter fields out of one inverter's 5 raw realtime payloads. */

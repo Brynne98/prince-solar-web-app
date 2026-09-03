@@ -222,5 +222,5 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <window.AuthGate><App /></window.AuthGate>
+  <window.AuthGate><window.LinkGate><App /></window.LinkGate></window.AuthGate>
 );
