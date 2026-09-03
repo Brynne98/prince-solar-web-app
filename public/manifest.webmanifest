@@ -1,6 +1,6 @@
 {
-  "name": "SynSynk Solar Dashboard",
-  "short_name": "SynSynk",
+  "name": "Prince Solar",
+  "short_name": "Prince Solar",
   "description": "Live solar / battery / grid dashboard for SunSynk inverters",
   "start_url": "/?tab=live",
   "display": "fullscreen",

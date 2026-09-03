@@ -71,7 +71,7 @@ function AuthBrand() {
     <div className="auth-brand">
       <span className="sun" />
       <div>
-        <div className="auth-brand-name">SynSynk</div>
+        <div className="auth-brand-name">Prince Solar</div>
         <div className="auth-brand-tag">Minute-by-minute solar history, kept for good.</div>
       </div>
     </div>

@@ -148,7 +148,7 @@ function App() {
           <div className="brand">
             <span className="sun" />
             <div>
-              <div className="brand-name">SynSynk<span className="brand-dot"> · </span><span className="brand-live">Live</span></div>
+              <div className="brand-name">Prince Solar<span className="brand-dot"> · </span><span className="brand-live">Live</span></div>
               <div className="brand-sub mono">{err ? 'connection error' : 'connecting to SunSynk…'}</div>
             </div>
           </div>
@@ -231,7 +231,7 @@ function App() {
         <div className="brand">
           <span className="sun" />
           <div>
-            <div className="brand-name">SynSynk<span className="brand-dot"> · </span><span className="brand-live">Live</span></div>
+            <div className="brand-name">Prince Solar<span className="brand-dot"> · </span><span className="brand-live">Live</span></div>
             <div className="brand-sub mono"><span className={'health-dot health-' + health} title={healthTitle} />updated {window.fmtTime(snap.updated)} · {onlineCount}/{snap.inverters.length} inverters online{sensorIssue && offlineCount === 0 ? ' · sensor issue' : ''}</div>
           </div>
         </div>
