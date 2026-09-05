@@ -92,6 +92,10 @@ export function extractReading(inv: InverterInfo, raw: RawBundle): Record<string
   return {
     sn: inv.sn,
     status: typeof inv.status === "number" ? inv.status : num(inv.status),
+    // The inverter's own timestamp for this sample (plant-local, kept verbatim).
+    // Only advances when the datalogger actually uploads — the slave does so every
+    // 5 minutes — so this is the field that tells a fresh minute from a repeat.
+    device_time: (p && Array.isArray(p.pvIV) && p.pvIV[0] && p.pvIV[0].time) || null,
     pv_w: powerField(p, "pac", "solarPower"),
     pv_today_kwh: num(pick(p, "etoday")),
     pv_total_kwh: num(pick(p, "etotal")),
@@ -151,6 +155,7 @@ export function extractMeta(inv: InverterInfo, raw: RawBundle, ts: number, ord?:
     sn: inv.sn,
     updated_ts: ts,
     ord: ord ?? null,
+    status: typeof inv.status === "number" ? inv.status : (inv.status == null ? null : num(inv.status)),
     alias: inv.alias ?? null,
     model: inv.model ?? null,
     soft_ver: inv.soft ?? null,

@@ -30,15 +30,23 @@ import {
 } from "../_shared/extract.ts";
 import {
   type Account,
+  apiCallCounts,
   apiGet,
   db,
   ensureBootstrapAccount,
   fetchInverterRaw,
   getInverters,
+  getInvertersCached,
   type PlantJob,
   plantsToPoll,
   RelinkNeeded,
+  syncPlants,
 } from "../_shared/sunsynk.ts";
+
+// The inverter and plant lists change rarely, so they are re-read from SunSynk only
+// on minutes divisible by this and served from private.inverters/meta (0031)
+// otherwise. One list call per account per REFRESH_EVERY_MIN instead of per minute.
+const REFRESH_EVERY_MIN = 10;
 
 /** epoch seconds for the current minute — the dedup key for a sample */
 const nowMinuteEpoch = () => Math.floor(Date.now() / 60000) * 60;
@@ -61,6 +69,10 @@ type AccountResult = {
   gapRecorded: number[];
   /** inverters on a plant nobody has linked; fetched nothing, stored nothing */
   skipped?: string[];
+  /** inverter + plant lists re-read from SunSynk this minute (else served from cache) */
+  listRefreshed: boolean;
+  /** SunSynk requests this account cost this minute, retries included */
+  apiCalls: number;
   burst?: string;
   error?: string;
   needsRelink?: boolean;
@@ -68,7 +80,11 @@ type AccountResult = {
 
 const emptyResult = (acc: Account): AccountResult => ({
   account: acc.id, inverters: 0, readings: 0, strings: 0, plants: [], gapRecorded: [],
+  listRefreshed: false, apiCalls: 0,
 });
+
+/** SunSynk requests made for this account since `since`. */
+const callsSince = (acc: Account, since: number) => (apiCallCounts.get(acc.id) ?? 0) - since;
 
 // ---------------------------------------------------------------------------
 // Grid burst: sub-minute samples after a relay-open / low-voltage minute.
@@ -149,12 +165,30 @@ function background(p: Promise<void>) {
 
 async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<AccountResult> {
   const result = emptyResult(acc);
+  const callsAtStart = apiCallCounts.get(acc.id) ?? 0;
   const wanted = new Set(jobs.map((j) => j.plantId));
 
-  const all = await getInverters(acc);
+  // Inverter list: from the cache, unless it is this account's refresh minute or
+  // the cache is empty (first minute after linking). The refresh minute also
+  // re-reads the plant list so a plant added at SunSynk later starts logging.
+  const refreshMinute = (ts / 60) % REFRESH_EVERY_MIN === 0;
+  let all = refreshMinute ? [] : await getInvertersCached(acc);
+  if (!all.length) {
+    result.listRefreshed = true;
+    all = await getInverters(acc);
+    if (refreshMinute) {
+      try {
+        const plants = await syncPlants(acc);
+        for (const p of plants) wanted.add(p.id);
+      } catch (e) {
+        console.warn(`plant refresh failed for ${acc.id}:`, e instanceof Error ? e.message : e);
+      }
+    }
+  }
   const inverters = all.filter((inv) => inv.plantId != null && wanted.has(Number(inv.plantId)));
   const skipped = all.filter((inv) => !inverters.includes(inv)).map((inv) => inv.sn);
   if (skipped.length) result.skipped = skipped;
+  result.apiCalls = callsSince(acc, callsAtStart);
   if (!inverters.length) return result;
   result.inverters = inverters.length;
 
@@ -206,6 +240,7 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
     await background(p);
   }
 
+  result.apiCalls = callsSince(acc, callsAtStart);
   return result;
 }
 

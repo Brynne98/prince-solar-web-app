@@ -186,10 +186,20 @@ const RATE_LIMIT_RETRIES = 2;
 const RATE_LIMIT_BACKOFF_MS = 1500;
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * SunSynk requests made per account since this isolate started, retries included.
+ * The poller reports the per-minute delta so the "fewer calls" claim is measurable
+ * from the cron log rather than assumed.
+ */
+export const apiCallCounts = new Map<string, number>();
+const countCall = (acc: Account) => apiCallCounts.set(acc.id, (apiCallCounts.get(acc.id) ?? 0) + 1);
+
 /** GET a resource for one account and return body.data. */
 export async function apiGet(pathname: string, acc: Account): Promise<any> {
-  const doFetch = async (tok: string) =>
-    fetch(`${API_BASE}${pathname}`, { headers: signedHeaders("GET", pathname, undefined, tok) });
+  const doFetch = async (tok: string) => {
+    countCall(acc);
+    return fetch(`${API_BASE}${pathname}`, { headers: signedHeaders("GET", pathname, undefined, tok) });
+  };
 
   let res = await doFetch(await accessTokenFor(acc));
   if (res.status === 401) res = await doFetch(await accessTokenFor(acc, true));
@@ -263,6 +273,27 @@ export async function getInverters(acc: Account): Promise<InverterInfo[]> {
   }));
 }
 
+/**
+ * The account's inverters as the poller last stored them (private.inverters +
+ * private.meta, migration 0031). Same shape as getInverters() so the two are
+ * interchangeable; empty until the first live fetch has been committed.
+ */
+export async function getInvertersCached(acc: Account): Promise<InverterInfo[]> {
+  const rows = await rpc<any[]>("inverters_cached", { p_account: acc.id });
+  return (rows ?? []).map((r) => ({
+    sn: r.sn,
+    alias: r.alias ?? r.sn,
+    plantId: r.plant_id == null ? undefined : Number(r.plant_id),
+    plantName: r.plant_name ?? undefined,
+    model: r.model ?? undefined,
+    status: r.status ?? undefined,
+    gsn: r.gsn ?? undefined,
+    soft: r.soft_ver ?? undefined,
+    hmi: r.hmi_ver ?? undefined,
+    commType: r.comm_type ?? undefined,
+  }));
+}
+
 /** All 5 raw payloads for one inverter; failed endpoints come back null. */
 export async function fetchInverterRaw(sn: string, acc: Account): Promise<RawBundle> {
   const paths = realtimePaths(sn);
@@ -295,15 +326,24 @@ export async function linkAccount(userId: string, username: string, password: st
     id: accountId, user_id: userId, sunsynk_username: username,
     access_token: t.access_token, access_expires_at: expiresAt(t.expires_in),
   };
+  const plants = await syncPlants(acc);
+  return { accountId, plants };
+}
+
+/**
+ * Record every plant the account can see against its dashboard user, and seed
+ * plant_config for any plant that has no row yet. Timezone and currency are
+ * SunSynk's own values for the site; lat/lon/kWp likewise. Never overwrites a
+ * config row (the user's edits are theirs) and never removes a plant_users row
+ * (unlinking stays a user action). Called at link time and by the poller's
+ * 10-minute refresh, so a plant added at SunSynk later shows up on its own.
+ */
+export async function syncPlants(acc: Account): Promise<PlantInfo[]> {
   const plants = await getPlants(acc);
   await rpc("plant_users_upsert", {
-    p_user: userId, p_account: accountId,
+    p_user: acc.user_id, p_account: acc.id,
     p_rows: plants.map((p) => ({ plant_id: p.id, plant_name: p.name })),
   });
-
-  // Seed plant_config from the API for any plant that has no row yet. Timezone and
-  // currency are SunSynk's own values for the site; lat/lon/kWp likewise. Never
-  // overwrites — a row the user has edited is theirs.
   const details = await Promise.allSettled(plants.map((p) => getPlantDetail(acc, p.id)));
   const rows = details
     .filter((r): r is PromiseFulfilledResult<PlantDetail> => r.status === "fulfilled")
@@ -312,8 +352,7 @@ export async function linkAccount(userId: string, username: string, password: st
       lat: r.value.lat, lon: r.value.lon, system_kwp: r.value.systemKwp,
     }));
   if (rows.length) await rpc("plant_config_seed", { p_rows: rows });
-
-  return { accountId, plants };
+  return plants;
 }
 
 /**
