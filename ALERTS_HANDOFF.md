@@ -1,7 +1,8 @@
 # Solar alerts — handoff
 
 Getting solar alerts onto a phone. Written 18 Aug 2026, spanning two repos:
-`sunsynk-dashboard` (this one) and `prince-todo-app`.
+`prince-solar-web-app` (this one, then named `sunsynk-dashboard`) and
+`prince-todo-app`.
 
 **The headline:** don't build a notification channel. `prince-todo-app` already has one,
 already talks to this project's API, and already solves the hard parts.
@@ -65,8 +66,8 @@ severity conventions exist to follow.
 ## 3. Proposed split
 
 ```
-sunsynk-dashboard                      prince-todo-app
-─────────────────                      ───────────────
+prince-solar-web-app                   prince-todo-app
+────────────────────                   ───────────────
 api_alerts_due()   ──── called by ───> solar-alerts (Edge Function)
   detection, thresholds,                 wording + Expo push
   debounce, event_key                    + stamps solar_alerts_sent
