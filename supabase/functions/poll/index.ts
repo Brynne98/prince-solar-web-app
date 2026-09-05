@@ -16,9 +16,12 @@ import {
   extractMeta,
   extractReading,
   extractStrings,
+  type InverterInfo,
+  realtimePaths,
 } from "../_shared/extract.ts";
 import {
   type Account,
+  apiGet,
   db,
   ensureBootstrapAccount,
   fetchInverterRaw,
@@ -45,9 +48,87 @@ type AccountResult = {
   strings: number;
   plants: number[];
   gapRecorded: number[];
+  burst?: string;
   error?: string;
   needsRelink?: boolean;
 };
+
+// ---------------------------------------------------------------------------
+// Grid burst: sub-minute samples after a relay-open / low-voltage minute.
+//
+// The one relay-open minute on record (2026-09-04 11:15) was sampled AFTER the
+// utility had returned -- grid_volt_v and output_volt_v, identical with the relay
+// closed, differed by 12.9 V, so the grid-side sensor was seeing live mains while the
+// inverter sat in its reconnect delay. The dead-grid interval fell between polls.
+// Nothing logged so far shows what this firmware reports while the grid is actually
+// OFF, which is the fact 0017's alert wording is waiting on.
+//
+// So when a poll sees the trigger, take BURST_SAMPLES more readings at
+// BURST_SPACING_MS, grid + output endpoints only, and store them in grid_burst
+// (migration 0029). Bounded to finish before the next minute's poll, which re-arms
+// if the relay is still open -- so an event of any length gets ~10 s coverage with
+// no overlap and no unbounded work.
+//
+// Runs after the response via EdgeRuntime.waitUntil, so the burst never delays the
+// minute's normal write and pg_cron's 50 s wait is unaffected.
+// ---------------------------------------------------------------------------
+const BURST_SAMPLES = 5;
+const BURST_SPACING_MS = 10_000;
+const BURST_BUDGET_MS = 55_000; // hard stop: the next poll starts at +60 s
+const LOW_VOLT_V = 100;         // same threshold as q_grid_present()
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Why a reading triggers a burst, or null if it doesn't. */
+function burstTrigger(r: Record<string, unknown>): "relay_open" | "low_volt" | null {
+  if (r.grid_relay_status === "0") return "relay_open";
+  const v = r.grid_volt_v;
+  if (typeof v === "number" && v < LOW_VOLT_V) return "low_volt";
+  return null;
+}
+
+async function burstGrid(
+  acc: Account, inverters: InverterInfo[], triggerTs: number, trigger: string,
+): Promise<void> {
+  const started = Date.now();
+  let stored = 0;
+  for (let i = 0; i < BURST_SAMPLES; i++) {
+    if (i > 0) await sleep(BURST_SPACING_MS);
+    if (Date.now() - started > BURST_BUDGET_MS) break;
+    const ts = Math.floor(Date.now() / 1000);
+
+    // Grid + output only: the two sensors that straddle the relay. Every inverter on
+    // the account, not just the one that tripped -- the slave's stale feed is part
+    // of what needs observing.
+    const rows = await Promise.all(inverters.map(async (inv) => {
+      const paths = realtimePaths(inv.sn);
+      const [grid, output] = await Promise.all([
+        apiGet(paths.grid, acc).catch(() => null),
+        apiGet(paths.output, acc).catch(() => null),
+      ]);
+      const r = extractReading(inv, { grid, output, battery: null, input: null, load: null });
+      return {
+        ts, sn: inv.sn, plant_id: inv.plantId ?? null, trigger, trigger_ts: triggerTs,
+        grid_volt_v: r.grid_volt_v, grid_relay_status: r.grid_relay_status,
+        grid_freq_hz: r.grid_freq_hz, grid_w: r.grid_w,
+        output_volt_v: r.output_volt_v, output_freq_hz: r.output_freq_hz,
+      };
+    }));
+    const withPlant = rows.filter((r) => r.plant_id != null);
+    if (!withPlant.length) continue;
+    const ins = await db.from("grid_burst").upsert(withPlant, { onConflict: "ts,sn" });
+    if (ins.error) { console.warn("grid_burst:", ins.error.message); continue; }
+    stored += withPlant.length;
+  }
+  console.log(`grid burst (${trigger} @ ${triggerTs}): ${stored} rows in ${Date.now() - started} ms`);
+}
+
+/** Run after the response if the runtime supports it; otherwise inline (local dev). */
+function background(p: Promise<void>) {
+  const rt = (globalThis as any).EdgeRuntime;
+  if (rt?.waitUntil) rt.waitUntil(p);
+  else return p;
+}
 
 async function pollAccount(acc: Account, ts: number): Promise<AccountResult> {
   const result: AccountResult = {
@@ -126,6 +207,15 @@ async function pollAccount(acc: Account, ts: number): Promise<AccountResult> {
   await rpc("account_access_set", {
     p_account: acc.id, p_access: acc.access_token, p_expires: acc.access_expires_at,
   });
+
+  // Relay open or mains voltage gone on any inverter: start the sub-minute burst.
+  const trigger = withPlant.map(burstTrigger).find((t) => t !== null) ?? null;
+  if (trigger) {
+    result.burst = trigger;
+    const p = burstGrid(acc, inverters, ts, trigger)
+      .catch((e) => console.warn("grid burst failed:", e instanceof Error ? e.message : e));
+    await background(p);
+  }
 
   return result;
 }

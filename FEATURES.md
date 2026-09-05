@@ -62,6 +62,23 @@ order by ts desc limit 20;
 
 Grid alerts under #2 depend on the same answer.
 
+**Update 5 Sep 2026 — first relay-open minute observed, question still open.** On
+4 Sep at 11:15 SAST the master logged relay 0 / 0 Hz / 0 W with output pinned to
+230.0 V / 50.00 Hz during a ~2 min outage — and `grid_volt_v` read **242.9 V**. That
+looks like the "signal is sound" row above, but it isn't proof: with the relay closed
+`grid_volt_v` and `output_volt_v` are the same number (mean |diff| 0.06 V over 5,759
+minutes), and at 11:15 they differed by 12.9 V. The two sensors sit on opposite sides of
+the relay, so the grid-side one was seeing mains that had already **returned** — the
+sample landed in the reconnect delay, not in the dead-grid interval, which fell between
+one-minute polls entirely. Nobody has yet seen a dead-grid reading.
+
+Migration `0029` + `poll` now take a burst of ~10 s samples into `grid_burst` whenever
+a poll sees the relay open or voltage under 100 V, so the next outage answers this
+directly. Read it with `scripts/sql/grid-burst.sql`. Two related facts from the same
+investigation: the slave's SunSynk feed repeats the previous minute 79.5% of the time
+(≈5 min real resolution), and `grid_down`'s `false_3m >= 3` debounce cannot be met by an
+event this short regardless of which signal is used.
+
 ---
 
 ## 1. Quick wins — surface data already in hand
