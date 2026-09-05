@@ -194,12 +194,18 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
   let res = await doFetch(await accessTokenFor(acc));
   if (res.status === 401) res = await doFetch(await accessTokenFor(acc, true));
 
-  for (let attempt = 1; (res.status === 429 || res.status === 403) && attempt <= RATE_LIMIT_RETRIES; attempt++) {
+  // The gateway also answers 403 for "this app key may not call that path", which
+  // no amount of waiting fixes; only treat a 403 as throttling when its message
+  // says so. (Survey 2026-09-05: /plant/{id}/realtime is a plain 403 on this key.)
+  const throttled = (r: Response) =>
+    r.status === 429 ||
+    (r.status === 403 && /throttl|quota|limit/i.test(r.headers.get("x-ca-error-message") ?? ""));
+  for (let attempt = 1; throttled(res) && attempt <= RATE_LIMIT_RETRIES; attempt++) {
     await res.body?.cancel();
     await wait(RATE_LIMIT_BACKOFF_MS * attempt);
     res = await doFetch(await accessTokenFor(acc));
   }
-  if (res.status === 429 || res.status === 403) {
+  if (throttled(res)) {
     throw new Error(`API ${pathname} -> HTTP ${res.status} (rate-limited after ${RATE_LIMIT_RETRIES} retries)`);
   }
   const gatewayErr = res.headers.get("x-ca-error-message");

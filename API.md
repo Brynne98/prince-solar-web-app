@@ -216,6 +216,76 @@ which is why `recover` sweeps a rolling 14-day window and why keeping our own
 minute log matters at all. The daily/monthly **kWh totals** do go back to
 commissioning, and those are what `sync-plant-energy` caches.
 
+### 🔎 Endpoint survey — 5 Sep 2026 (api.sunsynk.net, web login)
+
+Probed every path we could name against the master inverter. Anything not listed
+here answered `No Permissions` (per-inverter `settings`, `alarm`, `event*`, `summary`,
+`version`, `ct`, `dc`, `bms`, `ups`, `gen`, `meter`, `energy`, `statistics`, `pv`,
+`realtime`, `realtime/temperature`, `realtime/dc|ac|bms|gen`) or `404`
+(`plant/{id}/flow`, `eventList`, `alarm`, `generation`, `weather`).
+
+**Usable and not yet used**
+
+| Endpoint | What it gives | Verdict |
+|---|---|---|
+| `GET /inverter/{sn}/flow` | `pvPower`, `battPower`, `gridOrMeterPower`, `loadOrEpsPower`, `upsLoadPower`, `soc`, `genPower`, `pv[]{power}` per string, direction booleans (`toBat`, `gridTo`, …) | All five spine values in **one call**, matched the five realtime endpoints exactly on both inverters. Quirk: top-level `pvPower` reads `0` while `pv[].power` carries the strings — sum the array. No voltages, frequencies, relay status, temperatures or kWh counters, so it cannot replace grid/battery for alerts. |
+| `GET /inverter/{sn}` | firmware (`masterVer`, `softVer`, `hmiVer`, `bmsVer`), `ratePower`, `brand`, `pvNum`, plant + installer details, `etoday/emonth/eyear/etotal` | Richer metadata than `/inverters`; once a day is plenty. |
+| `GET /plant/{id}/realtime?sn=` | plant `pac`, `etoday/emonth/eyear/etotal`, currency, `income`, `updateAt` | Plant-level only. `updateAt` is the cloud's own freshness stamp. |
+| `GET /plant/{id}/inverters?…` | same rows as `/inverters` scoped to a plant | Interchangeable. |
+| `GET /plant/energy/{id}/total?lan=en` | lifetime kWh: PV, load, sold, purchased, charge, discharge | Six counters in one call. |
+| `GET /inverter/{sn}/month\|year\|total?…&column=pv` | daily/monthly kWh per inverter | Per-inverter version of the plant energy feed. |
+| `GET /inverter/gen/{sn}/realtime`, `GET /inverter/meter/{sn}/realtime` | generator and CT-meter readings | Zero / `Unconnected` on this hardware; relevant for customers with a genset or external meter. |
+| `GET /weather?lan=en&date=&lonLat=lon,lat` | current conditions, sunrise/sunset | We use our own source. |
+| `GET /plant/{id}/events?lan=en&sdate=&edate=&page=&limit=` | alarm/event list | Works (empty here). Needs `sdate`/`edate`. |
+
+**Per-inverter minute history — `…/day?lan=en&date=D&edate=D&column=…`**
+
+| Path | Columns that return anything |
+|---|---|
+| `/inverter/battery/{sn}/day` | `soc` → SOC (%) |
+| `/inverter/grid/{sn}/day` | `pac` → P-grid (W), `fac` → F-grid (Hz) |
+| `/inverter/load/{sn}/day` | `pac` → P-load (W) |
+| `/inverter/{sn}/input/day` | any token → V-pv-1/2 (V); `ipv` → I-pv-1/2 (A) |
+| `/inverter/{sn}/output/day` | `pac` → P-inv, `fac`, `vac1`, `iac1`, `vac2` |
+
+Facts that matter:
+
+- **Resolution is the device's upload cadence, not 5 min.** Master: 1,278 samples/day
+  (~67 s). Slave: **288/day — it uploads every 5 minutes**, which is why its realtime
+  feed repeats the previous minute ~80% of the time. Polling the slave every minute
+  buys nothing four times out of five.
+- **Retention is at least two months** (2026-07-01 returned a full day on 5 Sep;
+  2026-06-01 was empty). The "1–2 weeks" above applies to the *plant* feed's 5-min
+  detail, not to this.
+- **Missing:** battery power/voltage/current/temperature, grid voltage, relay status,
+  PV power (only string V and I; multiply), kWh counters. So history can backfill the
+  spine (grid, load, SOC direct; PV from V×I; battery by balance) but not the alert
+  inputs.
+- `date`/`edate` do not span days: a 3-day range returned only the first day. One
+  call per day per column set.
+- Timestamps are the device's own. Around the 4 Sep 11:15 outage the grid series
+  reads `0 W / 0 Hz` at 11:13:59 and then nothing until 11:15:44 — the inverter
+  did not upload during the dead minute, so the cloud has no dead-grid sample either.
+- `/inverter/{sn}/day` (no sub-resource) exists but needs an undocumented `params`
+  and returned 500 on every guess.
+- `pvIV[].time` on `/realtime/input` is the device data timestamp — the one field
+  that says whether a realtime payload is new or a repeat.
+
+**Official host (`openapi.sunsynk.net`, app-key signed — what production uses).**
+Re-run through the shared client the same day. The official host is a strict subset:
+
+| Available on the official host | Not available (404 / 403) |
+|---|---|
+| the five per-inverter realtime endpoints | `/inverter/{sn}/flow` |
+| `/inverters`, `/plant/{id}/inverters` | `/inverter/{sn}` detail |
+| all five `…/day` per-inverter history endpoints, same columns, 2+ month retention | `/plant/{id}/realtime` (plain 403 for this key) |
+| `/plant/energy/{id}/day\|month\|year\|total` | `/plant/{id}/events` |
+| `/inverter/{sn}/month\|year\|total` | `gen`, `meter`, `weather`, `settings`, `alarm` |
+
+So the flow shortcut is web-host only and off the table. Everything the product
+stores comes from the five realtime endpoints, and the per-inverter history is the
+one unused capability worth building on (backfill + a real freshness signal).
+
 ---
 
 ## High-value additions not yet on the dashboard
