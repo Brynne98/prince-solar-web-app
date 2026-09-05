@@ -64,6 +64,19 @@ would drag a Pages rebuild along for nothing.
 > supabase functions deploy poll link-sunsynk recover sync-plant-energy forecast alerts-due
 > ```
 
+> **Releasing the sharded poller (migration 0030):** push the migration **before**
+> deploying `poll`. The new function calls `poll_commit()`, which does not exist
+> until `0030` lands; the old function ignores the shard body the new cron job
+> sends, so the reverse order is the only one that stops the logger. `0030` also
+> reschedules `sunsynk-poll` with a 55 s pg_net timeout. Nothing is dropped and
+> the old accessor RPCs stay in place, so rolling back is redeploying the previous
+> `poll`.
+>
+> ```bash
+> supabase db push
+> supabase functions deploy poll
+> ```
+
 ```bash
 supabase db push                                  # pending migrations
 supabase functions deploy poll                    # only what changed

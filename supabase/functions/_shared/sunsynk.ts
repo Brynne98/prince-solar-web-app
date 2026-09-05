@@ -178,6 +178,14 @@ async function accessTokenFor(acc: Account, force = false): Promise<string> {
   return t.access_token;
 }
 
+// Rate limiting. SunSynk's gateway answers a burst with 429 (and sometimes 403) and
+// recovers within a second or two. Retry a couple of times with a growing wait
+// before giving the minute up for this account; the shard stagger in 0030 keeps
+// this the exception rather than the rule.
+const RATE_LIMIT_RETRIES = 2;
+const RATE_LIMIT_BACKOFF_MS = 1500;
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /** GET a resource for one account and return body.data. */
 export async function apiGet(pathname: string, acc: Account): Promise<any> {
   const doFetch = async (tok: string) =>
@@ -186,8 +194,13 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
   let res = await doFetch(await accessTokenFor(acc));
   if (res.status === 401) res = await doFetch(await accessTokenFor(acc, true));
 
+  for (let attempt = 1; (res.status === 429 || res.status === 403) && attempt <= RATE_LIMIT_RETRIES; attempt++) {
+    await res.body?.cancel();
+    await wait(RATE_LIMIT_BACKOFF_MS * attempt);
+    res = await doFetch(await accessTokenFor(acc));
+  }
   if (res.status === 429 || res.status === 403) {
-    throw new Error(`API ${pathname} -> HTTP ${res.status} (rate-limited)`);
+    throw new Error(`API ${pathname} -> HTTP ${res.status} (rate-limited after ${RATE_LIMIT_RETRIES} retries)`);
   }
   const gatewayErr = res.headers.get("x-ca-error-message");
   const body = await res.json().catch(() => ({}));

@@ -1,9 +1,18 @@
-// `poll` — the per-minute logger, now per linked account.
+// `poll` — the per-minute logger, sharded across linked accounts.
 //
-// pg_cron fires this every minute. For each active SunSynk account it fetches every
-// inverter's 5 realtime endpoints, maps them with the shared extractReading(), and
-// stores per-inverter readings + per-string PV + metadata + a summed row per plant
-// on the aggregate spine.
+// pg_cron fires this every minute — once per SHARD (migration 0030). The request
+// body carries {shard, shards, delay_ms}; this invocation keeps the accounts whose
+// id hashes into its shard, waits delay_ms so the fleet is spread over the minute
+// instead of hitting SunSynk at second zero, then polls its accounts in parallel.
+// No body (local dev, manual invoke) means "every account, no delay".
+//
+// The set of plants to log comes from plantsToPoll() — plant_users is the source of
+// truth for what a user can see, so it is also what gets stored. Jobs are grouped by
+// account so each account's inverter list is fetched once.
+//
+// Per account: fetch every inverter's 5 realtime endpoints, map them with the shared
+// extractReading(), and hand the whole minute (readings, per-string PV, metadata, a
+// summed row per plant) to poll_commit(), which writes it in one transaction.
 //
 // An account whose refresh token has died (password changed, token revoked) is
 // marked needs_relink and skipped; the others continue. Any other per-account
@@ -26,6 +35,8 @@ import {
   ensureBootstrapAccount,
   fetchInverterRaw,
   getInverters,
+  type PlantJob,
+  plantsToPoll,
   RelinkNeeded,
 } from "../_shared/sunsynk.ts";
 
@@ -48,10 +59,16 @@ type AccountResult = {
   strings: number;
   plants: number[];
   gapRecorded: number[];
+  /** inverters on a plant nobody has linked; fetched nothing, stored nothing */
+  skipped?: string[];
   burst?: string;
   error?: string;
   needsRelink?: boolean;
 };
+
+const emptyResult = (acc: Account): AccountResult => ({
+  account: acc.id, inverters: 0, readings: 0, strings: 0, plants: [], gapRecorded: [],
+});
 
 // ---------------------------------------------------------------------------
 // Grid burst: sub-minute samples after a relay-open / low-voltage minute.
@@ -70,7 +87,7 @@ type AccountResult = {
 // no overlap and no unbounded work.
 //
 // Runs after the response via EdgeRuntime.waitUntil, so the burst never delays the
-// minute's normal write and pg_cron's 50 s wait is unaffected.
+// minute's normal write and the cron job's 55 s wait is unaffected.
 // ---------------------------------------------------------------------------
 const BURST_SAMPLES = 5;
 const BURST_SPACING_MS = 10_000;
@@ -130,12 +147,14 @@ function background(p: Promise<void>) {
   else return p;
 }
 
-async function pollAccount(acc: Account, ts: number): Promise<AccountResult> {
-  const result: AccountResult = {
-    account: acc.id, inverters: 0, readings: 0, strings: 0, plants: [], gapRecorded: [],
-  };
+async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<AccountResult> {
+  const result = emptyResult(acc);
+  const wanted = new Set(jobs.map((j) => j.plantId));
 
-  const inverters = await getInverters(acc);
+  const all = await getInverters(acc);
+  const inverters = all.filter((inv) => inv.plantId != null && wanted.has(Number(inv.plantId)));
+  const skipped = all.filter((inv) => !inverters.includes(inv)).map((inv) => inv.sn);
+  if (skipped.length) result.skipped = skipped;
   if (!inverters.length) return result;
   result.inverters = inverters.length;
 
@@ -151,65 +170,35 @@ async function pollAccount(acc: Account, ts: number): Promise<AccountResult> {
   );
   const meta = perInv.map(({ inv, raw }, i) => extractMeta(inv, raw, ts, i));
 
-  // Rows with no plant can't be attributed to a user; drop them rather than store
-  // orphans that RLS would hide forever.
-  const withPlant = readings.filter((r) => r.plant_id != null);
-  const stringsWithPlant = strings.filter((s) => s.plant_id != null);
-
   // One aggregate row per plant on this account.
-  const plantIds = [...new Set(withPlant.map((r) => r.plant_id as number))];
-  result.plants = plantIds;
+  const plantIds = [...new Set(readings.map((r) => r.plant_id as number))];
+  const agg = plantIds.map((plantId) => ({
+    plant_id: plantId,
+    ...aggregate(readings.filter((r) => r.plant_id === plantId) as any),
+  }));
 
-  for (const plantId of plantIds) {
-    const agg = aggregate(withPlant.filter((r) => r.plant_id === plantId) as any);
-
-    // Logger-offline detection, same rule as db.js recordPoll(): this poll landing
-    // more than 90 s after the previous row for this plant means the minutes between
-    // were never sampled. Record the window so `recover` can backfill it.
-    const { data: prevRow } = await db
-      .from("agg_minute").select("ts").eq("plant_id", plantId)
-      .order("ts", { ascending: false }).limit(1).maybeSingle();
-    const prev = prevRow?.ts ? Number(prevRow.ts) : null;
-    if (prev !== null && ts - prev > 90) {
-      try {
-        await rpc("gap_record", { p_plant: plantId, p_from: prev, p_to: ts });
-        result.gapRecorded.push(plantId);
-      } catch (e) {
-        console.warn("gap_record failed:", e instanceof Error ? e.message : e);
-      }
-    }
-
-    // agg_minute is INSERT OR IGNORE — first write for a minute wins.
-    const aggIns = await db
-      .from("agg_minute")
-      .upsert({ plant_id: plantId, ts, ...agg, source: "poller" },
-              { onConflict: "plant_id,ts", ignoreDuplicates: true });
-    if (aggIns.error) throw new Error(`agg_minute: ${aggIns.error.message}`);
-  }
-
-  // readings/strings are INSERT OR REPLACE — last write wins.
-  if (withPlant.length) {
-    const rdIns = await db.from("readings").upsert(withPlant, { onConflict: "ts,sn" });
-    if (rdIns.error) throw new Error(`readings: ${rdIns.error.message}`);
-    result.readings = withPlant.length;
-  }
-  if (stringsWithPlant.length) {
-    const stIns = await db.from("strings").upsert(stringsWithPlant, { onConflict: "ts,sn,no" });
-    if (stIns.error) throw new Error(`strings: ${stIns.error.message}`);
-    result.strings = stringsWithPlant.length;
-  }
-
-  // meta and the inverter mirror live in `private`, reached via the accessors.
-  await rpc("meta_upsert", { p_rows: meta });
-  await rpc("inverters_seed", {
-    p_rows: inverters.map((i) => ({ sn: i.sn, plant_id: i.plantId ?? null, account_id: acc.id })),
-  });
-  await rpc("account_access_set", {
-    p_account: acc.id, p_access: acc.access_token, p_expires: acc.access_expires_at,
-  });
+  // The whole minute in one transaction (migration 0030): readings and strings
+  // last-write-wins, agg_minute first-write-wins with gap detection, meta, the
+  // inverter mirror and the account's token. fetchInverterRaw may have refreshed
+  // the token, so read it off `acc` here rather than from the row we started with.
+  const committed = await rpc("poll_commit", {
+    p_account: acc.id,
+    p_ts: ts,
+    p_readings: readings,
+    p_strings: strings,
+    p_agg: agg,
+    p_meta: meta,
+    p_inverters: inverters.map((i) => ({ sn: i.sn, plant_id: i.plantId ?? null, account_id: acc.id })),
+    p_access: acc.access_token,
+    p_expires: acc.access_expires_at,
+  }) as { readings: number; strings: number; plants: number[]; gaps: number[] };
+  result.readings = committed.readings;
+  result.strings = committed.strings;
+  result.plants = committed.plants;
+  result.gapRecorded = committed.gaps;
 
   // Relay open or mains voltage gone on any inverter: start the sub-minute burst.
-  const trigger = withPlant.map(burstTrigger).find((t) => t !== null) ?? null;
+  const trigger = readings.map(burstTrigger).find((t) => t !== null) ?? null;
   if (trigger) {
     result.burst = trigger;
     const p = burstGrid(acc, inverters, ts, trigger)
@@ -220,43 +209,83 @@ async function pollAccount(acc: Account, ts: number): Promise<AccountResult> {
   return result;
 }
 
-Deno.serve(async () => {
+// ---------------------------------------------------------------------------
+// Sharding. The cron job (0030) decides how many invocations this minute needs
+// and POSTs {shard, shards, delay_ms} to each. An account belongs to exactly one
+// shard, chosen by a stable hash of its uuid, so no two isolates ever work the
+// same account (or refresh the same token) in the same minute.
+// ---------------------------------------------------------------------------
+type ShardSpec = { shard: number; shards: number; delayMs: number };
+
+const MAX_DELAY_MS = 30_000; // never eat more of the minute than the cron job planned for
+
+async function shardSpec(req: Request): Promise<ShardSpec> {
+  const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+  const shards = Math.max(1, Math.floor(Number(body.shards) || 1));
+  const shard = Math.min(shards - 1, Math.max(0, Math.floor(Number(body.shard) || 0)));
+  const delayMs = Math.min(MAX_DELAY_MS, Math.max(0, Math.floor(Number(body.delay_ms) || 0)));
+  return { shard, shards, delayMs };
+}
+
+/** Stable shard for an account: first 8 hex digits of its uuid, mod shard count. */
+function shardOf(accountId: string, shards: number): number {
+  const hex = accountId.replace(/-/g, "").slice(0, 8);
+  return (parseInt(hex, 16) >>> 0) % shards;
+}
+
+Deno.serve(async (req) => {
   try {
-    // First run after deploy: link the env-credential account so logging never stops.
-    try {
-      await ensureBootstrapAccount();
-    } catch (e) {
-      console.warn("bootstrap skipped:", e instanceof Error ? e.message : e);
+    const spec = await shardSpec(req);
+    // The minute this invocation is logging — fixed before the stagger delay so
+    // a shard that waits 20 s still stamps the minute the cron tick was for.
+    const ts = nowMinuteEpoch();
+
+    let jobs = await plantsToPoll();
+    if (!jobs.length) {
+      // Nothing to poll: a fresh deploy. Link the env-credential account so
+      // logging starts without anyone signing in. Only the empty case pays for
+      // this; on a running deployment it never executes.
+      try {
+        if (await ensureBootstrapAccount()) jobs = await plantsToPoll();
+      } catch (e) {
+        console.warn("bootstrap skipped:", e instanceof Error ? e.message : e);
+      }
+      if (!jobs.length) return json({ ok: true, ts, ...spec, accounts: 0, note: "no plants to poll" });
     }
 
-    const accounts = (await rpc("accounts_active", {})) as Account[];
-    if (!accounts?.length) return json({ ok: true, ts: nowMinuteEpoch(), accounts: 0, note: "no active accounts" });
+    // Group jobs by account, keep this shard's accounts.
+    const byAccount = new Map<string, { acc: Account; jobs: PlantJob[] }>();
+    for (const j of jobs) {
+      const entry = byAccount.get(j.account.id) ?? { acc: j.account, jobs: [] };
+      entry.jobs.push(j);
+      byAccount.set(j.account.id, entry);
+    }
+    const mine = [...byAccount.values()].filter(({ acc }) => shardOf(acc.id, spec.shards) === spec.shard);
+    if (!mine.length) return json({ ok: true, ts, ...spec, accounts: 0, note: "no accounts in this shard" });
 
-    const ts = nowMinuteEpoch();
-    const results: AccountResult[] = [];
+    if (spec.delayMs > 0) await sleep(spec.delayMs);
 
     // Accounts are independent; one dying must not stop the others.
-    for (const acc of accounts) {
+    const results = await Promise.all(mine.map(async ({ acc, jobs }): Promise<AccountResult> => {
       try {
-        results.push(await pollAccount(acc, ts));
+        return await pollAccount(acc, jobs, ts);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (e instanceof RelinkNeeded) {
-          await rpc("account_mark", { p_account: acc.id, p_status: "needs_relink", p_error: msg }).catch(() => {});
-          results.push({ account: acc.id, inverters: 0, readings: 0, strings: 0, plants: [], gapRecorded: [], error: msg, needsRelink: true });
-        } else {
-          await rpc("account_mark", { p_account: acc.id, p_status: "active", p_error: msg }).catch(() => {});
-          results.push({ account: acc.id, inverters: 0, readings: 0, strings: 0, plants: [], gapRecorded: [], error: msg });
-        }
+        const needsRelink = e instanceof RelinkNeeded;
+        await rpc("account_mark", {
+          p_account: acc.id, p_status: needsRelink ? "needs_relink" : "active", p_error: msg,
+        }).catch(() => {});
         console.error(`poll: account ${acc.id} failed:`, msg);
+        return { ...emptyResult(acc), error: msg, ...(needsRelink ? { needsRelink } : {}) };
       }
-    }
+    }));
 
     const ok = results.filter((r) => !r.error);
     return json({
       ok: ok.length > 0,
       ts,
-      accounts: accounts.length,
+      ...spec,
+      accounts: mine.length,
       succeeded: ok.length,
       inverters: ok.reduce((n, r) => n + r.inverters, 0),
       readings: ok.reduce((n, r) => n + r.readings, 0),
