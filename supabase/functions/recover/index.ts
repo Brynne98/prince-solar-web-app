@@ -2,13 +2,23 @@
 //
 // Ported from recoverDay()/recoverAllGaps() in server.js. The inverters report to
 // SunSynk independently of our logger, so minutes we slept through still exist in
-// the cloud — until it drops the day (~1-2 weeks). Those minutes get written to
-// agg_minute tagged source='plantfeed':
+// the cloud. Two sources, tried in order (0034):
+//
+//   1. per-inverter history (_shared/invhistory.ts): grid, load and SoC per inverter
+//      straight from the device's own uploads, PV from string V×I, battery from the
+//      balance; summed across the plant. No scaling to guess. 2+ months retained.
+//      Written with source='invhistory'.
+//   2. the plant feed, for whatever minutes history could not fill — until the
+//      cloud drops the day (~1-2 weeks). Written with source='plantfeed':
 //   * calibrated per-day against that day's own poller overlap (never hardcode the
 //     feed's scale — it has changed under us before); thin days borrow today's
 //   * ON CONFLICT DO NOTHING, so it can only fill holes, never overwrite a reading
 //   * the live edge (last 10 min) is left to the poller
 //   * fully reversible: delete from agg_minute where source = 'plantfeed'
+//
+// ?dry=1&plant=ID&day=YYYY-MM-DD builds the history spine for a whole day and
+// reports its error against that day's poller rows, writing nothing — the way to
+// check the parser against a new firmware or account before trusting it.
 //
 // Runs on a schedule (the monolith swept every 6 h). Unlike the monolith it does NOT
 // sweep all history: the cloud only holds recent days, so scanning 60+ days would
@@ -25,6 +35,7 @@ import {
   type FeedScale,
   plantFeedForDay,
 } from "../_shared/plantfeed.ts";
+import { dayStartEpoch, fetchInverterDay, plantSpine, type SpineRow } from "../_shared/invhistory.ts";
 
 const DEFAULT_WINDOW_DAYS = 14;
 // Leave headroom under the 150 s free-tier wall clock; a partial sweep is fine
@@ -44,20 +55,6 @@ const addDays = (tz: string, day: string, n: number) => {
   const [y, m, d] = day.split("-").map(Number);
   return localDate(tz, new Date(Date.UTC(y, m - 1, d + n, 12)));
 };
-/** Epoch of local midnight for a YYYY-MM-DD in the plant's zone. */
-function dayStartEpoch(tz: string, day: string): number {
-  // Find the UTC instant whose wall-clock in `tz` is 00:00 on `day`: start from
-  // noon UTC that date and subtract the zone's offset at that instant.
-  const [y, m, d] = day.split("-").map(Number);
-  const noonUtc = Date.UTC(y, m - 1, d, 12);
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour12: false, hour: "2-digit", minute: "2-digit" })
-    .formatToParts(new Date(noonUtc));
-  const hh = Number(parts.find((p) => p.type === "hour")?.value ?? "12") % 24;
-  const mm = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
-  const offsetMin = (hh * 60 + mm) - 12 * 60;      // zone is `offset` ahead of UTC
-  return Math.floor(noonUtc / 1000) - 12 * 3600 - offsetMin * 60;
-}
-
 async function rpc(fn: string, args: Record<string, unknown>) {
   const { data, error } = await db.rpc(fn, args);
   if (error) throw new Error(`${fn}: ${error.message}`);
@@ -82,13 +79,47 @@ async function currentFeedScale(acc: Account, plantId: number, tz: string): Prom
   return scale;
 }
 
+/** A spine row is usable only when every series the chart needs is present. */
+const complete = (r: SpineRow | undefined): r is SpineRow =>
+  !!r && r.pv_w != null && r.grid_w != null && r.load_w != null;
+
+/** Per-inverter history for the plant's inverters, summed. Null if nothing came back. */
+async function historySpine(acc: Account, plantId: number, tz: string, day: string) {
+  const sns = (((await rpc("plant_inverters", { p_plant: plantId })) ?? []) as any[]).map((r) => String(r.sn ?? r));
+  if (!sns.length) return null;
+  const days = await Promise.all(sns.map((sn) => fetchInverterDay(acc, sn, day)));
+  const spine = plantSpine(days, dayStartEpoch(tz, day));
+  return spine.size ? { spine, days } : null;
+}
+
 async function recoverDay(acc: Account, plantId: number, tz: string, day: string) {
   const missing = await rpc("q_missing_minutes", { p_plant: plantId, p_day: day });
-  const gaps: number[] = (missing ?? []).map((r: any) => Number(r.ts ?? r));
+  let gaps: number[] = (missing ?? []).map((r: any) => Number(r.ts ?? r));
   if (!gaps.length) return { day, banked: 0, reason: "no gaps" };
+  const wanted = gaps.length;
 
+  // 1. per-inverter history
+  let bankedHistory = 0;
+  try {
+    const h = await historySpine(acc, plantId, tz, day);
+    if (h) {
+      const rows = gaps.map((ts) => ({ ts, row: h.spine.get(ts) }))
+        .filter((x): x is { ts: number; row: SpineRow } => complete(x.row))
+        .map(({ ts, row }) => ({ ts, ...row }));
+      if (rows.length) {
+        bankedHistory = Number(await rpc("q_insert_recovered", { p_plant: plantId, p_rows: rows, p_source: "invhistory" }) ?? 0);
+        const filled = new Set(rows.map((r) => r.ts));
+        gaps = gaps.filter((ts) => !filled.has(ts));
+      }
+    }
+  } catch (e) {
+    console.warn(`invhistory ${plantId} ${day}:`, e instanceof Error ? e.message : e);
+  }
+  if (!gaps.length) return { day, banked: bankedHistory, bankedHistory, missing: wanted };
+
+  // 2. the plant feed for what is left
   const feed = await plantFeedForDay(acc, plantId, day);
-  if (!feed) return { day, banked: 0, missing: gaps.length, reason: "cloud no longer has this day" };
+  if (!feed) return { day, banked: bankedHistory, bankedHistory, missing: wanted, reason: "cloud no longer has this day" };
 
   // Calibrate against this day's own poller rows when there are enough of them
   // (>= 3 h); otherwise borrow the current scale.
@@ -113,14 +144,16 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
       soc: e.soc == null ? null : Math.round(e.soc),
     });
   }
-  if (!rows.length) return { day, banked: 0, missing: gaps.length, reason: "feed had no matching buckets" };
+  if (!rows.length) return { day, banked: bankedHistory, bankedHistory, missing: wanted, reason: "feed had no matching buckets" };
 
-  const banked = await rpc("q_insert_recovered", { p_plant: plantId, p_rows: rows });
+  const banked = await rpc("q_insert_recovered", { p_plant: plantId, p_rows: rows, p_source: "plantfeed" });
 
   return {
     day,
-    banked: Number(banked ?? 0),
-    missing: gaps.length,
+    banked: bankedHistory + Number(banked ?? 0),
+    bankedHistory,
+    bankedPlantFeed: Number(banked ?? 0),
+    missing: wanted,
     scale: {
       pv: +scale.pv.toFixed(2), batt: +scale.batt.toFixed(2),
       grid: +scale.grid.toFixed(2), load: +scale.load.toFixed(2),
@@ -172,6 +205,43 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
   };
 }
 
+/** Median and p90 of |history − poller| per series over a day with poller rows. */
+async function dryRun(job: PlantJob, day: string) {
+  const { plantId, account: acc, timezone: tz } = job;
+  const h = await historySpine(acc, plantId, tz, day);
+  if (!h) return { plantId, day, error: "no history came back" };
+  const lo = dayStartEpoch(tz, day);
+  const { data, error } = await db.from("agg_minute")
+    .select("ts, pv_w, load_w, batt_w, grid_w, soc")
+    .eq("plant_id", plantId).eq("source", "poller").gte("ts", lo).lt("ts", lo + 86400);
+  if (error) throw new Error(`agg_minute: ${error.message}`);
+  const series = ["pv_w", "load_w", "batt_w", "grid_w", "soc"] as const;
+  const errs: Record<string, number[]> = Object.fromEntries(series.map((k) => [k, []]));
+  let overlap = 0;
+  for (const a of data ?? []) {
+    const r = h.spine.get(Number(a.ts));
+    if (!r) continue;
+    overlap++;
+    for (const k of series) {
+      const x = (r as any)[k], y = (a as any)[k];
+      if (x != null && y != null) errs[k].push(Math.abs(Number(x) - Number(y)));
+    }
+  }
+  const q = (xs: number[], p: number) => {
+    if (!xs.length) return null;
+    const s = [...xs].sort((a, b) => a - b);
+    return s[Math.min(s.length - 1, Math.floor(p * s.length))];
+  };
+  return {
+    plantId, day, inverters: h.days.map((d) => ({
+      sn: d.sn, labels: d.labels,
+      samples: { pv: d.pv?.length ?? 0, grid: d.grid?.length ?? 0, load: d.load?.length ?? 0, soc: d.soc?.length ?? 0 },
+    })),
+    spineMinutes: h.spine.size, pollerMinutes: (data ?? []).length, overlap,
+    error: Object.fromEntries(series.map((k) => [k, { n: errs[k].length, median: q(errs[k], 0.5), p90: q(errs[k], 0.9) }])),
+  };
+}
+
 Deno.serve(async (req) => {
   const started = Date.now();
   try {
@@ -180,6 +250,14 @@ Deno.serve(async (req) => {
 
     const jobs = await plantsToPoll();
     if (!jobs.length) return json({ ok: true, banked: 0, reason: "no linked plants" });
+
+    if (url.searchParams.get("dry") === "1") {
+      const plantId = Number(url.searchParams.get("plant"));
+      const day = url.searchParams.get("day") ?? "";
+      const job = jobs.find((j) => j.plantId === plantId);
+      if (!job || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return json({ error: "dry run needs plant=<linked id>&day=YYYY-MM-DD" }, 400);
+      return json({ ok: true, dry: true, ...(await dryRun(job, day)), elapsedMs: Date.now() - started });
+    }
 
     const plants = [];
     let total = 0;

@@ -10,9 +10,14 @@
 // truth for what a user can see, so it is also what gets stored. Jobs are grouped by
 // account so each account's inverter list is fetched once.
 //
-// Per account: fetch every inverter's 5 realtime endpoints, map them with the shared
+// Per account: fetch every inverter's realtime endpoints, map them with the shared
 // extractReading(), and hand the whole minute (readings, per-string PV, metadata, a
 // summed row per plant) to poll_commit(), which writes it in one transaction.
+//
+// Freshness gate (0032): `input` is fetched first. If its pvIV[0].time equals the
+// device_time of the inverter's last stored row, the datalogger has not uploaded
+// since, so the other four endpoints are skipped and the previous row's values are
+// stored again under this minute, marked carried. See fetchInverter().
 //
 // An account whose refresh token has died (password changed, token revoked) is
 // marked needs_relink and skipped; the others continue. Any other per-account
@@ -26,6 +31,8 @@ import {
   extractReading,
   extractStrings,
   type InverterInfo,
+  num,
+  type RawBundle,
   realtimePaths,
 } from "../_shared/extract.ts";
 import {
@@ -34,7 +41,6 @@ import {
   apiGet,
   db,
   ensureBootstrapAccount,
-  fetchInverterRaw,
   getInverters,
   getInvertersCached,
   type PlantJob,
@@ -44,9 +50,11 @@ import {
 } from "../_shared/sunsynk.ts";
 
 // The inverter and plant lists change rarely, so they are re-read from SunSynk only
-// on minutes divisible by this and served from private.inverters/meta (0031)
-// otherwise. One list call per account per REFRESH_EVERY_MIN instead of per minute.
+// on minutes divisible by these and served from private.inverters/meta (0031)
+// otherwise. The inverter list every 10 minutes (fleet composition, the online
+// badge); the plant list hourly (a plant added at SunSynk after linking).
 const REFRESH_EVERY_MIN = 10;
+const PLANTS_EVERY_MIN = 60;
 
 /** epoch seconds for the current minute — the dedup key for a sample */
 const nowMinuteEpoch = () => Math.floor(Date.now() / 60000) * 60;
@@ -69,8 +77,14 @@ type AccountResult = {
   gapRecorded: number[];
   /** inverters on a plant nobody has linked; fetched nothing, stored nothing */
   skipped?: string[];
-  /** inverter + plant lists re-read from SunSynk this minute (else served from cache) */
+  /** inverters whose datalogger had not uploaded: input only, rest carried forward */
+  carried?: string[];
+  /** per inverter, the endpoints not read this minute (values copied / derived) */
+  tiered?: Record<string, string[]>;
+  /** inverter list re-read from SunSynk this minute (else served from cache) */
   listRefreshed: boolean;
+  /** SunSynk requests spent on the inverter / plant lists this minute (0, 1 or 2+) */
+  listCalls: number;
   /** SunSynk requests this account cost this minute, retries included */
   apiCalls: number;
   burst?: string;
@@ -80,7 +94,7 @@ type AccountResult = {
 
 const emptyResult = (acc: Account): AccountResult => ({
   account: acc.id, inverters: 0, readings: 0, strings: 0, plants: [], gapRecorded: [],
-  listRefreshed: false, apiCalls: 0,
+  listRefreshed: false, listCalls: 0, apiCalls: 0,
 });
 
 /** SunSynk requests made for this account since `since`. */
@@ -163,28 +177,167 @@ function background(p: Promise<void>) {
   else return p;
 }
 
+// ---------------------------------------------------------------------------
+// Freshness gate + endpoint tiering.
+//
+// device_time (pvIV[0].time on /realtime/input) only advances when the datalogger
+// uploads. The master does so about every 67 s, the slave every 5 minutes; a
+// realtime call between uploads returns the previous sample again. So: fetch input
+// first, compare its time with the last stored row, and only fetch the other
+// endpoints when something new has arrived. Otherwise the previous row's
+// battery/grid/load/output columns are stored again under this minute, with the
+// fresh input fields, marked carried = true.
+//
+// Never carried: when the last row is unknown (first minute after linking) or has
+// no device_time; when the last row
+// showed an outage (relay open / mains < 100 V — the burst and the alerts need a
+// live read); after MAX_CARRIED_RUN carried rows in a row, so a stalled logger is
+// re-read; when input itself failed.
+//
+// When something new has arrived, not every endpoint is worth a call (0033):
+// battery and grid every time (SoC, battery power, mains voltage and the relay are
+// the alert inputs); `load` only when its last real read is LOAD_EVERY_S old, and
+// load_w is derived from the energy balance in between; `output` only when its last
+// real read is OUTPUT_EVERY_S old. Both every minute while the grid is down. The
+// age lives in the row itself (load_fetched_ts / output_fetched_ts) so a slow logger
+// whose real minute never lands on a multiple of five still gets its load read.
+// ---------------------------------------------------------------------------
+const MAX_CARRIED_RUN = 5;
+const LOAD_EVERY_S = 300;
+const OUTPUT_EVERY_S = 600;
+
+type Endpoint = "battery" | "grid" | "load" | "output";
+const ALL_ENDPOINTS: Endpoint[] = ["battery", "grid", "load", "output"];
+
+/** Columns that come from `input` and are therefore fresh on a carried row too. */
+const INPUT_FIELDS = ["device_time", "pv_w", "pv_today_kwh", "pv_total_kwh"] as const;
+
+/** Which readings columns each of the other four endpoints produces (extractReading). */
+const ENDPOINT_FIELDS: Record<Endpoint, string[]> = {
+  battery: [
+    "batt_power_w", "batt_w", "batt_soc", "batt_voltage_v", "batt_current_a", "batt_temp_c",
+    "batt_chg_today_kwh", "batt_dischg_today_kwh", "batt_chg_total_kwh", "batt_dischg_total_kwh",
+  ],
+  grid: [
+    "grid_w", "grid_import_today_kwh", "grid_export_today_kwh", "grid_import_total_kwh",
+    "grid_export_total_kwh", "grid_freq_hz", "grid_pf", "grid_volt_v", "grid_relay_status",
+  ],
+  load: ["load_w", "load_today_kwh", "load_total_kwh", "load_freq_hz"],
+  output: ["output_w", "output_volt_v", "output_freq_hz"],
+};
+
+type Fetched = { inv: InverterInfo; raw: RawBundle; carried: boolean; fetched: Set<Endpoint> };
+
+function canCarry(inv: InverterInfo, inputTime: string | null): boolean {
+  const prev = inv.lastReading;
+  if (!prev || inputTime == null || prev.device_time == null) return false;
+  if (prev.device_time !== inputTime) return false;
+  if ((inv.carriedRun ?? 0) >= MAX_CARRIED_RUN) return false;
+  if (burstTrigger(prev) !== null) return false;
+  return true;
+}
+
+/** Which of the four non-input endpoints this minute needs, given the last row. */
+function wantEndpoints(prev: Record<string, unknown> | null | undefined, ts: number): Set<Endpoint> {
+  if (!prev) return new Set(ALL_ENDPOINTS);
+  const want = new Set<Endpoint>(["battery", "grid"]);
+  const age = (k: string) => ts - (Number(prev[k]) || 0); // null/absent -> very old
+  if (prev.load_w == null || age("load_fetched_ts") >= LOAD_EVERY_S) want.add("load");
+  if (age("output_fetched_ts") >= OUTPUT_EVERY_S) want.add("output");
+  if (burstTrigger(prev) !== null) { want.add("load"); want.add("output"); }
+  return want;
+}
+
+async function fetchInto(raw: RawBundle, eps: Endpoint[], sn: string, acc: Account): Promise<void> {
+  const paths = realtimePaths(sn);
+  const settled = await Promise.allSettled(eps.map((k) => apiGet(paths[k], acc)));
+  eps.forEach((k, i) => {
+    raw[k] = settled[i].status === "fulfilled" ? (settled[i] as PromiseFulfilledResult<any>).value : null;
+  });
+}
+
+async function fetchInverter(inv: InverterInfo, acc: Account, ts: number): Promise<Fetched> {
+  const paths = realtimePaths(inv.sn);
+  const input = await apiGet(paths.input, acc).catch(() => null);
+  const inputTime: string | null =
+    (input && Array.isArray(input.pvIV) && input.pvIV[0] && input.pvIV[0].time) || null;
+  const raw: RawBundle = { input, grid: null, battery: null, load: null, output: null };
+  if (canCarry(inv, inputTime)) return { inv, raw, carried: true, fetched: new Set() };
+
+  const want = wantEndpoints(inv.lastReading, ts);
+  await fetchInto(raw, [...want], inv.sn, acc);
+
+  // The fresh grid payload shows an outage that the last row did not: read the far
+  // side of the relay (and the load) now rather than at the next tier boundary.
+  const late = (["output", "load"] as Endpoint[]).filter((k) => !want.has(k));
+  if (late.length && burstTrigger(extractReading(inv, raw)) !== null) {
+    await fetchInto(raw, late, inv.sn, acc);
+    for (const k of late) want.add(k);
+  }
+  return { inv, raw, carried: false, fetched: want };
+}
+
+/**
+ * The readings row for this minute. Carried: the last row with fresh input fields.
+ * Otherwise: fresh values for the endpoints fetched, the last row's for the rest,
+ * load_w derived from the balance when load was not read.
+ */
+function readingRow(f: Fetched, ts: number): Record<string, unknown> {
+  const fresh = extractReading(f.inv, f.raw);
+  const plant_id = f.inv.plantId ?? null;
+  const prev = f.inv.lastReading ?? {};
+  if (f.carried) {
+    const row: Record<string, unknown> = { ...prev, ts, plant_id, sn: f.inv.sn, status: fresh.status };
+    for (const k of INPUT_FIELDS) row[k] = fresh[k];
+    row.carried = true;
+    return row;
+  }
+  const row: Record<string, unknown> = { ts, plant_id, sn: f.inv.sn, status: fresh.status, carried: false };
+  for (const k of INPUT_FIELDS) row[k] = fresh[k];
+  for (const ep of ALL_ENDPOINTS) {
+    const src = f.fetched.has(ep) ? fresh : prev;
+    for (const col of ENDPOINT_FIELDS[ep]) row[col] = src[col] ?? null;
+  }
+  row.load_fetched_ts = f.fetched.has("load") ? ts : (prev.load_fetched_ts ?? null);
+  row.output_fetched_ts = f.fetched.has("output") ? ts : (prev.output_fetched_ts ?? null);
+  if (!f.fetched.has("load")) {
+    // grid + = import, batt + = charging (DATA_PIPELINE §9A); counters stay carried
+    row.load_w = Math.max(0, Math.round(num(row.pv_w) + num(row.grid_w) - num(row.batt_w)));
+  }
+  return row;
+}
+
 async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<AccountResult> {
   const result = emptyResult(acc);
   const callsAtStart = apiCallCounts.get(acc.id) ?? 0;
   const wanted = new Set(jobs.map((j) => j.plantId));
 
   // Inverter list: from the cache, unless it is this account's refresh minute or
-  // the cache is empty (first minute after linking). The refresh minute also
-  // re-reads the plant list so a plant added at SunSynk later starts logging.
+  // the cache is empty (first minute after linking). On a refresh minute the live
+  // list is merged with the cache so each inverter keeps its last row and carry
+  // run: the freshness gate and tiering then apply on refresh minutes too.
+  // The plant list is re-read hourly so a plant added at SunSynk starts logging.
   const refreshMinute = (ts / 60) % REFRESH_EVERY_MIN === 0;
-  let all = refreshMinute ? [] : await getInvertersCached(acc);
-  if (!all.length) {
+  const plantsMinute = (ts / 60) % PLANTS_EVERY_MIN === 0;
+  const cached = await getInvertersCached(acc);
+  let all = cached;
+  if (refreshMinute || !cached.length) {
     result.listRefreshed = true;
-    all = await getInverters(acc);
-    if (refreshMinute) {
-      try {
-        const plants = await syncPlants(acc);
-        for (const p of plants) wanted.add(p.id);
-      } catch (e) {
-        console.warn(`plant refresh failed for ${acc.id}:`, e instanceof Error ? e.message : e);
-      }
+    const bySn = new Map(cached.map((c) => [c.sn, c]));
+    all = (await getInverters(acc)).map((inv) => {
+      const c = bySn.get(inv.sn);
+      return c ? { ...inv, lastReading: c.lastReading, carriedRun: c.carriedRun } : inv;
+    });
+  }
+  if (plantsMinute || !cached.length) {
+    try {
+      const plants = await syncPlants(acc);
+      for (const p of plants) wanted.add(p.id);
+    } catch (e) {
+      console.warn(`plant refresh failed for ${acc.id}:`, e instanceof Error ? e.message : e);
     }
   }
+  result.listCalls = callsSince(acc, callsAtStart);
   const inverters = all.filter((inv) => inv.plantId != null && wanted.has(Number(inv.plantId)));
   const skipped = all.filter((inv) => !inverters.includes(inv)).map((inv) => inv.sn);
   if (skipped.length) result.skipped = skipped;
@@ -192,17 +345,25 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   if (!inverters.length) return result;
   result.inverters = inverters.length;
 
-  const perInv = await Promise.all(
-    inverters.map(async (inv) => ({ inv, raw: await fetchInverterRaw(inv.sn, acc) })),
-  );
+  const perInv = await Promise.all(inverters.map((inv) => fetchInverter(inv, acc, ts)));
+  const carried = perInv.filter((f) => f.carried).map((f) => f.inv.sn);
+  if (carried.length) result.carried = carried;
+  const tiered = Object.fromEntries(perInv
+    .filter((f) => !f.carried && f.fetched.size < ALL_ENDPOINTS.length)
+    .map((f) => [f.inv.sn, ALL_ENDPOINTS.filter((k) => !f.fetched.has(k))]));
+  if (Object.keys(tiered).length) result.tiered = tiered;
 
-  const readings = perInv.map(({ inv, raw }) => ({
-    ts, plant_id: inv.plantId ?? null, ...extractReading(inv, raw),
-  }));
+  const readings = perInv.map((f) => readingRow(f, ts));
+  // Strings come from input, which is always fetched, so they are fresh every minute.
   const strings = perInv.flatMap(({ inv, raw }) =>
     extractStrings(inv, raw).map((s) => ({ ts, plant_id: inv.plantId ?? null, ...s }))
   );
-  const meta = perInv.map(({ inv, raw }, i) => extractMeta(inv, raw, ts, i));
+  // Meta reads battery capacity off the battery payload; a carried inverter has no
+  // battery payload this minute, so leave its meta row alone rather than zero it.
+  // (A tiered inverter always has one: battery is never tiered.)
+  const meta = perInv
+    .map(({ inv, raw, carried }, i) => (carried ? null : extractMeta(inv, raw, ts, i)))
+    .filter((m) => m !== null);
 
   // One aggregate row per plant on this account.
   const plantIds = [...new Set(readings.map((r) => r.plant_id as number))];
@@ -213,7 +374,7 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
 
   // The whole minute in one transaction (migration 0030): readings and strings
   // last-write-wins, agg_minute first-write-wins with gap detection, meta, the
-  // inverter mirror and the account's token. fetchInverterRaw may have refreshed
+  // inverter mirror and the account's token. fetchInverter may have refreshed
   // the token, so read it off `acc` here rather than from the row we started with.
   const committed = await rpc("poll_commit", {
     p_account: acc.id,

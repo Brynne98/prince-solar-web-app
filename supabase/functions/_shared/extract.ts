@@ -68,6 +68,10 @@ export interface InverterInfo {
   soft?: string;
   hmi?: string;
   commType?: string;
+  /** the inverter's last stored readings row, whole (from inverters_cached, 0032) */
+  lastReading?: Record<string, unknown> | null;
+  /** how many carried rows sit on top of the last fetched one (0032) */
+  carriedRun?: number;
 }
 
 /** The 5 realtime endpoints every acquisition path reads (per inverter SN). */

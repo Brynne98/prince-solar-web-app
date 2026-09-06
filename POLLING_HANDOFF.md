@@ -25,10 +25,17 @@ the five-call fan-out as the thing to shrink.
 | Inverter + plant lists from cache, refreshed every 10 min | migration `0031`, `inverters_cached()`, `syncPlants()` | 10 calls/min per 2-inverter account instead of 11; new plants appear on their own |
 | `readings.device_time` — the inverter's own upload timestamp | `0031`, `extractReading` | the freshness signal step 3 needs |
 | `apiCalls` + `listRefreshed` per account in every poll response | `poll/index.ts` | request budget is measurable from `net._http_response` |
+| **Step 4, endpoint tiering** (deployed 5 Sep 2026 19:19 UTC) | migration `0033`, `poll/index.ts` `wantEndpoints()` / `readingRow()` | On a minute with new data: battery + grid always; `load` only when its last real read (`readings.load_fetched_ts`) is ≥ 300 s old, `load_w` derived from `pv + grid − batt` in between; `output` when ≥ 600 s old; both every minute while the grid is down (and a second round if the fresh grid payload shows an outage). Verified: derived load matched real reads within 150 W on 12/12 fetched minutes; account average 10 → 5.30 calls/min. |
+| **Cheaper refresh minute** (deployed 5 Sep 2026 19:50 UTC) | `poll/index.ts`, `syncPlants()` | Plant list hourly instead of every 10 min; plant detail only for plants with no `plant_config` row; on the inverter-list refresh minute the live list is merged with the cache so the gate and tiering apply on every minute. `listCalls` per account in the response. |
+| **Step 5, recover from inverter history** (deployed 5 Sep 2026 19:51 UTC) | migration `0034`, `_shared/invhistory.ts`, `recover/index.ts` | Gaps are filled first from the five per-inverter `…/day` endpoints (SoC, grid, load direct; PV = Σ V×I; battery by balance), summed across the plant, `source = 'invhistory'`; the plant feed only for what is left. `?dry=1&plant=&day=` reports error vs poller rows without writing. Dry run on 3 Sep: median error pv 23 W, load 11 W, batt 58 W, grid 2 W, SoC 0. |
+| **Step 6, storage** (deployed 5 Sep 2026 20:54 UTC) | migration `0035` | `readings` and `strings` are monthly range partitions on `ts` (`readings_y2026m09` …), rebuilt in place in 25 s with the poller blocked only for the final swap (no minute lost). `private.ensure_partitions(2)` daily at 03:00, `private.downsample_strings(90)` weekly Sunday 04:00 (first row per sn/string/5-minute bucket in partitions wholly older than 90 days, recorded in `private.strings_downsampled`). `inverters_cached`, `poll_commit` and `q_grid_feed_scale` carry a `ts` bound so the hot path prunes to the live month. The two `local_day(ts)` indexes are gone (unread since 0028). |
+| **Step 3, freshness gate** (deployed 5 Sep 2026 15:01 UTC) | migration `0032`, `poll/index.ts` `fetchInverter()` / `readingRow()`, `inverters_cached()` | `input` first; if `pvIV[0].time` equals the last row's `device_time`, the other four calls are skipped and the last row is stored again under the new `ts` with `carried = true`. Slave 5 → 1 call/min on 4 minutes in 5; master occasionally. Guard rails: never on a refresh minute, never after an outage row (relay `0` / mains < 100 V), never past 5 carried rows in a row, never when the last device_time is unknown or `input` failed. Carried inverters send no meta row so battery capacity is not zeroed. |
 
 Verification pattern that worked: `scripts/sql/verify-0031.sql` — a single `do $$` block
 that `raise exception`s on any failed criterion, run with
 `supabase db query --linked -f <file>` (exit code decides). Copy that pattern.
+`scripts/verify.sh <sql> snapshot|check <file>` wraps any verify SQL and adds the
+before/after `api_alerts_due()` hash comparison.
 
 ## 3. Facts the next steps rest on (all measured, see API.md for the probes)
 
@@ -57,9 +64,9 @@ that `raise exception`s on any failed criterion, run with
 
 ## 4. Next steps, in order
 
-### Step 3 — freshness gate (biggest win, lowest risk now that device_time exists)
+### Step 3 — freshness gate — DONE 5 Sep 2026 (see §2; verify result in §2a)
 
-Per inverter, per minute: fetch `input` first (needed anyway). If its `pvIV[0].time`
+Kept below for the reasoning. Per inverter, per minute: fetch `input` first (needed anyway). If its `pvIV[0].time`
 equals the `device_time` of the inverter's previous stored row, the datalogger has not
 uploaded — **skip the other four calls** and commit the previous row's values again
 with the new `ts` and the same `device_time`. Otherwise fetch the four and proceed as now.
@@ -77,26 +84,49 @@ with the new `ts` and the same `device_time`. Otherwise fetch the four and proce
   where `device_time` changed; outage alerts unchanged (`api_alerts_due()` output identical
   before/after on a quiet day).
 
-### Step 4 — endpoint tiering on fast loggers
+#### 2a. Step 3 verify result
 
-`load` every 5 minutes (derive `load_w` in between from the balance; carry counters
+Run 5 Sep 2026 15:35 UTC, 30 minutes after deploy, `scripts/verify.sh scripts/sql/verify-0032.sql check`:
+
+```
+verify_0032: PASS | win=1788620520..1788622260 minutes=30 gaps60=0 inverters=2 short_inv=0 short_agg=0 gaprecs=0
+| carried_dt_moved=0 missed_skips=0 | dt_master=26 dt_slave=7 | g_outage=0 g_run=0 g_refresh=0
+| mismatch=0 no_strings=0 | resp=30 bad_calls=0 avg_calls=6.97 | stale=false | plants=1 bad_acc=0
+alerts unchanged
+```
+
+Average calls per minute for the 2-inverter account: 10 → 6.97 (refresh minutes still 13).
+After steps 4 + the cheaper refresh minute (verify-0033, verify-0034): **4.88**.
+Every carried row repeated its predecessor exactly; every fetched row had a new
+device_time or a guard rail reason. The one lost minute (15:00) was the deploy window,
+see §6.
+
+### Step 4 — endpoint tiering on fast loggers — DONE 5 Sep 2026 (see §2)
+
+Original note: `load` every 5 minutes (derive `load_w` in between from the balance; carry counters
 forward); `output` every 10 minutes, every minute while `grid_relay_status = '0'` or
 `grid_volt_v < 100` (the burst in `poll/index.ts` already reads grid+output only).
 Expected master: 5 → ~3.3 calls/min. Mark derived load minutes (a `load_source` text
 column or a bit) so the integrity audit (`scripts/integrity-check.js`, DATA_PIPELINE §9)
 can exclude them.
 
-### Step 5 — use per-inverter history for `recover`
+### Step 5 — use per-inverter history for `recover` — DONE 5 Sep 2026 (see §2)
 
-`recover` backfills logger-offline minutes from the *plant* feed, whose scaling is
+Learned on the way: the `…/input/day` endpoint's `column` takes one token, so V and
+I need two calls (five calls per inverter-day in total); labels come back as
+`v-pv-1`, `i-pv-1`, `p-grid`, `p-load`, `soc`; record times are `HH:mm:ss`.
+Original note: `recover` backfills logger-offline minutes from the *plant* feed, whose scaling is
 unstable (DATA_PIPELINE §3.2). The per-inverter `…/day` endpoints give grid, load, SoC
 directly and PV from string V×I, so the spine can be rebuilt per inverter and summed —
 battery by balance. Quality change, not volume. Keep `source='plantfeed'` rows as they
 are; tag new ones `source='invhistory'`.
 
-### Step 6 — storage
+### Step 6 — storage — DONE 5 Sep 2026 (see §2)
 
-Partition `readings`/`strings` by month; downsample `strings` to 5-minute rows after
+Verified: 30 minutes gap-free after the swap, row counts before + polled minutes
+exactly, run-time pruning to the current child, overview read 5 ms, both cron jobs
+present. `vacuum full` of a downsampled partition is a by-hand step, off-peak.
+Original note: Partition `readings`/`strings` by month; downsample `strings` to 5-minute rows after
 90 days. Needed before the first thousand inverters, not before the first customer.
 
 ## 5. Things to leave alone
@@ -118,7 +148,11 @@ Partition `readings`/`strings` by month; downsample `strings` to 5-minute rows a
 - Type-check without a local Deno: from any scratch dir,
   `npx --yes deno@2 check --node-modules-dir=auto <entrypoints>`.
 - Deploy order when a function needs a new RPC: `supabase db push` **then**
-  `supabase functions deploy poll`. Reverse order stops the logger.
+  `supabase functions deploy poll`. Reverse order stops the logger. The minute
+  between the two is still at risk: 0032 added a NOT NULL column and the old poller
+  (which does not send it) lost the 15:00 minute to a constraint error, recorded as a
+  gap for `recover`. Next time make a new column nullable, or default it in SQL, so
+  the old code keeps landing rows until the new code is up.
 - Live check after any poll deploy: last rows of `net._http_response` (status 200,
   `results[0].apiCalls`, `listRefreshed`), `private.gaps` empty for the deploy window,
   `api_health()->>'stale' = 'false'`.

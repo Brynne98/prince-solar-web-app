@@ -22,7 +22,7 @@
 //   * there is no read-only scope; every token is scope=all
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createHash, createHmac } from "node:crypto";
-import { type InverterInfo, num, pick, type RawBundle, realtimePaths } from "./extract.ts";
+import { type InverterInfo, num, pick } from "./extract.ts";
 
 const API_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? "https://openapi.sunsynk.net";
 const APP_KEY = Deno.env.get("SUNSYNK_APP_KEY") ?? "";
@@ -291,19 +291,9 @@ export async function getInvertersCached(acc: Account): Promise<InverterInfo[]> 
     soft: r.soft_ver ?? undefined,
     hmi: r.hmi_ver ?? undefined,
     commType: r.comm_type ?? undefined,
+    lastReading: r.last_reading ?? null,
+    carriedRun: Number(r.carried_run) || 0,
   }));
-}
-
-/** All 5 raw payloads for one inverter; failed endpoints come back null. */
-export async function fetchInverterRaw(sn: string, acc: Account): Promise<RawBundle> {
-  const paths = realtimePaths(sn);
-  const keys = Object.keys(paths) as (keyof RawBundle)[];
-  const settled = await Promise.allSettled(keys.map((k) => apiGet(paths[k], acc)));
-  const raw = {} as RawBundle;
-  keys.forEach((k, i) => {
-    raw[k] = settled[i].status === "fulfilled" ? (settled[i] as PromiseFulfilledResult<any>).value : null;
-  });
-  return raw;
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +326,11 @@ export async function linkAccount(userId: string, username: string, password: st
  * SunSynk's own values for the site; lat/lon/kWp likewise. Never overwrites a
  * config row (the user's edits are theirs) and never removes a plant_users row
  * (unlinking stays a user action). Called at link time and by the poller's
- * 10-minute refresh, so a plant added at SunSynk later shows up on its own.
+ * hourly refresh, so a plant added at SunSynk later shows up on its own.
+ *
+ * Plant detail is one call per plant and only ever seeds a missing config row, so
+ * it is fetched only for plants that have none (one select, zero SunSynk calls
+ * for a plant already seeded).
  */
 export async function syncPlants(acc: Account): Promise<PlantInfo[]> {
   const plants = await getPlants(acc);
@@ -344,7 +338,12 @@ export async function syncPlants(acc: Account): Promise<PlantInfo[]> {
     p_user: acc.user_id, p_account: acc.id,
     p_rows: plants.map((p) => ({ plant_id: p.id, plant_name: p.name })),
   });
-  const details = await Promise.allSettled(plants.map((p) => getPlantDetail(acc, p.id)));
+  const { data: seeded, error } = await db.from("plant_config").select("plant_id")
+    .in("plant_id", plants.map((p) => p.id));
+  if (error) throw new Error(`plant_config: ${error.message}`);
+  const have = new Set((seeded ?? []).map((r: any) => Number(r.plant_id)));
+  const missing = plants.filter((p) => !have.has(p.id));
+  const details = await Promise.allSettled(missing.map((p) => getPlantDetail(acc, p.id)));
   const rows = details
     .filter((r): r is PromiseFulfilledResult<PlantDetail> => r.status === "fulfilled")
     .map((r) => ({
