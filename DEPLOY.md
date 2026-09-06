@@ -83,6 +83,26 @@ supabase functions deploy poll                    # only what changed
 supabase functions deploy forecast alerts-due recover sync-plant-energy
 ```
 
+**"Only what changed" includes `_shared/`.** Every function bundles the files it
+imports from `supabase/functions/_shared/` at deploy time, so a change there is a
+change to every importer — even if the importer's own `index.ts` is untouched.
+`git log -- supabase/functions/<name>` will say the function is current when it is
+not. Check the shared files too:
+
+```bash
+git log --name-only --since="<last deploy time>" -- supabase/functions/_shared
+```
+
+Then redeploy everything that imports a file in that list. When in doubt, deploy
+all six; the CLI skips any whose bundle is unchanged ("No change found in
+Function"), so over-deploying costs nothing. It also means `UPDATED_AT` in
+`supabase functions list` is not proof a function is stale — a deploy from an
+uncommitted working tree can land before the commit.
+
+```bash
+supabase functions deploy poll recover forecast alerts-due link-sunsynk sync-plant-energy
+```
+
 After deploying `poll`, confirm the logger survived:
 
 ```bash
@@ -152,7 +172,8 @@ onto today; that must stay local.
 | `public/` | the whole frontend, published as-is |
 | `public/config.js` | version + per-environment Supabase URL/key |
 | `supabase/migrations/` | schema and RPCs |
-| `supabase/functions/` | `poll`, `recover`, `sync-plant-energy`, `forecast`, `alerts-due` |
+| `supabase/functions/` | `poll`, `recover`, `sync-plant-energy`, `forecast`, `alerts-due`, `link-sunsynk` |
+| `supabase/functions/_shared/` | code bundled into every function that imports it; a change here needs those functions redeployed |
 | `.github/workflows/pages.yml` | the Pages deploy |
 | `.github/workflows/health.yml` | half-hourly logger check, emails on failure |
 
