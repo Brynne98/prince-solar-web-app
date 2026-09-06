@@ -24,6 +24,59 @@ function loadSettings() {
   return DEFAULT_SETTINGS;
 }
 
+// "2 min ago" for the header; ticks with useNow so it stays honest between refreshes.
+function fmtAgo(d, now) {
+  const s = Math.max(0, Math.round((now - d.getTime()) / 1000));
+  if (s < 45) return 'just now';
+  const m = Math.round(s / 60);
+  if (m < 90) return m + ' min ago';
+  const h = Math.round(m / 60);
+  if (h < 36) return h + ' h ago';
+  return window.fmtTime(d);
+}
+function useNow(ms) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), ms); return () => clearInterval(t); }, [ms]);
+  return now;
+}
+
+// Header status: one word, coloured. Live = fresh data and every inverter up;
+// Stale = the poller is behind (> 3 min) or an inverter is down; Offline = no data
+// for 15 min or nothing reporting.
+function HeaderStatus({ snap, onRefresh, pulse }) {
+  const now = useNow(15000);
+  const online = snap.inverters.filter(i => i.status === 'online').length;
+  const total = snap.inverters.length;
+  const offline = total - online;
+  const last = snap.lastReading || snap.updated;
+  const ageS = (now - last.getTime()) / 1000;
+  const status = (total > 0 && offline >= total) || ageS > 900 ? 'offline' : (offline > 0 || ageS > 180) ? 'stale' : 'live';
+  const word = { live: 'Live', stale: 'Stale', offline: 'Offline' }[status];
+  const detail = offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now);
+  return (
+    <div className="topbar-actions">
+      <div className={'status-pill status-' + status} title={'last reading ' + window.fmtTime(last)}>
+        <span className="status-dot" />
+        <span className="status-word">{word}</span>
+        <span className="status-detail mono">{detail}</span>
+      </div>
+      <button className={'refresh-btn' + (pulse ? ' pulse' : '')} onClick={onRefresh} title="Refresh now"><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
+    </div>
+  );
+}
+
+// Plant name under the product name; becomes the selector once there is more than one.
+function BrandLine({ snap, me, plantId, onPlant }) {
+  const plants = me?.plants || [];
+  const name = plants.find(p => p.id === plantId)?.name || snap?.plant?.name || '';
+  return (
+    <div>
+      <div className="brand-name">Prince Solar</div>
+      <div className="brand-sub mono">{plants.length > 1 ? <PlantSelect me={me} plantId={plantId} onChange={onPlant} /> : name}</div>
+    </div>
+  );
+}
+
 function PlantSelect({ me, plantId, onChange }) {
   const plants = me?.plants || [];
   if (plants.length < 2) return null;
@@ -42,7 +95,7 @@ function App() {
   const [plantId, setPlantId] = useState(null);
   const prefsLoaded = useRef(false);
   const [tab, setTab] = useState(() => new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab') || 'live');
-  const [auto, setAuto] = useState(true);
+  const auto = true; // refresh runs on its own; the header button forces one now
   const [snap, setSnap] = useState(null);
   const [today, setToday] = useState(null);
   const [energy, setEnergy] = useState({});
@@ -148,14 +201,13 @@ function App() {
           <div className="brand">
             <span className="sun" />
             <div>
-              <div className="brand-name">Prince Solar<span className="brand-dot"> · </span><span className="brand-live">Live</span></div>
+              <div className="brand-name">Prince Solar</div>
               <div className="brand-sub mono">{err ? 'connection error' : 'connecting to SunSynk…'}</div>
             </div>
           </div>
           <div className="topbar-actions">
-            <PlantSelect me={me} plantId={plantId} onChange={switchPlant} />
-            <label className="auto-toggle"><input type="checkbox" checked disabled /> Auto</label>
-            <button className="refresh-btn" disabled>Refresh</button>
+            <div className="status-pill status-idle"><span className="status-dot" /><span className="status-word">Connecting</span></div>
+            <button className="refresh-btn" disabled><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
           </div>
         </header>
 
@@ -219,30 +271,14 @@ function App() {
     );
   }
 
-  const onlineCount = snap.inverters.filter(i => i.status === 'online').length;
-  const offlineCount = snap.inverters.length - onlineCount;
-  const sensorIssue = snap.inverters.some(i => window.cleanTemp(i.battTemp) == null);
-  const health = offlineCount >= snap.inverters.length ? 'red' : (offlineCount > 0 || sensorIssue) ? 'orange' : 'green';
-  const healthTitle = health === 'red' ? 'All inverters offline' : health === 'orange' ? (offlineCount > 0 ? 'An inverter is offline' : 'Sensor issue detected') : 'All systems healthy';
-
   return (
     <div className="app">
       <header className="topbar">
         <div className="brand">
           <span className="sun" />
-          <div>
-            <div className="brand-name">Prince Solar<span className="brand-dot"> · </span><span className="brand-live">Live</span></div>
-            <div className="brand-sub mono"><span className={'health-dot health-' + health} title={healthTitle} />updated {window.fmtTime(snap.updated)} · {onlineCount}/{snap.inverters.length} inverters online{sensorIssue && offlineCount === 0 ? ' · sensor issue' : ''}</div>
-          </div>
+          <BrandLine snap={snap} me={me} plantId={plantId} onPlant={switchPlant} />
         </div>
-        <div className="topbar-actions">
-          <PlantSelect me={me} plantId={plantId} onChange={switchPlant} />
-          <label className="auto-toggle">
-            <input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} />
-            <span>Auto</span>
-          </label>
-          <button className={'refresh-btn' + (pulse ? ' pulse' : '')} onClick={refresh}>Refresh</button>
-        </div>
+        <HeaderStatus snap={snap} onRefresh={refresh} pulse={pulse} />
       </header>
 
       {err && <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(255,125,107,0.35)', color: 'var(--load)', fontSize: 13 }}>⚠ Last refresh failed: {err} — showing last good reading.</div>}

@@ -107,21 +107,36 @@
     box-shadow: 0 0 0 6px rgba(244,169,58,0.10), 0 0 34px rgba(244,169,58,0.45);
     flex: none;
   }
-  .brand-name { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; line-height: 1; }
+  .brand-name { font-size: 30px; font-weight: 700; letter-spacing: -0.01em; line-height: 1; white-space: nowrap; }
+  .topbar { flex-wrap: wrap; }
   .brand-dot { color: var(--muted); font-weight: 400; }
-  .brand-live { color: var(--pv); }
   .brand-sub { font-size: 12.5px; color: var(--muted); margin-top: 7px; letter-spacing: 0.02em; }
-  .health-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
-  .health-green { background: #3ddc84; box-shadow: 0 0 0 3px rgba(61,220,132,0.16); }
-  .health-orange { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.16); }
-  .health-red { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.16); }
+  .brand-sub .plant-select { padding: 2px 6px; font-size: 12.5px; margin-left: -6px; }
+  /* status pill: dot + word + detail, same height as the Refresh button beside it */
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 9px; height: 40px; padding: 0 16px 0 14px;
+    background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; white-space: nowrap;
+  }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .status-word { font-size: 14px; font-weight: 600; }
+  .status-detail { font-size: 12.5px; color: var(--muted); padding-left: 9px; border-left: 1px solid var(--line-2); }
+  .status-live .status-dot { background: var(--pv); box-shadow: 0 0 0 3px rgba(61,220,132,0.18); animation: status-breathe 2.4s ease-in-out infinite; }
+  .status-live .status-word { color: var(--pv); }
+  .status-stale .status-dot { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.18); }
+  .status-stale .status-word, .status-stale .status-detail { color: #f59e0b; }
+  .status-offline .status-dot { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.18); }
+  .status-offline .status-word, .status-offline .status-detail { color: #ef4444; }
+  .status-idle .status-word { color: var(--muted); }
+  @keyframes status-breathe { 0%, 100% { box-shadow: 0 0 0 3px rgba(61,220,132,0.18); } 50% { box-shadow: 0 0 0 5px rgba(61,220,132,0.06); } }
+  @media (prefers-reduced-motion: reduce) { .status-live .status-dot { animation: none; } }
   .topbar-actions { display: flex; align-items: center; gap: 16px; }
-  .auto-toggle { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); user-select: none; }
-  .auto-toggle input { width: 17px; height: 17px; accent-color: var(--ok); }
   .refresh-btn {
     background: var(--panel); color: var(--text); border: 1px solid var(--line-2);
     padding: 10px 22px; border-radius: 10px; font-size: 14px; font-weight: 500; transition: .15s;
   }
+  .refresh-btn { display: inline-flex; align-items: center; gap: 8px; height: 40px; }
+  .refresh-ico { font-size: 16px; line-height: 1; transition: transform .6s; }
+  .refresh-btn.pulse .refresh-ico { transform: rotate(360deg); }
   .refresh-btn:hover { background: var(--panel-2); border-color: var(--muted); }
   .refresh-btn.pulse { border-color: var(--ok); color: var(--ok); }
 
@@ -542,7 +557,10 @@
     .brand { gap: 12px; }
     .sun { width: 38px; height: 38px; }
     .brand-name { font-size: 23px; }
-    .topbar-actions { margin-left: auto; }
+    .topbar-actions { width: 100%; gap: 10px; }
+    .status-pill { flex: none; width: 236px; height: 38px; padding: 0 12px; }
+    .status-detail { overflow: hidden; text-overflow: ellipsis; }
+    .refresh-btn { height: 38px; padding: 0 14px; }
 
     /* tabs scroll horizontally instead of wrapping */
     .tabbar { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }

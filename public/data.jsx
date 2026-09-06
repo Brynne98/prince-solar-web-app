@@ -42,6 +42,7 @@ const ROUTES = {
   '/api/trends/segments':  (q) => ['api_trends_segments', { p_days: Number(q.days) || 7 }],
   '/api/trends/potential': (q) => ['api_trends_potential', { p_date: q.date || null }],
   '/api/balance':          () => ['api_balance', {}],
+  '/api/health':           () => ['api_health', {}],
 };
 
 async function getJSON(url) {
@@ -140,7 +141,9 @@ function aggregate(invs, totals) {
 }
 
 async function fetchSnapshot() {
-  const api = await getJSON('/api/overview');
+  // api_health carries the poller's last reading time; api_overview only stamps
+  // when it was generated. The header shows the former so a stalled poller is visible.
+  const [api, health] = await Promise.all([getJSON('/api/overview'), getJSON('/api/health').catch(() => ({}))]);
   const inverters = (api.inverters || []).map(mapInverter);
   // Battery capacity and reserve are not derived here (SunSynk under-reports Ah/V) —
   // they come from app_config via api_overview, which is also what the phone alerts
@@ -148,6 +151,7 @@ async function fetchSnapshot() {
   if (api.config && api.config.currency) window.PLANT_CURRENCY = api.config.currency;
   return {
     updated: new Date(api.generatedAt || Date.now()),
+    lastReading: health && health.lastTs ? new Date(health.lastTs * 1000) : null,
     plant: api.plant || { id: null, name: 'My plant' },
     aggregate: aggregate(inverters, api.totals || {}),
     config: api.config || null,
