@@ -294,15 +294,25 @@ function readingRow(f: Fetched, ts: number): Record<string, unknown> {
     row.carried = true;
     return row;
   }
+  // `fetched` says which endpoints were ASKED for, not which answered: fetchInto
+  // stores null for a rejected call and leaves the endpoint in the set. Reading
+  // `fresh` for one of those takes extractReading's defaults, which are 0 for every
+  // quantity but grid volts — so a single failed call wrote 0 W / 0 % / 0 V into an
+  // otherwise good minute, indistinguishable from a real reading. Ask whether the
+  // payload actually arrived, and fall back to the previous row when it did not.
+  const got = (ep: Endpoint) => f.fetched.has(ep) && f.raw[ep] != null;
   const row: Record<string, unknown> = { ts, plant_id, sn: f.inv.sn, status: fresh.status, carried: false };
   for (const k of INPUT_FIELDS) row[k] = fresh[k];
   for (const ep of ALL_ENDPOINTS) {
-    const src = f.fetched.has(ep) ? fresh : prev;
+    const src = got(ep) ? fresh : prev;
     for (const col of ENDPOINT_FIELDS[ep]) row[col] = src[col] ?? null;
   }
-  row.load_fetched_ts = f.fetched.has("load") ? ts : (prev.load_fetched_ts ?? null);
-  row.output_fetched_ts = f.fetched.has("output") ? ts : (prev.output_fetched_ts ?? null);
-  if (!f.fetched.has("load")) {
+  // Only stamp the tier clocks when the read succeeded. Stamping on failure told
+  // wantEndpoints the value was fresh, so a failed load or output was not retried
+  // for another 5 or 10 minutes.
+  row.load_fetched_ts = got("load") ? ts : (prev.load_fetched_ts ?? null);
+  row.output_fetched_ts = got("output") ? ts : (prev.output_fetched_ts ?? null);
+  if (!got("load")) {
     // grid + = import, batt + = charging (DATA_PIPELINE §9A); counters stay carried
     row.load_w = Math.max(0, Math.round(num(row.pv_w) + num(row.grid_w) - num(row.batt_w)));
   }
@@ -350,19 +360,27 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   const perInv = await Promise.all(inverters.map((inv) => fetchInverter(inv, acc, ts)));
   const carried = perInv.filter((f) => f.carried).map((f) => f.inv.sn);
   if (carried.length) result.carried = carried;
+  // Endpoints whose value on this row came from the previous one — whether they were
+  // never asked for (tiering) or asked for and did not answer. Both mean the same
+  // thing to a reader of the data, and lumping them together is what kept a failing
+  // endpoint invisible: it looked identical to a deliberate skip.
+  const arrived = (f: Fetched, k: Endpoint) => f.fetched.has(k) && f.raw[k] != null;
   const tiered = Object.fromEntries(perInv
-    .filter((f) => !f.carried && f.fetched.size < ALL_ENDPOINTS.length)
-    .map((f) => [f.inv.sn, ALL_ENDPOINTS.filter((k) => !f.fetched.has(k))]));
+    .filter((f) => !f.carried && ALL_ENDPOINTS.some((k) => !arrived(f, k)))
+    .map((f) => [f.inv.sn, ALL_ENDPOINTS.filter((k) => !arrived(f, k))]));
   if (Object.keys(tiered).length) result.tiered = tiered;
 
-  // An inverter whose fetch came back with nothing at all — not a carry, and every
-  // endpoint payload null — has no reading to store. Writing one anyway is what put
-  // seven all-zero minutes with a null device_time into 10 Sep: on a chart those read
-  // as a genuine drop to 0 kW rather than as absent data, and `recover` cannot repair
-  // them, because the minute is not missing, only wrong. Absent beats false.
-  const gotNothing = (f: Fetched) => !f.carried && Object.values(f.raw).every((v) => v == null);
-  const usable = perInv.filter((f) => !gotNothing(f));
-  const noData = perInv.filter(gotNothing).map((f) => f.inv.sn);
+  // `input` is the anchor: it carries device_time, the only field that says whether
+  // this minute is a fresh sample or a repeat of the last one. Without it there is
+  // nothing to date the row by, the freshness gate is blind, and PV would be stored
+  // as 0 W — which is what put seven all-zero minutes into 10 Sep. On a chart those
+  // read as a genuine drop to zero rather than as absent data, and `recover` cannot
+  // repair them, because the minute is present, only wrong. Leave it absent instead
+  // and let recover bank it from the inverter's own uploads. Absent beats false.
+  // (A carry has no input payload by design — it dates itself from the previous row.)
+  const noAnchor = (f: Fetched) => !f.carried && f.raw.input == null;
+  const usable = perInv.filter((f) => !noAnchor(f));
+  const noData = perInv.filter(noAnchor).map((f) => f.inv.sn);
   if (noData.length) result.noData = noData;
   // Every inverter silent: nothing to commit, and no agg row either. The minute is
   // left absent so recover can bank it from the cloud later.
