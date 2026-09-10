@@ -57,6 +57,13 @@ function shiftDate(s, days) {
   const [y, m, d] = s.split('-').map(Number);
   return localDateStr(new Date(y, m - 1, d + days));
 }
+/** "12 min" / "2h 33m" — spoken, not decimal hours, like everything else here. */
+function fmtGap(mins) {
+  if (mins < 60) return mins + ' min';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m ? h + 'h ' + m + 'm' : h + 'h';
+}
+
 function niceDate(s) {
   const [y, m, d] = s.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
@@ -117,6 +124,7 @@ function HistoryView({ today, refreshKey }) {
   const innerH = height - m.t - m.b;
 
   const dayData = isToday ? today : pastDay;
+  const gapMin = (dayData && dayData.gapMinutes) || 0;
   const pts = (dayData && dayData.points) || [];
   const real = pts.filter(p => p.pv != null); // anything with data (est = cloud-sourced, drawn dotted)
   const hasData = real.length > 1;
@@ -389,8 +397,15 @@ function HistoryView({ today, refreshKey }) {
         <button className="hv-daynav" disabled={!canNext} aria-label="Next day"
           onClick={() => canNext && setDate(shiftDate(date, 1))}>›</button>
         <span className="hv-datelabel">{isToday ? 'Today' : niceDate(date)}</span>
-        {/* The "Xh Ym missing" chip was removed by choice. api_history still returns
-            gapMinutes/recoveredMinutes, so it can come back as a one-liner here. */}
+        {/* Minutes this day has from nobody — not the poller, not the cloud. The line
+            already breaks at them, but a break reads as "the inverter was off" rather
+            than "we have no reading", and a short one hides inside a 5-minute bucket
+            entirely. Recovered minutes are not counted: they are present and real. */}
+        {gapMin > 0 && (
+          <span className="hv-gap" title="Minutes on this day with no reading from the poller or from SunSynk's cloud">
+            {fmtGap(gapMin)} missing
+          </span>
+        )}
         {!isToday && <button className="hv-today" onClick={() => setDate(todayStr)}>Today</button>}
       </div>
 
