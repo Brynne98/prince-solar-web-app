@@ -4,7 +4,7 @@
 // and `sync-plant-energy` (daily/monthly kWh totals, which reach back to the plant's
 // commission date and so cannot be derived from our own history).
 import { type Account, apiGet } from "./sunsynk.ts";
-import { num, numOrNull } from "./extract.ts";
+import { num } from "./extract.ts";
 
 /** Map a SunSynk plant-feed series label to our key. */
 export function plantSeriesKey(label: string): string | null {
@@ -51,13 +51,8 @@ export async function plantFeedForDay(acc: Account, plantId: number, day: string
       const h = parts[0], mn = parts[1];
       if (!Number.isFinite(h)) continue;
       const bkt = h * 12 + Math.floor((mn || 0) / 5);
-      // numOrNull, not num: an empty string or an unparseable value must read as
-      // absent, the way a missing record does. num() would make it 0, and recover
-      // writes a real 0 W for a present value and null for an absent one — so the
-      // difference decides whether a broken field becomes a fabricated reading.
-      const v = numOrNull(r.value);
-      if (bkt < 0 || bkt > 287 || v == null) continue;
-      (byBucket[bkt] = byBucket[bkt] || {})[k] = v;
+      if (bkt < 0 || bkt > 287 || r.value == null) continue;
+      (byBucket[bkt] = byBucket[bkt] || {})[k] = num(r.value);
     }
   }
   return byBucket.some(Boolean) ? byBucket : null; // null = feed no longer has this day
