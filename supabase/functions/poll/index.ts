@@ -81,6 +81,8 @@ type AccountResult = {
   carried?: string[];
   /** per inverter, the endpoints not read this minute (values copied / derived) */
   tiered?: Record<string, string[]>;
+  /** inverters that answered with nothing at all this minute; no row stored */
+  noData?: string[];
   /** inverter list re-read from SunSynk this minute (else served from cache) */
   listRefreshed: boolean;
   /** SunSynk requests spent on the inverter / plant lists this minute (0, 1 or 2+) */
@@ -353,15 +355,28 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
     .map((f) => [f.inv.sn, ALL_ENDPOINTS.filter((k) => !f.fetched.has(k))]));
   if (Object.keys(tiered).length) result.tiered = tiered;
 
-  const readings = perInv.map((f) => readingRow(f, ts));
+  // An inverter whose fetch came back with nothing at all — not a carry, and every
+  // endpoint payload null — has no reading to store. Writing one anyway is what put
+  // seven all-zero minutes with a null device_time into 10 Sep: on a chart those read
+  // as a genuine drop to 0 kW rather than as absent data, and `recover` cannot repair
+  // them, because the minute is not missing, only wrong. Absent beats false.
+  const gotNothing = (f: Fetched) => !f.carried && Object.values(f.raw).every((v) => v == null);
+  const usable = perInv.filter((f) => !gotNothing(f));
+  const noData = perInv.filter(gotNothing).map((f) => f.inv.sn);
+  if (noData.length) result.noData = noData;
+  // Every inverter silent: nothing to commit, and no agg row either. The minute is
+  // left absent so recover can bank it from the cloud later.
+  if (!usable.length) return result;
+
+  const readings = usable.map((f) => readingRow(f, ts));
   // Strings come from input, which is always fetched, so they are fresh every minute.
-  const strings = perInv.flatMap(({ inv, raw }) =>
+  const strings = usable.flatMap(({ inv, raw }) =>
     extractStrings(inv, raw).map((s) => ({ ts, plant_id: inv.plantId ?? null, ...s }))
   );
   // Meta reads battery capacity off the battery payload; a carried inverter has no
   // battery payload this minute, so leave its meta row alone rather than zero it.
   // (A tiered inverter always has one: battery is never tiered.)
-  const meta = perInv
+  const meta = usable
     .map(({ inv, raw, carried }, i) => (carried ? null : extractMeta(inv, raw, ts, i)))
     .filter((m) => m !== null);
 

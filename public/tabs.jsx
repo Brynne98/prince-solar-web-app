@@ -530,92 +530,6 @@ function InvertersTab({ snap }) {
 // The signed-in user's SunSynk link: what's connected, since when, and the one
 // revocation they have. Disconnect wipes the stored token; history stays. A reload
 // afterwards lands on the Connect screen, because there's no active link left.
-// ---------------------------------------------------------------- EVENTS
-// A log of what actually happened, newest day first.
-//
-// Nothing here is stored. api_events derives every row from the logged minutes on
-// each read, so a gap that `recover` has since backfilled stops appearing by itself
-// instead of sitting here as a warning about data that has long since arrived. The
-// same property is why a new event kind needs no migration of old rows.
-const EVENT_ICON = {
-  gap: '\u26a0', backfill: '\u2913', peak_solar: '\u2600', peak_load: '\u2302',
-  batt_full: '\u25b0', batt_reserve: '\u25b1', first_sun: '\u2191', last_sun: '\u2193',
-};
-
-/** "Today", "Yesterday", else "Wed 9 Sep". Days arrive as YYYY-MM-DD in plant-local time. */
-function eventDayLabel(day, todayStr, yesterdayStr) {
-  if (day === todayStr) return 'Today';
-  if (day === yesterdayStr) return 'Yesterday';
-  const [y, m, d] = day.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-}
-
-function EventsTab({ refreshKey }) {
-  const { useState, useEffect } = React;
-  const [days, setDays] = useState(14);
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    window.fetchEvents(days).then((d) => { if (alive) { setData(d); setLoading(false); } });
-    return () => { alive = false; };
-  }, [days, refreshKey]);
-
-  // Day labels are relative to the plant's zone, not the browser's — a dashboard read
-  // from another country should still say "Today" about the plant's today.
-  const tz = data?.timezone;
-  const localDay = (offset) => {
-    const d = new Date(Date.now() - offset * 86400000);
-    try { return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); }
-    catch (e) { return d.toISOString().slice(0, 10); }
-  };
-  const todayStr = tz ? localDay(0) : null;
-  const yesterdayStr = tz ? localDay(1) : null;
-
-  const dayList = data?.days || [];
-
-  return (
-    <div className="stack">
-      <window.Card>
-        <window.SectionTitle right={
-          <window.Segmented value={String(days)} onChange={(v) => setDays(Number(v))}
-            options={[{ value: '7', label: '7 days' }, { value: '14', label: '14 days' }, { value: '30', label: '30 days' }]} />
-        }>EVENTS</window.SectionTitle>
-        <div className="field-note" style={{ marginTop: 0 }}>
-          Worked out from the logged minutes each time you open this, so a gap disappears once it has been filled in.
-        </div>
-
-        {loading && !data && <div className="ev-empty">Reading the log\u2026</div>}
-        {!loading && !dayList.length && <div className="ev-empty">Nothing notable in the last {days} days.</div>}
-
-        {dayList.map((d) => {
-          const warns = d.events.filter((e) => e.severity === 'warn').length;
-          return (
-            <div className="ev-day" key={d.day}>
-              <div className="ev-dayhead">
-                <span className="ev-dayname">{eventDayLabel(d.day, todayStr, yesterdayStr)}</span>
-                <span className="ev-daymeta mono">{d.day}{warns ? ' \u00b7 ' + warns + ' to look at' : ''}</span>
-              </div>
-              {d.events.map((e, i) => (
-                <div className={'ev-row ev-' + e.severity} key={e.kind + i}>
-                  <span className="ev-at mono">{e.at}</span>
-                  <span className="ev-ico" aria-hidden="true">{EVENT_ICON[e.kind] || '\u00b7'}</span>
-                  <span className="ev-body">
-                    <b className="ev-title">{e.title}</b>
-                    {e.detail && <span className="ev-detail">{e.detail}</span>}
-                  </span>
-                </div>
-              ))}
-            </div>
-          );
-        })}
-      </window.Card>
-    </div>
-  );
-}
-
 function SunSynkConnectionCard() {
   const { useState } = React;
   const { loading, accounts } = window.useLinkStatus(0);
@@ -830,4 +744,4 @@ function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfig
   );
 }
 
-Object.assign(window, { LiveTab, SolarTab, BatteryTab, GridTab, InvertersTab, EventsTab, SettingsTab });
+Object.assign(window, { LiveTab, SolarTab, BatteryTab, GridTab, InvertersTab, SettingsTab });

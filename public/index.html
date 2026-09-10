@@ -491,30 +491,6 @@
   .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; align-items: start; }
   .field { margin-bottom: 16px; } .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 7px; letter-spacing: 0.04em; }
-  /* ---- Events tab: one log line per thing that happened ------------------- */
-  .ev-day { margin-top: 18px; }
-  .ev-day:first-of-type { margin-top: 14px; }
-  .ev-dayhead { display: flex; align-items: baseline; gap: 10px; padding-bottom: 6px;
-                border-bottom: 1px solid var(--line); margin-bottom: 2px; }
-  .ev-dayname { font-size: 13px; font-weight: 600; letter-spacing: 0.2px; }
-  .ev-daymeta { font-size: 11px; color: var(--dim); }
-  .ev-row { display: grid; grid-template-columns: 44px 18px 1fr; align-items: baseline;
-            gap: 10px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
-  .ev-row:last-child { border-bottom: 0; }
-  .ev-at { font-size: 12px; color: var(--dim); }
-  .ev-ico { font-size: 12px; color: var(--muted); text-align: center; }
-  .ev-body { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
-  .ev-title { font-size: 13px; font-weight: 500; }
-  .ev-detail { font-size: 12px; color: var(--dim); }
-  .ev-warn .ev-ico { color: var(--load); }
-  .ev-warn .ev-title { color: var(--load); }
-  .ev-empty { font-size: 13px; color: var(--dim); padding: 18px 0 6px; }
-  @media (max-width: 560px) {
-    .ev-row { grid-template-columns: 40px 16px 1fr; gap: 8px; }
-    .ev-body { display: block; }
-    .ev-detail { display: block; margin-top: 2px; }
-  }
-
   .field-note { font-size: 12px; color: var(--dim); margin-top: 10px; line-height: 1.55; }
   .select, .input { width: 100%; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text);
     border-radius: 9px; padding: 10px 12px; font-size: 14px; font-family: inherit; }
