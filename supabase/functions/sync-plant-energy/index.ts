@@ -49,7 +49,11 @@ async function syncPlant(job: PlantJob, dailyMonths: number, started: number) {
   for (let yr = now.y; yr >= now.y - MAX_YEARS_BACK; yr--) {
     if (Date.now() - started > TIME_BUDGET_MS) break;
     const rows = await fetchYearRows(account, plantId, yr, gridMul);
-    const nonEmpty = rows.filter((r) => r.pv > 0 || r.load > 0 || r.imp > 0 || r.exp > 0);
+    // A series the vendor did not send is now null rather than 0. Reading it as 0
+    // here keeps the original meaning of this test — "did anything positive come
+    // back for this year" — since an absent series is not evidence the year exists.
+    const nonEmpty = rows.filter((r) =>
+      (r.pv ?? 0) > 0 || (r.load ?? 0) > 0 || (r.imp ?? 0) > 0 || (r.exp ?? 0) > 0);
     if (!nonEmpty.length) {
       if (foundAny) break;
       continue;

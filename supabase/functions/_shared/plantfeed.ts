@@ -111,7 +111,18 @@ export function bucketizeAgg(aggRows: any[]): any[] {
   return byBucket;
 }
 
-const round1 = (v: unknown) => Math.round((Number(v) || 0) * 10) / 10;
+/**
+ * kWh for a series the vendor actually sent, null for one it did not.
+ *
+ * `|| 0` here used to turn an absent series into a real zero-kWh day. That is not
+ * a rounding detail: energyKey() matches SunSynk's labels by substring, so a label
+ * rename it does not recognise silently writes zero generation for every day of
+ * the sync rather than failing. plant_energy's kWh columns are nullable and
+ * fmtKwh renders null as an em dash, so an unsent series now reads as "no figure"
+ * instead of "nothing generated".
+ */
+const kwh = (v: number | undefined, mul = 1): number | null =>
+  v == null ? null : Math.round(v * mul * 10) / 10;
 
 /**
  * Normalise a plant energy payload into kWh rows keyed by period.
@@ -134,12 +145,12 @@ export function rowsFromEnergy(infos: any[], granularity: "day" | "month", gridM
   return times.map((t) => ({
     time: t,
     granularity,
-    pv: round1(byKey.pv?.[t] || 0),
-    load: round1(byKey.load?.[t] || 0),
-    imp: round1((byKey.imp?.[t] || 0) * gridMul),
-    exp: round1((byKey.exp?.[t] || 0) * gridMul),
-    chg: round1(byKey.chg?.[t] || 0),
-    dischg: round1(byKey.dischg?.[t] || 0),
+    pv: kwh(byKey.pv?.[t]),
+    load: kwh(byKey.load?.[t]),
+    imp: kwh(byKey.imp?.[t], gridMul),
+    exp: kwh(byKey.exp?.[t], gridMul),
+    chg: kwh(byKey.chg?.[t]),
+    dischg: kwh(byKey.dischg?.[t]),
   }));
 }
 
