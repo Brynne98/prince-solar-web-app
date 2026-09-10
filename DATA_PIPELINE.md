@@ -149,7 +149,7 @@ Supabase Postgres. `public`: `agg_minute` (1/min summed, with `source` provenanc
 - The `poll` Edge Function writes `readings` + `strings` + `agg_minute` together every minute, stamping `agg_minute.source = 'poller'`. Provenance is explicit in the row, not inferred by joining against `readings`. Since migration `0030` the whole minute for an account goes through one `poll_commit()` call, so it lands in a single transaction (readings and strings last-write-wins, `agg_minute` first-write-wins, the logger-offline gap recorded in the same statement). The cron job fans `poll` out into shards of ~10 accounts (`private.poll_shards()`), each invocation staggered 0/10/20 s into the minute so the fleet does not hit SunSynk at second zero; an account always hashes to the same shard. Since `0031` the inverter and plant lists are re-read from SunSynk only on minutes divisible by 10 and served from `private.inverters` + `private.meta` (`inverters_cached()`) in between, and every `readings` row carries `device_time`, the inverter's own upload timestamp from `pvIV[0].time` — the field that separates a fresh sample from a repeat of the previous one (the slave uploads every 5 minutes). Each poll response reports `apiCalls` and `listRefreshed` per account so the request budget is measurable from the cron log.
 - **Backfill code is DELETED** (2026-06-10; it had been disabled-but-present). It used to seed `agg_minute` from the plant feed (§3.2) → half values + inverted battery sign, and re-filled poller gaps on every restart. See §7. The poller is the only writer of `source='poller'` rows.
 - **Gap tracking:** when a poll lands > 90 s after the previous row, the offline window is recorded in `private.gaps` (historical gaps were seeded once from `agg_minute` timestamp jumps). `q_day_gap_minutes(date)` powers the day chart's "missing" badge.
-- **Cloud gap recovery:** logger-offline minutes are banked from SunSynk's cloud feed into `agg_minute` tagged `source='plantfeed'` (calibrated per §3.2, `ON CONFLICT DO NOTHING` so a poller row always wins, live edge of 10 min left to the poller). Runs every 6 h. Reversible: `DELETE FROM agg_minute WHERE source='plantfeed'`. Recovered minutes are first-class history for metrics, render DOTTED in the chart, and are EXCLUDED from the §9 integrity audit (they're estimates, not pipeline measurements). First sweep recovered all 1,547 missing minutes; recovered-day PV integrals then matched the hardware counters within ~1% (§9E).
+- **Cloud gap recovery:** logger-offline minutes are banked from SunSynk's cloud into `agg_minute`. Since `0034` the first source is per-inverter minute history (`_shared/invhistory.ts`, five `…/day` calls per inverter per day: SoC, grid, load direct, PV = Σ V×I, battery by balance), summed across the plant and tagged `source='invhistory'`; the plant feed below fills only what history could not. Recovery never reaches before a plant's first logged minute — a new user's history starts when they connect. Plant-feed rows are tagged `source='plantfeed'` (calibrated per §3.2, `ON CONFLICT DO NOTHING` so a poller row always wins, live edge of 10 min left to the poller). Runs every 6 h. Reversible: `DELETE FROM agg_minute WHERE source='plantfeed'`. Recovered minutes are first-class history for metrics, render DOTTED in the chart, and are EXCLUDED from the §9 integrity audit (they're estimates, not pipeline measurements). First sweep recovered all 1,547 missing minutes; recovered-day PV integrals then matched the hardware counters within ~1% (§9E).
   - **Changed in the Supabase port:** `recover` sweeps a rolling 14-day window rather than all history, because the cloud only retains ~1–2 weeks — scanning 60+ days spent API calls on days that can never return data. Days outside the window are reported in the response as `notScanned` rather than silently skipped. The opportunistic "recover when a day with holes is viewed" path is also gone: reads are now pure Postgres functions with no side effects, so recovery happens only on its schedule.
 - Local logging started **2026-05-30 16:44 SAST**. Earlier days are not stored; `api_history` returns `approx: true` with an empty series for them, and the day picker's lower bound comes from `api_history_earliest`.
 - **Not migrated from SQLite:** the `raw` table (gzipped full payloads). It was 46 MB of the old 96 MB file, had no consumer, and was a place account identifiers could hide. `api_db_stats` therefore reports its counters as 0.
@@ -242,6 +242,114 @@ Bucket residual by day. Backfill/seed corruption shows up as multi-kW residuals 
 3. Trace one value end-to-end: raw endpoint → `extractReading` → `agg_minute` → `getHistory` → `chart.jsx` rangeSummary, watching the **battery sign flip** at `getHistory` and the **grid/battery summing**.
 4. Confirm `getHistory` never serves the plant feed for a day that has `agg_minute` data (the plant feed is fallback-only), and that missing buckets arrive as `null` (not 0) with a correct `gapMinutes`.
 5. Review §8 residuals and decide which to fix.
+
+---
+
+## 12. Polling budget (Sep 2026)
+
+Folded in from the polling handoff of 5 Sep 2026. The minute logger is the only thing
+that scales with customers and SunSynk's API is the ceiling. SunSynk's written position
+(email, Sep 2026): "one poll per minute per inverter is fine." Whether five endpoint
+calls count as one poll was not clarified; per-minute polling is treated as approved
+and the five-call fan-out as the thing to shrink.
+
+### What is in production
+
+| Change | Where | Effect |
+|---|---|---|
+| Sharded poll fan-out; each account's minute in one transaction | `0030`, `poll/index.ts`, `poll_commit()` | scales past ~15 accounts; no half-written minutes |
+| Retry 429 (and 403 only when the gateway says throttled) | `_shared/sunsynk.ts` `apiGet` | a burst no longer loses the minute |
+| Inverter + plant lists from cache (inverters every 10 min, plants hourly) | `0031`, `inverters_cached()`, `syncPlants()` | new plants appear on their own; plant detail only for plants with no `plant_config` row |
+| `readings.device_time` — the inverter's own upload timestamp | `0031`, `extractReading` | the freshness signal |
+| Freshness gate | `0032`, `fetchInverter()` / `readingRow()` | `input` first; if `pvIV[0].time` equals the last row's `device_time`, skip the other four calls and store the last row again under the new `ts` with `carried = true`. Guard rails: never on a refresh minute, never after an outage row (relay `0` / mains < 100 V), never past 5 carried rows in a row, never when the last device_time is unknown or `input` failed. Carried inverters send no meta row so battery capacity is not zeroed. |
+| Endpoint tiering | `0033`, `wantEndpoints()` / `readingRow()` | battery + grid every fresh minute; `load` only when `readings.load_fetched_ts` is ≥ 300 s old (derived from `pv + grid − batt` in between); `output` when ≥ 600 s old; both every minute while the grid is down |
+| Recover from inverter history | `0034`, `_shared/invhistory.ts`, `recover/index.ts` | see §5; `?dry=1&plant=&day=` reports error vs poller rows without writing |
+| Storage | `0035` | `readings` and `strings` are monthly range partitions on `ts`. `private.ensure_partitions(2)` daily 03:00; `private.downsample_strings(90)` weekly Sunday 04:00 (first row per sn/string/5-minute bucket in partitions wholly older than 90 days, recorded in `private.strings_downsampled`). `vacuum full` of a downsampled partition is by hand, off-peak. |
+| Retention | `0036` | `private.drop_old_partitions(90)` weekly Sunday 04:30 drops `readings`/`strings` partitions whose upper bound is 90+ days old, logged in `private.partitions_dropped`. Nothing reads those tables beyond the latest minute; `agg_minute` and `plant_energy` are kept forever, so charts and totals are unaffected. Only per-inverter and per-string detail older than 90 days is lost. |
+
+Measured on the owner's 2-inverter account: 10 calls/min → **4.88** after all of the
+above. Dry-run error of history recovery on 3 Sep: median pv 23 W, load 11 W, batt 58 W,
+grid 2 W, SoC 0.
+
+### Facts the design rests on (measured; probes in `API.md`)
+
+- Five per-inverter endpoints, no overlap: `input` → PV + per-string V/I/W; `battery` →
+  battery power, SoC, V, A, temp, kWh counters; `grid` → grid power, freq, PF, mains
+  voltage, relay status (the outage signal); `load` → load power + counters; `output` →
+  inverter output power, voltage (far side of the relay), freq.
+- The minute spine (`agg_minute`) needs input, battery, grid and load. Output only
+  matters across an open relay.
+- Per-inverter energy balance holds to ~100 W: `load ≈ pv + grid − batt`.
+- Outage detection (`q_grid_present`, alerts `0016`–`0019`) uses 2–3 minute debounce
+  windows on grid voltage/relay. Grid must stay at one minute.
+- Datalogger cadence differs per inverter: master ~67 s, slave every 5 minutes.
+  `device_time` only advances on an upload.
+- The official host (`openapi.sunsynk.net`) has no `/flow` endpoint. Do not design
+  around a one-call spine.
+- Per-inverter minute history on the official host goes back 2+ months: battery `soc`;
+  grid `pac,fac`; load `pac`; input string V/I; output `pac,fac,vac1,iac1`. Missing:
+  battery power/V/A/temp, grid voltage, relay, kWh counters. One call per day per
+  endpoint (`date`/`edate` do not span days); `column` takes one token, so V and I
+  are two calls. Labels come back as `v-pv-1`, `i-pv-1`, `p-grid`, `p-load`, `soc`.
+- Storage: raw `readings`/`strings` are dropped after 90 days (`0036`); what accumulates is `agg_minute` at ~110 MB per plant per year.
+
+### Leave alone
+
+- The per-minute cadence for `input`, `battery`, `grid` on any inverter whose logger
+  uploads that often. The premise is minute-resolution history.
+- `agg_minute` first-write-wins and `readings` last-write-wins in `poll_commit`.
+- The 0/10/20 s shard stagger in `0030`.
+- Any platform move. Analysed 5 Sep 2026: the workload is SQL time-series; Supabase
+  Pro is not a limit anywhere near the SunSynk ceiling.
+
+### Working on the poller (what tripped us up)
+
+- Production SQL: `supabase db query --linked "<one statement>"` or `-f file`. One
+  statement per call; a file whose first line starts with `--` must go via `-f`.
+- Local: `supabase start` then `supabase db reset --local`. Multi-statement test
+  scripts: `docker exec -i supabase_db_sunsynk-dashboard psql -U postgres -d postgres -v ON_ERROR_STOP=1 < file`.
+- Type-check without a local Deno: `npx --yes deno@2 check --node-modules-dir=auto <entrypoints>`.
+- Deploy order when a function needs a new RPC: `supabase db push` **then**
+  `supabase functions deploy poll`. The minute between the two is still at risk: make a
+  new column nullable, or default it in SQL, so the old poller keeps landing rows.
+- Live check after any poll deploy: last rows of `net._http_response` (status 200,
+  `results[0].apiCalls`), `private.gaps` empty for the deploy window,
+  `api_health()->>'stale' = 'false'`.
+- Verification pattern: `scripts/sql/verify-00NN.sql`, a single `do $$` block that
+  `raise exception`s on any failed criterion, run with `supabase db query --linked -f`.
+  `scripts/verify.sh <sql> snapshot|check <file>` wraps it and adds the before/after
+  `api_alerts_due()` hash comparison.
+- App key/secret exist only as Supabase secrets. To probe the official API, deploy a
+  throwaway gated function and delete it afterwards; never print or commit the key.
+
+---
+
+## 13. Alerts
+
+Folded in from the alerts handoff of 18 Aug 2026. Detection lives here; delivery lives
+in `prince-todo-app`, which already had Expo push, dead-token handling and a digest.
+
+```
+prince-solar-web-app                   prince-todo-app
+────────────────────                   ───────────────
+api_alerts_due()   ──── called by ───> solar-alerts (Edge Function)
+  detection, thresholds,                 wording + Expo push
+  debounce, event_key                    + stamps solar_alerts_sent
+```
+
+- **Detection in SQL, delivery in the function.** No thresholds in TypeScript.
+- **Dedup is `event_key` + a unique index** on the sent table there (pattern from its
+  migration 0048). An `event_key` encodes which occurrence fired
+  (`soc_low:2026-08-18T19:40`); a repeat is a duplicate-key no-op.
+- `api_alerts_due()` returns `(kind, event_key, severity, title, body, value)`; execute
+  granted to `service_role` only. The todo app calls it with this project's
+  `sb_secret_…` key (legacy JWT keys are disabled since 2026-08-05).
+- Kinds: `logger_stale`, `bank_drift`, `batt_hot`, `soc_overnight`, `string_dead`,
+  `grid_down` / `grid_back`. Migrations `0016`–`0019`, `0021`, `0029`. Debounce and
+  hysteresis (fire below 20% SoC, re-arm above 30%) are in SQL.
+- Grid alerts depend on the unresolved grid-presence question in `FEATURES.md`.
+- Only the owner receives alerts today. Other users get none until the delivery side
+  is built for them (`LAUNCH.md`).
 
 ---
 

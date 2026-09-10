@@ -43,6 +43,7 @@ const ROUTES = {
   '/api/trends/potential': (q) => ['api_trends_potential', { p_date: q.date || null }],
   '/api/balance':          () => ['api_balance', {}],
   '/api/health':           () => ['api_health', {}],
+  '/api/events':           (q) => ['api_events', { p_days: Number(q.days) || 14 }],
 };
 
 async function getJSON(url) {
@@ -262,6 +263,13 @@ async function fetchBalance() {
   return getJSON('/api/balance').catch(() => null);
 }
 
+// ---- events: the notable things, newest day first --------------------------
+// Derived server-side from agg_minute every time it is asked, never stored. A gap
+// that `recover` has since backfilled stops appearing on its own.
+async function fetchEvents(days) {
+  return getJSON('/api/events?days=' + (days || 14)).catch(() => null);
+}
+
 // ---- me: plan, preferences, plants -----------------------------------------
 // One call on load. `plants[].config` is plant_config (timezone, currency, tariff,
 // battery, roof). `prefs` is the per-user display state that used to live in
@@ -296,6 +304,6 @@ function emptyText(days, fallback) {
 }
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance, fetchEvents,
   fetchMe, savePrefs, savePlantConfig, deleteAccount, emptyText, BATT_MAX_KW, TYPICAL_DAYS,
 });

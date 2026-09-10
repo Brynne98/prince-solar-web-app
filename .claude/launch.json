@@ -4,9 +4,25 @@
     {
       "name": "dashboard",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["server.js"],
+      "runtimeArgs": [
+        "server.js"
+      ],
       "port": 3003,
-      "env": { "PORT": "3003" }
+      "env": {
+        "PORT": "3003"
+      }
+    },
+    {
+      "name": "static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "3004",
+        "--directory",
+        "public"
+      ],
+      "port": 3004
     }
   ]
 }

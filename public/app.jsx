@@ -31,7 +31,7 @@ function fmtAgo(d, now) {
   const m = Math.round(s / 60);
   if (m < 90) return m + ' min ago';
   const h = Math.round(m / 60);
-  if (h < 36) return h + ' h ago';
+  if (h < 36) return h + 'h ago';
   return window.fmtTime(d);
 }
 function useNow(ms) {
@@ -185,6 +185,7 @@ function App() {
     settings.tabs.grid && { id: 'grid', label: 'Grid' },
     settings.tabs.inverters && { id: 'inverters', label: 'Inverters' },
     { id: 'trends', label: 'Trends' },
+    { id: 'events', label: 'Events' },
     { id: 'settings', label: 'Settings' },
   ].filter(Boolean);
   useEffect(() => { if (!TABS.some(t => t.id === tab)) setTab('live'); }, [settings.tabs]);
@@ -298,6 +299,7 @@ function App() {
         {tab === 'grid' && <window.GridTab snap={snap} settings={settings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} />}
         {tab === 'trends' && <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />}
+        {tab === 'events' && <window.EventsTab refreshKey={refreshKey} />}
         {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} />}
       </main>
 
