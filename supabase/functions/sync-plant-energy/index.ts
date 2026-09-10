@@ -39,6 +39,11 @@ async function syncPlant(job: PlantJob, dailyMonths: number, started: number) {
   const gridMul = Number(gm ?? 1) || 1;
 
   const now = localParts(tz);
+  // One stamp for the whole sweep. synced_at was absent from the upsert payload, so
+  // ON CONFLICT never touched it and the column kept the value from the row's first
+  // insert — the table could not say when it was last refreshed, only when it was
+  // first written. Every row this run touches now carries the run's own time.
+  const syncedAt = new Date().toISOString();
   const upserts: any[] = [];
   const synced = { years: [] as number[], months: [] as string[] };
 
@@ -68,6 +73,7 @@ async function syncPlant(job: PlantJob, dailyMonths: number, started: number) {
         period: `${yr}-${String(mi).padStart(2, "0")}-01`,
         pv_kwh: r.pv, load_kwh: r.load, imp_kwh: r.imp,
         exp_kwh: r.exp, chg_kwh: r.chg, dischg_kwh: r.dischg,
+        synced_at: syncedAt,
       });
     }
   }
@@ -87,6 +93,7 @@ async function syncPlant(job: PlantJob, dailyMonths: number, started: number) {
         plant_id: plantId, bucket: "day", period: r.time,
         pv_kwh: r.pv, load_kwh: r.load, imp_kwh: r.imp,
         exp_kwh: r.exp, chg_kwh: r.chg, dischg_kwh: r.dischg,
+        synced_at: syncedAt,
       });
     }
   }
