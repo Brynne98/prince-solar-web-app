@@ -18,11 +18,15 @@ function useFlowMobile(bp = 600) {
   return mobile;
 }
 
-function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
+function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour, features }) {
   const C = window.COLORS;
   const mobile = useFlowMobile();
+  const feat = features || {};
+  const hasBatt = feat.hasBattery !== false;
+  const hasGrid = feat.hasGrid !== false;
   const charging = agg.battState === 'charging';
   const gridImport = agg.gridPower > 0 ? agg.gridPower : 0;
+  const gridExport = agg.gridPower < 0 ? -agg.gridPower : 0;
   const kwhToday = v => (v != null ? v.toFixed(1) + ' kWh today' : null);
   const hh = (h) => String(h).padStart(2, '0') + ':00';
   // Typical charge sits on the live-% line as a muted ≈ N%, so the battery card
@@ -32,13 +36,17 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
     ? 'Typical charge at ' + (typicalHour != null ? hh(typicalHour) : 'this hour') + ' over complete days'
     : null;
 
+  // Sources: only what the plant has. Grid flows both ways — an export runs the
+  // animation back towards the grid node.
   const left = [
     { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun', tag: null, sub: kwhToday(agg.pvToday) },
-    { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, icon: 'battery', soc: agg.battSoc, reverse: charging,
+    hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, icon: 'battery', soc: agg.battSoc, reverse: charging,
       tag: agg.battPower > 5 ? (charging ? 'charging' : 'discharging') : 'idle', pct: agg.battSoc,
       sub: battInfo || null, usualPct: typicalSoc, typicalTitle },
-    { key: 'grid', label: 'Grid', color: C.grid, w: gridImport, icon: 'bolt', tag: null, sub: kwhToday(agg.gridFromToday) },
-  ];
+    hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 5 ? gridExport : gridImport, icon: 'bolt', reverse: gridExport > 5,
+      tag: gridExport > 5 ? 'exporting' : gridImport > 5 ? 'importing' : 'standby',
+      sub: gridExport > 5 && agg.gridToToday != null ? agg.gridToToday.toFixed(1) + ' kWh out today' : kwhToday(agg.gridFromToday) },
+  ].filter(Boolean);
   const home = { label: 'Home', color: C.load, w: agg.loadNow, sub: kwhToday(agg.loadToday) };
 
   const CEIL = 8000, MAXTH = 30;
@@ -101,7 +109,7 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
     // Cards grow right so the left edge (and the SOURCES column) stay put.
     const nodeW = 184, nodeH = 88, nx = -76, ny = -44;
     const srcX = 150, homeX = W - 150;
-    const sy = [110, 218, 326];
+    const sy = { 3: [110, 218, 326], 2: [164, 272], 1: [218] }[left.length] || [110, 218, 326];
     const srcRight = srcX + nx + nodeW;
     const srcMid = srcX + nx + nodeW / 2;
 
@@ -136,7 +144,7 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
             stroke={n.color} strokeOpacity={active ? 0.6 : 0.22} strokeWidth="1.3" filter={active ? 'url(#flglow)' : undefined} />
           {icon(n.icon, -56, -4, n.color, active, n.soc)}
           <text x={-36} y={ly} className="flow-node-label">{n.label.toUpperCase()}</text>
-          <text x={-36} y={vy} className="flow-node-val" fill={active ? n.color : 'var(--muted)'} textAnchor="start">{valKW(n.w)}<tspan className="flow-node-unit"> kWh</tspan></text>
+          <text x={-36} y={vy} className="flow-node-val" fill={active ? n.color : 'var(--muted)'} textAnchor="start">{valKW(n.w)}<tspan className="flow-node-unit"> kW</tspan></text>
           {n.tag && (
             <text x={-36} y={ty} className="flow-node-tag" textAnchor="start" fill={active ? n.color : 'var(--dim)'} fillOpacity="0.9">
               {n.typicalTitle && <title>{n.typicalTitle}</title>}
@@ -173,7 +181,7 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
             stroke={home.color} strokeOpacity="0.6" strokeWidth="1.3" filter={homeActive ? 'url(#flglow)' : undefined} />
           {icon('home', -56, -4, home.color, homeActive)}
           <text x={-36} y={-16} className="flow-node-label">HOME</text>
-          <text x={-36} y={7} className="flow-node-val" fill={home.color} textAnchor="start">{valKW(home.w)}<tspan className="flow-node-unit"> kWh</tspan></text>
+          <text x={-36} y={7} className="flow-node-val" fill={home.color} textAnchor="start">{valKW(home.w)}<tspan className="flow-node-unit"> kW</tspan></text>
           {home.sub && <text x={-36} y={28} className="flow-sub">{home.sub}</text>}
         </g>
         {left.map(sideNode)}
@@ -187,7 +195,7 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
   function renderMobile() {
     const dur = w => Math.max(0.9, 3.2 - (Math.min(w, CEIL) / CEIL) * 2.3);
     const homeActive = home.w > 5;
-    const cols = [16.67, 50, 83.33]; // tile x-centres as % (3 equal flex columns)
+    const cols = { 3: [16.67, 50, 83.33], 2: [30, 70], 1: [50] }[left.length] || [16.67, 50, 83.33]; // tile x-centres as %
     const miniIcon = (type, color, soc) => (
       <svg width="17" height="17" viewBox="-11 -11 22 22">{icon(type, 0, 0, color, true, soc)}</svg>
     );
@@ -201,7 +209,7 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
             {miniIcon(n.icon, n.color, n.soc)}
             <span className="mtile-label">{n.label}</span>
           </div>
-          <div className="mtile-val" style={{ color: active ? n.color : 'var(--muted)' }}>{valKW(n.w)}<span className="u">kWh</span></div>
+          <div className="mtile-val" style={{ color: active ? n.color : 'var(--muted)' }}>{valKW(n.w)}<span className="u">kW</span></div>
           {n.key === 'bat'
             ? <>
                 <div className="mtile-state" style={{ color: active ? n.color : 'var(--dim)' }} title={n.typicalTitle || undefined}>
@@ -265,7 +273,7 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
           <svg width="22" height="22" viewBox="-12 -12 24 24">{icon('home', 0, 0, home.color, homeActive)}</svg>
           <div className="mflow-home-text">
             <span className="mflow-home-label">HOME</span>
-            <span className="mflow-home-val" style={{ color: home.color }}>{valKW(home.w)}<span className="u">kWh</span></span>
+            <span className="mflow-home-val" style={{ color: home.color }}>{valKW(home.w)}<span className="u">kW</span></span>
           </div>
           {home.sub && <div className="mflow-home-today">{home.sub}</div>}
         </div>
@@ -275,15 +283,18 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour }) {
 
   const homeActive = home.w > 5;
   const chips = [
-    { label: 'Solar', color: C.pv, active: agg.pvNow > 5, state: agg.pvNow > 5 ? valKW(agg.pvNow) + ' kWh' : 'idle' },
-    { label: 'Battery', color: C.batt, active: agg.battPower > 5, state: agg.battPower > 5 ? (charging ? 'charging' : 'discharging') : 'idle' },
-    { label: 'Grid', color: C.grid, active: gridImport > 5, state: gridImport > 5 ? 'importing' : 'standby' },
-    { label: 'Home', color: C.load, active: homeActive, state: valKW(home.w) + ' kWh' },
-  ];
+    { label: 'Solar', color: C.pv, active: agg.pvNow > 5, state: agg.pvNow > 5 ? valKW(agg.pvNow) + ' kW' : 'idle' },
+    hasBatt && { label: 'Battery', color: C.batt, active: agg.battPower > 5, state: agg.battPower > 5 ? (charging ? 'charging' : 'discharging') : 'idle' },
+    hasGrid && { label: 'Grid', color: C.grid, active: gridImport > 5 || gridExport > 5, state: gridExport > 5 ? 'exporting' : gridImport > 5 ? 'importing' : 'standby' },
+    { label: 'Home', color: C.load, active: homeActive, state: valKW(home.w) + ' kW' },
+  ].filter(Boolean);
   let narrative;
-  if (agg.pvNow > home.w + 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{charging ? ' and charging the battery' : ''}.</>;
-  else if (agg.battPower > 5 && !charging && gridImport < 50) narrative = <>Your <b style={{ color: C.batt }}>battery</b> is powering the home — solar offline.</>;
-  else if (gridImport > 50) narrative = <>Pulling <b style={{ color: C.grid }}>{valKW(gridImport)} kWh</b> from the grid to meet demand.</>;
+  if (gridExport > 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ', charging the battery' : ''} and sending <b style={{ color: C.grid }}>{valKW(gridExport)} kW</b> to the grid.</>;
+  else if (agg.pvNow > home.w + 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ' and charging the battery' : ''}.</>;
+  else if (hasBatt && agg.battPower > 5 && !charging && gridImport < 50) narrative = <>Your <b style={{ color: C.batt }}>battery</b> is powering the home — solar offline.</>;
+  else if (gridImport > 50) narrative = <>Pulling <b style={{ color: C.grid }}>{valKW(gridImport)} kW</b> from the grid to meet demand.</>;
+  else if (!hasGrid && agg.pvNow < 50) narrative = <>Off-grid, after dark — the home is running on <b style={{ color: C.batt }}>stored energy</b>.</>;
+  else if (!hasBatt) narrative = <>Grid-tied — <b style={{ color: C.pv }}>solar</b> covers what it can, the grid the rest.</>;
   else narrative = <>System balanced — home running on <b style={{ color: C.batt }}>stored energy</b>.</>;
 
   return (

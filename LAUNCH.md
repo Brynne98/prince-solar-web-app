@@ -38,8 +38,14 @@ indie launch checklist.
 - **Cost per customer.** ~450 MB per inverter per year of storage; one poll per
   minute per inverter. No plan cap or per-user limit exists.
 - **Single-site features.** `forecast` and the clear-sky potential line are
-  fitted to the calibration plant only. Alert delivery lives in `prince-todo-app`,
-  so other users get no alerts.
+  fitted to the calibration plant only (pinned in `app_config.CALIBRATION_PLANT`
+  since 0041; other plants see "no clear-sky line for this plant"). Alert delivery
+  lives in `prince-todo-app`, so other users get no alerts.
+- **Question for SunSynk support (O8), not yet sent:** "We hold one app key. Each
+  customer links their own SunSynk login and we poll each of their inverters once a
+  minute through the official API with that customer's own token. Is that within the
+  terms of the app key, and is there a request quota per app key rather than per
+  user token?" Record the answer here.
 
 ## Order of work
 

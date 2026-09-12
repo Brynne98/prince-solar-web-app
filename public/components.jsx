@@ -11,13 +11,26 @@ const COLORS = {
 };
 
 // ---- formatting -------------------------------------------------------------
+// Live power is kilowatts. (It read "kWh" for a long time — energy, not power.)
 function fmtPower(w) {
   if (w == null || isNaN(w)) return '—';
-  return (w / 1000).toFixed(2) + ' kWh';
+  return (w / 1000).toFixed(2) + ' kW';
 }
 function fmtPowerParts(w) {
   if (w == null || isNaN(w)) return ['—', ''];
-  return [(w / 1000).toFixed(2), 'kWh'];
+  return [(w / 1000).toFixed(2), 'kW'];
+}
+// The hour it is AT THE PLANT, not on the viewer's device. An owner abroad, or a
+// plant in another country, must see "typical at this hour" for the plant's hour.
+function plantHour(tz, d = new Date()) {
+  try {
+    if (tz) return Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false }).format(d)) % 24;
+  } catch (e) {}
+  return d.getHours();
+}
+function fmtPlantTime(d, tz) {
+  try { return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: tz || undefined }); }
+  catch (e) { return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); }
 }
 function fmtKwh(k) {
   if (k == null || isNaN(k)) return '—';
@@ -239,7 +252,7 @@ function SectionTitle({ children, right }) {
 }
 
 Object.assign(window, {
-  COLORS, fmtPower, fmtPowerParts, fmtKwh, fmtRand, fmtTime, cleanTemp,
+  COLORS, fmtPower, fmtPowerParts, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
   Card, StatTile, Metric, Badge, Segmented, Toggle, LegendChip, Sparkline, SectionTitle, InfoDot,
   Skeleton, SkeletonTile,
   fmtEnergySmart, fmtRandSmart, fmtEnergyParts, fmtMoney, fmtMoneySmart, moneySymbol

@@ -91,6 +91,12 @@ function mapInverter(s) {
     grid: s.grid.power, // signed: + import / − export
     gridFromToday: s.grid.todayImport,
     gridFromTotal: s.grid.totalImport,
+    gridToToday: s.grid.todayExport,
+    gridToTotal: s.grid.totalExport,
+    gridVolt: s.grid.voltage ?? null,
+    gridVolts: s.grid.voltages || [],          // one per phase this inverter reports
+    gridRelay: s.grid.relay ?? null,
+    bank2: s.battery.bank2 || null,            // second battery bank, when the firmware has one
     gridFreq: s.grid.frequency || s.output.frequency || 0,
     gridPf: s.grid.powerFactor || 0,
     load: s.load.power,
@@ -100,7 +106,8 @@ function mapInverter(s) {
     strings: (s.pv.strings || []).map((st, i) => ({
       no: st.no || i + 1, v: st.voltage, i: st.current, p: st.power, today: st.today,
     })),
-    phases: [{ volt: s.output.voltage, current: s.output.voltage ? s.output.power / s.output.voltage : 0, power: s.output.power }],
+    phases: (s.output.voltages && s.output.voltages.length ? s.output.voltages : [s.output.voltage])
+      .map((v, i, arr) => ({ volt: v, current: v ? (s.output.power / arr.length) / v : 0, power: s.output.power / arr.length })),
     ups: { l1: s.load.power, l2: 0, l3: 0 },
   };
   return out;
@@ -132,6 +139,9 @@ function aggregate(invs, totals) {
     gridPresent: totals.gridPresent,
     gridFromToday: r1(totals.todayGridImport != null ? totals.todayGridImport : sum((x) => x.gridFromToday)),
     gridFromTotal: r1(sum((x) => x.gridFromTotal)),
+    gridToToday: r1(totals.todayGridExport != null ? totals.todayGridExport : sum((x) => x.gridToToday)),
+    gridToTotal: r1(sum((x) => x.gridToTotal)),
+    phaseDown: !!totals.phaseDown,
     gridFreq: gf ? gf.gridFreq : (invs[0] ? invs[0].gridFreq : 0),
     gridPf: invs[0] ? invs[0].gridPf : 0,
     loadNow: totals.load != null ? totals.load : sum((x) => x.load),
@@ -149,12 +159,20 @@ async function fetchSnapshot() {
   // they come from app_config via api_overview, which is also what the phone alerts
   // read. Pass them straight through; null until the first snapshot lands.
   if (api.config && api.config.currency) window.PLANT_CURRENCY = api.config.currency;
+  const cfg = api.config || {};
   return {
     updated: new Date(api.generatedAt || Date.now()),
     lastReading: health && health.lastTs ? new Date(health.lastTs * 1000) : null,
     plant: api.plant || { id: null, name: 'My plant' },
     aggregate: aggregate(inverters, api.totals || {}),
     config: api.config || null,
+    // What this plant has. null (not decided yet) shows everything; false hides it.
+    features: {
+      hasBattery: cfg.hasBattery !== false,
+      hasGrid: cfg.hasGrid !== false,
+      decided: cfg.featuresSource != null && cfg.featuresSource !== 'default',
+      banks: cfg.batteryBanks || 'per-inverter',
+    },
     inverters,
   };
 }

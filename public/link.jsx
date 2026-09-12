@@ -50,22 +50,21 @@ window.disconnectSunsynk = async function disconnectSunsynk(accountId) {
   if (error) throw new Error(error.message);
 };
 
-function LinkForm({ relink, onLinked }) {
+function LinkForm({ relink, onLinked, compact, onCancel }) {
   const { useState } = React;
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  const [warn, setWarn] = useState(null);
+  const [noPlants, setNoPlants] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
-    setBusy(true); setErr(null); setWarn(null);
+    setBusy(true); setErr(null); setNoPlants(false);
     try {
       const r = await window.linkSunsynk(username.trim(), password);
       setPassword('');
-      if (r.warning) setWarn(r.warning);
+      if (r.warning) { setNoPlants(true); return; }
       onLinked(r);
     } catch (ex) {
       setErr(ex.message);
@@ -74,14 +73,36 @@ function LinkForm({ relink, onLinked }) {
     }
   };
 
+  // The login worked but SunSynk lists no plant for it. Almost always the
+  // installer still owns the plant; nothing here can fix that, so say what will.
+  if (noPlants) {
+    return (
+      <div className={compact ? '' : 'login-card'}>
+        {!compact && <window.AuthBrand />}
+        <div className="login-title">Connected, but no plant yet</div>
+        <div className="login-sub">
+          <b>{username.trim()}</b> signed in fine, but SunSynk lists no plant for it. That usually means your installer
+          still owns the plant. Ask them to share it with this login in SunSynk Connect (Plant → Share), or to make you
+          the owner. Once it shows in the SunSynk app, come back and retry — your login is already saved here.
+        </div>
+        <button type="button" onClick={() => onLinked({ retry: true })}>Retry now</button>
+        <div className="login-links">
+          <button type="button" className="login-link quiet" onClick={() => setNoPlants(false)}>Use a different SunSynk login</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <form className="login-card" onSubmit={submit}>
-      <window.AuthBrand />
-      <div className="login-title">{relink ? 'Reconnect SunSynk' : 'Connect your SunSynk'}</div>
+    <form className={compact ? '' : 'login-card'} onSubmit={submit}>
+      {!compact && <window.AuthBrand />}
+      <div className="login-title">{relink ? 'Reconnect SunSynk' : compact ? 'Connect another SunSynk login' : 'Connect your SunSynk'}</div>
       <div className="login-sub">
         {relink
           ? 'Your SunSynk connection stopped working — usually a changed password. Sign in again to resume logging. Your history is intact.'
-          : 'Sign in with your SunSynk Connect login. We exchange it for an access token and never keep the password.'}
+          : compact
+            ? 'For a plant on a different SunSynk account. Its plants are added to your selector.'
+            : 'Sign in with your SunSynk Connect login. We exchange it for an access token and never keep the password.'}
       </div>
       <div className="auth-field">
         <label htmlFor="ss-user">SunSynk Connect email</label>
@@ -91,13 +112,15 @@ function LinkForm({ relink, onLinked }) {
       <window.PasswordField id="ss-pass" label="SunSynk Connect password" value={password} onChange={setPassword}
                             placeholder="••••••••" autoComplete="off" />
       <button type="submit" disabled={busy}>{busy ? 'Connecting…' : (relink ? 'Reconnect' : 'Connect')}</button>
-      <div className={'login-err' + (warn && !err ? ' login-note' : '')} role="alert" aria-live="polite">{err || warn}</div>
+      <div className="login-err" role="alert" aria-live="polite">{err}</div>
       <div className="login-links">
         <span className="login-fine">Signing in here does not sign you out of the SunSynk app. Disconnect any time from Settings.</span>
+        {onCancel && <button type="button" className="login-link quiet" onClick={onCancel}>Cancel</button>}
       </div>
     </form>
   );
 }
+window.LinkForm = LinkForm;
 
 /**
  * Sits inside AuthGate. Shows the dashboard when the user has at least one plant

@@ -165,6 +165,18 @@ onto today; that must stay local.
 
 ---
 
+## Moving to a custom domain
+
+Two places know the origin, neither needs a code change:
+
+- **Browser → link-sunsynk (CORS).** `supabase secrets set LINK_ALLOWED_ORIGINS=https://app.example.com`
+  then `supabase functions deploy link-sunsynk`. The GitHub Pages origin stays allowed by default.
+- **Supabase Auth.** Dashboard → Authentication → URL Configuration: Site URL and
+  the redirect list must include the new origin, or confirmation and reset links land on the old one.
+
+The cron jobs (0009, 0030) POST to `https://<project-ref>.functions.supabase.co`, which
+does not change with the site's domain.
+
 ## Layout
 
 | Path | What |

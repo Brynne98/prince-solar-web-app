@@ -27,6 +27,7 @@
 // 96 MB SQLite file, has no dashboard consumer, and may embed account identifiers.
 import {
   aggregate,
+  DEFAULT_BATT_POSITIVE_MEANS,
   extractMeta,
   extractReading,
   extractStrings,
@@ -219,16 +220,18 @@ const ENDPOINT_FIELDS: Record<Endpoint, string[]> = {
   battery: [
     "batt_power_w", "batt_w", "batt_soc", "batt_voltage_v", "batt_current_a", "batt_temp_c",
     "batt_chg_today_kwh", "batt_dischg_today_kwh", "batt_chg_total_kwh", "batt_dischg_total_kwh",
+    "batt2_soc", "batt2_voltage_v", "batt2_current_a", "batt2_power_w", "batt2_temp_c",
   ],
   grid: [
     "grid_w", "grid_import_today_kwh", "grid_export_today_kwh", "grid_import_total_kwh",
     "grid_export_total_kwh", "grid_freq_hz", "grid_pf", "grid_volt_v", "grid_relay_status",
+    "grid_volt_l2_v", "grid_volt_l3_v",
   ],
   load: ["load_w", "load_today_kwh", "load_total_kwh", "load_freq_hz"],
-  output: ["output_w", "output_volt_v", "output_freq_hz"],
+  output: ["output_w", "output_volt_v", "output_freq_hz", "output_volt_l2_v", "output_volt_l3_v"],
 };
 
-type Fetched = { inv: InverterInfo; raw: RawBundle; carried: boolean; fetched: Set<Endpoint> };
+type Fetched = { inv: InverterInfo; raw: RawBundle; carried: boolean; fetched: Set<Endpoint>; sign: string | null };
 
 function canCarry(inv: InverterInfo, inputTime: string | null): boolean {
   const prev = inv.lastReading;
@@ -258,13 +261,13 @@ async function fetchInto(raw: RawBundle, eps: Endpoint[], sn: string, acc: Accou
   });
 }
 
-async function fetchInverter(inv: InverterInfo, acc: Account, ts: number): Promise<Fetched> {
+async function fetchInverter(inv: InverterInfo, acc: Account, ts: number, sign: string | null): Promise<Fetched> {
   const paths = realtimePaths(inv.sn);
   const input = await apiGet(paths.input, acc).catch(() => null);
   const inputTime: string | null =
     (input && Array.isArray(input.pvIV) && input.pvIV[0] && input.pvIV[0].time) || null;
   const raw: RawBundle = { input, grid: null, battery: null, load: null, output: null };
-  if (canCarry(inv, inputTime)) return { inv, raw, carried: true, fetched: new Set() };
+  if (canCarry(inv, inputTime)) return { inv, raw, carried: true, fetched: new Set(), sign };
 
   const want = wantEndpoints(inv.lastReading, ts);
   await fetchInto(raw, [...want], inv.sn, acc);
@@ -272,11 +275,11 @@ async function fetchInverter(inv: InverterInfo, acc: Account, ts: number): Promi
   // The fresh grid payload shows an outage that the last row did not: read the far
   // side of the relay (and the load) now rather than at the next tier boundary.
   const late = (["output", "load"] as Endpoint[]).filter((k) => !want.has(k));
-  if (late.length && burstTrigger(extractReading(inv, raw)) !== null) {
+  if (late.length && burstTrigger(extractReading(inv, raw, { battPositiveMeans: sign })) !== null) {
     await fetchInto(raw, late, inv.sn, acc);
     for (const k of late) want.add(k);
   }
-  return { inv, raw, carried: false, fetched: want };
+  return { inv, raw, carried: false, fetched: want, sign };
 }
 
 /**
@@ -285,7 +288,7 @@ async function fetchInverter(inv: InverterInfo, acc: Account, ts: number): Promi
  * load_w derived from the balance when load was not read.
  */
 function readingRow(f: Fetched, ts: number): Record<string, unknown> {
-  const fresh = extractReading(f.inv, f.raw);
+  const fresh = extractReading(f.inv, f.raw, { battPositiveMeans: f.sign });
   const plant_id = f.inv.plantId ?? null;
   const prev = f.inv.lastReading ?? {};
   if (f.carried) {
@@ -357,7 +360,11 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   if (!inverters.length) return result;
   result.inverters = inverters.length;
 
-  const perInv = await Promise.all(inverters.map((inv) => fetchInverter(inv, acc, ts)));
+  // Battery sign per plant (0041): the plant's own answer, or the fleet default
+  // until detection has had enough data to decide.
+  const signOf = new Map(jobs.map((j) => [j.plantId, j.battPositiveMeans]));
+  const perInv = await Promise.all(inverters.map((inv) =>
+    fetchInverter(inv, acc, ts, signOf.get(Number(inv.plantId)) ?? null)));
   const carried = perInv.filter((f) => f.carried).map((f) => f.inv.sn);
   if (carried.length) result.carried = carried;
   // Endpoints whose value on this row came from the previous one — whether they were
@@ -424,6 +431,27 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   result.strings = committed.strings;
   result.plants = committed.plants;
   result.gapRecorded = committed.gaps;
+
+  // Plants still on the fleet default: let the database try to settle the battery
+  // sign from what has been stored so far. Cheap, and only on refresh minutes.
+  if (refreshMinute) {
+    for (const pid of plantIds) {
+      // Battery present? Grid present? Decided from the first day of readings (0042).
+      try {
+        const f = await rpc("plant_features_detect", { p_plant: pid }) as Record<string, unknown>;
+        if (f?.decided) console.log(`features for plant ${pid}:`, JSON.stringify(f));
+      } catch (e) {
+        console.warn(`plant_features_detect ${pid}:`, e instanceof Error ? e.message : e);
+      }
+      if (signOf.get(pid) != null) continue;
+      try {
+        const d = await rpc("batt_sign_detect", { p_plant: pid, p_default: DEFAULT_BATT_POSITIVE_MEANS }) as Record<string, unknown>;
+        if (d?.decided) console.log(`batt sign for plant ${pid}:`, JSON.stringify(d));
+      } catch (e) {
+        console.warn(`batt_sign_detect ${pid}:`, e instanceof Error ? e.message : e);
+      }
+    }
+  }
 
   // Relay open or mains voltage gone on any inverter: start the sub-minute burst.
   const trigger = readings.map(burstTrigger).find((t) => t !== null) ?? null;

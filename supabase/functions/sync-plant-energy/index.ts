@@ -10,7 +10,7 @@
 //   * monthly rows for every year with data (drives Lifetime / Monthly / Year)
 //   * daily rows for the last N months, default 6 (drives Week, Month, Daily trends
 //     and the Overview comparison arrows)
-import { db, type PlantJob, plantsToPoll } from "../_shared/sunsynk.ts";
+import { db, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
 import { fetchMonthRows, fetchYearRows } from "../_shared/plantfeed.ts";
 
 const DEFAULT_DAILY_MONTHS = 6;
@@ -112,14 +112,19 @@ Deno.serve(async (req) => {
   try {
     const url = new URL(req.url);
     const dailyMonths = Math.max(1, Math.min(24, Number(url.searchParams.get("months")) || DEFAULT_DAILY_MONTHS));
+    // ?budget_ms= lets a test shrink the time budget; production never passes it.
+    const budgetMs = Math.min(TIME_BUDGET_MS, Number(url.searchParams.get("budget_ms")) || TIME_BUDGET_MS);
 
     const jobs = await plantsToPoll();
     if (!jobs.length) return json({ ok: true, rows: 0, reason: "no linked plants" });
 
     const plants = [];
     let rows = 0;
-    for (const job of jobs) {
-      if (Date.now() - started > TIME_BUDGET_MS) {
+    // Round-robin from the plant the previous run finished on (READINESS P3).
+    let done = 0;
+    for (const job of await rotateJobs(jobs, "SYNC_CURSOR")) {
+      // Always make progress on at least one plant, however small the budget.
+      if (done > 0 && Date.now() - started > budgetMs) {
         plants.push({ plantId: job.plantId, rows: 0, reason: "time budget reached before this plant" });
         continue;
       }
@@ -130,6 +135,8 @@ Deno.serve(async (req) => {
       } catch (e) {
         plants.push({ plantId: job.plantId, rows: 0, error: String(e instanceof Error ? e.message : e) });
       }
+      done++;
+      await markCursor("SYNC_CURSOR", job.plantId);
     }
 
     return json({ ok: true, rows, plants, elapsedMs: Date.now() - started });

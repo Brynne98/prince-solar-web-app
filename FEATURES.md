@@ -212,3 +212,10 @@ event this short regardless of which signal is used.
 4. **Joy project:** pick the **iOS widget (§5)** *or* the **local Modbus rebuild (§10)**.
 5. Everything else as the mood strikes.
 </content>
+
+
+## Not supported (as of 2026-09-12)
+
+- **Generator input** and **external / smart meters**: the API fields exist but nothing maps them; a plant with either shows only what the inverter itself measures.
+- **More than one SunSynk cloud region**: only openapi.sunsynk.net.
+- **Forecast and clear-sky reference** are fitted to one site, the calibration plant; other plants see no dotted line and no outlook.

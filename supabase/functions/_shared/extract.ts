@@ -45,9 +45,13 @@ export function powerField(obj: any, ...keys: string[]): number {
   return v == null || v === "" ? sumVip(obj) : num(v);
 }
 
-// Battery sign convention. The firmware's sign differs between installs; the monolith
-// normalises to "+ = charging" at ingestion so every downstream consumer agrees.
-const BATTERY_POSITIVE_MEANS = Deno.env.get("BATTERY_POSITIVE_MEANS") ?? "discharging";
+// Battery sign convention. The firmware's sign differs between installs, so it is a
+// per-plant setting (plant_config.batt_positive_means, migration 0041) and every
+// consumer stores "+ = charging". The env var is only the fleet default used until a
+// plant's own sign has been detected or set.
+export const DEFAULT_BATT_POSITIVE_MEANS = Deno.env.get("BATTERY_POSITIVE_MEANS") ?? "discharging";
+
+export type ExtractOpts = { battPositiveMeans?: string | null };
 
 export interface RawBundle {
   grid: any;
@@ -84,15 +88,20 @@ export const realtimePaths = (sn: string) => ({
 });
 
 /** Pull the typed per-inverter fields out of one inverter's 5 raw realtime payloads. */
-export function extractReading(inv: InverterInfo, raw: RawBundle): Record<string, unknown> {
+export function extractReading(inv: InverterInfo, raw: RawBundle, opts: ExtractOpts = {}): Record<string, unknown> {
   const g = raw.grid, b = raw.battery, p = raw.input, l = raw.load, o = raw.output;
   const battPowerRaw = num(pick(b, "power")); // signed per firmware
-  const battSigned = BATTERY_POSITIVE_MEANS === "charging" ? battPowerRaw : -battPowerRaw;
+  const positiveMeans = opts.battPositiveMeans ?? DEFAULT_BATT_POSITIVE_MEANS;
+  const battSigned = positiveMeans === "charging" ? battPowerRaw : -battPowerRaw;
   const outVip0 = (o && Array.isArray(o.vip) && o.vip[0]) || {};
   // Grid voltage lives in the same per-phase shape as the output side. It is the only
   // field that separates "mains failed" from "mains fine, we just aren't drawing" —
   // see migration 0015.
   const gridVip0 = (g && Array.isArray(g.vip) && g.vip[0]) || {};
+  // Three-phase inverters report one vip entry per phase; L2/L3 stay null on
+  // single-phase units (0042).
+  const phaseVolt = (arr: any, i: number) =>
+    numOrNull(pick((arr && Array.isArray(arr.vip) && arr.vip[i]) || {}, "volt", "voltage"));
   return {
     sn: inv.sn,
     status: typeof inv.status === "number" ? inv.status : num(inv.status),
@@ -134,6 +143,16 @@ export function extractReading(inv: InverterInfo, raw: RawBundle): Record<string
     output_w: powerField(o, "pac"),
     output_volt_v: num(pick(outVip0, "volt", "voltage")),
     output_freq_hz: num(pick(o, "fac", "freq")),
+    grid_volt_l2_v: phaseVolt(g, 1),
+    grid_volt_l3_v: phaseVolt(g, 2),
+    output_volt_l2_v: phaseVolt(o, 1),
+    output_volt_l3_v: phaseVolt(o, 2),
+    // second battery bank: the API's *2 fields, null when the firmware has none
+    batt2_soc: numOrNull(pick(b, "soc2", "bmsSoc2")),
+    batt2_voltage_v: numOrNull(pick(b, "voltage2", "bmsVolt2")),
+    batt2_current_a: numOrNull(pick(b, "current2", "bmsCurrent2")),
+    batt2_power_w: numOrNull(pick(b, "power2")),
+    batt2_temp_c: numOrNull(pick(b, "temp2", "bmsTemp2")),
   };
 }
 

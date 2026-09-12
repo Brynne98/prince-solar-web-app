@@ -12,6 +12,9 @@
 // solar_forecast, which the `forecast` Edge Function keeps topped up).
 // ============================================================================
 const kW = (w) => (w == null ? '—' : (w / 1000).toFixed(2) + ' kW');
+// Axis label: whole numbers once the scale is 10+, one decimal below that so a
+// 0.6 kWh day does not read as a column of 0s and 1s.
+const fmtTick = (v, max) => (v >= 1000 ? (v / 1000).toFixed(1) + 'k' : max < 10 ? v.toFixed(1) : String(Math.round(v)));
 const hhmm = (h) => String(h).padStart(2, '0') + ':00';
 
 function useWidth() {
@@ -75,7 +78,7 @@ function BarChart({ bars, series, labelEvery = 1 }) {
         {yticks.map((v, i) => (
           <g key={i}>
             <line x1={m.l} y1={y(v)} x2={m.l + innerW} y2={y(v)} stroke="rgba(255,255,255,0.06)" />
-            <text x={m.l - 6} y={y(v) + 3} textAnchor="end" className="ax">{v >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v)}</text>
+            <text x={m.l - 6} y={y(v) + 3} textAnchor="end" className="ax">{fmtTick(v, niceMax)}</text>
           </g>
         ))}
         {bars.map((b, i) => {
@@ -166,7 +169,7 @@ function LineChart({ bars, series, labelEvery = 1 }) {
         {yticks.map((v, i) => (
           <g key={i}>
             <line x1={m.l} y1={y(v)} x2={m.l + innerW} y2={y(v)} stroke="rgba(255,255,255,0.06)" />
-            <text x={m.l - 6} y={y(v) + 3} textAnchor="end" className="ax">{v >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v)}</text>
+            <text x={m.l - 6} y={y(v) + 3} textAnchor="end" className="ax">{fmtTick(v, niceMax)}</text>
           </g>
         ))}
         {series.filter((s) => s.fill).map((s) => (
@@ -601,14 +604,14 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
               <SegmentUsage data={segData.segments} />
             ) : <div className="trend-empty">{window.emptyText(window.PLANT_DAYS, 'No data yet.')}</div>}
             <div className="hint-line">
-              Typical units (kWh) used in each part of the day over the last {segData ? segData.days : segDays} days, coloured by what supplied them. The <b>kW avg</b> alongside is the intensity — how hard you pull (the geysers are short but fierce). <b>At night the split is battery vs grid</b> (with your {config?.reserve ?? 20}% floor the grid carries the bit below it); by day it's mostly direct solar.
+              Typical units (kWh) used in each part of the day over the last {segData ? segData.days : segDays} days, coloured by what supplied them. The <b>kW avg</b> alongside is the intensity — how hard the house pulls; a short heavy load reads as a short bar with a high average. By day it is mostly direct solar; at night it is what the battery can give above its {config?.reserve ?? 20}% reserve, and the grid covers the rest.
             </div>
           </Card>
           <Card>
             <div className="trend-rec-label">Usual mix by hour</div>
             <div className="seg-key" style={{ marginTop: 8 }}><b>Bar</b> = share of the house load · <b>line</b> = typical charge · highlighted = this hour</div>
             {loading && !hourData ? <window.Skeleton h={240} r={12} style={{ marginTop: 14 }} /> : hourData && hourData.hours && hourData.hours.length ? (
-              <HourMixChart hours={hourData.hours} nowHour={new Date().getHours()} />
+              <HourMixChart hours={hourData.hours} nowHour={window.plantHour(config?.timezone)} />
             ) : <div className="trend-empty">{window.emptyText(window.PLANT_DAYS, 'No data yet.')}</div>}
             <div className="trend-legend" style={{ marginTop: 12 }}>
               <span className="tl-item"><span className="tl-dot" style={{ background: C.pv }} />Solar</span>
@@ -617,7 +620,7 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
               <span className="tl-item"><span className="tl-dash" style={{ borderColor: C.soc }} />Charge</span>
             </div>
             <div className="hint-line">
-              What usually covers the house at each hour, over the last {hourData ? hourData.days : segDays} complete days. On 7d this is the same figure Live shows as <b>≈ N%</b> next to the live charge.
+              What usually covers the house at each hour, over the last {hourData ? hourData.days : segDays} complete days. The line is the typical battery charge at that hour — the same figure the Live battery card shows as ≈ next to the current charge.
             </div>
           </Card>
         </>
@@ -644,6 +647,9 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
               {loading && !daily ? <ChartSkeleton /> : (
                 <>
                   <TrendStats bars={dailyBars} unit="day" />
+                  {window.PLANT_DAYS != null && window.PLANT_DAYS < 2 && (
+                    <div className="field-note">Logging began today, so it counts only the hours since. The Live tab shows the inverter's own full-day figure.</div>
+                  )}
                   <Chart series={seriesFor(DAILY_SERIES)} labelEvery={dailyDays > 14 ? 3 : 1} bars={dailyBars} />
                 </>
               )}

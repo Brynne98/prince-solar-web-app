@@ -252,7 +252,7 @@ function HistoryView({ today, refreshKey }) {
             <text x={m.l - 10} y={y(v) + 3} textAnchor="end" className={'ax' + (v === 0 ? ' ax-hi' : '')}>{+(v / 1000).toFixed(1)}</text>
           </g>
         ))}
-        <text x={m.l - 10} y={m.t - 9} textAnchor="end" className="ax" fillOpacity="0.55">kWh</text>
+        <text x={m.l - 10} y={m.t - 9} textAnchor="end" className="ax" fillOpacity="0.55">kW</text>
         {/* right axis: SOC — independent 0–100% scale */}
         {vis.soc && [0, 25, 50, 75, 100].map(s => (
           <text key={'sc' + s} x={m.l + innerW + 10} y={ysoc(s) + 3} className="ax" fill={C.soc} fillOpacity="0.75">{s}%</text>
@@ -384,7 +384,11 @@ function HistoryView({ today, refreshKey }) {
 
   const canPrev = !earliest || date > earliest;
   const canNext = date < todayStr;
-  const emptyMsg = loading ? 'Loading…' : isToday ? window.emptyText(window.PLANT_DAYS, 'Loading today’s data…') : 'No data for this day';
+  // The server sends no series until today has about half an hour of readings
+  // (`approx`), so a freshly linked plant sees a blank chart, not a short history.
+  const emptyMsg = loading ? 'Loading…'
+    : isToday && dayData?.approx ? 'Collecting today’s first readings — the chart starts after about half an hour of logging.'
+    : isToday ? window.emptyText(window.PLANT_DAYS, 'Loading today’s data…') : 'No data for this day';
 
   return (
     <div className="hv-root">
@@ -411,6 +415,14 @@ function HistoryView({ today, refreshKey }) {
 
       <div className="legend-row">
         {legend.map(([k, l, c]) => <window.LegendChip key={k} color={c} label={l} value={chipVal(k)} active={vis[k]} onClick={() => toggle(k)} />)}
+        {potential && potential.available === false && (
+          // The dotted clear-sky line is fitted to one site (the calibration plant).
+          // Say so instead of quietly drawing nothing.
+          <span className="dim" style={{ fontSize: 11, alignSelf: 'center', marginLeft: 6 }}
+                title="The dotted line showing what a clear sky would give is fitted to one site at a time and is not available for this plant yet.">
+            no expected-solar line for this plant yet
+          </span>
+        )}
       </div>
 
       <div className="chart-area" ref={ref} style={{ position: 'relative', height: height }}>

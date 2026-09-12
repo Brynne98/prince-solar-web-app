@@ -28,7 +28,7 @@
 // Multi-tenant: one pass per linked plant, read through the account that can see
 // it. The time budget is shared across plants; whatever is left over is picked up
 // next run.
-import { type Account, db, type PlantJob, plantsToPoll } from "../_shared/sunsynk.ts";
+import { type Account, db, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
 import {
   bucketizeAgg,
   calibrateFeedScale,
@@ -247,6 +247,8 @@ Deno.serve(async (req) => {
   try {
     const url = new URL(req.url);
     const windowDays = Math.max(1, Math.min(120, Number(url.searchParams.get("days")) || DEFAULT_WINDOW_DAYS));
+    // ?budget_ms= lets a test shrink the time budget; production never passes it.
+    const budgetMs = Math.min(TIME_BUDGET_MS, Number(url.searchParams.get("budget_ms")) || TIME_BUDGET_MS);
 
     const jobs = await plantsToPoll();
     if (!jobs.length) return json({ ok: true, banked: 0, reason: "no linked plants" });
@@ -261,8 +263,12 @@ Deno.serve(async (req) => {
 
     const plants = [];
     let total = 0;
-    for (const job of jobs) {
-      if (Date.now() - started > TIME_BUDGET_MS) {
+    // Start after the plant the previous run finished on, so a run that hits the
+    // budget does not starve the same plants every time.
+    let done = 0;
+    for (const job of await rotateJobs(jobs, "RECOVER_CURSOR")) {
+      // Always make progress on at least one plant, however small the budget.
+      if (done > 0 && Date.now() - started > budgetMs) {
         plants.push({ plantId: job.plantId, banked: 0, reason: "time budget reached before this plant" });
         continue;
       }
@@ -273,6 +279,8 @@ Deno.serve(async (req) => {
       } catch (e) {
         plants.push({ plantId: job.plantId, banked: 0, error: String(e instanceof Error ? e.message : e) });
       }
+      done++;
+      await markCursor("RECOVER_CURSOR", job.plantId);
     }
 
     return json({ ok: true, banked: total, windowDays, plants, elapsedMs: Date.now() - started });

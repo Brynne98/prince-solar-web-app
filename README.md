@@ -5,7 +5,8 @@ state of charge, grid import/export, home load, an energy-flow diagram, day char
 and longer-run trends across **every inverter on the account**.
 
 It also keeps its own minute-by-minute history, which is the point of it. SunSynk's
-cloud drops detail after a week or two; this logs every minute permanently, so the
+cloud drops detail after a week or two; this logs every minute (the plant total for
+good, per-inverter detail for 90 days), so the
 trends, integrity checks and battery-health views have something real to work from.
 
 > Two inverters? No setup needed — every inverter on the account is discovered
@@ -117,6 +118,19 @@ curl -X POST 'http://127.0.0.1:55321/functions/v1/forecast?mode=calibrate' # ref
 `pg_cron` is not enabled locally, so nothing runs on a schedule — invoke functions by
 hand. Ports are shifted to the 553xx range so this can run alongside another local
 Supabase project.
+
+### Trying other plant shapes without a SunSynk account
+
+`scripts/mock-sunsynk/` stands in for openapi.sunsynk.net with five pretend logins:
+a two-inverter home, a shared plant seen by two logins, a three-phase exporter in
+London, an off-grid cabin, a grid-tied plant with no battery, and two inverters on
+one shared battery. READINESS.md has the table and the three commands to bring it up.
+Two checks run against it and decide by exit code:
+
+```bash
+node scripts/mock-sunsynk/tenancy-check.mjs    # every user sees only their plants
+node scripts/mock-sunsynk/settings-check.mjs   # Settings round-trips and the guard triggers
+```
 
 ### Importing existing history
 

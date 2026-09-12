@@ -162,6 +162,9 @@ function App() {
     setPlantId(Number(id));
     window.savePrefs({ lastPlant: Number(id) }).catch(() => {});
     setEnergy({}); energyRef.current = {}; setSnap(null); setToday(null);
+    // how much history THIS plant has — the empty-state copy reads it
+    window.PLANT_DAYS = null;
+    window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
     loadLive(); loadToday(); setRefreshKey(k => k + 1);
   };
   const reloadPlantConfig = () => loadMe().then(loadLive);
@@ -304,6 +307,31 @@ function App() {
     </div>
   );
 }
+
+// A crash in someone's browser used to be invisible. Report it (once per message
+// per session) to client_errors; the table caps a runaway loop at 50/hour.
+(function () {
+  const seen = new Set();
+  const report = (message, stack) => {
+    try {
+      const key = String(message).slice(0, 200);
+      if (seen.has(key) || seen.size > 20 || !window.sb) return;
+      seen.add(key);
+      window.sb.auth.getSession().then(({ data }) => {
+        const uid = data?.session?.user?.id;
+        if (!uid) return;
+        return window.sb.from('client_errors').insert({
+          user_id: uid, plant_id: window.CURRENT_PLANT ?? null, app_version: window.APP_VERSION,
+          page: location.pathname + location.search, message: String(message), stack: stack ? String(stack) : null,
+          user_agent: navigator.userAgent,
+        });
+      }).catch(() => {});
+    } catch (e) {}
+  };
+  window.addEventListener('error', (e) => report(e.message || e.error, e.error && e.error.stack));
+  window.addEventListener('unhandledrejection', (e) => report((e.reason && e.reason.message) || e.reason, e.reason && e.reason.stack));
+  window.reportClientError = report;
+})();
 
 const legalPage = new URLSearchParams(location.search).get('page');
 ReactDOM.createRoot(document.getElementById('root')).render(

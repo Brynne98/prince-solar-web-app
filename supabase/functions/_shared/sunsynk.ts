@@ -230,10 +230,32 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
 
 export type PlantInfo = { id: number; name: string };
 
+/**
+ * Walk a paged list endpoint to the end. SunSynk pages `/plants` and `/inverters`
+ * (`total`, `pageSize`, `infos[]`); an installer login can see hundreds, and
+ * page 1 alone silently dropped the rest (READINESS P4). Stops when a page comes
+ * back short, when `total` is reached, or at MAX_PAGES as a guard.
+ */
+const PAGE_LIMIT = 50;
+const MAX_PAGES = 40;
+async function apiGetAll(base: string, acc: Account): Promise<any[]> {
+  const out: any[] = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const sep = base.includes("?") ? "&" : "?";
+    const data = await apiGet(`${base}${sep}page=${page}&limit=${PAGE_LIMIT}`, acc);
+    const list: any[] = (data && (data.infos || data.records)) || [];
+    out.push(...list);
+    const total = Number(data?.total);
+    const pageSize = Number(data?.pageSize) || PAGE_LIMIT;
+    if (!list.length || list.length < pageSize) break;
+    if (Number.isFinite(total) && out.length >= total) break;
+  }
+  return out;
+}
+
 /** Plants visible to this account — owned or shared to it. */
 export async function getPlants(acc: Account): Promise<PlantInfo[]> {
-  const data = await apiGet("/plants?page=1&limit=50", acc);
-  const list = (data && (data.infos || data.records)) || [];
+  const list = await apiGetAll("/plants", acc);
   return list.map((p: any) => ({ id: Number(p.id), name: p.name ?? String(p.id) }));
 }
 
@@ -257,8 +279,7 @@ export async function getPlantDetail(acc: Account, plantId: number): Promise<Pla
 
 /** All inverters visible to this account. */
 export async function getInverters(acc: Account): Promise<InverterInfo[]> {
-  const data = await apiGet("/inverters?page=1&limit=50&total=0&status=-1&type=-2", acc);
-  const list = (data && (data.infos || data.records)) || [];
+  const list = await apiGetAll("/inverters?total=0&status=-1&type=-2", acc);
   return list.map((i: any) => ({
     sn: i.sn,
     alias: i.alias || i.sn,
@@ -379,35 +400,75 @@ export async function ensureBootstrapAccount(): Promise<boolean> {
 }
 
 /** Every plant that should be worked on, with the account that can read it. */
-export type PlantJob = { plantId: number; plantName: string | null; timezone: string; account: Account };
+export type PlantJob = {
+  plantId: number; plantName: string | null; timezone: string;
+  /** plant_config.batt_positive_means; null until detected or set (0041) */
+  battPositiveMeans: string | null;
+  account: Account;
+};
 
 export async function plantsToPoll(): Promise<PlantJob[]> {
+  // accounts_active orders by linked_at, so index = seniority.
   const accounts = await rpc<Account[]>("accounts_active", {});
   if (!accounts?.length) return [];
+  const rank = new Map(accounts.map((a, i) => [a.id, i]));
   const byId = new Map(accounts.map((a) => [a.id, a]));
   const { data, error } = await db
     .from("plant_users").select("plant_id, plant_name, account_id")
     .in("account_id", [...byId.keys()]);
   if (error) throw new Error(`plant_users: ${error.message}`);
-  const { data: cfgRows } = await db.from("plant_config").select("plant_id, timezone");
-  const tzOf = new Map((cfgRows ?? []).map((c: any) => [Number(c.plant_id), String(c.timezone)]));
-  // one job per plant even if several users share it
-  const seen = new Set<number>();
-  const jobs: PlantJob[] = [];
+  const { data: cfgRows } = await db.from("plant_config").select("plant_id, timezone, batt_positive_means");
+  const cfg = new Map((cfgRows ?? []).map((c: any) => [Number(c.plant_id), c]));
+  // One job per plant even if several users share it. The plant is read through
+  // the EARLIEST-linked active account, and that choice is stable from minute to
+  // minute — the inverter cache (freshness gate, carry run) is keyed by account,
+  // so a flip would throw it away every time. If that account dies (needs_relink)
+  // the next-oldest takes over on the following minute.
+  const best = new Map<number, { row: any; acc: Account }>();
   for (const r of data ?? []) {
     const pid = Number(r.plant_id);
-    if (seen.has(pid) || !r.account_id) continue;
+    if (!r.account_id) continue;
     const acc = byId.get(r.account_id);
     if (!acc) continue;
-    seen.add(pid);
-    jobs.push({ plantId: pid, plantName: r.plant_name ?? null, timezone: tzOf.get(pid) ?? "Africa/Johannesburg", account: acc });
+    const cur = best.get(pid);
+    if (!cur || (rank.get(acc.id) ?? 1e9) < (rank.get(cur.acc.id) ?? 1e9)) best.set(pid, { row: r, acc });
   }
-  return jobs;
+  return [...best.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([pid, { row, acc }]) => ({
+      plantId: pid,
+      plantName: row.plant_name ?? null,
+      timezone: String(cfg.get(pid)?.timezone ?? "Africa/Johannesburg"),
+      battPositiveMeans: cfg.get(pid)?.batt_positive_means ?? null,
+      account: acc,
+    }));
+}
+
+/**
+ * Round-robin for the batch functions (recover, sync-plant-energy). Each has a
+ * time budget shared across every plant; without this, plants late in the list
+ * could starve run after run (READINESS P3). The id of the last plant a run
+ * finished is kept in app_config under `key`; the next run starts after it.
+ */
+export async function rotateJobs<T extends { plantId: number }>(jobs: T[], key: string): Promise<T[]> {
+  if (jobs.length < 2) return jobs;
+  const { data } = await db.from("app_config").select("value").eq("key", key).maybeSingle();
+  const last = data ? Number(data.value) : null;
+  if (last == null) return jobs;
+  const i = jobs.findIndex((j) => j.plantId === last);
+  if (i < 0) return jobs; // that plant is gone; start from the top
+  return [...jobs.slice(i + 1), ...jobs.slice(0, i + 1)];
+}
+export async function markCursor(key: string, plantId: number): Promise<void> {
+  const { error } = await db.from("app_config")
+    .upsert({ key, value: plantId, note: "last plant finished by this batch function; the next run starts after it" }, { onConflict: "key" });
+  if (error) console.warn(`cursor ${key}:`, error.message);
 }
 
 /**
  * The plant the single-site features (forecast calibration, phone alerts) are bound
- * to: the first plant ever linked. Same rule as public.calibration_plant().
+ * to: pinned in app_config.CALIBRATION_PLANT by the first link (migration 0041).
+ * Same rule as public.calibration_plant().
  */
 export async function bootstrapPlantId(): Promise<number | null> {
   const v = await rpc<number | null>("calibration_plant", {});

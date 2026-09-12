@@ -64,7 +64,7 @@ function BatteryBalanceBanner({ refreshKey }) {
       <span className="bb-div" />
       <div className="bb-stats">
         <span className="bb-stat" title={statusTip}>
-          <span className="bb-k">SOC</span><b className="mono">{(b.banks || []).map((x) => x.soc).join(' / ')}%</b>
+          <span className="bb-k">Charge</span><b className="mono">{(b.banks || []).map((x) => x.soc).join(' / ')}%</b>
         </span>
         {b.tempC != null && (
           <span className={'bb-stat' + (b.tempHot ? ' bb-hot' : '')} title="Pack temperature. LFP lasts longest below ~25°C; ageing climbs past ~35°C.">
@@ -73,7 +73,7 @@ function BatteryBalanceBanner({ refreshKey }) {
         )}
         {b.hrsAtFullToday != null && (
           <span className="bb-stat" title="Hours at ≥98% charge today. Brief is healthy and keeps the BMS calibrated; long spells in summer heat are what to avoid.">
-            <span className="bb-k">Full</span><b className="mono">{b.hrsAtFullToday}h</b>
+            <span className="bb-k">Full today</span><b className="mono">{b.hrsAtFullToday}h</b>
           </span>
         )}
       </div>
@@ -84,6 +84,10 @@ function BatteryBalanceBanner({ refreshKey }) {
 // ---------------------------------------------------------------- LIVE
 function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
   const a = snap.aggregate;
+  const feat = snap.features || {};
+  const hasBatt = feat.hasBattery !== false;
+  const hasGrid = feat.hasGrid !== false;
+  const tz = snap.config?.timezone;
   // Typical charge at this hour, from complete days over the last week
   // (same default window as Trends). Fetched on mount / manual refresh —
   // the 24-hour profile barely moves, and the live snapshot tick (60s) is
@@ -94,7 +98,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
     window.fetchHourly().then((d) => { if (alive) setHourly(d); }).catch(() => {});
     return () => { alive = false; };
   }, [refreshKey]);
-  const hourNow = (snap.updated instanceof Date ? snap.updated : new Date()).getHours();
+  const hourNow = window.plantHour(tz, snap.updated instanceof Date ? snap.updated : new Date());
   const typicalRow = (hourly && hourly.hours || []).find((h) => Number(h.hour) === hourNow);
   const typicalSoc = typicalRow && typicalRow.soc != null && Number.isFinite(Number(typicalRow.soc))
     ? Math.round(Number(typicalRow.soc)) : null;
@@ -103,16 +107,19 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
   // Pack figures come from app_config via the snapshot, so these agree with the
   // phone alerts by construction. The literals are only a pre-first-fetch fallback.
   const RESERVE = snap.config?.reserve ?? 20;
-  const cap = snap.config?.battCapacity ?? 26.5;
-  const availKwh = Math.max(0, (a.battSoc - RESERVE) / 100 * cap);
-  const headroomKwh = Math.max(0, (100 - a.battSoc) / 100 * cap);
+  // null until the owner sets the pack size in Settings; no guessing another plant's pack
+  const cap = snap.config?.battCapacity ?? null;
+  const availKwh = cap ? Math.max(0, (a.battSoc - RESERVE) / 100 * cap) : null;
+  const headroomKwh = cap ? Math.max(0, (100 - a.battSoc) / 100 * cap) : null;
   const fmtDur = (hrs) => { let h = Math.floor(hrs), m = Math.round((hrs - h) * 60); if (m === 60) { h++; m = 0; } return (h > 0 ? h + 'h ' : '') + String(m).padStart(h > 0 ? 2 : 1, '0') + 'm'; };
   const fmtEta = (hrs) => {
     const d = new Date(snap.updated.getTime() + hrs * 3600000);
-    return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) + ', ' + d.toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short' });
+    return window.fmtPlantTime(d, tz) + ', ' + d.toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz || undefined });
   };
   let battEta = null, battInfo = null;
-  if (a.battState === 'discharging' && a.battPower > 50) {
+  if (!hasBatt) { /* nothing to estimate */ }
+  else if (!cap) { battInfo = 'set pack size in Settings'; }
+  else if (a.battState === 'discharging' && a.battPower > 50) {
     const hrs = availKwh / (a.battPower / 1000);
     battEta = <span className="batt-eta"><span className="bel">≈ <b>{fmtDur(hrs)}</b> until {RESERVE}% reserve</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
     battInfo = `${fmtDur(hrs)} to empty`;
@@ -177,22 +184,26 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
     if (!isAgg) return null;
     const rows = energy[period];
     if (!rows) return null;
-    return rows.reduce((o, d) => ({ pv: o.pv + d.pv, load: o.load + d.load, imp: o.imp + d.imp, chg: o.chg + d.chg, dischg: o.dischg + d.dischg }), { pv: 0, load: 0, imp: 0, chg: 0, dischg: 0 });
+    return rows.reduce((o, d) => ({ pv: o.pv + (d.pv || 0), load: o.load + (d.load || 0), imp: o.imp + (d.imp || 0), exp: o.exp + (d.exp || 0), chg: o.chg + (d.chg || 0), dischg: o.dischg + (d.dischg || 0) }), { pv: 0, load: 0, imp: 0, exp: 0, chg: 0, dischg: 0 });
   }, [period, energy]);
   const rate = snap.config?.tariffImport ?? 0;
-  let pPv, pLoad, pImp;
-  if (period === 'today') { pPv = a.pvToday; pLoad = a.loadToday; pImp = a.gridFromToday; }
-  else if (heavy) { pPv = heavy.pv; pLoad = heavy.load; pImp = heavy.imp; }
-  else { pPv = pLoad = pImp = null; } // aggregate period still loading
+  const rateExp = snap.config?.tariffExport ?? 0;
+  let pPv, pLoad, pImp, pExp;
+  if (period === 'today') { pPv = a.pvToday; pLoad = a.loadToday; pImp = hasGrid ? a.gridFromToday : 0; pExp = hasGrid ? a.gridToToday : 0; }
+  else if (heavy) { pPv = heavy.pv; pLoad = heavy.load; pImp = hasGrid ? heavy.imp : 0; pExp = hasGrid ? heavy.exp : 0; }
+  else { pPv = pLoad = pImp = pExp = null; } // aggregate period still loading
   // clamp to 0–100: import can exceed load when the grid charges the battery,
   // which would otherwise drive this negative (and break the bar).
   const pSuff = (pLoad != null && pLoad > 0) ? Math.max(0, Math.min(100, Math.round(((pLoad - pImp) / pLoad) * 100))) : null;
-  const pSaved = (pLoad != null) ? Math.max(0, pLoad - pImp) * rate : null;
+  // avoided purchases at the import rate, plus anything sold at the feed-in rate
+  const pSaved = (pLoad != null) ? Math.max(0, pLoad - pImp) * rate + (pExp || 0) * rateExp : null;
+  // Show an Exported tile when this plant sells (a feed-in rate is set, or it has exported)
+  const showExport = hasGrid && (rateExp > 0 || (pExp || 0) > 0 || (a.gridToTotal || 0) > 0);
   const pending = isAgg && !energy[period];
   const periodWord = { today: 'today', week: 'this week', month: 'this month', year: 'this year', lifetime: 'all-time' }[period];
   // trend vs the same elapsed slice of the previous period. Suppress "today" until
   // midday — a partial morning vs a full yesterday reads as a misleading drop.
-  const showCmp = period !== 'today' || new Date().getHours() >= 12;
+  const showCmp = period !== 'today' || window.plantHour(tz) >= 12;
   // "current" = the live value shown in the tile (pPv/pLoad/…) so the arrow stays
   // consistent with the number AND moves on every refresh; "previous" comes from
   // the compare endpoint (same elapsed slice of the prior period).
@@ -246,7 +257,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
 
   return (
     <div className="live-grid">
-      <BatteryBalanceBanner refreshKey={refreshKey} />
+      {hasBatt && <BatteryBalanceBanner refreshKey={refreshKey} />}
       <div className={'flow-fs-wrap' + (cursorHidden ? ' cursor-hidden' : '')} ref={flowRef}>
         <Card className="flow-card">
           <SectionTitle right={
@@ -254,7 +265,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
               {isFs ? <FsExitIcon /> : <FsEnterIcon />}<span>{isFs ? 'Exit' : 'Fullscreen'}</span>
             </button>
           }>POWER FLOW</SectionTitle>
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} typicalSoc={typicalSoc} typicalHour={typicalHour} />
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} />
         </Card>
       </div>
 
@@ -276,7 +287,9 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
             info="Total energy your home used over the selected period, summed across all inverters." />
           <MiniStat loading={pending} label="Self-sufficiency" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
             info="Share of your home’s energy that came from your own solar + battery rather than the grid. 100% = fully off-grid for the period." />
-          <MiniStat loading={pending} label="Imported" value={window.fmtEnergySmart(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
+          {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergySmart(pExp)} color={CC.grid}
+            info={'Energy sent to the grid over the selected period' + (rateExp > 0 ? ', paid at your feed-in rate.' : '. Set a feed-in rate in Settings to count it in savings.')} />}
+          {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergySmart(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
             info="Energy drawn from the grid over the selected period."
             sub={a.gridPresent == null ? null : (
               // Presence, not usage: mains voltage is there even when you draw nothing
@@ -285,11 +298,14 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
                     title={a.gridPresent
                       ? 'Mains voltage detected. This reads ON whenever the utility is live, even when you are drawing nothing from it.'
                       : 'No mains voltage on any inverter — the utility supply is down.'}>
-                <span className="gs-dot" />{a.gridPresent ? 'Grid on' : 'Grid off'}
+                <span className="gs-dot" />{a.gridPresent ? (a.phaseDown ? 'Phase down' : 'Grid on') : 'Grid off'}
               </span>
-            )} />
+            )} />}
+          {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off-grid" color={CC.grid}
+            info="This plant has no grid connection. Everything the home uses comes from solar and the battery." />}
           <MiniStat loading={pending} label="Est. saved" value={window.fmtRandSmart(pSaved)} color={CC.batt}
-            info="Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your import rate. Set the rate in Settings." />
+            sub={!(rate > 0) ? 'set your rate in Settings' : undefined}
+            info={'Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your import rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '. Set the rates in Settings.'} />
         </div>
       </div>
 
@@ -392,10 +408,24 @@ function SolarTab({ snap, energy, onNeedEnergy }) {
 // ---------------------------------------------------------------- BATTERY
 function BatteryTab({ snap, settings }) {
   const a = snap.aggregate;
+  const feat = snap.features || {};
+  if (feat.hasBattery === false) {
+    return (
+      <div className="stack">
+        <Card>
+          <SectionTitle>BATTERY</SectionTitle>
+          <div className="field-note" style={{ marginTop: 0 }}>This plant has no battery — the inverter reports no pack. If one has just been fitted, Settings → Plant → Equipment can switch this on.</div>
+        </Card>
+      </div>
+    );
+  }
   const reserve = snap.config?.reserve ?? 20;
-  const cap = snap.config?.battCapacity ?? 26.5;
-  const banks = snap.inverters.filter(i => i.numberOfBatteries > 0).length;
-  const modules = snap.inverters.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
+  const cap = snap.config?.battCapacity ?? 0;
+  const shared = feat.banks === 'shared';
+  const withBatt = snap.inverters.filter(i => i.numberOfBatteries > 0 || i.battSoc > 0);
+  // One shared pack: every inverter reads the same BMS, so count it once.
+  const banks = shared ? Math.min(1, withBatt.length) : withBatt.length;
+  const modules = shared ? Math.max(0, ...withBatt.map(i => i.numberOfBatteries || 0)) : withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
   return (
     <div className="stack">
       <div className="batt-top">
@@ -412,8 +442,8 @@ function BatteryTab({ snap, settings }) {
           <div className="throughput">
             <div><div className="tp-label">Charged</div><div className="tp-val mono" style={{ color: CC.batt }}>+{a.battChgToday} kWh</div></div>
             <div><div className="tp-label">Discharged</div><div className="tp-val mono" style={{ color: CC.load }}>−{a.battDischgToday} kWh</div></div>
-            <div><div className="tp-label">Capacity</div><div className="tp-val mono">{cap.toFixed(1)} kWh</div></div>
-            <div><div className="tp-label">Est. cycles today</div><div className="tp-val mono">{(a.battDischgToday / cap).toFixed(2)}</div></div>
+            <div><div className="tp-label">Capacity</div><div className="tp-val mono">{cap > 0 ? cap.toFixed(1) + ' kWh' : 'set in Settings'}</div></div>
+            <div><div className="tp-label">Est. cycles today</div><div className="tp-val mono">{cap > 0 ? (a.battDischgToday / cap).toFixed(2) : '—'}</div></div>
           </div>
           <div className="meter-head">
             <span className="meter-cap">State of charge</span>
@@ -424,11 +454,11 @@ function BatteryTab({ snap, settings }) {
             <div className="reserve-mark" style={{ left: reserve + '%' }} title={`reserve ${reserve}%`} />
           </div>
           <div className="meter-scale"><span>0%</span><span>100%</span></div>
-          <div className="hint-line">The bar is your battery’s charge level; the tick marks the <b>{reserve}%</b> reserve floor where discharge stops (~{(Math.max(0, (a.battSoc - reserve) / 100 * cap)).toFixed(1)} kWh usable above it). Sign convention: <b>{settings.battPositive === 'charge' ? 'positive = charging' : 'negative current = charging'}</b> (set in Settings).</div>
+          <div className="hint-line">The bar is your battery’s charge level; the tick marks the <b>{reserve}%</b> reserve floor where discharge stops{cap > 0 ? <> (~{(Math.max(0, (a.battSoc - reserve) / 100 * cap)).toFixed(1)} kWh usable above it)</> : null}. Sign convention: <b>{settings.battPositive === 'charge' ? 'positive = charging' : 'negative current = charging'}</b> (set in Settings).</div>
         </Card>
       </div>
       <Card>
-        <SectionTitle right={<span className="dim">{banks} {banks === 1 ? 'bank' : 'banks'} · {modules} {modules === 1 ? 'battery' : 'batteries'} · single bank per inverter</span>}>PER INVERTER</SectionTitle>
+        <SectionTitle right={<span className="dim">{banks} {banks === 1 ? 'bank' : 'banks'} · {modules} {modules === 1 ? 'battery' : 'batteries'} · {shared ? 'one pack shared by ' + snap.inverters.length + ' inverters' : 'single bank per inverter'}</span>}>PER INVERTER</SectionTitle>
         <div className="duo">
           {snap.inverters.map(inv => {
             const t = cleanTemp(inv.battTemp);
@@ -441,6 +471,14 @@ function BatteryTab({ snap, settings }) {
                   <Metric label="Voltage" value={inv.battVolt.toFixed(1)} unit=" V" />
                   <Metric label="Temp" value={t != null ? inv.battTemp.toFixed(1) : 'bad sensor'} unit={t != null ? ' °C' : ''} accent={t == null ? CC.load : null} />
                 </div>
+                {inv.bank2 && (
+                  <div className="mp-grid" style={{ marginTop: 8 }} title="Second battery bank, as the inverter reports it">
+                    <Metric label="Bank 2 power" value={fmtPower(Math.abs(inv.bank2.power || 0))} accent={CC.batt} />
+                    <Metric label="Bank 2 charge" value={inv.bank2.soc} unit="%" accent={CC.batt} />
+                    <Metric label="Bank 2 voltage" value={(inv.bank2.voltage || 0).toFixed(1)} unit=" V" />
+                    <Metric label="Bank 2 temp" value={cleanTemp(inv.bank2.temperature) != null ? inv.bank2.temperature.toFixed(1) : '—'} unit={cleanTemp(inv.bank2.temperature) != null ? ' °C' : ''} />
+                  </div>
+                )}
               </div>
             );
           })}
@@ -453,18 +491,41 @@ function BatteryTab({ snap, settings }) {
 // ---------------------------------------------------------------- GRID
 function GridTab({ snap, settings }) {
   const a = snap.aggregate;
+  const feat = snap.features || {};
+  if (feat.hasGrid === false) {
+    const selfSuff = 100;
+    return (
+      <div className="stack">
+        <div className="trio">
+          <StatTile label="GRID" value="Off-grid" unit="" accent={CC.grid} sub="no utility connection" />
+          <StatTile label="SELF-SUFFICIENCY" value={selfSuff} unit="%" accent={CC.soc} bar={selfSuff} sub="everything from solar and battery" />
+          <StatTile label="USED TODAY" value={a.loadToday} unit=" kWh" accent={CC.load} sub="covered without a grid" />
+        </div>
+        <Card>
+          <SectionTitle>OFF-GRID</SectionTitle>
+          <div className="field-note" style={{ marginTop: 0 }}>The inverter reports no mains voltage and no import, so this tab has nothing to bill. If a grid connection is added later, Settings → Plant → Equipment can switch it on.</div>
+        </Card>
+      </div>
+    );
+  }
   const selfSuff = a.loadToday > 0 ? Math.max(0, Math.min(100, Math.round(((a.loadToday - a.gridFromToday) / a.loadToday) * 100))) : 0;
   const rate = snap.config?.tariffImport ?? 0;
+  const rateExp = snap.config?.tariffExport ?? 0;
+  const exporting = a.gridPower < -5;
   const wouldPay = a.loadToday * rate;                              // all consumption bought from grid
   const cost = a.gridFromToday * rate;                             // what you actually paid the grid
-  const saved = Math.max(0, a.loadToday - a.gridFromToday) * rate;  // avoided cost = wouldPay − cost
+  const earned = (a.gridToToday || 0) * rateExp;                   // feed-in income
+  const saved = Math.max(0, a.loadToday - a.gridFromToday) * rate + earned;  // avoided cost + income
+  const showExport = rateExp > 0 || (a.gridToToday || 0) > 0 || (a.gridToTotal || 0) > 0;
   return (
     <div className="stack">
       <div className="trio">
         <StatTile label="GRID NOW" value={fmtPowerParts(Math.abs(a.gridPower))[0]} unit={' ' + fmtPowerParts(Math.abs(a.gridPower))[1]} accent={CC.grid}
-          sub={a.gridPower > 0 ? 'importing' : 'idle'} />
+          sub={exporting ? 'exporting' : a.gridPower > 5 ? 'importing' : 'idle'} />
         <StatTile label="IMPORTED TODAY" value={a.gridFromToday} unit=" kWh" accent={CC.grid} sub={<>lifetime <b>{a.gridFromTotal.toLocaleString()} kWh</b></>} />
-        <StatTile label="SELF-SUFFICIENCY" value={selfSuff} unit="%" accent={CC.soc} bar={selfSuff} sub="of load met without the grid" />
+        {showExport
+          ? <StatTile label="EXPORTED TODAY" value={a.gridToToday} unit=" kWh" accent={CC.pv} sub={<>lifetime <b>{(a.gridToTotal || 0).toLocaleString()} kWh</b></>} />
+          : <StatTile label="SELF-SUFFICIENCY" value={selfSuff} unit="%" accent={CC.soc} bar={selfSuff} sub="of load met without the grid" />}
       </div>
       <div className="duo">
         <Card>
@@ -472,18 +533,25 @@ function GridTab({ snap, settings }) {
           <div className="mp-grid">
             <Metric label="Frequency" value={a.gridFreq.toFixed(2)} unit=" Hz" />
             <Metric label="Power factor" value={a.gridPf.toFixed(2)} />
-            <Metric label="Voltage L1" value={snap.inverters[0].phases[0].volt.toFixed(1)} unit=" V" />
-            <Metric label="Status" value={a.gridPower > 0 ? 'importing' : 'grid-tied'} />
+            {/* one voltage per inverter, one per phase where the inverter is three-phase */}
+            {snap.inverters.map(inv => (
+              <Metric key={inv.sn} label={(snap.inverters.length > 1 ? inv.alias + ' ' : '') + (inv.gridVolts.length > 1 ? 'L1 / L2 / L3' : 'Voltage')}
+                value={inv.gridVolts.length ? inv.gridVolts.map(v => Math.round(v)).join(' / ') : (inv.gridVolt != null ? Math.round(inv.gridVolt) : '—')} unit=" V"
+                accent={inv.gridVolts.some(v => v < 100) ? CC.load : null} />
+            ))}
+            <Metric label="Status" value={a.phaseDown ? 'phase down' : exporting ? 'exporting' : a.gridPower > 5 ? 'importing' : 'grid-tied'} accent={a.phaseDown ? CC.load : null} />
           </div>
+          {a.phaseDown && <div className="inv-warn">⚠ One phase has no voltage while another is live — check the supply on that phase.</div>}
         </Card>
         <Card accent={CC.batt}>
             <SectionTitle right={<span className="dim mono">{window.PLANT_CURRENCY}</span>}>COST & SAVINGS · TODAY</SectionTitle>
             <div className="savings-row">
               <div><div className="tp-label">Would've paid</div><div className="tp-val mono" style={{ color: CC.grid }}>{fmtRand(wouldPay)}</div></div>
               <div><div className="tp-label">Grid cost</div><div className="tp-val mono" style={{ color: CC.load }}>{fmtRand(cost)}</div></div>
+              {showExport && rateExp > 0 && <div><div className="tp-label">Earned</div><div className="tp-val mono" style={{ color: CC.pv }}>{fmtRand(earned)}</div></div>}
               <div><div className="tp-label">Saved</div><div className="tp-val mono" style={{ color: CC.batt }}>{fmtRand(saved)}</div></div>
             </div>
-          <div className="hint-line">All {fmtKwh(a.loadToday)} you used today @ {fmtRand(rate)}/kWh would've cost <b>{fmtRand(wouldPay)}</b>; you only bought {fmtKwh(a.gridFromToday)} from the grid, so you saved the difference. (Battery charged from the grid nets out, since it shows as import.) {rate ? 'Edit the rate in Settings.' : 'Set your import rate in Settings to see real numbers.'}</div>
+          <div className="hint-line">All {fmtKwh(a.loadToday)} you used today @ {fmtRand(rate)}/kWh would've cost <b>{fmtRand(wouldPay)}</b>; you only bought {fmtKwh(a.gridFromToday)} from the grid, so you saved the difference.{showExport && rateExp > 0 ? <> Plus {fmtKwh(a.gridToToday)} sold @ {fmtRand(rateExp)}/kWh.</> : null} (Battery charged from the grid nets out, since it shows as import.) {rate ? 'Edit the rates in Settings.' : 'Set your import rate in Settings to see real numbers.'}</div>
         </Card>
       </div>
     </div>
@@ -492,6 +560,8 @@ function GridTab({ snap, settings }) {
 
 // ---------------------------------------------------------------- INVERTERS
 function InvertersTab({ snap }) {
+  const feat = snap.features || {};
+  const hasBatt = feat.hasBattery !== false, hasGrid = feat.hasGrid !== false;
   return (
     <div className="stack">
       <SectionTitle right={<span className="dim">{snap.inverters.length} units · {snap.plant.name}</span>}>INVERTERS</SectionTitle>
@@ -510,14 +580,14 @@ function InvertersTab({ snap }) {
               <div className="inv-grid">
                 <Metric label="Solar" value={fmtPower(inv.pvNow)} accent={CC.pv} />
                 <Metric label="Output" value={fmtPower(inv.output)} />
-                <Metric label="Battery" value={fmtPower(inv.battPower)} accent={CC.batt} />
-                <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />
-                <Metric label="Grid" value={fmtPower(inv.grid)} accent={CC.grid} />
+                {hasBatt && <Metric label="Battery" value={fmtPower(inv.battPower)} accent={CC.batt} />}
+                {hasBatt && <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />}
+                {hasGrid && <Metric label={inv.grid < -5 ? 'Grid (export)' : 'Grid'} value={fmtPower(Math.abs(inv.grid))} accent={CC.grid} />}
                 <Metric label="Home" value={fmtPower(inv.load)} accent={CC.load} />
-                <Metric label="Batt temp" value={t != null ? inv.battTemp.toFixed(1) : 'bad sensor'} unit={t != null ? ' °C' : ''} accent={t == null ? CC.load : null} />
+                {hasBatt && <Metric label="Batt temp" value={t != null ? inv.battTemp.toFixed(1) : 'bad sensor'} unit={t != null ? ' °C' : ''} accent={t == null ? CC.load : null} />}
                 <Metric label="Today PV" value={fmtKwh(inv.pvToday)} accent={CC.pv} />
               </div>
-              {t == null && <div className="inv-warn">⚠ Battery temp sensor reading invalid (≤ −50 °C) — filtered.</div>}
+              {hasBatt && t == null && <div className="inv-warn">⚠ Battery temp sensor reading invalid (≤ −50 °C) — filtered.</div>}
             </Card>
           );
         })}
@@ -533,24 +603,24 @@ function InvertersTab({ snap }) {
 function SunSynkConnectionCard() {
   const { useState } = React;
   const { loading, accounts } = window.useLinkStatus(0);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
-  const acc = accounts.find(a => a.status !== 'disabled');
-  const fmt = (iso) => iso ? new Date(iso).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
-  const disconnect = async () => {
-    if (!acc) return;
+  const [adding, setAdding] = useState(false);
+  const live = accounts.filter(a => a.status !== 'disabled');
+  const fmt = (iso) => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+  const disconnect = async (acc) => {
     if (!confirm(`Disconnect ${acc.sunsynk_username}? Logging for its plants stops until you connect again. Your history is kept.`)) return;
-    setBusy(true); setErr(null);
+    setBusy(acc.account_id); setErr(null);
     try { await window.disconnectSunsynk(acc.account_id); location.reload(); }
-    catch (e) { setErr(e.message); setBusy(false); }
+    catch (e) { setErr(e.message); setBusy(null); }
   };
   return (
     <Card>
-      <SectionTitle>SUNSYNK CONNECTION</SectionTitle>
-      {loading ? <div className="field-note">Loading…</div> : !acc ? (
+      <SectionTitle right={live.length > 1 ? <span className="dim">{live.length} logins</span> : null}>SUNSYNK CONNECTION</SectionTitle>
+      {loading ? <div className="field-note">Loading…</div> : !live.length ? (
         <div className="field-note">No SunSynk account connected.</div>
-      ) : (
-        <>
+      ) : live.map((acc, i) => (
+        <div key={acc.account_id} style={i ? { marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--line, rgba(255,255,255,0.08))' } : undefined}>
           <div className="field">
             <label>Account</label>
             <div className="input mono" style={{ opacity: 0.85 }}>{acc.sunsynk_username}</div>
@@ -565,16 +635,19 @@ function SunSynkConnectionCard() {
           <div className="field-note">
             Connected {fmt(acc.linked_at)} · {(acc.plants || []).map(p => p.plant_name || p.plant_id).join(', ') || 'no plants visible'}
           </div>
-          <div className="field-note" style={{ marginTop: 10 }}>
-            Your SunSynk password was exchanged for a token and never stored. Disconnecting deletes that token.
-          </div>
-          <button type="button" className="ghost-btn" onClick={disconnect} disabled={busy}
+          <button type="button" className="ghost-btn" onClick={() => disconnect(acc)} disabled={busy === acc.account_id}
                   style={{ marginTop: 12, borderColor: 'var(--bad, #e06c75)', color: 'var(--bad, #e06c75)' }}>
-            {busy ? 'Disconnecting…' : 'Disconnect SunSynk'}
+            {busy === acc.account_id ? 'Disconnecting…' : 'Disconnect ' + acc.sunsynk_username}
           </button>
-          {err && <div className="field-note" style={{ color: 'var(--bad, #e06c75)' }}>{err}</div>}
-        </>
-      )}
+        </div>
+      ))}
+      <div className="field-note" style={{ marginTop: 14 }}>
+        Your SunSynk password was exchanged for a token and never stored. Disconnecting deletes that token.
+      </div>
+      {!loading && (adding
+        ? <div style={{ marginTop: 12 }}><window.LinkForm compact onLinked={() => location.reload()} onCancel={() => setAdding(false)} /></div>
+        : <button type="button" className="ghost-btn" style={{ marginTop: 12 }} onClick={() => setAdding(true)}>Connect another SunSynk login</button>)}
+      {err && <div className="field-note" style={{ color: 'var(--bad, #e06c75)' }}>{err}</div>}
     </Card>
   );
 }
@@ -609,6 +682,10 @@ function PlantConfigCard({ me, plantId, onSaved }) {
         timezone: f.timezone, currency: f.currency,
         tariff_import: num(f.tariff_import) ?? 0,
         battery_kwh: num(f.battery_kwh), battery_reserve_pct: num(f.battery_reserve_pct) ?? 20,
+        batt_positive_means: f.batt_positive_means ?? null,
+        tariff_export: num(f.tariff_export) ?? 0,
+        battery_banks: f.battery_banks || 'per-inverter',
+        has_battery: f.has_battery ?? null, has_grid: f.has_grid ?? null,
         system_kwp: num(f.system_kwp), panel_tilt: num(f.panel_tilt) ?? 15, panel_azimuth: num(f.panel_azimuth) ?? 0,
         // once a person has touched the roof or nameplate, stop calling it a default
         geometry_source: (isDefault && (num(f.system_kwp) !== cfg.system_kwp || num(f.panel_tilt) !== cfg.panel_tilt || num(f.panel_azimuth) !== cfg.panel_azimuth)) ? 'user' : f.geometry_source,
@@ -626,11 +703,17 @@ function PlantConfigCard({ me, plantId, onSaved }) {
     <Card>
       <SectionTitle right={<span className="dim mono">{plant.name}</span>}>PLANT</SectionTitle>
 
-      <div className="field">
-        <label>Import rate ({sym}/kWh)</label>
-        <input className="input mono" type="number" step="0.01" min="0" value={f.tariff_import ?? ''} onChange={e => set('tariff_import', e.target.value)} />
-        <div className="field-note">{!f.tariff_import ? <b>Set this — savings show as zero until you do.</b> : 'What you pay per unit, from your latest bill or prepaid receipt.'}</div>
+      <div className="settings-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="field">
+          <label>Import rate ({sym}/kWh)</label>
+          <input className="input mono" type="number" step="0.01" min="0" value={f.tariff_import ?? ''} onChange={e => set('tariff_import', e.target.value)} />
+        </div>
+        <div className="field">
+          <label>Feed-in rate ({sym}/kWh)</label>
+          <input className="input mono" type="number" step="0.01" min="0" value={f.tariff_export ?? ''} onChange={e => set('tariff_export', e.target.value)} placeholder="0 if you can't sell" />
+        </div>
       </div>
+      <div className="field-note">{!f.tariff_import ? <b>Set the import rate — savings show as zero until you do.</b> : 'What you pay per unit, from your latest bill or prepaid receipt.'} The feed-in rate is what the utility pays you per unit exported; leave it 0 if you cannot export.</div>
 
       <div className="settings-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
         <div className="field">
@@ -641,9 +724,9 @@ function PlantConfigCard({ me, plantId, onSaved }) {
         </div>
         <div className="field">
           <label>Timezone</label>
-          <select className="select" value={f.timezone || ''} onChange={e => set('timezone', e.target.value)}>
-            {zones.map(z => <option key={z} value={z}>{z}</option>)}
-          </select>
+          <input className="input" list="tz-zones" value={f.timezone || ''} placeholder="Type a city, e.g. Johannesburg"
+                 onChange={e => set('timezone', e.target.value)} spellCheck={false} autoComplete="off" />
+          <datalist id="tz-zones">{zones.map(z => <option key={z} value={z} />)}</datalist>
         </div>
       </div>
       <div className="field-note">Both came from your SunSynk plant. Change them only if they're wrong.</div>
@@ -658,9 +741,45 @@ function PlantConfigCard({ me, plantId, onSaved }) {
         <input className="range" type="range" min="5" max="50" step="1" value={f.battery_reserve_pct ?? 20} onChange={e => set('battery_reserve_pct', e.target.value)} />
         <div className="field-note">The state of charge your system stops discharging at.</div>
       </div>
+      <div className="field" style={{ marginTop: 16 }}>
+        <label>Equipment</label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <select className="select" value={f.has_battery == null ? '' : String(f.has_battery)} onChange={e => set('has_battery', e.target.value === '' ? null : e.target.value === 'true')}>
+            <option value="">{'Battery: auto' + (f.features_source === 'detected' ? (f.has_battery ? ' (found)' : ' (none found)') : '')}</option>
+            <option value="true">Battery: yes</option>
+            <option value="false">Battery: no</option>
+          </select>
+          <select className="select" value={f.has_grid == null ? '' : String(f.has_grid)} onChange={e => set('has_grid', e.target.value === '' ? null : e.target.value === 'true')}>
+            <option value="">{'Grid: auto' + (f.features_source === 'detected' ? (f.has_grid ? ' (connected)' : ' (off-grid)') : '')}</option>
+            <option value="true">Grid: connected</option>
+            <option value="false">Grid: off-grid</option>
+          </select>
+        </div>
+        <div className="field-note">Auto decides from the first day of readings. Set these by hand only if the dashboard is showing (or hiding) a battery or grid it should not.</div>
+      </div>
+      {(me?.plants || []).length >= 0 && (
+        <div className="field" style={{ marginTop: 16 }}>
+          <label>Battery banks</label>
+          <select className="select" value={f.battery_banks || 'per-inverter'} onChange={e => set('battery_banks', e.target.value)}>
+            <option value="per-inverter">Each inverter has its own pack</option>
+            <option value="shared">One pack shared by all inverters</option>
+          </select>
+          <div className="field-note">With a shared pack every inverter reads the same battery, so its charge is shown once and bank drift is not checked. Only matters with more than one inverter.</div>
+        </div>
+      )}
+      <div className="field" style={{ marginTop: 16 }}>
+        <label>How the inverter reports battery power</label>
+        <select className="select" value={f.batt_sign_source === 'user' ? (f.batt_positive_means || '') : ''}
+                onChange={e => setF(x => ({ ...x, batt_positive_means: e.target.value || null, batt_sign_source: e.target.value ? 'user' : 'default' }))}>
+          <option value="">{'Auto' + (f.batt_sign_source === 'detected' && f.batt_positive_means ? ' — detected: positive = ' + f.batt_positive_means : ' — still detecting')}</option>
+          <option value="charging">Positive = charging</option>
+          <option value="discharging">Positive = discharging</option>
+        </select>
+        <div className="field-note">Firmware differs on which way is positive. Auto works it out from the first hour of charge movement and corrects any minutes logged before it knew. Only set this by hand if the battery shows charging while it is clearly draining.</div>
+      </div>
 
       <div className="field" style={{ marginTop: 16 }}>
-        <label>PV array (kWp){isDefault && <span style={{ color: 'var(--load)' }}> — check this</span>}</label>
+        <label>Panel capacity (kW){isDefault && <span style={{ color: 'var(--load)' }}> — check this</span>}</label>
         <input className="input mono" type="number" step="0.1" min="0" value={f.system_kwp ?? ''} onChange={e => set('system_kwp', e.target.value)} />
         <div className="field-note">{isDefault ? 'SunSynk reported this figure, and it is often the inverter rating rather than the panels. Enter your total panel capacity.' : 'Total nameplate capacity of your panels.'}</div>
       </div>
@@ -688,8 +807,10 @@ function PlantConfigCard({ me, plantId, onSaved }) {
 }
 
 function DangerCard() {
-  const { useState } = React;
+  const { useState, useEffect } = React;
   const [busy, setBusy] = useState(false);
+  const [email, setEmail] = useState(null);
+  useEffect(() => { window.sb.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || null)).catch(() => {}); }, []);
   const [err, setErr] = useState(null);
   const del = async () => {
     if (!confirm('Delete your account? This removes your SunSynk connection, your settings and — unless someone else shares the plant — its logged history. This cannot be undone.')) return;
@@ -701,6 +822,8 @@ function DangerCard() {
   return (
     <Card>
       <SectionTitle>ACCOUNT</SectionTitle>
+      <div className="field-note" style={{ marginTop: 0 }}>Signed in as {email || 'this account'}. Signing out keeps your SunSynk connection and history.</div>
+      <button type="button" className="ghost-btn" onClick={() => window.signOut()} style={{ marginTop: 4, marginBottom: 18 }}>Sign out</button>
       <div className="field-note" style={{ marginTop: 0 }}>Deleting your account removes your SunSynk token, your plant mapping and your settings. Logged history is removed too unless another user shares the plant.</div>
       <button type="button" className="danger-btn" onClick={del} disabled={busy} style={{ marginTop: 12 }}>{busy ? 'Deleting…' : 'Delete my account'}</button>
       {err && <div className="field-note" style={{ color: 'var(--load)' }}>{err}</div>}
@@ -711,7 +834,13 @@ function DangerCard() {
 function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfigSaved }) {
   const set = (patch) => setSettings(s => ({ ...s, ...patch }));
   // Settings only, and nothing but the number — no rule above it, no card around it.
-  const version = <div className="app-version mono">{window.APP_VERSION}</div>;
+  const version = (
+    <div className="app-version mono">
+      {window.APP_VERSION}
+      {window.SUPPORT_EMAIL && <> · <a href={'mailto:' + window.SUPPORT_EMAIL + '?subject=Prince%20Solar%20' + encodeURIComponent(window.APP_VERSION)} style={{ color: 'inherit' }}>{window.SUPPORT_EMAIL}</a></>}
+      <div style={{ marginTop: 6, fontFamily: 'inherit' }}>Per-minute inverter readings are kept for 90 days; plant totals per minute and per day are kept for good.</div>
+    </div>
+  );
   return (
     <>
     <div className="settings-grid">
@@ -720,7 +849,7 @@ function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfig
       <Card>
         <SectionTitle>DISPLAY</SectionTitle>
         <div className="field">
-          <label>Battery sign convention</label>
+          <label>Show battery discharge as</label>
           <Segmented options={[{ value: 'discharge', label: 'Positive = discharging' }, { value: 'charge', label: 'Positive = charging' }]}
             value={settings.battPositive} onChange={v => set({ battPositive: v })} />
         </div>
