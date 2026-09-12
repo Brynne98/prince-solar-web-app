@@ -26,7 +26,11 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour, features
   const hasGrid = feat.hasGrid !== false;
   const charging = agg.battState === 'charging';
   const gridImport = agg.gridPower > 0 ? agg.gridPower : 0;
-  const gridExport = agg.gridPower < 0 ? -agg.gridPower : 0;
+  // Export only exists for plants paid to sell (a feed-in rate is set). Every
+  // grid-tied inverter leaks a few hundred watts of backflow when the load drops
+  // faster than it can throttle; on a site that cannot sell that reads as standby.
+  const sells = feat.sells === true;
+  const gridExport = sells && agg.gridPower < 0 ? -agg.gridPower : 0;
   const kwhToday = v => (v != null ? v.toFixed(1) + ' kWh today' : null);
   const hh = (h) => String(h).padStart(2, '0') + ':00';
   // Typical charge sits on the live-% line as a muted ≈ N%, so the battery card

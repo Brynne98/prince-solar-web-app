@@ -267,7 +267,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
               {isFs ? <FsExitIcon /> : <FsEnterIcon />}<span>{isFs ? 'Exit' : 'Fullscreen'}</span>
             </button>
           }>POWER FLOW</SectionTitle>
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} />
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} typicalSoc={typicalSoc} typicalHour={typicalHour} features={{ ...feat, sells: rateExp > 0 }} />
         </Card>
       </div>
 
