@@ -198,7 +198,9 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
   // avoided purchases at the import rate, plus anything sold at the feed-in rate
   const pSaved = (pLoad != null) ? Math.max(0, pLoad - pImp) * rate + (pExp || 0) * rateExp : null;
   // Show an Exported tile when this plant sells (a feed-in rate is set, or it has exported)
-  const showExport = hasGrid && (rateExp > 0 || (pExp || 0) > 0 || (a.gridToTotal || 0) > 0);
+  // Only plants paid for export get an Exported tile. Every grid-tied inverter leaks a
+  // few Wh of backflow, so a non-zero counter alone is not a sign the site sells.
+  const showExport = hasGrid && rateExp > 0;
   const pending = isAgg && !energy[period];
   const periodWord = { today: 'today', week: 'this week', month: 'this month', year: 'this year', lifetime: 'all-time' }[period];
   // trend vs the same elapsed slice of the previous period. Suppress "today" until
@@ -516,7 +518,7 @@ function GridTab({ snap, settings }) {
   const cost = a.gridFromToday * rate;                             // what you actually paid the grid
   const earned = (a.gridToToday || 0) * rateExp;                   // feed-in income
   const saved = Math.max(0, a.loadToday - a.gridFromToday) * rate + earned;  // avoided cost + income
-  const showExport = rateExp > 0 || (a.gridToToday || 0) > 0 || (a.gridToTotal || 0) > 0;
+  const showExport = rateExp > 0; // same rule as the Overview tile: only plants paid for export
   return (
     <div className="stack">
       <div className="trio">
