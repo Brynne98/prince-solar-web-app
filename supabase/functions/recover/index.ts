@@ -100,7 +100,7 @@ const complete = (r: SpineRow | undefined): r is SpineRow =>
 async function historySpine(acc: Account, plantId: number, tz: string, day: string) {
   const sns = (((await rpc("plant_inverters", { p_plant: plantId })) ?? []) as any[]).map((r) => String(r.sn ?? r));
   if (!sns.length) return null;
-  // One inverter at a time: 5 calls in flight, not 5 × inverters, for SunSynk's sake.
+  // One inverter at a time: 4 calls in flight, not 4 × inverters, for SunSynk's sake.
   const days = [];
   for (const sn of sns) days.push(await fetchInverterDay(acc, sn, day));
   const spine = plantSpine(days, dayStartEpoch(tz, day));

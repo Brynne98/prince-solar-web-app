@@ -4,17 +4,19 @@
 // for minutes our logger slept through — per inverter, then summed, which is what
 // the plant feed cannot do reliably (its scaling has changed under us before).
 //
-// What the five `…/day` endpoints give, and how the spine is built from them:
+// What the `…/day` endpoints give, and how the spine is built from them:
 //   battery  soc              -> soc   (average over inverters with soc > 0)
 //   grid     pac              -> grid  (sum; + import)
 //   load     pac              -> load  (sum)
-//   input    V-pv-n, I-pv-n   -> pv    (sum of V×I over strings, then inverters;
-//                                        two calls, `column` takes one token)
+//   output   ppv  (P-pv)      -> pv    (total PV per inverter, one series; sum)
+//   input    V-pv-n, I-pv-n   -> pv    fallback only: sum of V×I over strings; two
+//                                        calls, `column` takes one token. A 15-string
+//                                        inverter uploading every ~67 s times out
+//                                        SunSynk's backend here (sticky 504, 2026-09-13).
 //   battery power is NOT in history; it comes from the balance: batt = pv + grid − load
 //   (+ charging), the same identity the poller uses for derived load (0033).
-// Output is not needed for the spine and is not fetched.
 //
-// Five calls per inverter per day (date/edate do not span days).
+// Four calls per inverter per day, six when P-pv is empty (date/edate do not span days).
 import { type Account, apiGet } from "./sunsynk.ts";
 import { num } from "./extract.ts";
 
@@ -33,7 +35,16 @@ export const historyPaths = (sn: string, day: string) => {
     battery: `/inverter/battery/${sn}/day?${q}&column=soc`,
     grid: `/inverter/grid/${sn}/day?${q}&column=pac`,
     load: `/inverter/load/${sn}/day?${q}&column=pac`,
-    // `column` takes one token: vpv gives V-pv-n, ipv gives I-pv-n. Two calls.
+    // Total PV power as one series (P-pv). Found 2026-09-13: a 15-string inverter
+    // uploading every ~67 s times out SunSynk's backend on the per-string
+    // endpoints below (sticky HTTP 504 after 10 s), but answers this one.
+    pv: `/inverter/${sn}/output/day?${q}&column=ppv`,
+  };
+};
+/** Per-string V and I, the fallback when P-pv is absent. `column` takes one token; two calls. */
+export const stringPaths = (sn: string, day: string) => {
+  const q = `lan=en&date=${day}&edate=${day}`;
+  return {
     input_v: `/inverter/${sn}/input/day?${q}&column=vpv`,
     input_i: `/inverter/${sn}/input/day?${q}&column=ipv`,
   };
@@ -106,25 +117,42 @@ export type InverterDay = {
   labels: Record<string, string[]>;
 };
 
-/** The four history endpoints for one inverter-day; a failed endpoint is null. */
+/**
+ * One inverter-day from history: SoC, grid, load and total PV in four calls; the
+ * per-string V×I pair only when P-pv came back empty. A failed endpoint is null.
+ */
 export async function fetchInverterDay(acc: Account, sn: string, day: string): Promise<InverterDay> {
-  const paths = historyPaths(sn, day);
-  const keys = Object.keys(paths) as (keyof typeof paths)[];
-  const settled = await Promise.allSettled(keys.map((k) => apiGet(paths[k], acc)));
   const parsed: Record<string, SeriesMap> = {};
   const labels: Record<string, string[]> = {};
-  keys.forEach((k, i) => {
-    parsed[k] = settled[i].status === "fulfilled" ? parseSeries((settled[i] as PromiseFulfilledResult<any>).value) : new Map();
-    labels[k] = [...parsed[k].keys()];
-  });
-  const input: SeriesMap = new Map([...parsed.input_v, ...parsed.input_i]);
+  const rejected = new Set<string>();
+  const fetchAll = async (paths: Record<string, string>) => {
+    const keys = Object.keys(paths);
+    const settled = await Promise.allSettled(keys.map((k) => apiGet(paths[k], acc)));
+    keys.forEach((k, i) => {
+      const r = settled[i];
+      if (r.status === "rejected") rejected.add(k);
+      parsed[k] = r.status === "fulfilled" ? parseSeries(r.value) : new Map();
+      labels[k] = [...parsed[k].keys()];
+    });
+  };
+  await fetchAll(historyPaths(sn, day));
+  // Power only: a bare "pv" would also match v-pv-1 / i-pv-1 / e-pv and skip the fallback.
+  let pv = seriesLike(parsed.pv, "p-pv", "ppv");
+  if (!pv) {
+    await fetchAll(stringPaths(sn, day));
+    pv = pvFromStrings(new Map([...parsed.input_v, ...parsed.input_i]));
+  }
+  // A rejection counts only if it cost a series: strings that filled in for a
+  // rejected P-pv are fine; a rejected fallback with no P-pv is not.
+  const failed = ["battery", "grid", "load"].filter((k) => rejected.has(k)).length
+    + (pv == null && (rejected.has("pv") || rejected.has("input_v") || rejected.has("input_i")) ? 1 : 0);
   return {
     sn,
-    failed: settled.filter((r) => r.status === "rejected").length,
+    failed,
     soc: seriesLike(parsed.battery, "soc"),
     grid: seriesLike(parsed.grid, "p-grid", "pac", "grid"),
     load: seriesLike(parsed.load, "p-load", "pac", "load"),
-    pv: pvFromStrings(input),
+    pv,
     labels,
   };
 }

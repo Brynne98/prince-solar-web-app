@@ -297,6 +297,7 @@ function inverterDay(plantId, inv, day, column) {
   const scale = (k) => (rec) => rec.map((r) => ({ ...r, value: String(Math.round(Number(r.value) * (k === "grid" ? (inv.ct ? 1 / ctCount : 0) : s))) }));
   const rec = (k) => feedRecords(plant, day, k, step, "full");
   if (column === "soc") return { infos: [{ label: "SOC", unit: "%", records: plant.battKwh > 0 ? rec("soc") : [] }] };
+  if (column === "ppv") return { infos: [{ label: "P-pv", unit: "W", records: scale("pv")(rec("pv")) }] };
   if (column === "pac" ) return { infos: [{ label: "P-Grid", unit: "W", records: scale("grid")(rec("grid")) }] };
   if (column === "pac-load") return { infos: [{ label: "P-Load", unit: "W", records: scale("load")(rec("load")) }] };
   if (column === "vpv" || column === "ipv") {
@@ -393,6 +394,7 @@ const server = http.createServer(async (req, res) => {
   }
   if ((m = /^\/inverter\/battery\/([A-Z0-9]+)\/day$/.exec(path))) { const f = findInverter(m[1]); return f ? ok(res, inverterDay(f.plantId, f.inv, q.get("date"), "soc")) : fail(res, 404, "x"); }
   if ((m = /^\/inverter\/grid\/([A-Z0-9]+)\/day$/.exec(path))) { const f = findInverter(m[1]); return f ? ok(res, inverterDay(f.plantId, f.inv, q.get("date"), "pac")) : fail(res, 404, "x"); }
+  if ((m = /^\/inverter\/([A-Z0-9]+)\/output\/day$/.exec(path))) { const f = findInverter(m[1]); return f ? ok(res, inverterDay(f.plantId, f.inv, q.get("date"), q.get("column"))) : fail(res, 404, "x"); }
   if ((m = /^\/inverter\/load\/([A-Z0-9]+)\/day$/.exec(path))) { const f = findInverter(m[1]); return f ? ok(res, inverterDay(f.plantId, f.inv, q.get("date"), "pac-load")) : fail(res, 404, "x"); }
   if ((m = /^\/inverter\/([A-Z0-9]+)\/input\/day$/.exec(path))) { const f = findInverter(m[1]); return f ? ok(res, inverterDay(f.plantId, f.inv, q.get("date"), q.get("column"))) : fail(res, 404, "x"); }
   return fail(res, 404, `mock: no route for ${path}`);
