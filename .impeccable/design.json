@@ -1,0 +1,488 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-13T19:09:43.323Z",
+  "title": "Design System: Prince Solar",
+  "extensions": {
+    "colorMeta": {
+      "night-ground": {
+        "role": "neutral",
+        "displayName": "Night Ground",
+        "canonical": "oklch(15.8% 0.012 261)",
+        "tonalRamp": [
+          "oklch(15% 0.012 261)",
+          "oklch(25% 0.012 261)",
+          "oklch(35% 0.012 261)",
+          "oklch(45% 0.012 261)",
+          "oklch(55% 0.012 261)",
+          "oklch(65% 0.012 261)",
+          "oklch(75% 0.012 261)",
+          "oklch(85% 0.012 261)"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "canonical": "oklch(19.8% 0.016 257)",
+        "tonalRamp": [
+          "oklch(15% 0.016 257)",
+          "oklch(25% 0.016 257)",
+          "oklch(35% 0.016 257)",
+          "oklch(45% 0.016 257)",
+          "oklch(55% 0.016 257)",
+          "oklch(65% 0.016 257)",
+          "oklch(75% 0.016 257)",
+          "oklch(85% 0.016 257)"
+        ]
+      },
+      "panel-raised": {
+        "role": "neutral",
+        "displayName": "Panel Raised",
+        "canonical": "oklch(21.5% 0.018 256)",
+        "tonalRamp": [
+          "oklch(15% 0.018 256)",
+          "oklch(25% 0.018 256)",
+          "oklch(35% 0.018 256)",
+          "oklch(45% 0.018 256)",
+          "oklch(55% 0.018 256)",
+          "oklch(65% 0.018 256)",
+          "oklch(75% 0.018 256)",
+          "oklch(85% 0.018 256)"
+        ]
+      },
+      "paper-text": {
+        "role": "neutral",
+        "displayName": "Paper Text",
+        "canonical": "oklch(94.1% 0.010 253)",
+        "tonalRamp": [
+          "oklch(15% 0.010 253)",
+          "oklch(25% 0.010 253)",
+          "oklch(35% 0.010 253)",
+          "oklch(45% 0.010 253)",
+          "oklch(55% 0.010 253)",
+          "oklch(65% 0.010 253)",
+          "oklch(75% 0.010 253)",
+          "oklch(85% 0.010 253)"
+        ]
+      },
+      "muted-text": {
+        "role": "neutral",
+        "displayName": "Muted Text",
+        "canonical": "oklch(66.9% 0.024 254)",
+        "tonalRamp": [
+          "oklch(15% 0.024 254)",
+          "oklch(25% 0.024 254)",
+          "oklch(35% 0.024 254)",
+          "oklch(45% 0.024 254)",
+          "oklch(55% 0.024 254)",
+          "oklch(65% 0.024 254)",
+          "oklch(75% 0.024 254)",
+          "oklch(85% 0.024 254)"
+        ]
+      },
+      "dim-text": {
+        "role": "neutral",
+        "displayName": "Dim Text",
+        "canonical": "oklch(60.4% 0.035 253)",
+        "tonalRamp": [
+          "oklch(15% 0.035 253)",
+          "oklch(25% 0.035 253)",
+          "oklch(35% 0.035 253)",
+          "oklch(45% 0.035 253)",
+          "oklch(55% 0.035 253)",
+          "oklch(65% 0.035 253)",
+          "oklch(75% 0.035 253)",
+          "oklch(85% 0.035 253)"
+        ]
+      },
+      "solar-green": {
+        "role": "primary",
+        "displayName": "Solar Green",
+        "canonical": "oklch(79.3% 0.180 154)",
+        "tonalRamp": [
+          "oklch(15% 0.180 154)",
+          "oklch(25% 0.180 154)",
+          "oklch(35% 0.180 154)",
+          "oklch(45% 0.180 154)",
+          "oklch(55% 0.180 154)",
+          "oklch(65% 0.180 154)",
+          "oklch(75% 0.180 154)",
+          "oklch(85% 0.180 154)"
+        ]
+      },
+      "battery-violet": {
+        "role": "secondary",
+        "displayName": "Battery Violet",
+        "canonical": "oklch(70.9% 0.159 294)",
+        "tonalRamp": [
+          "oklch(15% 0.159 294)",
+          "oklch(25% 0.159 294)",
+          "oklch(35% 0.159 294)",
+          "oklch(45% 0.159 294)",
+          "oklch(55% 0.159 294)",
+          "oklch(65% 0.159 294)",
+          "oklch(75% 0.159 294)",
+          "oklch(85% 0.159 294)"
+        ]
+      },
+      "grid-amber": {
+        "role": "secondary",
+        "displayName": "Grid Amber",
+        "canonical": "oklch(86.1% 0.173 92)",
+        "tonalRamp": [
+          "oklch(15% 0.173 92)",
+          "oklch(25% 0.173 92)",
+          "oklch(35% 0.173 92)",
+          "oklch(45% 0.173 92)",
+          "oklch(55% 0.173 92)",
+          "oklch(65% 0.173 92)",
+          "oklch(75% 0.173 92)",
+          "oklch(85% 0.173 92)"
+        ]
+      },
+      "home-coral": {
+        "role": "secondary",
+        "displayName": "Home Coral",
+        "canonical": "oklch(71.1% 0.166 22)",
+        "tonalRamp": [
+          "oklch(15% 0.166 22)",
+          "oklch(25% 0.166 22)",
+          "oklch(35% 0.166 22)",
+          "oklch(45% 0.166 22)",
+          "oklch(55% 0.166 22)",
+          "oklch(65% 0.166 22)",
+          "oklch(75% 0.166 22)",
+          "oklch(85% 0.166 22)"
+        ]
+      },
+      "charge-cyan": {
+        "role": "secondary",
+        "displayName": "Charge Cyan",
+        "canonical": "oklch(79.7% 0.134 212)",
+        "tonalRamp": [
+          "oklch(15% 0.134 212)",
+          "oklch(25% 0.134 212)",
+          "oklch(35% 0.134 212)",
+          "oklch(45% 0.134 212)",
+          "oklch(55% 0.134 212)",
+          "oklch(65% 0.134 212)",
+          "oklch(75% 0.134 212)",
+          "oklch(85% 0.134 212)"
+        ]
+      },
+      "sun-mid": {
+        "role": "tertiary",
+        "displayName": "Sun",
+        "canonical": "oklch(78.9% 0.149 72)",
+        "tonalRamp": [
+          "oklch(15% 0.149 72)",
+          "oklch(25% 0.149 72)",
+          "oklch(35% 0.149 72)",
+          "oklch(45% 0.149 72)",
+          "oklch(55% 0.149 72)",
+          "oklch(65% 0.149 72)",
+          "oklch(75% 0.149 72)",
+          "oklch(85% 0.149 72)"
+        ]
+      },
+      "warn-amber": {
+        "role": "tertiary",
+        "displayName": "Warn Amber",
+        "canonical": "oklch(76.9% 0.165 70)",
+        "tonalRamp": [
+          "oklch(15% 0.165 70)",
+          "oklch(25% 0.165 70)",
+          "oklch(35% 0.165 70)",
+          "oklch(45% 0.165 70)",
+          "oklch(55% 0.165 70)",
+          "oklch(65% 0.165 70)",
+          "oklch(75% 0.165 70)",
+          "oklch(85% 0.165 70)"
+        ]
+      },
+      "fault-red": {
+        "role": "tertiary",
+        "displayName": "Fault Red",
+        "canonical": "oklch(63.7% 0.208 25)",
+        "tonalRamp": [
+          "oklch(15% 0.208 25)",
+          "oklch(25% 0.208 25)",
+          "oklch(35% 0.208 25)",
+          "oklch(45% 0.208 25)",
+          "oklch(55% 0.208 25)",
+          "oklch(65% 0.208 25)",
+          "oklch(75% 0.208 25)",
+          "oklch(85% 0.208 25)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Brand name in the topbar only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Hero mono figure in a stat tile."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Settings section and login titles."
+      },
+      "numeral": {
+        "displayName": "Numeral",
+        "purpose": "Mini-stat values, serials, legend readouts, tooltip times."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Notes, narrative, form copy."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase micro-label above a value; section titles."
+      }
+    },
+    "shadows": [
+      {
+        "name": "floating",
+        "value": "0 12px 30px rgba(0,0,0,0.5)",
+        "purpose": "Chart tooltips and the drag-range readout."
+      },
+      {
+        "name": "bubble",
+        "value": "0 14px 34px rgba(0,0,0,0.55)",
+        "purpose": "The info bubble that opens from an info dot."
+      },
+      {
+        "name": "front-door",
+        "value": "0 24px 60px -30px rgba(0,0,0,0.9), inset 0 0 0 1px rgba(0,0,0,0.25)",
+        "purpose": "The login card only."
+      },
+      {
+        "name": "lifted-segment",
+        "value": "0 1px 2px rgba(0,0,0,0.3)",
+        "purpose": "Active segment in a segmented control."
+      },
+      {
+        "name": "halo-live",
+        "value": "0 0 0 3px rgba(61,220,132,0.18)",
+        "purpose": "Status, connection and grid-presence dots; the switch knob has none."
+      },
+      {
+        "name": "sun-glow",
+        "value": "0 0 0 6px rgba(244,169,58,0.10), 0 0 34px rgba(244,169,58,0.45)",
+        "purpose": "The brand orb only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ui-fast",
+        "value": "120ms",
+        "purpose": "Segment and press feedback."
+      },
+      {
+        "name": "ui",
+        "value": "150ms",
+        "purpose": "Hover, border and colour transitions."
+      },
+      {
+        "name": "switch",
+        "value": "180ms",
+        "purpose": "Toggle knob travel."
+      },
+      {
+        "name": "meter",
+        "value": "500ms ease",
+        "purpose": "Meter and split-bar width changes."
+      },
+      {
+        "name": "refresh-spin",
+        "value": "600ms",
+        "purpose": "One rotation of the refresh icon."
+      },
+      {
+        "name": "skeleton-sweep",
+        "value": "1.5s ease-in-out infinite",
+        "purpose": "Loading shimmer; off under reduced motion."
+      },
+      {
+        "name": "status-breathe",
+        "value": "2.4s ease-in-out infinite",
+        "purpose": "Live dot halo; off under reduced motion."
+      },
+      {
+        "name": "flow-dash",
+        "value": "stroke-dashoffset loop, only while power moves",
+        "purpose": "Power-flow links; off under reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "login",
+        "value": "480px"
+      },
+      {
+        "name": "phone",
+        "value": "600px"
+      },
+      {
+        "name": "settings",
+        "value": "900px"
+      },
+      {
+        "name": "tablet",
+        "value": "980px"
+      },
+      {
+        "name": "shell-max",
+        "value": "1320px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Solar Green fill; the one filled button (Sign in, Save).",
+      "html": "<button class=\"ds-btn-primary\">Sign in</button>",
+      "css": ".ds-btn-primary{background:var(--pv,#3ddc84);color:#06210f;border:0;border-radius:11px;padding:13px 14px;font:700 14.5px \"Space Grotesk\",system-ui,sans-serif;cursor:pointer;box-shadow:0 8px 22px -10px rgba(61,220,132,.7);transition:transform .12s,filter .12s}.ds-btn-primary:hover{filter:brightness(1.06)}.ds-btn-primary:active{transform:translateY(1px)}.ds-btn-primary:focus-visible{outline:2px solid #3ddc84;outline-offset:2px}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Panel fill with a strong hairline; Refresh in the topbar.",
+      "html": "<button class=\"ds-btn-secondary\"><span class=\"ds-ico\">↻</span>Refresh</button>",
+      "css": ".ds-btn-secondary{display:inline-flex;align-items:center;gap:8px;height:40px;background:#11161d;color:#e7ecf2;border:1px solid rgba(255,255,255,.12);padding:10px 22px;border-radius:10px;font:500 14px \"Space Grotesk\",system-ui,sans-serif;cursor:pointer;transition:.15s}.ds-btn-secondary:hover{background:#141a22;border-color:#8b96a4}.ds-btn-secondary:focus-visible{outline:2px solid #3ddc84;outline-offset:2px}.ds-ico{font-size:16px;line-height:1}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Hairline only; secondary actions in Settings rows.",
+      "html": "<button class=\"ds-btn-ghost\">Disconnect</button>",
+      "css": ".ds-btn-ghost{background:none;border:1px solid rgba(255,255,255,.12);color:#8b96a4;padding:7px 14px;border-radius:9px;font:400 12.5px \"Space Grotesk\",system-ui,sans-serif;cursor:pointer;transition:.15s}.ds-btn-ghost:hover{color:#e7ecf2}.ds-btn-ghost:focus-visible{outline:2px solid #3ddc84;outline-offset:2px}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Panel Raised well, mono text, amber focus border.",
+      "html": "<label class=\"ds-field\"><span>Tariff (R/kWh)</span><input class=\"ds-input\" value=\"3.42\"></label>",
+      "css": ".ds-field{display:block}.ds-field>span{display:block;font:400 12px \"Space Grotesk\",system-ui,sans-serif;color:#8b96a4;margin-bottom:7px;letter-spacing:.04em}.ds-input{width:100%;background:#141a22;border:1px solid rgba(255,255,255,.12);color:#e7ecf2;border-radius:9px;padding:10px 12px;font:400 14px \"JetBrains Mono\",ui-monospace,monospace}.ds-input:focus{outline:none;border-color:#facc15}"
+    },
+    {
+      "name": "Tab Bar",
+      "kind": "nav",
+      "refersTo": "tab",
+      "description": "Text tabs on a hairline; the active one carries a green underline.",
+      "html": "<nav class=\"ds-tabbar\"><button class=\"ds-tab ds-active\">Live</button><button class=\"ds-tab\">Battery</button><button class=\"ds-tab\">Grid</button><button class=\"ds-tab\">Trends</button></nav>",
+      "css": ".ds-tabbar{display:flex;gap:4px;border-bottom:1px solid rgba(255,255,255,.07)}.ds-tab{background:none;border:none;color:#8b96a4;font:500 15px \"Space Grotesk\",system-ui,sans-serif;padding:12px 18px;border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:7px 7px 0 0;cursor:pointer;transition:.15s}.ds-tab:hover{color:#e7ecf2;background:rgba(255,255,255,.02)}.ds-tab.ds-active{color:#e7ecf2;border-bottom-color:#3ddc84}.ds-tab:focus-visible{outline:2px solid #3ddc84;outline-offset:-2px}"
+    },
+    {
+      "name": "Legend Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Series toggle with a ring-dot and a mono readout.",
+      "html": "<button class=\"ds-chip\"><span class=\"ds-chip-dot\"></span>Solar<span class=\"ds-chip-val\">12.40 kWh</span></button>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;gap:7px;background:#141a22;border:1px solid rgba(255,255,255,.07);border-radius:999px;padding:6px 13px;font:400 12.5px \"Space Grotesk\",system-ui,sans-serif;color:#e7ecf2;cursor:pointer;transition:.15s}.ds-chip-dot{width:10px;height:10px;border-radius:50%;border:2px solid #3ddc84;background:#3ddc84}.ds-chip-val{margin-left:6px;padding-left:8px;border-left:1px solid rgba(255,255,255,.12);font:600 12.5px \"JetBrains Mono\",ui-monospace,monospace;font-variant-numeric:tabular-nums;color:#3ddc84}.ds-chip:hover{border-color:rgba(255,255,255,.12)}.ds-chip:focus-visible{outline:2px solid #3ddc84;outline-offset:2px}"
+    },
+    {
+      "name": "Badge",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "Uppercase status pill; ok, warn or neutral tone.",
+      "html": "<span class=\"ds-badge ds-ok\"><i class=\"ds-badge-dot\"></i>Online</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:6px;font:600 11px \"Space Grotesk\",system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;padding:4px 11px;border-radius:999px;border:1px solid}.ds-badge-dot{width:6px;height:6px;border-radius:50%;background:currentColor}.ds-badge.ds-ok{color:#3ddc84;border-color:rgba(61,220,132,.4);background:rgba(61,220,132,.08)}"
+    },
+    {
+      "name": "Stat Tile",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Whisper label, tinted mono hero figure, meter, muted sub-line.",
+      "html": "<div class=\"ds-stat\"><div class=\"ds-stat-label\">Solar now</div><div class=\"ds-stat-value\"><span class=\"ds-num\">4.21</span><span class=\"ds-unit\">kW</span></div><div class=\"ds-meter\"><div class=\"ds-meter-fill\" style=\"width:62%\"></div></div><div class=\"ds-stat-sub\">Today <b>18.3 kWh</b></div></div>",
+      "css": ".ds-stat{background:#11161d;border:1px solid rgba(255,255,255,.07);border-left:2px solid #3ddc84;border-radius:16px;padding:22px 24px;display:flex;flex-direction:column;color:#e7ecf2;font-family:\"Space Grotesk\",system-ui,sans-serif;max-width:280px}.ds-stat-label{font-size:11px;letter-spacing:.16em;color:#8b96a4;text-transform:uppercase}.ds-stat-value{font-family:\"JetBrains Mono\",ui-monospace,monospace;font-variant-numeric:tabular-nums;font-weight:700;margin-top:10px;line-height:1;display:flex;align-items:baseline;color:#3ddc84}.ds-num{font-size:44px}.ds-unit{font-size:24px;margin-left:4px;opacity:.85}.ds-meter{height:7px;border-radius:4px;background:rgba(255,255,255,.07);overflow:hidden;margin-top:14px}.ds-meter-fill{height:100%;border-radius:4px;background:#3ddc84;transition:width .5s ease}.ds-stat-sub{font-size:13px;color:#8b96a4;margin-top:12px}.ds-stat-sub b{color:#e7ecf2;font-weight:700}"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "custom",
+      "refersTo": "card-inset",
+      "description": "Panel Raised track; the selected segment is Panel with a 1px lift.",
+      "html": "<div class=\"ds-seg\"><button class=\"ds-seg-btn ds-active\">Today</button><button class=\"ds-seg-btn\">Week</button><button class=\"ds-seg-btn\">Month</button></div>",
+      "css": ".ds-seg{display:inline-flex;background:#141a22;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:3px;gap:2px}.ds-seg-btn{background:none;border:none;color:#8b96a4;padding:7px 15px;border-radius:7px;font:500 13px \"Space Grotesk\",system-ui,sans-serif;cursor:pointer;transition:.12s}.ds-seg-btn:hover{color:#e7ecf2}.ds-seg-btn.ds-active{background:#11161d;color:#e7ecf2;box-shadow:0 1px 2px rgba(0,0,0,.3)}.ds-seg-btn:focus-visible{outline:2px solid #3ddc84;outline-offset:-2px}"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "custom",
+      "refersTo": "badge",
+      "description": "Topbar freshness: breathing green dot, word, detail behind a hairline.",
+      "html": "<span class=\"ds-status\"><span class=\"ds-status-dot\"></span><span class=\"ds-status-word\">Live</span><span class=\"ds-status-detail\">8 s ago</span></span>",
+      "css": ".ds-status{display:inline-flex;align-items:center;gap:9px;height:40px;padding:0 16px 0 14px;background:#11161d;border:1px solid rgba(255,255,255,.12);border-radius:10px;white-space:nowrap;font-family:\"Space Grotesk\",system-ui,sans-serif;color:#e7ecf2}.ds-status-dot{width:9px;height:9px;border-radius:50%;background:#3ddc84;box-shadow:0 0 0 3px rgba(61,220,132,.18);animation:ds-breathe 2.4s ease-in-out infinite}.ds-status-word{font-size:14px;font-weight:600;color:#3ddc84}.ds-status-detail{font-size:12.5px;color:#8b96a4;padding-left:9px;border-left:1px solid rgba(255,255,255,.12)}@keyframes ds-breathe{0%,100%{box-shadow:0 0 0 3px rgba(61,220,132,.18)}50%{box-shadow:0 0 0 5px rgba(61,220,132,.06)}}@media (prefers-reduced-motion:reduce){.ds-status-dot{animation:none}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Home Ledger",
+    "overview": "Prince Solar is a household's energy diary, kept in the dark. The page is a near-black ground with two faint tints of blue and green breathing at its corners, and on it sit flat panels edged in hairlines. Numbers are the content: big, monospaced, tabular, each tinted by the one thing it measures. Everything else, labels, notes, chrome, steps back to a muted grey so the figures read first. The single warm object on the page is the sun orb in the brand mark, and its glow is the only decorative light allowed.\n\nThe mood is calm, precise and honest. Calm: no card floats, nothing pulses except a status dot, and motion is reserved for data that is actually moving (the flow lines, a meter filling). Precise: one mono face for every number, tabular figures so columns line up, units set smaller and lighter than their value. Honest: a missing minute is a gap, a stale reading is amber, an estimate is marked \"approx\", and empty states say plainly what is not there yet.\n\nThe declared anti-reference is the gamer dashboard. No neon glow beyond the sun, no gradients laid over data, no skeuomorphic gauges, no glass. Where a competitor would add a glowing ring, this system adds a hairline and a smaller grey label.",
+    "keyCharacteristics": [
+      "Dark-only, tonal layering, hairline edges, no shadows at rest",
+      "Five semantic energy colours, each meaning exactly one thing everywhere",
+      "Mono numerals with tabular figures; sans for everything that is a word",
+      "Uppercase, wide-tracked micro-labels over big values",
+      "Motion only for live data and status; skeletons hold the layout while data lands"
+    ],
+    "rules": [
+      {
+        "name": "The One Meaning Rule",
+        "body": "A series colour means one thing. Green is solar, violet is battery, amber is grid, coral is home, cyan is self-sufficiency. A new metric that is none of these gets grey, never a sixth hue.",
+        "section": "colors"
+      },
+      {
+        "name": "The Sun Stays In The Orb Rule",
+        "body": "The warm gradient and its glow belong to the brand mark and the login backdrop only. No other element is warm-lit.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tinted Number Rule",
+        "body": "Colour goes on the value, not the tile. Cards stay Panel; the big number and its meter take the series colour, and an optional 2px left accent on the card edge is the most colour a container gets.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mono Numbers Rule",
+        "body": "Any figure the user might compare, add or scan down a column is set in JetBrains Mono with tabular figures. Words never are.",
+        "section": "typography"
+      },
+      {
+        "name": "The Small Unit Rule",
+        "body": "A unit is set at roughly half the size of its value, in the same face, sitting on the same baseline, slightly lighter.",
+        "section": "typography"
+      },
+      {
+        "name": "The Whisper Label Rule",
+        "body": "The label above a value is tiny, uppercase, wide-tracked and muted. It is found after the number, never before.",
+        "section": "typography"
+      },
+      {
+        "name": "The Nothing Floats At Rest Rule",
+        "body": "A surface gets a shadow only because it sits over other content. Cards in the flow of the page never do.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** set every number in JetBrains Mono with tabular figures, and every word in Space Grotesk.",
+      "**Do** put colour on the value and its meter, and keep the card Panel with a hairline.",
+      "**Do** keep Solar Green as the single accent for focus, active and success, and Home Coral for warning and danger.",
+      "**Do** hold the layout with a skeleton of the same height while data loads.",
+      "**Do** mark estimates, gaps and stale data with an amber pill or word rather than hiding them.",
+      "**Do** respect `prefers-reduced-motion`: the breathing dot, the skeleton sweep, the flow dashes and any new motion stop under it.",
+      "**Do** keep Muted and Dim text at or above 4.5:1 on Panel Raised."
+    ],
+    "donts": [
+      "**Don't** put a shadow on a card that sits in the page flow.",
+      "**Don't** add a sixth series colour or reuse one of the five for a different meaning.",
+      "**Don't** use the sun gradient or its glow anywhere but the brand orb and the login backdrop.",
+      "**Don't** lay a gradient over data, draw a skeuomorphic gauge, or add glass or neon.",
+      "**Don't** apply `-webkit-font-smoothing: antialiased`; it thins light text on the dark ground.",
+      "**Don't** ship a light scheme by accident: the app is dark-only today, and `color-scheme: dark` on native controls is part of that."
+    ]
+  }
+}
