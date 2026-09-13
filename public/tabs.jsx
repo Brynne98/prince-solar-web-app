@@ -496,7 +496,7 @@ function BatteryTab({ snap, settings }) {
 }
 
 // ---------------------------------------------------------------- GRID
-function GridTab({ snap, settings }) {
+function GridTab({ snap, settings, refreshKey }) {
   const a = snap.aggregate;
   const feat = snap.features || {};
   if (feat.hasGrid === false) {
@@ -566,17 +566,37 @@ function GridTab({ snap, settings }) {
             : <div className="hint-line">All {fmtKwh(a.loadToday)} you used today @ {fmtRand(rate)}/kWh would've cost <b>{fmtRand(wouldPay)}</b>; you only bought {fmtKwh(a.gridFromToday)} from the grid, so you saved the difference.{showExport && rateExp > 0 ? <> Plus {fmtKwh(a.gridToToday)} sold @ {fmtRand(rateExp)}/kWh.</> : null} (Charging the battery from the grid is already counted as import, so it isn't double-counted here.)Edit the rates in Settings.</div>}
         </Card>
       </div>
+      {/* the supply over a day: voltage at each inverter's AC terminal and the grid's
+          frequency, from SunSynk's history (two months back). A blackout shows as a
+          shaded band — the terminal keeps reading the inverter's own 230 V then, so
+          only the 0 Hz grid frequency gives it away. */}
+      <Card className="chart-card">
+        <SectionTitle>SUPPLY · DAY</SectionTitle>
+        <window.InverterHistoryChart kind="ac" refreshKey={refreshKey} />
+      </Card>
     </div>
   );
 }
 
 // ---------------------------------------------------------------- INVERTERS
-function InvertersTab({ snap }) {
+function InvertersTab({ snap, refreshKey }) {
   const feat = snap.features || {};
   const hasBatt = feat.hasBattery !== false, hasGrid = feat.hasGrid !== false;
   return (
     <div className="stack">
       <SectionTitle right={<span className="dim">{snap.inverters.length} units · {snap.plant.name}</span>}>INVERTERS</SectionTitle>
+      {/* inverter temperatures over a day (SunSynk history; nothing live reports them) */}
+      <Card className="chart-card">
+        <SectionTitle>TEMPERATURE · DAY</SectionTitle>
+        <window.InverterHistoryChart kind="temp" refreshKey={refreshKey} />
+      </Card>
+      {/* off-grid: the inverter's own output voltage and frequency live here, not on Grid */}
+      {!hasGrid && (
+        <Card className="chart-card">
+          <SectionTitle>OUTPUT · DAY</SectionTitle>
+          <window.InverterHistoryChart kind="output" refreshKey={refreshKey} />
+        </Card>
+      )}
       <div className="duo">
         {snap.inverters.map(inv => {
           const t = cleanTemp(inv.battTemp);

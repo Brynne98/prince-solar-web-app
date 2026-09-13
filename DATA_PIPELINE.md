@@ -346,7 +346,7 @@ Inverter temperature exists only in SunSynk's per-inverter `output/day` history
 the realtime endpoints on the official key report it, so an overheat alert cannot
 ride the minute poll the way the grid and battery alerts do.
 
-- **Source:** `inverter_temp` (0045), max per 5-minute bucket per inverter, written
+- **Source:** `inverter_history` (0045/0046), every device sample per inverter, written
   by `recover`. Today is refetched every run; the past is a watermark walk.
 - **Latency bound:** the recover schedule (6 h) + the device's upload cadence (up to
   5 min on the 5-minute loggers) + the cloud's own delay, and longer whenever the
@@ -355,11 +355,11 @@ ride the minute poll the way the grid and battery alerts do.
   one cheap call each — rather than waiting on recover.
 - **Threshold:** unknown yet. Observed 12 Sep 2026: AC TEMP 38–65 °C across five
   inverters on a normal day, peaking with output. Pick from a few weeks of
-  `inverter_temp` before setting one; a derate warning around 70 °C is the usual
+  `inverter_history` before setting one; a derate warning around 70 °C is the usual
   starting point for these units, not a fact we have measured.
 - **Sensor absent:** the parents' three inverters report DC TEMP as a constant 25 °C.
   Detect a flat series (min = max over the day) and ignore it, as `api_inverter_temps`
-  already flags with `dcFlat`.
+  already flags with `dcFlat` (now `api_inverter_history`).
 - **Shape:** the same `api_alerts_due()` contract — detection in SQL, event_key per
   (sn, day), debounce on two consecutive hot buckets so one spike does not page.
 

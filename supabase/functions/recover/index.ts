@@ -38,12 +38,13 @@
 // stores them). Both dates clear when the bookmark passes the end. The link kicks
 // this with ?plant=ID; the 6-hourly schedule finishes it.
 //
-// Temperatures (0045): every run also banks inverter AC/DC temperature from
-// output/day — today first thing (a few calls the panel depends on), then, after
-// gap recovery, a watermark walk (plant_config.temp_next) over past days, one call
-// per inverter-day, inside the same time budget. History is the only source of
-// these; nothing live reports them on the official key. A day's temps also ride
-// along free whenever the spine fetch ran for it.
+// Inverter history (0045/0046): every run also banks the per-inverter extras —
+// AC/DC temperature, AC terminal voltage and frequency, grid frequency — from
+// output/day and grid/day: today first thing (a few calls the charts depend on),
+// then, after gap recovery, a watermark walk (plant_config.temp_next) over past
+// days, two calls per inverter-day, inside the same time budget. History is the
+// only source of the temperatures; the same series also ride along free whenever
+// the spine fetch ran for a day.
 //
 // ?plant=ID restricts a run to one plant and leaves the round-robin cursor alone.
 import { type Account, db, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
@@ -53,7 +54,7 @@ import {
   type FeedScale,
   plantFeedForDay,
 } from "../_shared/plantfeed.ts";
-import { dayStartEpoch, fetchInverterDay, fetchInverterTemps, plantSpine, type SpineRow, tempRows } from "../_shared/invhistory.ts";
+import { dayStartEpoch, fetchInverterDay, fetchInverterExtras, historyRows, plantSpine, type SpineRow } from "../_shared/invhistory.ts";
 
 const DEFAULT_WINDOW_DAYS = 14;
 // Leave headroom under the 150 s free-tier wall clock; a partial sweep is fine
@@ -113,29 +114,35 @@ async function historySpine(acc: Account, plantId: number, tz: string, day: stri
   for (const sn of sns) {
     const d = await fetchInverterDay(acc, sn, day);
     days.push(d);
-    if (bank) await bankTemps(plantId, sn, tempRows(d, lo)).catch((e) => console.error(`inverter_temp ${sn}:`, e));
+    if (bank) await bankHistory(plantId, sn, historyRows(d, lo)).catch((e) => console.error(`inverter_history ${sn}:`, e));
   }
   const spine = plantSpine(days, lo);
   return spine.size ? { spine, days } : null;
 }
 
-/** Temperature rows into inverter_temp. Throws on a database error; callers decide. */
-async function bankTemps(plantId: number, sn: string, rows: ReturnType<typeof tempRows>): Promise<number> {
+/** Sample rows into inverter_history. Throws on a database error; callers decide. */
+async function bankHistory(plantId: number, sn: string, rows: ReturnType<typeof historyRows>): Promise<number> {
   if (!rows.length) return 0;
-  return Number(await rpc("q_insert_inverter_temp", { p_plant: plantId, p_sn: sn, p_rows: rows }) ?? 0);
+  return Number(await rpc("q_insert_inverter_history", { p_plant: plantId, p_sn: sn, p_rows: rows }) ?? 0);
 }
 
 /** Inverter serials the poller has stored for a plant. */
 const plantSns = async (plantId: number) =>
   (((await rpc("plant_inverters", { p_plant: plantId })) ?? []) as any[]).map((r) => String(r.sn ?? r));
 
-/** One day of temperatures for every inverter, one output/day call each. Throws on the first failure. */
+/**
+ * One day of extras for every inverter, two calls each. What answered is banked
+ * before a failed endpoint fails the day, so a retry loses nothing and a day
+ * given up after TEMP_MAX_TRIES still holds whatever it had.
+ */
 async function fetchTempDay(job: PlantJob, sns: string[], day: string, started: number) {
   const lo = dayStartEpoch(job.timezone, day);
   let banked = 0;
   for (const sn of sns) {
     if (Date.now() - started > TIME_BUDGET_MS) throw new BudgetReached(day);
-    banked += await bankTemps(job.plantId, sn, tempRows(await fetchInverterTemps(job.account, sn, day), lo));
+    const x = await fetchInverterExtras(job.account, sn, day);
+    banked += await bankHistory(job.plantId, sn, historyRows(x, lo));
+    if (x.failed.length) throw new Error(`${sn} ${x.failed.join("; ")}`);
   }
   return banked;
 }
@@ -149,7 +156,7 @@ async function temperatureToday(job: PlantJob, started: number) {
   const sns = await plantSns(job.plantId);
   if (!sns.length) return { banked: 0, reason: "no inverter serials stored yet" };
   try {
-    return { banked: await fetchTempDay(job, sns, localDate(job.timezone), started), calls: sns.length };
+    return { banked: await fetchTempDay(job, sns, localDate(job.timezone), started), calls: 2 * sns.length };
   } catch (e) {
     return { banked: 0, error: String(e instanceof Error ? e.message : e) };
   }
@@ -158,7 +165,7 @@ async function temperatureToday(job: PlantJob, started: number) {
 const TEMP_MAX_TRIES = 3;
 /**
  * The watermark walk, last in a plant's run: plant_config.temp_next up to
- * yesterday, one output/day call per inverter-day. A day advances the watermark
+ * yesterday, two calls per inverter-day. A day advances the watermark
  * when every inverter answered and every insert committed; a day that fails is
  * retried next run and stepped past after TEMP_MAX_TRIES, so one dead serial
  * cannot stall the walk. Never walks further back than the cloud keeps (60 days).
@@ -200,7 +207,10 @@ async function temperatureWalk(job: PlantJob, started: number) {
     if (failed) console.error(`temps ${plantId} ${day} given up after ${TEMP_MAX_TRIES} tries: ${failed}`);
     walked++; tries = 0;
   }
-  return { banked, walked, walkedTo: day, stoppedEarly };
+  let pruned = 0;
+  try { pruned = Number(await rpc("q_prune_inverter_history", { p_plant: plantId }) ?? 0); }
+  catch (e) { console.error(`prune inverter_history ${plantId}:`, e); }
+  return { banked, walked, walkedTo: day, stoppedEarly, pruned };
 }
 
 async function recoverDay(acc: Account, plantId: number, tz: string, day: string, historyOnly = false) {
@@ -414,7 +424,7 @@ async function dryRun(job: PlantJob, day: string) {
     plantId, day, inverters: h.days.map((d) => ({
       sn: d.sn, labels: d.labels,
       samples: { pv: d.pv?.length ?? 0, grid: d.grid?.length ?? 0, load: d.load?.length ?? 0, soc: d.soc?.length ?? 0,
-        acTemp: d.acTemp?.length ?? 0, dcTemp: d.dcTemp?.length ?? 0 },
+        acTemp: d.acTemp?.length ?? 0, dcTemp: d.dcTemp?.length ?? 0, vac: d.vac?.length ?? 0, fac: d.fac?.length ?? 0, gridFac: d.gridFac?.length ?? 0 },
     })),
     spineMinutes: h.spine.size, pollerMinutes: (data ?? []).length, overlap,
     error: Object.fromEntries(series.map((k) => [k, { n: errs[k].length, median: q(errs[k], 0.5), p90: q(errs[k], 0.9) }])),

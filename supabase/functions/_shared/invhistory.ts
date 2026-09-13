@@ -6,11 +6,12 @@
 //
 // What the `…/day` endpoints give, and how the spine is built from them:
 //   battery  soc              -> soc   (average over inverters with soc > 0)
-//   grid     pac              -> grid  (sum; + import)
+//   grid     pac, fac         -> grid  (sum; + import); F-grid banked per inverter (0046)
 //   load     pac              -> load  (sum)
 //   output   ppv  (P-pv)      -> pv    (total PV per inverter, one series; sum)
-//            igbt_temp, dc_temp -> AC TEMP / DC TEMP (°C), banked per inverter in
-//                                 inverter_temp (0045); nothing live reports these
+//            igbt_temp, dc_temp, vac1, fac -> AC TEMP / DC TEMP (°C), V-ac-1, F-ac:
+//                                 banked per inverter in inverter_history (0045/0046);
+//                                 nothing live reports the temperatures
 //   input    V-pv-n, I-pv-n   -> pv    fallback only: sum of V×I over strings; two
 //                                        calls, `column` takes one token. A 15-string
 //                                        inverter uploading every ~67 s times out
@@ -35,7 +36,7 @@ export const historyPaths = (sn: string, day: string) => {
   const q = `lan=en&date=${day}&edate=${day}`;
   return {
     battery: `/inverter/battery/${sn}/day?${q}&column=soc`,
-    grid: `/inverter/grid/${sn}/day?${q}&column=pac`,
+    grid: `/inverter/grid/${sn}/day?${q}&column=${GRID_COLUMNS}`,
     load: `/inverter/load/${sn}/day?${q}&column=pac`,
     // Total PV power as one series (P-pv). Found 2026-09-13: a 15-string inverter
     // uploading every ~67 s times out SunSynk's backend on the per-string
@@ -43,10 +44,17 @@ export const historyPaths = (sn: string, day: string) => {
     pv: `/inverter/${sn}/output/day?${q}&column=${OUTPUT_COLUMNS}`,
   };
 };
-/** `column` takes a comma list (survey 13 Sep 2026); the temperatures ride along free. */
-export const OUTPUT_COLUMNS = "ppv,dc_temp,igbt_temp";
-export const tempPath = (sn: string, day: string) =>
-  `/inverter/${sn}/output/day?lan=en&date=${day}&edate=${day}&column=dc_temp,igbt_temp`;
+/** `column` takes a comma list (survey 13 Sep 2026); the extra series ride along free. */
+export const OUTPUT_COLUMNS = "ppv,dc_temp,igbt_temp,vac1,fac";
+export const GRID_COLUMNS = "pac,fac";
+/** The walk's own calls: the extra series without the spine. Two calls per inverter-day. */
+export const extrasPaths = (sn: string, day: string) => {
+  const q = `lan=en&date=${day}&edate=${day}`;
+  return {
+    output: `/inverter/${sn}/output/day?${q}&column=dc_temp,igbt_temp,vac1,fac`,
+    grid: `/inverter/grid/${sn}/day?${q}&column=fac`,
+  };
+};
 /** Per-string V and I, the fallback when P-pv is absent. `column` takes one token; two calls. */
 export const stringPaths = (sn: string, day: string) => {
   const q = `lan=en&date=${day}&edate=${day}`;
@@ -87,9 +95,13 @@ export function parseSeries(data: any): SeriesMap {
   return out;
 }
 
-/** First series whose label contains any of the needles. */
+/**
+ * First series matching the needles, needle by needle: "p-grid" is tried against
+ * every label before "grid" is, so F-grid (grid/day now returns pac,fac) can never
+ * win over P-grid whatever order SunSynk lists them in.
+ */
 function seriesLike(m: SeriesMap, ...needles: string[]): Sample[] | null {
-  for (const [label, s] of m) if (needles.some((n) => label.includes(n))) return s;
+  for (const n of needles) for (const [label, s] of m) if (label.includes(n)) return s;
   return null;
 }
 
@@ -119,8 +131,8 @@ export type InverterDay = {
   /** history endpoints that were asked for and did not answer (0044: a backfill day banks only when 0) */
   failed: number;
   pv: Sample[] | null; grid: Sample[] | null; load: Sample[] | null; soc: Sample[] | null;
-  /** inverter temperatures from the same output/day call; opportunistic, never counted in `failed` */
-  acTemp: Sample[] | null; dcTemp: Sample[] | null;
+  /** extra series from the same output/day and grid/day calls; opportunistic, never counted in `failed` */
+  acTemp: Sample[] | null; dcTemp: Sample[] | null; vac: Sample[] | null; fac: Sample[] | null; gridFac: Sample[] | null;
   /** raw labels seen per endpoint, for the dry-run report */
   labels: Record<string, string[]>;
 };
@@ -161,34 +173,53 @@ export async function fetchInverterDay(acc: Account, sn: string, day: string): P
     grid: seriesLike(parsed.grid, "p-grid", "pac", "grid"),
     load: seriesLike(parsed.load, "p-load", "pac", "load"),
     pv,
-    ...tempsOf(parsed.pv),
+    ...extrasOf(parsed.pv, parsed.grid),
     labels,
   };
 }
 
-/** AC TEMP / DC TEMP out of an output/day response. Needles are exact: "ac" alone would hit V-ac-1. */
-export const tempsOf = (m: SeriesMap | undefined) => ({
-  acTemp: m ? seriesLike(m, "ac temp") : null,
-  dcTemp: m ? seriesLike(m, "dc temp") : null,
+export type Extras = { acTemp: Sample[] | null; dcTemp: Sample[] | null; vac: Sample[] | null; fac: Sample[] | null; gridFac: Sample[] | null };
+/**
+ * The extra series out of an output/day and a grid/day response. Labels (lower-cased):
+ * "ac temp", "dc temp", "v-ac-1", "f-ac" on output; "f-grid" on grid. Needles are
+ * exact: "ac" alone would hit V-ac-1, "fac" nothing.
+ */
+export const extrasOf = (out: SeriesMap | undefined, grid: SeriesMap | undefined): Extras => ({
+  acTemp: out ? seriesLike(out, "ac temp") : null,
+  dcTemp: out ? seriesLike(out, "dc temp") : null,
+  vac: out ? seriesLike(out, "v-ac-1", "vac1") : null,
+  fac: out ? seriesLike(out, "f-ac", "fac") : null,
+  gridFac: grid ? seriesLike(grid, "f-grid", "fac") : null,
 });
 
-/** Temperatures only, one call. Throws when the endpoint does not answer. */
-export async function fetchInverterTemps(acc: Account, sn: string, day: string) {
-  return tempsOf(parseSeries(await apiGet(tempPath(sn, day), acc)));
+/**
+ * The extra series only, two calls. Whatever answered is returned; `failed` names
+ * the endpoints that did not, so the caller can bank the partial day and still
+ * retry it.
+ */
+export async function fetchInverterExtras(acc: Account, sn: string, day: string): Promise<Extras & { failed: string[] }> {
+  const p = extrasPaths(sn, day);
+  const [out, grid] = await Promise.allSettled([apiGet(p.output, acc), apiGet(p.grid, acc)]);
+  const failed: string[] = [];
+  const val = (r: PromiseSettledResult<any>, k: string) => {
+    if (r.status === "fulfilled") return parseSeries(r.value);
+    failed.push(`${k}: ${String(r.reason instanceof Error ? r.reason.message : r.reason)}`);
+    return undefined;
+  };
+  return { ...extrasOf(val(out, "output"), val(grid, "grid")), failed };
 }
 
-/** {ts, ac, dc} rows for q_insert_inverter_temp, at the device's own sample times. */
-export function tempRows(t: { acTemp: Sample[] | null; dcTemp: Sample[] | null }, dayStart: number) {
-  const byT = new Map<number, { ts: number; ac?: number; dc?: number }>();
-  const put = (xs: Sample[] | null, k: "ac" | "dc") => {
+/** {ts, ac, dc, vac, fac, gfac} rows for q_insert_inverter_history, at the device's own sample times. */
+export function historyRows(t: Extras, dayStart: number) {
+  const byT = new Map<number, Record<string, number>>();
+  const put = (xs: Sample[] | null, k: string) => {
     for (const s of xs ?? []) {
       const row = byT.get(s.t) ?? { ts: dayStart + s.t };
       row[k] = s.v;
       byT.set(s.t, row);
     }
   };
-  put(t.acTemp, "ac");
-  put(t.dcTemp, "dc");
+  put(t.acTemp, "ac"); put(t.dcTemp, "dc"); put(t.vac, "vac"); put(t.fac, "fac"); put(t.gridFac, "gfac");
   return [...byT.values()];
 }
 
