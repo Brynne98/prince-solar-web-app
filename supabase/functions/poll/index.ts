@@ -261,7 +261,7 @@ async function fetchInto(raw: RawBundle, eps: Endpoint[], sn: string, acc: Accou
   });
 }
 
-async function fetchInverter(inv: InverterInfo, acc: Account, ts: number, sign: string | null): Promise<Fetched> {
+async function fetchInverter(inv: InverterInfo, acc: Account, ts: number, sign: string | null, offGrid = false): Promise<Fetched> {
   const paths = realtimePaths(inv.sn);
   const input = await apiGet(paths.input, acc).catch(() => null);
   const inputTime: string | null =
@@ -275,7 +275,7 @@ async function fetchInverter(inv: InverterInfo, acc: Account, ts: number, sign: 
   // The fresh grid payload shows an outage that the last row did not: read the far
   // side of the relay (and the load) now rather than at the next tier boundary.
   const late = (["output", "load"] as Endpoint[]).filter((k) => !want.has(k));
-  if (late.length && burstTrigger(extractReading(inv, raw, { battPositiveMeans: sign })) !== null) {
+  if (late.length && !offGrid && burstTrigger(extractReading(inv, raw, { battPositiveMeans: sign })) !== null) {
     await fetchInto(raw, late, inv.sn, acc);
     for (const k of late) want.add(k);
   }
@@ -363,8 +363,11 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   // Battery sign per plant (0041): the plant's own answer, or the fleet default
   // until detection has had enough data to decide.
   const signOf = new Map(jobs.map((j) => [j.plantId, j.battPositiveMeans]));
+  // Off-grid plants (has_grid = false, 0042): the relay is open by design, so the
+  // outage burst and the early far-side reads would fire every minute for nothing.
+  const offGrid = new Set(jobs.filter((j) => j.hasGrid === false).map((j) => j.plantId));
   const perInv = await Promise.all(inverters.map((inv) =>
-    fetchInverter(inv, acc, ts, signOf.get(Number(inv.plantId)) ?? null)));
+    fetchInverter(inv, acc, ts, signOf.get(Number(inv.plantId)) ?? null, offGrid.has(Number(inv.plantId)))));
   const carried = perInv.filter((f) => f.carried).map((f) => f.inv.sn);
   if (carried.length) result.carried = carried;
   // Endpoints whose value on this row came from the previous one — whether they were
@@ -453,11 +456,13 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
     }
   }
 
-  // Relay open or mains voltage gone on any inverter: start the sub-minute burst.
-  const trigger = readings.map(burstTrigger).find((t) => t !== null) ?? null;
+  // Relay open or mains voltage gone on any inverter of a plant that has a grid:
+  // start the sub-minute burst, on that account's grid-connected inverters only.
+  const gridInverters = inverters.filter((inv) => !offGrid.has(Number(inv.plantId)));
+  const trigger = readings.filter((r) => !offGrid.has(Number(r.plant_id))).map(burstTrigger).find((t) => t !== null) ?? null;
   if (trigger) {
     result.burst = trigger;
-    const p = burstGrid(acc, inverters, ts, trigger)
+    const p = burstGrid(acc, gridInverters, ts, trigger)
       .catch((e) => console.warn("grid burst failed:", e instanceof Error ? e.message : e));
     await background(p);
   }
