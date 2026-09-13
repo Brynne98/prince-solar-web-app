@@ -9,6 +9,8 @@
 //   grid     pac              -> grid  (sum; + import)
 //   load     pac              -> load  (sum)
 //   output   ppv  (P-pv)      -> pv    (total PV per inverter, one series; sum)
+//            igbt_temp, dc_temp -> AC TEMP / DC TEMP (°C), banked per inverter in
+//                                 inverter_temp (0045); nothing live reports these
 //   input    V-pv-n, I-pv-n   -> pv    fallback only: sum of V×I over strings; two
 //                                        calls, `column` takes one token. A 15-string
 //                                        inverter uploading every ~67 s times out
@@ -38,9 +40,13 @@ export const historyPaths = (sn: string, day: string) => {
     // Total PV power as one series (P-pv). Found 2026-09-13: a 15-string inverter
     // uploading every ~67 s times out SunSynk's backend on the per-string
     // endpoints below (sticky HTTP 504 after 10 s), but answers this one.
-    pv: `/inverter/${sn}/output/day?${q}&column=ppv`,
+    pv: `/inverter/${sn}/output/day?${q}&column=${OUTPUT_COLUMNS}`,
   };
 };
+/** `column` takes a comma list (survey 13 Sep 2026); the temperatures ride along free. */
+export const OUTPUT_COLUMNS = "ppv,dc_temp,igbt_temp";
+export const tempPath = (sn: string, day: string) =>
+  `/inverter/${sn}/output/day?lan=en&date=${day}&edate=${day}&column=dc_temp,igbt_temp`;
 /** Per-string V and I, the fallback when P-pv is absent. `column` takes one token; two calls. */
 export const stringPaths = (sn: string, day: string) => {
   const q = `lan=en&date=${day}&edate=${day}`;
@@ -113,6 +119,8 @@ export type InverterDay = {
   /** history endpoints that were asked for and did not answer (0044: a backfill day banks only when 0) */
   failed: number;
   pv: Sample[] | null; grid: Sample[] | null; load: Sample[] | null; soc: Sample[] | null;
+  /** inverter temperatures from the same output/day call; opportunistic, never counted in `failed` */
+  acTemp: Sample[] | null; dcTemp: Sample[] | null;
   /** raw labels seen per endpoint, for the dry-run report */
   labels: Record<string, string[]>;
 };
@@ -153,8 +161,35 @@ export async function fetchInverterDay(acc: Account, sn: string, day: string): P
     grid: seriesLike(parsed.grid, "p-grid", "pac", "grid"),
     load: seriesLike(parsed.load, "p-load", "pac", "load"),
     pv,
+    ...tempsOf(parsed.pv),
     labels,
   };
+}
+
+/** AC TEMP / DC TEMP out of an output/day response. Needles are exact: "ac" alone would hit V-ac-1. */
+export const tempsOf = (m: SeriesMap | undefined) => ({
+  acTemp: m ? seriesLike(m, "ac temp") : null,
+  dcTemp: m ? seriesLike(m, "dc temp") : null,
+});
+
+/** Temperatures only, one call. Throws when the endpoint does not answer. */
+export async function fetchInverterTemps(acc: Account, sn: string, day: string) {
+  return tempsOf(parseSeries(await apiGet(tempPath(sn, day), acc)));
+}
+
+/** {ts, ac, dc} rows for q_insert_inverter_temp, at the device's own sample times. */
+export function tempRows(t: { acTemp: Sample[] | null; dcTemp: Sample[] | null }, dayStart: number) {
+  const byT = new Map<number, { ts: number; ac?: number; dc?: number }>();
+  const put = (xs: Sample[] | null, k: "ac" | "dc") => {
+    for (const s of xs ?? []) {
+      const row = byT.get(s.t) ?? { ts: dayStart + s.t };
+      row[k] = s.v;
+      byT.set(s.t, row);
+    }
+  };
+  put(t.acTemp, "ac");
+  put(t.dcTemp, "dc");
+  return [...byT.values()];
 }
 
 /** Longest the last upload is trusted for: a 5-minute logger plus slack. */

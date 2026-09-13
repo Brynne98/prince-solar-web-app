@@ -286,6 +286,55 @@ So the flow shortcut is web-host only and off the table. Everything the product
 stores comes from the five realtime endpoints, and the per-inverter history is the
 one unused capability worth building on (backfill + a real freshness signal).
 
+### 🔎 Endpoint survey — 13 Sep 2026 (openapi.sunsynk.net, the production key)
+
+A systematic `column=` sweep of the five per-inverter `…/day` endpoints, run
+through the deployed `recover` function against 2026-09-12 (a full day), master
+inverter 2508290475 first, then confirmed on the home slave and all three of the
+parents' inverters (plant 495944). ~60 tokens per endpoint; only hits are listed.
+Anything not in the table returned `200` with an empty `infos` array.
+
+| Endpoint | Token → label (unit) | Notes |
+|---|---|---|
+| `/inverter/battery/{sn}/day` | `soc` → **SOC** (%) | The only column. `power`, `pbat`, `vbat`, `ibat`, `voltage`, `current`, `temp`, `bms*`, `chg`/`dischg`, `etodayChg`… all empty, on every firmware tried (2023, 2025). **Battery power is not in per-inverter history.** |
+| `/inverter/grid/{sn}/day` | `pac` → **P-grid** (W), `fac` → **F-grid** (Hz) | No voltage, current, pf, kWh or relay columns. Off-grid plant reads `0 W / 0 Hz` all day. |
+| `/inverter/load/{sn}/day` | `pac` → **P-load** (W) *or* **Total Load Power** (W); `etoday` → **Daily Consumption** (kWh); `etotal` → **Cumulative Consumption** (kWh) | The `pac` label differs by firmware: `P-load` at home, `Total Load Power` on all three parents' inverters. `invhistory.ts` matches on `p-load` / `pac` / `load`, so both parse. Daily/cumulative kWh at sample resolution is new. |
+| `/inverter/{sn}/output/day` | `ppv` → **P-pv** (W); `pac` → **P-inv** (W); `fac` → **F-ac** (Hz); `vac1`/`vac2` → **V-ac-1/2** (V); `iac1`/`iac2` → **I-ac-1/2** (A); `dc_temp` → **DC TEMP** (℃); `igbt_temp` → **AC TEMP** (℃); `temp1` → both temps | Inverter temperatures are new. `vac3`/`iac3`, `temp`, `ac_temp`, `pinv`, `pf`, `qac`, `etoday` empty. Parents' inverters report DC TEMP as a flat 25 ℃ (sensor absent); AC TEMP is real on all five. |
+| `/inverter/{sn}/input/day` | every token → **V-pv-n** (V); `ipv` → **I-pv-n** (A) | Unchanged from 5 Sep. |
+| `/inverter/{sn}/day` (bare) | — | Now a plain `404 API not found` (was 500 on 5 Sep). No `column` on a sub-resource endpoint → `400 Parameter column is required`. |
+
+**`column` takes a comma-separated list.** `output/day?column=ppv,pac,fac,vac1,iac1,dc_temp,igbt_temp`
+returned all seven series in one ~1 s call; `grid?column=pac,fac` and
+`load?column=pac,etoday,etotal` likewise. Unknown tokens in the list are ignored,
+not rejected. The 5 Sep note that `column` takes one token was wrong. So a whole
+inverter-day is **four calls** (one per endpoint) even with the extras, and the
+per-string V/I fallback needs one call, not two. Not changed in `invhistory.ts` yet.
+
+**Sample counts, 2026-09-12** (= the datalogger's upload cadence, same on every column):
+
+| Inverter | Plant | Samples | Cadence |
+|---|---|---|---|
+| 2508290475 (master) | 538820 | 1,276 | ~68 s |
+| 2512082438 (slave) | 538820 | 288 | 5 min |
+| 2303222237 | 495944 | 1,431 | ~60 s |
+| 2303251204 | 495944 | 284 | 5 min |
+| 2504193036 | 495944 | 1,257 | ~69 s |
+
+**`/inverter/{sn}/flow`** on the official host: `404 API not found` (confirmed
+again; the 5 Sep table stands). The five realtime endpoints answered normally in
+the same second, so there is no single-call shortcut on this key.
+
+**What this means**
+
+- Battery power history stays derived: `batt = pv + grid − load` from the four
+  history series, or the plant feed's Battery series while the cloud still has it.
+  Nothing in the sweep changes that.
+- New and free with the four calls we already make: inverter **AC/DC temperature**,
+  **AC voltage/current/frequency** (per inverter, minute-ish), and **load kWh
+  today/cumulative** at sample resolution. Alert-grade voltage/frequency history
+  is therefore recoverable for outage forensics; battery voltage/current/temperature
+  and grid relay state still are not.
+
 ---
 
 ## High-value additions not yet on the dashboard

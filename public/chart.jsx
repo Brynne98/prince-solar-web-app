@@ -69,6 +69,117 @@ function niceDate(s) {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+// ---------------------------- TEMPERATURE ----------------------------
+// Inverter AC/DC temperature under the day chart. History-only: SunSynk's
+// output/day, banked by `recover` every 6 h (no live endpoint carries it), so it
+// runs behind the power lines — the "to HH:MM" stamp says how far. Same 5-min
+// grid and margins as the chart above, so the crosshair lines up by index.
+const TEMP_COLORS = ['#fb923c', '#f472b6', '#60a5fa', '#fbbf24', '#34d399', '#c084fc'];
+function TempPanel({ date, refreshKey, width, m, innerW, lastIdx, mobile, hover, setHover, isToday }) {
+  const [invs, setInvs] = React.useState(null); // null = loading
+  React.useEffect(() => {
+    let alive = true;
+    window.fetchTemps(date)
+      .then(r => { if (alive) setInvs(r); })
+      .catch(() => { if (alive) setInvs([]); });
+    return () => { alive = false; };
+  }, [date, refreshKey]);
+
+  const H = mobile ? 150 : 200;
+  const t = 18, b = 24, innerH = H - t - b;
+  const shown = (invs || []).filter(i => i.points && i.points.some(p => p.ac != null || (p.dc != null && !i.dcFlat)));
+  const nInv = shown.length;
+
+  // Axis on the data, not on zero: a 40–60 °C day on a zero-anchored scale is a
+  // flat line two-thirds of the way up an empty plot.
+  let lo = Infinity, hi = -Infinity;
+  shown.forEach(i => i.points.forEach(p => {
+    if (p.ac != null) { lo = Math.min(lo, p.ac); hi = Math.max(hi, p.ac); }
+    if (!i.dcFlat && p.dc != null) { lo = Math.min(lo, p.dc); hi = Math.max(hi, p.dc); }
+  }));
+  if (!nInv) { lo = 0; hi = 1; }
+  lo = Math.floor((lo - 2) / 5) * 5; hi = Math.ceil((hi + 2) / 5) * 5;
+  if (hi - lo < 10) hi = lo + 10;
+  const step = hi - lo > 40 ? 10 : 5;
+  const ticks = []; for (let v = lo; v <= hi; v += step) ticks.push(v);
+  const x = i => m.l + (i / Math.max(1, lastIdx)) * innerW;
+  const y = v => t + innerH - ((v - lo) / (hi - lo)) * innerH;
+  const pathOf = (pts, k) => {
+    let d = '', pen = false;
+    pts.forEach((p, i) => {
+      if (i > lastIdx) return;
+      if (p[k] == null) { pen = false; return; }
+      d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p[k]).toFixed(1) + ' ';
+      pen = true;
+    });
+    return d;
+  };
+  const idxFromX = (clientX, el) => {
+    const mx = clientX - el.getBoundingClientRect().left;
+    return Math.max(0, Math.min(lastIdx, Math.round(((mx - m.l) / innerW) * lastIdx)));
+  };
+  // latest drawn bucket any inverter has; on a past day anything short of 23:55 is a lag
+  let lastI = -1;
+  shown.forEach(i => { for (let k = Math.min(lastIdx, i.points.length - 1); k > lastI; k--) if (i.points[k].ac != null || i.points[k].dc != null) { lastI = k; break; } });
+  const lagNote = lastI >= 0 && (isToday || lastI < 287) ? `to ${HM(lastI * 5)}` : null;
+  // hovered bucket, or the latest reading when nothing is hovered; never a reading from another time
+  const valAt = (inv, k) => {
+    if (hover != null) { const p = inv.points[hover]; return p ? p[k] : null; }
+    for (let i = Math.min(lastIdx, inv.points.length - 1); i >= 0; i--) if (inv.points[i][k] != null) return inv.points[i][k];
+    return null;
+  };
+  const fmtC = v => (v == null ? null : Math.round(v) + '°');
+
+  return (
+    <div className="temp-panel">
+      <div className="temp-head">
+        <span className="temp-title">Inverter temperature</span>
+        {lagNote && <span className="temp-lag" title="From SunSynk's history, fetched every six hours; the live chart above runs ahead of it">{lagNote}</span>}
+        {nInv > 0 && shown.map((inv, k) => (
+          <span key={inv.sn} className="temp-chip">
+            <span className="legend-dot" style={{ background: TEMP_COLORS[k % TEMP_COLORS.length], borderColor: TEMP_COLORS[k % TEMP_COLORS.length] }} />
+            {nInv > 1 ? inv.alias : 'AC'}
+            <span className="legend-val mono" style={{ color: TEMP_COLORS[k % TEMP_COLORS.length] }}>{fmtC(valAt(inv, 'ac')) || '—'}</span>
+            {!inv.dcFlat && <span className="legend-val mono dim" title="DC side">{fmtC(valAt(inv, 'dc')) || '—'} dc</span>}
+          </span>
+        ))}
+      </div>
+      {nInv === 0 ? (
+        <div className="temp-empty">{invs == null ? '' : 'No temperature for this day yet — it arrives from SunSynk with the six-hourly sync.'}</div>
+      ) : (
+        <svg width={width} height={H} className="chart-svg" style={{ cursor: 'crosshair', display: 'block' }}
+          onMouseMove={e => setHover(idxFromX(e.clientX, e.currentTarget))}
+          onMouseLeave={() => setHover(null)}
+          onTouchStart={e => e.touches[0] && setHover(idxFromX(e.touches[0].clientX, e.currentTarget))}
+          onTouchMove={e => e.touches[0] && setHover(idxFromX(e.touches[0].clientX, e.currentTarget))}>
+          {ticks.map(v => (
+            <g key={'t' + v}>
+              <line x1={m.l} x2={m.l + innerW} y1={y(v)} y2={y(v)} stroke="rgba(255,255,255,0.05)" />
+              <text x={m.l - 10} y={y(v) + 3} textAnchor="end" className="ax">{v}</text>
+            </g>
+          ))}
+          <text x={m.l - 10} y={t - 7} textAnchor="end" className="ax" fillOpacity="0.55">°C</text>
+          {shown.map((inv, k) => {
+            const c = TEMP_COLORS[k % TEMP_COLORS.length];
+            return (
+              <g key={inv.sn}>
+                {!inv.dcFlat && <path d={pathOf(inv.points, 'dc')} fill="none" stroke={c} strokeWidth="1" strokeOpacity="0.5" strokeDasharray="3 3" />}
+                <path d={pathOf(inv.points, 'ac')} fill="none" stroke={c} strokeWidth="1.4" strokeLinejoin="round" />
+              </g>
+            );
+          })}
+          {hover != null && hover <= lastIdx && (
+            <line x1={x(hover)} x2={x(hover)} y1={t - 4} y2={t + innerH} stroke="rgba(255,255,255,0.25)" />
+          )}
+          {[0, 360, 720, 1080].map(mn => (
+            <text key={'x' + mn} x={x(mn / 5)} y={H - 8} textAnchor="middle" className="ax" fillOpacity={mn / 5 <= lastIdx ? 1 : 0}>{HM(mn)}</text>
+          ))}
+        </svg>
+      )}
+    </div>
+  );
+}
+
 function HistoryView({ today, refreshKey }) {
   const C = window.COLORS;
   const todayStr = localDateStr();
@@ -434,6 +545,8 @@ function HistoryView({ today, refreshKey }) {
         {tooltip()}
         {rangeSummary()}
       </div>
+      <TempPanel date={date} refreshKey={refreshKey} width={width} m={m} innerW={innerW}
+        lastIdx={pts.length > 1 ? pts.length - 1 : 287} mobile={mobile} hover={hover} setHover={setHover} isToday={isToday} />
     </div>
   );
 }

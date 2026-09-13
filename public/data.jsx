@@ -33,6 +33,7 @@ const ROUTES = {
   '/api/overview':         () => ['api_overview', {}],
   '/api/history':          (q) => ['api_history', { p_date: q.date || null }],
   '/api/history/earliest': () => ['api_history_earliest', {}],
+  '/api/history/temps':    (q) => ['api_inverter_temps', { p_date: q.date || null }],
   '/api/energy':           (q) => ['api_energy', { p_period: q.period || 'week' }],
   '/api/db/stats':         () => ['api_db_stats', {}],
   '/api/trends/by-hour':   (q) => ['api_trends_by_hour', { p_days: Number(q.days) || 14 }],
@@ -231,6 +232,14 @@ async function fetchEarliest() {
   catch (e) { return null; }
 }
 
+// ---- /api/history/temps -> per-inverter AC/DC temperature, 288 buckets --------
+// History-only (SunSynk output/day, fetched by recover every 6 h), so it lags the
+// live chart; `last` on each inverter is the latest bucket with data.
+async function fetchTemps(date) {
+  const api = await getJSON('/api/history/temps' + (date ? '?date=' + date : ''));
+  return api.inverters || [];
+}
+
 // ---- /api/energy -> daily/monthly aggregate rows ---------------------------
 async function fetchEnergy(period) {
   const api = await getJSON('/api/energy?period=' + period);
@@ -314,6 +323,6 @@ function emptyText(days, fallback) {
 }
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchTemps, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance,
   fetchMe, savePrefs, savePlantConfig, deleteAccount, emptyText, BATT_MAX_KW, TYPICAL_DAYS,
 });

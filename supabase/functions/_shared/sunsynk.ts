@@ -436,6 +436,9 @@ export type PlantJob = {
   backfillNext: string | null;
   backfillUntil: string | null;
   backfillTries: number;
+  /** plant_config.temp_next (0045): next local day of the inverter-temperature walk; null = not started */
+  tempNext: string | null;
+  tempTries: number;
   /** plant_config.has_grid (0042): false = off-grid, null = not known yet */
   hasGrid: boolean | null;
   account: Account;
@@ -451,7 +454,7 @@ export async function plantsToPoll(): Promise<PlantJob[]> {
     .from("plant_users").select("plant_id, plant_name, account_id")
     .in("account_id", [...byId.keys()]);
   if (error) throw new Error(`plant_users: ${error.message}`);
-  const { data: cfgRows } = await db.from("plant_config").select("plant_id, timezone, batt_positive_means, backfill_next, backfill_until, backfill_tries, has_grid");
+  const { data: cfgRows } = await db.from("plant_config").select("plant_id, timezone, batt_positive_means, backfill_next, backfill_until, backfill_tries, has_grid, temp_next, temp_tries");
   const cfg = new Map((cfgRows ?? []).map((c: any) => [Number(c.plant_id), c]));
   // One job per plant even if several users share it. The plant is read through
   // the EARLIEST-linked active account, and that choice is stable from minute to
@@ -477,6 +480,8 @@ export async function plantsToPoll(): Promise<PlantJob[]> {
       backfillNext: cfg.get(pid)?.backfill_next ?? null,
       backfillUntil: cfg.get(pid)?.backfill_until ?? null,
       backfillTries: Number(cfg.get(pid)?.backfill_tries ?? 0),
+      tempNext: cfg.get(pid)?.temp_next ?? null,
+      tempTries: Number(cfg.get(pid)?.temp_tries ?? 0),
       hasGrid: cfg.get(pid)?.has_grid ?? null,
       account: acc,
     }));

@@ -38,6 +38,13 @@
 // stores them). Both dates clear when the bookmark passes the end. The link kicks
 // this with ?plant=ID; the 6-hourly schedule finishes it.
 //
+// Temperatures (0045): every run also banks inverter AC/DC temperature from
+// output/day — today first thing (a few calls the panel depends on), then, after
+// gap recovery, a watermark walk (plant_config.temp_next) over past days, one call
+// per inverter-day, inside the same time budget. History is the only source of
+// these; nothing live reports them on the official key. A day's temps also ride
+// along free whenever the spine fetch ran for it.
+//
 // ?plant=ID restricts a run to one plant and leaves the round-robin cursor alone.
 import { type Account, db, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
 import {
@@ -46,7 +53,7 @@ import {
   type FeedScale,
   plantFeedForDay,
 } from "../_shared/plantfeed.ts";
-import { dayStartEpoch, fetchInverterDay, plantSpine, type SpineRow } from "../_shared/invhistory.ts";
+import { dayStartEpoch, fetchInverterDay, fetchInverterTemps, plantSpine, type SpineRow, tempRows } from "../_shared/invhistory.ts";
 
 const DEFAULT_WINDOW_DAYS = 14;
 // Leave headroom under the 150 s free-tier wall clock; a partial sweep is fine
@@ -97,14 +104,103 @@ const complete = (r: SpineRow | undefined): r is SpineRow =>
   !!r && r.pv_w != null && r.grid_w != null && r.load_w != null;
 
 /** Per-inverter history for the plant's inverters, summed. Null if nothing came back. */
-async function historySpine(acc: Account, plantId: number, tz: string, day: string) {
+async function historySpine(acc: Account, plantId: number, tz: string, day: string, bank = true) {
   const sns = (((await rpc("plant_inverters", { p_plant: plantId })) ?? []) as any[]).map((r) => String(r.sn ?? r));
   if (!sns.length) return null;
   // One inverter at a time: 4 calls in flight, not 4 × inverters, for SunSynk's sake.
   const days = [];
-  for (const sn of sns) days.push(await fetchInverterDay(acc, sn, day));
-  const spine = plantSpine(days, dayStartEpoch(tz, day));
+  const lo = dayStartEpoch(tz, day);
+  for (const sn of sns) {
+    const d = await fetchInverterDay(acc, sn, day);
+    days.push(d);
+    if (bank) await bankTemps(plantId, sn, tempRows(d, lo)).catch((e) => console.error(`inverter_temp ${sn}:`, e));
+  }
+  const spine = plantSpine(days, lo);
   return spine.size ? { spine, days } : null;
+}
+
+/** Temperature rows into inverter_temp. Throws on a database error; callers decide. */
+async function bankTemps(plantId: number, sn: string, rows: ReturnType<typeof tempRows>): Promise<number> {
+  if (!rows.length) return 0;
+  return Number(await rpc("q_insert_inverter_temp", { p_plant: plantId, p_sn: sn, p_rows: rows }) ?? 0);
+}
+
+/** Inverter serials the poller has stored for a plant. */
+const plantSns = async (plantId: number) =>
+  (((await rpc("plant_inverters", { p_plant: plantId })) ?? []) as any[]).map((r) => String(r.sn ?? r));
+
+/** One day of temperatures for every inverter, one output/day call each. Throws on the first failure. */
+async function fetchTempDay(job: PlantJob, sns: string[], day: string, started: number) {
+  const lo = dayStartEpoch(job.timezone, day);
+  let banked = 0;
+  for (const sn of sns) {
+    if (Date.now() - started > TIME_BUDGET_MS) throw new BudgetReached(day);
+    banked += await bankTemps(job.plantId, sn, tempRows(await fetchInverterTemps(job.account, sn, day), lo));
+  }
+  return banked;
+}
+class BudgetReached extends Error { constructor(day: string) { super(`time budget reached at ${day}`); } }
+
+/**
+ * Today's temperatures, first thing in a plant's run: a handful of calls that must
+ * not wait behind a long gap recovery, since the panel has no other source.
+ */
+async function temperatureToday(job: PlantJob, started: number) {
+  const sns = await plantSns(job.plantId);
+  if (!sns.length) return { banked: 0, reason: "no inverter serials stored yet" };
+  try {
+    return { banked: await fetchTempDay(job, sns, localDate(job.timezone), started), calls: sns.length };
+  } catch (e) {
+    return { banked: 0, error: String(e instanceof Error ? e.message : e) };
+  }
+}
+
+const TEMP_MAX_TRIES = 3;
+/**
+ * The watermark walk, last in a plant's run: plant_config.temp_next up to
+ * yesterday, one output/day call per inverter-day. A day advances the watermark
+ * when every inverter answered and every insert committed; a day that fails is
+ * retried next run and stepped past after TEMP_MAX_TRIES, so one dead serial
+ * cannot stall the walk. Never walks further back than the cloud keeps (60 days).
+ * Compare-and-set on the day, like the backfill bookmark: an overlapping run stops
+ * rather than rewinding the other's bookmark.
+ */
+async function temperatureWalk(job: PlantJob, started: number) {
+  const { plantId, timezone: tz } = job;
+  const sns = await plantSns(plantId);
+  if (!sns.length) return { banked: 0, reason: "no inverter serials stored yet" };
+  const today = localDate(tz);
+  const floor = addDays(tz, today, -60);
+  let day = job.tempNext ?? floor;
+  let tries = job.tempTries;
+  let banked = 0, walked = 0;
+  let stoppedEarly: string | null = null;
+
+  if (day < floor) {
+    // idle plant: skip the days the cloud has already dropped
+    const { error } = await db.from("plant_config").update({ temp_next: floor, temp_tries: 0 }).eq("plant_id", plantId).eq("temp_next", day);
+    if (error) throw new Error(`temp watermark ${plantId}: ${error.message}`);
+    day = floor; tries = 0;
+  }
+  for (; day < today; day = addDays(tz, day, 1)) {
+    if (Date.now() - started > TIME_BUDGET_MS) { stoppedEarly = `time budget reached at ${day}; next run continues from here`; break; }
+    let failed: string | null = null;
+    try { banked += await fetchTempDay(job, sns, day, started); }
+    catch (e) {
+      if (e instanceof BudgetReached) { stoppedEarly = `${e.message}; next run continues from here`; break; }
+      failed = String(e instanceof Error ? e.message : e);
+    }
+    const retry = failed != null && tries + 1 < TEMP_MAX_TRIES;
+    const patch = retry ? { temp_tries: tries + 1 } : { temp_next: addDays(tz, day, 1), temp_tries: 0 };
+    const { data: moved, error } = await db.from("plant_config").update(patch)
+      .eq("plant_id", plantId).eq("temp_next", day).select("plant_id");
+    if (error) throw new Error(`temp watermark ${plantId}: ${error.message}`);
+    if (!moved?.length) { stoppedEarly = `another run moved the temperature watermark at ${day}`; break; }
+    if (retry) { stoppedEarly = `${day} failed (try ${tries + 1}): ${failed}; next run retries it`; break; }
+    if (failed) console.error(`temps ${plantId} ${day} given up after ${TEMP_MAX_TRIES} tries: ${failed}`);
+    walked++; tries = 0;
+  }
+  return { banked, walked, walkedTo: day, stoppedEarly };
 }
 
 async function recoverDay(acc: Account, plantId: number, tz: string, day: string, historyOnly = false) {
@@ -236,10 +332,11 @@ async function backfillPlant(job: PlantJob, started: number) {
 
 async function recoverPlant(job: PlantJob, windowDays: number, started: number) {
   const { plantId, account, timezone: tz } = job;
+  const tempsToday = await temperatureToday(job, started);
   const backfill = job.backfillNext ? await backfillPlant(job, started) : null;
   const stats = await rpc("q_stats", { p_plant: plantId });
   const row = Array.isArray(stats) ? stats[0] : stats;
-  if (!row?.first_ts) return { plantId, banked: backfill?.banked ?? 0, backfill, reason: "no history yet" };
+  if (!row?.first_ts) return { plantId, banked: backfill?.banked ?? 0, backfill, temps: { today: tempsToday }, reason: "no history yet" };
 
   const today = localDate(tz);
   const firstLogged = localDate(tz, new Date(Number(row.first_ts) * 1000));
@@ -264,10 +361,17 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
     }
   }
 
+  // The walk goes last, so gap recovery keeps first call on the budget.
+  let walk;
+  try { walk = await temperatureWalk(job, started); }
+  catch (e) { walk = { banked: 0, error: String(e instanceof Error ? e.message : e) }; }
+  const temps = { today: tempsToday, walk };
+
   return {
     plantId,
     banked: total + (backfill?.banked ?? 0),
     backfill,
+    temps,
     timezone: tz,
     scanned: `${addDays(tz, today, -(windowDays - 1))} .. ${today}`,
     // days older than the window are never scanned — the cloud has dropped them
@@ -282,7 +386,7 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
 /** Median and p90 of |history − poller| per series over a day with poller rows. */
 async function dryRun(job: PlantJob, day: string) {
   const { plantId, account: acc, timezone: tz } = job;
-  const h = await historySpine(acc, plantId, tz, day);
+  const h = await historySpine(acc, plantId, tz, day, false); // dry: writes nothing, temps included
   if (!h) return { plantId, day, error: "no history came back" };
   const lo = dayStartEpoch(tz, day);
   const { data, error } = await db.from("agg_minute")
@@ -309,7 +413,8 @@ async function dryRun(job: PlantJob, day: string) {
   return {
     plantId, day, inverters: h.days.map((d) => ({
       sn: d.sn, labels: d.labels,
-      samples: { pv: d.pv?.length ?? 0, grid: d.grid?.length ?? 0, load: d.load?.length ?? 0, soc: d.soc?.length ?? 0 },
+      samples: { pv: d.pv?.length ?? 0, grid: d.grid?.length ?? 0, load: d.load?.length ?? 0, soc: d.soc?.length ?? 0,
+        acTemp: d.acTemp?.length ?? 0, dcTemp: d.dcTemp?.length ?? 0 },
     })),
     spineMinutes: h.spine.size, pollerMinutes: (data ?? []).length, overlap,
     error: Object.fromEntries(series.map((k) => [k, { n: errs[k].length, median: q(errs[k], 0.5), p90: q(errs[k], 0.9) }])),

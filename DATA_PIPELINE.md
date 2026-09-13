@@ -338,6 +338,31 @@ api_alerts_due()   ──── called by ───> solar-alerts (Edge Function
 ```
 
 - **Detection in SQL, delivery in the function.** No thresholds in TypeScript.
+
+### 13.1 Overheat — not built yet, notes for when it is
+
+Inverter temperature exists only in SunSynk's per-inverter `output/day` history
+(`igbt_temp` → AC TEMP, `dc_temp` → DC TEMP; API.md, survey 13 Sep 2026). None of
+the realtime endpoints on the official key report it, so an overheat alert cannot
+ride the minute poll the way the grid and battery alerts do.
+
+- **Source:** `inverter_temp` (0045), max per 5-minute bucket per inverter, written
+  by `recover`. Today is refetched every run; the past is a watermark walk.
+- **Latency bound:** the recover schedule (6 h) + the device's upload cadence (up to
+  5 min on the 5-minute loggers) + the cloud's own delay, and longer whenever the
+  gateway is timing out. Worst case, not typical. An alert would want its own
+  hourly (or 15-minute) `output/day?column=dc_temp,igbt_temp` call per inverter —
+  one cheap call each — rather than waiting on recover.
+- **Threshold:** unknown yet. Observed 12 Sep 2026: AC TEMP 38–65 °C across five
+  inverters on a normal day, peaking with output. Pick from a few weeks of
+  `inverter_temp` before setting one; a derate warning around 70 °C is the usual
+  starting point for these units, not a fact we have measured.
+- **Sensor absent:** the parents' three inverters report DC TEMP as a constant 25 °C.
+  Detect a flat series (min = max over the day) and ignore it, as `api_inverter_temps`
+  already flags with `dcFlat`.
+- **Shape:** the same `api_alerts_due()` contract — detection in SQL, event_key per
+  (sn, day), debounce on two consecutive hot buckets so one spike does not page.
+
 - **Dedup is `event_key` + a unique index** on the sent table there (pattern from its
   migration 0048). An `event_key` encodes which occurrence fired
   (`soc_low:2026-08-18T19:40`); a repeat is a duplicate-key no-op.
