@@ -43,8 +43,22 @@ function useNow(ms) {
 // Header status: one word, coloured. Live = fresh data and every inverter up;
 // Stale = the poller is behind (> 3 min) or an inverter is down; Offline = no data
 // for 15 min or nothing reporting.
-function HeaderStatus({ snap, onRefresh, pulse }) {
+function HeaderStatus({ snap, onRefresh, pulse, notice }) {
   const now = useNow(15000);
+  // Just after a plant switch the pill names the plant for a moment, so the swap is
+  // visibly acknowledged before the freshness word takes over again.
+  if (notice) {
+    return (
+      <div className="topbar-actions">
+        <div className="status-pill status-switch" role="status">
+          <span className="status-dot" />
+          <span className="status-word">Switched</span>
+          <span className="status-detail mono">to {notice}</span>
+        </div>
+        <button className="refresh-btn" onClick={onRefresh}><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
+      </div>
+    );
+  }
   const online = snap.inverters.filter(i => i.status === 'online').length;
   const total = snap.inverters.length;
   const offline = total - online;
@@ -60,7 +74,7 @@ function HeaderStatus({ snap, onRefresh, pulse }) {
         <span className="status-word">{word}</span>
         <span className="status-detail mono">{detail}</span>
       </div>
-      <button className={'refresh-btn' + (pulse ? ' pulse' : '')} onClick={onRefresh} title="Refresh now"><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
+      <button className={'refresh-btn' + (pulse ? ' pulse' : '')} onClick={onRefresh}><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
     </div>
   );
 }
@@ -77,12 +91,29 @@ function BrandLine({ snap, me, plantId, onPlant }) {
   );
 }
 
+// What kind of plant an option is, from its config: the city its timezone names, then
+// anything unusual about its shape. A plain grid-tied plant with a battery gets the
+// city alone; there is no point announcing the default.
+function plantShape(p) {
+  const c = p.config || {};
+  const bits = [];
+  const city = (c.timezone || '').split('/').pop().replace(/_/g, ' ');
+  if (city) bits.push(city);
+  if (c.has_grid === false) bits.push('off-grid');
+  if (c.has_battery === false) bits.push('no battery');
+  return bits.join(' · ');
+}
+
 function PlantSelect({ me, plantId, onChange }) {
   const plants = me?.plants || [];
   if (plants.length < 2) return null;
   return (
     <select className="plant-select" value={plantId ?? ''} onChange={e => onChange(e.target.value)} title="Switch plant" aria-label="Plant">
-      {plants.map(p => <option key={p.id} value={p.id}>{p.name || ('Plant ' + p.id)}</option>)}
+      {plants.map(p => {
+        const name = p.name || ('Plant ' + p.id);
+        const shape = plantShape(p);
+        return <option key={p.id} value={p.id}>{shape ? name + '  ·  ' + shape : name}</option>;
+      })}
     </select>
   );
 }
@@ -156,10 +187,23 @@ function App() {
       window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
     } catch (e) { setErr(e.message); }
   }, []);
+  // Name of the plant just switched to, shown in the status pill until the new
+  // snapshot has been on screen for a moment; null the rest of the time.
+  const [notice, setNotice] = useState(null);
+  useEffect(() => {
+    if (!notice) return;
+    // A failed load leaves snap null; the pill must not sit on "Switching" forever.
+    if (err) { setNotice(null); return; }
+    if (!snap) return;
+    const t = setTimeout(() => setNotice(null), 2500);
+    return () => clearTimeout(t);
+  }, [notice, snap, err]);
   const switchPlant = (id) => {
-    const cfg = (me?.plants || []).find(p => p.id === Number(id))?.config;
+    const plant = (me?.plants || []).find(p => p.id === Number(id));
+    const cfg = plant?.config;
     window.setCurrentPlant(id, cfg?.currency);
     setPlantId(Number(id));
+    setNotice(plant?.name || ('Plant ' + id));
     window.savePrefs({ lastPlant: Number(id) }).catch(() => {});
     setEnergy({}); energyRef.current = {}; setSnap(null); setToday(null);
     // how much history THIS plant has — the empty-state copy reads it
@@ -203,13 +247,19 @@ function App() {
         <header className="topbar">
           <div className="brand">
             <span className="sun" />
-            <div>
-              <div className="brand-name">Prince Solar</div>
-              <div className="brand-sub mono">{err ? 'connection error' : 'connecting to SunSynk…'}</div>
-            </div>
+            {/* The selector stays put while a switch loads; it vanishing mid-switch
+                read as the app losing the plant. */}
+            {me && (me.plants || []).length > 1 && !err
+              ? <BrandLine snap={null} me={me} plantId={plantId} onPlant={switchPlant} />
+              : <div>
+                  <div className="brand-name">Prince Solar</div>
+                  <div className="brand-sub mono">{err ? 'connection error' : 'connecting to SunSynk…'}</div>
+                </div>}
           </div>
           <div className="topbar-actions">
-            <div className="status-pill status-idle"><span className="status-dot" /><span className="status-word">Connecting</span></div>
+            {notice
+              ? <div className="status-pill status-switch" role="status"><span className="status-dot" /><span className="status-word">Switching</span><span className="status-detail mono">to {notice}</span></div>
+              : <div className="status-pill status-idle"><span className="status-dot" /><span className="status-word">Connecting</span></div>}
             <button className="refresh-btn" disabled><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
           </div>
         </header>
@@ -223,8 +273,8 @@ function App() {
           ))}
         </nav>
 
-        {err && <div className="card" style={{ marginBottom: 20, borderColor: 'rgba(255,125,107,0.35)' }}>
-          <div style={{ color: 'var(--load)' }}>⚠ {err}<div className="dim" style={{ marginTop: 8, fontSize: 13 }}>Check your credentials in <span className="mono">.env</span> and that the server can reach api.sunsynk.net. Retrying every 60s.</div></div>
+        {err && <div className="card" style={{ marginBottom: 20, borderColor: 'rgba(248,113,113,0.35)' }}>
+          <div style={{ color: 'var(--load)' }}>⚠ Can't reach the server.<div className="dim" style={{ marginTop: 8, fontSize: 13 }}>Retrying every 60 seconds; nothing to do on your side.</div></div>
         </div>}
 
         <main className="content" aria-busy="true">
@@ -252,7 +302,7 @@ function App() {
                     options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }]} />
                 </div>
                 <div className="today-strip">
-                  {['Generated', 'Consumed', 'Self-sufficiency', 'Imported', 'Est. saved']
+                  {['Generated', 'Home', 'Self-sufficiency', 'Imported', 'Est. saved']
                     .map(l => <window.SkeletonTile key={l} label={l} />)}
                 </div>
               </div>
@@ -281,10 +331,12 @@ function App() {
           <span className="sun" />
           <BrandLine snap={snap} me={me} plantId={plantId} onPlant={switchPlant} />
         </div>
-        <HeaderStatus snap={snap} onRefresh={refresh} pulse={pulse} />
+        <HeaderStatus snap={snap} onRefresh={refresh} pulse={pulse} notice={notice} />
       </header>
 
-      {err && <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(255,125,107,0.35)', color: 'var(--load)', fontSize: 13 }}>⚠ Last refresh failed: {err} — showing last good reading.</div>}
+      {/* The raw error is logged by window.onerror's sibling in the fetch path; on screen it
+          was a Postgres or JWT string a homeowner cannot act on. */}
+      {err && <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(248,113,113,0.35)', color: 'var(--load)', fontSize: 13 }} title={String(err)}>⚠ Couldn't refresh; showing the last good reading.</div>}
 
       <nav className="tabbar" role="tablist">
         {TABS.map(t => (

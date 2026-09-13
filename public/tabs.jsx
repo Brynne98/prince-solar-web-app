@@ -44,14 +44,18 @@ function BatteryBalanceBanner({ refreshKey }) {
     return () => { alive = false; clearInterval(id); };
   }, [refreshKey]);
   if (!b || b.status === 'unknown') return null;
-  const COL = { balanced: '#3ddc84', watch: '#f5b545', drifting: '#f5664e' };
+  const COL = { balanced: '#3ddc84', watch: '#f59e0b', drifting: '#f87171' };
   const c = COL[b.status] || '#7c8794';
-  const label = { balanced: 'Balanced', watch: 'Watch', drifting: 'Drifting' }[b.status];
+  // 'single' is one bank with nothing to compare against: still worth the charge and
+  // temperature stats, but the status word must say so rather than render blank.
+  const label = { balanced: 'Balanced', watch: 'Watch', drifting: 'Drifting', single: 'One pack' }[b.status] || 'Unknown';
   // Status carries the desync detail (spread / voltage / 3-day peak) in its tooltip,
   // so the banner itself stays to a status + three clean stats.
-  const statusTip = b.stale
-    ? 'No recent paired reading from both banks'
-    : `Banks ${b.socSpread ?? 0}% / ${b.vSpread ?? 0} V apart`
+  const statusTip = b.status === 'single'
+    ? 'One battery pack, so there is nothing to drift apart'
+    : b.stale
+    ? 'No recent paired reading from both packs'
+    : `Packs ${b.socSpread ?? 0}% / ${b.vSpread ?? 0} V apart`
       + (b.max72h != null ? ` · peak ${b.max72h}% over 3 days` : '')
       + (b.pending ? ' · elevated now — flags only if it holds 10 min' : '');
   return (
@@ -67,12 +71,12 @@ function BatteryBalanceBanner({ refreshKey }) {
           <span className="bb-k">Charge</span><b className="mono">{(b.banks || []).map((x) => x.soc).join(' / ')}%</b>
         </span>
         {b.tempC != null && (
-          <span className={'bb-stat' + (b.tempHot ? ' bb-hot' : '')} title="Pack temperature. LFP lasts longest below ~25°C; ageing climbs past ~35°C.">
+          <span className={'bb-stat' + (b.tempHot ? ' bb-hot' : '')} title="Battery temperature. It lasts longest below ~25°C; heat above ~35°C shortens its life.">
             <span className="bb-k">Temp</span><b className="mono">{b.tempC}°{b.tempHot ? ' ⚠' : ''}</b>
           </span>
         )}
         {b.hrsAtFullToday != null && (
-          <span className="bb-stat" title="Hours at ≥98% charge today. Brief is healthy and keeps the BMS calibrated; long spells in summer heat are what to avoid.">
+          <span className="bb-stat" title="Hours at 98% charge or more today. A short spell is healthy and keeps the battery's charge reading accurate; long spells in summer heat are what to avoid.">
             <span className="bb-k">Full today</span><b className="mono">{b.hrsAtFullToday}h</b>
           </span>
         )}
@@ -285,7 +289,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
         <div className="today-strip">
           <MiniStat loading={pending} label="Generated" value={window.fmtEnergySmart(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord}
             info="Total solar energy your panels produced over the selected period." />
-          <MiniStat loading={pending} label="Consumed" value={window.fmtEnergySmart(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
+          <MiniStat loading={pending} label="Home" value={window.fmtEnergySmart(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
             info="Total energy your home used over the selected period, summed across all inverters." />
           <MiniStat loading={pending} label="Self-sufficiency" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
             info="Share of your home’s energy that came from your own solar + battery rather than the grid. 100% = fully off-grid for the period." />
@@ -306,7 +310,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
           {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off-grid" color={CC.grid}
             info="This plant has no grid connection. Everything the home uses comes from solar and the battery." />}
           <MiniStat loading={pending} label="Est. saved" value={window.fmtRandSmart(pSaved)} color={CC.batt}
-            sub={!(rate > 0) ? 'set your rate in Settings' : undefined}
+            sub={!(rate > 0) ? 'Set your rate in Settings' : undefined}
             info={'Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your import rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '. Set the rates in Settings.'} />
         </div>
       </div>
@@ -372,6 +376,7 @@ function SolarTab({ snap, energy, onNeedEnergy }) {
       </div>
       <Card>
         <SectionTitle>SOLAR STRINGS</SectionTitle>
+        <div className="hint-line" style={{ marginTop: 0, marginBottom: 16 }}>A string is a chain of panels wired together into one inverter input. Each card is one string.</div>
         {snap.inverters.map(inv => (
           <div className="string-group" key={inv.sn}>
             <div className="string-group-head">
@@ -416,7 +421,7 @@ function BatteryTab({ snap, settings }) {
       <div className="stack">
         <Card>
           <SectionTitle>BATTERY</SectionTitle>
-          <div className="field-note" style={{ marginTop: 0 }}>This plant has no battery — the inverter reports no pack. If one has just been fitted, Settings → Plant → Equipment can switch this on.</div>
+          <div className="field-note" style={{ marginTop: 0 }}>This plant has no battery — the inverter reports no pack. If one has just been fitted, set Battery to Yes under Settings → Plant.</div>
         </Card>
       </div>
     );
@@ -456,17 +461,17 @@ function BatteryTab({ snap, settings }) {
             <div className="reserve-mark" style={{ left: reserve + '%' }} title={`reserve ${reserve}%`} />
           </div>
           <div className="meter-scale"><span>0%</span><span>100%</span></div>
-          <div className="hint-line">The bar is your battery’s charge level; the tick marks the <b>{reserve}%</b> reserve floor where discharge stops{cap > 0 ? <> (~{(Math.max(0, (a.battSoc - reserve) / 100 * cap)).toFixed(1)} kWh usable above it)</> : null}. Sign convention: <b>{settings.battPositive === 'charge' ? 'positive = charging' : 'negative current = charging'}</b> (set in Settings).</div>
+          <div className="hint-line">The bar is your battery’s charge level; the tick marks the <b>{reserve}%</b> reserve floor where discharge stops{cap > 0 ? <> (~{(Math.max(0, (a.battSoc - reserve) / 100 * cap)).toFixed(1)} kWh usable above it)</> : null}. Charging shows as a <b>{settings.battPositive === 'charge' ? 'positive' : 'negative'}</b> number (change this in Settings).</div>
         </Card>
       </div>
       <Card>
-        <SectionTitle right={<span className="dim">{banks} {banks === 1 ? 'bank' : 'banks'} · {modules} {modules === 1 ? 'battery' : 'batteries'} · {shared ? 'one pack shared by ' + snap.inverters.length + ' inverters' : 'single bank per inverter'}</span>}>PER INVERTER</SectionTitle>
+        <SectionTitle right={<span className="dim">{banks} {banks === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'} · {shared ? 'one pack shared by ' + snap.inverters.length + ' inverters' : 'one pack per inverter'}</span>}>PER INVERTER</SectionTitle>
         <div className="duo">
           {snap.inverters.map(inv => {
             const t = cleanTemp(inv.battTemp);
             return (
               <div className="mini-panel" key={inv.sn}>
-                <div className="mp-head"><span className="mono">{inv.alias}</span><span className="dim mono">{inv.numberOfBatteries} × bank · {inv.battCap} Ah</span></div>
+                <div className="mp-head"><span className="mono">{inv.alias}</span><span className="dim mono">{inv.numberOfBatteries} × pack · {inv.battCap} Ah</span></div>
                 <div className="mp-grid">
                   <Metric label="Power" value={fmtPower(inv.battPower)} accent={CC.batt} />
                   <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />
@@ -474,8 +479,8 @@ function BatteryTab({ snap, settings }) {
                   <Metric label="Temp" value={t != null ? inv.battTemp.toFixed(1) : 'bad sensor'} unit={t != null ? ' °C' : ''} accent={t == null ? CC.load : null} />
                 </div>
                 {inv.bank2 && (
-                  <div className="mp-grid" style={{ marginTop: 8 }} title="Second battery bank, as the inverter reports it">
-                    <Metric label="Bank 2 power" value={fmtPower(Math.abs(inv.bank2.power || 0))} accent={CC.batt} />
+                  <div className="mp-grid" style={{ marginTop: 8 }} title="Second battery pack, as the inverter reports it">
+                    <Metric label="Pack 2 power" value={fmtPower(Math.abs(inv.bank2.power || 0))} accent={CC.batt} />
                     <Metric label="Bank 2 charge" value={inv.bank2.soc} unit="%" accent={CC.batt} />
                     <Metric label="Bank 2 voltage" value={(inv.bank2.voltage || 0).toFixed(1)} unit=" V" />
                     <Metric label="Bank 2 temp" value={cleanTemp(inv.bank2.temperature) != null ? inv.bank2.temperature.toFixed(1) : '—'} unit={cleanTemp(inv.bank2.temperature) != null ? ' °C' : ''} />
@@ -505,7 +510,7 @@ function GridTab({ snap, settings }) {
         </div>
         <Card>
           <SectionTitle>OFF-GRID</SectionTitle>
-          <div className="field-note" style={{ marginTop: 0 }}>The inverter reports no mains voltage and no import, so this tab has nothing to bill. If a grid connection is added later, Settings → Plant → Equipment can switch it on.</div>
+          <div className="field-note" style={{ marginTop: 0 }}>The inverter reports no mains voltage and no import, so this tab has nothing to bill. If a grid connection is added later, set Grid to Connected under Settings → Plant.</div>
         </Card>
       </div>
     );
@@ -519,6 +524,9 @@ function GridTab({ snap, settings }) {
   const earned = (a.gridToToday || 0) * rateExp;                   // feed-in income
   const saved = Math.max(0, a.loadToday - a.gridFromToday) * rate + earned;  // avoided cost + income
   const showExport = rateExp > 0; // same rule as the Overview tile: only plants paid for export
+  // No rate yet: a dash reads "not set"; R 0,00 three times reads "broken".
+  const noRate = !(rate > 0);
+  const money = v => noRate ? '—' : fmtRand(v);
   return (
     <div className="stack">
       <div className="trio">
@@ -541,19 +549,21 @@ function GridTab({ snap, settings }) {
                 value={inv.gridVolts.length ? inv.gridVolts.map(v => Math.round(v)).join(' / ') : (inv.gridVolt != null ? Math.round(inv.gridVolt) : '—')} unit=" V"
                 accent={inv.gridVolts.some(v => v < 100) ? CC.load : null} />
             ))}
-            <Metric label="Status" value={a.phaseDown ? 'phase down' : exporting ? 'exporting' : a.gridPower > 5 ? 'importing' : 'grid-tied'} accent={a.phaseDown ? CC.load : null} />
+            <Metric label="Status" value={a.phaseDown ? 'phase down' : exporting ? 'exporting' : a.gridPower > 5 ? 'importing' : 'connected'} accent={a.phaseDown ? CC.load : null} />
           </div>
           {a.phaseDown && <div className="inv-warn">⚠ One phase has no voltage while another is live — check the supply on that phase.</div>}
         </Card>
         <Card accent={CC.batt}>
             <SectionTitle right={<span className="dim mono">{window.PLANT_CURRENCY}</span>}>COST & SAVINGS · TODAY</SectionTitle>
             <div className="savings-row">
-              <div><div className="tp-label">Would've paid</div><div className="tp-val mono" style={{ color: CC.grid }}>{fmtRand(wouldPay)}</div></div>
-              <div><div className="tp-label">Grid cost</div><div className="tp-val mono" style={{ color: CC.load }}>{fmtRand(cost)}</div></div>
-              {showExport && rateExp > 0 && <div><div className="tp-label">Earned</div><div className="tp-val mono" style={{ color: CC.pv }}>{fmtRand(earned)}</div></div>}
-              <div><div className="tp-label">Saved</div><div className="tp-val mono" style={{ color: CC.batt }}>{fmtRand(saved)}</div></div>
+              <div><div className="tp-label">Would've paid</div><div className="tp-val mono" style={{ color: CC.grid }}>{money(wouldPay)}</div></div>
+              <div><div className="tp-label">Grid cost</div><div className="tp-val mono" style={{ color: CC.load }}>{money(cost)}</div></div>
+              {showExport && rateExp > 0 && <div><div className="tp-label">Earned</div><div className="tp-val mono" style={{ color: CC.pv }}>{money(earned)}</div></div>}
+              <div><div className="tp-label">Saved</div><div className="tp-val mono" style={{ color: CC.batt }}>{money(saved)}</div></div>
             </div>
-          <div className="hint-line">All {fmtKwh(a.loadToday)} you used today @ {fmtRand(rate)}/kWh would've cost <b>{fmtRand(wouldPay)}</b>; you only bought {fmtKwh(a.gridFromToday)} from the grid, so you saved the difference.{showExport && rateExp > 0 ? <> Plus {fmtKwh(a.gridToToday)} sold @ {fmtRand(rateExp)}/kWh.</> : null} (Battery charged from the grid nets out, since it shows as import.) {rate ? 'Edit the rates in Settings.' : 'Set your import rate in Settings to see real numbers.'}</div>
+          {noRate
+            ? <div className="hint-line">Set your import rate in Settings to see what today cost and what solar saved.</div>
+            : <div className="hint-line">All {fmtKwh(a.loadToday)} you used today @ {fmtRand(rate)}/kWh would've cost <b>{fmtRand(wouldPay)}</b>; you only bought {fmtKwh(a.gridFromToday)} from the grid, so you saved the difference.{showExport && rateExp > 0 ? <> Plus {fmtKwh(a.gridToToday)} sold @ {fmtRand(rateExp)}/kWh.</> : null} (Charging the battery from the grid is already counted as import, so it isn't double-counted here.)Edit the rates in Settings.</div>}
         </Card>
       </div>
     </div>
@@ -575,7 +585,7 @@ function InvertersTab({ snap }) {
               <div className="inv-head">
                 <div>
                   <div className="inv-sn">{inv.sn}</div>
-                  <div className="inv-meta mono dim">{inv.model} · fw {inv.soft} · {inv.commissioned}</div>
+                  <div className="inv-meta mono dim">{inv.model} · firmware {inv.soft} · {inv.commissioned}</div>
                 </div>
                 <Badge tone={inv.status === 'online' ? 'ok' : 'warn'} dot>{inv.status}</Badge>
               </div>
@@ -599,67 +609,148 @@ function InvertersTab({ snap }) {
 }
 
 // ---------------------------------------------------------------- SETTINGS
-// The signed-in user's SunSynk link: what's connected, since when, and the one
-// revocation they have. Disconnect wipes the stored token; history stays. A reload
-// afterwards lands on the Connect screen, because there's no active link left.
-function SunSynkConnectionCard() {
+// One column of sections with a sticky jump list beside it on wide screens. Sections
+// are separated by rules, not cards, so the long plant form and the short account
+// block sit in one rhythm instead of a lopsided grid.
+
+const SETTINGS_SECTIONS = [
+  ['tariff', 'Tariff'], ['plant', 'Plant'], ['battery', 'Battery'], ['panels', 'Panels'],
+  ['display', 'Display'], ['connection', 'Logins'], ['account', 'Account'],
+];
+
+// Inline "are you sure" for a destructive row. Sits under the row it belongs to, in
+// the same inset box the add-login form uses, so the question stays in the page
+// instead of a browser dialog. Focus lands on Cancel, so a second Enter from the button
+// that opened it cannot fire the deletion; Escape closes it the way a dialog would.
+function ConfirmCard({ text, action, onConfirm, onCancel }) {
+  return (
+    <div className="conn-form confirm-card" role="alertdialog" aria-label={action}
+         onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}>
+      <div className="confirm-text">{text}</div>
+      <div className="conn-form-actions">
+        <button type="button" className="danger-btn" onClick={onConfirm}>{action}</button>
+        <button type="button" className="ghost-btn" onClick={onCancel} autoFocus>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// Which settings section is showing. Sections stay mounted and hide themselves, so
+// the plant form keeps its unsaved edits while you look at another section.
+const SettingsActive = React.createContext('tariff');
+
+function SettingsSection({ id, title, note, right, children }) {
+  const active = React.useContext(SettingsActive);
+  return (
+    <section id={'settings-' + id} className="sset" role="tabpanel" hidden={active !== id}>
+      <div className="sset-head">
+        <h2 className="sset-title">{title}</h2>
+        {right && <div className="sset-right">{right}</div>}
+      </div>
+      {note && <p className="sset-note">{note}</p>}
+      <div className="sset-body">{children}</div>
+    </section>
+  );
+}
+
+// The signed-in user's SunSynk logins: one row each with its plants, a reconnect in
+// place when the token has died, and a remove. Adding or removing a login changes
+// which plants the app can see, so the app reloads its plant list afterwards; when
+// the last login goes there is nothing left to show and the page reloads onto the
+// Connect screen.
+function SunSynkConnectionSection({ onChanged }) {
   const { useState } = React;
-  const { loading, accounts } = window.useLinkStatus(0);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { loading, accounts } = window.useLinkStatus(refreshKey);
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
-  const [adding, setAdding] = useState(false);
+  const [mode, setMode] = useState(null); // null | 'add' | account_id being reconnected
   const live = accounts.filter(a => a.status !== 'disabled');
-  const fmt = (iso) => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
-  const disconnect = async (acc) => {
-    if (!confirm(`Disconnect ${acc.sunsynk_username}? Logging for its plants stops until you connect again. Your history is kept.`)) return;
+  // "read 2 min ago": freshness is what a login row is for, not the calendar date
+  const ago = (iso) => {
+    const s = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (s < 90) return 'just now';
+    const m = Math.round(s / 60); if (m < 90) return m + ' min ago';
+    const h = Math.round(m / 60); if (h < 36) return h + ' h ago';
+    return Math.round(h / 24) + ' days ago';
+  };
+  const changed = () => { setMode(null); setRefreshKey(k => k + 1); onChanged && onChanged(); };
+  // Removing asks once, inline under the row, in the app's own language rather than a
+  // browser dialog. 'confirming' holds the account_id whose card is open.
+  const [confirming, setConfirming] = useState(null);
+  const remove = async (acc) => {
+    const last = live.length === 1;
+    setConfirming(null);
     setBusy(acc.account_id); setErr(null);
-    try { await window.disconnectSunsynk(acc.account_id); location.reload(); }
+    try { await window.disconnectSunsynk(acc.account_id); if (last) location.reload(); else { setBusy(null); changed(); } }
     catch (e) { setErr(e.message); setBusy(null); }
   };
+  const right = !loading && live.length ? <span className="dim">{live.length === 1 ? '1 login' : live.length + ' logins'}</span> : null;
   return (
-    <Card>
-      <SectionTitle right={live.length > 1 ? <span className="dim">{live.length} logins</span> : null}>SUNSYNK CONNECTION</SectionTitle>
+    <SettingsSection id="connection" title="SunSynk logins" right={right}>
       {loading ? <div className="field-note">Loading…</div> : !live.length ? (
-        <div className="field-note">No SunSynk account connected.</div>
-      ) : live.map((acc, i) => (
-        <div key={acc.account_id} style={i ? { marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--line, rgba(255,255,255,0.08))' } : undefined}>
-          <div className="field">
-            <label>Account</label>
-            <div className="input mono" style={{ opacity: 0.85 }}>{acc.sunsynk_username}</div>
-          </div>
-          <div className="field" style={{ marginTop: 12 }}>
-            <label>Status</label>
-            <div className="input mono" style={{ color: acc.status === 'active' ? 'var(--good, #7ee2a0)' : 'var(--warn, #f0b35a)' }}>
-              {acc.status === 'active' ? 'Connected' : 'Needs reconnecting'}
-              {acc.status === 'active' && acc.last_ok_at ? ` · last read ${fmt(acc.last_ok_at)}` : ''}
+        <div className="field-note">No SunSynk login connected.</div>
+      ) : live.map(acc => {
+        const ok = acc.status === 'active';
+        const plants = acc.plants || [];
+        return (
+          <div key={acc.account_id} className="conn-row">
+            <div className="conn-text">
+              {/* Line 1: the login and the plants it brings. Line 2: is it working, and
+                  when it was added. */}
+              <div className="conn-user">
+                <span className="mono">{acc.sunsynk_username}</span>
+                {plants.length > 0 && <span className="conn-plants"> · {plants.map(p => p.plant_name || 'Plant ' + p.plant_id).join(', ')}</span>}
+              </div>
+              <div className="conn-meta">
+                <span className={'conn-status' + (ok ? ' ok' : ' warn')}>{ok ? 'Connected' : 'Needs reconnecting'}</span>
+                {ok && acc.last_ok_at ? ' · read ' + ago(acc.last_ok_at) : ''}
+                {acc.linked_at ? ' · added ' + new Date(acc.linked_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+              </div>
+              {!plants.length && <div className="conn-meta">No plant shared with this login yet. Ask your installer to share it in SunSynk Connect.</div>}
+              {mode === acc.account_id && (
+                <window.LinkForm compact relink initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
+              )}
+              {confirming === acc.account_id && (
+                <ConfirmCard
+                  text={`Remove ${acc.sunsynk_username}? Logging for its plants stops until you connect it again. Your history is kept.` + (live.length === 1 ? ' It is your only login, so the dashboard goes back to the Connect screen.' : '')}
+                  action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
+              )}
+            </div>
+            <div className="conn-actions">
+              {!ok && mode !== acc.account_id && <button type="button" className="save-btn" onClick={() => { setErr(null); setMode(acc.account_id); }}>Reconnect</button>}
+              <button type="button" className="ghost-btn" onClick={() => { setErr(null); setConfirming(confirming === acc.account_id ? null : acc.account_id); }} disabled={busy === acc.account_id}>
+                {busy === acc.account_id ? 'Removing…' : 'Remove'}
+              </button>
             </div>
           </div>
-          <div className="field-note">
-            Connected {fmt(acc.linked_at)} · {(acc.plants || []).map(p => p.plant_name || p.plant_id).join(', ') || 'no plants visible'}
-          </div>
-          <button type="button" className="ghost-btn" onClick={() => disconnect(acc)} disabled={busy === acc.account_id}
-                  style={{ marginTop: 12, borderColor: 'var(--bad, #e06c75)', color: 'var(--bad, #e06c75)' }}>
-            {busy === acc.account_id ? 'Disconnecting…' : 'Disconnect ' + acc.sunsynk_username}
-          </button>
-        </div>
-      ))}
-      <div className="field-note" style={{ marginTop: 14 }}>
-        Your SunSynk password was exchanged for a token and never stored. Disconnecting deletes that token.
-      </div>
-      {!loading && (adding
-        ? <div style={{ marginTop: 12 }}><window.LinkForm compact onLinked={() => location.reload()} onCancel={() => setAdding(false)} /></div>
-        : <button type="button" className="ghost-btn" style={{ marginTop: 12 }} onClick={() => setAdding(true)}>Connect another SunSynk login</button>)}
-      {err && <div className="field-note" style={{ color: 'var(--bad, #e06c75)' }}>{err}</div>}
-    </Card>
+        );
+      })}
+      {!loading && (mode === 'add'
+        ? <div className="conn-row"><div className="conn-text">
+            <div className="conn-user">Add a SunSynk login</div>
+            <div className="conn-meta">Use the email and password from the SunSynk Connect app. Its plants appear in the dropdown under the name at the top.</div>
+            <window.LinkForm compact onLinked={changed} onCancel={() => setMode(null)} />
+          </div></div>
+        : <div className="conn-add">
+            <button type="button" className="save-btn" onClick={() => { setErr(null); setMode('add'); }}>
+              <span aria-hidden="true">+</span> Add a SunSynk login
+            </button>
+            <span className="conn-add-hint">Another household member's login, or a second plant.</span>
+          </div>)}
+      {err && <div className="field-note" style={{ color: 'var(--load)' }}>{err}</div>}
+    </SettingsSection>
   );
 }
 
 // Per-plant numbers live in plant_config and are the user's to edit. Timezone and
 // currency arrive from SunSynk at link time; the rest are theirs. geometry_source
 // tells us whether the roof and nameplate are still defaults, which is when the
-// "check this" nudge shows.
-function PlantConfigCard({ me, plantId, onSaved }) {
+// "check this" nudge shows. One form, four sections, one save bar.
+const PLANT_SECTION_IDS = ['tariff', 'plant', 'battery', 'panels'];
+function PlantSections({ me, plantId, onSaved }) {
   const { useState, useEffect, useMemo } = React;
+  const activeSection = React.useContext(SettingsActive);
   const plant = (me?.plants || []).find(p => p.id === plantId) || (me?.plants || [])[0];
   const cfg = plant?.config || {};
   const [f, setF] = useState(cfg);
@@ -675,6 +766,11 @@ function PlantConfigCard({ me, plantId, onSaved }) {
   const num = (v) => v === '' || v == null ? null : Number(v);
   const dirty = JSON.stringify(f) !== JSON.stringify(cfg);
   const isDefault = f.geometry_source === 'default';
+  // South Africa only, for now. Currency and timezone still live per plant and are
+  // saved untouched; the fields only show when SunSynk reported something else, so a
+  // plant abroad can still be corrected. To open up other countries again, drop this
+  // flag and the three `abroad &&` guards below (feed-in rate, currency, timezone).
+  const abroad = (f.currency && f.currency !== 'ZAR') || (f.timezone && f.timezone !== 'Africa/Johannesburg');
 
   const save = async () => {
     if (!plant) return;
@@ -699,179 +795,207 @@ function PlantConfigCard({ me, plantId, onSaved }) {
     finally { setBusy(false); }
   };
 
-  if (!plant) return <Card><SectionTitle>PLANT</SectionTitle><div className="field-note">No plant connected yet.</div></Card>;
+  if (!plant) return <SettingsSection id="plant" title="Plant"><div className="field-note">No plant connected yet.</div></SettingsSection>;
   const sym = window.moneySymbol ? window.moneySymbol() : (f.currency || '');
   return (
-    <Card>
-      <SectionTitle right={<span className="dim mono">{plant.name}</span>}>PLANT</SectionTitle>
+    <>
+      <SettingsSection id="tariff" title="Tariff"
+        note={!f.tariff_import ? 'Set your electricity rate. Savings show as zero until you do.' : null}>
+        <div className="field-row">
+          <div className="field">
+            <label>Electricity rate ({sym}/kWh)</label>
+            <input className="input mono" type="number" step="0.01" min="0" value={f.tariff_import ?? ''} onChange={e => set('tariff_import', e.target.value)} />
+          </div>
+          {abroad && <div className="field">
+            <label>Feed-in rate ({sym}/kWh)</label>
+            <input className="input mono" type="number" step="0.01" min="0" value={f.tariff_export ?? ''} onChange={e => set('tariff_export', e.target.value)} placeholder="0" />
+          </div>}
+          {abroad && <div className="field">
+            <label>Currency</label>
+            <select className="select" value={f.currency || 'ZAR'} onChange={e => set('currency', e.target.value)}>
+              {(!f.currency || currencies.includes(f.currency) ? currencies : [f.currency, ...currencies]).map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>}
+        </div>
+      </SettingsSection>
 
-      <div className="settings-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <div className="field">
-          <label>Import rate ({sym}/kWh)</label>
-          <input className="input mono" type="number" step="0.01" min="0" value={f.tariff_import ?? ''} onChange={e => set('tariff_import', e.target.value)} />
+      <SettingsSection id="plant" title="Plant"
+        note="Does this plant have a battery, and is it connected to the utility? Auto answers both from the inverter's readings. Choose an answer yourself only if Auto gets it wrong.">
+        <div className="field-row">
+          {abroad && <div className="field">
+            <label>Timezone</label>
+            <input className="input" list="tz-zones" value={f.timezone || ''} placeholder="Type a city, e.g. Johannesburg"
+                   onChange={e => set('timezone', e.target.value)} spellCheck={false} autoComplete="off" />
+            <datalist id="tz-zones">{zones.map(z => <option key={z} value={z} />)}</datalist>
+          </div>}
+          <div className="field">
+            <label>Battery</label>
+            <select className="select" value={f.has_battery == null ? '' : String(f.has_battery)} onChange={e => set('has_battery', e.target.value === '' ? null : e.target.value === 'true')}>
+              <option value="">{'Auto' + (f.features_source === 'detected' ? (f.has_battery ? ' (battery found)' : ' (no battery found)') : '')}</option>
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Grid</label>
+            <select className="select" value={f.has_grid == null ? '' : String(f.has_grid)} onChange={e => set('has_grid', e.target.value === '' ? null : e.target.value === 'true')}>
+              <option value="">{'Auto' + (f.features_source === 'detected' ? (f.has_grid ? ' (grid found)' : ' (no grid found)') : '')}</option>
+              <option value="true">Connected</option>
+              <option value="false">Off-grid</option>
+            </select>
+          </div>
         </div>
-        <div className="field">
-          <label>Feed-in rate ({sym}/kWh)</label>
-          <input className="input mono" type="number" step="0.01" min="0" value={f.tariff_export ?? ''} onChange={e => set('tariff_export', e.target.value)} placeholder="0 if you can't sell" />
-        </div>
-      </div>
-      <div className="field-note">{!f.tariff_import ? <b>Set the import rate — savings show as zero until you do.</b> : 'What you pay per unit, from your latest bill or prepaid receipt.'} The feed-in rate is what the utility pays you per unit exported; leave it 0 if you cannot export.</div>
+      </SettingsSection>
 
-      <div className="settings-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
-        <div className="field">
-          <label>Currency</label>
-          <select className="select" value={f.currency || 'ZAR'} onChange={e => set('currency', e.target.value)}>
-            {(!f.currency || currencies.includes(f.currency) ? currencies : [f.currency, ...currencies]).map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+      <SettingsSection id="battery" title="Battery"
+        note="Capacity and reserve set how long the battery lasts on screen.">
+        <div className="field-row">
+          <div className="field">
+            <label>Capacity (kWh)</label>
+            <input className="input mono" type="number" step="0.1" min="0" value={f.battery_kwh ?? ''} onChange={e => set('battery_kwh', e.target.value)} placeholder="e.g. 5 × 5.3 = 26.5" />
+          </div>
+          <div className="field">
+            <label>Reserve: the battery won't discharge below <span className="mono" style={{ color: 'var(--soc)' }}>{f.battery_reserve_pct ?? 20}%</span></label>
+            <input className="range" type="range" min="5" max="50" step="1" value={f.battery_reserve_pct ?? 20} onChange={e => set('battery_reserve_pct', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Packs</label>
+            <select className="select" value={f.battery_banks || 'per-inverter'} onChange={e => set('battery_banks', e.target.value)}>
+              <option value="per-inverter">Each inverter has its own pack</option>
+              <option value="shared">One pack shared by all inverters</option>
+            </select>
+            <div className="field-note">Only matters with more than one inverter.</div>
+          </div>
+          <div className="field">
+            <label>Inverter reports positive battery power as</label>
+            <select className="select" value={f.batt_sign_source === 'user' ? (f.batt_positive_means || '') : ''}
+                    onChange={e => setF(x => ({ ...x, batt_positive_means: e.target.value || null, batt_sign_source: e.target.value ? 'user' : 'default' }))}>
+              <option value="">{'Auto' + (f.batt_sign_source === 'detected' && f.batt_positive_means ? ' (detected: ' + f.batt_positive_means + ')' : ' (still detecting)')}</option>
+              <option value="charging">Charging</option>
+              <option value="discharging">Discharging</option>
+            </select>
+            <div className="field-note">Change only if the battery shows charging while it is clearly draining.</div>
+          </div>
         </div>
-        <div className="field">
-          <label>Timezone</label>
-          <input className="input" list="tz-zones" value={f.timezone || ''} placeholder="Type a city, e.g. Johannesburg"
-                 onChange={e => set('timezone', e.target.value)} spellCheck={false} autoComplete="off" />
-          <datalist id="tz-zones">{zones.map(z => <option key={z} value={z} />)}</datalist>
-        </div>
-      </div>
-      <div className="field-note">Both came from your SunSynk plant. Change them only if they're wrong.</div>
+      </SettingsSection>
 
-      <div className="field" style={{ marginTop: 16 }}>
-        <label>Battery capacity (kWh)</label>
-        <input className="input mono" type="number" step="0.1" min="0" value={f.battery_kwh ?? ''} onChange={e => set('battery_kwh', e.target.value)} placeholder="e.g. 5 batteries × 5.3 = 26.5" />
-        <div className="field-note">Total pack energy across all banks. Runtime and cycle estimates use it.</div>
-      </div>
-      <div className="field" style={{ marginTop: 16 }}>
-        <label>Battery stopping reserve — <span className="mono" style={{ color: 'var(--soc)' }}>{f.battery_reserve_pct ?? 20}%</span></label>
-        <input className="range" type="range" min="5" max="50" step="1" value={f.battery_reserve_pct ?? 20} onChange={e => set('battery_reserve_pct', e.target.value)} />
-        <div className="field-note">The state of charge your system stops discharging at.</div>
-      </div>
-      <div className="field" style={{ marginTop: 16 }}>
-        <label>Equipment</label>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <select className="select" value={f.has_battery == null ? '' : String(f.has_battery)} onChange={e => set('has_battery', e.target.value === '' ? null : e.target.value === 'true')}>
-            <option value="">{'Battery: auto' + (f.features_source === 'detected' ? (f.has_battery ? ' (found)' : ' (none found)') : '')}</option>
-            <option value="true">Battery: yes</option>
-            <option value="false">Battery: no</option>
-          </select>
-          <select className="select" value={f.has_grid == null ? '' : String(f.has_grid)} onChange={e => set('has_grid', e.target.value === '' ? null : e.target.value === 'true')}>
-            <option value="">{'Grid: auto' + (f.features_source === 'detected' ? (f.has_grid ? ' (connected)' : ' (off-grid)') : '')}</option>
-            <option value="true">Grid: connected</option>
-            <option value="false">Grid: off-grid</option>
-          </select>
+      <SettingsSection id="panels" title="Panels"
+        note={isDefault ? 'The capacity came from SunSynk and is often the inverter rating, not the panels. Enter the panels\' total. Tilt and direction are guesses until you set them.' : null}>
+        <div className="field-row">
+          <div className="field">
+            <label>Panel capacity (kW){isDefault && <span style={{ color: 'var(--load)' }}> · check this</span>}</label>
+            <input className="input mono" type="number" step="0.1" min="0" value={f.system_kwp ?? ''} onChange={e => set('system_kwp', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Roof tilt (°)</label>
+            <input className="input mono" type="number" step="1" min="0" max="90" value={f.panel_tilt ?? ''} onChange={e => set('panel_tilt', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>Roof direction (° from north)</label>
+            <input className="input mono" type="number" step="1" min="0" max="359" value={f.panel_azimuth ?? ''} onChange={e => set('panel_azimuth', e.target.value)} />
+            <div className="field-note">0 faces north, 180 faces south.</div>
+          </div>
         </div>
-        <div className="field-note">Auto decides from the first day of readings. Set these by hand only if the dashboard is showing (or hiding) a battery or grid it should not.</div>
-      </div>
-      {(me?.plants || []).length >= 0 && (
-        <div className="field" style={{ marginTop: 16 }}>
-          <label>Battery banks</label>
-          <select className="select" value={f.battery_banks || 'per-inverter'} onChange={e => set('battery_banks', e.target.value)}>
-            <option value="per-inverter">Each inverter has its own pack</option>
-            <option value="shared">One pack shared by all inverters</option>
-          </select>
-          <div className="field-note">With a shared pack every inverter reads the same battery, so its charge is shown once and bank drift is not checked. Only matters with more than one inverter.</div>
+      </SettingsSection>
+
+      {(dirty || msg) && (
+        <div className={'save-bar' + (dirty ? ' dirty' : '')} hidden={!PLANT_SECTION_IDS.includes(activeSection)}>
+          <span className="save-text">{dirty ? 'Unsaved changes' : msg}</span>
+          {dirty && <button type="button" className="ghost-btn" onClick={() => { setF(cfg); setMsg(null); }} disabled={busy}>Discard</button>}
+          {dirty && <button type="button" className="save-btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
         </div>
       )}
-      <div className="field" style={{ marginTop: 16 }}>
-        <label>How the inverter reports battery power</label>
-        <select className="select" value={f.batt_sign_source === 'user' ? (f.batt_positive_means || '') : ''}
-                onChange={e => setF(x => ({ ...x, batt_positive_means: e.target.value || null, batt_sign_source: e.target.value ? 'user' : 'default' }))}>
-          <option value="">{'Auto' + (f.batt_sign_source === 'detected' && f.batt_positive_means ? ' — detected: positive = ' + f.batt_positive_means : ' — still detecting')}</option>
-          <option value="charging">Positive = charging</option>
-          <option value="discharging">Positive = discharging</option>
-        </select>
-        <div className="field-note">Firmware differs on which way is positive. Auto works it out from the first hour of charge movement and corrects any minutes logged before it knew. Only set this by hand if the battery shows charging while it is clearly draining.</div>
-      </div>
-
-      <div className="field" style={{ marginTop: 16 }}>
-        <label>Panel capacity (kW){isDefault && <span style={{ color: 'var(--load)' }}> — check this</span>}</label>
-        <input className="input mono" type="number" step="0.1" min="0" value={f.system_kwp ?? ''} onChange={e => set('system_kwp', e.target.value)} />
-        <div className="field-note">{isDefault ? 'SunSynk reported this figure, and it is often the inverter rating rather than the panels. Enter your total panel capacity.' : 'Total nameplate capacity of your panels.'}</div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
-        <div className="field">
-          <label>Roof tilt (°)</label>
-          <input className="input mono" type="number" step="1" min="0" max="90" value={f.panel_tilt ?? ''} onChange={e => set('panel_tilt', e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Roof direction (° from north)</label>
-          <input className="input mono" type="number" step="1" min="0" max="359" value={f.panel_azimuth ?? ''} onChange={e => set('panel_azimuth', e.target.value)} />
-        </div>
-      </div>
-      <div className="field-note">{isDefault ? 'Defaults until you set them. 0 = facing north, 180 = facing south.' : '0 = facing north, 180 = facing south.'}</div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
-        <button type="button" className="ghost-btn" onClick={save} disabled={busy || !dirty}
-                style={dirty ? { borderColor: 'var(--pv)', color: 'var(--pv)' } : undefined}>
-          {busy ? 'Saving…' : 'Save plant settings'}
-        </button>
-        {msg && <span className="field-note" style={{ margin: 0 }}>{msg}</span>}
-      </div>
-    </Card>
+    </>
   );
 }
 
-function DangerCard() {
+function AccountSection() {
   const { useState, useEffect } = React;
   const [busy, setBusy] = useState(false);
   const [email, setEmail] = useState(null);
   useEffect(() => { window.sb.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || null)).catch(() => {}); }, []);
   const [err, setErr] = useState(null);
+  const [confirming, setConfirming] = useState(false);
   const del = async () => {
-    if (!confirm('Delete your account? This removes your SunSynk connection, your settings and — unless someone else shares the plant — its logged history. This cannot be undone.')) return;
-    if (!confirm('Last check: delete everything?')) return;
+    setConfirming(false);
     setBusy(true); setErr(null);
     try { await window.deleteAccount(); await window.sb.auth.signOut(); location.href = './'; }
     catch (e) { setErr(e.message); setBusy(false); }
   };
   return (
-    <Card>
-      <SectionTitle>ACCOUNT</SectionTitle>
-      <div className="field-note" style={{ marginTop: 0 }}>Signed in as {email || 'this account'}. Signing out keeps your SunSynk connection and history.</div>
-      <button type="button" className="ghost-btn" onClick={() => window.signOut()} style={{ marginTop: 4, marginBottom: 18 }}>Sign out</button>
-      <div className="field-note" style={{ marginTop: 0 }}>Deleting your account removes your SunSynk token, your plant mapping and your settings. Logged history is removed too unless another user shares the plant.</div>
-      <button type="button" className="danger-btn" onClick={del} disabled={busy} style={{ marginTop: 12 }}>{busy ? 'Deleting…' : 'Delete my account'}</button>
+    <SettingsSection id="account" title="Account" note="Signing out keeps your SunSynk connection and history.">
+      <div className="conn-row">
+        <div className="conn-text">
+          <div className="conn-user mono">{email || 'this account'}</div>
+          <div className="conn-meta">Signed in</div>
+        </div>
+        <button type="button" className="ghost-btn" onClick={() => window.signOut()}>Sign out</button>
+      </div>
+      <div className="conn-row">
+        <div className="conn-text">
+          <div className="conn-user">Delete account</div>
+          <div className="conn-meta">Removes your logins and settings. History goes too, unless someone else shares the plant.</div>
+          {confirming && (
+            <ConfirmCard
+              text="This deletes your SunSynk connection, your settings and, unless someone else shares the plant, its logged history. It cannot be undone."
+              action="Delete everything" onConfirm={del} onCancel={() => setConfirming(false)} />
+          )}
+        </div>
+        <button type="button" className="danger-btn" onClick={() => { setErr(null); setConfirming(c => !c); }} disabled={busy}>{busy ? 'Deleting…' : 'Delete account'}</button>
+      </div>
       {err && <div className="field-note" style={{ color: 'var(--load)' }}>{err}</div>}
-    </Card>
+    </SettingsSection>
   );
 }
 
 function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfigSaved }) {
+  const { useState, useEffect } = React;
   const set = (patch) => setSettings(s => ({ ...s, ...patch }));
-  // Settings only, and nothing but the number — no rule above it, no card around it.
-  const version = (
-    <div className="app-version mono">
-      {window.APP_VERSION}
-      {window.SUPPORT_EMAIL && <> · <a href={'mailto:' + window.SUPPORT_EMAIL + '?subject=Prince%20Solar%20' + encodeURIComponent(window.APP_VERSION)} style={{ color: 'inherit' }}>{window.SUPPORT_EMAIL}</a></>}
-      <div style={{ marginTop: 6, fontFamily: 'inherit' }}>Per-minute inverter readings are kept for 90 days; plant totals per minute and per day are kept for good.</div>
-    </div>
-  );
+  // One section at a time. ?s= in the URL wins on load, then the last one opened,
+  // then Tariff. Read like ?tab= is: on mount only, never written back to the URL.
+  // 'synsynk.settings' is the display-prefs blob; this key must stay separate.
+  const ids = SETTINGS_SECTIONS.map(([id]) => id);
+  const [active, setActive] = useState(() => {
+    const want = new URLSearchParams(location.search).get('s') || localStorage.getItem('synsynk.section');
+    return ids.includes(want) ? want : 'tariff';
+  });
+  const open = (id) => {
+    setActive(id);
+    localStorage.setItem('synsynk.section', id);
+    window.scrollTo({ top: 0 });
+  };
   return (
-    <>
-    <div className="settings-grid">
-      <PlantConfigCard me={me} plantId={plantId} onSaved={onPlantConfigSaved} />
-
-      <Card>
-        <SectionTitle>DISPLAY</SectionTitle>
-        <div className="field">
-          <label>Show battery discharge as</label>
-          <Segmented options={[{ value: 'discharge', label: 'Positive = discharging' }, { value: 'charge', label: 'Positive = charging' }]}
-            value={settings.battPositive} onChange={v => set({ battPositive: v })} />
-        </div>
-        <div className="field-note" style={{ marginTop: 12 }}>Your preferences are saved to your account and follow you between devices.</div>
-      </Card>
-
-      <SunSynkConnectionCard />
-
-      <Card>
-        <SectionTitle>TABS</SectionTitle>
-        <div className="field-note" style={{ marginTop: 0, marginBottom: 10 }}>Show the extra tabs you want. Live, Trends &amp; Settings always stay.</div>
-        {[['solar', 'Solar (PV strings)'], ['battery', 'Battery'], ['grid', 'Grid & savings'], ['inverters', 'Inverters']].map(([k, l]) => (
-          <Toggle key={k} label={l} checked={settings.tabs[k]} onChange={v => set({ tabs: { ...settings.tabs, [k]: v } })} />
+    <SettingsActive.Provider value={active}>
+    <div className="settings">
+      <nav className="settings-nav" role="tablist" aria-label="Settings sections">
+        {SETTINGS_SECTIONS.map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={active === id} className={active === id ? 'active' : ''} onClick={() => open(id)}>{label}</button>
         ))}
-      </Card>
+      </nav>
+      <div className="settings-body">
+        <PlantSections me={me} plantId={plantId} onSaved={onPlantConfigSaved} />
 
-      <DangerCard />
+        <SettingsSection id="display" title="Display">
+          <div className="field">
+            <label>Show battery discharge as</label>
+            <Segmented options={[{ value: 'discharge', label: 'Positive = discharging' }, { value: 'charge', label: 'Positive = charging' }]}
+              value={settings.battPositive} onChange={v => set({ battPositive: v })} />
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Extra tabs</label>
+            {[['solar', 'Solar', 'Generation and PV strings'], ['battery', 'Battery', 'Charge, temperature and per-inverter packs'], ['grid', 'Grid', 'Import, quality and savings'], ['inverters', 'Inverters', 'Each unit in detail']].map(([k, l, h]) => (
+              <Toggle key={k} label={l} hint={h} checked={settings.tabs[k]} onChange={v => set({ tabs: { ...settings.tabs, [k]: v } })} />
+            ))}
+          </div>
+        </SettingsSection>
+
+        <SunSynkConnectionSection onChanged={onPlantConfigSaved} />
+        <AccountSection />
+        {/* under the card, not inside it */}
+        <div className="app-version mono">{window.APP_VERSION}</div>
+      </div>
     </div>
-    {version}
-    </>
+    </SettingsActive.Provider>
   );
 }
 

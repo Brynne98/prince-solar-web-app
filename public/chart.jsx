@@ -333,7 +333,7 @@ function HistoryView({ today, refreshKey }) {
       ...(hasPot ? [['Potential', potAt(p.t), C.pv, 'W']] : []), // dotted clear-sky line value
       ['Battery', p.batt, C.batt, 'W'], // signed: − = discharging
       ['Grid', p.grid, C.grid, 'W'], // signed: − = exporting
-      ['Load', p.load, C.load, 'W'],
+      ['Home', p.load, C.load, 'W'],
       ['Charge', p.soc, C.soc, '%'],
     ];
     return (
@@ -372,7 +372,7 @@ function HistoryView({ today, refreshKey }) {
       <div className="chart-range">
         <div className="cr-head"><span className="tip-time">{HM(t0)} – {HM(t1)} · {dur}</span><button className="cr-x" onClick={() => setSel(null)} aria-label="Clear">×</button></div>
         <div className="tip-row"><span className="tip-dot" style={{ background: C.pv }} /><span className="tip-l">Generated</span><span className="tip-v mono">{f(gen)} kWh</span></div>
-        <div className="tip-row"><span className="tip-dot" style={{ background: C.load }} /><span className="tip-l">Consumed</span><span className="tip-v mono">{f(cons)} kWh</span></div>
+        <div className="tip-row"><span className="tip-dot" style={{ background: C.load }} /><span className="tip-l">Home</span><span className="tip-v mono">{f(cons)} kWh</span></div>
         <div className="tip-row"><span className="tip-dot" style={{ background: C.grid }} /><span className="tip-l">Grid in / out</span><span className="tip-v mono">{f(gImp)} / {f(gExp)}</span></div>
         <div className="tip-row"><span className="tip-dot" style={{ background: C.batt }} /><span className="tip-l">Batt chg / dis</span><span className="tip-v mono">{f(bChg)} / {f(bDis)}</span></div>
         {dSoc != null && <div className="tip-row"><span className="tip-dot" style={{ background: C.soc }} /><span className="tip-l">Charge</span><span className="tip-v mono">{soc0}% → {soc1}% ({dSoc >= 0 ? '+' : ''}{dSoc}%)</span></div>}
@@ -380,7 +380,7 @@ function HistoryView({ today, refreshKey }) {
     );
   }
 
-  const legend = [['pv', 'Solar', C.pv], ['batt', 'Battery', C.batt], ['grid', 'Grid', C.grid], ['load', 'Load', C.load], ['soc', 'Charge', C.soc]];
+  const legend = [['pv', 'Solar', C.pv], ['batt', 'Battery', C.batt], ['grid', 'Grid', C.grid], ['load', 'Home', C.load], ['soc', 'Charge', C.soc]];
 
   const canPrev = !earliest || date > earliest;
   const canNext = date < todayStr;

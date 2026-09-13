@@ -229,14 +229,17 @@ function SkeletonTile({ label }) {
 }
 
 function InfoDot({ text }) {
+  // aria-describedby ties the bubble to the dot, so a screen reader on the dot hears the
+  // explanation instead of an unnamed note.
+  const id = React.useId();
   return (
-    <span className="info-dot" tabIndex={0} role="note">
+    <span className="info-dot" tabIndex={0} aria-label="More about this" aria-describedby={id}>
       <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
         <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.3" />
         <circle cx="8" cy="4.7" r="1" fill="currentColor" />
         <rect x="7.25" y="6.9" width="1.5" height="5" rx="0.75" fill="currentColor" />
       </svg>
-      <span className="info-bubble">{text}</span>
+      <span id={id} className="info-bubble" role="tooltip">{text}</span>
     </span>);
 
 }

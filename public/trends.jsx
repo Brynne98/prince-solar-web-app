@@ -116,7 +116,7 @@ function BarChart({ bars, series, labelEvery = 1 }) {
 //
 // Grid gets its own line rather than being stacked inside consumption: it rides near
 // zero most days and spikes where the house leaned on the grid. The split of consumption
-// into own-supply vs grid is shown on the Consumed stat card instead, where it can be
+// into own-supply vs grid is shown on the Home stat card instead, where it can be
 // read as exact figures rather than estimated off a band's thickness.
 function LineChart({ bars, series, labelEvery = 1 }) {
   const [ref, width] = useWidth();
@@ -226,7 +226,7 @@ function TrendStats({ bars, unit }) {
     <div className="trend-stats">
       <div><div className="ts-l">Generated</div><div className="ts-v mono" style={{ color: C.pv }}>{f(pv)}</div><div className="ts-sub">avg {f(pv / n)}/{unit}</div></div>
       <div>
-        <div className="ts-l">Consumed</div>
+        <div className="ts-l">Home</div>
         <div className="ts-v mono" style={{ color: C.load }}>{f(load)}</div>
         <div className="ts-sub">avg {f(load / n)}/{unit}</div>
         {load > 0 && (
@@ -477,7 +477,7 @@ function ChartSkeleton({ stats = true }) {
       {stats && (
         <div className="trend-stats">
           {/* labels are static; only the figures wait on data */}
-          {['Generated', 'Consumed', 'Self-sufficiency'].map(l => (
+          {['Generated', 'Home', 'Self-sufficiency'].map(l => (
             <div key={l}>
               <div className="ts-l">{l}</div>
               <div className="ts-v"><S w="70%" h={23} /></div>
@@ -555,11 +555,11 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
     return SEASONS.map((s) => { const a = acc[s.key] || { pv: 0, load: 0, imp: 0, cnt: 0 }; return { label: s.label, full: s.label, pv: a.pv, load: a.load, imp: a.imp, ...splitLoad(a.load, a.imp), sub: a.cnt + ' month(s) of data' }; });
   }, [monthly]);
 
-  // Three plain lines. Consumption's split into own-supply vs grid lives on the Consumed
+  // Three plain lines. Consumption's split into own-supply vs grid lives on the Home
   // stat card above the chart, not in the chart itself.
   const SERIES = [
     { key: 'pv', label: 'Generated', color: C.pv, fill: true },
-    { key: 'load', label: 'Consumed', color: C.load },
+    { key: 'load', label: 'Home', color: C.load },
     { key: 'gridPart', label: 'From grid', color: C.grid },
   ];
   // Daily only. Monthly and seasonal would need irradiance summed across whole months,
@@ -573,7 +573,7 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
   const genConsLegend = (
     <div className="trend-legend">
       <span className="tl-item"><span className="tl-dot" style={{ background: C.pv }} />Generated</span>
-      <span className="tl-item"><span className="tl-dot" style={{ background: C.load }} />Consumed</span>
+      <span className="tl-item"><span className="tl-dot" style={{ background: C.load }} />Home</span>
       <span className="tl-item"><span className="tl-dot" style={{ background: C.grid }} />From grid</span>
       {/* line-only: bars can't carry a dashed reference, so don't advertise one */}
       {kind !== 'bar' && <span className="tl-item"><span className="tl-dash" style={{ borderColor: C.pv }} />Expected</span>}

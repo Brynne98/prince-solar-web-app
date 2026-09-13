@@ -41,7 +41,7 @@ window.linkSunsynk = async function linkSunsynk(username, password) {
     body: JSON.stringify({ username, password }),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `Link failed (${res.status})`);
+  if (!res.ok) throw new Error(body.error || "Couldn't connect to SunSynk. Check the login and try again.");
   return body;
 };
 
@@ -50,9 +50,12 @@ window.disconnectSunsynk = async function disconnectSunsynk(accountId) {
   if (error) throw new Error(error.message);
 };
 
-function LinkForm({ relink, onLinked, compact, onCancel }) {
+// The same moment on the Connect screen and inside Settings; one wording for both.
+const NO_PLANT_TEXT = 'signed in, but SunSynk lists no plant for it. Usually the installer still owns the plant: ask them to share it with this login in SunSynk Connect (Plant → Share). Your login is saved here, so retry once the plant shows in SunSynk Connect.';
+
+function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
   const { useState } = React;
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(initialUsername || '');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -73,6 +76,41 @@ function LinkForm({ relink, onLinked, compact, onCancel }) {
     }
   };
 
+  // Inside Settings the form sits in the Connection section and borrows its field
+  // styling rather than the sign-in card's. Same submit, same messages.
+  if (compact) {
+    return (
+      <form className="conn-form" onSubmit={submit}>
+        {noPlants ? (
+          <div className="field-note" style={{ marginTop: 0 }}>
+            <b style={{ color: 'var(--text)' }}>{username.trim()}</b> {NO_PLANT_TEXT}
+          </div>
+        ) : (
+          <div className="field-row">
+            <div className="field">
+              <label htmlFor="ss-user">SunSynk Connect email</label>
+              <input id="ss-user" className="input" type="text" placeholder="you@example.com" value={username}
+                     autoComplete="off" onChange={(e) => setUsername(e.target.value)} required readOnly={!!relink} autoFocus={!relink} />
+            </div>
+            <div className="field">
+              <label htmlFor="ss-pass">SunSynk Connect password</label>
+              <input id="ss-pass" className="input" type="password" placeholder="••••••••" value={password} autoComplete="off"
+                     onChange={(e) => setPassword(e.target.value)} required />
+            </div>
+          </div>
+        )}
+        <div className="conn-form-actions">
+          {noPlants
+            ? <button type="button" className="save-btn" onClick={() => onLinked({ retry: true })}>Retry now</button>
+            : <button type="submit" className="save-btn" disabled={busy}>{busy ? 'Connecting…' : (relink ? 'Reconnect' : 'Connect')}</button>}
+          {onCancel && <button type="button" className="ghost-btn" onClick={onCancel}>Cancel</button>}
+          {err ? <span className="field-note" style={{ margin: 0, color: 'var(--load)' }}>{err}</span>
+               : <span className="field-note" style={{ margin: 0 }}>The password is swapped for a token and never stored.</span>}
+        </div>
+      </form>
+    );
+  }
+
   // The login worked but SunSynk lists no plant for it. Almost always the
   // installer still owns the plant; nothing here can fix that, so say what will.
   if (noPlants) {
@@ -81,9 +119,7 @@ function LinkForm({ relink, onLinked, compact, onCancel }) {
         {!compact && <window.AuthBrand />}
         <div className="login-title">Connected, but no plant yet</div>
         <div className="login-sub">
-          <b>{username.trim()}</b> signed in fine, but SunSynk lists no plant for it. That usually means your installer
-          still owns the plant. Ask them to share it with this login in SunSynk Connect (Plant → Share), or to make you
-          the owner. Once it shows in the SunSynk app, come back and retry — your login is already saved here.
+          <b>{username.trim()}</b> {NO_PLANT_TEXT}
         </div>
         <button type="button" onClick={() => onLinked({ retry: true })}>Retry now</button>
         <div className="login-links">
@@ -106,7 +142,7 @@ function LinkForm({ relink, onLinked, compact, onCancel }) {
       </div>
       <div className="auth-field">
         <label htmlFor="ss-user">SunSynk Connect email</label>
-        <input id="ss-user" type="text" placeholder="The login you use in the SunSynk app" value={username} autoComplete="off"
+        <input id="ss-user" type="text" placeholder="you@example.com" value={username} autoComplete="off"
                onChange={(e) => setUsername(e.target.value)} required />
       </div>
       <window.PasswordField id="ss-pass" label="SunSynk Connect password" value={password} onChange={setPassword}

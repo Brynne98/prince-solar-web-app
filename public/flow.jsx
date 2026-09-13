@@ -294,12 +294,14 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour, features
   ].filter(Boolean);
   let narrative;
   if (gridExport > 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ', charging the battery' : ''} and sending <b style={{ color: C.grid }}>{valKW(gridExport)} kW</b> to the grid.</>;
-  else if (agg.pvNow > home.w + 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ' and charging the battery' : ''}.</>;
+  // >= home - 50, not > home + 50: a home drawing exactly what the panels make is the
+  // commonest sunny-afternoon state and fell through to the vague fallback.
+  else if (agg.pvNow > 50 && agg.pvNow >= home.w - 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ' and charging the battery' : ''}.</>;
   else if (hasBatt && agg.battPower > 5 && !charging && gridImport < 50) narrative = <>Your <b style={{ color: C.batt }}>battery</b> is powering the home — solar offline.</>;
   else if (gridImport > 50) narrative = <>Pulling <b style={{ color: C.grid }}>{valKW(gridImport)} kW</b> from the grid to meet demand.</>;
   else if (!hasGrid && agg.pvNow < 50) narrative = <>Off-grid, after dark — the home is running on <b style={{ color: C.batt }}>stored energy</b>.</>;
-  else if (!hasBatt) narrative = <>Grid-tied — <b style={{ color: C.pv }}>solar</b> covers what it can, the grid the rest.</>;
-  else narrative = <>System balanced — home running on <b style={{ color: C.batt }}>stored energy</b>.</>;
+  else if (!hasBatt) narrative = <><b style={{ color: C.pv }}>Solar</b> covers what it can; the grid covers the rest.</>;
+  else narrative = <>Solar, battery and grid are <b>sharing the load</b>.</>;
 
   return (
     <div className="flow-wrap">
