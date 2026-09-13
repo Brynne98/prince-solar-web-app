@@ -28,6 +28,17 @@
 // Multi-tenant: one pass per linked plant, read through the account that can see
 // it. The time budget is shared across plants; whatever is left over is picked up
 // next run.
+//
+// Backfill (0044): a plant whose plant_config carries backfill_next..backfill_until
+// is first walked from that bookmark, per-inverter history only (the plant feed no
+// longer holds those days). A day that answered is banked and the bookmark moves
+// on, whatever it held (a night of null PV is not a failure). A day where an
+// endpoint failed stops the walk without moving, so the next run retries it; the
+// third failure gives the day up. No serials yet: nothing moves (the first poll
+// stores them). Both dates clear when the bookmark passes the end. The link kicks
+// this with ?plant=ID; the 6-hourly schedule finishes it.
+//
+// ?plant=ID restricts a run to one plant and leaves the round-robin cursor alone.
 import { type Account, db, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
 import {
   bucketizeAgg,
@@ -51,9 +62,11 @@ function localDate(tz: string, d = new Date()): string {
     timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
   }).format(d);
 }
-const addDays = (tz: string, day: string, n: number) => {
+// Calendar arithmetic needs no zone: formatting a UTC-noon instant in a UTC+12
+// or later zone used to land on the NEXT day, skipping every other day.
+const addDays = (_tz: string, day: string, n: number) => {
   const [y, m, d] = day.split("-").map(Number);
-  return localDate(tz, new Date(Date.UTC(y, m - 1, d + n, 12)));
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 };
 async function rpc(fn: string, args: Record<string, unknown>) {
   const { data, error } = await db.rpc(fn, args);
@@ -87,14 +100,24 @@ const complete = (r: SpineRow | undefined): r is SpineRow =>
 async function historySpine(acc: Account, plantId: number, tz: string, day: string) {
   const sns = (((await rpc("plant_inverters", { p_plant: plantId })) ?? []) as any[]).map((r) => String(r.sn ?? r));
   if (!sns.length) return null;
-  const days = await Promise.all(sns.map((sn) => fetchInverterDay(acc, sn, day)));
+  // One inverter at a time: 5 calls in flight, not 5 × inverters, for SunSynk's sake.
+  const days = [];
+  for (const sn of sns) days.push(await fetchInverterDay(acc, sn, day));
   const spine = plantSpine(days, dayStartEpoch(tz, day));
   return spine.size ? { spine, days } : null;
 }
 
-async function recoverDay(acc: Account, plantId: number, tz: string, day: string) {
-  const missing = await rpc("q_missing_minutes", { p_plant: plantId, p_day: day });
-  let gaps: number[] = (missing ?? []).map((r: any) => Number(r.ts ?? r));
+async function recoverDay(acc: Account, plantId: number, tz: string, day: string, historyOnly = false) {
+  // Paged: PostgREST caps any one response at max_rows (1000) and a day nobody
+  // logged is 1440 minutes. Before 0044 that silently left the last 440 unfilled.
+  let gaps: number[] = [];
+  for (let from = 0; ; ) {
+    const { data, error } = await db.rpc("q_missing_minutes", { p_plant: plantId, p_day: day }).range(from, from + 999);
+    if (error) throw new Error(`q_missing_minutes: ${error.message}`);
+    if (!data?.length) break;
+    gaps.push(...data.map((r: any) => Number(r.ts ?? r)));
+    from += data.length;
+  }
   if (!gaps.length) return { day, banked: 0, reason: "no gaps" };
   const wanted = gaps.length;
 
@@ -102,6 +125,10 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
   let bankedHistory = 0;
   try {
     const h = await historySpine(acc, plantId, tz, day);
+    const failed = h?.days.reduce((n, d) => n + d.failed, 0) ?? 0;
+    if (historyOnly && (!h || failed > 0)) {
+      return { day, banked: 0, missing: wanted, failed: true, reason: h ? `${failed} history endpoint(s) did not answer` : "no history came back" };
+    }
     if (h) {
       const rows = gaps.map((ts) => ({ ts, row: h.spine.get(ts) }))
         .filter((x): x is { ts: number; row: SpineRow } => complete(x.row))
@@ -116,6 +143,7 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
     console.warn(`invhistory ${plantId} ${day}:`, e instanceof Error ? e.message : e);
   }
   if (!gaps.length) return { day, banked: bankedHistory, bankedHistory, missing: wanted };
+  if (historyOnly) return { day, banked: bankedHistory, bankedHistory, missing: wanted, reason: "plant feed skipped (day older than the feed keeps)" };
 
   // 2. the plant feed for what is left
   const feed = await plantFeedForDay(acc, plantId, day);
@@ -162,11 +190,56 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
   };
 }
 
+const BACKFILL_MAX_TRIES = 3;
+
+/** Walk the backfill bookmark forward until it passes the end, a day fails, or the budget runs out. */
+async function backfillPlant(job: PlantJob, started: number) {
+  const { plantId, account, timezone: tz } = job;
+  let day = job.backfillNext!;
+  const until = job.backfillUntil ?? day;
+  let tries = job.backfillTries;
+  const results = [];
+  let total = 0;
+  let stoppedEarly: string | null = null;
+
+  const sns = ((await rpc("plant_inverters", { p_plant: plantId })) ?? []) as any[];
+  if (!sns.length) return { banked: 0, scanned: null, stoppedEarly: "no inverter serials stored yet; the first poll stores them", days: [] };
+
+  for (; day <= until; day = addDays(tz, day, 1)) {
+    if (Date.now() - started > TIME_BUDGET_MS) { stoppedEarly = `time budget reached at ${day}; next run continues from here`; break; }
+    let r: { banked: number; failed?: boolean; reason?: string; error?: string; day: string };
+    try {
+      r = await recoverDay(account, plantId, tz, day, true);
+    } catch (e) {
+      r = { day, banked: 0, failed: true, error: String(e instanceof Error ? e.message : e) };
+    }
+    total += r.banked;
+    if (r.banked > 0 || r.reason || r.error) results.push(r);
+
+    const retry = !!r.failed && tries + 1 < BACKFILL_MAX_TRIES;
+    const next = addDays(tz, day, 1);
+    const done = next > until;
+    const patch = retry ? { backfill_tries: tries + 1 }
+      : done ? { backfill_next: null, backfill_until: null, backfill_tries: 0 }
+      : { backfill_next: next, backfill_tries: 0 };
+    // Compare-and-set on the day: an overlapping run (link kick vs schedule) must
+    // not rewind or double-walk the bookmark. No row matched = the other run moved it.
+    const { data: moved, error } = await db.from("plant_config").update(patch)
+      .eq("plant_id", plantId).eq("backfill_next", day).select("plant_id");
+    if (error) throw new Error(`backfill bookmark ${plantId}: ${error.message}`);
+    if (!moved?.length) { stoppedEarly = `another run moved the bookmark at ${day}`; break; }
+    if (retry) { stoppedEarly = `${day} failed (try ${tries + 1}); next run retries it`; break; }
+    tries = 0;
+  }
+  return { banked: total, scanned: `${job.backfillNext} .. ${until}`, stoppedEarly, days: results };
+}
+
 async function recoverPlant(job: PlantJob, windowDays: number, started: number) {
   const { plantId, account, timezone: tz } = job;
+  const backfill = job.backfillNext ? await backfillPlant(job, started) : null;
   const stats = await rpc("q_stats", { p_plant: plantId });
   const row = Array.isArray(stats) ? stats[0] : stats;
-  if (!row?.first_ts) return { plantId, banked: 0, reason: "no history yet" };
+  if (!row?.first_ts) return { plantId, banked: backfill?.banked ?? 0, backfill, reason: "no history yet" };
 
   const today = localDate(tz);
   const firstLogged = localDate(tz, new Date(Number(row.first_ts) * 1000));
@@ -193,7 +266,8 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
 
   return {
     plantId,
-    banked: total,
+    banked: total + (backfill?.banked ?? 0),
+    backfill,
     timezone: tz,
     scanned: `${addDays(tz, today, -(windowDays - 1))} .. ${today}`,
     // days older than the window are never scanned — the cloud has dropped them
@@ -250,8 +324,10 @@ Deno.serve(async (req) => {
     // ?budget_ms= lets a test shrink the time budget; production never passes it.
     const budgetMs = Math.min(TIME_BUDGET_MS, Number(url.searchParams.get("budget_ms")) || TIME_BUDGET_MS);
 
-    const jobs = await plantsToPoll();
-    if (!jobs.length) return json({ ok: true, banked: 0, reason: "no linked plants" });
+    const only = Number(url.searchParams.get("plant")) || null;
+    let jobs = await plantsToPoll();
+    if (only && url.searchParams.get("dry") !== "1") jobs = jobs.filter((j) => j.plantId === only);
+    if (!jobs.length) return json({ ok: true, banked: 0, reason: only ? `plant ${only} is not linked` : "no linked plants" });
 
     if (url.searchParams.get("dry") === "1") {
       const plantId = Number(url.searchParams.get("plant"));
@@ -266,7 +342,7 @@ Deno.serve(async (req) => {
     // Start after the plant the previous run finished on, so a run that hits the
     // budget does not starve the same plants every time.
     let done = 0;
-    for (const job of await rotateJobs(jobs, "RECOVER_CURSOR")) {
+    for (const job of only ? jobs : await rotateJobs(jobs, "RECOVER_CURSOR")) {
       // Always make progress on at least one plant, however small the budget.
       if (done > 0 && Date.now() - started > budgetMs) {
         plants.push({ plantId: job.plantId, banked: 0, reason: "time budget reached before this plant" });
@@ -280,7 +356,7 @@ Deno.serve(async (req) => {
         plants.push({ plantId: job.plantId, banked: 0, error: String(e instanceof Error ? e.message : e) });
       }
       done++;
-      await markCursor("RECOVER_CURSOR", job.plantId);
+      if (!only) await markCursor("RECOVER_CURSOR", job.plantId);
     }
 
     return json({ ok: true, banked: total, windowDays, plants, elapsedMs: Date.now() - started });

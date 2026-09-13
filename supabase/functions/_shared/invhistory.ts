@@ -99,6 +99,8 @@ export function pvFromStrings(m: SeriesMap): Sample[] | null {
 
 export type InverterDay = {
   sn: string;
+  /** history endpoints that were asked for and did not answer (0044: a backfill day banks only when 0) */
+  failed: number;
   pv: Sample[] | null; grid: Sample[] | null; load: Sample[] | null; soc: Sample[] | null;
   /** raw labels seen per endpoint, for the dry-run report */
   labels: Record<string, string[]>;
@@ -118,6 +120,7 @@ export async function fetchInverterDay(acc: Account, sn: string, day: string): P
   const input: SeriesMap = new Map([...parsed.input_v, ...parsed.input_i]);
   return {
     sn,
+    failed: settled.filter((r) => r.status === "rejected").length,
     soc: seriesLike(parsed.battery, "soc"),
     grid: seriesLike(parsed.grid, "p-grid", "pac", "grid"),
     load: seriesLike(parsed.load, "p-load", "pac", "load"),

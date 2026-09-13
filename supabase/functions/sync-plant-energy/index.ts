@@ -115,14 +115,17 @@ Deno.serve(async (req) => {
     // ?budget_ms= lets a test shrink the time budget; production never passes it.
     const budgetMs = Math.min(TIME_BUDGET_MS, Number(url.searchParams.get("budget_ms")) || TIME_BUDGET_MS);
 
-    const jobs = await plantsToPoll();
-    if (!jobs.length) return json({ ok: true, rows: 0, reason: "no linked plants" });
+    // ?plant=ID (0044): one plant, cursor untouched — the link's bootstrap kick.
+    const only = Number(url.searchParams.get("plant")) || null;
+    let jobs = await plantsToPoll();
+    if (only) jobs = jobs.filter((j) => j.plantId === only);
+    if (!jobs.length) return json({ ok: true, rows: 0, reason: only ? `plant ${only} is not linked` : "no linked plants" });
 
     const plants = [];
     let rows = 0;
     // Round-robin from the plant the previous run finished on (READINESS P3).
     let done = 0;
-    for (const job of await rotateJobs(jobs, "SYNC_CURSOR")) {
+    for (const job of only ? jobs : await rotateJobs(jobs, "SYNC_CURSOR")) {
       // Always make progress on at least one plant, however small the budget.
       if (done > 0 && Date.now() - started > budgetMs) {
         plants.push({ plantId: job.plantId, rows: 0, reason: "time budget reached before this plant" });
@@ -136,7 +139,7 @@ Deno.serve(async (req) => {
         plants.push({ plantId: job.plantId, rows: 0, error: String(e instanceof Error ? e.message : e) });
       }
       done++;
-      await markCursor("SYNC_CURSOR", job.plantId);
+      if (!only) await markCursor("SYNC_CURSOR", job.plantId);
     }
 
     return json({ ok: true, rows, plants, elapsedMs: Date.now() - started });

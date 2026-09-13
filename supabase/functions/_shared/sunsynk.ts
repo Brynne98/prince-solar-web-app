@@ -353,6 +353,7 @@ export async function linkAccount(userId: string, username: string, password: st
  * it is fetched only for plants that have none (one select, zero SunSynk calls
  * for a plant already seeded).
  */
+const MAX_BOOTSTRAP_KICKS = 5;
 export async function syncPlants(acc: Account): Promise<PlantInfo[]> {
   const plants = await getPlants(acc);
   await rpc("plant_users_upsert", {
@@ -372,6 +373,33 @@ export async function syncPlants(acc: Account): Promise<PlantInfo[]> {
       lat: r.value.lat, lon: r.value.lon, system_kwp: r.value.systemKwp,
     }));
   if (rows.length) await rpc("plant_config_seed", { p_rows: rows });
+  // Plants seeded just now (0044): store their inverter serials so `recover` can
+  // ask SunSynk for per-inverter history before the first poll has run, then fire
+  // sync-plant-energy and recover for each. Best effort — a failure here leaves
+  // the plant on the nightly schedule, which is where it was before 0044.
+  if (rows.length) {
+    const seededIds = rows.map((r) => r.plant_id);
+    const wanted = new Set(seededIds);
+    try {
+      const invs = (await getInverters(acc)).filter((i) => i.plantId != null && wanted.has(Number(i.plantId)));
+      if (invs.length) {
+        await rpc("inverters_seed", { p_rows: invs.map((i) => ({ sn: i.sn, plant_id: i.plantId, account_id: acc.id })) });
+      }
+    } catch (e) {
+      // recover refuses to walk a plant with no serials, and the first poll stores them.
+      console.warn(`inverter seed for ${seededIds.join(",")}:`, e instanceof Error ? e.message : e);
+    }
+    // Two edge invocations per plant. An installer login can see hundreds of
+    // plants at once; those go to the nightly schedule instead of a burst.
+    if (seededIds.length <= MAX_BOOTSTRAP_KICKS) {
+      for (const pid of seededIds) {
+        try { await rpc("plant_bootstrap_kick", { p_plant: pid }); }
+        catch (e) { console.warn(`bootstrap kick ${pid}:`, e instanceof Error ? e.message : e); }
+      }
+    } else {
+      console.log(`${seededIds.length} plants seeded at once; leaving them to the schedule`);
+    }
+  }
   return plants;
 }
 
@@ -404,6 +432,10 @@ export type PlantJob = {
   plantId: number; plantName: string | null; timezone: string;
   /** plant_config.batt_positive_means; null until detected or set (0041) */
   battPositiveMeans: string | null;
+  /** plant_config.backfill_next / backfill_until (0044): YYYY-MM-DD, null = none pending */
+  backfillNext: string | null;
+  backfillUntil: string | null;
+  backfillTries: number;
   account: Account;
 };
 
@@ -417,7 +449,7 @@ export async function plantsToPoll(): Promise<PlantJob[]> {
     .from("plant_users").select("plant_id, plant_name, account_id")
     .in("account_id", [...byId.keys()]);
   if (error) throw new Error(`plant_users: ${error.message}`);
-  const { data: cfgRows } = await db.from("plant_config").select("plant_id, timezone, batt_positive_means");
+  const { data: cfgRows } = await db.from("plant_config").select("plant_id, timezone, batt_positive_means, backfill_next, backfill_until, backfill_tries");
   const cfg = new Map((cfgRows ?? []).map((c: any) => [Number(c.plant_id), c]));
   // One job per plant even if several users share it. The plant is read through
   // the EARLIEST-linked active account, and that choice is stable from minute to
@@ -440,6 +472,9 @@ export async function plantsToPoll(): Promise<PlantJob[]> {
       plantName: row.plant_name ?? null,
       timezone: String(cfg.get(pid)?.timezone ?? "Africa/Johannesburg"),
       battPositiveMeans: cfg.get(pid)?.batt_positive_means ?? null,
+      backfillNext: cfg.get(pid)?.backfill_next ?? null,
+      backfillUntil: cfg.get(pid)?.backfill_until ?? null,
+      backfillTries: Number(cfg.get(pid)?.backfill_tries ?? 0),
       account: acc,
     }));
 }

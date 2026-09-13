@@ -225,12 +225,14 @@ function feedRecords(plant, day, key, stepMin = 5, fmt = "hm") {
   return out;
 }
 /** Days the cloud "still has": last 10 days only, like the real feed. */
-function feedHasDay(plant, day) {
+// The plant feed is kept ~10 days, per-inverter history ~60 (API.md: 1-2 weeks
+// vs 2+ months on the real cloud). The 60-day link backfill (0044) leans on that gap.
+function feedHasDay(plant, day, keepDays = 10) {
   const p = localParts(plant.tz);
   const today = Date.UTC(p.y, p.m - 1, p.d);
   const [y, m, d] = day.split("-").map(Number);
   const diff = (today - Date.UTC(y, m - 1, d)) / 86400000;
-  return diff >= 0 && diff <= 10;
+  return diff >= 0 && diff <= keepDays;
 }
 function plantDayFeed(plant, day) {
   if (!feedHasDay(plant, day)) return { infos: [] };
@@ -288,7 +290,7 @@ function yearFeed(plant, y) {
 /** Per-inverter history: one series, at the logger's cadence. */
 function inverterDay(plantId, inv, day, column) {
   const plant = PLANTS[plantId];
-  if (!feedHasDay(plant, day)) return { infos: [] };
+  if (!feedHasDay(plant, day, 60)) return { infos: [] };
   const step = Math.max(1, Math.round(inv.upload / 60));
   const s = inv.share;
   const ctCount = plant.inverters.filter((i) => i.ct).length || 1;
