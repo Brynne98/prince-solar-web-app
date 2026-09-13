@@ -365,7 +365,9 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   const signOf = new Map(jobs.map((j) => [j.plantId, j.battPositiveMeans]));
   // Off-grid plants (has_grid = false, 0042): the relay is open by design, so the
   // outage burst and the early far-side reads would fire every minute for nothing.
-  const offGrid = new Set(jobs.filter((j) => j.hasGrid === false).map((j) => j.plantId));
+  // Unknown (null) counts as off-grid here too: a failed plant_config read would
+  // otherwise turn an off-grid plant back into a bursting one for that minute.
+  const offGrid = new Set(jobs.filter((j) => j.hasGrid !== true).map((j) => j.plantId));
   const perInv = await Promise.all(inverters.map((inv) =>
     fetchInverter(inv, acc, ts, signOf.get(Number(inv.plantId)) ?? null, offGrid.has(Number(inv.plantId)))));
   const carried = perInv.filter((f) => f.carried).map((f) => f.inv.sn);
