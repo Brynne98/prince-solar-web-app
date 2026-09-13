@@ -10,3 +10,8 @@ supabase/.temp/
 # editor / OS cruft
 .idea/
 .DS_Store
+
+# generated: knowledge graph and impeccable session scratch (design.json stays tracked)
+graphify-out/
+.impeccable/live/
+.impeccable/critique/
