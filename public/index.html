@@ -127,9 +127,11 @@
      The select still truncates a long plant name itself. */
   .brand-sub:has(.plant-select) { overflow: visible; }
   /* A hidden copy of the chosen name sets the width; the select is laid over it. The select
-     must be out of flow: in flow, its widest option still counts toward the box. */
+     must be out of flow: in flow, its widest option still counts toward the box.
+     The negative block margin holds the line to the caption's height, so the header does
+     not grow when "connecting to SunSynk…" is replaced by the picker. */
   .brand-sub .plant-pick { position: relative; display: inline-block; vertical-align: middle;
-    margin-left: -10px; max-width: calc(100% + 10px); }
+    margin: -7px 0 -7px -10px; max-width: calc(100% + 10px); }
   .brand-sub .plant-pick-size { display: block; visibility: hidden; overflow: hidden; white-space: nowrap;
     font-family: var(--display); font-size: 15px; font-weight: 500; line-height: normal;
     padding: 4px 28px 4px 9px; border: 1px solid transparent; }
