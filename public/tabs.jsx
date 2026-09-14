@@ -748,7 +748,7 @@ function SunSynkConnectionSection({ onChanged }) {
               )}
               {confirming === acc.account_id && (
                 <ConfirmCard
-                  text={`Remove ${acc.sunsynk_username}? Logging for its plants stops until you connect it again. Your history is kept.` + (live.length === 1 ? ' It is your only login, so the dashboard goes back to the Connect screen.' : '')}
+                  text={`Remove ${acc.sunsynk_username}? This plant's history is deleted unless someone else shares it; relinking fetches the last 60 days again.` + (live.length === 1 ? ' It is your only login, so the dashboard goes back to the Connect screen.' : '')}
                   action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
               )}
             </div>
