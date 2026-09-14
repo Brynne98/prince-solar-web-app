@@ -167,6 +167,8 @@ async function fetchSnapshot() {
     plant: api.plant || { id: null, name: 'My plant' },
     aggregate: aggregate(inverters, api.totals || {}),
     config: api.config || null,
+    // Fresh-link sync (0048): pending flags, bookmarks, days of the last 60 with a chart.
+    sync: api.sync || null,
     // What this plant has. null (not decided yet) shows everything; false hides it.
     features: {
       hasBattery: cfg.hasBattery !== false,
@@ -318,9 +320,17 @@ async function deleteAccount() {
 
 // What an empty chart should say. A plant with under a day of history is new, and
 // "collecting your first day" is the honest message; anything older is a real gap.
+// While the last 60 days are still being fetched (window.SYNC, from the snapshot)
+// a thin log is not a gap either, and says so.
 function emptyText(days, fallback) {
-  if (days != null && days < 1) return 'Collecting your first day of data — check back tomorrow.';
-  if (days != null && days < 3) return 'Only ' + days + ' day' + (days === 1 ? '' : 's') + ' logged so far — this fills in as history builds.';
+  const sync = window.SYNC;
+  const fetching = !!(sync && sync.pending && sync.days < sync.window);
+  if (days != null && days < 1) return fetching
+    ? 'Collecting your first day of data — the last 60 days are still being fetched and fill in over the next day.'
+    : 'Collecting your first day of data — check back tomorrow.';
+  if (fetching) return (days != null ? days + ' day' + (days === 1 ? '' : 's') + ' in so far — ' : '')
+    + 'the last 60 days are still being fetched; this fills in over the next day.';
+  if (days != null && days < 3) return days + ' day' + (days === 1 ? '' : 's') + ' in so far — this fills in as history builds.';
   return fallback || 'No data for this range yet.';
 }
 

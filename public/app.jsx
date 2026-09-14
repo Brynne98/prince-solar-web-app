@@ -73,6 +73,16 @@ function HeaderStatus({ snap, onRefresh, busy, notice }) {
         <span className="status-dot" />
         <span className="status-word">{word}</span>
         <span className="status-detail mono">{detail}</span>
+        {/* A freshly linked plant: the last 60 days arrive over a day or two of
+            six-hourly runs (0048). The arc says it is working, the bar how far. Once
+            every one of the 60 days has a chart the pill is quiet even if the
+            inverter-history walk is still topping up; the charts say so themselves. */}
+        {snap.sync && snap.sync.pending && snap.sync.days < snap.sync.window && (
+          <span className="status-sync" title={`${snap.sync.days} of ${snap.sync.window} days so far`}>
+            <span className="sync-arc" aria-hidden="true" />Fetching history
+            <span className="sync-bar"><i style={{ width: Math.max(4, Math.round(100 * (snap.sync.days || 0) / (snap.sync.window || 60))) + '%' }} /></span>
+          </span>
+        )}
       </div>
       {/* The button takes the pill's colour once something is wrong, and reads Retry when
           nothing is reporting. The icon spins for as long as a fetch is in flight. */}
@@ -199,10 +209,25 @@ function App() {
     window.savePrefs({ lastPlant: Number(id) }).catch(() => {});
     setEnergy({}); energyRef.current = {}; setSnap(null); setToday(null);
     // how much history THIS plant has — the empty-state copy reads it
-    window.PLANT_DAYS = null;
+    window.PLANT_DAYS = null; window.SYNC = null; syncDaysRef.current = null;
     window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
     loadLive(); loadToday(); setRefreshKey(k => k + 1);
   };
+  // Fresh-link sync state (0048) rides on every snapshot; the empty-state copy reads
+  // it from window.SYNC during render, so it is assigned here in the render path,
+  // before any child renders (an effect would run after they had already painted
+  // with the previous value). When the walk lands more days, the logged-days count
+  // that drives "only N days so far" is refreshed too, so it does not stick at 2.
+  window.SYNC = snap?.sync ?? null;
+  const syncDaysRef = useRef(null);
+  useEffect(() => {
+    const sync = snap?.sync ?? null;
+    if (!sync) return;
+    if (syncDaysRef.current != null && sync.days !== syncDaysRef.current) {
+      window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
+    }
+    syncDaysRef.current = sync.days;
+  }, [snap]);
   const reloadPlantConfig = () => loadMe().then(loadLive);
 
   // initial load: who am I and which plant, then the data

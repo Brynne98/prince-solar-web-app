@@ -278,9 +278,16 @@ function InverterHistoryChart({ kind, refreshKey }) {
     );
   };
 
+  // A past day can be empty for three reasons; say which (0048).
+  const sync = window.SYNC;
   const emptyMsg = invs == null ? '' : isToday
-    ? 'Nothing for today yet — SunSynk history arrives with the six-hourly sync.'
-    : 'No history for this day. SunSynk keeps about two months; older days are gone.';
+    ? 'Nothing for today yet — it arrives with the six-hourly sync.'
+    : sync && sync.invPending && sync.tempNext && date >= sync.tempNext
+      ? (sync.tempNext > earliest
+          ? `Still fetching this day — fetched up to ${niceDate(shiftDate(sync.tempNext, -1))} so far, a few more days every six hours.`
+          : 'Still fetching this day — older days arrive first, a few every six hours.')
+      : date < earliest ? 'Only the last 60 days could be fetched; this day is before that.'
+      : 'No data for this day.';
 
   return (
     <div className="hv-root">
@@ -660,9 +667,19 @@ function HistoryView({ today, refreshKey }) {
 
   // The server sends no series until today has about half an hour of readings
   // (`approx`), so a freshly linked plant sees a blank chart, not a short history.
+  // A past day with nothing: still being fetched (fresh link, 0048), before the
+  // 60 days the fetch reaches, or a real gap. Say which.
+  // The walk is oldest-first from the bookmark: a day before it has been walked
+  // (a real gap); a day at or after it is still to come, including the last two
+  // weeks, which the normal sweep fills once the first walked day is in.
+  const sync = window.SYNC;
+  const pastMsg = sync && sync.spinePending && sync.backfillNext && date >= sync.backfillNext
+    ? 'Still fetching this day — older days arrive first, a few every six hours.'
+    : sync && sync.spinePending && date < shiftDate(todayStr, -DAY_FLOOR_DAYS) ? 'Only the last 60 days could be fetched; this day is before that.'
+    : 'No data for this day';
   const emptyMsg = loading ? 'Loading…'
     : isToday && dayData?.approx ? 'Collecting today’s first readings — the chart starts after about half an hour of logging.'
-    : isToday ? window.emptyText(window.PLANT_DAYS, 'Loading today’s data…') : 'No data for this day';
+    : isToday ? window.emptyText(window.PLANT_DAYS, 'Loading today’s data…') : pastMsg;
 
   return (
     <div className="hv-root">
