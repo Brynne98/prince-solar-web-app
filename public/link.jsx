@@ -30,7 +30,7 @@ window.useLinkStatus = function useLinkStatus(refreshKey) {
 
 window.linkSunsynk = async function linkSunsynk(username, password) {
   const { data: { session } } = await window.sb.auth.getSession();
-  if (!session) throw new Error('Not signed in');
+  if (!session) throw new Error(LINK_ERRORS['sign in first']);
   const res = await fetch(`${window.SUNSYNK_CONFIG.url}/functions/v1/link-sunsynk`, {
     method: 'POST',
     headers: {
@@ -41,8 +41,16 @@ window.linkSunsynk = async function linkSunsynk(username, password) {
     body: JSON.stringify({ username, password }),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || "Couldn't connect to SunSynk. Check the login and try again.");
+  if (!res.ok) throw new Error(LINK_ERRORS[body.error] || 'Couldn’t connect to SunSynk. Check the login and try again.');
   return body;
+};
+
+// link-sunsynk answers in developer shorthand; these are the household's words for it.
+const LINK_ERRORS = {
+  'SunSynk rejected those credentials': 'SunSynk didn’t accept that email and password.',
+  'could not reach SunSynk': 'Can’t reach SunSynk right now. Try again in a minute.',
+  'sign in first': 'Your session ended. Sign in again.',
+  'session invalid': 'Your session ended. Sign in again.',
 };
 
 window.disconnectSunsynk = async function disconnectSunsynk(accountId) {
@@ -51,7 +59,7 @@ window.disconnectSunsynk = async function disconnectSunsynk(accountId) {
 };
 
 // The same moment on the Connect screen and inside Settings; one wording for both.
-const NO_PLANT_TEXT = 'signed in, but SunSynk lists no plant for it. Usually the installer still owns the plant: ask them to share it with this login in SunSynk Connect (Plant → Share). Your login is saved here, so retry once the plant shows in SunSynk Connect.';
+const NO_PLANT_TEXT = 'signed in, but SunSynk lists no plant for it. The installer usually still owns the plant: ask them to share it with this login in SunSynk Connect (Plant → Share). Your login is saved, so retry once it appears.';
 
 function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
   const { useState } = React;
@@ -60,17 +68,28 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [noPlants, setNoPlants] = useState(false);
+  // Field id → message, shown on the label line like the sign-in card.
+  const [bad, setBad] = useState({});
+  const edited = (id) => setBad(b => (b[id] ? { ...b, [id]: undefined } : b));
 
   const submit = async (e) => {
     e.preventDefault();
-    setBusy(true); setErr(null); setNoPlants(false);
+    const problems = {};
+    if (!username.trim()) problems['ss-user'] = 'Enter your email';
+    if (!password) problems['ss-pass'] = 'Enter your password';
+    if (Object.keys(problems).length) {
+      setBad(problems); setErr(compact ? 'Enter your SunSynk email and password.' : null);
+      setTimeout(() => document.getElementById(Object.keys(problems)[0])?.focus());
+      return;
+    }
+    setBusy(true); setErr(null); setBad({}); setNoPlants(false);
     try {
       const r = await window.linkSunsynk(username.trim(), password);
       setPassword('');
       if (r.warning) { setNoPlants(true); return; }
       onLinked(r);
     } catch (ex) {
-      setErr(ex.message);
+      setErr(ex instanceof TypeError ? 'Can’t reach Prince Solar. Check your connection and try again.' : ex.message);
     } finally {
       setBusy(false);
     }
@@ -80,7 +99,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
   // styling rather than the sign-in card's. Same submit, same messages.
   if (compact) {
     return (
-      <form className="conn-form" onSubmit={submit}>
+      <form className="conn-form" onSubmit={submit} noValidate aria-busy={busy}>
         {noPlants ? (
           <div className="field-note" style={{ marginTop: 0 }}>
             <b style={{ color: 'var(--text)' }}>{username.trim()}</b> {NO_PLANT_TEXT}
@@ -90,19 +109,20 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
             <div className="field">
               <label htmlFor="ss-user">SunSynk Connect email</label>
               <input id="ss-user" className="input" type="text" placeholder="you@example.com" value={username}
-                     autoComplete="off" onChange={(e) => setUsername(e.target.value)} required readOnly={!!relink} autoFocus={!relink} />
+                     autoComplete="off" onChange={(e) => { setUsername(e.target.value); edited('ss-user'); }}
+                     readOnly={!!relink} autoFocus={!relink} {...window.invalidProps('ss-user', bad['ss-user'], null)} />
             </div>
             <div className="field">
               <label htmlFor="ss-pass">SunSynk Connect password</label>
-              <input id="ss-pass" className="input" type="password" placeholder="••••••••" value={password} autoComplete="off"
-                     onChange={(e) => setPassword(e.target.value)} required />
+              <input id="ss-pass" className="input" type="password" placeholder="Your SunSynk password" value={password} autoComplete="off"
+                     onChange={(e) => { setPassword(e.target.value); edited('ss-pass'); }} {...window.invalidProps('ss-pass', bad['ss-pass'], null)} />
             </div>
           </div>
         )}
         <div className="conn-form-actions">
           {noPlants
             ? <button type="button" className="save-btn" onClick={() => onLinked({ retry: true })}>Retry now</button>
-            : <button type="submit" className="save-btn" disabled={busy}>{busy ? 'Connecting…' : (relink ? 'Reconnect' : 'Connect')}</button>}
+            : <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>{busy ? 'Connecting…' : (relink ? 'Reconnect' : 'Connect')}</button>}
           {onCancel && <button type="button" className="ghost-btn" onClick={onCancel}>Cancel</button>}
           {err ? <span className="field-note" style={{ margin: 0, color: 'var(--load)' }}>{err}</span>
                : <span className="field-note" style={{ margin: 0 }}>Password is exchanged for a token, never stored.</span>}
@@ -113,45 +133,50 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
 
   // The login worked but SunSynk lists no plant for it. Almost always the
   // installer still owns the plant; nothing here can fix that, so say what will.
+  // A form so Retry is the card's submit button and gets the primary look.
   if (noPlants) {
     return (
-      <div className={compact ? '' : 'login-card'}>
-        {!compact && <window.AuthBrand />}
+      <form className="login-card" onSubmit={(e) => { e.preventDefault(); onLinked({ retry: true }); }}>
+        <window.AuthBrand />
         <div className="login-title">Connected, but no plant yet</div>
         <div className="login-sub">
           <b>{username.trim()}</b> {NO_PLANT_TEXT}
         </div>
-        <button type="button" onClick={() => onLinked({ retry: true })}>Retry now</button>
+        <button type="submit">Retry now</button>
+        <div className="login-err" role="alert" aria-live="polite"></div>
         <div className="login-links">
           <button type="button" className="login-link quiet" onClick={() => setNoPlants(false)}>Use a different SunSynk login</button>
         </div>
-      </div>
+      </form>
     );
   }
 
   return (
-    <form className={compact ? '' : 'login-card'} onSubmit={submit}>
-      {!compact && <window.AuthBrand />}
-      <div className="login-title">{relink ? 'Reconnect SunSynk' : compact ? 'Connect another SunSynk login' : 'Connect your SunSynk'}</div>
+    <form className="login-card" onSubmit={submit} noValidate aria-busy={busy}>
+      <window.AuthBrand />
+      <div className="login-title">{relink ? 'Reconnect SunSynk' : 'Connect SunSynk'}</div>
       <div className="login-sub">
         {relink
-          ? 'Your SunSynk connection stopped working — usually a changed password. Sign in again to resume logging. Your history is intact.'
-          : compact
-            ? 'For a plant on a different SunSynk account. Its plants are added to your selector.'
-            : 'Sign in with your SunSynk Connect login. We exchange it for an access token and never keep the password.'}
+          ? 'SunSynk stopped accepting the saved login, usually after a password change. Sign in again to keep logging. Your history is safe.'
+          : 'Use your SunSynk Connect login. We never keep the password.'}
       </div>
       <div className="auth-field">
-        <label htmlFor="ss-user">SunSynk Connect email</label>
+        <window.FieldLabel id="ss-user" label="SunSynk email" error={bad['ss-user']} />
         <input id="ss-user" type="text" placeholder="you@example.com" value={username} autoComplete="off"
-               onChange={(e) => setUsername(e.target.value)} required />
+               onChange={(e) => { setUsername(e.target.value); edited('ss-user'); }}
+               {...window.invalidProps('ss-user', bad['ss-user'])} />
       </div>
-      <window.PasswordField id="ss-pass" label="SunSynk Connect password" value={password} onChange={setPassword}
-                            placeholder="••••••••" autoComplete="off" />
-      <button type="submit" disabled={busy}>{busy ? 'Connecting…' : (relink ? 'Reconnect' : 'Connect')}</button>
+      <window.PasswordField id="ss-pass" label="SunSynk password" value={password} error={bad['ss-pass']}
+                            onChange={(v) => { setPassword(v); edited('ss-pass'); }}
+                            placeholder="Your SunSynk password" autoComplete="off" />
+      <button type="submit" disabled={busy} aria-busy={busy}>{busy ? 'Connecting…' : (relink ? 'Reconnect' : 'Connect')}</button>
       <div className="login-err" role="alert" aria-live="polite">{err}</div>
+      <div className="login-fine">Signing in here doesn’t sign you out of the SunSynk app. Disconnect any time in Settings.</div>
       <div className="login-links">
-        <span className="login-fine">Signing in here does not sign you out of the SunSynk app. Disconnect any time from Settings.</span>
-        {onCancel && <button type="button" className="login-link quiet" onClick={onCancel}>Cancel</button>}
+        {/* Without a way out, someone signed in to the wrong account is stuck on this screen. */}
+        {onCancel
+          ? <button type="button" className="login-link quiet" onClick={onCancel}>Cancel</button>
+          : <button type="button" className="login-link quiet" onClick={() => window.signOut()}>Sign out</button>}
       </div>
     </form>
   );
@@ -177,8 +202,9 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
   if (!plants.length || (!active && needsRelink)) {
     return (
       <div className="login-wrap">
-        <LinkForm relink={needsRelink && !active} onLinked={() => setRefreshKey(k => k + 1)} />
-        {error && <div className="login-err">{error}</div>}
+        <LinkForm relink={needsRelink && !active} onLinked={() => setRefreshKey(k => k + 1)}
+                  initialUsername={needsRelink && !active ? accounts.find(a => a.status === 'needs_relink')?.sunsynk_username : undefined} />
+        {error && <div className="login-err">Couldn’t check your SunSynk connection. Reload to try again.</div>}
       </div>
     );
   }

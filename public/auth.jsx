@@ -367,4 +367,4 @@ window.AuthGate = function AuthGate({ children, fallback = null }) {
 
 window.signOut = () => window.sb.auth.signOut();
 // Shared with the Connect screen so it looks like the same product.
-Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordField });
+Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordField, FieldLabel, invalidProps });
