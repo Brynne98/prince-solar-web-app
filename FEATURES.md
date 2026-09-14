@@ -15,7 +15,7 @@ See `API.md` for the field catalog this references.
 ## ✅ Agreed roadmap — reviewed 14 Aug 2026
 
 Everything below survived a pass over what's *actually shipped* (tariff/savings, runtime
-estimate, self-sufficiency, clear-sky potential line, battery-balance banner, trends and
+estimate, self-sufficiency, battery-balance banner, trends and
 wall-display mode are all done). These are the real remaining gaps, to be worked through
 **one at a time, in this order**.
 
@@ -218,4 +218,5 @@ event this short regardless of which signal is used.
 
 - **Generator input** and **external / smart meters**: the API fields exist but nothing maps them; a plant with either shows only what the inverter itself measures.
 - **More than one SunSynk cloud region**: only openapi.sunsynk.net.
-- **Forecast and clear-sky reference** are fitted to one site, the calibration plant; other plants see no dotted line and no outlook.
+- **Forecast** is fitted to one site, the calibration plant; other plants see no outlook.
+- **No best-day line on the day chart.** Removed 14 Sep 2026 (0052); the smooth replacement is planned in `BEST_DAY_CURVE.md`.

@@ -63,7 +63,7 @@ function BatteryBalanceBanner({ refreshKey }) {
       <span className="bb-dot" style={{ background: c }} />
       <span className="bb-title">Battery</span>
       <span className="bb-status" style={{ color: c }} title={statusTip}>
-        {label}{b.status === 'drifting' ? ' ⚠' : b.status === 'balanced' ? ' ✓' : ''}
+        {label}{b.status === 'drifting' ? ' ⚠' : b.status === 'watch' ? ' !' : b.status === 'balanced' ? ' ✓' : ''}
       </span>
       <span className="bb-div" />
       <div className="bb-stats">
@@ -802,7 +802,7 @@ function SunSynkConnectionSection({ onChanged }) {
 
 // Per-plant numbers live in plant_config and are the user's to edit. Timezone and
 // currency arrive from SunSynk at link time; the rest are theirs. The roof is not asked
-// for: the dotted line on Live is learned from the plant's own readings (0051).
+// for: the planned best-day line (BEST_DAY_CURVE.md) would learn from the plant's readings.
 // One form, three sections, one save bar.
 const PLANT_SECTION_IDS = ['tariff', 'plant', 'battery'];
 // Pick one of a few, each with a line on what it means. Native radios underneath, so the

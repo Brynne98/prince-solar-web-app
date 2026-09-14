@@ -41,7 +41,6 @@ const ROUTES = {
   '/api/trends/monthly':   () => ['api_trends_monthly', {}],
   '/api/trends/compare':   () => ['api_trends_compare', {}],
   '/api/trends/segments':  (q) => ['api_trends_segments', { p_days: Number(q.days) || 7 }],
-  '/api/trends/potential': (q) => ['api_trends_potential', { p_date: q.date || null }],
   '/api/balance':          () => ['api_balance', {}],
   '/api/health':           () => ['api_health', {}],
 };
@@ -283,10 +282,6 @@ async function fetchTrendMonthly() {
 async function fetchCompare() {
   return getJSON('/api/trends/compare').catch(() => ({}));
 }
-// calibrated clear-sky potential profile for a date: { date, scaleW, points:[{t,w}] } (dotted chart line)
-async function fetchPotential(date) {
-  return getJSON('/api/trends/potential' + (date ? '?date=' + date : '')).catch(() => null);
-}
 // avg power per day-segment + load source split: { days, segments:[{seg,load_w,solar_w,batt_w,grid_w,mins}] }
 // (replaced the removed "wasted solar" estimate — see server.js note)
 async function fetchSegments(days) {
@@ -339,6 +334,6 @@ function emptyText(days, fallback) {
 }
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchInverterHistory, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchPotential, fetchSegments, fetchBalance,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchInverterHistory, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchSegments, fetchBalance,
   fetchMe, savePrefs, savePlantConfig, deleteAccount, emptyText, BATT_MAX_KW, TYPICAL_DAYS,
 });

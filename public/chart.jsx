@@ -77,7 +77,7 @@ function niceDate(s) {
 // grid (0..287, stretched to the last bucket on today), x ticks, crosshair index
 // from a pointer, and a tooltip that sits beside the crosshair. Each chart keeps
 // its own series, axes and overlays; the power chart also keeps its range drag
-// and potential line to itself.
+// to itself.
 const DAY_FLOOR_DAYS = 60; // what SunSynk's per-inverter history keeps
 
 /** Selected day + the arrows' bounds. `earliest` may be null (no lower bound). */
@@ -373,7 +373,6 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
   const [earliest, setEarliest] = React.useState(null);
   const pick = useDayPicker(earliest);
   const { date, setDate, todayStr, isToday } = pick;
-  const [potential, setPotential] = React.useState(null); // clear-sky "could-have-made" profile (dotted line)
   const [pastDay, setPastDay] = React.useState(null); // fetched series for a non-today date
   const [loading, setLoading] = React.useState(false);
   const [ref, width, height] = useChartSize();
@@ -381,9 +380,6 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
 
   // lower bound for the picker (≈ commission date)
   React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
-
-  // clear-sky "potential generation" profile for the displayed date (dotted line)
-  React.useEffect(() => { window.fetchPotential(date).then(setPotential).catch(() => {}); }, [date, refreshKey]);
 
   // Fetch a past day's series. `silent` keeps the current chart on screen while
   // refetching (used by the Refresh button) instead of flashing the loader.
@@ -427,16 +423,6 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
   const real = pts.filter(p => p.pv != null); // anything with data (est = cloud-sourced, drawn dotted)
   const hasData = real.length > 1;
 
-  // "Best recent output" (dotted line, 0051): per 5-minute slot, what this plant made on
-  // its better days in the 30 days before the date shown, from readings where the
-  // battery had room. A slot with too few such days is null and the line lifts there.
-  const hasPot = potential && potential.available && potential.points && potential.points.length > 0;
-  const potAt = (t) => {
-    if (!hasPot) return null;
-    const i = Math.max(0, Math.min(potential.points.length - 1, Math.round(t / 5)));
-    return potential.points[i].w;
-  };
-
   // value shown inside each legend pill: the hovered point, else the latest reading
   const cur = (hover != null && pts[hover] && pts[hover].pv != null) ? pts[hover] : (real.length ? real[real.length - 1] : null);
   const chipVal = (k) => {
@@ -462,8 +448,6 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
         if (v == null) return; dmax = Math.max(dmax, v); dmin = Math.min(dmin, v);
       });
     });
-    // include the dotted potential overlay so the line always fits the axis
-    if (hasPot) potential.points.forEach(p => { if (p.w != null && p.t <= (pts[lastIdx] ? pts[lastIdx].t : 1440)) dmax = Math.max(dmax, p.w); });
     const { lo, hi, ticks: yticks } = niceScale(dmin, dmax, 8);
     const x = i => m.l + (i / lastIdx) * innerW;
     const y = v => m.t + innerH - ((v - lo) / (hi - lo)) * innerH;   // power → left axis (kW)
@@ -497,17 +481,6 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
       }).join(' ');
       return <path d={d} fill={color} fillOpacity="0.13" />;
     };
-
-    // dotted "best recent output" line — the pen lifts over slots with no value
-    let avgD = '';
-    if (hasPot) {
-      let pen = false;
-      pts.forEach((p, i) => {
-        const v = potAt(p.t);
-        if (v == null) { pen = false; return; }
-        avgD += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1) + ' '; pen = true;
-      });
-    }
 
     // SOC line — overlaid on the power series, mapped to the independent right axis
     let socD = '';
@@ -596,7 +569,6 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
           {vis.batt && line('batt', C.batt)}
           {vis.load && line('load', C.load)}
           {vis.pv && line('pv', C.pv)}
-          {hasPot && <path d={avgD} fill="none" stroke={C.pv} strokeWidth="1.5" strokeDasharray="1.5 4" strokeLinecap="round" strokeOpacity="0.9" />}
         </g>
 
         {/* SOC drawn last so it sits on top of the power series (right axis) */}
@@ -626,7 +598,6 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
     const left = tipLeftFor(px, width);
     const rows = [
       ['Solar', p.pv, C.pv, 'W'],
-      ...(hasPot ? [['Best recent', potAt(p.t), C.pv, 'W']] : []), // dotted line value
       ['Battery', p.batt, C.batt, 'W'], // signed the way Settings → Display says
       ['Grid', p.grid, C.grid, 'W'], // signed: − = exporting
       ['Home', p.load, C.load, 'W'],
@@ -710,29 +681,6 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
 
       <div className="legend-row">
         {legend.map(([k, l, c]) => <window.LegendChip key={k} color={c} label={l} value={chipVal(k)} active={vis[k]} onClick={() => toggle(k)} />)}
-        {potential && potential.available === false && potential.waiting && (() => {
-          // No dotted line yet: a small progress ring, the words only on hover or tap
-          // (the same bubble as the info dots, which also opens on keyboard focus).
-          const frac = Math.min(1, (potential.days || 0) / potential.needDays);
-          const what = 'A dotted line on this chart showing what your panels made on their best days in the past month.';
-          const when = potential.waiting === 'days'
-            ? `It appears after ${potential.needDays} days of readings: ${potential.days || 0} so far.`
-            : 'Waiting for sunny days when the battery wasn\'t full, so the panels weren\'t held back.';
-          const text = `Best recent output. ${what} ${when}`;
-          const C = 2 * Math.PI * 7;
-          return (
-            <span className="info-dot pot-ring" tabIndex={0} role="img" aria-label={text}>
-              <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-                <circle cx="9" cy="9" r="7" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="2" />
-                <circle cx="9" cy="9" r="7" fill="none" stroke="var(--pv)" strokeWidth="2" strokeLinecap="round"
-                        strokeDasharray={`${(frac * C).toFixed(2)} ${C.toFixed(2)}`} transform="rotate(-90 9 9)" />
-              </svg>
-              <span className="info-bubble" aria-hidden="true">
-                <b className="pot-ring-title">Best recent output</b>{what} <span className="pot-ring-when">{when}</span>
-              </span>
-            </span>
-          );
-        })()}
       </div>
 
       <div className="chart-area" ref={ref} style={{ position: 'relative', height: height }}>

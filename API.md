@@ -67,9 +67,8 @@ needed its transport swapped.
 | `api_trends_monthly` | — | Every month on record, tagged year + month |
 | `api_trends_compare` | — | Period-over-period totals, each compared against the same elapsed slice of the previous period |
 | `api_trends_segments` | `p_days` | Avg power per day-segment with load split by source (solar / battery / grid) |
-| `api_trends_potential` | `p_date` | Calibrated clear-sky potential curve: `{ scaleW, points[] }` |
 | `api_balance` | — | Bank desync signal (sustained 10-min SOC spread) plus battery temperature and time-at-full |
-| `api_forecast` | — | Three-day solar outlook: `{ k, kDay, calibrated, samples, updatedAt, days[], points[] }`. `days[]` carries `kwh` / `peakW` / `cloud` per day, plus `remainingKwh` on today; `points[]` is today's curve on the same 5-min grid as `api_trends_potential` |
+| `api_forecast` | — | Three-day solar outlook: `{ k, kDay, calibrated, samples, updatedAt, days[], points[] }`. `days[]` carries `kwh` / `peakW` / `cloud` per day, plus `remainingKwh` on today; `points[]` is today's curve on a 5-min grid (`t` = minutes since local midnight) |
 
 Internal `q_*` primitives (the equivalent of the old `db.js` exports) are
 `service_role`-only except for the read-only ones the `api_*` wrappers call.

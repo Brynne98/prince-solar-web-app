@@ -186,9 +186,9 @@ Solar-model constants live in the `app_config` table, not in code:
 | `SOLAR_CAL_PERCENTILE` | calibration percentile |
 | `SOLAR_CAL_CAP_MULT` | ceiling as a multiple of nameplate |
 
-These drive the clear-sky "potential" curve, and `PANEL_TILT` / `PANEL_AZIMUTH` are sent
-to Open-Meteo so the forecast is for this roof rather than a flat one. Getting
-`PANEL_AZIMUTH` wrong visibly skews both, so they're data rather than constants.
+`PANEL_TILT` / `PANEL_AZIMUTH` are sent to Open-Meteo so the forecast is for this roof
+rather than a flat one. Getting `PANEL_AZIMUTH` wrong visibly skews it, so they're data
+rather than constants. The clear-sky "potential" curve they also drove was retired in 0051.
 
 Battery sign convention is the `BATTERY_POSITIVE_MEANS` Edge Function secret
 (`charging` or `discharging`) — flip it if charge/discharge reads backwards versus
