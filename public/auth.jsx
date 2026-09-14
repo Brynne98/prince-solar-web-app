@@ -62,13 +62,13 @@ window.useSession = function useSession() {
 
 // Eye / eye-with-a-line-through-it, for the reveal toggle.
 const EyeIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M1.5 10S4.5 4.5 10 4.5 18.5 10 18.5 10 15.5 15.5 10 15.5 1.5 10 1.5 10Z" />
     <circle cx="10" cy="10" r="2.5" />
   </svg>
 );
 const EyeOffIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M8.1 4.7A7.7 7.7 0 0 1 10 4.5c5.5 0 8.5 5.5 8.5 5.5a15 15 0 0 1-2.4 3.1M4.4 6A15 15 0 0 0 1.5 10S4.5 15.5 10 15.5c1.2 0 2.2-.2 3.2-.6" />
     <path d="M8.3 8.3a2.5 2.5 0 0 0 3.4 3.4" />
     <path d="M2.5 2.5l15 15" />
@@ -77,7 +77,7 @@ const EyeOffIcon = () => (
 
 /** Google's four-colour G, as drawn in their sign-in branding guide. */
 const GoogleMark = () => (
-  <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+  <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
     <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.5 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.7 17.7 9.5 24 9.5z"/>
     <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 2.9-2.2 5.4-4.7 7.1l7.6 5.9c4.4-4.1 6.9-10.1 6.9-17z"/>
     <path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C1 16.5 0 20.1 0 24s1 7.5 2.6 10.8l7.9-6.1z"/>
@@ -100,15 +100,16 @@ function AuthBrand() {
 
 /** Labelled password input with a reveal toggle. type="button" on the eye matters:
  *  inside a form a bare <button> submits, so revealing would sign in half-typed. */
-function PasswordField({ id, label, value, onChange, placeholder, autoComplete }) {
+function PasswordField({ id, label, value, onChange, placeholder, autoComplete, error, hint }) {
   const { useState } = React;
   const [show, setShow] = useState(false);
   return (
     <div className="auth-field">
-      <label htmlFor={id}>{label}</label>
+      <FieldLabel id={id} label={label} error={error} hint={hint} />
       <div className="login-pw">
         <input id={id} type={show ? 'text' : 'password'} placeholder={placeholder} value={value}
-               autoComplete={autoComplete} onChange={(e) => onChange(e.target.value)} required minLength={6} />
+               autoComplete={autoComplete} onChange={(e) => onChange(e.target.value)} required minLength={6}
+               {...(error ? invalidProps(id, error) : hint ? { 'aria-describedby': `${id}-hint` } : {})} />
         <button type="button" className="login-eye" onClick={() => setShow(v => !v)}
                 title={show ? 'Hide password' : 'Show password'}
                 aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show}>
@@ -117,6 +118,41 @@ function PasswordField({ id, label, value, onChange, placeholder, autoComplete }
       </div>
     </div>
   );
+}
+
+/** Marks a field invalid and ties it to its message (`describedBy` defaults to the label-line one). */
+const invalidProps = (id, error, describedBy = `${id}-err`) =>
+  error ? { 'aria-invalid': true, 'aria-describedby': describedBy } : {};
+
+/** The label, with the field's error (or, when there is none, a standing hint) on the same
+ *  line, so neither ever grows the card. */
+const FieldLabel = ({ id, label, error, hint }) => (
+  <div className="auth-label-row">
+    <label htmlFor={id}>{label}</label>
+    {error ? <span id={`${id}-err`} className="field-err">{error}</span>
+           : hint && <span id={`${id}-hint`} className="field-hint">{hint}</span>}
+  </div>
+);
+
+/** Supabase's own error text is written for developers; say it in the household's words.
+ *  Returns the message, and the field it belongs to or a follow-up action when there is one. */
+function explain(ex) {
+  const code = ex?.code;
+  if (code === 'invalid_credentials') return { text: 'Email or password is wrong.' };
+  if (code === 'email_not_confirmed') return { text: 'Confirm your email first. The link is in your inbox.' };
+  if (code === 'user_already_exists' || code === 'email_exists') return { text: 'That email already has an account.', action: 'signin' };
+  if (code === 'weak_password') {
+    const reasons = ex.reasons || [];
+    if (reasons.includes('pwned')) return { text: 'That password has appeared in a data leak. Choose another.' };
+    return { field: 'auth-password', text: reasons.includes('characters') ? 'Mix letters, numbers and symbols' : 'Choose a longer password' };
+  }
+  if (code === 'same_password') return { field: 'auth-password', text: 'That’s your current password' };
+  if (code === 'email_address_invalid') return { field: 'auth-email', text: 'Use a different email' };
+  if (code === 'signup_disabled') return { text: 'New accounts are closed right now.' };
+  if (code === 'over_email_send_rate_limit') return { text: 'Too many emails sent. Wait a few minutes, then try again.' };
+  if (code === 'over_request_rate_limit' || ex?.status === 429) return { text: 'Too many tries. Wait a minute, then try again.' };
+  if (ex?.name === 'AuthRetryableFetchError' || ex instanceof TypeError) return { text: 'Can’t reach Prince Solar. Check your connection and try again.' };
+  return { text: ex?.message || 'Something went wrong. Try again.' };
 }
 
 function AuthScreen({ initialMode = 'signin', onRecovered }) {
@@ -133,44 +169,89 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   // A failed Google round trip lands here signed out with the reason in the URL.
   // The back button restores the page from cache with `busy` still set, so clear it.
   React.useEffect(() => {
-    const reason = new URLSearchParams(location.hash.slice(1) || location.search).get('error_description');
-    if (reason) { setErr(reason); history.replaceState(null, '', location.pathname); }
+    // Email links (confirm, reset) come back the same way when they are stale.
+    const params = new URLSearchParams(location.hash.slice(1) || location.search);
+    if (params.get('error_description')) {
+      setErr(params.get('error_code') === 'otp_expired'
+        ? 'That link has expired. Ask for a new one.'
+        : 'Sign-in didn’t finish. Try again.');
+      history.replaceState(null, '', location.pathname);
+    }
     const onShow = (e) => { if (e.persisted) setBusy(false); };
     window.addEventListener('pageshow', onShow);
     return () => window.removeEventListener('pageshow', onShow);
   }, []);
 
-  const go = (m) => { setMode(m); setErr(null); setNote(null); setPassword(''); setPassword2(''); };
+  // Field id → its message. Every problem at once, each shown under its own field.
+  const [bad, setBad] = useState({});
+
+  const go = (m) => { setMode(m); setErr(null); setNote(null); setBad({}); setPassword(''); setPassword2(''); };
+
+  // Replaces the browser's own bubbles (noValidate), which named one field in a popup.
+  const check = () => {
+    const newPw = mode === 'signup' || mode === 'recovery';
+    const out = {};
+    if (mode !== 'recovery') {
+      if (!email.trim()) out['auth-email'] = 'Enter your email';
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) out['auth-email'] = 'Enter a valid email';
+    }
+    if (mode !== 'forgot') {
+      if (!password) out['auth-password'] = mode === 'signin' ? 'Enter your password' : 'Choose a password';
+      // Matches the minimum set in Supabase (Auth → Email) and supabase/config.toml.
+      else if (newPw && password.length < 8) out['auth-password'] = 'Use at least 8 characters';
+    }
+    if (newPw) {
+      if (!password2) out['auth-password2'] = 'Confirm your password';
+      else if (password !== password2) out['auth-password2'] = 'Passwords don’t match';
+    }
+    if (mode === 'signup' && !agree) out['auth-agree'] = 'Accept the Terms and Privacy Policy';
+    return out;
+  };
+
+  // Focus the first bad field after React commits, so it already reads as invalid.
+  const flag = (problems) => {
+    setBad(problems); setErr(null); setNote(null);
+    // Blur first: re-focusing a field that already has focus is silent to a screen reader.
+    setTimeout(() => { const el = document.getElementById(Object.keys(problems)[0]); el?.blur(); el?.focus(); });
+  };
+  // Editing a field clears only its own message.
+  const edited = (...ids) => setBad(b => {
+    if (!ids.some(id => b[id])) return b;
+    const next = { ...b };
+    ids.forEach(id => delete next[id]);
+    return next;
+  });
 
   const submit = async (e) => {
     e.preventDefault();
-    setBusy(true); setErr(null); setNote(null);
+    const problems = check();
+    if (Object.keys(problems).length) return flag(problems);
+    const addr = email.trim();
+    setBusy(true); setErr(null); setNote(null); setBad({});
     try {
       if (mode === 'signin') {
-        const { error } = await window.sb.auth.signInWithPassword({ email, password });
+        const { error } = await window.sb.auth.signInWithPassword({ email: addr, password });
         if (error) throw error;
       } else if (mode === 'signup') {
-        if (password !== password2) throw new Error('Passwords don’t match');
-        if (!agree) throw new Error('Please accept the Terms and Privacy Policy');
-        const { data, error } = await window.sb.auth.signUp({ email, password, options: { emailRedirectTo: SITE_URL } });
+        const { data, error } = await window.sb.auth.signUp({ email: addr, password, options: { emailRedirectTo: SITE_URL } });
         if (error) throw error;
         // With email confirmation on, signUp returns a user but no session.
         if (!data.session) {
           go('signin');
-          setNote(`Check ${email} for a confirmation link, then sign in.`);
+          setNote(`Check ${addr} for a confirmation link, then sign in.`);
         }
       } else if (mode === 'forgot') {
-        const { error } = await window.sb.auth.resetPasswordForEmail(email, { redirectTo: SITE_URL });
+        const { error } = await window.sb.auth.resetPasswordForEmail(addr, { redirectTo: SITE_URL });
         if (error) throw error;
-        setNote(`If ${email} has an account, a reset link is on its way.`);
+        setNote(`If ${addr} has an account, a reset link is on its way.`);
       } else if (mode === 'recovery') {
-        if (password !== password2) throw new Error('Passwords don’t match');
         const { error } = await window.sb.auth.updateUser({ password });
         if (error) throw error;
         onRecovered && onRecovered();
       }
     } catch (ex) {
-      setErr(ex.message || String(ex));
+      const e = explain(ex);
+      if (e.field) flag({ [e.field]: e.text }); else setErr(e);
     } finally {
       setBusy(false);
     }
@@ -178,59 +259,68 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
 
   // Leaves the page on success, so `busy` stays set until the redirect lands.
   const google = async () => {
-    if (mode === 'signup' && !agree) { setErr('Please accept the Terms and Privacy Policy'); return; }
-    setBusy(true); setErr(null); setNote(null);
+    if (mode === 'signup' && !agree) return flag({ 'auth-agree': 'Accept the Terms and Privacy Policy' });
+    setBusy(true); setErr(null); setNote(null); setBad({});
     // select_account: a household shares a tablet, so always offer the account list.
     const { error } = await window.sb.auth.signInWithOAuth({
       provider: 'google', options: { redirectTo: SITE_URL, queryParams: { prompt: 'select_account' } },
     });
-    if (error) { setErr(error.message); setBusy(false); }
+    if (error) { setErr(explain(error)); setBusy(false); }
   };
 
   const copy = {
-    signin:   { h: 'Welcome back',          p: 'Sign in to your dashboard.',                                                cta: 'Sign in' },
-    signup:   { h: 'Create your account',   p: 'This is your dashboard login. You’ll connect your SunSynk account next.',   cta: 'Create account' },
-    forgot:   { h: 'Reset your password',   p: 'Enter your email and we’ll send you a link to choose a new one.',            cta: 'Send reset link' },
-    recovery: { h: 'Choose a new password', p: 'You’re signed in from the reset link. Set a new password to continue.',     cta: 'Save password' },
+    signin:   { h: 'Welcome back',          p: null,                                                   cta: 'Sign in',         busy: 'Signing in…' },
+    signup:   { h: 'Create your account',   p: 'Your Prince Solar login. You’ll connect SunSynk next.', cta: 'Create account',  busy: 'Creating account…' },
+    forgot:   { h: 'Reset your password',   p: 'We’ll email you a link to choose a new one.',          cta: 'Send reset link', busy: 'Sending…' },
+    recovery: { h: 'Choose a new password', p: 'Set a new password to continue.',                      cta: 'Save password',   busy: 'Saving…' },
   }[mode];
 
   return (
     <div className="login-wrap">
-      <form className="login-card" onSubmit={submit}>
+      <form className="login-card" onSubmit={submit} noValidate aria-busy={busy}>
         <AuthBrand />
         <div className="login-title">{copy.h}</div>
-        <div className="login-sub">{copy.p}</div>
+        {copy.p && <div className="login-sub">{copy.p}</div>}
 
         {mode !== 'recovery' && (
           <div className="auth-field">
-            <label htmlFor="auth-email">Email</label>
+            <FieldLabel id="auth-email" label="Email" error={bad['auth-email']} />
             <input id="auth-email" type="email" placeholder="you@example.com" value={email} autoComplete="username"
-                   onChange={(e) => setEmail(e.target.value)} required />
+                   onChange={(e) => { setEmail(e.target.value); edited('auth-email'); }}
+                   {...invalidProps('auth-email', bad['auth-email'])} />
           </div>
         )}
         {mode !== 'forgot' && (
-          <PasswordField id="auth-password" label={mode === 'signin' ? 'Password' : 'New password'}
-                         value={password} onChange={setPassword}
-                         placeholder={mode === 'signin' ? '••••••••' : 'At least 6 characters'}
+          <PasswordField id="auth-password" label={mode === 'recovery' ? 'New password' : 'Password'}
+                         value={password} error={bad['auth-password']}
+                         onChange={(v) => { setPassword(v); edited('auth-password', 'auth-password2'); }}
+                         hint={mode === 'signin' ? null : '8+ characters'}
+                         placeholder={mode === 'signin' ? 'Your password' : 'Choose a password'}
                          autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} />
         )}
         {(mode === 'signup' || mode === 'recovery') && (
-          <PasswordField id="auth-password2" label="Confirm password" value={password2} onChange={setPassword2}
-                         placeholder="Same again" autoComplete="new-password" />
+          <PasswordField id="auth-password2" label="Confirm password" value={password2}
+                         error={bad['auth-password2']}
+                         onChange={(v) => { setPassword2(v); edited('auth-password2'); }}
+                         placeholder="Type it again" autoComplete="new-password" />
         )}
 
         {mode === 'signup' && (
-          <label className="auth-consent">
-            <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+          <label className={'auth-consent' + (bad['auth-agree'] ? ' invalid' : '')}>
+            <input id="auth-agree" type="checkbox" checked={agree}
+                   onChange={(e) => { setAgree(e.target.checked); edited('auth-agree'); }}
+                   {...invalidProps('auth-agree', bad['auth-agree'])} />
             <span>I agree to the <a href="?page=terms" target="_blank" rel="noopener">Terms of Service</a> and <a href="?page=privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span>
+            {/* The sentence turns red instead of adding a line; this names the problem for screen readers. */}
+            {bad['auth-agree'] && <span id="auth-agree-err" className="sr-only">{bad['auth-agree']}</span>}
           </label>
         )}
-        <button type="submit" disabled={busy}>{busy ? '…' : copy.cta}</button>
+        <button type="submit" disabled={busy} aria-busy={busy}>{busy ? copy.busy : copy.cta}</button>
 
-        {/* Always rendered, even when empty: mounting it only on error grew the card by
-            a line and shunted the centred form up under the cursor mid-retype. */}
-        <div className={'login-err' + (note && !err ? ' login-note' : '')} role="alert" aria-live="polite">
-          {err || note}
+        {/* Always mounted so it works as a live region; empty, it takes no space. */}
+        <div id="auth-msg" className={'login-err' + (note && !err ? ' login-note' : '')} role="alert" aria-live="polite">
+          {err?.text ?? err ?? note}
+          {err?.action === 'signin' && <> <button type="button" className="login-link" onClick={() => go('signin')}>Sign in</button></>}
         </div>
 
         {(mode === 'signin' || mode === 'signup') && (<>
@@ -239,7 +329,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
             <GoogleMark /> Continue with Google
           </button>
           {mode === 'signin' && (
-            <div className="login-fine">New to Prince Solar? Continuing with Google creates an account and accepts
+            <div className="login-fine">Continuing with Google creates an account and accepts
               the <a href="?page=terms" target="_blank" rel="noopener">Terms</a> and <a href="?page=privacy" target="_blank" rel="noopener">Privacy Policy</a>.</div>
           )}
         </>)}
@@ -253,7 +343,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
             <span>Already have an account? <button type="button" className="login-link" onClick={() => go('signin')}>Sign in</button></span>
           )}
           {mode === 'forgot' && (
-            <button type="button" className="login-link quiet" onClick={() => go('signin')}>← Back to sign in</button>
+            <button type="button" className="login-link quiet" onClick={() => go('signin')}>Back to sign in</button>
           )}
           {mode === 'recovery' && (
             <button type="button" className="login-link quiet" onClick={() => window.sb.auth.signOut()}>Cancel</button>
