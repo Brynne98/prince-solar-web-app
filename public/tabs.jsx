@@ -720,13 +720,21 @@ function SunSynkConnectionSection({ onChanged }) {
     try { await window.disconnectSunsynk(acc.account_id); if (last) location.reload(); else { setBusy(null); changed(); } }
     catch (e) { setErr(e.message); setBusy(null); }
   };
-  const right = !loading && live.length ? <span className="dim">{live.length === 1 ? '1 login' : live.length + ' logins'}</span> : null;
+  const n = live.length;
+  const title = <>SunSynk logins{!loading && n > 0 && <span className="sset-count">{n}</span>}</>;
   return (
-    <SettingsSection id="connection" title="SunSynk logins" right={right}>
-      {loading ? <div className="field-note">Loading…</div> : !live.length ? (
-        <div className="field-note">No SunSynk login connected.</div>
+    <SettingsSection id="connection" title={title}>
+      {loading ? (
+        // same height as a row, so the section does not jump when the logins land
+        <div className="conn-row"><div className="conn-text"><div className="conn-user dim">Loading…</div><div className="conn-meta">&nbsp;</div></div></div>
+      ) : !live.length ? (
+        <div className="field-note">No login connected.</div>
       ) : live.map(acc => {
         const ok = acc.status === 'active';
+        // Green only while the poller is actually reaching it: the header pill calls
+        // 15 minutes without a reading "offline", so a login goes amber at the same age.
+        const stale = ok && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
+        const word = !ok ? 'Sign-in expired' : stale ? 'Stale' : 'Connected';
         const plants = acc.plants || [];
         return (
           <div key={acc.account_id} className="conn-row">
@@ -738,17 +746,16 @@ function SunSynkConnectionSection({ onChanged }) {
                 {plants.length > 0 && <span className="conn-plants"> · {plants.map(p => p.plant_name || 'Plant ' + p.plant_id).join(', ')}</span>}
               </div>
               <div className="conn-meta">
-                <span className={'conn-status' + (ok ? ' ok' : ' warn')}>{ok ? 'Connected' : 'Needs reconnecting'}</span>
-                {ok && acc.last_ok_at ? ' · read ' + ago(acc.last_ok_at) : ''}
-                {acc.linked_at ? ' · added ' + new Date(acc.linked_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                <span className={'conn-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
+                {acc.last_ok_at ? ' · read ' + ago(acc.last_ok_at) : ''}
               </div>
-              {!plants.length && <div className="conn-meta">No plant shared with this login yet. Ask your installer to share it in SunSynk Connect.</div>}
+              {!plants.length && <div className="conn-meta">No plant shared with this login. Ask your installer to share it in SunSynk Connect.</div>}
               {mode === acc.account_id && (
                 <window.LinkForm compact relink initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
               )}
               {confirming === acc.account_id && (
                 <ConfirmCard
-                  text={`Remove ${acc.sunsynk_username}? This plant's history is deleted unless someone else shares it; relinking fetches the last 60 days again.` + (live.length === 1 ? ' It is your only login, so the dashboard goes back to the Connect screen.' : '')}
+                  text={`Remove ${acc.sunsynk_username}? History goes too, unless someone else shares the plant.` + (live.length === 1 ? ' Your only login, so the app returns to the Connect screen.' : '')}
                   action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
               )}
             </div>
@@ -763,15 +770,13 @@ function SunSynkConnectionSection({ onChanged }) {
       })}
       {!loading && (mode === 'add'
         ? <div className="conn-row"><div className="conn-text">
-            <div className="conn-user">Add a SunSynk login</div>
-            <div className="conn-meta">Use the email and password from the SunSynk Connect app. Its plants appear in the dropdown under the name at the top.</div>
+            <div className="conn-user">Add login</div>
             <window.LinkForm compact onLinked={changed} onCancel={() => setMode(null)} />
           </div></div>
         : <div className="conn-add">
             <button type="button" className="save-btn" onClick={() => { setErr(null); setMode('add'); }}>
-              <span aria-hidden="true">+</span> Add a SunSynk login
+              <span aria-hidden="true">+</span> Add login
             </button>
-            <span className="conn-add-hint">Another household member's login, or a second plant.</span>
           </div>)}
       {err && <div className="field-note" style={{ color: 'var(--load)' }}>{err}</div>}
     </SettingsSection>

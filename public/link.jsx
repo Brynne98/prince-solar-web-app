@@ -105,7 +105,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
             : <button type="submit" className="save-btn" disabled={busy}>{busy ? 'Connecting…' : (relink ? 'Reconnect' : 'Connect')}</button>}
           {onCancel && <button type="button" className="ghost-btn" onClick={onCancel}>Cancel</button>}
           {err ? <span className="field-note" style={{ margin: 0, color: 'var(--load)' }}>{err}</span>
-               : <span className="field-note" style={{ margin: 0 }}>The password is swapped for a token and never stored.</span>}
+               : <span className="field-note" style={{ margin: 0 }}>Password is exchanged for a token, never stored.</span>}
         </div>
       </form>
     );
@@ -163,12 +163,12 @@ window.LinkForm = LinkForm;
  * they can see; otherwise the connect form. A needs_relink account with plants
  * still shows the dashboard, with a banner (rendered by the app shell).
  */
-window.LinkGate = function LinkGate({ children }) {
+window.LinkGate = function LinkGate({ children, fallback = null }) {
   const { useState } = React;
   const [refreshKey, setRefreshKey] = useState(0);
   const { loading, accounts, error } = window.useLinkStatus(refreshKey);
 
-  if (loading) return <div className="login-wrap"><div className="login-card">Loading…</div></div>;
+  if (loading) return fallback;
 
   const plants = accounts.flatMap(a => a.plants || []);
   const active = accounts.some(a => a.status === 'active');

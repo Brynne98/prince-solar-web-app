@@ -9,7 +9,7 @@
 // Shown in Settings -> About. Bumped on every deploy; semver, so patch for fixes,
 // minor for features, major for a rewrite. Lives here rather than in the JSX so it sits
 // with the other deploy-time config and loads before anything renders.
-window.APP_VERSION = 'v0.17.0';
+window.APP_VERSION = 'v0.17.1';
 // Shown in Settings → About and on error screens.
 window.SUPPORT_EMAIL = 'brynneprince98@gmail.com';
 

@@ -15,3 +15,6 @@ supabase/.temp/
 graphify-out/
 .impeccable/live/
 .impeccable/critique/
+
+# stray Deno lockfile from running `deno check` at the root; the functions bundle without it
+deno.lock
