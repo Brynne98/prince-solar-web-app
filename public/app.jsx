@@ -110,10 +110,17 @@ function BrandLine({ snap, me, plantId, onPlant }) {
 function PlantSelect({ me, plantId, onChange }) {
   const plants = me?.plants || [];
   if (plants.length < 2) return null;
+  const label = (p) => p.name || ('Plant ' + p.id);
+  const current = plants.find(p => p.id === plantId);
+  // A select is as wide as its longest option, which left a gap before the chevron for
+  // every shorter name. The hidden copy of the chosen name sizes the box instead.
   return (
-    <select className="plant-select" value={plantId ?? ''} onChange={e => onChange(e.target.value)} title="Switch plant" aria-label="Plant">
-      {plants.map(p => <option key={p.id} value={p.id}>{p.name || ('Plant ' + p.id)}</option>)}
-    </select>
+    <span className="plant-pick">
+      <span className="plant-pick-size" aria-hidden="true">{current ? label(current) : ''}</span>
+      <select className="plant-select" value={plantId ?? ''} onChange={e => onChange(e.target.value)} title="Switch plant" aria-label="Plant">
+        {plants.map(p => <option key={p.id} value={p.id}>{label(p)}</option>)}
+      </select>
+    </span>
   );
 }
 
