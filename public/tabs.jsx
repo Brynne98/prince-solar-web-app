@@ -86,7 +86,7 @@ function BatteryBalanceBanner({ refreshKey }) {
 }
 
 // ---------------------------------------------------------------- LIVE
-function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
+function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOpenSettings }) {
   const a = snap.aggregate;
   const feat = snap.features || {};
   const hasBatt = feat.hasBattery !== false;
@@ -122,7 +122,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
   };
   let battEta = null, battInfo = null;
   if (!hasBatt) { /* nothing to estimate */ }
-  else if (!cap) { battInfo = 'set pack size in Settings'; }
+  else if (!cap) { battInfo = 'Set pack size'; } // a link on the flow's battery node
   else if (a.battState === 'discharging' && a.battPower > 50) {
     const hrs = availKwh / (a.battPower / 1000);
     battEta = <span className="batt-eta"><span className="bel">≈ <b>{fmtDur(hrs)}</b> until {RESERVE}% reserve</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
@@ -279,7 +279,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
               {isFs ? <FsExitIcon /> : <FsEnterIcon />}<span>{isFs ? 'Exit' : 'Fullscreen'}</span>
             </button>
           }>POWER FLOW</SectionTitle>
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} typicalSoc={typicalSoc} typicalHour={typicalHour} features={{ ...feat, sells: rateExp > 0 }} />
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={{ ...feat, sells: rateExp > 0 }} />
         </Card>
       </div>
 
@@ -323,8 +323,11 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
             )} />}
           {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off-grid" color={CC.grid}
             info="This plant has no grid connection. Everything the home uses comes from solar and the battery." />}
-          <MiniStat loading={pending} label="Est. saved" value={(rate > 0 || rateExp > 0) ? window.fmtRandSmart(pSaved) : '—'} color={CC.batt}
+          <MiniStat loading={pending} label="Est. saved" color={CC.batt}
+            value={(rate > 0 || rateExp > 0) ? window.fmtRandSmart(pSaved) : '—'}
             trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord}
+            // no rate yet: the line under the dash opens Settings on Tariff
+            sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your rate</button> : undefined}
             info={'Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your import rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '. Set the rates in Settings.'} />
         </div>
       </div>
@@ -427,7 +430,7 @@ function SolarTab({ snap, energy, onNeedEnergy }) {
 }
 
 // ---------------------------------------------------------------- BATTERY
-function BatteryTab({ snap, settings }) {
+function BatteryTab({ snap, settings, onOpenSettings }) {
   const a = snap.aggregate;
   const feat = snap.features || {};
   if (feat.hasBattery === false) {
@@ -463,7 +466,8 @@ function BatteryTab({ snap, settings }) {
           <div className="throughput">
             <div><div className="tp-label">Charged</div><div className="tp-val mono" style={{ color: CC.batt }}>+{a.battChgToday} kWh</div></div>
             <div><div className="tp-label">Discharged</div><div className="tp-val mono" style={{ color: CC.load }}>−{a.battDischgToday} kWh</div></div>
-            <div><div className="tp-label">Capacity</div><div className="tp-val mono">{cap > 0 ? cap.toFixed(1) + ' kWh' : 'set in Settings'}</div></div>
+            <div><div className="tp-label">Capacity</div><div className="tp-val mono">{cap > 0 ? cap.toFixed(1) + ' kWh' : '—'}</div>
+              {!(cap > 0) && <button type="button" className="mini-link tp-link" onClick={() => onOpenSettings('battery')}>Set pack size</button>}</div>
             <div><div className="tp-label">Est. cycles today</div><div className="tp-val mono">{cap > 0 ? (a.battDischgToday / cap).toFixed(2) : '—'}</div></div>
           </div>
           <div className="meter-head">
@@ -475,7 +479,7 @@ function BatteryTab({ snap, settings }) {
             <div className="reserve-mark" style={{ left: reserve + '%' }} title={`reserve ${reserve}%`} />
           </div>
           <div className="meter-scale"><span>0%</span><span>100%</span></div>
-          <div className="hint-line">The bar is your battery’s charge level; the tick marks the <b>{reserve}%</b> reserve floor where discharge stops{cap > 0 ? <> (~{(Math.max(0, (a.battSoc - reserve) / 100 * cap)).toFixed(1)} kWh usable above it)</> : null}. Charging shows as a <b>{settings.battPositive === 'charge' ? 'positive' : 'negative'}</b> number (change this in Settings).</div>
+          <div className="hint-line">The bar is your battery’s charge level; the tick marks the <b>{reserve}%</b> reserve floor where discharge stops{cap > 0 ? <> (~{(Math.max(0, (a.battSoc - reserve) / 100 * cap)).toFixed(1)} kWh usable above it)</> : null}. Charging shows as a <b>{settings.battPositive === 'charge' ? 'positive' : 'negative'}</b> number (<button type="button" className="mini-link" onClick={() => onOpenSettings('display')}>change in Settings</button>).</div>
         </Card>
       </div>
       <Card>
@@ -510,7 +514,7 @@ function BatteryTab({ snap, settings }) {
 }
 
 // ---------------------------------------------------------------- GRID
-function GridTab({ snap, settings, refreshKey }) {
+function GridTab({ snap, settings, refreshKey, onOpenSettings }) {
   const a = snap.aggregate;
   const feat = snap.features || {};
   if (feat.hasGrid === false) {
@@ -576,8 +580,8 @@ function GridTab({ snap, settings, refreshKey }) {
               <div><div className="tp-label">Saved</div><div className="tp-val mono" style={{ color: CC.batt }}>{money(saved)}</div></div>
             </div>
           {noRate
-            ? <div className="hint-line">Set your import rate in Settings to see what today cost and what solar saved.</div>
-            : <div className="hint-line">All {fmtKwh(a.loadToday)} you used today @ {fmtRand(rate)}/kWh would've cost <b>{fmtRand(wouldPay)}</b>; you only bought {fmtKwh(a.gridFromToday)} from the grid, so you saved the difference.{showExport && rateExp > 0 ? <> Plus {fmtKwh(a.gridToToday)} sold @ {fmtRand(rateExp)}/kWh.</> : null} (Charging the battery from the grid is already counted as import, so it isn't double-counted here.)Edit the rates in Settings.</div>}
+            ? <div className="hint-line"><button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your import rate</button> to see what today cost and what solar saved.</div>
+            : <div className="hint-line">All {fmtKwh(a.loadToday)} you used today @ {fmtRand(rate)}/kWh would've cost <b>{fmtRand(wouldPay)}</b>; you only bought {fmtKwh(a.gridFromToday)} from the grid, so you saved the difference.{showExport && rateExp > 0 ? <> Plus {fmtKwh(a.gridToToday)} sold @ {fmtRand(rateExp)}/kWh.</> : null} (Charging the battery from the grid is already counted as import, so it isn't double-counted here.) <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Edit rates</button></div>}
         </Card>
       </div>
       {/* the supply over a day: voltage at each inverter's AC terminal and the grid's
@@ -673,11 +677,16 @@ function ConfirmCard({ title, text, action, onConfirm, onCancel }) {
 // Which settings section is showing. Sections stay mounted and hide themselves, so
 // the plant form keeps its unsaved edits while you look at another section.
 const SettingsActive = React.createContext('tariff');
+// { id, done } when a section should flash once on arrival (e.g. from "Set your rate")
+const SettingsFlash = React.createContext(null);
 
 function SettingsSection({ id, title, note, right, children }) {
   const active = React.useContext(SettingsActive);
+  const flash = React.useContext(SettingsFlash);
+  const flashing = flash && flash.id === id;
   return (
-    <section id={'settings-' + id} className="sset" role="tabpanel" hidden={active !== id}>
+    <section id={'settings-' + id} className={'sset' + (flashing ? ' sset-flash' : '')} role="tabpanel" hidden={active !== id}
+             onAnimationEnd={flashing ? (e) => { if (e.target === e.currentTarget) flash.done(); } : undefined}>
       <div className="sset-head">
         <h2 className="sset-title">{title}</h2>
         {right && <div className="sset-right">{right}</div>}
@@ -994,7 +1003,7 @@ function AccountSection() {
   );
 }
 
-function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfigSaved }) {
+function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfigSaved, flash, onFlashed }) {
   const { useState, useEffect } = React;
   const set = (patch) => setSettings(s => ({ ...s, ...patch }));
   // One section at a time. ?s= in the URL wins on load, then the last one opened,
@@ -1011,7 +1020,7 @@ function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfig
     window.scrollTo({ top: 0 });
   };
   return (
-    <SettingsActive.Provider value={active}>
+    <SettingsActive.Provider value={active}><SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
     <div className="settings">
       <nav className="settings-nav" role="tablist" aria-label="Settings sections">
         {SETTINGS_SECTIONS.map(([id, label]) => (
@@ -1045,8 +1054,8 @@ function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfig
         <div className="app-version mono">{window.APP_VERSION}</div>
       </div>
     </div>
-    </SettingsActive.Provider>
+    </SettingsFlash.Provider></SettingsActive.Provider>
   );
 }
 
-Object.assign(window, { LiveTab, SolarTab, BatteryTab, GridTab, InvertersTab, SettingsTab });
+Object.assign(window, { LiveTab, SolarTab, BatteryTab, GridTab, InvertersTab, SettingsTab, MiniStat, FsEnterIcon });

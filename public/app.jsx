@@ -117,6 +117,89 @@ function PlantSelect({ me, plantId, onChange }) {
   );
 }
 
+function tabsFor(settings) {
+  return [
+    { id: 'live', label: 'Live' },
+    settings.tabs.solar && { id: 'solar', label: 'Solar' },
+    settings.tabs.battery && { id: 'battery', label: 'Battery' },
+    settings.tabs.grid && { id: 'grid', label: 'Grid' },
+    settings.tabs.inverters && { id: 'inverters', label: 'Inverters' },
+    { id: 'trends', label: 'Trends' },
+    { id: 'settings', label: 'Settings' },
+  ].filter(Boolean);
+}
+
+function LiveSkeleton() {
+  return (
+    <div className="live-grid">
+      <div className="overview-section">
+        <div className="overview-head">
+          <div className="section-title">OVERVIEW · <span style={{ color: 'var(--text)' }}>today</span></div>
+          <window.Segmented size="sm" value="today" onChange={() => {}}
+            options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }]} />
+        </div>
+        {/* The real tiles in loading mode, with the same meter and second line the live
+            ones carry, so the row lands at the same height. */}
+        <div className="today-strip">
+          <window.MiniStat loading label="Generated" />
+          <window.MiniStat loading label="Home" />
+          <window.MiniStat loading label="Self-sufficiency" bar={0} />
+          <window.MiniStat loading label="Imported" sub={' '} />
+          <window.MiniStat loading label="Est. saved" sub={' '} />
+        </div>
+      </div>
+      <div className="card flow-card">
+        <window.SectionTitle right={<button className="flow-fs-btn" disabled><window.FsEnterIcon /><span>Fullscreen</span></button>}>POWER FLOW</window.SectionTitle>
+        {/* sized in CSS to the diagram's proportions, which change with the card width */}
+        <window.Skeleton className="flow-skel" h="auto" r={12} />
+        {/* the status sentence under the diagram, so the card's bottom gutter matches */}
+        <div className="flow-status flow-skel-status">
+          <div style={{ height: 18, display: 'flex', alignItems: 'center' }}><window.Skeleton w={190} h={10} r={5} /></div>
+          <div style={{ height: 18, display: 'flex', alignItems: 'center', gap: 16 }}>
+            {[78, 84, 92, 84].map((w, i) => <window.Skeleton key={i} w={w} h={10} r={5} />)}
+          </div>
+        </div>
+      </div>
+      <div className="card chart-card">
+        {/* The real chart with no data yet: its day picker and legend draw for real and
+            the plot area is its own skeleton, so labels show and the height matches. */}
+        <window.HistoryView today={null} refreshKey={0} locked />
+      </div>
+    </div>
+  );
+}
+
+// Shown while the session and the SunSynk link are still being checked, before App
+// mounts. Same shell as App's own not-yet-loaded gate, so the hand-over does not flash.
+function BootShell() {
+  const tabs = tabsFor(loadSettings());
+  const saved = new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab');
+  const tab = tabs.some(t => t.id === saved) ? saved : 'live';
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          <span className="sun" />
+          <div>
+            <div className="brand-name">Prince Solar</div>
+            <div className="brand-sub mono">connecting to SunSynk…</div>
+          </div>
+        </div>
+        <div className="topbar-actions">
+          <div className="status-pill status-idle"><span className="status-dot" /><span className="status-word">Connecting</span></div>
+          <button className="refresh-btn" disabled><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
+        </div>
+      </header>
+      <nav className="tabbar" role="tablist" aria-busy="true">
+        {tabs.map(t => <button key={t.id} className={'tab' + (tab === t.id ? ' active' : '')} role="tab" aria-selected={tab === t.id} disabled>{t.label}</button>)}
+      </nav>
+      <main className="content" aria-busy="true">
+        {tab !== 'trends' && tab !== 'settings' && <LiveSkeleton />}
+      </main>
+    </div>
+  );
+}
+
 function App() {
   const [settings, setSettings] = useState(loadSettings);
   // plan, preferences and plants for the signed-in user (api_me). Preferences from
@@ -133,6 +216,13 @@ function App() {
   // whole number of 800 ms turns so it never stops mid-rotation.
   const [busy, setBusy] = useState(0);
   const [err, setErr] = useState(null);
+  const [flashSection, setFlashSection] = useState(null); // a Settings section to flash once on arrival
+  // "Set your rate", "Set pack size": jump to that Settings section and flash it once.
+  // SettingsTab opens whichever section synsynk.section names when it mounts.
+  const openSettings = (section) => {
+    localStorage.setItem('synsynk.section', section);
+    setFlashSection(section); setTab('settings'); window.scrollTo({ top: 0 });
+  };
   const [refreshKey, setRefreshKey] = useState(0); // bumped on manual refresh so the chart re-fetches its current day
 
   const energyRef = useRef({});
@@ -246,15 +336,7 @@ function App() {
 
   const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(); setRefreshKey(k => k + 1); };
 
-  const TABS = [
-    { id: 'live', label: 'Live' },
-    settings.tabs.solar && { id: 'solar', label: 'Solar' },
-    settings.tabs.battery && { id: 'battery', label: 'Battery' },
-    settings.tabs.grid && { id: 'grid', label: 'Grid' },
-    settings.tabs.inverters && { id: 'inverters', label: 'Inverters' },
-    { id: 'trends', label: 'Trends' },
-    { id: 'settings', label: 'Settings' },
-  ].filter(Boolean);
+  const TABS = tabsFor(settings);
   useEffect(() => { if (!TABS.some(t => t.id === tab)) setTab('live'); }, [settings.tabs]);
   // On a phone the tab bar scrolls sideways, so the active tab can sit off-screen after
   // a reload or a tap on the last visible one. Bring it into view; a no-op on desktop.
@@ -318,30 +400,7 @@ function App() {
             // still answering. Showing it a loading state was pure theatre.
             <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} />
           ) : (
-            <div className="live-grid">
-              <div className="overview-section">
-                <div className="overview-head">
-                  <div className="section-title">OVERVIEW · <span style={{ color: 'var(--text)' }}>today</span></div>
-                  <window.Segmented size="sm" value="today" onChange={() => {}}
-                    options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }]} />
-                </div>
-                <div className="today-strip">
-                  {['Generated', 'Home', 'Self-sufficiency', 'Imported', 'Est. saved']
-                    .map(l => <window.SkeletonTile key={l} label={l} />)}
-                </div>
-              </div>
-              <div className="card flow-card">
-                <div className="section-title">POWER FLOW</div>
-                {/* .flow-wrap measures 577px with data in it */}
-                <window.Skeleton h={577} r={12} />
-              </div>
-              <div className="card chart-card">
-                {/* the day-picker row is static UI we can't populate yet: reserve its
-                    33px without shimmering, then skeleton the 620px plot area */}
-                <div style={{ height: 33 }} />
-                <window.Skeleton h={620} r={12} style={{ marginTop: 16 }} />
-              </div>
-            </div>
+            <LiveSkeleton />
           )}
         </main>
       </div>
@@ -371,13 +430,15 @@ function App() {
       </nav>
 
       <main className="content">
-        {tab === 'live' && <window.LiveTab snap={snap} settings={settings} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey} />}
+        {tab === 'live' && <window.LiveTab snap={snap} settings={settings} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
+          onOpenSettings={openSettings} />}
         {tab === 'solar' && <window.SolarTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} />}
-        {tab === 'battery' && <window.BatteryTab snap={snap} settings={settings} />}
-        {tab === 'grid' && <window.GridTab snap={snap} settings={settings} refreshKey={refreshKey} />}
+        {tab === 'battery' && <window.BatteryTab snap={snap} settings={settings} onOpenSettings={openSettings} />}
+        {tab === 'grid' && <window.GridTab snap={snap} settings={settings} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} refreshKey={refreshKey} />}
         {tab === 'trends' && <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />}
-        {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} />}
+        {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
+          flash={flashSection} onFlashed={() => setFlashSection(null)} />}
       </main>
 
     </div>
@@ -413,5 +474,5 @@ const legalPage = new URLSearchParams(location.search).get('page');
 ReactDOM.createRoot(document.getElementById('root')).render(
   legalPage === 'terms' || legalPage === 'privacy'
     ? <window.LegalPage which={legalPage} />
-    : <window.AuthGate><window.LinkGate><App /></window.LinkGate></window.AuthGate>
+    : <window.AuthGate fallback={<BootShell />}><window.LinkGate fallback={<BootShell />}><App /></window.LinkGate></window.AuthGate>
 );

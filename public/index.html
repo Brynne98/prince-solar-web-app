@@ -136,7 +136,7 @@
   .brand-sub .plant-select:focus-visible { outline: none; background-color: var(--panel); border-color: var(--pv); }
   .brand-sub .plant-select option { background: var(--panel-2); color: var(--text); }
   /* plant just switched: a quiet cyan confirmation, distinct from live / stale / offline */
-  .status-switch .status-dot { background: var(--soc); box-shadow: 0 0 0 3px rgba(34,211,238,0.18); }
+  .status-switch .status-dot { background: var(--soc); --ring: rgba(34,211,238,0.18); }
   .status-switch .status-word { color: var(--soc); }
   /* status pill: dot + word + detail, same height as the Refresh button beside it */
   /* Fits its text. max-width and the ellipsis only bite when a plant name is wider
@@ -146,18 +146,20 @@
     background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; white-space: nowrap;
   }
   .status-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  /* every state breathes, in its own colour; --ring is the halo */
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none;
+    --ring: rgba(255,255,255,0.14); box-shadow: 0 0 0 3px var(--ring); animation: status-breathe 2.4s ease-in-out infinite; }
   .status-word { font-size: 14px; font-weight: 600; }
   .status-detail { font-size: 12.5px; color: var(--muted); padding-left: 9px; border-left: 1px solid var(--line-2); }
-  .status-live .status-dot { background: var(--pv); box-shadow: 0 0 0 3px rgba(61,220,132,0.18); animation: status-breathe 2.4s ease-in-out infinite; }
+  .status-live .status-dot { background: var(--pv); --ring: rgba(61,220,132,0.18); }
   .status-live .status-word { color: var(--pv); }
-  .status-stale .status-dot { background: var(--warn); box-shadow: 0 0 0 3px rgba(245,158,11,0.18); }
+  .status-stale .status-dot { background: var(--warn); --ring: rgba(245,158,11,0.18); }
   .status-stale .status-word, .status-stale .status-detail { color: var(--warn); }
-  .status-offline .status-dot { background: var(--bad); box-shadow: 0 0 0 3px rgba(239,68,68,0.18); }
+  .status-offline .status-dot { background: var(--bad); --ring: rgba(239,68,68,0.18); }
   .status-offline .status-word, .status-offline .status-detail { color: var(--bad); }
   .status-idle .status-word { color: var(--muted); }
-  @keyframes status-breathe { 0%, 100% { box-shadow: 0 0 0 3px rgba(61,220,132,0.18); } 50% { box-shadow: 0 0 0 5px rgba(61,220,132,0.06); } }
-  @media (prefers-reduced-motion: reduce) { .status-live .status-dot { animation: none; } }
+  @keyframes status-breathe { 0%, 100% { box-shadow: 0 0 0 3px var(--ring); } 50% { box-shadow: 0 0 0 5px transparent; } }
+  @media (prefers-reduced-motion: reduce) { .status-dot { animation: none; } }
   /* "Fetching history" inside the status pill while a fresh plant's 60 days arrive (0048) */
   .status-sync { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--soc); padding-left: 9px; border-left: 1px solid var(--line-2); }
   .sync-arc { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(34,211,238,0.25); border-top-color: var(--soc); animation: sync-spin 0.9s linear infinite; flex: none; }
@@ -187,7 +189,7 @@
 
 
   /* ---------- tab bar ---------- */
-  .tabbar { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 26px; }
+  .tabbar { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 20px; }
   .tab {
     background: none; border: none; color: var(--muted); font-size: 15px; font-weight: 500;
     padding: 12px 18px; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: .15s; border-radius: 7px 7px 0 0;
@@ -198,7 +200,18 @@
   /* ---------- cards ---------- */
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px; }
   /* charts want the width more than they want the gutter */
-  .chart-card, .trend-chart-card { padding-left: 12px; padding-right: 12px; }
+  .trend-chart-card { padding-left: 12px; padding-right: 12px; }
+  /* the day chart and power flow keep one gutter on all four sides */
+  .chart-card, .flow-card { padding: 12px; }
+  /* the 28px Fullscreen button made the row taller and centring pushed the title down;
+     pin both to the top so the title sits as far from the top edge as from the left */
+  .flow-card .section-title { align-items: flex-start; }
+  /* loading stand-in for .flow-wrap: the desktop diagram's viewBox, then a status line;
+     the phone layout (flow.jsx, ≤600px) is a fixed 525px with the status inside it */
+  .flow-skel { aspect-ratio: 884 / 396; }
+  @media (max-width: 600px) { .flow-skel { aspect-ratio: auto; height: 525px !important; } .flow-card .flow-skel-status { display: none; } }
+  /* legend to plot gets the same gap as date bar to legend */
+  .hv-root .legend-row { margin-bottom: 12px; }
   .grow { flex: 1; } .stack { display: flex; flex-direction: column; gap: 20px; }
   .section-title { display: flex; align-items: center; justify-content: space-between;
     font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: var(--muted); text-transform: uppercase; margin-bottom: 18px; }
@@ -263,6 +276,23 @@
      the baseline is the middle, and it is a nudge rather than a different rule. */
   .trend-badge { position: relative; top: 1px; }
   .mv-num { white-space: nowrap; }
+  /* a tile's second line that is an action ("Set your rate" on Est. saved with no rate yet) */
+  .mini-link { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer;
+    text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
+  .mini-link:hover { color: var(--text); text-decoration-color: currentColor; }
+  .tp-link { font-size: 11.5px; margin-top: 4px; }
+  /* the same link inside the power-flow SVG ("Set pack size" on the battery node) */
+  .flow-link { cursor: pointer; text-decoration: underline; text-decoration-color: var(--line-2); }
+  .flow-link:hover { fill: var(--text); }
+  .flow-link:focus-visible { outline: 2px solid var(--line-2); outline-offset: 2px; }
+  /* a Settings card flashes once when a link elsewhere sends you to it */
+  .sset-flash { animation: sset-flash 1.1s ease-out 0.15s 1; }
+  @keyframes sset-flash {
+    0%, 100% { border-color: var(--line); box-shadow: 0 0 0 0 rgba(61,220,132,0); }
+    35% { border-color: var(--pv); box-shadow: 0 0 0 4px rgba(61,220,132,0.18); }
+  }
+  @media (prefers-reduced-motion: reduce) { .sset-flash { animation: none; } }
+  .mini-link:focus-visible { outline: 2px solid var(--line-2); outline-offset: 2px; border-radius: 3px; }
   /* grid presence chip on the Imported card — green when the mains is live, red when down */
   /* padding-left leaves room for the dot's 3px glow ring: .mini-sub clips overflow for
      its ellipsis, so a ring flush against x=0 loses its left edge. */
@@ -755,6 +785,7 @@
     .tab { white-space: nowrap; padding: 11px 13px; font-size: 14px; }
 
     .card { padding: 16px 15px; border-radius: 14px; min-width: 0; }
+    .chart-card, .flow-card { padding: 15px; }
     /* let grid/flex items shrink below their content so wide children scroll instead of widening the page */
     .live-grid > *, .stack > *, .duo > * { min-width: 0; }
 

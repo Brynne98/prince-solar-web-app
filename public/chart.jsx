@@ -90,13 +90,15 @@ function useDayPicker(earliest) {
   };
 }
 
-function DateBar({ pick, earliest, children }) {
-  const { date, setDate, todayStr, isToday, canPrev, canNext } = pick;
+function DateBar({ pick, earliest, locked, children }) {
+  const { date, setDate, todayStr, isToday } = pick;
+  // locked: the app is still loading, so the picker shows today and goes nowhere
+  const canPrev = pick.canPrev && !locked, canNext = pick.canNext && !locked;
   return (
     <div className="hv-datebar">
       <button className="hv-daynav" disabled={!canPrev} aria-label="Previous day"
         onClick={() => canPrev && setDate(shiftDate(date, -1))}>‹</button>
-      <input className="hv-dateinput" type="date" value={date}
+      <input className="hv-dateinput" type="date" value={date} disabled={locked}
         min={earliest || undefined} max={todayStr}
         onChange={e => e.target.value && setDate(e.target.value)} />
       <button className="hv-daynav" disabled={!canNext} aria-label="Next day"
@@ -361,7 +363,7 @@ function InverterHistoryChart({ kind, refreshKey }) {
 }
 window.InverterHistoryChart = InverterHistoryChart;
 
-function HistoryView({ today, refreshKey }) {
+function HistoryView({ today, refreshKey, locked }) {
   const C = window.COLORS;
   const [vis, setVis] = React.useState({ pv: true, batt: true, load: true, grid: true, soc: true });
   const [hover, setHover] = React.useState(null);
@@ -433,7 +435,8 @@ function HistoryView({ today, refreshKey }) {
   // value shown inside each legend pill: the hovered point, else the latest reading
   const cur = (hover != null && pts[hover] && pts[hover].pv != null) ? pts[hover] : (real.length ? real[real.length - 1] : null);
   const chipVal = (k) => {
-    if (!cur) return null;
+    // still fetching: keep the value slot so the chips (and the row wrap) hold their size
+    if (!cur) return (loading || (isToday && !dayData)) ? ' ' : null;
     if (k === 'soc') return cur.soc != null ? cur.soc + '%' : null;
     const v = cur[k];
     return v != null ? window.fmtPower(v) : null;
@@ -683,7 +686,7 @@ function HistoryView({ today, refreshKey }) {
 
   return (
     <div className="hv-root">
-      <DateBar pick={pick} earliest={earliest}>
+      <DateBar pick={pick} earliest={earliest} locked={locked}>
         {/* Minutes this day has from nobody — not the poller, not the cloud. The line
             already breaks at them, but a break reads as "the inverter was off" rather
             than "we have no reading", and a short one hides inside a 5-minute bucket

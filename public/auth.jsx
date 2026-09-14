@@ -265,9 +265,11 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
 }
 
 /** Renders children only when signed in and not mid-password-reset. */
-window.AuthGate = function AuthGate({ children }) {
+window.AuthGate = function AuthGate({ children, fallback = null }) {
   const { loading, session, recovering, doneRecovering } = window.useSession();
-  if (loading) return <div className="login-wrap"><div className="login-card"><AuthBrand /><div className="login-sub">Loading…</div></div></div>;
+  // A stored session will almost always come back signed in, so show the dashboard's
+  // shape; with none, the sign-in screen is a moment away and a skeleton would mislead.
+  if (loading) return localStorage.getItem('synsynk.auth') ? fallback : null;
   if (recovering) return <AuthScreen initialMode="recovery" onRecovered={doneRecovering} />;
   if (!session) return <AuthScreen />;
   return children;

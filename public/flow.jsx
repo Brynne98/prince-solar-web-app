@@ -18,7 +18,7 @@ function useFlowMobile(bp = 600) {
   return mobile;
 }
 
-function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour, features }) {
+function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features }) {
   const C = window.COLORS;
   const mobile = useFlowMobile();
   const feat = features || {};
@@ -46,7 +46,7 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour, features
     { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun', tag: null, sub: kwhToday(agg.pvToday) },
     hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, icon: 'battery', soc: agg.battSoc, reverse: charging,
       tag: agg.battPower > 5 ? (charging ? 'charging' : 'discharging') : 'idle', pct: agg.battSoc,
-      sub: battInfo || null, usualPct: typicalSoc, typicalTitle },
+      sub: battInfo || null, onSub: onBattInfo, usualPct: typicalSoc, typicalTitle },
     hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 5 ? gridExport : gridImport, icon: 'bolt', reverse: gridExport > 5,
       tag: gridExport > 5 ? 'exporting' : gridImport > 5 ? 'importing' : 'standby',
       sub: gridExport > 5 && agg.gridToToday != null ? agg.gridToToday.toFixed(1) + ' kWh out today' : kwhToday(agg.gridFromToday) },
@@ -157,7 +157,11 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour, features
               {n.usualPct != null && <tspan dx="5" className="flow-typical">≈ {n.usualPct}%</tspan>}
             </text>
           )}
-          {n.sub && <text x={-36} y={subY} className="flow-sub">{n.sub}</text>}
+          {n.sub && (n.onSub
+            // a prompt that leads somewhere ("Set pack size"): clickable and keyboard-reachable
+            ? <text x={-36} y={subY} className="flow-sub flow-link" role="link" tabIndex={0} onClick={n.onSub}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); n.onSub(); } }}>{n.sub}</text>
+            : <text x={-36} y={subY} className="flow-sub">{n.sub}</text>)}
         </g>
       );
     };
@@ -219,7 +223,7 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour, features
                 <div className="mtile-state" style={{ color: active ? n.color : 'var(--dim)' }} title={n.typicalTitle || undefined}>
                   {n.tag}{n.pct != null ? ` · ${n.pct}%` : ''}{n.usualPct != null ? <span className="mtile-typical"> ≈ {n.usualPct}%</span> : null}
                 </div>
-                {n.sub && <div className="mtile-sub">{n.sub}</div>}
+                {n.sub && <div className="mtile-sub">{n.onSub ? <button type="button" className="mini-link" onClick={n.onSub}>{n.sub}</button> : n.sub}</div>}
               </>
             : (n.sub && <div className="mtile-sub">{n.sub}</div>)}
         </div>
@@ -297,7 +301,11 @@ function PowerFlow({ agg, inverters, battInfo, typicalSoc, typicalHour, features
   // >= home - 50, not > home + 50: a home drawing exactly what the panels make is the
   // commonest sunny-afternoon state and fell through to the vague fallback.
   else if (agg.pvNow > 50 && agg.pvNow >= home.w - 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ' and charging the battery' : ''}.</>;
-  else if (hasBatt && agg.battPower > 5 && !charging && gridImport < 50) narrative = <>Your <b style={{ color: C.batt }}>battery</b> is powering the home — solar offline.</>;
+  // Solar can still be making something here, just less than the home draws, so only
+  // leave it out when it is effectively zero.
+  else if (hasBatt && agg.battPower > 5 && !charging && gridImport < 50) narrative = agg.pvNow > 50
+    ? <><b style={{ color: C.pv }}>Solar</b> and your <b style={{ color: C.batt }}>battery</b> are powering the home.</>
+    : <>Your <b style={{ color: C.batt }}>battery</b> is powering the home.</>;
   else if (gridImport > 50) narrative = <>Pulling <b style={{ color: C.grid }}>{valKW(gridImport)} kW</b> from the grid to meet demand.</>;
   else if (!hasGrid && agg.pvNow < 50) narrative = <>Off-grid, after dark — the home is running on <b style={{ color: C.batt }}>stored energy</b>.</>;
   else if (!hasBatt) narrative = <><b style={{ color: C.pv }}>Solar</b> covers what it can; the grid covers the rest.</>;
