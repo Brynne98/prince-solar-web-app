@@ -257,9 +257,17 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
   const tSuff = (cSuff != null && prevSuff != null) ? (cSuff - prevSuff) : null;
   // "vs last year, 40 of 120 days compared" — say when the arrow rests on a subset
   const cmpBase = { today: 'vs yesterday', week: 'vs last week', month: 'vs last month', year: 'vs last year' }[period];
-  const cmpWord = (cmpBase && cmpRow && !useLive && cmpDays < (cmpRow.span || 0))
-    ? cmpBase + ', ' + cmpDays + ' of ' + cmpRow.span + ' days compared'
-    : cmpBase;
+  const partial = !!(cmpBase && cmpRow && !useLive && prev && cmpDays < (cmpRow.span || 0));
+  const cmpWord = partial ? cmpBase + ', ' + cmpDays + ' of ' + cmpRow.span + ' days compared' : cmpBase;
+  // Est. saved trend: avoided import at today's rate, both sides from the paired
+  // compare rows (they carry no export). A plant paid for export gets no arrow, since
+  // the tile's figure includes feed-in and the arrow could not.
+  const avoided = (load, imp) => Math.max(0, load - imp) * rate;
+  const cSaved = useLive ? (pLoad != null ? avoided(pLoad, pImp) : null) : (cmpRow ? avoided(cmpRow.cur.load, cmpRow.cur.imp) : null);
+  const prevSaved = prev ? avoided(prev.load, prev.imp) : null;
+  const moneyTrend = rate > 0 && !(rateExp > 0);
+  const tSaved = moneyTrend ? pct(cSaved, prevSaved) : null;
+  const dSaved = (moneyTrend && prev && cSaved != null) ? cSaved - prevSaved : null;
 
   return (
     <div className="live-grid">
@@ -286,6 +294,8 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
             options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }]}
             value={period} onChange={setPeriod} />
         </div>
+        {/* On a phone there is no hover, so a thin comparison base is said on screen. */}
+        {partial && <div className="cmp-note">Arrows compare {cmpDays} of {cmpRow.span} days with the {cmpBase.replace('vs ', '')}. The rest have no record on one side.</div>}
         <div className="today-strip">
           <MiniStat loading={pending} label="Generated" value={window.fmtEnergySmart(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord}
             info="Total solar energy your panels produced over the selected period." />
@@ -297,7 +307,11 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
             info={'Energy sent to the grid over the selected period' + (rateExp > 0 ? ', paid at your feed-in rate.' : '. Set a feed-in rate in Settings to count it in savings.')} />}
           {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergySmart(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
             info="Energy drawn from the grid over the selected period."
-            sub={a.gridPresent == null ? null : (
+            sub={a.gridPresent == null ? (
+              // No inverter has reported mains voltage yet; a blank here read as a
+              // chip that failed to load.
+              <span className="grid-state unknown"><span className="gs-dot" />Grid unknown</span>
+            ) : (
               // Presence, not usage: mains voltage is there even when you draw nothing
               // from it, so this stays ON through a sunny self-powered afternoon.
               <span className={'grid-state ' + (a.gridPresent ? 'on' : 'off')}
@@ -309,8 +323,9 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
             )} />}
           {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off-grid" color={CC.grid}
             info="This plant has no grid connection. Everything the home uses comes from solar and the battery." />}
-          <MiniStat loading={pending} label="Est. saved" value={window.fmtRandSmart(pSaved)} color={CC.batt}
-            sub={!(rate > 0) ? 'Set your rate in Settings' : undefined}
+          <MiniStat loading={pending} label="Est. saved" value={(rate > 0 || rateExp > 0) ? window.fmtRandSmart(pSaved) : '—'} color={CC.batt}
+            trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord}
+            sub={!(rate > 0 || rateExp > 0) ? 'Set your rate in Settings' : undefined}
             info={'Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your import rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '. Set the rates in Settings.'} />
         </div>
       </div>
@@ -318,7 +333,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
     </div>
   );
 }
-function TrendBadge({ pct, unit = '%', invert, title, delta }) {
+function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt }) {
   if (pct == null) return null;                       // only hide when there is no prior period
   const usable = Number.isFinite(delta);
   if (!Number.isFinite(pct) && !usable) return null;  // grew from zero and no kWh figure to show
@@ -332,13 +347,13 @@ function TrendBadge({ pct, unit = '%', invert, title, delta }) {
   let label;
   if ((mag >= 200 || !Number.isFinite(mag)) && usable) {
     const d = Math.abs(delta);
-    label = (d < 10 ? d.toFixed(1) : String(Math.round(d))) + ' kWh';
+    label = deltaFmt ? deltaFmt(d) : (d < 10 ? d.toFixed(1) : String(Math.round(d))) + ' kWh';
   } else {
     label = (mag < 1 ? mag.toFixed(1) : String(Math.round(mag))) + unit; // decimal under 1% so a tiny change isn't shown as "0%"
   }
   return <span className={'trend-badge ' + (good ? 'good' : 'bad')} title={title || 'vs previous period'}>{up ? '▲' : '▼'} {label}</span>;
 }
-function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendTitle, trendDelta, loading }) {
+function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendTitle, trendDelta, trendDeltaFmt, loading }) {
   return (
     <Card className="mini-stat">
       <div className="mini-label">{label}{info && <window.InfoDot text={info} />}</div>
@@ -346,7 +361,7 @@ function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trend
           "no data" rather than "fetching" */}
       {loading
         ? <div className="mini-value"><window.Skeleton w="70%" h={26} /></div>
-        : <div className="mini-value mono" style={{ color }}><span className="mv-num">{value}</span><TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} title={trendTitle} delta={trendDelta} /></div>}
+        : <div className="mini-value mono" style={{ color }}><span className="mv-num">{value}</span><TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} title={trendTitle} delta={trendDelta} deltaFmt={trendDeltaFmt} /></div>}
       {bar != null && !loading && <div className="meter sm"><div className="meter-fill" style={{ width: Math.max(0, Math.min(100, bar)) + '%', background: color }} /></div>}
       {bar != null && loading && <window.Skeleton h={5} r={4} style={{ marginTop: 8 }} />}
       {sub && <div className="mini-sub mono">{sub}</div>}

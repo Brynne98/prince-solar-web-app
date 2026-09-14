@@ -105,7 +105,11 @@
   /* > * so a tab whose root is a grid/stack still behaves as it did before */
   .content > * { flex: none; }
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 26px; }
-  .brand { display: flex; align-items: center; gap: 18px; }
+  /* min-width: 0 on the brand and its text column so a long plant name truncates
+     instead of pushing the header past the screen edge on a phone */
+  .brand { display: flex; align-items: center; gap: 18px; min-width: 0; max-width: 100%; }
+  .brand > div { min-width: 0; }
+  .brand-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sun {
     width: 46px; height: 46px; border-radius: 50%;
     background: radial-gradient(circle at 38% 34%, #ffd56b, #f4a93a 58%, #e07a1f);
@@ -135,10 +139,13 @@
   .status-switch .status-dot { background: var(--soc); box-shadow: 0 0 0 3px rgba(34,211,238,0.18); }
   .status-switch .status-word { color: var(--soc); }
   /* status pill: dot + word + detail, same height as the Refresh button beside it */
+  /* Fits its text. max-width and the ellipsis only bite when a plant name is wider
+     than the screen itself, so the pill can never push the page sideways. */
   .status-pill {
-    display: inline-flex; align-items: center; gap: 9px; height: 40px; padding: 0 16px 0 14px;
+    display: inline-flex; align-items: center; gap: 9px; height: 40px; padding: 0 16px 0 14px; max-width: 100%;
     background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px; white-space: nowrap;
   }
+  .status-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
   .status-word { font-size: 14px; font-weight: 600; }
   .status-detail { font-size: 12.5px; color: var(--muted); padding-left: 9px; border-left: 1px solid var(--line-2); }
@@ -156,11 +163,18 @@
     background: var(--panel); color: var(--text); border: 1px solid var(--line-2);
     padding: 10px 22px; border-radius: 10px; font-size: 14px; font-weight: 500; transition: .15s;
   }
-  .refresh-btn { display: inline-flex; align-items: center; gap: 8px; height: 40px; }
-  .refresh-ico { font-size: 14px; line-height: 1; transition: transform .6s; }
-  .refresh-btn.pulse .refresh-ico { transform: rotate(360deg); }
-  .refresh-btn:hover { background: var(--panel-2); border-color: var(--muted); }
-  .refresh-btn.pulse { border-color: var(--ok); color: var(--ok); }
+  /* min-width so the shorter Retry label keeps the button the width of Refresh */
+  .refresh-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; min-width: 116px; }
+  .refresh-ico { font-size: 14px; line-height: 1; }
+  /* spins for as long as a snapshot fetch is in flight (app.jsx holds it ≥ 800 ms) */
+  .refresh-btn.busy .refresh-ico { animation: refresh-spin .8s linear infinite; }
+  @keyframes refresh-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .refresh-btn.busy .refresh-ico { animation: none; opacity: .5; } }
+  .refresh-btn:hover:not(:disabled) { background: var(--panel-2); border-color: var(--muted); }
+  .refresh-btn:disabled { opacity: .55; cursor: progress; }
+  /* follows the status pill: amber when stale, red (and "Retry") when offline */
+  .refresh-btn.refresh-stale, .refresh-btn.refresh-stale:hover { border-color: rgba(245,158,11,0.45); color: var(--warn); }
+  .refresh-btn.refresh-offline, .refresh-btn.refresh-offline:hover { border-color: rgba(239,68,68,0.5); color: var(--bad); }
 
 
   /* ---------- tab bar ---------- */
@@ -221,10 +235,12 @@
   .chart-card { display: flex; flex-direction: column; min-width: 0; }
   .hv-root { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
   .stat-col { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-  .today-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 14px; }
+  /* 150px so six tiles (an exporting plant) share one row on a laptop instead of orphaning the last */
+  .today-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
   .overview-section { order: -1; }
   .overview-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
   .overview-head .section-title { margin-bottom: 0; }
+  .cmp-note { font-size: 12.5px; color: var(--muted); margin: -6px 0 12px; }
   .mini-stat { padding: 16px 18px; }
   .mini-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; }
   .mini-stat { transition: border-color .15s; }
@@ -233,7 +249,7 @@
      space, and the mono face reserves more of it — so its glyphs ride higher and the
      badge reads as sitting low. Baselines are where the glyphs actually rest. */
   .mini-value { font-size: 20px; font-weight: 600; margin-top: 8px; letter-spacing: -0.01em;
-    display: flex; align-items: baseline; }
+    display: flex; align-items: baseline; flex-wrap: wrap; row-gap: 2px; }
   /* Baseline alone sits the badge a touch high, box-bottom a touch low. 1px down off
      the baseline is the middle, and it is a nudge rather than a different rule. */
   .trend-badge { position: relative; top: 1px; }
@@ -246,6 +262,8 @@
   .grid-state.on  { color: var(--muted); }
   .grid-state.on  .gs-dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(61,220,132,0.14); }
   .grid-state.off { color: var(--load); font-weight: 600; }
+  .grid-state.unknown { color: var(--dim); cursor: default; }
+  .grid-state.unknown .gs-dot { background: var(--dim); opacity: .5; }
   .grid-state.off .gs-dot { background: var(--load); box-shadow: 0 0 0 3px rgba(248,113,113,0.16); }
   /* Two lines, then clip. The old single-line ellipsis cut "Set your rate in Settings"
      to "Set your rate in Se…" on every width; a second line costs 15px and keeps
@@ -687,18 +705,16 @@
     .brand { gap: 12px; }
     .sun { width: 38px; height: 38px; }
     .brand-name { font-size: 23px; }
-    .topbar-actions { width: 100%; gap: 10px; }
-    .status-pill { flex: none; width: 236px; height: 38px; padding: 0 12px; }
-    /* min-width: 0 lets a long plant name in "Switching to …" truncate instead of
-       growing the pill into the Refresh button */
-    .status-detail { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    /* wraps so a long pill ("1 of 2 inverters offline") pushes Refresh down, never clips */
+    .topbar-actions { width: 100%; gap: 10px; flex-wrap: wrap; }
+    .status-pill { flex: none; height: 38px; padding: 0 12px; }
     .refresh-btn { height: 38px; padding: 0 14px; }
 
     /* tabs scroll horizontally instead of wrapping. The right edge fades so the tabs
        past the screen edge read as "more this way". A spacer flex item (not padding,
        which Safari leaves out of the scroll width) sits after the last tab, so at the
        end of the scroll the fade covers empty track rather than "Settings". */
-    .tabbar { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none;
+    .tabbar { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; scroll-padding-inline-end: 40px;
       -webkit-mask-image: linear-gradient(90deg, var(--bg) calc(100% - 40px), transparent);
       mask-image: linear-gradient(90deg, var(--bg) calc(100% - 40px), transparent); }
     .tabbar::after { content: ''; flex: none; width: 40px; }

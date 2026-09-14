@@ -43,7 +43,7 @@ function useNow(ms) {
 // Header status: one word, coloured. Live = fresh data and every inverter up;
 // Stale = the poller is behind (> 3 min) or an inverter is down; Offline = no data
 // for 15 min or nothing reporting.
-function HeaderStatus({ snap, onRefresh, pulse, notice }) {
+function HeaderStatus({ snap, onRefresh, busy, notice }) {
   const now = useNow(15000);
   // Just after a plant switch the pill names the plant for a moment, so the swap is
   // visibly acknowledged before the freshness word takes over again.
@@ -55,7 +55,7 @@ function HeaderStatus({ snap, onRefresh, pulse, notice }) {
           <span className="status-word">Switched</span>
           <span className="status-detail mono">to {notice}</span>
         </div>
-        <button className="refresh-btn" onClick={onRefresh}><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
+        <button className={'refresh-btn' + (busy ? ' busy' : '')} onClick={onRefresh}><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
       </div>
     );
   }
@@ -74,7 +74,9 @@ function HeaderStatus({ snap, onRefresh, pulse, notice }) {
         <span className="status-word">{word}</span>
         <span className="status-detail mono">{detail}</span>
       </div>
-      <button className={'refresh-btn' + (pulse ? ' pulse' : '')} onClick={onRefresh}><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
+      {/* The button takes the pill's colour once something is wrong, and reads Retry when
+          nothing is reporting. The icon spins for as long as a fetch is in flight. */}
+      <button className={'refresh-btn refresh-' + status + (busy ? ' busy' : '')} aria-busy={busy} onClick={onRefresh}><span className="refresh-ico" aria-hidden="true">↻</span>{status === 'offline' ? 'Retry' : 'Refresh'}</button>
     </div>
   );
 }
@@ -91,29 +93,12 @@ function BrandLine({ snap, me, plantId, onPlant }) {
   );
 }
 
-// What kind of plant an option is, from its config: the city its timezone names, then
-// anything unusual about its shape. A plain grid-tied plant with a battery gets the
-// city alone; there is no point announcing the default.
-function plantShape(p) {
-  const c = p.config || {};
-  const bits = [];
-  const city = (c.timezone || '').split('/').pop().replace(/_/g, ' ');
-  if (city) bits.push(city);
-  if (c.has_grid === false) bits.push('off-grid');
-  if (c.has_battery === false) bits.push('no battery');
-  return bits.join(' · ');
-}
-
 function PlantSelect({ me, plantId, onChange }) {
   const plants = me?.plants || [];
   if (plants.length < 2) return null;
   return (
     <select className="plant-select" value={plantId ?? ''} onChange={e => onChange(e.target.value)} title="Switch plant" aria-label="Plant">
-      {plants.map(p => {
-        const name = p.name || ('Plant ' + p.id);
-        const shape = plantShape(p);
-        return <option key={p.id} value={p.id}>{shape ? name + '  ·  ' + shape : name}</option>;
-      })}
+      {plants.map(p => <option key={p.id} value={p.id}>{p.name || ('Plant ' + p.id)}</option>)}
     </select>
   );
 }
@@ -130,7 +115,9 @@ function App() {
   const [snap, setSnap] = useState(null);
   const [today, setToday] = useState(null);
   const [energy, setEnergy] = useState({});
-  const [pulse, setPulse] = useState(false);
+  // > 0 while a snapshot fetch is in flight; the Refresh icon spins on it. Held to a
+  // whole number of 800 ms turns so it never stops mid-rotation.
+  const [busy, setBusy] = useState(0);
   const [err, setErr] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0); // bumped on manual refresh so the chart re-fetches its current day
 
@@ -146,9 +133,14 @@ function App() {
   }, [settings]);
   useEffect(() => { localStorage.setItem('synsynk.tab', tab); }, [tab]);
 
-  const loadLive = useCallback(async () => {
+  // spin = false on the 60 s auto tick, so the icon only turns for something the
+  // person asked for (a click, first load, a plant switch).
+  const loadLive = useCallback(async (spin = true) => {
+    const t0 = Date.now();
+    if (spin) setBusy(b => b + 1);
     try { setSnap(await window.fetchSnapshot()); setErr(null); }
     catch (e) { setErr(e.message); }
+    finally { if (spin) setTimeout(() => setBusy(b => b - 1), Math.ceil((Date.now() - t0) / 800) * 800 - (Date.now() - t0)); }
   }, []);
   const loadToday = useCallback(async () => {
     try { setToday(await window.fetchDay()); } catch (e) { /* chart shows its own placeholder */ }
@@ -218,12 +210,12 @@ function App() {
   // auto refresh: live every 60s (matches SunSynk's cadence), today every 5 min
   useEffect(() => {
     if (!auto) return;
-    const a = setInterval(loadLive, 60000);
+    const a = setInterval(() => loadLive(false), 60000);
     const b = setInterval(() => { loadToday(); refreshEnergy(); }, 300000);
     return () => { clearInterval(a); clearInterval(b); };
   }, [auto]);
 
-  const refresh = () => { loadLive(); loadToday(); refreshEnergy(); setRefreshKey(k => k + 1); setPulse(true); setTimeout(() => setPulse(false), 600); };
+  const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(); setRefreshKey(k => k + 1); };
 
   const TABS = [
     { id: 'live', label: 'Live' },
@@ -235,6 +227,9 @@ function App() {
     { id: 'settings', label: 'Settings' },
   ].filter(Boolean);
   useEffect(() => { if (!TABS.some(t => t.id === tab)) setTab('live'); }, [settings.tabs]);
+  // On a phone the tab bar scrolls sideways, so the active tab can sit off-screen after
+  // a reload or a tap on the last visible one. Bring it into view; a no-op on desktop.
+  useEffect(() => { document.querySelector('.tab.active')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }); }, [tab, !!snap]);
 
   // ---- not-yet-loaded gate ----
   //
@@ -260,7 +255,7 @@ function App() {
             {notice
               ? <div className="status-pill status-switch" role="status"><span className="status-dot" /><span className="status-word">Switching</span><span className="status-detail mono">to {notice}</span></div>
               : <div className="status-pill status-idle"><span className="status-dot" /><span className="status-word">Connecting</span></div>}
-            <button className="refresh-btn" disabled><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
+            <button className={'refresh-btn' + (busy ? ' busy' : '')} disabled><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
           </div>
         </header>
 
@@ -331,7 +326,7 @@ function App() {
           <span className="sun" />
           <BrandLine snap={snap} me={me} plantId={plantId} onPlant={switchPlant} />
         </div>
-        <HeaderStatus snap={snap} onRefresh={refresh} pulse={pulse} notice={notice} />
+        <HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} notice={notice} />
       </header>
 
       {/* The raw error is logged by window.onerror's sibling in the fetch path; on screen it
