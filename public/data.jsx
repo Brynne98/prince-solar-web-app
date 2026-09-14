@@ -77,6 +77,8 @@ function mapInverter(s) {
     pvTotal: s.pv.total,
     output: s.output.power,
     battPower: s.battery.power,
+    // signed, + = powering the house (stored readings are + = charging)
+    battOut: s.battery.signedPower == null ? null : -s.battery.signedPower,
     battState: s.battery.status,
     battSoc: s.battery.soc,
     battVolt: s.battery.voltage,
@@ -126,6 +128,8 @@ function aggregate(invs, totals) {
     pvTotal: r1(sum((x) => x.pvTotal)),
     battSoc: totals.soc != null ? totals.soc : Math.round(sum((x) => x.battSoc) / n),
     battPower: totals.batteryPower != null ? totals.batteryPower : sum((x) => x.battPower),
+    // signed, + = powering the house; nets a charging inverter against a discharging one
+    battOut: totals.batteryPower != null ? (totals.batteryDirection === 'charging' ? -totals.batteryPower : totals.batteryPower) : sum((x) => x.battOut),
     battState: totals.batteryDirection || 'idle',
     battVoltage: r1(sum((x) => x.battVolt) / n),
     battCurrent: r1(sum((x) => x.battCurrent)),

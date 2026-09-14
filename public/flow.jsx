@@ -18,7 +18,7 @@ function useFlowMobile(bp = 600) {
   return mobile;
 }
 
-function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features }) {
+function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, battPositive }) {
   const C = window.COLORS;
   const mobile = useFlowMobile();
   const feat = features || {};
@@ -44,7 +44,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   // animation back towards the grid node.
   const left = [
     { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun', tag: null, sub: kwhToday(agg.pvToday) },
-    hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, icon: 'battery', soc: agg.battSoc, reverse: charging,
+    // w stays the magnitude (animation, stroke); val is the signed figure printed on the node
+    hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: window.battShown(agg.battOut, battPositive), icon: 'battery', soc: agg.battSoc, reverse: charging,
       tag: agg.battPower > 5 ? (charging ? 'charging' : 'discharging') : 'idle', pct: agg.battSoc,
       sub: battInfo || null, onSub: onBattInfo, usualPct: typicalSoc, typicalTitle },
     hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 5 ? gridExport : gridImport, icon: 'bolt', reverse: gridExport > 5,
@@ -148,7 +149,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
             stroke={n.color} strokeOpacity={active ? 0.6 : 0.22} strokeWidth="1.3" filter={active ? 'url(#flglow)' : undefined} />
           {icon(n.icon, -56, -4, n.color, active, n.soc)}
           <text x={-36} y={ly} className="flow-node-label">{n.label.toUpperCase()}</text>
-          <text x={-36} y={vy} className="flow-node-val" fill={active ? n.color : 'var(--muted)'} textAnchor="start">{valKW(n.w)}<tspan className="flow-node-unit"> kW</tspan></text>
+          <text x={-36} y={vy} className="flow-node-val" fill={active ? n.color : 'var(--muted)'} textAnchor="start">{valKW(n.val ?? n.w)}<tspan className="flow-node-unit"> kW</tspan></text>
           {n.tag && (
             <text x={-36} y={ty} className="flow-node-tag" textAnchor="start" fill={active ? n.color : 'var(--dim)'} fillOpacity="0.9">
               {n.typicalTitle && <title>{n.typicalTitle}</title>}
@@ -217,7 +218,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
             {miniIcon(n.icon, n.color, n.soc)}
             <span className="mtile-label">{n.label}</span>
           </div>
-          <div className="mtile-val" style={{ color: active ? n.color : 'var(--muted)' }}>{valKW(n.w)}<span className="u">kW</span></div>
+          <div className="mtile-val" style={{ color: active ? n.color : 'var(--muted)' }}>{valKW(n.val ?? n.w)}<span className="u">kW</span></div>
           {n.key === 'bat'
             ? <>
                 <div className="mtile-state" style={{ color: active ? n.color : 'var(--dim)' }} title={n.typicalTitle || undefined}>

@@ -442,7 +442,7 @@ function App() {
         {tab === 'solar' && <window.SolarTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} />}
         {tab === 'battery' && <window.BatteryTab snap={snap} settings={settings} onOpenSettings={openSettings} />}
         {tab === 'grid' && <window.GridTab snap={snap} settings={settings} refreshKey={refreshKey} onOpenSettings={openSettings} />}
-        {tab === 'inverters' && <window.InvertersTab snap={snap} refreshKey={refreshKey} />}
+        {tab === 'inverters' && <window.InvertersTab snap={snap} settings={settings} refreshKey={refreshKey} />}
         {tab === 'trends' && <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />}
         {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
           flash={flashSection} onFlashed={() => setFlashSection(null)} />}

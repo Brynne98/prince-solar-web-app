@@ -20,6 +20,13 @@ function fmtPowerParts(w) {
   if (w == null || isNaN(w)) return ['—', ''];
   return [(w / 1000).toFixed(2), 'kW'];
 }
+// Battery power the way the owner reads it (Settings → Display). `w` is + = powering
+// the house; 'charge' flips it. Within ±5 W it is idle and shows 0, never −0.00.
+function battShown(w, pref) {
+  if (w == null || isNaN(w)) return w;
+  if (Math.abs(w) <= 5) return 0;
+  return pref === 'charge' ? -w : w;
+}
 // The hour it is AT THE PLANT, not on the viewer's device. An owner abroad, or a
 // plant in another country, must see "typical at this hour" for the plant's hour.
 function plantHour(tz, d = new Date()) {
@@ -255,7 +262,7 @@ function SectionTitle({ children, right }) {
 }
 
 Object.assign(window, {
-  COLORS, fmtPower, fmtPowerParts, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
+  COLORS, fmtPower, fmtPowerParts, battShown, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
   Card, StatTile, Metric, Badge, Segmented, Toggle, LegendChip, Sparkline, SectionTitle, InfoDot,
   Skeleton, SkeletonTile,
   fmtEnergySmart, fmtRandSmart, fmtEnergyParts, fmtMoney, fmtMoneySmart, moneySymbol

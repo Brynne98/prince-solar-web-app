@@ -5,7 +5,7 @@
 // `onNeedEnergy(period)` asks App to lazily fetch a period it hasn't loaded yet.
 // ============================================================================
 const { Card, StatTile, Metric, Badge, Segmented, Toggle, SectionTitle, Sparkline,
-  fmtPower, fmtPowerParts, fmtKwh, fmtRand, cleanTemp, COLORS: CC } = window;
+  fmtPower, fmtPowerParts, battShown, fmtKwh, fmtRand, cleanTemp, COLORS: CC } = window;
 
 const FsEnterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" /></svg>;
 const FsExitIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" /></svg>;
@@ -279,12 +279,12 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
               {isFs ? <FsExitIcon /> : <FsEnterIcon />}<span>{isFs ? 'Exit' : 'Fullscreen'}</span>
             </button>
           }>POWER FLOW</SectionTitle>
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={{ ...feat, sells: rateExp > 0 }} />
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={{ ...feat, sells: rateExp > 0 }} battPositive={settings.battPositive} />
         </Card>
       </div>
 
       <Card className="chart-card">
-        <window.HistoryView today={today} refreshKey={refreshKey} />
+        <window.HistoryView today={today} refreshKey={refreshKey} battPositive={settings.battPositive} />
       </Card>
 
       <div className="overview-section">
@@ -446,6 +446,7 @@ function BatteryTab({ snap, settings, onOpenSettings }) {
   const reserve = snap.config?.reserve ?? 20;
   const cap = snap.config?.battCapacity ?? 0;
   const shared = feat.banks === 'shared';
+  const chgUp = settings.battPositive === 'charge'; // Settings → Display: which way is +
   const withBatt = snap.inverters.filter(i => i.numberOfBatteries > 0 || i.battSoc > 0);
   // One shared pack: every inverter reads the same BMS, so count it once.
   const banks = shared ? Math.min(1, withBatt.length) : withBatt.length;
@@ -454,7 +455,7 @@ function BatteryTab({ snap, settings, onOpenSettings }) {
     <div className="stack">
       <div className="batt-top">
         <Card className="batt-gauge-card">
-          <Gauge value={a.battSoc} color={CC.batt} label={a.battState} sub={fmtPower(a.battPower)} />
+          <Gauge value={a.battSoc} color={CC.batt} label={a.battState} sub={fmtPower(battShown(a.battOut, settings.battPositive))} />
           <div className="batt-gauge-meta">
             <Metric label="Pack voltage" value={a.battVoltage.toFixed(1)} unit=" V" />
             <Metric label="Current" value={a.battCurrent.toFixed(1)} unit=" A" accent={a.battCurrent < 0 ? CC.batt : CC.pv} />
@@ -464,8 +465,8 @@ function BatteryTab({ snap, settings, onOpenSettings }) {
         <Card className="grow">
           <SectionTitle>THROUGHPUT TODAY</SectionTitle>
           <div className="throughput">
-            <div><div className="tp-label">Charged</div><div className="tp-val mono" style={{ color: CC.batt }}>+{a.battChgToday} kWh</div></div>
-            <div><div className="tp-label">Discharged</div><div className="tp-val mono" style={{ color: CC.load }}>−{a.battDischgToday} kWh</div></div>
+            <div><div className="tp-label">Charged</div><div className="tp-val mono" style={{ color: CC.batt }}>{chgUp ? '+' : '−'}{a.battChgToday} kWh</div></div>
+            <div><div className="tp-label">Discharged</div><div className="tp-val mono" style={{ color: CC.load }}>{chgUp ? '−' : '+'}{a.battDischgToday} kWh</div></div>
             <div><div className="tp-label">Capacity</div><div className="tp-val mono">{cap > 0 ? cap.toFixed(1) + ' kWh' : '—'}</div>
               {!(cap > 0) && <button type="button" className="mini-link tp-link" onClick={() => onOpenSettings('battery')}>Set pack size</button>}</div>
             <div><div className="tp-label">Est. cycles today</div><div className="tp-val mono">{cap > 0 ? (a.battDischgToday / cap).toFixed(2) : '—'}</div></div>
@@ -491,7 +492,7 @@ function BatteryTab({ snap, settings, onOpenSettings }) {
               <div className="mini-panel" key={inv.sn}>
                 <div className="mp-head"><span className="mono">{inv.alias}</span><span className="dim mono">{inv.numberOfBatteries} × pack · {inv.battCap} Ah</span></div>
                 <div className="mp-grid">
-                  <Metric label="Power" value={fmtPower(inv.battPower)} accent={CC.batt} />
+                  <Metric label="Power" value={fmtPower(battShown(inv.battOut, settings.battPositive))} accent={CC.batt} />
                   <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />
                   <Metric label="Voltage" value={inv.battVolt.toFixed(1)} unit=" V" />
                   <Metric label="Temp" value={t != null ? inv.battTemp.toFixed(1) : 'bad sensor'} unit={t != null ? ' °C' : ''} accent={t == null ? CC.load : null} />
@@ -597,7 +598,7 @@ function GridTab({ snap, settings, refreshKey, onOpenSettings }) {
 }
 
 // ---------------------------------------------------------------- INVERTERS
-function InvertersTab({ snap, refreshKey }) {
+function InvertersTab({ snap, settings, refreshKey }) {
   const feat = snap.features || {};
   const hasBatt = feat.hasBattery !== false, hasGrid = feat.hasGrid !== false;
   return (
@@ -630,7 +631,7 @@ function InvertersTab({ snap, refreshKey }) {
               <div className="inv-grid">
                 <Metric label="Solar" value={fmtPower(inv.pvNow)} accent={CC.pv} />
                 <Metric label="Output" value={fmtPower(inv.output)} />
-                {hasBatt && <Metric label="Battery" value={fmtPower(inv.battPower)} accent={CC.batt} />}
+                {hasBatt && <Metric label="Battery" value={fmtPower(battShown(inv.battOut, settings.battPositive))} accent={CC.batt} />}
                 {hasBatt && <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />}
                 {hasGrid && <Metric label={inv.grid < -5 ? 'Grid (export)' : 'Grid'} value={fmtPower(Math.abs(inv.grid))} accent={CC.grid} />}
                 <Metric label="Home" value={fmtPower(inv.load)} accent={CC.load} />
@@ -1035,7 +1036,6 @@ function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfig
           <div className="field sset-choice">
             <span className="toggle-text">
               <span className="toggle-label">Battery power</span>
-              <span className="toggle-hint">Which way the battery number on the Live tab reads.</span>
             </span>
             <Segmented options={[{ value: 'discharge', label: '+ powering the house' }, { value: 'charge', label: '+ charging' }]}
               value={settings.battPositive} onChange={v => set({ battPositive: v })} />

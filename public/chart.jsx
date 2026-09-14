@@ -363,7 +363,7 @@ function InverterHistoryChart({ kind, refreshKey }) {
 }
 window.InverterHistoryChart = InverterHistoryChart;
 
-function HistoryView({ today, refreshKey, locked }) {
+function HistoryView({ today, refreshKey, locked, battPositive }) {
   const C = window.COLORS;
   const [vis, setVis] = React.useState({ pv: true, batt: true, load: true, grid: true, soc: true });
   const [hover, setHover] = React.useState(null);
@@ -418,7 +418,12 @@ function HistoryView({ today, refreshKey, locked }) {
 
   const dayData = isToday ? today : pastDay;
   const gapMin = (dayData && dayData.gapMinutes) || 0;
-  const pts = (dayData && dayData.points) || [];
+  const raw = (dayData && dayData.points) || [];
+  // The battery series is + = powering the house; Settings → Display can flip it, and
+  // idle reads 0. Gaps stay null. Range totals read `raw`, so charged never swaps with
+  // discharged.
+  const pts = React.useMemo(() => raw.map(p => (p.batt == null ? p : { ...p, batt: window.battShown(p.batt, battPositive) })),
+    [dayData, battPositive]); // eslint-disable-line react-hooks/exhaustive-deps
   const real = pts.filter(p => p.pv != null); // anything with data (est = cloud-sourced, drawn dotted)
   const hasData = real.length > 1;
 
@@ -617,7 +622,7 @@ function HistoryView({ today, refreshKey, locked }) {
     const rows = [
       ['Solar', p.pv, C.pv, 'W'],
       ...(hasPot ? [['Potential', potAt(p.t), C.pv, 'W']] : []), // dotted clear-sky line value
-      ['Battery', p.batt, C.batt, 'W'], // signed: − = discharging
+      ['Battery', p.batt, C.batt, 'W'], // signed the way Settings → Display says
       ['Grid', p.grid, C.grid, 'W'], // signed: − = exporting
       ['Home', p.load, C.load, 'W'],
       ['Charge', p.soc, C.soc, '%'],
@@ -640,9 +645,9 @@ function HistoryView({ today, refreshKey, locked }) {
     if (!sel || !hasData) return null;
     const [a, b] = sel;
     let gen = 0, cons = 0, gImp = 0, gExp = 0, bChg = 0, bDis = 0;
-    for (let i = a; i <= b && i < pts.length; i++) {
-      const p = pts[i]; if (!p || p.pv == null) continue; // est (cloud-recovered) counts — it's part of history
-      const nx = pts[i + 1];
+    for (let i = a; i <= b && i < raw.length; i++) {
+      const p = raw[i]; if (!p || p.pv == null) continue; // est (cloud-recovered) counts — it's part of history
+      const nx = raw[i + 1];
       const dt = (nx && nx.t > p.t ? nx.t - p.t : 5) / 60; // hours to next sample
       gen += (p.pv || 0) / 1000 * dt;
       cons += (p.load || 0) / 1000 * dt;
