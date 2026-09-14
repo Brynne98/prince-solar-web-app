@@ -35,14 +35,33 @@ function Gauge({ value, color, size = 168, label, sub }) {
 // banks (the desync signal) while the charge current is being pushed up. Polls every
 // 60 s on its own. Subtle when Balanced, loud when Drifting.
 function BatteryBalanceBanner({ refreshKey }) {
-  const [b, setB] = React.useState(null);
+  const [b, setB] = React.useState(undefined); // undefined = first load; null = failed
   React.useEffect(() => {
     let alive = true;
-    const load = () => window.fetchBalance().then((d) => { if (alive) setB(d); }).catch(() => {});
+    const load = () => window.fetchBalance().then((d) => { if (alive) setB(d); }).catch(() => { if (alive) setB((v) => v === undefined ? null : v); });
     load();
     const id = setInterval(load, 60000);
     return () => { alive = false; clearInterval(id); };
   }, [refreshKey]);
+  // First load: the banner's own frame with shimmering values, so it lands at its height.
+  // Each value keeps a space of text in the mono face, so the line is as tall as a real one;
+  // top-aligned, because a clipped inline block otherwise sits on the baseline and adds 4px.
+  if (b === undefined) {
+    const bar = (w) => <b className="mono skel" style={{ display: 'inline-block', verticalAlign: 'top', width: w, borderRadius: 5 }}>{' '}</b>;
+    return (
+      <div className="batt-balance" role="status" aria-busy="true" aria-label="Loading battery balance">
+        <span className="bb-dot skel" aria-hidden="true" />
+        <span className="bb-title" aria-hidden="true">Battery</span>
+        <span className="bb-status" aria-hidden="true">{bar(70)}</span>
+        <span className="bb-div" />
+        <div className="bb-stats" aria-hidden="true">
+          <span className="bb-stat"><span className="bb-k">Charge</span>{bar(64)}</span>
+          <span className="bb-stat"><span className="bb-k">Temp</span>{bar(30)}</span>
+          <span className="bb-stat"><span className="bb-k">Full today</span>{bar(34)}</span>
+        </div>
+      </div>
+    );
+  }
   if (!b || b.status === 'unknown') return null;
   const COL = { balanced: '#3ddc84', watch: '#f59e0b', drifting: '#f87171' };
   const c = COL[b.status] || '#7c8794';
