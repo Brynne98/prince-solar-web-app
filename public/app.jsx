@@ -77,12 +77,16 @@ function HeaderStatus({ snap, onRefresh, busy, notice }) {
             six-hourly runs (0048). The arc says it is working, the bar how far. Once
             every one of the 60 days has a chart the pill is quiet even if the
             inverter-history walk is still topping up; the charts say so themselves. */}
-        {snap.sync && snap.sync.pending && snap.sync.days < snap.sync.window && (
-          <span className="status-sync" title={`${snap.sync.days} of ${snap.sync.window} days so far`}>
-            <span className="sync-arc" aria-hidden="true" />Fetching history
-            <span className="sync-bar"><i style={{ width: Math.max(4, Math.round(100 * (snap.sync.days || 0) / (snap.sync.window || 60))) + '%' }} /></span>
-          </span>
-        )}
+        {snap.sync && snap.sync.pending && snap.sync.days < snap.sync.window && (() => {
+          const pct = Math.round(100 * (snap.sync.days || 0) / (snap.sync.window || 60));
+          return (
+            <span className="status-sync" title={`${snap.sync.days} of ${snap.sync.window} days so far`}>
+              <span className="sync-arc" aria-hidden="true" />Fetching history
+              <span className="sync-bar"><i style={{ width: Math.max(4, pct) + '%' }} /></span>
+              <span className="sync-pct mono">{pct}%</span>
+            </span>
+          );
+        })()}
       </div>
       {/* The button takes the pill's colour once something is wrong, and reads Retry when
           nothing is reporting. The icon spins for as long as a fetch is in flight. */}
