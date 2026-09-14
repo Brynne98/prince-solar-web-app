@@ -205,8 +205,9 @@
     background: none; border: none; color: var(--muted); font-size: 15px; font-weight: 500;
     padding: 12px 18px; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: .15s; border-radius: 7px 7px 0 0;
   }
-  .tab:hover { color: var(--text); background: rgba(255,255,255,0.02); }
-  .tab.active { color: var(--text); border-bottom-color: var(--pv); }
+  /* the same tinted highlight as the Settings list: no green at rest, light on hover, stronger when selected */
+  .tab:hover { color: var(--text); background: rgba(61,220,132,0.07); }
+  .tab.active { color: var(--text); border-bottom-color: var(--pv); background: rgba(61,220,132,0.16); }
 
   /* ---------- cards ---------- */
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px; }
@@ -600,8 +601,9 @@
   .settings-nav { display: flex; flex-direction: column; gap: 2px; }
   .settings-nav button { background: none; border: none; text-align: left; color: var(--muted); font-size: 14px; padding: 8px 12px; border-radius: 7px;
     border-left: 2px solid transparent; transition: .12s; }
-  .settings-nav button:hover { color: var(--text); background: rgba(255,255,255,0.03); }
-  .settings-nav button.active { color: var(--text); border-left-color: var(--pv); border-radius: 0 7px 7px 0; }
+  /* a tinted highlight: no green at rest, light green on hover, stronger green when selected */
+  .settings-nav button:hover { color: var(--text); background: rgba(61,220,132,0.07); }
+  .settings-nav button.active { color: var(--text); border-left-color: var(--pv); border-radius: 0 7px 7px 0; background: rgba(61,220,132,0.16); }
   .settings-nav button:focus-visible { outline: 2px solid var(--pv); outline-offset: -2px; }
   .settings-body { display: flex; flex-direction: column; min-width: 0; }
   /* Each section is its own panel. Hairline rules alone let the seven sections read
@@ -630,6 +632,44 @@
   .sset .field label.toggle-row { display: flex; margin-bottom: 0; letter-spacing: 0; color: var(--text); }
   .sset .field label.toggle-row .toggle-label { font-size: 14px; }
   .sset .sset-body > .field + .field { margin-top: 20px; }
+  /* Tariff, Plant and Battery: the login rows' layout (name and hint left, control right).
+     The name is a <label> or a <div> of spans, so stack the spans like the login rows' divs. */
+  .sset-row .conn-text > span { display: block; }
+  /* no rules between these rows (the tiles already box each answer); 20px apart, like Display's fields */
+  .conn-row.sset-row { border-top: none; padding: 10px 0; }
+  .sset-body > .sset-row:last-child { padding-bottom: 0; }
+  .tz-input { width: 240px; }
+  .currency-select { width: 120px; }
+  .unit-input.wide { width: 150px; }
+  .unit-input.wide .input { padding-right: 66px; }   /* room for "R/unit" */
+  /* a number box with its unit inside it, e.g. "26.5 kWh" */
+  .unit-input { position: relative; width: 128px; }
+  .unit-input .input { padding-right: 46px; -moz-appearance: textfield; }
+  .unit-input .input::-webkit-outer-spin-button, .unit-input .input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .unit-input .unit { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--dim); pointer-events: none; }
+  /* reserve's slider runs the row's full width under its name and box, filled to the value */
+  .reserve-slider { flex-basis: 100%; min-width: 0; padding-top: 4px; }
+  .sset .reserve-slider .range { display: block; margin-top: 0; background: linear-gradient(to right, var(--soc) var(--fill, 0%), rgba(255,255,255,0.1) var(--fill, 0%)); }
+  .reserve-scale { display: flex; justify-content: space-between; margin-top: 10px; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  .reserve-slider .range:focus-visible { outline: 2px solid var(--pv); outline-offset: 6px; }   /* the base .range drops the outline */
+  /* pick one of a few (Plant, Battery, Display): described tiles across the row, native radios underneath */
+  .choice-tiles { flex-basis: 100%; display: grid; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); gap: 12px; }
+  .sset-choice .choice-tiles { margin-top: 12px; }
+  .choice-tile { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel-2); cursor: pointer; transition: border-color .15s, background-color .15s; }
+  .choice-tile:hover { border-color: rgba(255,255,255,0.2); }
+  .choice-tile.on { border-color: rgba(61,220,132,0.55); background: rgba(61,220,132,0.06); }
+  .choice-tile input { -webkit-appearance: none; appearance: none; flex: none; width: 16px; height: 16px; margin: 2px 0 0; border: 1.5px solid var(--dim); border-radius: 50%; cursor: pointer; }
+  .choice-tile input:checked { border: 5px solid var(--pv); }
+  .choice-tile input:focus-visible { outline: 2px solid var(--pv); outline-offset: 2px; }
+  /* a tile is a <label>; inside a .field (Display) the field's small grey block label style would win */
+  .sset .field label.choice-tile { display: flex; margin-bottom: 0; font-size: inherit; letter-spacing: 0; color: var(--text); }
+  .choice-text { flex: 1; min-width: 0; }
+  .choice-text > span { display: block; }
+  @media (max-width: 600px) {
+    .sset-row > .conn-text { flex-basis: 100%; }   /* on a phone each control drops under its name */
+    .choice-tiles { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { .choice-tile { transition: none; } }
 
   /* just the number, centred under the last section */
   .app-version { padding-top: 14px; text-align: center; font-size: 11.5px; color: var(--dim); }
@@ -642,7 +682,7 @@
   .conn-plants { color: var(--muted); }
   /* the add row: a filled button so it reads as the section's one action, plus a hint */
   .conn-add { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--line); }
-  #settings-connection.sset, #settings-account.sset, #settings-display.sset { padding: 19px 24px 24px; }   /* 25px from the box edge to the content on every side, the title's line lead included */
+  #settings-connection.sset, #settings-account.sset, #settings-display.sset, #settings-battery.sset, #settings-plant.sset { padding: 19px 24px 24px; }   /* 25px from the box edge to the content on every side, the title's line lead included */
   #settings-account .conn-row:last-of-type { padding-bottom: 0; }
   #settings-account .conn-actions .ghost-btn { min-width: 124px; }   /* Sign out and Delete account, one size */
   .conn-add-row { padding-bottom: 0; }   /* the open add form ends at the card's own padding */
@@ -691,7 +731,7 @@
       mask-image: linear-gradient(90deg, var(--bg) calc(100% - 32px), transparent); }
     .settings-nav::after { content: ''; flex: none; width: 32px; }
     .settings-nav button { white-space: nowrap; border-left: none; padding: 6px 12px; font-size: 13px; }
-    .settings-nav button.active { border-radius: 7px; background: var(--panel); }
+    .settings-nav button.active { border-radius: 7px; background: rgba(61,220,132,0.16); }
     .settings-body { gap: 14px; }
     .sset { padding: 16px 15px 20px; border-radius: 14px; }
     .sset .field-row { grid-template-columns: 1fr; }

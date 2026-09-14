@@ -149,7 +149,7 @@ function Segmented({ options, value, onChange, size = 'md' }) {
         const val = typeof o === 'string' ? o : o.value;
         const lab = typeof o === 'string' ? o : o.label;
         return (
-          <button key={val} className={'seg-btn' + (val === value ? ' active' : '')}
+          <button key={val} type="button" className={'seg-btn' + (val === value ? ' active' : '')} aria-pressed={val === value}
           onClick={() => onChange(val)}>{lab}</button>);
 
       })}

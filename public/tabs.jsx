@@ -738,7 +738,7 @@ function SunSynkConnectionSection({ onChanged }) {
   const n = live.length;
   const title = <>SunSynk logins{!loading && n > 0 && <span className="sset-count">{n}</span>}</>;
   return (
-    <SettingsSection id="connection" title={title}>
+    <SettingsSection id="connection" title={title} note="The SunSynk logins the app reads your plants through.">
       {loading ? (
         // same height as a row, so the section does not jump when the logins land
         <div className="conn-row"><div className="conn-text"><div className="conn-user dim">Loading…</div><div className="conn-meta">&nbsp;</div></div></div>
@@ -805,6 +805,21 @@ function SunSynkConnectionSection({ onChanged }) {
 // for: the dotted line on Live is learned from the plant's own readings (0051).
 // One form, three sections, one save bar.
 const PLANT_SECTION_IDS = ['tariff', 'plant', 'battery'];
+// Pick one of a few, each with a line on what it means. Native radios underneath, so the
+// group takes arrow keys and reads as one question; the tile is only their dress.
+function ChoiceTiles({ name, labelledBy, value, options, onChange }) {
+  return (
+    <div className="choice-tiles" role="radiogroup" aria-labelledby={labelledBy} style={{ '--cols': options.length }}>
+      {options.map(o => (
+        <label key={o.label} className={'choice-tile' + (o.value === value ? ' on' : '')}>
+          <input type="radio" name={name} checked={o.value === value} onChange={() => onChange(o.value)} />
+          <span className="choice-text"><span className="conn-user">{o.label}</span><span className="conn-meta">{o.hint}</span></span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function PlantSections({ me, plantId, onSaved }) {
   const { useState, useEffect, useMemo } = React;
   const activeSection = React.useContext(SettingsActive);
@@ -835,11 +850,20 @@ function PlantSections({ me, plantId, onSaved }) {
       const patch = {
         timezone: f.timezone, currency: f.currency,
         tariff_import: num(f.tariff_import) ?? 0,
-        battery_kwh: num(f.battery_kwh), battery_reserve_pct: num(f.battery_reserve_pct) ?? 20,
-        batt_positive_means: f.batt_positive_means ?? null,
+        battery_kwh: num(f.battery_kwh),
+        // untouched, a stored reserve outside the slider's range is kept; edited, it is held to 5..50 even if the box was never left
+        battery_reserve_pct: f.battery_reserve_pct === cfg.battery_reserve_pct ? (cfg.battery_reserve_pct ?? 20)
+          : Math.min(50, Math.max(5, Math.round(num(f.battery_reserve_pct) ?? cfg.battery_reserve_pct ?? 20))),
         tariff_export: num(f.tariff_export) ?? 0,
         battery_banks: f.battery_banks || 'per-inverter',
-        has_battery: f.has_battery ?? null, has_grid: f.has_grid ?? null,
+        // Detected answers go out only when the owner touched them. Detection can rewrite them
+        // while this page is open, and sending the stale copy back would read to the triggers as
+        // the owner's choice (0041, 0042). The triggers also mark a choice as the owner's only
+        // when its value changes, so confirming what detection found says so outright.
+        ...(f.batt_positive_means !== cfg.batt_positive_means || f.batt_sign_source !== cfg.batt_sign_source
+          ? { batt_positive_means: f.batt_positive_means ?? null, ...(f.batt_sign_source === 'user' ? { batt_sign_source: 'user' } : {}) } : {}),
+        ...(f.has_battery !== cfg.has_battery || f.has_grid !== cfg.has_grid || f.features_source !== cfg.features_source
+          ? { has_battery: f.has_battery ?? null, has_grid: f.has_grid ?? null, ...(f.features_source === 'user' ? { features_source: 'user' } : {}) } : {}),
       };
       await window.savePlantConfig(plant.id, patch);
       window.PLANT_CURRENCY = patch.currency;
@@ -850,85 +874,160 @@ function PlantSections({ me, plantId, onSaved }) {
 
   if (!plant) return <SettingsSection id="plant" title="Plant"><div className="field-note">No plant connected yet.</div></SettingsSection>;
   const sym = window.moneySymbol ? window.moneySymbol() : (f.currency || '');
+  // Battery and grid show Auto until the owner pins an answer. The database pins both flags
+  // as soon as either is chosen (0042), so a pick can take the other question off Auto too.
+  const featureValue = (k) => f.features_source === 'user' && f[k] != null ? f[k] : 'auto';
+  // Auto hands both back, as the trigger does: to what detection found when the saved row was
+  // never pinned (so an already-selected Auto changes nothing), else to detection itself
+  const pickFeature = (k, v) => setF(x => v !== 'auto' ? { ...x, [k]: v, features_source: 'user' }
+    : cfg.features_source === 'user' ? { ...x, has_battery: null, has_grid: null, features_source: 'default' }
+    : { ...x, has_battery: cfg.has_battery, has_grid: cfg.has_grid, features_source: cfg.features_source });
+  // what Auto knows comes from the saved row, never from an unsaved pick
+  const featureAutoHint = (k, yes, no) => cfg.features_source === 'detected' ? (cfg[k] ? yes : no)
+    : cfg.features_source === 'user' ? 'Reads it from the inverter.' : 'Still checking.';
+  // where the reserve slider sits: the box while it holds a number, else the saved value
+  const reserve = Math.min(50, Math.max(5, num(f.battery_reserve_pct) ?? cfg.battery_reserve_pct ?? 20));
   return (
     <>
-      <SettingsSection id="tariff" title="Tariff"
-        note={!f.tariff_import ? 'Set your electricity rate. Savings show as zero until you do.' : null}>
-        <div className="field-row">
-          <div className="field">
-            <label>Electricity rate ({sym}/kWh)</label>
-            <input className="input mono" type="number" step="0.01" min="0" value={f.tariff_import ?? ''} onChange={e => set('tariff_import', e.target.value)} />
+      {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
+      <SettingsSection id="tariff" title="Tariff" note="What you pay for electricity, per unit (kWh).">
+        <div className="conn-row sset-row">
+          <label className="conn-text" htmlFor="tariff-import">
+            <span className="conn-user">Electricity rate</span>
+            <span className="conn-meta">{f.tariff_import > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}</span>
+          </label>
+          <div className="conn-actions">
+            <div className="unit-input wide">
+              <input id="tariff-import" className="input mono" type="number" inputMode="decimal" step="0.01" min="0" placeholder="3.40" aria-describedby="tariff-import-unit"
+                     value={f.tariff_import ?? ''} onChange={e => set('tariff_import', e.target.value)} />
+              <span id="tariff-import-unit" className="unit">{sym}/unit</span>
+            </div>
           </div>
-          {abroad && <div className="field">
-            <label>Feed-in rate ({sym}/kWh)</label>
-            <input className="input mono" type="number" step="0.01" min="0" value={f.tariff_export ?? ''} onChange={e => set('tariff_export', e.target.value)} placeholder="0" />
-          </div>}
-          {abroad && <div className="field">
-            <label>Currency</label>
-            <select className="select" value={f.currency || 'ZAR'} onChange={e => set('currency', e.target.value)}>
-              {(!f.currency || currencies.includes(f.currency) ? currencies : [f.currency, ...currencies]).map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>}
         </div>
+        {abroad && (
+          <div className="conn-row sset-row">
+            <label className="conn-text" htmlFor="tariff-export">
+              <span className="conn-user">Feed-in rate</span>
+              <span className="conn-meta">Paid for each unit sent to the grid.</span>
+            </label>
+            <div className="conn-actions">
+              <div className="unit-input wide">
+                <input id="tariff-export" className="input mono" type="number" inputMode="decimal" step="0.01" min="0" placeholder="0" aria-describedby="tariff-export-unit"
+                       value={f.tariff_export ?? ''} onChange={e => set('tariff_export', e.target.value)} />
+                <span id="tariff-export-unit" className="unit">{sym}/unit</span>
+              </div>
+            </div>
+          </div>
+        )}
+        {abroad && (
+          <div className="conn-row sset-row">
+            <label className="conn-text" htmlFor="tariff-currency">
+              <span className="conn-user">Currency</span>
+              <span className="conn-meta">From SunSynk. Change it if it is wrong.</span>
+            </label>
+            <div className="conn-actions">
+              <select id="tariff-currency" className="select currency-select" value={f.currency || 'ZAR'} onChange={e => set('currency', e.target.value)}>
+                {(!f.currency || currencies.includes(f.currency) ? currencies : [f.currency, ...currencies]).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
       </SettingsSection>
 
       <SettingsSection id="plant" title="Plant"
-        note="Does this plant have a battery, and is it connected to the utility? Auto answers both from the inverter's readings. Choose an answer yourself only if Auto gets it wrong.">
-        <div className="field-row">
-          {abroad && <div className="field">
-            <label>Timezone</label>
-            <input className="input" list="tz-zones" value={f.timezone || ''} placeholder="Type a city, e.g. Johannesburg"
-                   onChange={e => set('timezone', e.target.value)} spellCheck={false} autoComplete="off" />
-            <datalist id="tz-zones">{zones.map(z => <option key={z} value={z} />)}</datalist>
-          </div>}
-          <div className="field">
-            <label>Battery</label>
-            <select className="select" value={f.has_battery == null ? '' : String(f.has_battery)} onChange={e => set('has_battery', e.target.value === '' ? null : e.target.value === 'true')}>
-              <option value="">{'Auto' + (f.features_source === 'detected' ? (f.has_battery ? ' (battery found)' : ' (no battery found)') : '')}</option>
-              <option value="true">Yes</option>
-              <option value="false">No</option>
-            </select>
+        note="Auto reads both from the inverter. A choice here, Auto included, applies to both.">
+        {abroad && (
+          <div className="conn-row sset-row">
+            <label className="conn-text" htmlFor="plant-tz">
+              <span className="conn-user">Timezone</span>
+              <span className="conn-meta">The plant's own clock, for daily totals.</span>
+            </label>
+            <div className="conn-actions">
+              <input id="plant-tz" className="input tz-input" list="tz-zones" value={f.timezone || ''} placeholder="e.g. Johannesburg"
+                     onChange={e => set('timezone', e.target.value)} spellCheck={false} autoComplete="off" />
+              <datalist id="tz-zones">{zones.map(z => <option key={z} value={z} />)}</datalist>
+            </div>
           </div>
-          <div className="field">
-            <label>Grid</label>
-            <select className="select" value={f.has_grid == null ? '' : String(f.has_grid)} onChange={e => set('has_grid', e.target.value === '' ? null : e.target.value === 'true')}>
-              <option value="">{'Auto' + (f.features_source === 'detected' ? (f.has_grid ? ' (grid found)' : ' (no grid found)') : '')}</option>
-              <option value="true">Connected</option>
-              <option value="false">Off-grid</option>
-            </select>
-          </div>
+        )}
+        <div className="conn-row sset-row">
+          <div className="conn-text"><span id="plant-batt-q" className="conn-user">Does this plant have a battery?</span></div>
+          <ChoiceTiles name="plant-batt" labelledBy="plant-batt-q" value={featureValue('has_battery')} onChange={v => pickFeature('has_battery', v)}
+            options={[{ value: 'auto', label: 'Auto', hint: featureAutoHint('has_battery', 'Found a battery.', 'Found no battery.') },
+                      { value: true, label: 'Yes', hint: 'Batteries are connected.' },
+                      { value: false, label: 'No', hint: 'No batteries connected.' }]} />
+        </div>
+        <div className="conn-row sset-row">
+          <div className="conn-text"><span id="plant-grid-q" className="conn-user">Is it connected to the grid?</span></div>
+          <ChoiceTiles name="plant-grid" labelledBy="plant-grid-q" value={featureValue('has_grid')} onChange={v => pickFeature('has_grid', v)}
+            options={[{ value: 'auto', label: 'Auto', hint: featureAutoHint('has_grid', 'Found a grid connection.', 'Found no grid connection.') },
+                      { value: true, label: 'Connected', hint: 'Wired to the utility.' },
+                      { value: false, label: 'Off-grid', hint: 'No utility connection.' }]} />
         </div>
       </SettingsSection>
 
-      <SettingsSection id="battery" title="Battery"
-        note="Capacity and reserve set how long the battery lasts on screen.">
-        <div className="field-row">
-          <div className="field">
-            <label>Capacity (kWh)</label>
-            <input className="input mono" type="number" step="0.1" min="0" value={f.battery_kwh ?? ''} onChange={e => set('battery_kwh', e.target.value)} placeholder="e.g. 5 × 5.3 = 26.5" />
+      <SettingsSection id="battery" title="Battery" note="How big the battery is, and how the inverter reports it.">
+        {/* rows like Logins and Account: name and hint on the left, control on the right, a rule between */}
+        <div className="conn-row sset-row">
+          <label className="conn-text" htmlFor="batt-kwh">
+            <span className="conn-user">Capacity</span>
+            <span className="conn-meta">Every battery added together.</span>
+          </label>
+          <div className="conn-actions">
+            <div className="unit-input">
+              <input id="batt-kwh" className="input mono" type="number" inputMode="decimal" step="0.1" min="0" placeholder="26.5" aria-describedby="batt-kwh-unit"
+                     value={f.battery_kwh ?? ''} onChange={e => set('battery_kwh', e.target.value)} />
+              <span id="batt-kwh-unit" className="unit">kWh</span>
+            </div>
           </div>
-          <div className="field">
-            <label>Reserve: the battery won't discharge below <span className="mono" style={{ color: 'var(--soc)' }}>{f.battery_reserve_pct ?? 20}%</span></label>
-            <input className="range" type="range" min="5" max="50" step="1" value={f.battery_reserve_pct ?? 20} onChange={e => set('battery_reserve_pct', e.target.value)} />
+        </div>
+        <div className="conn-row sset-row">
+          <label className="conn-text" htmlFor="batt-reserve">
+            <span className="conn-user">Reserve</span>
+            <span className="conn-meta">Discharging stops at this level.</span>
+          </label>
+          {/* type in the box or drag; an edited box settles into 5 to 50 when it loses focus */}
+          <div className="conn-actions">
+            <div className="unit-input">
+              <input id="batt-reserve" className="input mono" type="number" inputMode="numeric" min="5" max="50" step="1" aria-describedby="batt-reserve-unit"
+                     value={f.battery_reserve_pct ?? ''} onChange={e => set('battery_reserve_pct', e.target.value)}
+                     onBlur={e => {
+                       if (f.battery_reserve_pct === cfg.battery_reserve_pct) return;   // untouched: keep a stored value outside the range
+                       const v = Math.round(Number(e.target.value));
+                       set('battery_reserve_pct', e.target.value === '' || isNaN(v) ? (cfg.battery_reserve_pct ?? 20) : Math.min(50, Math.max(5, v)));
+                     }} />
+              <span id="batt-reserve-unit" className="unit">%</span>
+            </div>
           </div>
-          <div className="field">
-            <label>Packs</label>
-            <select className="select" value={f.battery_banks || 'per-inverter'} onChange={e => set('battery_banks', e.target.value)}>
-              <option value="per-inverter">Each inverter has its own pack</option>
-              <option value="shared">One pack shared by all inverters</option>
-            </select>
-            <div className="field-note">Only matters with more than one inverter.</div>
+          <div className="reserve-slider">
+            <input className="range" type="range" min="5" max="50" step="1" aria-label="Reserve slider"
+                   style={{ '--fill': ((reserve - 5) / 45 * 100) + '%' }}
+                   value={reserve} onChange={e => set('battery_reserve_pct', Number(e.target.value))} />
+            <div className="reserve-scale" aria-hidden="true"><span>5%</span><span>50%</span></div>
           </div>
-          <div className="field">
-            <label>Inverter reports positive battery power as</label>
-            <select className="select" value={f.batt_sign_source === 'user' ? (f.batt_positive_means || '') : ''}
-                    onChange={e => setF(x => ({ ...x, batt_positive_means: e.target.value || null, batt_sign_source: e.target.value ? 'user' : 'default' }))}>
-              <option value="">{'Auto' + (f.batt_sign_source === 'detected' && f.batt_positive_means ? ' (detected: ' + f.batt_positive_means + ')' : ' (still detecting)')}</option>
-              <option value="charging">Charging</option>
-              <option value="discharging">Discharging</option>
-            </select>
-            <div className="field-note">Change only if the battery shows charging while it is clearly draining.</div>
+        </div>
+        {/* battery_banks: 'shared' means every inverter reads the same batteries, so charge counts once */}
+        <div className="conn-row sset-row">
+          <div className="conn-text"><span id="batt-banks-q" className="conn-user">Do the inverters share batteries?</span></div>
+          <ChoiceTiles name="batt-banks" labelledBy="batt-banks-q" value={f.battery_banks || 'per-inverter'} onChange={v => set('battery_banks', v)}
+            options={[{ value: 'shared', label: 'Shared', hint: 'Every inverter reads the same batteries.' },
+                      { value: 'per-inverter', label: 'Separate', hint: 'Each inverter has its own batteries.' }]} />
+        </div>
+        <div className="conn-row sset-row">
+          <div className="conn-text">
+            <span id="batt-sign-q" className="conn-user">Positive battery number</span>
+            <span className="conn-meta">Change only if a draining battery shows as charging.</span>
           </div>
+          <ChoiceTiles name="batt-sign" labelledBy="batt-sign-q" value={f.batt_sign_source === 'user' ? (f.batt_positive_means || '') : ''}
+            // Auto on a plant that was never pinned puts back what detection found, so tapping
+            // an already-selected Auto changes nothing; Auto on a pinned plant clears the pin
+            onChange={v => setF(x => ({ ...x, ...(v ? { batt_positive_means: v, batt_sign_source: 'user' }
+              : cfg.batt_sign_source === 'user' ? { batt_positive_means: null, batt_sign_source: 'default' }
+              : { batt_positive_means: cfg.batt_positive_means, batt_sign_source: cfg.batt_sign_source }) }))}
+            // what Auto knows comes from the saved row; a pinned answer says nothing about detection
+            options={[{ value: '', label: 'Auto', hint: cfg.batt_sign_source === 'detected' && cfg.batt_positive_means ? 'Found: positive means ' + cfg.batt_positive_means + '.'
+                        : cfg.batt_sign_source === 'user' ? 'Reads it from the inverter.' : 'Still checking.' },
+                      { value: 'charging', label: 'Charging', hint: 'Positive means the battery is charging.' },
+                      { value: 'discharging', label: 'Discharging', hint: "Positive means it's powering the house." }]} />
         </div>
       </SettingsSection>
 
@@ -957,7 +1056,7 @@ function AccountSection() {
     catch (e) { setErr(e.message); setBusy(false); }
   };
   return (
-    <SettingsSection id="account" title="Account">
+    <SettingsSection id="account" title="Account" note="Sign out of this device, or delete your account.">
       <div className="conn-row">
         <div className="conn-text">
           <div className="conn-user mono">{email || 'this account'}</div>
@@ -1008,14 +1107,15 @@ function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfig
       <div className="settings-body">
         <PlantSections me={me} plantId={plantId} onSaved={onPlantConfigSaved} />
 
-        <SettingsSection id="display" title="Display">
+        <SettingsSection id="display" title="Display" note="Saved to your account, so every device looks the same.">
           {/* reads like the toggle rows below: name, hint, then the control */}
           <div className="field sset-choice">
             <span className="toggle-text">
-              <span className="toggle-label">Battery power</span>
+              <span id="batt-power-q" className="toggle-label">Battery power</span>
             </span>
-            <Segmented options={[{ value: 'discharge', label: '+ powering the house' }, { value: 'charge', label: '+ charging' }]}
-              value={settings.battPositive} onChange={v => set({ battPositive: v })} />
+            <ChoiceTiles name="batt-power" labelledBy="batt-power-q" value={settings.battPositive} onChange={v => set({ battPositive: v })}
+              options={[{ value: 'discharge', label: '+ powering the house', hint: 'Discharging reads as a positive number.' },
+                        { value: 'charge', label: '+ charging', hint: 'Charging reads as a positive number.' }]} />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
             <label>Extra tabs</label>
