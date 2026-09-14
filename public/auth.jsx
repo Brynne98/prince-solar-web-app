@@ -48,6 +48,9 @@ window.useSession = function useSession() {
     const { data: sub } = window.sb.auth.onAuthStateChange((event, session) => {
       if (!alive) return;
       if (event === 'PASSWORD_RECOVERY') setState({ loading: false, session, recovering: true });
+      // Whoever signs in next starts on the dashboard, not on the Settings tab the
+      // last person signed out from.
+      else if (event === 'SIGNED_OUT') { localStorage.removeItem('synsynk.tab'); setState({ loading: false, session: null, recovering: false }); }
       else setState(s => ({ ...s, loading: false, session: session || null,
                               recovering: event === 'SIGNED_OUT' ? false : s.recovering }));
     });
