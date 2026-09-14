@@ -653,7 +653,7 @@ function InvertersTab({ snap, settings, refreshKey }) {
 // block sit in one rhythm instead of a lopsided grid.
 
 const SETTINGS_SECTIONS = [
-  ['tariff', 'Tariff'], ['plant', 'Plant'], ['battery', 'Battery'], ['panels', 'Panels'],
+  ['tariff', 'Tariff'], ['plant', 'Plant'], ['battery', 'Battery'],
   ['display', 'Display'], ['connection', 'Logins'], ['account', 'Account'],
 ];
 
@@ -665,10 +665,10 @@ function ConfirmCard({ title, text, action, onConfirm, onCancel }) {
   return (
     <div className="conn-form confirm-card" role="alertdialog" aria-label={action}
          onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}>
+      {title && <div className="confirm-title">{title}</div>}
       <div className="confirm-text">{text}</div>
       <div className="conn-form-actions">
         <button type="button" className="danger-btn" onClick={onConfirm}>{action}</button>
-      {title && <div className="confirm-title">{title}</div>}
         <button type="button" className="ghost-btn" onClick={onCancel} autoFocus>Cancel</button>
       </div>
     </div>
@@ -723,10 +723,10 @@ function SunSynkConnectionSection({ onChanged }) {
   // Removing asks once, inline under the row, in the app's own language rather than a
   // browser dialog. 'confirming' holds the account_id whose card is open.
   const [confirming, setConfirming] = useState(null);
+  const [leaving, setLeaving] = useState(null); // account_id folding away after a remove
   const remove = async (acc) => {
     const last = live.length === 1;
     setConfirming(null);
-  const [leaving, setLeaving] = useState(null); // account_id folding away after a remove
     setBusy(acc.account_id); setErr(null);
     try {
       await window.disconnectSunsynk(acc.account_id);
@@ -772,9 +772,6 @@ function SunSynkConnectionSection({ onChanged }) {
                 {busy === acc.account_id ? 'Removing…' : 'Remove'}
               </button>
             </div>
-          </div>
-        );
-      })}
             {/* the reconnect form and the remove card sit under the whole row, full width */}
             {mode === acc.account_id && (
               <window.LinkForm compact relink initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
@@ -785,6 +782,9 @@ function SunSynkConnectionSection({ onChanged }) {
                 text={'History goes too, unless someone else shares the plant.' + (live.length === 1 ? ' Your only login, so the app returns to the Connect screen.' : '')}
                 action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
             )}
+          </div>
+        );
+      })}
       {!loading && (mode === 'add'
         ? <div className="conn-row conn-add-row"><div className="conn-text">
             <div className="conn-user">Add login</div>
@@ -801,10 +801,10 @@ function SunSynkConnectionSection({ onChanged }) {
 }
 
 // Per-plant numbers live in plant_config and are the user's to edit. Timezone and
-// currency arrive from SunSynk at link time; the rest are theirs. geometry_source
-// tells us whether the roof and nameplate are still defaults, which is when the
-// "check this" nudge shows. One form, four sections, one save bar.
-const PLANT_SECTION_IDS = ['tariff', 'plant', 'battery', 'panels'];
+// currency arrive from SunSynk at link time; the rest are theirs. The roof is not asked
+// for: the dotted line on Live is learned from the plant's own readings (0051).
+// One form, three sections, one save bar.
+const PLANT_SECTION_IDS = ['tariff', 'plant', 'battery'];
 function PlantSections({ me, plantId, onSaved }) {
   const { useState, useEffect, useMemo } = React;
   const activeSection = React.useContext(SettingsActive);
@@ -822,7 +822,6 @@ function PlantSections({ me, plantId, onSaved }) {
   const set = (k, v) => setF(x => ({ ...x, [k]: v }));
   const num = (v) => v === '' || v == null ? null : Number(v);
   const dirty = JSON.stringify(f) !== JSON.stringify(cfg);
-  const isDefault = f.geometry_source === 'default';
   // South Africa only, for now. Currency and timezone still live per plant and are
   // saved untouched; the fields only show when SunSynk reported something else, so a
   // plant abroad can still be corrected. To open up other countries again, drop this
@@ -841,9 +840,6 @@ function PlantSections({ me, plantId, onSaved }) {
         tariff_export: num(f.tariff_export) ?? 0,
         battery_banks: f.battery_banks || 'per-inverter',
         has_battery: f.has_battery ?? null, has_grid: f.has_grid ?? null,
-        system_kwp: num(f.system_kwp), panel_tilt: num(f.panel_tilt) ?? 15, panel_azimuth: num(f.panel_azimuth) ?? 0,
-        // once a person has touched the roof or nameplate, stop calling it a default
-        geometry_source: (isDefault && (num(f.system_kwp) !== cfg.system_kwp || num(f.panel_tilt) !== cfg.panel_tilt || num(f.panel_azimuth) !== cfg.panel_azimuth)) ? 'user' : f.geometry_source,
       };
       await window.savePlantConfig(plant.id, patch);
       window.PLANT_CURRENCY = patch.currency;
@@ -932,25 +928,6 @@ function PlantSections({ me, plantId, onSaved }) {
               <option value="discharging">Discharging</option>
             </select>
             <div className="field-note">Change only if the battery shows charging while it is clearly draining.</div>
-          </div>
-        </div>
-      </SettingsSection>
-
-      <SettingsSection id="panels" title="Panels"
-        note={isDefault ? 'The capacity came from SunSynk and is often the inverter rating, not the panels. Enter the panels\' total. Tilt and direction are guesses until you set them.' : null}>
-        <div className="field-row">
-          <div className="field">
-            <label>Panel capacity (kW){isDefault && <span style={{ color: 'var(--load)' }}> · check this</span>}</label>
-            <input className="input mono" type="number" step="0.1" min="0" value={f.system_kwp ?? ''} onChange={e => set('system_kwp', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Roof tilt (°)</label>
-            <input className="input mono" type="number" step="1" min="0" max="90" value={f.panel_tilt ?? ''} onChange={e => set('panel_tilt', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Roof direction (° from north)</label>
-            <input className="input mono" type="number" step="1" min="0" max="359" value={f.panel_azimuth ?? ''} onChange={e => set('panel_azimuth', e.target.value)} />
-            <div className="field-note">0 faces north, 180 faces south.</div>
           </div>
         </div>
       </SettingsSection>

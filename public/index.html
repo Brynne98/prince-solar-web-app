@@ -223,6 +223,14 @@
   @media (max-width: 600px) { .flow-skel { aspect-ratio: auto; height: 525px !important; } .flow-card .flow-skel-status { display: none; } }
   /* legend to plot gets the same gap as date bar to legend */
   .hv-root .legend-row { margin-bottom: 12px; }
+  /* progress ring in the legend row until a plant has enough readings for the dotted line;
+     its bubble opens from the left edge so it never runs off a phone screen */
+  .legend-row .pot-ring { align-self: center; margin-left: auto; cursor: default; }   /* far right of the legend row; outranks .info-dot's margin */
+  .legend-row .pot-ring .info-bubble { left: auto; right: -6px; transform: translateY(4px); width: 240px; }
+  .legend-row .pot-ring .info-bubble::after { left: auto; right: 9px; transform: none; }
+  .pot-ring-title { display: block; margin-bottom: 3px; font-weight: 600; }
+  .pot-ring-when { color: var(--muted); }
+  .legend-row .pot-ring:hover .info-bubble, .legend-row .pot-ring:focus .info-bubble { transform: translateY(0); }   /* outranks .info-dot's centring shift */
   .grow { flex: 1; } .stack { display: flex; flex-direction: column; gap: 20px; }
   .section-title { display: flex; align-items: center; justify-content: space-between;
     font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: var(--muted); text-transform: uppercase; margin-bottom: 18px; }
@@ -670,7 +678,7 @@
   .save-bar.dirty { border-color: rgba(61,220,132,0.4); }
   .save-text { font-size: 13px; color: var(--muted); margin-right: auto; }
   .save-btn { background: var(--pv); color: #07130c; border: none; padding: 8px 18px; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
-  .save-btn:disabled { opacity: .6; }
+  .save-btn:disabled { opacity: .4; cursor: default; }   /* a Save that cannot save must not look like one that can */
   .sset .ghost-btn:disabled, .sset .danger-btn:disabled { opacity: .5; }
 
   @media (max-width: 900px) {
