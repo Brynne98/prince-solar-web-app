@@ -325,7 +325,6 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey }) {
             info="This plant has no grid connection. Everything the home uses comes from solar and the battery." />}
           <MiniStat loading={pending} label="Est. saved" value={(rate > 0 || rateExp > 0) ? window.fmtRandSmart(pSaved) : '—'} color={CC.batt}
             trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord}
-            sub={!(rate > 0 || rateExp > 0) ? 'Set your rate in Settings' : undefined}
             info={'Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your import rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '. Set the rates in Settings.'} />
         </div>
       </div>
@@ -657,13 +656,14 @@ const SETTINGS_SECTIONS = [
 // the same inset box the add-login form uses, so the question stays in the page
 // instead of a browser dialog. Focus lands on Cancel, so a second Enter from the button
 // that opened it cannot fire the deletion; Escape closes it the way a dialog would.
-function ConfirmCard({ text, action, onConfirm, onCancel }) {
+function ConfirmCard({ title, text, action, onConfirm, onCancel }) {
   return (
     <div className="conn-form confirm-card" role="alertdialog" aria-label={action}
          onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}>
       <div className="confirm-text">{text}</div>
       <div className="conn-form-actions">
         <button type="button" className="danger-btn" onClick={onConfirm}>{action}</button>
+      {title && <div className="confirm-title">{title}</div>}
         <button type="button" className="ghost-btn" onClick={onCancel} autoFocus>Cancel</button>
       </div>
     </div>
@@ -716,9 +716,14 @@ function SunSynkConnectionSection({ onChanged }) {
   const remove = async (acc) => {
     const last = live.length === 1;
     setConfirming(null);
+  const [leaving, setLeaving] = useState(null); // account_id folding away after a remove
     setBusy(acc.account_id); setErr(null);
-    try { await window.disconnectSunsynk(acc.account_id); if (last) location.reload(); else { setBusy(null); changed(); } }
-    catch (e) { setErr(e.message); setBusy(null); }
+    try {
+      await window.disconnectSunsynk(acc.account_id);
+      if (last) { location.reload(); return; }
+      setBusy(null); setLeaving(acc.account_id);
+      setTimeout(() => { setLeaving(null); changed(); }, 240); // matches .conn-row.leaving
+    } catch (e) { setErr(e.message); setBusy(null); }
   };
   const n = live.length;
   const title = <>SunSynk logins{!loading && n > 0 && <span className="sset-count">{n}</span>}</>;
@@ -737,7 +742,7 @@ function SunSynkConnectionSection({ onChanged }) {
         const word = !ok ? 'Sign-in expired' : stale ? 'Stale' : 'Connected';
         const plants = acc.plants || [];
         return (
-          <div key={acc.account_id} className="conn-row">
+          <div key={acc.account_id} className={'conn-row' + (leaving === acc.account_id ? ' leaving' : '')}>
             <div className="conn-text">
               {/* Line 1: the login and the plants it brings. Line 2: is it working, and
                   when it was added. */}
@@ -750,14 +755,6 @@ function SunSynkConnectionSection({ onChanged }) {
                 {acc.last_ok_at ? ' · read ' + ago(acc.last_ok_at) : ''}
               </div>
               {!plants.length && <div className="conn-meta">No plant shared with this login. Ask your installer to share it in SunSynk Connect.</div>}
-              {mode === acc.account_id && (
-                <window.LinkForm compact relink initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
-              )}
-              {confirming === acc.account_id && (
-                <ConfirmCard
-                  text={`Remove ${acc.sunsynk_username}? History goes too, unless someone else shares the plant.` + (live.length === 1 ? ' Your only login, so the app returns to the Connect screen.' : '')}
-                  action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
-              )}
             </div>
             <div className="conn-actions">
               {!ok && mode !== acc.account_id && <button type="button" className="save-btn" onClick={() => { setErr(null); setMode(acc.account_id); }}>Reconnect</button>}
@@ -768,8 +765,18 @@ function SunSynkConnectionSection({ onChanged }) {
           </div>
         );
       })}
+            {/* the reconnect form and the remove card sit under the whole row, full width */}
+            {mode === acc.account_id && (
+              <window.LinkForm compact relink initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
+            )}
+            {confirming === acc.account_id && (
+              <ConfirmCard
+                title={<>Remove <b>{acc.sunsynk_username}</b>?</>}
+                text={'History goes too, unless someone else shares the plant.' + (live.length === 1 ? ' Your only login, so the app returns to the Connect screen.' : '')}
+                action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
+            )}
       {!loading && (mode === 'add'
-        ? <div className="conn-row"><div className="conn-text">
+        ? <div className="conn-row conn-add-row"><div className="conn-text">
             <div className="conn-user">Add login</div>
             <window.LinkForm compact onLinked={changed} onCancel={() => setMode(null)} />
           </div></div>
@@ -963,25 +970,24 @@ function AccountSection() {
     catch (e) { setErr(e.message); setBusy(false); }
   };
   return (
-    <SettingsSection id="account" title="Account" note="Signing out keeps your SunSynk connection and history.">
+    <SettingsSection id="account" title="Account">
       <div className="conn-row">
         <div className="conn-text">
           <div className="conn-user mono">{email || 'this account'}</div>
-          <div className="conn-meta">Signed in</div>
+          <div className="conn-meta">Signing out keeps your logins and history.</div>
         </div>
-        <button type="button" className="ghost-btn" onClick={() => window.signOut()}>Sign out</button>
+        <div className="conn-actions"><button type="button" className="ghost-btn" onClick={() => window.signOut()}>Sign out</button></div>
       </div>
       <div className="conn-row">
         <div className="conn-text">
           <div className="conn-user">Delete account</div>
           <div className="conn-meta">Removes your logins and settings. History goes too, unless someone else shares the plant.</div>
-          {confirming && (
-            <ConfirmCard
-              text="This deletes your SunSynk connection, your settings and, unless someone else shares the plant, its logged history. It cannot be undone."
-              action="Delete everything" onConfirm={del} onCancel={() => setConfirming(false)} />
-          )}
         </div>
-        <button type="button" className="danger-btn" onClick={() => { setErr(null); setConfirming(c => !c); }} disabled={busy}>{busy ? 'Deleting…' : 'Delete account'}</button>
+        <div className="conn-actions"><button type="button" className="ghost-btn" onClick={() => { setErr(null); setConfirming(c => !c); }} disabled={busy}>{busy ? 'Deleting…' : 'Delete account'}</button></div>
+        {confirming && (
+          <ConfirmCard title={<>Delete <b>{email || 'this account'}</b>?</>} text="It cannot be undone."
+            action="Delete account" onConfirm={del} onCancel={() => setConfirming(false)} />
+        )}
       </div>
       {err && <div className="field-note" style={{ color: 'var(--load)' }}>{err}</div>}
     </SettingsSection>
@@ -1016,9 +1022,13 @@ function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfig
         <PlantSections me={me} plantId={plantId} onSaved={onPlantConfigSaved} />
 
         <SettingsSection id="display" title="Display">
-          <div className="field">
-            <label>Show battery discharge as</label>
-            <Segmented options={[{ value: 'discharge', label: 'Positive = discharging' }, { value: 'charge', label: 'Positive = charging' }]}
+          {/* reads like the toggle rows below: name, hint, then the control */}
+          <div className="field sset-choice">
+            <span className="toggle-text">
+              <span className="toggle-label">Battery power</span>
+              <span className="toggle-hint">Which way the battery number on the Live tab reads.</span>
+            </span>
+            <Segmented options={[{ value: 'discharge', label: '+ powering the house' }, { value: 'charge', label: '+ charging' }]}
               value={settings.battPositive} onChange={v => set({ battPositive: v })} />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>

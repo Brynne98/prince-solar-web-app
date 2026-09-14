@@ -560,7 +560,7 @@
   .settings-body { gap: 20px; }
   .sset { padding: 22px 24px 26px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; scroll-margin-top: 16px; }
   .sset-head { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 4px; }
-  .sset-title { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  .sset-title { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
   .sset-note { margin: 0 0 20px; font-size: 13px; line-height: 1.55; color: var(--muted); }
   .sset-right { font-size: 12px; white-space: nowrap; }
   .sset-count { margin-left: 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 500; color: var(--dim); vertical-align: 1px; }
@@ -569,7 +569,14 @@
   .sset .field { margin-bottom: 0; }
   .sset .field-row .field-note { margin-top: 8px; }
   .sset .range { margin-top: 14px; }
-  .sset .toggle-row:first-of-type { border-top: none; }
+  /* toggle rows keep the login rows' rhythm: 14px, no rule above the first, nothing under the last.
+     (`:first-of-type` never matched: the field's own <label> is the first label in the field.) */
+  .sset .toggle-row { padding: 14px 0; }
+  .sset .field > label:not(.toggle-row) + .toggle-row { border-top: none; padding-top: 6px; }
+  .sset .field > .toggle-row:last-of-type { padding-bottom: 0; }
+  .sset-choice .toggle-label { color: var(--text); }
+  .sset-choice .segmented { margin-top: 12px; }
+  .sset-choice .seg-btn { white-space: nowrap; }
   /* Toggle is a <label>, and .field label is display:block; put the row back to flex */
   .sset .field label.toggle-row { display: flex; margin-bottom: 0; letter-spacing: 0; color: var(--text); }
   .sset .field label.toggle-row .toggle-label { font-size: 14px; }
@@ -585,20 +592,34 @@
   .conn-user { font-size: 14px; }
   .conn-plants { color: var(--muted); }
   /* the add row: a filled button so it reads as the section's one action, plus a hint */
-  .conn-add { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .conn-add { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--line); }
+  #settings-connection.sset, #settings-account.sset, #settings-display.sset { padding: 19px 24px 24px; }   /* 25px from the box edge to the content on every side, the title's line lead included */
+  #settings-account .conn-row:last-of-type { padding-bottom: 0; }
+  #settings-account .conn-actions .ghost-btn { min-width: 124px; }   /* Sign out and Delete account, one size */
+  .conn-add-row { padding-bottom: 0; }   /* the open add form ends at the card's own padding */
   .conn-add .save-btn { display: inline-flex; align-items: center; gap: 6px; }
   .conn-meta { font-size: 12px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
   .conn-status::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--grid); }
   .conn-status.ok { color: var(--ok); } .conn-status.ok::before { background: var(--ok); }
   .conn-status.warn { color: var(--warn); } .conn-status.warn::before { background: var(--warn); }
-  .conn-actions { display: flex; gap: 8px; align-self: flex-start; flex: none; }
-  .conn-row { align-items: flex-start; }
+  .conn-actions { display: flex; gap: 8px; align-self: center; flex: none; }   /* centred on the row's two text lines */
+  .conn-row { align-items: flex-start; flex-wrap: wrap; }
+  /* a login row or an inline card eases in; a removed row folds away before the list refreshes */
+  @keyframes conn-in { from { opacity: 0; transform: translateY(-4px); } }
+  @keyframes conn-out { from { max-height: 200px; } to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; border-color: transparent; } }
+  .conn-row > .conn-text, .conn-row > .conn-actions, .conn-form { animation: conn-in .2s ease-out; } /* the row's rule itself stays put */
+  .conn-row.leaving { overflow: hidden; animation: conn-out .24s ease-in forwards; }
+  @media (prefers-reduced-motion: reduce) { .conn-row > .conn-text, .conn-row > .conn-actions, .conn-form, .conn-row.leaving { animation: none; } }
+  .conn-row > .conn-form { flex-basis: 100%; }
   .conn-form { margin-top: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.015); }
   .conn-form .field-row { grid-template-columns: 1fr 1fr; gap: 14px 20px; }
   .conn-form-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
   /* inline confirmation for a destructive row: same inset box, coral edge and tint */
-  .confirm-card { border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.06); }
-  .confirm-text { font-size: 13px; line-height: 1.5; color: var(--text); }
+  .confirm-card { margin-top: 4px; border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.06); }
+  .confirm-title { font-size: 15px; line-height: 1.4; color: var(--text); }
+  .confirm-title b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 700; }
+  .confirm-text { margin-top: 4px; font-size: 14px; line-height: 1.5; color: var(--text); }
+
   .confirm-card .conn-form-actions { margin-top: 12px; }
 
   /* one pinned bar for unsaved plant changes; everything else saves on its own */
@@ -799,9 +820,9 @@
       radial-gradient(900px 500px at 50% 110%, rgba(61,220,132,0.06), transparent 70%);
   }
   .login-card {
-    width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 14px;
+    width: 100%; max-width: 520px; display: flex; flex-direction: column; gap: 20px;
     background: linear-gradient(180deg, var(--panel-2), var(--panel));
-    border: 1px solid var(--line-2); border-radius: 18px; padding: 30px 30px 26px;
+    border: 1px solid var(--line-2); border-radius: 22px; padding: 48px 48px 44px;
     color: var(--text); text-align: left;
     box-shadow: 0 24px 60px -30px rgba(0,0,0,0.9), 0 0 0 1px rgba(0,0,0,0.25) inset;
   }
@@ -814,8 +835,10 @@
   .auth-field { display: flex; flex-direction: column; gap: 6px; }
   .auth-field > label { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
   .login-card input {
-    background: var(--bg); border: 1px solid var(--line-2); border-radius: 11px;
-    padding: 12px 14px; color: var(--text); font-family: var(--display); font-size: 14.5px;
+    background: var(--bg); border: 1px solid var(--line-2); border-radius: 12px;
+    padding: 16px 18px; color: var(--text); font-family: var(--display); font-size: 16px;
+  /* Spacing: 10 inside a pair (title/sub, label/input), 20 between items, 30 between groups.
+     The card gap is 20; groups add margin-top: 10. */
     transition: border-color .15s, box-shadow .15s;
   }
   .login-card input::placeholder { color: var(--dim); }
@@ -823,18 +846,18 @@
   .login-pw { position: relative; display: flex; }
   .login-pw input { flex: 1; padding-right: 42px; min-width: 0; }
   .login-card .login-eye {
-    position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
     display: flex; align-items: center; justify-content: center;
-    width: 32px; height: 32px; padding: 0;
+    width: 42px; height: 42px; padding: 0;
     background: none; border: 0; border-radius: 7px;
     color: var(--muted); cursor: pointer; transition: color .15s;
   }
   .login-card .login-eye:hover { color: var(--text); }
   .login-card .login-eye:focus-visible { outline: 2px solid var(--pv); outline-offset: -2px; }
   .login-card button[type="submit"] {
-    margin-top: 6px;
-    background: var(--pv); color: #06210f; border: 0; border-radius: 11px; padding: 13px 14px;
-    font-family: var(--display); font-size: 14.5px; font-weight: 700; letter-spacing: 0.005em; cursor: pointer;
+    margin-top: 10px;
+    background: var(--pv); color: #06210f; border: 0; border-radius: 12px; padding: 17px 18px;
+    font-family: var(--display); font-size: 16px; font-weight: 700; letter-spacing: 0.005em; cursor: pointer;
     box-shadow: 0 8px 22px -10px rgba(61,220,132,0.7);
     transition: transform .12s, filter .12s;
   }
@@ -846,12 +869,12 @@
   .login-note { color: var(--muted); }
   .login-links {
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
-    margin-top: 6px; padding-top: 16px; border-top: 1px solid var(--line);
-    font-size: 13px; color: var(--muted);
+    margin-top: 10px; padding-top: 24px; border-top: 1px solid var(--line);
+    font-size: 14.5px; color: var(--muted);
   }
   .login-card .login-link {
     background: none; border: 0; padding: 0; margin: 0; width: auto; box-shadow: none;
-    color: var(--pv); font-family: var(--display); font-size: 13px; font-weight: 600; cursor: pointer;
+    color: var(--pv); font-family: var(--display); font-size: 14.5px; font-weight: 600; cursor: pointer;
   }
   .login-card .login-link:hover { text-decoration: underline; text-underline-offset: 3px; }
   .login-card .login-link.quiet { color: var(--muted); font-weight: 500; }
@@ -861,9 +884,9 @@
   .login-or { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--dim); }
   .login-or::before, .login-or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
   .login-card .login-google {
-    display: flex; align-items: center; justify-content: center; gap: 10px;
-    background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 11px; padding: 12px 14px;
-    font-family: var(--display); font-size: 14px; font-weight: 600; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 12px; padding: 16px 18px;
+    font-family: var(--display); font-size: 16px; font-weight: 600; cursor: pointer;
   }
   .login-card .login-google:hover { border-color: var(--muted); }
   .login-card .login-google:disabled { opacity: 0.6; cursor: default; }
