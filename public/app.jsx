@@ -155,6 +155,8 @@ function LiveSkeleton() {
           <window.MiniStat loading label="Est. saved" sub={' '} />
         </div>
       </div>
+      {/* A battery is assumed until the snapshot says otherwise, as LiveTab does */}
+      <window.BalanceSkeleton />
       <div className="card flow-card">
         <window.SectionTitle right={<button className="flow-fs-btn" disabled><window.FsEnterIcon /><span>Fullscreen</span></button>}>POWER FLOW</window.SectionTitle>
         {/* sized in CSS to the diagram's proportions, which change with the card width */}
