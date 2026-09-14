@@ -853,6 +853,17 @@
   .login-card .login-link:hover { text-decoration: underline; text-underline-offset: 3px; }
   .login-card .login-link.quiet { color: var(--muted); font-weight: 500; }
   .login-fine { font-size: 12px; color: var(--dim); line-height: 1.45; }
+  .login-fine a { color: var(--muted); }
+  /* "or" rule between the password form and the Google button */
+  .login-or { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--dim); }
+  .login-or::before, .login-or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+  .login-card .login-google {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 11px; padding: 12px 14px;
+    font-family: var(--display); font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .login-card .login-google:hover { border-color: var(--muted); }
+  .login-card .login-google:disabled { opacity: 0.6; cursor: default; }
   @media (max-width: 480px) {
     .login-card { padding: 26px 22px 22px; }
     /* the two footer actions share a line on wide cards; on a phone they stack
