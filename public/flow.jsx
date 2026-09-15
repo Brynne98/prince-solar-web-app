@@ -18,7 +18,7 @@ function useFlowMobile(bp = 600) {
   return mobile;
 }
 
-function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, battPositive }) {
+function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features }) {
   const C = window.COLORS;
   const mobile = useFlowMobile();
   const feat = features || {};
@@ -44,8 +44,9 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   // animation back towards the grid node.
   const left = [
     { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun', tag: null, sub: kwhToday(agg.pvToday) },
-    // w stays the magnitude (animation, stroke); val is the signed figure printed on the node
-    hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: window.battShown(agg.battOut, battPositive), icon: 'battery', soc: agg.battSoc, reverse: charging,
+    // w stays the magnitude (animation, stroke); val is the signed figure printed on the node,
+    // always + = charging; Settings → Display applies everywhere except here
+    hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: window.battShown(agg.battOut, 'charge'), icon: 'battery', soc: agg.battSoc, reverse: charging,
       tag: agg.battPower > 5 ? (charging ? 'charging' : 'discharging') : 'idle', pct: agg.battSoc,
       sub: battInfo || null, onSub: onBattInfo, usualPct: typicalSoc, typicalTitle },
     hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 5 ? gridExport : gridImport, icon: 'bolt', reverse: gridExport > 5,
