@@ -258,6 +258,19 @@ function App() {
   const loadToday = useCallback(async () => {
     try { setToday(await window.fetchDay()); } catch (e) { /* chart shows its own placeholder */ }
   }, []);
+  // Battery balance is asked for alongside the snapshot, not after Live has drawn, and
+  // refreshed every 5 min: pack drift, temperature and hours at full move slowly, and it is
+  // the heaviest query on the screen. undefined = loading; null = failed with nothing to keep.
+  // Only the latest request's reply is kept, so a slow one from an earlier plant or refresh
+  // cannot overwrite a newer answer.
+  const [balance, setBalance] = useState(undefined);
+  const balanceSeq = useRef(0);
+  const loadBalance = useCallback(() => {
+    const seq = ++balanceSeq.current;
+    window.fetchBalance().then(d => {
+      if (seq === balanceSeq.current) setBalance(v => d ?? (v === undefined ? null : v));
+    });
+  }, []);
   const onNeedEnergy = useCallback((period) => {
     if (energyRef.current[period] || inflight.current[period]) return;
     inflight.current[period] = true;
@@ -310,11 +323,11 @@ function App() {
     setPlantId(Number(id));
     setNotice(plant?.name || ('Plant ' + id));
     window.savePrefs({ lastPlant: Number(id) }).catch(() => {});
-    setEnergy({}); energyRef.current = {}; setSnap(null); setToday(null);
+    setEnergy({}); energyRef.current = {}; setSnap(null); setToday(null); setBalance(undefined);
     // how much history THIS plant has — the empty-state copy reads it
     window.PLANT_DAYS = null; window.SYNC = null; syncDaysRef.current = null;
     window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
-    loadLive(); loadToday(); setRefreshKey(k => k + 1);
+    loadLive(); loadToday(); loadBalance(); setRefreshKey(k => k + 1);
   };
   // Fresh-link sync state (0048) rides on every snapshot; the empty-state copy reads
   // it from window.SYNC during render, so it is assigned here in the render path,
@@ -331,19 +344,26 @@ function App() {
     }
     syncDaysRef.current = sync.days;
   }, [snap]);
-  const reloadPlantConfig = () => loadMe().then(loadLive);
+  // A config save can change which plant is shown (a removed login); the balance follows it.
+  const reloadPlantConfig = () => {
+    const before = window.CURRENT_PLANT;
+    return loadMe().then(() => {
+      if (window.CURRENT_PLANT !== before) setBalance(undefined);
+      loadLive(); loadBalance();
+    });
+  };
 
   // initial load: who am I and which plant, then the data
-  useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); }); }, []);
-  // auto refresh: live every 60s (matches SunSynk's cadence), today every 5 min
+  useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); loadBalance(); }); }, []);
+  // auto refresh: live every 60s (matches SunSynk's cadence), today and battery balance every 5 min
   useEffect(() => {
     if (!auto) return;
     const a = setInterval(() => loadLive(false), 60000);
-    const b = setInterval(() => { loadToday(); refreshEnergy(); }, 300000);
+    const b = setInterval(() => { loadToday(); refreshEnergy(); loadBalance(); }, 300000);
     return () => { clearInterval(a); clearInterval(b); };
   }, [auto]);
 
-  const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(); setRefreshKey(k => k + 1); };
+  const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(); loadBalance(); setRefreshKey(k => k + 1); };
 
   const TABS = tabsFor(settings);
   useEffect(() => { if (!TABS.some(t => t.id === tab)) setTab('live'); }, [settings.tabs]);
@@ -439,7 +459,7 @@ function App() {
       </nav>
 
       <main className="content">
-        {tab === 'live' && <window.LiveTab snap={snap} settings={settings} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
+        {tab === 'live' && <window.LiveTab snap={snap} settings={settings} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey} balance={balance}
           onOpenSettings={openSettings} />}
         {tab === 'solar' && <window.SolarTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} />}
         {tab === 'battery' && <window.BatteryTab snap={snap} settings={settings} onOpenSettings={openSettings} />}

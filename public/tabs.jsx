@@ -32,8 +32,8 @@ function Gauge({ value, color, size = 168, label, sub }) {
 }
 
 // Battery-balance banner — watches the SOC/voltage spread between the two inverter
-// banks (the desync signal) while the charge current is being pushed up. Polls every
-// 60 s on its own. Subtle when Balanced, loud when Drifting.
+// banks (the desync signal) while the charge current is being pushed up. Its data is
+// fetched by App. Subtle when Balanced, loud when Drifting.
 // The banner's own frame with shimmering values, so it lands at its height. Also drawn by
 // App's loading shell, so the row is there from the first paint rather than after the
 // snapshot. Each value keeps a space of text in the mono face, so the line is as tall as a
@@ -55,15 +55,8 @@ function BalanceSkeleton() {
   );
 }
 
-function BatteryBalanceBanner({ refreshKey }) {
-  const [b, setB] = React.useState(undefined); // undefined = first load; null = failed
-  React.useEffect(() => {
-    let alive = true;
-    const load = () => window.fetchBalance().then((d) => { if (alive) setB(d); }).catch(() => { if (alive) setB((v) => v === undefined ? null : v); });
-    load();
-    const id = setInterval(load, 60000);
-    return () => { alive = false; clearInterval(id); };
-  }, [refreshKey]);
+// b comes from App (fetched with the snapshot, refreshed every 5 min): undefined = loading.
+function BatteryBalanceBanner({ b }) {
   if (b === undefined) return <BalanceSkeleton />;
   if (!b || b.status === 'unknown') return null;
   const COL = { balanced: '#3ddc84', watch: '#f59e0b', drifting: '#f87171' };
@@ -108,7 +101,7 @@ function BatteryBalanceBanner({ refreshKey }) {
 }
 
 // ---------------------------------------------------------------- LIVE
-function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOpenSettings }) {
+function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, balance, onOpenSettings }) {
   const a = snap.aggregate;
   const feat = snap.features || {};
   const hasBatt = feat.hasBattery !== false;
@@ -293,7 +286,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
 
   return (
     <div className="live-grid">
-      {hasBatt && <BatteryBalanceBanner refreshKey={refreshKey} />}
+      {hasBatt && <BatteryBalanceBanner b={balance} />}
       <div className={'flow-fs-wrap' + (cursorHidden ? ' cursor-hidden' : '')} ref={flowRef}>
         <Card className="flow-card">
           <SectionTitle right={
