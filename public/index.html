@@ -221,10 +221,10 @@
   /* the 28px Fullscreen button made the row taller and centring pushed the title down;
      pin both to the top so the title sits as far from the top edge as from the left */
   .flow-card .section-title { align-items: flex-start; }
-  /* loading stand-in for .flow-wrap: the desktop diagram's viewBox, then a status line;
-     the phone layout (flow.jsx, ≤600px) is a fixed 525px with the status inside it */
-  .flow-skel { aspect-ratio: 884 / 396; }
-  @media (max-width: 600px) { .flow-skel { aspect-ratio: auto; height: 525px !important; } .flow-card .flow-skel-status { display: none; } }
+  /* loading stand-in for .flow-wrap: the summary line (app.jsx), then the diagram at the
+     desktop viewBox's proportions; the stacked layout (flow.jsx, ≤900px) is about 490px */
+  .flow-skel { aspect-ratio: 884 / 378; }
+  @media (max-width: 900px) { .flow-skel { aspect-ratio: auto; height: 490px !important; } }
   /* legend to plot gets the same gap as date bar to legend */
   .hv-root .legend-row { margin-bottom: 12px; }
   .grow { flex: 1; } .stack { display: flex; flex-direction: column; gap: 20px; }
@@ -342,7 +342,7 @@
   .flow-fs-wrap:fullscreen .flow-card, .flow-fs-wrap:-webkit-full-screen .flow-card {
     width: 100%; height: 100%; max-width: 1800px; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
   .flow-fs-wrap:fullscreen .flow-svg, .flow-fs-wrap:-webkit-full-screen .flow-svg { max-height: 72vh; }
-  .flow-fs-wrap:fullscreen .flow-narrative, .flow-fs-wrap:-webkit-full-screen .flow-narrative { font-size: 18px; }
+  .flow-fs-wrap:fullscreen .flow-narrative, .flow-fs-wrap:-webkit-full-screen .flow-narrative { font-size: 22px; }
   .cursor-hidden, .cursor-hidden * { cursor: none !important; }
   /* slide a whole number of dash-periods so the loop is seamless: 195 = 15 (desktop "2 13") × 13 (mobile "2 11") */
   @keyframes flow { to { stroke-dashoffset: -195; } }
@@ -351,25 +351,22 @@
   .flow-node-label { font: 600 10.5px var(--display); letter-spacing: 0.12em; fill: var(--muted); }
   .flow-node-val { font: 700 21px var(--mono); }
   .flow-node-unit { font-size: 11px; fill: var(--muted); }
-  .flow-node-tag { font: 400 9.5px var(--display); letter-spacing: 0.08em; fill: var(--dim); text-transform: uppercase; }
   .flow-col-title { font: 600 10px var(--display); letter-spacing: 0.2em; fill: var(--dim); }
   .flow-node-extra { font: 600 11px var(--mono); fill: var(--batt); }
   .flow-inv-label { font: 700 11px var(--display); letter-spacing: 0.14em; fill: var(--text); }
-  .flow-inv-sub { font: 400 10px var(--mono); fill: var(--muted); }
   .flow-sub { font: 500 9px var(--mono); fill: var(--muted); }
+  /* a card's detail figure: small uppercase label, then the value */
+  .flow-kv-k { font: 600 8.5px var(--display); letter-spacing: 0.1em; fill: var(--dim); }
+  .flow-kv-v { font: 600 11px var(--mono); fill: var(--text); }
   .flow-pct { font: 700 13px var(--mono); }
-  .flow-typical { font: 500 10.5px var(--mono); letter-spacing: 0; text-transform: none; fill: var(--muted); }
-  .flow-status { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap;
-    margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--line); }
-  .flow-narrative { font-size: 14px; color: var(--text); }
+  /* the summary sentence opens the card, above the diagram */
+  .flow-narrative { font-size: 17px; line-height: 1.35; color: var(--text); text-wrap: pretty; margin-bottom: 14px; }
   .flow-narrative b { font-weight: 600; }
-  .flow-chips { display: flex; gap: 16px; flex-wrap: wrap; }
-  .flow-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
-  .flow-chip-dot { width: 9px; height: 9px; border-radius: 50%; border: 2px solid; flex: none; }
-  .flow-chip b { font-weight: 600; }
 
   /* ---------- mobile power-flow (vertical, card-style nodes) ---------- */
   .mflow { display: flex; flex-direction: column; }
+  /* on a tablet the stacked layout keeps a phone-ish width instead of stretching Home across the card */
+  @media (min-width: 601px) { .mflow { width: 100%; max-width: 620px; margin: 0 auto; } }
   .mflow-sources { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
   .mtile { background: rgba(255,255,255,0.015); border: 1px solid var(--line); border-radius: 12px; padding: 13px 12px; min-width: 0; transition: border-color .2s; }
   .mtile-head { display: flex; align-items: center; gap: 7px; margin-bottom: 11px; }
@@ -377,22 +374,31 @@
   .mtile-label { font-size: 11px; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mtile-val { font-family: var(--mono); font-weight: 700; font-size: 21px; line-height: 1; white-space: nowrap; }
   .mtile-val .u { font-size: 11px; color: var(--muted); margin-left: 2px; font-weight: 600; }
-  .mtile-state { font-size: 12px; font-weight: 600; margin-top: 9px; line-height: 1.35; word-break: break-word; }
-  .mtile-sub { font-size: 11px; color: var(--dim); margin-top: 7px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .mtile-typical { color: var(--dim); font-weight: 500; }
-  .mflow-links { display: block; width: 100%; height: 54px; }
+  /* a tile's detail figure: small uppercase label over the value */
+  .mtile-kv { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; min-width: 0; }
+  .mtile-kv span { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  .mtile-kv b { font: 600 12.5px var(--mono); color: var(--text); white-space: nowrap; }
+  /* battery charge at the foot of its tile: a strip filled to the level, the % beside it */
+  .mtile-charge { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  .mtile-charge b { font: 700 16px var(--mono); white-space: nowrap; }
+  .mtile-strip { flex: 1; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
+  .mtile-strip i { display: block; height: 100%; border-radius: 3px; }
+  .mflow-links { display: block; width: 100%; height: 72px; overflow: visible; }
   .mflow-inv { display: flex; flex-direction: column; align-items: center; }
   .mflow-inv svg { display: block; }
   .mflow-inv-label { font: 700 12px var(--display); letter-spacing: 0.14em; color: var(--text); margin-top: 8px; }
-  .mflow-inv-sub { font: 400 11px var(--mono); color: var(--muted); margin-top: 3px; }
-  .mflow-down { display: block; width: 8px; height: 32px; margin: 2px auto; }
-  .mflow-home { display: flex; align-items: center; gap: 14px; background: rgba(255,255,255,0.015); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 6px; transition: border-color .2s; }
+  .mflow-down { display: block; width: 12px; height: 56px; margin: 0 auto; overflow: visible; }
+  .mflow-home { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 14px; background: rgba(255,255,255,0.015); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; transition: border-color .2s; }
+  /* where the home's power is coming from: one segment per source, full width under Home */
+  .mflow-split { flex: 1 0 100%; display: flex; gap: 2px; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,0.08); }
+  .mflow-split i { display: block; height: 100%; }
+  .mflow-split-words { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: -6px; font-size: 12px; font-weight: 600; }
   .mflow-home svg { flex: none; }
   .mflow-home-text { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
   .mflow-home-label { font-size: 11px; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; }
   .mflow-home-val { font-family: var(--mono); font-weight: 700; font-size: 24px; line-height: 1; }
   .mflow-home-val .u { font-size: 12px; color: var(--muted); margin-left: 2px; font-weight: 600; }
-  .mflow-home-today { margin-left: auto; font-size: 12px; color: var(--dim); white-space: nowrap; padding-left: 10px; }
+  .mflow-home-today { margin-left: auto; margin-top: 0; padding-left: 10px; align-items: flex-end; }
 
   /* ---------- trend arrows on overview cards ---------- */
   .trend-badge { font-family: var(--display); font-size: 12px; font-weight: 600; margin-left: 9px; letter-spacing: 0; white-space: nowrap; }
@@ -860,9 +866,8 @@
     /* chart: smaller pills */
     .legend-chip { padding: 5px 10px; font-size: 11.5px; }
 
-    /* power-flow: status stacks; the 4 chips become a 2×2 grid */
-    .flow-status { flex-direction: column; align-items: stretch; gap: 12px; }
-    .flow-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+    /* power-flow: the summary sentence a step smaller on a phone */
+    .flow-narrative { font-size: 15.5px; }
 
     /* keep wide controls/SVGs from forcing the grid column wider than the screen */
     .overview-section, .flow-card { overflow: hidden; }

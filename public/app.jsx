@@ -159,15 +159,10 @@ function LiveSkeleton() {
       <window.BalanceSkeleton />
       <div className="card flow-card">
         <window.SectionTitle right={<button className="flow-fs-btn" disabled><window.FsEnterIcon /><span>Fullscreen</span></button>}>POWER FLOW</window.SectionTitle>
+        {/* the summary sentence opens the card, one line of its height */}
+        <div className="flow-narrative" style={{ height: 23, display: 'flex', alignItems: 'center' }}><window.Skeleton w={300} h={12} r={6} style={{ maxWidth: '80%' }} /></div>
         {/* sized in CSS to the diagram's proportions, which change with the card width */}
         <window.Skeleton className="flow-skel" h="auto" r={12} />
-        {/* the status sentence under the diagram, so the card's bottom gutter matches */}
-        <div className="flow-status flow-skel-status">
-          <div style={{ height: 18, display: 'flex', alignItems: 'center' }}><window.Skeleton w={190} h={10} r={5} /></div>
-          <div style={{ height: 18, display: 'flex', alignItems: 'center', gap: 16 }}>
-            {[78, 84, 92, 84].map((w, i) => <window.Skeleton key={i} w={w} h={10} r={5} />)}
-          </div>
-        </div>
       </div>
       <div className="card chart-card">
         {/* The real chart with no data yet: its day picker and legend draw for real and

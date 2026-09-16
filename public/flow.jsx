@@ -5,7 +5,9 @@
 // + chips below are shared (chips wrap 2×2 on mobile via CSS).
 // ============================================================================
 
-function useFlowMobile(bp = 600) {
+// 900, not 600: the wide layout is one scaled SVG, and at tablet widths its text
+// shrank to about 7px. Tablets get the stacked layout, which keeps real type sizes.
+function useFlowMobile(bp = 900) {
   const [mobile, setMobile] = React.useState(
     () => typeof window !== 'undefined' && window.matchMedia(`(max-width:${bp}px)`).matches
   );
@@ -16,6 +18,12 @@ function useFlowMobile(bp = 600) {
     return () => mq.removeEventListener('change', h);
   }, []);
   return mobile;
+}
+
+// node colours are hex; cards tint and outline with them at the same strengths everywhere
+function flowAlpha(hex, a) {
+  const h = String(hex).replace('#', '');
+  return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`;
 }
 
 function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features }) {
@@ -31,33 +39,72 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   // faster than it can throttle; on a site that cannot sell that reads as standby.
   const sells = feat.sells === true;
   const gridExport = sells && agg.gridPower < 0 ? -agg.gridPower : 0;
-  const kwhToday = v => (v != null ? v.toFixed(1) + ' kWh today' : null);
   const hh = (h) => String(h).padStart(2, '0') + ':00';
-  // Typical charge sits on the live-% line as a muted ≈ N%, so the battery card
-  // stays the same height as solar/grid. All three source cards widen a little
-  // to fit "discharging 41% ≈ 69%" without clipping.
-  const typicalTitle = typicalSoc != null
-    ? 'Typical charge at ' + (typicalHour != null ? hh(typicalHour) : 'this hour') + ' over complete days'
-    : null;
+  // The usual charge at this hour is hover text on the battery's charge %.
+  const usualTitle = typicalSoc != null
+    ? 'Usually ' + typicalSoc + '% at ' + (typicalHour != null ? hh(typicalHour) : 'this hour') + ' over complete days'
+    : undefined;
 
+  // Detail under each card: one labelled figure ({ k: label, v: value, on: click }),
+  // the label small and uppercase, the value in mono, so every card reads the same way.
+  const today = v => (v != null ? { k: 'Today', v: Number(v).toFixed(1) + ' kWh' } : null);
+  // battInfo arrives as "3h 40m to empty" / "1h 55m to full" / "Set pack size"; no time while idle
+  const battRow = (() => {
+    const m = battInfo && /^(.*) to (empty|full)$/.exec(battInfo);
+    if (m) return { k: m[2] === 'empty' ? 'Empty in' : 'Full in', v: m[1] };
+    if (battInfo) return { k: 'Time left', v: battInfo, on: onBattInfo };
+    return { k: 'Idle', v: '' };
+  })();
   // Sources: only what the plant has. Grid flows both ways — an export runs the
-  // animation back towards the grid node.
+  // animation back towards the grid node. Each card: label, value, then one detail figure.
   const left = [
-    { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun', tag: null, sub: kwhToday(agg.pvToday) },
+    { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun', row: today(agg.pvToday) },
     // w stays the magnitude (animation, stroke); val is the signed figure printed on the node,
-    // always + = charging; Settings → Display applies everywhere except here
+    // always + = charging; Settings → Display applies everywhere except here.
+    // The charge % sits at the foot of the card, big, beside a strip filled to the same level.
     hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: window.battShown(agg.battOut, 'charge'), icon: 'battery', soc: agg.battSoc, reverse: charging,
-      tag: agg.battPower > 5 ? (charging ? 'charging' : 'discharging') : 'idle', pct: agg.battSoc,
-      sub: battInfo || null, onSub: onBattInfo, usualPct: typicalSoc, typicalTitle },
-    hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 5 ? gridExport : gridImport, icon: 'bolt', reverse: gridExport > 5,
-      tag: gridExport > 5 ? 'exporting' : gridImport > 5 ? 'importing' : 'standby',
-      sub: gridExport > 5 && agg.gridToToday != null ? agg.gridToToday.toFixed(1) + ' kWh out today' : kwhToday(agg.gridFromToday) },
+      charge: agg.battSoc, row: battRow },
+    // bought from the grid today; zero on most days, and that is worth seeing too
+    hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 5 ? gridExport : gridImport, icon: 'bolt', reverse: gridExport > 5, row: today(agg.gridFromToday ?? 0) },
   ].filter(Boolean);
-  const home = { label: 'Home', color: C.load, w: agg.loadNow, sub: kwhToday(agg.loadToday) };
+
+  // Where the home's power is coming from right now: the battery only while discharging,
+  // the grid only while importing, solar whatever is left (never more than it is making).
+  const battIn = hasBatt && !charging && agg.battPower > 5 ? agg.battPower : 0;
+  const gridIn = hasGrid ? gridImport : 0;
+  const solarIn = Math.max(0, Math.min(agg.pvNow, agg.loadNow - battIn - gridIn));
+  const split = [
+    { label: 'Solar', color: C.pv, w: solarIn },
+    { label: 'Battery', color: C.batt, w: battIn },
+    { label: 'Grid', color: C.grid, w: gridIn },
+  ].filter(s => s.w > 5);
+  const splitTotal = split.reduce((a, s) => a + s.w, 0);
+  split.forEach(s => { s.pct = Math.round((s.w / splitTotal) * 100); });
+  const home = { label: 'Home', color: C.load, w: agg.loadNow, row: today(agg.loadToday) };
 
   const CEIL = 8000, MAXTH = 30;
   const th = w => Math.max(3.5, Math.min(MAXTH, (w / CEIL) * MAXTH + 3.5));
   const valKW = w => (w / 1000).toFixed(2);
+
+  // One look for every line, desktop and phone: a soft band with dots moving along it,
+  // faster with more power. `fixed` is the phone: widths stay in screen pixels where the
+  // drawing is stretched to fit (preserveAspectRatio="none"), and the band is slimmer.
+  const flowLine = (d, color, w, key, reverse, fixed) => {
+    const active = w > 5;
+    const dur = Math.max(0.9, 3.2 - (Math.min(w, CEIL) / CEIL) * 2.3);
+    const ve = fixed ? 'non-scaling-stroke' : undefined;
+    return (
+      <g key={key}>
+        <path d={d} fill="none" stroke={active ? color : 'rgba(255,255,255,0.08)'}
+          strokeOpacity={active ? 0.16 : 1} strokeWidth={active ? (fixed ? 6 : 11) : (fixed ? 2 : 2.5)} strokeLinecap="round" vectorEffect={ve} />
+        {active && (
+          <path d={d} fill="none" stroke={color} strokeOpacity="1" strokeWidth={fixed ? 2.2 : 2.8}
+            strokeDasharray="2 13" strokeLinecap="round" vectorEffect={ve}
+            style={{ animation: `flow ${dur}s linear infinite ${reverse ? 'reverse' : 'normal'}` }} />
+        )}
+      </g>
+    );
+  };
 
   // node icons (kept simple & monoline)
   const icon = (type, cx, cy, color, active, soc) => {
@@ -110,71 +157,69 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
 
   // ---------------- DESKTOP (wide, horizontal) ----------------
   function renderDesktop() {
-    const W = 980, H = 436;
-    const invX = 490, invY = H / 2;
+    // Source cards and Home are 96 high: label, value, detail, and the battery's charge foot.
+    // Fewer sources sit centred on the same slots.
+    const nodeW = 184, nodeH = 96, nx = -76, ny = -nodeH / 2;
+    const pitch = nodeH + 16, top0 = 58 + nodeH / 2;
+    const W = 980, H = 58 + 3 * nodeH + 2 * 16 + 20;
+    const invX = 490, invY = top0 + pitch;
     // Cards grow right so the left edge (and the SOURCES column) stay put.
-    const nodeW = 184, nodeH = 88, nx = -76, ny = -44;
     const srcX = 150, homeX = W - 150;
-    const sy = { 3: [110, 218, 326], 2: [164, 272], 1: [218] }[left.length] || [110, 218, 326];
+    const sy = left.map((_, i) => top0 + i * pitch + ((3 - left.length) * pitch) / 2);
     const srcRight = srcX + nx + nodeW;
     const srcMid = srcX + nx + nodeW / 2;
 
     const link = (x1, y1, x2, y2, color, w, key, reverse) => {
       const mx = (x1 + x2) / 2;
-      const d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
-      const active = w > 5;
-      const dur = Math.max(0.9, 3.2 - (Math.min(w, CEIL) / CEIL) * 2.3);
-      return (
-        <g key={key}>
-          <path d={d} fill="none" stroke={active ? color : 'rgba(255,255,255,0.08)'}
-            strokeOpacity={active ? 0.16 : 1} strokeWidth={active ? 11 : 2.5} strokeLinecap="round" />
-          {active && (
-            <path d={d} fill="none" stroke={color} strokeOpacity="1" strokeWidth="2.8"
-              strokeDasharray="2 13" strokeLinecap="round"
-              style={{ animation: `flow ${dur}s linear infinite ${reverse ? 'reverse' : 'normal'}` }} />
-          )}
-        </g>
-      );
+      return flowLine(`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`, color, w, key, reverse);
     };
+
+    // a detail figure: small uppercase label, then the value in mono
+    const kv = (r, x, y) => r && (r.on
+      // a prompt that leads somewhere ("Set pack size"): clickable and keyboard-reachable
+      ? <text x={x} y={y} className="flow-sub flow-link" role="link" tabIndex={0} onClick={r.on}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); r.on(); } }}>
+          <tspan className="flow-kv-k">{r.k.toUpperCase()}</tspan><tspan dx="6" className="flow-kv-v">{r.v}</tspan>
+        </text>
+      : <text x={x} y={y} className="flow-sub">
+          <tspan className="flow-kv-k">{r.k.toUpperCase()}</tspan>{r.v && <tspan dx="6" className="flow-kv-v">{r.v}</tspan>}
+        </text>);
 
     const sideNode = (n, i) => {
       const active = n.w > 5;
-      const ly = n.tag ? -24 : -16;
-      const vy = n.tag ? 1 : 7;
-      const ty = n.tag ? 20 : null;
-      const subY = n.tag ? 37 : 28;
+      const ly = ny + 22, vy = ny + 47;
       return (
         <g key={n.key} transform={`translate(${srcX},${sy[i]})`}>
           {active && <rect x={nx} y={ny} width={nodeW} height={nodeH} rx={15} fill={n.color} opacity="0.07" />}
           <rect x={nx} y={ny} width={nodeW} height={nodeH} rx={15} fill="rgba(255,255,255,0.015)"
             stroke={n.color} strokeOpacity={active ? 0.6 : 0.22} strokeWidth="1.3" filter={active ? 'url(#flglow)' : undefined} />
-          {icon(n.icon, -56, -4, n.color, active, n.soc)}
+          {icon(n.icon, -56, vy - 7, n.color, active, n.soc)}
           <text x={-36} y={ly} className="flow-node-label">{n.label.toUpperCase()}</text>
           <text x={-36} y={vy} className="flow-node-val" fill={active ? n.color : 'var(--muted)'} textAnchor="start">{valKW(n.val ?? n.w)}<tspan className="flow-node-unit"> kW</tspan></text>
-          {n.tag && (
-            <text x={-36} y={ty} className="flow-node-tag" textAnchor="start" fill={active ? n.color : 'var(--dim)'} fillOpacity="0.9">
-              {n.typicalTitle && <title>{n.typicalTitle}</title>}
-              {n.tag}
-              {n.pct != null && <tspan dx="6" className="flow-pct" fill={n.color}>{n.pct}%</tspan>}
-              {n.usualPct != null && <tspan dx="5" className="flow-typical">≈ {n.usualPct}%</tspan>}
-            </text>
+          {kv(n.row, -36, ny + 67)}
+          {n.charge != null && (
+            <g>
+              {usualTitle && <title>{usualTitle}</title>}
+              <rect x={-36} y={ny + 79} width={84} height={5} rx={2.5} fill="rgba(255,255,255,0.08)" />
+              <rect x={-36} y={ny + 79} width={(84 * Math.max(0, Math.min(100, n.charge))) / 100} height={5} rx={2.5} fill={n.color} />
+              <text x={nx + nodeW - 14} y={ny + 87} textAnchor="end" className="flow-pct" fill={n.color} style={{ fontSize: 17 }}>{n.charge}%</text>
+            </g>
           )}
-          {n.sub && (n.onSub
-            // a prompt that leads somewhere ("Set pack size"): clickable and keyboard-reachable
-            ? <text x={-36} y={subY} className="flow-sub flow-link" role="link" tabIndex={0} onClick={n.onSub}
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); n.onSub(); } }}>{n.sub}</text>
-            : <text x={-36} y={subY} className="flow-sub">{n.sub}</text>)}
         </g>
       );
     };
     const homeActive = home.w > 5;
+    // the split bar under Home: one segment per source feeding it, 2 apart
+    const splitBar = 130;
+    let sx = -52;
+    const splitW = splitBar - 2 * Math.max(0, split.length - 1);
 
     return (
-      <svg viewBox="48 20 884 396" className="flow-svg" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox={`48 20 884 ${H - 20}`} className="flow-svg" preserveAspectRatio="xMidYMid meet">
         {defs}
         <rect x="0" y="58" width={W} height={H - 58} fill="url(#flgrid)" />
-        {left.map((n, i) => link(srcRight + 12, sy[i], invX - 60, invY + (sy[i] - invY) * 0.34, n.color, n.w, 'l' + n.key, n.reverse))}
-        {link(invX + 60, invY, homeX - 90, invY, home.color, home.w, 'lhome', false)}
+        {left.map((n, i) => link(srcRight + 12, sy[i], invX - 60, invY + (sy[i] - invY) * 0.2, n.color, n.w, 'l' + n.key, n.reverse))}
+        {link(invX + 60, invY, homeX - 104, invY, home.color, home.w, 'lhome', false)}
         <circle cx={invX} cy={invY} r={47} fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.24)" strokeWidth="1.3" />
         <circle cx={invX} cy={invY} r={47} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="8" />
         <g transform={`translate(${invX}, ${invY})`} strokeLinecap="round">
@@ -184,15 +229,27 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
           <path d="M 7 3 q 5 -11 9.5 0 q 4.5 11 9.5 0" stroke={C.pv} strokeWidth="2.2" fill="none" />
         </g>
         <text x={invX} y={invY - 62} textAnchor="middle" className="flow-inv-label">INVERTER{inverters > 1 ? 'S' : ''}</text>
-        <text x={invX} y={invY + 70} textAnchor="middle" className="flow-inv-sub">{inverters} online</text>
+        {/* Home is as wide as the source cards, so the split in words fits under its bar */}
         <g transform={`translate(${homeX},${invY})`}>
-          {homeActive && <rect x={-78} y={-44} width={156} height={88} rx={15} fill={home.color} opacity="0.07" />}
-          <rect x={-78} y={-44} width={156} height={88} rx={15} fill="rgba(255,255,255,0.015)"
+          {homeActive && <rect x={-92} y={-58} width={184} height={116} rx={15} fill={home.color} opacity="0.07" />}
+          <rect x={-92} y={-58} width={184} height={116} rx={15} fill="rgba(255,255,255,0.015)"
             stroke={home.color} strokeOpacity="0.6" strokeWidth="1.3" filter={homeActive ? 'url(#flglow)' : undefined} />
-          {icon('home', -56, -4, home.color, homeActive)}
-          <text x={-36} y={-16} className="flow-node-label">HOME</text>
-          <text x={-36} y={7} className="flow-node-val" fill={home.color} textAnchor="start">{valKW(home.w)}<tspan className="flow-node-unit"> kW</tspan></text>
-          {home.sub && <text x={-36} y={28} className="flow-sub">{home.sub}</text>}
+          {icon('home', -72, -18, home.color, homeActive)}
+          <text x={-52} y={-36} className="flow-node-label">HOME</text>
+          <text x={-52} y={-11} className="flow-node-val" fill={home.color} textAnchor="start">{valKW(home.w)}<tspan className="flow-node-unit"> kW</tspan></text>
+          {kv(home.row, -52, 8)}
+          {/* where it is coming from: the bar, and the same split in words under it */}
+          <rect x={-52} y={19} width={splitBar} height={5} rx={2.5} fill="rgba(255,255,255,0.08)" />
+          {split.map(s => {
+            const w = (splitW * s.w) / splitTotal;
+            const el = <rect key={s.label} x={sx} y={19} width={w} height={5} rx={2.5} fill={s.color} />;
+            sx += w + 2;
+            return el;
+          })}
+          <text x={-52} y={40} className="flow-sub">
+            {/* three sources: the colours already match the bar, so just the shares */}
+            {split.map((s, j) => <tspan key={s.label} dx={j ? 8 : 0} fill={s.color}>{split.length > 2 ? '' : s.label + ' '}{s.pct}%</tspan>)}
+          </text>
         </g>
         {left.map(sideNode)}
         <text x={srcMid} y={32} textAnchor="middle" className="flow-col-title">SOURCES</text>
@@ -203,9 +260,9 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
 
   // ---------------- MOBILE (vertical, card-style HTML nodes) ----------------
   function renderMobile() {
-    const dur = w => Math.max(0.9, 3.2 - (Math.min(w, CEIL) / CEIL) * 2.3);
     const homeActive = home.w > 5;
-    const cols = { 3: [16.67, 50, 83.33], 2: [30, 70], 1: [50] }[left.length] || [16.67, 50, 83.33]; // tile x-centres as %
+    // tile x-centres as %: the tiles share the row equally, however many sources the plant has
+    const cols = left.map((_, i) => ((i + 0.5) / left.length) * 100);
     const miniIcon = (type, color, soc) => (
       <svg width="17" height="17" viewBox="-11 -11 22 22">{icon(type, 0, 0, color, true, soc)}</svg>
     );
@@ -214,46 +271,44 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
       const active = n.w > 5;
       return (
         <div className="mtile" key={n.key}
-          style={active ? { borderColor: n.color, boxShadow: `inset 0 0 0 1px ${n.color}`, background: n.color + '12' } : null}>
+          // same outline and tint strengths as the desktop cards
+          style={{ borderColor: flowAlpha(n.color, active ? 0.6 : 0.22), background: active ? flowAlpha(n.color, 0.07) : undefined }}>
           <div className="mtile-head">
             {miniIcon(n.icon, n.color, n.soc)}
             <span className="mtile-label">{n.label}</span>
           </div>
           <div className="mtile-val" style={{ color: active ? n.color : 'var(--muted)' }}>{valKW(n.val ?? n.w)}<span className="u">kW</span></div>
-          {n.key === 'bat'
-            ? <>
-                <div className="mtile-state" style={{ color: active ? n.color : 'var(--dim)' }} title={n.typicalTitle || undefined}>
-                  {n.tag}{n.pct != null ? ` · ${n.pct}%` : ''}{n.usualPct != null ? <span className="mtile-typical"> ≈ {n.usualPct}%</span> : null}
-                </div>
-                {n.sub && <div className="mtile-sub">{n.onSub ? <button type="button" className="mini-link" onClick={n.onSub}>{n.sub}</button> : n.sub}</div>}
-              </>
-            : (n.sub && <div className="mtile-sub">{n.sub}</div>)}
+          {n.row && (
+            <div className="mtile-kv">
+              <span>{n.row.k}</span>
+              {n.row.on ? <button type="button" className="mini-link" onClick={n.row.on}>{n.row.v}</button> : n.row.v && <b>{n.row.v}</b>}
+            </div>
+          )}
+          {n.charge != null && (
+            <div className="mtile-charge" title={usualTitle}>
+              <span className="mtile-strip"><i style={{ width: Math.max(0, Math.min(100, n.charge)) + '%', background: n.color }} /></span>
+              <b style={{ color: n.color }}>{n.charge}%</b>
+            </div>
+          )}
         </div>
       );
     };
 
+    // Like desktop: each line starts a gap below its tile and stops a gap short of the
+    // inverter, spread out rather than merging into one point.
     const linkStrip = (
-      <svg className="mflow-links" viewBox="0 0 100 54" preserveAspectRatio="none">
+      <svg className="mflow-links" viewBox="0 0 100 72" preserveAspectRatio="none">
         {left.map((n, i) => {
           const sx = cols[i];
-          const active = n.w > 5;
-          const d = `M ${sx} 1 C ${sx} 30, 50 22, 50 53`;
-          return (
-            <g key={n.key}>
-              <path d={d} fill="none" stroke={active ? n.color : 'rgba(255,255,255,0.09)'} strokeOpacity={active ? 0.18 : 1}
-                strokeWidth={active ? 5 : 1.6} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
-              {active && <path d={d} fill="none" stroke={n.color} strokeWidth="2.4" vectorEffect="non-scaling-stroke"
-                strokeDasharray="2 11" strokeLinecap="round"
-                style={{ animation: `flow ${dur(n.w)}s linear infinite ${n.reverse ? 'reverse' : 'normal'}` }} />}
-            </g>
-          );
+          const ex = 50 + (sx - 50) * 0.2;
+          return flowLine(`M ${sx} 12 C ${sx} 40, ${ex} 32, ${ex} 60`, n.color, n.w, n.key, n.reverse, true);
         })}
       </svg>
     );
 
     return (
       <div className="mflow">
-        <div className="mflow-sources">{left.map(mTile)}</div>
+        <div className="mflow-sources" style={{ gridTemplateColumns: `repeat(${left.length}, minmax(0, 1fr))` }}>{left.map(mTile)}</div>
 
         {linkStrip}
 
@@ -268,36 +323,32 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
             </g>
           </svg>
           <div className="mflow-inv-label">INVERTER{inverters > 1 ? 'S' : ''}</div>
-          <div className="mflow-inv-sub">{inverters} online</div>
         </div>
 
         <svg className="mflow-down" viewBox="0 0 10 100" preserveAspectRatio="none">
-          <line x1="5" y1="0" x2="5" y2="100" stroke={homeActive ? home.color : 'rgba(255,255,255,0.09)'} strokeOpacity={homeActive ? 0.18 : 1}
-            strokeWidth={homeActive ? 5 : 1.6} vectorEffect="non-scaling-stroke" />
-          {homeActive && <line x1="5" y1="0" x2="5" y2="100" stroke={home.color} strokeWidth="2.4" vectorEffect="non-scaling-stroke"
-            strokeDasharray="2 11" style={{ animation: `flow ${dur(home.w)}s linear infinite` }} />}
+          {flowLine('M 5 21 L 5 79', home.color, home.w, 'home', false, true)}
         </svg>
 
         <div className="mflow-home"
-          style={homeActive ? { borderColor: home.color, boxShadow: `inset 0 0 0 1px ${home.color}`, background: home.color + '10' } : null}>
+          style={{ borderColor: flowAlpha(home.color, 0.6), background: homeActive ? flowAlpha(home.color, 0.07) : undefined }}>
           <svg width="22" height="22" viewBox="-12 -12 24 24">{icon('home', 0, 0, home.color, homeActive)}</svg>
           <div className="mflow-home-text">
             <span className="mflow-home-label">HOME</span>
             <span className="mflow-home-val" style={{ color: home.color }}>{valKW(home.w)}<span className="u">kW</span></span>
           </div>
-          {home.sub && <div className="mflow-home-today">{home.sub}</div>}
+          {home.row && <div className="mflow-home-today mtile-kv"><span>{home.row.k}</span><b>{home.row.v}</b></div>}
+          <div className="mflow-split">
+            {split.map(s => <i key={s.label} style={{ flexGrow: s.w, background: s.color }} />)}
+          </div>
+          <div className="mflow-split-words">
+            {split.map(s => <span key={s.label} style={{ color: s.color }}>{s.label} {s.pct}%</span>)}
+          </div>
         </div>
       </div>
     );
   }
 
-  const homeActive = home.w > 5;
-  const chips = [
-    { label: 'Solar', color: C.pv, active: agg.pvNow > 5, state: agg.pvNow > 5 ? valKW(agg.pvNow) + ' kW' : 'idle' },
-    hasBatt && { label: 'Battery', color: C.batt, active: agg.battPower > 5, state: agg.battPower > 5 ? (charging ? 'charging' : 'discharging') : 'idle' },
-    hasGrid && { label: 'Grid', color: C.grid, active: gridImport > 5 || gridExport > 5, state: gridExport > 5 ? 'exporting' : gridImport > 5 ? 'importing' : 'standby' },
-    { label: 'Home', color: C.load, active: homeActive, state: valKW(home.w) + ' kW' },
-  ].filter(Boolean);
+  // The one-line summary of what is happening; it opens the card, above the diagram.
   let narrative;
   if (gridExport > 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ', charging the battery' : ''} and sending <b style={{ color: C.grid }}>{valKW(gridExport)} kW</b> to the grid.</>;
   // >= home - 50, not > home + 50: a home drawing exactly what the panels make is the
@@ -315,18 +366,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
 
   return (
     <div className="flow-wrap">
+      <div className="flow-narrative">{narrative}</div>
       {mobile ? renderMobile() : renderDesktop()}
-      <div className="flow-status">
-        <div className="flow-narrative">{narrative}</div>
-        <div className="flow-chips">
-          {chips.map(c => (
-            <span className="flow-chip" key={c.label}>
-              <i className="flow-chip-dot" style={{ background: c.active ? c.color : 'transparent', borderColor: c.color }} />
-              {c.label} <b style={{ color: c.active ? c.color : 'var(--muted)' }}>{c.state}</b>
-            </span>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
