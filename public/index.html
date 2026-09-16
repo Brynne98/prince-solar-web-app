@@ -333,17 +333,36 @@
   .flow-fs-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line);
     border-radius: 9px; color: var(--muted); font-size: 12px; padding: 5px 11px; cursor: pointer; transition: .15s; }
   .flow-fs-btn:hover { border-color: var(--line-2); color: var(--text); }
-  /* wall-dashboard mode: fill the whole screen (incl. tablets), centre the flow */
-  .flow-fs-wrap:fullscreen, .flow-fs-wrap:-webkit-full-screen {
-    width: 100%; height: 100%; background: var(--bg);
-    display: flex; align-items: center; justify-content: center;
-    padding: max(10px, 2vmin) max(10px, 2.5vmin); overflow: hidden;
-    padding-top: max(10px, env(safe-area-inset-top)); padding-bottom: max(10px, env(safe-area-inset-bottom)); }
-  .flow-fs-wrap:fullscreen .flow-card, .flow-fs-wrap:-webkit-full-screen .flow-card {
-    width: 100%; height: 100%; max-width: 1800px; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
-  .flow-fs-wrap:fullscreen .flow-svg, .flow-fs-wrap:-webkit-full-screen .flow-svg { max-height: 72vh; }
-  .flow-fs-wrap:fullscreen .flow-narrative, .flow-fs-wrap:-webkit-full-screen .flow-narrative { font-size: 22px; }
-  .cursor-hidden, .cursor-hidden * { cursor: none !important; }
+  /* wall-dashboard mode (tabs.jsx): a class rather than :fullscreen, because an iPad
+     home-screen app has no Fullscreen API and there the wrapper just covers the page.
+     No card: status and Exit in a bar at the top, the sentence and diagram centred in
+     the rest, every size taken from the screen. */
+  .flow-fs-wrap.wall { --wall-pad: clamp(16px, 3vmin, 48px);
+    position: fixed; inset: 0; z-index: 1000; overflow: hidden; background: var(--bg);
+    display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); gap: clamp(8px, 1.5vmin, 24px);
+    padding: max(var(--wall-pad), env(safe-area-inset-top)) max(var(--wall-pad), env(safe-area-inset-right))
+             max(var(--wall-pad), env(safe-area-inset-bottom)) max(var(--wall-pad), env(safe-area-inset-left));
+    font-size: clamp(14px, 1.6vmin + 4px, 24px); }
+  html:has(.flow-fs-wrap.wall) { overflow: hidden; }
+  .wall-bar { display: flex; align-items: center; justify-content: space-between; gap: 1em; }
+  .wall-status { display: inline-flex; align-items: center; gap: .6em; min-width: 0; white-space: nowrap; }
+  .wall-status .status-dot { width: .55em; height: .55em; }
+  .wall-status .status-word { font-size: 1em; }
+  .wall-status .status-detail { font-size: .9em; padding-left: .6em; }
+  .wall .wall-exit { font-size: .85em; padding: .5em .9em; gap: .5em; border-radius: .7em; flex: none;
+    transition: opacity .3s, visibility .3s, border-color .15s, color .15s; }
+  .wall .wall-exit svg { width: 1em; height: 1em; }
+  @media (pointer: coarse) { .wall .wall-exit { min-height: 44px; } }
+  .wall.idle .wall-exit:not(:focus-visible) { opacity: 0; visibility: hidden; }
+  .wall.idle, .wall.idle * { cursor: none !important; }
+  @media (prefers-reduced-motion: reduce) { .wall .wall-exit { transition: none; } }
+  .wall .flow-card { background: none; border: 0; border-radius: 0; padding: 0; min-height: 0; }
+  .wall .flow-wrap { height: 100%; display: flex; flex-direction: column; justify-content: center; }
+  .wall .flow-narrative { flex: none; text-align: center; text-wrap: balance;
+    font-size: clamp(18px, 2vmin + 8px, 40px); margin-bottom: clamp(10px, 2.5vmin, 36px); }
+  .wall .flow-svg { flex: 0 1 auto; min-height: 0; }
+  /* the stacked layout is HTML at phone sizes; tabs.jsx sets the zoom that fills the room */
+  .wall .mflow { flex: none; width: 440px; max-width: none; margin: 0 auto; zoom: var(--wall-zoom, 1); }
   /* slide a whole number of dash-periods so the loop is seamless: 195 = 15 (desktop "2 13") × 13 (mobile "2 11") */
   @keyframes flow { to { stroke-dashoffset: -195; } }
   /* the moving dashes are the one piece of continuous motion on the page */
@@ -888,8 +907,9 @@
     .bb-div { display: none; }
     .bb-stats { flex-basis: 100%; gap: 10px 18px; }
 
-    /* fullscreen API is a no-op on mobile browsers — hide the button there */
-    .flow-fs-btn { display: none; }
+    /* a phone is not a wall display, so no Fullscreen button there
+       (Exit stays, for a desktop window narrowed while in wall mode) */
+    .flow-fs-btn:not(.wall-exit) { display: none; }
 
     /* trend card sub-nav: stack the label above its control on phones */
     .trend-subnav { flex-direction: column; align-items: flex-start; gap: 8px; }

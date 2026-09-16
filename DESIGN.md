@@ -346,8 +346,13 @@ Desktop keeps its sizes.
 Settings is tabbed: a 150px column of vertical tabs beside one 720px card, the
 section chosen. On phones the tabs become a horizontal scrolling row above the card.
 
-A fullscreen "wall display" mode centres the flow card on the bare ground with safe-area
-padding, caps the diagram at 72vh, and hides the cursor.
+A fullscreen "wall display" mode drops the card for the bare ground with safe-area
+padding. The live status and an Exit button sit in a bar at the top; the summary sentence
+is centred as the headline and the diagram fills the rest, every size taken from the
+screen. On an upright tablet the stacked tiles are zoomed to fill the width. After 3
+seconds idle the Exit button and cursor hide until a move, tap or key. Where there is no
+Fullscreen API (an iPad home-screen app) the same view covers the page, and the screen
+is kept awake while it shows.
 
 ## Elevation & Depth
 

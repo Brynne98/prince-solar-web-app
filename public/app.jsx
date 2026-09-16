@@ -43,6 +43,34 @@ function useNow(ms) {
 // Header status: one word, coloured. Live = fresh data and every inverter up;
 // Stale = the poller is behind (> 3 min) or an inverter is down; Offline = no data
 // for 15 min or nothing reporting.
+function plantStatus(snap, now) {
+  const online = snap.inverters.filter(i => i.status === 'online').length;
+  const total = snap.inverters.length;
+  const offline = total - online;
+  const last = snap.lastReading || snap.updated;
+  const ageS = (now - last.getTime()) / 1000;
+  const status = (total > 0 && offline >= total) || ageS > 900 ? 'offline' : (offline > 0 || ageS > 180) ? 'stale' : 'live';
+  return {
+    status, last,
+    word: { live: 'Live', stale: 'Stale', offline: 'Offline' }[status],
+    detail: offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now),
+  };
+}
+
+// The same status on the fullscreen flow, which covers the header. Its own clock, so
+// the tick re-renders this line and not the Live tab.
+function WallStatus({ snap }) {
+  const s = plantStatus(snap, useNow(15000));
+  return (
+    <span className={'wall-status status-' + s.status} title={'last reading ' + window.fmtTime(s.last)}>
+      <span className="status-dot" />
+      <span className="status-word">{s.word}</span>
+      <span className="status-detail mono">{s.detail}</span>
+    </span>
+  );
+}
+window.WallStatus = WallStatus;
+
 function HeaderStatus({ snap, onRefresh, busy, notice }) {
   const now = useNow(15000);
   // Just after a plant switch the pill names the plant for a moment, so the swap is
@@ -59,14 +87,7 @@ function HeaderStatus({ snap, onRefresh, busy, notice }) {
       </div>
     );
   }
-  const online = snap.inverters.filter(i => i.status === 'online').length;
-  const total = snap.inverters.length;
-  const offline = total - online;
-  const last = snap.lastReading || snap.updated;
-  const ageS = (now - last.getTime()) / 1000;
-  const status = (total > 0 && offline >= total) || ageS > 900 ? 'offline' : (offline > 0 || ageS > 180) ? 'stale' : 'live';
-  const word = { live: 'Live', stale: 'Stale', offline: 'Offline' }[status];
-  const detail = offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now);
+  const { status, word, detail, last } = plantStatus(snap, now);
   return (
     <div className="topbar-actions">
       <div className={'status-pill status-' + status} title={'last reading ' + window.fmtTime(last)}>

@@ -149,42 +149,103 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, bala
   }
 
   // ---- power-flow fullscreen (wall-dashboard mode) ----
+  // Wall mode is a class on the wrapper, with the Fullscreen API asked for on top. An iPad
+  // home-screen app has no such API and a browser may refuse; either way the wrapper
+  // still covers the page, which on a chromeless screen is the same thing.
   const flowRef = React.useRef(null);
-  const [isFs, setIsFs] = React.useState(false);
-  const [cursorHidden, setCursorHidden] = React.useState(false);
+  const [wall, setWall] = React.useState(false);
+  const [idle, setIdle] = React.useState(false);
+  const idleRef = React.useRef(false);
+  const revealedAt = React.useRef(0);
+  const stacked = useFlowMobile();
   const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
-  const toggleFlowFs = () => {
+  // Remembered here, not in an effect on `wall`: that effect's first run would clear the
+  // flag before the re-enter effect below could read it.
+  const rememberWall = on => { try { on ? localStorage.setItem('synsynk.flowFs', '1') : localStorage.removeItem('synsynk.flowFs'); } catch (e) {} };
+  const enterWall = () => {
     const el = flowRef.current; if (!el) return;
-    if (fsEl()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-    else (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+    setWall(true); rememberWall(true);
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    try { const p = req && req.call(el); if (p && p.catch) p.catch(() => {}); } catch (e) {}
   };
+  const exitWall = () => {
+    setWall(false); rememberWall(false);
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    try { const p = fsEl() && exit.call(document); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+  };
+  // Esc in real fullscreen is handled by the browser; follow it out
   React.useEffect(() => {
-    const onChange = () => {
-      const on = fsEl() === flowRef.current;
-      setIsFs(on);
-      if (!on) setCursorHidden(false);
-      try { on ? localStorage.setItem('synsynk.flowFs', '1') : localStorage.removeItem('synsynk.flowFs'); } catch (e) {}
-    };
+    const onChange = () => { if (!fsEl()) { setWall(false); rememberWall(false); } };
     document.addEventListener('fullscreenchange', onChange);
     document.addEventListener('webkitfullscreenchange', onChange);
     return () => { document.removeEventListener('fullscreenchange', onChange); document.removeEventListener('webkitfullscreenchange', onChange); };
   }, []);
-  // auto-hide the cursor after a few idle seconds while fullscreen (wall display)
+  // After 3 idle seconds the Exit button and cursor hide; a move, tap or key brings them back.
+  // A tap that reveals Exit must not also press it: Safari fires its click after the reveal.
   React.useEffect(() => {
-    if (!isFs) return;
+    if (!wall) return;
     let t;
-    const arm = () => { setCursorHidden(false); clearTimeout(t); t = setTimeout(() => setCursorHidden(true), 3000); };
-    arm();
-    window.addEventListener('mousemove', arm);
-    return () => { clearTimeout(t); window.removeEventListener('mousemove', arm); };
-  }, [isFs]);
+    const wake = e => {
+      if (idleRef.current && e && e.type === 'pointerdown') revealedAt.current = Date.now();
+      idleRef.current = false; setIdle(false);
+      clearTimeout(t); t = setTimeout(() => { idleRef.current = true; setIdle(true); }, 3000);
+    };
+    const onKey = e => { if (e.key === 'Escape') exitWall(); else wake(); };
+    wake();
+    window.addEventListener('mousemove', wake);
+    window.addEventListener('pointerdown', wake);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      clearTimeout(t); idleRef.current = false; setIdle(false);
+      window.removeEventListener('mousemove', wake); window.removeEventListener('pointerdown', wake); window.removeEventListener('keydown', onKey);
+    };
+  }, [wall]);
+  // A wall tablet must not lock itself while showing the flow. The lock drops whenever the
+  // page is hidden, so it is asked for again on return.
+  React.useEffect(() => {
+    if (!wall || !('wakeLock' in navigator)) return;
+    let lock = null, pending = false, gone = false;
+    const ask = () => {
+      if (gone || pending || document.visibilityState !== 'visible' || (lock && !lock.released)) return;
+      pending = true;
+      navigator.wakeLock.request('screen').then(l => {
+        pending = false;
+        if (gone) { l.release().catch(() => {}); return; }
+        // the system can drop it while the page is showing (low power); ask again
+        lock = l; l.addEventListener('release', ask);
+      }).catch(() => { pending = false; });
+    };
+    ask();
+    document.addEventListener('visibilitychange', ask);
+    return () => { gone = true; document.removeEventListener('visibilitychange', ask); if (lock) lock.release().catch(() => {}); };
+  }, [wall]);
+  // The stacked layout is HTML at phone sizes, so on a wall it is zoomed to fill the room
+  // under the sentence. It is measured at zoom 1 and set back in the same task, so the
+  // observer sees one settled size and cannot feed itself.
+  React.useEffect(() => {
+    const wrap = flowRef.current;
+    if (!wall || !stacked || !wrap) return;
+    const card = wrap.querySelector('.flow-card');
+    const fit = () => {
+      const m = wrap.querySelector('.mflow'), n = wrap.querySelector('.flow-narrative');
+      if (!m || !n) return;
+      wrap.style.setProperty('--wall-zoom', '1');
+      const room = card.clientHeight - n.offsetHeight - parseFloat(getComputedStyle(n).marginBottom);
+      if (!m.offsetWidth || !m.offsetHeight) return;
+      const z = Math.min(card.clientWidth / m.offsetWidth, room / m.offsetHeight);
+      if (z > 0) wrap.style.setProperty('--wall-zoom', z.toFixed(3));
+    };
+    const ro = new ResizeObserver(fit);
+    [card, wrap.querySelector('.flow-narrative'), wrap.querySelector('.mflow')].forEach(el => el && ro.observe(el));
+    return () => { ro.disconnect(); wrap.style.removeProperty('--wall-zoom'); };
+  }, [wall, stacked]);
   // remember the dashboard: if we left in fullscreen, re-enter on the first interaction
   // (browsers require a user gesture, so we can't auto-enter on load alone)
   React.useEffect(() => {
     let armed = false;
     try { armed = localStorage.getItem('synsynk.flowFs') === '1'; } catch (e) {}
     if (!armed) return;
-    const resume = () => { cleanup(); if (!fsEl() && flowRef.current) { try { (flowRef.current.requestFullscreen || flowRef.current.webkitRequestFullscreen).call(flowRef.current); } catch (e) {} } };
+    const resume = () => { cleanup(); enterWall(); };
     const cleanup = () => { window.removeEventListener('pointerdown', resume); window.removeEventListener('keydown', resume); };
     window.addEventListener('pointerdown', resume, { once: true });
     window.addEventListener('keydown', resume, { once: true });
@@ -287,14 +348,23 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, bala
   return (
     <div className="live-grid">
       {hasBatt && <BatteryBalanceBanner b={balance} />}
-      <div className={'flow-fs-wrap' + (cursorHidden ? ' cursor-hidden' : '')} ref={flowRef}>
-        <Card className="flow-card">
-          <SectionTitle right={
-            <button className="flow-fs-btn" onClick={toggleFlowFs} title={isFs ? 'Exit fullscreen (Esc)' : 'Fullscreen — wall-dashboard mode'} aria-label="Toggle fullscreen">
-              {isFs ? <FsExitIcon /> : <FsEnterIcon />}<span>{isFs ? 'Exit' : 'Fullscreen'}</span>
+      <div className={'flow-fs-wrap' + (wall ? ' wall' : '') + (wall && idle ? ' idle' : '')} ref={flowRef}>
+        {wall && (
+          <div className="wall-bar">
+            <window.WallStatus snap={snap} />
+            <button className="flow-fs-btn wall-exit" title="Exit fullscreen (Esc)"
+              onClick={() => { if (Date.now() - revealedAt.current > 400) exitWall(); }}>
+              <FsExitIcon /><span>Exit</span>
             </button>
-          }>POWER FLOW</SectionTitle>
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={{ ...feat, sells: rateExp > 0 }} />
+          </div>
+        )}
+        <Card className="flow-card">
+          {!wall && <SectionTitle right={
+            <button className="flow-fs-btn" onClick={enterWall}>
+              <FsEnterIcon /><span>Fullscreen</span>
+            </button>
+          }>POWER FLOW</SectionTitle>}
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={{ ...feat, sells: rateExp > 0 }} />
         </Card>
       </div>
 
