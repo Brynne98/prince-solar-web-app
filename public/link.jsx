@@ -13,19 +13,36 @@
 // in a browser bundle.
 // ============================================================================
 
-/** Status of the signed-in user's SunSynk link(s). Null while loading. */
-window.useLinkStatus = function useLinkStatus(refreshKey) {
-  const { useState, useEffect } = React;
+/**
+ * Status of the signed-in user's SunSynk link(s). `refresh()` reads it again and resolves
+ * once the newest read has landed, with that read's error or null, so a button can stay
+ * busy until the list it changed is back on screen. `loading` is only the first read: a
+ * re-read never blanks the list.
+ */
+window.useLinkStatus = function useLinkStatus() {
+  const { useState, useEffect, useRef, useCallback } = React;
   const [state, setState] = useState({ loading: true, accounts: [], error: null });
-  useEffect(() => {
-    let alive = true;
-    window.sb.rpc('api_link_status').then(({ data, error }) => {
-      if (!alive) return;
-      setState({ loading: false, accounts: error ? [] : (data || []), error: error ? error.message : null });
+  const latest = useRef(null);
+  const refresh = useCallback(() => {
+    // Ten seconds, then it counts as a failed read. Raced here rather than with an abort
+    // signal: supabase-js waits on the stored session before the request even starts, and
+    // a stall there never reaches the signal.
+    const timedOut = new Promise(r => setTimeout(() => r({ data: null, error: { message: 'timed out' } }), 10000));
+    const read = Promise.race([window.sb.rpc('api_link_status'), timedOut]).catch(e => ({ data: null, error: e })).then(({ data, error }) => {
+      // A failed re-read keeps the logins already shown; an empty list would send a
+      // signed-in household from the dashboard back to the Connect screen.
+      // `|| 'failed'`: a failure with no message must still read as one, not as "no logins".
+      if (read === latest.current) setState(s => ({ loading: false, accounts: error ? s.accounts : (data || []), error: error ? (error.message || 'failed') : null }));
+      return error || null;
     });
-    return () => { alive = false; };
-  }, [refreshKey]);
-  return state;
+    latest.current = read;
+    // An older caller waits for whichever read is newest, so it never settles on a list
+    // that is about to be replaced, and never hangs because its own read was dropped.
+    const settle = (p) => p.then(e => (p === latest.current ? e : settle(latest.current)));
+    return settle(read);
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
+  return { ...state, refresh };
 };
 
 window.linkSunsynk = async function linkSunsynk(username, password) {
@@ -82,12 +99,19 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
       setTimeout(() => document.getElementById(Object.keys(problems)[0])?.focus());
       return;
     }
-    setBusy(true); setErr(null); setBad({}); setNoPlants(false);
+    setBusy(true); setErr(null); setBad({});
     try {
       const r = await window.linkSunsynk(username.trim(), password);
-      setPassword('');
-      if (r.warning) { setNoPlants(true); return; }
-      onLinked(r);
+      // No plant yet. Nothing on the server looks at this login again, so Retry has to
+      // ask SunSynk afresh: the password stays in memory while the card is up, no longer.
+      if (r.warning) {
+        if (noPlants) setErr('Still no plant on this login.');
+        setNoPlants(true);
+        return;
+      }
+      // Busy until the caller has the new login list, or the screen sits idle before it changes.
+      await onLinked(r);
+      setPassword(''); setNoPlants(false);
     } catch (ex) {
       setErr(ex instanceof TypeError ? 'Can’t reach Prince Solar. Check your connection and try again.' : ex.message);
     } finally {
@@ -120,10 +144,11 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
           </div>
         )}
         <div className="conn-form-actions">
-          {noPlants
-            ? <button type="button" className="save-btn" onClick={() => onLinked({ retry: true })}>Retry now</button>
-            : <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>{busy ? 'Connecting…' : (relink ? 'Reconnect' : 'Connect')}</button>}
-          {onCancel && <button type="button" className="ghost-btn" onClick={onCancel}>Cancel</button>}
+          <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>
+            {noPlants ? (busy ? 'Checking…' : 'Retry now') : busy ? 'Connecting…' : relink ? 'Reconnect' : 'Connect'}
+          </button>
+          {/* not mid-request: its answer would land after the form had gone */}
+          {onCancel && <button type="button" className="ghost-btn" onClick={onCancel} disabled={busy}>Cancel</button>}
           {err ? <span className="field-note" style={{ margin: 0, color: 'var(--load)' }}>{err}</span>
                : <span className="field-note" style={{ margin: 0 }}>Password is exchanged for a token, never stored.</span>}
         </div>
@@ -136,16 +161,17 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
   // A form so Retry is the card's submit button and gets the primary look.
   if (noPlants) {
     return (
-      <form className="login-card" onSubmit={(e) => { e.preventDefault(); onLinked({ retry: true }); }}>
+      <form className="login-card" onSubmit={submit} noValidate aria-busy={busy}>
         <window.AuthBrand />
         <div className="login-title">Connected, but no plant yet</div>
         <div className="login-sub">
           <b>{username.trim()}</b> {NO_PLANT_TEXT}
         </div>
-        <button type="submit">Retry now</button>
-        <div className="login-err" role="alert" aria-live="polite"></div>
+        <button type="submit" disabled={busy} aria-busy={busy}>{busy ? 'Checking…' : 'Retry now'}</button>
+        <div className="login-err" role="alert" aria-live="polite">{err}</div>
         <div className="login-links">
-          <button type="button" className="login-link quiet" onClick={() => setNoPlants(false)}>Use a different SunSynk login</button>
+          <button type="button" className="login-link quiet" disabled={busy}
+                  onClick={() => { setNoPlants(false); setPassword(''); setErr(null); }}>Use a different SunSynk login</button>
         </div>
       </form>
     );
@@ -176,7 +202,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
         {/* Without a way out, someone signed in to the wrong account is stuck on this screen. */}
         {onCancel
           ? <button type="button" className="login-link quiet" onClick={onCancel}>Cancel</button>
-          : <button type="button" className="login-link quiet" onClick={() => window.signOut()}>Sign out</button>}
+          : <window.SignOutButton className="login-link quiet" />}
       </div>
     </form>
   );
@@ -189,9 +215,8 @@ window.LinkForm = LinkForm;
  * still shows the dashboard, with a banner (rendered by the app shell).
  */
 window.LinkGate = function LinkGate({ children, fallback = null }) {
-  const { useState } = React;
-  const [refreshKey, setRefreshKey] = useState(0);
-  const { loading, accounts, error } = window.useLinkStatus(refreshKey);
+  const [checking, setChecking] = React.useState(false);
+  const { loading, accounts, error, refresh } = window.useLinkStatus();
 
   if (loading) return fallback;
 
@@ -200,13 +225,28 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
   const needsRelink = accounts.some(a => a.status === 'needs_relink');
 
   if (!plants.length || (!active && needsRelink)) {
+    // A read that failed says nothing about the logins, so it must not ask for one: a
+    // household with plants would land on Connect, and a login that just connected would
+    // be asked for again.
+    if (error) {
+      const retry = async (e) => { e.preventDefault(); setChecking(true); await refresh(); setChecking(false); };
+      return (
+        <div className="login-wrap">
+          <form className="login-card" onSubmit={retry} aria-busy={checking}>
+            <window.AuthBrand />
+            <div className="login-title">Couldn’t check your SunSynk logins</div>
+            <button type="submit" disabled={checking} aria-busy={checking}>{checking ? 'Checking…' : 'Try again'}</button>
+            <div className="login-links"><window.SignOutButton className="login-link quiet" /></div>
+          </form>
+        </div>
+      );
+    }
     return (
       <div className="login-wrap">
-        <LinkForm relink={needsRelink && !active} onLinked={() => setRefreshKey(k => k + 1)}
+        <LinkForm relink={needsRelink && !active} onLinked={refresh}
                   initialUsername={needsRelink && !active ? accounts.find(a => a.status === 'needs_relink')?.sunsynk_username : undefined} />
-        {error && <div className="login-err">Couldn’t check your SunSynk connection. Reload to try again.</div>}
       </div>
     );
   }
-  return typeof children === 'function' ? children({ accounts, refresh: () => setRefreshKey(k => k + 1) }) : children;
+  return typeof children === 'function' ? children({ accounts, refresh }) : children;
 };

@@ -790,12 +790,16 @@ function SettingsSection({ id, title, note, right, children }) {
 // Connect screen.
 function SunSynkConnectionSection({ onChanged }) {
   const { useState } = React;
-  const [refreshKey, setRefreshKey] = useState(0);
-  const { loading, accounts } = window.useLinkStatus(refreshKey);
+  const { loading, accounts, error, refresh } = window.useLinkStatus();
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
   const [mode, setMode] = useState(null); // null | 'add' | account_id being reconnected
   const live = accounts.filter(a => a.status !== 'disabled');
+  // A failed read with nothing listed says nothing about the logins; "No login connected"
+  // would be a guess. Try again re-reads.
+  const unread = !!error && !live.length;
+  const [checking, setChecking] = useState(false);
+  const retry = async () => { setChecking(true); setErr(null); await refresh(); setChecking(false); };
   // "read 2 min ago": freshness is what a login row is for, not the calendar date
   const ago = (iso) => {
     const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -804,7 +808,12 @@ function SunSynkConnectionSection({ onChanged }) {
     const h = Math.round(m / 60); if (h < 36) return h + ' h ago';
     return Math.round(h / 24) + ' days ago';
   };
-  const changed = () => { setMode(null); setRefreshKey(k => k + 1); onChanged && onChanged(); };
+  // Waits for the fresh list, so the form's "Connecting…" holds until the login is listed.
+  const changed = async () => {
+    const readError = await refresh();
+    setMode(null); onChanged && onChanged();
+    if (readError) setErr('Connected. Reload the page to see it here.');
+  };
   // Removing asks once, inline under the row, in the app's own language rather than a
   // browser dialog. 'confirming' holds the account_id whose card is open.
   const [confirming, setConfirming] = useState(null);
@@ -817,8 +826,13 @@ function SunSynkConnectionSection({ onChanged }) {
       await window.disconnectSunsynk(acc.account_id);
       if (last) { location.reload(); return; }
       setBusy(null); setLeaving(acc.account_id);
-      setTimeout(() => { setLeaving(null); changed(); }, 240); // matches .conn-row.leaving
-    } catch (e) { setErr(e.message); setBusy(null); }
+      // The row stays folded until the fresh list drops it; clearing it first popped it back.
+      // If that read fails the old list stays, so the row stays folded rather than showing
+      // a login that is gone. Not changed(): an Add form open meanwhile keeps its fields.
+      const [readError] = await Promise.all([refresh(), new Promise(r => setTimeout(r, 240))]); // matches .conn-row.leaving
+      onChanged && onChanged();
+      if (readError) setErr('Removed. Reload the page to update this list.'); else setLeaving(null);
+    } catch (e) { setErr(e.message); setBusy(null); setLeaving(null); }
   };
   const n = live.length;
   const title = <>SunSynk logins{!loading && n > 0 && <span className="sset-count">{n}</span>}</>;
@@ -827,6 +841,11 @@ function SunSynkConnectionSection({ onChanged }) {
       {loading ? (
         // same height as a row, so the section does not jump when the logins land
         <div className="conn-row"><div className="conn-text"><div className="conn-user dim">Loading…</div><div className="conn-meta">&nbsp;</div></div></div>
+      ) : unread ? (
+        <div className="conn-row">
+          <div className="conn-text"><div className="conn-user">Couldn’t load your logins</div><div className="conn-meta">&nbsp;</div></div>
+          <div className="conn-actions"><button type="button" className="ghost-btn" onClick={retry} disabled={checking} aria-busy={checking}>{checking ? 'Checking…' : 'Try again'}</button></div>
+        </div>
       ) : !live.length ? (
         <div className="field-note">No login connected.</div>
       ) : live.map(acc => {
@@ -870,10 +889,11 @@ function SunSynkConnectionSection({ onChanged }) {
           </div>
         );
       })}
-      {!loading && (mode === 'add'
+      {!loading && !unread && (mode === 'add'
         ? <div className="conn-row conn-add-row"><div className="conn-text">
             <div className="conn-user">Add login</div>
-            <window.LinkForm compact onLinked={changed} onCancel={() => setMode(null)} />
+            {/* Cancel re-reads too: a login with no plant yet is saved but not listed. */}
+            <window.LinkForm compact onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
           </div></div>
         : <div className="conn-add">
             <button type="button" className="save-btn" onClick={() => { setErr(null); setMode('add'); }}>
@@ -1147,7 +1167,7 @@ function AccountSection() {
           <div className="conn-user mono">{email || 'this account'}</div>
           <div className="conn-meta">Signing out keeps your logins and history.</div>
         </div>
-        <div className="conn-actions"><button type="button" className="ghost-btn" onClick={() => window.signOut()}>Sign out</button></div>
+        <div className="conn-actions"><window.SignOutButton className="ghost-btn" /></div>
       </div>
       <div className="conn-row">
         <div className="conn-text">

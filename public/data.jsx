@@ -284,7 +284,8 @@ async function fetchCompare() {
 // avg power per day-segment + load source split: { days, segments:[{seg,load_w,solar_w,batt_w,grid_w,mins}] }
 // (replaced the removed "wasted solar" estimate — see server.js note)
 async function fetchSegments(days) {
-  return getJSON('/api/trends/segments?days=' + (days || 7)).catch(() => null);
+  // A failure throws, so Trends says so rather than showing an empty chart.
+  return getJSON('/api/trends/segments?days=' + (days || 7));
 }
 // battery balance + health: { banks:[{sn,soc,voltage,current}], socSpread, vSpread, status (sustained 10min), pending, max24h, max72h, stale, tempC, hrsAtFullToday, tempHot }
 async function fetchBalance() {

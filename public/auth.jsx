@@ -161,6 +161,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [password2, setPassword2] = useState('');
+  // false, or the button that is waiting ('form' or 'google'); only that one says so.
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [note, setNote] = useState(null);
@@ -227,7 +228,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     const problems = check();
     if (Object.keys(problems).length) return flag(problems);
     const addr = email.trim();
-    setBusy(true); setErr(null); setNote(null); setBad({});
+    setBusy('form'); setErr(null); setNote(null); setBad({});
     try {
       if (mode === 'signin') {
         const { error } = await window.sb.auth.signInWithPassword({ email: addr, password });
@@ -260,7 +261,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   // Leaves the page on success, so `busy` stays set until the redirect lands.
   const google = async () => {
     if (mode === 'signup' && !agree) return flag({ 'auth-agree': 'Accept the Terms and Privacy Policy' });
-    setBusy(true); setErr(null); setNote(null); setBad({});
+    setBusy('google'); setErr(null); setNote(null); setBad({});
     // select_account: a household shares a tablet, so always offer the account list.
     const { error } = await window.sb.auth.signInWithOAuth({
       provider: 'google', options: { redirectTo: SITE_URL, queryParams: { prompt: 'select_account' } },
@@ -277,7 +278,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
 
   return (
     <div className="login-wrap">
-      <form className="login-card" onSubmit={submit} noValidate aria-busy={busy}>
+      <form className="login-card" onSubmit={submit} noValidate aria-busy={!!busy}>
         <AuthBrand />
         <div className="login-title">{copy.h}</div>
         {copy.p && <div className="login-sub">{copy.p}</div>}
@@ -315,7 +316,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
             {bad['auth-agree'] && <span id="auth-agree-err" className="sr-only">{bad['auth-agree']}</span>}
           </label>
         )}
-        <button type="submit" disabled={busy} aria-busy={busy}>{busy ? copy.busy : copy.cta}</button>
+        <button type="submit" disabled={!!busy} aria-busy={busy === 'form'}>{busy === 'form' ? copy.busy : copy.cta}</button>
 
         {/* Always mounted so it works as a live region; empty, it takes no space. */}
         <div id="auth-msg" className={'login-err' + (note && !err ? ' login-note' : '')} role="alert" aria-live="polite">
@@ -325,8 +326,8 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
 
         {(mode === 'signin' || mode === 'signup') && (<>
           <div className="login-or"><span>or</span></div>
-          <button type="button" className="login-google" onClick={google} disabled={busy}>
-            <GoogleMark /> Continue with Google
+          <button type="button" className="login-google" onClick={google} disabled={!!busy} aria-busy={busy === 'google'}>
+            <GoogleMark /> {busy === 'google' ? 'Opening Google…' : 'Continue with Google'}
           </button>
           {mode === 'signin' && (
             <div className="login-fine">Continuing with Google creates an account and accepts
@@ -346,7 +347,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
             <button type="button" className="login-link quiet" onClick={() => go('signin')}>Back to sign in</button>
           )}
           {mode === 'recovery' && (
-            <button type="button" className="login-link quiet" onClick={() => window.sb.auth.signOut()}>Cancel</button>
+            <SignOutButton className="login-link quiet" busyText="Cancelling…">Cancel</SignOutButton>
           )}
         </div>
       </form>
@@ -360,11 +361,27 @@ window.AuthGate = function AuthGate({ children, fallback = null }) {
   // A stored session will almost always come back signed in, so show the dashboard's
   // shape; with none, the sign-in screen is a moment away and a skeleton would mislead.
   if (loading) return localStorage.getItem('synsynk.auth') ? fallback : null;
-  if (recovering) return <AuthScreen initialMode="recovery" onRecovered={doneRecovering} />;
-  if (!session) return <AuthScreen />;
+  // Keyed apart: the two sit in one spot, so React would otherwise keep the recovery
+  // card's mode (and its busy Cancel) after Cancel signs out.
+  if (recovering) return <AuthScreen key="recovery" initialMode="recovery" onRecovered={doneRecovering} />;
+  if (!session) return <AuthScreen key="signin" />;
   return children;
 };
 
-window.signOut = () => window.sb.auth.signOut();
+// Signs out this device only: the wall tablet stays signed in when a phone signs out.
+// That still waits on a server round trip before the screen changes, so the button says
+// it is working. It is never reset: the session ends either way, and that unmounts it.
+// supabase-js 2.58 keeps the session when that call fails (offline, a 5xx), which left
+// the button doing nothing. Newer releases clear it locally then; _removeSession is that
+// same step (storage, then SIGNED_OUT to every tab), safe to call on the pinned build.
+function SignOutButton({ className, children = 'Sign out', busyText = 'Signing out…' }) {
+  const [busy, setBusy] = React.useState(false);
+  const click = async () => {
+    setBusy(true);
+    const { error } = await window.sb.auth.signOut({ scope: 'local' }).catch(e => ({ error: e }));
+    if (error) await window.sb.auth._removeSession();
+  };
+  return <button type="button" className={className} onClick={click} disabled={busy} aria-busy={busy}>{busy ? busyText : children}</button>;
+}
 // Shared with the Connect screen so it looks like the same product.
-Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordField, FieldLabel, invalidProps });
+Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordField, FieldLabel, invalidProps, SignOutButton });

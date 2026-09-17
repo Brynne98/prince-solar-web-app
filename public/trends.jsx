@@ -180,7 +180,8 @@ function LineChart({ bars, series, labelEvery = 1 }) {
                 strokeWidth={s.dash ? 1.5 : 1.8} strokeDasharray={s.dash} strokeOpacity={s.dash ? 0.85 : 1}
                 strokeLinejoin="round" strokeLinecap="round" />
         ))}
-        {hover != null && (
+        {/* bars[hover] can be gone: a point tapped on 30 days, then the range cut to 7 */}
+        {hover != null && bars[hover] && (
           <g>
             <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + innerH} stroke="var(--line-2)" strokeWidth="1" />
             {series.filter((s) => bars[hover][s.key] != null).map((s) => (
@@ -491,6 +492,16 @@ function ChartSkeleton({ stats = true }) {
   );
 }
 
+// A load that failed, in the chart's place and at its height, so it neither passes for an
+// empty range nor shrinks the card. Try again runs the fetch again.
+function TrendFailed({ onRetry }) {
+  return (
+    <div className="trend-empty" role="alert" style={{ minHeight: 380, marginTop: 14, gap: 6 }}>
+      Couldn’t load.<button type="button" className="mini-link" onClick={onRetry}>Try again</button>
+    </div>
+  );
+}
+
 function TrendsTab({ refreshKey, auto, settings, config }) {
   const C = window.COLORS;
   const { Card, SectionTitle, Segmented } = window;
@@ -507,8 +518,17 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
   const [segData, setSegData] = React.useState(null);
   const [hourData, setHourData] = React.useState(null);
   const [segDays, setSegDays] = React.useState(7);
+  // The range the data on screen was fetched for. After a 7d/14d/30d change the old
+  // charts stay up, dimmed, until the new range lands; refreshes keep the range, so they
+  // stay silent.
+  const [dailyFor, setDailyFor] = React.useState(null);
+  const [segFor, setSegFor] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
-  const [tick, setTick] = React.useState(0); // bumped by auto-refresh
+  const [tick, setTick] = React.useState(0); // bumped by auto-refresh and Try again
+  // Which load failed, named by what it asked for, so a failure never shows on a view or
+  // range not yet tried. Monthly and seasonal share one fetch.
+  const loadKey = view === 'battery' ? 'battery' + segDays : gran === 'daily' ? 'daily' + dailyDays : 'monthly';
+  const [failedKey, setFailedKey] = React.useState(null);
 
   // auto-refresh while this tab is open (trends are slow-moving aggregates, so 5 min is plenty)
   React.useEffect(() => {
@@ -521,15 +541,15 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
   // (refreshKey), and on the auto tick. The render keeps the existing chart while
   // refetching (loader only shows when there's no data yet), so updates are silent.
   React.useEffect(() => {
-    let alive = true; setLoading(true);
+    let alive = true; setLoading(true); setFailedKey(null);
     const done = (set) => (d) => { if (alive) { set(d); setLoading(false); } };
-    const fail = () => { if (alive) setLoading(false); };
+    const fail = () => { if (alive) { setLoading(false); setFailedKey(loadKey); } };
     if (view === 'energy') {
-      if (gran === 'daily') window.fetchTrendDaily(dailyDays).then(done(setDaily)).catch(fail);
+      if (gran === 'daily') window.fetchTrendDaily(dailyDays).then(done(d => { setDaily(d); setDailyFor(dailyDays); })).catch(fail);
       else window.fetchTrendMonthly().then(done(setMonthly)).catch(fail); // monthly + seasonal share data
     } else { // battery: per-segment usage split + hour-of-day mix
       Promise.all([window.fetchSegments(segDays), window.fetchHourly(segDays)])
-        .then(([seg, hour]) => { if (!alive) return; setSegData(seg); setHourData(hour); setLoading(false); })
+        .then(([seg, hour]) => { if (!alive) return; setSegData(seg); setHourData(hour); setSegFor(segDays); setLoading(false); })
         .catch(fail);
     }
     return () => { alive = false; };
@@ -581,6 +601,20 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
   );
 
 
+  const segStale = segData != null && segFor !== segDays;
+  const dailyStale = daily != null && dailyFor !== dailyDays;
+  // A failure shows only where there is nothing right to show: no data yet, or the old
+  // range's. A failed refresh under a chart already right stays quiet; the tick retries.
+  const failed = failedKey === loadKey;
+  const retry = () => setTick(t => t + 1);
+  const batteryFailed = failed && (!segData || segStale);
+  const dailyFailed = failed && (!daily || dailyStale);
+  const monthlyFailed = failed && !monthly;
+  const staleProps = (stale) => ({
+    'aria-busy': stale && loading,
+    style: { opacity: stale ? 0.45 : 1, transition: 'opacity .15s' },
+  });
+
   const VIEWS = [{ value: 'battery', label: 'Battery' }, { value: 'energy', label: 'Energy' }];
   const GRAN = [{ value: 'daily', label: 'Daily' }, { value: 'monthly', label: 'Monthly' }, { value: 'seasonal', label: 'Seasonal' }];
 
@@ -598,31 +632,40 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
             <div className="trend-rec-label">Electricity used by time of day</div>
             <Segmented size="sm" value={segDays} onChange={setSegDays} options={[{ value: 7, label: '7d' }, { value: 14, label: '14d' }, { value: 30, label: '30d' }]} />
           </div>
-          <Card>
-            <div className="seg-key"><b>Bar length</b> = units used (kWh) — longer = more · <b>colours</b> = where it came from</div>
-            {loading && !segData ? <ChartSkeleton stats={false} /> : segData && segData.segments && segData.segments.length ? (
-              <SegmentUsage data={segData.segments} />
-            ) : <div className="trend-empty">{window.emptyText(window.PLANT_DAYS, 'No data yet.')}</div>}
-            <div className="hint-line">
-              Typical units (kWh) used in each part of the day over the last {segData ? segData.days : segDays} days, coloured by what supplied them. The <b>kW avg</b> alongside is the intensity — how hard the house pulls; a short heavy load reads as a short bar with a high average. By day it is mostly direct solar; at night it is what the battery can give above its {config?.reserve ?? 20}% reserve, and the grid covers the rest.
-            </div>
-          </Card>
-          <Card>
-            <div className="trend-rec-label">Usual mix by hour</div>
-            <div className="seg-key" style={{ marginTop: 8 }}><b>Bar</b> = share of the house load · <b>line</b> = typical charge · highlighted = this hour</div>
-            {loading && !hourData ? <window.Skeleton h={240} r={12} style={{ marginTop: 14 }} /> : hourData && hourData.hours && hourData.hours.length ? (
-              <HourMixChart hours={hourData.hours} nowHour={window.plantHour(config?.timezone)} />
-            ) : <div className="trend-empty">{window.emptyText(window.PLANT_DAYS, 'No data yet.')}</div>}
-            <div className="trend-legend" style={{ marginTop: 12 }}>
-              <span className="tl-item"><span className="tl-dot" style={{ background: C.pv }} />Solar</span>
-              <span className="tl-item"><span className="tl-dot" style={{ background: C.batt }} />Battery</span>
-              <span className="tl-item"><span className="tl-dot" style={{ background: C.grid }} />Grid</span>
-              <span className="tl-item"><span className="tl-dash" style={{ borderColor: C.soc }} />Charge</span>
-            </div>
-            <div className="hint-line">
-              What usually covers the house at each hour, over the last {hourData ? hourData.days : segDays} complete days. The line is the typical battery charge at that hour — the same figure the Live battery card shows as ≈ next to the current charge.
-            </div>
-          </Card>
+          {/* one fetch feeds both cards, so one failure message stands in for both */}
+          {batteryFailed ? <Card><TrendFailed onRetry={retry} /></Card> : (
+            <>
+              <Card>
+                <div className="seg-key"><b>Bar length</b> = units used (kWh) — longer = more · <b>colours</b> = where it came from</div>
+                <div {...staleProps(segStale)}>
+                  {loading && !segData ? <ChartSkeleton stats={false} /> : segData && segData.segments && segData.segments.length ? (
+                    <SegmentUsage data={segData.segments} />
+                  ) : <div className="trend-empty">{window.emptyText(window.PLANT_DAYS, 'No data yet.')}</div>}
+                </div>
+                <div className="hint-line">
+                  Typical units (kWh) used in each part of the day over the last {segData ? segData.days : segDays} days, coloured by what supplied them. The <b>kW avg</b> alongside is the intensity — how hard the house pulls; a short heavy load reads as a short bar with a high average. By day it is mostly direct solar; at night it is what the battery can give above its {config?.reserve ?? 20}% reserve, and the grid covers the rest.
+                </div>
+              </Card>
+              <Card>
+                <div className="trend-rec-label">Usual mix by hour</div>
+                <div className="seg-key" style={{ marginTop: 8 }}><b>Bar</b> = share of the house load · <b>line</b> = typical charge · highlighted = this hour</div>
+                <div {...staleProps(segStale)}>
+                  {loading && !hourData ? <window.Skeleton h={240} r={12} style={{ marginTop: 14 }} /> : hourData && hourData.hours && hourData.hours.length ? (
+                    <HourMixChart hours={hourData.hours} nowHour={window.plantHour(config?.timezone)} />
+                  ) : <div className="trend-empty">{window.emptyText(window.PLANT_DAYS, 'No data yet.')}</div>}
+                </div>
+                <div className="trend-legend" style={{ marginTop: 12 }}>
+                  <span className="tl-item"><span className="tl-dot" style={{ background: C.pv }} />Solar</span>
+                  <span className="tl-item"><span className="tl-dot" style={{ background: C.batt }} />Battery</span>
+                  <span className="tl-item"><span className="tl-dot" style={{ background: C.grid }} />Grid</span>
+                  <span className="tl-item"><span className="tl-dash" style={{ borderColor: C.soc }} />Charge</span>
+                </div>
+                <div className="hint-line">
+                  What usually covers the house at each hour, over the last {hourData ? hourData.days : segDays} complete days. The line is the typical battery charge at that hour — the same figure the Live battery card shows as ≈ next to the current charge.
+                </div>
+              </Card>
+            </>
+          )}
         </>
       )}
 
@@ -644,27 +687,28 @@ function TrendsTab({ refreshKey, auto, settings, config }) {
               <div className="trend-subnav" style={{ marginBottom: 8, justifyContent: 'flex-end' }}>
                 <Segmented size="sm" value={dailyDays} onChange={setDailyDays} options={[{ value: 7, label: '7d' }, { value: 14, label: '14d' }, { value: 30, label: '30d' }]} />
               </div>
-              {loading && !daily ? <ChartSkeleton /> : (
-                <>
+              {dailyFailed ? <TrendFailed onRetry={retry} /> : loading && !daily ? <ChartSkeleton /> : (
+                <div {...staleProps(dailyStale)}>
                   <TrendStats bars={dailyBars} unit="day" />
                   {window.PLANT_DAYS != null && window.PLANT_DAYS < 2 && (
                     <div className="field-note">Logging began today, so it counts only the hours since. The Live tab shows the inverter's own full-day figure.</div>
                   )}
-                  <Chart series={seriesFor(DAILY_SERIES)} labelEvery={dailyDays > 14 ? 3 : 1} bars={dailyBars} />
-                </>
+                  {/* spaced for the range on screen, not the one still loading */}
+                  <Chart series={seriesFor(DAILY_SERIES)} labelEvery={dailyFor > 14 ? 3 : 1} bars={dailyBars} />
+                </div>
               )}
-              <div className="hint-line">Solar generated, home consumption, and how much of it came off the grid, each day for the last {dailyDays} days. The dotted <b>Expected</b> line is what a typical day of yours converts from that day's sunshine — generation falls below it when the battery fills and the panels throttle, and rises above it on heavy-use days when nothing holds them back.</div>
+              <div className="hint-line">Solar generated, home consumption, and how much of it came off the grid, each day for the last {dailyFailed ? dailyDays : dailyFor ?? dailyDays} days. The dotted <b>Expected</b> line is what a typical day of yours converts from that day's sunshine — generation falls below it when the battery fills and the panels throttle, and rises above it on heavy-use days when nothing holds them back.</div>
             </>
           )}
           {gran === 'monthly' && (
             <>
-              {loading && !monthly ? <ChartSkeleton /> : <><TrendStats bars={monthlyBars} unit="month" /><Chart series={seriesFor(SERIES)} bars={monthlyBars} /></>}
+              {monthlyFailed ? <TrendFailed onRetry={retry} /> : loading && !monthly ? <ChartSkeleton /> : <><TrendStats bars={monthlyBars} unit="month" /><Chart series={seriesFor(SERIES)} bars={monthlyBars} /></>}
               <div className="hint-line">Solar generated vs home consumption per month across every year on record. One new point lands each month.</div>
             </>
           )}
           {gran === 'seasonal' && (
             <>
-              {loading && !monthly ? <ChartSkeleton stats={false} /> : <Chart series={seriesFor(SERIES)} bars={seasonBars} />}
+              {monthlyFailed ? <TrendFailed onRetry={retry} /> : loading && !monthly ? <ChartSkeleton stats={false} /> : <Chart series={seriesFor(SERIES)} bars={seasonBars} />}
               <div className="hint-line">
                 Generation vs consumption rolled into SA seasons (Summer Dec–Feb · Autumn Mar–May · Winter Jun–Aug · Spring Sep–Nov).
                 <b> Sparse for now</b> — this only becomes meaningful with a full year of data, when winter-vs-summer solar (a big swing here) shows up. The logger is banking toward it.
