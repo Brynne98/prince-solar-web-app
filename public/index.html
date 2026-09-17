@@ -488,7 +488,6 @@
   .hv-dateinput { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
     font-family: var(--mono); font-size: 12.5px; padding: 6px 10px; color-scheme: dark; cursor: pointer; }
   .hv-dateinput:hover { border-color: var(--line-2); }
-  .hv-datelabel { font-size: 12.5px; color: var(--muted); margin-left: 2px; }
   .hv-approx { font-size: 11px; color: var(--warn); border: 1px solid var(--line); border-radius: 7px; padding: 1px 7px; margin-left: 2px; cursor: help; white-space: nowrap; }
   .hv-gap { font-size: 11px; color: var(--warn); border: 1px solid var(--line); border-radius: 7px;
     padding: 1px 7px; margin-left: 2px; cursor: help; white-space: nowrap; font-family: var(--mono); }
@@ -502,6 +501,14 @@
   .chart-svg { display: block; touch-action: pan-y; }
   .ax { font: 400 10.5px var(--mono); fill: var(--muted); }
   .ax-hi { fill: var(--text); }
+  /* day chart, Rows and Hours views */
+  .lane-name { font: 600 10.5px var(--display); letter-spacing: 0.12em; fill: var(--muted); text-transform: uppercase; }
+  .lane-val { font: 600 12px var(--mono); fill: var(--text); }
+  .lane-word { font: 400 11px var(--display); fill: var(--muted); }
+  .chart-zone { font: 600 10px var(--display); letter-spacing: 0.16em; fill: var(--dim); text-transform: uppercase; }
+  .legend-swatch { width: 12px; height: 10px; border-radius: 3px; flex: none; }
+  .hv-end { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+  .hv-end .hv-today { margin-left: 0; }
   .legend-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
   .legend-chip { display: inline-flex; align-items: center; gap: 7px; background: var(--panel-2); border: 1px solid var(--line);
     border-radius: 999px; padding: 6px 13px; font-size: 12.5px; color: var(--text); transition: .15s; }
@@ -529,6 +536,10 @@
   .tip-l { color: var(--muted); } .tip-v { margin-left: auto; color: var(--text); }
   .tip-total { margin-top: 5px; border-top: 1px solid var(--line); padding-top: 6px; }
   .tip-total .tip-l { color: var(--text); font-weight: 600; }
+  .tip-row.head .tip-l { color: var(--text); font-weight: 600; }
+  .tip-row.sub { padding-left: 15px; }
+  .tip-gap { height: 6px; }
+  .tip-sq { width: 9px; height: 8px; border-radius: 2px; flex: none; }
   /* drag-to-select range totals */
   .chart-range { position: absolute; left: 8px; top: 8px; background: rgba(13,17,23,0.97); border: 1px solid var(--line-2);
     border-radius: 10px; padding: 9px 12px; min-width: 180px; box-shadow: 0 12px 30px rgba(0,0,0,0.5); z-index: 6; }
@@ -895,10 +906,6 @@
     .overview-head .segmented::-webkit-scrollbar { display: none; }
     .seg-btn { padding: 6px 10px; }
 
-    /* day chart: hide the date label (the picker already shows the date) so the
-       "missing" pill fits on one row; drag-to-range is mouse-only, so its hint
-       and selection UI just cover the plot on phones */
-    .hv-datelabel { display: none; }
     .hv-approx { font-size: 10px; padding: 1px 6px; }
 
     /* battery banner on phones: status on row 1, stats forced to their own row

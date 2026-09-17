@@ -2,7 +2,9 @@
 // chart.jsx — <HistoryView/> : the day power graph.
 //   • 5-minute power lines for Solar / Battery / Grid / Load, SOC on a right axis
 //   • Series toggles, hover crosshair + exact-value tooltip
-//   • Mode: Lines  /  Power balance (stacked area: where power came from)
+//   • View, remembered per device: Lines (all series on one plot), Rows (one row per
+//     flow, charge at the foot) or Hours (kWh per hour: home use by source above the
+//     line, stored or exported below)
 //   • Day picker: step prev/next or jump via the date field, back to the plant's
 //     first day of data (/api/history/earliest); today streams in live.
 // Self-contained SVG; no external chart libs. `today` (live day series) comes in
@@ -90,10 +92,11 @@ function useDayPicker(earliest) {
   };
 }
 
-function DateBar({ pick, earliest, locked, children }) {
+function DateBar({ pick, earliest, locked, right, children }) {
   const { date, setDate, todayStr, isToday } = pick;
   // locked: the app is still loading, so the picker shows today and goes nowhere
   const canPrev = pick.canPrev && !locked, canNext = pick.canNext && !locked;
+  const todayBtn = !isToday && <button className="hv-today" onClick={() => setDate(todayStr)}>Today</button>;
   return (
     <div className="hv-datebar">
       <button className="hv-daynav" disabled={!canPrev} aria-label="Previous day"
@@ -103,9 +106,9 @@ function DateBar({ pick, earliest, locked, children }) {
         onChange={e => e.target.value && setDate(e.target.value)} />
       <button className="hv-daynav" disabled={!canNext} aria-label="Next day"
         onClick={() => canNext && setDate(shiftDate(date, 1))}>›</button>
-      <span className="hv-datelabel">{isToday ? 'Today' : niceDate(date)}</span>
       {children}
-      {!isToday && <button className="hv-today" onClick={() => setDate(todayStr)}>Today</button>}
+      {/* anything on the right shares the Today button's push to the end, so the two stay together */}
+      {right ? <span className="hv-end">{todayBtn}{right}</span> : todayBtn}
     </div>
   );
 }
@@ -137,6 +140,50 @@ function fitScale(lo, hi, unit) {
   const ticks = []; for (let v = lo; v <= hi + 1e-9; v += step) ticks.push(+v.toFixed(2));
   return { lo, hi, ticks };
 }
+/** Path through get(p) at each index, broken wherever it is null. */
+function seriesPath(pts, x, y, get) {
+  let d = '', pen = false;
+  pts.forEach((p, i) => {
+    const v = get(p);
+    if (v == null) { pen = false; return; }
+    d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1) + ' ';
+    pen = true;
+  });
+  return d;
+}
+/** Filled band from lo(p) up to hi(p), in pieces broken wherever hi(p) is null. */
+function seriesBand(pts, x, y, lo, hi) {
+  const segs = []; let seg = null;
+  pts.forEach((p, i) => {
+    const v = hi(p);
+    if (v == null) { seg = null; return; }
+    if (!seg) { seg = []; segs.push(seg); }
+    seg.push([x(i), y(lo(p)), y(v)]);
+  });
+  return segs.map(s => 'M' + s.map(q => q[0].toFixed(1) + ' ' + q[2].toFixed(1)).join(' L')
+    + ' L' + [...s].reverse().map(q => q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' L') + ' Z').join(' ');
+}
+/** An x-axis time label; the one at the right edge ends there instead of being cut in half. */
+const xLabel = (t, px, right, y) => {
+  const end = px > right - 16;
+  return <text key={'gx' + t} x={end ? right : px} y={y} textAnchor={end ? 'end' : 'middle'} className="ax">{HM(t)}</text>;
+};
+/** Where one five-minute reading's power went, in W. The house draws on solar first, then
+ *  the battery, then the grid; whatever inverter losses leave unexplained goes to the
+ *  biggest of those, and to none when nothing was supplying it, so a grid-less plant is
+ *  never handed grid power. Takes the raw series: batt + = powering the house, grid + = importing. */
+function powerSplit(p) {
+  const pv = Math.max(0, p.pv || 0), load = Math.max(0, p.load || 0);
+  const dis = Math.max(0, p.batt || 0), chg = Math.max(0, -(p.batt || 0));
+  const imp = Math.max(0, p.grid || 0), exp = Math.max(0, -(p.grid || 0));
+  let sH = Math.min(pv, load), rest = load - sH;
+  let bH = Math.min(dis, rest); rest -= bH;
+  let gH = Math.min(imp, rest); rest -= gH;
+  const top = Math.max(sH, bH, gH);
+  if (rest > 0 && top > 0) { if (gH === top) gH += rest; else if (bH === top) bH += rest; else sH += rest; }
+  return { sH, bH, gH, chg, exp };
+}
+const DAY_VIEWS = [{ value: 'lines', label: 'Lines' }, { value: 'rows', label: 'Rows' }, { value: 'hours', label: 'Hours' }];
 
 // ---------------------------- INVERTER HISTORY (Grid / Inverters tabs) ----------------------------
 // Per-inverter samples from SunSynk's history (api_inverter_history), bucketed to
@@ -375,7 +422,15 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
   const { date, setDate, todayStr, isToday } = pick;
   const [pastDay, setPastDay] = React.useState(null); // fetched series for a non-today date
   const [loading, setLoading] = React.useState(false);
-  const [ref, width, height] = useChartSize();
+  const [view, setViewState] = React.useState(() => {
+    try { const v = localStorage.getItem('synsynk.dayView'); return DAY_VIEWS.some(o => o.value === v) ? v : 'lines'; } catch (e) { return 'lines'; }
+  });
+  const setView = v => {
+    setViewState(v); setHover(null); setSel(null); setDrag(null); dragRef.current = null;
+    try { localStorage.setItem('synsynk.dayView', v); } catch (e) {}
+  };
+  // Rows stacks five labelled rows, so on a phone it needs more height than one plot
+  const [ref, width, height] = useChartSize(view === 'rows' ? [430, 620] : undefined);
   const mobile = width < 560;
 
   // lower bound for the picker (≈ commission date)
@@ -413,7 +468,6 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
   const innerH = height - m.t - m.b;
 
   const dayData = isToday ? today : pastDay;
-  const gapMin = (dayData && dayData.gapMinutes) || 0;
   const raw = (dayData && dayData.points) || [];
   // The battery series is + = powering the house; Settings → Display can flip it, and
   // idle reads 0. Gaps stay null. Range totals read `raw`, so charged never swaps with
@@ -587,7 +641,229 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
     );
   }
 
+  // ---------------------------- ROWS ----------------------------
+  // Solar, Home, Battery and Grid each get a row on one shared kW-per-pixel scale, so a
+  // quiet grid is a flat row instead of a line buried under the others. Charge takes its
+  // own 0–100% row at the foot rather than a second scale over the power. The readings
+  // sit beside the row names, so there is no tooltip over the plot.
+  function renderRows() {
+    const lastIdx = pts.length - 1;
+    const mr = { l: mobile ? 34 : 40, r: mobile ? 4 : 8, t: 2, b: 30 };
+    const iW = Math.max(40, width - mr.l - mr.r), R = mr.l + iW;
+    const x = i => mr.l + (i / lastIdx) * iW;
+    const HEAD = 22, GAP = 12, CH = mobile ? 44 : 60, MIN = 18;
+    const rows = [['pv', 'Solar'], ['load', 'Home'], ['batt', 'Battery'], ['grid', 'Grid']].map(([k, name]) => {
+      let lo = 0, hi = 0;
+      pts.forEach(p => { if (p[k] != null) { lo = Math.min(lo, p[k]); hi = Math.max(hi, p[k]); } });
+      lo = Math.floor(lo / 500) * 500; hi = Math.ceil(hi / 500) * 500;
+      if (hi - lo < 500) hi = lo + 500;
+      return { k, name, lo, hi };
+    });
+    // one watts-to-pixels ratio for every row; a row too flat to read is held at MIN
+    // and the rest share what is left
+    const avail = height - mr.t - mr.b - rows.length * (HEAD + GAP) - HEAD - CH;
+    const total = rows.reduce((n, r) => n + r.hi - r.lo, 0);
+    // held rows take more than their share, which can push another under MIN, so settle it
+    let perW = avail / total;
+    for (let pass = 0; pass < rows.length; pass++) {
+      const small = rows.filter(r => (r.hi - r.lo) * perW < MIN);
+      const next = small.length ? (avail - small.length * MIN) / Math.max(1, total - small.reduce((n, r) => n + r.hi - r.lo, 0)) : perW;
+      if (next === perW) break;
+      perW = next;
+    }
+    let top = mr.t;
+    rows.forEach(r => {
+      r.head = top; r.top = top + HEAD; r.h = Math.max(MIN, (r.hi - r.lo) * perW);
+      r.y = v => r.top + ((r.hi - v) / (r.hi - r.lo)) * r.h;
+      top = r.top + r.h + GAP;
+    });
+    const socHead = top, socTop = top + HEAD;
+    const ysoc = s => socTop + CH - (s / 100) * CH;
+
+    // the hovered reading, else the latest; over a gap, no values rather than the latest
+    // under a pointer at another time. The words come from the raw sign so they read the
+    // same whichever way Settings flips the battery line.
+    const at = hover != null ? (pts[hover] && pts[hover].pv != null ? hover : -1) : (cur ? pts.indexOf(cur) : -1);
+    const valueOf = k => {
+      const v = at >= 0 ? pts[at][k] : null;
+      if (v == null) return null;
+      if (k === 'batt') return [v === 0 ? '' : raw[at].batt < 0 ? 'charging ' : 'powering home ', window.fmtPower(Math.abs(v))];
+      if (k === 'grid') return [v < 0 ? 'exporting ' : '', window.fmtPower(Math.abs(v))];
+      return ['', window.fmtPower(v)];
+    };
+    const head = (y, color, name, val) => (
+      <g>
+        <circle cx={mr.l + 4} cy={y + 8} r="4" fill={color} />
+        <text x={mr.l + 14} y={y + 12} className="lane-name">{name}</text>
+        {val && <text x={R} y={y + 12} textAnchor="end" className="lane-val">{val[0] && <tspan className="lane-word">{val[0]}</tspan>}{val[1]}</text>}
+      </g>
+    );
+    const hp = hover != null && pts[hover] && pts[hover].pv != null ? hover : null;
+    const idxFromX = (clientX, el) => idxFromPointer(clientX, el, mr, iW, lastIdx);
+    const pillW = 44, pillX = hp != null ? Math.max(mr.l, Math.min(R - pillW, x(hp) - pillW / 2)) : 0;
+    return (
+      <svg width={width} height={height} className="chart-svg" style={{ cursor: 'crosshair' }}
+        onMouseMove={e => setHover(idxFromX(e.clientX, e.currentTarget))}
+        onMouseLeave={() => setHover(null)}
+        onTouchStart={e => e.touches[0] && setHover(idxFromX(e.touches[0].clientX, e.currentTarget))}
+        onTouchMove={e => e.touches[0] && setHover(idxFromX(e.touches[0].clientX, e.currentTarget))}>
+        {rows.map(r => (
+          <g key={r.k}>
+            {head(r.head, C[r.k], r.name, valueOf(r.k))}
+            {r.hi > 0 && <line x1={mr.l} x2={R} y1={r.top} y2={r.top} stroke="rgba(255,255,255,0.05)" />}
+            {r.hi > 0 && <text x={mr.l - 8} y={r.top + 4} textAnchor="end" className="ax">{+(r.hi / 1000).toFixed(1)}</text>}
+            {r.lo < 0 && <line x1={mr.l} x2={R} y1={r.top + r.h} y2={r.top + r.h} stroke="rgba(255,255,255,0.05)" />}
+            {r.lo < 0 && <text x={mr.l - 8} y={r.top + r.h + 3} textAnchor="end" className="ax">{+(r.lo / 1000).toFixed(1)}</text>}
+            {r.lo < 0 && r.hi > 0 && r.h > 40 && <text x={mr.l - 8} y={r.y(0) + 3} textAnchor="end" className="ax ax-hi">0</text>}
+            <line x1={mr.l} x2={R} y1={r.y(0)} y2={r.y(0)} stroke="rgba(255,255,255,0.16)" />
+            <path d={seriesBand(pts, x, r.y, () => 0, p => p[r.k])} fill={C[r.k]} fillOpacity="0.2" />
+            <path d={seriesPath(pts, x, r.y, p => p[r.k])} fill="none" stroke={C[r.k]} strokeWidth="1.3" strokeLinejoin="round" />
+          </g>
+        ))}
+        {head(socHead, C.soc, 'Charge', at >= 0 && pts[at].soc != null ? ['', pts[at].soc + '%'] : null)}
+        <line x1={mr.l} x2={R} y1={socTop} y2={socTop} stroke="rgba(255,255,255,0.05)" />
+        <line x1={mr.l} x2={R} y1={socTop + CH} y2={socTop + CH} stroke="rgba(255,255,255,0.16)" />
+        <text x={mr.l - 8} y={socTop + 4} textAnchor="end" className="ax">100%</text>
+        <text x={mr.l - 8} y={socTop + CH + 3} textAnchor="end" className="ax">0</text>
+        <path d={seriesBand(pts, x, ysoc, () => 0, p => p.soc)} fill={C.soc} fillOpacity="0.1" />
+        <path d={seriesPath(pts, x, ysoc, p => p.soc)} fill="none" stroke={C.soc} strokeWidth="1.4" strokeLinejoin="round" />
+        {xTicksFor(pts[lastIdx].t, mobile).map(t => xLabel(t, x(t / 5), R, height - 8))}
+        {hp != null && (
+          <g>
+            <line x1={x(hp)} x2={x(hp)} y1={rows[0].top} y2={socTop + CH} stroke="rgba(255,255,255,0.28)" />
+            {rows.map(r => pts[hp][r.k] != null && <circle key={r.k} cx={x(hp)} cy={r.y(pts[hp][r.k])} r="3" fill={C[r.k]} stroke="#0b0e12" strokeWidth="1.5" />)}
+            {pts[hp].soc != null && <circle cx={x(hp)} cy={ysoc(pts[hp].soc)} r="3" fill={C.soc} stroke="#0b0e12" strokeWidth="1.5" />}
+            {/* the time sits over the x axis, where the eye already is */}
+            <rect x={pillX} y={height - 22} width={pillW} height="20" rx="6" fill="#1c2430" stroke="rgba(255,255,255,0.14)" />
+            <text x={pillX + pillW / 2} y={height - 8} textAnchor="middle" className="ax ax-hi">{HM(pts[hp].t)}</text>
+          </g>
+        )}
+      </svg>
+    );
+  }
+
+  // ---------------------------- HOURS ----------------------------
+  // Each hour's energy as a bar. Above the line, what the house used, split by where it
+  // came from; below it, what went into the battery or out to the grid. Charge keeps its
+  // own row. Built from the raw series, so the battery sign setting does not apply.
+  const mh = { l: mobile ? 32 : 38, r: mobile ? 8 : 12, t: 22, b: 30 };
+  const hourData = (view === 'hours' && hasData) ? (() => {
+    const lastIdx = raw.length - 1;
+    const domain = isToday ? Math.min(1440, Math.ceil((raw[lastIdx].t + 5) / 60) * 60) : 1440;
+    const hours = [];
+    for (let h = 0; h < domain / 60; h++) hours.push({ h, sH: 0, bH: 0, gH: 0, chg: 0, exp: 0, n: 0, soc0: null, soc1: null });
+    raw.forEach(p => {
+      const o = p && p.pv != null && hours[Math.floor(p.t / 60)];
+      if (!o) return;
+      const s = powerSplit(p), dt = 5 / 60; // W over five minutes → Wh
+      o.sH += s.sH * dt; o.bH += s.bH * dt; o.gH += s.gH * dt; o.chg += s.chg * dt; o.exp += s.exp * dt;
+      o.n++;
+      if (p.soc != null) { if (o.soc0 == null) o.soc0 = p.soc; o.soc1 = p.soc; }
+    });
+    // a short hour is drawn fainter: today's last one is still filling, any other has a gap
+    const lastH = Math.floor(raw[lastIdx].t / 60);
+    hours.forEach(o => { o.partial = o.n < 12; o.filling = isToday && o.h === lastH; });
+    return { hours, domain, slot: Math.max(40, width - mh.l - mh.r) / hours.length };
+  })() : null;
+
+  function renderHours() {
+    const { hours, domain, slot } = hourData;
+    const iW = Math.max(40, width - mh.l - mh.r), R = mh.l + iW;
+    const CH = mobile ? 40 : 56, GAP = 18;
+    const mainH = height - mh.t - mh.b - CH - GAP;
+    let up = 0, dn = 0;
+    hours.forEach(o => { up = Math.max(up, o.sH + o.bH + o.gH); dn = Math.max(dn, o.chg + o.exp); });
+    const { lo, hi, ticks } = niceScale(-dn, up, mobile ? 4 : 6);
+    const y = v => mh.t + ((hi - v) / (hi - lo)) * mainH;
+    const xm = t => mh.l + (t / domain) * iW;
+    const xs = i => xm(pts[i].t + 2.5);
+    const socTop = mh.t + mainH + GAP, ysoc = s => socTop + CH - (s / 100) * CH;
+    const bw = Math.max(3, slot * (mobile ? 0.66 : 0.62)), gap = mobile ? 1 : 2, rad = Math.min(3, bw / 2);
+    // one stacked segment from a to b (Wh, signed); the outermost gets its far corners rounded
+    const seg = (key, x0, a, b, color, op, round) => {
+      const ya = y(a), yb = y(b), h = Math.abs(yb - ya) - gap;
+      if (h < 0.8) return null;
+      const upward = b > a, top = upward ? yb : ya + gap;
+      if (!round) return <rect key={key} x={x0} y={top} width={bw} height={h} fill={color} fillOpacity={op} />;
+      const r = Math.min(rad, h), x1 = x0 + bw, bot = top + h;
+      const d = upward
+        ? `M${x0} ${bot} V${top + r} Q${x0} ${top} ${x0 + r} ${top} H${x1 - r} Q${x1} ${top} ${x1} ${top + r} V${bot} Z`
+        : `M${x0} ${top} V${bot - r} Q${x0} ${bot} ${x0 + r} ${bot} H${x1 - r} Q${x1} ${bot} ${x1} ${bot - r} V${top} Z`;
+      return <path key={key} d={d} fill={color} fillOpacity={op} />;
+    };
+    const hourFromX = (clientX, el) => Math.max(0, Math.min(hours.length - 1, Math.floor((clientX - el.getBoundingClientRect().left - mh.l) / slot)));
+    return (
+      <svg width={width} height={height} className="chart-svg" style={{ cursor: 'pointer' }}
+        onMouseMove={e => setHover(hourFromX(e.clientX, e.currentTarget))}
+        onMouseLeave={() => setHover(null)}
+        onTouchStart={e => e.touches[0] && setHover(hourFromX(e.touches[0].clientX, e.currentTarget))}
+        onTouchMove={e => e.touches[0] && setHover(hourFromX(e.touches[0].clientX, e.currentTarget))}>
+        {ticks.map((v, i) => (
+          <g key={'gy' + i}>
+            <line x1={mh.l} x2={R} y1={y(v)} y2={y(v)} stroke={v === 0 ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.05)'} />
+            <text x={mh.l - 8} y={y(v) + 3} textAnchor="end" className={'ax' + (v === 0 ? ' ax-hi' : '')}>{+(Math.abs(v) / 1000).toFixed(2)}</text>
+          </g>
+        ))}
+        <text x={mh.l - 8} y={mh.t - 10} textAnchor="end" className="ax" fillOpacity="0.55">kWh</text>
+        <text x={mh.l + 8} y={mh.t + 12} className="chart-zone">Home used</text>
+        <text x={mh.l + 8} y={mh.t + mainH - 6} className="chart-zone">Stored or exported</text>
+        {hours.map(o => {
+          const x0 = mh.l + o.h * slot + (slot - bw) / 2;
+          const dim = (hover != null && hover !== o.h ? 0.35 : 1) * (o.partial ? 0.55 : 1);
+          const ups = [['sH', C.pv], ['bH', C.batt], ['gH', C.grid]].filter(([k]) => o[k] > 1);
+          const dns = [['chg', C.batt], ['exp', C.grid]].filter(([k]) => o[k] > 1);
+          let acc = 0;
+          const upSegs = ups.map(([k, c], n) => { const s = seg(k, x0, acc, acc + o[k], c, 0.85 * dim, n === ups.length - 1); acc += o[k]; return s; });
+          acc = 0;
+          const dnSegs = dns.map(([k, c], n) => { const s = seg(k, x0, -acc, -acc - o[k], c, 0.4 * dim, n === dns.length - 1); acc += o[k]; return s; });
+          return <g key={o.h}>{upSegs}{dnSegs}</g>;
+        })}
+        <line x1={mh.l} x2={R} y1={socTop} y2={socTop} stroke="rgba(255,255,255,0.05)" />
+        <line x1={mh.l} x2={R} y1={socTop + CH} y2={socTop + CH} stroke="rgba(255,255,255,0.16)" />
+        <text x={mh.l - 8} y={socTop + 4} textAnchor="end" className="ax">100%</text>
+        <text x={mh.l - 8} y={socTop + CH + 3} textAnchor="end" className="ax">0</text>
+        <path d={seriesBand(pts, xs, ysoc, () => 0, p => p.soc)} fill={C.soc} fillOpacity="0.1" />
+        <path d={seriesPath(pts, xs, ysoc, p => p.soc)} fill="none" stroke={C.soc} strokeWidth="1.4" strokeLinejoin="round" />
+        {/* a full day ends its axis at 23:55 like Lines, not at a 24:00 no one else prints */}
+        {xTicksFor(Math.min(domain, 1435), mobile).map(t => xLabel(t, xm(t), R, height - 8))}
+      </svg>
+    );
+  }
+
+  function tooltipHours() {
+    if (hover == null || !hourData) return null;
+    const o = hourData.hours[hover]; if (!o) return null;
+    const px = mh.l + (hover + 0.5) * hourData.slot;
+    const kwh = wh => window.fmtKwh(wh / 1000);
+    const part = (color, op, label, wh) => wh >= 50 && (
+      <div className="tip-row sub" key={label}><span className="tip-sq" style={{ background: color, opacity: op }} /><span className="tip-l">{label}</span><span className="tip-v mono">{kwh(wh)}</span></div>
+    );
+    return (
+      <div className="chart-tip" style={{ left: tipLeftFor(px, width), top: 24 }}>
+        <div className="tip-time">{HM(o.h * 60)}–{HM(Math.min(1440, o.h * 60 + 60))}{o.filling ? ' so far' : o.n && o.partial ? ` · ${o.n * 5} of 60 min` : ''}</div>
+        {!o.n ? <div className="tip-row"><span className="tip-l">No readings</span></div> : <>
+          <div className="tip-row head"><span className="tip-dot" style={{ background: C.load }} /><span className="tip-l">Home</span><span className="tip-v mono">{kwh(o.sH + o.bH + o.gH)}</span></div>
+          {part(C.pv, 0.85, 'from solar', o.sH)}
+          {part(C.batt, 0.85, 'from battery', o.bH)}
+          {part(C.grid, 0.85, 'from grid', o.gH)}
+          {o.chg + o.exp >= 50 && <>
+            <div className="tip-gap" />
+            <div className="tip-row head"><span className="tip-l">Stored or exported</span><span className="tip-v mono">{kwh(o.chg + o.exp)}</span></div>
+            {part(C.batt, 0.4, 'into battery', o.chg)}
+            {part(C.grid, 0.4, 'exported', o.exp)}
+          </>}
+          {o.soc0 != null && <>
+            <div className="tip-gap" />
+            <div className="tip-row"><span className="tip-dot" style={{ background: C.soc }} /><span className="tip-l">Charge</span><span className="tip-v mono">{o.soc0}% → {o.soc1}%</span></div>
+          </>}
+        </>}
+      </div>
+    );
+  }
+
   function tooltip() {
+    if (view === 'hours') return tooltipHours();
+    if (view !== 'lines') return null;
     if (sel || drag || hover == null || !hasData) return null;  // range mode suppresses the point tooltip
     const p = pts[hover]; if (!p || p.pv == null) return null;
     const li = pts.length - 1; const px = m.l + (hover / li) * innerW;
@@ -618,7 +894,7 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
 
   // Totals over a drag-selected time range (energy = ∫ power dt across the points).
   function rangeSummary() {
-    if (!sel || !hasData) return null;
+    if (view !== 'lines' || !sel || !hasData) return null;
     const [a, b] = sel;
     let gen = 0, cons = 0, gImp = 0, gExp = 0, bChg = 0, bDis = 0;
     for (let i = a; i <= b && i < raw.length; i++) {
@@ -667,24 +943,28 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
 
   return (
     <div className="hv-root">
-      <DateBar pick={pick} earliest={earliest} locked={locked}>
-        {/* Minutes this day has from nobody — not the poller, not the cloud. The line
-            already breaks at them, but a break reads as "the inverter was off" rather
-            than "we have no reading", and a short one hides inside a 5-minute bucket
-            entirely. Recovered minutes are not counted: they are present and real. */}
-        {gapMin > 0 && (
-          <span className="hv-gap" title="Minutes on this day with no reading from the poller or from SunSynk's cloud">
-            {fmtGap(gapMin)} missing
-          </span>
-        )}
-      </DateBar>
+      <DateBar pick={pick} earliest={earliest} locked={locked}
+        right={<window.Segmented size="sm" options={DAY_VIEWS} value={view} onChange={setView} />} />
+      {/* No count of missing minutes: most are single minutes inside a five-minute bucket
+          the graph cannot show, and a hole long enough to matter already breaks the lines. */}
 
-      <div className="legend-row">
-        {legend.map(([k, l, c]) => <window.LegendChip key={k} color={c} label={l} value={chipVal(k)} active={vis[k]} onClick={() => toggle(k)} />)}
-      </div>
+      {/* Rows names each series beside its own row, so it needs no legend */}
+      {view === 'lines' && (
+        <div className="legend-row">
+          {legend.map(([k, l, c]) => <window.LegendChip key={k} color={c} label={l} value={chipVal(k)} active={vis[k]} onClick={() => toggle(k)} />)}
+        </div>
+      )}
+      {view === 'hours' && (
+        <div className="legend-row">
+          {[['Solar', C.pv], ['Battery', C.batt], ['Grid', C.grid]].map(([l, c]) => (
+            <span className="legend-chip" key={l}><span className="legend-swatch" style={{ background: c }} />{l}</span>
+          ))}
+          <span className="legend-chip"><span className="legend-dot" style={{ background: C.soc, borderColor: C.soc }} />Charge</span>
+        </div>
+      )}
 
       <div className="chart-area" ref={ref} style={{ position: 'relative', height: height }}>
-        {hasData ? renderDay()
+        {hasData ? (view === 'rows' ? renderRows() : view === 'hours' ? renderHours() : renderDay())
           : (loading || (isToday && !dayData))
             // still fetching: hold the chart's shape rather than printing "Loading…"
             ? <window.Skeleton h={height} r={12} />

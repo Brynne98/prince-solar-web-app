@@ -221,7 +221,6 @@ async function fetchDay(date) {
   return {
     points,
     approx: !!api.approx, // pre-logging day: the whole day is SunSynk's feed (calibrated scale)
-    gapMinutes: api.gapMinutes || 0, // minutes with no data from anywhere
     recoveredMinutes: api.recoveredMinutes || 0, // minutes recovered from SunSynk's cloud
     totals: {
       pv: +pvK.toFixed(1), load: +loadK.toFixed(1),

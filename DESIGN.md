@@ -248,7 +248,7 @@ semantic, not decorative.
   palette entry for UI.
 - **Warn Amber** (`warn-amber`, CSS `--warn`) and **Fault Red** (`fault-red`, CSS
   `--bad`): status only. The stale and offline states of the topbar pill, the
-  "approx" and "gap" pills on the day chart, a hot battery, a battery pack drifting
+  outage pill on the Grid and Inverters charts, a hot battery, a battery pack drifting
   towards "watch". Kept distinct from Grid Amber so a status colour is never mistaken
   for a data series. Warning surfaces (a drifting pack, an inverter warning strip, a
   delete confirmation) tint with Home Coral at 6% to 9% and edge it at 25% to 55%; a
