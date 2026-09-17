@@ -197,6 +197,10 @@ function LiveSkeleton() {
 // Shown while the session and the SunSynk link are still being checked, before App
 // mounts. Same shell as App's own not-yet-loaded gate, so the hand-over does not flash.
 function BootShell() {
+  // No remembered tab means this browser hasn't shown this account a dashboard since the
+  // last sign-out: most likely a new account on its way to Connect SunSynk. A skeleton
+  // would flash a dashboard it will never get, so show the empty sign-in backdrop.
+  if (!localStorage.getItem('synsynk.tab')) return <div className="login-wrap" />;
   const tabs = tabsFor(loadSettings());
   const saved = new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab');
   const tab = tabs.some(t => t.id === saved) ? saved : 'live';

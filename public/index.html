@@ -961,8 +961,10 @@
   /* invalid: red border; invalid and focused: red border plus the ring, so focus stays visible */
   .login-card input:not([type="checkbox"])[aria-invalid="true"] { border-color: var(--load); box-shadow: none; }
   .login-card input:not([type="checkbox"])[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px rgba(248,113,113,0.28); }
-  .auth-consent input[aria-invalid="true"] { outline: 2px solid var(--load); outline-offset: 2px; }
-  .auth-consent.invalid > span { color: var(--load); }
+  /* the ring hugs the box, with no green focus glow around it, and the links go red with the
+     rest of the sentence */
+  .auth-consent input[aria-invalid="true"] { outline: 2px solid var(--load); outline-offset: 0; box-shadow: none; }
+  .auth-consent.invalid > span, .auth-consent.invalid a { color: var(--load); }
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .auth-consent input[aria-invalid="true"]:focus-visible { box-shadow: 0 0 0 6px rgba(248,113,113,0.28); }
   .field-hint { color: var(--dim); font-size: 13px; line-height: 1.2; text-align: right; }
@@ -1036,7 +1038,9 @@
   /* sign-up consent */
   /* the whole label ticks the box; 13px of invisible padding makes it a 48px target without moving anything */
   .auth-consent { display: flex; gap: 12px; align-items: flex-start; font-size: 14px; color: var(--muted); line-height: 1.45; padding-block: 13px; margin-block: -13px; }
-  .auth-consent input { margin-top: 2px; width: 18px; height: 18px; accent-color: var(--pv); color-scheme: dark; }
+  /* flex: none, or a phone-width sentence squeezes the box narrower than it is tall; margin
+     overrides each browser's own, so the box lines up with the fields' left edge */
+  .auth-consent input { flex: none; margin: 2px 0 0; width: 18px; height: 18px; accent-color: var(--pv); color-scheme: dark; }
   .auth-consent a { color: var(--pv); }
   /* legal pages */
   .legal-wrap { min-height: 100dvh; padding: 40px 24px 80px; display: flex; justify-content: center; }
