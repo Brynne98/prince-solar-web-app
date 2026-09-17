@@ -260,7 +260,7 @@ export async function getPlants(acc: Account): Promise<PlantInfo[]> {
 }
 
 export type PlantDetail = {
-  id: number; timezone: string | null; currency: string | null;
+  id: number; timezone: string | null;
   lat: number | null; lon: number | null; systemKwp: number | null;
 };
 
@@ -271,7 +271,6 @@ export async function getPlantDetail(acc: Account, plantId: number): Promise<Pla
   return {
     id: plantId,
     timezone: d?.timezone?.code ?? null,      // IANA, e.g. "Africa/Harare", "Europe/London"
-    currency: d?.currency?.code ?? null,      // ISO 4217, e.g. "ZAR", "GBP"
     lat: n(d?.lat), lon: n(d?.lon),
     systemKwp: n(d?.totalPower),
   };
@@ -343,8 +342,9 @@ export async function linkAccount(userId: string, username: string, password: st
 
 /**
  * Record every plant the account can see against its dashboard user, and seed
- * plant_config for any plant that has no row yet. Timezone and currency are
- * SunSynk's own values for the site; lat/lon/kWp likewise. Never overwrites a
+ * plant_config for any plant that has no row yet. Timezone, lat/lon and kWp are
+ * SunSynk's own values for the site. Currency is not sent, so the seed stores
+ * rand: the app serves South Africa only for now. Never overwrites a
  * config row (the user's edits are theirs) and never removes a plant_users row
  * (unlinking stays a user action). Called at link time and by the poller's
  * hourly refresh, so a plant added at SunSynk later shows up on its own.
@@ -369,7 +369,7 @@ export async function syncPlants(acc: Account): Promise<PlantInfo[]> {
   const rows = details
     .filter((r): r is PromiseFulfilledResult<PlantDetail> => r.status === "fulfilled")
     .map((r) => ({
-      plant_id: r.value.id, timezone: r.value.timezone, currency: r.value.currency,
+      plant_id: r.value.id, timezone: r.value.timezone,
       lat: r.value.lat, lon: r.value.lon, system_kwp: r.value.systemKwp,
     }));
   if (rows.length) await rpc("plant_config_seed", { p_rows: rows });

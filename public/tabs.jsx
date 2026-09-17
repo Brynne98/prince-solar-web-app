@@ -389,7 +389,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, bala
           <MiniStat loading={pending} label="Self-sufficiency" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
             info="Share of your home’s energy that came from your own solar + battery rather than the grid. 100% = fully off-grid for the period." />
           {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergySmart(pExp)} color={CC.grid}
-            info={'Energy sent to the grid over the selected period' + (rateExp > 0 ? ', paid at your feed-in rate.' : '. Set a feed-in rate in Settings to count it in savings.')} />}
+            info={'Energy sent to the grid over the selected period' + (rateExp > 0 ? ', paid at your feed-in rate.' : '.')} />}
           {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergySmart(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
             info="Energy drawn from the grid over the selected period."
             sub={a.gridPresent == null ? (
@@ -413,7 +413,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, bala
             trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord}
             // no rate yet: the line under the dash opens Settings on Tariff
             sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your rate</button> : undefined}
-            info={'Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your import rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '. Set the rates in Settings.'} />
+            info={'Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your electricity rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '. Set your rate in Settings.'} />
         </div>
       </div>
 
@@ -666,8 +666,8 @@ function GridTab({ snap, settings, refreshKey, onOpenSettings }) {
               <div><div className="tp-label">Saved</div><div className="tp-val mono" style={{ color: CC.batt }}>{money(saved)}</div></div>
             </div>
           {noRate
-            ? <div className="hint-line"><button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your import rate</button> to see what today cost and what solar saved.</div>
-            : <div className="hint-line">All {fmtKwh(a.loadToday)} you used today @ {fmtRand(rate)}/kWh would've cost <b>{fmtRand(wouldPay)}</b>; you only bought {fmtKwh(a.gridFromToday)} from the grid, so you saved the difference.{showExport && rateExp > 0 ? <> Plus {fmtKwh(a.gridToToday)} sold @ {fmtRand(rateExp)}/kWh.</> : null} (Charging the battery from the grid is already counted as import, so it isn't double-counted here.) <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Edit rates</button></div>}
+            ? <div className="hint-line"><button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your electricity rate</button> to see what today cost and what solar saved.</div>
+            : <div className="hint-line">All {fmtKwh(a.loadToday)} you used today @ {fmtRand(rate)}/kWh would've cost <b>{fmtRand(wouldPay)}</b>; you only bought {fmtKwh(a.gridFromToday)} from the grid, so you saved the difference.{showExport && rateExp > 0 ? <> Plus {fmtKwh(a.gridToToday)} sold @ {fmtRand(rateExp)}/kWh.</> : null} (Charging the battery from the grid is already counted as import, so it isn't double-counted here.) <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Edit rate</button></div>}
         </Card>
       </div>
       {/* the supply over a day: voltage at each inverter's AC terminal and the grid's
@@ -926,7 +926,7 @@ function ChoiceTiles({ name, labelledBy, value, options, onChange }) {
 }
 
 function PlantSections({ me, plantId, onSaved }) {
-  const { useState, useEffect, useMemo } = React;
+  const { useState, useEffect } = React;
   const activeSection = React.useContext(SettingsActive);
   const plant = (me?.plants || []).find(p => p.id === plantId) || (me?.plants || [])[0];
   const cfg = plant?.config || {};
@@ -934,32 +934,22 @@ function PlantSections({ me, plantId, onSaved }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   useEffect(() => { setF(plant?.config || {}); }, [plant?.id, JSON.stringify(plant?.config || {})]);
-  const zones = useMemo(() => {
-    try { const z = Intl.supportedValuesOf('timeZone'); return z.includes(f.timezone) || !f.timezone ? z : [f.timezone, ...z]; }
-    catch (e) { return [f.timezone || 'Africa/Johannesburg']; }
-  }, [f.timezone]);
-  const currencies = ['ZAR','GBP','EUR','AUD','USD','NZD','KES','NGN','ZMW','BWP','NAD','MZN','INR','PKR','BRL'];
   const set = (k, v) => setF(x => ({ ...x, [k]: v }));
   const num = (v) => v === '' || v == null ? null : Number(v);
   const dirty = JSON.stringify(f) !== JSON.stringify(cfg);
-  // South Africa only, for now. Currency and timezone still live per plant and are
-  // saved untouched; the fields only show when SunSynk reported something else, so a
-  // plant abroad can still be corrected. To open up other countries again, drop this
-  // flag and the three `abroad &&` guards below (feed-in rate, currency, timezone).
-  const abroad = (f.currency && f.currency !== 'ZAR') || (f.timezone && f.timezone !== 'Africa/Johannesburg');
 
+  // South Africa only, for now: no feed-in rate, currency or timezone to set. Those
+  // columns keep what SunSynk reported at link time and are never sent from here.
   const save = async () => {
     if (!plant) return;
     setBusy(true); setMsg(null);
     try {
       const patch = {
-        timezone: f.timezone, currency: f.currency,
         tariff_import: num(f.tariff_import) ?? 0,
         battery_kwh: num(f.battery_kwh),
         // untouched, a stored reserve outside the slider's range is kept; edited, it is held to 5..50 even if the box was never left
         battery_reserve_pct: f.battery_reserve_pct === cfg.battery_reserve_pct ? (cfg.battery_reserve_pct ?? 20)
           : Math.min(50, Math.max(5, Math.round(num(f.battery_reserve_pct) ?? cfg.battery_reserve_pct ?? 20))),
-        tariff_export: num(f.tariff_export) ?? 0,
         battery_banks: f.battery_banks || 'per-inverter',
         // Detected answers go out only when the owner touched them. Detection can rewrite them
         // while this page is open, and sending the stale copy back would read to the triggers as
@@ -971,7 +961,6 @@ function PlantSections({ me, plantId, onSaved }) {
           ? { has_battery: f.has_battery ?? null, has_grid: f.has_grid ?? null, ...(f.features_source === 'user' ? { features_source: 'user' } : {}) } : {}),
       };
       await window.savePlantConfig(plant.id, patch);
-      window.PLANT_CURRENCY = patch.currency;
       setMsg('Saved.'); onSaved && onSaved();
     } catch (e) { setMsg(e.message); }
     finally { setBusy(false); }
@@ -1009,51 +998,10 @@ function PlantSections({ me, plantId, onSaved }) {
             </div>
           </div>
         </div>
-        {abroad && (
-          <div className="conn-row sset-row">
-            <label className="conn-text" htmlFor="tariff-export">
-              <span className="conn-user">Feed-in rate</span>
-              <span className="conn-meta">Paid for each unit sent to the grid.</span>
-            </label>
-            <div className="conn-actions">
-              <div className="unit-input wide">
-                <input id="tariff-export" className="input mono" type="number" inputMode="decimal" step="0.01" min="0" placeholder="0" aria-describedby="tariff-export-unit"
-                       value={f.tariff_export ?? ''} onChange={e => set('tariff_export', e.target.value)} />
-                <span id="tariff-export-unit" className="unit">{sym}/unit</span>
-              </div>
-            </div>
-          </div>
-        )}
-        {abroad && (
-          <div className="conn-row sset-row">
-            <label className="conn-text" htmlFor="tariff-currency">
-              <span className="conn-user">Currency</span>
-              <span className="conn-meta">From SunSynk. Change it if it is wrong.</span>
-            </label>
-            <div className="conn-actions">
-              <select id="tariff-currency" className="select currency-select" value={f.currency || 'ZAR'} onChange={e => set('currency', e.target.value)}>
-                {(!f.currency || currencies.includes(f.currency) ? currencies : [f.currency, ...currencies]).map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-          </div>
-        )}
       </SettingsSection>
 
       <SettingsSection id="plant" title="Plant"
         note="Auto reads both from the inverter. A choice here, Auto included, applies to both.">
-        {abroad && (
-          <div className="conn-row sset-row">
-            <label className="conn-text" htmlFor="plant-tz">
-              <span className="conn-user">Timezone</span>
-              <span className="conn-meta">The plant's own clock, for daily totals.</span>
-            </label>
-            <div className="conn-actions">
-              <input id="plant-tz" className="input tz-input" list="tz-zones" value={f.timezone || ''} placeholder="e.g. Johannesburg"
-                     onChange={e => set('timezone', e.target.value)} spellCheck={false} autoComplete="off" />
-              <datalist id="tz-zones">{zones.map(z => <option key={z} value={z} />)}</datalist>
-            </div>
-          </div>
-        )}
         <div className="conn-row sset-row">
           <div className="conn-text"><span id="plant-batt-q" className="conn-user">Does this plant have a battery?</span></div>
           <ChoiceTiles name="plant-batt" labelledBy="plant-batt-q" value={featureValue('has_battery')} onChange={v => pickFeature('has_battery', v)}

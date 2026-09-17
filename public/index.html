@@ -657,8 +657,6 @@
   /* no rules between these rows (the tiles already box each answer); 20px apart, like Display's fields */
   .conn-row.sset-row { border-top: none; padding: 10px 0; }
   .sset-body > .sset-row:last-child { padding-bottom: 0; }
-  .tz-input { width: 240px; }
-  .currency-select { width: 120px; }
   .unit-input.wide { width: 150px; }
   .unit-input.wide .input { padding-right: 66px; }   /* room for "R/unit" */
   /* a number box with its unit inside it, e.g. "26.5 kWh" */
@@ -765,16 +763,9 @@
   .field { margin-bottom: 16px; } .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 7px; letter-spacing: 0.04em; }
   .field-note { font-size: 12px; color: var(--dim); margin-top: 10px; line-height: 1.55; }
-  .select, .input { width: 100%; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text);
-    border-radius: 9px; padding: 10px 12px; font-size: 14px; font-family: inherit; }
-  .input { font-family: var(--mono); }
-  /* own chevron, inset from the edge, and a dark native menu (color-scheme) */
-  .select { appearance: none; -webkit-appearance: none; padding-right: 40px; cursor: pointer; color-scheme: dark;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%238b96a4' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-    background-repeat: no-repeat; background-position: right 14px center; }
-  .select:hover { border-color: var(--muted); }
-  .select option { background: var(--panel-2); color: var(--text); }
-  .select:focus, .input:focus { outline: none; border-color: var(--grid); }
+  .input { width: 100%; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text);
+    border-radius: 9px; padding: 10px 12px; font-size: 14px; font-family: var(--mono); }
+  .input:focus { outline: none; border-color: var(--grid); }
   /* Autofilled fields, on every input in the app (login and Settings both sit on
      --panel-2). Chrome paints its own near-white background for an autofilled field
      and ignores `background`, so the only way to keep a dark field dark is to cover it
