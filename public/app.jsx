@@ -481,7 +481,7 @@ function App() {
       <main className="content">
         {tab === 'live' && <window.LiveTab snap={snap} settings={settings} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey} balance={balance}
           onOpenSettings={openSettings} />}
-        {tab === 'solar' && <window.SolarTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} />}
+        {tab === 'solar' && <window.SolarTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'battery' && <window.BatteryTab snap={snap} settings={settings} onOpenSettings={openSettings} />}
         {tab === 'grid' && <window.GridTab snap={snap} settings={settings} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} settings={settings} refreshKey={refreshKey} />}

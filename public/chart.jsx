@@ -79,9 +79,10 @@ function niceDate(s) {
 // to itself.
 const DAY_FLOOR_DAYS = 60; // what SunSynk's per-inverter history keeps
 
-/** Selected day + the arrows' bounds. `earliest` may be null (no lower bound). */
-function useDayPicker(earliest) {
-  const todayStr = localDateStr();
+/** Selected day + the arrows' bounds. `earliest` may be null (no lower bound). `today` is the
+ *  plant's own date when the caller knows it; otherwise the device's. */
+function useDayPicker(earliest, today) {
+  const todayStr = today || localDateStr();
   const [date, setDate] = React.useState(todayStr);
   return {
     date, setDate, todayStr, isToday: date === todayStr,

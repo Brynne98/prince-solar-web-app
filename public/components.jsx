@@ -73,14 +73,23 @@ function moneyFormatter(dp) {
   }
   return _moneyFmt[key];
 }
+// No space after a leading symbol: "R57", not the "R 57" en-ZA (and pt-BR) prints. Only the
+// space straight after the symbol goes; thousands spaces and a symbol written after the
+// amount ("12 MTn") are left alone.
+function moneyText(dp, v) {
+  const f = moneyFormatter(dp);
+  if (!f.formatToParts) return f.format(v);
+  const parts = f.formatToParts(v);
+  return parts.filter((p, i) => !(p.type === 'literal' && /^\s+$/.test(p.value) && i > 0 && parts[i - 1].type === 'currency')).map(p => p.value).join('');
+}
 function fmtMoney(v, dp = 2) {
   if (v == null || isNaN(v)) return '—';
-  return moneyFormatter(dp).format(v);
+  return moneyText(dp, v);
 }
 // compact: switches to k above 10,000
 function fmtMoneySmart(v) {
   if (v == null || isNaN(v)) return '—';
-  if (Math.abs(v) >= 10000) return moneyFormatter(1).format(v / 1000) + 'k';
+  if (Math.abs(v) >= 10000) return moneyText(1, v / 1000) + 'k';
   return fmtMoney(v, 0);
 }
 // the symbol alone, for labels like "R/kWh"
