@@ -688,6 +688,29 @@
   .unit-input .input { padding-right: 46px; -moz-appearance: textfield; }
   .unit-input .input::-webkit-outer-spin-button, .unit-input .input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .unit-input .unit { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--dim); pointer-events: none; }
+  /* panel capacity: the Total box, or the By panel rows, under the row's name and switch */
+  .cap-body { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+  /* as wide as the rows, so the total's rule runs the width of the rows and no further */
+  .panel-block { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: max-content; max-width: 100%; }
+  .cap-err { margin: 0; font-size: 12px; line-height: 1.5; color: var(--load); }
+  .cap-total { flex-direction: row; align-items: center; gap: 12px; }   /* the error sits beside the box, so it moves nothing */
+  /* By panel: count × watts and a remove per row. The two box columns give way on the narrowest
+     phones rather than push the remove out of the card. */
+  .panel-list { display: grid; grid-template-columns: minmax(0, 112px) min-content minmax(0, 96px) min-content; align-items: center; gap: 8px; width: max-content; max-width: 100%; }
+  .panel-row { display: contents; }
+  .panel-list .unit-input { width: auto; }
+  .unit-input.panel-count .input { padding-right: 60px; }   /* room for "panels" */
+  .unit-input.panel-watts .input { padding-right: 32px; }   /* room for "W" */
+  .panel-times { color: var(--dim); }
+  @media (max-width: 355px) { .panel-list { grid-template-columns: minmax(0, 100px) min-content minmax(0, 76px) min-content; } }
+  .panel-del { width: 32px; height: 32px; display: grid; place-items: center; padding: 0; background: none; border: none; border-radius: 7px; color: var(--muted); cursor: pointer; transition: color .15s; }
+  .panel-del:hover { color: var(--text); }
+  .panel-del:focus-visible { outline: 2px solid var(--pv); outline-offset: -2px; }
+  @media (max-width: 600px) { .panel-del { width: 44px; height: 44px; } }   /* a finger-sized remove */
+  .cap-body .cap-err { min-height: 18px; }   /* the error's slot, kept even when there is none */
+  .panel-sum { width: 100%; display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line-2); font-size: 13px; color: var(--muted); }
+  .panel-sum .mono { font-size: 14px; color: var(--text); }
+  .input[aria-invalid="true"], .input[aria-invalid="true"]:focus { border-color: var(--load); }
   /* reserve's slider runs the row's full width under its name and box, filled to the value */
   .reserve-slider { flex-basis: 100%; min-width: 0; padding-top: 4px; }
   .sset .reserve-slider .range { display: block; margin-top: 0; background: linear-gradient(to right, var(--soc) var(--fill, 0%), rgba(255,255,255,0.1) var(--fill, 0%)); }
