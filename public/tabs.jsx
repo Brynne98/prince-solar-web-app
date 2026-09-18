@@ -814,7 +814,8 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
     <div className="stack solar-tab">
       <div className="solar-stats">
         <StatTile label="SOLAR NOW" value={nowN} unit={nowU} accent={CC.pv}
-          sub={kwp > 0 ? <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</> : null} />
+          sub={kwp > 0 ? <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>
+            : <button type="button" className="mini-link" onClick={() => onOpenSettings('plant')}>Set panel capacity</button>} />
         {tile('TODAY', a.pvToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.pv)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
@@ -1341,8 +1342,12 @@ function PlantSections({ me, plantId, onSaved, onOpenSection }) {
   const [f, setF] = useState(cfg);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
-  // Panel capacity as one Total or By panel. Kept out of f: flipping it alone is not an unsaved change.
-  const capModeOf = (c) => Array.isArray(c?.panel_groups) && c.panel_groups.length ? 'panels' : 'total';
+  // Panel capacity as one Total or By panel. Kept out of f: flipping it alone is not an unsaved
+  // change. A plant with nothing set opens on By panel: a household counts panels, it does not
+  // know its kW, and SunSynk's figure is no longer seeded (0054).
+  const savedList = Array.isArray(cfg?.panel_groups) && cfg.panel_groups.length > 0;
+  const capModeOf = (c) => Array.isArray(c?.panel_groups) && c.panel_groups.length ? 'panels'
+    : c?.system_kwp == null ? 'panels' : 'total';
   const [capMode, setCapMode] = useState(capModeOf(cfg));
   const [capEditing, setCapEditing] = useState(null);   // 'total' or the row index typed in and not yet left
   const listRef = React.useRef(null);
@@ -1364,7 +1369,7 @@ function PlantSections({ me, plantId, onSaved, onOpenSection }) {
   // Numbers are compared as numbers, not as typed: 12.60 over a stored 12.6, or a figure
   // typed and taken back out, is not an unsaved change.
   const savedKwp = cfg.system_kwp ?? null;
-  // untouched, a stored total is kept whatever it is (SunSynk's seed can be 0)
+  // untouched, a stored total is kept whatever it is
   const totalOk = num(f.system_kwp) === savedKwp || (f.system_kwp ?? '') === '' || Number(f.system_kwp) > 0;
   const capBad = capMode === 'total' ? !totalOk : !filledRows.every(rowOk);
   // Capacity counts as changed only as the switch shows it: the Total box, or the filled rows.
@@ -1372,9 +1377,9 @@ function PlantSections({ me, plantId, onSaved, onOpenSection }) {
   // never saves over a stored Total. Against a saved list, though, the switch itself is the
   // change: Total on screen means one figure and no list, even at the same kW, and emptying
   // the rows means no capacity at all.
-  const capDirty = capMode === 'total' ? num(f.system_kwp) !== savedKwp || capModeOf(cfg) === 'panels'
+  const capDirty = capMode === 'total' ? num(f.system_kwp) !== savedKwp || savedList
     : filledRows.length ? JSON.stringify(typedRows) !== JSON.stringify(cfg.panel_groups)
-    : capModeOf(cfg) === 'panels';
+    : savedList;
   // The other boxes read the same way: what was typed counts as a change only if the number
   // changed. No `...rest` here: every .jsx is transpiled into the one global scope, and Babel's
   // rest helper keeps its key list in a shared `_excluded`, so a rest pattern in this file
@@ -1538,9 +1543,9 @@ function PlantSections({ me, plantId, onSaved, onOpenSection }) {
               </div>
               {/* always there, so an error arriving on blur never moves the button being clicked */}
               <p id="cap-err" className="cap-err" aria-live="polite">{capErr}</p>
-              <button type="button" className="ghost-btn panel-add" onClick={() => { set('panel_groups', [...panelRows, { count: '', watts: '' }]); focusRow(panelRows.length); }}>Add panels</button>
+              <button type="button" className="panel-add" onClick={() => { set('panel_groups', [...panelRows, { count: '', watts: '' }]); focusRow(panelRows.length); }}>Add panels</button>
               {/* not "Total": that word is the other way of entering it, on the switch above */}
-              <div className="panel-sum"><span>Comes to</span><span className="mono">{+(panelWatts / 1000).toFixed(3)} kW</span></div>
+              <div className={'panel-sum' + (panelWatts > 0 ? '' : ' empty')}><span>Comes to</span><span className="mono">{+(panelWatts / 1000).toFixed(3)} kW</span></div>
               </div>
             </div>
           )}

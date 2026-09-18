@@ -259,9 +259,11 @@ export async function getPlants(acc: Account): Promise<PlantInfo[]> {
   return list.map((p: any) => ({ id: Number(p.id), name: p.name ?? String(p.id) }));
 }
 
+// No panel capacity here on purpose: SunSynk's totalPower is the figure from the first
+// install and is never revised, so the owner sets it in Settings (0054).
 export type PlantDetail = {
   id: number; timezone: string | null;
-  lat: number | null; lon: number | null; systemKwp: number | null;
+  lat: number | null; lon: number | null;
 };
 
 /** What the API knows about a plant that belongs in plant_config. */
@@ -272,7 +274,6 @@ export async function getPlantDetail(acc: Account, plantId: number): Promise<Pla
     id: plantId,
     timezone: d?.timezone?.code ?? null,      // IANA, e.g. "Africa/Harare", "Europe/London"
     lat: n(d?.lat), lon: n(d?.lon),
-    systemKwp: n(d?.totalPower),
   };
 }
 
@@ -342,8 +343,9 @@ export async function linkAccount(userId: string, username: string, password: st
 
 /**
  * Record every plant the account can see against its dashboard user, and seed
- * plant_config for any plant that has no row yet. Timezone, lat/lon and kWp are
- * SunSynk's own values for the site. Currency is not sent, so the seed stores
+ * plant_config for any plant that has no row yet. Timezone and lat/lon are
+ * SunSynk's own values for the site; panel capacity is not seeded at all, because
+ * SunSynk's figure is the one from the first install (0054). Currency is not sent, so the seed stores
  * rand: the app serves South Africa only for now. Never overwrites a
  * config row (the user's edits are theirs) and never removes a plant_users row
  * (unlinking stays a user action). Called at link time and by the poller's
@@ -370,7 +372,7 @@ export async function syncPlants(acc: Account): Promise<PlantInfo[]> {
     .filter((r): r is PromiseFulfilledResult<PlantDetail> => r.status === "fulfilled")
     .map((r) => ({
       plant_id: r.value.id, timezone: r.value.timezone,
-      lat: r.value.lat, lon: r.value.lon, system_kwp: r.value.systemKwp,
+      lat: r.value.lat, lon: r.value.lon,
     }));
   if (rows.length) await rpc("plant_config_seed", { p_rows: rows });
   // Plants seeded just now (0044): store their inverter serials so `recover` can

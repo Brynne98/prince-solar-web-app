@@ -690,8 +690,17 @@
   .unit-input .unit { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--dim); pointer-events: none; }
   /* panel capacity: the Total box, or the By panel rows, under the row's name and switch */
   .cap-body { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-  /* as wide as the rows, so the total's rule runs the width of the rows and no further */
-  .panel-block { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: max-content; max-width: 100%; }
+  /* the list is one object: an inset well the width of its rows, so the total's rule runs the
+     width of the rows and no further. On phones the card is frame enough and the border would
+     cost the boxes their room, so it flattens. */
+  .panel-block { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: max-content; max-width: 100%;
+    padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.015); }
+  @media (max-width: 600px) { .panel-block { padding: 0; border: none; background: none; } }
+  .panel-add { background: none; border: none; padding: 0; color: var(--pv); font-size: 13px; font-weight: 600; cursor: pointer; }
+  .panel-add:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .panel-add:focus-visible { outline: 2px solid var(--pv); outline-offset: 3px; border-radius: 3px; }
+  .panel-row > * { animation: conn-in .2s ease-out; }   /* an added row eases in, as a login row does */
+  @media (prefers-reduced-motion: reduce) { .panel-row > * { animation: none; } }
   .cap-err { margin: 0; font-size: 12px; line-height: 1.5; color: var(--load); }
   .cap-total { flex-direction: row; align-items: center; gap: 12px; }   /* the error sits beside the box, so it moves nothing */
   /* By panel: count × watts and a remove per row. The two box columns give way on the narrowest
@@ -710,6 +719,7 @@
   .cap-body .cap-err { min-height: 18px; }   /* the error's slot, kept even when there is none */
   .panel-sum { width: 100%; display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line-2); font-size: 13px; color: var(--muted); }
   .panel-sum .mono { font-size: 14px; color: var(--text); }
+  .panel-sum.empty, .panel-sum.empty .mono { color: var(--dim); }   /* nothing entered yet: the total steps back */
   .input[aria-invalid="true"], .input[aria-invalid="true"]:focus { border-color: var(--load); }
   /* reserve's slider runs the row's full width under its name and box, filled to the value */
   .reserve-slider { flex-basis: 100%; min-width: 0; padding-top: 4px; }
