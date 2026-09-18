@@ -516,19 +516,19 @@ function lifetimeSince(rows, earliest, today) {
     : shortDate(ym + '-01', { month: 'short', year: 'numeric' }));
 }
 
-// Where a day's solar went, from its 5-minute points: the house first, then the battery,
-// then (for a plant paid for export) the grid. What is left is backflow or rounding.
-function solarSplit(points, sells) {
-  let home = 0, batt = 0, grid = 0;
+// Where a day's solar went inside the house, from its 5-minute points: the house first,
+// then the battery. What is left is export, backflow or rounding, and none of those are
+// this tab's subject — the grid has its own tab.
+function solarSplit(points) {
+  let home = 0, batt = 0;
   const kwh = 5 / 60 / 1000;
   points.forEach(p => {
     if (p.pv == null || p.load == null) return;
     const pv = Math.max(0, p.pv), toHome = Math.min(pv, Math.max(0, p.load));
     const toBatt = Math.min(pv - toHome, p.batt != null && p.batt < 0 ? -p.batt : 0); // day series: − = charging
     home += toHome * kwh; batt += toBatt * kwh;
-    if (sells) grid += Math.min(pv - toHome - toBatt, p.grid != null && p.grid < 0 ? -p.grid : 0) * kwh;
   });
-  return { home, batt, grid };
+  return { home, batt };
 }
 
 // One day's solar: a green line from first light to the last reading, and the reading under
@@ -738,8 +738,20 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // the Today tile always shows today's peak, whichever day the chart is on, so the tiles
   // keep their height and a scroll to the chart lands where it aimed
   const todayPeak = peakOf(today && !today.approx ? today.points : null);
-  const split = React.useMemo(() => solarSplit(points, sells), [day, sells]); // eslint-disable-line react-hooks/exhaustive-deps
-  const splitTotal = split.home + split.batt + split.grid;
+  const split = React.useMemo(() => solarSplit(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
+  const splitTotal = split.home + split.batt;
+  // A destination is shown only once it holds something: a 0.0 kWh column would be a
+  // zero-width segment under a full-width label, and "the battery got none of it" is said
+  // better by its absence than by a zero.
+  const dests = [['Battery', split.batt, CC.batt, hasBatt], ['Home', split.home, CC.load, true]]
+    .filter(d => d[3] && d[1] >= 0.05);
+  const destPct = (v) => v / splitTotal * 100;
+  // The percentages were a permanent column until 2026-09-19; the bar says the same thing,
+  // so they moved to the bar's hover title rather than being printed twice. The label row
+  // below is aria-hidden, so the bar's own label has to carry the kWh as well as the
+  // shares, or a screen reader hears the proportions and never the figures.
+  const destTitle = dests.map(d => d[0] + ' ' + Math.round(destPct(d[1])) + '%').join(', ');
+  const destLabel = dests.map(d => d[0] + ' ' + fmtKwh(d[1]) + ', ' + Math.round(destPct(d[1])) + '%').join('; ');
   // No money on this card. It answers one question — where the day's sun went — and the rows
   // sum to the day's solar. Est. saved is (load - import) x rate, which is the electricity the
   // house USED and did not buy; it cannot divide into a generation split, so beside these rows
@@ -848,22 +860,26 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         <Card>
           <SectionTitle>
             {titled('WHERE IT WENT', dayWord)}
-            <window.InfoDot text={'An estimate from 5-minute readings: solar is counted to the house first, then to the battery' + (sells ? ', then to the grid' : '') + '.'} />
+            <window.InfoDot text={'An estimate from 5-minute readings: solar is counted to the house first, then to the battery. Anything sold to the grid is on the Grid tab.'} />
           </SectionTitle>
           {!day ? <window.Skeleton h={140} r={10} />
             : noReadings ? <div className="solar-note" {...dim}>{noReadings}</div>
             : splitTotal < 0.05 ? <div className="solar-note" {...dim}>{view.isToday ? 'No solar yet today.' : 'No solar on this day.'}</div>
             : <div {...dim}>
-                <div className="solar-split" role="img" aria-label={[['Battery', split.batt], ['Home', split.home], ['Grid', split.grid]].filter(r => r[1] > 0).map(r => r[0] + ' ' + Math.round(r[1] / splitTotal * 100) + '%').join(', ')}>
-                  {split.batt > 0 && <i style={{ width: split.batt / splitTotal * 100 + '%', background: CC.batt }} />}
-                  {split.home > 0 && <i style={{ width: split.home / splitTotal * 100 + '%', background: CC.load }} />}
-                  {split.grid > 0 && <i style={{ width: split.grid / splitTotal * 100 + '%', background: CC.grid }} />}
+                <div className="solar-split" role="img" title={destTitle} aria-label={destLabel}>
+                  {dests.map(([l, v, c]) => <i key={l} style={{ width: destPct(v) + '%', background: c }} />)}
                 </div>
-                <ul className="solar-dest">
-                  {[['Battery', split.batt, CC.batt, hasBatt], ['Home', split.home, CC.load, true], ['Grid', split.grid, CC.grid, sells]].filter(r => r[3]).map(([l, v, c]) => (
-                    <li key={l}><span className="dot" style={{ background: c }} /><span>{l}</span><span className="kwh mono">{fmtKwh(v)}</span><span className="pct mono">{Math.round(v / splitTotal * 100)}%</span></li>
-                  ))}
-                </ul>
+                <div className="solar-dest" aria-hidden="true">
+                  {dests.map(([l, v, c]) => {
+                    const [n, u] = EP(v);
+                    return (
+                      <div className="sd" key={l} style={{ width: destPct(v) + '%' }}>
+                        <div className="sd-v mono" style={{ color: c }}>{n}<s>{u}</s></div>
+                        <div className="sd-k">{l}</div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>}
         </Card>
 
