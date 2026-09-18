@@ -88,7 +88,7 @@ decaying to 7.3 V** over 37 minutes on 538820's master with **5.5 V** on its sla
 sensor float, not mains, and far under the 100 V floor. Output stayed live at
 217–230 V on all five: islanding. So the table above resolves to its middle row.
 `q_grid_present`'s `> 100` test is correct and the Grid on/off chip is trustworthy.
-Full working in `OUTAGE_2026-09-18.md`.
+The queries that produced this are in `scripts/sql/outage-2026-09-18.sql`.
 
 **The return was captured too, at 17:18:14:** `grid_volt_v` jumped 6.6 → 241.0 V and
 `grid_freq_hz` 0.00 → 49.86 in the *same* sample, relay still `0`, no current flowing —
