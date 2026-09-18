@@ -676,7 +676,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const feat = snap.features || {};
   const tz = cfg.timezone;
   const plantToday = plantDateStr(tz);
-  const rate = cfg.tariffImport ?? 0, rateExp = cfg.tariffExport ?? 0;
+  const rateExp = cfg.tariffExport ?? 0; // only to decide whether the plant sells; no money on this tab
   const hasGrid = feat.hasGrid !== false;
   const hasBatt = feat.hasBattery !== false;
   const sells = hasGrid && rateExp > 0;
@@ -740,12 +740,12 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const todayPeak = peakOf(today && !today.approx ? today.points : null);
   const split = React.useMemo(() => solarSplit(points, sells), [day, sells]); // eslint-disable-line react-hooks/exhaustive-deps
   const splitTotal = split.home + split.batt + split.grid;
-  // Est. saved exactly as the Live overview works it out: grid energy the home avoided
-  // buying at the import rate, plus anything sold at the feed-in rate
-  const dLoad = view.isToday ? a.loadToday : day && day.totals ? day.totals.load : null;
-  const dImp = !hasGrid ? 0 : view.isToday ? a.gridFromToday : day && day.totals ? day.totals.imp : null;
-  const dExp = !hasGrid ? 0 : view.isToday ? a.gridToToday : points.reduce((s, p) => s + (p.grid != null && p.grid < 0 ? -p.grid * 5 / 60 / 1000 : 0), 0);
-  const saved = dLoad != null && dImp != null ? Math.max(0, dLoad - dImp) * rate + (dExp || 0) * rateExp : null;
+  // No money on this card. It answers one question — where the day's sun went — and the rows
+  // sum to the day's solar. Est. saved is (load - import) x rate, which is the electricity the
+  // house USED and did not buy; it cannot divide into a generation split, so beside these rows
+  // it reads as a third unexplained number. It lives on Live, where Home and Imported sit on
+  // the same strip and the subtraction is on screen, and on the Grid tab, which spells today's
+  // sum out in a sentence. Rejected here on 2026-09-19 after trying it three ways.
 
   // ---- battery full ----
   const cap = cfg.battCapacity;
@@ -864,17 +864,6 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
                     <li key={l}><span className="dot" style={{ background: c }} /><span>{l}</span><span className="kwh mono">{fmtKwh(v)}</span><span className="pct mono">{Math.round(v / splitTotal * 100)}%</span></li>
                   ))}
                 </ul>
-                <div className="solar-saved">
-                  <div>
-                    <div className="solar-saved-l">Est. saved<window.InfoDot text={'Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your import rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '. Set the rates in Settings.'} /></div>
-                    <div className="solar-saved-rate">
-                      {rate > 0 || rateExp > 0
-                        ? [rate > 0 && 'at ' + window.fmtMoney(rate) + '/kWh', rateExp > 0 && window.fmtMoney(rateExp) + '/kWh sold'].filter(Boolean).join(', ')
-                        : <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your rate</button>}
-                    </div>
-                  </div>
-                  <span className="solar-saved-v mono">{rate > 0 || rateExp > 0 ? window.fmtMoneySmart(saved) : '—'}</span>
-                </div>
               </div>}
         </Card>
 
