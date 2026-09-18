@@ -475,8 +475,9 @@ const shortDate = (s, opts = { weekday: 'short', day: 'numeric', month: 'short' 
 
 // Every total is the days before today plus today's live figure, and the current month is
 // rebuilt from its days: the nightly sync (02:15 UTC) writes today's cached row, and the
-// month holding it, at whatever today was then. Yesterday's row is also only as complete
-// as that sync, so the hours before it runs read a little low (a server fix, not done here).
+// month holding it, at whatever today was then. Today's row is therefore still dropped here
+// and replaced with the live figure. Yesterday used to read low for the same reason; since
+// 0058 the server serves any day whose cached row is unfinished from agg_minute instead.
 // A null in any row reads as NaN, which shows "—" rather than a confident smaller total.
 function solarTotals(a, energy, today) {
   const sum = (rows) => rows.reduce((s, r) => s + (r.pv == null ? NaN : r.pv), 0);
