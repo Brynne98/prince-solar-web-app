@@ -156,6 +156,29 @@ with a *known* answer rather than three clock slots in a 180-second window, so a
 lost to a gateway timeout no longer postpones the alert. Replayed against the real
 minutes, `grid_down` comes due at **16:11 instead of 16:14**.
 
+**Three-phase: this protects three-phase PLANTS, not three-phase HOUSEHOLDS.** The
+distinction is the whole safety boundary and it is easy to miss. `phase_down` reads L1,
+L2 and L3 off *one inverter's row*, so it only ever sees the legs that inverter itself
+senses.
+
+| Setup | What the rows hold | Covered? |
+|---|---|---|
+| Three-phase inverter (e.g. `SG04LP3`) | L1/L2/L3 all populated on each row | **Yes** |
+| Three-phase house, single-phase inverter on one leg | L2/L3 null — other two legs invisible | **No** |
+| Three-phase house, three single-phase inverters, one per leg | each row has only its own leg as L1, L2/L3 null | **No, and worse** |
+
+Plant 495944 is the first kind: all three of its inverters report three phases, and
+their output legs read ~219 V each, so each unit senses the whole board. It is covered
+by the fix.
+
+The third row is the dangerous one and this codebase has no model for it. `phase_down`
+could never fire, because it needs L2/L3 on a single row. And presence is
+`bool_or(grid_volt_v > 100)` across inverters, so **one live leg out of three reads as a
+healthy grid** — two-thirds of the house dark, chip says "Grid on". Detecting that means
+comparing `grid_volt_v` *between* inverters and knowing which leg each sits on, which is
+a different rule and needs a fact nothing records today. Worth knowing before anyone
+links a plant wired that way.
+
 A third, latent version of defect 1 is still open: `api_overview`'s `phase_down` reads
 `grid_volt_v` off the latest rows with the same unfiltered `bool_or`, so on a
 three-phase plant a stale row could show "Phase down". Neither plant here is
