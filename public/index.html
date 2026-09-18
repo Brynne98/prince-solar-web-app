@@ -410,7 +410,7 @@
   .mflow-home { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 14px; background: rgba(255,255,255,0.015); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; transition: border-color .2s; }
   /* where the home's power is coming from: one segment per source, full width under Home */
   .mflow-split { flex: 1 0 100%; display: flex; gap: 2px; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,0.08); }
-  .mflow-split i { display: block; height: 100%; }
+  .mflow-split i { display: block; height: 100%; min-width: 6px; }   /* a 1% share still reads as a segment */
   .mflow-split-words { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: -6px; font-size: 12px; font-weight: 600; }
   .mflow-home svg { flex: none; }
   .mflow-home-text { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
@@ -688,6 +688,7 @@
   .unit-input .input { padding-right: 46px; -moz-appearance: textfield; }
   .unit-input .input::-webkit-outer-spin-button, .unit-input .input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .unit-input .unit { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--dim); pointer-events: none; }
+  .cap-switch { flex-basis: 100%; margin-top: 2px; }   /* the switch leads the boxes it governs */
   /* panel capacity: the Total box, or the By panel rows, under the row's name and switch */
   .cap-body { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
   /* the list is one object: an inset well the width of its rows, so the total's rule runs the

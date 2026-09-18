@@ -209,10 +209,20 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
       );
     };
     const homeActive = home.w > 5;
-    // the split bar under Home: one segment per source feeding it, 2 apart
+    // The split bar under Home: one segment per source feeding it, 2 apart. A 1% share is
+    // a pixel wide, and a 2.5 radius on a 1px rect draws a smudge, so every segment gets a
+    // readable minimum and the widest one pays for it; the radius never exceeds half a segment.
     const splitBar = 130;
     let sx = -52;
     const splitW = splitBar - 2 * Math.max(0, split.length - 1);
+    const MIN_SEG = 6;
+    const segW = split.map(s => (splitW * s.w) / splitTotal);
+    const owed = segW.reduce((a, w) => a + Math.max(0, MIN_SEG - w), 0);
+    if (owed > 0) {
+      const widest = segW.indexOf(Math.max(...segW));
+      segW.forEach((w, i) => { if (w < MIN_SEG) segW[i] = MIN_SEG; });
+      segW[widest] = Math.max(MIN_SEG, segW[widest] - owed);
+    }
 
     return (
       <svg viewBox={`48 20 884 ${H - 20}`} className="flow-svg" preserveAspectRatio="xMidYMid meet">
@@ -240,9 +250,9 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
           {kv(home.row, -52, 8)}
           {/* where it is coming from: the bar, and the same split in words under it */}
           <rect x={-52} y={19} width={splitBar} height={5} rx={2.5} fill="rgba(255,255,255,0.08)" />
-          {split.map(s => {
-            const w = (splitW * s.w) / splitTotal;
-            const el = <rect key={s.label} x={sx} y={19} width={w} height={5} rx={2.5} fill={s.color} />;
+          {split.map((s, i) => {
+            const w = segW[i];
+            const el = <rect key={s.label} x={sx} y={19} width={w} height={5} rx={Math.min(2.5, w / 2)} fill={s.color} />;
             sx += w + 2;
             return el;
           })}

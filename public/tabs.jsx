@@ -1499,7 +1499,9 @@ function PlantSections({ me, plantId, onSaved, onOpenSection }) {
             <span id="plant-kwp-q" className="conn-user">Panel capacity</span>
             <span className="conn-meta">What all the panels can make in full sun.</span>
           </div>
-          <div className="conn-actions">
+          {/* The switch belongs to what it switches, so it sits over the boxes on the left
+              rather than alone at the far edge of a wide card. */}
+          <div className="cap-switch">
             <Segmented size="sm" value={capMode} onChange={setCapMode}
               options={[{ value: 'total', label: 'Total' }, { value: 'panels', label: 'By panel' }]} />
           </div>
