@@ -983,11 +983,12 @@
   }
   /* Sizes follow common guidance: 52px fields (44-48 minimum targets), 16px field text (iOS
      zooms below it). Spacing: 10 inside a pair, 20 between items, 30 between groups, 40 under
-     the brand. The card gap is 20; groups add margin-top: 10. Padding is 48 on every side. */
+     the brand. The card gap is 20; groups add margin-top: 10. Padding is 32 on every side:
+     48 was proportioned for the old 600px card and reads heavy at this width. */
   .login-card {
-    width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 20px;
+    width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 20px;
     background: linear-gradient(180deg, var(--panel-2), var(--panel));
-    border: 1px solid var(--line-2); border-radius: 22px; padding: 48px;
+    border: 1px solid var(--line-2); border-radius: 22px; padding: 32px;
     color: var(--text); text-align: left;
     box-shadow: 0 24px 60px -30px rgba(0,0,0,0.9), 0 0 0 1px rgba(0,0,0,0.25) inset;
   }
@@ -1047,11 +1048,17 @@
   .login-note { color: var(--muted); }
   .login-links {
     /* the links are 48px targets; 6 + their 14px of slack reads as 20 above the text, and
-       -14 below keeps the card's visible bottom padding at 48 */
-    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+       -14 below cancels the slack so the card's bottom padding shows at its full value */
+    /* One line wherever the pair fits, phone included. They only stack on a screen too
+       narrow to hold both, and wrap does that on its own, so there is no breakpoint to
+       keep in step with the card's width. Row gap 0: the 48px targets are the spacing. */
+    display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+    gap: 0 12px;
     padding-top: 6px; margin-bottom: -14px; border-top: 1px solid var(--line);
     font-size: 14.5px; color: var(--muted);
   }
+  /* a footer link breaks the line, never its own phrase */
+  .login-links .login-link { white-space: nowrap; }
   .login-card .login-link {
     background: none; border: 0; padding: 0; margin: 0; width: auto; box-shadow: none;
     min-height: 48px; display: inline-flex; align-items: center;
@@ -1078,9 +1085,6 @@
     .auth-brand-name { font-size: 22px; }
     .auth-brand-tag { font-size: 13px; }
     .login-title { font-size: 26px; }
-    /* the two footer actions share a line on wide cards; on a phone they stack
-       cleanly instead of one of them wrapping mid-phrase */
-    .login-links { flex-direction: column; align-items: flex-start; gap: 0; }
   }
   /* plant selector in the topbar */
   .plant-select { background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text); border-radius: 9px; padding: 7px 10px; font-family: var(--display); font-size: 13px; }

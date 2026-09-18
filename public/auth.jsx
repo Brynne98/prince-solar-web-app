@@ -337,7 +337,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
 
         <div className="login-links">
           {mode === 'signin' && (<>
-            <span>New here? <button type="button" className="login-link" onClick={() => go('signup')}>Create an account</button></span>
+            <button type="button" className="login-link" onClick={() => go('signup')}>Create an account</button>
             <button type="button" className="login-link quiet" onClick={() => go('forgot')}>Forgot password?</button>
           </>)}
           {mode === 'signup' && (
