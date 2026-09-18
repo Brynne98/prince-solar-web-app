@@ -179,10 +179,42 @@ comparing `grid_volt_v` *between* inverters and knowing which leg each sits on, 
 a different rule and needs a fact nothing records today. Worth knowing before anyone
 links a plant wired that way.
 
-A third, latent version of defect 1 is still open: `api_overview`'s `phase_down` reads
-`grid_volt_v` off the latest rows with the same unfiltered `bool_or`, so on a
-three-phase plant a stale row could show "Phase down". Neither plant here is
-three-phase, so it cannot fire today.
+**`phase_down` is worse than defect 1 and is NOT fixed.** It carries the same
+unfiltered `bool_or` over possibly-stale rows, which on plant 495944 — three-phase, so
+this is live, not latent — could show "Phase down" off a frozen reading. But the
+council found a larger fault underneath, verified by running the deployed function
+against synthetic three-phase rows:
+
+```
+L1 dead (4 V), L2/L3 live (231/229 V)  ->  q_grid_present = FALSE, phase_down = FALSE
+L2 dead (4 V), L1/L3 live (231/229 V)  ->  q_grid_present = TRUE,  phase_down = TRUE
+```
+
+`q_grid_present` votes on `grid_volt_v` (L1) alone, and `phase_down` requires
+`grid_volt_v > 100` before it will test `least(L2, L3)`. So a dropped L1 sets neither:
+the chip reads "Grid off" and `grid_down` fires after three known minutes while two
+phases are live and the house is two-thirds powered. A dropped L2 or L3 is caught
+correctly. The check is one-third blind.
+
+The agreed shape, not yet built: make presence any-phase with
+`greatest(grid_volt_v, grid_volt_l2_v, grid_volt_l3_v) > 100` and the drop test
+all-phase with `least(...) < 100`, both over 0055's newest-`device_time` rows; delete
+the `coalesce(..., 999)` sentinel, since Postgres `least`/`greatest` already skip NULLs
+and the sentinel currently makes a *missing* phase read as a healthy 999 V; widen
+0055's voter filter, which requires L1 non-null and would exclude a three-phase
+inverter whose L1 field alone went missing; and make a dropped phase an alert in
+`api_alerts_due_raw` with `grid_down`'s debounce rather than a third state on the
+presence chip, since it is an electrician call. Phase count stays out of
+`plant_config`: it is an inverter fact, not a plant fact, and is inferable from whether
+L2/L3 are ever reported.
+
+What the existing data already settles, so this needs no new capture: single-phase
+firmware returns NULL for L2/L3 (538820, 0 non-null rows), three-phase firmware returns
+all three and writes a real 0.0 when a leg is dead (495944, 7,509 rows each). So
+single-phase units do not pad with zeros, and the null-based `least`/`greatest` form is
+safe. What is still unobserved is a three-phase plant while grid-connected: 495944 has
+never once read above 0.0 V on any phase, and `0057`'s `grid_seen` exists to say when
+that changes.
 
 `grid_burst` has done its job and comes out in `0056`, per the 5 Sep decision. The
 reconnect window was the last thing minute rows could not show, and it showed it. The
