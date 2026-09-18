@@ -31,7 +31,7 @@ wall-display mode are all done). These are the real remaining gaps, to be worked
 | 8 | **String sibling comparison over time** — A vs B divergence across weeks | The Solar tab flags a *dead* string live; slow soiling/shading drift is invisible. | 🟡 | ⬜ |
 | 9 | **Service worker** — `manifest.webmanifest` exists but there's no `sw.js` | Installs but doesn't work offline and can't do web push; would make #2 land as a real phone notification. | 🟡 | ⬜ |
 
-### ⚠ Open question — grid presence (raised 18 Aug 2026)
+### ✅ Answered — grid presence (raised 18 Aug 2026, closed 18 Sep 2026)
 
 Item #3 was originally scoped as "grid failures are already in `grid_w`". **That was
 wrong.** `grid_w` and `grid_freq_hz` both read zero during an ordinary self-powered
@@ -78,6 +78,94 @@ directly. Read it with `scripts/sql/grid-burst.sql`. Two related facts from the 
 investigation: the slave's SunSynk feed repeats the previous minute 79.5% of the time
 (≈5 min real resolution), and `grid_down`'s `false_3m >= 3` debounce cannot be met by an
 event this short regardless of which signal is used.
+
+**ANSWERED 18 Sep 2026 — a dead grid reads a few volts, and the voltage test is
+sound.** Mains failed at 16:09 SAST and stayed off past 16:46, across both plants
+and all five inverters. `grid_burst` caught it from 17 s in. While the utility was
+genuinely dead: `grid_freq_hz` **0.00** and `grid_relay_status` **`0`** everywhere;
+`grid_volt_v` exactly **0.0 V** on plant 495944's three inverters, and **15.2 V
+decaying to 7.3 V** over 37 minutes on 538820's master with **5.5 V** on its slave —
+sensor float, not mains, and far under the 100 V floor. Output stayed live at
+217–230 V on all five: islanding. So the table above resolves to its middle row.
+`q_grid_present`'s `> 100` test is correct and the Grid on/off chip is trustworthy.
+Full working in `OUTAGE_2026-09-18.md`.
+
+**The return was captured too, at 17:18:14:** `grid_volt_v` jumped 6.6 → 241.0 V and
+`grid_freq_hz` 0.00 → 49.86 in the *same* sample, relay still `0`, no current flowing —
+then 92 seconds of reconnect delay before the relay closed at 17:20:06, output snapped
+from its islanded 230.0 V / 50.00 Hz to 237.7 V / 49.90 Hz and 187 W began to flow.
+Presence turns true on the 17:19 minute and "Grid is back" comes due at 17:21, which is
+just after power is genuinely usable. So "back" meaning *utility live* rather than
+*relay closed* is right, and the two-minute debounce absorbs the reconnect delay on its
+own.
+
+**Frequency is not the test — but the earlier reasoning here was wrong.** It said
+frequency sits on the inverter side of the relay; the 17:18 sample refutes that, since
+Hz returned with the mains while the relay was still open. And `0015`'s "54% of minutes
+read zero frequency" describes the history logged up to Aug 2026, not this firmware
+today: cross-tabulated over the last seven days on the master, `grid_freq_hz = 0` covers
+70 minutes, every one of them this outage, against 8,741 minutes of relay closed / volts
+up / non-zero Hz at an average of just 32 W across the CT. On this week's data frequency
+would have worked.
+
+The reason it is still the wrong column has nothing to do with the physics:
+`grid_freq_hz` arrives through `extract.ts`'s `num()`, which turns an absent or
+unparseable field into **0**, while `grid_volt_v` uses `numOrNull` and reads NULL. The
+same API hiccup is a silent blackout on frequency and an honest "unknown" on voltage.
+The 4 Sep 11:15 minute is the matching observation — 0.00 Hz alongside 242.9 V for one
+minute as the inverter tripped, before it re-locked. Frequency is fair corroboration and
+worth storing; nothing should branch on it alone.
+
+**Two defects the same outage exposed, both fixed in `0055`.** The alert did not
+arrive until 16:14 — five minutes of darkness — and neither minute of the delay was
+the signal's fault.
+
+1. *A stale inverter out-voted a fresh one.* 538820's slave uploads about every five
+   minutes, so its rows for 16:08–16:10 all carried `device_time` frozen at 16:05:54
+   with a pre-outage 240.1 V. Presence was `bool_or(grid_volt_v > 100)` over every row
+   at the minute, so that one frozen sample reported "grid present" for two minutes
+   after the master had already gone dark. `q_grid_present` now answers from the rows
+   carrying the **newest `device_time`** at that minute and ignores the rest: each
+   row's `device_time` names the moment its voltage describes, so an older row is not
+   evidence against a newer one. Over the last 7 days and 16,283 minutes this changes
+   exactly those 2 minutes and nothing else — nothing flipped the other way and no
+   minute became unknown.
+
+   The council rejected the first attempt, which ignored a row whose `device_time`
+   repeated its own previous row and fell back to counting every row when none was
+   fresh. The master uploads about every 67 s against a 60 s poll, so on 736 minutes
+   of the last week (8.3%) *no* row moved — and on any of those the fallback would
+   have handed the vote straight back to the frozen 240.1 V, flipping presence to
+   "grid on" mid-outage and potentially firing "Grid is back" while the grid was
+   dead. Today's outage happened to miss those minutes; the design should not depend
+   on that. Ranking by `device_time` has no such hole, needs no cadence guessed and
+   no threshold picked, and the comparison is plain text order because `device_time`
+   is `'YYYY-MM-DD HH24:MI:SS'` and only ever compared within one plant at one
+   minute.
+2. *The confidence wording was inverted.* `0017` hedged to "Grid may be off …
+   unconfirmed" whenever the relay was open, because voltage might have been merely
+   tracking the relay. It is not — but anti-islanding opens the relay within seconds
+   of losing mains, so a real blackout always reads relay `0`, and the confident
+   branch (relay closed, no volts) was the unreachable one. Today's genuine outage
+   returned the hedge. There is now a single **"Grid is off"**, with the relay out of
+   the test entirely.
+
+The debounce stays at three minutes — deliberate relay-open stretches never read under
+100 V, so they were never what it guarded — but it now counts the three newest minutes
+with a *known* answer rather than three clock slots in a 180-second window, so a poll
+lost to a gateway timeout no longer postpones the alert. Replayed against the real
+minutes, `grid_down` comes due at **16:11 instead of 16:14**.
+
+A third, latent version of defect 1 is still open: `api_overview`'s `phase_down` reads
+`grid_volt_v` off the latest rows with the same unfiltered `bool_or`, so on a
+three-phase plant a stale row could show "Phase down". Neither plant here is
+three-phase, so it cannot fire today.
+
+`grid_burst` has done its job and comes out in `0056`, per the 5 Sep decision. The
+reconnect window was the last thing minute rows could not show, and it showed it. The
+sub-minute-outage question from 4 Sep is *not* foreclosed by the drop: the burst only
+ever armed on the minute after a poll saw the trigger, so it could never have answered
+that one. If it ever matters it wants continuous 10 s grid polling, not this table.
 
 ---
 

@@ -90,7 +90,6 @@ type AccountResult = {
   listCalls: number;
   /** SunSynk requests this account cost this minute, retries included */
   apiCalls: number;
-  burst?: string;
   error?: string;
   needsRelink?: boolean;
 };
@@ -104,80 +103,30 @@ const emptyResult = (acc: Account): AccountResult => ({
 const callsSince = (acc: Account, since: number) => (apiCallCounts.get(acc.id) ?? 0) - since;
 
 // ---------------------------------------------------------------------------
-// Grid burst: sub-minute samples after a relay-open / low-voltage minute.
+// Outage signal: does this reading look like the grid is gone?
 //
-// The one relay-open minute on record (2026-09-04 11:15) was sampled AFTER the
-// utility had returned -- grid_volt_v and output_volt_v, identical with the relay
-// closed, differed by 12.9 V, so the grid-side sensor was seeing live mains while the
-// inverter sat in its reconnect delay. The dead-grid interval fell between polls.
-// Nothing logged so far shows what this firmware reports while the grid is actually
-// OFF, which is the fact 0017's alert wording is waiting on.
+// Three unrelated things need to know. `canCarry` refuses to carry such a row
+// forward, because freezing an outage minute is worse than fetching again.
+// `wantEndpoints` forces the load and output reads, which are otherwise on 5 and
+// 10 minute tiers. And `fetchInverter` reads the far side of the relay early
+// rather than waiting for the next tier boundary.
 //
-// So when a poll sees the trigger, take BURST_SAMPLES more readings at
-// BURST_SPACING_MS, grid + output endpoints only, and store them in grid_burst
-// (migration 0029). Bounded to finish before the next minute's poll, which re-arms
-// if the relay is still open -- so an event of any length gets ~10 s coverage with
-// no overlap and no unbounded work.
-//
-// Runs after the response via EdgeRuntime.waitUntil, so the burst never delays the
-// minute's normal write and the cron job's 55 s wait is unaffected.
+// The threshold is q_grid_present's: mains voltage collapses to a few volts of
+// sensor float when the supply fails -- 15.2 V decaying to 6.5 V on the master
+// through the 18 Sep outage, 5.0 V on the slave, exactly 0.0 V on another plant
+// entirely. Relay '0' alone is not specific: the inverter also opens it on
+// purpose when it is running the house off the battery.
 // ---------------------------------------------------------------------------
-const BURST_SAMPLES = 5;
-const BURST_SPACING_MS = 10_000;
-const BURST_BUDGET_MS = 55_000; // hard stop: the next poll starts at +60 s
 const LOW_VOLT_V = 100;         // same threshold as q_grid_present()
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Why a reading triggers a burst, or null if it doesn't. */
-function burstTrigger(r: Record<string, unknown>): "relay_open" | "low_volt" | null {
+/** Why a reading looks like an outage, or null if it doesn't. */
+function outageSignal(r: Record<string, unknown>): "relay_open" | "low_volt" | null {
   if (r.grid_relay_status === "0") return "relay_open";
   const v = r.grid_volt_v;
   if (typeof v === "number" && v < LOW_VOLT_V) return "low_volt";
   return null;
-}
-
-async function burstGrid(
-  acc: Account, inverters: InverterInfo[], triggerTs: number, trigger: string,
-): Promise<void> {
-  const started = Date.now();
-  let stored = 0;
-  for (let i = 0; i < BURST_SAMPLES; i++) {
-    if (i > 0) await sleep(BURST_SPACING_MS);
-    if (Date.now() - started > BURST_BUDGET_MS) break;
-    const ts = Math.floor(Date.now() / 1000);
-
-    // Grid + output only: the two sensors that straddle the relay. Every inverter on
-    // the account, not just the one that tripped -- the slave's stale feed is part
-    // of what needs observing.
-    const rows = await Promise.all(inverters.map(async (inv) => {
-      const paths = realtimePaths(inv.sn);
-      const [grid, output] = await Promise.all([
-        apiGet(paths.grid, acc).catch(() => null),
-        apiGet(paths.output, acc).catch(() => null),
-      ]);
-      const r = extractReading(inv, { grid, output, battery: null, input: null, load: null });
-      return {
-        ts, sn: inv.sn, plant_id: inv.plantId ?? null, trigger, trigger_ts: triggerTs,
-        grid_volt_v: r.grid_volt_v, grid_relay_status: r.grid_relay_status,
-        grid_freq_hz: r.grid_freq_hz, grid_w: r.grid_w,
-        output_volt_v: r.output_volt_v, output_freq_hz: r.output_freq_hz,
-      };
-    }));
-    const withPlant = rows.filter((r) => r.plant_id != null);
-    if (!withPlant.length) continue;
-    const ins = await db.from("grid_burst").upsert(withPlant, { onConflict: "ts,sn" });
-    if (ins.error) { console.warn("grid_burst:", ins.error.message); continue; }
-    stored += withPlant.length;
-  }
-  console.log(`grid burst (${trigger} @ ${triggerTs}): ${stored} rows in ${Date.now() - started} ms`);
-}
-
-/** Run after the response if the runtime supports it; otherwise inline (local dev). */
-function background(p: Promise<void>) {
-  const rt = (globalThis as any).EdgeRuntime;
-  if (rt?.waitUntil) rt.waitUntil(p);
-  else return p;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,8 +142,7 @@ function background(p: Promise<void>) {
 //
 // Never carried: when the last row is unknown (first minute after linking) or has
 // no device_time; when the last row
-// showed an outage (relay open / mains < 100 V — the burst and the alerts need a
-// live read); after MAX_CARRIED_RUN carried rows in a row, so a stalled logger is
+// showed an outage (relay open / mains < 100 V — the alerts need a live read); after MAX_CARRIED_RUN carried rows in a row, so a stalled logger is
 // re-read; when input itself failed.
 //
 // When something new has arrived, not every endpoint is worth a call (0033):
@@ -231,6 +179,19 @@ const ENDPOINT_FIELDS: Record<Endpoint, string[]> = {
   output: ["output_w", "output_volt_v", "output_freq_hz", "output_volt_l2_v", "output_volt_l3_v"],
 };
 
+/**
+ * Columns that must read NULL rather than the previous row's value when their
+ * endpoint did not answer. The fallback below is right for counters, which only
+ * grow, so the last known total beats a zero. It is wrong for an instantaneous
+ * grid reading: copying one forward re-stamps a pre-outage 240 V with this
+ * minute's device_time, so it cannot be told from a live measurement and the
+ * grid goes on reading "present" through a blackout. Absent beats false, the
+ * same rule the all-zero rows of 2026-09-10 were deleted under.
+ */
+const NEVER_CARRY: ReadonlySet<string> = new Set([
+  "grid_volt_v", "grid_volt_l2_v", "grid_volt_l3_v", "grid_relay_status", "grid_freq_hz",
+]);
+
 type Fetched = { inv: InverterInfo; raw: RawBundle; carried: boolean; fetched: Set<Endpoint>; sign: string | null };
 
 function canCarry(inv: InverterInfo, inputTime: string | null): boolean {
@@ -238,7 +199,7 @@ function canCarry(inv: InverterInfo, inputTime: string | null): boolean {
   if (!prev || inputTime == null || prev.device_time == null) return false;
   if (prev.device_time !== inputTime) return false;
   if ((inv.carriedRun ?? 0) >= MAX_CARRIED_RUN) return false;
-  if (burstTrigger(prev) !== null) return false;
+  if (outageSignal(prev) !== null) return false;
   return true;
 }
 
@@ -249,7 +210,7 @@ function wantEndpoints(prev: Record<string, unknown> | null | undefined, ts: num
   const age = (k: string) => ts - (Number(prev[k]) || 0); // null/absent -> very old
   if (prev.load_w == null || age("load_fetched_ts") >= LOAD_EVERY_S) want.add("load");
   if (age("output_fetched_ts") >= OUTPUT_EVERY_S) want.add("output");
-  if (burstTrigger(prev) !== null) { want.add("load"); want.add("output"); }
+  if (outageSignal(prev) !== null) { want.add("load"); want.add("output"); }
   return want;
 }
 
@@ -275,7 +236,7 @@ async function fetchInverter(inv: InverterInfo, acc: Account, ts: number, sign: 
   // The fresh grid payload shows an outage that the last row did not: read the far
   // side of the relay (and the load) now rather than at the next tier boundary.
   const late = (["output", "load"] as Endpoint[]).filter((k) => !want.has(k));
-  if (late.length && !offGrid && burstTrigger(extractReading(inv, raw, { battPositiveMeans: sign })) !== null) {
+  if (late.length && !offGrid && outageSignal(extractReading(inv, raw, { battPositiveMeans: sign })) !== null) {
     await fetchInto(raw, late, inv.sn, acc);
     for (const k of late) want.add(k);
   }
@@ -307,8 +268,12 @@ function readingRow(f: Fetched, ts: number): Record<string, unknown> {
   const row: Record<string, unknown> = { ts, plant_id, sn: f.inv.sn, status: fresh.status, carried: false };
   for (const k of INPUT_FIELDS) row[k] = fresh[k];
   for (const ep of ALL_ENDPOINTS) {
-    const src = got(ep) ? fresh : prev;
-    for (const col of ENDPOINT_FIELDS[ep]) row[col] = src[col] ?? null;
+    const ok = got(ep);
+    for (const col of ENDPOINT_FIELDS[ep]) {
+      row[col] = ok ? (fresh[col] ?? null)
+               : NEVER_CARRY.has(col) ? null
+               : (prev[col] ?? null);
+    }
   }
   // Only stamp the tier clocks when the read succeeded. Stamping on failure told
   // wantEndpoints the value was fresh, so a failed load or output was not retried
@@ -364,9 +329,8 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   // until detection has had enough data to decide.
   const signOf = new Map(jobs.map((j) => [j.plantId, j.battPositiveMeans]));
   // Off-grid plants (has_grid = false, 0042): the relay is open by design, so the
-  // outage burst and the early far-side reads would fire every minute for nothing.
-  // Unknown (null) counts as off-grid here too: a failed plant_config read would
-  // otherwise turn an off-grid plant back into a bursting one for that minute.
+  // early far-side reads would fire every minute for nothing. Unknown (null) counts
+  // as off-grid here too, so a failed plant_config read does not start them up.
   const offGrid = new Set(jobs.filter((j) => j.hasGrid !== true).map((j) => j.plantId));
   const perInv = await Promise.all(inverters.map((inv) =>
     fetchInverter(inv, acc, ts, signOf.get(Number(inv.plantId)) ?? null, offGrid.has(Number(inv.plantId)))));
@@ -456,17 +420,6 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
         console.warn(`batt_sign_detect ${pid}:`, e instanceof Error ? e.message : e);
       }
     }
-  }
-
-  // Relay open or mains voltage gone on any inverter of a plant that has a grid:
-  // start the sub-minute burst, on that account's grid-connected inverters only.
-  const gridInverters = inverters.filter((inv) => !offGrid.has(Number(inv.plantId)));
-  const trigger = readings.filter((r) => !offGrid.has(Number(r.plant_id))).map(burstTrigger).find((t) => t !== null) ?? null;
-  if (trigger) {
-    result.burst = trigger;
-    const p = burstGrid(acc, gridInverters, ts, trigger)
-      .catch((e) => console.warn("grid burst failed:", e instanceof Error ? e.message : e));
-    await background(p);
   }
 
   result.apiCalls = callsSince(acc, callsAtStart);
