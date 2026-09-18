@@ -105,10 +105,11 @@ function fmtTime(d) {
 function cleanTemp(t) {return t == null || t <= -50 || t > 120 ? null : t;}
 
 // ---- Card -------------------------------------------------------------------
-function Card({ accent, children, className = '', style = {}, ...rest }) {
+// No coloured left edge: on a tab where every tile is the same subject it was six identical
+// strips saying nothing, and where subjects differ the number already carries the colour.
+function Card({ children, className = '', style = {}, ...rest }) {
   return (
-    <div className={'card ' + className}
-    style={{ borderLeft: accent ? `2px solid ${accent}` : undefined, ...style }} {...rest}>
+    <div className={'card ' + className} style={style} {...rest}>
       {children}
     </div>);
 
@@ -117,7 +118,7 @@ function Card({ accent, children, className = '', style = {}, ...rest }) {
 // ---- Big number stat tile (the "4 tabs" the user liked) ---------------------
 function StatTile({ label, value, unit, accent, sub, bar, loading }) {
   return (
-    <Card accent={accent} className="stat-tile">
+    <Card className="stat-tile">
       <div className="stat-label">{label}</div>
       {loading
         ? <div className="stat-value"><Skeleton w="65%" h={44} /></div>

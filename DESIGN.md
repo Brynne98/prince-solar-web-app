@@ -391,7 +391,8 @@ and the segmented track, 7px for the segment inside it, and full pills for chips
 badges. Dots are circles at 6px to 10px. Meters are 5px to 13px tall with 4px to 5px
 radius. Borders are always 1px hairlines; the one dashed line is the 2px legend key for
 a reference series.
-The card's optional 2px left edge in a series colour is the only asymmetric border.
+Cards carry no coloured edge: a tile's subject is carried by the colour of its number.
+The only asymmetric border left is the Settings tab's green left edge when active.
 
 ## Components
 
@@ -433,8 +434,8 @@ The card's optional 2px left edge in a series colour is the only asymmetric bord
   form) and 2% for the battery banner. The login card alone runs a top-to-bottom
   gradient from Panel Raised to Panel.
 - **Shadow Strategy:** none; see Elevation.
-- **Border:** hairline; strengthens on hover for mini-stats; a series-coloured 2px left
-  edge marks a stat tile's subject; a coral border at 35% to 55% marks a warning card or
+- **Border:** hairline; strengthens on hover for mini-stats; a stat tile's subject is
+  marked by its number, not its edge; a coral border at 35% to 55% marks a warning card or
   a drifting battery banner, with a matching 6% to 9% tint; a bad string card gets the
   edge without the tint.
 - **Internal Padding:** 22px 24px; 16px 18px for mini-stats; 26px 28px for hero solar

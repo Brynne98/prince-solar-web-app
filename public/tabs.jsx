@@ -1065,7 +1065,7 @@ function GridTab({ snap, settings, refreshKey, onOpenSettings }) {
           </div>
           {a.phaseDown && <div className="inv-warn">⚠ One phase has no voltage while another is live — check the supply on that phase.</div>}
         </Card>
-        <Card accent={CC.batt}>
+        <Card>
             <SectionTitle right={<span className="dim mono">{window.PLANT_CURRENCY}</span>}>COST & SAVINGS · TODAY</SectionTitle>
             <div className="savings-row">
               <div><div className="tp-label">Would've paid</div><div className="tp-val mono" style={{ color: CC.grid }}>{money(wouldPay)}</div></div>
