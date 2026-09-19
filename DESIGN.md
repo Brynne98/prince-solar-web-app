@@ -78,11 +78,6 @@ typography:
     fontSize: "21px"
     fontWeight: 700
     lineHeight: 1
-  gauge:
-    fontFamily: "JetBrains Mono, ui-monospace, monospace"
-    fontSize: "40px"
-    fontWeight: 700
-    lineHeight: 1
   headline-phone:
     fontFamily: "JetBrains Mono, ui-monospace, monospace"
     fontSize: "34px"
@@ -240,7 +235,7 @@ semantic, not decorative.
   the login card.
 - **Charge Cyan** (`charge-cyan`): the house running on its own: the self-sufficiency
   tile and its meter, the runtime estimate line, the range slider thumb, and the
-  plant-switched status dot. The battery gauge and charge bar are Battery Violet.
+  plant-switched status dot. The Battery tab's charge line and totals are Battery Violet.
 
 ### Tertiary
 - **Sun** (`sun-core` → `sun-mid` → `sun-rim`): a radial gradient inside the brand orb
@@ -296,8 +291,7 @@ browser default renders crisper.
   topbar only. 23px on phones.
 - **Headline** (mono 700, 44px, line-height 1): the hero figure in a stat tile, with
   its unit at 24px and 85% opacity riding the baseline; the unit inherits the 700. On
-  phones 34px with an 18px unit. The battery gauge value is 40px (34px on phones);
-  flow-diagram node values are 21px mono at 700.
+  phones 34px with an 18px unit. Flow-diagram node values are 21px mono at 700.
 - **Title** (600, 18px, tracking -0.01em): Settings section titles; the login title is
   22px at 700 with -0.02em.
 - **Numeral** (mono 600, 20px, tracking -0.01em): overview mini-stat values, legend-chip
@@ -332,7 +326,7 @@ Density is medium-high: card padding 22px by 24px (16px by 15px on phones), 16px
 18px grid gaps, 14px between small tiles. Section titles sit 18px above their content.
 
 Breakpoints are three: 980px collapses four-up and three-up grids to two columns and
-stacks the battery gauge; 900px turns the Settings tab column into a horizontally
+stacks each tab's pair of cards; 900px turns the Settings tab column into a horizontally
 scrolling row with a faded right edge; 600px is the phone layout, where big-number rows
 go to one column, metric grids stay two-up, the tab bar scrolls sideways, the flow
 diagram becomes a vertical card stack, and the four flow chips become a 2×2 grid. The

@@ -66,7 +66,7 @@ that log.
 
 Confirmed functionality:
 
-- Live power flow, per-inverter cards, battery gauge, runtime estimate, reserve, grid
+- Live power flow, per-inverter cards, battery charge by day, runtime estimate, reserve, grid
   presence per phase, grid voltages per inverter.
 - Day chart with an expected-solar line and a forward forecast line; Trends over
   today / week / month / year / lifetime; savings against a user-entered tariff and

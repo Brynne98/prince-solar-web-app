@@ -145,11 +145,14 @@ function fitScale(lo, hi, unit) {
 //   kind="ac"     AC terminal voltage band per inverter + grid frequency (right axis);
 //                 minutes where the grid read 0 Hz are shaded as an outage
 //   kind="output" as "ac" but the inverter's own frequency, for an off-grid plant
+// A tab with a day picker of its own (Grid) passes it as `dayPick`; the chart then follows
+// that day and draws no date arrows of its own, only its lag and outage notes.
 const INV_COLORS = ['#fb923c', '#f472b6', '#60a5fa', '#fbbf24', '#34d399', '#c084fc'];
-function InverterHistoryChart({ kind, refreshKey }) {
+function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   const C = window.COLORS;
   const earliest = shiftDate(localDateStr(), -DAY_FLOOR_DAYS);
-  const pick = useDayPicker(earliest);
+  const ownPick = useDayPicker(earliest);
+  const pick = dayPick || ownPick;
   const { date, isToday } = pick;
   const [invs, setInvs] = React.useState(null); // null = loading
   const [hover, setHover] = React.useState(null);
@@ -292,10 +295,15 @@ function InverterHistoryChart({ kind, refreshKey }) {
 
   return (
     <div className="hv-root">
-      <DateBar pick={pick} earliest={earliest}>
-        {lagNote && <span className="hv-lag mono" title="From SunSynk's history, fetched every six hours; the live numbers above run ahead of it">{lagNote}</span>}
-        {outageMin > 0 && <span className="hv-gap" title="Five-minute buckets with at least one reading under 50 V or 10 Hz — a blackout, to the nearest bucket">{fmtGap(outageMin)} out</span>}
-      </DateBar>
+      {(() => {
+        const notes = <>
+          {lagNote && <span className="hv-lag mono" title="From SunSynk's history, fetched every six hours; the live numbers above run ahead of it">{lagNote}</span>}
+          {outageMin > 0 && <span className="hv-gap" title="Five-minute buckets with at least one reading under 50 V or 10 Hz — a blackout, to the nearest bucket">{fmtGap(outageMin)} out</span>}
+        </>;
+        return dayPick
+          ? (lagNote || outageMin > 0) && <div className="hv-datebar">{notes}</div>
+          : <DateBar pick={pick} earliest={earliest}>{notes}</DateBar>;
+      })()}
       <div className="legend-row">
         {shown.map((inv, k) => (
           <window.LegendChip key={inv.sn} color={color(k)} label={nInv > 1 ? inv.alias : (isTemp ? 'AC side' : 'Voltage')}

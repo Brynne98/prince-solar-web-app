@@ -157,43 +157,6 @@ function tabsFor(settings) {
   ].filter(Boolean);
 }
 
-function LiveSkeleton() {
-  return (
-    <div className="live-grid">
-      <div className="overview-section">
-        <div className="overview-head">
-          <div className="section-title">OVERVIEW · <span style={{ color: 'var(--text)' }}>today</span></div>
-          <window.Segmented size="sm" value="today" onChange={() => {}}
-            options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }]} />
-        </div>
-        {/* The real tiles in loading mode, with the same meter and second line the live
-            ones carry, so the row lands at the same height. */}
-        <div className="today-strip">
-          <window.MiniStat loading label="Generated" />
-          <window.MiniStat loading label="Home" />
-          <window.MiniStat loading label="Self-sufficiency" bar={0} />
-          <window.MiniStat loading label="Imported" sub={' '} />
-          <window.MiniStat loading label="Est. saved" sub={' '} />
-        </div>
-      </div>
-      {/* A battery is assumed until the snapshot says otherwise, as LiveTab does */}
-      <window.BalanceSkeleton />
-      <div className="card flow-card">
-        <window.SectionTitle right={<button className="flow-fs-btn" disabled><window.FsEnterIcon /><span>Fullscreen</span></button>}>POWER FLOW</window.SectionTitle>
-        {/* the summary sentence opens the card, one line of its height */}
-        <div className="flow-narrative" style={{ height: 23, display: 'flex', alignItems: 'center' }}><window.Skeleton w={300} h={12} r={6} style={{ maxWidth: '80%' }} /></div>
-        {/* sized in CSS to the diagram's proportions, which change with the card width */}
-        <window.Skeleton className="flow-skel" h="auto" r={12} />
-      </div>
-      <div className="card chart-card">
-        {/* The real chart with no data yet: its day picker and legend draw for real and
-            the plot area is its own skeleton, so labels show and the height matches. */}
-        <window.HistoryView today={null} refreshKey={0} locked />
-      </div>
-    </div>
-  );
-}
-
 // Shown while the session and the SunSynk link are still being checked, before App
 // mounts. Same shell as App's own not-yet-loaded gate, so the hand-over does not flash.
 function BootShell() {
@@ -223,7 +186,7 @@ function BootShell() {
         {tabs.map(t => <button key={t.id} className={'tab' + (tab === t.id ? ' active' : '')} role="tab" aria-selected={tab === t.id} disabled>{t.label}</button>)}
       </nav>
       <main className="content" aria-busy="true">
-        {tab !== 'trends' && tab !== 'settings' && <LiveSkeleton />}
+        {tab !== 'trends' && tab !== 'settings' && <window.TabSkeleton tab={tab} />}
       </main>
     </div>
   );
@@ -449,7 +412,7 @@ function App() {
             // still answering. Showing it a loading state was pure theatre.
             <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} />
           ) : (
-            <LiveSkeleton />
+            <window.TabSkeleton tab={tab} />
           )}
         </main>
       </div>
@@ -482,8 +445,8 @@ function App() {
         {tab === 'live' && <window.LiveTab snap={snap} settings={settings} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey} balance={balance}
           onOpenSettings={openSettings} />}
         {tab === 'solar' && <window.SolarTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
-        {tab === 'battery' && <window.BatteryTab snap={snap} settings={settings} onOpenSettings={openSettings} />}
-        {tab === 'grid' && <window.GridTab snap={snap} settings={settings} refreshKey={refreshKey} onOpenSettings={openSettings} />}
+        {tab === 'battery' && <window.BatteryTab snap={snap} settings={settings} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
+        {tab === 'grid' && <window.GridTab snap={snap} settings={settings} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} settings={settings} refreshKey={refreshKey} />}
         {tab === 'trends' && <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />}
         {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}

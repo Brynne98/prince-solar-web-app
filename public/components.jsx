@@ -120,8 +120,10 @@ function StatTile({ label, value, unit, accent, sub, bar, loading }) {
   return (
     <Card className="stat-tile">
       <div className="stat-label">{label}</div>
+      {/* The placeholder is sized in the number's own font, so it is 44px on a desktop
+          and 34px on a phone, like the number that replaces it. */}
       {loading
-        ? <div className="stat-value"><Skeleton w="65%" h={44} /></div>
+        ? <div className="stat-value"><span className="num" style={{ width: '65%' }}><Skeleton h="1em" /></span></div>
         : <div className="stat-value" style={{ color: accent }}>
             <span className="num">{value}</span>{unit && <span className="unit">{unit}</span>}
           </div>}

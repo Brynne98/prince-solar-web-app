@@ -11,27 +11,6 @@ const FsEnterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="
 const TrashIcon = () => <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.6 9h6.8l.6-9M6.75 7v4M9.25 7v4" /></svg>;
 const FsExitIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" /></svg>;
 
-// circular SOC gauge -----------------------------------------------------------
-function Gauge({ value, color, size = 168, label, sub }) {
-  const r = size / 2 - 12, cx = size / 2, c = 2 * Math.PI * r;
-  const off = c * (1 - value / 100);
-  return (
-    <div className="gauge" style={{ width: size, height: size }}>
-      <svg width={size} height={size}>
-        <circle cx={cx} cy={cx} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="9" />
-        <circle cx={cx} cy={cx} r={r} fill="none" stroke={color} strokeWidth="9" strokeLinecap="round"
-          strokeDasharray={c} strokeDashoffset={off} transform={`rotate(-90 ${cx} ${cx})`}
-          style={{ transition: 'stroke-dashoffset .6s ease' }} />
-      </svg>
-      <div className="gauge-center">
-        <div className="gauge-val mono" style={{ color }}>{value}<span className="gauge-pct">%</span></div>
-        {label && <div className="gauge-label">{label}</div>}
-        {sub && <div className="gauge-sub">{sub}</div>}
-      </div>
-    </div>
-  );
-}
-
 // Battery-balance banner — watches the SOC/voltage spread between the two inverter
 // banks (the desync signal) while the charge current is being pushed up. Its data is
 // fetched by App. Subtle when Balanced, loud when Drifting.
@@ -102,6 +81,73 @@ function BatteryBalanceBanner({ b }) {
 }
 
 // ---------------------------------------------------------------- LIVE
+// ---- loading skeletons ------------------------------------------------------
+// Each tab's shape while the first snapshot is still on its way. They sit beside the tab
+// they stand in for, so a card added to one is a card missing from the other in plain
+// sight. Static chrome — titles, labels, the day picker — draws for real; only values and
+// plot areas shimmer. Nothing here fetches: these also draw App's boot shell, which runs
+// before the session has been checked.
+
+// The plot area a skeleton cannot draw: the day picker renders for real but locked, the
+// legend gets an inert row of its own height, and the chart is a block at the height
+// useChartSize gives the real one.
+function DayChartSkeleton({ legend }) {
+  const pick = useDayPicker(null);
+  return (
+    <>
+      <DateBar pick={pick} earliest={null} locked />
+      {legend && <div className="legend-row" style={{ height: 31 }} aria-hidden="true" />}
+      <window.Skeleton className="chart-skel" h="auto" r={12} />
+    </>
+  );
+}
+
+// A tile's second line, held open while the words for it are still coming: a plain space
+// collapses to a zero-height line box, and the tile lands 17px short of the real one.
+const NBSP = '\u00a0';
+
+// A readout whose number hasn't arrived. The label is static and draws for real.
+function skelVal(w) {
+  return <window.Skeleton w={w} h={19} r={5} style={{ display: 'inline-block', verticalAlign: 'top', marginTop: 3 }} />;
+}
+
+function LiveSkeleton() {
+  return (
+    <div className="live-grid">
+      <div className="overview-section">
+        <div className="overview-head">
+          <div className="section-title">OVERVIEW · <span style={{ color: 'var(--text)' }}>today</span></div>
+          <window.Segmented size="sm" value="today" onChange={() => {}}
+            options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }]} />
+        </div>
+        {/* The real tiles in loading mode, with the same meter and second line the live
+            ones carry, so the row lands at the same height. */}
+        <div className="today-strip">
+          <MiniStat loading label="Generated" />
+          <MiniStat loading label="Home" />
+          <MiniStat loading label="Self-sufficiency" bar={0} />
+          <MiniStat loading label="Imported" sub={' '} />
+          <MiniStat loading label="Est. saved" sub={' '} />
+        </div>
+      </div>
+      {/* A battery is assumed until the snapshot says otherwise, as LiveTab does */}
+      <BalanceSkeleton />
+      <div className="card flow-card">
+        <SectionTitle right={<button className="flow-fs-btn" disabled><FsEnterIcon /><span>Fullscreen</span></button>}>POWER FLOW</SectionTitle>
+        {/* the summary sentence opens the card, one line of its height */}
+        <div className="flow-narrative" style={{ height: 23, display: 'flex', alignItems: 'center' }}><window.Skeleton w={300} h={12} r={6} style={{ maxWidth: '80%' }} /></div>
+        {/* sized in CSS to the diagram's proportions, which change with the card width */}
+        <window.Skeleton className="flow-skel" h="auto" r={12} />
+      </div>
+      <div className="card chart-card">
+        {/* The real chart with no data yet: its day picker and legend draw for real and
+            the plot area is its own skeleton, so labels show and the height matches. */}
+        <window.HistoryView today={null} refreshKey={0} locked />
+      </div>
+    </div>
+  );
+}
+
 function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, balance, onOpenSettings }) {
   const a = snap.aggregate;
   const feat = snap.features || {};
@@ -479,9 +525,11 @@ const shortDate = (s, opts = { weekday: 'short', day: 'numeric', month: 'short' 
 // and replaced with the live figure. Yesterday used to read low for the same reason; since
 // 0058 the server serves any day whose cached row is unfinished from agg_minute instead.
 // A null in any row reads as NaN, which shows "—" rather than a confident smaller total.
-function solarTotals(a, energy, today) {
-  const sum = (rows) => rows.reduce((s, r) => s + (r.pv == null ? NaN : r.pv), 0);
-  const days = (rows) => (rows ? sum(rows.filter(r => r.date < today)) + (a.pvToday || 0) : null);
+// `key` is the row's field (pv, imp, dischg) and `now` today's live figure for it; the
+// Solar, Grid and Battery tabs all total their subject this way.
+function periodTotals(key, now, energy, today) {
+  const sum = (rows) => rows.reduce((s, r) => s + (r[key] == null ? NaN : r[key]), 0);
+  const days = (rows) => (rows ? sum(rows.filter(r => r.date < today)) + (now || 0) : null);
   // month rows carry no year; they come oldest first, so this month can only be the last
   const isThisMonth = (rows, r, i) => i === rows.length - 1 && r.date === today.slice(5, 7);
   const monthRow = (energy.year || []).find((r, i, rows) => isThisMonth(rows, r, i));
@@ -490,7 +538,7 @@ function solarTotals(a, energy, today) {
   // time), today alone would undercount it; the cached month total is closer.
   const haveDays = energy.month && energy.month.some(r => r.date < today);
   const month = energy.month == null ? null
-    : !haveDays && monthRow ? Math.max(monthRow.pv || 0, a.pvToday || 0) : days(energy.month);
+    : !haveDays && monthRow ? Math.max(monthRow[key] || 0, now || 0) : days(energy.month);
   const withMonth = (rows) => (rows && month != null ? sum(rows.filter((r, i) => !isThisMonth(rows, r, i))) + month : null);
   return { week, month, year: withMonth(energy.year), lifetime: withMonth(energy.lifetime) };
 }
@@ -531,64 +579,80 @@ function solarSplit(points) {
   return { home, batt };
 }
 
-// One day's solar: a green line from first light to the last reading, and the reading under
-// the pointer.
-function SolarDayChart({ points, empty }) {
+// One day of one reading as a line: solar (cropped to first light and the last reading),
+// grid import, or the battery's charge on a fixed 0-100% scale with the reserve dashed.
+// The reading under the pointer shows beside it.
+function DayLineChart({ points, field, color, label, crop, pct, reserve, empty }) {
   const [ref, width, height] = useChartSize([220, 300]);
   const [hover, setHover] = React.useState(null);
   const mobile = width < 560;
-  const lit = [];
-  points.forEach((p, i) => { if (p.pv != null && p.pv > 20) lit.push(i); });
-  const hp = hover != null && points[hover] && points[hover].pv != null ? hover : null;
+  const v = i => points[i][field];
+  const has = [];
+  points.forEach((p, i) => { if (p[field] != null && (!crop || p[field] > 20)) has.push(i); });
+  const hp = hover != null && points[hover] && v(hover) != null ? hover : null;
   let body = null, tip = null;
-  if (lit.length > 1) {
+  if (has.length > 1) {
     const last = points.length - 1;
-    const i0 = Math.max(0, lit[0] - 6);
-    const i1 = Math.min(last, lit[lit.length - 1] + 6);
+    // Solar is cropped to the lit hours; anything else keeps the whole day, since grid
+    // and charge tell most of their story after dark.
+    const i0 = crop ? Math.max(0, has[0] - 6) : 0;
+    const i1 = crop ? Math.min(last, has[has.length - 1] + 6) : last;
     const m = { l: mobile ? 32 : 38, r: 12, t: 24, b: 30 };
     const innerW = Math.max(40, width - m.l - m.r), innerH = height - m.t - m.b;
     let peak = i0;
-    for (let i = i0; i <= i1; i++) if ((points[i].pv || 0) > (points[peak].pv || 0)) peak = i;
-    const { lo, hi, ticks } = niceScale(0, points[peak].pv, 4);
-    const x = i => m.l + ((i - i0) / Math.max(1, i1 - i0)) * innerW;
-    const y = v => m.t + innerH - ((v - lo) / (hi - lo)) * innerH;
+    for (let i = i0; i <= i1; i++) if ((v(i) || 0) > (v(peak) || 0)) peak = i;
+    const { lo, hi, ticks } = pct ? { lo: 0, hi: 100, ticks: [0, 25, 50, 75, 100] } : niceScale(0, v(peak) || 0, 4);
+    // the x axis is the clock: the lit hours for solar, the whole day otherwise, so today's
+    // line stops at the last reading rather than stretching to fill the width
+    const t0 = crop ? points[i0].t : 0, t1 = crop ? points[i1].t : 1435;
+    const x = i => m.l + ((points[i].t - t0) / Math.max(5, t1 - t0)) * innerW;
+    const y = val => m.t + innerH - ((val - lo) / (hi - lo)) * innerH;
     // runs of readings; a missing bucket breaks the line
     const runs = [];
     for (let i = i0; i <= i1; i++) {
-      if (points[i].pv == null) { runs.push(null); continue; }
+      if (v(i) == null) { runs.push(null); continue; }
       if (!runs.length || runs[runs.length - 1] == null) runs.push([]);
       runs[runs.length - 1].push(i);
     }
-    const P = i => x(i).toFixed(1) + ' ' + y(points[i].pv).toFixed(1);
+    const P = i => x(i).toFixed(1) + ' ' + y(v(i)).toFixed(1);
     const base = y(0).toFixed(1);
     const line = runs.filter(Boolean).map(r => 'M' + r.map(P).join(' L')).join(' ');
     const area = runs.filter(Boolean).map(r => `M${x(r[0]).toFixed(1)} ${base} L` + r.map(P).join(' L') + ` L${x(r[r.length - 1]).toFixed(1)} ${base} Z`).join(' ');
     const step = mobile ? 360 : 180;
     const xt = [];
-    for (let t = Math.ceil(points[i0].t / step) * step; t <= points[i1].t; t += step) xt.push(t);
+    for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) xt.push(t);
+    const xt5 = t => m.l + ((t - t0) / Math.max(5, t1 - t0)) * innerW;
     const idxAt = (clientX, el) => {
       const mx = clientX - el.getBoundingClientRect().left;
-      return Math.max(i0, Math.min(i1, Math.round(i0 + ((mx - m.l) / innerW) * (i1 - i0))));
+      const t = t0 + ((mx - m.l) / innerW) * (t1 - t0);
+      return Math.max(i0, Math.min(i1, Math.round((t - points[0].t) / 5)));
     };
+    const fmt = val => (pct ? Math.round(val) + '%' : fmtPower(val));
     body = (
-      <svg width={width} height={height} className="chart-svg" role="img" aria-label="Solar power over the day" style={{ cursor: 'crosshair' }}
+      <svg width={width} height={height} className="chart-svg" role="img" aria-label={label + ' over the day'} style={{ cursor: 'crosshair' }}
         onPointerMove={e => setHover(idxAt(e.clientX, e.currentTarget))}
         onPointerDown={e => setHover(idxAt(e.clientX, e.currentTarget))}
         onPointerLeave={() => setHover(null)}>
-        {ticks.map((v, k) => (
+        {ticks.map((t, k) => (
           <g key={k}>
-            <line x1={m.l} x2={m.l + innerW} y1={y(v)} y2={y(v)} stroke={v === 0 ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'} />
-            <text x={m.l - 8} y={y(v) + 3} textAnchor="end" className="ax">{+(v / 1000).toFixed(1)}</text>
+            <line x1={m.l} x2={m.l + innerW} y1={y(t)} y2={y(t)} stroke={t === 0 ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'} />
+            <text x={m.l - 8} y={y(t) + 3} textAnchor="end" className="ax">{pct ? t : +(t / 1000).toFixed(1)}</text>
           </g>
         ))}
-        <text x={m.l - 8} y={m.t - 10} textAnchor="end" className="ax" fillOpacity="0.55">kW</text>
-        {xt.map(t => <text key={t} x={x(t / 5)} y={m.t + innerH + 20} textAnchor="middle" className="ax">{HM(t)}</text>)}
-        <path d={area} fill={CC.pv} fillOpacity="0.14" />
-        <path d={line} fill="none" stroke={CC.pv} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <text x={m.l - 8} y={m.t - 10} textAnchor="end" className="ax" fillOpacity="0.55">{pct ? '%' : 'kW'}</text>
+        {xt.map(t => <text key={t} x={xt5(t)} y={m.t + innerH + 20} textAnchor="middle" className="ax">{HM(t)}</text>)}
+        {reserve != null && (
+          <g>
+            <line x1={m.l} x2={m.l + innerW} y1={y(reserve)} y2={y(reserve)} stroke={color} strokeOpacity="0.55" strokeDasharray="4 4" />
+            <text x={m.l + innerW - 4} y={y(reserve) - 6} textAnchor="end" className="ax">reserve {reserve}%</text>
+          </g>
+        )}
+        <path d={area} fill={color} fillOpacity="0.14" />
+        <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
         {hp != null && (
           <g>
             <line x1={x(hp)} x2={x(hp)} y1={m.t} y2={m.t + innerH} stroke="rgba(255,255,255,0.25)" />
-            <circle cx={x(hp)} cy={y(points[hp].pv)} r="3" fill={CC.pv} stroke="#0b0e12" strokeWidth="1.5" />
+            <circle cx={x(hp)} cy={y(v(hp))} r="3" fill={color} stroke="#0b0e12" strokeWidth="1.5" />
           </g>
         )}
       </svg>
@@ -597,7 +661,7 @@ function SolarDayChart({ points, empty }) {
       tip = (
         <div className="chart-tip" style={{ left: tipLeftFor(x(hp), width, 168), top: 12 }}>
           <div className="tip-time">{HM(points[hp].t)}</div>
-          <div className="tip-row"><span className="tip-dot" style={{ background: CC.pv }} /><span className="tip-l">Solar</span><span className="tip-v mono">{fmtPower(points[hp].pv)}</span></div>
+          <div className="tip-row"><span className="tip-dot" style={{ background: color }} /><span className="tip-l">{label}</span><span className="tip-v mono">{fmt(v(hp))}</span></div>
         </div>
       );
     }
@@ -610,28 +674,30 @@ function SolarDayChart({ points, empty }) {
   );
 }
 
-// Solar per day for the last 30 days. The best day is solid green; the bar under
-// the pointer brightens and shows its date and total; clicking one opens that day in the
-// chart above, whose day is outlined here.
-function SolarDaysBars({ rows, today, selected, earliest, onPick }) {
+// One reading per day for the last 30 days (solar made, grid bought, battery gave out).
+// The biggest finished day is solid; the bar under the pointer brightens and shows its date
+// and total; clicking one opens that day in the chart above, whose day is outlined here.
+// `rgb` is `color` as "r,g,b", for the lighter fills.
+function DaysBars({ rows, field, color, rgb, word, label, today, selected, earliest, onPick }) {
   const [ref, width, height] = useChartSize([170, 220]);
   const [hover, setHover] = React.useState(null);
   const mobile = width < 560;
   const m = { l: 30, r: 4, t: 22, b: 24 };
   const innerW = Math.max(40, width - m.l - m.r), innerH = height - m.t - m.b;
-  const { lo, hi, ticks } = niceScale(0, Math.max(10, ...rows.map(r => r.pv || 0)), 2);
+  const { lo, hi, ticks } = niceScale(0, Math.max(10, ...rows.map(r => r[field] || 0)), 2);
   const y = v => m.t + innerH - ((v - lo) / (hi - lo)) * innerH;
   const slot = innerW / rows.length, bw = Math.max(3, slot * 0.66);
   const past = rows.filter(r => r.date !== today);
-  const best = past.length ? past.reduce((b, r) => ((r.pv || 0) > (b.pv || 0) ? r : b)) : null;
+  const best = past.length ? past.reduce((b, r) => ((r[field] || 0) > (b[field] || 0) ? r : b)) : null;
   const firstOfMonth = rows.findIndex((r, i) => i > 2 && r.date.endsWith('-01'));
   const idxAt = (clientX, el) => Math.max(0, Math.min(rows.length - 1, Math.floor((clientX - el.getBoundingClientRect().left - m.l) / slot)));
   const can = (r) => !earliest || r.date >= earliest;
   const h = hover != null ? rows[hover] : null;
-  const label = (r, opts) => shortDate(r.date, opts || { day: 'numeric', month: 'short' });
+  const dateLabel = (r, opts) => shortDate(r.date, opts || { day: 'numeric', month: 'short' });
+  const fill = (a) => 'rgba(' + rgb + ',' + a + ')';
   return (
     <div className="chart-area" ref={ref} style={{ position: 'relative', height }}>
-      <svg width={width} height={height} className="chart-svg" role="img" aria-label="Solar per day for the last 30 days"
+      <svg width={width} height={height} className="chart-svg" role="img" aria-label={label}
         style={{ cursor: h && can(h) ? 'pointer' : 'default' }}
         onPointerMove={e => setHover(idxAt(e.clientX, e.currentTarget))}
         onPointerDown={e => setHover(idxAt(e.clientX, e.currentTarget))}
@@ -646,26 +712,126 @@ function SolarDaysBars({ rows, today, selected, earliest, onPick }) {
         <text x={m.l - 7} y={m.t - 10} textAnchor="end" className="ax" fillOpacity="0.55">kWh</text>
         {h && <rect x={m.l + slot * hover} y={m.t} width={slot} height={innerH} fill="rgba(255,255,255,0.04)" />}
         {rows.map((r, i) => {
-          const cx = m.l + slot * i + slot / 2, top = y(r.pv || 0), isToday = r.date === today;
+          const cx = m.l + slot * i + slot / 2, top = y(r[field] || 0), isToday = r.date === today;
           return (
             <rect key={r.date} x={cx - bw / 2} y={top} width={bw} height={Math.max(0, y(0) - top)} rx={Math.min(2, bw / 2)}
-              fill={isToday ? 'rgba(61,220,132,0.16)' : r === best ? CC.pv : hover === i ? 'rgba(61,220,132,0.7)' : 'rgba(61,220,132,0.38)'}
-              stroke={r.date === selected ? 'var(--text)' : isToday ? CC.pv : 'none'} strokeWidth={r.date === selected ? 1.5 : 1}
+              fill={isToday ? fill(0.16) : r === best ? color : hover === i ? fill(0.7) : fill(0.38)}
+              stroke={r.date === selected ? 'var(--text)' : isToday ? color : 'none'} strokeWidth={r.date === selected ? 1.5 : 1}
               strokeDasharray={isToday && r.date !== selected ? '2 2' : undefined}
               style={{ transition: 'fill .12s' }} />
           );
         })}
-        <text x={m.l + slot / 2} y={height - 6} textAnchor="start" className="ax">{label(rows[0])}</text>
-        {firstOfMonth > 0 && firstOfMonth < rows.length - 4 && <text x={m.l + slot * firstOfMonth + slot / 2} y={height - 6} textAnchor="middle" className="ax">{label(rows[firstOfMonth])}</text>}
-        <text x={m.l + innerW - slot / 2} y={height - 6} textAnchor="end" className="ax">{rows[rows.length - 1].date === today ? 'Today' : label(rows[rows.length - 1])}</text>
+        <text x={m.l + slot / 2} y={height - 6} textAnchor="start" className="ax">{dateLabel(rows[0])}</text>
+        {firstOfMonth > 0 && firstOfMonth < rows.length - 4 && <text x={m.l + slot * firstOfMonth + slot / 2} y={height - 6} textAnchor="middle" className="ax">{dateLabel(rows[firstOfMonth])}</text>}
+        <text x={m.l + innerW - slot / 2} y={height - 6} textAnchor="end" className="ax">{rows[rows.length - 1].date === today ? 'Today' : dateLabel(rows[rows.length - 1])}</text>
       </svg>
       {h && (
         <div className="chart-tip" style={{ left: tipLeftFor(m.l + slot * hover + slot / 2, width, 168), top: 8 }}>
           <div className="tip-time">{shortDate(h.date)}</div>
-          <div className="tip-row"><span className="tip-dot" style={{ background: CC.pv }} /><span className="tip-l">Solar</span><span className="tip-v mono">{fmtKwh(h.pv)}{h.date === today ? ' so far' : ''}</span></div>
+          <div className="tip-row"><span className="tip-dot" style={{ background: color }} /><span className="tip-l">{word}</span><span className="tip-v mono">{fmtKwh(h[field])}{h.date === today ? ' so far' : ''}</span></div>
           {can(h) && h.date !== selected && <div className="tip-hint">{mobile ? 'Tap' : 'Click'} to see this day</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+// The day a tab's chart and cards are on. Today is the live series App already holds; a
+// past day is fetched. While a newly picked day loads, the day already on screen stays,
+// dimmed as Trends does, so its title and cards don't blank out and flash. `dim` goes on
+// whatever shows that day.
+function useShownDay(pick, today, refreshKey) {
+  const [loaded, setLoaded] = React.useState(null); // { date, data }
+  React.useEffect(() => {
+    if (pick.isToday) return;
+    let alive = true;
+    window.fetchDay(pick.date)
+      .then(r => { if (alive) setLoaded({ date: pick.date, data: r }); })
+      .catch(() => { if (alive) setLoaded({ date: pick.date, data: { points: [], totals: {}, failed: true } }); });
+    return () => { alive = false; };
+  }, [pick.date, pick.isToday, refreshKey]);
+  const shownRef = React.useRef(null);
+  const ready = pick.isToday ? { isToday: true, date: pick.date, data: today }
+    : loaded && loaded.date === pick.date ? { isToday: false, date: pick.date, data: loaded.data } : null;
+  if (ready) shownRef.current = ready;
+  const view = ready || shownRef.current || { isToday: pick.isToday, date: pick.date, data: null };
+  const dim = { 'aria-busy': !ready, style: { opacity: ready ? 1 : 0.45, transition: 'opacity .15s' } };
+  const day = view.data;
+  return { view, dim, day, points: (day && day.points) || [], dayWord: view.isToday ? 'today' : shortDate(view.date) };
+}
+
+// A day with nothing to draw, in words, or null. `approx` means no 5-minute readings (before
+// logging began, or the first half hour of a new plant), which is not a day with no sun.
+function dayProblem(view, day, points) {
+  if (!day) return null;
+  if (day.failed) return 'Couldn’t load this day.';
+  if (day.approx || !points.length) return view.isToday ? 'Collecting today’s first readings.' : 'No 5-minute readings for this day.';
+  return null;
+}
+
+// The last 30 days of plant totals, for a tab's bars: null loading, false failed.
+function useDaily(refreshKey) {
+  const [daily, setDaily] = React.useState(null);
+  const load = React.useCallback(() => {
+    setDaily(null);
+    window.fetchTrendDaily(30).then(setDaily).catch(() => setDaily(false));
+  }, []);
+  React.useEffect(load, [refreshKey]);
+  return [daily, load];
+}
+
+// Scroll a tab's day card into view after a bar picked its day.
+function scrollToDay(id) {
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const card = document.getElementById(id); // scroll-margin-top leaves the gap above it
+  card && card.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+}
+
+const titled = (title, word) => <>{title} · <span style={{ color: 'var(--text)' }}>{word}</span></>;
+
+// A week or month tile's trend, with the Live overview's pairing: matched days before today,
+// and at least `min` of them. Solar needs something last period to compare with. Grid import
+// (invert: less is better) often really is zero, so a zero last period counts whenever that
+// period logged anything at all; a rise from zero shows as kWh.
+function periodTrend(cmp, k, key, min, word, invert) {
+  const r = cmp && cmp[k];
+  if (!r || (r.days || 0) < min || r.cur[key] == null || r.prev[key] == null) return null;
+  const c = r.cur[key], p = r.prev[key];
+  const logged = (r.prev.pv || 0) > 0 || (r.prev.load || 0) > 0;
+  if (!(p > 0) && !(invert && logged)) return null;
+  const pct = p > 0 ? ((c - p) / p) * 100 : (c === 0 ? 0 : Infinity);
+  return <><TrendBadge pct={pct} delta={c - p} invert={invert} title={'vs ' + word + ', ' + r.days + ' matched days'} /> on {word}</>;
+}
+
+// Six tiles, the day's chart, the month's bars and the pair of cards under them. PANELS is
+// left out: a plant may report no strings at all, and the card sits below the fold anyway.
+function SolarSkeleton() {
+  return (
+    <div className="stack solar-tab">
+      <div className="solar-stats">
+        {/* "30% of your 15.9 kW of panels" runs to two lines on a phone, so Solar now
+            holds two there; the rest hold one. */}
+        {['SOLAR NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME']
+          .map(l => <StatTile key={l} label={l} loading sub={l === 'SOLAR NOW' ? <span className="sub-hold-2">{NBSP}</span> : NBSP} />)}
+      </div>
+      <Card>
+        <SectionTitle>{titled('GENERATION', 'today')}</SectionTitle>
+        <DayChartSkeleton />
+      </Card>
+      <Card>
+        <SectionTitle>{titled('GENERATION', 'last 30 days')}</SectionTitle>
+        <window.Skeleton className="bars-skel" h="auto" r={10} />
+      </Card>
+      <div className="solar-row">
+        <Card>
+          <SectionTitle>{titled('WHERE IT WENT', 'today')}</SectionTitle>
+          <window.Skeleton h={64} r={10} />
+        </Card>
+        <Card>
+          <SectionTitle>GEYSER, POOL PUMP, WASHING</SectionTitle>
+          <window.Skeleton h={90} r={10} />
+        </Card>
+      </div>
     </div>
   );
 }
@@ -687,48 +853,23 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const [earliest, setEarliest] = React.useState(null);
   React.useEffect(() => { window.fetchCompare().then(setCmp).catch(() => {}); }, [refreshKey]);
   React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
-  const tot = solarTotals(a, energy, plantToday);
+  const tot = periodTotals('pv', a.pvToday, energy, plantToday);
   const EP = window.fmtEnergyParts;
-  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.pv} loading={v == null} sub={sub} />; };
-  // same pairing as the Live overview: matched days before today, and enough of them
-  const trend = (k, min, word) => {
-    const r = cmp && cmp[k];
-    if (!r || (r.days || 0) < min || !(r.prev.pv > 0)) return null;
-    return <><TrendBadge pct={((r.cur.pv - r.prev.pv) / r.prev.pv) * 100} delta={r.cur.pv - r.prev.pv} title={'vs ' + word + ', ' + r.days + ' matched days'} /> on {word}</>;
-  };
+  // Every tile keeps its second line, empty or not: the trends and the since-date land after
+  // the totals, and a row whose tiles had none yet was 29px short until they did.
+  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.pv} loading={v == null} sub={sub || NBSP} />; };
+  const trend = (k, min, word) => periodTrend(cmp, k, 'pv', min, word);
   const kwp = cfg.systemKwp;
   const [nowN, nowU] = fmtPowerParts(a.pvNow);
 
   // ---- the day on the chart ----
   const pick = useDayPicker(earliest, plantToday); // the plant's date, as the totals and bars use
-  // The last past day fetched. While a newly picked day loads, the day already on screen
-  // stays, dimmed as Trends does, so its title and cards don't blank out and flash.
-  const [loaded, setLoaded] = React.useState(null); // { date, data }
-  React.useEffect(() => {
-    if (pick.isToday) return;
-    let alive = true;
-    window.fetchDay(pick.date)
-      .then(r => { if (alive) setLoaded({ date: pick.date, data: r }); })
-      .catch(() => { if (alive) setLoaded({ date: pick.date, data: { points: [], totals: {}, failed: true } }); });
-    return () => { alive = false; };
-  }, [pick.date, pick.isToday, refreshKey]);
-  const shownRef = React.useRef(null);
-  const ready = pick.isToday ? { isToday: true, data: today }
-    : loaded && loaded.date === pick.date ? { isToday: false, date: pick.date, data: loaded.data } : null;
-  if (ready) shownRef.current = ready;
-  const view = ready || shownRef.current || { isToday: pick.isToday, date: pick.date, data: null };
-  const dim = { 'aria-busy': !ready, style: { opacity: ready ? 1 : 0.45, transition: 'opacity .15s' } };
-  const day = view.data;
-  const points = (day && day.points) || [];
-  const dayWord = view.isToday ? 'today' : shortDate(view.date);
-  // `approx` means the day has no 5-minute readings (before logging began, or the first
-  // half hour of a new plant), which is not the same as a day with no sun
+  const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
   // A past day with most of 06:00–18:00 missing and no solar in what is there is a logging gap
   const daytime = points.slice(72, 216);
   const gapDay = !view.isToday && daytime.length > 0 && !points.some(p => p.pv != null && p.pv > 20)
     && daytime.filter(p => p.pv == null).length > daytime.length / 2;
-  const noReadings = day && (day.approx || day.failed || !points.length || gapDay)
-    ? (day.failed ? 'Couldn’t load this day.' : gapDay ? 'Readings are missing for most of this day.' : view.isToday ? 'Collecting today’s first readings.' : 'No 5-minute readings for this day.') : null;
+  const noReadings = dayProblem(view, day, points) || (day && gapDay ? 'Readings are missing for most of this day.' : null);
   const peakOf = (pts) => {
     let pk = null;
     (pts || []).forEach(p => { if (p.pv != null && (!pk || p.pv > pk.pv)) pk = p; });
@@ -806,23 +947,12 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const anyDead = strings.some(s => s.v < 1.5 && s.p < 5);
 
   // ---- last 30 days ----
-  const [daily, setDaily] = React.useState(null); // null loading, false failed
-  const loadDaily = React.useCallback(() => {
-    setDaily(null);
-    window.fetchTrendDaily(30).then(setDaily).catch(() => setDaily(false));
-  }, []);
-  React.useEffect(loadDaily, [refreshKey]);
+  const [daily, loadDaily] = useDaily(refreshKey);
   const bars = daily ? daily.filter(r => r.date) : [];
   const pastBars = bars.filter(r => r.date !== plantToday);
   const best = pastBars.length ? pastBars.reduce((b, r) => ((r.pv || 0) > (b.pv || 0) ? r : b)) : null;
-  const openDay = (d) => {
-    pick.setDate(d);
-    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const card = document.getElementById('solar-day'); // scroll-margin-top leaves the gap above it
-    card && card.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
-  };
+  const openDay = (d) => { pick.setDate(d); scrollToDay('solar-day'); };
 
-  const titled = (title, word) => <>{title} · <span style={{ color: 'var(--text)' }}>{word}</span></>;
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
@@ -841,8 +971,8 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
           {titled('GENERATION', dayWord)}
         </SectionTitle>
         <DateBar pick={pick} earliest={earliest} />
-        {!day ? <window.Skeleton h={300} r={12} />
-          : <div {...dim}><SolarDayChart points={noReadings ? [] : points} empty={noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')} /></div>}
+        {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
+          : <div {...dim}><DayLineChart points={noReadings ? [] : points} field="pv" color={CC.pv} label="Solar" crop empty={noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')} /></div>}
       </Card>
 
       <Card>
@@ -851,9 +981,10 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         </SectionTitle>
         {daily === false
           ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
-          : !daily ? <window.Skeleton h={220} r={10} />
+          : !daily ? <window.Skeleton className="bars-skel" h="auto" r={10} />
           : bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
-          : <SolarDaysBars rows={bars} today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
+          : <DaysBars rows={bars} field="pv" color={CC.pv} rgb="61,220,132" word="Solar" label="Solar per day for the last 30 days"
+              today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
       </Card>
 
       <div className="solar-row">
@@ -862,7 +993,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
             {titled('WHERE IT WENT', dayWord)}
             <window.InfoDot text={'An estimate from 5-minute readings: solar is counted to the house first, then to the battery. Anything sold to the grid is on the Grid tab.'} />
           </SectionTitle>
-          {!day ? <window.Skeleton h={140} r={10} />
+          {!day ? <window.Skeleton h={64} r={10} />
             : noReadings ? <div className="solar-note" {...dim}>{noReadings}</div>
             : splitTotal < 0.05 ? <div className="solar-note" {...dim}>{view.isToday ? 'No solar yet today.' : 'No solar on this day.'}</div>
             : <div {...dim}>
@@ -930,10 +1061,97 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 }
 
 // ---------------------------------------------------------------- BATTERY
-function BatteryTab({ snap, settings, onOpenSettings }) {
-  const a = snap.aggregate;
-  const feat = snap.features || {};
-  if (feat.hasBattery === false) {
+// Built like Solar: what came out of the battery (today, week, month, year, lifetime) beside
+// its charge now, a day's charge against the reserve, the last 30 days, how the battery
+// did overnight, how long it would carry the house if the grid went, and each pack.
+
+// "13 h 10 m", "45 m": spoken, not decimal hours, and never broken across a line
+function fmtHrs(h) {
+  let hh = Math.floor(h), mm = Math.round((h - hh) * 60);
+  if (mm === 60) { hh++; mm = 0; }
+  return (hh > 0 ? hh + ' h ' + mm + ' m' : mm + ' m').replace(/ /g, NBSP);
+}
+
+// Two figures under a split bar, as Solar's Where it went draws them. Each part is
+// [label, share, colour, value]; the value is kWh, or already-formatted text.
+function SplitBar({ parts, title, aria }) {
+  const tot = parts.reduce((s, p) => s + p[1], 0);
+  const pct = (v) => v / tot * 100;
+  return (
+    <>
+      <div className="solar-split" role="img" title={title} aria-label={aria}>
+        {parts.map(([l, v, c]) => <i key={l} style={{ width: pct(v) + '%', background: c }} />)}
+      </div>
+      <div className="solar-dest" aria-hidden="true">
+        {parts.map(([l, v, c, shown]) => {
+          const [n, u] = typeof shown === 'string' ? [shown, ''] : window.fmtEnergyParts(shown == null ? v : shown);
+          return (
+            <div className="sd" key={l} style={{ width: pct(v) + '%' }}>
+              <div className="sd-v mono" style={{ color: c }}>{n}{u && <s>{u}</s>}</div>
+              <div className="sd-k">{l}</div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+// How the battery did over a night, from 17:00 on the day before to 07:00: how long the
+// battery ran the house and how long the grid did (any 5 minutes that drew more than 50 W
+// from it, which includes the grid charging the battery), the first time the charge reached
+// the reserve, and the lowest charge. null when too little of the night was logged to say.
+const NIGHT_FROM = 17 * 60, NIGHT_TO = 7 * 60;
+function nightOf(before, after, reserve) {
+  const pts = [...(before || []).filter(p => p.t >= NIGHT_FROM), ...(after || []).filter(p => p.t < NIGHT_TO)];
+  const read = pts.filter(p => p.soc != null && p.load != null);
+  if (read.length < 12 || read.length < pts.length / 2) return null;
+  let gridMin = 0, battMin = 0, gridToBatt = 0;
+  read.forEach(p => {
+    if (p.grid != null && p.grid > 50) {
+      gridMin += 5;
+      if (p.batt != null && p.batt < 0) gridToBatt += Math.min(-p.batt, p.grid) * 5 / 60 / 1000; // day series: − = charging
+    } else battMin += 5;
+  });
+  return {
+    gridMin, battMin, gridToBatt,
+    hit: read.find(p => p.soc <= reserve + 1) || null,
+    low: read.reduce((b, p) => (p.soc < b.soc ? p : b)),
+    done: (after || []).some(p => p.t >= NIGHT_TO - 5 && p.soc != null),
+  };
+}
+
+// Six tiles, the day's chart, the month's bars and the pair of cards under them.
+function BatterySkeleton() {
+  return (
+    <div className="stack solar-tab">
+      <div className="solar-stats">
+        {['CHARGE NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'].map(l => <StatTile key={l} label={l} loading sub={NBSP} />)}
+      </div>
+      <Card>
+        <SectionTitle>{titled('CHARGE', 'today')}</SectionTitle>
+        <DayChartSkeleton />
+      </Card>
+      <Card>
+        <SectionTitle>{titled('OUT OF THE BATTERY', 'last 30 days')}</SectionTitle>
+        <window.Skeleton className="bars-skel" h="auto" r={10} />
+      </Card>
+      <div className="solar-row">
+        <Card>
+          <SectionTitle>{titled('OVERNIGHT', 'last night')}</SectionTitle>
+          <window.Skeleton h={64} r={10} />
+        </Card>
+        <Card>
+          <SectionTitle>IF THE GRID GOES OFF</SectionTitle>
+          <window.Skeleton h={90} r={10} />
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function BatteryTab(props) {
+  if ((props.snap.features || {}).hasBattery === false) {
     return (
       <div className="stack">
         <Card>
@@ -943,48 +1161,172 @@ function BatteryTab({ snap, settings, onOpenSettings }) {
       </div>
     );
   }
-  const reserve = snap.config?.reserve ?? 20;
-  const cap = snap.config?.battCapacity ?? 0;
+  return <BatteryBody {...props} />;
+}
+
+function BatteryBody({ snap, settings, energy, onNeedEnergy, today, refreshKey, onOpenSettings }) {
+  const a = snap.aggregate;
+  const cfg = snap.config || {};
+  const feat = snap.features || {};
+  const tz = cfg.timezone;
+  const plantToday = plantDateStr(tz);
+  const hasGrid = feat.hasGrid !== false;
+  const reserve = cfg.reserve ?? 20;
+  const cap = cfg.battCapacity ?? 0;
+  const updated = snap.updated instanceof Date ? snap.updated : new Date();
+  React.useEffect(() => { ['week', 'month', 'year', 'lifetime'].forEach(p => { if (!energy[p]) onNeedEnergy(p); }); }, [energy]);
+  const [earliest, setEarliest] = React.useState(null);
+  React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
+
+  // ---- totals: what came out of the battery ----
+  const tot = periodTotals('dischg', a.battDischgToday, energy, plantToday);
+  const EP = window.fmtEnergyParts;
+  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.batt} loading={v == null} sub={sub || NBSP} />; };
+  const soc = Math.round(a.battSoc);
+  let nowSub;
+  if (a.battState === 'charging' && a.battPower > 50) {
+    const eta = cap > 0 ? new Date(updated.getTime() + ((100 - a.battSoc) / 100 * cap) / (a.battPower / 1000) * 3600000) : null;
+    const sameDay = eta && plantDateStr(tz, eta) === plantDateStr(tz, updated);
+    nowSub = <>Charging at <b>{fmtPower(a.battPower)}</b>{sameDay && <>, full at about <b>{window.fmtPlantTime(eta, tz)}</b></>}</>;
+  } else if (a.battState === 'discharging' && a.battPower > 50) {
+    nowSub = <>Giving out <b>{fmtPower(a.battPower)}</b></>;
+  } else {
+    nowSub = a.battSoc <= reserve + 1 ? <>Resting at the <b>{reserve}%</b> reserve</> : 'Resting';
+  }
+  const cycles = cap > 0 && tot.lifetime > 0 ? Math.round(tot.lifetime / cap) : null;
+
+  // ---- the day on the chart ----
+  const pick = useDayPicker(earliest, plantToday);
+  const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
+  const noReadings = dayProblem(view, day, points);
+  const socs = points.filter(p => p.soc != null);
+  const low = socs.length ? socs.reduce((b, p) => (p.soc < b.soc ? p : b)) : null;
+  const full = socs.find(p => p.soc >= 98); // 98, as the Live banner counts full
+
+  // ---- overnight: the night into the day on the chart ----
+  const [before, setBefore] = React.useState(null); // { date, points }
+  const prevDate = window.shiftDate(view.date || plantToday, -1);
+  React.useEffect(() => {
+    let alive = true;
+    window.fetchDay(prevDate)
+      .then(r => { if (alive) setBefore({ date: prevDate, points: r.points || [] }); })
+      .catch(() => { if (alive) setBefore({ date: prevDate, points: [] }); });
+    return () => { alive = false; };
+  }, [prevDate, refreshKey]);
+  const night = before && before.date === prevDate && day ? nightOf(before.points, points, reserve) : null;
+  const nightLoading = !day || !before || before.date !== prevDate;
+  const nightWord = view.isToday ? 'last night' : 'into ' + dayWord;
+  let nightCard = null;
+  if (night) {
+    const at = (p) => HM(p.t);
+    const d = (m) => fmtHrs(m / 60);
+    const lowest = <>Lowest <b>{night.low.soc}%</b> at <b>{at(night.low)}</b>.</>;
+    nightCard = {
+      parts: [['Battery', night.battMin, CC.batt, d(night.battMin)], [hasGrid ? 'Grid' : 'Other', night.gridMin, CC.grid, d(night.gridMin)]].filter(p => p[1] > 0),
+      note: !night.gridMin
+        ? <>The battery ran the house {night.done ? 'all night' : 'so far'}. {lowest}</>
+        : <>{night.hit ? <>The battery reached the {reserve}% reserve at <b>{at(night.hit)}</b>. </> : null}The grid ran the house for {d(night.gridMin)}{night.gridToBatt >= 0.3 ? <> and put {fmtKwh(night.gridToBatt)} into the battery</> : null}.{!night.hit ? <> {lowest}</> : null}</>,
+    };
+  }
+
+  // ---- if the grid goes off ----
+  // Hours down to the reserve at what the house usually draws between 18:00 and 06:00,
+  // from the same hourly profile Live uses. Not at the battery's draw right now: at noon the
+  // sun covers the house and that would read as days.
+  const [hourly, setHourly] = React.useState(null);
+  React.useEffect(() => { if (hasGrid) window.fetchHourly().then(setHourly).catch(() => {}); }, [refreshKey, hasGrid]);
+  const nightHours = ((hourly && hourly.hours) || []).filter(h => (Number(h.hour) >= 18 || Number(h.hour) < 6) && h.load_w != null);
+  const nightKw = nightHours.length >= 6 ? nightHours.reduce((s, h) => s + Number(h.load_w), 0) / nightHours.length / 1000 : null;
+  const usable = cap > 0 ? Math.max(0, (a.battSoc - reserve) / 100 * cap) : null;
+  let offCard = null;
+  if (hasGrid) {
+    if (!(cap > 0)) offCard = { head: 'Needs your battery size', link: true };
+    else if (a.gridPresent === false) {
+      offCard = a.battState === 'discharging' && a.battPower > 50
+        ? { head: <>The grid is off: about <span className="mono">{fmtHrs(usable / (a.battPower / 1000))}</span> left</>, note: 'Down to the ' + reserve + '% reserve at the ' + fmtPower(a.battPower) + ' the battery is giving out now.' }
+        : { head: 'The grid is off now', note: 'The battery is at ' + soc + '%.' };
+    }
+    else if (usable < 0.1) offCard = { head: 'Not long', note: 'The battery is at the ' + reserve + '% reserve.' };
+    else if (nightKw > 0.05) offCard = { head: <>About <span className="mono">{fmtHrs(usable / nightKw)}</span></>, note: 'From ' + soc + '% down to the ' + reserve + '% reserve, at the ' + nightKw.toFixed(1) + ' kW the house usually uses at night. Longer while the sun is up.' };
+    else if (hourly) offCard = { head: 'Not known yet', note: 'It needs a few nights of readings first.' };
+  }
+
+  // ---- last 30 days ----
+  const [daily, loadDaily] = useDaily(refreshKey);
+  const bars = daily ? daily.filter(r => r.date) : [];
+  const pastBars = bars.filter(r => r.date !== plantToday);
+  const most = pastBars.length ? pastBars.reduce((b, r) => ((r.dischg || 0) > (b.dischg || 0) ? r : b)) : null;
+  const openDay = (d) => { pick.setDate(d); scrollToDay('battery-day'); };
+
+  // ---- packs ----
   const shared = feat.banks === 'shared';
-  const chgUp = settings.battPositive === 'charge'; // Settings → Display: which way is +
   const withBatt = snap.inverters.filter(i => i.numberOfBatteries > 0 || i.battSoc > 0);
   // One shared pack: every inverter reads the same BMS, so count it once.
   const banks = shared ? Math.min(1, withBatt.length) : withBatt.length;
   const modules = shared ? Math.max(0, ...withBatt.map(i => i.numberOfBatteries || 0)) : withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
+
   return (
-    <div className="stack">
-      <div className="batt-top">
-        <Card className="batt-gauge-card">
-          <Gauge value={a.battSoc} color={CC.batt} label={a.battState} sub={fmtPower(battShown(a.battOut, settings.battPositive))} />
-          <div className="batt-gauge-meta">
-            <Metric label="Pack voltage" value={a.battVoltage.toFixed(1)} unit=" V" />
-            <Metric label="Current" value={a.battCurrent.toFixed(1)} unit=" A" accent={a.battCurrent < 0 ? CC.batt : CC.pv} />
-            <Metric label="Temperature" value={cleanTemp(a.battTemp) != null ? a.battTemp.toFixed(1) : '—'} unit={cleanTemp(a.battTemp) != null ? ' °C' : ''} />
-          </div>
-        </Card>
-        <Card className="grow">
-          <SectionTitle>THROUGHPUT TODAY</SectionTitle>
-          <div className="throughput">
-            <div><div className="tp-label">Charged</div><div className="tp-val mono" style={{ color: CC.batt }}>{chgUp ? '+' : '−'}{a.battChgToday} kWh</div></div>
-            <div><div className="tp-label">Discharged</div><div className="tp-val mono" style={{ color: CC.load }}>{chgUp ? '−' : '+'}{a.battDischgToday} kWh</div></div>
-            <div><div className="tp-label">Capacity</div><div className="tp-val mono">{cap > 0 ? cap.toFixed(1) + ' kWh' : '—'}</div>
-              {!(cap > 0) && <button type="button" className="mini-link tp-link" onClick={() => onOpenSettings('battery')}>Set pack size</button>}</div>
-            <div><div className="tp-label">Est. cycles today</div><div className="tp-val mono">{cap > 0 ? (a.battDischgToday / cap).toFixed(2) : '—'}</div></div>
-          </div>
-          <div className="meter-head">
-            <span className="meter-cap">State of charge</span>
-            <span className="mono" style={{ color: CC.batt }}>{a.battSoc}%</span>
-          </div>
-          <div className="meter big">
-            <div className="meter-fill" style={{ width: a.battSoc + '%', background: CC.batt }} />
-            <div className="reserve-mark" style={{ left: reserve + '%' }} title={`reserve ${reserve}%`} />
-          </div>
-          <div className="meter-scale"><span>0%</span><span>100%</span></div>
-          <div className="hint-line">The bar is your battery’s charge level; the tick marks the <b>{reserve}%</b> reserve floor where discharge stops{cap > 0 ? <> (~{(Math.max(0, (a.battSoc - reserve) / 100 * cap)).toFixed(1)} kWh usable above it)</> : null}. Charging shows as a <b>{settings.battPositive === 'charge' ? 'positive' : 'negative'}</b> number (<button type="button" className="mini-link" onClick={() => onOpenSettings('display')}>change in Settings</button>).</div>
-        </Card>
+    <div className="stack solar-tab">
+      <div className="solar-stats">
+        <StatTile label="CHARGE NOW" value={soc} unit="%" accent={CC.batt} sub={nowSub} />
+        {tile('TODAY', a.battDischgToday, <>Out of the battery. In: <b>{fmtKwh(a.battChgToday)}</b></>)}
+        {tile('THIS WEEK', tot.week)}
+        {tile('THIS MONTH', tot.month)}
+        {tile('THIS YEAR', tot.year)}
+        {tile('LIFETIME', tot.lifetime, cycles ? <>About <b>{cycles}</b> full cycles</> : lifetimeSince(energy.lifetime, earliest, plantToday))}
       </div>
+
+      <Card id="battery-day">
+        <SectionTitle right={day && !noReadings && !view.isToday && low ? <>Low <b>{low.soc}%</b> at <b>{HM(low.t)}</b>{full ? <>, full at <b>{HM(full.t)}</b></> : ', never full'}</> : null}>
+          {titled('CHARGE', dayWord)}
+        </SectionTitle>
+        <DateBar pick={pick} earliest={earliest} />
+        {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
+          : <div {...dim}><DayLineChart points={noReadings ? [] : points} field="soc" color={CC.batt} label="Charge" pct reserve={reserve}
+              empty={noReadings || 'No charge readings for this day.'} /></div>}
+      </Card>
+
       <Card>
-        <SectionTitle right={<span className="dim">{banks} {banks === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'} · {shared ? 'one pack shared by ' + snap.inverters.length + ' inverters' : 'one pack per inverter'}</span>}>PER INVERTER</SectionTitle>
+        <SectionTitle right={most && most.dischg > 0 ? <>Most <b>{fmtKwh(most.dischg)}</b> on {shortDate(most.date)}</> : null}>
+          {titled('OUT OF THE BATTERY', 'last 30 days')}
+        </SectionTitle>
+        {daily === false
+          ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
+          : !daily ? <window.Skeleton className="bars-skel" h="auto" r={10} />
+          : bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
+          : <DaysBars rows={bars} field="dischg" color={CC.batt} rgb="167,139,250" word="Out" label="Energy out of the battery per day for the last 30 days"
+              today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
+      </Card>
+
+      <div className="solar-row">
+        <Card>
+          <SectionTitle>
+            {titled('OVERNIGHT', nightWord)}
+            <window.InfoDot text={'From 17:00 to 07:00, in 5-minute readings. Any five minutes that drew from the grid count as the grid’s.'} />
+          </SectionTitle>
+          {nightLoading ? <window.Skeleton h={64} r={10} />
+            : !nightCard ? <div className="solar-note" {...dim}>Readings are missing for most of that night.</div>
+            : <div {...dim}>
+                <SplitBar parts={nightCard.parts} title={nightCard.parts.map(p => p[0] + ' ' + p[3]).join(', ')} aria={nightCard.parts.map(p => p[0] + ' ' + p[3]).join('; ')} />
+                <p className="solar-spare-note">{nightCard.note}</p>
+              </div>}
+        </Card>
+
+        {offCard && (
+          <Card>
+            <SectionTitle>
+              IF THE GRID GOES OFF
+              <window.InfoDot text="The charge above the reserve, divided by the house’s usual use at night. It lasts longer if the inverter cuts some circuits in an outage." />
+            </SectionTitle>
+            <div className="solar-verdict">{offCard.head}</div>
+            {offCard.note && <p className="solar-spare-note">{offCard.note}</p>}
+            {offCard.link && <button type="button" className="mini-link" onClick={() => onOpenSettings('battery')}>Set battery size</button>}
+          </Card>
+        )}
+      </div>
+
+      <Card>
+        <SectionTitle right={<span className="dim">{banks} {banks === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'} · {shared ? 'one pack shared by ' + snap.inverters.length + ' inverters' : 'one pack per inverter'}</span>}>PACKS</SectionTitle>
         <div className="duo">
           {snap.inverters.map(inv => {
             const t = cleanTemp(inv.battTemp);
@@ -1015,10 +1357,42 @@ function BatteryTab({ snap, settings, onOpenSettings }) {
 }
 
 // ---------------------------------------------------------------- GRID
-function GridTab({ snap, settings, refreshKey, onOpenSettings }) {
-  const a = snap.aggregate;
-  const feat = snap.features || {};
-  if (feat.hasGrid === false) {
+// Built like Solar: what was bought (now, today, week, month, year, lifetime), a day's
+// import, the last 30 days, what the house ran on and what the grid cost, whether the supply
+// is there now, and the day's voltage and frequency.
+
+// A connected plant is assumed until the snapshot says otherwise.
+function GridSkeleton() {
+  return (
+    <div className="stack solar-tab">
+      <div className="solar-stats">
+        {['GRID NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'].map(l => <StatTile key={l} label={l} loading sub={NBSP} />)}
+      </div>
+      <Card>
+        <SectionTitle>{titled('BOUGHT FROM THE GRID', 'today')}</SectionTitle>
+        <DayChartSkeleton />
+      </Card>
+      <Card>
+        <SectionTitle>{titled('BOUGHT FROM THE GRID', 'last 30 days')}</SectionTitle>
+        <window.Skeleton className="bars-skel" h="auto" r={10} />
+      </Card>
+      <div className="solar-row">
+        <Card>
+          <SectionTitle>{titled('WHAT THE HOUSE RAN ON', 'today')}</SectionTitle>
+          <window.Skeleton h={64} r={10} />
+        </Card>
+        <Card>
+          <SectionTitle>SUPPLY</SectionTitle>
+          <window.Skeleton h={90} r={10} />
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function GridTab(props) {
+  const a = props.snap.aggregate;
+  if ((props.snap.features || {}).hasGrid === false) {
     const selfSuff = 100;
     return (
       <div className="stack">
@@ -1034,70 +1408,198 @@ function GridTab({ snap, settings, refreshKey, onOpenSettings }) {
       </div>
     );
   }
-  const selfSuff = a.loadToday > 0 ? Math.max(0, Math.min(100, Math.round(((a.loadToday - a.gridFromToday) / a.loadToday) * 100))) : 0;
-  const rate = snap.config?.tariffImport ?? 0;
-  const rateExp = snap.config?.tariffExport ?? 0;
-  const exporting = a.gridPower < -5;
-  const wouldPay = a.loadToday * rate;                              // all consumption bought from grid
-  const cost = a.gridFromToday * rate;                             // what you actually paid the grid
-  const earned = (a.gridToToday || 0) * rateExp;                   // feed-in income
-  const saved = Math.max(0, a.loadToday - a.gridFromToday) * rate + earned;  // avoided cost + income
-  const showExport = rateExp > 0; // same rule as the Overview tile: only plants paid for export
-  // No rate yet: a dash reads "not set"; R 0,00 three times reads "broken".
+  return <GridBody {...props} />;
+}
+
+// What a day's house load ran on, from its 5-minute points, with the same allocation as
+// Solar's Where it went: solar to the house first, then the battery, and the grid for the
+// rest. Import beyond that went into the battery.
+function houseSplit(points) {
+  let sun = 0, batt = 0, grid = 0, load = 0, imp = 0, exp = 0;
+  const kwh = 5 / 60 / 1000;
+  points.forEach(p => {
+    if (p.grid != null) { if (p.grid > 0) imp += p.grid * kwh; else exp += -p.grid * kwh; }
+    if (p.pv == null || p.load == null) return;
+    const l = Math.max(0, p.load), s = Math.min(Math.max(0, p.pv), l);
+    const b = Math.min(l - s, p.batt != null && p.batt > 0 ? p.batt : 0); // day series: + = discharging
+    sun += s * kwh; batt += b * kwh; grid += (l - s - b) * kwh; load += l * kwh;
+  });
+  return { sun, batt, grid, load, imp, exp };
+}
+
+function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSettings }) {
+  const a = snap.aggregate;
+  const cfg = snap.config || {};
+  const tz = cfg.timezone;
+  const plantToday = plantDateStr(tz);
+  const rate = cfg.tariffImport ?? 0;
+  const rateExp = cfg.tariffExport ?? 0;
+  const sells = rateExp > 0; // same rule as the Overview tile: only plants paid for export
+  const hasBatt = (snap.features || {}).hasBattery !== false;
+  React.useEffect(() => { ['week', 'month', 'year', 'lifetime'].forEach(p => { if (!energy[p]) onNeedEnergy(p); }); }, [energy]);
+  const [cmp, setCmp] = React.useState(null);
+  const [earliest, setEarliest] = React.useState(null);
+  React.useEffect(() => { window.fetchCompare().then(setCmp).catch(() => {}); }, [refreshKey]);
+  React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
+
+  // ---- totals: what was bought ----
+  // Today is the logger's own integral, as Live's Imported tile uses: one inverter's CT on a
+  // two-inverter plant reads nothing, so the inverters' own counters undercount.
+  const tot = periodTotals('imp', a.gridFromToday, energy, plantToday);
+  const EP = window.fmtEnergyParts;
+  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.grid} loading={v == null} sub={sub || NBSP} />; };
+  const trend = (k, min, word) => periodTrend(cmp, k, 'imp', min, word, true);
+  // Every grid-tied inverter leaks a little backflow, so a plant not paid for export only
+  // counts as sending power out above 100 W.
+  const exporting = a.gridPower < (sells ? -5 : -100);
+  const [nowN, nowU] = fmtPowerParts(Math.abs(a.gridPower));
+  // Presence is mains voltage, not usage: nothing is bought on a sunny afternoon with the
+  // grid live, and a blackout reads 0 W too.
+  const nowSub = a.gridPresent === false ? <span style={{ color: CC.load }}>The grid is off</span>
+    : exporting ? (sells ? 'Selling' : 'Sending to the grid')
+    : a.gridPower > 5 ? 'Buying' : 'Not buying';
+  const importPeak = (pts) => {
+    let pk = null;
+    (pts || []).forEach(p => { if (p.grid != null && p.grid > 50 && (!pk || p.grid > pk.grid)) pk = p; });
+    return pk;
+  };
+  const todayPeak = importPeak(today && !today.approx ? today.points : null);
+
+  // ---- the day on the chart ----
+  const pick = useDayPicker(earliest, plantToday);
+  const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
+  const noReadings = dayProblem(view, day, points);
+  // export is negative in the day series; this line is what was bought
+  const bought = React.useMemo(() => points.map(p => ({ t: p.t, imp: p.grid == null ? null : Math.max(0, p.grid) })), [day]); // eslint-disable-line react-hooks/exhaustive-deps
+  const peak = importPeak(points);
+  const split = React.useMemo(() => houseSplit(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
+  const parts = [['Solar', split.sun, CC.pv, true], ['Battery', split.batt, CC.batt, hasBatt], ['Grid', split.grid, CC.grid, true]]
+    .filter(p => p[3] && p[1] >= 0.05).map(p => p.slice(0, 3));
+  const intoBatt = hasBatt ? split.imp - split.grid : 0;
   const noRate = !(rate > 0);
-  const money = v => noRate ? '—' : fmtRand(v);
+  const money = window.fmtRandSmart; // whole rand, as the Live overview shows money
+
+  // ---- supply now ----
+  // One figure per phase each online inverter senses. A dead leg reads a few volts, not 0,
+  // so anything under 100 V is "off" (the same test as the grid-down alert).
+  const online = snap.inverters.filter(i => i.status === 'online');
+  const legs = online.map(inv => ({ inv, v: inv.gridVolts.length ? inv.gridVolts : inv.gridVolt != null ? [inv.gridVolt] : [] })).filter(l => l.v.length);
+  const all = legs.flatMap(l => l.v);
+  const live = all.filter(v => v > 100).length, dead = all.length - live;
+  // The plant's grid-present flag votes on L1 alone, so L1 down with L2 and L3 live reads as
+  // a blackout there. Where this inverter shows a live leg, say part of it is off instead.
+  let supply;
+  if (a.gridPresent == null && !all.length) supply = { head: 'Can’t tell', note: 'The inverter doesn’t report mains voltage.' };
+  else if (live > 0 && dead > 0) supply = { head: 'Part of the supply is off', off: true };
+  else if (a.gridPresent === false || (all.length && live === 0)) supply = { head: 'The grid is off', off: true };
+  else supply = { head: 'The grid is on' };
+  if (!supply.note && all.length) {
+    const volts = (vs) => <span className="mono">{vs.map(v => (v > 100 ? Math.round(v) : 'off')).join(' / ')} V</span>;
+    const same = legs.length > 1 && legs.every(l => l.v.length === 1 && Math.round(l.v[0]) === Math.round(legs[0].v[0]));
+    supply.note = live === 0 ? 'No mains voltage at the inverter.'
+      : legs.length === 1 ? <>Mains reads {volts(legs[0].v)}{all.length === 3 ? ' on the three phases' : ''}.</>
+      : same ? <>Mains reads {volts(legs[0].v)} at {legs.length === 2 ? 'both' : 'each'} inverter{legs.length === 2 ? 's' : ''}.</>
+      : <>Mains reads {legs.map((l, i) => <React.Fragment key={l.inv.sn}>{i ? ', ' : ''}{volts(l.v)} at {l.inv.alias}</React.Fragment>)}.</>;
+  }
+
+  // ---- last 30 days ----
+  const [daily, loadDaily] = useDaily(refreshKey);
+  const bars = daily ? daily.filter(r => r.date) : [];
+  const pastBars = bars.filter(r => r.date !== plantToday);
+  const most = pastBars.length ? pastBars.reduce((b, r) => ((r.imp || 0) > (b.imp || 0) ? r : b)) : null;
+  const openDay = (d) => { pick.setDate(d); scrollToDay('grid-day'); };
+
   return (
-    <div className="stack">
-      <div className="trio">
-        <StatTile label="GRID NOW" value={fmtPowerParts(Math.abs(a.gridPower))[0]} unit={' ' + fmtPowerParts(Math.abs(a.gridPower))[1]} accent={CC.grid}
-          sub={exporting ? 'exporting' : a.gridPower > 5 ? 'importing' : 'idle'} />
-        <StatTile label="IMPORTED TODAY" value={a.gridFromToday} unit=" kWh" accent={CC.grid} sub={<>lifetime <b>{a.gridFromTotal.toLocaleString()} kWh</b></>} />
-        {showExport
-          ? <StatTile label="EXPORTED TODAY" value={a.gridToToday} unit=" kWh" accent={CC.pv} sub={<>lifetime <b>{(a.gridToTotal || 0).toLocaleString()} kWh</b></>} />
-          : <StatTile label="SELF-SUFFICIENCY" value={selfSuff} unit="%" accent={CC.soc} bar={selfSuff} sub="of load met without the grid" />}
+    <div className="stack solar-tab">
+      <div className="solar-stats">
+        <StatTile label="GRID NOW" value={nowN} unit={nowU} accent={CC.grid} sub={nowSub} />
+        {tile('TODAY', a.gridFromToday, sells ? <>Sold <b>{fmtKwh(a.gridToToday)}</b></> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
+        {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
+        {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
+        {tile('THIS YEAR', tot.year)}
+        {tile('LIFETIME', tot.lifetime, lifetimeSince(energy.lifetime, earliest, plantToday))}
       </div>
-      <div className="duo">
+
+      <Card id="grid-day">
+        <SectionTitle right={day && !noReadings && !view.isToday ? <>Bought <b>{fmtKwh(split.imp)}</b>{peak && <>, most at <b>{HM(peak.t)}</b></>}</> : null}>
+          {titled('BOUGHT FROM THE GRID', dayWord)}
+        </SectionTitle>
+        <DateBar pick={pick} earliest={earliest} />
+        {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
+          : <div {...dim}><DayLineChart points={noReadings ? [] : bought} field="imp" color={CC.grid} label="Bought"
+              empty={noReadings || 'No grid readings for this day.'} /></div>}
+      </Card>
+
+      <Card>
+        <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {shortDate(most.date)}</> : null}>
+          {titled('BOUGHT FROM THE GRID', 'last 30 days')}
+        </SectionTitle>
+        {daily === false
+          ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
+          : !daily ? <window.Skeleton className="bars-skel" h="auto" r={10} />
+          : bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
+          : <DaysBars rows={bars} field="imp" color={CC.grid} rgb="250,204,21" word="Bought" label="Energy bought from the grid per day for the last 30 days"
+              today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
+      </Card>
+
+      <div className="solar-row">
         <Card>
-          <SectionTitle>GRID QUALITY</SectionTitle>
-          <div className="mp-grid">
-            <Metric label="Frequency" value={a.gridFreq.toFixed(2)} unit=" Hz" />
-            <Metric label="Power factor" value={a.gridPf.toFixed(2)} />
-            {/* one voltage per inverter, one per phase where the inverter is three-phase */}
-            {snap.inverters.map(inv => (
-              <Metric key={inv.sn} label={(snap.inverters.length > 1 ? inv.alias + ' ' : '') + (inv.gridVolts.length > 1 ? 'L1 / L2 / L3' : 'Voltage')}
-                value={inv.gridVolts.length ? inv.gridVolts.map(v => Math.round(v)).join(' / ') : (inv.gridVolt != null ? Math.round(inv.gridVolt) : '—')} unit=" V"
-                accent={inv.gridVolts.some(v => v < 100) ? CC.load : null} />
-            ))}
-            <Metric label="Status" value={a.phaseDown ? 'phase down' : exporting ? 'exporting' : a.gridPower > 5 ? 'importing' : 'connected'} accent={a.phaseDown ? CC.load : null} />
-          </div>
-          {a.phaseDown && <div className="inv-warn">⚠ One phase has no voltage while another is live — check the supply on that phase.</div>}
+          <SectionTitle>
+            {titled('WHAT THE HOUSE RAN ON', dayWord)}
+            <window.InfoDot text={'An estimate from 5-minute readings: solar counts first, then the battery, then the grid.'} />
+          </SectionTitle>
+          {!day ? <window.Skeleton h={64} r={10} />
+            : noReadings ? <div className="solar-note" {...dim}>{noReadings}</div>
+            : split.load < 0.05 ? <div className="solar-note" {...dim}>No use recorded on this day.</div>
+            : <div {...dim}>
+                <SplitBar parts={parts} title={parts.map(p => p[0] + ' ' + Math.round(p[1] / split.load * 100) + '%').join(', ')}
+                  aria={parts.map(p => p[0] + ' ' + fmtKwh(p[1])).join('; ')} />
+                {noRate
+                  ? <p className="solar-spare-note"><button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your electricity rate</button> to see what the grid cost.</p>
+                  : <p className="solar-spare-note">
+                      {split.imp < 0.05 ? 'Bought nothing from the grid.' : <>Paid about <b style={{ color: 'var(--text)' }}>{money(split.imp * rate)}</b> for {fmtKwh(split.imp)}.</>}
+                      {' '}The {fmtKwh(split.load)} the house used would have cost {money(split.load * rate)} from the grid alone.
+                      {intoBatt >= 0.3 ? <> {fmtKwh(intoBatt)} of what was bought went into the battery.</> : null}
+                      {sells && split.exp >= 0.05 ? <> Sold {fmtKwh(split.exp)} for {money(split.exp * rateExp)}.</> : null}
+                      {' '}<button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Edit rate</button>
+                    </p>}
+              </div>}
         </Card>
+
         <Card>
-            <SectionTitle right={<span className="dim mono">{window.PLANT_CURRENCY}</span>}>COST & SAVINGS · TODAY</SectionTitle>
-            <div className="savings-row">
-              <div><div className="tp-label">Would've paid</div><div className="tp-val mono" style={{ color: CC.grid }}>{money(wouldPay)}</div></div>
-              <div><div className="tp-label">Grid cost</div><div className="tp-val mono" style={{ color: CC.load }}>{money(cost)}</div></div>
-              {showExport && rateExp > 0 && <div><div className="tp-label">Earned</div><div className="tp-val mono" style={{ color: CC.pv }}>{money(earned)}</div></div>}
-              <div><div className="tp-label">Saved</div><div className="tp-val mono" style={{ color: CC.batt }}>{money(saved)}</div></div>
-            </div>
-          {noRate
-            ? <div className="hint-line"><button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your electricity rate</button> to see what today cost and what solar saved.</div>
-            : <div className="hint-line">All {fmtKwh(a.loadToday)} you used today @ {fmtRand(rate)}/kWh would've cost <b>{fmtRand(wouldPay)}</b>; you only bought {fmtKwh(a.gridFromToday)} from the grid, so you saved the difference.{showExport && rateExp > 0 ? <> Plus {fmtKwh(a.gridToToday)} sold @ {fmtRand(rateExp)}/kWh.</> : null} (Charging the battery from the grid is already counted as import, so it isn't double-counted here.) <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Edit rate</button></div>}
+          <SectionTitle>SUPPLY</SectionTitle>
+          <div className="solar-verdict" style={{ color: supply.off ? CC.load : 'var(--text)' }}>{supply.head}</div>
+          {supply.note && <p className="solar-spare-note">{supply.note}</p>}
         </Card>
       </div>
-      {/* the supply over a day: voltage at each inverter's AC terminal and the grid's
-          frequency, from SunSynk's history (two months back). A blackout shows as a
-          shaded band — the terminal keeps reading the inverter's own 230 V then, so
-          only the 0 Hz grid frequency gives it away. */}
+
+      {/* The supply over the picked day: voltage at each inverter's AC terminal and the grid's
+          frequency, from SunSynk's history (two months back). A blackout shows as a shaded
+          band — the terminal keeps reading the inverter's own 230 V then, so only the 0 Hz
+          grid frequency gives it away. */}
       <Card className="chart-card">
-        <SectionTitle>SUPPLY · DAY</SectionTitle>
-        <window.InverterHistoryChart kind="ac" refreshKey={refreshKey} />
+        <SectionTitle>{titled('SUPPLY', dayWord)}</SectionTitle>
+        <window.InverterHistoryChart kind="ac" refreshKey={refreshKey} dayPick={pick} />
       </Card>
     </div>
   );
 }
 
 // ---------------------------------------------------------------- INVERTERS
+// One inverter card, not two: how many there are is the snapshot's to say.
+function InvertersSkeleton() {
+  return (
+    <div className="stack">
+      <SectionTitle>INVERTERS</SectionTitle>
+      <Card className="chart-card">
+        <SectionTitle>TEMPERATURE · DAY</SectionTitle>
+        <DayChartSkeleton legend />
+      </Card>
+      <div className="duo"><window.Skeleton h={277} r={12} /></div>
+    </div>
+  );
+}
+
 function InvertersTab({ snap, settings, refreshKey }) {
   const feat = snap.features || {};
   const hasBatt = feat.hasBattery !== false, hasGrid = feat.hasGrid !== false;
@@ -1145,6 +1647,16 @@ function InvertersTab({ snap, settings, refreshKey }) {
       </div>
     </div>
   );
+}
+
+// The shape to hold while the first snapshot is on its way. Trends and Settings never wait
+// on one — App draws those for real — so they have no skeleton here.
+function TabSkeleton({ tab }) {
+  return tab === 'solar' ? <SolarSkeleton />
+    : tab === 'battery' ? <BatterySkeleton />
+    : tab === 'grid' ? <GridSkeleton />
+    : tab === 'inverters' ? <InvertersSkeleton />
+    : <LiveSkeleton />;
 }
 
 // ---------------------------------------------------------------- SETTINGS
@@ -1730,4 +2242,4 @@ function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfig
   );
 }
 
-Object.assign(window, { LiveTab, SolarTab, BatteryTab, GridTab, InvertersTab, SettingsTab, MiniStat, FsEnterIcon, BalanceSkeleton });
+Object.assign(window, { LiveTab, SolarTab, BatteryTab, GridTab, InvertersTab, SettingsTab, MiniStat, FsEnterIcon, BalanceSkeleton, TabSkeleton });

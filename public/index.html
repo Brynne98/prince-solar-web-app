@@ -224,6 +224,14 @@
   /* loading stand-in for .flow-wrap: the summary line (app.jsx), then the diagram at the
      desktop viewBox's proportions; the stacked layout (flow.jsx, ≤900px) is about 490px */
   .flow-skel { aspect-ratio: 884 / 378; }
+  /* a chart's plot area before it can be drawn, at the heights useChartSize picks */
+  .chart-skel { height: 300px !important; }
+  @media (max-width: 620px) { .chart-skel { height: 220px !important; } }
+  /* the month's bars, likewise */
+  .bars-skel { height: 220px !important; }
+  @media (max-width: 620px) { .bars-skel { height: 192px !important; } }
+  /* a tile's second line held open at two lines where the real one wraps (SolarSkeleton) */
+  @media (max-width: 600px) { .sub-hold-2 { display: block; height: 34px; } }
   @media (max-width: 900px) { .flow-skel { aspect-ratio: auto; height: 490px !important; } }
   /* legend to plot gets the same gap as date bar to legend */
   .hv-root .legend-row { margin-bottom: 12px; }
@@ -245,13 +253,8 @@
   .batt-eta .bel { display: block; }
   .batt-eta .bel.sub { color: var(--muted); margin-top: 1px; }
   .meter { height: 7px; border-radius: 4px; background: rgba(255,255,255,0.07); overflow: hidden; margin-top: 14px; position: relative; }
-  .meter.sm { height: 5px; margin-top: 8px; } .meter.big { height: 12px; margin-top: 0; }
+  .meter.sm { height: 5px; margin-top: 8px; }
   .meter-fill { height: 100%; border-radius: 4px; transition: width .5s ease; }
-  .reserve-mark { position: absolute; top: -2px; width: 2px; height: calc(100% + 4px); background: rgba(255,255,255,0.5); }
-  .meter-head { display: flex; align-items: baseline; justify-content: space-between; margin: 18px 0 8px; }
-  .meter-cap { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
-  .meter-head .mono { font-size: 15px; font-weight: 600; }
-  .meter-scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-top: 6px; font-family: var(--mono); }
 
   /* ---------- live layout ---------- */
   .live-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
@@ -295,7 +298,6 @@
   .mini-link { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer;
     text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
   .mini-link:hover { color: var(--text); text-decoration-color: currentColor; }
-  .tp-link { font-size: 11.5px; margin-top: 4px; }
   /* the same link inside the power-flow SVG ("Set pack size" on the battery node) */
   .flow-link { cursor: pointer; text-decoration: underline; text-decoration-color: var(--line-2); }
   .flow-link:hover { fill: var(--text); }
@@ -567,7 +569,7 @@
   .mp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; }
   .hint-line { font-size: 12.5px; color: var(--dim); margin-top: 16px; line-height: 1.5; }
 
-  /* solar tab */
+  /* solar tab, and the Battery and Grid tabs, which are built the same way */
   .solar-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
   .solar-stats .stat-tile { padding: 26px 28px; }
   .stat-sub .trend-badge { margin: 0 3px 0 0; top: 0; }
@@ -577,7 +579,7 @@
   .solar-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 20px; align-items: stretch; }
   .solar-row > * { min-width: 0; }
   .solar-row > :only-child { grid-column: 1 / -1; }
-  #solar-day { scroll-margin-top: 16px; }
+  #solar-day, #battery-day, #grid-day { scroll-margin-top: 16px; }
   .solar-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
   .tip-hint { font-size: 11px; color: var(--dim); margin-top: 6px; }
   /* Where it went: one object. Each share is a column — its own segment of the bar, its
@@ -612,19 +614,7 @@
   .solar-best { margin-top: 10px; font-size: 13px; color: var(--muted); }
   .solar-best b { font-family: var(--mono); font-weight: 600; color: var(--text); }
 
-  /* battery */
-  .batt-top { display: grid; grid-template-columns: 360px 1fr; gap: 20px; }
-  .batt-gauge-card { display: flex; align-items: center; gap: 26px; }
-  .gauge { position: relative; flex: none; }
-  .gauge svg { display: block; } .gauge-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-  .gauge-val { font-size: 40px; font-weight: 700; line-height: 1; } .gauge-pct { font-size: 18px; }
-  .gauge-label { font-size: 12px; color: var(--muted); margin-top: 6px; text-transform: capitalize; letter-spacing: 0.04em; }
-  .gauge-sub { font-size: 12px; color: var(--text); margin-top: 2px; font-family: var(--mono); }
-  .batt-gauge-meta { display: flex; flex-direction: column; gap: 16px; }
-  .throughput, .savings-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-  .savings-row { grid-template-columns: repeat(3, 1fr); }
-  .tp-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-  .tp-val { font-size: 22px; font-weight: 600; margin-top: 6px; }
+  /* battery packs */
   .mini-panel { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
   .mp-head { display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 14px; }
 
@@ -875,8 +865,7 @@
     .stat-col { grid-template-columns: 1fr 1fr; }
     .solar-stats { grid-template-columns: 1fr 1fr; }
     .solar-row { grid-template-columns: minmax(0, 1fr); }
-    .trio, .quad, .duo, .batt-top, .inv-grid, .field-row { grid-template-columns: 1fr 1fr; }
-    .batt-top { grid-template-columns: 1fr; }
+    .trio, .quad, .duo, .inv-grid, .field-row { grid-template-columns: 1fr 1fr; }
   }
 
   /* ---------- phones ---------- */
@@ -919,7 +908,7 @@
 
     /* big-number rows stack; metric grids stay 2-up */
     .stat-col, .trio, .duo { grid-template-columns: 1fr; }
-    .quad, .inv-grid, .solar-stats, .throughput, .savings-row, .mp-grid, .field-row { grid-template-columns: 1fr 1fr; }
+    .quad, .inv-grid, .solar-stats, .mp-grid, .field-row { grid-template-columns: 1fr 1fr; }
     /* five overview tiles in a two-up grid orphan the last one; an odd last tile spans */
     .today-strip > :last-child:nth-child(odd) { grid-column: 1 / -1; }
     .solar-stats { gap: 12px; }
@@ -930,10 +919,6 @@
     .stat-value .num { font-size: 34px; }
     .stat-value .unit { font-size: 18px; }
     .inv-sn { font-size: 18px; }
-    .gauge-val { font-size: 34px; }
-
-    /* battery gauge keeps its readouts to the right of the circle */
-    .batt-gauge-card { gap: 18px; }
 
     /* chart: smaller pills */
     .legend-chip { padding: 5px 10px; font-size: 11.5px; }
