@@ -1050,6 +1050,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
                     );
                   })}
                 </div>
+                {inv.unusedInputs > 0 && <div className="solar-string-sub">{inv.unusedInputs} unused {inv.unusedInputs === 1 ? 'input' : 'inputs'}</div>}
               </div>
             ))}
           </div>

@@ -108,6 +108,8 @@ function mapInverter(s) {
     strings: (s.pv.strings || []).map((st, i) => ({
       no: st.no || i + 1, v: st.voltage, i: st.current, p: st.power, today: st.today,
     })),
+    // inputs the inverter reports that have never produced; their rows are not stored (0061)
+    unusedInputs: Math.max(0, (s.pv.stringSlots || 0) - (s.pv.strings || []).length),
     phases: (s.output.voltages && s.output.voltages.length ? s.output.voltages : [s.output.voltage])
       .map((v, i, arr) => ({ volt: v, current: v ? (s.output.power / arr.length) / v : 0, power: s.output.power / arr.length })),
     ups: { l1: s.load.power, l2: 0, l3: 0 },
