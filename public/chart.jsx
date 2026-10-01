@@ -109,18 +109,19 @@ function DateBar({ pick, earliest, locked, children }) {
   );
 }
 
-/** x ticks in minutes-of-day up to `nowMin`: 6 h apart on phones, 3 h on desktop, plus "now" if far from the last. */
-function xTicksFor(nowMin, mobile) {
+/** Both day charts span the whole day, 288 five-minute buckets; today fills in from the left. */
+const DAY_LAST = 287;
+/** x ticks in minutes-of-day across the whole day: 6 h apart on phones, 3 h on desktop. */
+function xTicksFor(mobile) {
   const ticks = [];
   const step = mobile ? 360 : 180;
-  for (let t = 0; t <= nowMin; t += step) ticks.push(t);
-  if (nowMin - (ticks[ticks.length - 1] || 0) > step * 0.4) ticks.push(nowMin);
+  for (let t = 0; t < 1440; t += step) ticks.push(t);
   return ticks;
 }
-/** Pointer → bucket index over 0..lastIdx. */
+/** Pointer → bucket index on the day axis, held to 0..lastIdx (the last bucket with data). */
 const idxFromPointer = (clientX, el, m, innerW, lastIdx) => {
   const mx = clientX - el.getBoundingClientRect().left;
-  return Math.max(0, Math.min(lastIdx, Math.round(((mx - m.l) / innerW) * lastIdx)));
+  return Math.max(0, Math.min(lastIdx, Math.round(((mx - m.l) / innerW) * DAY_LAST)));
 };
 /** Tooltip left edge: beside the crosshair, flipped near the right edge, never off either end. */
 const tipLeftFor = (px, width, tipW = 190, gap = 16) =>
@@ -174,16 +175,15 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   const shown = (invs || []).filter(i => i.points && i.points.some(p => has(i, p)));
   const nInv = shown.length;
 
-  // today stretches to the last bucket with data, like the Live chart; a past day is the full 288
+  // the axis is always the whole day; today draws up to the last bucket with data
   let lastData = -1;
   shown.forEach(i => i.points.forEach((p, k) => { if (has(i, p) && k > lastData) lastData = k; }));
-  const lastIdx = isToday ? Math.max(1, lastData) : 287;
-  const nowMin = lastIdx * 5;
+  const lastIdx = isToday ? Math.max(1, lastData) : DAY_LAST;
 
   const m = { l: mobile ? 34 : 42, r: isTemp ? (mobile ? 12 : 16) : (mobile ? 40 : 46), t: 24, b: 34 };
   const innerW = Math.max(40, width - m.l - m.r);
   const innerH = height - m.t - m.b;
-  const x = i => m.l + (i / lastIdx) * innerW;
+  const x = i => m.l + (i / DAY_LAST) * innerW;
 
   // left axis: °C or V, fitted to the data; right axis: Hz, fitted
   let lo = Infinity, hi = -Infinity, flo = Infinity, fhi = -Infinity;
@@ -255,7 +255,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
 
   const onMove = e => setHover(idxFromPointer(e.clientX, e.currentTarget, m, innerW, lastIdx));
   const hp = hover != null && nInv ? hover : null;
-  const xticks = xTicksFor(nowMin, mobile);
+  const xticks = xTicksFor(mobile);
 
   const tooltip = () => {
     if (hp == null) return null;
@@ -455,7 +455,7 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
       });
     });
     const { lo, hi, ticks: yticks } = niceScale(dmin, dmax, 8);
-    const x = i => m.l + (i / lastIdx) * innerW;
+    const x = i => m.l + (i / DAY_LAST) * innerW;
     const y = v => m.t + innerH - ((v - lo) / (hi - lo)) * innerH;   // power → left axis (kW)
     const ysoc = s => m.t + innerH - (s / 100) * innerH;            // SOC → right axis (independent, 0–100%)
 
@@ -499,9 +499,17 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
       });
     }
 
+    // Runs of 30 min or more with no reading get a striped band, from the last reading
+    // before to the first after; shorter holes are just the break in the line.
+    const gaps = [];
+    for (let i = 0, a = -1; i <= lastIdx + 1; i++) {
+      const missing = i <= lastIdx && pts[i].pv == null;
+      if (missing && a < 0) a = i;
+      if (!missing && a >= 0) { if (i - a >= 6) gaps.push([Math.max(0, a - 1), Math.min(lastIdx, i)]); a = -1; }
+    }
+
     // axes
-    const nowMin = pts[lastIdx].t;
-    const xticks = xTicksFor(nowMin, mobile);
+    const xticks = xTicksFor(mobile);
 
     const hp = hover != null ? pts[hover] : null;
     const idxFromX = (clientX, el) => idxFromPointer(clientX, el, m, innerW, lastIdx);
@@ -521,7 +529,11 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
         onTouchMove={e => e.touches[0] && setHover(idxFromX(e.touches[0].clientX, e.currentTarget))}>
         <defs>
           <clipPath id="plotclip"><rect x={m.l} y={m.t - 8} width={innerW} height={innerH + 16} /></clipPath>
+          <pattern id="gaphatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(255,255,255,0.07)" strokeWidth="3" />
+          </pattern>
         </defs>
+        {gaps.map(([a, b]) => <rect key={'gap' + a} x={x(a)} y={m.t} width={x(b) - x(a)} height={innerH} fill="url(#gaphatch)" />)}
         {/* left axis: power (kW) */}
         {yticks.map((v, i) => (
           <g key={'gy' + i}>
@@ -596,7 +608,7 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
   function tooltip() {
     if (sel || drag || hover == null || !hasData) return null;  // range mode suppresses the point tooltip
     const p = pts[hover]; if (!p || p.pv == null) return null;
-    const li = pts.length - 1; const px = m.l + (hover / li) * innerW;
+    const px = m.l + (hover / DAY_LAST) * innerW;
     // Sit beside the crosshair rather than in a far corner — on a wide screen the old
     // fixed corner meant reading a value a whole screen-width from the point it
     // described. Flips to the other side of the cursor near the right edge, and is
