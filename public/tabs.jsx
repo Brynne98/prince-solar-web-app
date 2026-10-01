@@ -611,6 +611,7 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty }
       if (!runs.length || runs[runs.length - 1] == null) runs.push([]);
       runs[runs.length - 1].push(i);
     }
+    const gaps = gapRuns(i0, i1, i => v(i) == null);
     const P = i => x(i).toFixed(1) + ' ' + y(v(i)).toFixed(1);
     const base = y(0).toFixed(1);
     const line = runs.filter(Boolean).map(r => 'M' + r.map(P).join(' L')).join(' ');
@@ -630,6 +631,8 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty }
         onPointerMove={e => setHover(idxAt(e.clientX, e.currentTarget))}
         onPointerDown={e => setHover(idxAt(e.clientX, e.currentTarget))}
         onPointerLeave={() => setHover(null)}>
+        <defs><GapHatch /></defs>
+        {gaps.map(([a, b]) => <rect key={'gap' + a} x={x(a)} y={m.t} width={x(b) - x(a)} height={innerH} fill="url(#gaphatch)" />)}
         {ticks.map((t, k) => (
           <g key={k}>
             <line x1={m.l} x2={m.l + innerW} y1={y(t)} y2={y(t)} stroke={t === 0 ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'} />

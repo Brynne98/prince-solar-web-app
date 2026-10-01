@@ -123,6 +123,23 @@ const idxFromPointer = (clientX, el, m, innerW, lastIdx) => {
   const mx = clientX - el.getBoundingClientRect().left;
   return Math.max(0, Math.min(lastIdx, Math.round(((mx - m.l) / innerW) * DAY_LAST)));
 };
+/** Runs of 30 min or more with no reading, as [from, to] buckets: the last reading before
+ *  to the first after. They get a striped band; shorter holes are just the break in the line. */
+function gapRuns(from, to, missing) {
+  const gaps = [];
+  for (let i = from, a = -1; i <= to + 1; i++) {
+    const miss = i <= to && missing(i);
+    if (miss && a < 0) a = i;
+    if (!miss && a >= 0) { if (i - a >= 6) gaps.push([Math.max(from, a - 1), Math.min(to, i)]); a = -1; }
+  }
+  return gaps;
+}
+/** The stripes for a gap band; goes in the chart's <defs>, filled as url(#gaphatch). */
+const GapHatch = () => (
+  <pattern id="gaphatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(255,255,255,0.07)" strokeWidth="3" />
+  </pattern>
+);
 /** Tooltip left edge: beside the crosshair, flipped near the right edge, never off either end. */
 const tipLeftFor = (px, width, tipW = 190, gap = 16) =>
   Math.max(8, Math.min(width - tipW - 8, px + gap + tipW <= width - 8 ? px + gap : px - gap - tipW));
@@ -499,14 +516,7 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
       });
     }
 
-    // Runs of 30 min or more with no reading get a striped band, from the last reading
-    // before to the first after; shorter holes are just the break in the line.
-    const gaps = [];
-    for (let i = 0, a = -1; i <= lastIdx + 1; i++) {
-      const missing = i <= lastIdx && pts[i].pv == null;
-      if (missing && a < 0) a = i;
-      if (!missing && a >= 0) { if (i - a >= 6) gaps.push([Math.max(0, a - 1), Math.min(lastIdx, i)]); a = -1; }
-    }
+    const gaps = gapRuns(0, lastIdx, i => pts[i].pv == null);
 
     // axes
     const xticks = xTicksFor(mobile);
@@ -529,9 +539,7 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
         onTouchMove={e => e.touches[0] && setHover(idxFromX(e.touches[0].clientX, e.currentTarget))}>
         <defs>
           <clipPath id="plotclip"><rect x={m.l} y={m.t - 8} width={innerW} height={innerH + 16} /></clipPath>
-          <pattern id="gaphatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-            <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(255,255,255,0.07)" strokeWidth="3" />
-          </pattern>
+          <GapHatch />
         </defs>
         {gaps.map(([a, b]) => <rect key={'gap' + a} x={x(a)} y={m.t} width={x(b) - x(a)} height={innerH} fill="url(#gaphatch)" />)}
         {/* left axis: power (kW) */}
