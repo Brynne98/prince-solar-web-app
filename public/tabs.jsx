@@ -130,8 +130,6 @@ function LiveSkeleton() {
           <MiniStat loading label="Est. saved" sub={' '} />
         </div>
       </div>
-      {/* A battery is assumed until the snapshot says otherwise, as LiveTab does */}
-      <BalanceSkeleton />
       <div className="card flow-card">
         <SectionTitle right={<button className="flow-fs-btn" disabled><FsEnterIcon /><span>Fullscreen</span></button>}>POWER FLOW</SectionTitle>
         {/* the summary sentence opens the card, one line of its height */}
@@ -148,7 +146,7 @@ function LiveSkeleton() {
   );
 }
 
-function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, balance, onOpenSettings }) {
+function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOpenSettings }) {
   const a = snap.aggregate;
   const feat = snap.features || {};
   const hasBatt = feat.hasBattery !== false;
@@ -394,7 +392,6 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, bala
 
   return (
     <div className="live-grid">
-      {hasBatt && <BatteryBalanceBanner b={balance} />}
       <div className={'flow-fs-wrap' + (wall ? ' wall' : '') + (wall && idle ? ' idle' : '')} ref={flowRef}>
         {wall && (
           <div className="wall-bar">
@@ -1126,6 +1123,10 @@ function nightOf(before, after, reserve) {
 function BatterySkeleton() {
   return (
     <div className="stack solar-tab">
+      <div>
+        <SectionTitle>BATTERY HEALTH</SectionTitle>
+        <BalanceSkeleton />
+      </div>
       <div className="solar-stats">
         {['CHARGE NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'].map(l => <StatTile key={l} label={l} loading sub={NBSP} />)}
       </div>
@@ -1165,7 +1166,7 @@ function BatteryTab(props) {
   return <BatteryBody {...props} />;
 }
 
-function BatteryBody({ snap, settings, energy, onNeedEnergy, today, refreshKey, onOpenSettings }) {
+function BatteryBody({ snap, settings, energy, onNeedEnergy, today, refreshKey, balance, onOpenSettings }) {
   const a = snap.aggregate;
   const cfg = snap.config || {};
   const feat = snap.features || {};
@@ -1195,6 +1196,9 @@ function BatteryBody({ snap, settings, energy, onNeedEnergy, today, refreshKey, 
     nowSub = a.battSoc <= reserve + 1 ? <>Resting at the <b>{reserve}%</b> reserve</> : 'Resting';
   }
   const cycles = cap > 0 && tot.lifetime > 0 ? Math.round(tot.lifetime / cap) : null;
+  // SunSynk sends no state-of-health figure, so health is the bar (pack balance,
+  // temperature, hours at full) and the cycle count. Hidden when it has neither.
+  const showHealth = balance === undefined || (balance && balance.status !== 'unknown') || cycles;
 
   // ---- the day on the chart ----
   const pick = useDayPicker(earliest, plantToday);
@@ -1202,7 +1206,7 @@ function BatteryBody({ snap, settings, energy, onNeedEnergy, today, refreshKey, 
   const noReadings = dayProblem(view, day, points);
   const socs = points.filter(p => p.soc != null);
   const low = socs.length ? socs.reduce((b, p) => (p.soc < b.soc ? p : b)) : null;
-  const full = socs.find(p => p.soc >= 98); // 98, as the Live banner counts full
+  const full = socs.find(p => p.soc >= 98); // 98, as the health bar counts full
 
   // ---- overnight: the night into the day on the chart ----
   const [before, setBefore] = React.useState(null); // { date, points }
@@ -1268,13 +1272,19 @@ function BatteryBody({ snap, settings, energy, onNeedEnergy, today, refreshKey, 
 
   return (
     <div className="stack solar-tab">
+      {showHealth && (
+        <div>
+          <SectionTitle right={cycles ? <>About <b>{cycles}</b> full cycles</> : null}>BATTERY HEALTH</SectionTitle>
+          <BatteryBalanceBanner b={balance} />
+        </div>
+      )}
       <div className="solar-stats">
         <StatTile label="CHARGE NOW" value={soc} unit="%" accent={CC.batt} sub={nowSub} />
         {tile('TODAY', a.battDischgToday, <>Out of the battery. In: <b>{fmtKwh(a.battChgToday)}</b></>)}
         {tile('THIS WEEK', tot.week)}
         {tile('THIS MONTH', tot.month)}
         {tile('THIS YEAR', tot.year)}
-        {tile('LIFETIME', tot.lifetime, cycles ? <>About <b>{cycles}</b> full cycles</> : lifetimeSince(energy.lifetime, earliest, plantToday))}
+        {tile('LIFETIME', tot.lifetime, lifetimeSince(energy.lifetime, earliest, plantToday))}
       </div>
 
       <Card id="battery-day">

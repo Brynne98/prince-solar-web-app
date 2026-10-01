@@ -251,7 +251,7 @@ function App({ links }) {
   const loadToday = useCallback(async () => {
     try { setToday(await window.fetchDay()); } catch (e) { /* chart shows its own placeholder */ }
   }, []);
-  // Battery balance is asked for alongside the snapshot, not after Live has drawn, and
+  // Battery balance is asked for alongside the snapshot, not after Battery has drawn, and
   // refreshed every 5 min: pack drift, temperature and hours at full move slowly, and it is
   // the heaviest query on the screen. undefined = loading; null = failed with nothing to keep.
   // Only the latest request's reply is kept, so a slow one from an earlier plant or refresh
@@ -475,10 +475,10 @@ function App({ links }) {
       </nav>
 
       <main className="content">
-        {tab === 'live' && <window.LiveTab snap={snap} settings={settings} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey} balance={balance}
+        {tab === 'live' && <window.LiveTab snap={snap} settings={settings} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
           onOpenSettings={openSettings} />}
         {tab === 'solar' && <window.SolarTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
-        {tab === 'battery' && <window.BatteryTab snap={snap} settings={settings} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
+        {tab === 'battery' && <window.BatteryTab snap={snap} settings={settings} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} balance={balance} onOpenSettings={openSettings} />}
         {tab === 'grid' && <window.GridTab snap={snap} settings={settings} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} settings={settings} refreshKey={refreshKey} />}
         {tab === 'trends' && <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />}
