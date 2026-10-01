@@ -671,9 +671,19 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty }
   );
 }
 
+// The day with the most `field` in `rows`. Today is still running, so it counts only once
+// it has already passed every finished day: its total can only grow, so it is the record.
+function bestDay(rows, field, today) {
+  const past = rows.filter(r => r.date !== today);
+  const best = past.length ? past.reduce((b, r) => ((r[field] || 0) > (b[field] || 0) ? r : b)) : null;
+  const now = rows.find(r => r.date === today);
+  return now && (now[field] || 0) > (best ? best[field] || 0 : 0) ? now : best;
+}
+
 // One reading per day for the last 30 days (solar made, grid bought, battery gave out).
-// The biggest finished day is solid; the bar under the pointer brightens and shows its date
-// and total; clicking one opens that day in the chart above, whose day is outlined here.
+// The biggest day is solid (today too, once it has passed the rest); the bar under the
+// pointer brightens and shows its date and total; clicking one opens that day in the chart
+// above, whose day is outlined here.
 // `rgb` is `color` as "r,g,b", for the lighter fills.
 function DaysBars({ rows, field, color, rgb, word, label, today, selected, earliest, onPick }) {
   const [ref, width, height] = useChartSize([170, 220]);
@@ -684,8 +694,7 @@ function DaysBars({ rows, field, color, rgb, word, label, today, selected, earli
   const { lo, hi, ticks } = niceScale(0, Math.max(10, ...rows.map(r => r[field] || 0)), 2);
   const y = v => m.t + innerH - ((v - lo) / (hi - lo)) * innerH;
   const slot = innerW / rows.length, bw = Math.max(3, slot * 0.66);
-  const past = rows.filter(r => r.date !== today);
-  const best = past.length ? past.reduce((b, r) => ((r[field] || 0) > (b[field] || 0) ? r : b)) : null;
+  const best = bestDay(rows, field, today);
   const firstOfMonth = rows.findIndex((r, i) => i > 2 && r.date.endsWith('-01'));
   const idxAt = (clientX, el) => Math.max(0, Math.min(rows.length - 1, Math.floor((clientX - el.getBoundingClientRect().left - m.l) / slot)));
   const can = (r) => !earliest || r.date >= earliest;
@@ -712,7 +721,7 @@ function DaysBars({ rows, field, color, rgb, word, label, today, selected, earli
           const cx = m.l + slot * i + slot / 2, top = y(r[field] || 0), isToday = r.date === today;
           return (
             <rect key={r.date} x={cx - bw / 2} y={top} width={bw} height={Math.max(0, y(0) - top)} rx={Math.min(2, bw / 2)}
-              fill={isToday ? fill(0.16) : r === best ? color : hover === i ? fill(0.7) : fill(0.38)}
+              fill={r === best ? color : isToday ? fill(0.16) : hover === i ? fill(0.7) : fill(0.38)}
               stroke={r.date === selected ? 'var(--text)' : isToday ? color : 'none'} strokeWidth={r.date === selected ? 1.5 : 1}
               strokeDasharray={isToday && r.date !== selected ? '2 2' : undefined}
               style={{ transition: 'fill .12s' }} />
@@ -946,8 +955,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // ---- last 30 days ----
   const [daily, loadDaily] = useDaily(refreshKey);
   const bars = daily ? daily.filter(r => r.date) : [];
-  const pastBars = bars.filter(r => r.date !== plantToday);
-  const best = pastBars.length ? pastBars.reduce((b, r) => ((r.pv || 0) > (b.pv || 0) ? r : b)) : null;
+  const best = bestDay(bars, 'pv', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('solar-day'); };
 
   return (
@@ -1259,8 +1267,7 @@ function BatteryBody({ snap, settings, energy, onNeedEnergy, today, refreshKey, 
   // ---- last 30 days ----
   const [daily, loadDaily] = useDaily(refreshKey);
   const bars = daily ? daily.filter(r => r.date) : [];
-  const pastBars = bars.filter(r => r.date !== plantToday);
-  const most = pastBars.length ? pastBars.reduce((b, r) => ((r.dischg || 0) > (b.dischg || 0) ? r : b)) : null;
+  const most = bestDay(bars, 'dischg', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('battery-day'); };
 
   // ---- packs ----
@@ -1516,8 +1523,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // ---- last 30 days ----
   const [daily, loadDaily] = useDaily(refreshKey);
   const bars = daily ? daily.filter(r => r.date) : [];
-  const pastBars = bars.filter(r => r.date !== plantToday);
-  const most = pastBars.length ? pastBars.reduce((b, r) => ((r.imp || 0) > (b.imp || 0) ? r : b)) : null;
+  const most = bestDay(bars, 'imp', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('grid-day'); };
 
   return (
