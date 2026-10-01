@@ -576,8 +576,9 @@ function solarSplit(points) {
   return { home, batt };
 }
 
-// One day of one reading as a line: solar (cropped to first light and the last reading),
-// grid import, or the battery's charge on a fixed 0-100% scale with the reserve dashed.
+// One day of one reading as a line across the whole day: solar (which needs a reading over
+// 20 W to count as made), grid import, or the battery's charge on a fixed 0-100% scale with
+// the reserve dashed.
 // The reading under the pointer shows beside it.
 function DayLineChart({ points, field, color, label, crop, pct, reserve, empty }) {
   const [ref, width, height] = useChartSize([220, 300]);
@@ -589,19 +590,15 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty }
   const hp = hover != null && points[hover] && v(hover) != null ? hover : null;
   let body = null, tip = null;
   if (has.length > 1) {
-    const last = points.length - 1;
-    // Solar is cropped to the lit hours; anything else keeps the whole day, since grid
-    // and charge tell most of their story after dark.
-    const i0 = crop ? Math.max(0, has[0] - 6) : 0;
-    const i1 = crop ? Math.min(last, has[has.length - 1] + 6) : last;
+    const i0 = 0, i1 = points.length - 1;
     const m = { l: mobile ? 32 : 38, r: 12, t: 24, b: 30 };
     const innerW = Math.max(40, width - m.l - m.r), innerH = height - m.t - m.b;
     let peak = i0;
     for (let i = i0; i <= i1; i++) if ((v(i) || 0) > (v(peak) || 0)) peak = i;
     const { lo, hi, ticks } = pct ? { lo: 0, hi: 100, ticks: [0, 25, 50, 75, 100] } : niceScale(0, v(peak) || 0, 4);
-    // the x axis is the clock: the lit hours for solar, the whole day otherwise, so today's
-    // line stops at the last reading rather than stretching to fill the width
-    const t0 = crop ? points[i0].t : 0, t1 = crop ? points[i1].t : 1435;
+    // the x axis is the whole day, so today's line stops at the last reading rather than
+    // stretching to fill the width
+    const t0 = 0, t1 = 1435;
     const x = i => m.l + ((points[i].t - t0) / Math.max(5, t1 - t0)) * innerW;
     const y = val => m.t + innerH - ((val - lo) / (hi - lo)) * innerH;
     // runs of readings; a missing bucket breaks the line
