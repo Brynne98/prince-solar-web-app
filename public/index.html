@@ -281,14 +281,14 @@
   .overview-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
   .overview-head .section-title { margin-bottom: 0; }
   .cmp-note { font-size: 12.5px; color: var(--muted); margin: -6px 0 12px; }
-  .mini-stat { padding: 16px 18px; }
-  .mini-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; }
+  .mini-stat { padding: 20px 22px; }
+  .mini-label { font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; }
   .mini-stat { transition: border-color .15s; }
   .mini-stat:hover { border-color: var(--line-2); }
   /* baseline, not flex-end. Aligning the boxes lines up the two fonts' DESCENDER
      space, and the mono face reserves more of it — so its glyphs ride higher and the
      badge reads as sitting low. Baselines are where the glyphs actually rest. */
-  .mini-value { font-size: 20px; font-weight: 600; margin-top: 8px; letter-spacing: -0.01em;
+  .mini-value { font-size: 24px; font-weight: 600; margin-top: 10px; letter-spacing: -0.01em;
     display: flex; align-items: baseline; flex-wrap: wrap; row-gap: 2px; }
   /* Baseline alone sits the badge a touch high, box-bottom a touch low. 1px down off
      the baseline is the middle, and it is a nudge rather than a different rule. */
@@ -324,7 +324,7 @@
   /* Two lines, then clip. The old single-line ellipsis cut "Set your rate in Settings"
      to "Set your rate in Se…" on every width; a second line costs 15px and keeps
      the sentence. Grid rows stretch, so a two-line tile does not misalign its row. */
-  .mini-sub { font-size: 11.5px; color: var(--dim); margin-top: 5px; line-height: 1.35;
+  .mini-sub { font-size: 12px; color: var(--dim); margin-top: 5px; line-height: 1.35;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 
@@ -928,8 +928,10 @@
     /* power-flow: the summary sentence a step smaller on a phone */
     .flow-narrative { font-size: 15.5px; }
 
-    /* keep wide controls/SVGs from forcing the grid column wider than the screen */
-    .overview-section, .flow-card { overflow: hidden; }
+    /* keep wide controls/SVGs from forcing the grid column wider than the screen. clip, not
+       hidden: hidden makes a scroll box, and focusing a period button scrolled it sideways
+       onto the hidden info bubbles that hang past the edge */
+    .overview-section, .flow-card { overflow: clip; }
     .overview-head { flex-direction: column; align-items: stretch; gap: 10px; }
     .overview-head .segmented { display: flex; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
     .overview-head .segmented::-webkit-scrollbar { display: none; }

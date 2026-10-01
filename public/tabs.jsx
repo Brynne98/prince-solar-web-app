@@ -491,7 +491,7 @@ function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trend
       {/* a shimmer beats an em-dash: switching to Week/Month refetches, and "—" reads as
           "no data" rather than "fetching" */}
       {loading
-        ? <div className="mini-value"><window.Skeleton w="70%" h={26} /></div>
+        ? <div className="mini-value"><window.Skeleton w="70%" h={31} /></div>
         : <div className="mini-value mono" style={{ color }}><span className="mv-num">{value}</span><TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} title={trendTitle} delta={trendDelta} deltaFmt={trendDeltaFmt} /></div>}
       {bar != null && !loading && <div className="meter sm"><div className="meter-fill" style={{ width: Math.max(0, Math.min(100, bar)) + '%', background: color }} /></div>}
       {bar != null && loading && <window.Skeleton h={5} r={4} style={{ marginTop: 8 }} />}
