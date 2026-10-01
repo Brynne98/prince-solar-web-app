@@ -778,6 +778,12 @@ function dayProblem(view, day, points) {
   return null;
 }
 
+// A tab's bars, with today's taking the live total its TODAY tile shows: the bars load once
+// a visit, the tile every minute, so today's bar would otherwise freeze where it opened.
+function withLiveToday(daily, today, field, live) {
+  return (daily || []).filter(r => r.date).map(r => (r.date === today && live != null ? { ...r, [field]: live } : r));
+}
+
 // The last 30 days of plant totals, for a tab's bars: null loading, false failed.
 function useDaily(refreshKey) {
   const [daily, setDaily] = React.useState(null);
@@ -957,7 +963,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 
   // ---- last 30 days ----
   const [daily, loadDaily] = useDaily(refreshKey);
-  const bars = daily ? daily.filter(r => r.date) : [];
+  const bars = withLiveToday(daily, plantToday, 'pv', a.pvToday);
   const best = bestDay(bars, 'pv', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('solar-day'); };
 
@@ -1269,7 +1275,7 @@ function BatteryBody({ snap, settings, energy, onNeedEnergy, today, refreshKey, 
 
   // ---- last 30 days ----
   const [daily, loadDaily] = useDaily(refreshKey);
-  const bars = daily ? daily.filter(r => r.date) : [];
+  const bars = withLiveToday(daily, plantToday, 'dischg', a.battDischgToday);
   const most = bestDay(bars, 'dischg', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('battery-day'); };
 
@@ -1525,7 +1531,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 
   // ---- last 30 days ----
   const [daily, loadDaily] = useDaily(refreshKey);
-  const bars = daily ? daily.filter(r => r.date) : [];
+  const bars = withLiveToday(daily, plantToday, 'imp', a.gridFromToday);
   const most = bestDay(bars, 'imp', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('grid-day'); };
 
