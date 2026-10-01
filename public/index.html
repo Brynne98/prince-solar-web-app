@@ -200,6 +200,12 @@
   /* follows the status pill: amber when stale, red (and "Retry") when offline */
   .refresh-btn.refresh-stale, .refresh-btn.refresh-stale:hover { border-color: rgba(245,158,11,0.45); color: var(--warn); }
   .refresh-btn.refresh-offline, .refresh-btn.refresh-offline:hover { border-color: rgba(239,68,68,0.5); color: var(--bad); }
+  /* phones only (shown in the 600px block): Settings, out of the tab row */
+  .settings-btn { display: none; position: relative; align-items: center; justify-content: center; width: 40px; height: 40px; flex: none;
+    background: var(--panel); color: var(--muted); border: 1px solid var(--line-2); border-radius: 10px; transition: .15s; }
+  .settings-btn:hover:not(:disabled) { color: var(--text); border-color: var(--muted); }
+  .settings-btn.active { color: var(--text); border-color: var(--pv); background: rgba(61,220,132,0.16); }
+  .settings-btn .alert-dot { position: absolute; top: 6px; right: 6px; margin: 0; }
 
 
   /* ---------- tab bar ---------- */
@@ -892,16 +898,18 @@
     .status-pill { flex: none; height: 38px; padding: 0 12px; }
     .refresh-btn { height: 38px; padding: 0 14px; }
 
-    /* tabs scroll horizontally instead of wrapping. The right edge fades so the tabs
-       past the screen edge read as "more this way". A spacer flex item (not padding,
-       which Safari leaves out of the scroll width) sits after the last tab, so at the
-       end of the scroll the fade covers empty track rather than "Settings". */
-    .tabbar { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; scroll-padding-inline-end: 40px;
-      -webkit-mask-image: linear-gradient(90deg, var(--bg) calc(100% - 40px), transparent);
-      mask-image: linear-gradient(90deg, var(--bg) calc(100% - 40px), transparent); }
-    .tabbar::after { content: ''; flex: none; width: 40px; }
+    /* Every tab on screen at once (SOLAR-12): Settings moves to the gear beside Refresh,
+       and the other six share the row, splitting the spare width between them. The
+       scroll stays only as a fallback for very large text sizes. */
+    .tabbar { overflow-x: auto; flex-wrap: nowrap; gap: 0; scrollbar-width: none; }
     .tabbar::-webkit-scrollbar { display: none; }
-    .tab { white-space: nowrap; padding: 11px 13px; font-size: 14px; }
+    .tab { flex: 1 1 auto; white-space: nowrap; padding: 11px 4px; font-size: 14px; }
+    .tab-settings { display: none; }
+    /* Settings' six sections fit the same way, so its row needs no fade either */
+    .settings-nav { gap: 0; -webkit-mask-image: none; mask-image: none; }
+    .settings-nav::after { content: none; }
+    .settings-nav button { flex: 1 1 auto; padding: 6px 4px; text-align: center; }
+    .settings-btn { display: inline-flex; width: 38px; height: 38px; }
 
     .card { padding: 16px 15px; border-radius: 14px; min-width: 0; }
     .chart-card, .flow-card { padding: 15px; }

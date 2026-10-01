@@ -71,7 +71,22 @@ function WallStatus({ snap }) {
 }
 window.WallStatus = WallStatus;
 
-function HeaderStatus({ snap, onRefresh, busy, notice }) {
+// Phones only: seven tabs don't fit across a phone, so Settings leaves the tab row
+// there and lives beside Refresh instead (SOLAR-12). The CSS shows one or the other.
+function SettingsButton({ active, alert, onClick, disabled }) {
+  return (
+    <button type="button" className={'settings-btn' + (active ? ' active' : '')} onClick={onClick} disabled={disabled}
+            aria-label="Settings" aria-pressed={!!active}>
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+      {alert && <span className="alert-dot" aria-label="A login needs reconnecting" />}
+    </button>
+  );
+}
+
+function HeaderStatus({ snap, onRefresh, busy, notice, settingsBtn }) {
   const now = useNow(15000);
   // Just after a plant switch the pill names the plant for a moment, so the swap is
   // visibly acknowledged before the freshness word takes over again.
@@ -84,6 +99,7 @@ function HeaderStatus({ snap, onRefresh, busy, notice }) {
           <span className="status-detail mono">to {notice}</span>
         </div>
         <button className={'refresh-btn' + (busy ? ' busy' : '')} onClick={onRefresh}><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
+        {settingsBtn}
       </div>
     );
   }
@@ -112,6 +128,7 @@ function HeaderStatus({ snap, onRefresh, busy, notice }) {
       {/* The button takes the pill's colour once something is wrong, and reads Retry when
           nothing is reporting. The icon spins for as long as a fetch is in flight. */}
       <button className={'refresh-btn refresh-' + status + (busy ? ' busy' : '')} aria-busy={busy} onClick={onRefresh}><span className="refresh-ico" aria-hidden="true">↻</span>{status === 'offline' ? 'Retry' : 'Refresh'}</button>
+      {settingsBtn}
     </div>
   );
 }
@@ -180,10 +197,11 @@ function BootShell() {
         <div className="topbar-actions">
           <div className="status-pill status-idle"><span className="status-dot" /><span className="status-word">Connecting</span></div>
           <button className="refresh-btn" disabled><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
+          <SettingsButton active={tab === 'settings'} disabled />
         </div>
       </header>
       <nav className="tabbar" role="tablist" aria-busy="true">
-        {tabs.map(t => <button key={t.id} className={'tab' + (tab === t.id ? ' active' : '')} role="tab" aria-selected={tab === t.id} disabled>{t.label}</button>)}
+        {tabs.map(t => <button key={t.id} className={'tab tab-' + t.id + (tab === t.id ? ' active' : '')} role="tab" aria-selected={tab === t.id} disabled>{t.label}</button>)}
       </nav>
       <main className="content" aria-busy="true">
         {tab !== 'trends' && tab !== 'settings' && <window.TabSkeleton tab={tab} />}
@@ -398,6 +416,7 @@ function App({ links }) {
               ? <div className="status-pill status-switch" role="status"><span className="status-dot" /><span className="status-word">Switching</span><span className="status-detail mono">to {notice}</span></div>
               : <div className="status-pill status-idle"><span className="status-dot" /><span className="status-word">Connecting</span></div>}
             <button className={'refresh-btn' + (busy ? ' busy' : '')} disabled><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
+            <SettingsButton active={tab === 'settings'} onClick={() => setTab('settings')} />
           </div>
         </header>
 
@@ -405,7 +424,7 @@ function App({ links }) {
             just because the first snapshot hasn't landed. */}
         <nav className="tabbar" role="tablist" aria-busy="true">
           {TABS.map(t => (
-            <button key={t.id} className={'tab' + (tab === t.id ? ' active' : '')}
+            <button key={t.id} className={'tab tab-' + t.id + (tab === t.id ? ' active' : '')}
                     onClick={() => setTab(t.id)} role="tab" aria-selected={tab === t.id}>{t.label}</button>
           ))}
         </nav>
@@ -449,7 +468,8 @@ function App({ links }) {
           <span className="sun" />
           <BrandLine snap={snap} me={me} plantId={plantId} onPlant={switchPlant} />
         </div>
-        <HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} notice={notice} />
+        <HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} notice={notice}
+          settingsBtn={<SettingsButton active={tab === 'settings'} alert={loginDead} onClick={() => setTab('settings')} />} />
       </header>
 
       {/* The raw error is logged by window.onerror's sibling in the fetch path; on screen it
@@ -468,7 +488,7 @@ function App({ links }) {
 
       <nav className="tabbar" role="tablist">
         {TABS.map(t => (
-          <button key={t.id} className={'tab' + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)} role="tab" aria-selected={tab === t.id}>
+          <button key={t.id} className={'tab tab-' + t.id + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)} role="tab" aria-selected={tab === t.id}>
             {t.label}{t.id === 'settings' && loginDead && <span className="alert-dot" aria-label="A login needs reconnecting" />}
           </button>
         ))}
