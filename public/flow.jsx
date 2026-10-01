@@ -223,6 +223,19 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
       segW.forEach((w, i) => { if (w < MIN_SEG) segW[i] = MIN_SEG; });
       segW[widest] = Math.max(MIN_SEG, segW[widest] - owed);
     }
+    // Each share is named, with its % under the name. The first sits at the bar's left end,
+    // the last ends flush with its right end, and a middle one starts under its own segment,
+    // pushed along only as far as it needs to clear its neighbours (widths estimated: the
+    // label font is ~6.3 per letter with its tracking).
+    const labelW = s => Math.max(s.label.length * 6.3, String(s.pct).length * 5.4 + 6);
+    const splitLabelX = split.map((s, i) => {
+      if (i === 0) return -52;
+      if (i === split.length - 1) return -52 + splitBar - labelW(s);
+      const segX = -52 + segW.slice(0, i).reduce((a, w) => a + w + 2, 0);
+      const minX = -52 + labelW(split[0]) + 8;
+      const maxX = -52 + splitBar - labelW(split[split.length - 1]) - 8 - labelW(s);
+      return Math.min(maxX, Math.max(minX, segX));
+    });
 
     return (
       <svg viewBox={`48 20 884 ${H - 20}`} className="flow-svg" preserveAspectRatio="xMidYMid meet">
@@ -256,10 +269,16 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
             sx += w + 2;
             return el;
           })}
-          <text x={-52} y={40} className="flow-sub">
-            {/* three sources: the colours already match the bar, so just the shares */}
-            {split.map((s, j) => <tspan key={s.label} dx={j ? 8 : 0} fill={s.color}>{split.length > 2 ? '' : s.label + ' '}{s.pct}%</tspan>)}
-          </text>
+          {split.map((s, i) => {
+            const end = i > 0 && i === split.length - 1;
+            const x = end ? -52 + splitBar : splitLabelX[i];
+            return (
+              <g key={s.label}>
+                <text x={x} y={37} textAnchor={end ? 'end' : 'start'} className="flow-kv-k">{s.label.toUpperCase()}</text>
+                <text x={x} y={49} textAnchor={end ? 'end' : 'start'} className="flow-sub" style={{ fill: s.color }}>{s.pct}%</text>
+              </g>
+            );
+          })}
         </g>
         {left.map(sideNode)}
         <text x={srcMid} y={32} textAnchor="middle" className="flow-col-title">SOURCES</text>
