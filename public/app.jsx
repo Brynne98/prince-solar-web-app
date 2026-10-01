@@ -438,6 +438,10 @@ function App({ links }) {
     );
   }
 
+  const loginDead = links.accounts.some(a => a.status === 'needs_relink');
+  const plantLogins = links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(plantId)));
+  const plantCutOff = plantLogins.length > 0 && !plantLogins.some(a => a.status === 'active') && !!snap && plantStatus(snap, Date.now()).status === 'offline';
+
   return (
     <div className="app">
       <header className="topbar">
@@ -452,8 +456,10 @@ function App({ links }) {
           was a Postgres or JWT string a homeowner cannot act on. */}
       {err && <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(248,113,113,0.35)', color: 'var(--load)', fontSize: 13 }} title={String(err)}>⚠ Couldn't refresh; showing the last good reading.</div>}
 
-      {/* A dead login stops its plants' readings; Settings reconnects each login on its own. */}
-      {tab !== 'settings' && links.accounts.some(a => a.status === 'needs_relink') && (
+      {/* The banner is for the plant on screen: none of its logins work and its readings
+          have stopped. A plant still read through someone else's copy of the login stays
+          quiet; any dead login still marks Settings → Logins with a dot. */}
+      {tab !== 'settings' && plantCutOff && (
         <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(248,113,113,0.35)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <span style={{ flex: '1 1 200px' }}>⚠ SunSynk login stopped working. Readings paused.</span>
           <button type="button" className="save-btn" onClick={() => openSettings('connection')}>Reconnect</button>
@@ -463,7 +469,7 @@ function App({ links }) {
       <nav className="tabbar" role="tablist">
         {TABS.map(t => (
           <button key={t.id} className={'tab' + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)} role="tab" aria-selected={tab === t.id}>
-            {t.label}
+            {t.label}{t.id === 'settings' && loginDead && <span className="alert-dot" aria-label="A login needs reconnecting" />}
           </button>
         ))}
       </nav>
@@ -477,7 +483,7 @@ function App({ links }) {
         {tab === 'inverters' && <window.InvertersTab snap={snap} settings={settings} refreshKey={refreshKey} />}
         {tab === 'trends' && <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />}
         {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
-          flash={flashSection} onFlashed={() => setFlashSection(null)} />}
+          flash={flashSection} onFlashed={() => setFlashSection(null)} loginDead={loginDead} />}
       </main>
 
     </div>

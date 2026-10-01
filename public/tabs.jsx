@@ -2188,7 +2188,7 @@ function AccountSection() {
   );
 }
 
-function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfigSaved, flash, onFlashed }) {
+function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfigSaved, flash, onFlashed, loginDead }) {
   const { useState, useEffect } = React;
   const set = (patch) => setSettings(s => ({ ...s, ...patch }));
   // One section at a time. ?s= in the URL wins on load, then the last one opened,
@@ -2209,7 +2209,7 @@ function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfig
     <div className="settings">
       <nav className="settings-nav" role="tablist" aria-label="Settings sections">
         {SETTINGS_SECTIONS.map(([id, label]) => (
-          <button key={id} type="button" role="tab" aria-selected={active === id} className={active === id ? 'active' : ''} onClick={() => open(id)}>{label}</button>
+          <button key={id} type="button" role="tab" aria-selected={active === id} className={active === id ? 'active' : ''} onClick={() => open(id)}>{label}{id === 'connection' && loginDead && <span className="alert-dot" aria-label="A login needs reconnecting" />}</button>
         ))}
       </nav>
       <div className="settings-body">
