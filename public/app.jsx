@@ -231,11 +231,21 @@ function App({ links }) {
 
   // spin = false on the 60 s auto tick, so the icon only turns for something the
   // person asked for (a click, first load, a plant switch).
+  // A tablet waking from sleep often fails its first check while wifi reconnects, so an
+  // automatic check only raises the banner on the second failure in a row, and a failure
+  // is retried in 10 s (three times) rather than waiting for the next minute's tick.
+  const liveFails = useRef(0);
+  const liveRetry = useRef(null);
   const loadLive = useCallback(async (spin = true) => {
     const t0 = Date.now();
     if (spin) setBusy(b => b + 1);
-    try { setSnap(await window.fetchSnapshot()); setErr(null); }
-    catch (e) { setErr(e.message); }
+    clearTimeout(liveRetry.current);
+    try { setSnap(await window.fetchSnapshot()); setErr(null); liveFails.current = 0; }
+    catch (e) {
+      liveFails.current += 1;
+      if (spin || liveFails.current >= 2) setErr(e.message);
+      if (liveFails.current <= 3) liveRetry.current = setTimeout(() => loadLive(false), 10000);
+    }
     finally { if (spin) setTimeout(() => setBusy(b => b - 1), Math.ceil((Date.now() - t0) / 800) * 800 - (Date.now() - t0)); }
   }, []);
   const loadToday = useCallback(async () => {
@@ -345,7 +355,14 @@ function App({ links }) {
     if (!auto) return;
     const a = setInterval(() => loadLive(false), 60000);
     const b = setInterval(() => { loadToday(); refreshEnergy(); loadBalance(); }, 300000);
-    return () => { clearInterval(a); clearInterval(b); };
+    // timers sleep with a tablet's screen; catch up the moment it is back or online again
+    const wake = () => { if (document.visibilityState === 'visible') { loadLive(false); loadToday(); refreshEnergy(); loadBalance(); } };
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
+    return () => {
+      clearInterval(a); clearInterval(b); clearTimeout(liveRetry.current);
+      document.removeEventListener('visibilitychange', wake); window.removeEventListener('online', wake);
+    };
   }, [auto]);
 
   const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(); loadBalance(); setRefreshKey(k => k + 1); };
