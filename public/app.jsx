@@ -192,7 +192,7 @@ function BootShell() {
   );
 }
 
-function App() {
+function App({ links }) {
   const [settings, setSettings] = useState(loadSettings);
   // plan, preferences and plants for the signed-in user (api_me). Preferences from
   // the server win over the localStorage cache so a new device looks the same.
@@ -328,8 +328,10 @@ function App() {
     syncDaysRef.current = sync.days;
   }, [snap]);
   // A config save can change which plant is shown (a removed login); the balance follows it.
+  // A reconnected login also clears the banner, so the gate's list is read again.
   const reloadPlantConfig = () => {
     const before = window.CURRENT_PLANT;
+    links.refresh();
     return loadMe().then(() => {
       if (window.CURRENT_PLANT !== before) setBalance(undefined);
       loadLive(); loadBalance();
@@ -433,6 +435,14 @@ function App() {
           was a Postgres or JWT string a homeowner cannot act on. */}
       {err && <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(248,113,113,0.35)', color: 'var(--load)', fontSize: 13 }} title={String(err)}>⚠ Couldn't refresh; showing the last good reading.</div>}
 
+      {/* A dead login stops its plants' readings; Settings reconnects each login on its own. */}
+      {tab !== 'settings' && links.accounts.some(a => a.status === 'needs_relink') && (
+        <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(248,113,113,0.35)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ flex: '1 1 200px' }}>⚠ SunSynk login stopped working. Readings paused.</span>
+          <button type="button" className="save-btn" onClick={() => openSettings('connection')}>Reconnect</button>
+        </div>
+      )}
+
       <nav className="tabbar" role="tablist">
         {TABS.map(t => (
           <button key={t.id} className={'tab' + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)} role="tab" aria-selected={tab === t.id}>
@@ -486,5 +496,5 @@ const legalPage = new URLSearchParams(location.search).get('page');
 ReactDOM.createRoot(document.getElementById('root')).render(
   legalPage === 'terms' || legalPage === 'privacy'
     ? <window.LegalPage which={legalPage} />
-    : <window.AuthGate fallback={<BootShell />}><window.LinkGate fallback={<BootShell />}><App /></window.LinkGate></window.AuthGate>
+    : <window.AuthGate fallback={<BootShell />}><window.LinkGate fallback={<BootShell />}>{(links) => <App links={links} />}</window.LinkGate></window.AuthGate>
 );

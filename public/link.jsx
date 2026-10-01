@@ -211,8 +211,10 @@ window.LinkForm = LinkForm;
 
 /**
  * Sits inside AuthGate. Shows the dashboard when the user has at least one plant
- * they can see; otherwise the connect form. A needs_relink account with plants
- * still shows the dashboard, with a banner (rendered by the app shell).
+ * they can see; otherwise the connect form. A login that needs reconnecting never
+ * hides the dashboard, even when every login has died: the stored readings are
+ * still worth seeing, and the app shell shows a banner leading to Settings, where
+ * each login reconnects on its own.
  */
 window.LinkGate = function LinkGate({ children, fallback = null }) {
   const [checking, setChecking] = React.useState(false);
@@ -224,7 +226,7 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
   const active = accounts.some(a => a.status === 'active');
   const needsRelink = accounts.some(a => a.status === 'needs_relink');
 
-  if (!plants.length || (!active && needsRelink)) {
+  if (!plants.length) {
     // A read that failed says nothing about the logins, so it must not ask for one: a
     // household with plants would land on Connect, and a login that just connected would
     // be asked for again.
