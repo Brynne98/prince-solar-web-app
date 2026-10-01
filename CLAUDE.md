@@ -12,6 +12,8 @@
   in the browser.
 - **Backend host:** Supabase project `pmakzojwhouamawgszrc` (see `public/config.js`).
   The Supabase CLI login stored on this machine reaches it directly.
+- **Issues:** Linear, workspace `brynne98`, team Brynne (`BP`), project
+  **Prince Solar**.
 
 ## Releasing
 
