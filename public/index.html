@@ -113,7 +113,8 @@
     .frame { height: 100dvh; }
     .frame-body { overflow-y: auto; overscroll-behavior: none; }
   }
-  .content { flex: 1; display: flex; flex-direction: column; min-height: 0; width: 100%; max-width: 1360px; padding: 24px 28px 40px; }
+  /* flex: 1 0 auto: shrinking to the scroll box would push the bottom padding under the last card (SOLAR-25) */
+  .content { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; max-width: 1360px; padding: 14px 28px 40px; }
   /* > * so a tab whose root is a grid/stack still behaves as it did before */
   .content > * { flex: none; }
   .ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -252,7 +253,7 @@
     .acct-head .avatar { width: 32px; height: 32px; }
     .acct-head .acct-btn.needs::after { left: auto; right: 1px; top: 1px; box-shadow: 0 0 0 2px var(--bg); }
     .acct-head .acct-menu { left: auto; right: 0; bottom: auto; top: calc(100% + 6px); width: 260px; max-width: calc(100vw - 20px); }
-    .content { padding: 16px 12px calc(84px + env(safe-area-inset-bottom, 0px)); }
+    .content { padding: 10px 12px calc(84px + env(safe-area-inset-bottom, 0px)); }
 
     .phonebar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: #0d1117; border-top: 1px solid var(--line);
       padding: 0 6px env(safe-area-inset-bottom, 0px); }
