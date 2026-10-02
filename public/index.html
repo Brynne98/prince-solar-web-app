@@ -427,7 +427,7 @@
   /* slide a whole number of dash-periods so the loop is seamless: 195 = 15 (desktop "2 13") × 13 (mobile "2 11") */
   @keyframes flow { to { stroke-dashoffset: -195; } }
   /* the moving dashes are the one piece of continuous motion on the page */
-  @media (prefers-reduced-motion: reduce) { .flow-svg *, .mflow-links *, .mflow-down * { animation: none !important; } }
+  @media (prefers-reduced-motion: reduce) { .flow-svg *, .mflow-links * { animation: none !important; } }
   .flow-node-label { font: 600 12px var(--display); letter-spacing: 0.12em; fill: var(--muted); }
   .flow-node-val { font: 700 24px var(--mono); }
   .flow-node-unit { font-size: 12px; fill: var(--muted); }
@@ -446,7 +446,7 @@
 
   /* ---------- mobile power-flow (vertical, card-style nodes) ---------- */
   .mflow { display: flex; flex-direction: column; }
-  /* on a tablet the stacked layout keeps a phone-ish width instead of stretching Home across the card */
+  /* on a tablet the stacked layout keeps a phone-ish width instead of stretching the tiles across the card */
   @media (min-width: 601px) { .mflow { width: 100%; max-width: 620px; margin: 0 auto; } }
   .mflow-sources { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
   .mtile { background: rgba(255,255,255,0.015); border: 1px solid var(--line); border-radius: 12px; padding: 13px 12px; min-width: 0; transition: border-color .2s; }
@@ -474,18 +474,10 @@
   .mflow-inv { display: flex; flex-direction: column; align-items: center; }
   .mflow-inv svg { display: block; }
   .mflow-inv-label { font: 700 12px var(--display); letter-spacing: 0.14em; color: var(--text); margin-top: 8px; }
-  .mflow-down { display: block; width: 12px; height: 56px; margin: 0 auto; overflow: visible; }
-  .mflow-home { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 14px; background: rgba(255,255,255,0.015); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; transition: border-color .2s; }
-  /* where the home's power is coming from: one segment per source, full width under Home */
-  .mflow-split { flex: 1 0 100%; display: flex; gap: 2px; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,0.08); }
+  /* where the home's power is coming from: one segment per source, across the Home tile */
+  .mflow-split { display: flex; gap: 2px; height: 5px; margin-top: 10px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,0.08); }
   .mflow-split i { display: block; height: 100%; min-width: 6px; }   /* a 1% share still reads as a segment */
-  .mflow-split-words { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: -6px; font-size: 12px; font-weight: 600; }
-  .mflow-home svg { flex: none; }
-  .mflow-home-text { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-  .mflow-home-label { font-size: 11.5px; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; }
-  .mflow-home-val { font-family: var(--mono); font-weight: 700; font-size: 24px; line-height: 1; }
-  .mflow-home-val .u { font-size: 12px; color: var(--muted); margin-left: 2px; font-weight: 600; }
-  .mflow-home-today { margin-left: auto; margin-top: 0; padding-left: 10px; align-items: flex-end; }
+  .mflow-split-words { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 6px; font-size: 12px; font-weight: 600; }
 
   /* ---------- trend arrows on overview cards ---------- */
   .trend-badge { font-family: var(--display); font-size: 12px; font-weight: 600; margin-left: 9px; letter-spacing: 0; white-space: nowrap; }

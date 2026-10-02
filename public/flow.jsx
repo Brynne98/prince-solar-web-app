@@ -308,10 +308,14 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   }
 
   // ---------------- MOBILE (vertical, card-style HTML nodes) ----------------
+  // Like desktop (SOLAR-20): Solar and Battery on top, Home and Grid below with Grid on the
+  // right, the inverter between the two rows.
   function renderMobile() {
-    const homeActive = home.w > 5;
-    // tile x-centres as %: the tiles share the row equally, however many sources the plant has
-    const cols = left.map((_, i) => ((i + 0.5) / left.length) * 100);
+    const top = left.filter(n => n.key !== 'grid');
+    const grid = left.find(n => n.key === 'grid');
+    const bottom = [{ ...home, key: 'home', icon: 'home', split: true }, grid].filter(Boolean);
+    // tile x-centres as %: the tiles share their row equally
+    const cols = row => row.map((_, i) => ((i + 0.5) / row.length) * 100);
     const miniIcon = (type, color, soc, off) => (
       <svg width="17" height="17" viewBox="-11 -11 22 22">{icon(type, 0, 0, color, !off, soc, off)}</svg>
     );
@@ -340,27 +344,42 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
             </div>
           )}
           {n.known && <div className={'mtile-grid' + (n.off ? ' off' : '')}><i />{n.off ? 'Grid off' : 'Grid on'}</div>}
+          {n.split && split.length > 0 && <>
+            <div className="mflow-split">
+              {split.map(s => <i key={s.label} style={{ flexGrow: s.w, background: s.color }} />)}
+            </div>
+            <div className="mflow-split-words">
+              {split.map(s => <span key={s.label} style={{ color: s.color }}>{s.label} {s.pct}%</span>)}
+            </div>
+          </>}
         </div>
       );
     };
 
-    // Like desktop: each line starts a gap below its tile and stops a gap short of the
-    // inverter, spread out rather than merging into one point.
-    const linkStrip = (
-      <svg className="mflow-links" viewBox="0 0 100 72" preserveAspectRatio="none">
-        {left.map((n, i) => {
-          const sx = cols[i];
-          const ex = 50 + (sx - 50) * 0.2;
-          return flowLine(`M ${sx} 12 C ${sx} 40, ${ex} 32, ${ex} 60`, n.color, n.w, n.key, n.reverse, true, n.off);
-        })}
-      </svg>
+    // Like desktop: each line starts a gap from its tile and stops a gap short of the
+    // inverter, spread out rather than merging into one point. Lines are drawn tile →
+    // inverter; Home's runs the other way, out of the inverter.
+    const linkStrip = (row, below) => {
+      const xs = cols(row);
+      return (
+        <svg className="mflow-links" viewBox="0 0 100 72" preserveAspectRatio="none">
+          {row.map((n, i) => {
+            const sx = xs[i];
+            const ex = 50 + (sx - 50) * 0.2;
+            const [ty, iy, tc, ic] = below ? [60, 12, 32, 40] : [12, 60, 40, 32];
+            return flowLine(`M ${sx} ${ty} C ${sx} ${tc}, ${ex} ${ic}, ${ex} ${iy}`, n.color, n.w, n.key, n.key === 'home' ? !n.reverse : n.reverse, true, n.off);
+          })}
+        </svg>
+      );
+    };
+    const tiles = row => (
+      <div className="mflow-sources" style={{ gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))` }}>{row.map(mTile)}</div>
     );
 
     return (
       <div className="mflow">
-        <div className="mflow-sources" style={{ gridTemplateColumns: `repeat(${left.length}, minmax(0, 1fr))` }}>{left.map(mTile)}</div>
-
-        {linkStrip}
+        {tiles(top)}
+        {linkStrip(top, false)}
 
         <div className="mflow-inv">
           <svg width="84" height="84" viewBox="-42 -42 84 84">
@@ -375,25 +394,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
           <div className="mflow-inv-label">INVERTER{inverters > 1 ? 'S' : ''}</div>
         </div>
 
-        <svg className="mflow-down" viewBox="0 0 10 100" preserveAspectRatio="none">
-          {flowLine('M 5 21 L 5 79', home.color, home.w, 'home', false, true)}
-        </svg>
-
-        <div className="mflow-home"
-          style={{ borderColor: flowAlpha(home.color, 0.6), background: homeActive ? flowAlpha(home.color, 0.07) : undefined }}>
-          <svg width="22" height="22" viewBox="-12 -12 24 24">{icon('home', 0, 0, home.color, homeActive)}</svg>
-          <div className="mflow-home-text">
-            <span className="mflow-home-label">HOME</span>
-            <span className="mflow-home-val" style={{ color: home.color }}>{valKW(home.w)}<span className="u">kW</span></span>
-          </div>
-          {home.row && <div className="mflow-home-today mtile-kv"><span>{home.row.k}</span><b>{home.row.v}</b></div>}
-          <div className="mflow-split">
-            {split.map(s => <i key={s.label} style={{ flexGrow: s.w, background: s.color }} />)}
-          </div>
-          <div className="mflow-split-words">
-            {split.map(s => <span key={s.label} style={{ color: s.color }}>{s.label} {s.pct}%</span>)}
-          </div>
-        </div>
+        {linkStrip(bottom, true)}
+        {tiles(bottom)}
       </div>
     );
   }
