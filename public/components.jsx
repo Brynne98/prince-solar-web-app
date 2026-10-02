@@ -260,8 +260,8 @@ function InfoDot({ text }) {
     <span className="info-dot" tabIndex={0} aria-label="More about this" aria-describedby={id}>
       <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
         <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.3" />
-        <circle cx="8" cy="4.7" r="1" fill="currentColor" />
-        <rect x="7.25" y="6.9" width="1.5" height="5" rx="0.75" fill="currentColor" />
+        <path d="M6.1 6.3a1.95 1.95 0 1 1 2.8 1.75c-.55.3-.9.65-.9 1.25v.35" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <circle cx="8" cy="11.7" r="0.85" fill="currentColor" />
       </svg>
       <span id={id} className="info-bubble" role="tooltip">{text}</span>
     </span>);

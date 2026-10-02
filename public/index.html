@@ -272,9 +272,9 @@
   /* the 28px Fullscreen button made the row taller and centring pushed the title down;
      pin both to the top so the title sits as far from the top edge as from the left */
   .flow-card .section-title { align-items: flex-start; }
-  /* loading stand-in for .flow-wrap: the summary line (app.jsx), then the diagram at the
-     desktop viewBox's proportions; the stacked layout (flow.jsx, ≤900px) is about 490px */
-  .flow-skel { aspect-ratio: 884 / 378; }
+  /* loading stand-in for .flow-wrap: the summary line (app.jsx), then the diagram, which
+     the wide layout draws 348px tall at every width; the stacked one (flow.jsx, ≤900px) is about 495px */
+  .flow-skel { height: 348px !important; }
   /* a chart's plot area before it can be drawn, at the heights useChartSize picks */
   .chart-skel { height: 300px !important; }
   @media (max-width: 620px) { .chart-skel { height: 220px !important; } }
@@ -283,7 +283,7 @@
   @media (max-width: 620px) { .bars-skel { height: 192px !important; } }
   /* a tile's second line held open at two lines where the real one wraps (SolarSkeleton) */
   @media (max-width: 600px) { .sub-hold-2 { display: block; height: 34px; } }
-  @media (max-width: 900px) { .flow-skel { aspect-ratio: auto; height: 490px !important; } }
+  @media (max-width: 900px) { .flow-skel { height: 495px !important; } }
   /* legend to plot gets the same gap as date bar to legend */
   .hv-root .legend-row { margin-bottom: 12px; }
   .grow { flex: 1; } .stack { display: flex; flex-direction: column; gap: 20px; }
@@ -428,17 +428,18 @@
   @keyframes flow { to { stroke-dashoffset: -195; } }
   /* the moving dashes are the one piece of continuous motion on the page */
   @media (prefers-reduced-motion: reduce) { .flow-svg *, .mflow-links *, .mflow-down * { animation: none !important; } }
-  .flow-node-label { font: 600 11.5px var(--display); letter-spacing: 0.12em; fill: var(--muted); }
-  .flow-node-val { font: 700 21px var(--mono); }
+  .flow-node-label { font: 600 12px var(--display); letter-spacing: 0.12em; fill: var(--muted); }
+  .flow-node-val { font: 700 24px var(--mono); }
   .flow-node-unit { font-size: 12px; fill: var(--muted); }
-  .flow-col-title { font: 600 10.5px var(--display); letter-spacing: 0.2em; fill: var(--dim); }
   .flow-node-extra { font: 600 11px var(--mono); fill: var(--batt); }
   .flow-inv-label { font: 700 11px var(--display); letter-spacing: 0.14em; fill: var(--text); }
   .flow-sub { font: 500 10px var(--mono); fill: var(--muted); }
   /* a card's detail figure: small uppercase label, then the value */
   .flow-kv-k { font: 600 9.5px var(--display); letter-spacing: 0.1em; fill: var(--dim); }
   .flow-kv-v { font: 600 12px var(--mono); fill: var(--text); }
-  .flow-pct { font: 700 13px var(--mono); }
+  .flow-pct { font: 700 12px var(--mono); }
+  /* the grid card's foot: mains there or gone, beside its dot */
+  .flow-grid-state { font: 500 12.5px var(--display); fill: var(--muted); }
   /* the summary sentence opens the card, above the diagram */
   .flow-narrative { font-size: 17px; line-height: 1.35; color: var(--text); text-wrap: pretty; margin-bottom: 14px; }
   .flow-narrative b { font-weight: 600; }
@@ -465,6 +466,10 @@
   .mtile-charge b { font: 700 16px var(--mono); white-space: nowrap; }
   .mtile-strip { flex: 1; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
   .mtile-strip i { display: block; height: 100%; border-radius: 3px; }
+  /* the grid tile's foot: a green dot while mains is there, a hollow grey one once it has gone */
+  .mtile-grid { display: flex; align-items: center; gap: 7px; margin-top: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .mtile-grid i { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ok); }
+  .mtile-grid.off i { box-sizing: border-box; background: none; border: 1.5px solid var(--dim); }
   .mflow-links { display: block; width: 100%; height: 72px; overflow: visible; }
   .mflow-inv { display: flex; flex-direction: column; align-items: center; }
   .mflow-inv svg { display: block; }

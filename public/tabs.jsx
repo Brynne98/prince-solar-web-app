@@ -125,7 +125,7 @@ function LiveSkeleton() {
         <div className="today-strip">
           <MiniStat loading label="Generated" />
           <MiniStat loading label="Home" />
-          <MiniStat loading label="Self-sufficiency" bar={0} />
+          <MiniStat loading label="Independence" bar={0} />
           <MiniStat loading label="Imported" sub={' '} />
           <MiniStat loading label="Est. saved" sub={' '} />
         </div>
@@ -183,11 +183,12 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
   let battEta = null, battInfo = null;
   if (!hasBatt) { /* nothing to estimate */ }
   else if (!cap) { battInfo = 'Set pack size'; } // a link on the flow's battery node
-  else if (a.battState === 'discharging' && a.battPower > 50) {
+  // Under 200 W the battery is only trickling and a time would read in days, so it says Idle.
+  else if (a.battState === 'discharging' && a.battPower >= 200) {
     const hrs = availKwh / (a.battPower / 1000);
     battEta = <span className="batt-eta"><span className="bel">≈ <b>{fmtDur(hrs)}</b> until {RESERVE}% reserve</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
     battInfo = `${fmtDur(hrs)} to empty`;
-  } else if (a.battState === 'charging' && a.battPower > 50) {
+  } else if (a.battState === 'charging' && a.battPower >= 200) {
     const hrs = headroomKwh / (a.battPower / 1000);
     battEta = <span className="batt-eta"><span className="bel">≈ <b>{fmtDur(hrs)}</b> to full</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
     battInfo = `${fmtDur(hrs)} to full`;
@@ -408,7 +409,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
               <FsEnterIcon /><span>Fullscreen</span>
             </button>
           }>POWER FLOW</SectionTitle>}
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={{ ...feat, sells: rateExp > 0 }} />
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={{ ...feat, sells: rateExp > 0 }} wall={wall} />
         </Card>
       </div>
 
@@ -430,7 +431,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
             info="Total solar energy your panels produced over the selected period." />
           <MiniStat loading={pending} label="Home" value={window.fmtEnergySmart(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
             info="Total energy your home used over the selected period, summed across all inverters." />
-          <MiniStat loading={pending} label="Self-sufficiency" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
+          <MiniStat loading={pending} label="Independence" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
             info="Share of your home’s energy that came from your own solar + battery rather than the grid. 100% = fully off-grid for the period." />
           {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergySmart(pExp)} color={CC.grid}
             info={'Energy sent to the grid over the selected period' + (rateExp > 0 ? ', paid at your feed-in rate.' : '.')} />}
