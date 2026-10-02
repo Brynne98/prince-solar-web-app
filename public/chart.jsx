@@ -90,21 +90,45 @@ function useDayPicker(earliest, today) {
   };
 }
 
+// "Fri 2 Oct", and the year too when it is not this year: the phone's face for the date.
+function dayFace(s, todayStr) {
+  const [y, m, d] = s.split('-').map(Number);
+  const opts = { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' };
+  if (y !== Number(todayStr.slice(0, 4))) opts.year = 'numeric';
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-GB', opts).replace(',', '');
+}
+
+// On a phone (SOLAR-27) ‹ and › sit at the card's two ends and the date fills the middle,
+// reading "Fri 2 Oct"; the native input lies invisible over it so a tap still opens the
+// phone's picker, and Today sits inside the box. Desktop shows the plain input as before.
 function DateBar({ pick, earliest, locked, children }) {
   const { date, setDate, todayStr, isToday } = pick;
   // locked: the app is still loading, so the picker shows today and goes nowhere
   const canPrev = pick.canPrev && !locked, canNext = pick.canNext && !locked;
+  const input = React.useRef(null);
+  // a tap anywhere in the box, not just on the words, opens the picker where the browser allows
+  const openPicker = e => { if (!locked && e.target === e.currentTarget) try { input.current.showPicker(); } catch (err) {} };
   return (
     <div className="hv-datebar">
       <button className="hv-daynav" disabled={!canPrev} aria-label="Previous day"
         onClick={() => canPrev && setDate(shiftDate(date, -1))}>‹</button>
-      <input className="hv-dateinput" type="date" value={date} disabled={locked}
-        min={earliest || undefined} max={todayStr}
-        onChange={e => e.target.value && setDate(e.target.value)} />
+      <div className="hv-datebox" onClick={openPicker}>
+        <label className="hv-datepick">
+          <svg className="hv-cal" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+            <rect x="1.75" y="2.75" width="12.5" height="11.5" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M1.75 6.5h12.5M5 1.5v2.5M11 1.5v2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          <span className="hv-dateface">{dayFace(date, todayStr)}</span>
+          <input ref={input} className="hv-dateinput" type="date" value={date} disabled={locked}
+            min={earliest || undefined} max={todayStr} aria-label="Day"
+            onChange={e => e.target.value && setDate(e.target.value)} />
+        </label>
+        {!isToday && <button className="hv-today hv-today-in" onClick={() => setDate(todayStr)}>Today</button>}
+      </div>
       <button className="hv-daynav" disabled={!canNext} aria-label="Next day"
         onClick={() => canNext && setDate(shiftDate(date, 1))}>›</button>
       {children}
-      {!isToday && <button className="hv-today" onClick={() => setDate(todayStr)}>Today</button>}
+      {!isToday && <button className="hv-today hv-today-out" onClick={() => setDate(todayStr)}>Today</button>}
     </div>
   );
 }

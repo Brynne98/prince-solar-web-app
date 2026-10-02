@@ -563,6 +563,9 @@
   .hv-dateinput { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
     font-family: var(--mono); font-size: 12.5px; padding: 6px 10px; color-scheme: dark; cursor: pointer; }
   .hv-dateinput:hover { border-color: var(--line-2); }
+  /* desktop: the box is just a wrapper round the plain input; the phone's face and inner Today stay hidden */
+  .hv-datebox, .hv-datepick { display: contents; }
+  .hv-cal, .hv-dateface, .hv-today-in { display: none; }
   .hv-approx { font-size: 11px; color: var(--warn); border: 1px solid var(--line); border-radius: 7px; padding: 1px 7px; margin-left: 2px; cursor: help; white-space: nowrap; }
   .hv-gap { font-size: 11px; color: var(--warn); border: 1px solid var(--line); border-radius: 7px;
     padding: 1px 7px; margin-left: 2px; cursor: help; white-space: nowrap; font-family: var(--mono); }
@@ -940,6 +943,18 @@
     /* thumb-sized targets on phones (36px inside the segmented track), desktop unchanged */
     .hv-daynav { width: 40px; height: 40px; }
     .hv-today, .hv-dateinput { min-height: 40px; }
+    /* SOLAR-27: arrows at the two ends, the date centred between them as "Fri 2 Oct" */
+    .hv-datebox { display: flex; flex: 1; min-width: 0; min-height: 40px; align-items: center; justify-content: center; gap: 10px;
+      background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; cursor: pointer; }
+    .hv-datepick { display: inline-flex; position: relative; align-items: center; gap: 8px; padding: 6px 4px; cursor: pointer; }
+    .hv-cal { display: block; flex: none; color: var(--muted); }
+    .hv-dateface { display: inline; font: 600 14px var(--display); letter-spacing: 0.01em; color: var(--text); white-space: nowrap; }
+    /* the real input, invisible, over the words: a tap opens the phone's own picker */
+    .hv-datepick .hv-dateinput { position: absolute; inset: 0; width: 100%; min-height: 0; opacity: 0; padding: 0; border: 0; }
+    .hv-today-out { display: none; }
+    .hv-today-in { display: inline-flex; align-items: center; min-height: 0; margin-left: 0; background: none; border: 0; border-left: 1px solid var(--line-2);
+      border-radius: 0; padding: 2px 0 2px 10px; color: var(--soc); font: 500 12px var(--display);
+      text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
     .legend-chip { min-height: 40px; }
     .seg-btn { min-height: 36px; }
     .ghost-btn, .danger-btn, .flow-fs-btn { min-height: 40px; }
