@@ -206,7 +206,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
       const active = n.w > 5, tx = x + PL;
       return (
         <g key={n.key}>
-          <rect x={x} y={y} width={BW} height={BH} rx={15} fill={active ? n.color : 'none'} fillOpacity={active ? 0.07 : 0}
+          <rect x={x} y={y} width={BW} height={BH} rx={16} fill={active ? n.color : 'none'} fillOpacity={active ? 0.07 : 0}
             stroke={n.color} strokeOpacity={active ? 0.6 : 0.22} strokeWidth="1.3" strokeDasharray={n.off ? '5 4' : undefined} />
           {icon(n.icon, x + PL / 2, y + Y.iconC, n.color, active, n.soc, n.off)}
           <text x={tx} y={y + Y.label} className="flow-node-label">{n.label.toUpperCase()}</text>
@@ -254,8 +254,9 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
     // Each share is named, with its % under the name. The first sits at the bar's left end,
     // the last ends flush with its right end, and a middle one starts under its own segment,
     // pushed along only as far as it needs to clear its neighbours (widths estimated: the
-    // label font is ~6.3 per letter with its tracking, the % ~7.2 per digit).
-    const labelW = s => Math.max(s.label.length * 6.3, String(s.pct).length * 7.2 + 8);
+    // label font is ~7.6 per letter with its tracking, the % ~7.6 per digit; measured at
+    // the 11px / 12.5px the overview cards use, SOLAR-16).
+    const labelW = s => Math.max(s.label.length * 7.6, String(s.pct).length * 7.6 + 9);
     const homeFoot = (x, fy) => {
       let sx = x;
       const lx = split.map((s, i) => {
