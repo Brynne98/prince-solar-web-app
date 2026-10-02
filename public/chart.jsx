@@ -622,7 +622,7 @@ function HistoryView({ today, refreshKey, locked }) {
     const left = tipLeftFor(px, width);
     const rows = [
       ['Solar', p.pv, C.pv, 'W'],
-      [window.battWord(p.batt) ? 'Battery, ' + window.battWord(p.batt) : 'Battery', p.batt, C.batt, 'W'], // + = powering the house
+      ['Battery', p.batt, C.batt, 'W'], // + = powering the house
       ['Grid', p.grid, C.grid, 'W'], // signed: − = exporting
       ['Home', p.load, C.load, 'W'],
       ['Charge', p.soc, C.soc, '%'],
