@@ -27,8 +27,13 @@ window.useLinkStatus = function useLinkStatus() {
     // Ten seconds, then it counts as a failed read. Raced here rather than with an abort
     // signal: supabase-js waits on the stored session before the request even starts, and
     // a stall there never reaches the signal.
-    const timedOut = new Promise(r => setTimeout(() => r({ data: null, error: { message: 'timed out' } }), 10000));
-    const read = Promise.race([window.sb.rpc('api_link_status'), timedOut]).catch(e => ({ data: null, error: e })).then(({ data, error }) => {
+    const attempt = () => {
+      const timedOut = new Promise(r => setTimeout(() => r({ data: null, error: { message: 'timed out' } }), 10000));
+      return Promise.race([window.sb.rpc('api_link_status'), timedOut]).catch(e => ({ data: null, error: e }));
+    };
+    // One quiet second try: a phone opening the app can stall or fail the first read
+    // while its network and stored session wake up, and a retry then loads (SOLAR-21).
+    const read = attempt().then(r => (r.error ? attempt() : r)).then(({ data, error }) => {
       // A failed re-read keeps the logins already shown; an empty list would send a
       // signed-in household from the dashboard back to the Connect screen.
       // `|| 'failed'`: a failure with no message must still read as one, not as "no logins".
@@ -238,6 +243,8 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
             <window.AuthBrand />
             <div className="login-title">Couldn’t check your SunSynk logins</div>
             <button type="submit" disabled={checking} aria-busy={checking}>{checking ? 'Checking…' : 'Try again'}</button>
+            {/* The real reason, so a report from a phone says which failure it was. */}
+            <div className="login-fine">Error: {error}</div>
             <div className="login-links"><window.SignOutButton className="login-link quiet" /></div>
           </form>
         </div>
