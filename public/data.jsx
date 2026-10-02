@@ -177,7 +177,9 @@ async function fetchSnapshot() {
     // What this plant has. null (not decided yet) shows everything; false hides it.
     features: {
       hasBattery: cfg.hasBattery !== false,
-      hasGrid: cfg.hasGrid !== false,
+      // Mains live right now beats the off-grid flag, which the poller only re-decides
+      // every 10 min; until then a grid switched back on would still read Off-grid (SOLAR-7).
+      hasGrid: cfg.hasGrid !== false || (api.totals || {}).gridPresent === true,
       decided: cfg.featuresSource != null && cfg.featuresSource !== 'default',
       banks: cfg.batteryBanks || 'per-inverter',
     },
