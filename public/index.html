@@ -29,11 +29,11 @@
     --line: rgba(255,255,255,0.07);
     --line-2: rgba(255,255,255,0.12);
     --text: #e7ecf2;
-    /* Both meet WCAG AA (4.5:1) on all three surfaces, worst case --dim on --panel-2
-       at 4.51:1. The previous values were 4.17:1 and 2.30:1 there — the latter below
-       even the 3:1 large-text floor, which is why small grey text read as blurry. */
-    --muted: #8b96a4;
-    --dim: #738396;
+    /* Raised a step for readability (SOLAR-14): --muted is 7.0:1 and --dim 5.2:1 at worst,
+       on --panel-2. Before that they were 5.8:1 and 4.5:1, and small grey labels still
+       read as faint on a phone. Keep --dim above 5:1 on all three surfaces. */
+    --muted: #9aa5b3;
+    --dim: #7f8da0;
     --pv: #3ddc84; --batt: #a78bfa; --grid: #facc15; --load: #f87171; --soc: #22d3ee;
     --ok: #3ddc84;
     /* status colours, distinct from the five series colours: stale/estimate amber, fault red */
@@ -215,7 +215,7 @@
     .rail { padding: 14px 8px; }
     .rail-logo { justify-content: center; padding-left: 0; }
     .rail-logo .app-name { display: none; }
-    .nav button { flex-direction: column; gap: 5px; padding: 9px 2px 8px; font-size: 11px; text-align: center; }
+    .nav button { flex-direction: column; gap: 5px; padding: 9px 2px 8px; font-size: 11.5px; text-align: center; }
     .nav button .t { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .acct-btn { justify-content: center; padding: 8px 0; }
     .acct-rail .who { display: none; }
@@ -235,6 +235,8 @@
     .status-sync { display: none; }
     .refresh { height: 36px; min-width: 36px; }
     @media (max-width: 399px) { .refresh-offline { padding: 0 10px; } .refresh .lbl { display: none; } }
+    /* the plant name needs the room more; the page's banner already says how old the reading is */
+    @media (max-width: 359px) { .status-age { display: none; } }
     .acct-head { display: block; flex: none; }
     .acct-head .acct-btn { width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 50%; }
     .acct-head .avatar { width: 32px; height: 32px; }
@@ -245,7 +247,7 @@
     .phonebar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: #0d1117; border-top: 1px solid var(--line);
       padding: 0 6px env(safe-area-inset-bottom, 0px); }
     .phonebar button { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 0 10px;
-      border: none; background: none; color: var(--muted); font-size: 11px; font-weight: 500; }
+      border: none; background: none; color: var(--muted); font-size: 11.5px; font-weight: 500; }
     .phonebar button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .phonebar button[aria-current="page"], .phonebar button.on { color: var(--text); font-weight: 600; }
     .phonebar button[aria-current="page"] .ico, .phonebar button.on .ico { stroke-width: 2.2; }
@@ -289,7 +291,7 @@
 
   /* ---------- stat tiles (the 4 the user liked) ---------- */
   .stat-tile { display: flex; flex-direction: column; gap: 0; }
-  .stat-label { font-size: 11px; letter-spacing: 0.16em; color: var(--muted); text-transform: uppercase; }
+  .stat-label { font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
   .stat-value { font-family: var(--mono); font-weight: 700; margin-top: 10px; line-height: 1; display: flex; align-items: baseline; }
   .stat-value .num { font-size: 44px; }
   .stat-value .unit { font-size: 24px; margin-left: 4px; opacity: 0.85; }
@@ -316,7 +318,7 @@
   .bb-div { width: 1px; align-self: stretch; background: var(--line); }
   .bb-stats { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
   .bb-stat { display: inline-flex; align-items: baseline; gap: 5px; cursor: help; }
-  .bb-k { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .bb-k { color: var(--dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
   .bb-stat b { color: var(--text); font-weight: 600; }
   .bb-stat.bb-hot b { color: var(--warn); }
   .chart-card { display: flex; flex-direction: column; min-width: 0; }
@@ -328,10 +330,10 @@
   .overview-section { order: -1; }
   .overview-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
   .overview-head .section-title { margin-bottom: 0; }
-  .cmp-note { font-size: 12.5px; color: var(--muted); margin: -6px 0 12px; }
+  .cmp-note { font-size: 13px; color: var(--muted); margin: -6px 0 12px; }
   .mini-stat { padding: 20px 22px; }
   /* label left, trend arrow right on the same line; a long label wraps, the arrow keeps its corner */
-  .mini-label { font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+  .mini-label { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
     display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 2px 8px; }
   .ml-text { display: flex; align-items: center; min-width: 0; line-height: 1.35; }
   .mini-label .trend-badge { margin-left: 0; top: 0; line-height: 1.35; text-transform: none; }
@@ -378,7 +380,7 @@
   /* Two lines, then clip. The old single-line ellipsis cut "Set your rate in Settings"
      to "Set your rate in Se…" on every width; a second line costs 15px and keeps
      the sentence. Grid rows stretch, so a two-line tile does not misalign its row. */
-  .mini-sub { font-size: 12px; color: var(--dim); margin-top: 5px; line-height: 1.35;
+  .mini-sub { font-size: 12.5px; color: var(--dim); margin-top: 5px; line-height: 1.35;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 
@@ -423,16 +425,16 @@
   @keyframes flow { to { stroke-dashoffset: -195; } }
   /* the moving dashes are the one piece of continuous motion on the page */
   @media (prefers-reduced-motion: reduce) { .flow-svg *, .mflow-links *, .mflow-down * { animation: none !important; } }
-  .flow-node-label { font: 600 10.5px var(--display); letter-spacing: 0.12em; fill: var(--muted); }
+  .flow-node-label { font: 600 11.5px var(--display); letter-spacing: 0.12em; fill: var(--muted); }
   .flow-node-val { font: 700 21px var(--mono); }
-  .flow-node-unit { font-size: 11px; fill: var(--muted); }
-  .flow-col-title { font: 600 10px var(--display); letter-spacing: 0.2em; fill: var(--dim); }
+  .flow-node-unit { font-size: 12px; fill: var(--muted); }
+  .flow-col-title { font: 600 10.5px var(--display); letter-spacing: 0.2em; fill: var(--dim); }
   .flow-node-extra { font: 600 11px var(--mono); fill: var(--batt); }
   .flow-inv-label { font: 700 11px var(--display); letter-spacing: 0.14em; fill: var(--text); }
-  .flow-sub { font: 500 9px var(--mono); fill: var(--muted); }
+  .flow-sub { font: 500 10px var(--mono); fill: var(--muted); }
   /* a card's detail figure: small uppercase label, then the value */
-  .flow-kv-k { font: 600 8.5px var(--display); letter-spacing: 0.1em; fill: var(--dim); }
-  .flow-kv-v { font: 600 11px var(--mono); fill: var(--text); }
+  .flow-kv-k { font: 600 9.5px var(--display); letter-spacing: 0.1em; fill: var(--dim); }
+  .flow-kv-v { font: 600 12px var(--mono); fill: var(--text); }
   .flow-pct { font: 700 13px var(--mono); }
   /* the summary sentence opens the card, above the diagram */
   .flow-narrative { font-size: 17px; line-height: 1.35; color: var(--text); text-wrap: pretty; margin-bottom: 14px; }
@@ -446,12 +448,14 @@
   .mtile { background: rgba(255,255,255,0.015); border: 1px solid var(--line); border-radius: 12px; padding: 13px 12px; min-width: 0; transition: border-color .2s; }
   .mtile-head { display: flex; align-items: center; gap: 7px; margin-bottom: 11px; }
   .mtile-head svg { flex: none; }
-  .mtile-label { font-size: 11px; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* under 360 px a tile is ~58 px inside: the name needs the room more than the icon does */
+  @media (max-width: 359px) { .mtile-head svg { display: none; } }
+  .mtile-label { font-size: 11.5px; letter-spacing: 0.03em; color: var(--muted); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mtile-val { font-family: var(--mono); font-weight: 700; font-size: 21px; line-height: 1; white-space: nowrap; }
   .mtile-val .u { font-size: 11px; color: var(--muted); margin-left: 2px; font-weight: 600; }
   /* a tile's detail figure: small uppercase label over the value */
   .mtile-kv { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; min-width: 0; }
-  .mtile-kv span { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  .mtile-kv span { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
   .mtile-kv b { font: 600 12.5px var(--mono); color: var(--text); white-space: nowrap; }
   /* battery charge at the foot of its tile: a strip filled to the level, the % beside it */
   .mtile-charge { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
@@ -470,7 +474,7 @@
   .mflow-split-words { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: -6px; font-size: 12px; font-weight: 600; }
   .mflow-home svg { flex: none; }
   .mflow-home-text { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-  .mflow-home-label { font-size: 11px; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; }
+  .mflow-home-label { font-size: 11.5px; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; }
   .mflow-home-val { font-family: var(--mono); font-weight: 700; font-size: 24px; line-height: 1; }
   .mflow-home-val .u { font-size: 12px; color: var(--muted); margin-left: 2px; font-weight: 600; }
   .mflow-home-today { margin-left: auto; margin-top: 0; padding-left: 10px; align-items: flex-end; }
@@ -484,11 +488,11 @@
   /* ---------- trends ---------- */
   .trend-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
   .trend-stats > div { background: rgba(255,255,255,0.015); border: 1px solid var(--line); border-radius: 12px; padding: 11px 13px; }
-  .ts-l { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .ts-l { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
   .ts-v { font-size: 18px; font-weight: 600; margin-top: 5px; white-space: nowrap; }
-  .ts-sub { font-size: 11px; color: var(--dim); font-weight: 400; margin-top: 4px; }
+  .ts-sub { font-size: 12px; color: var(--dim); font-weight: 400; margin-top: 4px; }
   .trend-rec { display: flex; flex-direction: column; gap: 4px; }
-  .trend-rec-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .trend-rec-label { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
   .trend-rec-window { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; margin: 2px 0; }
   .trend-rec-detail { font-size: 13px; color: var(--text); line-height: 1.5; }
   .trend-rec-detail b { font-weight: 600; }
@@ -506,13 +510,13 @@
   .seg-row { display: flex; flex-direction: column; gap: 6px; }
   .seg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
   .seg-name { color: var(--text); font-weight: 600; font-size: 13px; }
-  .seg-range { color: var(--dim); font-weight: 400; font-size: 11.5px; }
+  .seg-range { color: var(--dim); font-weight: 400; font-size: 12px; }
   .seg-avg { color: var(--text); font-weight: 600; font-size: 13px; white-space: nowrap; }
   .seg-kwh { color: var(--dim); font-weight: 400; }
   .seg-bar { display: flex; height: 13px; border-radius: 5px; overflow: hidden; background: rgba(255,255,255,0.05); }
   .seg-seg { flex: none; }
-  .seg-from { font-size: 11px; color: var(--dim); margin-top: 4px; }
-  .seg-key { font-size: 11.5px; color: var(--dim); margin: 2px 0 6px; }
+  .seg-from { font-size: 12px; color: var(--dim); margin-top: 4px; }
+  .seg-key { font-size: 12.5px; color: var(--dim); margin: 2px 0 6px; }
   .seg-key b { color: var(--muted); font-weight: 600; }
   .trend-chart { width: 100%; min-width: 0; overflow: hidden; }
   .trend-empty { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 200px; color: var(--muted); font-size: 13px; }
@@ -550,12 +554,12 @@
   .hv-today { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
     font-size: 12px; padding: 6px 12px; cursor: pointer; transition: .15s; margin-left: auto; }
   .hv-today:hover { border-color: var(--line-2); }
-  .hv-lag { font-size: 11px; color: var(--dim); }
+  .hv-lag { font-size: 12px; color: var(--dim); }
   .chart-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
   .chart-controls-right { display: flex; align-items: center; gap: 10px; }
   .chart-area { width: 100%; min-width: 0; overflow: hidden; }
   .chart-svg { display: block; touch-action: pan-y; }
-  .ax { font: 400 10.5px var(--mono); fill: var(--muted); }
+  .ax { font: 400 11.5px var(--mono); fill: var(--muted); }
   .ax-hi { fill: var(--text); }
   .legend-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
   .legend-chip { display: inline-flex; align-items: center; gap: 7px; background: var(--panel-2); border: 1px solid var(--line);
@@ -565,7 +569,7 @@
     display: inline-block; min-width: 9.5ch; text-align: left; font-variant-numeric: tabular-nums; }
   .legend-chip.off .legend-val { color: var(--dim); border-color: var(--line); }
   .legend-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; }
-  .legend-note { font-size: 11.5px; color: var(--dim); margin-left: 4px; }
+  .legend-note { font-size: 12.5px; color: var(--dim); margin-left: 4px; }
   .legend-mode { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; }
   /* Dragging across a chart otherwise text-selects the axis labels and tooltip, so the
      plot fills with blue highlight while you're trying to read a range. Charts are
@@ -594,22 +598,22 @@
   /* lives in the SVG's empty top margin — bottom-right overlapped the last x-axis label */
   .chart-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-top: 18px;
     border-top: 1px solid var(--line); padding-top: 18px; }
-  .sum-cell { } .sum-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .sum-cell { } .sum-label { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
   .sum-value { font-size: 22px; font-weight: 600; margin-top: 6px; } .sum-sub { font-size: 11px; color: var(--dim); margin-top: 3px; }
 
   /* ---------- segmented / buttons ---------- */
   .segmented { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; }
   .seg-btn { background: none; border: none; color: var(--muted); padding: 7px 15px; border-radius: 7px; font-size: 13px; font-weight: 500; transition: .12s; }
-  .seg-sm .seg-btn { padding: 5px 11px; font-size: 12px; }
+  .seg-sm .seg-btn { padding: 5px 11px; font-size: 12.5px; }
   .seg-btn:hover { color: var(--text); } .seg-btn.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
   .ghost-btn { background: none; border: 1px solid var(--line-2); color: var(--muted); padding: 7px 14px; border-radius: 9px; font-size: 12.5px; transition: .15s; }
   .ghost-btn:hover { color: var(--text); } .ghost-btn.active { border-color: var(--pv); color: var(--pv); }
 
   /* ---------- metric / badge ---------- */
-  .metric-label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .metric-label { font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
   .metric-value { font-size: 20px; font-weight: 600; margin-top: 5px; }
   .metric-unit { font-size: 13px; color: var(--muted); margin-left: 2px; font-family: var(--mono); }
-  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em;
     text-transform: uppercase; padding: 4px 11px; border-radius: 999px; border: 1px solid; }
   .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   /* a dead SunSynk login: on the Settings tab and its Logins entry */
@@ -623,7 +627,7 @@
   .quad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
   .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .mp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; }
-  .hint-line { font-size: 12.5px; color: var(--dim); margin-top: 16px; line-height: 1.5; }
+  .hint-line { font-size: 13.5px; color: var(--dim); margin-top: 16px; line-height: 1.5; }
 
   /* solar tab, and the Battery and Grid tabs, which are built the same way */
   .solar-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
@@ -637,7 +641,7 @@
   .solar-row > :only-child { grid-column: 1 / -1; }
   #solar-day, #battery-day, #grid-day { scroll-margin-top: 16px; }
   .solar-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
-  .tip-hint { font-size: 11px; color: var(--dim); margin-top: 6px; }
+  .tip-hint { font-size: 12px; color: var(--dim); margin-top: 6px; }
   /* Where it went: one object. Each share is a column — its own segment of the bar, its
      kWh tinted in the series colour, its name under it. The bar keeps exact proportions;
      the label row below carries a min-width floor so a thin share never clips its text,
@@ -648,9 +652,9 @@
   .solar-dest .sd { flex: 0 1 auto; min-width: 84px; }
   .solar-dest .sd-v { font-size: 20px; font-weight: 600; line-height: 1; letter-spacing: -0.01em; white-space: nowrap; }
   .solar-dest .sd-v s { text-decoration: none; font-size: 11px; font-weight: 700; opacity: 0.85; margin-left: 3px; }
-  .solar-dest .sd-k { margin-top: 7px; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+  .solar-dest .sd-k { margin-top: 7px; font-size: 12px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase;
     color: var(--muted); white-space: nowrap; }
-  .solar-note { margin: 0 0 8px; font-size: 13px; color: var(--muted); max-width: 60ch; }
+  .solar-note { margin: 0 0 8px; font-size: 13.5px; color: var(--muted); max-width: 60ch; }
   .solar-verdict { font-size: 24px; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
   .solar-verdict .mono { font-weight: 700; }
   .solar-spare-note { margin: 14px 0 6px; font-size: 13.5px; color: var(--muted); max-width: 62ch; line-height: 1.5; }
@@ -666,7 +670,7 @@
   .solar-string-name { display: inline-flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
   .solar-string-kw { font-family: var(--mono); font-size: 17px; font-weight: 700; color: var(--pv); }
   .solar-string.idle .solar-string-kw { color: var(--muted); }
-  .solar-string-sub { margin-top: 7px; font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .solar-string-sub { margin-top: 7px; font-family: var(--mono); font-size: 13px; color: var(--dim); }
   .solar-best { margin-top: 10px; font-size: 13px; color: var(--muted); }
   .solar-best b { font-family: var(--mono); font-weight: 600; color: var(--text); }
 
@@ -677,7 +681,7 @@
   /* inverters */
   .inv-card { } .inv-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
   .inv-sn { font-size: 22px; font-weight: 700; font-family: var(--mono); }
-  .inv-meta { font-size: 11.5px; margin-top: 5px; }
+  .inv-meta { font-size: 12.5px; margin-top: 5px; }
   .inv-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 18px 16px; }
   .inv-warn { margin-top: 18px; font-size: 12.5px; color: var(--load); background: rgba(248,113,113,0.07);
     border: 1px solid rgba(248,113,113,0.25); border-radius: 7px; padding: 9px 12px; }
@@ -695,7 +699,7 @@
   .sec-intro { min-width: 0; }
   .sset { padding: 18px 22px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; min-width: 0; }
   .sset-title { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
-  .sset-note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+  .sset-note { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
   .sset-count { margin-left: 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 500; color: var(--dim); }
   /* the inverter's own answers, folded away under the battery */
   details.adv { margin-top: 12px; border-top: 1px solid var(--line); }
@@ -807,7 +811,7 @@
   #settings-delete .conn-row { padding-bottom: 0; }
   .conn-add-row { padding-bottom: 0; }   /* the open add form ends at the card's own padding */
   .conn-add .save-btn { display: inline-flex; align-items: center; gap: 6px; }
-  .conn-meta { font-size: 12px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
+  .conn-meta { font-size: 13px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
   .conn-status::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--grid); }
   .conn-status.ok { color: var(--ok); } .conn-status.ok::before { background: var(--ok); }
   .conn-status.warn { color: var(--warn); } .conn-status.warn::before { background: var(--warn); }
@@ -854,7 +858,7 @@
   }
   .field { margin-bottom: 16px; } .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 7px; letter-spacing: 0.04em; }
-  .field-note { font-size: 12px; color: var(--dim); margin-top: 10px; line-height: 1.55; }
+  .field-note { font-size: 13px; color: var(--dim); margin-top: 10px; line-height: 1.55; }
   .input { width: 100%; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text);
     border-radius: 9px; padding: 10px 12px; font-size: 14px; font-family: var(--mono); }
   .input:focus { outline: none; border-color: var(--grid); }
@@ -881,7 +885,7 @@
   .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid var(--line); }
   .toggle-row:first-of-type { border-top: none; }
   .toggle-text { display: flex; flex-direction: column; gap: 3px; }
-  .toggle-label { font-size: 14px; } .toggle-hint { font-size: 11.5px; color: var(--dim); }
+  .toggle-label { font-size: 14.5px; } .toggle-hint { font-size: 12.5px; color: var(--dim); }
   .switch { width: 42px; height: 24px; border-radius: 14px; background: rgba(255,255,255,0.1); border: none; position: relative; transition: .18s; flex: none; }
   .switch.on { background: var(--ok); }
   .knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: .18s; }
@@ -959,7 +963,7 @@
     .overview-head .segmented::-webkit-scrollbar { display: none; }
     .seg-btn { padding: 6px 10px; }
 
-    .hv-approx { font-size: 10px; padding: 1px 6px; }
+    .hv-approx { font-size: 11px; padding: 1px 6px; }
 
     /* battery banner on phones: status on row 1, stats forced to their own row
        below via flex-basis:100% (margin-auto alone doesn't wrap reliably) */

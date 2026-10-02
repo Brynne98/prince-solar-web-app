@@ -8,8 +8,8 @@ colors:
   hairline: "rgba(255,255,255,0.07)"
   hairline-strong: "rgba(255,255,255,0.12)"
   paper-text: "#e7ecf2"
-  muted-text: "#8b96a4"
-  dim-text: "#738396"
+  muted-text: "#9aa5b3"
+  dim-text: "#7f8da0"
   solar-green: "#3ddc84"
   battery-violet: "#a78bfa"
   grid-amber: "#facc15"
@@ -48,10 +48,10 @@ typography:
     lineHeight: 1.5
   label:
     fontFamily: "Space Grotesk, system-ui, sans-serif"
-    fontSize: "11px"
-    fontWeight: 400
+    fontSize: "12px"
+    fontWeight: 500
     lineHeight: 1.2
-    letterSpacing: "0.16em"
+    letterSpacing: "0.12em"
   small:
     fontFamily: "Space Grotesk, system-ui, sans-serif"
     fontSize: "13px"
@@ -261,7 +261,8 @@ semantic, not decorative.
   the plain hairline), the status pill, floating surfaces, and a hovered card.
 - **Paper Text** (`paper-text`): values and titles. **Muted Text** (`muted-text`): labels,
   legends, chart axes, notes, inactive tabs. **Dim Text** (`dim-text`): sub-notes,
-  meter scales, version numbers. Muted and Dim both clear WCAG AA 4.5:1 on all three surfaces.
+  meter scales, version numbers. Muted clears 7:1 and Dim 5.2:1 on all three surfaces
+  (raised for readability, SOLAR-14).
 
 ### Named Rules
 **The One Meaning Rule.** A series colour means one thing. Green is solar, violet is
@@ -300,8 +301,10 @@ browser default renders crisper.
   at 12px. Notes run the width of their card.
 - **Small** (400, 13px, line-height 1.5): sub-lines under a value, section notes,
   hints, confirmation text, save-row text.
-- **Label** (400, 11px, tracking 0.16em, uppercase): the micro-label above a stat-tile
-  value; mini-stat, metric and throughput labels loosen to 0.06em to 0.1em. Section
+- **Label** (500, 12px, tracking 0.12em, uppercase): the micro-label above a stat-tile
+  value; mini-stat, metric and throughput labels loosen to 0.06em to 0.1em. Nothing that
+  is read as text goes below 12px except chart axes (11.5px) and the flow diagram's
+  scaled SVG labels; hints and notes are 13px or more (SOLAR-14). Section
   titles are 600 at 12px with 0.16em; flow column titles 600 at 10px with 0.2em.
 
 ### Named Rules
@@ -524,7 +527,7 @@ it stands in for. The sweep stops under reduced motion.
   hiding them.
 - **Do** respect `prefers-reduced-motion`: the breathing dot, the skeleton sweep, the
   flow dashes and any new motion stop under it.
-- **Do** keep Muted and Dim text at or above 4.5:1 on Panel Raised.
+- **Do** keep Muted text at or above 7:1 and Dim at or above 5:1 on Panel Raised.
 
 ### Don't:
 - **Don't** put a shadow on a card that sits in the page flow.
