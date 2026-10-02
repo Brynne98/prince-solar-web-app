@@ -60,9 +60,9 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   const left = [
     { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun', row: today(agg.pvToday) },
     // w stays the magnitude (animation, stroke); val is the signed figure printed on the node,
-    // always + = charging; Settings → Display applies everywhere except here.
+    // + = powering the house, as everywhere else in the app.
     // The charge % sits at the foot of the card, big, beside a strip filled to the same level.
-    hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: window.battShown(agg.battOut, 'charge'), icon: 'battery', soc: agg.battSoc, reverse: charging,
+    hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: window.battShown(agg.battOut), icon: 'battery', soc: agg.battSoc, reverse: charging,
       charge: agg.battSoc, row: battRow },
     // bought from the grid today; zero on most days, and that is worth seeing too
     hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 5 ? gridExport : gridImport, icon: 'bolt', reverse: gridExport > 5, row: today(agg.gridFromToday ?? 0) },

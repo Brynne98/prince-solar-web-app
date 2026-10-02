@@ -5,7 +5,7 @@
 // `onNeedEnergy(period)` asks App to lazily fetch a period it hasn't loaded yet.
 // ============================================================================
 const { Card, StatTile, Metric, Badge, Segmented, Toggle, SectionTitle, Sparkline,
-  fmtPower, fmtPowerParts, battShown, fmtKwh, fmtRand, cleanTemp, COLORS: CC } = window;
+  fmtPower, fmtPowerParts, battShown, battWord, fmtKwh, fmtRand, cleanTemp, COLORS: CC } = window;
 
 const FsEnterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" /></svg>;
 const TrashIcon = () => <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.6 9h6.8l.6-9M6.75 7v4M9.25 7v4" /></svg>;
@@ -413,7 +413,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
       </div>
 
       <Card className="chart-card">
-        <window.HistoryView today={today} refreshKey={refreshKey} battPositive={settings.battPositive} />
+        <window.HistoryView today={today} refreshKey={refreshKey} />
       </Card>
 
       <div className="overview-section">
@@ -484,15 +484,24 @@ function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt }) {
   }
   return <span className={'trend-badge ' + (good ? 'good' : 'bad')} title={title || 'vs previous period'}>{up ? '▲' : '▼'} {label}</span>;
 }
+// "14.2 kWh" → the number, then a smaller unit, so the figure reads first
+function unitSplit(v) {
+  const m = typeof v === 'string' && /^(.*?)\s?(kWh|MWh|GWh|kW|%)$/.exec(v);
+  return m ? <>{m[1]}<span className={'mv-unit' + (m[2] === '%' ? ' pct' : '')}>{m[2]}</span></> : v;
+}
 function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendTitle, trendDelta, trendDeltaFmt, loading }) {
   return (
     <Card className="mini-stat">
-      <div className="mini-label">{label}{info && <window.InfoDot text={info} />}</div>
+      {/* the trend arrow sits on the label's line, top right, so it fits at every width */}
+      <div className="mini-label">
+        <span className="ml-text">{label}{info && <window.InfoDot text={info} />}</span>
+        {!loading && <TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} title={trendTitle} delta={trendDelta} deltaFmt={trendDeltaFmt} />}
+      </div>
       {/* a shimmer beats an em-dash: switching to Week/Month refetches, and "—" reads as
           "no data" rather than "fetching" */}
       {loading
         ? <div className="mini-value"><window.Skeleton w="70%" h={31} /></div>
-        : <div className="mini-value mono" style={{ color }}><span className="mv-num">{value}</span><TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} title={trendTitle} delta={trendDelta} deltaFmt={trendDeltaFmt} /></div>}
+        : <div className="mini-value mono" style={{ color }}><span className="mv-num">{unitSplit(value)}</span></div>}
       {bar != null && !loading && <div className="meter sm"><div className="meter-fill" style={{ width: Math.max(0, Math.min(100, bar)) + '%', background: color }} /></div>}
       {bar != null && loading && <window.Skeleton h={5} r={4} style={{ marginTop: 8 }} />}
       {sub && <div className="mini-sub mono">{sub}</div>}
@@ -1358,7 +1367,7 @@ function BatteryBody({ snap, settings, energy, onNeedEnergy, today, refreshKey, 
               <div className="mini-panel" key={inv.sn}>
                 <div className="mp-head"><span className="mono">{inv.alias}</span><span className="dim mono">{inv.numberOfBatteries} × pack · {inv.battCap} Ah</span></div>
                 <div className="mp-grid">
-                  <Metric label="Power" value={fmtPower(battShown(inv.battOut, settings.battPositive))} accent={CC.batt} />
+                  <Metric label="Power" value={fmtPower(battShown(inv.battOut))} unit={battWord(inv.battOut) && ' ' + battWord(inv.battOut)} accent={CC.batt} />
                   <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />
                   <Metric label="Voltage" value={inv.battVolt.toFixed(1)} unit=" V" />
                   <Metric label="Temp" value={t != null ? inv.battTemp.toFixed(1) : 'bad sensor'} unit={t != null ? ' °C' : ''} accent={t == null ? CC.load : null} />
@@ -1656,7 +1665,7 @@ function InvertersTab({ snap, settings, refreshKey }) {
               <div className="inv-grid">
                 <Metric label="Solar" value={fmtPower(inv.pvNow)} accent={CC.pv} />
                 <Metric label="Output" value={fmtPower(inv.output)} />
-                {hasBatt && <Metric label="Battery" value={fmtPower(battShown(inv.battOut, settings.battPositive))} accent={CC.batt} />}
+                {hasBatt && <Metric label="Battery" value={fmtPower(battShown(inv.battOut))} unit={battWord(inv.battOut) && ' ' + battWord(inv.battOut)} accent={CC.batt} />}
                 {hasBatt && <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />}
                 {hasGrid && <Metric label={inv.grid < -5 ? 'Grid (export)' : 'Grid'} value={fmtPower(Math.abs(inv.grid))} accent={CC.grid} />}
                 <Metric label="Home" value={fmtPower(inv.load)} accent={CC.load} />
@@ -1682,15 +1691,10 @@ function TabSkeleton({ tab }) {
     : <LiveSkeleton />;
 }
 
-// ---------------------------------------------------------------- SETTINGS
-// One column of sections with a sticky jump list beside it on wide screens. Sections
-// are separated by rules, not cards, so the long plant form and the short account
-// block sit in one rhythm instead of a lopsided grid.
-
-const SETTINGS_SECTIONS = [
-  ['tariff', 'Tariff'], ['plant', 'Plant'], ['battery', 'Battery'],
-  ['display', 'Display'], ['connection', 'Logins'], ['account', 'Account'],
-];
+// ---------------------------------------------------------------- SETTINGS / ACCOUNT
+// Settings is the plant on screen (Plant, Battery, Tariff) and Account is the person
+// (SunSynk logins, Pages, Delete account), each one scrolling page (SOLAR-13). A section
+// is a title and note on the left with its card on the right; stacked on a phone.
 
 // Inline "are you sure" for a destructive row. Sits under the row it belongs to, in
 // the same inset box the add-login form uses, so the question stays in the page
@@ -1710,25 +1714,25 @@ function ConfirmCard({ title, text, action, onConfirm, onCancel }) {
   );
 }
 
-// Which settings section is showing. Sections stay mounted and hide themselves, so
-// the plant form keeps its unsaved edits while you look at another section.
-const SettingsActive = React.createContext('tariff');
-// { id, done } when a section should flash once on arrival (e.g. from "Set your rate")
+// { id, done } when a section should flash once on arrival (e.g. from "Set your rate");
+// it scrolls itself into view first.
 const SettingsFlash = React.createContext(null);
 
-function SettingsSection({ id, title, note, right, children }) {
-  const active = React.useContext(SettingsActive);
+function SettingsSection({ id, title, note, children }) {
   const flash = React.useContext(SettingsFlash);
   const flashing = flash && flash.id === id;
+  const ref = React.useRef(null);
+  React.useEffect(() => { if (flashing) ref.current?.scrollIntoView({ block: 'start' }); }, [flashing]);
   return (
-    <section id={'settings-' + id} className={'sset' + (flashing ? ' sset-flash' : '')} role="tabpanel" hidden={active !== id}
-             onAnimationEnd={flashing ? (e) => { if (e.target === e.currentTarget) flash.done(); } : undefined}>
-      <div className="sset-head">
-        <h2 className="sset-title">{title}</h2>
-        {right && <div className="sset-right">{right}</div>}
+    <section id={'settings-' + id} className="sec" ref={ref} aria-labelledby={'settings-' + id + '-t'}>
+      <div className="sec-intro">
+        <h2 id={'settings-' + id + '-t'} className="sset-title">{title}</h2>
+        {note && <p className="sset-note">{note}</p>}
       </div>
-      {note && <p className="sset-note">{note}</p>}
-      <div className="sset-body">{children}</div>
+      <div className={'sset' + (flashing ? ' sset-flash' : '')}
+           onAnimationEnd={flashing ? (e) => { if (e.target === e.currentTarget) flash.done(); } : undefined}>
+        <div className="sset-body">{children}</div>
+      </div>
     </section>
   );
 }
@@ -1858,8 +1862,7 @@ function SunSynkConnectionSection({ onChanged }) {
 // Per-plant numbers live in plant_config and are the user's to edit. Timezone and
 // currency arrive from SunSynk at link time; the rest are theirs. The roof is not asked
 // for: the planned best-day line (BEST_DAY_CURVE.md) would learn from the plant's readings.
-// One form, three sections, one save bar.
-const PLANT_SECTION_IDS = ['tariff', 'plant', 'battery'];
+// One form, three sections, one floating save bar.
 // Pick one of a few, each with a line on what it means. Native radios underneath, so the
 // group takes arrow keys and reads as one question; the tile is only their dress.
 function ChoiceTiles({ name, labelledBy, value, options, onChange }) {
@@ -1875,9 +1878,8 @@ function ChoiceTiles({ name, labelledBy, value, options, onChange }) {
   );
 }
 
-function PlantSections({ me, plantId, onSaved, onOpenSection }) {
+function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   const { useState, useEffect } = React;
-  const activeSection = React.useContext(SettingsActive);
   const plant = (me?.plants || []).find(p => p.id === plantId) || (me?.plants || [])[0];
   const cfg = plant?.config || {};
   const [f, setF] = useState(cfg);
@@ -1932,6 +1934,13 @@ function PlantSections({ me, plantId, onSaved, onOpenSection }) {
     return o;
   };
   const dirty = capDirty || JSON.stringify(sansCap(f)) !== JSON.stringify(sansCap(cfg));
+  // App holds the plant still while there are unsaved changes; a switch asked for meanwhile
+  // says so in the save bar until the changes are saved or discarded.
+  useEffect(() => { onDirty && onDirty(dirty); }, [dirty]);
+  useEffect(() => () => onDirty && onDirty(false), []);
+  const [blocked, setBlocked] = useState(false);
+  useEffect(() => { if (switchBlocked && dirty) setBlocked(true); }, [switchBlocked]);
+  useEffect(() => { if (!dirty) setBlocked(false); }, [dirty]);
   // A box turns red, with one line saying what to enter, once focus leaves a row typed in (or
   // Save is pressed), so a number part-way typed never flashes an error. Clicking back into a
   // red box keeps it red until it is changed.
@@ -1949,10 +1958,9 @@ function PlantSections({ me, plantId, onSaved, onOpenSection }) {
   const save = async () => {
     if (!plant) return;
     // A capacity box still wrong: Save stays pressable (the bar is shared with Tariff and Battery)
-    // and instead opens Plant with the message showing and focus on the box to fix.
+    // and instead shows the message and puts focus on the box to fix.
     if (capBad) {
       setCapEditing(null);
-      if (activeSection !== 'plant') onOpenSection && onOpenSection('plant');
       setTimeout(() => document.querySelector('#settings-plant input[aria-invalid="true"]')?.focus());
       return;
     }
@@ -2002,23 +2010,6 @@ function PlantSections({ me, plantId, onSaved, onOpenSection }) {
   const reserve = Math.min(50, Math.max(5, num(f.battery_reserve_pct) ?? cfg.battery_reserve_pct ?? 20));
   return (
     <>
-      {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
-      <SettingsSection id="tariff" title="Tariff" note="What you pay for electricity, per unit (kWh).">
-        <div className="conn-row sset-row">
-          <label className="conn-text" htmlFor="tariff-import">
-            <span className="conn-user">Electricity rate</span>
-            <span className="conn-meta">{f.tariff_import > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}</span>
-          </label>
-          <div className="conn-actions">
-            <div className="unit-input wide">
-              <input id="tariff-import" className="input mono" type="number" inputMode="decimal" step="0.01" min="0" placeholder="3.40" aria-describedby="tariff-import-unit"
-                     value={f.tariff_import ?? ''} onChange={e => set('tariff_import', e.target.value)} />
-              <span id="tariff-import-unit" className="unit">{sym}/unit</span>
-            </div>
-          </div>
-        </div>
-      </SettingsSection>
-
       <SettingsSection id="plant" title="Plant"
         note="What this plant has: a battery, a grid connection and panels. Auto reads the first two from the inverter, and any choice applies to both.">
         <div className="conn-row sset-row">
@@ -2135,6 +2126,9 @@ function PlantSections({ me, plantId, onSaved, onOpenSection }) {
             <div className="reserve-scale" aria-hidden="true"><span>5%</span><span>50%</span></div>
           </div>
         </div>
+        {/* What the inverters report, folded away: set once, if ever */}
+        <details className="adv">
+        <summary>Inverter details</summary>
         {/* battery_banks: 'shared' means every inverter reads the same batteries, so charge counts once */}
         <div className="conn-row sset-row">
           <div className="conn-text"><span id="batt-banks-q" className="conn-user">Do the inverters share batteries?</span></div>
@@ -2159,11 +2153,29 @@ function PlantSections({ me, plantId, onSaved, onOpenSection }) {
                       { value: 'charging', label: 'Charging', hint: 'Positive means the battery is charging.' },
                       { value: 'discharging', label: 'Discharging', hint: "Positive means it's powering the house." }]} />
         </div>
+        </details>
+      </SettingsSection>
+
+      {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
+      <SettingsSection id="tariff" title="Tariff" note="What you pay for electricity, per unit (kWh).">
+        <div className="conn-row sset-row">
+          <label className="conn-text" htmlFor="tariff-import">
+            <span className="conn-user">Electricity rate</span>
+            <span className="conn-meta">{f.tariff_import > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}</span>
+          </label>
+          <div className="conn-actions">
+            <div className="unit-input wide">
+              <input id="tariff-import" className="input mono" type="number" inputMode="decimal" step="0.01" min="0" placeholder="3.40" aria-describedby="tariff-import-unit"
+                     value={f.tariff_import ?? ''} onChange={e => set('tariff_import', e.target.value)} />
+              <span id="tariff-import-unit" className="unit">{sym}/unit</span>
+            </div>
+          </div>
+        </div>
       </SettingsSection>
 
       {(dirty || msg) && (
-        <div className={'save-bar' + (dirty ? ' dirty' : '')} hidden={!PLANT_SECTION_IDS.includes(activeSection)}>
-          <span className="save-text">{dirty ? 'Unsaved changes' : msg}</span>
+        <div className={'save-bar' + (dirty ? ' dirty' : '')} role="status">
+          <span className="save-text">{!dirty ? msg : blocked ? 'Save or discard before switching plant.' : 'Unsaved changes'}</span>
           {dirty && <button type="button" className="ghost-btn" onClick={() => { setF(cfg); setCapMode(capModeOf(cfg)); setMsg(null); }} disabled={busy}>Discard</button>}
           {dirty && <button type="button" className="save-btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
         </div>
@@ -2172,11 +2184,9 @@ function PlantSections({ me, plantId, onSaved, onOpenSection }) {
   );
 }
 
-function AccountSection() {
-  const { useState, useEffect } = React;
+function DeleteAccountSection({ email }) {
+  const { useState } = React;
   const [busy, setBusy] = useState(false);
-  const [email, setEmail] = useState(null);
-  useEffect(() => { window.sb.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || null)).catch(() => {}); }, []);
   const [err, setErr] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const del = async () => {
@@ -2186,20 +2196,13 @@ function AccountSection() {
     catch (e) { setErr(e.message); setBusy(false); }
   };
   return (
-    <SettingsSection id="account" title="Account" note="Sign out of this device, or delete your account.">
+    <SettingsSection id="delete" title="Delete account" note="Removes your logins and settings. History goes too, unless someone else shares the plant.">
       <div className="conn-row">
         <div className="conn-text">
-          <div className="conn-user mono">{email || 'this account'}</div>
-          <div className="conn-meta">Signing out keeps your logins and history.</div>
+          <div className="conn-user">Delete <span className="mono">{email || 'this account'}</span></div>
+          <div className="conn-meta">It cannot be undone.</div>
         </div>
-        <div className="conn-actions"><window.SignOutButton className="ghost-btn" /></div>
-      </div>
-      <div className="conn-row">
-        <div className="conn-text">
-          <div className="conn-user">Delete account</div>
-          <div className="conn-meta">Removes your logins and settings. History goes too, unless someone else shares the plant.</div>
-        </div>
-        <div className="conn-actions"><button type="button" className="ghost-btn" onClick={() => { setErr(null); setConfirming(c => !c); }} disabled={busy}>{busy ? 'Deleting…' : 'Delete account'}</button></div>
+        <div className="conn-actions"><button type="button" className="danger-btn" onClick={() => { setErr(null); setConfirming(c => !c); }} disabled={busy || confirming}>{busy ? 'Deleting…' : 'Delete account'}</button></div>
         {confirming && (
           <ConfirmCard title={<>Delete <b>{email || 'this account'}</b>?</>} text="It cannot be undone."
             action="Delete account" onConfirm={del} onCancel={() => setConfirming(false)} />
@@ -2210,59 +2213,47 @@ function AccountSection() {
   );
 }
 
-function SettingsTab({ settings, setSettings, config, me, plantId, onPlantConfigSaved, flash, onFlashed, loginDead }) {
-  const { useState, useEffect } = React;
-  const set = (patch) => setSettings(s => ({ ...s, ...patch }));
-  // One section at a time. ?s= in the URL wins on load, then the last one opened,
-  // then Tariff. Read like ?tab= is: on mount only, never written back to the URL.
-  // 'synsynk.settings' is the display-prefs blob; this key must stay separate.
-  const ids = SETTINGS_SECTIONS.map(([id]) => id);
-  const [active, setActive] = useState(() => {
-    const want = new URLSearchParams(location.search).get('s') || localStorage.getItem('synsynk.section');
-    return ids.includes(want) ? want : 'tariff';
-  });
-  const open = (id) => {
-    setActive(id);
-    localStorage.setItem('synsynk.section', id);
-    window.scrollTo({ top: 0 });
-  };
+// Settings: the plant on screen.
+function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirty, switchBlocked }) {
+  const plant = (me?.plants || []).find(p => p.id === plantId);
   return (
-    <SettingsActive.Provider value={active}><SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
-    <div className="settings">
-      <nav className="settings-nav" role="tablist" aria-label="Settings sections">
-        {SETTINGS_SECTIONS.map(([id, label]) => (
-          <button key={id} type="button" role="tab" aria-selected={active === id} className={active === id ? 'active' : ''} onClick={() => open(id)}>{label}{id === 'connection' && loginDead && <span className="alert-dot" aria-label="A login needs reconnecting" />}</button>
-        ))}
-      </nav>
-      <div className="settings-body">
-        <PlantSections me={me} plantId={plantId} onSaved={onPlantConfigSaved} onOpenSection={open} />
-
-        <SettingsSection id="display" title="Display" note="Saved to your account, so every device looks the same.">
-          {/* reads like the toggle rows below: name, hint, then the control */}
-          <div className="field sset-choice">
-            <span className="toggle-text">
-              <span id="batt-power-q" className="toggle-label">Battery power</span>
-            </span>
-            <ChoiceTiles name="batt-power" labelledBy="batt-power-q" value={settings.battPositive} onChange={v => set({ battPositive: v })}
-              options={[{ value: 'discharge', label: '+ powering the house', hint: 'Discharging reads as a positive number.' },
-                        { value: 'charge', label: '+ charging', hint: 'Charging reads as a positive number.' }]} />
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>Extra tabs</label>
-            {[['solar', 'Solar', 'Generation and PV strings'], ['battery', 'Battery', 'Charge, temperature and per-inverter packs'], ['grid', 'Grid', 'Import, quality and savings'], ['inverters', 'Inverters', 'Each unit in detail']].map(([k, l, h]) => (
-              <Toggle key={k} label={l} hint={h} checked={settings.tabs[k]} onChange={v => set({ tabs: { ...settings.tabs, [k]: v } })} />
-            ))}
-          </div>
-        </SettingsSection>
-
-        <SunSynkConnectionSection onChanged={onPlantConfigSaved} />
-        <AccountSection />
-        {/* under the card, not inside it */}
-        <div className="app-version mono">{window.APP_VERSION}</div>
+    <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
+      <div className="settings-page">
+        <div className="page-head">
+          <h1>Settings</h1>
+          {plant && <p>For {plant.name || 'Plant ' + plant.id}. Shared with everyone who sees it.</p>}
+        </div>
+        <PlantSections me={me} plantId={plantId} onSaved={onPlantConfigSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
       </div>
-    </div>
-    </SettingsFlash.Provider></SettingsActive.Provider>
+    </SettingsFlash.Provider>
   );
 }
 
-Object.assign(window, { LiveTab, SolarTab, BatteryTab, GridTab, InvertersTab, SettingsTab, MiniStat, FsEnterIcon, BalanceSkeleton, TabSkeleton });
+// Account: the person. Sign out is in the account menu only.
+function AccountTab({ settings, setSettings, onPlantConfigSaved, flash, onFlashed }) {
+  const { useState, useEffect } = React;
+  const [email, setEmail] = useState(null);
+  useEffect(() => { window.sb.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || null)).catch(() => {}); }, []);
+  const PAGES = [['solar', 'Solar', 'Generation and panel strings'], ['grid', 'Grid', 'Import, quality and savings'],
+    ['battery', 'Battery', 'Charge, temperature and packs'], ['inverters', 'Inverters', 'Each unit in detail']];
+  return (
+    <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
+      <div className="settings-page">
+        <div className="page-head">
+          <h1>Account</h1>
+          {email && <p className="mono">{email}</p>}
+        </div>
+        <SunSynkConnectionSection onChanged={onPlantConfigSaved} />
+        <SettingsSection id="pages" title="Pages" note="Shown in the sidebar on every device.">
+          {PAGES.map(([k, l, h]) => (
+            <Toggle key={k} label={l} hint={h} checked={settings.tabs[k]} onChange={v => setSettings(s => ({ ...s, tabs: { ...s.tabs, [k]: v } }))} />
+          ))}
+        </SettingsSection>
+        <DeleteAccountSection email={email} />
+        <div className="app-version mono">{window.APP_VERSION}</div>
+      </div>
+    </SettingsFlash.Provider>
+  );
+}
+
+Object.assign(window, { LiveTab, SolarTab, BatteryTab, GridTab, InvertersTab, SettingsTab, AccountTab, MiniStat, FsEnterIcon, BalanceSkeleton, TabSkeleton });

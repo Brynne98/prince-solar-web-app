@@ -6,7 +6,8 @@
 const { useState, useEffect, useRef, useCallback } = React;
 
 const DEFAULT_SETTINGS = {
-  battPositive: 'discharge',
+  // battPositive (which way round battery power reads) was here; it is gone (SOLAR-13):
+  // discharging always reads +, with the words beside it.
   // battCapacity and reserve used to live here. They are facts about the
   // installation, not per-device preferences, so they now live in app_config and
   // arrive on the snapshot as `config` — one editable copy, shared with the phone
@@ -51,7 +52,7 @@ function plantStatus(snap, now) {
   const ageS = (now - last.getTime()) / 1000;
   const status = (total > 0 && offline >= total) || ageS > 900 ? 'offline' : (offline > 0 || ageS > 180) ? 'stale' : 'live';
   return {
-    status, last,
+    status, last, old: ageS > 180,
     word: { live: 'Live', stale: 'Stale', offline: 'Offline' }[status],
     detail: offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now),
   };
@@ -71,94 +72,241 @@ function WallStatus({ snap }) {
 }
 window.WallStatus = WallStatus;
 
-// Phones only: seven tabs don't fit across a phone, so Settings leaves the tab row
-// there and lives beside Refresh instead (SOLAR-12). The CSS shows one or the other.
-function SettingsButton({ active, alert, onClick, disabled }) {
+// ---- the frame (SOLAR-13) ---------------------------------------------------
+// A sidebar of pages with the account at its foot, a header with the plant and its
+// status, and on a phone a bottom bar instead of the sidebar. Tablet (600–1023 px)
+// narrows the sidebar to an icon rail in CSS; nothing here knows the width.
+
+const NAV_ICONS = {
+  live: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  solar: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  battery: '<rect x="2" y="7" width="16" height="10" rx="2"/><path d="M22 11v2M6 11v2M10 11v2"/>',
+  grid: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
+  inverters: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 12h4"/><circle cx="16" cy="12" r="2"/>',
+  trends: '<path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 6-6"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  account: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  signout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+};
+// fixed strings from the table above, never data
+const Icon = ({ id }) => <svg className="ico" viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: NAV_ICONS[id] }} />;
+
+// An open menu closes on a click elsewhere or Escape (focus goes back to its button), and
+// takes the arrow keys while focus is inside it. No keyboard shortcuts beyond that, by decision.
+function usePopover() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const key = e => { if (e.key === 'Escape') { setOpen(false); ref.current?.querySelector('button')?.focus(); } };
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', key); };
+  }, [open]);
+  return [open, setOpen, ref];
+}
+function MenuList({ className, label, children }) {
+  const ref = useRef(null);
+  useEffect(() => { (ref.current.querySelector('[aria-checked="true"]') || ref.current.querySelector('button'))?.focus(); }, []);
+  const keys = e => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+    const items = [...ref.current.querySelectorAll('button:not(:disabled)')], i = items.indexOf(document.activeElement);
+    const n = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[n]?.focus(); e.preventDefault();
+  };
+  return <div className={'menu ' + className} role="menu" aria-label={label} ref={ref} onKeyDown={keys}>{children}</div>;
+}
+
+// The plant on screen, left in the header; a menu once there is more than one.
+function PlantMenu({ me, plantId, onPlant, fallback }) {
+  const plants = me?.plants || [];
+  const label = (p) => p.name || ('Plant ' + p.id);
+  const current = plants.find(p => p.id === plantId);
+  const name = current ? label(current) : (fallback || '');
+  const [open, setOpen, ref] = usePopover();
+  if (plants.length < 2 || !onPlant) return <div className="plant"><span className="plant-btn static"><span className="plant-name">{name}</span></span></div>;
   return (
-    <button type="button" className={'settings-btn' + (active ? ' active' : '')} onClick={onClick} disabled={disabled}
-            aria-label="Settings" aria-pressed={!!active}>
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-        <circle cx="12" cy="12" r="3" />
-      </svg>
-      {alert && <span className="alert-dot" aria-label="A login needs reconnecting" />}
-    </button>
+    <div className="plant" ref={ref}>
+      <button type="button" className="plant-btn" aria-haspopup="menu" aria-expanded={open} aria-label={'Plant: ' + name + '. Switch plant'} onClick={() => setOpen(o => !o)}>
+        <span className="plant-name">{name}</span><Icon id="chevron" />
+      </button>
+      {open && (
+        <MenuList className="plant-menu" label="Plants">
+          {plants.map(p => (
+            <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
+                    onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
+              <span className="tick" aria-hidden="true">{p.id === plantId ? '✓' : ''}</span><span className="nm">{label(p)}</span>
+            </button>
+          ))}
+        </MenuList>
+      )}
+    </div>
   );
 }
 
-function HeaderStatus({ snap, onRefresh, busy, notice, settingsBtn }) {
-  const now = useNow(15000);
-  // Just after a plant switch the pill names the plant for a moment, so the swap is
-  // visibly acknowledged before the freshness word takes over again.
-  if (notice) {
-    return (
-      <div className="topbar-actions">
-        <div className="status-pill status-switch" role="status">
-          <span className="status-dot" />
-          <span className="status-word">Switched</span>
-          <span className="status-detail mono">to {notice}</span>
+// The person: avatar, name and plant count in the sidebar; the avatar alone in a phone's
+// header. A dead SunSynk login puts a red dot on the avatar and on Account.
+function AccountMenu({ user, plantCount, alert, onAccount, active, variant }) {
+  const [open, setOpen, ref] = usePopover();
+  const sub = alert ? 'Reconnect a login' : plantCount + (plantCount === 1 ? ' plant' : ' plants');
+  return (
+    <div className={'acct acct-' + variant} ref={ref}>
+      <button type="button" className={'acct-btn' + (alert ? ' needs' : '')} aria-haspopup="menu" aria-expanded={open}
+              aria-current={active ? 'page' : undefined} onClick={() => setOpen(o => !o)}
+              aria-label={'Account menu' + (alert ? '. A SunSynk login needs reconnecting' : '')}>
+        <span className="avatar" aria-hidden="true">{user.initials}</span>
+        {variant === 'rail' && <span className="who" aria-hidden="true"><b>{user.name}</b><span className={alert ? 'warn' : ''}>{sub}</span></span>}
+      </button>
+      {open && (
+        <MenuList className="acct-menu" label="Account">
+          <div className="menu-email">{user.email}</div>
+          <button type="button" onClick={() => { setOpen(false); onAccount(); }}>
+            <Icon id="account" />Account{alert && <span className="dot" aria-label="A login needs reconnecting" />}
+          </button>
+          <hr />
+          <window.SignOutButton className="menu-signout"><Icon id="signout" />Sign out</window.SignOutButton>
+        </MenuList>
+      )}
+    </div>
+  );
+}
+
+function Sidebar({ tabs, tab, onTab, account }) {
+  return (
+    <aside className="rail">
+      <div className="rail-logo"><span className="sun" aria-hidden="true" /><span className="app-name">Prince Solar</span></div>
+      <nav className="nav" aria-label="Pages">
+        {tabs.map(t => (
+          <button key={t.id} type="button" className={t.id === 'settings' ? 'nav-settings' : undefined} aria-current={tab === t.id ? 'page' : undefined}
+                  onClick={onTab && (() => onTab(t.id))} disabled={!onTab}>
+            <Icon id={t.id} /><span className="t">{t.label}</span>
+          </button>
+        ))}
+      </nav>
+      {account && <AccountMenu {...account} variant="rail" />}
+    </aside>
+  );
+}
+
+// Phone: at most five slots, Settings always the last. More than four pages: the first
+// three, then More, which opens a sheet with the rest.
+function PhoneBar({ tabs, tab, onTab }) {
+  const [more, setMore] = useState(false);
+  const pages = tabs.filter(t => t.id !== 'settings');
+  const settingsTab = tabs.find(t => t.id === 'settings');
+  const split = pages.length > 4;
+  const bar = split ? pages.slice(0, 3) : pages;
+  const rest = split ? pages.slice(3) : [];
+  const go = (id) => { setMore(false); onTab && onTab(id); };
+  useEffect(() => {
+    if (!more) return;
+    const key = e => { if (e.key === 'Escape') { setMore(false); document.querySelector('.phonebar .more-btn')?.focus(); } };
+    document.addEventListener('keydown', key);
+    document.querySelector('.sheet button')?.focus();
+    return () => document.removeEventListener('keydown', key);
+  }, [more]);
+  const slot = (t) => (
+    <button key={t.id} type="button" aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id)} disabled={!onTab}>
+      <Icon id={t.id} /><span>{t.label}</span>
+    </button>
+  );
+  return (
+    <>
+      <nav className="phonebar" aria-label="Pages">
+        {bar.map(slot)}
+        {split && (
+          <button type="button" className={'more-btn' + (rest.some(t => t.id === tab) ? ' on' : '')} aria-expanded={more} aria-haspopup="dialog"
+                  onClick={() => setMore(m => !m)} disabled={!onTab}>
+            <Icon id="more" /><span>More</span>
+          </button>
+        )}
+        {settingsTab && slot(settingsTab)}
+      </nav>
+      {more && (
+        <div className="sheet" onClick={e => { if (e.target === e.currentTarget) setMore(false); }}>
+          <div className="sheet-panel" role="dialog" aria-label="More pages">
+            <div className="sheet-grip" aria-hidden="true" />
+            {rest.map(slot)}
+          </div>
         </div>
-        <button className={'refresh-btn' + (busy ? ' busy' : '')} onClick={onRefresh}><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
-        {settingsBtn}
-      </div>
+      )}
+    </>
+  );
+}
+
+// Status word right of the plant, coloured; the age only once it is worth reading.
+function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
+  const now = useNow(15000);
+  if (!snap) {
+    return (
+      <>
+        <div className="status status-idle" role="status"><span className="status-dot" /><span className="status-word">{idleWord}</span></div>
+        <button type="button" className={'refresh' + (busy ? ' busy' : '')} aria-label="Refresh" title="Refresh" disabled><Icon id="refresh" /></button>
+      </>
     );
   }
-  const { status, word, detail, last } = plantStatus(snap, now);
+  const s = plantStatus(snap, now);
   return (
-    <div className="topbar-actions">
-      <div className={'status-pill status-' + status} title={'last reading ' + window.fmtTime(last)}>
+    <>
+      <div className={'status status-' + s.status} title={'Last reading ' + window.fmtTime(s.last)} role="status">
         <span className="status-dot" />
-        <span className="status-word">{word}</span>
-        <span className="status-detail mono">{detail}</span>
+        <span className="status-word">{s.word}</span>
+        {s.old && <span className="status-age mono">{fmtAgo(s.last, now).replace(' ago', '')}</span>}
         {/* A freshly linked plant: the last 60 days arrive over a day or two of
-            six-hourly runs (0048). The arc says it is working, the bar how far. Once
-            every one of the 60 days has a chart the pill is quiet even if the
-            inverter-history walk is still topping up; the charts say so themselves. */}
+            six-hourly runs (0048). Quiet once every day has a chart. */}
         {snap.sync && snap.sync.pending && snap.sync.days < snap.sync.window && (() => {
           const pct = Math.round(100 * (snap.sync.days || 0) / (snap.sync.window || 60));
           return (
             <span className="status-sync" title={`${snap.sync.days} of ${snap.sync.window} days so far`}>
               <span className="sync-arc" aria-hidden="true" />Fetching history
-              <span className="sync-bar"><i style={{ width: Math.max(4, pct) + '%' }} /></span>
               <span className="sync-pct mono">{pct}%</span>
             </span>
           );
         })()}
       </div>
-      {/* The button takes the pill's colour once something is wrong, and reads Retry when
-          nothing is reporting. The icon spins for as long as a fetch is in flight. */}
-      <button className={'refresh-btn refresh-' + status + (busy ? ' busy' : '')} aria-busy={busy} onClick={onRefresh}><span className="refresh-ico" aria-hidden="true">↻</span>{status === 'offline' ? 'Retry' : 'Refresh'}</button>
-      {settingsBtn}
-    </div>
+      {/* takes the status colour once something is wrong, and reads Retry when nothing reports */}
+      <button type="button" className={'refresh refresh-' + s.status + (busy ? ' busy' : '')} aria-busy={busy} onClick={onRefresh}
+              aria-label={s.status === 'offline' ? 'Retry' : 'Refresh'} title={s.status === 'offline' ? 'Retry' : 'Refresh'}>
+        <Icon id="refresh" />{s.status === 'offline' && <span className="lbl">Retry</span>}
+      </button>
+    </>
   );
 }
 
-// Plant name under the product name; becomes the selector once there is more than one.
-function BrandLine({ snap, me, plantId, onPlant }) {
-  const plants = me?.plants || [];
-  const name = plants.find(p => p.id === plantId)?.name || snap?.plant?.name || '';
-  return (
-    <div>
-      <div className="brand-name">Prince Solar</div>
-      <div className="brand-sub mono">{plants.length > 1 ? <PlantSelect me={me} plantId={plantId} onChange={onPlant} /> : name}</div>
+// Says on the page when its numbers are old, and why. Grid off is news, not a fault: calm purple.
+function PageNotice({ snap, cutOff, onReconnect }) {
+  const s = plantStatus(snap, useNow(15000));
+  const at = window.fmtTime(s.last);
+  const a = snap.aggregate || {};
+  if (s.status === 'offline' && cutOff) return (
+    <div className="notice offline" role="alert">
+      <p><b>SunSynk login stopped working.</b> Readings paused at {at}.</p>
+      <button type="button" className="save-btn" onClick={onReconnect}>Reconnect</button>
     </div>
   );
-}
-
-function PlantSelect({ me, plantId, onChange }) {
-  const plants = me?.plants || [];
-  if (plants.length < 2) return null;
-  const label = (p) => p.name || ('Plant ' + p.id);
-  const current = plants.find(p => p.id === plantId);
-  // A select is as wide as its longest option, which left a gap before the chevron for
-  // every shorter name. The hidden copy of the chosen name sizes the box instead.
+  if (s.status === 'offline') return (
+    <div className="notice offline" role="alert">
+      <p><b>{s.old ? 'No readings since ' + at + '.' : 'No inverter is reporting.'}</b></p>
+    </div>
+  );
+  // stale readings still say the grid is off, so both banners can show
   return (
-    <span className="plant-pick">
-      <span className="plant-pick-size" aria-hidden="true">{current ? label(current) : ''}</span>
-      <select className="plant-select" value={plantId ?? ''} onChange={e => onChange(e.target.value)} title="Switch plant" aria-label="Plant">
-        {plants.map(p => <option key={p.id} value={p.id}>{label(p)}</option>)}
-      </select>
-    </span>
+    <>
+      {s.status === 'stale' && (
+        <div className="notice stale" role="status">
+          <p>{s.old ? <><b>Last reading at {at},</b> {fmtAgo(s.last, Date.now())}.</> : <b>{s.detail}.</b>}</p>
+        </div>
+      )}
+      {a.gridPresent === false && snap.features?.hasGrid !== false && (
+        <div className="notice gridoff" role="status">
+          <p><b>Grid off.</b> {snap.features?.hasBattery === false ? 'Running on solar.' : 'Running on solar and battery.'}</p>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -166,16 +314,35 @@ function tabsFor(settings) {
   return [
     { id: 'live', label: 'Live' },
     settings.tabs.solar && { id: 'solar', label: 'Solar' },
-    settings.tabs.battery && { id: 'battery', label: 'Battery' },
     settings.tabs.grid && { id: 'grid', label: 'Grid' },
+    settings.tabs.battery && { id: 'battery', label: 'Battery' },
     settings.tabs.inverters && { id: 'inverters', label: 'Inverters' },
     { id: 'trends', label: 'Trends' },
     { id: 'settings', label: 'Settings' },
   ].filter(Boolean);
 }
+// Account is a page too, reached from the account menu rather than the page list.
+const pageOk = (tabs, id) => id === 'account' || tabs.some(t => t.id === id);
+
+// The frame around every page: sidebar, header, content, phone bar.
+function Frame({ tabs, tab, onTab, head, account, busy, children }) {
+  return (
+    <div className="frame">
+      <Sidebar tabs={tabs} tab={tab} onTab={onTab} account={account} />
+      <div className="frame-body">
+        <header className="head">
+          {head}
+          {account && <AccountMenu {...account} variant="head" />}
+        </header>
+        <main className="content" aria-busy={busy || undefined}>{children}</main>
+      </div>
+      <PhoneBar tabs={tabs} tab={tab} onTab={onTab} />
+    </div>
+  );
+}
 
 // Shown while the session and the SunSynk link are still being checked, before App
-// mounts. Same shell as App's own not-yet-loaded gate, so the hand-over does not flash.
+// mounts. Same frame as App's own not-yet-loaded gate, so the hand-over does not flash.
 function BootShell() {
   // No remembered tab means this browser hasn't shown this account a dashboard since the
   // last sign-out: most likely a new account on its way to Connect SunSynk. A skeleton
@@ -183,30 +350,11 @@ function BootShell() {
   if (!localStorage.getItem('synsynk.tab')) return <div className="login-wrap" />;
   const tabs = tabsFor(loadSettings());
   const saved = new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab');
-  const tab = tabs.some(t => t.id === saved) ? saved : 'live';
+  const tab = pageOk(tabs, saved) ? saved : 'live';
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="sun" />
-          <div>
-            <div className="brand-name">Prince Solar</div>
-            <div className="brand-sub mono">connecting to SunSynk…</div>
-          </div>
-        </div>
-        <div className="topbar-actions">
-          <div className="status-pill status-idle"><span className="status-dot" /><span className="status-word">Connecting</span></div>
-          <button className="refresh-btn" disabled><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
-          <SettingsButton active={tab === 'settings'} disabled />
-        </div>
-      </header>
-      <nav className="tabbar" role="tablist" aria-busy="true">
-        {tabs.map(t => <button key={t.id} className={'tab tab-' + t.id + (tab === t.id ? ' active' : '')} role="tab" aria-selected={tab === t.id} disabled>{t.label}</button>)}
-      </nav>
-      <main className="content" aria-busy="true">
-        {tab !== 'trends' && tab !== 'settings' && <window.TabSkeleton tab={tab} />}
-      </main>
-    </div>
+    <Frame tabs={tabs} tab={tab} busy head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /></>}>
+      {tab !== 'trends' && tab !== 'settings' && tab !== 'account' && <window.TabSkeleton tab={tab} />}
+    </Frame>
   );
 }
 
@@ -227,12 +375,26 @@ function App({ links }) {
   const [busy, setBusy] = useState(0);
   const [err, setErr] = useState(null);
   const [flashSection, setFlashSection] = useState(null); // a Settings section to flash once on arrival
-  // "Set your rate", "Set pack size": jump to that Settings section and flash it once.
-  // SettingsTab opens whichever section synsynk.section names when it mounts.
+  // "Set your rate", "Set pack size", Reconnect: open the page that holds that section
+  // (logins are on Account) and flash it once; the section scrolls itself into view.
   const openSettings = (section) => {
-    localStorage.setItem('synsynk.section', section);
-    setFlashSection(section); setTab('settings'); window.scrollTo({ top: 0 });
+    setFlashSection(section); setTab(section === 'connection' ? 'account' : 'settings'); window.scrollTo({ top: 0 });
   };
+  // The signed-in person, for the account menu: name, initials, email.
+  const [user, setUser] = useState({ name: '', initials: '', email: '' });
+  useEffect(() => {
+    window.sb.auth.getSession().then(({ data }) => {
+      const u = data?.session?.user; if (!u) return;
+      const email = u.email || '';
+      const name = u.user_metadata?.full_name || u.user_metadata?.name || email.split('@')[0];
+      const initials = name.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+      setUser({ name, initials, email });
+    }).catch(() => {});
+  }, []);
+  // Settings with unsaved plant edits holds the plant where it is; a switch asked for
+  // meanwhile bumps switchBlocked, and the save bar says why nothing happened.
+  const settingsDirty = useRef(false);
+  const [switchBlocked, setSwitchBlocked] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0); // bumped on manual refresh so the chart re-fetches its current day
 
   const energyRef = useRef({});
@@ -242,7 +404,7 @@ function App({ links }) {
   useEffect(() => {
     localStorage.setItem('synsynk.settings', JSON.stringify(settings));
     if (!prefsLoaded.current) return;
-    const t = setTimeout(() => window.savePrefs({ battPositive: settings.battPositive, tabs: settings.tabs }).catch(() => {}), 600);
+    const t = setTimeout(() => window.savePrefs({ tabs: settings.tabs }).catch(() => {}), 600);
     return () => clearTimeout(t);
   }, [settings]);
   useEffect(() => { localStorage.setItem('synsynk.tab', tab); }, [tab]);
@@ -308,9 +470,7 @@ function App({ links }) {
       const cfg = (m.plants || []).find(p => p.id === wanted)?.config;
       window.setCurrentPlant(wanted, cfg?.currency);
       setPlantId(wanted);
-      if (m.prefs && (m.prefs.battPositive || m.prefs.tabs)) {
-        setSettings(s => ({ ...s, ...(m.prefs.battPositive ? { battPositive: m.prefs.battPositive } : {}), tabs: { ...s.tabs, ...(m.prefs.tabs || {}) } }));
-      }
+      if (m.prefs && m.prefs.tabs) setSettings(s => ({ ...s, tabs: { ...s.tabs, ...m.prefs.tabs } }));
       prefsLoaded.current = true;
       // how much history this plant has — drives the "collecting your first day" copy
       window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
@@ -328,6 +488,7 @@ function App({ links }) {
     return () => clearTimeout(t);
   }, [notice, snap, err]);
   const switchPlant = (id) => {
+    if (tab === 'settings' && settingsDirty.current) { setSwitchBlocked(n => n + 1); return; }
     const plant = (me?.plants || []).find(p => p.id === Number(id));
     const cfg = plant?.config;
     window.setCurrentPlant(id, cfg?.currency);
@@ -386,115 +547,50 @@ function App({ links }) {
   const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(); loadBalance(); setRefreshKey(k => k + 1); };
 
   const TABS = tabsFor(settings);
-  useEffect(() => { if (!TABS.some(t => t.id === tab)) setTab('live'); }, [settings.tabs]);
-  // On a phone the tab bar scrolls sideways, so the active tab can sit off-screen after
-  // a reload or a tap on the last visible one. Bring it into view; a no-op on desktop.
-  useEffect(() => { document.querySelector('.tab.active')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }); }, [tab, !!snap]);
+  useEffect(() => { if (!pageOk(TABS, tab)) setTab('live'); }, [settings.tabs]);
+  const go = (id) => { setTab(id); window.scrollTo({ top: 0 }); };
+  const loginDead = links.accounts.some(a => a.status === 'needs_relink');
+  const account = { user, plantCount: (me?.plants || []).length, alert: loginDead, onAccount: () => go('account'), active: tab === 'account' };
+  const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} />;
+  const settingsPage = <window.SettingsTab me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
+    flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />;
+  const accountPage = <window.AccountTab settings={settings} setSettings={setSettings} onPlantConfigSaved={reloadPlantConfig}
+    flash={flashSection} onFlashed={() => setFlashSection(null)} />;
 
   // ---- not-yet-loaded gate ----
   //
-  // Renders the whole shell — topbar, tabs, page layout — with skeletons where the data
-  // will go, rather than a bare "Loading…" card. The old gate withheld even the tab bar,
-  // so there was nothing to look at until the snapshot landed.
+  // The whole frame with skeletons where the data will go. Pages stay live while loading:
+  // there is no reason to trap someone on Live because the first snapshot hasn't landed.
   if (!snap) {
     return (
-      <div className="app">
-        <header className="topbar">
-          <div className="brand">
-            <span className="sun" />
-            {/* The selector stays put while a switch loads; it vanishing mid-switch
-                read as the app losing the plant. */}
-            {me && (me.plants || []).length > 1 && !err
-              ? <BrandLine snap={null} me={me} plantId={plantId} onPlant={switchPlant} />
-              : <div>
-                  <div className="brand-name">Prince Solar</div>
-                  <div className="brand-sub mono">{err ? 'connection error' : 'connecting to SunSynk…'}</div>
-                </div>}
-          </div>
-          <div className="topbar-actions">
-            {notice
-              ? <div className="status-pill status-switch" role="status"><span className="status-dot" /><span className="status-word">Switching</span><span className="status-detail mono">to {notice}</span></div>
-              : <div className="status-pill status-idle"><span className="status-dot" /><span className="status-word">Connecting</span></div>}
-            <button className={'refresh-btn' + (busy ? ' busy' : '')} disabled><span className="refresh-ico" aria-hidden="true">↻</span>Refresh</button>
-            <SettingsButton active={tab === 'settings'} onClick={() => setTab('settings')} />
-          </div>
-        </header>
-
-        {/* Tabs stay live while loading: there is no reason to trap someone on Live
-            just because the first snapshot hasn't landed. */}
-        <nav className="tabbar" role="tablist" aria-busy="true">
-          {TABS.map(t => (
-            <button key={t.id} className={'tab tab-' + t.id + (tab === t.id ? ' active' : '')}
-                    onClick={() => setTab(t.id)} role="tab" aria-selected={tab === t.id}>{t.label}</button>
-          ))}
-        </nav>
-
-        {err && <div className="card" style={{ marginBottom: 20, borderColor: 'rgba(248,113,113,0.35)' }}>
-          <div style={{ color: 'var(--load)' }}>⚠ Can't reach the server.<div className="dim" style={{ marginTop: 8, fontSize: 13 }}>Retrying every 60 seconds; nothing to do on your side.</div></div>
-        </div>}
-
-        <main className="content" aria-busy="true">
-          {/* Static chrome renders for real — titles, tab rows, segmented controls and
-              tile labels are not data and have no business shimmering. Only values and
-              plot areas get skeletons; control rows that can't be rendered yet get an
-              inert spacer of the right height so nothing jumps either. */}
-          {tab === 'trends' ? (
-            // Like Settings, Trends never touches the snapshot — it fetches its own
-            // aggregates. So render the real thing and let its own ChartSkeleton cover
-            // the wait. A hand-built copy here drifted immediately: it hardcoded the
-            // Energy view while TrendsTab actually defaults to Battery.
-            <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />
-          ) : tab === 'settings' ? (
-            // Still nothing to wait for: the pack figures come off the snapshot but
-            // render as '—' until it lands, so Settings draws in full while the API is
-            // still answering. Showing it a loading state was pure theatre.
-            <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} />
-          ) : (
-            <window.TabSkeleton tab={tab} />
-          )}
-        </main>
-      </div>
+      <Frame tabs={TABS} tab={tab} onTab={go} account={me ? account : null} busy
+        head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
+          <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} /></>}>
+        {err && <div className="notice offline" role="alert"><p><b>Can't reach the server.</b> Retrying every minute.</p></div>}
+        {/* Trends, Settings and Account never touch the snapshot: they draw for real. */}
+        {tab === 'trends' ? <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />
+          : tab === 'settings' ? settingsPage
+          : tab === 'account' ? accountPage
+          : <window.TabSkeleton tab={tab} />}
+      </Frame>
     );
   }
 
-  const loginDead = links.accounts.some(a => a.status === 'needs_relink');
   const plantLogins = links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(plantId)));
   const plantCutOff = plantLogins.length > 0 && !plantLogins.some(a => a.status === 'active') && !!snap && plantStatus(snap, Date.now()).status === 'offline';
 
+  const dataPage = tab !== 'settings' && tab !== 'account';
+  const old = dataPage && plantStatus(snap, Date.now()).old;
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="sun" />
-          <BrandLine snap={snap} me={me} plantId={plantId} onPlant={switchPlant} />
-        </div>
-        <HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} notice={notice}
-          settingsBtn={<SettingsButton active={tab === 'settings'} alert={loginDead} onClick={() => setTab('settings')} />} />
-      </header>
-
-      {/* The raw error is logged by window.onerror's sibling in the fetch path; on screen it
-          was a Postgres or JWT string a homeowner cannot act on. */}
-      {err && <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(248,113,113,0.35)', color: 'var(--load)', fontSize: 13 }} title={String(err)}>⚠ Couldn't refresh; showing the last good reading.</div>}
-
-      {/* The banner is for the plant on screen: none of its logins work and its readings
-          have stopped. A plant still read through someone else's copy of the login stays
-          quiet; any dead login still marks Settings → Logins with a dot. */}
-      {tab !== 'settings' && plantCutOff && (
-        <div className="card" style={{ marginBottom: 16, borderColor: 'rgba(248,113,113,0.35)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <span style={{ flex: '1 1 200px' }}>⚠ SunSynk login stopped working. Readings paused.</span>
-          <button type="button" className="save-btn" onClick={() => openSettings('connection')}>Reconnect</button>
-        </div>
-      )}
-
-      <nav className="tabbar" role="tablist">
-        {TABS.map(t => (
-          <button key={t.id} className={'tab tab-' + t.id + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)} role="tab" aria-selected={tab === t.id}>
-            {t.label}{t.id === 'settings' && loginDead && <span className="alert-dot" aria-label="A login needs reconnecting" />}
-          </button>
-        ))}
-      </nav>
-
-      <main className="content">
+    <Frame tabs={TABS} tab={tab} onTab={go} account={account}
+      head={<>{plantMenu}<HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} /></>}>
+      {/* The raw error stays in the title; on screen it was a Postgres or JWT string a
+          homeowner cannot act on. */}
+      {err && <div className="notice stale" role="status" title={String(err)}><p><b>Couldn't refresh.</b> Showing the last good reading.</p></div>}
+      {/* For the plant on screen. A plant still read through someone else's copy of the
+          login stays quiet; a dead login still marks the avatar and Account with a dot. */}
+      {dataPage && <PageNotice snap={snap} cutOff={plantCutOff} onReconnect={() => openSettings('connection')} />}
+      <div className={'page' + (old ? ' old' : '')}>
         {tab === 'live' && <window.LiveTab snap={snap} settings={settings} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
           onOpenSettings={openSettings} />}
         {tab === 'solar' && <window.SolarTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
@@ -502,11 +598,10 @@ function App({ links }) {
         {tab === 'grid' && <window.GridTab snap={snap} settings={settings} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} settings={settings} refreshKey={refreshKey} />}
         {tab === 'trends' && <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />}
-        {tab === 'settings' && <window.SettingsTab settings={settings} setSettings={setSettings} config={snap?.config} me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
-          flash={flashSection} onFlashed={() => setFlashSection(null)} loginDead={loginDead} />}
-      </main>
-
-    </div>
+        {tab === 'settings' && settingsPage}
+        {tab === 'account' && accountPage}
+      </div>
+    </Frame>
   );
 }
 
