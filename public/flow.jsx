@@ -62,7 +62,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   const battRow = (() => {
     const m = battInfo && /^(.*) to (empty|full)$/.exec(battInfo);
     if (m) return { k: m[2] === 'empty' ? 'Empty in' : 'Full in', v: m[1] };
-    if (battInfo) return { k: 'Time left', v: battInfo, on: onBattInfo };
+    // "Set pack size" stands alone, with no label over it (SOLAR-23)
+    if (battInfo) return { k: '', v: battInfo, on: onBattInfo };
     return { k: 'Idle', v: '' };
   })();
   // Sources: only what the plant has. Grid flows both ways — an export runs the
@@ -193,10 +194,10 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
       // a prompt that leads somewhere ("Set pack size"): clickable and keyboard-reachable
       ? <text x={x} y={y} className="flow-sub flow-link" role="link" tabIndex={0} onClick={r.on}
           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); r.on(); } }}>
-          <tspan className="flow-kv-k">{r.k.toUpperCase()}</tspan><tspan dx="6" className="flow-kv-v">{r.v}</tspan>
+          {r.k && <tspan className="flow-kv-k">{r.k.toUpperCase()}</tspan>}<tspan dx={r.k ? 6 : 0} className="flow-kv-v">{r.v}</tspan>
         </text>
       : <text x={x} y={y} className="flow-sub">
-          <tspan className="flow-kv-k">{r.k.toUpperCase()}</tspan>{r.v && <tspan dx="6" className="flow-kv-v">{r.v}</tspan>}
+          {r.k && <tspan className="flow-kv-k">{r.k.toUpperCase()}</tspan>}{r.v && <tspan dx={r.k ? 6 : 0} className="flow-kv-v">{r.v}</tspan>}
         </text>);
 
     // the box itself: tinted and outlined in its colour while power moves, faint when idle,
@@ -333,7 +334,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
           <div className="mtile-val" style={{ color: active ? n.color : 'var(--muted)' }}>{valKW(n.val ?? n.w)}<span className="u">kW</span></div>
           {n.row && (
             <div className="mtile-kv">
-              <span>{n.row.k}</span>
+              {n.row.k && <span>{n.row.k}</span>}
               {n.row.on ? <button type="button" className="mini-link" onClick={n.row.on}>{n.row.v}</button> : n.row.v && <b>{n.row.v}</b>}
             </div>
           )}
