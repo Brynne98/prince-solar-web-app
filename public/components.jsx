@@ -258,8 +258,14 @@ function InfoDot({ text }) {
   // aria-describedby ties the bubble to the dot, so a screen reader on the dot hears the
   // explanation instead of an unnamed note.
   const id = React.useId();
+  // On open, shift the 210px bubble so it stays 8px inside the window (SOLAR-26).
+  const place = (e) => {
+    const r = e.currentTarget.getBoundingClientRect(), half = 105, mid = r.left + r.width / 2;
+    const shift = Math.max(8 + half - mid, Math.min(0, window.innerWidth - 8 - half - mid));
+    e.currentTarget.style.setProperty('--shift', Math.round(shift) + 'px');
+  };
   return (
-    <span className="info-dot" tabIndex={0} aria-label="More about this" aria-describedby={id}>
+    <span className="info-dot" tabIndex={0} aria-label="More about this" aria-describedby={id} onMouseEnter={place} onFocus={place}>
       <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
         <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.3" />
         <path d="M6.1 6.3a1.95 1.95 0 1 1 2.8 1.75c-.55.3-.9.65-.9 1.25v.35" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
