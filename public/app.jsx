@@ -324,6 +324,9 @@ function tabsFor(settings) {
 // Account is a page too, reached from the account menu rather than the page list.
 const pageOk = (tabs, id) => id === 'account' || tabs.some(t => t.id === id);
 
+// Back to the top of the page: the frame's body scrolls beside a sidebar, the document on a phone.
+const toTop = () => { document.querySelector('.frame-body')?.scrollTo({ top: 0 }); window.scrollTo({ top: 0 }); };
+
 // The frame around every page: sidebar, header, content, phone bar.
 function Frame({ tabs, tab, onTab, head, account, busy, children }) {
   return (
@@ -378,7 +381,7 @@ function App({ links }) {
   // "Set your rate", "Set pack size", Reconnect: open the page that holds that section
   // (logins are on Account) and flash it once; the section scrolls itself into view.
   const openSettings = (section) => {
-    setFlashSection(section); setTab(section === 'connection' ? 'account' : 'settings'); window.scrollTo({ top: 0 });
+    setFlashSection(section); setTab(section === 'connection' ? 'account' : 'settings'); toTop();
   };
   // The signed-in person, for the account menu: name, initials, email.
   const [user, setUser] = useState({ name: '', initials: '', email: '' });
@@ -548,7 +551,7 @@ function App({ links }) {
 
   const TABS = tabsFor(settings);
   useEffect(() => { if (!pageOk(TABS, tab)) setTab('live'); }, [settings.tabs]);
-  const go = (id) => { setTab(id); window.scrollTo({ top: 0 }); };
+  const go = (id) => { setTab(id); toTop(); };
   const loginDead = links.accounts.some(a => a.status === 'needs_relink');
   const account = { user, plantCount: (me?.plants || []).length, alert: loginDead, onAccount: () => go('account'), active: tab === 'account' };
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} />;

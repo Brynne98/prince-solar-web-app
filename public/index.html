@@ -48,6 +48,8 @@
   [hidden] { display: none !important; }
   /* clip, not hidden: overflow-x hidden on body turns it into a scroll container and kills position: sticky further down */
   html, body { margin: 0; overflow-x: clip; max-width: 100%; }
+  /* no rubber-band bounce past the top or bottom (SOLAR-22) */
+  html, body { overscroll-behavior: none; }
   body {
     background:
       radial-gradient(1200px 600px at 80% -10%, rgba(91,157,255,0.06), transparent 60%),
@@ -105,6 +107,12 @@
      raised neutral surface: green is kept for the data. */
   .frame { --rail-w: 208px; --head-h: 60px; display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100dvh; }
   .frame-body { display: flex; flex-direction: column; min-width: 0; }
+  /* with a sidebar, only the page beside it scrolls, so a wheel over the sidebar
+     moves nothing (SOLAR-22); a phone keeps scrolling the document */
+  @media (min-width: 600px) {
+    .frame { height: 100dvh; }
+    .frame-body { overflow-y: auto; overscroll-behavior: none; }
+  }
   .content { flex: 1; display: flex; flex-direction: column; min-height: 0; width: 100%; max-width: 1360px; padding: 24px 28px 40px; }
   /* > * so a tab whose root is a grid/stack still behaves as it did before */
   .content > * { flex: none; }
