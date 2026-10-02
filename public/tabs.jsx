@@ -487,7 +487,7 @@ function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt }) {
 }
 // "14.2 kWh" → the number, then a smaller unit, so the figure reads first
 function unitSplit(v) {
-  const m = typeof v === 'string' && /^(.*?)\s?(kWh|MWh|GWh|kW|%)$/.exec(v);
+  const m = typeof v === 'string' && /^(.*?)\s?(kWh|MWh|GWh|kW|W|%)$/.exec(v);
   return m ? <>{m[1]}<span className={'mv-unit' + (m[2] === '%' ? ' pct' : '')}>{m[2]}</span></> : v;
 }
 function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendTitle, trendDelta, trendDeltaFmt, loading }) {
@@ -1276,7 +1276,7 @@ function BatteryBody({ snap, settings, energy, onNeedEnergy, today, refreshKey, 
         : { head: 'The grid is off now', note: 'The battery is at ' + soc + '%.' };
     }
     else if (usable < 0.1) offCard = { head: 'Not long', note: 'The battery is at the ' + reserve + '% reserve.' };
-    else if (nightKw > 0.05) offCard = { head: <>About <span className="mono">{fmtHrs(usable / nightKw)}</span></>, note: 'From ' + soc + '% down to the ' + reserve + '% reserve, at the ' + nightKw.toFixed(1) + ' kW the house usually uses at night. Longer while the sun is up.' };
+    else if (nightKw > 0.05) offCard = { head: <>About <span className="mono">{fmtHrs(usable / nightKw)}</span></>, note: 'From ' + soc + '% down to the ' + reserve + '% reserve, at the ' + window.fmtPower(nightKw * 1000) + ' the house usually uses at night. Longer while the sun is up.' };
     else if (hourly) offCard = { head: 'Not known yet', note: 'It needs a few nights of readings first.' };
   }
 
@@ -1433,7 +1433,7 @@ function GridTab(props) {
         <div className="trio">
           <StatTile label="GRID" value="Off-grid" unit="" accent={CC.grid} sub="no utility connection" />
           <StatTile label="SELF-SUFFICIENCY" value={selfSuff} unit="%" accent={CC.soc} bar={selfSuff} sub="everything from solar and battery" />
-          <StatTile label="USED TODAY" value={a.loadToday} unit=" kWh" accent={CC.load} sub="covered without a grid" />
+          <StatTile label="USED TODAY" value={window.fmtEnergyParts(a.loadToday)[0]} unit={' ' + window.fmtEnergyParts(a.loadToday)[1]} accent={CC.load} sub="covered without a grid" />
         </div>
         <Card>
           <SectionTitle>OFF-GRID</SectionTitle>

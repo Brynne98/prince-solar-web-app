@@ -11,14 +11,16 @@ const COLORS = {
 };
 
 // ---- formatting -------------------------------------------------------------
-// Live power is kilowatts. (It read "kWh" for a long time — energy, not power.)
-function fmtPower(w) {
-  if (w == null || isNaN(w)) return '—';
-  return (w / 1000).toFixed(2) + ' kW';
-}
+// Live power: whole watts under 1 kW ("450 W"), kilowatts from there ("1.25 kW") (SOLAR-24).
+// Power is never kWh; that is energy. Chart axes keep kW throughout, one unit per axis.
 function fmtPowerParts(w) {
   if (w == null || isNaN(w)) return ['—', ''];
+  if (Math.abs(w) < 999.5) return [String(Math.round(w) || 0), 'W'];
   return [(w / 1000).toFixed(2), 'kW'];
+}
+function fmtPower(w) {
+  const [v, u] = fmtPowerParts(w);
+  return u ? v + ' ' + u : v;
 }
 // Battery power as shown everywhere: + = powering the house, − = charging, with the
 // words beside the number (battWord), so nobody has to learn the sign. Within ±5 W it is

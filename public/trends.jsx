@@ -11,7 +11,6 @@
 // Data: /api/trends/* (local log; daily/monthly from SunSynk; irradiance from
 // solar_forecast, which the `forecast` Edge Function keeps topped up).
 // ============================================================================
-const kW = (w) => (w == null ? '—' : (w / 1000).toFixed(2) + ' kW');
 // Axis label: whole numbers once the scale is 10+, one decimal below that so a
 // 0.6 kWh day does not read as a column of 0s and 1s.
 const fmtTick = (v, max) => (v >= 1000 ? (v / 1000).toFixed(1) + 'k' : max < 10 ? v.toFixed(1) : String(Math.round(v)));
@@ -81,6 +80,7 @@ function BarChart({ bars, series, labelEvery = 1 }) {
             <text x={m.l - 6} y={y(v) + 3} textAnchor="end" className="ax">{fmtTick(v, niceMax)}</text>
           </g>
         ))}
+        <text x={m.l - 6} y={m.t - 6} textAnchor="end" className="ax" fillOpacity="0.55">kWh</text>
         {bars.map((b, i) => {
           const cx = m.l + slot * (i + 0.5);
           const x0 = cx - groupW / 2;
@@ -172,6 +172,7 @@ function LineChart({ bars, series, labelEvery = 1 }) {
             <text x={m.l - 6} y={y(v) + 3} textAnchor="end" className="ax">{fmtTick(v, niceMax)}</text>
           </g>
         ))}
+        <text x={m.l - 6} y={m.t - 6} textAnchor="end" className="ax" fillOpacity="0.55">kWh</text>
         {series.filter((s) => s.fill).map((s) => (
           <path key={s.key + '-f'} d={area(s.key)} fill={s.color} fillOpacity="0.10" />
         ))}
@@ -299,7 +300,7 @@ function SegmentUsage({ data }) {
               onMouseMove={track(r.def.seg)} onMouseLeave={() => setHover(null)} onTouchStart={track(r.def.seg)}>
               <div className="seg-head">
                 <span className="seg-name">{r.def.name}<span className="seg-range"> · {r.def.range}</span></span>
-                <span className="seg-avg mono">{r.loadKwh.toFixed(1)} kWh<span className="seg-kwh"> · {r.loadKw.toFixed(1)} kW avg</span></span>
+                <span className="seg-avg mono">{r.loadKwh.toFixed(1)} kWh<span className="seg-kwh"> · {window.fmtPower(r.loadKw * 1000)} avg</span></span>
               </div>
               <div className="seg-bar">
                 {r.parts.map((p) => (p.kwh > 0

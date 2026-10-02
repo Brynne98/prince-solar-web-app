@@ -57,7 +57,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
 
   // Detail under each card: one labelled figure ({ k: label, v: value, on: click }),
   // the label small and uppercase, the value in mono, so every card reads the same way.
-  const today = v => (v != null ? { k: 'Today', v: Number(v).toFixed(1) + ' kWh' } : null);
+  const today = v => (v != null ? { k: 'Today', v: window.fmtKwh(Number(v)) } : null);
   // battInfo arrives as "3h 40m to empty" / "1h 55m to full" / "Set pack size"; no time while idle
   const battRow = (() => {
     const m = battInfo && /^(.*) to (empty|full)$/.exec(battInfo);
@@ -96,7 +96,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
 
   const CEIL = 8000, MAXTH = 30;
   const th = w => Math.max(3.5, Math.min(MAXTH, (w / CEIL) * MAXTH + 3.5));
-  const valKW = w => (w / 1000).toFixed(2);
+  const pw = w => window.fmtPowerParts(w);
 
   // One look for every line, desktop and phone: a soft band with dots moving along it,
   // faster with more power. `fixed` is the phone: widths stay in screen pixels where the
@@ -210,7 +210,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
             stroke={n.color} strokeOpacity={active ? 0.6 : 0.22} strokeWidth="1.3" strokeDasharray={n.off ? '5 4' : undefined} />
           {icon(n.icon, x + PL / 2, y + Y.iconC, n.color, active, n.soc, n.off)}
           <text x={tx} y={y + Y.label} className="flow-node-label">{n.label.toUpperCase()}</text>
-          <text x={tx} y={y + Y.val} className="flow-node-val" fill={active ? n.color : 'var(--muted)'}>{valKW(n.val ?? n.w)}<tspan className="flow-node-unit"> kW</tspan></text>
+          <text x={tx} y={y + Y.val} className="flow-node-val" fill={active ? n.color : 'var(--muted)'}>{pw(n.val ?? n.w)[0]}<tspan className="flow-node-unit"> {pw(n.val ?? n.w)[1]}</tspan></text>
           {kv(n.row, tx, y + Y.kv)}
           {foot && foot(tx, y + Y.foot)}
         </g>
@@ -332,7 +332,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
             {miniIcon(n.icon, n.color, n.soc, n.off)}
             <span className="mtile-label">{n.label}</span>
           </div>
-          <div className="mtile-val" style={{ color: active ? n.color : 'var(--muted)' }}>{valKW(n.val ?? n.w)}<span className="u">kW</span></div>
+          <div className="mtile-val" style={{ color: active ? n.color : 'var(--muted)' }}>{pw(n.val ?? n.w)[0]}<span className="u">{pw(n.val ?? n.w)[1]}</span></div>
           {n.row && (
             <div className="mtile-kv">
               {n.row.k && <span>{n.row.k}</span>}
@@ -410,7 +410,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
       ? <> Your <b style={{ color: C.batt }}>battery</b> is powering the home{timeLeft ? <>, with about {timeLeft} left</> : ''}.</>
       : agg.pvNow > 50 ? <> <b style={{ color: C.pv }}>Solar</b> is powering the home.</> : null}</>;
   }
-  else if (gridExport > 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ', charging the battery' : ''} and sending <b style={{ color: C.grid }}>{valKW(gridExport)} kW</b> to the grid.</>;
+  else if (gridExport > 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ', charging the battery' : ''} and sending <b style={{ color: C.grid }}>{window.fmtPower(gridExport)}</b> to the grid.</>;
   // >= home - 50, not > home + 50: a home drawing exactly what the panels make is the
   // commonest sunny-afternoon state and fell through to the vague fallback.
   else if (agg.pvNow > 50 && agg.pvNow >= home.w - 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ' and charging the battery' : ''}.</>;
@@ -419,7 +419,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   else if (hasBatt && agg.battPower > 5 && !charging && gridImport < 50) narrative = agg.pvNow > 50
     ? <><b style={{ color: C.pv }}>Solar</b> and your <b style={{ color: C.batt }}>battery</b> are powering the home.</>
     : <>Your <b style={{ color: C.batt }}>battery</b> is powering the home.</>;
-  else if (gridImport > 50) narrative = <>Pulling <b style={{ color: C.grid }}>{valKW(gridImport)} kW</b> from the grid to meet demand.</>;
+  else if (gridImport > 50) narrative = <>Pulling <b style={{ color: C.grid }}>{window.fmtPower(gridImport)}</b> from the grid to meet demand.</>;
   else if (!hasGrid && agg.pvNow < 50) narrative = <>Off-grid, after dark — the home is running on <b style={{ color: C.batt }}>stored energy</b>.</>;
   else if (!hasBatt) narrative = <><b style={{ color: C.pv }}>Solar</b> covers what it can; the grid covers the rest.</>;
   else narrative = <>Solar, battery and grid are <b>sharing the load</b>.</>;
