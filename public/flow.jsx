@@ -44,11 +44,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   const gridOff = hasGrid && agg.gridPresent === false;
   const gridKnown = hasGrid && agg.gridPresent != null;
   const gridImport = !gridOff && agg.gridPower > 0 ? agg.gridPower : 0;
-  // Export only exists for plants paid to sell (a feed-in rate is set). Every
-  // grid-tied inverter leaks a few hundred watts of backflow when the load drops
-  // faster than it can throttle; on a site that cannot sell that reads as standby.
-  const sells = feat.sells === true;
-  const gridExport = sells && !gridOff && agg.gridPower < 0 ? -agg.gridPower : 0;
+  // Export shows whatever the tariff, as SunSynk's own flow does (SOLAR-38).
+  const gridExport = !gridOff && agg.gridPower < 0 ? -agg.gridPower : 0;
   const hh = (h) => String(h).padStart(2, '0') + ':00';
   // The usual charge at this hour is hover text on the battery's charge %.
   const usualTitle = typicalSoc != null
