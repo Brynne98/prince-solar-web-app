@@ -224,6 +224,24 @@ window.LinkForm = LinkForm;
 window.LinkGate = function LinkGate({ children, fallback = null }) {
   const [checking, setChecking] = React.useState(false);
   const { loading, accounts, error, refresh } = window.useLinkStatus();
+  // The wall tablet's connection drops for minutes at a time, and Chrome on iPad reloads
+  // the page now and then; a reload inside a drop fails both tries and used to sit on
+  // "Couldn't check" until someone tapped it (SOLAR-21). Keep checking while stuck there:
+  // every 15 s, and the moment the tablet is back online or on screen.
+  const stuck = !loading && !!error && !accounts.some(a => (a.plants || []).length);
+  React.useEffect(() => {
+    if (!stuck) return;
+    // One read at a time: a read inside a drop can take its full 20 s.
+    let busy = false;
+    const again = () => {
+      if (busy || document.visibilityState !== 'visible') return;
+      busy = true; refresh().finally(() => { busy = false; });
+    };
+    const timer = setInterval(again, 15000);
+    window.addEventListener('online', again);
+    document.addEventListener('visibilitychange', again);
+    return () => { clearInterval(timer); window.removeEventListener('online', again); document.removeEventListener('visibilitychange', again); };
+  }, [stuck, refresh]);
 
   if (loading) return fallback;
 
