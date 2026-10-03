@@ -2011,6 +2011,23 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   const reserve = Math.min(50, Math.max(5, num(f.battery_reserve_pct) ?? cfg.battery_reserve_pct ?? 20));
   return (
     <>
+      {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
+      <SettingsSection id="tariff" title="Tariff" note="What you pay for electricity, per unit (kWh).">
+        <div className="conn-row sset-row">
+          <label className="conn-text" htmlFor="tariff-import">
+            <span className="conn-user">Electricity rate</span>
+            <span className="conn-meta">{f.tariff_import > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}</span>
+          </label>
+          <div className="conn-actions">
+            <div className="unit-input wide">
+              <input id="tariff-import" className="input mono" type="number" inputMode="decimal" step="0.01" min="0" placeholder="3.40" aria-describedby="tariff-import-unit"
+                     value={f.tariff_import ?? ''} onChange={e => set('tariff_import', e.target.value)} />
+              <span id="tariff-import-unit" className="unit">{sym}/unit</span>
+            </div>
+          </div>
+        </div>
+      </SettingsSection>
+
       <SettingsSection id="plant" title="Plant"
         note="What this plant has: a battery, a grid connection and panels. Auto reads the first two from the inverter, and any choice applies to both.">
         <div className="conn-row sset-row">
@@ -2155,23 +2172,6 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
                       { value: 'discharging', label: 'Discharging', hint: "Positive means it's powering the house." }]} />
         </div>
         </details>
-      </SettingsSection>
-
-      {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
-      <SettingsSection id="tariff" title="Tariff" note="What you pay for electricity, per unit (kWh).">
-        <div className="conn-row sset-row">
-          <label className="conn-text" htmlFor="tariff-import">
-            <span className="conn-user">Electricity rate</span>
-            <span className="conn-meta">{f.tariff_import > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}</span>
-          </label>
-          <div className="conn-actions">
-            <div className="unit-input wide">
-              <input id="tariff-import" className="input mono" type="number" inputMode="decimal" step="0.01" min="0" placeholder="3.40" aria-describedby="tariff-import-unit"
-                     value={f.tariff_import ?? ''} onChange={e => set('tariff_import', e.target.value)} />
-              <span id="tariff-import-unit" className="unit">{sym}/unit</span>
-            </div>
-          </div>
-        </div>
       </SettingsSection>
 
       {(dirty || msg) && (
