@@ -534,17 +534,25 @@ function App({ links }) {
 
   // initial load: who am I and which plant, then the data
   useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); loadBalance(); }); }, []);
-  // auto refresh: live every 60s (matches SunSynk's cadence), today and battery balance every 5 min
+  // auto refresh: live every minute (matches SunSynk's cadence), today and battery balance every
+  // 5th minute. On the clock, not from page load: every open device asks at :15, after the
+  // poller's reading has landed (by ~:06), so devices side by side show the same numbers (SOLAR-33).
   useEffect(() => {
     if (!auto) return;
-    const a = setInterval(() => loadLive(false), 60000);
-    const b = setInterval(() => { loadToday(); refreshEnergy(); loadBalance(); }, 300000);
+    let a;
+    const next = () => { const ms = 60000 - (Date.now() - 15000) % 60000; a = setTimeout(tick, ms < 1000 ? ms + 60000 : ms); };
+    const tick = () => {
+      loadLive(false);
+      if (new Date().getMinutes() % 5 === 0) { loadToday(); refreshEnergy(); loadBalance(); }
+      next();
+    };
+    next();
     // timers sleep with a tablet's screen; catch up the moment it is back or online again
     const wake = () => { if (document.visibilityState === 'visible') { loadLive(false); loadToday(); refreshEnergy(); loadBalance(); } };
     document.addEventListener('visibilitychange', wake);
     window.addEventListener('online', wake);
     return () => {
-      clearInterval(a); clearInterval(b); clearTimeout(liveRetry.current);
+      clearTimeout(a); clearTimeout(liveRetry.current);
       document.removeEventListener('visibilitychange', wake); window.removeEventListener('online', wake);
     };
   }, [auto]);
