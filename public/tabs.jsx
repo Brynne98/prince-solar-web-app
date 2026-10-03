@@ -265,15 +265,15 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
     document.addEventListener('visibilitychange', ask);
     return () => { gone = true; document.removeEventListener('visibilitychange', ask); if (lock) lock.release().catch(() => {}); };
   }, [wall]);
-  // The stacked layout is HTML at phone sizes, so on a wall it is zoomed to fill the room
-  // under the sentence. It is measured at zoom 1 and set back in the same task, so the
-  // observer sees one settled size and cannot feed itself.
+  // Both layouts are HTML at screen sizes, so on a wall the diagram is zoomed to fill the
+  // room under the sentence (SOLAR-39). It is measured at zoom 1 and set back in the same
+  // task, so the observer sees one settled size and cannot feed itself.
   React.useEffect(() => {
     const wrap = flowRef.current;
-    if (!wall || !stacked || !wrap) return;
+    if (!wall || !wrap) return;
     const card = wrap.querySelector('.flow-card');
     const fit = () => {
-      const m = wrap.querySelector('.mflow'), n = wrap.querySelector('.flow-narrative');
+      const m = wrap.querySelector('.mflow, .pflow'), n = wrap.querySelector('.flow-narrative');
       if (!m || !n) return;
       wrap.style.setProperty('--wall-zoom', '1');
       const room = card.clientHeight - n.offsetHeight - parseFloat(getComputedStyle(n).marginBottom);
@@ -282,7 +282,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
       if (z > 0) wrap.style.setProperty('--wall-zoom', z.toFixed(3));
     };
     const ro = new ResizeObserver(fit);
-    [card, wrap.querySelector('.flow-narrative'), wrap.querySelector('.mflow')].forEach(el => el && ro.observe(el));
+    [card, wrap.querySelector('.flow-narrative'), wrap.querySelector('.mflow, .pflow')].forEach(el => el && ro.observe(el));
     return () => { ro.disconnect(); wrap.style.removeProperty('--wall-zoom'); };
   }, [wall, stacked]);
   // remember the dashboard: if we left in fullscreen, re-enter on the first interaction

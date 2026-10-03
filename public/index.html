@@ -285,8 +285,8 @@
      pin both to the top so the title sits as far from the top edge as from the left */
   .flow-card .section-title { align-items: flex-start; }
   /* loading stand-in for .flow-wrap: the summary line (app.jsx), then the diagram, which
-     the wide layout draws 348px tall at every width; the stacked one (flow.jsx, ≤900px) is about 495px */
-  .flow-skel { height: 348px !important; }
+     the wide layout draws 374px tall at every width; the stacked one (flow.jsx, ≤900px) is about 625px */
+  .flow-skel { height: 374px !important; }
   /* a chart's plot area before it can be drawn, at the heights useChartSize picks */
   .chart-skel { height: 300px !important; }
   @media (max-width: 620px) { .chart-skel { height: 220px !important; } }
@@ -295,7 +295,7 @@
   @media (max-width: 620px) { .bars-skel { height: 192px !important; } }
   /* a tile's second line held open at two lines where the real one wraps (SolarSkeleton) */
   @media (max-width: 600px) { .sub-hold-2 { display: block; height: 34px; } }
-  @media (max-width: 900px) { .flow-skel { height: 495px !important; } }
+  @media (max-width: 900px) { .flow-skel { height: 625px !important; } }
   /* legend to plot gets the same gap as date bar to legend */
   .hv-root .legend-row { margin-bottom: 12px; }
   .grow { flex: 1; } .stack { display: flex; flex-direction: column; gap: 20px; }
@@ -369,10 +369,6 @@
   .mini-link { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer;
     text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
   .mini-link:hover { color: var(--text); text-decoration-color: currentColor; }
-  /* the same link inside the power-flow SVG ("Set pack size" on the battery node) */
-  .flow-link { cursor: pointer; text-decoration: underline; text-decoration-color: var(--line-2); }
-  .flow-link:hover { fill: var(--text); }
-  .flow-link:focus-visible { outline: 2px solid var(--line-2); outline-offset: 2px; }
   /* a Settings card flashes once when a link elsewhere sends you to it */
   .sset-flash { animation: sset-flash 1.1s ease-out 0.15s 1; }
   @keyframes sset-flash {
@@ -402,7 +398,6 @@
   /* ---------- flow svg ---------- */
   .flow-fs-wrap { width: 100%; }
   .flow-wrap { width: 100%; }
-  .flow-svg { width: 100%; height: auto; display: block; }
   .flow-fs-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line);
     border-radius: 9px; color: var(--muted); font-size: 12px; padding: 5px 11px; cursor: pointer; transition: .15s; }
   .flow-fs-btn:hover { border-color: var(--line-2); color: var(--text); }
@@ -433,26 +428,60 @@
   .wall .flow-wrap { height: 100%; display: flex; flex-direction: column; justify-content: center; }
   .wall .flow-narrative { flex: none; text-align: center; text-wrap: balance;
     font-size: clamp(18px, 2vmin + 8px, 40px); margin-bottom: clamp(10px, 2.5vmin, 36px); }
-  .wall .flow-svg { flex: 0 1 auto; min-height: 0; }
-  /* the stacked layout is HTML at phone sizes; tabs.jsx sets the zoom that fills the room */
+  /* both layouts are HTML at screen sizes; tabs.jsx sets the zoom that fills the room */
+  .wall .pflow { flex: none; width: 1100px; max-width: none; margin: 0 auto; zoom: var(--wall-zoom, 1); }
   .wall .mflow { flex: none; width: 440px; max-width: none; margin: 0 auto; zoom: var(--wall-zoom, 1); }
   /* slide a whole number of dash-periods so the loop is seamless: 195 = 15 (desktop "2 13") × 13 (mobile "2 11") */
   @keyframes flow { to { stroke-dashoffset: -195; } }
   /* the moving dashes are the one piece of continuous motion on the page */
-  @media (prefers-reduced-motion: reduce) { .flow-svg *, .mflow-links * { animation: none !important; } }
-  /* the boxes' type matches the overview cards above them (SOLAR-16): label, number and unit */
-  .flow-node-label { font: 500 12px var(--display); letter-spacing: 0.1em; fill: var(--muted); }
-  .flow-node-val { font: 600 24px var(--mono); letter-spacing: -0.01em; }
-  .flow-node-unit { font-size: 14px; font-weight: 500; fill-opacity: 0.85; }
-  .flow-node-extra { font: 600 11px var(--mono); fill: var(--batt); }
-  .flow-inv-label { font: 700 11px var(--display); letter-spacing: 0.14em; fill: var(--text); }
-  .flow-sub { font: 500 10px var(--mono); fill: var(--muted); }
-  /* a card's detail figure: small uppercase label, then the value */
-  .flow-kv-k { font: 500 11px var(--display); letter-spacing: 0.1em; fill: var(--dim); }
-  .flow-kv-v { font: 600 12.5px var(--mono); fill: var(--text); }
-  .flow-pct { font: 700 12px var(--mono); }
-  /* the grid card's foot: mains there or gone, beside its dot */
-  .flow-grid-state { font: 500 12.5px var(--display); fill: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { .pflow-lane *, .mflow-links * { animation: none !important; } }
+  /* ---------- power-flow box, shared by both layouts (SOLAR-39) ---------- */
+  /* the type matches the overview cards above (SOLAR-16): label, number and unit */
+  .fbox { border: 1.3px solid var(--line); border-radius: 16px; min-width: 0; overflow: hidden; transition: border-color .2s; }
+  .fbox.off { border-style: dashed; }
+  .fbox-now { display: flex; flex-direction: column; min-width: 0; }
+  .fbox-head { display: flex; align-items: center; gap: 9px; }
+  .fbox-head svg { flex: none; }
+  .fbox-label { font: 500 12px var(--display); letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fbox-val { font: 600 30px var(--mono); letter-spacing: -0.01em; line-height: 1; margin-top: 12px; white-space: nowrap; }
+  .fbox-val .u { font-size: 15px; font-weight: 500; margin-left: 5px; opacity: 0.85; }
+  .fbox-state { font-size: 12.5px; font-weight: 500; color: var(--muted); margin-top: 8px; white-space: nowrap; }
+  .fbox-state b { font: 600 12.5px var(--mono); color: var(--text); margin-left: 5px; }
+  /* the foot sits on the box's bottom edge whatever is above it */
+  .fbox-foot { margin-top: auto; padding-top: 10px; }
+  .fbox-bar { display: flex; gap: 2px; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,0.08); }
+  .fbox-bar i { display: block; height: 100%; border-radius: 3px; min-width: 6px; }   /* a 1% share still reads as a segment */
+  .fbox-split { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 10px; margin-top: 7px; }
+  .fbox-split span { display: flex; flex-direction: column; gap: 2px; }
+  .fbox-split span:last-child:not(:first-child) { align-items: flex-end; }
+  .fbox-split em, .fbox-today span, .fbox-today-h { font: 500 11px var(--display); font-style: normal; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  .fbox-split b { font: 600 12.5px var(--mono); }
+  .fbox-charge { display: flex; align-items: center; gap: 10px; }
+  .fbox-charge .fbox-bar { flex: 1; }
+  .fbox-charge b { font: 700 18px var(--mono); white-space: nowrap; }
+  /* mains there or gone: a green dot, or a hollow grey one */
+  .fbox-grid { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  .fbox-grid i { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ok); }
+  .fbox-grid.off i { box-sizing: border-box; background: none; border: 1.5px solid var(--dim); }
+  .fbox-today { display: flex; flex-direction: column; gap: 12px; }
+  .fbox-today > div:not(.fbox-today-h) { display: flex; flex-direction: column; gap: 3px; }
+  .fbox-today b { font: 600 17px var(--mono); color: var(--text); white-space: nowrap; }
+  .fbox-today b .u { font: 500 11px var(--mono); letter-spacing: 0; text-transform: none; color: var(--muted); margin-left: 4px; }
+
+  /* ---------- wide power-flow: two rows of two, the inverter in a lane between ---------- */
+  .pflow { display: grid; }
+  .pflow-cell { display: grid; min-width: 0; }
+  .pflow .fbox { display: grid; grid-template-columns: minmax(0, 1fr) 148px; }
+  .pflow .fbox-now { padding: 18px 20px 16px; }
+  .pflow .fbox-today { border-left: 1px solid var(--line); background: rgba(255,255,255,0.015); padding: 18px 18px 16px; }
+  .pflow.narrow .fbox { grid-template-columns: minmax(0, 1fr) 116px; }
+  .pflow.narrow .fbox-now { padding: 16px 14px 14px; }
+  .pflow.narrow .fbox-today { padding: 16px 14px 14px; }
+  .pflow.narrow .fbox-val { font-size: 24px; }
+  .pflow.narrow .fbox-val .u { font-size: 14px; }
+  .pflow-lane { position: relative; }
+  .pflow-lane svg { display: block; overflow: visible; }
+  .pflow-inv-label { position: absolute; left: 0; right: 0; text-align: center; font: 700 11px var(--display); letter-spacing: 0.14em; color: var(--text); }
   /* the summary sentence opens the card, above the diagram */
   .flow-narrative { font-size: 17px; line-height: 1.35; color: var(--text); text-wrap: pretty; margin-bottom: 14px; }
   .flow-narrative b { font-weight: 600; }
@@ -461,38 +490,33 @@
   .mflow { display: flex; flex-direction: column; }
   /* on a tablet the stacked layout keeps a phone-ish width instead of stretching the tiles across the card */
   @media (min-width: 601px) { .mflow { width: 100%; max-width: 620px; margin: 0 auto; } }
-  .mflow-sources { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-  .mtile { background: rgba(255,255,255,0.015); border: 1px solid var(--line); border-radius: 14px; padding: 14px; min-width: 0; transition: border-color .2s; }
-  .mtile-head { display: flex; align-items: center; gap: 7px; margin-bottom: 11px; }
-  .mtile-head svg { flex: none; }
-  /* under 360 px a tile is ~58 px inside: the name needs the room more than the icon does */
-  @media (max-width: 359px) { .mtile-head svg { display: none; } }
-  .mtile-label { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .mtile-val { font-family: var(--mono); font-weight: 600; font-size: 21px; letter-spacing: -0.01em; line-height: 1; white-space: nowrap; }
-  .mtile-val .u { font-size: 14px; font-weight: 500; margin-left: 4px; opacity: 0.85; }
-  /* a tile's detail figure: small uppercase label over the value */
-  .mtile-kv { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; min-width: 0; }
-  .mtile-kv span { font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
-  .mtile-kv b { font: 600 12.5px var(--mono); color: var(--text); white-space: nowrap; }
-  /* a link in that slot ("Set pack size") sits flush left like the figures, not centred by the column */
-  .mtile-kv .mini-link { align-self: flex-start; text-align: left; }
-  /* battery charge at the foot of its tile: a strip filled to the level, the % beside it */
-  .mtile-charge { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
-  .mtile-charge b { font: 700 16px var(--mono); white-space: nowrap; }
-  .mtile-strip { flex: 1; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
-  .mtile-strip i { display: block; height: 100%; border-radius: 3px; }
-  /* the grid tile's foot: a green dot while mains is there, a hollow grey one once it has gone */
-  .mtile-grid { display: flex; align-items: center; gap: 7px; margin-top: 8px; font-size: 12px; color: var(--muted); white-space: nowrap; }
-  .mtile-grid i { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ok); }
-  .mtile-grid.off i { box-sizing: border-box; background: none; border: 1.5px solid var(--dim); }
+  .mflow-sources { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  /* a tile: the box with today's figures under a rule instead of beside it */
+  .mflow .fbox { display: flex; flex-direction: column; border-radius: 14px; }
+  .mflow .fbox-now { padding: 13px 13px 12px; flex: 1; }
+  .mflow .fbox-head { gap: 7px; }
+  /* under 360 px a tile is narrow: the name needs the room more than the icon does */
+  @media (max-width: 359px) { .mflow .fbox-head svg { display: none; } }
+  .mflow .fbox-val { font-size: 21px; margin-top: 10px; }
+  .mflow .fbox-val .u { font-size: 14px; margin-left: 4px; }
+  .mflow .fbox-state { font-size: 12px; margin-top: 7px; white-space: normal; }
+  .mflow .fbox-state b { font-size: 12px; margin-left: 4px; white-space: nowrap; }
+  .mflow .fbox-charge b { font-size: 15px; }
+  .mflow .fbox-split span { flex-direction: row; align-items: baseline; gap: 5px; }
+  .mflow .fbox-split span:last-child:not(:first-child) { align-items: baseline; }
+  .mflow .fbox-split { justify-content: flex-start; }
+  .mflow .fbox-split em { font-size: 10.5px; }
+  .mflow .fbox-split b { font-size: 12px; }
+  .mflow .fbox-today { border-top: 1px solid var(--line); padding: 9px 13px 10px; gap: 5px; }
+  .mflow .fbox-today-h { display: none; }
+  .mflow .fbox-today > div:not(.fbox-today-h) { flex-direction: row; justify-content: space-between; align-items: baseline; gap: 6px; }
+  .mflow .fbox-today span { font-size: 10.5px; }
+  .mflow .fbox-today b { font-size: 13px; }
+  .mflow .fbox-today b .u { font-size: 10px; margin-left: 3px; }
   .mflow-links { display: block; width: 100%; height: 72px; overflow: visible; }
   .mflow-inv { display: flex; flex-direction: column; align-items: center; }
   .mflow-inv svg { display: block; }
   .mflow-inv-label { font: 700 12px var(--display); letter-spacing: 0.14em; color: var(--text); margin-top: 8px; }
-  /* where the home's power is coming from: one segment per source, across the Home tile */
-  .mflow-split { display: flex; gap: 2px; height: 5px; margin-top: 10px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,0.08); }
-  .mflow-split i { display: block; height: 100%; min-width: 6px; }   /* a 1% share still reads as a segment */
-  .mflow-split-words { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 6px; font-size: 12px; font-weight: 600; }
 
   /* ---------- trend arrows on overview cards ---------- */
   .trend-badge { font-family: var(--display); font-size: 12px; font-weight: 600; margin-left: 9px; letter-spacing: 0; white-space: nowrap; }
