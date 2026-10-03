@@ -81,10 +81,12 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
     bat: hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: window.battShown(agg.battOut, battPositive),
       icon: 'battery', soc: agg.battSoc, reverse: charging, state: battState, charge: agg.battSoc,
       today: today(['Charged', agg.battChgToday], ['Used', agg.battDischgToday]) },
-    // flows both ways: an export runs the animation back towards the grid
-    grid: hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 5 ? gridExport : gridImport, icon: 'bolt',
-      reverse: gridExport > 5, off: gridOff, known: gridKnown,
-      state: gridOff ? 'No supply' : gridExport > 5 ? 'Sending out' : gridImport > 5 ? 'Drawing' : 'Not drawing',
+    // flows both ways: an export runs the animation back towards the grid and prints
+    // negative (SOLAR-41), as a discharging battery does
+    grid: hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 0 ? gridExport : gridImport,
+      val: gridExport > 0 ? -gridExport : gridImport, icon: 'bolt',
+      reverse: gridExport > 0, off: gridOff, known: gridKnown,
+      state: gridOff ? 'No supply' : gridExport > 0 ? 'Sending out' : gridImport > 0 ? 'Drawing' : 'Not drawing',
       today: today(['Bought', agg.gridFromToday ?? 0], ['Sent out', agg.gridToToday ?? 0]) },
     home: { key: 'home', label: 'Home', color: C.load, w: agg.loadNow, icon: 'home',
       split: [['Solar', C.pv, solarIn], ['Battery', C.batt, battIn], ['Grid', C.grid, gridIn]],
@@ -98,8 +100,9 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   // faster with more power. `fixed` is the phone: widths stay in screen pixels where the
   // drawing is stretched to fit (preserveAspectRatio="none"), and the band is slimmer.
   // `broken` is the grid's line once mains has gone: grey and dashed.
+  // Any flow at all moves, however small (SOLAR-41): a 5 W dusk trickle is real.
   const flowLine = (d, color, w, key, reverse, fixed, broken) => {
-    const active = w > 5;
+    const active = w > 0;
     const dur = Math.max(0.9, 3.2 - (Math.min(w, CEIL) / CEIL) * 2.3);
     const ve = fixed ? 'non-scaling-stroke' : undefined;
     return (
@@ -174,7 +177,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   // (share bar, charge strip or grid on/off), then today's figures. Tinted and outlined in
   // its colour while power moves, faint when idle, dashed once the grid has gone.
   const box = n => {
-    const active = n.w > 5;
+    const active = n.w > 0;
     const [v, u] = pw(n.val ?? n.w);
     return (
       <div className={'fbox' + (n.off ? ' off' : '')} key={n.key}
