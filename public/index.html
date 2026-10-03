@@ -731,7 +731,6 @@
   .sset .field-row { grid-template-columns: 1fr 1fr; gap: 14px 20px; }
   .sset .field { margin-bottom: 0; }
   .sset .field-row .field-note { margin-top: 8px; }
-  .sset .range { margin-top: 14px; }
   /* toggle rows keep the login rows' rhythm: 14px, no rule above the first, nothing under the last.
      (`:first-of-type` never matched: the field's own <label> is the first label in the field.) */
   .sset .toggle-row { padding: 14px 0; }
@@ -792,10 +791,6 @@
   .panel-sum.empty, .panel-sum.empty .mono { color: var(--dim); }   /* nothing entered yet: the total steps back */
   .input[aria-invalid="true"], .input[aria-invalid="true"]:focus { border-color: var(--load); }
   /* reserve's slider runs the row's full width under its name and box, filled to the value */
-  .reserve-slider { flex-basis: 100%; min-width: 0; padding-top: 4px; }
-  .sset .reserve-slider .range { display: block; margin-top: 0; background: linear-gradient(to right, var(--soc) var(--fill, 0%), rgba(255,255,255,0.1) var(--fill, 0%)); }
-  .reserve-scale { display: flex; justify-content: space-between; margin-top: 10px; font-family: var(--mono); font-size: 11px; color: var(--dim); }
-  .reserve-slider .range:focus-visible { outline: 2px solid var(--pv); outline-offset: 6px; }   /* the base .range drops the outline */
   /* pick one of a few (Plant, Battery, Display): described tiles across the row, native radios underneath */
   .choice-tiles { flex-basis: 100%; display: grid; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); gap: 12px; }
   .sset-choice .choice-tiles { margin-top: 12px; }
@@ -895,11 +890,6 @@
     caret-color: var(--text);
     transition: background-color 9999s ease-in-out 0s;
   }
-  .range { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 4px;
-    background: rgba(255,255,255,0.1); outline: none; margin: 6px 0 2px; }
-  .range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%;
-    background: var(--soc); cursor: pointer; border: 3px solid var(--bg); box-shadow: 0 0 0 1px var(--soc); }
-  .range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--soc); cursor: pointer; border: 3px solid var(--bg); }
   .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid var(--line); }
   .toggle-row:first-of-type { border-top: none; }
   .toggle-text { display: flex; flex-direction: column; gap: 3px; }

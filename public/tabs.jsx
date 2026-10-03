@@ -2007,12 +2007,10 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   // what Auto knows comes from the saved row, never from an unsaved pick
   const featureAutoHint = (k, yes, no) => cfg.features_source === 'detected' ? (cfg[k] ? yes : no)
     : cfg.features_source === 'user' ? 'Reads it from the inverter.' : 'Still checking.';
-  // where the reserve slider sits: the box while it holds a number, else the saved value
-  const reserve = Math.min(50, Math.max(5, num(f.battery_reserve_pct) ?? cfg.battery_reserve_pct ?? 20));
   return (
     <>
       {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
-      <SettingsSection id="tariff" title="Tariff" note="What you pay for electricity, per unit (kWh).">
+      <SettingsSection id="tariff" title="Tariff">
         <div className="conn-row sset-row">
           <label className="conn-text" htmlFor="tariff-import">
             <span className="conn-user">Electricity rate</span>
@@ -2028,22 +2026,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
         </div>
       </SettingsSection>
 
-      <SettingsSection id="plant" title="Plant"
-        note="What this plant has: a battery, a grid connection and panels. Auto reads the first two from the inverter, and any choice applies to both.">
-        <div className="conn-row sset-row">
-          <div className="conn-text"><span id="plant-batt-q" className="conn-user">Does this plant have a battery?</span></div>
-          <ChoiceTiles name="plant-batt" labelledBy="plant-batt-q" value={featureValue('has_battery')} onChange={v => pickFeature('has_battery', v)}
-            options={[{ value: 'auto', label: 'Auto', hint: featureAutoHint('has_battery', 'Found a battery.', 'Found no battery.') },
-                      { value: true, label: 'Yes', hint: 'Batteries are connected.' },
-                      { value: false, label: 'No', hint: 'No batteries connected.' }]} />
-        </div>
-        <div className="conn-row sset-row">
-          <div className="conn-text"><span id="plant-grid-q" className="conn-user">Is it connected to the grid?</span></div>
-          <ChoiceTiles name="plant-grid" labelledBy="plant-grid-q" value={featureValue('has_grid')} onChange={v => pickFeature('has_grid', v)}
-            options={[{ value: 'auto', label: 'Auto', hint: featureAutoHint('has_grid', 'Found a grid connection.', 'Found no grid connection.') },
-                      { value: true, label: 'Connected', hint: 'Wired to the utility.' },
-                      { value: false, label: 'Off-grid', hint: 'No utility connection.' }]} />
-        </div>
+      <SettingsSection id="plant" title="Plant">
         <div className="conn-row sset-row">
           <div className="conn-text">
             <span id="plant-kwp-q" className="conn-user">Panel capacity</span>
@@ -2102,9 +2085,27 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
             </div>
           )}
         </div>
+        {/* Auto reads both from the inverter; a choice on either pins both (features_source) */}
+        <details className="adv">
+        <summary>Inverter details</summary>
+        <div className="conn-row sset-row">
+          <div className="conn-text"><span id="plant-batt-q" className="conn-user">Does this plant have a battery?</span></div>
+          <ChoiceTiles name="plant-batt" labelledBy="plant-batt-q" value={featureValue('has_battery')} onChange={v => pickFeature('has_battery', v)}
+            options={[{ value: 'auto', label: 'Auto', hint: featureAutoHint('has_battery', 'Found a battery.', 'Found no battery.') },
+                      { value: true, label: 'Yes', hint: 'Batteries are connected.' },
+                      { value: false, label: 'No', hint: 'No batteries connected.' }]} />
+        </div>
+        <div className="conn-row sset-row">
+          <div className="conn-text"><span id="plant-grid-q" className="conn-user">Is it connected to the grid?</span></div>
+          <ChoiceTiles name="plant-grid" labelledBy="plant-grid-q" value={featureValue('has_grid')} onChange={v => pickFeature('has_grid', v)}
+            options={[{ value: 'auto', label: 'Auto', hint: featureAutoHint('has_grid', 'Found a grid connection.', 'Found no grid connection.') },
+                      { value: true, label: 'Connected', hint: 'Wired to the utility.' },
+                      { value: false, label: 'Off-grid', hint: 'No utility connection.' }]} />
+        </div>
+        </details>
       </SettingsSection>
 
-      <SettingsSection id="battery" title="Battery" note="How big the battery is, and how the inverter reports it.">
+      <SettingsSection id="battery" title="Battery">
         {/* rows like Logins and Account: name and hint on the left, control on the right, a rule between */}
         <div className="conn-row sset-row">
           <label className="conn-text" htmlFor="batt-kwh">
@@ -2124,7 +2125,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
             <span className="conn-user">Reserve</span>
             <span className="conn-meta">Discharging stops at this level.</span>
           </label>
-          {/* type in the box or drag; an edited box settles into 5 to 50 when it loses focus */}
+          {/* an edited box settles into 5 to 50 when it loses focus */}
           <div className="conn-actions">
             <div className="unit-input">
               <input id="batt-reserve" className="input mono" type="number" inputMode="numeric" min="5" max="50" step="1" aria-describedby="batt-reserve-unit"
@@ -2136,12 +2137,6 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
                      }} />
               <span id="batt-reserve-unit" className="unit">%</span>
             </div>
-          </div>
-          <div className="reserve-slider">
-            <input className="range" type="range" min="5" max="50" step="1" aria-label="Reserve slider"
-                   style={{ '--fill': ((reserve - 5) / 45 * 100) + '%' }}
-                   value={reserve} onChange={e => set('battery_reserve_pct', Number(e.target.value))} />
-            <div className="reserve-scale" aria-hidden="true"><span>5%</span><span>50%</span></div>
           </div>
         </div>
         {/* What the inverters report, folded away: set once, if ever */}
