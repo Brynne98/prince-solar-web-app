@@ -759,12 +759,10 @@
   .cap-switch { flex-basis: 100%; margin-top: 2px; }   /* the switch leads the boxes it governs */
   /* panel capacity: the Total box, or the By panel rows, under the row's name and switch */
   .cap-body { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-  /* the list is one object: an inset well the width of its rows, so the total's rule runs the
-     width of the rows and no further. On phones the card is frame enough and the border would
-     cost the boxes their room, so it flattens. */
-  .panel-block { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: max-content; max-width: 100%;
-    padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.015); }
-  @media (max-width: 600px) { .panel-block { padding: 0; border: none; background: none; } }
+  .cap-text { flex: 1 1 auto; min-width: 0; }
+  .sset-row .conn-text > .cap-head { width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .cap-kw { font-size: 15px; color: var(--text); font-variant-numeric: tabular-nums; }
+  .cap-kw.empty { color: var(--dim); }
   .panel-add { background: none; border: none; padding: 0; color: var(--pv); font-size: 13px; font-weight: 600; cursor: pointer; }
   .panel-add:hover { text-decoration: underline; text-underline-offset: 3px; }
   .panel-add:focus-visible { outline: 2px solid var(--pv); outline-offset: 3px; border-radius: 3px; }
@@ -774,21 +772,17 @@
   .cap-total { flex-direction: row; align-items: center; gap: 12px; }   /* the error sits beside the box, so it moves nothing */
   /* By panel: count × watts and a remove per row. The two box columns give way on the narrowest
      phones rather than push the remove out of the card. */
-  .panel-list { display: grid; grid-template-columns: minmax(0, 112px) min-content minmax(0, 96px) min-content; align-items: center; gap: 8px; width: max-content; max-width: 100%; }
+  .panel-list { display: grid; grid-template-columns: minmax(0, 76px) min-content minmax(0, 96px) min-content; align-items: center; gap: 8px; width: max-content; max-width: 100%; }
   .panel-row { display: contents; }
   .panel-list .unit-input { width: auto; }
-  .unit-input.panel-count .input { padding-right: 60px; }   /* room for "panels" */
+  .panel-of { font-size: 13px; color: var(--muted); white-space: nowrap; }
   .unit-input.panel-watts .input { padding-right: 32px; }   /* room for "W" */
-  .panel-times { color: var(--dim); }
-  @media (max-width: 355px) { .panel-list { grid-template-columns: minmax(0, 100px) min-content minmax(0, 76px) min-content; } }
+  @media (max-width: 355px) { .panel-list { grid-template-columns: minmax(0, 64px) min-content minmax(0, 84px) min-content; } }
   .panel-del { width: 32px; height: 32px; display: grid; place-items: center; padding: 0; background: none; border: none; border-radius: 7px; color: var(--muted); cursor: pointer; transition: color .15s; }
   .panel-del:hover { color: var(--text); }
   .panel-del:focus-visible { outline: 2px solid var(--pv); outline-offset: -2px; }
   @media (max-width: 600px) { .panel-del { width: 44px; height: 44px; } }   /* a finger-sized remove */
   .cap-body .cap-err { min-height: 18px; }   /* the error's slot, kept even when there is none */
-  .panel-sum { width: 100%; display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line-2); font-size: 13px; color: var(--muted); }
-  .panel-sum .mono { font-size: 14px; color: var(--text); }
-  .panel-sum.empty, .panel-sum.empty .mono { color: var(--dim); }   /* nothing entered yet: the total steps back */
   .input[aria-invalid="true"], .input[aria-invalid="true"]:focus { border-color: var(--load); }
   /* reserve's slider runs the row's full width under its name and box, filled to the value */
   /* pick one of a few (Plant, Battery, Display): described tiles across the row, native radios underneath */

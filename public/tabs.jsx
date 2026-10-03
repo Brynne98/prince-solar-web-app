@@ -1949,6 +1949,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   const rowShown = (r, i) => i !== capEditing && filled(r);
   const badRow = panelRows.find((r, i) => rowShown(r, i) && !rowOk(r));
   const boxMsg = (v, empty, fraction, range) => (v ?? '') === '' ? empty : Number.isInteger(Number(v)) ? range : fraction;
+  const capKw = capMode === 'total' ? (num(f.system_kwp) || 0) : panelWatts / 1000;
   const capErr = capMode === 'total' ? (capEditing !== 'total' && !totalOk ? 'Enter more than 0 kW.' : null)
     : !badRow ? null
     : !whole(badRow.count, 1, 2000) ? boxMsg(badRow.count, 'Enter the number of panels.', 'Enter a whole number of panels.', 'Enter 1 to 2000 panels.')
@@ -2008,15 +2009,17 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
 
       <SettingsSection id="plant" title="Plant">
         <div className="conn-row sset-row">
-          <div className="conn-text">
-            <span id="plant-kwp-q" className="conn-user">Panel capacity</span>
-            <span className="conn-meta">What all the panels can make in full sun.</span>
+          <div className="conn-text cap-text">
+            {/* the answer sits on the label's line in both modes and at every width, so it reads before the boxes */}
+            <span className="cap-head"><span id="plant-kwp-q" className="conn-user">Solar panels</span>
+              <span className={'cap-kw mono' + (capKw > 0 ? '' : ' empty')} aria-live="polite">{capKw > 0 ? +capKw.toFixed(2) + ' kW' : '— kW'}</span></span>
+            <span className="conn-meta">What they make in full sun.</span>
           </div>
           {/* The switch belongs to what it switches, so it sits over the boxes on the left
               rather than alone at the far edge of a wide card. */}
           <div className="cap-switch">
             <Segmented size="sm" value={capMode} onChange={setCapMode}
-              options={[{ value: 'total', label: 'Total' }, { value: 'panels', label: 'By panel' }]} />
+              options={[{ value: 'panels', label: 'Panels' }, { value: 'total', label: 'Total kW' }]} />
           </div>
           {capMode === 'total' ? (
             <div className="cap-body cap-total" onBlur={capBlur}>
@@ -2030,8 +2033,6 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
             </div>
           ) : (
             <div className="cap-body">
-              {/* the block is as wide as the rows, so the total's rule runs under them */}
-              <div className="panel-block">
               <div className="panel-list" ref={listRef}>
                 {panelRows.map((r, i) => {
                   const countBad = rowShown(r, i) && !whole(r.count, 1, 2000), wattsBad = rowShown(r, i) && !whole(r.watts, 50, 1000);
@@ -2040,9 +2041,8 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
                       <div className="unit-input panel-count">
                         <input className="input mono" type="number" inputMode="numeric" min="1" max="2000" step="1" placeholder="20" aria-label={'Panels, row ' + (i + 1)}
                                aria-invalid={countBad} aria-describedby={countBad ? 'cap-err' : undefined} value={r.count ?? ''} onChange={e => setRow(i, 'count', e.target.value)} />
-                        <span className="unit" aria-hidden="true">panels</span>
                       </div>
-                      <span className="panel-times" aria-hidden="true">×</span>
+                      <span className="panel-of" aria-hidden="true">panels of</span>
                       <div className="unit-input panel-watts">
                         <input className="input mono" type="number" inputMode="numeric" min="50" max="1000" step="1" placeholder="450" aria-label={'Watts per panel, row ' + (i + 1)}
                                aria-invalid={wattsBad} aria-describedby={wattsBad ? 'cap-err' : undefined} value={r.watts ?? ''} onChange={e => setRow(i, 'watts', e.target.value)} />
@@ -2058,10 +2058,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
               </div>
               {/* always there, so an error arriving on blur never moves the button being clicked */}
               <p id="cap-err" className="cap-err" aria-live="polite">{capErr}</p>
-              <button type="button" className="panel-add" onClick={() => { set('panel_groups', [...panelRows, { count: '', watts: '' }]); focusRow(panelRows.length); }}>Add panels</button>
-              {/* not "Total": that word is the other way of entering it, on the switch above */}
-              <div className={'panel-sum' + (panelWatts > 0 ? '' : ' empty')}><span>Comes to</span><span className="mono">{+(panelWatts / 1000).toFixed(3)} kW</span></div>
-              </div>
+              <button type="button" className="panel-add" onClick={() => { set('panel_groups', [...panelRows, { count: '', watts: '' }]); focusRow(panelRows.length); }}>Add another panel size</button>
             </div>
           )}
         </div>
