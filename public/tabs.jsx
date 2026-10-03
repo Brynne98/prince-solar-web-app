@@ -409,12 +409,12 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
               <FsEnterIcon /><span>Fullscreen</span>
             </button>
           }>POWER FLOW</SectionTitle>}
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={{ ...feat, sells: rateExp > 0 }} wall={wall} />
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={{ ...feat, sells: rateExp > 0 }} wall={wall} battPositive={settings.battPositive} />
         </Card>
       </div>
 
       <Card className="chart-card">
-        <window.HistoryView today={today} refreshKey={refreshKey} />
+        <window.HistoryView today={today} refreshKey={refreshKey} battPositive={settings.battPositive} />
       </Card>
 
       <div className="overview-section">
@@ -1368,7 +1368,7 @@ function BatteryBody({ snap, settings, energy, onNeedEnergy, today, refreshKey, 
               <div className="mini-panel" key={inv.sn}>
                 <div className="mp-head"><span className="mono">{inv.alias}</span><span className="dim mono">{inv.numberOfBatteries} × pack · {inv.battCap} Ah</span></div>
                 <div className="mp-grid">
-                  <Metric label="Power" value={fmtPower(battShown(inv.battOut))} unit={battWord(inv.battOut) && ' ' + battWord(inv.battOut)} accent={CC.batt} />
+                  <Metric label="Power" value={fmtPower(battShown(inv.battOut, settings.battPositive))} unit={battWord(inv.battOut) && ' ' + battWord(inv.battOut)} accent={CC.batt} />
                   <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />
                   <Metric label="Voltage" value={inv.battVolt.toFixed(1)} unit=" V" />
                   <Metric label="Temp" value={t != null ? inv.battTemp.toFixed(1) : 'bad sensor'} unit={t != null ? ' °C' : ''} accent={t == null ? CC.load : null} />
@@ -1666,7 +1666,7 @@ function InvertersTab({ snap, settings, refreshKey }) {
               <div className="inv-grid">
                 <Metric label="Solar" value={fmtPower(inv.pvNow)} accent={CC.pv} />
                 <Metric label="Output" value={fmtPower(inv.output)} />
-                {hasBatt && <Metric label="Battery" value={fmtPower(battShown(inv.battOut))} unit={battWord(inv.battOut) && ' ' + battWord(inv.battOut)} accent={CC.batt} />}
+                {hasBatt && <Metric label="Battery" value={fmtPower(battShown(inv.battOut, settings.battPositive))} unit={battWord(inv.battOut) && ' ' + battWord(inv.battOut)} accent={CC.batt} />}
                 {hasBatt && <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />}
                 {hasGrid && <Metric label={inv.grid < -5 ? 'Grid (export)' : 'Grid'} value={fmtPower(Math.abs(inv.grid))} accent={CC.grid} />}
                 <Metric label="Home" value={fmtPower(inv.load)} accent={CC.load} />
@@ -2249,6 +2249,13 @@ function AccountTab({ settings, setSettings, onPlantConfigSaved, flash, onFlashe
           {PAGES.map(([k, l, h]) => (
             <Toggle key={k} label={l} hint={h} checked={settings.tabs[k]} onChange={v => setSettings(s => ({ ...s, tabs: { ...s.tabs, [k]: v } }))} />
           ))}
+        </SettingsSection>
+        <SettingsSection id="display" title="Display">
+          <div className="conn-row sset-row">
+            <div className="conn-text"><span id="batt-power-q" className="conn-user">Battery power is positive when</span></div>
+            <ChoiceTiles name="batt-power" labelledBy="batt-power-q" value={settings.battPositive} onChange={v => setSettings(s => ({ ...s, battPositive: v }))}
+              options={[{ value: 'discharge', label: 'Powering the house' }, { value: 'charge', label: 'Charging' }]} />
+          </div>
         </SettingsSection>
         <DeleteAccountSection email={email} />
         <div className="app-version mono">{window.APP_VERSION}</div>

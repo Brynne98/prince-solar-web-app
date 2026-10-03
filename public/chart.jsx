@@ -411,7 +411,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
 }
 window.InverterHistoryChart = InverterHistoryChart;
 
-function HistoryView({ today, refreshKey, locked }) {
+function HistoryView({ today, refreshKey, locked, battPositive }) {
   const C = window.COLORS;
   const [vis, setVis] = React.useState({ pv: true, batt: true, load: true, grid: true, soc: true });
   const [hover, setHover] = React.useState(null);
@@ -462,9 +462,10 @@ function HistoryView({ today, refreshKey, locked }) {
 
   const dayData = isToday ? today : pastDay;
   const raw = (dayData && dayData.points) || [];
-  // The battery series is + = powering the house and idle reads 0. Gaps stay null.
-  const pts = React.useMemo(() => raw.map(p => (p.batt == null ? p : { ...p, batt: window.battShown(p.batt) })),
-    [dayData]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The battery series is + = powering the house; Account → Display can flip it, and idle
+  // reads 0. Gaps stay null. The range totals below read `raw`, so they never flip.
+  const pts = React.useMemo(() => raw.map(p => (p.batt == null ? p : { ...p, batt: window.battShown(p.batt, battPositive) })),
+    [dayData, battPositive]); // eslint-disable-line react-hooks/exhaustive-deps
   const real = pts.filter(p => p.pv != null); // anything with data (est = cloud-sourced, drawn dotted)
   const hasData = real.length > 1;
 
@@ -646,7 +647,7 @@ function HistoryView({ today, refreshKey, locked }) {
     const left = tipLeftFor(px, width);
     const rows = [
       ['Solar', p.pv, C.pv, 'W'],
-      ['Battery', p.batt, C.batt, 'W'], // + = powering the house
+      ['Battery', p.batt, C.batt, 'W'], // signed the way Account → Display says
       ['Grid', p.grid, C.grid, 'W'], // signed: − = exporting
       ['Home', p.load, C.load, 'W'],
       ['Charge', p.soc, C.soc, '%'],

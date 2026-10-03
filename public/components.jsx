@@ -22,13 +22,13 @@ function fmtPower(w) {
   const [v, u] = fmtPowerParts(w);
   return u ? v + ' ' + u : v;
 }
-// Battery power as shown everywhere: + = powering the house, − = charging, with the
-// words beside the number (battWord), so nobody has to learn the sign. Within ±5 W it is
-// idle and shows 0, never −0.00. The display preference that flipped it is gone (SOLAR-13).
-function battShown(w) {
+// Battery power the way the owner reads it (Account → Display). `w` is + = powering the
+// house; 'charge' flips it so charging reads +. The words beside the number (battWord) take
+// the unflipped `w`. Within ±5 W it is idle and shows 0, never −0.00.
+function battShown(w, pref) {
   if (w == null || isNaN(w)) return w;
   if (Math.abs(w) <= 5) return 0;
-  return w;
+  return pref === 'charge' ? -w : w;
 }
 function battWord(w) {
   if (w == null || isNaN(w) || Math.abs(w) <= 5) return '';

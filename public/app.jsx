@@ -6,8 +6,8 @@
 const { useState, useEffect, useRef, useCallback } = React;
 
 const DEFAULT_SETTINGS = {
-  // battPositive (which way round battery power reads) was here; it is gone (SOLAR-13):
-  // discharging always reads +, with the words beside it.
+  // which way round battery power reads: 'discharge' = + powering the house, 'charge' = + charging
+  battPositive: 'discharge',
   // battCapacity and reserve used to live here. They are facts about the
   // installation, not per-device preferences, so they now live in app_config and
   // arrive on the snapshot as `config` — one editable copy, shared with the phone
@@ -407,7 +407,7 @@ function App({ links }) {
   useEffect(() => {
     localStorage.setItem('synsynk.settings', JSON.stringify(settings));
     if (!prefsLoaded.current) return;
-    const t = setTimeout(() => window.savePrefs({ tabs: settings.tabs }).catch(() => {}), 600);
+    const t = setTimeout(() => window.savePrefs({ battPositive: settings.battPositive, tabs: settings.tabs }).catch(() => {}), 600);
     return () => clearTimeout(t);
   }, [settings]);
   useEffect(() => { localStorage.setItem('synsynk.tab', tab); }, [tab]);
@@ -473,7 +473,9 @@ function App({ links }) {
       const cfg = (m.plants || []).find(p => p.id === wanted)?.config;
       window.setCurrentPlant(wanted, cfg?.currency);
       setPlantId(wanted);
-      if (m.prefs && m.prefs.tabs) setSettings(s => ({ ...s, tabs: { ...s.tabs, ...m.prefs.tabs } }));
+      if (m.prefs && (m.prefs.battPositive || m.prefs.tabs)) {
+        setSettings(s => ({ ...s, ...(m.prefs.battPositive ? { battPositive: m.prefs.battPositive } : {}), tabs: { ...s.tabs, ...(m.prefs.tabs || {}) } }));
+      }
       prefsLoaded.current = true;
       // how much history this plant has — drives the "collecting your first day" copy
       window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
