@@ -1182,7 +1182,7 @@ function BatteryTab(props) {
       <div className="stack">
         <Card>
           <SectionTitle>BATTERY</SectionTitle>
-          <div className="field-note" style={{ marginTop: 0 }}>This plant has no battery — the inverter reports no pack. If one has just been fitted, set Battery to Yes under Settings → Plant.</div>
+          <div className="field-note" style={{ marginTop: 0 }}>This plant has no battery — the inverter reports no pack. A newly fitted battery shows here once the inverter reports it.</div>
         </Card>
       </div>
     );
@@ -1437,7 +1437,7 @@ function GridTab(props) {
         </div>
         <Card>
           <SectionTitle>OFF-GRID</SectionTitle>
-          <div className="field-note" style={{ marginTop: 0 }}>The inverter reports no mains voltage and no import, so this tab has nothing to bill. If a grid connection is added later, set Grid to Connected under Settings → Plant.</div>
+          <div className="field-note" style={{ marginTop: 0 }}>The inverter reports no mains voltage and no import, so this tab has nothing to bill. A new grid connection shows here once the inverter sees it.</div>
         </Card>
       </div>
     );
@@ -1975,18 +1975,9 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
           : { system_kwp: null, panel_groups: null }),
         tariff_import: num(f.tariff_import) ?? 0,
         battery_kwh: num(f.battery_kwh),
-        // untouched, a stored reserve outside the slider's range is kept; edited, it is held to 5..50 even if the box was never left
+        // untouched, a stored reserve outside 5..50 is kept; edited, it is held to 5..50 even if the box was never left
         battery_reserve_pct: num(f.battery_reserve_pct) === (cfg.battery_reserve_pct ?? null) ? (cfg.battery_reserve_pct ?? 20)
           : Math.min(50, Math.max(5, Math.round(num(f.battery_reserve_pct) ?? cfg.battery_reserve_pct ?? 20))),
-        battery_banks: f.battery_banks || 'per-inverter',
-        // Detected answers go out only when the owner touched them. Detection can rewrite them
-        // while this page is open, and sending the stale copy back would read to the triggers as
-        // the owner's choice (0041, 0042). The triggers also mark a choice as the owner's only
-        // when its value changes, so confirming what detection found says so outright.
-        ...(f.batt_positive_means !== cfg.batt_positive_means || f.batt_sign_source !== cfg.batt_sign_source
-          ? { batt_positive_means: f.batt_positive_means ?? null, ...(f.batt_sign_source === 'user' ? { batt_sign_source: 'user' } : {}) } : {}),
-        ...(f.has_battery !== cfg.has_battery || f.has_grid !== cfg.has_grid || f.features_source !== cfg.features_source
-          ? { has_battery: f.has_battery ?? null, has_grid: f.has_grid ?? null, ...(f.features_source === 'user' ? { features_source: 'user' } : {}) } : {}),
       };
       await window.savePlantConfig(plant.id, patch);
       setMsg('Saved.'); onSaved && onSaved();
@@ -1996,17 +1987,6 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
 
   if (!plant) return <SettingsSection id="plant" title="Plant"><div className="field-note">No plant connected yet.</div></SettingsSection>;
   const sym = window.moneySymbol ? window.moneySymbol() : (f.currency || '');
-  // Battery and grid show Auto until the owner pins an answer. The database pins both flags
-  // as soon as either is chosen (0042), so a pick can take the other question off Auto too.
-  const featureValue = (k) => f.features_source === 'user' && f[k] != null ? f[k] : 'auto';
-  // Auto hands both back, as the trigger does: to what detection found when the saved row was
-  // never pinned (so an already-selected Auto changes nothing), else to detection itself
-  const pickFeature = (k, v) => setF(x => v !== 'auto' ? { ...x, [k]: v, features_source: 'user' }
-    : cfg.features_source === 'user' ? { ...x, has_battery: null, has_grid: null, features_source: 'default' }
-    : { ...x, has_battery: cfg.has_battery, has_grid: cfg.has_grid, features_source: cfg.features_source });
-  // what Auto knows comes from the saved row, never from an unsaved pick
-  const featureAutoHint = (k, yes, no) => cfg.features_source === 'detected' ? (cfg[k] ? yes : no)
-    : cfg.features_source === 'user' ? 'Reads it from the inverter.' : 'Still checking.';
   return (
     <>
       {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
@@ -2085,24 +2065,6 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
             </div>
           )}
         </div>
-        {/* Auto reads both from the inverter; a choice on either pins both (features_source) */}
-        <details className="adv">
-        <summary>Inverter details</summary>
-        <div className="conn-row sset-row">
-          <div className="conn-text"><span id="plant-batt-q" className="conn-user">Does this plant have a battery?</span></div>
-          <ChoiceTiles name="plant-batt" labelledBy="plant-batt-q" value={featureValue('has_battery')} onChange={v => pickFeature('has_battery', v)}
-            options={[{ value: 'auto', label: 'Auto', hint: featureAutoHint('has_battery', 'Found a battery.', 'Found no battery.') },
-                      { value: true, label: 'Yes', hint: 'Batteries are connected.' },
-                      { value: false, label: 'No', hint: 'No batteries connected.' }]} />
-        </div>
-        <div className="conn-row sset-row">
-          <div className="conn-text"><span id="plant-grid-q" className="conn-user">Is it connected to the grid?</span></div>
-          <ChoiceTiles name="plant-grid" labelledBy="plant-grid-q" value={featureValue('has_grid')} onChange={v => pickFeature('has_grid', v)}
-            options={[{ value: 'auto', label: 'Auto', hint: featureAutoHint('has_grid', 'Found a grid connection.', 'Found no grid connection.') },
-                      { value: true, label: 'Connected', hint: 'Wired to the utility.' },
-                      { value: false, label: 'Off-grid', hint: 'No utility connection.' }]} />
-        </div>
-        </details>
       </SettingsSection>
 
       <SettingsSection id="battery" title="Battery">
@@ -2139,34 +2101,6 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
             </div>
           </div>
         </div>
-        {/* What the inverters report, folded away: set once, if ever */}
-        <details className="adv">
-        <summary>Inverter details</summary>
-        {/* battery_banks: 'shared' means every inverter reads the same batteries, so charge counts once */}
-        <div className="conn-row sset-row">
-          <div className="conn-text"><span id="batt-banks-q" className="conn-user">Do the inverters share batteries?</span></div>
-          <ChoiceTiles name="batt-banks" labelledBy="batt-banks-q" value={f.battery_banks || 'per-inverter'} onChange={v => set('battery_banks', v)}
-            options={[{ value: 'shared', label: 'Shared', hint: 'Every inverter reads the same batteries.' },
-                      { value: 'per-inverter', label: 'Separate', hint: 'Each inverter has its own batteries.' }]} />
-        </div>
-        <div className="conn-row sset-row">
-          <div className="conn-text">
-            <span id="batt-sign-q" className="conn-user">Positive battery number</span>
-            <span className="conn-meta">Change only if a draining battery shows as charging.</span>
-          </div>
-          <ChoiceTiles name="batt-sign" labelledBy="batt-sign-q" value={f.batt_sign_source === 'user' ? (f.batt_positive_means || '') : ''}
-            // Auto on a plant that was never pinned puts back what detection found, so tapping
-            // an already-selected Auto changes nothing; Auto on a pinned plant clears the pin
-            onChange={v => setF(x => ({ ...x, ...(v ? { batt_positive_means: v, batt_sign_source: 'user' }
-              : cfg.batt_sign_source === 'user' ? { batt_positive_means: null, batt_sign_source: 'default' }
-              : { batt_positive_means: cfg.batt_positive_means, batt_sign_source: cfg.batt_sign_source }) }))}
-            // what Auto knows comes from the saved row; a pinned answer says nothing about detection
-            options={[{ value: '', label: 'Auto', hint: cfg.batt_sign_source === 'detected' && cfg.batt_positive_means ? 'Found: positive means ' + cfg.batt_positive_means + '.'
-                        : cfg.batt_sign_source === 'user' ? 'Reads it from the inverter.' : 'Still checking.' },
-                      { value: 'charging', label: 'Charging', hint: 'Positive means the battery is charging.' },
-                      { value: 'discharging', label: 'Discharging', hint: "Positive means it's powering the house." }]} />
-        </div>
-        </details>
       </SettingsSection>
 
       {(dirty || msg) && (

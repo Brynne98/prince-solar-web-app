@@ -412,6 +412,13 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
       } catch (e) {
         console.warn(`plant_features_detect ${pid}:`, e instanceof Error ? e.message : e);
       }
+      // One battery pack or one per inverter? Decided from matching charge and voltage (0065).
+      try {
+        const b = await rpc("battery_banks_detect", { p_plant: pid }) as Record<string, unknown>;
+        if (b?.decided && b.detected !== b.was) console.log(`battery banks for plant ${pid}:`, JSON.stringify(b));
+      } catch (e) {
+        console.warn(`battery_banks_detect ${pid}:`, e instanceof Error ? e.message : e);
+      }
       if (signOf.get(pid) != null) continue;
       try {
         const d = await rpc("batt_sign_detect", { p_plant: pid, p_default: DEFAULT_BATT_POSITIVE_MEANS }) as Record<string, unknown>;
