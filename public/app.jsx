@@ -557,9 +557,9 @@ function App({ links }) {
   const loginDead = links.accounts.some(a => a.status === 'needs_relink');
   const account = { user, plantCount: (me?.plants || []).length, alert: loginDead, onAccount: () => go('account'), active: tab === 'account' };
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} />;
-  const settingsPage = <window.SettingsTab me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
+  const settingsPage = <window.SettingsTab me={me} plantId={plantId} settings={settings} setSettings={setSettings} onPlantConfigSaved={reloadPlantConfig}
     flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />;
-  const accountPage = <window.AccountTab settings={settings} setSettings={setSettings} onPlantConfigSaved={reloadPlantConfig}
+  const accountPage = <window.AccountTab onPlantConfigSaved={reloadPlantConfig}
     flash={flashSection} onFlashed={() => setFlashSection(null)} />;
 
   // ---- not-yet-loaded gate ----

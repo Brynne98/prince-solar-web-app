@@ -2215,7 +2215,9 @@ function DeleteAccountSection({ email }) {
 }
 
 // Settings: the plant on screen.
-function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirty, switchBlocked }) {
+function SettingsTab({ me, plantId, settings, setSettings, onPlantConfigSaved, flash, onFlashed, onDirty, switchBlocked }) {
+  const PAGES = [['solar', 'Solar', 'Generation and panel strings'], ['grid', 'Grid', 'Import, quality and savings'],
+    ['battery', 'Battery', 'Charge, temperature and packs'], ['inverters', 'Inverters', 'Each unit in detail']];
   const plant = (me?.plants || []).find(p => p.id === plantId);
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
@@ -2225,18 +2227,28 @@ function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirt
           {plant && <p>For {plant.name || 'Plant ' + plant.id}. Shared with everyone who sees it.</p>}
         </div>
         <PlantSections me={me} plantId={plantId} onSaved={onPlantConfigSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
+        <SettingsSection id="display" title="Display" note="Only for you.">
+          <div className="conn-row sset-row">
+            <div className="conn-text"><span id="batt-power-q" className="conn-user">Battery power is positive when</span></div>
+            <ChoiceTiles name="batt-power" labelledBy="batt-power-q" value={settings.battPositive} onChange={v => setSettings(s => ({ ...s, battPositive: v }))}
+              options={[{ value: 'discharge', label: 'Powering the house' }, { value: 'charge', label: 'Charging' }]} />
+          </div>
+        </SettingsSection>
+        <SettingsSection id="pages" title="Pages" note="Only for you, on every device.">
+          {PAGES.map(([k, l, h]) => (
+            <Toggle key={k} label={l} hint={h} checked={settings.tabs[k]} onChange={v => setSettings(s => ({ ...s, tabs: { ...s.tabs, [k]: v } }))} />
+          ))}
+        </SettingsSection>
       </div>
     </SettingsFlash.Provider>
   );
 }
 
 // Account: the person. Sign out is in the account menu only.
-function AccountTab({ settings, setSettings, onPlantConfigSaved, flash, onFlashed }) {
+function AccountTab({ onPlantConfigSaved, flash, onFlashed }) {
   const { useState, useEffect } = React;
   const [email, setEmail] = useState(null);
   useEffect(() => { window.sb.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || null)).catch(() => {}); }, []);
-  const PAGES = [['solar', 'Solar', 'Generation and panel strings'], ['grid', 'Grid', 'Import, quality and savings'],
-    ['battery', 'Battery', 'Charge, temperature and packs'], ['inverters', 'Inverters', 'Each unit in detail']];
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
       <div className="settings-page">
@@ -2245,18 +2257,6 @@ function AccountTab({ settings, setSettings, onPlantConfigSaved, flash, onFlashe
           {email && <p className="mono">{email}</p>}
         </div>
         <SunSynkConnectionSection onChanged={onPlantConfigSaved} />
-        <SettingsSection id="pages" title="Pages" note="Shown in the sidebar on every device.">
-          {PAGES.map(([k, l, h]) => (
-            <Toggle key={k} label={l} hint={h} checked={settings.tabs[k]} onChange={v => setSettings(s => ({ ...s, tabs: { ...s.tabs, [k]: v } }))} />
-          ))}
-        </SettingsSection>
-        <SettingsSection id="display" title="Display">
-          <div className="conn-row sset-row">
-            <div className="conn-text"><span id="batt-power-q" className="conn-user">Battery power is positive when</span></div>
-            <ChoiceTiles name="batt-power" labelledBy="batt-power-q" value={settings.battPositive} onChange={v => setSettings(s => ({ ...s, battPositive: v }))}
-              options={[{ value: 'discharge', label: 'Powering the house' }, { value: 'charge', label: 'Charging' }]} />
-          </div>
-        </SettingsSection>
         <DeleteAccountSection email={email} />
         <div className="app-version mono">{window.APP_VERSION}</div>
       </div>
