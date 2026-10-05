@@ -65,17 +65,20 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   const battIn = hasBatt && !charging && agg.battPower > 5 ? agg.battPower : 0;
   const gridIn = hasGrid ? gridImport : 0;
   const solarIn = Math.max(0, Math.min(agg.pvNow, agg.loadNow - battIn - gridIn));
-  // and where solar is going: the home first, then the battery, then out to the grid
-  const solarSpare = Math.max(0, agg.pvNow - solarIn);
-  const solarToBatt = hasBatt && charging ? Math.min(agg.battPower, solarSpare) : 0;
-  const solarToGrid = Math.min(gridExport, solarSpare - solarToBatt);
+  // and where solar is going: home, battery and grid in proportion to their watts. When the
+  // inverters' readings add up to more than solar made, all three shrink alike rather than
+  // the grid alone taking the cut (SOLAR-55).
+  const sunToHome = Math.max(0, agg.loadNow - battIn - gridIn);
+  const sunToBatt = hasBatt && charging ? agg.battPower : 0;
+  const sunOut = sunToHome + sunToBatt + gridExport;
+  const sunScale = sunOut > agg.pvNow ? agg.pvNow / sunOut : 1;
 
   // Today's figures, in a column of their own on desktop and under a rule on a phone.
   const today = (...rows) => rows.filter(r => r[1] != null);
   const flows = { pv: agg.pvNow, bat: agg.battPower, home: agg.loadNow };
   const nodes = {
     pv: { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun',
-      split: [['Home', C.load, solarIn], ['Battery', C.batt, solarToBatt], ['Grid', C.grid, solarToGrid]],
+      split: [['Home', C.load, sunToHome * sunScale], ['Battery', C.batt, sunToBatt * sunScale], ['Grid', C.grid, gridExport * sunScale]],
       today: today(['Made', agg.pvToday]) },
     // w stays the magnitude (animation, stroke); val is the signed figure printed on the box,
     // + = powering the house, as everywhere else in the app.
