@@ -325,9 +325,16 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
       : agg.pvNow > 50 ? <> <b style={{ color: C.pv }}>Solar</b> is powering the home.</> : null}</>;
   }
   // Exporting while the battery also feeds the home: solar alone isn't covering it (SOLAR-46).
-  else if (gridExport > 50) narrative = battIn > 50
-    ? <><b style={{ color: C.pv }}>Solar</b> and your <b style={{ color: C.batt }}>battery</b> are powering the home and sending <b style={{ color: C.grid }}>{window.fmtPower(gridExport)}</b> to the grid.</>
-    : <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ', charging the battery' : ''} and sending <b style={{ color: C.grid }}>{window.fmtPower(gridExport)}</b> to the grid.</>;
+  // Solar is only named when it is making something; a battery can export after dark (SOLAR-63).
+  else if (gridExport > 50) {
+    const sending = <>sending <b style={{ color: C.grid }}>{window.fmtPower(gridExport)}</b> to the grid</>;
+    const sun = agg.pvNow > 50;
+    narrative = sun && battIn > 50
+      ? <><b style={{ color: C.pv }}>Solar</b> and your <b style={{ color: C.batt }}>battery</b> are powering the home and {sending}.</>
+      : sun ? <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ', charging the battery' : ''} and {sending}.</>
+      : battIn > 50 ? <>Your <b style={{ color: C.batt }}>battery</b> is powering the home and {sending}.</>
+      : <>Sending <b style={{ color: C.grid }}>{window.fmtPower(gridExport)}</b> to the grid.</>;
+  }
   // >= home - 50, not > home + 50: a home drawing exactly what the panels make is the
   // commonest sunny-afternoon state and fell through to the vague fallback.
   else if (agg.pvNow > 50 && agg.pvNow >= agg.loadNow - 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ' and charging the battery' : ''}.</>;
