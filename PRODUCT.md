@@ -26,8 +26,8 @@ A dashboard for a SunSynk Connect solar install: live solar, battery charge, gri
 import/export, home load, an animated energy-flow diagram, day charts, and long-run
 trends across every inverter on the account.
 
-Its reason to exist is its own history. It logs every minute (plant totals forever,
-per-inverter detail for 90 days), so trends, battery-health checks, integrity checks and
+Its reason to exist is its own history. It logs every minute (full detail for 60 days,
+then 5-minute steps kept for good), so trends, battery-health checks, integrity checks and
 the self-calibrating solar forecast rest on real data rather than the cloud's fading
 summary.
 
@@ -37,8 +37,8 @@ what their system is doing now and whether it is healthy over time. Tonight's de
 
 ## Positioning
 
-Permanent minute-by-minute history. SunSynk's cloud drops detail after a week or two;
-this keeps every minute, so the trends, battery health and integrity views are real, not
+Permanent history. SunSynk's cloud drops detail after a week or two; this keeps every
+minute for 60 days and 5-minute steps after that, for good, so the trends, battery health and integrity views are real, not
 reconstructed. Everything else (combined multi-inverter view, forecast, alerts) builds on
 that log.
 
