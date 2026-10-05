@@ -313,13 +313,15 @@ function tabsFor(settings) {
     { id: 'live', label: 'Live' },
     settings.tabs.solar && { id: 'solar', label: 'Solar' },
     settings.tabs.grid && { id: 'grid', label: 'Grid' },
-    settings.tabs.battery && { id: 'battery', label: 'Battery' },
-    settings.tabs.inverters && { id: 'inverters', label: 'Inverters' },
+    // Battery and Inverters became one Equipment page (SOLAR-52); either old switch shows it.
+    (settings.tabs.inverters || settings.tabs.battery) && { id: 'inverters', label: 'Equipment' },
     { id: 'settings', label: 'Settings' },
   ].filter(Boolean);
 }
 // Account is a page too, reached from the account menu rather than the page list.
 const pageOk = (tabs, id) => id === 'account' || tabs.some(t => t.id === id);
+// A saved or linked Battery page opens Equipment, where the packs now are.
+const tabAlias = (id) => (id === 'battery' ? 'inverters' : id);
 
 // Back to the top of the page: the frame's body scrolls beside a sidebar, the document on a phone.
 const toTop = () => { document.querySelector('.frame-body')?.scrollTo({ top: 0 }); window.scrollTo({ top: 0 }); };
@@ -349,7 +351,7 @@ function BootShell() {
   // would flash a dashboard it will never get, so show the empty sign-in backdrop.
   if (!localStorage.getItem('synsynk.tab')) return <div className="login-wrap" />;
   const tabs = tabsFor(loadSettings());
-  const saved = new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab');
+  const saved = tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab'));
   const tab = pageOk(tabs, saved) ? saved : 'live';
   return (
     <Frame tabs={tabs} tab={tab} busy head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /></>}>
@@ -365,7 +367,7 @@ function App({ links }) {
   const [me, setMe] = useState(null);
   const [plantId, setPlantId] = useState(null);
   const prefsLoaded = useRef(false);
-  const [tab, setTab] = useState(() => new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab') || 'live');
+  const [tab, setTab] = useState(() => tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab')) || 'live');
   const auto = true; // refresh runs on its own; the header button forces one now
   const [snap, setSnap] = useState(null);
   const [today, setToday] = useState(null);
@@ -431,19 +433,6 @@ function App({ links }) {
   const loadToday = useCallback(async () => {
     try { setToday(await window.fetchDay()); } catch (e) { /* chart shows its own placeholder */ }
   }, []);
-  // Battery balance is asked for alongside the snapshot, not after Battery has drawn, and
-  // refreshed every 5 min: pack drift, temperature and hours at full move slowly, and it is
-  // the heaviest query on the screen. undefined = loading; null = failed with nothing to keep.
-  // Only the latest request's reply is kept, so a slow one from an earlier plant or refresh
-  // cannot overwrite a newer answer.
-  const [balance, setBalance] = useState(undefined);
-  const balanceSeq = useRef(0);
-  const loadBalance = useCallback(() => {
-    const seq = ++balanceSeq.current;
-    window.fetchBalance().then(d => {
-      if (seq === balanceSeq.current) setBalance(v => d ?? (v === undefined ? null : v));
-    });
-  }, []);
   const onNeedEnergy = useCallback((period) => {
     if (energyRef.current[period] || inflight.current[period]) return;
     inflight.current[period] = true;
@@ -497,11 +486,11 @@ function App({ links }) {
     setPlantId(Number(id));
     setNotice(plant?.name || ('Plant ' + id));
     window.savePrefs({ lastPlant: Number(id) }).catch(() => {});
-    setEnergy({}); energyRef.current = {}; setSnap(null); setToday(null); setBalance(undefined);
+    setEnergy({}); energyRef.current = {}; setSnap(null); setToday(null);
     // how much history THIS plant has — the empty-state copy reads it
     window.PLANT_DAYS = null; window.SYNC = null; syncDaysRef.current = null;
     window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
-    loadLive(); loadToday(); loadBalance(); setRefreshKey(k => k + 1);
+    loadLive(); loadToday(); setRefreshKey(k => k + 1);
   };
   // Fresh-link sync state (0048) rides on every snapshot; the empty-state copy reads
   // it from window.SYNC during render, so it is assigned here in the render path,
@@ -518,20 +507,20 @@ function App({ links }) {
     }
     syncDaysRef.current = sync.days;
   }, [snap]);
-  // A config save can change which plant is shown (a removed login); the balance follows it.
+  // A config save can change which plant is shown (a removed login); the data follows it.
   // A reconnected login also clears the banner, so the gate's list is read again.
   const reloadPlantConfig = () => {
     const before = window.CURRENT_PLANT;
     links.refresh();
     return loadMe().then(() => {
-      if (window.CURRENT_PLANT !== before) setBalance(undefined);
-      loadLive(); loadBalance();
+      if (window.CURRENT_PLANT !== before) setRefreshKey(k => k + 1);
+      loadLive();
     });
   };
 
   // initial load: who am I and which plant, then the data
-  useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); loadBalance(); }); }, []);
-  // auto refresh: live every minute (matches SunSynk's cadence), today and battery balance every
+  useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); }); }, []);
+  // auto refresh: live every minute (matches SunSynk's cadence), today and energy every
   // 5th minute. On the clock, not from page load: every open device asks at :15, after the
   // poller's reading has landed (by ~:06), so devices side by side show the same numbers (SOLAR-33).
   useEffect(() => {
@@ -540,12 +529,12 @@ function App({ links }) {
     const next = () => { const ms = 60000 - (Date.now() - 15000) % 60000; a = setTimeout(tick, ms < 1000 ? ms + 60000 : ms); };
     const tick = () => {
       loadLive(false);
-      if (new Date().getMinutes() % 5 === 0) { loadToday(); refreshEnergy(); loadBalance(); }
+      if (new Date().getMinutes() % 5 === 0) { loadToday(); refreshEnergy(); }
       next();
     };
     next();
     // timers sleep with a tablet's screen; catch up the moment it is back or online again
-    const wake = () => { if (document.visibilityState === 'visible') { loadLive(false); loadToday(); refreshEnergy(); loadBalance(); } };
+    const wake = () => { if (document.visibilityState === 'visible') { loadLive(false); loadToday(); refreshEnergy(); } };
     document.addEventListener('visibilitychange', wake);
     window.addEventListener('online', wake);
     return () => {
@@ -554,7 +543,7 @@ function App({ links }) {
     };
   }, [auto]);
 
-  const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(); loadBalance(); setRefreshKey(k => k + 1); };
+  const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(); setRefreshKey(k => k + 1); };
 
   const TABS = tabsFor(settings);
   useEffect(() => { if (!pageOk(TABS, tab)) setTab('live'); }, [settings.tabs]);
@@ -603,7 +592,6 @@ function App({ links }) {
         {tab === 'live' && <window.LiveTab snap={snap} settings={settings} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
           onOpenSettings={openSettings} />}
         {tab === 'solar' && <window.SolarTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
-        {tab === 'battery' && <window.BatteryTab snap={snap} settings={settings} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} balance={balance} onOpenSettings={openSettings} />}
         {tab === 'grid' && <window.GridTab snap={snap} settings={settings} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} settings={settings} refreshKey={refreshKey} />}
         {tab === 'settings' && settingsPage}

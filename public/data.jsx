@@ -39,7 +39,6 @@ const ROUTES = {
   '/api/trends/by-hour':   (q) => ['api_trends_by_hour', { p_days: Number(q.days) || 14 }],
   '/api/trends/daily':     (q) => ['api_trends_daily', { p_days: Number(q.days) || 30 }],
   '/api/trends/compare':   () => ['api_trends_compare', {}],
-  '/api/balance':          () => ['api_balance', {}],
   '/api/health':           () => ['api_health', {}],
 };
 
@@ -279,10 +278,6 @@ async function fetchTrendDaily(days) {
 async function fetchCompare() {
   return getJSON('/api/trends/compare').catch(() => ({}));
 }
-// battery balance + health: { banks:[{sn,soc,voltage,current}], socSpread, vSpread, status (sustained 10min), pending, max24h, max72h, stale, tempC, hrsAtFullToday, tempHot }
-async function fetchBalance() {
-  return getJSON('/api/balance').catch(() => null);
-}
 
 // ---- me: plan, preferences, plants -----------------------------------------
 // One call on load. `plants[].config` is plant_config (timezone, currency, tariff,
@@ -326,6 +321,6 @@ function emptyText(days, fallback) {
 }
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchInverterHistory, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchCompare, fetchBalance,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchInverterHistory, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchCompare,
   fetchMe, savePrefs, savePlantConfig, deleteAccount, emptyText, BATT_MAX_KW, TYPICAL_DAYS,
 });

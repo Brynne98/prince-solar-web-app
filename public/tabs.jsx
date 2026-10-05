@@ -11,75 +11,6 @@ const FsEnterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="
 const TrashIcon = () => <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.6 9h6.8l.6-9M6.75 7v4M9.25 7v4" /></svg>;
 const FsExitIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" /></svg>;
 
-// Battery-balance banner — watches the SOC/voltage spread between the two inverter
-// banks (the desync signal) while the charge current is being pushed up. Its data is
-// fetched by App. Subtle when Balanced, loud when Drifting.
-// The banner's own frame with shimmering values, so it lands at its height. Also drawn by
-// App's loading shell, so the row is there from the first paint rather than after the
-// snapshot. Each value keeps a space of text in the mono face, so the line is as tall as a
-// real one; top-aligned, because a clipped inline block otherwise sits on the baseline and adds 4px.
-function BalanceSkeleton() {
-  const bar = (w) => <b className="mono skel" style={{ display: 'inline-block', verticalAlign: 'top', width: w, borderRadius: 5 }}>{' '}</b>;
-  return (
-    <div className="batt-balance" role="status" aria-busy="true" aria-label="Loading battery balance">
-      <span className="bb-dot skel" aria-hidden="true" />
-      <span className="bb-title" aria-hidden="true">Battery</span>
-      <span className="bb-status" aria-hidden="true">{bar(70)}</span>
-      <span className="bb-div" />
-      <div className="bb-stats" aria-hidden="true">
-        <span className="bb-stat"><span className="bb-k">Charge</span>{bar(64)}</span>
-        <span className="bb-stat"><span className="bb-k">Temp</span>{bar(30)}</span>
-        <span className="bb-stat"><span className="bb-k">Full today</span>{bar(34)}</span>
-      </div>
-    </div>
-  );
-}
-
-// b comes from App (fetched with the snapshot, refreshed every 5 min): undefined = loading.
-function BatteryBalanceBanner({ b }) {
-  if (b === undefined) return <BalanceSkeleton />;
-  if (!b || b.status === 'unknown') return null;
-  const COL = { balanced: '#3ddc84', watch: '#f59e0b', drifting: '#f87171' };
-  const c = COL[b.status] || '#7c8794';
-  // 'single' is one bank with nothing to compare against: still worth the charge and
-  // temperature stats, but the status word must say so rather than render blank.
-  const label = { balanced: 'Balanced', watch: 'Watch', drifting: 'Drifting', single: 'One pack' }[b.status] || 'Unknown';
-  // Status carries the desync detail (spread / voltage / 3-day peak) in its tooltip,
-  // so the banner itself stays to a status + three clean stats.
-  const statusTip = b.status === 'single'
-    ? 'One battery pack, so there is nothing to drift apart'
-    : b.stale
-    ? 'No recent paired reading from both packs'
-    : `Packs ${b.socSpread ?? 0}% / ${b.vSpread ?? 0} V apart`
-      + (b.max72h != null ? ` · peak ${b.max72h}% over 3 days` : '')
-      + (b.pending ? ' · elevated now — flags only if it holds 10 min' : '');
-  return (
-    <div className={'batt-balance ' + b.status}>
-      <span className="bb-dot" style={{ background: c }} />
-      <span className="bb-title">Battery</span>
-      <span className="bb-status" style={{ color: c }} title={statusTip}>
-        {label}{b.status === 'drifting' ? ' ⚠' : b.status === 'watch' ? ' !' : b.status === 'balanced' ? ' ✓' : ''}
-      </span>
-      <span className="bb-div" />
-      <div className="bb-stats">
-        <span className="bb-stat" title={statusTip}>
-          <span className="bb-k">Charge</span><b className="mono">{(b.banks || []).map((x) => x.soc).join(' / ')}%</b>
-        </span>
-        {b.tempC != null && (
-          <span className={'bb-stat' + (b.tempHot ? ' bb-hot' : '')} title="Battery temperature. It lasts longest below ~25°C; heat above ~35°C shortens its life.">
-            <span className="bb-k">Temp</span><b className="mono">{b.tempC}°{b.tempHot ? ' ⚠' : ''}</b>
-          </span>
-        )}
-        {b.hrsAtFullToday != null && (
-          <span className="bb-stat" title="Hours at 98% charge or more today. A short spell is healthy and keeps the battery's charge reading accurate; long spells in summer heat are what to avoid.">
-            <span className="bb-k">Full today</span><b className="mono">{b.hrsAtFullToday}h</b>
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------- LIVE
 // ---- loading skeletons ------------------------------------------------------
 // Each tab's shape while the first snapshot is still on its way. They sit beside the tab
@@ -1082,18 +1013,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   );
 }
 
-// ---------------------------------------------------------------- BATTERY
-// Built like Solar: what came out of the battery (today, week, month, year, lifetime) beside
-// its charge now, a day's charge against the reserve, the last 30 days, how the battery
-// did overnight, how long it would carry the house if the grid went, and each pack.
-
-// "13 h 10 m", "45 m": spoken, not decimal hours, and never broken across a line
-function fmtHrs(h) {
-  let hh = Math.floor(h), mm = Math.round((h - hh) * 60);
-  if (mm === 60) { hh++; mm = 0; }
-  return (hh > 0 ? hh + ' h ' + mm + ' m' : mm + ' m').replace(/ /g, NBSP);
-}
-
+// ---------------------------------------------------------------- SHARED
 // Two figures under a split bar, as Solar's Where it went draws them. Each part is
 // [label, share, colour, value]; the value is kWh, or already-formatted text.
 function SplitBar({ parts, title, aria }) {
@@ -1116,277 +1036,6 @@ function SplitBar({ parts, title, aria }) {
         })}
       </div>
     </>
-  );
-}
-
-// How the battery did over a night, from 17:00 on the day before to 07:00: how long the
-// battery ran the house and how long the grid did (any 5 minutes that drew more than 50 W
-// from it, which includes the grid charging the battery), the first time the charge reached
-// the reserve, and the lowest charge. null when too little of the night was logged to say.
-const NIGHT_FROM = 17 * 60, NIGHT_TO = 7 * 60;
-function nightOf(before, after, reserve) {
-  const pts = [...(before || []).filter(p => p.t >= NIGHT_FROM), ...(after || []).filter(p => p.t < NIGHT_TO)];
-  const read = pts.filter(p => p.soc != null && p.load != null);
-  if (read.length < 12 || read.length < pts.length / 2) return null;
-  let gridMin = 0, battMin = 0, gridToBatt = 0;
-  read.forEach(p => {
-    if (p.grid != null && p.grid > 50) {
-      gridMin += 5;
-      if (p.batt != null && p.batt < 0) gridToBatt += Math.min(-p.batt, p.grid) * 5 / 60 / 1000; // day series: − = charging
-    } else battMin += 5;
-  });
-  return {
-    gridMin, battMin, gridToBatt,
-    hit: read.find(p => p.soc <= reserve + 1) || null,
-    low: read.reduce((b, p) => (p.soc < b.soc ? p : b)),
-    done: (after || []).some(p => p.t >= NIGHT_TO - 5 && p.soc != null),
-  };
-}
-
-// Six tiles, the day's chart, the month's bars and the pair of cards under them.
-function BatterySkeleton() {
-  return (
-    <div className="stack solar-tab">
-      <div>
-        <SectionTitle>BATTERY HEALTH</SectionTitle>
-        <BalanceSkeleton />
-      </div>
-      <div className="solar-stats">
-        {['CHARGE NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'].map(l => <StatTile key={l} label={l} loading sub={NBSP} />)}
-      </div>
-      <Card>
-        <SectionTitle>{titled('CHARGE', 'today')}</SectionTitle>
-        <DayChartSkeleton />
-      </Card>
-      <Card>
-        <SectionTitle>{titled('OUT OF THE BATTERY', 'last 30 days')}</SectionTitle>
-        <window.Skeleton className="bars-skel" h="auto" r={10} />
-      </Card>
-      <div className="solar-row">
-        <Card>
-          <SectionTitle>{titled('OVERNIGHT', 'last night')}</SectionTitle>
-          <window.Skeleton h={64} r={10} />
-        </Card>
-        <Card>
-          <SectionTitle>IF THE GRID GOES OFF</SectionTitle>
-          <window.Skeleton h={90} r={10} />
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function BatteryTab(props) {
-  if ((props.snap.features || {}).hasBattery === false) {
-    return (
-      <div className="stack">
-        <Card>
-          <SectionTitle>BATTERY</SectionTitle>
-          <div className="field-note" style={{ marginTop: 0 }}>This plant has no battery — the inverter reports no pack. A newly fitted battery shows here once the inverter reports it.</div>
-        </Card>
-      </div>
-    );
-  }
-  return <BatteryBody {...props} />;
-}
-
-function BatteryBody({ snap, settings, energy, onNeedEnergy, today, refreshKey, balance, onOpenSettings }) {
-  const a = snap.aggregate;
-  const cfg = snap.config || {};
-  const feat = snap.features || {};
-  const tz = cfg.timezone;
-  const plantToday = plantDateStr(tz);
-  const hasGrid = feat.hasGrid !== false;
-  const reserve = cfg.reserve ?? 20;
-  const cap = cfg.battCapacity ?? 0;
-  const updated = snap.updated instanceof Date ? snap.updated : new Date();
-  React.useEffect(() => { ['week', 'month', 'year', 'lifetime'].forEach(p => { if (!energy[p]) onNeedEnergy(p); }); }, [energy]);
-  const [earliest, setEarliest] = React.useState(null);
-  React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
-
-  // ---- totals: what came out of the battery ----
-  const tot = periodTotals('dischg', a.battDischgToday, energy, plantToday);
-  const EP = window.fmtEnergyParts;
-  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.batt} loading={v == null} sub={sub || NBSP} />; };
-  const soc = Math.round(a.battSoc);
-  let nowSub;
-  if (a.battState === 'charging' && a.battPower > 50) {
-    const eta = cap > 0 ? new Date(updated.getTime() + ((100 - a.battSoc) / 100 * cap) / (a.battPower / 1000) * 3600000) : null;
-    const sameDay = eta && plantDateStr(tz, eta) === plantDateStr(tz, updated);
-    nowSub = <>Charging at <b>{fmtPower(a.battPower)}</b>{sameDay && <>, full at about <b>{window.fmtPlantTime(eta, tz)}</b></>}</>;
-  } else if (a.battState === 'discharging' && a.battPower > 50) {
-    nowSub = <>Giving out <b>{fmtPower(a.battPower)}</b></>;
-  } else {
-    nowSub = a.battSoc <= reserve + 1 ? <>Resting at the <b>{reserve}%</b> reserve</> : 'Resting';
-  }
-  const cycles = cap > 0 && tot.lifetime > 0 ? Math.round(tot.lifetime / cap) : null;
-  // SunSynk sends no state-of-health figure, so health is the bar (pack balance,
-  // temperature, hours at full) and the cycle count. Hidden when it has neither.
-  const showHealth = balance === undefined || (balance && balance.status !== 'unknown') || cycles;
-
-  // ---- the day on the chart ----
-  const pick = useDayPicker(earliest, plantToday);
-  const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
-  const noReadings = dayProblem(view, day, points);
-  const socs = points.filter(p => p.soc != null);
-  const low = socs.length ? socs.reduce((b, p) => (p.soc < b.soc ? p : b)) : null;
-  const full = socs.find(p => p.soc >= 98); // 98, as the health bar counts full
-
-  // ---- overnight: the night into the day on the chart ----
-  const [before, setBefore] = React.useState(null); // { date, points }
-  const prevDate = window.shiftDate(view.date || plantToday, -1);
-  React.useEffect(() => {
-    let alive = true;
-    window.fetchDay(prevDate)
-      .then(r => { if (alive) setBefore({ date: prevDate, points: r.points || [] }); })
-      .catch(() => { if (alive) setBefore({ date: prevDate, points: [] }); });
-    return () => { alive = false; };
-  }, [prevDate, refreshKey]);
-  const night = before && before.date === prevDate && day ? nightOf(before.points, points, reserve) : null;
-  const nightLoading = !day || !before || before.date !== prevDate;
-  const nightWord = view.isToday ? 'last night' : 'into ' + dayWord;
-  let nightCard = null;
-  if (night) {
-    const at = (p) => HM(p.t);
-    const d = (m) => fmtHrs(m / 60);
-    const lowest = <>Lowest <b>{night.low.soc}%</b> at <b>{at(night.low)}</b>.</>;
-    nightCard = {
-      parts: [['Battery', night.battMin, CC.batt, d(night.battMin)], [hasGrid ? 'Grid' : 'Other', night.gridMin, CC.grid, d(night.gridMin)]].filter(p => p[1] > 0),
-      note: !night.gridMin
-        ? <>The battery ran the house {night.done ? 'all night' : 'so far'}. {lowest}</>
-        : <>{night.hit ? <>The battery reached the {reserve}% reserve at <b>{at(night.hit)}</b>. </> : null}The grid ran the house for {d(night.gridMin)}{night.gridToBatt >= 0.3 ? <> and put {fmtKwh(night.gridToBatt)} into the battery</> : null}.{!night.hit ? <> {lowest}</> : null}</>,
-    };
-  }
-
-  // ---- if the grid goes off ----
-  // Hours down to the reserve at what the house usually draws between 18:00 and 06:00,
-  // from the same hourly profile Live uses. Not at the battery's draw right now: at noon the
-  // sun covers the house and that would read as days.
-  const [hourly, setHourly] = React.useState(null);
-  React.useEffect(() => { if (hasGrid) window.fetchHourly().then(setHourly).catch(() => {}); }, [refreshKey, hasGrid]);
-  const nightHours = ((hourly && hourly.hours) || []).filter(h => (Number(h.hour) >= 18 || Number(h.hour) < 6) && h.load_w != null);
-  const nightKw = nightHours.length >= 6 ? nightHours.reduce((s, h) => s + Number(h.load_w), 0) / nightHours.length / 1000 : null;
-  const usable = cap > 0 ? Math.max(0, (a.battSoc - reserve) / 100 * cap) : null;
-  let offCard = null;
-  if (hasGrid) {
-    if (!(cap > 0)) offCard = { head: 'Needs your battery size', link: true };
-    else if (a.gridPresent === false) {
-      offCard = a.battState === 'discharging' && a.battPower > 50
-        ? { head: <>The grid is off: about <span className="mono">{fmtHrs(usable / (a.battPower / 1000))}</span> left</>, note: 'Down to the ' + reserve + '% reserve at the ' + fmtPower(a.battPower) + ' the battery is giving out now.' }
-        : { head: 'The grid is off now', note: 'The battery is at ' + soc + '%.' };
-    }
-    else if (usable < 0.1) offCard = { head: 'Not long', note: 'The battery is at the ' + reserve + '% reserve.' };
-    else if (nightKw > 0.05) offCard = { head: <>About <span className="mono">{fmtHrs(usable / nightKw)}</span></>, note: 'From ' + soc + '% down to the ' + reserve + '% reserve, at the ' + window.fmtPower(nightKw * 1000) + ' the house usually uses at night. Longer while the sun is up.' };
-    else if (hourly) offCard = { head: 'Not known yet', note: 'It needs a few nights of readings first.' };
-  }
-
-  // ---- last 30 days ----
-  const [daily, loadDaily] = useDaily(refreshKey);
-  const bars = withLiveToday(daily, plantToday, 'dischg', a.battDischgToday);
-  const most = bestDay(bars, 'dischg', plantToday);
-  const openDay = (d) => { pick.setDate(d); scrollToDay('battery-day'); };
-
-  // ---- packs ----
-  const shared = feat.banks === 'shared';
-  const withBatt = snap.inverters.filter(i => i.numberOfBatteries > 0 || i.battSoc > 0);
-  // One shared pack: every inverter reads the same BMS, so count it once.
-  const banks = shared ? Math.min(1, withBatt.length) : withBatt.length;
-  const modules = shared ? Math.max(0, ...withBatt.map(i => i.numberOfBatteries || 0)) : withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
-
-  return (
-    <div className="stack solar-tab">
-      {showHealth && (
-        <div>
-          <SectionTitle right={cycles ? <>About <b>{cycles}</b> full cycles</> : null}>BATTERY HEALTH</SectionTitle>
-          <BatteryBalanceBanner b={balance} />
-        </div>
-      )}
-      <div className="solar-stats">
-        <StatTile label="CHARGE NOW" value={soc} unit="%" accent={CC.batt} sub={nowSub} />
-        {tile('TODAY', a.battDischgToday, <>Out of the battery. In: <b>{fmtKwh(a.battChgToday)}</b></>)}
-        {tile('THIS WEEK', tot.week)}
-        {tile('THIS MONTH', tot.month)}
-        {tile('THIS YEAR', tot.year)}
-        {tile('LIFETIME', tot.lifetime, lifetimeSince(energy.lifetime, earliest, plantToday))}
-      </div>
-
-      <Card id="battery-day">
-        <SectionTitle right={day && !noReadings && !view.isToday && low ? <>Low <b>{low.soc}%</b> at <b>{HM(low.t)}</b>{full ? <>, full at <b>{HM(full.t)}</b></> : ', never full'}</> : null}>
-          {titled('CHARGE', dayWord)}
-        </SectionTitle>
-        <DateBar pick={pick} earliest={earliest} />
-        {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
-          : <div {...dim}><DayLineChart points={noReadings ? [] : points} field="soc" color={CC.batt} label="Charge" pct reserve={reserve}
-              empty={noReadings || 'No charge readings for this day.'} /></div>}
-      </Card>
-
-      <Card>
-        <SectionTitle right={most && most.dischg > 0 ? <>Most <b>{fmtKwh(most.dischg)}</b> on {shortDate(most.date)}</> : null}>
-          {titled('OUT OF THE BATTERY', 'last 30 days')}
-        </SectionTitle>
-        {daily === false
-          ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
-          : !daily ? <window.Skeleton className="bars-skel" h="auto" r={10} />
-          : bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
-          : <DaysBars rows={bars} field="dischg" color={CC.batt} rgb="167,139,250" word="Out" label="Energy out of the battery per day for the last 30 days"
-              today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
-      </Card>
-
-      <div className="solar-row">
-        <Card>
-          <SectionTitle>
-            {titled('OVERNIGHT', nightWord)}
-            <window.InfoDot text={'From 17:00 to 07:00, in 5-minute readings. Any five minutes that drew from the grid count as the grid’s.'} />
-          </SectionTitle>
-          {nightLoading ? <window.Skeleton h={64} r={10} />
-            : !nightCard ? <div className="solar-note" {...dim}>Readings are missing for most of that night.</div>
-            : <div {...dim}>
-                <SplitBar parts={nightCard.parts} title={nightCard.parts.map(p => p[0] + ' ' + p[3]).join(', ')} aria={nightCard.parts.map(p => p[0] + ' ' + p[3]).join('; ')} />
-                <p className="solar-spare-note">{nightCard.note}</p>
-              </div>}
-        </Card>
-
-        {offCard && (
-          <Card>
-            <SectionTitle>
-              IF THE GRID GOES OFF
-              <window.InfoDot text="The charge above the reserve, divided by the house’s usual use at night. It lasts longer if the inverter cuts some circuits in an outage." />
-            </SectionTitle>
-            <div className="solar-verdict">{offCard.head}</div>
-            {offCard.note && <p className="solar-spare-note">{offCard.note}</p>}
-            {offCard.link && <button type="button" className="mini-link" onClick={() => onOpenSettings('battery')}>Set battery size</button>}
-          </Card>
-        )}
-      </div>
-
-      <Card>
-        <SectionTitle right={<span className="dim">{banks} {banks === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'} · {shared ? 'one pack shared by ' + snap.inverters.length + ' inverters' : 'one pack per inverter'}</span>}>PACKS</SectionTitle>
-        <div className="duo">
-          {snap.inverters.map(inv => {
-            const t = cleanTemp(inv.battTemp);
-            return (
-              <div className="mini-panel" key={inv.sn}>
-                <div className="mp-head"><span className="mono">{inv.alias}</span><span className="dim mono">{inv.numberOfBatteries} × pack · {inv.battCap} Ah</span></div>
-                <div className="mp-grid">
-                  <Metric label="Power" value={fmtPower(battShown(inv.battOut, settings.battPositive))} unit={battWord(inv.battOut) && ' ' + battWord(inv.battOut)} accent={CC.batt} />
-                  <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />
-                  <Metric label="Voltage" value={inv.battVolt.toFixed(1)} unit=" V" />
-                  <Metric label="Temp" value={t != null ? inv.battTemp.toFixed(1) : 'bad sensor'} unit={t != null ? ' °C' : ''} accent={t == null ? CC.load : null} />
-                </div>
-                {inv.bank2 && (
-                  <div className="mp-grid" style={{ marginTop: 8 }} title="Second battery pack, as the inverter reports it">
-                    <Metric label="Pack 2 power" value={fmtPower(Math.abs(inv.bank2.power || 0))} accent={CC.batt} />
-                    <Metric label="Bank 2 charge" value={inv.bank2.soc} unit="%" accent={CC.batt} />
-                    <Metric label="Bank 2 voltage" value={(inv.bank2.voltage || 0).toFixed(1)} unit=" V" />
-                    <Metric label="Bank 2 temp" value={cleanTemp(inv.bank2.temperature) != null ? inv.bank2.temperature.toFixed(1) : '—'} unit={cleanTemp(inv.bank2.temperature) != null ? ' °C' : ''} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-    </div>
   );
 }
 
@@ -1618,12 +1267,54 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   );
 }
 
-// ---------------------------------------------------------------- INVERTERS
+// ---------------------------------------------------------------- EQUIPMENT
+// Battery packs and each inverter. The page id stays `inverters` so saved links and
+// preferences keep working; it reads "Equipment" (SOLAR-52).
+// The battery packs, one panel per inverter, as the inverters report them. Moved here from
+// the Battery page when that page went (SOLAR-52).
+function PacksCard({ snap, settings }) {
+  const feat = snap.features || {};
+  const shared = feat.banks === 'shared';
+  const withBatt = snap.inverters.filter(i => i.numberOfBatteries > 0 || i.battSoc > 0);
+  // One shared pack: every inverter reads the same BMS, so count it once.
+  const banks = shared ? Math.min(1, withBatt.length) : withBatt.length;
+  const modules = shared ? Math.max(0, ...withBatt.map(i => i.numberOfBatteries || 0)) : withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
+  return (
+    <Card>
+      <SectionTitle right={<span className="dim">{banks} {banks === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'} · {shared ? 'one pack shared by ' + snap.inverters.length + ' inverters' : 'one pack per inverter'}</span>}>PACKS</SectionTitle>
+      <div className="duo">
+        {snap.inverters.map(inv => {
+          const t = cleanTemp(inv.battTemp);
+          return (
+            <div className="mini-panel" key={inv.sn}>
+              <div className="mp-head"><span className="mono">{inv.alias}</span><span className="dim mono">{inv.numberOfBatteries} × pack · {inv.battCap} Ah</span></div>
+              <div className="mp-grid">
+                <Metric label="Power" value={fmtPower(battShown(inv.battOut, settings.battPositive))} unit={battWord(inv.battOut) && ' ' + battWord(inv.battOut)} accent={CC.batt} />
+                <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />
+                <Metric label="Voltage" value={inv.battVolt.toFixed(1)} unit=" V" />
+                <Metric label="Temp" value={t != null ? inv.battTemp.toFixed(1) : 'bad sensor'} unit={t != null ? ' °C' : ''} accent={t == null ? CC.load : null} />
+              </div>
+              {inv.bank2 && (
+                <div className="mp-grid" style={{ marginTop: 8 }} title="Second battery pack, as the inverter reports it">
+                  <Metric label="Pack 2 power" value={fmtPower(Math.abs(inv.bank2.power || 0))} accent={CC.batt} />
+                  <Metric label="Bank 2 charge" value={inv.bank2.soc} unit="%" accent={CC.batt} />
+                  <Metric label="Bank 2 voltage" value={(inv.bank2.voltage || 0).toFixed(1)} unit=" V" />
+                  <Metric label="Bank 2 temp" value={cleanTemp(inv.bank2.temperature) != null ? inv.bank2.temperature.toFixed(1) : '—'} unit={cleanTemp(inv.bank2.temperature) != null ? ' °C' : ''} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 // One inverter card, not two: how many there are is the snapshot's to say.
 function InvertersSkeleton() {
   return (
     <div className="stack">
-      <SectionTitle>INVERTERS</SectionTitle>
+      <SectionTitle>EQUIPMENT</SectionTitle>
       <Card className="chart-card">
         <SectionTitle>TEMPERATURE · DAY</SectionTitle>
         <DayChartSkeleton legend />
@@ -1638,7 +1329,8 @@ function InvertersTab({ snap, settings, refreshKey }) {
   const hasBatt = feat.hasBattery !== false, hasGrid = feat.hasGrid !== false;
   return (
     <div className="stack">
-      <SectionTitle right={<span className="dim">{snap.inverters.length} units · {snap.plant.name}</span>}>INVERTERS</SectionTitle>
+      <SectionTitle right={<span className="dim">{snap.inverters.length} units · {snap.plant.name}</span>}>EQUIPMENT</SectionTitle>
+      {hasBatt && <PacksCard snap={snap} settings={settings} />}
       {/* inverter temperatures over a day (SunSynk history; nothing live reports them) */}
       <Card className="chart-card">
         <SectionTitle>TEMPERATURE · DAY</SectionTitle>
@@ -1686,7 +1378,6 @@ function InvertersTab({ snap, settings, refreshKey }) {
 // on one — App draws those for real — so they have no skeleton here.
 function TabSkeleton({ tab }) {
   return tab === 'solar' ? <SolarSkeleton />
-    : tab === 'battery' ? <BatterySkeleton />
     : tab === 'grid' ? <GridSkeleton />
     : tab === 'inverters' ? <InvertersSkeleton />
     : <LiveSkeleton />;
@@ -2143,7 +1834,7 @@ function DeleteAccountSection({ email }) {
 // Settings: the plant on screen.
 function SettingsTab({ me, plantId, settings, setSettings, onPlantConfigSaved, flash, onFlashed, onDirty, switchBlocked }) {
   const PAGES = [['solar', 'Solar', 'Generation and panel strings'], ['grid', 'Grid', 'Import, quality and savings'],
-    ['battery', 'Battery', 'Charge, temperature and packs'], ['inverters', 'Inverters', 'Each unit in detail']];
+    ['inverters', 'Equipment', 'Battery packs and each inverter']];
   const plant = (me?.plants || []).find(p => p.id === plantId);
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
@@ -2162,7 +1853,8 @@ function SettingsTab({ me, plantId, settings, setSettings, onPlantConfigSaved, f
         </SettingsSection>
         <SettingsSection id="pages" title="Pages" note="Only for you, on every device.">
           {PAGES.map(([k, l, h]) => (
-            <Toggle key={k} label={l} hint={h} checked={settings.tabs[k]} onChange={v => setSettings(s => ({ ...s, tabs: { ...s.tabs, [k]: v } }))} />
+            <Toggle key={k} label={l} hint={h} checked={!!settings.tabs[k] || (k === 'inverters' && !!settings.tabs.battery)}
+              onChange={v => setSettings(s => ({ ...s, tabs: { ...s.tabs, [k]: v, ...(k === 'inverters' ? { battery: false } : {}) } }))} />
           ))}
         </SettingsSection>
       </div>
@@ -2190,4 +1882,4 @@ function AccountTab({ onPlantConfigSaved, flash, onFlashed }) {
   );
 }
 
-Object.assign(window, { LiveTab, SolarTab, BatteryTab, GridTab, InvertersTab, SettingsTab, AccountTab, MiniStat, FsEnterIcon, BalanceSkeleton, TabSkeleton });
+Object.assign(window, { LiveTab, SolarTab, GridTab, InvertersTab, SettingsTab, AccountTab, MiniStat, FsEnterIcon, TabSkeleton });
