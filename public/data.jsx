@@ -143,11 +143,9 @@ function aggregate(invs, totals) {
     // true = mains seen, false = supply down, null/undefined = this firmware doesn't
     // report grid voltage, so the UI says nothing rather than guessing (migration 0015)
     gridPresent: totals.gridPresent,
-    // bought and sent out today: the inverters' own counters, as SunSynk shows; our integral
-    // of both grid ports ran ~2× (SOLAR-45)
-    gridFromToday: r1(sum((x) => x.gridFromToday)),
+    gridFromToday: r1(totals.todayGridImport != null ? totals.todayGridImport : sum((x) => x.gridFromToday)),
     gridFromTotal: r1(sum((x) => x.gridFromTotal)),
-    gridToToday: r1(sum((x) => x.gridToToday)),
+    gridToToday: r1(totals.todayGridExport != null ? totals.todayGridExport : sum((x) => x.gridToToday)),
     gridToTotal: r1(sum((x) => x.gridToTotal)),
     phaseDown: !!totals.phaseDown,
     gridFreq: gf ? gf.gridFreq : (invs[0] ? invs[0].gridFreq : 0),
