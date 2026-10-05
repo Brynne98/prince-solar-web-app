@@ -165,12 +165,19 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   const splitFoot = parts => {
     const on = parts.filter(p => p[2] > 5);
     const total = on.reduce((a, p) => a + p[2], 0);
+    // round down, then hand the missing points to the biggest remainders, so the
+    // shares always total 100 (SOLAR-57)
+    const exact = on.map(p => p[2] / total * 100);
+    const pct = exact.map(Math.floor);
+    let left = 100 - pct.reduce((a, v) => a + v, 0);
+    exact.map((v, i) => i).sort((a, b) => (exact[b] - pct[b]) - (exact[a] - pct[a]))
+      .forEach(i => { if (left > 0) { pct[i]++; left--; } });
     return (
       <div className="fbox-foot">
         <div className="fbox-bar">{on.map(p => <i key={p[0]} style={{ flexGrow: p[2], background: p[1] }} />)}</div>
         {on.length > 0 && (
           <div className="fbox-split">
-            {on.map(p => <span key={p[0]}><em>{p[0]}</em><b style={{ color: p[1] }}>{Math.round((p[2] / total) * 100)}%</b></span>)}
+            {on.map((p, i) => <span key={p[0]}><em>{p[0]}</em><b style={{ color: p[1] }}>{pct[i]}%</b></span>)}
           </div>
         )}
       </div>
