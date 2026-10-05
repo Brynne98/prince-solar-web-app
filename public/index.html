@@ -115,7 +115,7 @@
   }
   /* flex: 1 0 auto: shrinking to the scroll box would push the bottom padding under the last card (SOLAR-25) */
   /* the gap under the last card matches the one above the first (SOLAR-25) */
-  .content { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; max-width: 1360px; padding: 14px 28px; }
+  .content { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; max-width: 1360px; margin: 0 auto; padding: 14px 28px; }
   /* > * so a tab whose root is a grid/stack still behaves as it did before */
   .content > * { flex: none; }
   .ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -168,8 +168,9 @@
 
   /* header: the plant left; status and refresh right */
   /* flex: none: the page under it no longer shrinks, so a shrinkable header was squashed to 39px (SOLAR-25) */
-  /* the right padding grows past 1360 px so status and refresh end where .content's cards do */
-  .head { flex: none; position: sticky; top: 0; z-index: 5; height: var(--head-h); display: flex; align-items: center; gap: 16px; padding: 0 max(28px, calc(100% - 1360px + 28px)) 0 28px;
+  /* past 1360 px .content centres, so the padding grows on both sides to keep the plant
+     and refresh over the cards' edges */
+  .head { flex: none; position: sticky; top: 0; z-index: 5; height: var(--head-h); display: flex; align-items: center; gap: 16px; padding: 0 max(28px, calc((100% - 1360px) / 2 + 28px));
     background: var(--bg); border-bottom: 1px solid var(--line); }
   .plant { position: relative; min-width: 0; margin-left: -10px; }
   .plant-btn { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 7px 10px; border: 1px solid transparent; border-radius: 9px;
