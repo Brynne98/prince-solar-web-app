@@ -146,15 +146,14 @@ function outageSignal(r: Record<string, unknown>): "relay_open" | "low_volt" | n
 // re-read; when input itself failed.
 //
 // When something new has arrived, not every endpoint is worth a call (0033):
-// battery and grid every time (SoC, battery power, mains voltage and the relay are
-// the alert inputs); `load` only when its last real read is LOAD_EVERY_S old, and
-// load_w is derived from the energy balance in between; `output` only when its last
-// real read is OUTPUT_EVERY_S old. Both every minute while the grid is down. The
-// age lives in the row itself (load_fetched_ts / output_fetched_ts) so a slow logger
-// whose real minute never lands on a multiple of five still gets its load read.
+// battery, grid and load every time. Load used to be read every 5 minutes and derived
+// from pv + grid - batt in between, but that sum leaves out the inverter's own use, so
+// Home read 20-175 W high on four minutes in five (SOLAR-40). `output` only when its
+// last real read is OUTPUT_EVERY_S old, and every minute while the grid is down. The
+// age lives in the row itself (output_fetched_ts) so a slow logger whose real minute
+// never lands on a multiple of ten still gets its output read.
 // ---------------------------------------------------------------------------
 const MAX_CARRIED_RUN = 5;
-const LOAD_EVERY_S = 300;
 const OUTPUT_EVERY_S = 600;
 
 type Endpoint = "battery" | "grid" | "load" | "output";
@@ -206,11 +205,10 @@ function canCarry(inv: InverterInfo, inputTime: string | null): boolean {
 /** Which of the four non-input endpoints this minute needs, given the last row. */
 function wantEndpoints(prev: Record<string, unknown> | null | undefined, ts: number): Set<Endpoint> {
   if (!prev) return new Set(ALL_ENDPOINTS);
-  const want = new Set<Endpoint>(["battery", "grid"]);
+  const want = new Set<Endpoint>(["battery", "grid", "load"]);
   const age = (k: string) => ts - (Number(prev[k]) || 0); // null/absent -> very old
-  if (prev.load_w == null || age("load_fetched_ts") >= LOAD_EVERY_S) want.add("load");
   if (age("output_fetched_ts") >= OUTPUT_EVERY_S) want.add("output");
-  if (outageSignal(prev) !== null) { want.add("load"); want.add("output"); }
+  if (outageSignal(prev) !== null) want.add("output");
   return want;
 }
 
