@@ -7,7 +7,7 @@
 // (Field names mirror API.md; the old mock generators were removed.)
 // ============================================================================
 
-const TYPICAL_DAYS = 7; // Live "usually N%" and the Trends hourly default.
+const TYPICAL_DAYS = 7; // Live "usually N%" and Battery's "if the grid goes off".
 const BATT_MAX_KW = 5.0; // charge/discharge ceiling per inverter (display only)
 
 // ---- transport -------------------------------------------------------------
@@ -38,9 +38,7 @@ const ROUTES = {
   '/api/db/stats':         () => ['api_db_stats', {}],
   '/api/trends/by-hour':   (q) => ['api_trends_by_hour', { p_days: Number(q.days) || 14 }],
   '/api/trends/daily':     (q) => ['api_trends_daily', { p_days: Number(q.days) || 30 }],
-  '/api/trends/monthly':   () => ['api_trends_monthly', {}],
   '/api/trends/compare':   () => ['api_trends_compare', {}],
-  '/api/trends/segments':  (q) => ['api_trends_segments', { p_days: Number(q.days) || 7 }],
   '/api/balance':          () => ['api_balance', {}],
   '/api/health':           () => ['api_health', {}],
 };
@@ -277,19 +275,9 @@ async function fetchTrendDaily(days) {
   const api = await getJSON('/api/trends/daily?days=' + days);
   return api.rows || [];
 }
-async function fetchTrendMonthly() {
-  const api = await getJSON('/api/trends/monthly');
-  return api.rows || [];
-}
 // period-over-period totals for the Overview trend arrows ({today,week,month}:{cur,prev})
 async function fetchCompare() {
   return getJSON('/api/trends/compare').catch(() => ({}));
-}
-// avg power per day-segment + load source split: { days, segments:[{seg,load_w,solar_w,batt_w,grid_w,mins}] }
-// (replaced the removed "wasted solar" estimate — see server.js note)
-async function fetchSegments(days) {
-  // A failure throws, so Trends says so rather than showing an empty chart.
-  return getJSON('/api/trends/segments?days=' + (days || 7));
 }
 // battery balance + health: { banks:[{sn,soc,voltage,current}], socSpread, vSpread, status (sustained 10min), pending, max24h, max72h, stale, tempC, hrsAtFullToday, tempHot }
 async function fetchBalance() {
@@ -338,6 +326,6 @@ function emptyText(days, fallback) {
 }
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchInverterHistory, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchTrendMonthly, fetchCompare, fetchSegments, fetchBalance,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchInverterHistory, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchCompare, fetchBalance,
   fetchMe, savePrefs, savePlantConfig, deleteAccount, emptyText, BATT_MAX_KW, TYPICAL_DAYS,
 });

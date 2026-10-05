@@ -526,55 +526,6 @@
   .trend-badge.bad { color: #f87171; }
   .trend-badge.flat { color: var(--dim); font-weight: 500; }
 
-  /* ---------- trends ---------- */
-  .trend-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
-  .trend-stats > div { background: rgba(255,255,255,0.015); border: 1px solid var(--line); border-radius: 12px; padding: 11px 13px; }
-  .ts-l { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
-  .ts-v { font-size: 18px; font-weight: 600; margin-top: 5px; white-space: nowrap; }
-  .ts-sub { font-size: 12px; color: var(--dim); font-weight: 400; margin-top: 4px; }
-  .trend-rec { display: flex; flex-direction: column; gap: 4px; }
-  .trend-rec-label { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
-  .trend-rec-window { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; margin: 2px 0; }
-  .trend-rec-detail { font-size: 13px; color: var(--text); line-height: 1.5; }
-  .trend-rec-detail b { font-weight: 600; }
-  .rec-list { margin: 6px 0 0; padding-left: 18px; }
-  .rec-list li { margin: 3px 0; color: var(--muted); }
-  .rec-list li b { color: inherit; }
-  .trend-subnav { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
-  .trend-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .trend-legend { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
-  .tl-item { display: inline-flex; align-items: center; gap: 7px; }
-  .tl-dot { width: 10px; height: 10px; border-radius: 50%; }
-  .tl-axes { margin-left: auto; font-size: 11px; color: var(--dim); }
-  /* per-segment usage rows (units used + solar/battery/grid split bar) */
-  .seg-list { display: flex; flex-direction: column; gap: 14px; margin: 14px 0 4px; }
-  .seg-row { display: flex; flex-direction: column; gap: 6px; }
-  .seg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-  .seg-name { color: var(--text); font-weight: 600; font-size: 13px; }
-  .seg-range { color: var(--dim); font-weight: 400; font-size: 12px; }
-  .seg-avg { color: var(--text); font-weight: 600; font-size: 13px; white-space: nowrap; }
-  .seg-kwh { color: var(--dim); font-weight: 400; }
-  .seg-bar { display: flex; height: 13px; border-radius: 5px; overflow: hidden; background: rgba(255,255,255,0.05); }
-  .seg-seg { flex: none; }
-  .seg-from { font-size: 12px; color: var(--dim); margin-top: 4px; }
-  .seg-key { font-size: 12.5px; color: var(--dim); margin: 2px 0 6px; }
-  .seg-key b { color: var(--muted); font-weight: 600; }
-  .trend-chart { width: 100%; min-width: 0; overflow: hidden; }
-  .trend-empty { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 200px; color: var(--muted); font-size: 13px; }
-  /* keep a two-word source label on one line rather than wrapping mid-phrase */
-  .trend-tip .tip-l, .trend-tip .tip-v { white-space: nowrap; }
-  /* Consumed card: one bar split into own-supply vs grid, with the exact figures under it */
-  /* legend key for a dashed series — a short dashed rule rather than a solid dot */
-  .tl-dash { display: inline-block; width: 12px; height: 0; border-top: 2px dashed; opacity: 0.9; }
-  .ts-split { display: flex; height: 6px; border-radius: 4px; overflow: hidden; margin-top: 12px; background: rgba(255,255,255,0.07); cursor: help; }
-  .ts-split span { display: block; height: 100%; transition: width .5s ease; }
-  .ts-split-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 11.5px; color: var(--muted); }
-  .ts-split-key span { display: inline-flex; align-items: center; gap: 6px; }
-  .ts-split-key i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
-  .ts-split-key b { color: var(--text); font-weight: 600; }
-  .trend-tip { position: absolute; top: 12px; pointer-events: none; background: rgba(13,17,23,0.96); border: 1px solid var(--line-2);
-    border-radius: 10px; padding: 10px 12px; min-width: 150px; box-shadow: 0 12px 30px rgba(0,0,0,0.5); z-index: 5; }
-
   /* ---------- chart ---------- */
   .hv-waste { font-size: 12.5px; color: var(--muted); margin-top: 12px; line-height: 1.45; }
   .hv-waste b { font-weight: 600; }
@@ -1189,7 +1140,6 @@
 <script type="text/babel" src="components.jsx"></script>
 <script type="text/babel" src="flow.jsx"></script>
 <script type="text/babel" src="chart.jsx"></script>
-<script type="text/babel" src="trends.jsx"></script>
 <script type="text/babel" src="tabs.jsx"></script>
 <script type="text/babel" src="app.jsx"></script>
 

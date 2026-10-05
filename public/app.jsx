@@ -12,8 +12,7 @@ const DEFAULT_SETTINGS = {
   // installation, not per-device preferences, so they now live in app_config and
   // arrive on the snapshot as `config` — one editable copy, shared with the phone
   // alerts, which read the same rows. See migration 0022.
-  // Off by default — the optional per-subject tabs are opt-in from Settings. Trends is
-  // no longer listed here: like Live and Settings it is always on, so it needs no flag.
+  // Off by default — the optional per-subject tabs are opt-in from Settings.
   tabs: { solar: false, battery: false, grid: false, inverters: false },
 };
 
@@ -83,7 +82,6 @@ const NAV_ICONS = {
   battery: '<rect x="2" y="7" width="16" height="10" rx="2"/><path d="M22 11v2M6 11v2M10 11v2"/>',
   grid: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
   inverters: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 12h4"/><circle cx="16" cy="12" r="2"/>',
-  trends: '<path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 6-6"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   account: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
@@ -317,7 +315,6 @@ function tabsFor(settings) {
     settings.tabs.grid && { id: 'grid', label: 'Grid' },
     settings.tabs.battery && { id: 'battery', label: 'Battery' },
     settings.tabs.inverters && { id: 'inverters', label: 'Inverters' },
-    { id: 'trends', label: 'Trends' },
     { id: 'settings', label: 'Settings' },
   ].filter(Boolean);
 }
@@ -356,7 +353,7 @@ function BootShell() {
   const tab = pageOk(tabs, saved) ? saved : 'live';
   return (
     <Frame tabs={tabs} tab={tab} busy head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /></>}>
-      {tab !== 'trends' && tab !== 'settings' && tab !== 'account' && <window.TabSkeleton tab={tab} />}
+      {tab !== 'settings' && tab !== 'account' && <window.TabSkeleton tab={tab} />}
     </Frame>
   );
 }
@@ -580,9 +577,8 @@ function App({ links }) {
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
           <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} /></>}>
         {err && <div className="notice offline" role="alert"><p><b>Can't reach the server.</b> Retrying every minute.</p></div>}
-        {/* Trends, Settings and Account never touch the snapshot: they draw for real. */}
-        {tab === 'trends' ? <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />
-          : tab === 'settings' ? settingsPage
+        {/* Settings and Account never touch the snapshot: they draw for real. */}
+        {tab === 'settings' ? settingsPage
           : tab === 'account' ? accountPage
           : <window.TabSkeleton tab={tab} />}
       </Frame>
@@ -610,7 +606,6 @@ function App({ links }) {
         {tab === 'battery' && <window.BatteryTab snap={snap} settings={settings} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} balance={balance} onOpenSettings={openSettings} />}
         {tab === 'grid' && <window.GridTab snap={snap} settings={settings} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} settings={settings} refreshKey={refreshKey} />}
-        {tab === 'trends' && <window.TrendsTab refreshKey={refreshKey} auto={auto} settings={settings} config={snap?.config} />}
         {tab === 'settings' && settingsPage}
         {tab === 'account' && accountPage}
       </div>
