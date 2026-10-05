@@ -79,19 +79,19 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   const nodes = {
     pv: { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun',
       split: [['Home', C.load, sunToHome * sunScale], ['Battery', C.batt, sunToBatt * sunScale], ['Grid', C.grid, gridExport * sunScale]],
-      today: today(['Made', agg.pvToday]) },
+      today: today(['Generated', agg.pvToday]) },
     // w stays the magnitude (animation, stroke); val is the signed figure printed on the box,
     // + = powering the house, as everywhere else in the app.
     bat: hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: window.battShown(agg.battOut, battPositive),
       icon: 'battery', soc: agg.battSoc, reverse: charging, state: battState, charge: agg.battSoc,
-      today: today(['Charged', agg.battChgToday], ['Used', agg.battDischgToday]) },
+      today: today(['Charged', agg.battChgToday], ['Discharged', agg.battDischgToday]) },
     // flows both ways: an export runs the animation back towards the grid and prints
     // negative (SOLAR-41), as a discharging battery does
     grid: hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 0 ? gridExport : gridImport,
       val: gridExport > 0 ? -gridExport : gridImport, icon: 'bolt',
       reverse: gridExport > 0, off: gridOff, known: gridKnown,
-      state: gridOff ? 'No supply' : gridExport > 0 ? 'Sending out' : gridImport > 0 ? 'Drawing' : 'Not drawing',
-      today: today(['Bought', agg.gridFromToday ?? 0], ['Sent out', agg.gridToToday ?? 0]) },
+      state: gridOff ? 'No supply' : gridExport > 0 ? 'Exporting' : gridImport > 0 ? 'Importing' : 'Idle',
+      today: today(['Imported', agg.gridFromToday ?? 0], ['Exported', agg.gridToToday ?? 0]) },
     home: { key: 'home', label: 'Home', color: C.load, w: agg.loadNow, icon: 'home',
       split: [['Solar', C.pv, solarIn], ['Battery', C.batt, battIn], ['Grid', C.grid, gridIn]],
       today: today(['Used', agg.loadToday]) },

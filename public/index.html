@@ -168,7 +168,8 @@
 
   /* header: the plant left; status and refresh right */
   /* flex: none: the page under it no longer shrinks, so a shrinkable header was squashed to 39px (SOLAR-25) */
-  .head { flex: none; position: sticky; top: 0; z-index: 5; height: var(--head-h); display: flex; align-items: center; gap: 16px; padding: 0 28px;
+  /* the right padding grows past 1360 px so status and refresh end where .content's cards do */
+  .head { flex: none; position: sticky; top: 0; z-index: 5; height: var(--head-h); display: flex; align-items: center; gap: 16px; padding: 0 max(28px, calc(100% - 1360px + 28px)) 0 28px;
     background: var(--bg); border-bottom: 1px solid var(--line); }
   .plant { position: relative; min-width: 0; margin-left: -10px; }
   .plant-btn { display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 7px 10px; border: 1px solid transparent; border-radius: 9px;
