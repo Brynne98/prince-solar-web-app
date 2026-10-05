@@ -56,7 +56,7 @@ begin
   select count(*) into n_bad_acc from private.sunsynk_accounts where status <> 'active' or last_error is not null;
   n_jobs := 0;
   if to_regclass('cron.job') is not null then
-    execute 'select count(*) from cron.job where jobname in (''ensure-partitions'', ''downsample-strings'')' into n_jobs;
+    execute 'select count(*) from cron.job where jobname in (''ensure-partitions'', ''drop-old-partitions'')' into n_jobs;
   end if;
 
   report := format(
