@@ -53,7 +53,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
     if (m) return { k: m[2] === 'empty' ? 'Empty in' : 'Full in', v: m[1] };
     // "Set pack size" stands alone, a link to Settings (SOLAR-23)
     if (battInfo) return { k: '', v: battInfo, on: onBattInfo };
-    return { k: 'Idle', v: '' };
+    // under 200 W there is no time (tabs.jsx), but the power is still moving (SOLAR-44)
+    return { k: charging ? 'Trickle charging' : agg.battState === 'discharging' ? 'Discharging' : 'Idle', v: '' };
   })();
   const battState = battRow.on
     ? <button type="button" className="mini-link" onClick={battRow.on}>{battRow.v}</button>
@@ -313,7 +314,10 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
       ? <> Your <b style={{ color: C.batt }}>battery</b> is powering the home{timeLeft ? <>, with about {timeLeft} left</> : ''}.</>
       : agg.pvNow > 50 ? <> <b style={{ color: C.pv }}>Solar</b> is powering the home.</> : null}</>;
   }
-  else if (gridExport > 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ', charging the battery' : ''} and sending <b style={{ color: C.grid }}>{window.fmtPower(gridExport)}</b> to the grid.</>;
+  // Exporting while the battery also feeds the home: solar alone isn't covering it (SOLAR-46).
+  else if (gridExport > 50) narrative = battIn > 50
+    ? <><b style={{ color: C.pv }}>Solar</b> and your <b style={{ color: C.batt }}>battery</b> are powering the home and sending <b style={{ color: C.grid }}>{window.fmtPower(gridExport)}</b> to the grid.</>
+    : <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ', charging the battery' : ''} and sending <b style={{ color: C.grid }}>{window.fmtPower(gridExport)}</b> to the grid.</>;
   // >= home - 50, not > home + 50: a home drawing exactly what the panels make is the
   // commonest sunny-afternoon state and fell through to the vague fallback.
   else if (agg.pvNow > 50 && agg.pvNow >= agg.loadNow - 50) narrative = <><b style={{ color: C.pv }}>Solar</b> is covering the home{hasBatt && charging ? ' and charging the battery' : ''}.</>;

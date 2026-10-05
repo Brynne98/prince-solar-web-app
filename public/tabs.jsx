@@ -183,7 +183,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
   let battEta = null, battInfo = null;
   if (!hasBatt) { /* nothing to estimate */ }
   else if (!cap) { battInfo = 'Set pack size'; } // a link on the flow's battery node
-  // Under 200 W the battery is only trickling and a time would read in days, so it says Idle.
+  // Under 200 W the battery is only trickling and a time would read in days, so it gives none.
   else if (a.battState === 'discharging' && a.battPower >= 200) {
     const hrs = availKwh / (a.battPower / 1000);
     battEta = <span className="batt-eta"><span className="bel">≈ <b>{fmtDur(hrs)}</b> until {RESERVE}% reserve</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
