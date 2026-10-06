@@ -529,7 +529,7 @@ const PANELS_MIN_DAYS = 7;     // days of history before shares mean anything
 const PANELS_LOW = 2 / 3;      // today's share under two thirds of usual is "less than usual"
 
 function invName(inv) {
-  return inv.alias && inv.alias !== inv.sn ? inv.alias : 'Inverter …' + String(inv.sn).slice(-4);
+  return inv.alias && inv.alias !== inv.sn ? inv.alias : 'Inverter ' + inv.sn;
 }
 
 // The verdict from api_string_health plus the snapshot: which state, the alerts, and per
