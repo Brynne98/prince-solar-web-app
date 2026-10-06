@@ -76,7 +76,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
 
   // Today's figures, in a column of their own on desktop and under a rule on a phone.
   const today = (...rows) => rows.filter(r => r[1] != null);
-  const flows = { pv: agg.pvNow, bat: agg.battPower, home: agg.loadNow };
+  const flows = silentSince ? { pv: 0, bat: 0, home: 0 } : { pv: agg.pvNow, bat: agg.battPower, home: agg.loadNow };
   const nodes = {
     pv: { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun',
       split: [['Home', C.load, sunToHome * sunScale], ['Battery', C.batt, sunToBatt * sunScale], ['Grid', C.grid, gridExport * sunScale]],
@@ -97,6 +97,10 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
       split: [['Solar', C.pv, solarIn], ['Battery', C.batt, battIn], ['Grid', C.grid, gridIn]],
       today: today(['Used', agg.loadToday]) },
   };
+  // A silent plant: each box keeps its name and shows a dash, with no state, share, charge,
+  // grid chip or Today figures, and no line runs. The sentence above says since when.
+  if (silentSince) Object.values(nodes).forEach(n => n && Object.assign(n, {
+    w: 0, dash: true, state: null, split: null, charge: null, known: false, off: false, reverse: false, today: [] }));
 
   const CEIL = 8000;
   const pw = w => window.fmtPowerParts(w);
@@ -190,7 +194,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   // its colour while power moves, faint when idle, dashed once the grid has gone.
   const box = n => {
     const active = n.w > 0;
-    const [v, u] = pw(n.val ?? n.w);
+    const [v, u] = n.dash ? ['—', ''] : pw(n.val ?? n.w);
     return (
       <div className={'fbox' + (n.off ? ' off' : '')} key={n.key}
         style={{ borderColor: flowAlpha(n.color, active ? 0.6 : 0.22), background: active ? flowAlpha(n.color, 0.07) : undefined }}>

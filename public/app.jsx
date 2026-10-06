@@ -262,8 +262,9 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
 
 // Says on the page when its numbers are old, and why. Grid off is news, not a fault: calm purple.
 function PageNotice({ snap, cutOff, onReconnect }) {
-  const s = plantStatus(snap, useNow(15000));
-  const at = window.fmtTime(s.last);
+  const now = useNow(15000);
+  const s = plantStatus(snap, now);
+  const at = readAgo(s.last.getTime(), now); // with the date once it is over a day old
   const a = snap.aggregate || {};
   if (s.status === 'offline' && cutOff) return (
     <div className="notice offline" role="alert">
