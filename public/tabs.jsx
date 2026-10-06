@@ -782,10 +782,6 @@ function SolarSkeleton() {
           <SectionTitle>{titled('WHERE IT WENT', 'today')}</SectionTitle>
           <window.Skeleton h={64} r={10} />
         </Card>
-        <Card>
-          <SectionTitle>GEYSER, POOL PUMP, WASHING</SectionTitle>
-          <window.Skeleton h={90} r={10} />
-        </Card>
       </div>
     </div>
   );
@@ -797,10 +793,8 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const feat = snap.features || {};
   const tz = cfg.timezone;
   const plantToday = plantDateStr(tz);
-  const rateExp = cfg.tariffExport ?? 0; // only to decide whether the plant sells; no money on this tab
   const hasGrid = feat.hasGrid !== false;
   const hasBatt = feat.hasBattery !== false;
-  const sells = hasGrid && rateExp > 0;
   React.useEffect(() => { ['week', 'month', 'year', 'lifetime'].forEach(p => { if (!energy[p]) onNeedEnergy(p); }); }, [energy]);
 
   // ---- totals ----
@@ -871,36 +865,6 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // it reads as a third unexplained number. It lives on Live, where Home and Imported sit on
   // the same strip and the subtraction is on screen, and on the Grid tab, which spells today's
   // sum out in a sentence. Rejected here on 2026-09-19 after trying it three ways.
-
-  // ---- battery full ----
-  const cap = cfg.battCapacity;
-  const updated = snap.updated instanceof Date ? snap.updated : new Date();
-  // Can the house run a big appliance on solar right now? Only once the battery is full
-  // does solar the house doesn't use go spare, so the answer hangs on when it fills.
-  let spare = null;
-  if (hasBatt) {
-    const lost = sells ? 'be sold to the grid' : 'go to waste';
-    const soc = Math.round(a.battSoc);
-    // charging from the sun: the panels cover the house and most of what the battery takes
-    const fromSun = a.battState === 'charging' && a.battPower > 50 && a.pvNow >= a.loadNow + a.battPower * 0.8 && !(a.gridPower > 100);
-    const charging = a.battState === 'charging' && a.battPower > 300;
-    // Past 17:00 at the plant there is little sun left to fill a battery or run appliances on,
-    // wherever the plant is; saying "later" is safer than naming a time after dark.
-    const late = (d) => window.plantHour(tz, d) >= 17;
-    if (a.battSoc >= 99 && !charging && a.pvNow > a.loadNow + 200 && !late(updated)) {
-      spare = { go: true, head: 'Go ahead now', note: 'The battery is full and the panels are making more than the house is using. The extra would ' + lost + '.' };
-    } else if (fromSun && cap) {
-      const eta = new Date(updated.getTime() + ((100 - a.battSoc) / 100 * cap) / (a.battPower / 1000) * 3600000);
-      const at = window.fmtPlantTime(eta, tz);
-      spare = plantDateStr(tz, eta) === plantDateStr(tz, updated) && !late(eta)
-        ? { head: <>Wait until about <span className="mono">{at}</span></>, estimate: true, note: 'The battery is still charging (' + soc + '%). Once it is full, they can run on solar that would otherwise ' + lost + '.' }
-        : { head: 'Not on spare solar today', estimate: true, note: 'The battery is charging (' + soc + '%), but at this rate it won’t be full while there’s still good sun.' };
-    } else if (fromSun) {
-      spare = { head: 'Wait until the battery is full', note: 'It is charging (' + soc + '%). Set your battery size to see what time that will be.', link: true };
-    } else {
-      spare = { head: 'Not right now', note: 'The panels aren’t making more than the house and battery can use.' };
-    }
-  }
 
   // ---- strings ----
   // some firmware leaves a string's readings empty; read those as zero rather than crash
@@ -984,17 +948,6 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
               </div>}
         </Card>
 
-        {spare && (
-          <Card>
-            <SectionTitle>
-              GEYSER, POOL PUMP, WASHING
-              {spare.estimate && <window.InfoDot text="The time comes from the battery’s charge now and how fast it is charging. Charging slows as the battery nears full, so it can take a little longer." />}
-            </SectionTitle>
-            <div className="solar-verdict" style={{ color: spare.go ? CC.pv : 'var(--text)' }}>{spare.head}</div>
-            <p className="solar-spare-note">{spare.note}</p>
-            {spare.link && <button type="button" className="mini-link" onClick={() => onOpenSettings('battery')}>Set battery size</button>}
-          </Card>
-        )}
       </div>
 
       {strings.length > 0 && (
