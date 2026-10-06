@@ -1,0 +1,284 @@
+<title>Prince Solar Storage Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: one reading column, wide tables scroll in their own boxes; the app's own night palette, with a paper version for light. */
+:root {
+  --bg: #0a0d12; --panel: #11161d; --line: rgba(255,255,255,0.08); --line-strong: rgba(255,255,255,0.14);
+  --text: #e7ecf2; --muted: #9aa5b3; --dim: #7f8da0;
+  --pv: #3ddc84; --batt: #a78bfa; --grid: #facc15; --load: #f87171; --soc: #22d3ee;
+  --keep: #3ddc84; --cut: #f87171; --merge: #a78bfa; --simplify: #facc15;
+  --chip-bg: rgba(255,255,255,0.05);
+  --display: 'Space Grotesk', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg: #f6f7f9; --panel: #ffffff; --line: rgba(10,13,18,0.09); --line-strong: rgba(10,13,18,0.16);
+  --text: #12171f; --muted: #4c5766; --dim: #667386;
+  --pv: #13914f; --batt: #6d4fd8; --grid: #a27c00; --load: #c93636; --soc: #0a8aa3;
+  --keep: #13914f; --cut: #c93636; --merge: #6d4fd8; --simplify: #a27c00;
+  --chip-bg: rgba(10,13,18,0.04);
+  color-scheme: light; } }
+:root[data-theme="light"] {
+  --bg: #f6f7f9; --panel: #ffffff; --line: rgba(10,13,18,0.09); --line-strong: rgba(10,13,18,0.16);
+  --text: #12171f; --muted: #4c5766; --dim: #667386;
+  --pv: #13914f; --batt: #6d4fd8; --grid: #a27c00; --load: #c93636; --soc: #0a8aa3;
+  --keep: #13914f; --cut: #c93636; --merge: #6d4fd8; --simplify: #a27c00;
+  --chip-bg: rgba(10,13,18,0.04);
+  color-scheme: light; }
+
+body { background: var(--bg); color: var(--text); font: 15px/1.55 var(--display); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 80px; display: grid; gap: 48px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font: 500 12px/1.2 var(--mono); letter-spacing: 0.08em; color: var(--dim); text-transform: uppercase; }
+h1 { font-size: clamp(28px, 4vw, 40px); line-height: 1.05; margin: 0; letter-spacing: -0.015em; text-wrap: balance; }
+h2 { font-size: 21px; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+h3 { font-size: 15px; margin: 0; color: var(--muted); font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.lede { color: var(--muted); font-size: 16px; }
+section { display: grid; gap: 16px; min-width: 0; }
+.num, td.n, th.n { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 6px; align-content: start; }
+.stat b { font: 600 28px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 13px; }
+.bar { height: 6px; border-radius: 3px; background: var(--chip-bg); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--load); }
+
+ol.findings { margin: 0; padding-left: 22px; display: grid; gap: 10px; max-width: 76ch; }
+ol.findings li::marker { font-family: var(--mono); color: var(--dim); }
+ol.findings b { font-weight: 600; }
+
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font: 500 11.5px/1.3 var(--display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); background: var(--chip-bg); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td.n, th.n { text-align: right; white-space: nowrap; }
+tr.group td { font: 600 12px/1.2 var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); background: var(--chip-bg); }
+code { font: 12.5px var(--mono); color: var(--muted); }
+.v { display: inline-block; font: 600 11px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 7px; border-radius: 5px; border: 1px solid currentColor; white-space: nowrap; }
+.v.keep { color: var(--keep); } .v.cut { color: var(--cut); } .v.merge { color: var(--merge); } .v.simplify { color: var(--simplify); }
+.flag { color: var(--load); font-weight: 600; }
+.note { color: var(--dim); font-size: 13px; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.card ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; color: var(--muted); }
+.tickets { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.tickets li { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; }
+.tickets li b { font-weight: 600; }
+.tickets li span { color: var(--muted); font-size: 13.5px; }
+.tickets .tag { font: 500 11px var(--mono); color: var(--dim); letter-spacing: 0.06em; }
+a { color: var(--soc); }
+:focus-visible { outline: 2px solid var(--soc); outline-offset: 2px; }
+@media (max-width: 520px) { .wrap { padding-inline: 16px; padding-block: 28px 60px; gap: 40px; } .stat b { font-size: 24px; } }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">SOLAR-43 · production read 5 Oct 2026, 11:41 UTC</div>
+  <h1>Prince Solar storage audit</h1>
+  <p class="lede">What each feature reads, what the database keeps, and a retention plan. Read-only: nothing was changed. No tickets have been made yet.</p>
+</header>
+
+<section aria-label="Summary">
+  <div class="stats">
+    <div class="stat"><span>Database now</span><b>379 MB</b><div class="bar" aria-hidden="true"><i style="width:75.8%"></i></div><span>of the free plan's 500 MB, with 2 plants and 5 inverters</span></div>
+    <div class="stat"><span>Per 1-inverter home, year one, today's rules</span><b>228 MB</b><span>then +83 MB every year, because minute history is never deleted</span></div>
+    <div class="stat"><span>Same home, proposed rules</span><b>48 MB</b><span>then +17 MB a year. About 5× smaller, and no feature loses anything it shows today</span></div>
+    <div class="stat"><span>Raw rows kept but never read</span><b>~130 MB</b><span>string readings older than 15 minutes and per-inverter readings older than 30 days. A third of the database</span></div>
+  </div>
+</section>
+
+<section>
+  <h2>What the audit found</h2>
+  <ol class="findings">
+    <li><b>The size comes from three raw logs, not from features.</b> Per-inverter readings (513 bytes a row, one row per inverter per minute), string readings (2 rows per inverter per minute) and inverter history are 80% of the database.</li>
+    <li><b>String readings are kept 90 to 120 days but read back 15 minutes at most.</b> Only the Live screen (newest row) and the phone alerts (last 15 min) read them.</li>
+    <li><b>Per-inverter readings are kept 90 to 120 days but read back 30 days at most.</b> Most readers want the newest row or the last 72 hours. The 30-day reader is the grid feed-scale check in <code>sync-plant-energy</code>.</li>
+    <li><b>The weekly “downsample strings” job does nothing useful, and it fails.</b> It thins the same 90-day-old months that the drop job deletes 30 minutes later. Its one run this week stopped at the 120 s limit, and no run has ever recorded a success.</li>
+    <li><b>Minute history (<code>agg_minute</code>) is the only data kept forever, at full minute detail.</b> The day chart for past dates draws 5-minute steps, so after the recent window, 4 of every 5 rows are never shown.</li>
+    <li><b>Inverter history stores every upload (about 850 a day per inverter) and keeps it 120 days.</b> The charts draw 5-minute steps (288 a day) and go back 60 days.</li>
+    <li><b>Two background readers take most of the database time.</b> Since 5 Aug, <code>api_balance</code> used 7.3 h and <code>api_alerts_due</code> 5.6 h. The alerts call comes from the TODO app every ~7.5 min, takes 1.7 s each time and runs the balance check inside. This bears on SOLAR-42, the memory swapping.</li>
+    <li><b>The app counts every stored row on each load.</b> <code>api_db_stats</code> averages 1.8 s, and its worst call took 55 s, just to work out how many days of history exist.</li>
+    <li><b>Features overlap a lot, but cheaply.</b> The four optional pages repeat the Live period tiles and day chart, and the Trends 30-day bars. They share the same calls, so they cost almost nothing in storage. Duplication is a design question, not a storage one.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>Data map</h2>
+  <p class="note">Sizes include indexes. Rows a day are measured over the last 7 days. Plant 495944 has 3 inverters; 538820 has 2.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Table</th><th class="n">Size</th><th class="n">Rows / day</th><th>Kept</th><th>Furthest anyone reads</th><th>Read by</th><th>Flag</th></tr></thead>
+    <tbody>
+      <tr><td><code>readings</code> (4 monthly parts, Jul–Oct)</td><td class="n">139 MB</td><td class="n">1,440 per inverter</td><td>90–120 d (whole months dropped weekly)</td><td>30 d; mostly newest row or 72 h</td><td>Live, battery health, alerts, inverter list, feature detection, grid feed scale, row count</td><td class="flag">60–90 d never read</td></tr>
+      <tr><td><code>inverter_history</code></td><td class="n">78 MB</td><td class="n">~850 per inverter</td><td>120 d (pruned by <code>recover</code>)</td><td>60 d, one day at a time</td><td>Grid supply chart, Inverters temperature and output</td><td class="flag">3× finer than drawn; 60 d unread</td></tr>
+      <tr><td><code>strings</code> (4 monthly parts)</td><td class="n">87 MB</td><td class="n">2,880 per inverter</td><td>90–120 d</td><td>15 min</td><td>Live (newest), alerts</td><td class="flag">~99% never read</td></tr>
+      <tr><td><code>agg_minute</code></td><td class="n">48 MB</td><td class="n">1,440 per plant</td><td>Forever (since 30 May)</td><td>Any past day (day chart); 120 d for forecast fitting; 30 d for Trends</td><td>Live, day charts, Trends by hour and time of day, alerts, balance, forecast fitting, backfill</td><td class="flag">Minute detail kept forever; chart draws 5 min</td></tr>
+      <tr><td><code>solar_forecast</code></td><td class="n">0.8 MB</td><td class="n">24</td><td>400 d</td><td>All rows (daily Expected line)</td><td>Trends daily, forecast fitting</td><td>Holds one plant only (no plant column)</td></tr>
+      <tr><td><code>plant_energy</code></td><td class="n">0.15 MB</td><td class="n">~1</td><td>Forever (back to commissioning)</td><td>All rows</td><td>Period tiles, Lifetime, Monthly, compare arrows, earliest day</td><td>Right as is</td></tr>
+      <tr><td><code>plant_config</code>, <code>plant_users</code>, <code>profiles</code>, <code>app_config</code>, <code>solar_forecast_cal</code></td><td class="n">&lt;0.1 MB each</td><td class="n">—</td><td>Current rows</td><td>Current</td><td>Settings, sign-in, every call</td><td>—</td></tr>
+      <tr><td><code>client_errors</code></td><td class="n">24 kB</td><td class="n">0</td><td>Forever</td><td>Nothing reads it</td><td>Written by the app on a page error</td><td class="flag">Empty, never read</td></tr>
+      <tr><td><code>readings</code> / <code>strings</code> Nov, Dec parts</td><td class="n">&lt;0.1 MB</td><td class="n">—</td><td>Made 2 months ahead</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><td>private: <code>gaps</code>, <code>meta</code>, <code>inverters</code>, <code>sunsynk_accounts</code>, <code>partitions_dropped</code>, <code>strings_downsampled</code>, <code>plant_purge</code></td><td class="n">0.5 MB total</td><td class="n">—</td><td>Current rows</td><td>—</td><td>Poller, backfill, clean-up jobs</td><td><code>strings_downsampled</code> is empty: the job has never finished</td></tr>
+      <tr><td>Outside the app: job log, sign-in, web responses, migrations</td><td class="n">13 MB</td><td class="n">—</td><td>Job log purged daily</td><td>—</td><td>—</td><td>Fixed cost, not per home</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>Feature map</h2>
+  <p class="note">Database time is the total since 5 Aug (61 days) for the call each card relies on. Calls shared by several cards are counted once, on the first card. Verdicts are for an ordinary household owner.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Card</th><th>Shows</th><th>Calls, and how far back</th><th>Fetched</th><th class="n">DB time</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="6">Live</td></tr>
+      <tr><td>Power flow (and fullscreen)</td><td>Solar, battery, grid, home now; today's totals</td><td><code>api_overview</code> + <code>api_health</code>: newest readings and strings, today's minutes</td><td>Every minute at :15</td><td class="n">68 min</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td>Day chart</td><td>5-minute power and charge for any day</td><td><code>api_history</code>: one day of minutes, any date back to the first</td><td>Every 5 min; on date change</td><td class="n">18 min</td><td><span class="v keep">Keep</span> This is what “kept forever” means to a user</td></tr>
+      <tr><td>Overview tiles and arrows</td><td>Generated, home, independence, imported, saved, per period</td><td><code>api_energy</code>, <code>api_trends_compare</code>: daily and monthly totals; minutes for the last 14 d</td><td>On period pick; every 5 min</td><td class="n">10 min</td><td><span class="v keep">Keep</span></td></tr>
+      <tr class="group"><td colspan="6">Solar (optional page)</td></tr>
+      <tr><td>Period tiles</td><td>Solar per period, % of kWp</td><td><code>api_energy</code> (shared)</td><td>On open</td><td class="n">shared</td><td><span class="v merge">Merge</span> Repeats Live tiles</td></tr>
+      <tr><td>Generation day chart</td><td>Solar line for one day</td><td><code>api_history</code> (shared)</td><td>On date change</td><td class="n">shared</td><td><span class="v simplify">Simplify</span> Same line as the Live chart</td></tr>
+      <tr><td>Last 30 days bars</td><td>Daily solar</td><td><code>api_trends_daily</code> 30 d</td><td>On open</td><td class="n">1 min</td><td><span class="v merge">Merge</span> Repeats Trends daily</td></tr>
+      <tr><td>Where it went</td><td>Solar split to home and battery</td><td>One day (shared)</td><td>With the day picker</td><td class="n">shared</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td>Geyser, pool pump, washing</td><td>Spare-solar advice</td><td>Snapshot</td><td>Every minute</td><td class="n">shared</td><td><span class="v keep">Keep</span> Most useful card for a household</td></tr>
+      <tr><td>Panels</td><td>String voltage and current</td><td>Snapshot (newest strings)</td><td>Every minute</td><td class="n">shared</td><td><span class="v simplify">Simplify</span> The “check” light fires on empty inputs</td></tr>
+      <tr class="group"><td colspan="6">Battery (optional page)</td></tr>
+      <tr><td>Battery health</td><td>Balanced or drifting, cycles, temperature</td><td><code>api_balance</code>: newest reading, 72 h, today</td><td>On load; every 5 min</td><td class="n">7.3 h</td><td><span class="v keep">Keep</span> Most expensive call. Also used by the TODO app</td></tr>
+      <tr><td>Period tiles</td><td>Out of battery per period</td><td><code>api_energy</code> (shared)</td><td>On open</td><td class="n">shared</td><td><span class="v merge">Merge</span></td></tr>
+      <tr><td>Charge day chart</td><td>Charge line against reserve</td><td><code>api_history</code> (shared)</td><td>On date change</td><td class="n">shared</td><td><span class="v simplify">Simplify</span> The charge line is already on the Live chart</td></tr>
+      <tr><td>Out of the battery, 30 days</td><td>Daily discharge</td><td><code>api_trends_daily</code> (shared)</td><td>On open</td><td class="n">shared</td><td><span class="v merge">Merge</span></td></tr>
+      <tr><td>Overnight</td><td>Battery against grid from 17:00 to 07:00</td><td>Two days of minutes (shared)</td><td>On date change</td><td class="n">shared</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td>If the grid goes off</td><td>Hours to reserve</td><td><code>api_trends_by_hour</code> 7 d</td><td>On open</td><td class="n">7 min</td><td><span class="v keep">Keep</span> Load-shedding question</td></tr>
+      <tr><td>Packs</td><td>Per-pack power, voltage, temperature</td><td>Snapshot</td><td>Every minute</td><td class="n">shared</td><td><span class="v keep">Keep</span></td></tr>
+      <tr class="group"><td colspan="6">Grid (optional page)</td></tr>
+      <tr><td>Period tiles, day chart, 30 days</td><td>Bought from the grid</td><td>Shared calls</td><td>On open</td><td class="n">shared</td><td><span class="v merge">Merge</span> Repeats Live and Trends</td></tr>
+      <tr><td>What the house ran on</td><td>Solar, battery, grid split and cost</td><td>One day (shared)</td><td>With the day picker</td><td class="n">shared</td><td><span class="v merge">Merge</span> With Solar's “Where it went”</td></tr>
+      <tr><td>Supply card and day chart</td><td>Grid on or off, voltage, Hz, outages</td><td><code>api_inverter_history</code>: one day, back 60 d</td><td>On date change</td><td class="n">&lt;1 min</td><td><span class="v keep">Keep</span> The only outage record</td></tr>
+      <tr class="group"><td colspan="6">Inverters (optional page)</td></tr>
+      <tr><td>Temperature, day</td><td>AC and DC temperature</td><td><code>api_inverter_history</code> (shared)</td><td>On date change</td><td class="n">shared</td><td><span class="v simplify">Simplify</span> Niche; 5-minute steps are enough</td></tr>
+      <tr><td>Output, day (off-grid plants)</td><td>Output voltage and Hz</td><td>Same</td><td>On date change</td><td class="n">shared</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td>Per-inverter cards</td><td>Eight live values each</td><td>Snapshot</td><td>Every minute</td><td class="n">shared</td><td><span class="v keep">Keep</span></td></tr>
+      <tr class="group"><td colspan="6">Trends</td></tr>
+      <tr><td>Electricity used by time of day</td><td>5 parts of the day, by source</td><td><code>api_trends_segments</code> 7/14/30 d of minutes</td><td>On open; every 5 min</td><td class="n">&lt;1 min</td><td><span class="v merge">Merge</span> With “Usual mix by hour”: same data, two drawings</td></tr>
+      <tr><td>Usual mix by hour</td><td>24 stacked hours and typical charge</td><td><code>api_trends_by_hour</code> 7/14/30 d of minutes</td><td>Same</td><td class="n">shared</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td>Energy daily, with Expected</td><td>Daily totals and forecast line</td><td><code>api_trends_daily</code> ≤120 d of totals; all forecast rows</td><td>On open; every 5 min</td><td class="n">shared</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td>Energy monthly and seasonal</td><td>Monthly totals, seasons from them</td><td><code>api_trends_monthly</code>: all monthly totals</td><td>On open</td><td class="n">&lt;1 min</td><td><span class="v keep">Keep</span></td></tr>
+      <tr class="group"><td colspan="6">Frame, settings, sign-in</td></tr>
+      <tr><td>Header status, notices</td><td>Live, stale or offline; banners</td><td>Snapshot</td><td>15 s tick, no fetch</td><td class="n">shared</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td>History-day count on load</td><td>Feeds “Fetching history N%”</td><td><code>api_db_stats</code>: counts every minute and reading row</td><td>Every app load</td><td class="n">15 min</td><td><span class="v simplify">Simplify</span> 1.8 s average for a number that could be read from one row</td></tr>
+      <tr><td>Settings: tariff, panels, battery, display, pages</td><td>Plant set-up</td><td><code>plant_config</code>, <code>api_prefs_set</code></td><td>On save</td><td class="n">&lt;1 min</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td>Account: SunSynk logins, delete account</td><td>Connect, reconnect, remove</td><td><code>api_link_status</code>, <code>link-sunsynk</code>, <code>api_account_delete</code></td><td>On open; on action</td><td class="n">&lt;1 min</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td>Sign-in, connect SunSynk</td><td>Email, Google, password reset</td><td>Supabase sign-in; <code>link-sunsynk</code></td><td>On action</td><td class="n">&lt;1 min</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td>Terms and privacy pages</td><td>Static text</td><td>None</td><td>—</td><td class="n">0</td><td><span class="v keep">Keep</span> Still placeholder text; must match the retention chosen</td></tr>
+      <tr><td>Error reporting</td><td>Nothing visible</td><td>Inserts into <code>client_errors</code></td><td>On a page error</td><td class="n">0</td><td><span class="v cut">Cut</span> or give it a reader: nothing ever looks at it</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>Background work</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Job</th><th>Schedule (UTC)</th><th>Does</th><th>Writes</th><th class="n">Runs / 7 d</th><th class="n">DB time since 5 Aug</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td><code>sunsynk-poll</code> → <code>poll</code></td><td>every minute</td><td>Reads SunSynk, stores one minute</td><td>readings, strings, agg_minute</td><td class="n">9,989</td><td class="n">55 min write + 26 min inverter list</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td>TODO app → <code>alerts-due</code></td><td>~every 7.5 min</td><td>Checks for alerts to send to one phone</td><td>none</td><td class="n">~1,350</td><td class="n">5.6 h (1.7 s a call)</td><td><span class="v simplify">Simplify</span> Second-biggest cost</td></tr>
+      <tr><td><code>sunsynk-recover</code> → <code>recover</code></td><td>:17 every 6 h</td><td>Fills missed minutes; prunes inverter history at 120 d</td><td>agg_minute, inverter_history</td><td class="n">27</td><td class="n">7 min (row count) + 1 min</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td><code>sunsynk-plant-energy</code></td><td>02:15 daily</td><td>Daily and monthly totals from SunSynk; grid feed scale</td><td>plant_energy</td><td class="n">7</td><td class="n">4 min (30 d readings scan)</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td><code>sunsynk-forecast</code></td><td>:23 every 6 h</td><td>Next 3 days of sunshine</td><td>solar_forecast</td><td class="n">27</td><td class="n">small</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td><code>sunsynk-forecast-cal</code></td><td>Sun 03:10</td><td>Refits forecast against 120 d of output</td><td>solar_forecast_cal</td><td class="n">1</td><td class="n">small</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td><code>ensure-partitions</code></td><td>03:00 daily</td><td>Makes next 2 months' tables</td><td>—</td><td class="n">7</td><td class="n">0.1 s a run</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td><code>drop-old-partitions</code></td><td>Sun 04:30</td><td>Drops whole months older than 90 d</td><td>—</td><td class="n">1</td><td class="n">1.8 s a run</td><td><span class="v simplify">Simplify</span> Shorter limits, day-sized tables</td></tr>
+      <tr><td><code>downsample-strings</code></td><td>Sun 04:00</td><td>Thins 90-day-old strings to 5 min</td><td>strings</td><td class="n">1 (failed, 120 s)</td><td class="n">—</td><td><span class="v cut">Cut</span> Works on rows deleted 30 min later</td></tr>
+      <tr><td><code>plant-purge</code></td><td>every 5 min</td><td>Deletes removed plants' data</td><td>all plant tables</td><td class="n">1,998</td><td class="n">2 min</td><td><span class="v keep">Keep</span></td></tr>
+      <tr><td><code>purge-cron-log</code></td><td>04:45 daily</td><td>Trims the job log</td><td>job log</td><td class="n">7</td><td class="n">0.8 s a run</td><td><span class="v keep">Keep</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Edge-function run times were not read: they are in the Supabase dashboard's function logs, which this audit had no access to. The times above are database time only. <code>link-sunsynk</code> runs only when someone connects a login.</p>
+</section>
+
+<section>
+  <h2>Storage plan</h2>
+  <p>One rule: keep each thing at the detail and age its furthest reader needs, plus a small margin. Sizes are for a home with one inverter, using bytes a row measured on production (readings 513, strings 150, minutes 158, inverter history 211).</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Data</th><th>Furthest reader</th><th>Today</th><th class="n">MB, today</th><th>Proposed</th><th class="n">MB, proposed</th></tr></thead>
+    <tbody>
+      <tr><td>String readings</td><td>15 min (alerts)</td><td>90–120 d</td><td class="n">45.2</td><td>2 days</td><td class="n">0.9</td></tr>
+      <tr><td>Per-inverter readings</td><td>72 h, and 30 d for grid feed scale</td><td>90–120 d</td><td class="n">77.6</td><td>7 days; feed-scale check moved to 7 d</td><td class="n">5.2</td></tr>
+      <tr><td>Inverter history</td><td>60 d, drawn in 5-min steps</td><td>Every upload, 120 d</td><td class="n">21.6</td><td>5-minute steps, 60 d</td><td class="n">3.7</td></tr>
+      <tr><td>Minute history, recent</td><td>120 d (forecast fitting); 30 d (Trends)</td><td>Every minute, forever</td><td class="n">83.1 a year</td><td>Every minute for 120 d</td><td class="n">27.3</td></tr>
+      <tr><td>Minute history, older</td><td>Day chart, any past date, drawn in 5-min steps</td><td>(same)</td><td class="n">—</td><td>5-minute steps, forever</td><td class="n">16.6 a year</td></tr>
+      <tr><td>Daily and monthly totals</td><td>Lifetime</td><td>Forever</td><td class="n">&lt;0.1</td><td>Forever</td><td class="n">&lt;0.1</td></tr>
+      <tr><td><b>Year one</b></td><td></td><td></td><td class="n"><b>227.5</b></td><td></td><td class="n"><b>48.2</b></td></tr>
+      <tr><td><b>Each later year adds</b></td><td></td><td></td><td class="n"><b>83.1</b></td><td></td><td class="n"><b>16.6</b></td></tr>
+    </tbody>
+  </table></div>
+  <div class="cols">
+    <div class="card">
+      <h3>What it means for the free plan</h3>
+      <ul>
+        <li>About 450 MB is usable once the fixed 15 MB and some headroom are taken off.</li>
+        <li>Today's rules: about 2 one-inverter homes in year one, and fewer each year after.</li>
+        <li>Proposed: about 9 homes in year one and 5 by year three.</li>
+        <li>A 3-inverter home costs about 2.5× a one-inverter home for raw readings.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>How to get there</h3>
+      <ul>
+        <li>Store readings and strings in day-sized tables, not month-sized ones. A month-sized table can only be dropped once its last day is old enough, so a 2- or 7-day limit would still keep a month or more.</li>
+        <li>Roll minutes older than 120 days into 5-minute rows in a separate table. The day chart reads whichever table covers the date.</li>
+        <li>Write inverter history as 5-minute maximums, the way the chart already draws it.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>The “kept forever” promise</h3>
+      <ul>
+        <li>Sign-in screen: “Minute-by-minute solar history, kept forever.” (<code>auth.jsx:110</code>)</li>
+        <li>Terms: “keeps a permanent history of it” (<code>legal.jsx:15</code>).</li>
+        <li>Under the plan, history is still kept forever, but in 5-minute steps after 120 days. A wording that stays true: “Your solar history, minute by minute, kept for good.” Minute detail would cover the recent four months only.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Paid tier options</h2>
+  <p class="note">Options only. The choice is yours.</p>
+  <div class="cols">
+    <div class="card"><h3>A · Free keeps everything in the plan</h3><ul><li>Everything above is free.</li><li>Paid adds things that aren't storage: phone alerts, more than one plant, CSV export.</li><li>Simplest promise. Storage cost grows with every free home.</li></ul></div>
+    <div class="card"><h3>B · Free has a time window</h3><ul><li>Free: live data, 120 days of day charts, and daily and monthly totals forever.</li><li>Paid: 5-minute day charts forever, plus inverter and grid-supply history past 60 days.</li><li>Free costs about 37 MB a home, and that stops growing after 120 days.</li></ul></div>
+    <div class="card"><h3>C · Paid covers the bigger plan</h3><ul><li>The Supabase Pro plan (check current pricing) moves the cap from 0.5 GB to several GB.</li><li>At 48 MB a home-year, a few paying homes would carry many free ones.</li><li>Needs either A or B anyway, so growth stays predictable.</li></ul></div>
+  </div>
+</section>
+
+<section>
+  <h2>Proposed tickets</h2>
+  <p class="note">Not created. Waiting on your review.</p>
+  <ul class="tickets">
+    <li><span class="tag">STORAGE · SMALL</span><b>Remove the downsample-strings job</b><span>It thins rows that are deleted 30 minutes later, and it fails at 120 s. One migration that drops the job and its function.</span></li>
+    <li><span class="tag">STORAGE · LARGE · SCHEMA</span><b>Day-sized tables for readings and strings; keep strings 2 days and readings 7 days</b><span>Saves ~120 MB a home. The grid feed-scale check moves from 30 d to 7 d. The row count stops counting readings.</span></li>
+    <li><span class="tag">STORAGE · MEDIUM · SCHEMA</span><b>Roll minute history older than 120 days into 5-minute rows</b><span>The day chart reads the right table for the date. Cuts long-term growth by 5×. Needs a decision on the “kept forever” wording first.</span></li>
+    <li><span class="tag">STORAGE · MEDIUM</span><b>Store inverter history as 5-minute maximums and keep 60 days</b><span>Matches what the charts draw. Saves ~18 MB a home. Check whether the plant/time index is still needed (18 MB, used 251 times since August).</span></li>
+    <li><span class="tag">SPEED · MEDIUM</span><b>Make the alerts check cheap</b><span>Its 1.7 s a call, every 7.5 min, is the second-biggest database cost. Worth doing before or alongside SOLAR-42.</span></li>
+    <li><span class="tag">SPEED · SMALL</span><b>Stop counting every row on each app load</b><span>Read the history-day count from the first day on record instead. Today it averages 1.8 s and its worst call took 55 s.</span></li>
+    <li><span class="tag">COPY · SMALL</span><b>Make the sign-in line and Terms match the retention chosen</b><span><code>auth.jsx:110</code>, <code>legal.jsx:15</code>. Terms and Privacy are still placeholder text.</span></li>
+    <li><span class="tag">CLEAN-UP · SMALL</span><b>Remove dead pieces</b><span>The <code>client_errors</code> table (empty, never read) or a way to read it; <code>q_cal_samples</code> (no caller); the stale <code>q_recompute_solar_scale</code> call in <code>scripts/etl-sqlite-to-postgres.js</code>; the unused <code>Sparkline</code> component.</span></li>
+    <li><span class="tag">DESIGN · OPTIONAL</span><b>Merge repeated cards on the optional pages</b><span>The period tiles, day charts and 30-day bars repeat Live and Trends. “Time of day” and “Usual mix by hour” on Trends show the same data twice. No storage gain; a calmer app.</span></li>
+  </ul>
+</section>
+
+<section>
+  <h2>How this was measured</h2>
+  <ul class="note" style="margin:0;padding-left:18px;display:grid;gap:4px">
+    <li>Production project <code>pmakzojwhouamawgszrc</code>, read-only queries on 5 Oct 2026 from 11:41 UTC: <code>scripts/audit-solar-43*.sql</code>.</li>
+    <li>Database time comes from <code>pg_stat_statements</code> since its reset on 5 Aug 2026. <code>api_balance</code> includes the weeks before it was sped up on 3 Oct. Calls that timed out are not counted.</li>
+    <li>Bytes a row are taken from the September tables (full month, both plants) and include indexes.</li>
+    <li>Every page and card in <code>public/*.jsx</code>, and every table in the public and private schemas, is listed above. Shared widgets, icons and skeletons have no data of their own and are left out.</li>
+  </ul>
+</section>
+
+</div>
