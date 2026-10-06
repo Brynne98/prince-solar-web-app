@@ -374,13 +374,13 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   // A past day can be empty for three reasons; say which (0048).
   const sync = window.SYNC;
   const emptyMsg = invs == null ? '' : isToday
-    ? 'Nothing for today yet — it arrives with the six-hourly sync.'
+    ? 'Today’s readings arrive every six hours.'
     : sync && sync.invPending && sync.tempNext && date >= sync.tempNext
       ? (sync.tempNext > earliest
-          ? `Still fetching this day — fetched up to ${niceDate(shiftDate(sync.tempNext, -1))} so far, a few more days every six hours.`
-          : 'Still fetching this day — older days arrive first, a few every six hours.')
-      : date < earliest ? 'Only the last 60 days could be fetched; this day is before that.'
-      : 'No data for this day.';
+          ? `Not fetched yet. Up to ${niceDate(shiftDate(sync.tempNext, -1))} so far, more every six hours.`
+          : 'Not fetched yet. Older days come first, more every six hours.')
+      : date < earliest ? 'Older than 60 days, so not available.'
+      : 'No readings for this day.';
 
   return (
     <div className="hv-root">

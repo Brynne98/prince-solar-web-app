@@ -1272,7 +1272,7 @@ function equipmentState(snap, health, now) {
   if (verdict && verdict.state === 'alert') verdict.alerts.forEach(x => issues.push({
     string: x.kind,
     title: invName(x.inv) + ', string ' + x.no + (x.kind === 'nothing' ? ' made nothing today' : ' is making less than usual'),
-    todo: x.kind === 'nothing' ? 'Check its breaker or isolator.' : 'Check for shade, dirt or a tripped breaker.', since: 'Today' }));
+    todo: x.kind === 'nothing' ? 'Check its breaker or isolator.' : 'Check for shade, dirt or a tripped breaker.' }));
   // Battery checks read only inverters still reporting; a stale reading proves nothing.
   const withBatt = invs.filter(i => i.numberOfBatteries > 0 || i.battSoc > 0);
   const liveBatt = withBatt.filter(i => !quiet.includes(i));
@@ -1300,7 +1300,7 @@ function simpleIssues(issues) {
   if (!strs.length) return issues;
   const nothing = strs.every(x => x.string === 'nothing');
   const one = { title: nothing ? 'Some panels made nothing today' : 'Some panels are making less than usual',
-    todo: nothing ? 'Check the breaker or isolator for your panels.' : 'Check for shade, dirt or a tripped breaker.', since: 'Today' };
+    todo: nothing ? 'Check the breaker or isolator for your panels.' : 'Check for shade, dirt or a tripped breaker.', since: nothing ? '' : 'Today' };
   let placed = false;
   return issues.flatMap(x => !x.string ? [x] : placed ? [] : (placed = true, [one]));
 }
@@ -1325,24 +1325,23 @@ function EquipmentSimple({ st, now }) {
   const last = t => t ? 'Last reading ' + readAgo(t, now) : 'Not reporting';
   const alerts = verdict && verdict.state === 'alert' ? verdict.alerts : [];
   const pvState = st.allQuiet ? ['stale', last(st.lastAt)]
-    : st.quiet.length ? ['stale', 'Missing some readings']
-    : alerts.length ? ['warn', alerts.every(x => x.kind === 'nothing') ? 'Some made nothing today' : 'Some are making less than usual']
+    : st.quiet.length ? ['stale', 'Not all reporting']
+    : alerts.length ? ['warn', 'Needs a look']
     : st.night ? ['ok', 'Resting for the night']
-    : ['ok', verdict && verdict.state === 'normal' ? 'Working normally' : 'Working'];
+    : ['ok', 'Working'];
   const battState = st.battStale ? ['stale', last(st.battAt)]
-    : st.hot ? ['warn', 'Hot, ' + Math.round(st.battTemp) + ' °C']
-    : st.badSensor ? ['warn', 'Temperature sensor not reading']
+    : st.hot || st.badSensor ? ['warn', 'Needs a look']
     : ['ok', a.battOut > 5 ? 'Powering the house' : a.battOut < -5 ? 'Charging' : 'Resting'];
   const n = st.invs.length, live = n - st.quiet.length;
   const invState = !st.quiet.length ? ['ok', 'Working']
     : st.allQuiet ? ['stale', last(st.lastAt)]
-    : ['warn', st.quiet.length === 1 ? invName(st.quiet[0]) + ' isn’t reporting' : st.quiet.length + ' aren’t reporting'];
+    : ['warn', 'Needs a look'];
   const invValue = !st.quiet.length ? (n === 1 ? 'On' : 'All on') : n === 1 ? '—' : live + ' of ' + n;
   const invSub = st.quiet.length ? (n === 1 ? 'not reporting' : 'reporting') : n === 2 ? st.invs.map(invName).join(' and ') : n > 2 ? n + ' inverters' : '';
   return (
     <div className="eq-tiles">
       <EqTile label="Solar panels" state={pvState} value={st.pvParts[0]} unit={st.pvParts[1]} sub={st.pvSub} color={CC.pv} stale={st.allQuiet} />
-      {st.hasBatt && <EqTile label="Battery" state={battState} value={a.battSoc} unit="%" sub={st.battStale ? 'charged then' : 'charged'} color={CC.batt} stale={st.battStale} />}
+      {st.hasBatt && <EqTile label="Battery" state={battState} value={a.battSoc} unit="%" sub="charged" color={CC.batt} stale={st.battStale} />}
       <EqTile label={n === 1 ? 'Inverter' : 'Inverters'} state={invState} value={invValue} sub={invSub} word
         color={!st.quiet.length ? CC.pv : st.allQuiet ? 'var(--dim)' : 'var(--warn)'} />
     </div>
@@ -1375,15 +1374,15 @@ function EqPanelsCard({ st, snap, health, now }) {
   const anyMark = groups.some(g => g.rows.some(r => r.usual != null));
   const toGo = PANELS_MIN_DAYS - ((health && health.historyDays) || 0);
   const note = v && {
-    single: 'One string, so there is nothing to compare it with.',
+    single: 'One string, nothing to compare it with.',
     learning: 'Checks start in ' + toGo + (toGo === 1 ? ' day.' : ' days.'),
     early: 'Checked once the panels have made ' + PANELS_MIN_KWH + ' kWh today.',
     dull: 'Not enough sun today to check.',
-    unchecked: 'The battery filled and the inverter turned its panels down, so its output can’t be compared fairly.',
+    unchecked: 'Battery full, panels turned down. Not checked today.',
   }[v.state];
   return (
     <Card className="eq-card">
-      <SectionTitle>PANELS</SectionTitle>
+      <SectionTitle>SOLAR PANELS</SectionTitle>
       <div className={'eq-big mono' + (st.allQuiet ? ' stale' : '')} style={{ color: CC.pv }}>{st.pvParts[0]}{st.pvParts[1] && <span className="u">{st.pvParts[1]}</span>}</div>
       <div className="eq-big-sub">{st.pvSub}</div>
       {groups.length > 0 && (
@@ -1395,7 +1394,7 @@ function EqPanelsCard({ st, snap, health, now }) {
                 {(groups.length > 1 || g.quiet) && (
                   <div className="eq-group-head">
                     <span>{invName(g.inv)}</span>
-                    <span className={'mono' + (g.quiet ? ' warn' : '')}>{g.quiet ? (g.inv.readAt ? 'No readings since ' + readAgo(g.inv.readAt, now) : 'Not reporting') : fmtKwh(g.kwh)}</span>
+                    <span className={'mono' + (g.quiet ? ' warn' : '')}>{g.quiet ? (g.inv.readAt ? 'Not reporting since ' + readAgo(g.inv.readAt, now) : 'Not reporting') : fmtKwh(g.kwh)}</span>
                   </div>
                 )}
                 {(folded ? g.rows.slice(0, EQ_FOLD) : g.rows).map(r => (
@@ -1461,11 +1460,11 @@ function EqInvertersCard({ st, now }) {
           return (
             <div className={'eq-inv' + (down ? ' down' : '')} key={inv.sn}>
               <div className="eq-inv-name">{invName(inv)}</div>
-              <div className={'eq-inv-state' + (down ? ' warn' : '')}><i className={'eq-dot sm ' + (down ? 'warn' : 'ok')} />{down ? 'No readings' : 'On'}</div>
+              <div className={'eq-inv-state' + (down ? ' warn' : '')}><i className={'eq-dot sm ' + (down ? 'warn' : 'ok')} />{down ? 'Not reporting' : 'On'}</div>
               <div className="eq-inv-now mono" style={{ color: down ? 'var(--dim)' : CC.pv }}>{n}{u && <span className="u">{u}</span>}</div>
               <div className="eq-inv-cap">solar now</div>
               <div className="eq-inv-today"><span>Today</span><span className="mono">{fmtKwh(inv.pvToday)}</span></div>
-              <div className="eq-inv-foot">{down ? (inv.readAt ? 'Since ' + readAgo(inv.readAt, now) : 'Not reporting') : inv.readAt ? 'Updated ' + window.fmtAgo(new Date(inv.readAt), now) : NBSP}</div>
+              <div className="eq-inv-foot">{down ? (inv.readAt ? 'Since ' + readAgo(inv.readAt, now) : NBSP) : inv.readAt ? 'Last reading ' + window.fmtAgo(new Date(inv.readAt), now) : NBSP}</div>
             </div>
           );
         })}
@@ -1480,7 +1479,7 @@ function EqSpecCard({ inv, st, now }) {
   const down = st.quiet.includes(inv);
   const rows = [
     ['Model', inv.model], ['Serial number', inv.sn], ['Firmware', inv.soft],
-    ['Last reading', inv.readAt ? readAgo(inv.readAt, now) + (now - inv.readAt <= 36 * 3600e3 ? ', ' + window.fmtAgo(new Date(inv.readAt), now) : '') : '—'],
+    ['Last reading', inv.readAt ? readAgo(inv.readAt, now) : '—'],
   ];
   const packs = [];
   const reads = inv.numberOfBatteries > 0 || inv.battSoc > 0;
@@ -1493,7 +1492,7 @@ function EqSpecCard({ inv, st, now }) {
     <Card className="eq-spec">
       <div className="eq-spec-head">
         <span>{invName(inv)}</span>
-        <span className={'eq-inv-state' + (down ? ' warn' : '')}><i className={'eq-dot sm ' + (down ? 'warn' : 'ok')} />{down ? 'No readings' : 'Online'}</span>
+        <span className={'eq-inv-state' + (down ? ' warn' : '')}><i className={'eq-dot sm ' + (down ? 'warn' : 'ok')} />{down ? 'Not reporting' : 'On'}</span>
       </div>
       <dl className="eq-spec-rows">
         {rows.map(([l, val]) => <div key={l}><dt>{l}</dt><dd className="mono">{val}</dd></div>)}
@@ -1526,7 +1525,7 @@ function EquipmentDetailed({ st, snap, health, now, refreshKey }) {
       </div>
       {/* inverter temperatures over a day (SunSynk history; nothing live reports them) */}
       <Card className="chart-card">
-        <SectionTitle>TEMPERATURE · DAY</SectionTitle>
+        <SectionTitle>TEMPERATURE</SectionTitle>
         <window.InverterHistoryChart kind="temp" refreshKey={refreshKey} />
       </Card>
       {/* The supply over a day: voltage at each inverter's AC terminal and the grid's frequency,
@@ -1534,7 +1533,7 @@ function EquipmentDetailed({ st, snap, health, now, refreshKey }) {
           terminal keeps reading the inverter's own 230 V then, so only the 0 Hz gives it away.
           Off-grid, the inverter's own output takes its place. */}
       <Card className="chart-card">
-        <SectionTitle>{st.hasGrid ? 'GRID SUPPLY · DAY' : 'OUTPUT · DAY'}</SectionTitle>
+        <SectionTitle>{st.hasGrid ? 'GRID SUPPLY' : 'OUTPUT'}</SectionTitle>
         <window.InverterHistoryChart kind={st.hasGrid ? 'ac' : 'output'} refreshKey={refreshKey} />
       </Card>
     </>
@@ -1560,7 +1559,7 @@ function InvertersTab({ snap, refreshKey }) {
   const simple = view === 'simple';
   const issues = simple ? simpleIssues(st.issues) : st.issues;
   const n = issues.length;
-  const head = n === 0 ? 'All your equipment is working' : n === 1 ? '1 thing needs a look' : n + ' things need a look';
+  const head = n === 0 ? 'Everything is working' : n === 1 ? '1 thing needs a look' : n + ' things need a look';
 
   return (
     <div className="stack eq-tab">
