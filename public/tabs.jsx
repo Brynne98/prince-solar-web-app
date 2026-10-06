@@ -1326,6 +1326,7 @@ function InvertersSkeleton() {
 
 function InvertersTab({ snap, settings, refreshKey }) {
   const feat = snap.features || {};
+  const now = window.useNow(15000);
   const hasBatt = feat.hasBattery !== false, hasGrid = feat.hasGrid !== false;
   return (
     <div className="stack">
@@ -1352,6 +1353,11 @@ function InvertersTab({ snap, settings, refreshKey }) {
                 <div>
                   <div className="inv-sn">{inv.sn}</div>
                   <div className="inv-meta mono dim">{inv.model} · firmware {inv.soft} · {inv.commissioned}</div>
+                  {/* Loggers upload at their own pace (one here every 5 min), so say how old each reading is. */}
+                  {inv.readAt && <div className="inv-meta mono" style={{ color: now - inv.readAt > 600000 ? 'var(--warn)' : 'var(--dim)' }}>
+                    Last reading {now - inv.readAt > 36 * 3600e3
+                      ? new Date(inv.readAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' + window.fmtTime(new Date(inv.readAt))
+                      : window.fmtTime(new Date(inv.readAt)) + ' · ' + window.fmtAgo(new Date(inv.readAt), now)}</div>}
                 </div>
                 <Badge tone={inv.status === 'online' ? 'ok' : 'warn'} dot>{inv.status}</Badge>
               </div>

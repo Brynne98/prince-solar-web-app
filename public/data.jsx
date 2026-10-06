@@ -68,6 +68,7 @@ function mapInverter(s) {
     hmi: s.hmi || '—',
     gsn: s.gsn || '—',
     commissioned: s.commType || '—', // no commissioning date in the API; show link type
+    readAt: s.readAt ? s.readAt * 1000 : null, // when this inverter took its reading (ms)
     pvNow: s.pv.power,
     pvToday: s.pv.today,
     pvTotal: s.pv.total,
