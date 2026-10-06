@@ -599,12 +599,25 @@ function panelsVerdict(h, snap, now) {
   return { state, alerts, lines, silent, night };
 }
 
-function PanelsCard({ snap, health }) {
+// Today's solar first, as Battery leads with its charge; then the check. Without string
+// readings (still loading, failed, or none) the figure stands alone rather than a guess.
+// `staleAt`: the plant has gone quiet, so the figure is as of that reading, or none at all
+// when that reading was on another day.
+function PanelsCard({ snap, health, staleAt }) {
   const now = window.useNow(60000);
-  if (!health) return null; // loading, or failed: the card waits rather than guessing
-  const v = panelsVerdict(health, snap, now);
-  if (v.state === 'none') return null;
   const a = snap.aggregate;
+  const tz = (snap.config || {}).timezone;
+  const oldDay = staleAt != null && plantDateStr(tz, new Date(staleAt)) !== plantDateStr(tz, new Date(now));
+  const [kwhN, kwhU] = oldDay ? ['—', ''] : window.fmtEnergyParts(a.pvToday);
+  const v = health && staleAt == null ? panelsVerdict(health, snap, now) : null;
+  const big = (
+    <>
+      <SectionTitle>PANELS</SectionTitle>
+      <div className="eq-big mono" style={{ color: CC.pv }}>{kwhN}<span className="u">{kwhU}</span></div>
+      <div className="eq-line dim">{oldDay ? 'No readings today' : staleAt != null ? 'today, by ' + window.fmtTime(new Date(staleAt)) : v && v.night ? 'made today' : 'so far today'}</div>
+    </>
+  );
+  if (!v || v.state === 'none') return <Card className={staleAt != null ? 'eq-stale' : null}>{big}</Card>;
   const lows = v.alerts.filter(x => x.kind === 'low').length, nothings = v.alerts.length - lows;
   const head = {
     normal: ['ok', 'All panels working normally'],
@@ -622,14 +635,14 @@ function PanelsCard({ snap, health }) {
   const toGo = PANELS_MIN_DAYS - (health.historyDays || 0);
   const note = {
     single: 'With a single string there is nothing to compare it with, so no check is shown.',
-    learning: 'Strings are compared once there are ' + PANELS_MIN_DAYS + ' days to compare with. ' + toGo + ' to go.',
+    learning: 'Checks start in ' + toGo + (toGo === 1 ? ' day.' : ' days.'),
     early: 'Checked once the panels have made ' + PANELS_MIN_KWH + ' kWh today.',
     unchecked: 'The battery filled and the inverter turned its panels down, so its output can’t be compared fairly.',
   }[v.state];
   return (
     <Card>
-      <SectionTitle right={<>{fmtKwh(a.pvToday)}{v.night ? ' today' : ' so far'}</>}>PANELS</SectionTitle>
-      {head && <div className="panels-status"><i className={'panels-dot ' + head[0]} />{head[1]}</div>}
+      {big}
+      {head && <div className="panels-status eq-status"><i className={'panels-dot ' + head[0]} />{head[1]}</div>}
       {v.state === 'alert' && v.alerts.map(x => (
         <div className="panels-alert" key={x.inv.sn + x.no}>
           <b>{invName(x.inv)}, string {x.no}</b>{x.kind === 'nothing'
@@ -1329,7 +1342,9 @@ const readAgo = (t, now) => now - t > 36 * 3600e3
 
 // Equipment for a home user (SOLAR-73): is everything OK, in one line at the top; then a short
 // card each for the panels, the battery and the inverters. Serial numbers, firmware, the packs'
-// volts, each inverter's live figures and the two day charts sit behind Details.
+// volts, each inverter's live figures and the two day charts sit behind Technical details.
+// SOLAR-75: each problem says what to do; a silent plant is one problem, and figures from a
+// silent inverter read as its last reading, not as now.
 function InvertersTab({ snap, refreshKey }) {
   const feat = snap.features || {};
   const now = window.useNow(15000);
@@ -1347,49 +1362,78 @@ function InvertersTab({ snap, refreshKey }) {
   const [details, setDetails] = React.useState(() => { try { return localStorage.getItem('synsynk.eqDetails') === '1'; } catch (e) { return false; } });
   const toggleDetails = () => setDetails(d => { try { localStorage.setItem('synsynk.eqDetails', d ? '0' : '1'); } catch (e) {} return !d; });
 
-  // ---- what needs a look ----
+  // ---- what needs a look: a plain line each, and what to do where a home user can do something ----
   const verdict = health ? panelsVerdict(health, snap, now) : null;
   const issues = [];
   // an inverter offline, or quiet for 30 minutes (one here uploads every 5)
   const quiet = snap.inverters.filter(inv => inv.status === 'offline' || (inv.readAt && now - inv.readAt > 30 * 60000));
-  quiet.forEach(inv => issues.push(inv.readAt ? invName(inv) + ' hasn’t reported since ' + readAgo(inv.readAt, now) + '.' : invName(inv) + ' isn’t reporting.'));
-  if (verdict && verdict.state === 'alert') verdict.alerts.forEach(x => issues.push(invName(x.inv) + ', string ' + x.no + (x.kind === 'nothing' ? ' made nothing today.' : ' is making less than usual today.')));
+  const reads = snap.inverters.map(i => i.readAt).filter(Boolean);
+  const lastAt = reads.length ? Math.max(...reads) : null;
+  const since = t => t ? ' since ' + readAgo(t, now) : '';
+  // The whole plant gone quiet is one problem, not one per inverter.
+  const allQuiet = quiet.length > 0 && quiet.length === snap.inverters.length;
+  if (allQuiet) {
+    issues.push({ text: 'No readings' + since(lastAt), todo: snap.inverters.length === 1
+      ? 'Check the inverter is on and its Wi-Fi dongle shows a light.'
+      : 'Check the inverters are on and each Wi-Fi dongle shows a light.' });
+  } else {
+    quiet.forEach(inv => issues.push({ text: invName(inv) + (inv.readAt ? ' hasn’t reported' + since(inv.readAt) : ' isn’t reporting'),
+      todo: 'Check it is on and its Wi-Fi dongle shows a light.' }));
+  }
+  // the Panels card carries what to check for a string
+  if (verdict && verdict.state === 'alert') verdict.alerts.forEach(x => issues.push({ text: invName(x.inv) + ', string ' + x.no + (x.kind === 'nothing' ? ' made nothing today' : ' is making less than usual') }));
+  // Battery checks read only inverters still reporting; a stale reading proves nothing.
   const withBatt = snap.inverters.filter(i => i.numberOfBatteries > 0 || i.battSoc > 0);
-  const temps = withBatt.map(i => cleanTemp(i.battTemp)).filter(t => t != null);
+  const liveBatt = withBatt.filter(i => !quiet.includes(i));
+  const battStale = hasBatt && withBatt.length > 0 && !liveBatt.length;
+  const battAt = battStale ? Math.max(0, ...withBatt.map(i => i.readAt || 0)) || null : null;
+  const temps = liveBatt.map(i => cleanTemp(i.battTemp)).filter(t => t != null);
   const battTemp = temps.length ? Math.max(...temps) : null;
-  const badSensor = hasBatt && withBatt.some(i => cleanTemp(i.battTemp) == null);
-  if (badSensor) issues.push('A battery temperature sensor isn’t reading.');
-  if (hasBatt && battTemp != null && battTemp > 45) issues.push('The battery is hot, ' + Math.round(battTemp) + ' °C.');
-  const head = issues.length === 0 ? 'All your equipment is working' : issues.length === 1 ? issues[0].replace(/\.$/, '') : issues.length + ' things need a look';
+  const badSensor = hasBatt && liveBatt.some(i => cleanTemp(i.battTemp) == null);
+  if (badSensor) issues.push({ text: 'A battery temperature sensor isn’t reading', todo: 'Mention it at the battery’s next service.' });
+  if (hasBatt && battTemp != null && battTemp > 45) issues.push({ text: 'The battery is hot, ' + Math.round(battTemp) + ' °C', todo: 'Make sure air can move around it.' });
+  const head = issues.length === 0 ? 'All your equipment is working' : issues.length === 1 ? issues[0].text : issues.length + ' things need a look';
 
   // ---- battery ----
   const a = snap.aggregate;
-  const battState = a.battOut > 5 ? 'Powering the house' : a.battOut < -5 ? 'Charging' : 'Resting';
+  const cap = (snap.config || {}).battCapacity;
+  const battState = battStale ? (battAt ? 'Last reading ' + readAgo(battAt, now) : 'Not reporting')
+    : a.battOut > 5 ? 'Powering the house at ' + fmtPower(a.battOut)
+    : a.battOut < -5 ? 'Charging at ' + fmtPower(-a.battOut) : 'Resting';
   const shared = feat.banks === 'shared';
   const packs = shared ? Math.min(1, withBatt.length) : withBatt.length;
   const modules = shared ? Math.max(0, ...withBatt.map(i => i.numberOfBatteries || 0)) : withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
 
   return (
-    <div className="stack">
-      <SectionTitle right={<span className="dim">{snap.plant.name}</span>}>EQUIPMENT</SectionTitle>
+    <div className="stack eq-tab">
+      <SectionTitle right={snap.plant.name}>EQUIPMENT</SectionTitle>
 
-      <Card className="eq-verdict">
+      <Card className={'eq-verdict' + (issues.length ? ' warn' : '')}>
         <div className="panels-status"><i className={'panels-dot ' + (issues.length ? 'warn' : 'ok')} />{head}</div>
-        {issues.length > 1 && <ul className="eq-issues">{issues.map(t => <li key={t}>{t}</li>)}</ul>}
-        {issues.length === 0 && <p className="eq-sub">Panels, {hasBatt ? 'battery and ' : ''}{snap.inverters.length === 1 ? 'inverter' : 'inverters'} are reporting normally.</p>}
+        {issues.length === 1 && issues[0].todo && <p className="eq-sub">{issues[0].todo}</p>}
+        {issues.length > 1 && (
+          <ul className="eq-issues">
+            {issues.map(x => <li key={x.text}><span>{x.text}.</span>{x.todo && <span className="eq-todo">{x.todo}</span>}</li>)}
+          </ul>
+        )}
+        {issues.length === 0 && lastAt && <p className="eq-sub">Last reading {window.fmtAgo(new Date(lastAt), now)}</p>}
       </Card>
 
       <div className="eq-row">
-        <PanelsCard snap={snap} health={health} />
+        <PanelsCard snap={snap} health={health} staleAt={allQuiet ? lastAt || 0 : null} />
 
         {hasBatt && (
-          <Card>
+          <Card className={battStale ? 'eq-stale' : null}>
             <SectionTitle>BATTERY</SectionTitle>
             <div className="eq-big mono" style={{ color: CC.batt }}>{a.battSoc}<span className="u">%</span></div>
             <div className="eq-line">{battState}</div>
-            <div className="eq-line dim">
-              {badSensor ? 'Temperature: sensor not reading' : battTemp != null ? <>Temperature {Math.round(battTemp)} °C, {battTemp > 45 ? 'hot' : battTemp < 5 ? 'cold' : 'normal'}</> : null}
-            </div>
+            {cap > 0 && <div className="eq-line dim">{(a.battSoc * cap / 100).toFixed(1)} of {fmtKwh(cap)} stored</div>}
+            {!battStale && (badSensor || battTemp != null) && (
+              <div className="eq-line dim">
+                {badSensor ? 'Temperature sensor not reading' : battTemp > 45 ? <span style={{ color: 'var(--warn)' }}>{Math.round(battTemp)} °C, hot</span>
+                  : <>{Math.round(battTemp)} °C, {battTemp < 5 ? 'cold' : 'normal'}</>}
+              </div>
+            )}
             <div className="eq-line dim">{packs} {packs === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'}</div>
           </Card>
         )}
@@ -1403,7 +1447,9 @@ function InvertersTab({ snap, refreshKey }) {
                 <div className="panels-row" key={inv.sn}>
                   <span>{invName(inv)}<span className="panels-sub" style={down ? { color: 'var(--warn)' } : null}>
                     {down ? (inv.readAt ? 'No readings since ' + readAgo(inv.readAt, now) : 'Not reporting') : 'Working'}</span></span>
-                  <span className="panels-kwh mono">{fmtKwh(inv.pvToday)}<span className="dim"> today</span></span>
+                  {down
+                    ? <span className="panels-kwh mono" style={{ color: 'var(--dim)' }}>—</span>
+                    : <span className="panels-kwh mono">{fmtPower(inv.pvNow)}<span className="dim"> solar</span></span>}
                 </div>
               );
             })}
@@ -1411,7 +1457,7 @@ function InvertersTab({ snap, refreshKey }) {
         </Card>
       </div>
 
-      <div><button type="button" className="ghost-btn" aria-expanded={details} onClick={toggleDetails}>{details ? 'Hide details' : 'Show details'}</button></div>
+      <button type="button" className="eq-more" aria-expanded={details} onClick={toggleDetails}>Technical details</button>
 
       {details && <>
         {hasBatt && <PacksCard snap={snap} />}
