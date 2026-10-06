@@ -17,7 +17,7 @@ function fmtAgo(d, now) {
   if (m < 90) return m + ' min ago';
   const h = Math.round(m / 60);
   if (h < 36) return h + 'h ago';
-  return window.fmtTime(d);
+  return readAgo(d.getTime(), now); // older than a day and a half: the date and time
 }
 function useNow(ms) {
   const [now, setNow] = useState(Date.now());
@@ -238,7 +238,9 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
       <div className={'status status-' + s.status} title={'Last reading ' + window.fmtTime(s.last)} role="status">
         <span className="status-dot" />
         <span className="status-word">{s.word}</span>
-        {s.old && <span className="status-age mono">{fmtAgo(s.last, now).replace(' ago', '')}</span>}
+        {/* an old reading's date shows from tablet width up; a phone keeps the room for the plant name */}
+        {s.old && (() => { const p = fmtAgo(s.last, now).replace(' ago', '').split(', ');
+          return <span className="status-age mono">{p.length === 2 && <span className="age-date">{p[0]}, </span>}{p[p.length - 1]}</span>; })()}
         {/* A freshly linked plant: the last 60 days arrive over a day or two of
             six-hourly runs (0048). Quiet once every day has a chart. */}
         {snap.sync && snap.sync.pending && snap.sync.days < snap.sync.window && (() => {
