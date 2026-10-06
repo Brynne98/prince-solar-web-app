@@ -854,10 +854,11 @@ function useShownDay(pick, today, refreshKey) {
 
 // A day with nothing to draw, in words, or null. `approx` means no 5-minute readings (before
 // logging began, or the first half hour of a new plant), which is not a day with no sun.
-function dayProblem(view, day, points) {
+// A plant that has gone silent isn't collecting today's readings: it has none.
+function dayProblem(view, day, points, silent) {
   if (!day) return null;
   if (day.failed) return 'Couldn’t load this day.';
-  if (day.approx || !points.length) return view.isToday ? 'Collecting today’s first readings.' : 'No 5-minute readings for this day.';
+  if (day.approx || !points.length) return view.isToday && !silent ? 'Collecting today’s first readings.' : view.isToday ? 'No readings today.' : 'No readings for this day.';
   return null;
 }
 
@@ -964,7 +965,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const daytime = points.slice(72, 216);
   const gapDay = !view.isToday && daytime.length > 0 && !points.some(p => p.pv != null && p.pv > 20)
     && daytime.filter(p => p.pv == null).length > daytime.length / 2;
-  const noReadings = dayProblem(view, day, points) || (day && gapDay ? 'Readings are missing for most of this day.' : null);
+  const noReadings = dayProblem(view, day, points, window.plantStatus(snap, Date.now()).status === 'offline') || (day && gapDay ? 'Readings are missing for most of this day.' : null);
   const peakOf = (pts) => {
     let pk = null;
     (pts || []).forEach(p => { if (p.pv != null && (!pk || p.pv > pk.pv)) pk = p; });
@@ -1106,13 +1107,13 @@ function GridTab(props) {
     return (
       <div className="stack">
         <div className="trio">
-          <StatTile label="GRID" value="Off-grid" unit="" accent={CC.grid} sub="no utility connection" />
-          <StatTile label="SELF-SUFFICIENCY" value={selfSuff} unit="%" accent={CC.soc} bar={selfSuff} sub="everything from solar and battery" />
-          <StatTile label="USED TODAY" value={window.fmtEnergyParts(a.loadToday)[0]} unit={' ' + window.fmtEnergyParts(a.loadToday)[1]} accent={CC.load} sub="covered without a grid" />
+          <StatTile label="GRID" value="Off" unit="" accent={CC.grid} sub="Not connected" />
+          <StatTile label="INDEPENDENCE" value={selfSuff} unit="%" accent={CC.soc} bar={selfSuff} sub={NBSP} />
+          <StatTile label="USED TODAY" value={window.fmtEnergyParts(a.loadToday)[0]} unit={' ' + window.fmtEnergyParts(a.loadToday)[1]} accent={CC.load} sub={NBSP} />
         </div>
         <Card>
           <SectionTitle>OFF-GRID</SectionTitle>
-          <div className="field-note" style={{ marginTop: 0 }}>The inverter reports no mains voltage and no import, so this tab has nothing to bill. A new grid connection shows here once the inverter sees it.</div>
+          <div className="field-note" style={{ marginTop: 0 }}>No grid for a day or more. Figures come back when the inverter sees the grid again.</div>
         </Card>
       </div>
     );
@@ -1155,11 +1156,14 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
     return pk;
   };
   const todayPeak = importPeak(today && !today.approx ? today.points : null);
+  // A silent plant's last figures aren't now: a dash and when they were read.
+  const ps = window.plantStatus(snap, Date.now());
+  const silent = ps.status === 'offline';
 
   // ---- the day on the chart: grid power signed, + bought and − exported ----
   const pick = useDayPicker(earliest, plantToday);
   const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
-  const noReadings = dayProblem(view, day, points);
+  const noReadings = dayProblem(view, day, points, silent);
   const peak = importPeak(points);
   const flows = React.useMemo(() => {
     let imp = 0, exp = 0;
@@ -1176,7 +1180,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
-        <StatTile label="GRID NOW" value={nowN} unit={nowU} accent={CC.grid} sub={nowSub} />
+        <StatTile label="GRID NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.grid} sub={silent ? 'Last reading ' + readAgo(ps.last.getTime(), Date.now()) : nowSub} />
         {tile('TODAY', a.gridFromToday, sells ? <>Exported <b>{fmtKwh(a.gridToToday)}</b></> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}

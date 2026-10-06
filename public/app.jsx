@@ -24,7 +24,7 @@ function useNow(ms) {
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), ms); return () => clearInterval(t); }, [ms]);
   return now;
 }
-Object.assign(window, { fmtAgo, useNow }); // Equipment's per-inverter reading age
+Object.assign(window, { fmtAgo, useNow, plantStatus }); // Equipment's reading ages; Solar and Grid's silent plant
 
 // Header status: one word, coloured. Live = fresh data and every inverter up;
 // Stale = the poller is behind (> 3 min) or an inverter is down; Offline = no data
