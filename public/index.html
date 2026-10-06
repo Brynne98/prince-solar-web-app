@@ -656,17 +656,13 @@
   #solar-day, #battery-day, #grid-day { scroll-margin-top: 16px; }
   .solar-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
   .tip-hint { font-size: 12px; color: var(--dim); margin-top: 6px; }
-  /* Where it went: one object. Each share is a column — its own segment of the bar, its
-     kWh tinted in the series colour, its name under it. The bar keeps exact proportions;
-     the label row below carries a min-width floor so a thin share never clips its text,
-     which is why the two are separate elements rather than one nested column. */
-  /* Where it went: a box like Live's power-flow boxes, half the row (SOLAR-72) */
-  .solar-row > .wiw { width: 100%; max-width: 560px; }
-  /* overflow visible so the info bubble isn't clipped; the side column keeps the rounded corners itself */
-  .wiw { display: grid; grid-template-columns: minmax(0, 1fr) 160px; overflow: visible; }
-  .wiw .fbox-now { padding: 18px 20px 16px; }
-  .wiw .fbox-head .info-dot, .wiw .fbox-head .infodot { margin-left: -3px; }
-  .wiw .fbox-today { border-left: 1px solid var(--line); background: rgba(255,255,255,0.015); padding: 18px 18px 16px; border-radius: 0 15px 15px 0; }
+  /* Where it went: a plain card, half the row (SOLAR-74). Its title keeps "Made" beside it at every width. */
+  .solar-row > .wiw { width: 100%; max-width: 560px; box-sizing: border-box; }
+  .solar-tab .wiw .section-title { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 5px 12px; margin-bottom: 14px; }
+  .wiw-figs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 16px; margin-top: 18px; }
+  .wiw-figs b { display: block; font: 700 28px var(--mono); line-height: 1; letter-spacing: -0.01em; white-space: nowrap; }
+  .wiw-figs b .u { font-size: 15px; margin-left: 4px; opacity: 0.85; }
+  .wiw-figs span:not(.u) { display: block; margin-top: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
   .solar-note { margin: 0 0 8px; font-size: 13.5px; color: var(--muted); max-width: 60ch; }
   /* Panels (SOLAR-51): a status line, alerts only when a string is low, one line per inverter */
   /* Equipment for a home user (SOLAR-73): the verdict, then three short cards */
@@ -948,10 +944,10 @@
     .solar-stats .stat-tile { padding: 18px; }
     .solar-tab .section-title { flex-direction: column; align-items: flex-start; gap: 5px; }
     .solar-row { gap: 14px; }
-    .wiw { grid-template-columns: minmax(0, 1fr); }
-    .wiw .fbox-now { padding: 15px 15px 13px; }
-    .wiw .fbox-today { border-left: 0; border-top: 1px solid var(--line); padding: 13px 15px 14px; flex-direction: row; flex-wrap: wrap; gap: 10px 24px; border-radius: 0 0 13px 13px; }
-    .wiw .fbox-today-h { flex-basis: 100%; }
+    .wiw-figs { gap: 10px; margin-top: 16px; }
+    .wiw-figs b { font-size: 22px; }
+    .wiw-figs b .u { font-size: 12px; }
+    .wiw-figs span:not(.u) { font-size: 11px; margin-top: 7px; }
     .stat-value .num { font-size: 34px; }
     .stat-value .unit { font-size: 18px; }
     .inv-sn { font-size: 18px; }

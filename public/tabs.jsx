@@ -1102,38 +1102,28 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
               today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
       </Card>
 
-      {/* Where it went, built like the boxes on Live's power flow (SOLAR-72): the day's solar,
-          the share bar, and where it went in the side column, each in its own colour. */}
+      {/* Where it went: a plain card like the rest of the page (SOLAR-74). The day's solar in the
+          header, the share bar, and each part's kWh with its name under it, in its own colour. */}
       <div className="solar-row">
-        <div className="fbox wiw" {...dim} style={{ borderColor: 'rgba(61,220,132,0.6)', background: 'rgba(61,220,132,0.07)' }}>
-          <div className="fbox-now">
-            <div className="fbox-head">
-              <svg width="18" height="18" viewBox="-11 -11 22 22" aria-hidden="true">
-                <circle r="4.2" fill={CC.pv} />
-                {[0, 45, 90, 135, 180, 225, 270, 315].map(r => <line key={r} x1="0" y1="-6.6" x2="0" y2="-9" stroke={CC.pv} strokeWidth="1.6" strokeLinecap="round" transform={'rotate(' + r + ')'} />)}
-              </svg>
-              <span className="fbox-label">Where it went</span>
-              <window.InfoDot text={'Worked out from 5-minute readings: solar counts to the house first, then the battery, then the grid. Scaled to the day’s total, so it matches the Today tile.'} />
-            </div>
-            {!day ? <window.Skeleton h={30} w="50%" r={8} style={{ marginTop: 12 }} />
-              : <div className="fbox-val" style={{ color: splitTotal >= 0.05 && !noReadings ? CC.pv : 'var(--muted)' }}>{noReadings || splitTotal < 0.05 ? '—' : EP(splitTotal)[0]}<span className="u">{noReadings || splitTotal < 0.05 ? '' : EP(splitTotal)[1]}</span></div>}
-            <div className="fbox-state">{!day ? NBSP : noReadings || (splitTotal < 0.05 ? (view.isToday ? 'No solar yet today.' : 'No solar on this day.') : (view.isToday ? 'Made so far today' : 'Made on ' + dayWord))}</div>
-            {day && !noReadings && splitTotal >= 0.05 && (
-              <div className="fbox-foot">
-                <div className="fbox-bar" role="img" title={destTitle} aria-label={destLabel}>
-                  {dests.map(([l, v, c]) => <i key={l} style={{ flexGrow: v, background: c }} />)}
-                </div>
+        <Card className="wiw" {...dim}>
+          <SectionTitle right={day && !noReadings && splitTotal >= 0.05 ? <>Made <b>{fmtKwh(splitTotal)}</b></> : null}>
+            {titled('WHERE IT WENT', dayWord)}
+            <window.InfoDot text={'Worked out from 5-minute readings: solar counts to the house first, then the battery, then the grid. Scaled to the day’s total, so it matches the Today tile.'} />
+          </SectionTitle>
+          {!day ? <window.Skeleton h={62} r={8} />
+            : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')}</div>
+            : <>
+              <div className="fbox-bar" role="img" title={destTitle} aria-label={destLabel}>
+                {dests.map(([l, v, c]) => <i key={l} style={{ flexGrow: v, background: c }} />)}
               </div>
-            )}
-          </div>
-          <div className="fbox-today" aria-hidden="true">
-            <div className="fbox-today-h">Went to</div>
-            {(day && !noReadings && splitTotal >= 0.05 ? dests : []).map(([l, v, c]) => {
-              const [n, u] = EP(v);
-              return <div key={l}><span>{l}</span><b style={{ color: c }}>{n}<span className="u">{u}</span></b></div>;
-            })}
-          </div>
-        </div>
+              <div className="wiw-figs" aria-hidden="true">
+                {dests.map(([l, v, c]) => {
+                  const [n, u] = EP(v);
+                  return <div key={l}><b style={{ color: c }}>{n}<span className="u">{u}</span></b><span>{l}</span></div>;
+                })}
+              </div>
+            </>}
+        </Card>
       </div>
     </div>
   );
