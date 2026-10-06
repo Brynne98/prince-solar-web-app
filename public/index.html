@@ -532,13 +532,16 @@
   .hv-waste-sub { color: var(--dim); }
   .hv-waste-none { opacity: 0.78; }
   .hv-datebar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-  .hv-daynav { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  /* the arrows and the date box share one height (--datebar-h) so they read as one control */
+  .hv-datebar { --datebar-h: 32px; }
+  .hv-daynav { box-sizing: border-box; width: var(--datebar-h); height: var(--datebar-h); flex: none; display: inline-flex; align-items: center; justify-content: center;
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
-    font-size: 18px; line-height: 1; cursor: pointer; transition: .15s; padding: 0; }
+    line-height: 0; cursor: pointer; transition: .15s; padding: 0; }
+  .hv-daynav svg { display: block; }
   .hv-daynav:hover:not(:disabled) { border-color: var(--line-2); }
   .hv-daynav:disabled { color: var(--dim); cursor: default; opacity: .45; }
-  .hv-dateinput { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
-    font-family: var(--mono); font-size: 12.5px; padding: 6px 10px; color-scheme: dark; cursor: pointer; }
+  .hv-dateinput { box-sizing: border-box; height: var(--datebar-h); background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
+    font-family: var(--mono); font-size: 12.5px; padding: 0 10px; color-scheme: dark; cursor: pointer; }
   .hv-dateinput:hover { border-color: var(--line-2); }
   /* desktop: the box is just a wrapper round the plain input; the phone's face and inner Today stay hidden */
   .hv-datebox, .hv-datepick { display: contents; }
@@ -561,7 +564,7 @@
     border-radius: 999px; padding: 6px 13px; font-size: 12.5px; color: var(--text); transition: .15s; }
   .legend-chip.off { color: var(--dim); }
   .legend-val { margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--line-2); font-family: var(--mono); font-weight: 600; letter-spacing: -0.01em;
-    display: inline-block; min-width: 9.5ch; text-align: left; font-variant-numeric: tabular-nums; }
+    display: inline-block; font-variant-numeric: tabular-nums; }
   .legend-chip.off .legend-val { color: var(--dim); border-color: var(--line); }
   .legend-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; }
   .legend-note { font-size: 12.5px; color: var(--dim); margin-left: 4px; }
@@ -643,14 +646,18 @@
      kWh tinted in the series colour, its name under it. The bar keeps exact proportions;
      the label row below carries a min-width floor so a thin share never clips its text,
      which is why the two are separate elements rather than one nested column. */
-  .solar-split { display: flex; gap: 3px; cursor: help; }
-  .solar-split i { display: block; height: 10px; border-radius: 4px; min-width: 3px; }
-  .solar-dest { display: flex; gap: 3px; margin-top: 13px; }
-  .solar-dest .sd { flex: 0 1 auto; min-width: 84px; }
-  .solar-dest .sd-v { font-size: 20px; font-weight: 600; line-height: 1; letter-spacing: -0.01em; white-space: nowrap; }
-  .solar-dest .sd-v s { text-decoration: none; font-size: 11px; font-weight: 700; opacity: 0.85; margin-left: 3px; }
-  .solar-dest .sd-k { margin-top: 7px; font-size: 12px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase;
+  /* Where it went: one bar, then each part under it in a row of its own (SOLAR-71) */
+  .solar-split { display: flex; gap: 3px; height: 14px; margin-top: 4px; cursor: help; }
+  .solar-split i { display: block; flex-basis: 0; min-width: 4px; border-radius: 3px; }
+  .solar-split i:first-child { border-top-left-radius: 7px; border-bottom-left-radius: 7px; }
+  .solar-split i:last-child { border-top-right-radius: 7px; border-bottom-right-radius: 7px; }
+  .solar-dest { display: flex; flex-wrap: wrap; gap: 14px 36px; margin-top: 18px; }
+  .solar-dest .sd { min-width: 0; }
+  .solar-dest .sd-k { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase;
     color: var(--muted); white-space: nowrap; }
+  .solar-dest .sd-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .solar-dest .sd-v { margin-top: 8px; font-size: 24px; font-weight: 600; line-height: 1; letter-spacing: -0.01em; white-space: nowrap; }
+  .solar-dest .sd-v s { text-decoration: none; font-size: 12px; font-weight: 700; opacity: 0.85; margin-left: 4px; }
   .solar-note { margin: 0 0 8px; font-size: 13.5px; color: var(--muted); max-width: 60ch; }
   .solar-verdict { font-size: 24px; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
   .solar-verdict .mono { font-weight: 700; }
@@ -681,7 +688,7 @@
   .inv-card { } .inv-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
   .inv-sn { font-size: 22px; font-weight: 700; font-family: var(--mono); }
   .inv-meta { font-size: 12.5px; margin-top: 5px; }
-  .inv-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 18px 16px; }
+  .inv-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 16px; }
   .inv-warn { margin-top: 18px; font-size: 12.5px; color: var(--load); background: rgba(248,113,113,0.07);
     border: 1px solid rgba(248,113,113,0.25); border-radius: 7px; padding: 9px 12px; }
 
@@ -767,23 +774,10 @@
   .input[aria-invalid="true"], .input[aria-invalid="true"]:focus { border-color: var(--load); }
   /* reserve's slider runs the row's full width under its name and box, filled to the value */
   /* pick one of a few (Plant, Battery, Display): described tiles across the row, native radios underneath */
-  .choice-tiles { flex-basis: 100%; display: grid; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); gap: 12px; }
-  .sset-choice .choice-tiles { margin-top: 12px; }
-  .choice-tile { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel-2); cursor: pointer; transition: border-color .15s, background-color .15s; }
-  .choice-tile:hover { border-color: rgba(255,255,255,0.2); }
-  .choice-tile.on { border-color: rgba(61,220,132,0.55); background: rgba(61,220,132,0.06); }
-  .choice-tile input { -webkit-appearance: none; appearance: none; flex: none; width: 16px; height: 16px; margin: 2px 0 0; border: 1.5px solid var(--dim); border-radius: 50%; cursor: pointer; }
-  .choice-tile input:checked { border: 5px solid var(--pv); }
-  .choice-tile input:focus-visible { outline: 2px solid var(--pv); outline-offset: 2px; }
-  /* a tile is a <label>; inside a .field (Display) the field's small grey block label style would win */
-  .sset .field label.choice-tile { display: flex; margin-bottom: 0; font-size: inherit; letter-spacing: 0; color: var(--text); }
-  .choice-text { flex: 1; min-width: 0; }
-  .choice-text > span { display: block; }
   @media (max-width: 600px) {
     .sset-row > .conn-text { flex-basis: 100%; }   /* on a phone each control drops under its name */
-    .choice-tiles { grid-template-columns: 1fr; }
   }
-  @media (prefers-reduced-motion: reduce) { .choice-tile { transition: none; } }
+
 
   /* just the number, centred under the last section */
   .app-version { padding-top: 14px; text-align: center; font-size: 11.5px; color: var(--dim); }
@@ -906,10 +900,10 @@
   /* ---------- phones ---------- */
   @media (max-width: 600px) {
     /* thumb-sized targets on phones (36px inside the segmented track), desktop unchanged */
-    .hv-daynav { width: 40px; height: 40px; }
+    .hv-datebar { --datebar-h: 40px; }
     .hv-today, .hv-dateinput { min-height: 40px; }
     /* SOLAR-27: arrows at the two ends, the date centred between them as "Fri 2 Oct" */
-    .hv-datebox { display: flex; flex: 1; min-width: 0; min-height: 40px; align-items: center; justify-content: center; gap: 10px;
+    .hv-datebox { box-sizing: border-box; display: flex; flex: 1; min-width: 0; height: var(--datebar-h); align-items: center; justify-content: center; gap: 10px;
       background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; cursor: pointer; }
     .hv-datepick { display: inline-flex; position: relative; align-items: center; gap: 8px; padding: 6px 4px; cursor: pointer; }
     .hv-cal { display: block; flex: none; color: var(--muted); }

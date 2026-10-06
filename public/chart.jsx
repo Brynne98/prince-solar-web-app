@@ -98,6 +98,13 @@ function dayFace(s, todayStr) {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-GB', opts).replace(',', '');
 }
 
+// A drawn chevron, so it sits in the middle of its box; the ‹ › glyphs sat on the text baseline.
+const Chevron = ({ dir }) => (
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+    <path d={dir < 0 ? 'M8.5 3 4.5 7l4 4' : 'M5.5 3l4 4-4 4'} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 // On a phone (SOLAR-27) ‹ and › sit at the card's two ends and the date fills the middle,
 // reading "Fri 2 Oct"; the native input lies invisible over it so a tap still opens the
 // phone's picker, and Today sits inside the box. Desktop shows the plain input as before.
@@ -111,7 +118,7 @@ function DateBar({ pick, earliest, locked, children }) {
   return (
     <div className="hv-datebar">
       <button className="hv-daynav" disabled={!canPrev} aria-label="Previous day"
-        onClick={() => canPrev && setDate(shiftDate(date, -1))}>‹</button>
+        onClick={() => canPrev && setDate(shiftDate(date, -1))}><Chevron dir={-1} /></button>
       <div className="hv-datebox" onClick={openPicker}>
         <label className="hv-datepick">
           <svg className="hv-cal" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
@@ -126,7 +133,7 @@ function DateBar({ pick, earliest, locked, children }) {
         {!isToday && <button className="hv-today hv-today-in" onClick={() => setDate(todayStr)}>Today</button>}
       </div>
       <button className="hv-daynav" disabled={!canNext} aria-label="Next day"
-        onClick={() => canNext && setDate(shiftDate(date, 1))}>›</button>
+        onClick={() => canNext && setDate(shiftDate(date, 1))}><Chevron dir={1} /></button>
       {children}
       {!isToday && <button className="hv-today hv-today-out" onClick={() => setDate(todayStr)}>Today</button>}
     </div>
@@ -135,11 +142,11 @@ function DateBar({ pick, earliest, locked, children }) {
 
 /** Both day charts span the whole day, 288 five-minute buckets; today fills in from the left. */
 const DAY_LAST = 287;
-/** x ticks in minutes-of-day across the whole day: 6 h apart on phones, 3 h on desktop. */
+/** x ticks in minutes-of-day across the whole day, 00:00 to 24:00: 6 h apart on phones, 3 h on desktop. */
 function xTicksFor(mobile) {
   const ticks = [];
   const step = mobile ? 360 : 180;
-  for (let t = 0; t < 1440; t += step) ticks.push(t);
+  for (let t = 0; t <= 1440; t += step) ticks.push(t);
   return ticks;
 }
 /** Pointer → bucket index on the day axis, held to 0..lastIdx (the last bucket with data). */
@@ -411,7 +418,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
 }
 window.InverterHistoryChart = InverterHistoryChart;
 
-function HistoryView({ today, refreshKey, locked, battPositive }) {
+function HistoryView({ today, refreshKey, locked }) {
   const C = window.COLORS;
   const [vis, setVis] = React.useState({ pv: true, batt: true, load: true, grid: true, soc: true });
   const [hover, setHover] = React.useState(null);
@@ -462,10 +469,9 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
 
   const dayData = isToday ? today : pastDay;
   const raw = (dayData && dayData.points) || [];
-  // The battery series is + = powering the house; Account → Display can flip it, and idle
-  // reads 0. Gaps stay null. The range totals below read `raw`, so they never flip.
-  const pts = React.useMemo(() => raw.map(p => (p.batt == null ? p : { ...p, batt: window.battShown(p.batt, battPositive) })),
-    [dayData, battPositive]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The battery series is + = the house is using it, − = charging; idle reads 0. Gaps stay null.
+  const pts = React.useMemo(() => raw.map(p => (p.batt == null ? p : { ...p, batt: window.battShown(p.batt) })),
+    [dayData]); // eslint-disable-line react-hooks/exhaustive-deps
   const real = pts.filter(p => p.pv != null); // anything with data (est = cloud-sourced, drawn dotted)
   const hasData = real.length > 1;
 
@@ -647,7 +653,7 @@ function HistoryView({ today, refreshKey, locked, battPositive }) {
     const left = tipLeftFor(px, width);
     const rows = [
       ['Solar', p.pv, C.pv, 'W'],
-      ['Battery', p.batt, C.batt, 'W'], // signed the way Account → Display says
+      ['Battery', p.batt, C.batt, 'W'], // + = the house is using it, − = charging
       ['Grid', p.grid, C.grid, 'W'], // signed: − = exporting
       ['Home', p.load, C.load, 'W'],
       ['Charge', p.soc, C.soc, '%'],

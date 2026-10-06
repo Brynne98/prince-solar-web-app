@@ -25,7 +25,7 @@ function flowAlpha(hex, a) {
   return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`;
 }
 
-function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, battPositive }) {
+function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall }) {
   const C = window.COLORS;
   const mobile = useFlowMobile();
   // The boxes stretch with the card (SOLAR-39); its width only decides the lane's.
@@ -82,7 +82,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
       today: today(['Generated', agg.pvToday]) },
     // w stays the magnitude (animation, stroke); val is the signed figure printed on the box,
     // + = powering the house, as everywhere else in the app.
-    bat: hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: window.battShown(agg.battOut, battPositive),
+    bat: hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: window.battShown(agg.battOut),
       icon: 'battery', soc: agg.battSoc, reverse: charging, state: battState, charge: agg.battSoc,
       today: today(['Charged', agg.battChgToday], ['Discharged', agg.battDischgToday]) },
     // flows both ways: an export runs the animation back towards the grid and prints

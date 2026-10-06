@@ -5,24 +5,9 @@
 // ============================================================================
 const { useState, useEffect, useRef, useCallback } = React;
 
-const DEFAULT_SETTINGS = {
-  // which way round battery power reads: 'discharge' = + powering the house, 'charge' = + charging
-  battPositive: 'discharge',
-  // battCapacity and reserve used to live here. They are facts about the
-  // installation, not per-device preferences, so they now live in app_config and
-  // arrive on the snapshot as `config` — one editable copy, shared with the phone
-  // alerts, which read the same rows. See migration 0022.
-  // Off by default — the optional per-subject tabs are opt-in from Settings.
-  tabs: { solar: false, battery: false, grid: false, inverters: false },
-};
-
-function loadSettings() {
-  try {
-    const s = JSON.parse(localStorage.getItem('synsynk.settings'));
-    if (s) return { ...DEFAULT_SETTINGS, ...s, tabs: { ...DEFAULT_SETTINGS.tabs, ...(s.tabs || {}) } };
-  } catch (e) {}
-  return DEFAULT_SETTINGS;
-}
+// Every page always shows and battery power always reads + = the house is using it; the
+// old per-user switches for both are gone (SOLAR-71), so drop what they left behind.
+try { localStorage.removeItem('synsynk.settings'); } catch (e) {}
 
 // "2 min ago" for the header; ticks with useNow so it stays honest between refreshes.
 function fmtAgo(d, now) {
@@ -309,16 +294,13 @@ function PageNotice({ snap, cutOff, onReconnect }) {
   );
 }
 
-function tabsFor(settings) {
-  return [
-    { id: 'live', label: 'Live' },
-    settings.tabs.solar && { id: 'solar', label: 'Solar' },
-    settings.tabs.grid && { id: 'grid', label: 'Grid' },
-    // Battery and Inverters became one Equipment page (SOLAR-52); either old switch shows it.
-    (settings.tabs.inverters || settings.tabs.battery) && { id: 'inverters', label: 'Equipment' },
-    { id: 'settings', label: 'Settings' },
-  ].filter(Boolean);
-}
+const TABS = [
+  { id: 'live', label: 'Live' },
+  { id: 'solar', label: 'Solar' },
+  { id: 'grid', label: 'Grid' },
+  { id: 'inverters', label: 'Equipment' },
+  { id: 'settings', label: 'Settings' },
+];
 // Account is a page too, reached from the account menu rather than the page list.
 const pageOk = (tabs, id) => id === 'account' || tabs.some(t => t.id === id);
 // A saved or linked Battery page opens Equipment, where the packs now are.
@@ -351,23 +333,19 @@ function BootShell() {
   // last sign-out: most likely a new account on its way to Connect SunSynk. A skeleton
   // would flash a dashboard it will never get, so show the empty sign-in backdrop.
   if (!localStorage.getItem('synsynk.tab')) return <div className="login-wrap" />;
-  const tabs = tabsFor(loadSettings());
   const saved = tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab'));
-  const tab = pageOk(tabs, saved) ? saved : 'live';
+  const tab = pageOk(TABS, saved) ? saved : 'live';
   return (
-    <Frame tabs={tabs} tab={tab} busy head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /></>}>
+    <Frame tabs={TABS} tab={tab} busy head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /></>}>
       {tab !== 'settings' && tab !== 'account' && <window.TabSkeleton tab={tab} />}
     </Frame>
   );
 }
 
 function App({ links }) {
-  const [settings, setSettings] = useState(loadSettings);
-  // plan, preferences and plants for the signed-in user (api_me). Preferences from
-  // the server win over the localStorage cache so a new device looks the same.
+  // plan, preferences (the last plant viewed) and plants for the signed-in user (api_me)
   const [me, setMe] = useState(null);
   const [plantId, setPlantId] = useState(null);
-  const prefsLoaded = useRef(false);
   const [tab, setTab] = useState(() => tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab')) || 'live');
   const auto = true; // refresh runs on its own; the header button forces one now
   const [snap, setSnap] = useState(null);
@@ -404,12 +382,6 @@ function App({ links }) {
   const inflight = useRef({});
   useEffect(() => { energyRef.current = energy; }, [energy]);
 
-  useEffect(() => {
-    localStorage.setItem('synsynk.settings', JSON.stringify(settings));
-    if (!prefsLoaded.current) return;
-    const t = setTimeout(() => window.savePrefs({ battPositive: settings.battPositive, tabs: settings.tabs }).catch(() => {}), 600);
-    return () => clearTimeout(t);
-  }, [settings]);
   useEffect(() => { localStorage.setItem('synsynk.tab', tab); }, [tab]);
 
   // spin = false on the 60 s auto tick, so the icon only turns for something the
@@ -460,10 +432,6 @@ function App({ links }) {
       const cfg = (m.plants || []).find(p => p.id === wanted)?.config;
       window.setCurrentPlant(wanted, cfg?.currency);
       setPlantId(wanted);
-      if (m.prefs && (m.prefs.battPositive || m.prefs.tabs)) {
-        setSettings(s => ({ ...s, ...(m.prefs.battPositive ? { battPositive: m.prefs.battPositive } : {}), tabs: { ...s.tabs, ...(m.prefs.tabs || {}) } }));
-      }
-      prefsLoaded.current = true;
       // how much history this plant has — drives the "collecting your first day" copy
       window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
     } catch (e) { setErr(e.message); }
@@ -546,13 +514,11 @@ function App({ links }) {
 
   const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(); setRefreshKey(k => k + 1); };
 
-  const TABS = tabsFor(settings);
-  useEffect(() => { if (!pageOk(TABS, tab)) setTab('live'); }, [settings.tabs]);
   const go = (id) => { setTab(id); toTop(); };
   const loginDead = links.accounts.some(a => a.status === 'needs_relink');
   const account = { user, plantCount: (me?.plants || []).length, alert: loginDead, onAccount: () => go('account'), active: tab === 'account' };
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} />;
-  const settingsPage = <window.SettingsTab me={me} plantId={plantId} settings={settings} setSettings={setSettings} onPlantConfigSaved={reloadPlantConfig}
+  const settingsPage = <window.SettingsTab me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
     flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />;
   const accountPage = <window.AccountTab onPlantConfigSaved={reloadPlantConfig}
     flash={flashSection} onFlashed={() => setFlashSection(null)} />;
@@ -590,11 +556,11 @@ function App({ links }) {
           login stays quiet; a dead login still marks the avatar and Account with a dot. */}
       {dataPage && <PageNotice snap={snap} cutOff={plantCutOff} onReconnect={() => openSettings('connection')} />}
       <div className={'page' + (old ? ' old' : '')}>
-        {tab === 'live' && <window.LiveTab snap={snap} settings={settings} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
+        {tab === 'live' && <window.LiveTab snap={snap} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
           onOpenSettings={openSettings} />}
         {tab === 'solar' && <window.SolarTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
-        {tab === 'grid' && <window.GridTab snap={snap} settings={settings} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
-        {tab === 'inverters' && <window.InvertersTab snap={snap} settings={settings} refreshKey={refreshKey} />}
+        {tab === 'grid' && <window.GridTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
+        {tab === 'inverters' && <window.InvertersTab snap={snap} refreshKey={refreshKey} />}
         {tab === 'settings' && settingsPage}
         {tab === 'account' && accountPage}
       </div>

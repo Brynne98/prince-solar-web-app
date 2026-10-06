@@ -5,7 +5,7 @@
 // `onNeedEnergy(period)` asks App to lazily fetch a period it hasn't loaded yet.
 // ============================================================================
 const { Card, StatTile, Metric, Badge, Segmented, Toggle, SectionTitle, Sparkline,
-  fmtPower, fmtPowerParts, battShown, battWord, fmtKwh, fmtRand, cleanTemp, COLORS: CC } = window;
+  fmtPower, fmtPowerParts, battShown, fmtKwh, fmtRand, cleanTemp, COLORS: CC } = window;
 
 const FsEnterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" /></svg>;
 const TrashIcon = () => <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.6 9h6.8l.6-9M6.75 7v4M9.25 7v4" /></svg>;
@@ -77,7 +77,7 @@ function LiveSkeleton() {
   );
 }
 
-function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOpenSettings }) {
+function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings }) {
   const a = snap.aggregate;
   const feat = snap.features || {};
   const hasBatt = feat.hasBattery !== false;
@@ -351,12 +351,12 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
               <FsEnterIcon /><span>Fullscreen</span>
             </button>
           }>POWER FLOW</SectionTitle>}
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} battPositive={settings.battPositive} />
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} />
         </Card>
       </div>
 
       <Card className="chart-card">
-        <window.HistoryView today={today} refreshKey={refreshKey} battPositive={settings.battPositive} />
+        <window.HistoryView today={today} refreshKey={refreshKey} />
       </Card>
 
       <div className="overview-section">
@@ -654,12 +654,17 @@ function PanelsCard({ snap, health }) {
 }
 
 // One day of one reading as a line across the whole day: solar (which needs a reading over
-// 20 W to count as made), grid import, or the battery's charge on a fixed 0-100% scale with
-// the reserve dashed.
-// The reading under the pointer shows beside it.
-function DayLineChart({ points, field, color, label, crop, pct, reserve, empty }) {
+// 20 W to count as made), grid power signed (+ bought, − exported), or the battery's charge
+// on a fixed 0-100% scale with the reserve dashed.
+// The reading under the pointer shows beside it. As on Live, dragging across the chart with
+// a mouse totals the energy between the two times (`sums` names the + and − parts). Callers
+// key it by date, so a new day starts with no range.
+function DayLineChart({ points, field, color, label, crop, pct, reserve, empty, sums }) {
   const [ref, width, height] = useChartSize([220, 300]);
   const [hover, setHover] = React.useState(null);
+  const [sel, setSel] = React.useState(null);    // [i0, i1] the selected range
+  const [drag, setDrag] = React.useState(null);  // the range while it is being dragged
+  const dragRef = React.useRef(null);
   const mobile = width < 560;
   const v = i => points[i][field];
   const has = [];
@@ -670,12 +675,12 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty }
     const i0 = 0, i1 = points.length - 1;
     const m = { l: mobile ? 32 : 38, r: 12, t: 24, b: 30 };
     const innerW = Math.max(40, width - m.l - m.r), innerH = height - m.t - m.b;
-    let peak = i0;
-    for (let i = i0; i <= i1; i++) if ((v(i) || 0) > (v(peak) || 0)) peak = i;
-    const { lo, hi, ticks } = pct ? { lo: 0, hi: 100, ticks: [0, 25, 50, 75, 100] } : niceScale(0, v(peak) || 0, 4);
-    // the x axis is the whole day, so today's line stops at the last reading rather than
-    // stretching to fill the width
-    const t0 = 0, t1 = 1435;
+    let dmin = 0, dmax = 0;
+    for (let i = i0; i <= i1; i++) { const val = v(i); if (val != null) { dmax = Math.max(dmax, val); dmin = Math.min(dmin, val); } }
+    const { lo, hi, ticks } = pct ? { lo: 0, hi: 100, ticks: [0, 25, 50, 75, 100] } : niceScale(dmin, dmax, 4);
+    // the x axis is the whole day, 00:00 to 24:00, so today's line stops at the last reading
+    // rather than stretching to fill the width
+    const t0 = 0, t1 = 1440;
     const x = i => m.l + ((points[i].t - t0) / Math.max(5, t1 - t0)) * innerW;
     const y = val => m.t + innerH - ((val - lo) / (hi - lo)) * innerH;
     // runs of readings; a missing bucket breaks the line
@@ -700,11 +705,28 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty }
       return Math.max(i0, Math.min(i1, Math.round((t - points[0].t) / 5)));
     };
     const fmt = val => (pct ? Math.round(val) + '%' : fmtPower(val));
+    // drag-to-range is a mouse interaction, as on Live; a tap on a phone just reads a point
+    const canRange = !!sums && !mobile;
+    const onDown = e => {
+      const i = idxAt(e.clientX, e.currentTarget);
+      if (!canRange || e.pointerType !== 'mouse') { setHover(i); return; }
+      dragRef.current = { i0: i, i1: i }; setSel(null); setHover(null); setDrag({ i0: i, i1: i });
+    };
+    const onMove = e => {
+      const i = idxAt(e.clientX, e.currentTarget);
+      if (dragRef.current) { dragRef.current = { ...dragRef.current, i1: i }; setDrag({ ...dragRef.current }); } else setHover(i);
+    };
+    const onUp = () => {
+      const d = dragRef.current; if (!d) return;
+      dragRef.current = null; setDrag(null);
+      const a = Math.min(d.i0, d.i1), b = Math.max(d.i0, d.i1);
+      setSel(b - a >= 1 ? [a, b] : null);
+    };
+    const band = drag ? [Math.min(drag.i0, drag.i1), Math.max(drag.i0, drag.i1)] : sel;
     body = (
       <svg width={width} height={height} className="chart-svg" role="img" aria-label={label + ' over the day'} style={{ cursor: 'crosshair' }}
-        onPointerMove={e => setHover(idxAt(e.clientX, e.currentTarget))}
-        onPointerDown={e => setHover(idxAt(e.clientX, e.currentTarget))}
-        onPointerLeave={() => setHover(null)}>
+        onPointerMove={onMove} onPointerDown={onDown} onPointerUp={onUp}
+        onPointerLeave={() => { setHover(null); onUp(); }}>
         <defs><GapHatch /></defs>
         {gaps.map(([a, b]) => <rect key={'gap' + a} x={x(a)} y={m.t} width={x(b) - x(a)} height={innerH} fill="url(#gaphatch)" />)}
         {ticks.map((t, k) => (
@@ -714,16 +736,23 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty }
           </g>
         ))}
         <text x={m.l - 8} y={m.t - 10} textAnchor="end" className="ax" fillOpacity="0.55">{pct ? '%' : 'kW'}</text>
-        {xt.map(t => <text key={t} x={xt5(t)} y={m.t + innerH + 20} textAnchor="middle" className="ax">{HM(t)}</text>)}
+        {xt.map(t => <text key={t} x={xt5(t)} y={m.t + innerH + 20} textAnchor={t === t1 ? 'end' : t === t0 ? 'start' : 'middle'} className="ax">{HM(t)}</text>)}
         {reserve != null && (
           <g>
             <line x1={m.l} x2={m.l + innerW} y1={y(reserve)} y2={y(reserve)} stroke={color} strokeOpacity="0.55" strokeDasharray="4 4" />
             <text x={m.l + innerW - 4} y={y(reserve) - 6} textAnchor="end" className="ax">reserve {reserve}%</text>
           </g>
         )}
+        {band && (
+          <g>
+            <rect x={x(band[0])} y={m.t} width={Math.max(1, x(band[1]) - x(band[0]))} height={innerH} fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.4)" strokeDasharray="3 3" />
+            <text x={Math.max(m.l + 16, x(band[0]))} y={m.t - 6} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(points[band[0]].t)}</text>
+            {band[1] > band[0] && x(band[1]) - x(band[0]) >= 78 && <text x={Math.min(m.l + innerW - 16, x(band[1]))} y={m.t - 6} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(points[band[1]].t)}</text>}
+          </g>
+        )}
         <path d={area} fill={color} fillOpacity="0.14" />
         <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-        {hp != null && (
+        {hp != null && !band && (
           <g>
             <line x1={x(hp)} x2={x(hp)} y1={m.t} y2={m.t + innerH} stroke="rgba(255,255,255,0.25)" />
             <circle cx={x(hp)} cy={y(v(hp))} r="3" fill={color} stroke="#0b0e12" strokeWidth="1.5" />
@@ -731,7 +760,25 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty }
         )}
       </svg>
     );
-    if (hp != null) {
+    if (sel) {
+      // energy between the two times: ∫ power dt, + and − kept apart
+      const [a, b] = sel;
+      let pos = 0, neg = 0;
+      for (let i = a; i <= b; i++) {
+        const val = v(i); if (val == null) continue;
+        const nx = points[i + 1], dt = (nx && nx.t > points[i].t ? nx.t - points[i].t : 5) / 60;
+        if (val > 0) pos += val / 1000 * dt; else neg += -val / 1000 * dt;
+      }
+      const mins = points[b].t - points[a].t;
+      const dur = mins >= 60 ? `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m` : `${mins}m`;
+      tip = (
+        <div className="chart-range">
+          <div className="cr-head"><span className="tip-time">{HM(points[a].t)} – {HM(points[b].t)} · {dur}</span><button className="cr-x" onClick={() => setSel(null)} aria-label="Clear">×</button></div>
+          <div className="tip-row"><span className="tip-dot" style={{ background: color }} /><span className="tip-l">{sums[0]}</span><span className="tip-v mono">{pos.toFixed(2)} kWh</span></div>
+          {sums[1] && <div className="tip-row"><span className="tip-dot" style={{ background: color }} /><span className="tip-l">{sums[1]}</span><span className="tip-v mono">{neg.toFixed(2)} kWh</span></div>}
+        </div>
+      );
+    } else if (hp != null && !drag) {
       tip = (
         <div className="chart-tip" style={{ left: tipLeftFor(x(hp), width, 168), top: 12 }}>
           <div className="tip-time">{HM(points[hp].t)}</div>
@@ -889,7 +936,10 @@ function periodTrend(cmp, k, key, min, word, invert) {
   const logged = (r.prev.pv || 0) > 0 || (r.prev.load || 0) > 0;
   if (!(p > 0) && !(invert && logged)) return null;
   const pct = p > 0 ? ((c - p) / p) * 100 : (c === 0 ? 0 : Infinity);
-  return <><TrendBadge pct={pct} delta={c - p} invert={invert} title={'vs ' + word + ', ' + r.days + ' matched days'} /> on {word}</>;
+  // "▲ 12% vs last month"; a jump the badge shows as kWh reads "▲ 14 kWh more than last month"
+  const asKwh = !Number.isFinite(pct) || Math.abs(pct) >= 200;
+  const words = asKwh ? (c > p ? ' more than ' : ' less than ') + word : ' vs ' + word;
+  return <><TrendBadge pct={pct} delta={c - p} invert={invert} title={'vs ' + word + ', ' + r.days + ' matched days'} />{words}</>;
 }
 
 // Six tiles, the day's chart, the month's bars and the pair of cards under them. PANELS is
@@ -935,15 +985,6 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const [cmp, setCmp] = React.useState(null);
   const [earliest, setEarliest] = React.useState(null);
   React.useEffect(() => { window.fetchCompare().then(setCmp).catch(() => {}); }, [refreshKey]);
-  // Panels: today's share of each string against its usual share by this time (0076). Asked on
-  // open, on refresh and every 10 minutes; the shares move slowly.
-  const [health, setHealth] = React.useState(null);
-  React.useEffect(() => {
-    const load = () => window.fetchStringHealth().then(setHealth).catch(() => setHealth(false));
-    load();
-    const t = setInterval(load, 600000);
-    return () => clearInterval(t);
-  }, [refreshKey]);
   React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
   const tot = periodTotals('pv', a.pvToday, energy, plantToday);
   const EP = window.fmtEnergyParts;
@@ -1033,7 +1074,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         </SectionTitle>
         <DateBar pick={pick} earliest={earliest} />
         {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
-          : <div {...dim}><DayLineChart points={noReadings ? [] : points} field="pv" color={CC.pv} label="Solar" crop empty={noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')} /></div>}
+          : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="pv" color={CC.pv} label="Solar" crop sums={['Generated']} empty={noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')} /></div>}
       </Card>
 
       <Card>
@@ -1058,16 +1099,18 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
             : noReadings ? <div className="solar-note" {...dim}>{noReadings}</div>
             : splitTotal < 0.05 ? <div className="solar-note" {...dim}>{view.isToday ? 'No solar yet today.' : 'No solar on this day.'}</div>
             : <div {...dim}>
+                {/* one object: the bar, and under it each part's kWh in its own colour, in a
+                    row of their own so a thin segment can't squeeze its label (SOLAR-71) */}
                 <div className="solar-split" role="img" title={destTitle} aria-label={destLabel}>
-                  {dests.map(([l, v, c]) => <i key={l} style={{ width: destPct(v) + '%', background: c }} />)}
+                  {dests.map(([l, v, c]) => <i key={l} style={{ flexGrow: v, background: c }} />)}
                 </div>
                 <div className="solar-dest" aria-hidden="true">
                   {dests.map(([l, v, c]) => {
                     const [n, u] = EP(v);
                     return (
-                      <div className="sd" key={l} style={{ width: destPct(v) + '%' }}>
+                      <div className="sd" key={l}>
+                        <div className="sd-k"><span className="sd-dot" style={{ background: c }} />{l}</div>
                         <div className="sd-v mono" style={{ color: c }}>{n}<s>{u}</s></div>
-                        <div className="sd-k">{l}</div>
                       </div>
                     );
                   })}
@@ -1076,42 +1119,14 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         </Card>
 
       </div>
-
-      <PanelsCard snap={snap} health={health} />
     </div>
   );
 }
 
-// ---------------------------------------------------------------- SHARED
-// Two figures under a split bar, as Solar's Where it went draws them. Each part is
-// [label, share, colour, value]; the value is kWh, or already-formatted text.
-function SplitBar({ parts, title, aria }) {
-  const tot = parts.reduce((s, p) => s + p[1], 0);
-  const pct = (v) => v / tot * 100;
-  return (
-    <>
-      <div className="solar-split" role="img" title={title} aria-label={aria}>
-        {parts.map(([l, v, c]) => <i key={l} style={{ width: pct(v) + '%', background: c }} />)}
-      </div>
-      <div className="solar-dest" aria-hidden="true">
-        {parts.map(([l, v, c, shown]) => {
-          const [n, u] = typeof shown === 'string' ? [shown, ''] : window.fmtEnergyParts(shown == null ? v : shown);
-          return (
-            <div className="sd" key={l} style={{ width: pct(v) + '%' }}>
-              <div className="sd-v mono" style={{ color: c }}>{n}{u && <s>{u}</s>}</div>
-              <div className="sd-k">{l}</div>
-            </div>
-          );
-        })}
-      </div>
-    </>
-  );
-}
-
 // ---------------------------------------------------------------- GRID
-// Built like Solar: what was bought (now, today, week, month, year, lifetime), a day's
-// import, the last 30 days, what the house ran on and what the grid cost, whether the supply
-// is there now, and the day's voltage and frequency.
+// Built like Solar: what was bought (now, today, week, month, year, lifetime), the day's grid
+// power both ways, and the last 30 days. The supply's voltage and frequency moved to
+// Equipment (SOLAR-71).
 
 // A connected plant is assumed until the snapshot says otherwise.
 function GridSkeleton() {
@@ -1121,23 +1136,13 @@ function GridSkeleton() {
         {['GRID NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'].map(l => <StatTile key={l} label={l} loading sub={NBSP} />)}
       </div>
       <Card>
-        <SectionTitle>{titled('BOUGHT FROM THE GRID', 'today')}</SectionTitle>
+        <SectionTitle>{titled('GRID', 'today')}</SectionTitle>
         <DayChartSkeleton />
       </Card>
       <Card>
         <SectionTitle>{titled('BOUGHT FROM THE GRID', 'last 30 days')}</SectionTitle>
         <window.Skeleton className="bars-skel" h="auto" r={10} />
       </Card>
-      <div className="solar-row">
-        <Card>
-          <SectionTitle>{titled('WHAT THE HOUSE RAN ON', 'today')}</SectionTitle>
-          <window.Skeleton h={64} r={10} />
-        </Card>
-        <Card>
-          <SectionTitle>SUPPLY</SectionTitle>
-          <window.Skeleton h={90} r={10} />
-        </Card>
-      </div>
     </div>
   );
 }
@@ -1163,31 +1168,12 @@ function GridTab(props) {
   return <GridBody {...props} />;
 }
 
-// What a day's house load ran on, from its 5-minute points, with the same allocation as
-// Solar's Where it went: solar to the house first, then the battery, and the grid for the
-// rest. Import beyond that went into the battery.
-function houseSplit(points) {
-  let sun = 0, batt = 0, grid = 0, load = 0, imp = 0, exp = 0;
-  const kwh = 5 / 60 / 1000;
-  points.forEach(p => {
-    if (p.grid != null) { if (p.grid > 0) imp += p.grid * kwh; else exp += -p.grid * kwh; }
-    if (p.pv == null || p.load == null) return;
-    const l = Math.max(0, p.load), s = Math.min(Math.max(0, p.pv), l);
-    const b = Math.min(l - s, p.batt != null && p.batt > 0 ? p.batt : 0); // day series: + = discharging
-    sun += s * kwh; batt += b * kwh; grid += (l - s - b) * kwh; load += l * kwh;
-  });
-  return { sun, batt, grid, load, imp, exp };
-}
-
 function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSettings }) {
   const a = snap.aggregate;
   const cfg = snap.config || {};
   const tz = cfg.timezone;
   const plantToday = plantDateStr(tz);
-  const rate = cfg.tariffImport ?? 0;
-  const rateExp = cfg.tariffExport ?? 0;
-  const sells = rateExp > 0; // same rule as the Overview tile: only plants paid for export
-  const hasBatt = (snap.features || {}).hasBattery !== false;
+  const sells = (cfg.tariffExport ?? 0) > 0; // same rule as the Overview tile: only plants paid for export
   React.useEffect(() => { ['week', 'month', 'year', 'lifetime'].forEach(p => { if (!energy[p]) onNeedEnergy(p); }); }, [energy]);
   const [cmp, setCmp] = React.useState(null);
   const [earliest, setEarliest] = React.useState(null);
@@ -1204,11 +1190,12 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // Every grid-tied inverter leaks a little backflow, so a plant not paid for export only
   // counts as sending power out above 100 W.
   const exporting = a.gridPower < (sells ? -5 : -100);
-  const [nowN, nowU] = fmtPowerParts(Math.abs(a.gridPower));
+  // signed as the chart is: + bought, − exported (a small backflow reads 0)
+  const [nowN, nowU] = fmtPowerParts(exporting || a.gridPower > 5 ? a.gridPower : 0);
   // Presence is mains voltage, not usage: nothing is bought on a sunny afternoon with the
   // grid live, and a blackout reads 0 W too.
   const nowSub = a.gridPresent === false ? <span style={{ color: CC.load }}>The grid is off</span>
-    : exporting ? (sells ? 'Selling' : 'Sending to the grid')
+    : exporting ? 'Exporting to the grid'
     : a.gridPower > 5 ? 'Buying' : 'Not buying';
   const importPeak = (pts) => {
     let pk = null;
@@ -1217,42 +1204,16 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   };
   const todayPeak = importPeak(today && !today.approx ? today.points : null);
 
-  // ---- the day on the chart ----
+  // ---- the day on the chart: grid power signed, + bought and − exported ----
   const pick = useDayPicker(earliest, plantToday);
   const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
   const noReadings = dayProblem(view, day, points);
-  // export is negative in the day series; this line is what was bought
-  const bought = React.useMemo(() => points.map(p => ({ t: p.t, imp: p.grid == null ? null : Math.max(0, p.grid) })), [day]); // eslint-disable-line react-hooks/exhaustive-deps
   const peak = importPeak(points);
-  const split = React.useMemo(() => houseSplit(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
-  const parts = [['Solar', split.sun, CC.pv, true], ['Battery', split.batt, CC.batt, hasBatt], ['Grid', split.grid, CC.grid, true]]
-    .filter(p => p[3] && p[1] >= 0.05).map(p => p.slice(0, 3));
-  const intoBatt = hasBatt ? split.imp - split.grid : 0;
-  const noRate = !(rate > 0);
-  const money = window.fmtRandSmart; // whole rand, as the Live overview shows money
-
-  // ---- supply now ----
-  // One figure per phase each online inverter senses. A dead leg reads a few volts, not 0,
-  // so anything under 100 V is "off" (the same test as the grid-down alert).
-  const online = snap.inverters.filter(i => i.status === 'online');
-  const legs = online.map(inv => ({ inv, v: inv.gridVolts.length ? inv.gridVolts : inv.gridVolt != null ? [inv.gridVolt] : [] })).filter(l => l.v.length);
-  const all = legs.flatMap(l => l.v);
-  const live = all.filter(v => v > 100).length, dead = all.length - live;
-  // The plant's grid-present flag votes on L1 alone, so L1 down with L2 and L3 live reads as
-  // a blackout there. Where this inverter shows a live leg, say part of it is off instead.
-  let supply;
-  if (a.gridPresent == null && !all.length) supply = { head: 'Can’t tell', note: 'The inverter doesn’t report mains voltage.' };
-  else if (live > 0 && dead > 0) supply = { head: 'Part of the supply is off', off: true };
-  else if (a.gridPresent === false || (all.length && live === 0)) supply = { head: 'The grid is off', off: true };
-  else supply = { head: 'The grid is on' };
-  if (!supply.note && all.length) {
-    const volts = (vs) => <span className="mono">{vs.map(v => (v > 100 ? Math.round(v) : 'off')).join(' / ')} V</span>;
-    const same = legs.length > 1 && legs.every(l => l.v.length === 1 && Math.round(l.v[0]) === Math.round(legs[0].v[0]));
-    supply.note = live === 0 ? 'No mains voltage at the inverter.'
-      : legs.length === 1 ? <>Mains reads {volts(legs[0].v)}{all.length === 3 ? ' on the three phases' : ''}.</>
-      : same ? <>Mains reads {volts(legs[0].v)} at {legs.length === 2 ? 'both' : 'each'} inverter{legs.length === 2 ? 's' : ''}.</>
-      : <>Mains reads {legs.map((l, i) => <React.Fragment key={l.inv.sn}>{i ? ', ' : ''}{volts(l.v)} at {l.inv.alias}</React.Fragment>)}.</>;
-  }
+  const flows = React.useMemo(() => {
+    let imp = 0, exp = 0;
+    points.forEach(p => { if (p.grid != null) { if (p.grid > 0) imp += p.grid * 5 / 60 / 1000; else exp += -p.grid * 5 / 60 / 1000; } });
+    return { imp, exp };
+  }, [day]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- last 30 days ----
   const [daily, loadDaily] = useDaily(refreshKey);
@@ -1264,7 +1225,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
     <div className="stack solar-tab">
       <div className="solar-stats">
         <StatTile label="GRID NOW" value={nowN} unit={nowU} accent={CC.grid} sub={nowSub} />
-        {tile('TODAY', a.gridFromToday, sells ? <>Sold <b>{fmtKwh(a.gridToToday)}</b></> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
+        {tile('TODAY', a.gridFromToday, sells ? <>Exported <b>{fmtKwh(a.gridToToday)}</b> to the grid</> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
         {tile('THIS YEAR', tot.year)}
@@ -1272,13 +1233,14 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
       </div>
 
       <Card id="grid-day">
-        <SectionTitle right={day && !noReadings && !view.isToday ? <>Bought <b>{fmtKwh(split.imp)}</b>{peak && <>, most at <b>{HM(peak.t)}</b></>}</> : null}>
-          {titled('BOUGHT FROM THE GRID', dayWord)}
+        <SectionTitle right={day && !noReadings && !view.isToday ? <>Bought <b>{fmtKwh(flows.imp)}</b>{flows.exp >= 0.05 && <>, exported <b>{fmtKwh(flows.exp)}</b></>}</> : null}>
+          {titled('GRID', dayWord)}
+          <window.InfoDot text={'Above the line is power bought from the grid; below it is power exported to the grid.'} />
         </SectionTitle>
         <DateBar pick={pick} earliest={earliest} />
         {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
-          : <div {...dim}><DayLineChart points={noReadings ? [] : bought} field="imp" color={CC.grid} label="Bought"
-              empty={noReadings || 'No grid readings for this day.'} /></div>}
+          : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="grid" color={CC.grid} label="Grid"
+              sums={['Bought', 'Exported to the grid']} empty={noReadings || 'No grid readings for this day.'} /></div>}
       </Card>
 
       <Card>
@@ -1292,46 +1254,6 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
           : <DaysBars rows={bars} field="imp" color={CC.grid} rgb="250,204,21" word="Bought" label="Energy bought from the grid per day for the last 30 days"
               today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
       </Card>
-
-      <div className="solar-row">
-        <Card>
-          <SectionTitle>
-            {titled('WHAT THE HOUSE RAN ON', dayWord)}
-            <window.InfoDot text={'An estimate from 5-minute readings: solar counts first, then the battery, then the grid.'} />
-          </SectionTitle>
-          {!day ? <window.Skeleton h={64} r={10} />
-            : noReadings ? <div className="solar-note" {...dim}>{noReadings}</div>
-            : split.load < 0.05 ? <div className="solar-note" {...dim}>No use recorded on this day.</div>
-            : <div {...dim}>
-                <SplitBar parts={parts} title={parts.map(p => p[0] + ' ' + Math.round(p[1] / split.load * 100) + '%').join(', ')}
-                  aria={parts.map(p => p[0] + ' ' + fmtKwh(p[1])).join('; ')} />
-                {noRate
-                  ? <p className="solar-spare-note"><button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your electricity rate</button> to see what the grid cost.</p>
-                  : <p className="solar-spare-note">
-                      {split.imp < 0.05 ? 'Bought nothing from the grid.' : <>Paid about <b style={{ color: 'var(--text)' }}>{money(split.imp * rate)}</b> for {fmtKwh(split.imp)}.</>}
-                      {' '}The {fmtKwh(split.load)} the house used would have cost {money(split.load * rate)} from the grid alone.
-                      {intoBatt >= 0.3 ? <> {fmtKwh(intoBatt)} of what was bought went into the battery.</> : null}
-                      {sells && split.exp >= 0.05 ? <> Sold {fmtKwh(split.exp)} for {money(split.exp * rateExp)}.</> : null}
-                      {' '}<button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Edit rate</button>
-                    </p>}
-              </div>}
-        </Card>
-
-        <Card>
-          <SectionTitle>SUPPLY</SectionTitle>
-          <div className="solar-verdict" style={{ color: supply.off ? CC.load : 'var(--text)' }}>{supply.head}</div>
-          {supply.note && <p className="solar-spare-note">{supply.note}</p>}
-        </Card>
-      </div>
-
-      {/* The supply over the picked day: voltage at each inverter's AC terminal and the grid's
-          frequency, from SunSynk's history (two months back). A blackout shows as a shaded
-          band — the terminal keeps reading the inverter's own 230 V then, so only the 0 Hz
-          grid frequency gives it away. */}
-      <Card className="chart-card">
-        <SectionTitle>{titled('SUPPLY', dayWord)}</SectionTitle>
-        <window.InverterHistoryChart kind="ac" refreshKey={refreshKey} dayPick={pick} />
-      </Card>
     </div>
   );
 }
@@ -1341,7 +1263,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 // preferences keep working; it reads "Equipment" (SOLAR-52).
 // The battery packs, one panel per inverter, as the inverters report them. Moved here from
 // the Battery page when that page went (SOLAR-52).
-function PacksCard({ snap, settings }) {
+function PacksCard({ snap }) {
   const feat = snap.features || {};
   const shared = feat.banks === 'shared';
   const withBatt = snap.inverters.filter(i => i.numberOfBatteries > 0 || i.battSoc > 0);
@@ -1350,7 +1272,7 @@ function PacksCard({ snap, settings }) {
   const modules = shared ? Math.max(0, ...withBatt.map(i => i.numberOfBatteries || 0)) : withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
   return (
     <Card>
-      <SectionTitle right={<span className="dim">{banks} {banks === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'} · {shared ? 'one pack shared by ' + snap.inverters.length + ' inverters' : 'one pack per inverter'}</span>}>PACKS</SectionTitle>
+      <SectionTitle right={<span className="dim">{banks} {banks === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'} · {shared ? 'one pack shared by ' + snap.inverters.length + ' inverters' : 'one pack per inverter'}</span>}>BATTERIES</SectionTitle>
       <div className="duo">
         {snap.inverters.map(inv => {
           const t = cleanTemp(inv.battTemp);
@@ -1358,7 +1280,7 @@ function PacksCard({ snap, settings }) {
             <div className="mini-panel" key={inv.sn}>
               <div className="mp-head"><span className="mono">{inv.alias}</span><span className="dim mono">{inv.numberOfBatteries} × pack · {inv.battCap} Ah</span></div>
               <div className="mp-grid">
-                <Metric label="Power" value={fmtPower(battShown(inv.battOut, settings.battPositive))} unit={battWord(inv.battOut) && ' ' + battWord(inv.battOut)} accent={CC.batt} />
+                <Metric label="Power" value={fmtPower(battShown(inv.battOut))} accent={CC.batt} />
                 <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />
                 <Metric label="Voltage" value={inv.battVolt.toFixed(1)} unit=" V" />
                 <Metric label="Temp" value={t != null ? inv.battTemp.toFixed(1) : 'bad sensor'} unit={t != null ? ' °C' : ''} accent={t == null ? CC.load : null} />
@@ -1379,72 +1301,87 @@ function PacksCard({ snap, settings }) {
   );
 }
 
-// One inverter card, not two: how many there are is the snapshot's to say.
+// Panels first, then batteries and each inverter, then the day charts (SOLAR-71).
 function InvertersSkeleton() {
   return (
     <div className="stack">
       <SectionTitle>EQUIPMENT</SectionTitle>
+      <Card>
+        <SectionTitle>PANELS</SectionTitle>
+        <window.Skeleton h={90} r={10} />
+      </Card>
+      <window.Skeleton h={150} r={12} />
       <Card className="chart-card">
         <SectionTitle>TEMPERATURE · DAY</SectionTitle>
         <DayChartSkeleton legend />
       </Card>
-      <div className="duo"><window.Skeleton h={277} r={12} /></div>
     </div>
   );
 }
 
-function InvertersTab({ snap, settings, refreshKey }) {
+// Equipment, health first: are the panels working, the batteries, each inverter's live
+// figures, then the day charts. Panels moved here from Solar and the grid supply chart from
+// Grid (SOLAR-71). Each inverter card keeps what an owner reads: what it makes now and today,
+// the battery, the grid and the home (SOLAR-54); battery voltage and temperature are on
+// Batteries. Signed as everywhere: battery + = the house is using it, grid − = exporting.
+function InvertersTab({ snap, refreshKey }) {
   const feat = snap.features || {};
   const now = window.useNow(15000);
   const hasBatt = feat.hasBattery !== false, hasGrid = feat.hasGrid !== false;
+  // Panels: today's share of each string against its usual share by this time (0076). Asked on
+  // open, on refresh and every 10 minutes; the shares move slowly.
+  const [health, setHealth] = React.useState(null);
+  React.useEffect(() => {
+    const load = () => window.fetchStringHealth().then(setHealth).catch(() => setHealth(false));
+    load();
+    const t = setInterval(load, 600000);
+    return () => clearInterval(t);
+  }, [refreshKey]);
   return (
     <div className="stack">
-      <SectionTitle right={<span className="dim">{snap.inverters.length} units · {snap.plant.name}</span>}>EQUIPMENT</SectionTitle>
-      {hasBatt && <PacksCard snap={snap} settings={settings} />}
+      <SectionTitle right={<span className="dim">{snap.inverters.length} {snap.inverters.length === 1 ? 'inverter' : 'inverters'} · {snap.plant.name}</span>}>EQUIPMENT</SectionTitle>
+      <PanelsCard snap={snap} health={health} />
+      {hasBatt && <PacksCard snap={snap} />}
+      {/* one inverter per row, so its six figures sit in a line on a wide screen */}
+      <div className="stack">
+        {snap.inverters.map(inv => (
+          <Card key={inv.sn} className="inv-card">
+            <div className="inv-head">
+              <div>
+                <div className="inv-sn">{inv.sn}</div>
+                <div className="inv-meta mono dim">{inv.model} · firmware {inv.soft}</div>
+                {/* Loggers upload at their own pace (one here every 5 min), so say how old each reading is. */}
+                {inv.readAt && <div className="inv-meta mono" style={{ color: now - inv.readAt > 600000 ? 'var(--warn)' : 'var(--dim)' }}>
+                  Last reading {now - inv.readAt > 36 * 3600e3
+                    ? new Date(inv.readAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' + window.fmtTime(new Date(inv.readAt))
+                    : window.fmtTime(new Date(inv.readAt)) + ' · ' + window.fmtAgo(new Date(inv.readAt), now)}</div>}
+              </div>
+              <Badge tone={inv.status === 'online' ? 'ok' : 'warn'} dot>{inv.status}</Badge>
+            </div>
+            <div className="inv-grid">
+              <Metric label="Solar" value={fmtPower(inv.pvNow)} accent={CC.pv} />
+              <Metric label="Solar today" value={fmtKwh(inv.pvToday)} accent={CC.pv} />
+              {hasBatt && <Metric label="Battery" value={fmtPower(battShown(inv.battOut))} accent={CC.batt} />}
+              {hasBatt && <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />}
+              {hasGrid && <Metric label="Grid" value={fmtPower(inv.grid)} accent={CC.grid} />}
+              <Metric label="Home" value={fmtPower(inv.load)} accent={CC.load} />
+            </div>
+          </Card>
+        ))}
+      </div>
       {/* inverter temperatures over a day (SunSynk history; nothing live reports them) */}
       <Card className="chart-card">
         <SectionTitle>TEMPERATURE · DAY</SectionTitle>
         <window.InverterHistoryChart kind="temp" refreshKey={refreshKey} />
       </Card>
-      {/* off-grid: the inverter's own output voltage and frequency live here, not on Grid */}
-      {!hasGrid && (
-        <Card className="chart-card">
-          <SectionTitle>OUTPUT · DAY</SectionTitle>
-          <window.InverterHistoryChart kind="output" refreshKey={refreshKey} />
-        </Card>
-      )}
-      <div className="duo">
-        {snap.inverters.map(inv => {
-          const t = cleanTemp(inv.battTemp);
-          return (
-            <Card key={inv.sn} className="inv-card">
-              <div className="inv-head">
-                <div>
-                  <div className="inv-sn">{inv.sn}</div>
-                  <div className="inv-meta mono dim">{inv.model} · firmware {inv.soft} · {inv.commissioned}</div>
-                  {/* Loggers upload at their own pace (one here every 5 min), so say how old each reading is. */}
-                  {inv.readAt && <div className="inv-meta mono" style={{ color: now - inv.readAt > 600000 ? 'var(--warn)' : 'var(--dim)' }}>
-                    Last reading {now - inv.readAt > 36 * 3600e3
-                      ? new Date(inv.readAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' + window.fmtTime(new Date(inv.readAt))
-                      : window.fmtTime(new Date(inv.readAt)) + ' · ' + window.fmtAgo(new Date(inv.readAt), now)}</div>}
-                </div>
-                <Badge tone={inv.status === 'online' ? 'ok' : 'warn'} dot>{inv.status}</Badge>
-              </div>
-              <div className="inv-grid">
-                <Metric label="Solar" value={fmtPower(inv.pvNow)} accent={CC.pv} />
-                <Metric label="Output" value={fmtPower(inv.output)} />
-                {hasBatt && <Metric label="Battery" value={fmtPower(battShown(inv.battOut, settings.battPositive))} unit={battWord(inv.battOut) && ' ' + battWord(inv.battOut)} accent={CC.batt} />}
-                {hasBatt && <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />}
-                {hasGrid && <Metric label={inv.grid < -5 ? 'Grid (export)' : 'Grid'} value={fmtPower(Math.abs(inv.grid))} accent={CC.grid} />}
-                <Metric label="Home" value={fmtPower(inv.load)} accent={CC.load} />
-                {hasBatt && <Metric label="Batt temp" value={t != null ? inv.battTemp.toFixed(1) : 'bad sensor'} unit={t != null ? ' °C' : ''} accent={t == null ? CC.load : null} />}
-                <Metric label="Today PV" value={fmtKwh(inv.pvToday)} accent={CC.pv} />
-              </div>
-              {hasBatt && t == null && <div className="inv-warn">⚠ Battery temp sensor reading invalid (≤ −50 °C) — filtered.</div>}
-            </Card>
-          );
-        })}
-      </div>
+      {/* The supply over a day: voltage at each inverter's AC terminal and the grid's frequency,
+          from SunSynk's history (two months back). A blackout shows as a shaded band; the
+          terminal keeps reading the inverter's own 230 V then, so only the 0 Hz gives it away.
+          Off-grid, the inverter's own output takes its place. */}
+      <Card className="chart-card">
+        <SectionTitle>{hasGrid ? 'GRID SUPPLY · DAY' : 'OUTPUT · DAY'}</SectionTitle>
+        <window.InverterHistoryChart kind={hasGrid ? 'ac' : 'output'} refreshKey={refreshKey} />
+      </Card>
     </div>
   );
 }
@@ -1630,21 +1567,6 @@ function SunSynkConnectionSection({ onChanged }) {
 // currency arrive from SunSynk at link time; the rest are theirs. The roof is not asked
 // for: the planned best-day line (BEST_DAY_CURVE.md) would learn from the plant's readings.
 // One form, three sections, one floating save bar.
-// Pick one of a few, each with a line on what it means. Native radios underneath, so the
-// group takes arrow keys and reads as one question; the tile is only their dress.
-function ChoiceTiles({ name, labelledBy, value, options, onChange }) {
-  return (
-    <div className="choice-tiles" role="radiogroup" aria-labelledby={labelledBy} style={{ '--cols': options.length }}>
-      {options.map(o => (
-        <label key={o.label} className={'choice-tile' + (o.value === value ? ' on' : '')}>
-          <input type="radio" name={name} checked={o.value === value} onChange={() => onChange(o.value)} />
-          <span className="choice-text"><span className="conn-user">{o.label}</span><span className="conn-meta">{o.hint}</span></span>
-        </label>
-      ))}
-    </div>
-  );
-}
-
 function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   const { useState, useEffect } = React;
   const plant = (me?.plants || []).find(p => p.id === plantId) || (me?.plants || [])[0];
@@ -1773,6 +1695,42 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
         </div>
       </SettingsSection>
 
+      <SettingsSection id="battery" title="Battery">
+        {/* rows like Logins and Account: name and hint on the left, control on the right, a rule between */}
+        <div className="conn-row sset-row">
+          <label className="conn-text" htmlFor="batt-kwh">
+            <span className="conn-user">Capacity</span>
+            <span className="conn-meta">Every battery added together.</span>
+          </label>
+          <div className="conn-actions">
+            <div className="unit-input">
+              <input id="batt-kwh" className="input mono" type="number" inputMode="decimal" step="0.1" min="0" placeholder="26.5" aria-describedby="batt-kwh-unit"
+                     value={f.battery_kwh ?? ''} onChange={e => set('battery_kwh', e.target.value)} />
+              <span id="batt-kwh-unit" className="unit">kWh</span>
+            </div>
+          </div>
+        </div>
+        <div className="conn-row sset-row">
+          <label className="conn-text" htmlFor="batt-reserve">
+            <span className="conn-user">Reserve</span>
+            <span className="conn-meta">Discharging stops at this level.</span>
+          </label>
+          {/* an edited box settles into 5 to 50 when it loses focus */}
+          <div className="conn-actions">
+            <div className="unit-input">
+              <input id="batt-reserve" className="input mono" type="number" inputMode="numeric" min="5" max="50" step="1" aria-describedby="batt-reserve-unit"
+                     value={f.battery_reserve_pct ?? ''} onChange={e => set('battery_reserve_pct', e.target.value)}
+                     onBlur={e => {
+                       if (num(f.battery_reserve_pct) === (cfg.battery_reserve_pct ?? null)) return;   // untouched: keep a stored value outside the range
+                       const v = Math.round(Number(e.target.value));
+                       set('battery_reserve_pct', e.target.value === '' || isNaN(v) ? (cfg.battery_reserve_pct ?? 20) : Math.min(50, Math.max(5, v)));
+                     }} />
+              <span id="batt-reserve-unit" className="unit">%</span>
+            </div>
+          </div>
+        </div>
+      </SettingsSection>
+
       <SettingsSection id="plant" title="Plant">
         <div className="conn-row sset-row">
           <div className="conn-text cap-text">
@@ -1830,42 +1788,6 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
         </div>
       </SettingsSection>
 
-      <SettingsSection id="battery" title="Battery">
-        {/* rows like Logins and Account: name and hint on the left, control on the right, a rule between */}
-        <div className="conn-row sset-row">
-          <label className="conn-text" htmlFor="batt-kwh">
-            <span className="conn-user">Capacity</span>
-            <span className="conn-meta">Every battery added together.</span>
-          </label>
-          <div className="conn-actions">
-            <div className="unit-input">
-              <input id="batt-kwh" className="input mono" type="number" inputMode="decimal" step="0.1" min="0" placeholder="26.5" aria-describedby="batt-kwh-unit"
-                     value={f.battery_kwh ?? ''} onChange={e => set('battery_kwh', e.target.value)} />
-              <span id="batt-kwh-unit" className="unit">kWh</span>
-            </div>
-          </div>
-        </div>
-        <div className="conn-row sset-row">
-          <label className="conn-text" htmlFor="batt-reserve">
-            <span className="conn-user">Reserve</span>
-            <span className="conn-meta">Discharging stops at this level.</span>
-          </label>
-          {/* an edited box settles into 5 to 50 when it loses focus */}
-          <div className="conn-actions">
-            <div className="unit-input">
-              <input id="batt-reserve" className="input mono" type="number" inputMode="numeric" min="5" max="50" step="1" aria-describedby="batt-reserve-unit"
-                     value={f.battery_reserve_pct ?? ''} onChange={e => set('battery_reserve_pct', e.target.value)}
-                     onBlur={e => {
-                       if (num(f.battery_reserve_pct) === (cfg.battery_reserve_pct ?? null)) return;   // untouched: keep a stored value outside the range
-                       const v = Math.round(Number(e.target.value));
-                       set('battery_reserve_pct', e.target.value === '' || isNaN(v) ? (cfg.battery_reserve_pct ?? 20) : Math.min(50, Math.max(5, v)));
-                     }} />
-              <span id="batt-reserve-unit" className="unit">%</span>
-            </div>
-          </div>
-        </div>
-      </SettingsSection>
-
       {(dirty || msg) && (
         <div className={'save-bar' + (dirty ? ' dirty' : '')} role="status">
           <span className="save-text">{!dirty ? msg : blocked ? 'Save or discard before switching plant.' : 'Unsaved changes'}</span>
@@ -1907,9 +1829,7 @@ function DeleteAccountSection({ email }) {
 }
 
 // Settings: the plant on screen.
-function SettingsTab({ me, plantId, settings, setSettings, onPlantConfigSaved, flash, onFlashed, onDirty, switchBlocked }) {
-  const PAGES = [['solar', 'Solar', 'Generation and panel strings'], ['grid', 'Grid', 'Import, quality and savings'],
-    ['inverters', 'Equipment', 'Battery packs and each inverter']];
+function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirty, switchBlocked }) {
   const plant = (me?.plants || []).find(p => p.id === plantId);
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
@@ -1919,19 +1839,6 @@ function SettingsTab({ me, plantId, settings, setSettings, onPlantConfigSaved, f
           {plant && <p>For {plant.name || 'Plant ' + plant.id}. Shared with everyone who sees it.</p>}
         </div>
         <PlantSections me={me} plantId={plantId} onSaved={onPlantConfigSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
-        <SettingsSection id="display" title="Display" note="Only for you.">
-          <div className="conn-row sset-row">
-            <div className="conn-text"><span id="batt-power-q" className="conn-user">Battery power is positive when</span></div>
-            <ChoiceTiles name="batt-power" labelledBy="batt-power-q" value={settings.battPositive} onChange={v => setSettings(s => ({ ...s, battPositive: v }))}
-              options={[{ value: 'discharge', label: 'Powering the house' }, { value: 'charge', label: 'Charging' }]} />
-          </div>
-        </SettingsSection>
-        <SettingsSection id="pages" title="Pages" note="Only for you, on every device.">
-          {PAGES.map(([k, l, h]) => (
-            <Toggle key={k} label={l} hint={h} checked={!!settings.tabs[k] || (k === 'inverters' && !!settings.tabs.battery)}
-              onChange={v => setSettings(s => ({ ...s, tabs: { ...s.tabs, [k]: v, ...(k === 'inverters' ? { battery: false } : {}) } }))} />
-          ))}
-        </SettingsSection>
       </div>
     </SettingsFlash.Provider>
   );

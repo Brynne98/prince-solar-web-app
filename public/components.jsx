@@ -22,17 +22,11 @@ function fmtPower(w) {
   const [v, u] = fmtPowerParts(w);
   return u ? v + ' ' + u : v;
 }
-// Battery power the way the owner reads it (Account → Display). `w` is + = powering the
-// house; 'charge' flips it so charging reads +. The words beside the number (battWord) take
-// the unflipped `w`. Within ±5 W it is idle and shows 0, never −0.00.
-function battShown(w, pref) {
+// Battery power as shown everywhere: + = the house is using the battery, − = charging.
+// There is no setting for it (SOLAR-71). Within ±5 W it is idle and shows 0, never −0.00.
+function battShown(w) {
   if (w == null || isNaN(w)) return w;
-  if (Math.abs(w) <= 5) return 0;
-  return pref === 'charge' ? -w : w;
-}
-function battWord(w) {
-  if (w == null || isNaN(w) || Math.abs(w) <= 5) return '';
-  return w > 0 ? 'powering the house' : 'charging';
+  return Math.abs(w) <= 5 ? 0 : w;
 }
 // The hour it is AT THE PLANT, not on the viewer's device. An owner abroad, or a
 // plant in another country, must see "typical at this hour" for the plant's hour.
@@ -193,9 +187,7 @@ function Toggle({ checked, onChange, label, hint }) {
 
 // ---- Legend chip (clickable series toggle) ----------------------------------
 function LegendChip({ color, label, value, active, onClick }) {
-  // kWh values reserve room for a negative 2-decimal number; % values are short, so narrow them
-  const pct = value != null && String(value).trim().endsWith('%');
-  const valStyle = { ...(active ? { color } : {}), ...(pct ? { minWidth: '5ch' } : {}) };
+  const valStyle = active ? { color } : {};
   return (
     <button className={'legend-chip' + (active ? '' : ' off')} onClick={onClick}>
       <span className="legend-dot" style={{ background: active ? color : 'transparent', borderColor: color }} />
@@ -287,7 +279,7 @@ function SectionTitle({ children, right }) {
 }
 
 Object.assign(window, {
-  COLORS, fmtPower, fmtPowerParts, battShown, battWord, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
+  COLORS, fmtPower, fmtPowerParts, battShown, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
   Card, StatTile, Metric, Badge, Segmented, Toggle, LegendChip, Sparkline, SectionTitle, InfoDot,
   Skeleton, SkeletonTile,
   fmtEnergySmart, fmtRandSmart, fmtEnergyParts, fmtMoney, fmtMoneySmart, moneySymbol
