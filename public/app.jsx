@@ -490,12 +490,15 @@ function App({ links }) {
   // initial load: who am I and which plant, then the data
   useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); }); }, []);
   // auto refresh: live every minute (matches SunSynk's cadence), today and energy every
-  // 5th minute. On the clock, not from page load: every open device asks at :15, after the
-  // poller's reading has landed (by ~:06), so devices side by side show the same numbers (SOLAR-33).
+  // 5th minute. On the clock, not from page load, so devices side by side show the same
+  // numbers (SOLAR-33). The second past the minute is the plant's own, 12–42 s, so every
+  // device on one plant still asks together, after the reading has landed (by ~:06), while
+  // different plants ask at different moments instead of all in one second (SOLAR-70).
   useEffect(() => {
     if (!auto) return;
     let a;
-    const next = () => { const ms = 60000 - (Date.now() - 15000) % 60000; a = setTimeout(tick, ms < 1000 ? ms + 60000 : ms); };
+    const off = 12000 + ((Number(plantId) || 0) * 7919 % 31) * 1000;
+    const next = () => { const ms = 60000 - (Date.now() - off) % 60000; a = setTimeout(tick, ms < 1000 ? ms + 60000 : ms); };
     const tick = () => {
       loadLive(false);
       if (new Date().getMinutes() % 5 === 0) { loadToday(); refreshEnergy(); }
@@ -510,7 +513,7 @@ function App({ links }) {
       clearTimeout(a); clearTimeout(liveRetry.current);
       document.removeEventListener('visibilitychange', wake); window.removeEventListener('online', wake);
     };
-  }, [auto]);
+  }, [auto, plantId]);
 
   const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(); setRefreshKey(k => k + 1); };
 
