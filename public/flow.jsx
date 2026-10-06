@@ -323,8 +323,9 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
 
   // The one-line summary of what is happening; it opens the card, above the diagram.
   let narrative;
-  // a silent plant's last figures aren't happening now
-  if (silentSince) narrative = <>No readings since {silentSince}.</>;
+  // A silent plant's last figures aren't happening now. The page banner says since when;
+  // fullscreen covers the banner, so only there does the card say it.
+  if (silentSince) narrative = wall ? <>No readings since {silentSince}.</> : null;
   else if (gridOff) {
     const timeLeft = battRow.k === 'Empty in' ? battRow.v : null;
     narrative = <><b>The grid is off.</b>{hasBatt && agg.battPower > 5 && !charging
@@ -357,7 +358,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
 
   return (
     <div className="flow-wrap" ref={wrapRef}>
-      <div className="flow-narrative">{narrative}</div>
+      {narrative && <div className="flow-narrative">{narrative}</div>}
       {mobile ? renderMobile() : renderDesktop()}
     </div>
   );
