@@ -302,12 +302,11 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
   // identical and the badge has to stay silent.
   const prevHasData = !!prev && ((prev.pv || 0) > 0 || (prev.load || 0) > 0);
   const pct = (c, p) => {
-    if (c == null || p == null) return null;
+    // nothing logged on the other side: no arrow at all, not even a "0%"
+    if (c == null || p == null || !prevHasData) return null;
     // Zero then zero is no change. Zero then something has no meaningful percentage,
-    // so hand the badge Infinity and let it fall back to the absolute kWh change —
-    // but only when the previous period actually logged data, otherwise a logger
-    // outage would read as a rise from nothing.
-    if (p === 0) return c === 0 ? 0 : (prevHasData ? Infinity : null);
+    // so hand the badge Infinity and let it fall back to the absolute kWh change.
+    if (p === 0) return c === 0 ? 0 : Infinity;
     return ((c - p) / p) * 100;
   };
   const tGen = prev ? pct(cPv, prev.pv) : null;
@@ -321,11 +320,8 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
   const tSuff = (cSuff != null && prevSuff != null) ? (cSuff - prevSuff) : null;
   // "vs last year, 40 of 120 days compared" — say when the arrow rests on a subset
   const cmpBase = { today: 'vs yesterday at this time', week: 'vs last week', month: 'vs last month', year: 'vs last year' }[period];
-  const partial = !!(cmpBase && cmpRow && !useLive && prev && cmpDays < (cmpRow.span || 0));
-  // nothing logged on the other side at all: a dim "New" holds the arrow's place
-  const noCmp = (cmpRow && !prevHasData)
-    ? 'Nothing logged ' + { today: 'yesterday', week: 'last week', month: 'last month', year: 'last year' }[period] + ' to compare with'
-    : null;
+  // nothing logged on the other side: no arrows, and no note about them either
+  const partial = !!(cmpBase && cmpRow && !useLive && prevHasData && cmpDays < (cmpRow.span || 0));
   const cmpWord = partial ? cmpBase + ', ' + cmpDays + ' of ' + cmpRow.span + ' days compared' : cmpBase;
   // Est. saved trend: avoided import at today's rate, both sides from the paired
   // compare rows (they carry no export). A plant paid for export gets no arrow, since
@@ -373,15 +369,15 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
         {/* On a phone there is no hover, so a thin comparison base is said on screen. */}
         {partial && <div className="cmp-note">Arrows compare {cmpDays} of {cmpRow.span} days with the {cmpBase.replace('vs ', '')}. The rest have no record on one side.</div>}
         <div className="today-strip">
-          <MiniStat loading={pending} label="Generated" value={window.fmtEnergySmart(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord} trendNone={noCmp}
+          <MiniStat loading={pending} label="Generated" value={window.fmtEnergySmart(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord}
             info="Total solar energy your panels produced over the selected period." />
-          <MiniStat loading={pending} label="Home" value={window.fmtEnergySmart(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord} trendNone={noCmp}
+          <MiniStat loading={pending} label="Home" value={window.fmtEnergySmart(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
             info="Total energy your home used over the selected period, summed across all inverters." />
-          <MiniStat loading={pending} label="Independence" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord} trendNone={noCmp}
+          <MiniStat loading={pending} label="Independence" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
             info="Share of your home’s energy that came from your own solar + battery rather than the grid. 100% = fully off-grid for the period." />
           {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergySmart(pExp)} color={CC.grid}
             info={'Energy sent to the grid over the selected period' + (rateExp > 0 ? ', paid at your feed-in rate.' : '.')} />}
-          {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergySmart(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord} trendNone={noCmp}
+          {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergySmart(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
             info="Energy drawn from the grid over the selected period."
             sub={a.gridPresent == null ? (
               // No inverter has reported mains voltage yet; a blank here read as a
@@ -401,7 +397,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
             info="This plant has no grid connection. Everything the home uses comes from solar and the battery." />}
           <MiniStat loading={pending} label="Est. saved" color={CC.batt}
             value={(rate > 0 || rateExp > 0) ? window.fmtRandSmart(pSaved) : '—'}
-            trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord} trendNone={moneyTrend ? noCmp : null}
+            trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord}
             // no rate yet: the line under the dash opens Settings on Tariff
             sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your rate</button> : undefined}
             info={'Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your electricity rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '. Set your rate in Settings.'} />
@@ -411,8 +407,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
     </div>
   );
 }
-function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt, none }) {
-  if (none) return <span className="trend-badge flat" title={none}>New</span>;
+function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt }) {
   if (pct == null) return null;                       // only hide when there is no prior period
   const usable = Number.isFinite(delta);
   if (!Number.isFinite(pct) && !usable) return null;  // grew from zero and no kWh figure to show
@@ -437,13 +432,13 @@ function unitSplit(v) {
   const m = typeof v === 'string' && /^(.*?)\s?(kWh|MWh|GWh|kW|W|%)$/.exec(v);
   return m ? <>{m[1]}<span className={'mv-unit' + (m[2] === '%' ? ' pct' : '')}>{m[2]}</span></> : v;
 }
-function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendTitle, trendDelta, trendDeltaFmt, trendNone, loading }) {
+function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendTitle, trendDelta, trendDeltaFmt, loading }) {
   return (
     <Card className="mini-stat">
       {/* the trend arrow sits on the label's line, top right, so it fits at every width */}
       <div className="mini-label">
         <span className="ml-text">{label}{info && <window.InfoDot text={info} />}</span>
-        {!loading && <TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} title={trendTitle} delta={trendDelta} deltaFmt={trendDeltaFmt} none={trendNone} />}
+        {!loading && <TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} title={trendTitle} delta={trendDelta} deltaFmt={trendDeltaFmt} />}
       </div>
       {/* a shimmer beats an em-dash: switching to Week/Month refetches, and "—" reads as
           "no data" rather than "fetching" */}
