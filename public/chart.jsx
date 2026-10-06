@@ -459,7 +459,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
 }
 window.InverterHistoryChart = InverterHistoryChart;
 
-function HistoryView({ today, refreshKey, locked }) {
+function HistoryView({ today, refreshKey, locked, silent }) {
   const C = window.COLORS;
   const [vis, setVis] = React.useState({ pv: true, batt: true, load: true, grid: true, soc: true });
   const [hover, setHover] = React.useState(null);
@@ -754,11 +754,12 @@ function HistoryView({ today, refreshKey, locked }) {
   // weeks, which the normal sweep fills once the first walked day is in.
   const sync = window.SYNC;
   const pastMsg = sync && sync.spinePending && sync.backfillNext && date >= sync.backfillNext
-    ? 'Still fetching this day — older days arrive first, a few every six hours.'
-    : sync && sync.spinePending && date < shiftDate(todayStr, -DAY_FLOOR_DAYS) ? 'Only the last 60 days could be fetched; this day is before that.'
-    : 'No data for this day';
+    ? 'Not fetched yet. Older days come first, more every six hours.'
+    : sync && sync.spinePending && date < shiftDate(todayStr, -DAY_FLOOR_DAYS) ? 'Older than 60 days, so not available.'
+    : 'No readings for this day.';
   const emptyMsg = loading ? 'Loading…'
-    : isToday && dayData?.approx ? 'Collecting today’s first readings — the chart starts after about half an hour of logging.'
+    : isToday && silent ? 'No readings today.'
+    : isToday && dayData?.approx ? 'Collecting today’s first readings. The chart starts after half an hour.'
     : isToday ? window.emptyText(window.PLANT_DAYS, 'Loading today’s data…') : pastMsg;
 
   return (

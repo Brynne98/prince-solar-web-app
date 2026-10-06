@@ -25,7 +25,7 @@ function flowAlpha(hex, a) {
   return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`;
 }
 
-function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall }) {
+function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince }) {
   const C = window.COLORS;
   const mobile = useFlowMobile();
   // The boxes stretch with the card (SOLAR-39); its width only decides the lane's.
@@ -44,17 +44,18 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   const hh = (h) => String(h).padStart(2, '0') + ':00';
   // The usual charge at this hour is hover text on the battery's charge %.
   const usualTitle = typicalSoc != null
-    ? 'Usually ' + typicalSoc + '% at ' + (typicalHour != null ? hh(typicalHour) : 'this hour') + ' over complete days'
+    ? 'Usually ' + typicalSoc + '% at ' + (typicalHour != null ? hh(typicalHour) : 'this hour')
     : undefined;
 
   // battInfo arrives as "3h 40m to empty" / "1h 55m to full" / "Set pack size"; no time while idle
   const battRow = (() => {
+    if (silentSince) return { k: '', v: '' }; // a silent plant's battery is doing nothing we know of
     const m = battInfo && /^(.*) to (empty|full)$/.exec(battInfo);
     if (m) return { k: m[2] === 'empty' ? 'Empty in' : 'Full in', v: m[1] };
     // "Set pack size" stands alone, a link to Settings (SOLAR-23)
     if (battInfo) return { k: '', v: battInfo, on: onBattInfo };
     // under 200 W there is no time (tabs.jsx), but the power is still moving (SOLAR-44)
-    return { k: charging ? 'Trickle charging' : agg.battState === 'discharging' ? 'Discharging' : 'Idle', v: '' };
+    return { k: charging ? 'Charging slowly' : agg.battState === 'discharging' ? 'Discharging' : 'Resting', v: '' };
   })();
   const battState = battRow.on
     ? <button type="button" className="mini-link" onClick={battRow.on}>{battRow.v}</button>
@@ -79,7 +80,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   const nodes = {
     pv: { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun',
       split: [['Home', C.load, sunToHome * sunScale], ['Battery', C.batt, sunToBatt * sunScale], ['Grid', C.grid, gridExport * sunScale]],
-      today: today(['Generated', agg.pvToday]) },
+      today: today(['Made', agg.pvToday]) },
     // w stays the magnitude (animation, stroke); val is the signed figure printed on the box,
     // + = powering the house, as everywhere else in the app.
     bat: hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: window.battShown(agg.battOut),
@@ -90,7 +91,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
     grid: hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 0 ? gridExport : gridImport,
       val: gridExport > 0 ? -gridExport : gridImport, icon: 'bolt',
       reverse: gridExport > 0, off: gridOff, known: gridKnown,
-      state: gridOff ? 'No supply' : gridExport > 0 ? 'Exporting' : gridImport > 0 ? 'Importing' : 'Idle',
+      state: gridOff ? 'Off' : gridExport > 0 ? 'Exporting' : gridImport > 0 ? 'Importing' : 'Not in use',
       today: today(['Imported', agg.gridFromToday ?? 0], ['Exported', agg.gridToToday ?? 0]) },
     home: { key: 'home', label: 'Home', color: C.load, w: agg.loadNow, icon: 'home',
       split: [['Solar', C.pv, solarIn], ['Battery', C.batt, battIn], ['Grid', C.grid, gridIn]],
@@ -318,7 +319,9 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
 
   // The one-line summary of what is happening; it opens the card, above the diagram.
   let narrative;
-  if (gridOff) {
+  // a silent plant's last figures aren't happening now
+  if (silentSince) narrative = <>No readings since {silentSince}.</>;
+  else if (gridOff) {
     const timeLeft = battRow.k === 'Empty in' ? battRow.v : null;
     narrative = <><b>The grid is off.</b>{hasBatt && agg.battPower > 5 && !charging
       ? <> Your <b style={{ color: C.batt }}>battery</b> is powering the home{timeLeft ? <>, with about {timeLeft} left</> : ''}.</>
@@ -343,10 +346,10 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   else if (hasBatt && agg.battPower > 5 && !charging && gridImport < 50) narrative = agg.pvNow > 50
     ? <><b style={{ color: C.pv }}>Solar</b> and your <b style={{ color: C.batt }}>battery</b> are powering the home.</>
     : <>Your <b style={{ color: C.batt }}>battery</b> is powering the home.</>;
-  else if (gridImport > 50) narrative = <>Pulling <b style={{ color: C.grid }}>{window.fmtPower(gridImport)}</b> from the grid to meet demand.</>;
-  else if (!hasGrid && agg.pvNow < 50) narrative = <>Off-grid, after dark — the home is running on <b style={{ color: C.batt }}>stored energy</b>.</>;
+  else if (gridImport > 50) narrative = <>Using <b style={{ color: C.grid }}>{window.fmtPower(gridImport)}</b> from the grid.</>;
+  else if (!hasGrid && agg.pvNow < 50) narrative = <>Your <b style={{ color: C.batt }}>battery</b> is powering the home.</>;
   else if (!hasBatt) narrative = <><b style={{ color: C.pv }}>Solar</b> covers what it can; the grid covers the rest.</>;
-  else narrative = <>Solar, battery and grid are <b>sharing the load</b>.</>;
+  else narrative = <>Solar, battery and grid are <b>all powering the home</b>.</>;
 
   return (
     <div className="flow-wrap" ref={wrapRef}>

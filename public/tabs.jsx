@@ -54,7 +54,7 @@ function LiveSkeleton() {
         {/* The real tiles in loading mode, with the same meter and second line the live
             ones carry, so the row lands at the same height. */}
         <div className="today-strip">
-          <MiniStat loading label="Generated" />
+          <MiniStat loading label="Made" />
           <MiniStat loading label="Home" />
           <MiniStat loading label="Independence" bar={0} />
           <MiniStat loading label="Imported" sub={' '} />
@@ -111,8 +111,11 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
     const d = new Date(snap.updated.getTime() + hrs * 3600000);
     return window.fmtPlantTime(d, tz) + ', ' + d.toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz || undefined });
   };
+  // A silent plant's last figures aren't now: no forecast from them, and Today's tiles show a dash.
+  const ps = window.plantStatus(snap, Date.now());
+  const silent = ps.status === 'offline';
   let battEta = null, battInfo = null;
-  if (!hasBatt) { /* nothing to estimate */ }
+  if (!hasBatt || silent) { /* nothing to estimate */ }
   else if (!cap) { battInfo = 'Set pack size'; } // a link on the flow's battery node
   // Under 200 W the battery is only trickling and a time would read in days, so it gives none.
   else if (a.battState === 'discharging' && a.battPower >= 200) {
@@ -246,7 +249,8 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const rate = snap.config?.tariffImport ?? 0;
   const rateExp = snap.config?.tariffExport ?? 0;
   let pPv, pLoad, pImp, pExp;
-  if (period === 'today') { pPv = a.pvToday; pLoad = a.loadToday; pImp = hasGrid ? a.gridFromToday : 0; pExp = hasGrid ? a.gridToToday : 0; }
+  if (period === 'today' && silent) { pPv = pLoad = pImp = pExp = null; }
+  else if (period === 'today') { pPv = a.pvToday; pLoad = a.loadToday; pImp = hasGrid ? a.gridFromToday : 0; pExp = hasGrid ? a.gridToToday : 0; }
   else if (heavy) { pPv = heavy.pv; pLoad = heavy.load; pImp = hasGrid ? heavy.imp : 0; pExp = hasGrid ? heavy.exp : 0; }
   else { pPv = pLoad = pImp = pExp = null; } // aggregate period still loading
   // clamp to 0–100: import can exceed load when the grid charges the battery,
@@ -259,7 +263,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   // few Wh of backflow, so a non-zero counter alone is not a sign the site sells.
   const showExport = hasGrid && rateExp > 0;
   const pending = isAgg && !energy[period];
-  const periodWord = { today: 'today', week: 'this week', month: 'this month', year: 'this year', lifetime: 'all-time' }[period];
+  const periodWord = { today: 'today', week: 'this week', month: 'this month', year: 'this year', lifetime: 'lifetime' }[period];
   // trend vs the same elapsed slice of the previous period. Today's is yesterday up to
   // the same time (0077), so it is fair from the first minute and shows all day.
   // "current" = the live value shown in the tile (pPv/pLoad/…) so the arrow stays
@@ -351,12 +355,12 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
               <FsEnterIcon /><span>Fullscreen</span>
             </button>
           }>POWER FLOW</SectionTitle>}
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} />
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} silentSince={silent ? readAgo(ps.last.getTime(), Date.now()) : null} />
         </Card>
       </div>
 
       <Card className="chart-card">
-        <window.HistoryView today={today} refreshKey={refreshKey} />
+        <window.HistoryView today={today} refreshKey={refreshKey} silent={silent} />
       </Card>
 
       <div className="overview-section">
@@ -367,19 +371,17 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             value={period} onChange={setPeriod} />
         </div>
         {/* On a phone there is no hover, so a thin comparison base is said on screen. */}
-        {partial && <div className="cmp-note">Arrows compare {cmpDays} of {cmpRow.span} days with the {cmpBase.replace('vs ', '')}. The rest have no record on one side.</div>}
+        {partial && <div className="cmp-note">Arrows compare the {cmpDays} of {cmpRow.span} days with readings on both sides.</div>}
         <div className="today-strip">
-          <MiniStat loading={pending} label="Generated" value={window.fmtEnergySmart(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord}
-            info="Total solar energy your panels produced over the selected period." />
+          <MiniStat loading={pending} label="Made" value={window.fmtEnergySmart(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord} />
           <MiniStat loading={pending} label="Home" value={window.fmtEnergySmart(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
-            info="Total energy your home used over the selected period, summed across all inverters." />
+            info="What your home used, across all inverters." />
           <MiniStat loading={pending} label="Independence" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
-            info="Share of your home’s energy that came from your own solar + battery rather than the grid. 100% = fully off-grid for the period." />
+            info="How much of what your home used didn’t come from the grid." />
           {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergySmart(pExp)} color={CC.grid}
-            info={'Energy sent to the grid over the selected period' + (rateExp > 0 ? ', paid at your feed-in rate.' : '.')} />}
+            info="Sent to the grid, paid at your feed-in rate." />}
           {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergySmart(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
-            info="Energy drawn from the grid over the selected period."
-            sub={a.gridPresent == null ? (
+            sub={silent ? undefined : a.gridPresent == null ? (
               // No inverter has reported mains voltage yet; a blank here read as a
               // chip that failed to load.
               <span className="grid-state unknown"><span className="gs-dot" />Grid unknown</span>
@@ -388,19 +390,19 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
               // from it, so this stays ON through a sunny self-powered afternoon.
               <span className={'grid-state ' + (a.gridPresent ? 'on' : 'off')}
                     title={a.gridPresent
-                      ? 'Mains voltage detected. This reads ON whenever the utility is live, even when you are drawing nothing from it.'
-                      : 'No mains voltage on any inverter — the utility supply is down.'}>
+                      ? 'The grid is live, even when you’re not using it.'
+                      : 'No power from the grid.'}>
                 <span className="gs-dot" />{a.gridPresent ? (a.phaseDown ? 'Phase down' : 'Grid on') : 'Grid off'}
               </span>
             )} />}
-          {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off-grid" color={CC.grid}
-            info="This plant has no grid connection. Everything the home uses comes from solar and the battery." />}
+          {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off" color={CC.grid}
+            info="No grid connection. Everything the home uses comes from solar and the battery." />}
           <MiniStat loading={pending} label="Est. saved" color={CC.batt}
-            value={(rate > 0 || rateExp > 0) ? window.fmtRandSmart(pSaved) : '—'}
+            value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
             trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord}
             // no rate yet: the line under the dash opens Settings on Tariff
             sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your rate</button> : undefined}
-            info={'Rough money saved = the grid energy you avoided buying (your consumption not supplied by the grid) valued at your electricity rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '. Set your rate in Settings.'} />
+            info={'What your home used that didn’t come from the grid, at your electricity rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '.'} />
         </div>
       </div>
 
