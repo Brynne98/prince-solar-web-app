@@ -634,6 +634,8 @@
   .solar-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 20px; align-items: stretch; }
   .solar-row > * { min-width: 0; }
   .solar-row > :only-child { grid-column: 1 / -1; }
+  /* the half-width cards stack their figure under the title at every width, as the phone does (SOLAR-49) */
+  .solar-row .section-title { flex-direction: column; align-items: flex-start; gap: 5px; }
   #solar-day, #battery-day, #grid-day { scroll-margin-top: 16px; }
   .solar-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
   .tip-hint { font-size: 12px; color: var(--dim); margin-top: 6px; }

@@ -506,15 +506,17 @@ function lifetimeSince(rows, earliest, today) {
 // then the battery. What is left is export, backflow or rounding, and none of those are
 // this tab's subject — the grid has its own tab.
 function solarSplit(points) {
-  let home = 0, batt = 0;
+  let home = 0, batt = 0, grid = 0;
   const kwh = 5 / 60 / 1000;
   points.forEach(p => {
     if (p.pv == null || p.load == null) return;
     const pv = Math.max(0, p.pv), toHome = Math.min(pv, Math.max(0, p.load));
     const toBatt = Math.min(pv - toHome, p.batt != null && p.batt < 0 ? -p.batt : 0); // day series: − = charging
-    home += toHome * kwh; batt += toBatt * kwh;
+    // whatever solar is left that minute and went out of the meter (grid − = exporting)
+    const toGrid = Math.min(pv - toHome - toBatt, p.grid != null && p.grid < 0 ? -p.grid : 0);
+    home += toHome * kwh; batt += toBatt * kwh; grid += toGrid * kwh;
   });
-  return { home, batt };
+  return { home, batt, grid };
 }
 
 // One day of one reading as a line across the whole day: solar (which needs a reading over
@@ -815,6 +817,9 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const kwp = cfg.systemKwp;
   const [nowN, nowU] = fmtPowerParts(a.pvNow);
 
+  // ---- last 30 days (also the day totals Where it went scales to) ----
+  const [daily, loadDaily] = useDaily(refreshKey);
+
   // ---- the day on the chart ----
   const pick = useDayPicker(earliest, plantToday); // the plant's date, as the totals and bars use
   const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
@@ -832,12 +837,26 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // the Today tile always shows today's peak, whichever day the chart is on, so the tiles
   // keep their height and a scroll to the chart lands where it aimed
   const todayPeak = peakOf(today && !today.approx ? today.points : null);
-  const split = React.useMemo(() => solarSplit(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
-  const splitTotal = split.home + split.batt;
+  const est = React.useMemo(() => solarSplit(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The day's solar as the tiles and bars show it (SunSynk's own counter). The 5-minute
+  // readings give the shares; scaling them to this total makes the card add up to the TODAY
+  // tile. Tested 30 Sep–5 Oct: the readings land within ~1 kWh of it once the grid is
+  // counted, so the scale moves each part about 2% at most (SOLAR-49).
+  const estTotal = est.home + est.batt + est.grid;
+  const dayRow = !view.isToday && (daily || []).find(r => r.date === pick.date);
+  const madeKwh = view.isToday ? a.pvToday : (dayRow && dayRow.pv != null ? dayRow.pv : day && day.totals && day.totals.pv);
+  const k = madeKwh > 0 && estTotal > 0 ? madeKwh / estTotal : 1;
+  // Round each part to the 0.1 kWh shown, then give any rounding gap to the largest part, so the
+  // three figures on screen add up to the total exactly (16.4, not 6.8 + 8.9 + 0.8 = 16.5).
+  const tenths = (v) => Math.round(v * 10) / 10;
+  const split = { home: tenths(est.home * k), batt: tenths(est.batt * k), grid: tenths(est.grid * k) };
+  const big = ['home', 'batt', 'grid'].reduce((m, x) => (split[x] > split[m] ? x : m), 'home');
+  split[big] = tenths(split[big] + tenths(est.home * k + est.batt * k + est.grid * k) - (split.home + split.batt + split.grid));
+  const splitTotal = split.home + split.batt + split.grid;
   // A destination is shown only once it holds something: a 0.0 kWh column would be a
   // zero-width segment under a full-width label, and "the battery got none of it" is said
   // better by its absence than by a zero.
-  const dests = [['Battery', split.batt, CC.batt, hasBatt], ['Home', split.home, CC.load, true]]
+  const dests = [['Home', split.home, CC.load, true], ['Battery', split.batt, CC.batt, hasBatt], ['Grid', split.grid, CC.grid, hasGrid]]
     .filter(d => d[3] && d[1] >= 0.05);
   const destPct = (v) => v / splitTotal * 100;
   // The percentages were a permanent column until 2026-09-19; the bar says the same thing,
@@ -846,8 +865,8 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // shares, or a screen reader hears the proportions and never the figures.
   const destTitle = dests.map(d => d[0] + ' ' + Math.round(destPct(d[1])) + '%').join(', ');
   const destLabel = dests.map(d => d[0] + ' ' + fmtKwh(d[1]) + ', ' + Math.round(destPct(d[1])) + '%').join('; ');
-  // No money on this card. It answers one question — where the day's sun went — and the rows
-  // sum to the day's solar. Est. saved is (load - import) x rate, which is the electricity the
+  // No money on this card. It answers one question — where the day's sun went — and the parts
+  // sum to the day's solar, grid included (left out until SOLAR-49, so they didn't). Est. saved is (load - import) x rate, which is the electricity the
   // house USED and did not buy; it cannot divide into a generation split, so beside these rows
   // it reads as a third unexplained number. It lives on Live, where Home and Imported sit on
   // the same strip and the subtraction is on screen, and on the Grid tab, which spells today's
@@ -900,7 +919,6 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const anyDead = strings.some(s => s.v < 1.5 && s.p < 5);
 
   // ---- last 30 days ----
-  const [daily, loadDaily] = useDaily(refreshKey);
   const bars = withLiveToday(daily, plantToday, 'pv', a.pvToday);
   const best = bestDay(bars, 'pv', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('solar-day'); };
@@ -919,7 +937,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
       </div>
 
       <Card id="solar-day">
-        <SectionTitle right={day && !noReadings && (view.isToday ? null : <>Made <b>{fmtKwh(day.totals.pv)}</b>{peak && <>, peak <b>{fmtPower(peak.pv)}</b> at <b>{HM(peak.t)}</b></>}</>)}>
+        <SectionTitle right={day && !noReadings && (view.isToday ? null : <>Made <b>{fmtKwh(madeKwh)}</b>{peak && <>, peak <b>{fmtPower(peak.pv)}</b> at <b>{HM(peak.t)}</b></>}</>)}>
           {titled('GENERATION', dayWord)}
         </SectionTitle>
         <DateBar pick={pick} earliest={earliest} />
@@ -941,9 +959,9 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 
       <div className="solar-row">
         <Card>
-          <SectionTitle>
+          <SectionTitle right={day && !noReadings && splitTotal >= 0.05 ? <>Made <b>{fmtKwh(splitTotal)}</b></> : null}>
             {titled('WHERE IT WENT', dayWord)}
-            <window.InfoDot text={'An estimate from 5-minute readings: solar is counted to the house first, then to the battery. Anything sold to the grid is on the Grid tab.'} />
+            <window.InfoDot text={'Worked out from 5-minute readings: solar counts to the house first, then the battery, then the grid. Scaled to the day’s total, so it matches the Today tile.'} />
           </SectionTitle>
           {!day ? <window.Skeleton h={64} r={10} />
             : noReadings ? <div className="solar-note" {...dim}>{noReadings}</div>
