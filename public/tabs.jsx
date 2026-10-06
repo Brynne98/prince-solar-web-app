@@ -659,7 +659,10 @@ function PanelsCard({ snap, health }) {
 // The reading under the pointer shows beside it. As on Live, dragging across the chart with
 // a mouse totals the energy between the two times (`sums` names the + and − parts). Callers
 // key it by date, so a new day starts with no range.
-function DayLineChart({ points, field, color, label, crop, pct, reserve, empty, sums }) {
+// `importScale` (Grid): the scale is set by what came in, at least 2 kW, and the side below
+// zero is always a third of it, as on an import day; a bigger export is cut off at the bottom,
+// and the hover and drag totals still give its real size (SOLAR-72).
+function DayLineChart({ points, field, color, label, crop, pct, reserve, empty, sums, importScale }) {
   const [ref, width, height] = useChartSize([220, 300]);
   const [hover, setHover] = React.useState(null);
   const [sel, setSel] = React.useState(null);    // [i0, i1] the selected range
@@ -677,7 +680,17 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty, 
     const innerW = Math.max(40, width - m.l - m.r), innerH = height - m.t - m.b;
     let dmin = 0, dmax = 0;
     for (let i = i0; i <= i1; i++) { const val = v(i); if (val != null) { dmax = Math.max(dmax, val); dmin = Math.min(dmin, val); } }
-    const { lo, hi, ticks } = pct ? { lo: 0, hi: 100, ticks: [0, 25, 50, 75, 100] } : niceScale(dmin, dmax, 4);
+    const { lo, hi, ticks } = pct ? { lo: 0, hi: 100, ticks: [0, 25, 50, 75, 100] }
+      : importScale ? (() => {
+          const up = niceScale(0, Math.max(2000, dmax), 3);
+          const step = up.ticks[1] - up.ticks[0];
+          const down = step * Math.max(1, Math.round(up.hi / 3 / step));
+          const t = [];
+          for (let v = -down; v <= up.hi + step / 2; v += step) t.push(Math.round(v));
+          return { lo: -down, hi: up.hi, ticks: t };
+        })()
+      : niceScale(dmin, dmax, 4);
+    const clipId = 'dlc-' + field;
     // the x axis is the whole day, 00:00 to 24:00, so today's line stops at the last reading
     // rather than stretching to fill the width
     const t0 = 0, t1 = 1440;
@@ -750,12 +763,15 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty, 
             {band[1] > band[0] && x(band[1]) - x(band[0]) >= 78 && <text x={Math.min(m.l + innerW - 16, x(band[1]))} y={m.t - 6} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(points[band[1]].t)}</text>}
           </g>
         )}
-        <path d={area} fill={color} fillOpacity="0.14" />
-        <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <clipPath id={clipId}><rect x={m.l} y={m.t - 2} width={innerW} height={innerH + 4} /></clipPath>
+        <g clipPath={'url(#' + clipId + ')'}>
+          <path d={area} fill={color} fillOpacity="0.14" />
+          <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        </g>
         {hp != null && !band && (
           <g>
             <line x1={x(hp)} x2={x(hp)} y1={m.t} y2={m.t + innerH} stroke="rgba(255,255,255,0.25)" />
-            <circle cx={x(hp)} cy={y(v(hp))} r="3" fill={color} stroke="#0b0e12" strokeWidth="1.5" />
+            <circle cx={x(hp)} cy={Math.max(m.t, Math.min(m.t + innerH, y(v(hp))))} r="3" fill={color} stroke="#0b0e12" strokeWidth="1.5" />
           </g>
         )}
       </svg>
@@ -962,10 +978,7 @@ function SolarSkeleton() {
         <window.Skeleton className="bars-skel" h="auto" r={10} />
       </Card>
       <div className="solar-row">
-        <Card>
-          <SectionTitle>{titled('WHERE IT WENT', 'today')}</SectionTitle>
-          <window.Skeleton h={64} r={10} />
-        </Card>
+        <window.Skeleton className="wiw" h={150} r={16} />
       </div>
     </div>
   );
@@ -1089,35 +1102,38 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
               today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
       </Card>
 
+      {/* Where it went, built like the boxes on Live's power flow (SOLAR-72): the day's solar,
+          the share bar, and where it went in the side column, each in its own colour. */}
       <div className="solar-row">
-        <Card>
-          <SectionTitle right={day && !noReadings && splitTotal >= 0.05 ? <>Made <b>{fmtKwh(splitTotal)}</b></> : null}>
-            {titled('WHERE IT WENT', dayWord)}
-            <window.InfoDot text={'Worked out from 5-minute readings: solar counts to the house first, then the battery, then the grid. Scaled to the day’s total, so it matches the Today tile.'} />
-          </SectionTitle>
-          {!day ? <window.Skeleton h={64} r={10} />
-            : noReadings ? <div className="solar-note" {...dim}>{noReadings}</div>
-            : splitTotal < 0.05 ? <div className="solar-note" {...dim}>{view.isToday ? 'No solar yet today.' : 'No solar on this day.'}</div>
-            : <div {...dim}>
-                {/* one object: the bar, and under it each part's kWh in its own colour, in a
-                    row of their own so a thin segment can't squeeze its label (SOLAR-71) */}
-                <div className="solar-split" role="img" title={destTitle} aria-label={destLabel}>
+        <div className="fbox wiw" {...dim} style={{ borderColor: 'rgba(61,220,132,0.6)', background: 'rgba(61,220,132,0.07)' }}>
+          <div className="fbox-now">
+            <div className="fbox-head">
+              <svg width="18" height="18" viewBox="-11 -11 22 22" aria-hidden="true">
+                <circle r="4.2" fill={CC.pv} />
+                {[0, 45, 90, 135, 180, 225, 270, 315].map(r => <line key={r} x1="0" y1="-6.6" x2="0" y2="-9" stroke={CC.pv} strokeWidth="1.6" strokeLinecap="round" transform={'rotate(' + r + ')'} />)}
+              </svg>
+              <span className="fbox-label">Where it went</span>
+              <window.InfoDot text={'Worked out from 5-minute readings: solar counts to the house first, then the battery, then the grid. Scaled to the day’s total, so it matches the Today tile.'} />
+            </div>
+            {!day ? <window.Skeleton h={30} w="50%" r={8} style={{ marginTop: 12 }} />
+              : <div className="fbox-val" style={{ color: splitTotal >= 0.05 && !noReadings ? CC.pv : 'var(--muted)' }}>{noReadings || splitTotal < 0.05 ? '—' : EP(splitTotal)[0]}<span className="u">{noReadings || splitTotal < 0.05 ? '' : EP(splitTotal)[1]}</span></div>}
+            <div className="fbox-state">{!day ? NBSP : noReadings || (splitTotal < 0.05 ? (view.isToday ? 'No solar yet today.' : 'No solar on this day.') : (view.isToday ? 'Made so far today' : 'Made on ' + dayWord))}</div>
+            {day && !noReadings && splitTotal >= 0.05 && (
+              <div className="fbox-foot">
+                <div className="fbox-bar" role="img" title={destTitle} aria-label={destLabel}>
                   {dests.map(([l, v, c]) => <i key={l} style={{ flexGrow: v, background: c }} />)}
                 </div>
-                <div className="solar-dest" aria-hidden="true">
-                  {dests.map(([l, v, c]) => {
-                    const [n, u] = EP(v);
-                    return (
-                      <div className="sd" key={l}>
-                        <div className="sd-k"><span className="sd-dot" style={{ background: c }} />{l}</div>
-                        <div className="sd-v mono" style={{ color: c }}>{n}<s>{u}</s></div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>}
-        </Card>
-
+              </div>
+            )}
+          </div>
+          <div className="fbox-today" aria-hidden="true">
+            <div className="fbox-today-h">Went to</div>
+            {(day && !noReadings && splitTotal >= 0.05 ? dests : []).map(([l, v, c]) => {
+              const [n, u] = EP(v);
+              return <div key={l}><span>{l}</span><b style={{ color: c }}>{n}<span className="u">{u}</span></b></div>;
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1140,7 +1156,7 @@ function GridSkeleton() {
         <DayChartSkeleton />
       </Card>
       <Card>
-        <SectionTitle>{titled('BOUGHT FROM THE GRID', 'last 30 days')}</SectionTitle>
+        <SectionTitle>{titled('IMPORTED', 'last 30 days')}</SectionTitle>
         <window.Skeleton className="bars-skel" h="auto" r={10} />
       </Card>
     </div>
@@ -1195,8 +1211,8 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // Presence is mains voltage, not usage: nothing is bought on a sunny afternoon with the
   // grid live, and a blackout reads 0 W too.
   const nowSub = a.gridPresent === false ? <span style={{ color: CC.load }}>The grid is off</span>
-    : exporting ? 'Exporting to the grid'
-    : a.gridPower > 5 ? 'Buying' : 'Not buying';
+    : exporting ? 'Exporting'
+    : a.gridPower > 5 ? 'Importing' : 'Not importing';
   const importPeak = (pts) => {
     let pk = null;
     (pts || []).forEach(p => { if (p.grid != null && p.grid > 50 && (!pk || p.grid > pk.grid)) pk = p; });
@@ -1225,7 +1241,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
     <div className="stack solar-tab">
       <div className="solar-stats">
         <StatTile label="GRID NOW" value={nowN} unit={nowU} accent={CC.grid} sub={nowSub} />
-        {tile('TODAY', a.gridFromToday, sells ? <>Exported <b>{fmtKwh(a.gridToToday)}</b> to the grid</> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
+        {tile('TODAY', a.gridFromToday, sells ? <>Exported <b>{fmtKwh(a.gridToToday)}</b></> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
         {tile('THIS YEAR', tot.year)}
@@ -1233,25 +1249,25 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
       </div>
 
       <Card id="grid-day">
-        <SectionTitle right={day && !noReadings && !view.isToday ? <>Bought <b>{fmtKwh(flows.imp)}</b>{flows.exp >= 0.05 && <>, exported <b>{fmtKwh(flows.exp)}</b></>}</> : null}>
+        <SectionTitle right={day && !noReadings && !view.isToday ? <>Imported <b>{fmtKwh(flows.imp)}</b>{flows.exp >= 0.05 && <>, exported <b>{fmtKwh(flows.exp)}</b></>}</> : null}>
           {titled('GRID', dayWord)}
-          <window.InfoDot text={'Above the line is power bought from the grid; below it is power exported to the grid.'} />
+          <window.InfoDot text={'Above the line is power imported from the grid; below it is power exported.'} />
         </SectionTitle>
         <DateBar pick={pick} earliest={earliest} />
         {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
           : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="grid" color={CC.grid} label="Grid"
-              sums={['Bought', 'Exported to the grid']} empty={noReadings || 'No grid readings for this day.'} /></div>}
+              sums={['Imported', 'Exported']} importScale empty={noReadings || 'No grid readings for this day.'} /></div>}
       </Card>
 
       <Card>
         <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {shortDate(most.date)}</> : null}>
-          {titled('BOUGHT FROM THE GRID', 'last 30 days')}
+          {titled('IMPORTED', 'last 30 days')}
         </SectionTitle>
         {daily === false
           ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
           : !daily ? <window.Skeleton className="bars-skel" h="auto" r={10} />
           : bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
-          : <DaysBars rows={bars} field="imp" color={CC.grid} rgb="250,204,21" word="Bought" label="Energy bought from the grid per day for the last 30 days"
+          : <DaysBars rows={bars} field="imp" color={CC.grid} rgb="250,204,21" word="Imported" label="Energy imported from the grid per day for the last 30 days"
               today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
       </Card>
     </div>

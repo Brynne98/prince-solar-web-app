@@ -159,7 +159,6 @@
   .menu button .ico { width: 16px; height: 16px; color: var(--muted); }
   .menu hr { border: none; border-top: 1px solid var(--line); margin: 4px 0; }
   .menu .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bad); margin-left: auto; }
-  .menu-email { padding: 8px 10px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .acct-menu { left: 0; right: 0; bottom: calc(100% + 6px); }
   .plant-menu { top: calc(100% + 6px); left: 0; min-width: 300px; width: max-content; max-width: min(460px, calc(100vw - 260px)); }
   .plant-menu button { display: grid; grid-template-columns: 18px minmax(0, 1fr); padding: 10px 12px; white-space: nowrap; }
@@ -219,7 +218,7 @@
   .notice.gridoff { border-color: rgba(167,139,250,0.35); background: rgba(167,139,250,0.08); }
   .page { display: flex; flex-direction: column; }
   .page.old .mini-value, .page.old .stat-value, .page.old .metric-value, .page.old .flow-wrap,
-  .page.old .chart-area, .page.old .solar-dest, .page.old .solar-verdict { opacity: 0.45; }
+  .page.old .chart-area, .page.old .wiw { opacity: 0.45; }
 
   /* phone-only pieces, hidden wider */
   .phonebar, .sheet { display: none; }
@@ -540,12 +539,27 @@
   .hv-daynav svg { display: block; }
   .hv-daynav:hover:not(:disabled) { border-color: var(--line-2); }
   .hv-daynav:disabled { color: var(--dim); cursor: default; opacity: .45; }
-  .hv-dateinput { box-sizing: border-box; height: var(--datebar-h); background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
-    font-family: var(--mono); font-size: 12.5px; padding: 0 10px; color-scheme: dark; cursor: pointer; }
-  .hv-dateinput:hover { border-color: var(--line-2); }
-  /* desktop: the box is just a wrapper round the plain input; the phone's face and inner Today stay hidden */
-  .hv-datebox, .hv-datepick { display: contents; }
-  .hv-cal, .hv-dateface, .hv-today-in { display: none; }
+  /* the date box: "Tue 6 Oct", opening our calendar (SOLAR-72); Today sits inside it only on a phone */
+  .hv-datebox { position: relative; box-sizing: border-box; height: var(--datebar-h); display: inline-flex; align-items: center; gap: 10px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; }
+  .hv-datebox:hover { border-color: var(--line-2); }
+  .hv-datepick { display: inline-flex; align-items: center; gap: 8px; height: 100%; padding: 0 12px; background: none; border: 0; color: var(--text); cursor: pointer; }
+  .hv-datepick:disabled { cursor: default; }
+  .hv-cal { display: block; flex: none; color: var(--muted); }
+  .hv-dateface { font: 600 13px var(--display); letter-spacing: 0.01em; white-space: nowrap; }
+  .hv-today-in { display: none; }
+  .cal-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; width: 276px; padding: 12px; box-sizing: border-box;
+    background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .cal-title { font: 600 14px var(--display); color: var(--text); }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .cal-dow { text-align: center; font: 500 11px var(--display); letter-spacing: 0.08em; color: var(--dim); padding: 4px 0 6px; }
+  .cal-day { height: 34px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--text); font: 500 13px var(--mono); cursor: pointer; padding: 0; }
+  .cal-day:hover:not(:disabled) { background: var(--panel-2); border-color: var(--line-2); }
+  .cal-day:disabled { color: var(--dim); opacity: 0.35; cursor: default; }
+  .cal-day.today { color: var(--pv); }
+  .cal-day.on { background: rgba(61,220,132,0.14); border-color: rgba(61,220,132,0.55); color: var(--text); }
+  .cal-day:focus-visible, .hv-datepick:focus-visible { outline: 2px solid var(--pv); outline-offset: 1px; }
   .hv-approx { font-size: 11px; color: var(--warn); border: 1px solid var(--line); border-radius: 7px; padding: 1px 7px; margin-left: 2px; cursor: help; white-space: nowrap; }
   .hv-gap { font-size: 11px; color: var(--warn); border: 1px solid var(--line); border-radius: 7px;
     padding: 1px 7px; margin-left: 2px; cursor: help; white-space: nowrap; font-family: var(--mono); }
@@ -646,22 +660,14 @@
      kWh tinted in the series colour, its name under it. The bar keeps exact proportions;
      the label row below carries a min-width floor so a thin share never clips its text,
      which is why the two are separate elements rather than one nested column. */
-  /* Where it went: one bar, then each part under it in a row of its own (SOLAR-71) */
-  .solar-split { display: flex; gap: 3px; height: 14px; margin-top: 4px; cursor: help; }
-  .solar-split i { display: block; flex-basis: 0; min-width: 4px; border-radius: 3px; }
-  .solar-split i:first-child { border-top-left-radius: 7px; border-bottom-left-radius: 7px; }
-  .solar-split i:last-child { border-top-right-radius: 7px; border-bottom-right-radius: 7px; }
-  .solar-dest { display: flex; flex-wrap: wrap; gap: 14px 36px; margin-top: 18px; }
-  .solar-dest .sd { min-width: 0; }
-  .solar-dest .sd-k { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--muted); white-space: nowrap; }
-  .solar-dest .sd-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .solar-dest .sd-v { margin-top: 8px; font-size: 24px; font-weight: 600; line-height: 1; letter-spacing: -0.01em; white-space: nowrap; }
-  .solar-dest .sd-v s { text-decoration: none; font-size: 12px; font-weight: 700; opacity: 0.85; margin-left: 4px; }
+  /* Where it went: a box like Live's power-flow boxes, half the row (SOLAR-72) */
+  .solar-row > .wiw { width: 100%; max-width: 560px; }
+  /* overflow visible so the info bubble isn't clipped; the side column keeps the rounded corners itself */
+  .wiw { display: grid; grid-template-columns: minmax(0, 1fr) 160px; overflow: visible; }
+  .wiw .fbox-now { padding: 18px 20px 16px; }
+  .wiw .fbox-head .info-dot, .wiw .fbox-head .infodot { margin-left: -3px; }
+  .wiw .fbox-today { border-left: 1px solid var(--line); background: rgba(255,255,255,0.015); padding: 18px 18px 16px; border-radius: 0 15px 15px 0; }
   .solar-note { margin: 0 0 8px; font-size: 13.5px; color: var(--muted); max-width: 60ch; }
-  .solar-verdict { font-size: 24px; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
-  .solar-verdict .mono { font-weight: 700; }
-  .solar-spare-note { margin: 14px 0 6px; font-size: 13.5px; color: var(--muted); max-width: 62ch; line-height: 1.5; }
   /* Panels (SOLAR-51): a status line, alerts only when a string is low, one line per inverter */
   .panels-status { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 600; }
   .panels-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--dim); }
@@ -901,15 +907,13 @@
   @media (max-width: 600px) {
     /* thumb-sized targets on phones (36px inside the segmented track), desktop unchanged */
     .hv-datebar { --datebar-h: 40px; }
-    .hv-today, .hv-dateinput { min-height: 40px; }
+    .hv-today { min-height: 40px; }
     /* SOLAR-27: arrows at the two ends, the date centred between them as "Fri 2 Oct" */
-    .hv-datebox { box-sizing: border-box; display: flex; flex: 1; min-width: 0; height: var(--datebar-h); align-items: center; justify-content: center; gap: 10px;
-      background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; cursor: pointer; }
-    .hv-datepick { display: inline-flex; position: relative; align-items: center; gap: 8px; padding: 6px 4px; cursor: pointer; }
-    .hv-cal { display: block; flex: none; color: var(--muted); }
-    .hv-dateface { display: inline; font: 600 14px var(--display); letter-spacing: 0.01em; color: var(--text); white-space: nowrap; }
-    /* the real input, invisible, over the words: a tap opens the phone's own picker */
-    .hv-datepick .hv-dateinput { position: absolute; inset: 0; width: 100%; min-height: 0; opacity: 0; padding: 0; border: 0; }
+    .hv-datebox { display: flex; flex: 1; min-width: 0; justify-content: center; }
+    .hv-datepick { padding: 0 4px; }
+    .hv-dateface { font-size: 14px; }
+    /* the calendar spans the bar under the date on a phone */
+    .cal-pop { left: 50%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); }
     .hv-today-out { display: none; }
     .hv-today-in { display: inline-flex; align-items: center; min-height: 0; margin-left: 0; background: none; border: 0; border-left: 1px solid var(--line-2);
       border-radius: 0; padding: 2px 0 2px 10px; color: var(--soc); font: 500 12px var(--display);
@@ -936,6 +940,10 @@
     .solar-stats .stat-tile { padding: 18px; }
     .solar-tab .section-title { flex-direction: column; align-items: flex-start; gap: 5px; }
     .solar-row { gap: 14px; }
+    .wiw { grid-template-columns: minmax(0, 1fr); }
+    .wiw .fbox-now { padding: 15px 15px 13px; }
+    .wiw .fbox-today { border-left: 0; border-top: 1px solid var(--line); padding: 13px 15px 14px; flex-direction: row; flex-wrap: wrap; gap: 10px 24px; border-radius: 0 0 13px 13px; }
+    .wiw .fbox-today-h { flex-basis: 100%; }
     .stat-value .num { font-size: 34px; }
     .stat-value .unit { font-size: 18px; }
     .inv-sn { font-size: 18px; }

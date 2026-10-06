@@ -33,6 +33,7 @@ const ROUTES = {
   '/api/overview':         () => ['api_overview', {}],
   '/api/history':          (q) => ['api_history', { p_date: q.date || null }],
   '/api/history/earliest': () => ['api_history_earliest', {}],
+  '/api/data/days':        () => ['api_data_days', {}],
   '/api/history/inverters': (q) => ['api_inverter_history', { p_date: q.date || null }],
   '/api/strings/health':    () => ['api_string_health', {}],
   '/api/energy':           (q) => ['api_energy', { p_period: q.period || 'week' }],
@@ -234,6 +235,15 @@ async function fetchDay(date) {
 
 // Earliest date with data (≈ commission date). Bounds the day picker; null if
 // unknown (treated as "no lower limit" by the UI).
+// The days that have any data, as a Set of 'YYYY-MM-DD', for the calendar pop-up (0080).
+// One ask per plant and page load: every date bar shares it.
+const dataDaysCache = {};
+function fetchDataDays() {
+  const k = window.CURRENT_PLANT;
+  if (!dataDaysCache[k]) dataDaysCache[k] = getJSON('/api/data/days').then(d => new Set(Array.isArray(d) ? d : [])).catch(() => { delete dataDaysCache[k]; return null; });
+  return dataDaysCache[k];
+}
+
 async function fetchEarliest() {
   try { const api = await getJSON('/api/history/earliest'); return api.earliest || null; }
   catch (e) { return null; }
@@ -327,6 +337,6 @@ function emptyText(days, fallback) {
 }
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchInverterHistory, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchCompare, fetchStringHealth,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchCompare, fetchStringHealth,
   fetchMe, savePrefs, savePlantConfig, deleteAccount, emptyText, BATT_MAX_KW, TYPICAL_DAYS,
 });

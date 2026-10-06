@@ -105,32 +105,73 @@ const Chevron = ({ dir }) => (
   </svg>
 );
 
-// On a phone (SOLAR-27) ‹ and › sit at the card's two ends and the date fills the middle,
-// reading "Fri 2 Oct"; the native input lies invisible over it so a tap still opens the
-// phone's picker, and Today sits inside the box. Desktop shows the plain input as before.
+// Our own calendar (SOLAR-72): a month at a time, Monday first. Days with nothing logged,
+// days before `earliest` and days after today are greyed and can't be picked; the days
+// with data come from api_data_days, shared by every date bar.
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function CalendarPop({ date, todayStr, earliest, onPick, onClose }) {
+  const [days, setDays] = React.useState(null);
+  const [month, setMonth] = React.useState(date.slice(0, 7));
+  const ref = React.useRef(null);
+  React.useEffect(() => { let alive = true; window.fetchDataDays().then(d => { if (alive) setDays(d); }); return () => { alive = false; }; }, []);
+  // a click outside or Escape closes it
+  React.useEffect(() => {
+    const down = e => { if (ref.current && !ref.current.parentNode.contains(e.target)) onClose(); };
+    const key = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('pointerdown', down); document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('pointerdown', down); document.removeEventListener('keydown', key); };
+  }, [onClose]);
+  const [y, m] = month.split('-').map(Number);
+  const shift = n => { const d = new Date(Date.UTC(y, m - 1 + n, 1)); setMonth(d.toISOString().slice(0, 7)); };
+  const lead = (new Date(Date.UTC(y, m - 1, 1)).getUTCDay() + 6) % 7; // blanks before the 1st, Monday first
+  const count = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const key = d => month + '-' + String(d).padStart(2, '0');
+  const ok = k => k <= todayStr && (!earliest || k >= earliest) && (k === todayStr || !days || days.has(k));
+  return (
+    <div className="cal-pop" ref={ref} role="dialog" aria-label="Pick a day">
+      <div className="cal-head">
+        <button type="button" className="hv-daynav" aria-label="Previous month" disabled={!!earliest && month <= earliest.slice(0, 7)} onClick={() => shift(-1)}><Chevron dir={-1} /></button>
+        <span className="cal-title">{MONTHS[m - 1]} {y}</span>
+        <button type="button" className="hv-daynav" aria-label="Next month" disabled={month >= todayStr.slice(0, 7)} onClick={() => shift(1)}><Chevron dir={1} /></button>
+      </div>
+      <div className="cal-grid">
+        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <span key={'h' + i} className="cal-dow" aria-hidden="true">{d}</span>)}
+        {Array.from({ length: lead }, (_, i) => <span key={'b' + i} />)}
+        {Array.from({ length: count }, (_, i) => {
+          const k = key(i + 1);
+          return (
+            <button type="button" key={k} disabled={!ok(k)} aria-label={dayFace(k, todayStr)} aria-current={k === date ? 'date' : undefined}
+              className={'cal-day' + (k === date ? ' on' : '') + (k === todayStr ? ' today' : '')}
+              onClick={() => { onPick(k); onClose(); }}>{i + 1}</button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ‹ and › sit either side of the date box, which reads "Fri 2 Oct" and opens the calendar
+// (on a phone they sit at the card's two ends, SOLAR-27). Today sits inside the box on a phone.
 function DateBar({ pick, earliest, locked, children }) {
   const { date, setDate, todayStr, isToday } = pick;
   // locked: the app is still loading, so the picker shows today and goes nowhere
   const canPrev = pick.canPrev && !locked, canNext = pick.canNext && !locked;
-  const input = React.useRef(null);
-  // a tap anywhere in the box, not just on the words, opens the picker where the browser allows
-  const openPicker = e => { if (!locked && e.target === e.currentTarget) try { input.current.showPicker(); } catch (err) {} };
+  const [open, setOpen] = React.useState(false);
+  const close = React.useCallback(() => setOpen(false), []);
   return (
     <div className="hv-datebar">
       <button className="hv-daynav" disabled={!canPrev} aria-label="Previous day"
         onClick={() => canPrev && setDate(shiftDate(date, -1))}><Chevron dir={-1} /></button>
-      <div className="hv-datebox" onClick={openPicker}>
-        <label className="hv-datepick">
+      <div className="hv-datebox">
+        <button type="button" className="hv-datepick" disabled={locked} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(o => !o)}>
           <svg className="hv-cal" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
             <rect x="1.75" y="2.75" width="12.5" height="11.5" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
             <path d="M1.75 6.5h12.5M5 1.5v2.5M11 1.5v2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
           <span className="hv-dateface">{dayFace(date, todayStr)}</span>
-          <input ref={input} className="hv-dateinput" type="date" value={date} disabled={locked}
-            min={earliest || undefined} max={todayStr} aria-label="Day"
-            onChange={e => e.target.value && setDate(e.target.value)} />
-        </label>
+        </button>
         {!isToday && <button className="hv-today hv-today-in" onClick={() => setDate(todayStr)}>Today</button>}
+        {open && <CalendarPop date={date} todayStr={todayStr} earliest={earliest} onPick={setDate} onClose={close} />}
       </div>
       <button className="hv-daynav" disabled={!canNext} aria-label="Next day"
         onClick={() => canNext && setDate(shiftDate(date, 1))}><Chevron dir={1} /></button>

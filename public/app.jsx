@@ -147,7 +147,6 @@ function AccountMenu({ user, plantCount, alert, onAccount, active, variant }) {
       </button>
       {open && (
         <MenuList className="acct-menu" label="Account">
-          <div className="menu-email">{user.email}</div>
           <button type="button" onClick={() => { setOpen(false); onAccount(); }}>
             <Icon id="account" />Account{alert && <span className="dot" aria-label="A login needs reconnecting" />}
           </button>
