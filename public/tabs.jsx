@@ -260,9 +260,8 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
   const showExport = hasGrid && rateExp > 0;
   const pending = isAgg && !energy[period];
   const periodWord = { today: 'today', week: 'this week', month: 'this month', year: 'this year', lifetime: 'all-time' }[period];
-  // trend vs the same elapsed slice of the previous period. Suppress "today" until
-  // midday — a partial morning vs a full yesterday reads as a misleading drop.
-  const showCmp = period !== 'today' || window.plantHour(tz) >= 12;
+  // trend vs the same elapsed slice of the previous period; Today's is yesterday up to
+  // the same time (0077), so it is fair from the first minute and shows all day.
   // "current" = the live value shown in the tile (pPv/pLoad/…) so the arrow stays
   // consistent with the number AND moves on every refresh; "previous" comes from
   // the compare endpoint (same elapsed slice of the prior period).
@@ -273,14 +272,16 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
   // full slice against a few matched days. Today is a single pair, so the live
   // value is used there and the arrow keeps moving on every refresh.
   const MIN_DAYS = { today: 1, week: 2, month: 3, year: 3 };
-  const cmpRow = (showCmp && cmp && cmp[period]) ? cmp[period] : null;
+  const cmpRow = (cmp && cmp[period]) ? cmp[period] : null;
   const cmpDays = cmpRow ? (cmpRow.days || 0) : 0;
   const prev = (cmpRow && cmpDays >= (MIN_DAYS[period] || 1)) ? cmpRow.prev : null;
   const useLive = period === 'today';
   const cPv = useLive ? pPv : (cmpRow ? cmpRow.cur.pv : null);
   const cLoad = useLive ? pLoad : (cmpRow ? cmpRow.cur.load : null);
   const cImp = useLive ? pImp : (cmpRow ? cmpRow.cur.imp : null);
-  const cSuff = useLive ? pSuff : ((cmpRow && cmpRow.cur.load > 0) ? Math.max(0, Math.min(100, ((cmpRow.cur.load - cmpRow.cur.imp) / cmpRow.cur.load) * 100)) : null);
+  const suff = (load, imp) => Math.max(0, Math.min(100, ((load - imp) / load) * 100));
+  // unrounded on both sides; the tile's pSuff is rounded for display
+  const cSuff = useLive ? ((pLoad != null && pLoad > 0) ? suff(pLoad, pImp) : null) : ((cmpRow && cmpRow.cur.load > 0) ? suff(cmpRow.cur.load, cmpRow.cur.imp) : null);
   // A zero baseline is not the same as "nothing to compare". Zero then zero is a real
   // result — no change — and dropping the badge made a steady 0.0 kWh import look like
   // missing data. Zero then something has no meaningful percentage, so hand the badge
@@ -306,10 +307,10 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
   const dGen = prev ? (cPv - prev.pv) : null;
   const dCon = prev ? (cLoad - prev.load) : null;
   const dImp = prev ? (cImp - prev.imp) : null;
-  const prevSuff = (prev && prev.load > 0) ? Math.max(0, Math.min(100, ((prev.load - prev.imp) / prev.load) * 100)) : null;
+  const prevSuff = (prev && prev.load > 0) ? suff(prev.load, prev.imp) : null;
   const tSuff = (cSuff != null && prevSuff != null) ? (cSuff - prevSuff) : null;
   // "vs last year, 40 of 120 days compared" — say when the arrow rests on a subset
-  const cmpBase = { today: 'vs yesterday', week: 'vs last week', month: 'vs last month', year: 'vs last year' }[period];
+  const cmpBase = { today: 'vs yesterday at this time', week: 'vs last week', month: 'vs last month', year: 'vs last year' }[period];
   const partial = !!(cmpBase && cmpRow && !useLive && prev && cmpDays < (cmpRow.span || 0));
   const cmpWord = partial ? cmpBase + ', ' + cmpDays + ' of ' + cmpRow.span + ' days compared' : cmpBase;
   // Est. saved trend: avoided import at today's rate, both sides from the paired
@@ -362,7 +363,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
             info="Total solar energy your panels produced over the selected period." />
           <MiniStat loading={pending} label="Home" value={window.fmtEnergySmart(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
             info="Total energy your home used over the selected period, summed across all inverters." />
-          <MiniStat loading={pending} label="Independence" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
+          <MiniStat loading={pending} label="Independence" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendUnit=" pts" trendTitle={cmpWord}
             info="Share of your home’s energy that came from your own solar + battery rather than the grid. 100% = fully off-grid for the period." />
           {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergySmart(pExp)} color={CC.grid}
             info={'Energy sent to the grid over the selected period' + (rateExp > 0 ? ', paid at your feed-in rate.' : '.')} />}
@@ -412,7 +413,8 @@ function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt }) {
     const d = Math.abs(delta);
     label = deltaFmt ? deltaFmt(d) : (d < 10 ? d.toFixed(1) : String(Math.round(d))) + ' kWh';
   } else {
-    label = (mag < 1 ? mag.toFixed(1) : String(Math.round(mag))) + unit; // decimal under 1% so a tiny change isn't shown as "0%"
+    const n = mag < 1 ? mag.toFixed(1) : String(Math.round(mag)); // decimal under 1% so a tiny change isn't shown as "0%"
+    label = n + (unit === ' pts' && n === '1' ? ' pt' : unit);
   }
   return <span className={'trend-badge ' + (good ? 'good' : 'bad')} title={title || 'vs previous period'}>{up ? '▲' : '▼'} {label}</span>;
 }
