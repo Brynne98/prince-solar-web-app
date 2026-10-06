@@ -917,11 +917,11 @@ function SolarSkeleton() {
           .map(l => <StatTile key={l} label={l} loading sub={l === 'SOLAR NOW' ? <span className="sub-hold-2">{NBSP}</span> : NBSP} />)}
       </div>
       <Card>
-        <SectionTitle>{titled('GENERATION', 'today')}</SectionTitle>
+        <SectionTitle>{titled('SOLAR', 'today')}</SectionTitle>
         <DayChartSkeleton />
       </Card>
       <Card>
-        <SectionTitle>{titled('GENERATION', 'last 30 days')}</SectionTitle>
+        <SectionTitle>{titled('SOLAR', 'last 30 days')}</SectionTitle>
         <window.Skeleton className="bars-skel" h="auto" r={10} />
       </Card>
       <div className="solar-row">
@@ -965,7 +965,10 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const daytime = points.slice(72, 216);
   const gapDay = !view.isToday && daytime.length > 0 && !points.some(p => p.pv != null && p.pv > 20)
     && daytime.filter(p => p.pv == null).length > daytime.length / 2;
-  const noReadings = dayProblem(view, day, points, window.plantStatus(snap, Date.now()).status === 'offline') || (day && gapDay ? 'Readings are missing for most of this day.' : null);
+  // A silent plant's last figures aren't now: a dash and when they were read.
+  const ps = window.plantStatus(snap, Date.now());
+  const silent = ps.status === 'offline';
+  const noReadings = dayProblem(view, day, points, silent) || (day && gapDay ? 'Readings are missing for most of this day.' : null);
   const peakOf = (pts) => {
     let pk = null;
     (pts || []).forEach(p => { if (p.pv != null && (!pk || p.pv > pk.pv)) pk = p; });
@@ -1018,8 +1021,8 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
-        <StatTile label="SOLAR NOW" value={nowN} unit={nowU} accent={CC.pv}
-          sub={kwp > 0 ? <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>
+        <StatTile label="SOLAR NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.pv}
+          sub={silent ? 'Last reading ' + readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>
             : <button type="button" className="mini-link" onClick={() => onOpenSettings('plant')}>Set panel capacity</button>} />
         {tile('TODAY', a.pvToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.pv)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
@@ -1029,17 +1032,17 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
       </div>
 
       <Card id="solar-day">
-        <SectionTitle right={day && !noReadings && (view.isToday ? null : <>Made <b>{fmtKwh(madeKwh)}</b>{peak && <>, peak <b>{fmtPower(peak.pv)}</b> at <b>{HM(peak.t)}</b></>}</>)}>
-          {titled('GENERATION', dayWord)}
+        <SectionTitle right={day && !noReadings && !view.isToday && peak ? <>Peak <b>{fmtPower(peak.pv)}</b> at <b>{HM(peak.t)}</b></> : null}>
+          {titled('SOLAR', dayWord)}
         </SectionTitle>
         <DateBar pick={pick} earliest={earliest} />
         {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
-          : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="pv" color={CC.pv} label="Solar" crop sums={['Generated']} empty={noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')} /></div>}
+          : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="pv" color={CC.pv} label="Solar" crop sums={['Made']} empty={noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')} /></div>}
       </Card>
 
       <Card>
         <SectionTitle right={best ? <>Best <b>{fmtKwh(best.pv)}</b> on {shortDate(best.date)}</> : null}>
-          {titled('GENERATION', 'last 30 days')}
+          {titled('SOLAR', 'last 30 days')}
         </SectionTitle>
         {daily === false
           ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
@@ -1055,7 +1058,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         <Card className="wiw" {...dim}>
           <SectionTitle right={day && !noReadings && splitTotal >= 0.05 ? <>Made <b>{fmtKwh(splitTotal)}</b></> : null}>
             {titled('WHERE IT WENT', dayWord)}
-            <window.InfoDot text={'Worked out from 5-minute readings: solar counts to the house first, then the battery, then the grid. Scaled to the day’s total, so it matches the Today tile.'} />
+            <window.InfoDot text={'Solar counts to the house first, then the battery, then the grid.'} />
           </SectionTitle>
           {!day ? <window.Skeleton h={62} r={8} />
             : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')}</div>
