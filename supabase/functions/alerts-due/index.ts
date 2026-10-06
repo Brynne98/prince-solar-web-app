@@ -1,7 +1,7 @@
-// Returns api_alerts_due() for the todo app's solar-alerts sender.
+// Returns api_alerts_due() over HTTP for an alert sender. No sender calls it yet.
 //
 // PostgREST on this project rejects the secret key from outside, and the
-// legacy JWT is disabled, so the todo app cannot call the RPC directly.
+// legacy JWT is disabled, so a sender cannot call the RPC directly.
 // This function uses the platform-injected service role, which already
 // works for poll / recover. Auth is a shared bearer token, not a JWT —
 // verify_jwt is off for this function only.

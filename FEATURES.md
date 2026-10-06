@@ -21,8 +21,8 @@ wall-display mode are all done). These are the real remaining gaps, to be worked
 
 | # | Feature | Why it matters | Effort | Status |
 |:-:|---------|----------------|:------:|:------:|
-| 1 | ~~**Solar forecast for tomorrow**~~ **DONE** — `forecast` Edge Function + `api_forecast()`, outlook card under Trends → Energy, and a forward line on the day chart | Everything else is backwards-looking. This is the only feature that changes what you *do* tonight (hold charge or not). | 🟡 | ✅ |
-| 2 | ~~**Alerts that reach your phone**~~ **DONE** — detection here (`api_alerts_due`, `alerts-due` function, migrations 0016/0017); delivery in `prince-todo-app` (`solar-alerts`, its migrations 0069/0070). Design notes in `DATA_PIPELINE.md` §13 | Covers logger stopped, bank drift, hot battery, overnight SoC, dead string. Grid alerts ship deliberately ungated as a live test — see the open question below. | 🟡 | ✅ |
+| 1 | ~~**Solar outlook for tomorrow**~~ **REMOVED** in 0074 (SOLAR-64) | Everything else is backwards-looking. This is the only feature that changes what you *do* tonight (hold charge or not). | 🟡 | ✅ |
+| 2 | **Alerts that reach your phone** — **detection only**: `api_alerts_due`, `alerts-due` function, migrations 0016/0017. Nothing sends them yet. Design notes in `DATA_PIPELINE.md` §13 | Covers logger stopped, bank drift, hot battery, overnight SoC, dead string. Grid alerts ship deliberately ungated as a live test — see the open question below. | 🟡 | ✅ |
 | 3 | **Outage log** — ⚠ **blocked on verification, see below** | "Off-grid 5 h 20 m this month across 7 outages, battery carried all of it." Turns the logging into a story. | 🟡 | ⬜ |
 | 4 | **CSV / JSON export** of the logged history | The whole premise is owning the history SunSynk throws away — and there's currently no way to get it out. | 🟢 | ⬜ |
 | 5 | **Records & streaks** — best solar day, longest fully-solar run, lowest-import week | Free from data already banked. Pure enjoyment. | 🟢 | ⬜ |
@@ -340,7 +340,7 @@ that one. If it ever matters it wants continuous 10 s grid polling, not this tab
 
 - Daily "energy report" summary (push or email each morning).
 - Voice: "Hey Siri, how's my battery?" via Shortcuts + the API.
-- Weather-forecast-aware battery strategy ("cloudy tomorrow — hold charge").
+- Weather-aware battery strategy ("cloudy tomorrow — hold charge").
 - Anomaly detection on consumption (fridge left open, geyser stuck on).
 - E-paper / Raspberry Pi wall display in "control-room" theme.
 - Public read-only share link for a single live tile.
@@ -361,5 +361,4 @@ that one. If it ever matters it wants continuous 10 s grid polling, not this tab
 
 - **Generator input** and **external / smart meters**: the API fields exist but nothing maps them; a plant with either shows only what the inverter itself measures.
 - **More than one SunSynk cloud region**: only openapi.sunsynk.net.
-- **Forecast** is fitted to one site, the calibration plant; other plants see no outlook.
 - **No best-day line on the day chart.** Removed 14 Sep 2026 (0052); the smooth replacement is planned in `BEST_DAY_CURVE.md`.

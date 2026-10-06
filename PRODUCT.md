@@ -27,19 +27,17 @@ import/export, home load, an animated energy-flow diagram, day charts, and long-
 trends across every inverter on the account.
 
 Its reason to exist is its own history. It logs every minute (full detail for 60 days,
-then 5-minute steps kept for good), so trends, battery-health checks, integrity checks and
-the self-calibrating solar forecast rest on real data rather than the cloud's fading
-summary.
+then 5-minute steps kept for good), so trends, battery-health checks and integrity checks rest on
+real data rather than the cloud's fading summary.
 
 Success: a homeowner connects their SunSynk login once and then understands, at a glance,
-what their system is doing now and whether it is healthy over time. Tonight's decision
-(hold charge or not) is the one forward-looking job.
+what their system is doing now and whether it is healthy over time.
 
 ## Positioning
 
 Permanent history. SunSynk's cloud drops detail after a week or two; this keeps every
 minute for 60 days and 5-minute steps after that, for good, so the trends, battery health and integrity views are real, not
-reconstructed. Everything else (combined multi-inverter view, forecast, alerts) builds on
+reconstructed. Everything else (combined multi-inverter view, alerts) builds on
 that log.
 
 ## Operating Context
@@ -68,14 +66,11 @@ Confirmed functionality:
 
 - Live power flow, per-inverter cards, battery charge by day, runtime estimate, reserve, grid
   presence per phase, grid voltages per inverter.
-- Day chart with an expected-solar line and a forward forecast line; Trends over
+- Day chart of solar; Trends over
   today / week / month / year / lifetime; savings against a user-entered tariff and
   feed-in rate; self-sufficiency.
-- Solar forecast (Open-Meteo irradiance, refitted weekly to this array's own log) for the
-  calibration plant only; other plants get an honest "not available here" message.
 - Alerts (logger stopped, bank drift, hot battery, overnight charge, dead string) are
-  detected here but delivered through a separate app, so today only the owner receives
-  them.
+  detected here, but nothing sends them yet.
 - Auto-detected per-plant config: has battery, has grid, battery sign convention, bank
   model (per-inverter or shared), with user override in Settings.
 - Account: sign out, delete account, disconnect any linked SunSynk account, timezone,

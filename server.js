@@ -1121,7 +1121,7 @@ function potentialProfile(dateStr) { // per-5-min potential (W) for a YYYY-MM-DD
   return points;
 }
 
-// NOTE (2026-06): the overnight "battery at midnight" forecast card was removed.
+// NOTE (2026-06): the overnight "battery at midnight" estimate card was removed.
 // The per-segment usage card (segmentPower / /api/trends/segments) now covers the
 // overnight breakdown, and the midnight target was obsoleted by the grid-backstop
 // floor. Removed with it: overnightModel(), GET /api/overnight, db.eveningRows(),

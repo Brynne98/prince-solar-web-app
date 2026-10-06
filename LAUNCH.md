@@ -21,7 +21,7 @@ indie launch checklist.
 | 3 | Analytics | fail | No product analytics or crash reporter. Add PostHog with three events: `signup_completed`, `plant_linked`, `dashboard_viewed`. Add Sentry or equivalent. |
 | 4 | Payments | pass (for now) | Free service. `profiles.plan` exists for later. Stripe when needed. |
 | 5 | Legal / trust | fail | `public/legal.jsx` is placeholder copy, flagged on screen. Review and replace. Add a support link and contact email inside the app (Settings → About). |
-| 6 | Onboarding | partial | Path is short (sign up → connect → dashboard). Gaps: an account with no visible plants gets a one-line warning and no "ask your installer to share the plant" guidance; the forecast card reads "unavailable" for every plant except the calibration plant. |
+| 6 | Onboarding | partial | Path is short (sign up → connect → dashboard). Gaps: an account with no visible plants gets a one-line warning and no "ask your installer to share the plant" guidance. |
 | 7 | Distribution | fail | `public/manifest.webmanifest` `start_url` is `/`, which on GitHub Pages is a 404 — installed PWAs open a dead page. `orientation: landscape` blocks portrait on phones. No custom domain; `link-sunsynk` CORS allow-list is hardcoded to `brynne98.github.io`. |
 | 8 | First week | fail | No dashboards, no bug-report path. Depends on 3 and 5. Schedule a metrics review a week after the first outside user. |
 
@@ -31,16 +31,15 @@ indie launch checklist.
   and a few per hour. Sign-up confirmation and password reset for anyone else
   need a custom SMTP provider set in the Supabase dashboard (Auth → SMTP). Also
   confirm Site URL and redirect URLs there include the production origin.
-- **SunSynk app key terms.** The app key/secret was issued to the owner. Whether
+- **SunSynk app key terms.** Each customer links their own SunSynk login, but every
+  request is also signed with the app key/secret issued to the owner. Whether
   SunSynk permits polling other people's accounts with it, and the rate limit
   across accounts, is not written down. Email SunSynk support before inviting
   anyone. See memory: one poll per minute per inverter is known fine.
 - **Cost per customer.** ~450 MB per inverter per year of storage; one poll per
   minute per inverter. No plan cap or per-user limit exists.
-- **Single-site features.** `forecast` is fitted to the calibration plant only
-  (pinned in `app_config.CALIBRATION_PLANT` since 0041). The day chart's best-day
-  line was removed in 0052; see `BEST_DAY_CURVE.md`. Alert delivery
-  lives in `prince-todo-app`, so other users get no alerts.
+- **Single-site features.** The day chart's best-day line was removed in 0052; see
+  `BEST_DAY_CURVE.md`. Alerts are detected for every plant, but nothing sends them.
 - **Question for SunSynk support (O8), not yet sent:** "We hold one app key. Each
   customer links their own SunSynk login and we poll each of their inverters once a
   minute through the official API with that customer's own token. Is that within the
@@ -54,4 +53,4 @@ indie launch checklist.
 3. Support email in-app; real terms and privacy copy.
 4. PostHog + crash reporting with the three events above.
 5. One real second user (own SunSynk login) end to end.
-6. Then: Google sign-in, custom domain, per-plant forecast, alerts for all users.
+6. Then: Google sign-in, custom domain, alert delivery.

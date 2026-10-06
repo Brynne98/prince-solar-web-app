@@ -113,8 +113,7 @@ outside the day.
 - **Day score.** "Today made 84% of a best day" on Overview and each trend day.
 - **Panel health alert.** Several clear days in a row well under the curve at usable
   minutes → dirty panels, a failed string, or new shade.
-- **Forecast link.** Scale the curve by forecast cloud for a per-plant outlook, replacing
-  the single-site clear-sky forecast.
+- **Cloud outlook.** Scale the curve by tomorrow's cloud cover for a per-plant outlook.
 - **Held-back solar, as a range.** Where the battery was full, the gap up to the curve
   suggests solar that was turned away. The curve is a stitched reference and the
   usable-reading rules are a proxy, so this can only ever be a labelled estimate,

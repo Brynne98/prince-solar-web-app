@@ -61,7 +61,7 @@ would drag a Pages rebuild along for nothing.
 > ```bash
 > supabase secrets set SUNSYNK_APP_KEY=… SUNSYNK_APP_SECRET=… BOOTSTRAP_USER_EMAIL=brynneprince98@gmail.com
 > supabase db push
-> supabase functions deploy poll link-sunsynk recover sync-plant-energy forecast alerts-due
+> supabase functions deploy poll link-sunsynk recover sync-plant-energy alerts-due
 > ```
 
 > **Releasing the sharded poller (migration 0030):** push the migration **before**
@@ -80,7 +80,7 @@ would drag a Pages rebuild along for nothing.
 ```bash
 supabase db push                                  # pending migrations
 supabase functions deploy poll                    # only what changed
-supabase functions deploy forecast alerts-due recover sync-plant-energy
+supabase functions deploy alerts-due recover sync-plant-energy
 ```
 
 **"Only what changed" includes `_shared/`.** Every function bundles the files it
@@ -94,13 +94,13 @@ git log --name-only --since="<last deploy time>" -- supabase/functions/_shared
 ```
 
 Then redeploy everything that imports a file in that list. When in doubt, deploy
-all six; the CLI skips any whose bundle is unchanged ("No change found in
+all five; the CLI skips any whose bundle is unchanged ("No change found in
 Function"), so over-deploying costs nothing. It also means `UPDATED_AT` in
 `supabase functions list` is not proof a function is stale — a deploy from an
 uncommitted working tree can land before the commit.
 
 ```bash
-supabase functions deploy poll recover forecast alerts-due link-sunsynk sync-plant-energy
+supabase functions deploy poll recover alerts-due link-sunsynk sync-plant-energy
 ```
 
 After deploying `poll`, confirm the logger survived:
@@ -184,7 +184,7 @@ does not change with the site's domain.
 | `public/` | the whole frontend, published as-is |
 | `public/config.js` | version + per-environment Supabase URL/key |
 | `supabase/migrations/` | schema and RPCs |
-| `supabase/functions/` | `poll`, `recover`, `sync-plant-energy`, `forecast`, `alerts-due`, `link-sunsynk` |
+| `supabase/functions/` | `poll`, `recover`, `sync-plant-energy`, `alerts-due`, `link-sunsynk` |
 | `supabase/functions/_shared/` | code bundled into every function that imports it; a change here needs those functions redeployed |
 | `.github/workflows/pages.yml` | the Pages deploy |
 | `.github/workflows/health.yml` | half-hourly logger check, emails on failure |

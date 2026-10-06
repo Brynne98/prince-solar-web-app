@@ -49,7 +49,7 @@ curl -s -X POST http://127.0.0.1:55321/functions/v1/poll -d '{}'
 ## Stage 2 — multiple plants (P)
 
 - [x] **P1 Plant days refetched on switch** — Accept: switch plants, the empty-state copy matches the plant switched to.
-- [x] **P2 Forecast copy on non-calibration plants** — Accept: on 3001 the card says the forecast is fitted to one site and not available here.
+- [x] **P2 Forecast copy on non-calibration plants** — Accept: on 3001 the card says the forecast is fitted to one site and not available here. Forecast since removed (0074, SOLAR-64).
 - [x] **P3 Recover and sync budgets round-robin** — cursor in `app_config`. Accept: with the budget forced to one plant per run, three runs visit three different plants.
 - [x] **P4 Paginate SunSynk lists** — Reproduced: export@mock shows one plant of two. Accept: both 3001 and 6002 linked and polled.
 - [x] **P5 All SunSynk accounts in Settings** — Accept: dev user sees four accounts, each with its own disconnect.

@@ -334,18 +334,10 @@ grid 2 W, SoC 0.
 
 ## 13. Alerts
 
-Folded in from the alerts handoff of 18 Aug 2026. Detection lives here; delivery lives
-in `prince-todo-app`, which already had Expo push, dead-token handling and a digest.
+Folded in from the alerts handoff of 18 Aug 2026. Detection lives here, in
+`api_alerts_due()`. Nothing sends alerts yet: a sender has to be built.
 
-```
-prince-solar-web-app                   prince-todo-app
-────────────────────                   ───────────────
-api_alerts_due()   ──── called by ───> solar-alerts (Edge Function)
-  detection, thresholds,                 wording + Expo push
-  debounce, event_key                    + stamps solar_alerts_sent
-```
-
-- **Detection in SQL, delivery in the function.** No thresholds in TypeScript.
+- **Detection in SQL.** No thresholds in TypeScript.
 
 ### 13.1 Overheat — not built yet, notes for when it is
 
@@ -371,18 +363,16 @@ ride the minute poll the way the grid and battery alerts do.
 - **Shape:** the same `api_alerts_due()` contract — detection in SQL, event_key per
   (sn, day), debounce on two consecutive hot buckets so one spike does not page.
 
-- **Dedup is `event_key` + a unique index** on the sent table there (pattern from its
-  migration 0048). An `event_key` encodes which occurrence fired
+- **Dedup is `event_key`.** A sender keeps a unique index on it. An `event_key` encodes which occurrence fired
   (`soc_low:2026-08-18T19:40`); a repeat is a duplicate-key no-op.
 - `api_alerts_due()` returns `(kind, event_key, severity, title, body, value)`; execute
-  granted to `service_role` only. The todo app calls it with this project's
-  `sb_secret_…` key (legacy JWT keys are disabled since 2026-08-05).
+  granted to `service_role` only. The `alerts-due` function serves it over HTTP behind a
+  shared bearer token (legacy JWT keys are disabled since 2026-08-05).
 - Kinds: `logger_stale`, `bank_drift`, `batt_hot`, `soc_overnight`, `string_dead`,
   `grid_down` / `grid_back`. Migrations `0016`–`0019`, `0021`, `0029`. Debounce and
   hysteresis (fire below 20% SoC, re-arm above 30%) are in SQL.
 - Grid alerts depend on the unresolved grid-presence question in `FEATURES.md`.
-- Only the owner receives alerts today. Other users get none until the delivery side
-  is built for them (`LAUNCH.md`).
+- No one receives alerts today, until a sender is built (`LAUNCH.md`).
 
 ---
 

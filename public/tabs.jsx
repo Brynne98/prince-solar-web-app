@@ -111,7 +111,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
     const d = new Date(snap.updated.getTime() + hrs * 3600000);
     return window.fmtPlantTime(d, tz) + ', ' + d.toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz || undefined });
   };
-  // A silent plant's last figures aren't now: no forecast from them, and Today's tiles show a dash.
+  // A silent plant's last figures aren't now: no projection from them, and Today's tiles show a dash.
   const ps = window.plantStatus(snap, Date.now());
   const silent = ps.status === 'offline';
   let battEta = null, battInfo = null;

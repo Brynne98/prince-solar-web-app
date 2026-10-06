@@ -511,7 +511,7 @@ export async function markCursor(key: string, plantId: number): Promise<void> {
 }
 
 /**
- * The plant the single-site features (forecast calibration, phone alerts) are bound
+ * The plant the single-site features (alerts) are bound
  * to: pinned in app_config.CALIBRATION_PLANT by the first link (migration 0041).
  * Same rule as public.calibration_plant().
  */

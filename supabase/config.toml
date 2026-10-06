@@ -7,8 +7,8 @@ project_id = "sunsynk-dashboard"
 [api]
 enabled = true
 # Port to use for the API URL.
-# NOTE: shifted to the 553xx range — the prince-todo-app local stack owns 543xx,
-# and both need to run at the same time.
+# NOTE: shifted to the 553xx range so it can run beside another local Supabase
+# stack on 543xx.
 port = 55321
 # Schemas to expose in your API. Tables, views and stored procedures in this schema will get API
 # endpoints. `public` and `graphql_public` schemas are included by default.
@@ -397,7 +397,7 @@ inspector_port = 8083
 deno_version = 2
 
 [functions.alerts-due]
-# Shared bearer token from the todo app, not a JWT.
+# Shared bearer token, not a JWT.
 verify_jwt = false
 
 # [edge_runtime.secrets]
