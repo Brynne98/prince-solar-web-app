@@ -599,73 +599,6 @@ function panelsVerdict(h, snap, now) {
   return { state, alerts, lines, silent, night };
 }
 
-// Today's solar first, as Battery leads with its charge; then the check. Without string
-// readings (still loading, failed, or none) the figure stands alone rather than a guess.
-// `staleAt`: the plant has gone quiet, so the figure is as of that reading, or none at all
-// when that reading was on another day.
-function PanelsCard({ snap, health, staleAt }) {
-  const now = window.useNow(60000);
-  const a = snap.aggregate;
-  const tz = (snap.config || {}).timezone;
-  const oldDay = staleAt != null && plantDateStr(tz, new Date(staleAt)) !== plantDateStr(tz, new Date(now));
-  const [kwhN, kwhU] = oldDay ? ['—', ''] : window.fmtEnergyParts(a.pvToday);
-  const v = health && staleAt == null ? panelsVerdict(health, snap, now) : null;
-  const big = (
-    <>
-      <SectionTitle>PANELS</SectionTitle>
-      <div className="eq-big mono" style={{ color: CC.pv }}>{kwhN}<span className="u">{kwhU}</span></div>
-      <div className="eq-line dim">{oldDay ? 'No readings today' : staleAt != null ? 'today, by ' + window.fmtTime(new Date(staleAt)) : v && v.night ? 'made today' : 'so far today'}</div>
-    </>
-  );
-  if (!v || v.state === 'none') return <Card className={staleAt != null ? 'eq-stale' : null}>{big}</Card>;
-  const lows = v.alerts.filter(x => x.kind === 'low').length, nothings = v.alerts.length - lows;
-  const head = {
-    normal: ['ok', 'All panels working normally'],
-    resting: ['rest', 'Resting · all strings were normal today'],
-    silent: ['warn', v.silent.length === 1 ? 'No readings from one inverter' : 'No readings from ' + v.silent.length + ' inverters'],
-    single: null,
-    learning: ['rest', 'Learning your panels'],
-    early: ['rest', 'Too early to tell'],
-    dull: ['rest', 'Not enough sun today to check'],
-    unchecked: ['rest', 'Not checked today'],
-    alert: ['warn', nothings && !lows ? (nothings === 1 ? 'One string made nothing today' : nothings + ' strings made nothing today')
-      : v.alerts.length === 1 ? 'One string is making less than usual' : v.alerts.length + ' strings are making less than usual'],
-  }[v.state];
-  const pct = (x) => Math.round(x * 100);
-  const toGo = PANELS_MIN_DAYS - (health.historyDays || 0);
-  const note = {
-    single: 'With a single string there is nothing to compare it with, so no check is shown.',
-    learning: 'Checks start in ' + toGo + (toGo === 1 ? ' day.' : ' days.'),
-    early: 'Checked once the panels have made ' + PANELS_MIN_KWH + ' kWh today.',
-    unchecked: 'The battery filled and the inverter turned its panels down, so its output can’t be compared fairly.',
-  }[v.state];
-  return (
-    <Card>
-      {big}
-      {head && <div className="panels-status eq-status"><i className={'panels-dot ' + head[0]} />{head[1]}</div>}
-      {v.state === 'alert' && v.alerts.map(x => (
-        <div className="panels-alert" key={x.inv.sn + x.no}>
-          <b>{invName(x.inv)}, string {x.no}</b>{x.kind === 'nothing'
-            ? ' made nothing today, while the others made power.'
-            : <> made {pct(1 - x.today / x.usual)}% less than usual today.</>}
-          <div className="panels-why">{x.kind === 'nothing'
-            ? 'Usually ' + pct(x.usual) + '% of ' + (x.multi ? 'this inverter’s' : 'your') + ' solar. Check its breaker or isolator, or call your installer.'
-            : 'Usually ' + pct(x.usual) + '% of ' + (x.multi ? 'this inverter’s' : 'your') + ' solar by now; today ' + pct(x.today) + '%. Worth checking for shade, dirt or a tripped breaker.'}</div>
-        </div>
-      ))}
-      <div className={'panels-rows' + (head ? '' : ' flush')}>
-        {v.lines.map(l => (
-          <div className="panels-row" key={l.sn}>
-            <span>{l.name}<span className="panels-sub">{l.sub}</span></span>
-            <span className="panels-kwh mono" style={l.kwh == null ? { color: 'var(--dim)' } : null}>{l.kwh == null ? '—' : fmtKwh(l.kwh)}</span>
-          </div>
-        ))}
-      </div>
-      {note && <div className="panels-note">{note}</div>}
-    </Card>
-  );
-}
-
 // One day of one reading as a line across the whole day: solar (which needs a reading over
 // 20 W to count as made), grid power signed (+ bought, − exported), or the battery's charge
 // on a fixed 0-100% scale with the reserve dashed.
@@ -1278,40 +1211,261 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 }
 
 // ---------------------------------------------------------------- EQUIPMENT
-// Battery packs and each inverter. The page id stays `inverters` so saved links and
-// preferences keep working; it reads "Equipment" (SOLAR-52).
-// The battery packs, one panel per inverter, as the inverters report them. Moved here from
-// the Battery page when that page went (SOLAR-52).
-function PacksCard({ snap }) {
-  const feat = snap.features || {};
-  const shared = feat.banks === 'shared';
-  const withBatt = snap.inverters.filter(i => i.numberOfBatteries > 0 || i.battSoc > 0);
-  // One shared pack: every inverter reads the same BMS, so count it once.
-  const banks = shared ? Math.min(1, withBatt.length) : withBatt.length;
-  const modules = shared ? Math.max(0, ...withBatt.map(i => i.numberOfBatteries || 0)) : withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
+// The page id stays `inverters` so saved links and preferences keep working; it reads
+// "Equipment" (SOLAR-52). Built for a home user (SOLAR-73, SOLAR-75): one headline says
+// whether anything needs a look and a coral-edged card per problem says what to do. Under
+// it, Simple (a tile each for panels, battery and inverters: one figure, one word) or
+// Detailed (each panel string against its usual, the battery against its reserve, a tile
+// per inverter, spec sheets and the two day charts). The choice is the viewer's, kept.
+
+function InvertersSkeleton() {
   return (
-    <Card>
-      <SectionTitle right={<span className="dim">{banks} {banks === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'} · {shared ? 'one pack shared by ' + snap.inverters.length + ' inverters' : 'one pack per inverter'}</span>}>BATTERIES</SectionTitle>
-      <div className="duo">
-        {snap.inverters.map(inv => {
-          const t = cleanTemp(inv.battTemp);
-          return (
-            <div className="mini-panel" key={inv.sn}>
-              <div className="mp-head"><span className="mono">{inv.alias}</span><span className="dim mono">{inv.numberOfBatteries} × pack · {inv.battCap} Ah</span></div>
-              <div className="mp-grid">
-                <Metric label="Power" value={fmtPower(battShown(inv.battOut))} accent={CC.batt} />
-                <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />
-                <Metric label="Voltage" value={inv.battVolt.toFixed(1)} unit=" V" />
-                <Metric label="Temp" value={t != null ? inv.battTemp.toFixed(1) : 'bad sensor'} unit={t != null ? ' °C' : ''} accent={t == null ? CC.load : null} />
+    <div className="stack">
+      <SectionTitle>EQUIPMENT</SectionTitle>
+      <window.Skeleton h={56} r={12} />
+      <div className="eq-tiles">
+        <window.Skeleton h={120} r={16} />
+        <window.Skeleton h={120} r={16} />
+        <window.Skeleton h={120} r={16} />
+      </div>
+    </div>
+  );
+}
+
+// How long ago a reading was, the way the cards say it.
+const readAgo = (t, now) => now - t > 36 * 3600e3
+  ? new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' + window.fmtTime(new Date(t))
+  : window.fmtTime(new Date(t));
+const kwh1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
+const EQ_FOLD = 6; // strings shown per inverter before "Show all"
+
+// Everything both views read: who is quiet, the problems, the battery's checks and today's
+// solar as it may be shown. Pure, so every state can be checked without a screen.
+function equipmentState(snap, health, now) {
+  const feat = snap.features || {};
+  const a = snap.aggregate;
+  const tz = (snap.config || {}).timezone;
+  const hasBatt = feat.hasBattery !== false, hasGrid = feat.hasGrid !== false;
+  const invs = snap.inverters;
+  // an inverter offline, or quiet for 30 minutes (one here uploads every 5)
+  const quiet = invs.filter(inv => inv.status === 'offline' || (inv.readAt && now - inv.readAt > 30 * 60000));
+  const allQuiet = quiet.length > 0 && quiet.length === invs.length;
+  const reads = invs.map(i => i.readAt).filter(Boolean);
+  const lastAt = reads.length ? Math.max(...reads) : null;
+  const since = t => t ? 'Since ' + readAgo(t, now) : '';
+  const verdict = health && !allQuiet ? panelsVerdict(health, snap, now) : null;
+  const hour = window.plantHour(tz, new Date(now));
+  const night = verdict ? verdict.night : (hour >= 18 || hour < 6) && !(a.pvNow > 20);
+
+  const issues = [];
+  // The whole plant gone quiet is one problem, not one per inverter. With the grid down at
+  // the last reading the router has likely lost power too, so that comes first.
+  if (allQuiet) {
+    const check = invs.length === 1 ? 'check the inverter is on and its Wi-Fi dongle shows a light.' : 'check the inverters are on and each Wi-Fi dongle shows a light.';
+    issues.push({ title: 'Nothing is reporting', since: since(lastAt),
+      todo: hasGrid && a.gridPresent === false
+        ? 'The grid was off at the last reading, so your Wi-Fi may be off too. If the power is back, ' + check
+        : check[0].toUpperCase() + check.slice(1) });
+  } else {
+    quiet.forEach(inv => issues.push({ title: invName(inv) + ' isn’t reporting', since: since(inv.readAt), todo: 'Check it is on and its Wi-Fi dongle shows a light.' }));
+  }
+  if (verdict && verdict.state === 'alert') verdict.alerts.forEach(x => issues.push({
+    string: x.kind,
+    title: invName(x.inv) + ', string ' + x.no + (x.kind === 'nothing' ? ' made nothing today' : ' is making less than usual'),
+    todo: x.kind === 'nothing' ? 'Check its breaker or isolator.' : 'Check for shade, dirt or a tripped breaker.', since: 'Today' }));
+  // Battery checks read only inverters still reporting; a stale reading proves nothing.
+  const withBatt = invs.filter(i => i.numberOfBatteries > 0 || i.battSoc > 0);
+  const liveBatt = withBatt.filter(i => !quiet.includes(i));
+  const battStale = hasBatt && withBatt.length > 0 && !liveBatt.length;
+  const battAt = battStale ? Math.max(0, ...withBatt.map(i => i.readAt || 0)) || null : null;
+  const temps = liveBatt.map(i => cleanTemp(i.battTemp)).filter(t => t != null);
+  const battTemp = temps.length ? Math.max(...temps) : null;
+  const badSensor = hasBatt && liveBatt.some(i => cleanTemp(i.battTemp) == null);
+  const hot = hasBatt && battTemp != null && battTemp > 45;
+  if (badSensor) issues.push({ title: 'A battery temperature sensor isn’t reading', todo: 'Mention it at the battery’s next service.' });
+  if (hot) issues.push({ title: 'The battery is hot, ' + Math.round(battTemp) + ' °C', todo: 'Make sure air can move around it.' });
+
+  // Today's solar: as of the last reading when the plant is quiet, none when that was another day.
+  const oldDay = allQuiet && (!lastAt || plantDateStr(tz, new Date(lastAt)) !== plantDateStr(tz, new Date(now)));
+  const pvParts = oldDay ? ['—', ''] : window.fmtEnergyParts(a.pvToday);
+  const pvSub = oldDay ? 'No readings today' : allQuiet ? 'today, by ' + window.fmtTime(new Date(lastAt)) : night ? 'made today' : 'so far today';
+
+  return { a, tz, hasBatt, hasGrid, invs, quiet, allQuiet, lastAt, verdict, night, issues,
+    withBatt, battStale, battAt, battTemp, badSensor, hot, shared: feat.banks === 'shared', pvParts, pvSub };
+}
+
+// Simple names no strings: every string problem folds into one card about the panels.
+function simpleIssues(issues) {
+  const strs = issues.filter(x => x.string);
+  if (!strs.length) return issues;
+  const nothing = strs.every(x => x.string === 'nothing');
+  const one = { title: nothing ? 'Some panels made nothing today' : 'Some panels are making less than usual',
+    todo: nothing ? 'Check the breaker or isolator for your panels.' : 'Check for shade, dirt or a tripped breaker.', since: 'Today' };
+  let placed = false;
+  return issues.flatMap(x => !x.string ? [x] : placed ? [] : (placed = true, [one]));
+}
+
+function EqTile({ label, state, value, unit, sub, color, stale, word }) {
+  return (
+    <section className={'card eq-tile' + (stale ? ' stale' : '')} aria-label={label}>
+      <div className="eq-tile-fig">
+        <div className={'eq-fig' + (word ? ' word' : ' mono')} style={{ color }}>{value}{unit && <span className="u">{unit}</span>}</div>
+        {sub && <div className="eq-fig-sub">{sub}</div>}
+      </div>
+      <div className="eq-tile-text">
+        <span className="eq-tile-label">{label}</span>
+        <span className={'eq-tile-state ' + state[0]}><i className={'eq-dot sm ' + state[0]} />{state[1]}</span>
+      </div>
+    </section>
+  );
+}
+
+function EquipmentSimple({ st, now }) {
+  const { a, verdict } = st;
+  const last = t => t ? 'Last reading ' + readAgo(t, now) : 'Not reporting';
+  const alerts = verdict && verdict.state === 'alert' ? verdict.alerts : [];
+  const pvState = st.allQuiet ? ['stale', last(st.lastAt)]
+    : st.quiet.length ? ['stale', 'Missing some readings']
+    : alerts.length ? ['warn', alerts.every(x => x.kind === 'nothing') ? 'Some made nothing today' : 'Some are making less than usual']
+    : st.night ? ['ok', 'Resting for the night']
+    : ['ok', verdict && verdict.state === 'normal' ? 'Working normally' : 'Working'];
+  const battState = st.battStale ? ['stale', last(st.battAt)]
+    : st.hot ? ['warn', 'Hot, ' + Math.round(st.battTemp) + ' °C']
+    : st.badSensor ? ['warn', 'Temperature sensor not reading']
+    : ['ok', a.battOut > 5 ? 'Powering the house' : a.battOut < -5 ? 'Charging' : 'Resting'];
+  const n = st.invs.length, live = n - st.quiet.length;
+  const invState = !st.quiet.length ? ['ok', 'Working']
+    : st.allQuiet ? ['stale', last(st.lastAt)]
+    : ['warn', st.quiet.length === 1 ? invName(st.quiet[0]) + ' isn’t reporting' : st.quiet.length + ' aren’t reporting'];
+  const invValue = !st.quiet.length ? (n === 1 ? 'On' : 'All on') : n === 1 ? '—' : live + ' of ' + n;
+  const invSub = st.quiet.length ? (n === 1 ? 'not reporting' : 'reporting') : n === 2 ? st.invs.map(invName).join(' and ') : n > 2 ? n + ' inverters' : '';
+  return (
+    <div className="eq-tiles">
+      <EqTile label="Solar panels" state={pvState} value={st.pvParts[0]} unit={st.pvParts[1]} sub={st.pvSub} color={CC.pv} stale={st.allQuiet} />
+      {st.hasBatt && <EqTile label="Battery" state={battState} value={a.battSoc} unit="%" sub={st.battStale ? 'charged then' : 'charged'} color={CC.batt} stale={st.battStale} />}
+      <EqTile label={n === 1 ? 'Inverter' : 'Inverters'} state={invState} value={invValue} sub={invSub} word
+        color={!st.quiet.length ? CC.pv : st.allQuiet ? 'var(--dim)' : 'var(--warn)'} />
+    </div>
+  );
+}
+
+// Panels in detail: one bar per string, grouped under its inverter, with a mark where it
+// usually is by this time. The mark shows only where panelsVerdict really compared.
+function EqPanelsCard({ st, snap, health, now }) {
+  const [open, setOpen] = React.useState({}); // inverters whose long string list is unfolded
+  const v = st.verdict;
+  const hi = v && health ? health.inverters || [] : [];
+  const compared = v && (v.state === 'normal' || v.state === 'alert' || v.state === 'resting');
+  const groups = st.allQuiet || (v && (v.state === 'single' || v.state === 'none')) ? []
+    : snap.inverters.filter(inv => st.quiet.includes(inv) || hi.some(h => h.sn === inv.sn)).map(inv => {
+      if (st.quiet.includes(inv)) return { inv, quiet: true, rows: [] };
+      const h = hi.find(x => x.sn === inv.sn);
+      const multi = h.strings.length >= 2;
+      const invKwh = h.strings.reduce((n, s) => n + (s.todayKwh || 0), 0);
+      const rows = h.strings.map(s => {
+        const share = multi ? s.usualInvShare : s.usualPlantShare;
+        const usual = compared && share != null && share >= 0.02 && (multi || !h.battFull) ? share * (multi ? invKwh : health.todayKwh) : null;
+        return { no: s.no, kwh: s.todayKwh || 0, usual, alert: v.alerts.find(x => x.inv.sn === inv.sn && x.no === s.no) };
+      });
+      return { inv, rows, kwh: invKwh };
+    });
+  let max = 0;
+  groups.forEach(g => g.rows.forEach(r => { max = Math.max(max, r.kwh, r.usual || 0); }));
+  const pct = x => (max > 0 ? Math.min(100, x / max * 100) : 0) + '%';
+  const anyMark = groups.some(g => g.rows.some(r => r.usual != null));
+  const toGo = PANELS_MIN_DAYS - ((health && health.historyDays) || 0);
+  const note = v && {
+    single: 'One string, so there is nothing to compare it with.',
+    learning: 'Checks start in ' + toGo + (toGo === 1 ? ' day.' : ' days.'),
+    early: 'Checked once the panels have made ' + PANELS_MIN_KWH + ' kWh today.',
+    dull: 'Not enough sun today to check.',
+    unchecked: 'The battery filled and the inverter turned its panels down, so its output can’t be compared fairly.',
+  }[v.state];
+  return (
+    <Card className="eq-card">
+      <SectionTitle>PANELS</SectionTitle>
+      <div className={'eq-big mono' + (st.allQuiet ? ' stale' : '')} style={{ color: CC.pv }}>{st.pvParts[0]}{st.pvParts[1] && <span className="u">{st.pvParts[1]}</span>}</div>
+      <div className="eq-big-sub">{st.pvSub}</div>
+      {groups.length > 0 && (
+        <div className="eq-groups">
+          {groups.map(g => {
+            const folded = g.rows.length > EQ_FOLD && !open[g.inv.sn];
+            return (
+              <div className="eq-group" key={g.inv.sn}>
+                {(groups.length > 1 || g.quiet) && (
+                  <div className="eq-group-head">
+                    <span>{invName(g.inv)}</span>
+                    <span className={'mono' + (g.quiet ? ' warn' : '')}>{g.quiet ? (g.inv.readAt ? 'No readings since ' + readAgo(g.inv.readAt, now) : 'Not reporting') : fmtKwh(g.kwh)}</span>
+                  </div>
+                )}
+                {(folded ? g.rows.slice(0, EQ_FOLD) : g.rows).map(r => (
+                  <div className={'eq-string' + (r.alert ? ' weak' : '')} key={r.no}>
+                    <span className="eq-string-name">String {r.no}</span>
+                    <span className="eq-bar"><i style={{ width: pct(r.kwh) }} />{r.usual != null && <b style={{ left: pct(r.usual) }} />}</span>
+                    <span className="eq-string-kwh mono">{kwh1(r.kwh)}</span>
+                    {r.alert && <span className="eq-string-why">{r.alert.kind === 'nothing' ? 'Made nothing today' : 'Usually ' + kwh1(r.usual) + ' kWh by now'}</span>}
+                  </div>
+                ))}
+                {folded && <button type="button" className="mini-link eq-fold" onClick={() => setOpen(o => Object.assign({}, o, { [g.inv.sn]: true }))}>Show all {g.rows.length} strings</button>}
               </div>
-              {inv.bank2 && (
-                <div className="mp-grid" style={{ marginTop: 8 }} title="Second battery pack, as the inverter reports it">
-                  <Metric label="Pack 2 power" value={fmtPower(Math.abs(inv.bank2.power || 0))} accent={CC.batt} />
-                  <Metric label="Bank 2 charge" value={inv.bank2.soc} unit="%" accent={CC.batt} />
-                  <Metric label="Bank 2 voltage" value={(inv.bank2.voltage || 0).toFixed(1)} unit=" V" />
-                  <Metric label="Bank 2 temp" value={cleanTemp(inv.bank2.temperature) != null ? inv.bank2.temperature.toFixed(1) : '—'} unit={cleanTemp(inv.bank2.temperature) != null ? ' °C' : ''} />
-                </div>
-              )}
+            );
+          })}
+        </div>
+      )}
+      {anyMark && <div className="eq-legend"><b />usual by now</div>}
+      {note && <div className="eq-note">{note}</div>}
+    </Card>
+  );
+}
+
+// The battery against its reserve, then what it is doing and what it holds. Temperature
+// shows only when it is worth a look.
+function EqBatteryCard({ st, snap, now }) {
+  const { a } = st;
+  const cfg = snap.config || {};
+  const reserve = cfg.reserve ?? 20;
+  const cap = cfg.battCapacity;
+  const rows = [];
+  if (st.battStale) rows.push(['Last reading', st.battAt ? readAgo(st.battAt, now) : '—']);
+  else {
+    rows.push(['Now', a.battOut > 5 ? 'Powering the house at ' + fmtPower(a.battOut) : a.battOut < -5 ? 'Charging at ' + fmtPower(-a.battOut) : 'Resting']);
+    if (cap > 0) rows.push(['Stored', kwh1(a.battSoc * cap / 100) + ' of ' + fmtKwh(cap)]);
+    if (st.badSensor) rows.push(['Temperature', 'Sensor not reading', true]);
+    else if (st.battTemp != null && (st.battTemp > 45 || st.battTemp < 5)) rows.push(['Temperature', Math.round(st.battTemp) + ' °C, ' + (st.battTemp > 45 ? 'hot' : 'cold'), st.battTemp > 45]);
+  }
+  const packs = st.shared ? Math.min(1, st.withBatt.length) : st.withBatt.length;
+  const modules = st.shared ? Math.max(0, ...st.withBatt.map(i => i.numberOfBatteries || 0)) : st.withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
+  const soc = Math.max(0, Math.min(100, a.battSoc || 0));
+  return (
+    <Card className="eq-card">
+      <SectionTitle>BATTERY</SectionTitle>
+      <div className={'eq-big mono' + (st.battStale ? ' stale' : '')} style={{ color: CC.batt }}>{a.battSoc}<span className="u">%</span></div>
+      <div className={'eq-meter' + (st.battStale ? ' stale' : '')}><i style={{ width: soc + '%', background: CC.batt }} /><b style={{ left: reserve + '%' }} /></div>
+      <div className="eq-meter-scale"><span style={reserve > 60 ? { right: (100 - reserve) + '%' } : { left: reserve + '%' }}>{reserve}% reserve</span></div>
+      <dl className="eq-rows">
+        {rows.map(([l, val, warn]) => <div key={l}><dt>{l}</dt><dd className={warn ? 'warn' : ''}>{val}</dd></div>)}
+      </dl>
+      <div className="eq-foot">{packs} {packs === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'}</div>
+    </Card>
+  );
+}
+
+function EqInvertersCard({ st, now }) {
+  return (
+    <Card className="eq-card">
+      <SectionTitle>{st.invs.length === 1 ? 'INVERTER' : 'INVERTERS'}</SectionTitle>
+      <div className={'eq-inv-tiles' + (st.invs.length === 1 ? ' one' : '')}>
+        {st.invs.map(inv => {
+          const down = st.quiet.includes(inv);
+          const [n, u] = down ? ['—', ''] : fmtPowerParts(inv.pvNow);
+          return (
+            <div className={'eq-inv' + (down ? ' down' : '')} key={inv.sn}>
+              <div className="eq-inv-name">{invName(inv)}</div>
+              <div className={'eq-inv-state' + (down ? ' warn' : '')}><i className={'eq-dot sm ' + (down ? 'warn' : 'ok')} />{down ? 'No readings' : 'On'}</div>
+              <div className="eq-inv-now mono" style={{ color: down ? 'var(--dim)' : CC.pv }}>{n}{u && <span className="u">{u}</span>}</div>
+              <div className="eq-inv-cap">solar now</div>
+              <div className="eq-inv-today"><span>Today</span><span className="mono">{fmtKwh(inv.pvToday)}</span></div>
+              <div className="eq-inv-foot">{down ? (inv.readAt ? 'Since ' + readAgo(inv.readAt, now) : 'Not reporting') : inv.readAt ? 'Updated ' + window.fmtAgo(new Date(inv.readAt), now) : NBSP}</div>
             </div>
           );
         })}
@@ -1320,35 +1474,75 @@ function PacksCard({ snap }) {
   );
 }
 
-// The verdict, then panels, battery and inverters (SOLAR-73).
-function InvertersSkeleton() {
+// One plain sheet per inverter: what it is, and its battery pack as the inverter reads it.
+// A shared pack shows once, under the first inverter that reads it.
+function EqSpecCard({ inv, st, now }) {
+  const down = st.quiet.includes(inv);
+  const rows = [
+    ['Model', inv.model], ['Serial number', inv.sn], ['Firmware', inv.soft],
+    ['Last reading', inv.readAt ? readAgo(inv.readAt, now) + (now - inv.readAt <= 36 * 3600e3 ? ', ' + window.fmtAgo(new Date(inv.readAt), now) : '') : '—'],
+  ];
+  const packs = [];
+  const reads = inv.numberOfBatteries > 0 || inv.battSoc > 0;
+  if (st.hasBatt && reads && (!st.shared || inv === st.withBatt[0])) {
+    const label = st.shared ? 'Battery pack, shared' : inv.bank2 ? 'Battery pack 1' : 'Battery pack';
+    packs.push({ label, soc: inv.battSoc, v: inv.battVolt, t: cleanTemp(inv.battTemp), n: inv.numberOfBatteries });
+    if (inv.bank2) packs.push({ label: 'Battery pack 2', soc: inv.bank2.soc, v: inv.bank2.voltage, t: cleanTemp(inv.bank2.temperature), n: null });
+  }
   return (
-    <div className="stack">
-      <SectionTitle>EQUIPMENT</SectionTitle>
-      <window.Skeleton h={92} r={16} />
-      <div className="eq-row">
-        <window.Skeleton h={170} r={16} />
-        <window.Skeleton h={170} r={16} />
-        <window.Skeleton h={170} r={16} />
+    <Card className="eq-spec">
+      <div className="eq-spec-head">
+        <span>{invName(inv)}</span>
+        <span className={'eq-inv-state' + (down ? ' warn' : '')}><i className={'eq-dot sm ' + (down ? 'warn' : 'ok')} />{down ? 'No readings' : 'Online'}</span>
       </div>
-    </div>
+      <dl className="eq-spec-rows">
+        {rows.map(([l, val]) => <div key={l}><dt>{l}</dt><dd className="mono">{val}</dd></div>)}
+      </dl>
+      {packs.map(p => (
+        <div key={p.label}>
+          <div className="eq-label eq-pack-label">{p.label}</div>
+          <div className="eq-pack">
+            <div><b className="mono">{p.soc}%</b><span>Charge</span></div>
+            <div><b className="mono">{p.v != null ? p.v.toFixed(1) + ' V' : '—'}</b><span>Voltage</span></div>
+            <div><b className="mono">{p.t != null ? Math.round(p.t) + ' °C' : '—'}</b><span>{p.t != null ? 'Temperature' : 'Sensor not reading'}</span></div>
+            {p.n != null && <div><b className="mono">{p.n}</b><span>{p.n === 1 ? 'Battery' : 'Batteries'}</span></div>}
+          </div>
+        </div>
+      ))}
+    </Card>
   );
 }
 
-// How long ago a reading was, the way the inverter cards say it.
-const readAgo = (t, now) => now - t > 36 * 3600e3
-  ? new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' + window.fmtTime(new Date(t))
-  : window.fmtTime(new Date(t));
+function EquipmentDetailed({ st, snap, health, now, refreshKey }) {
+  return (
+    <>
+      <div className={'eq-cards' + (st.hasBatt ? '' : ' two')}>
+        <EqPanelsCard st={st} snap={snap} health={health} now={now} />
+        {st.hasBatt && <EqBatteryCard st={st} snap={snap} now={now} />}
+        <EqInvertersCard st={st} now={now} />
+      </div>
+      <div className="eq-specs">
+        {snap.inverters.map(inv => <EqSpecCard key={inv.sn} inv={inv} st={st} now={now} />)}
+      </div>
+      {/* inverter temperatures over a day (SunSynk history; nothing live reports them) */}
+      <Card className="chart-card">
+        <SectionTitle>TEMPERATURE · DAY</SectionTitle>
+        <window.InverterHistoryChart kind="temp" refreshKey={refreshKey} />
+      </Card>
+      {/* The supply over a day: voltage at each inverter's AC terminal and the grid's frequency,
+          from SunSynk's history (two months back). A blackout shows as a shaded band; the
+          terminal keeps reading the inverter's own 230 V then, so only the 0 Hz gives it away.
+          Off-grid, the inverter's own output takes its place. */}
+      <Card className="chart-card">
+        <SectionTitle>{st.hasGrid ? 'GRID SUPPLY · DAY' : 'OUTPUT · DAY'}</SectionTitle>
+        <window.InverterHistoryChart kind={st.hasGrid ? 'ac' : 'output'} refreshKey={refreshKey} />
+      </Card>
+    </>
+  );
+}
 
-// Equipment for a home user (SOLAR-73): is everything OK, in one line at the top; then a short
-// card each for the panels, the battery and the inverters. Serial numbers, firmware, the packs'
-// volts, each inverter's live figures and the two day charts sit behind Technical details.
-// SOLAR-75: each problem says what to do; a silent plant is one problem, and figures from a
-// silent inverter read as its last reading, not as now.
 function InvertersTab({ snap, refreshKey }) {
-  const feat = snap.features || {};
   const now = window.useNow(15000);
-  const hasBatt = feat.hasBattery !== false, hasGrid = feat.hasGrid !== false;
   // Panels: today's share of each string against its usual share by this time (0076). Asked on
   // open, on refresh and every 10 minutes; the shares move slowly.
   const [health, setHealth] = React.useState(null);
@@ -1358,143 +1552,41 @@ function InvertersTab({ snap, refreshKey }) {
     const t = setInterval(load, 600000);
     return () => clearInterval(t);
   }, [refreshKey]);
-  // Details open or closed is this viewer's own choice, kept across visits
-  const [details, setDetails] = React.useState(() => { try { return localStorage.getItem('synsynk.eqDetails') === '1'; } catch (e) { return false; } });
-  const toggleDetails = () => setDetails(d => { try { localStorage.setItem('synsynk.eqDetails', d ? '0' : '1'); } catch (e) {} return !d; });
+  // Simple or Detailed is this viewer's own choice, kept across visits
+  const [view, setView] = React.useState(() => { try { return localStorage.getItem('synsynk.eqView') === 'detailed' ? 'detailed' : 'simple'; } catch (e) { return 'simple'; } });
+  const pickView = (v) => { setView(v); try { localStorage.setItem('synsynk.eqView', v); } catch (e) {} };
 
-  // ---- what needs a look: a plain line each, and what to do where a home user can do something ----
-  const verdict = health ? panelsVerdict(health, snap, now) : null;
-  const issues = [];
-  // an inverter offline, or quiet for 30 minutes (one here uploads every 5)
-  const quiet = snap.inverters.filter(inv => inv.status === 'offline' || (inv.readAt && now - inv.readAt > 30 * 60000));
-  const reads = snap.inverters.map(i => i.readAt).filter(Boolean);
-  const lastAt = reads.length ? Math.max(...reads) : null;
-  const since = t => t ? ' since ' + readAgo(t, now) : '';
-  // The whole plant gone quiet is one problem, not one per inverter.
-  const allQuiet = quiet.length > 0 && quiet.length === snap.inverters.length;
-  if (allQuiet) {
-    issues.push({ text: 'No readings' + since(lastAt), todo: snap.inverters.length === 1
-      ? 'Check the inverter is on and its Wi-Fi dongle shows a light.'
-      : 'Check the inverters are on and each Wi-Fi dongle shows a light.' });
-  } else {
-    quiet.forEach(inv => issues.push({ text: invName(inv) + (inv.readAt ? ' hasn’t reported' + since(inv.readAt) : ' isn’t reporting'),
-      todo: 'Check it is on and its Wi-Fi dongle shows a light.' }));
-  }
-  // the Panels card carries what to check for a string
-  if (verdict && verdict.state === 'alert') verdict.alerts.forEach(x => issues.push({ text: invName(x.inv) + ', string ' + x.no + (x.kind === 'nothing' ? ' made nothing today' : ' is making less than usual') }));
-  // Battery checks read only inverters still reporting; a stale reading proves nothing.
-  const withBatt = snap.inverters.filter(i => i.numberOfBatteries > 0 || i.battSoc > 0);
-  const liveBatt = withBatt.filter(i => !quiet.includes(i));
-  const battStale = hasBatt && withBatt.length > 0 && !liveBatt.length;
-  const battAt = battStale ? Math.max(0, ...withBatt.map(i => i.readAt || 0)) || null : null;
-  const temps = liveBatt.map(i => cleanTemp(i.battTemp)).filter(t => t != null);
-  const battTemp = temps.length ? Math.max(...temps) : null;
-  const badSensor = hasBatt && liveBatt.some(i => cleanTemp(i.battTemp) == null);
-  if (badSensor) issues.push({ text: 'A battery temperature sensor isn’t reading', todo: 'Mention it at the battery’s next service.' });
-  if (hasBatt && battTemp != null && battTemp > 45) issues.push({ text: 'The battery is hot, ' + Math.round(battTemp) + ' °C', todo: 'Make sure air can move around it.' });
-  const head = issues.length === 0 ? 'All your equipment is working' : issues.length === 1 ? issues[0].text : issues.length + ' things need a look';
-
-  // ---- battery ----
-  const a = snap.aggregate;
-  const cap = (snap.config || {}).battCapacity;
-  const battState = battStale ? (battAt ? 'Last reading ' + readAgo(battAt, now) : 'Not reporting')
-    : a.battOut > 5 ? 'Powering the house at ' + fmtPower(a.battOut)
-    : a.battOut < -5 ? 'Charging at ' + fmtPower(-a.battOut) : 'Resting';
-  const shared = feat.banks === 'shared';
-  const packs = shared ? Math.min(1, withBatt.length) : withBatt.length;
-  const modules = shared ? Math.max(0, ...withBatt.map(i => i.numberOfBatteries || 0)) : withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
+  const st = equipmentState(snap, health, now);
+  const simple = view === 'simple';
+  const issues = simple ? simpleIssues(st.issues) : st.issues;
+  const n = issues.length;
+  const head = n === 0 ? 'All your equipment is working' : n === 1 ? '1 thing needs a look' : n + ' things need a look';
 
   return (
     <div className="stack eq-tab">
-      <SectionTitle right={snap.plant.name}>EQUIPMENT</SectionTitle>
-
-      <Card className={'eq-verdict' + (issues.length ? ' warn' : '')}>
-        <div className="panels-status"><i className={'panels-dot ' + (issues.length ? 'warn' : 'ok')} />{head}</div>
-        {issues.length === 1 && issues[0].todo && <p className="eq-sub">{issues[0].todo}</p>}
-        {issues.length > 1 && (
-          <ul className="eq-issues">
-            {issues.map(x => <li key={x.text}><span>{x.text}.</span>{x.todo && <span className="eq-todo">{x.todo}</span>}</li>)}
-          </ul>
-        )}
-        {issues.length === 0 && lastAt && <p className="eq-sub">Last reading {window.fmtAgo(new Date(lastAt), now)}</p>}
-      </Card>
-
-      <div className="eq-row">
-        <PanelsCard snap={snap} health={health} staleAt={allQuiet ? lastAt || 0 : null} />
-
-        {hasBatt && (
-          <Card className={battStale ? 'eq-stale' : null}>
-            <SectionTitle>BATTERY</SectionTitle>
-            <div className="eq-big mono" style={{ color: CC.batt }}>{a.battSoc}<span className="u">%</span></div>
-            <div className="eq-line">{battState}</div>
-            {cap > 0 && <div className="eq-line dim">{(a.battSoc * cap / 100).toFixed(1)} of {fmtKwh(cap)} stored</div>}
-            {!battStale && (badSensor || battTemp != null) && (
-              <div className="eq-line dim">
-                {badSensor ? 'Temperature sensor not reading' : battTemp > 45 ? <span style={{ color: 'var(--warn)' }}>{Math.round(battTemp)} °C, hot</span>
-                  : <>{Math.round(battTemp)} °C, {battTemp < 5 ? 'cold' : 'normal'}</>}
-              </div>
-            )}
-            <div className="eq-line dim">{packs} {packs === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'}</div>
-          </Card>
-        )}
-
-        <Card>
-          <SectionTitle>{snap.inverters.length === 1 ? 'INVERTER' : 'INVERTERS'}</SectionTitle>
-          <div className="panels-rows flush">
-            {snap.inverters.map(inv => {
-              const down = quiet.includes(inv);
-              return (
-                <div className="panels-row" key={inv.sn}>
-                  <span>{invName(inv)}<span className="panels-sub" style={down ? { color: 'var(--warn)' } : null}>
-                    {down ? (inv.readAt ? 'No readings since ' + readAgo(inv.readAt, now) : 'Not reporting') : 'Working'}</span></span>
-                  {down
-                    ? <span className="panels-kwh mono" style={{ color: 'var(--dim)' }}>—</span>
-                    : <span className="panels-kwh mono">{fmtPower(inv.pvNow)}<span className="dim"> solar</span></span>}
-                </div>
-              );
-            })}
-          </div>
-        </Card>
+      <div className="eq-top">
+        <span className="eq-label">Equipment</span>
+        <Segmented size="sm" value={view} onChange={pickView} options={[{ value: 'simple', label: 'Simple' }, { value: 'detailed', label: 'Detailed' }]} />
       </div>
 
-      <button type="button" className="eq-more" aria-expanded={details} onClick={toggleDetails}>Technical details</button>
+      {/* the one place that says whether things are OK */}
+      <section className="eq-status" aria-label="Status">
+        <div className="eq-head"><i className={'eq-dot ' + (n ? 'warn' : 'ok')} />{head}</div>
+        {n === 0 && st.lastAt && <div className="eq-head-sub">Last reading {window.fmtAgo(new Date(st.lastAt), now)}</div>}
+      </section>
+      {n > 0 && (
+        <div className="eq-problems">
+          {issues.map(x => (
+            <div className="eq-problem" key={x.title}>
+              <div className="eq-problem-head"><b>{x.title}</b>{x.since && <span className="mono">{x.since}</span>}</div>
+              <p>{x.todo}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
-      {details && <>
-        {hasBatt && <PacksCard snap={snap} />}
-        {snap.inverters.map(inv => (
-          <Card key={inv.sn} className="inv-card">
-            <div className="inv-head">
-              <div>
-                <div className="inv-sn">{inv.sn}</div>
-                <div className="inv-meta mono dim">{inv.model} · firmware {inv.soft}</div>
-                {inv.readAt && <div className="inv-meta mono dim">Last reading {readAgo(inv.readAt, now)}{now - inv.readAt <= 36 * 3600e3 ? ' · ' + window.fmtAgo(new Date(inv.readAt), now) : ''}</div>}
-              </div>
-              <Badge tone={inv.status === 'online' ? 'ok' : 'warn'} dot>{inv.status}</Badge>
-            </div>
-            <div className="inv-grid">
-              <Metric label="Solar" value={fmtPower(inv.pvNow)} accent={CC.pv} />
-              <Metric label="Solar today" value={fmtKwh(inv.pvToday)} accent={CC.pv} />
-              {hasBatt && <Metric label="Battery" value={fmtPower(battShown(inv.battOut))} accent={CC.batt} />}
-              {hasBatt && <Metric label="Charge" value={inv.battSoc} unit="%" accent={CC.batt} />}
-              {hasGrid && <Metric label="Grid" value={fmtPower(inv.grid)} accent={CC.grid} />}
-              <Metric label="Home" value={fmtPower(inv.load)} accent={CC.load} />
-            </div>
-          </Card>
-        ))}
-        {/* inverter temperatures over a day (SunSynk history; nothing live reports them) */}
-        <Card className="chart-card">
-          <SectionTitle>TEMPERATURE · DAY</SectionTitle>
-          <window.InverterHistoryChart kind="temp" refreshKey={refreshKey} />
-        </Card>
-        {/* The supply over a day: voltage at each inverter's AC terminal and the grid's frequency,
-            from SunSynk's history (two months back). A blackout shows as a shaded band; the
-            terminal keeps reading the inverter's own 230 V then, so only the 0 Hz gives it away.
-            Off-grid, the inverter's own output takes its place. */}
-        <Card className="chart-card">
-          <SectionTitle>{hasGrid ? 'GRID SUPPLY · DAY' : 'OUTPUT · DAY'}</SectionTitle>
-          <window.InverterHistoryChart kind={hasGrid ? 'ac' : 'output'} refreshKey={refreshKey} />
-        </Card>
-      </>}
+      {simple ? <EquipmentSimple st={st} now={now} />
+        : <EquipmentDetailed st={st} snap={snap} health={health} now={now} refreshKey={refreshKey} />}
     </div>
   );
 }
