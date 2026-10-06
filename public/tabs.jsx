@@ -363,7 +363,7 @@ function LiveTab({ snap, settings, today, energy, onNeedEnergy, refreshKey, onOp
             info="Total solar energy your panels produced over the selected period." />
           <MiniStat loading={pending} label="Home" value={window.fmtEnergySmart(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
             info="Total energy your home used over the selected period, summed across all inverters." />
-          <MiniStat loading={pending} label="Independence" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendUnit=" pts" trendTitle={cmpWord}
+          <MiniStat loading={pending} label="Independence" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
             info="Share of your home’s energy that came from your own solar + battery rather than the grid. 100% = fully off-grid for the period." />
           {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergySmart(pExp)} color={CC.grid}
             info={'Energy sent to the grid over the selected period' + (rateExp > 0 ? ', paid at your feed-in rate.' : '.')} />}
@@ -413,8 +413,7 @@ function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt }) {
     const d = Math.abs(delta);
     label = deltaFmt ? deltaFmt(d) : (d < 10 ? d.toFixed(1) : String(Math.round(d))) + ' kWh';
   } else {
-    const n = mag < 1 ? mag.toFixed(1) : String(Math.round(mag)); // decimal under 1% so a tiny change isn't shown as "0%"
-    label = n + (unit === ' pts' && n === '1' ? ' pt' : unit);
+    label = (mag < 1 ? mag.toFixed(1) : String(Math.round(mag))) + unit; // decimal under 1% so a tiny change isn't shown as "0%"
   }
   return <span className={'trend-badge ' + (good ? 'good' : 'bad')} title={title || 'vs previous period'}>{up ? '▲' : '▼'} {label}</span>;
 }
