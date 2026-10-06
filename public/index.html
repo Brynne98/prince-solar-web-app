@@ -669,6 +669,14 @@
   .wiw .fbox-today { border-left: 1px solid var(--line); background: rgba(255,255,255,0.015); padding: 18px 18px 16px; border-radius: 0 15px 15px 0; }
   .solar-note { margin: 0 0 8px; font-size: 13.5px; color: var(--muted); max-width: 60ch; }
   /* Panels (SOLAR-51): a status line, alerts only when a string is low, one line per inverter */
+  /* Equipment for a home user (SOLAR-73): the verdict, then three short cards */
+  .eq-verdict .panels-status { font-size: 20px; }
+  .eq-sub { margin: 8px 0 0 19px; font-size: 13.5px; color: var(--muted); }
+  .eq-issues { margin: 10px 0 0 19px; padding-left: 16px; font-size: 13.5px; color: var(--muted); line-height: 1.6; }
+  .eq-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; align-items: start; }
+  .eq-big { font-size: 34px; font-weight: 600; line-height: 1; letter-spacing: -0.01em; margin-top: 4px; }
+  .eq-big .u { font-size: 16px; margin-left: 3px; opacity: 0.85; }
+  .eq-line { margin-top: 9px; font-size: 13.5px; }
   .panels-status { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 600; }
   .panels-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--dim); }
   .panels-dot.ok { background: var(--pv); box-shadow: 0 0 0 4px rgba(61,220,132,0.15); }

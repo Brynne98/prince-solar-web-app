@@ -1317,29 +1317,29 @@ function PacksCard({ snap }) {
   );
 }
 
-// Panels first, then batteries and each inverter, then the day charts (SOLAR-71).
+// The verdict, then panels, battery and inverters (SOLAR-73).
 function InvertersSkeleton() {
   return (
     <div className="stack">
       <SectionTitle>EQUIPMENT</SectionTitle>
-      <Card>
-        <SectionTitle>PANELS</SectionTitle>
-        <window.Skeleton h={90} r={10} />
-      </Card>
-      <window.Skeleton h={150} r={12} />
-      <Card className="chart-card">
-        <SectionTitle>TEMPERATURE · DAY</SectionTitle>
-        <DayChartSkeleton legend />
-      </Card>
+      <window.Skeleton h={92} r={16} />
+      <div className="eq-row">
+        <window.Skeleton h={170} r={16} />
+        <window.Skeleton h={170} r={16} />
+        <window.Skeleton h={170} r={16} />
+      </div>
     </div>
   );
 }
 
-// Equipment, health first: are the panels working, the batteries, each inverter's live
-// figures, then the day charts. Panels moved here from Solar and the grid supply chart from
-// Grid (SOLAR-71). Each inverter card keeps what an owner reads: what it makes now and today,
-// the battery, the grid and the home (SOLAR-54); battery voltage and temperature are on
-// Batteries. Signed as everywhere: battery + = the house is using it, grid − = exporting.
+// How long ago a reading was, the way the inverter cards say it.
+const readAgo = (t, now) => now - t > 36 * 3600e3
+  ? new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' + window.fmtTime(new Date(t))
+  : window.fmtTime(new Date(t));
+
+// Equipment for a home user (SOLAR-73): is everything OK, in one line at the top; then a short
+// card each for the panels, the battery and the inverters. Serial numbers, firmware, the packs'
+// volts, each inverter's live figures and the two day charts sit behind Details.
 function InvertersTab({ snap, refreshKey }) {
   const feat = snap.features || {};
   const now = window.useNow(15000);
@@ -1353,24 +1353,85 @@ function InvertersTab({ snap, refreshKey }) {
     const t = setInterval(load, 600000);
     return () => clearInterval(t);
   }, [refreshKey]);
+  // Details open or closed is this viewer's own choice, kept across visits
+  const [details, setDetails] = React.useState(() => { try { return localStorage.getItem('synsynk.eqDetails') === '1'; } catch (e) { return false; } });
+  const toggleDetails = () => setDetails(d => { try { localStorage.setItem('synsynk.eqDetails', d ? '0' : '1'); } catch (e) {} return !d; });
+
+  // ---- what needs a look ----
+  const verdict = health ? panelsVerdict(health, snap, now) : null;
+  const issues = [];
+  // an inverter offline, or quiet for 30 minutes (one here uploads every 5)
+  const quiet = snap.inverters.filter(inv => inv.status === 'offline' || (inv.readAt && now - inv.readAt > 30 * 60000));
+  quiet.forEach(inv => issues.push(inv.readAt ? invName(inv) + ' hasn’t reported since ' + readAgo(inv.readAt, now) + '.' : invName(inv) + ' isn’t reporting.'));
+  if (verdict && verdict.state === 'alert') verdict.alerts.forEach(x => issues.push(invName(x.inv) + ', string ' + x.no + (x.kind === 'nothing' ? ' made nothing today.' : ' is making less than usual today.')));
+  const withBatt = snap.inverters.filter(i => i.numberOfBatteries > 0 || i.battSoc > 0);
+  const temps = withBatt.map(i => cleanTemp(i.battTemp)).filter(t => t != null);
+  const battTemp = temps.length ? Math.max(...temps) : null;
+  const badSensor = hasBatt && withBatt.some(i => cleanTemp(i.battTemp) == null);
+  if (badSensor) issues.push('A battery temperature sensor isn’t reading.');
+  if (hasBatt && battTemp != null && battTemp > 45) issues.push('The battery is hot, ' + Math.round(battTemp) + ' °C.');
+  const head = issues.length === 0 ? 'All your equipment is working' : issues.length === 1 ? issues[0].replace(/\.$/, '') : issues.length + ' things need a look';
+
+  // ---- battery ----
+  const a = snap.aggregate;
+  const battState = a.battOut > 5 ? 'Powering the house' : a.battOut < -5 ? 'Charging' : 'Resting';
+  const shared = feat.banks === 'shared';
+  const packs = shared ? Math.min(1, withBatt.length) : withBatt.length;
+  const modules = shared ? Math.max(0, ...withBatt.map(i => i.numberOfBatteries || 0)) : withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
+
   return (
     <div className="stack">
-      <SectionTitle right={<span className="dim">{snap.inverters.length} {snap.inverters.length === 1 ? 'inverter' : 'inverters'} · {snap.plant.name}</span>}>EQUIPMENT</SectionTitle>
-      <PanelsCard snap={snap} health={health} />
-      {hasBatt && <PacksCard snap={snap} />}
-      {/* one inverter per row, so its six figures sit in a line on a wide screen */}
-      <div className="stack">
+      <SectionTitle right={<span className="dim">{snap.plant.name}</span>}>EQUIPMENT</SectionTitle>
+
+      <Card className="eq-verdict">
+        <div className="panels-status"><i className={'panels-dot ' + (issues.length ? 'warn' : 'ok')} />{head}</div>
+        {issues.length > 1 && <ul className="eq-issues">{issues.map(t => <li key={t}>{t}</li>)}</ul>}
+        {issues.length === 0 && <p className="eq-sub">Panels, {hasBatt ? 'battery and ' : ''}{snap.inverters.length === 1 ? 'inverter' : 'inverters'} are reporting normally.</p>}
+      </Card>
+
+      <div className="eq-row">
+        <PanelsCard snap={snap} health={health} />
+
+        {hasBatt && (
+          <Card>
+            <SectionTitle>BATTERY</SectionTitle>
+            <div className="eq-big mono" style={{ color: CC.batt }}>{a.battSoc}<span className="u">%</span></div>
+            <div className="eq-line">{battState}</div>
+            <div className="eq-line dim">
+              {badSensor ? 'Temperature: sensor not reading' : battTemp != null ? <>Temperature {Math.round(battTemp)} °C, {battTemp > 45 ? 'hot' : battTemp < 5 ? 'cold' : 'normal'}</> : null}
+            </div>
+            <div className="eq-line dim">{packs} {packs === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'}</div>
+          </Card>
+        )}
+
+        <Card>
+          <SectionTitle>{snap.inverters.length === 1 ? 'INVERTER' : 'INVERTERS'}</SectionTitle>
+          <div className="panels-rows flush">
+            {snap.inverters.map(inv => {
+              const down = quiet.includes(inv);
+              return (
+                <div className="panels-row" key={inv.sn}>
+                  <span>{invName(inv)}<span className="panels-sub" style={down ? { color: 'var(--warn)' } : null}>
+                    {down ? (inv.readAt ? 'No readings since ' + readAgo(inv.readAt, now) : 'Not reporting') : 'Working'}</span></span>
+                  <span className="panels-kwh mono">{fmtKwh(inv.pvToday)}<span className="dim"> today</span></span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      </div>
+
+      <div><button type="button" className="ghost-btn" aria-expanded={details} onClick={toggleDetails}>{details ? 'Hide details' : 'Show details'}</button></div>
+
+      {details && <>
+        {hasBatt && <PacksCard snap={snap} />}
         {snap.inverters.map(inv => (
           <Card key={inv.sn} className="inv-card">
             <div className="inv-head">
               <div>
                 <div className="inv-sn">{inv.sn}</div>
                 <div className="inv-meta mono dim">{inv.model} · firmware {inv.soft}</div>
-                {/* Loggers upload at their own pace (one here every 5 min), so say how old each reading is. */}
-                {inv.readAt && <div className="inv-meta mono" style={{ color: now - inv.readAt > 600000 ? 'var(--warn)' : 'var(--dim)' }}>
-                  Last reading {now - inv.readAt > 36 * 3600e3
-                    ? new Date(inv.readAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' + window.fmtTime(new Date(inv.readAt))
-                    : window.fmtTime(new Date(inv.readAt)) + ' · ' + window.fmtAgo(new Date(inv.readAt), now)}</div>}
+                {inv.readAt && <div className="inv-meta mono dim">Last reading {readAgo(inv.readAt, now)}{now - inv.readAt <= 36 * 3600e3 ? ' · ' + window.fmtAgo(new Date(inv.readAt), now) : ''}</div>}
               </div>
               <Badge tone={inv.status === 'online' ? 'ok' : 'warn'} dot>{inv.status}</Badge>
             </div>
@@ -1384,20 +1445,20 @@ function InvertersTab({ snap, refreshKey }) {
             </div>
           </Card>
         ))}
-      </div>
-      {/* inverter temperatures over a day (SunSynk history; nothing live reports them) */}
-      <Card className="chart-card">
-        <SectionTitle>TEMPERATURE · DAY</SectionTitle>
-        <window.InverterHistoryChart kind="temp" refreshKey={refreshKey} />
-      </Card>
-      {/* The supply over a day: voltage at each inverter's AC terminal and the grid's frequency,
-          from SunSynk's history (two months back). A blackout shows as a shaded band; the
-          terminal keeps reading the inverter's own 230 V then, so only the 0 Hz gives it away.
-          Off-grid, the inverter's own output takes its place. */}
-      <Card className="chart-card">
-        <SectionTitle>{hasGrid ? 'GRID SUPPLY · DAY' : 'OUTPUT · DAY'}</SectionTitle>
-        <window.InverterHistoryChart kind={hasGrid ? 'ac' : 'output'} refreshKey={refreshKey} />
-      </Card>
+        {/* inverter temperatures over a day (SunSynk history; nothing live reports them) */}
+        <Card className="chart-card">
+          <SectionTitle>TEMPERATURE · DAY</SectionTitle>
+          <window.InverterHistoryChart kind="temp" refreshKey={refreshKey} />
+        </Card>
+        {/* The supply over a day: voltage at each inverter's AC terminal and the grid's frequency,
+            from SunSynk's history (two months back). A blackout shows as a shaded band; the
+            terminal keeps reading the inverter's own 230 V then, so only the 0 Hz gives it away.
+            Off-grid, the inverter's own output takes its place. */}
+        <Card className="chart-card">
+          <SectionTitle>{hasGrid ? 'GRID SUPPLY · DAY' : 'OUTPUT · DAY'}</SectionTitle>
+          <window.InverterHistoryChart kind={hasGrid ? 'ac' : 'output'} refreshKey={refreshKey} />
+        </Card>
+      </>}
     </div>
   );
 }
