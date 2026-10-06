@@ -34,6 +34,7 @@ const ROUTES = {
   '/api/history':          (q) => ['api_history', { p_date: q.date || null }],
   '/api/history/earliest': () => ['api_history_earliest', {}],
   '/api/history/inverters': (q) => ['api_inverter_history', { p_date: q.date || null }],
+  '/api/strings/health':    () => ['api_string_health', {}],
   '/api/energy':           (q) => ['api_energy', { p_period: q.period || 'week' }],
   '/api/db/stats':         () => ['api_db_stats', {}],
   '/api/trends/by-hour':   (q) => ['api_trends_by_hour', { p_days: Number(q.days) || 14 }],
@@ -279,6 +280,10 @@ async function fetchTrendDaily(days) {
 async function fetchCompare() {
   return getJSON('/api/trends/compare').catch(() => ({}));
 }
+// each used string's kWh today and its usual share by this time of day (0076, SOLAR-51)
+async function fetchStringHealth() {
+  return getJSON('/api/strings/health');
+}
 
 // ---- me: plan, preferences, plants -----------------------------------------
 // One call on load. `plants[].config` is plant_config (timezone, currency, tariff,
@@ -322,6 +327,6 @@ function emptyText(days, fallback) {
 }
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchInverterHistory, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchCompare,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchInverterHistory, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchCompare, fetchStringHealth,
   fetchMe, savePrefs, savePlantConfig, deleteAccount, emptyText, BATT_MAX_KW, TYPICAL_DAYS,
 });

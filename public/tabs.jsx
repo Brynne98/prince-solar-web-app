@@ -519,6 +519,129 @@ function solarSplit(points) {
   return { home, batt, grid };
 }
 
+// ---------------------------------------------------------------- PANELS
+// Is every panel string doing its usual share? (SOLAR-51, mocked with all ten states first.)
+// Each string's share of the solar is steady day to day, so a string well below its usual
+// share by this time of day, on a day with real sun, is worth naming. Volts, amps and the old
+// "check" badge (which lit on empty inputs floating near 1.5 V) are gone.
+const PANELS_MIN_KWH = 2;      // below this today, nothing is judged yet
+const PANELS_MIN_DAYS = 7;     // days of history before shares mean anything
+const PANELS_LOW = 2 / 3;      // today's share under two thirds of usual is "less than usual"
+
+function invName(inv) {
+  return inv.alias && inv.alias !== inv.sn ? inv.alias : 'Inverter …' + String(inv.sn).slice(-4);
+}
+
+// The verdict from api_string_health plus the snapshot: which state, the alerts, and per
+// inverter what its line says. Pure, so every state can be checked without a screen.
+function panelsVerdict(h, snap, now) {
+  const tz = (snap.config || {}).timezone;
+  const hour = window.plantHour(tz, new Date(now));
+  const night = (hour >= 18 || hour < 6) && !(snap.aggregate.pvNow > 20);
+  const bySn = Object.fromEntries((h.inverters || []).map(i => [i.sn, i]));
+  const used = (h.inverters || []).reduce((n, i) => n + i.strings.length, 0);
+  // a silent inverter: offline, or its last reading 20 minutes old while the sun is up
+  const silent = snap.inverters.filter(inv => inv.status === 'offline'
+    || (!night && inv.readAt && now - inv.readAt > 20 * 60000));
+  const alerts = [];
+  let compared = 0, skipped = 0;
+  const broken = {};
+  if (used > 1 && h.historyDays >= PANELS_MIN_DAYS && h.todayKwh >= PANELS_MIN_KWH) {
+    (h.inverters || []).forEach(hi => {
+      const multi = hi.strings.length >= 2;
+      if (!multi && hi.battFull) { skipped++; return; } // a full battery turns the panels down
+      hi.strings.forEach(st => {
+        const usual = multi ? st.usualInvShare : st.usualPlantShare;
+        const today = multi ? st.todayInvShare : st.todayPlantShare;
+        if (usual == null || usual < 0.02) return;
+        compared++;
+        const inv = snap.inverters.find(x => x.sn === hi.sn) || { sn: hi.sn };
+        if (st.todayKwh < 0.05) {
+          alerts.push({ kind: 'nothing', inv, no: st.no, usual, multi });
+          broken[hi.sn] = (broken[hi.sn] || 0) + 1;
+        } else if (today != null && today / usual < PANELS_LOW) {
+          alerts.push({ kind: 'low', inv, no: st.no, usual, today, multi });
+        }
+      });
+    });
+  }
+  let state;
+  if (used === 0) state = 'none';
+  else if (silent.length) state = 'silent';
+  else if (used === 1) state = 'single';
+  else if (h.historyDays < PANELS_MIN_DAYS) state = 'learning';
+  else if (h.todayKwh < PANELS_MIN_KWH) state = night ? 'dull' : 'early';
+  else if (alerts.length) state = 'alert';
+  else if (!compared && skipped) state = 'unchecked';
+  else state = night ? 'resting' : 'normal';
+  const lines = snap.inverters.filter(inv => bySn[inv.sn]).map(inv => {
+    const n = bySn[inv.sn].strings.length;
+    const quiet = silent.includes(inv);
+    return {
+      sn: inv.sn, name: invName(inv), kwh: quiet ? null : inv.pvToday,
+      sub: quiet ? (inv.readAt ? 'No readings since ' + (now - inv.readAt > 36 * 3600e3
+          ? new Date(inv.readAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' : '') + window.fmtTime(new Date(inv.readAt)) : 'No readings')
+        : broken[inv.sn] ? (n - broken[inv.sn]) + ' of ' + n + ' strings working'
+        : n + (n === 1 ? ' string' : ' strings'),
+    };
+  });
+  return { state, alerts, lines, silent, night };
+}
+
+function PanelsCard({ snap, health }) {
+  const now = window.useNow(60000);
+  if (!health) return null; // loading, or failed: the card waits rather than guessing
+  const v = panelsVerdict(health, snap, now);
+  if (v.state === 'none') return null;
+  const a = snap.aggregate;
+  const lows = v.alerts.filter(x => x.kind === 'low').length, nothings = v.alerts.length - lows;
+  const head = {
+    normal: ['ok', 'All panels working normally'],
+    resting: ['rest', 'Resting · all strings were normal today'],
+    silent: ['warn', v.silent.length === 1 ? 'No readings from one inverter' : 'No readings from ' + v.silent.length + ' inverters'],
+    single: null,
+    learning: ['rest', 'Learning your panels'],
+    early: ['rest', 'Too early to tell'],
+    dull: ['rest', 'Not enough sun today to check'],
+    unchecked: ['rest', 'Not checked today'],
+    alert: ['warn', nothings && !lows ? (nothings === 1 ? 'One string made nothing today' : nothings + ' strings made nothing today')
+      : v.alerts.length === 1 ? 'One string is making less than usual' : v.alerts.length + ' strings are making less than usual'],
+  }[v.state];
+  const pct = (x) => Math.round(x * 100);
+  const toGo = PANELS_MIN_DAYS - (health.historyDays || 0);
+  const note = {
+    single: 'With a single string there is nothing to compare it with, so no check is shown.',
+    learning: 'Strings are compared once there are ' + PANELS_MIN_DAYS + ' days to compare with. ' + toGo + ' to go.',
+    early: 'Checked once the panels have made ' + PANELS_MIN_KWH + ' kWh today.',
+    unchecked: 'The battery filled and the inverter turned its panels down, so its output can’t be compared fairly.',
+  }[v.state];
+  return (
+    <Card>
+      <SectionTitle right={<>{fmtKwh(a.pvToday)}{v.night ? ' today' : ' so far'}</>}>PANELS</SectionTitle>
+      {head && <div className="panels-status"><i className={'panels-dot ' + head[0]} />{head[1]}</div>}
+      {v.state === 'alert' && v.alerts.map(x => (
+        <div className="panels-alert" key={x.inv.sn + x.no}>
+          <b>{invName(x.inv)}, string {x.no}</b>{x.kind === 'nothing'
+            ? ' made nothing today, while the others made power.'
+            : <> made {pct(1 - x.today / x.usual)}% less than usual today.</>}
+          <div className="panels-why">{x.kind === 'nothing'
+            ? 'Usually ' + pct(x.usual) + '% of ' + (x.multi ? 'this inverter’s' : 'your') + ' solar. Check its breaker or isolator, or call your installer.'
+            : 'Usually ' + pct(x.usual) + '% of ' + (x.multi ? 'this inverter’s' : 'your') + ' solar by now; today ' + pct(x.today) + '%. Worth checking for shade, dirt or a tripped breaker.'}</div>
+        </div>
+      ))}
+      <div className={'panels-rows' + (head ? '' : ' flush')}>
+        {v.lines.map(l => (
+          <div className="panels-row" key={l.sn}>
+            <span>{l.name}<span className="panels-sub">{l.sub}</span></span>
+            <span className="panels-kwh mono" style={l.kwh == null ? { color: 'var(--dim)' } : null}>{l.kwh == null ? '—' : fmtKwh(l.kwh)}</span>
+          </div>
+        ))}
+      </div>
+      {note && <div className="panels-note">{note}</div>}
+    </Card>
+  );
+}
+
 // One day of one reading as a line across the whole day: solar (which needs a reading over
 // 20 W to count as made), grid import, or the battery's charge on a fixed 0-100% scale with
 // the reserve dashed.
@@ -801,6 +924,15 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const [cmp, setCmp] = React.useState(null);
   const [earliest, setEarliest] = React.useState(null);
   React.useEffect(() => { window.fetchCompare().then(setCmp).catch(() => {}); }, [refreshKey]);
+  // Panels: today's share of each string against its usual share by this time (0076). Asked on
+  // open, on refresh and every 10 minutes; the shares move slowly.
+  const [health, setHealth] = React.useState(null);
+  React.useEffect(() => {
+    const load = () => window.fetchStringHealth().then(setHealth).catch(() => setHealth(false));
+    load();
+    const t = setInterval(load, 600000);
+    return () => clearInterval(t);
+  }, [refreshKey]);
   React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
   const tot = periodTotals('pv', a.pvToday, energy, plantToday);
   const EP = window.fmtEnergyParts;
@@ -865,22 +997,6 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // it reads as a third unexplained number. It lives on Live, where Home and Imported sit on
   // the same strip and the subtraction is on screen, and on the Grid tab, which spells today's
   // sum out in a sentence. Rejected here on 2026-09-19 after trying it three ways.
-
-  // ---- strings ----
-  // some firmware leaves a string's readings empty; read those as zero rather than crash
-  const invs = snap.inverters.map(inv => ({ ...inv, strings: inv.strings.map(s => ({ ...s, v: Number(s.v) || 0, i: Number(s.i) || 0, p: Number(s.p) || 0 })) }));
-  const strings = invs.flatMap(inv => inv.strings);
-  const active = strings.filter(s => s.p >= 5).map(s => s.p);
-  const maxP = Math.max(0, ...active);
-  let lead = null;
-  if (strings.length && !active.length) lead = 'No string is making power right now.';
-  else if (active.length > 1) {
-    const spread = (maxP - Math.min(...active)) / maxP * 100;
-    lead = spread <= 10
-      ? 'The strings making power are within ' + Math.max(1, Math.ceil(spread)) + '% of each other.'
-      : 'The strings making power range from ' + fmtPower(Math.min(...active)) + ' to ' + fmtPower(maxP) + '.';
-  }
-  const anyDead = strings.some(s => s.v < 1.5 && s.p < 5);
 
   // ---- last 30 days ----
   const bars = withLiveToday(daily, plantToday, 'pv', a.pvToday);
@@ -950,36 +1066,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 
       </div>
 
-      {strings.length > 0 && (
-        <Card>
-          <SectionTitle>PANELS</SectionTitle>
-          {lead && <p className="solar-lead">{lead}</p>}
-          <div className="solar-invs">
-            {invs.filter(inv => inv.strings.length).map(inv => (
-              <div className="solar-inv" key={inv.sn}>
-                <div className="solar-inv-head"><span className="solar-inv-name">{inv.alias}</span><span className="solar-inv-today">{fmtKwh(inv.pvToday)} today</span></div>
-                <div className="solar-strings">
-                  {inv.strings.map(s => {
-                    const dead = s.v < 1.5 && s.p < 5, idle = s.p < 5;
-                    return (
-                      <div className={'solar-string' + (idle ? ' idle' : '') + (dead ? ' warn' : '')} key={s.no}>
-                        <div className="solar-string-top">
-                          <span className="solar-string-name">String {s.no} {dead ? <Badge tone="warn" dot>check</Badge> : idle ? <Badge tone="neutral">idle</Badge> : <Badge tone="ok" dot>active</Badge>}</span>
-                          <span className="solar-string-kw">{fmtPower(s.p)}</span>
-                        </div>
-                        {!idle && <div className="meter sm"><div className="meter-fill" style={{ width: (s.p / maxP * 100) + '%', background: CC.pv }} /></div>}
-                        <div className="solar-string-sub">{s.v.toFixed(1)} V · {s.i.toFixed(1)} A</div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {inv.unusedInputs > 0 && <div className="solar-string-sub">{inv.unusedInputs} unused {inv.unusedInputs === 1 ? 'input' : 'inputs'}</div>}
-              </div>
-            ))}
-          </div>
-          {anyDead && a.pvNow > 500 && <div className="hint-line">A string at 0 V while others make power is worth a look: shade, a tripped breaker or a failed string.</div>}
-        </Card>
-      )}
+      <PanelsCard snap={snap} health={health} />
     </div>
   );
 }

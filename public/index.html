@@ -655,19 +655,21 @@
   .solar-verdict { font-size: 24px; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
   .solar-verdict .mono { font-weight: 700; }
   .solar-spare-note { margin: 14px 0 6px; font-size: 13.5px; color: var(--muted); max-width: 62ch; line-height: 1.5; }
-  .solar-lead { font-size: 13px; color: var(--muted); margin: -6px 0 14px; }
-  .solar-invs { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px 20px; }
-  .solar-inv-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12.5px; }
-  .solar-inv-name { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
-  .solar-inv-today { font-family: var(--mono); color: var(--pv); }
-  .solar-strings { display: grid; gap: 8px; }
-  .solar-string { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
-  .solar-string.warn { border-color: rgba(248,113,113,0.35); }
-  .solar-string-top { display: flex; align-items: center; justify-content: space-between; gap: 8px 10px; flex-wrap: wrap; }
-  .solar-string-name { display: inline-flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
-  .solar-string-kw { font-family: var(--mono); font-size: 17px; font-weight: 700; color: var(--pv); }
-  .solar-string.idle .solar-string-kw { color: var(--muted); }
-  .solar-string-sub { margin-top: 7px; font-family: var(--mono); font-size: 13px; color: var(--dim); }
+  /* Panels (SOLAR-51): a status line, alerts only when a string is low, one line per inverter */
+  .panels-status { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 600; }
+  .panels-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--dim); }
+  .panels-dot.ok { background: var(--pv); box-shadow: 0 0 0 4px rgba(61,220,132,0.15); }
+  .panels-dot.warn { background: var(--warn); box-shadow: 0 0 0 4px rgba(245,158,11,0.15); }
+  .panels-alert { margin-top: 12px; padding: 12px 14px; border-radius: 10px; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25); font-size: 13.5px; }
+  .panels-alert b { color: var(--warn); }
+  .panels-why { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+  .panels-rows { margin-top: 14px; border-top: 1px solid var(--line); }
+  .panels-rows.flush { margin-top: 0; border-top: 0; }
+  .panels-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .panels-row:last-child { border-bottom: 0; }
+  .panels-sub { color: var(--dim); font-size: 12.5px; margin-left: 8px; }
+  .panels-kwh { font-weight: 600; color: var(--pv); white-space: nowrap; }
+  .panels-note { color: var(--dim); font-size: 12.5px; margin-top: 10px; }
   .solar-best { margin-top: 10px; font-size: 13px; color: var(--muted); }
   .solar-best b { font-family: var(--mono); font-weight: 600; color: var(--text); }
 
@@ -940,7 +942,6 @@
     .solar-stats .stat-tile { padding: 18px; }
     .solar-tab .section-title { flex-direction: column; align-items: flex-start; gap: 5px; }
     .solar-row { gap: 14px; }
-    .solar-invs { grid-template-columns: 1fr; }
     .stat-value .num { font-size: 34px; }
     .stat-value .unit { font-size: 18px; }
     .inv-sn { font-size: 18px; }
