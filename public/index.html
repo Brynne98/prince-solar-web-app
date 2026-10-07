@@ -162,6 +162,8 @@
   .menu hr { border: none; border-top: 1px solid var(--line); margin: 4px 0; }
   .menu .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bad); margin-left: auto; }
   .acct-menu { left: 0; right: 0; bottom: calc(100% + 6px); }
+  /* who is signed in, above Account and Sign out (back in SOLAR-97) */
+  .menu-email { padding: 8px 10px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .plant-menu { top: calc(100% + 6px); left: 0; min-width: 300px; width: max-content; max-width: min(460px, calc(100vw - 260px)); }
   .plant-menu button { display: grid; grid-template-columns: 18px minmax(0, 1fr); padding: 10px 12px; white-space: nowrap; }
   .plant-menu button[aria-checked="true"] { background: rgba(255,255,255,0.075); font-weight: 600; }
@@ -1245,7 +1247,8 @@
   .link-form .field label .link-bad { color: var(--load); }
   .link-form .input[aria-invalid="true"] { border-color: var(--load); }
   .link-form .link-last { margin-bottom: 0; }
-  .link-form .link-last .field-note { margin-top: 8px; }
+  .link-form .field-row .field { margin-bottom: 0; }
+  .link-form .link-note { margin-top: 8px; }
   .link-pw { position: relative; }
   .link-pw .input { padding-right: 44px; }
   .link-eye { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 40px; height: 36px; display: grid; place-items: center;

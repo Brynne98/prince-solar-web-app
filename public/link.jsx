@@ -182,16 +182,20 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
         <p className="sset-note">{relink
           ? 'SunSynk stopped accepting the saved login, usually after a password change. Your history is safe.'
           : 'Use the login from the SunSynk Connect app.'}</p>
-        <div className="field">
-          {label('ss-user', 'SunSynk email', ownEmail && username === ownEmail ? 'Your account email' : null)}
-          <input id="ss-user" className="input" type="text" placeholder="you@example.com" value={username} autoComplete="off"
-                 readOnly={!!relink} onChange={(e) => { setUsername(e.target.value); edited('ss-user'); }} {...invalid('ss-user')} />
+        {/* In Account the two fields share one line, as they did before (SOLAR-97); a phone
+            stacks them. On the Connect card they stack. */}
+        <div className={compact ? 'field-row' : undefined}>
+          <div className="field">
+            {label('ss-user', 'SunSynk email', ownEmail && username === ownEmail ? 'Your account email' : null)}
+            <input id="ss-user" className="input" type="text" placeholder="you@example.com" value={username} autoComplete="off"
+                   readOnly={!!relink} onChange={(e) => { setUsername(e.target.value); edited('ss-user'); }} {...invalid('ss-user')} />
+          </div>
+          <div className="field link-last">
+            {label('ss-pass', 'SunSynk password')}
+            <LinkPassword value={password} onChange={(v) => { setPassword(v); edited('ss-pass'); }} invalid={invalid('ss-pass')} />
+          </div>
         </div>
-        <div className="field link-last">
-          {label('ss-pass', 'SunSynk password')}
-          <LinkPassword value={password} onChange={(v) => { setPassword(v); edited('ss-pass'); }} invalid={invalid('ss-pass')} />
-          <div className="field-note">{compact ? 'We never keep your password.' : 'We never keep your password. Disconnect any time in Account.'}</div>
-        </div>
+        <div className="field-note link-note">{compact ? 'We never keep your password.' : 'We never keep your password. Disconnect any time in Account.'}</div>
       </>)}
       <div className="field-note link-err" role="alert" aria-live="polite">{err}</div>
       <div className="conn-form-actions link-actions">

@@ -148,6 +148,7 @@ function AccountMenu({ user, plantCount, alert, onAccount, active, variant }) {
       </button>
       {open && (
         <MenuList className="acct-menu" label="Account">
+          <div className="menu-email">{user.email}</div>
           <button type="button" onClick={() => { setOpen(false); onAccount(); }}>
             <Icon id="account" />Account{alert && <span className="dot" aria-label="A login needs reconnecting" />}
           </button>
@@ -360,14 +361,6 @@ function useUser() {
   return user;
 }
 
-// What each data page will hold, said over its empty outline.
-const SETUP_EMPTY = {
-  live: ['Your power right now', 'Solar, battery, grid and home, updated every minute.'],
-  solar: ['Your solar output', 'Each day’s production, and how it compares.'],
-  grid: ['Your grid use', 'What you bought, and when the grid went off.'],
-  inverters: ['Your equipment', 'Inverters, battery packs and panel strings.'],
-  settings: ['Your plant’s settings', 'Panels, tariff and battery, once your inverter is connected.'],
-};
 
 // Settings' own outline for Setup: its three plant sections, title on the left and a card of
 // fields on the right, as the real page draws them (SOLAR-96).
@@ -414,7 +407,6 @@ function Setup({ links }) {
   const connectBtn = (cls) => (
     <button type="button" className={'save-btn setup-btn ' + cls} onClick={connect} aria-label="Connect inverter"><Icon id="plug" /><span>Connect inverter</span></button>
   );
-  const empty = SETUP_EMPTY[tab];
   const outline = tab === 'settings' ? <SettingsSkeleton /> : <window.TabSkeleton tab={tab} />;
   return (
     <Frame tabs={TABS} tab={tab} onTab={go} account={account}
@@ -430,10 +422,11 @@ function Setup({ links }) {
                                    initialUsername={relink ? dead[0].sunsynk_username : undefined} />
                 </div>
               ) : (
+                // One card, the same words on every page (SOLAR-97).
                 <div className="setup-empty-box">
-                  <Icon id={tab} />
-                  <h2>{empty[0]}</h2>
-                  <p>{empty[1]}</p>
+                  <Icon id="plug" />
+                  <h2>Connect your inverter</h2>
+                  <p>Your solar, battery, grid and home show here once it’s connected.</p>
                   {connectBtn('')}
                 </div>
               )}
