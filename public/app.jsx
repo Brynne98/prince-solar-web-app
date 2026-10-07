@@ -164,8 +164,8 @@ function Sidebar({ tabs, tab, onTab, account }) {
       <div className="rail-logo"><span className="sun" aria-hidden="true" /><span className="app-name">Prince Solar</span></div>
       <nav className="nav" aria-label="Pages">
         {tabs.map(t => (
-          <button key={t.id} type="button" className={t.id === 'settings' ? 'nav-settings' : undefined} aria-current={tab === t.id ? 'page' : undefined}
-                  onClick={onTab && (() => onTab(t.id))} disabled={!onTab}>
+          <button key={t.id} type="button" className={(t.id === 'settings' ? 'nav-settings' : '') + (t.locked ? ' locked' : '') || undefined} aria-current={tab === t.id ? 'page' : undefined}
+                  onClick={onTab && (() => onTab(t.id))} disabled={!onTab || t.locked} title={t.locked ? LOCKED_TITLE : undefined}>
             <Icon id={t.id} /><span className="t">{t.label}</span>
           </button>
         ))}
@@ -193,7 +193,8 @@ function PhoneBar({ tabs, tab, onTab }) {
     return () => document.removeEventListener('keydown', key);
   }, [more]);
   const slot = (t) => (
-    <button key={t.id} type="button" aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id)} disabled={!onTab}>
+    <button key={t.id} type="button" className={t.locked ? 'locked' : undefined} aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id)}
+            disabled={!onTab || t.locked} title={t.locked ? LOCKED_TITLE : undefined}>
       <Icon id={t.id} /><span>{t.label}</span>
     </button>
   );
@@ -303,6 +304,8 @@ const TABS = [
   { id: 'inverters', label: 'Equipment' },
   { id: 'settings', label: 'Settings' },
 ];
+// A page that needs a plant, before one is connected (Setup).
+const LOCKED_TITLE = 'Connect your inverter first';
 // Account is a page too, reached from the account menu rather than the page list.
 const pageOk = (tabs, id) => id === 'account' || tabs.some(t => t.id === id);
 // A saved or linked Battery page opens Equipment, where the packs now are.
@@ -344,6 +347,55 @@ function BootShell() {
   );
 }
 
+// The signed-in person, for the account menu: name, initials, email.
+function useUser() {
+  const [user, setUser] = useState({ name: '', initials: '', email: '' });
+  useEffect(() => {
+    window.sb.auth.getSession().then(({ data }) => {
+      const u = data?.session?.user; if (!u) return;
+      const email = u.email || '';
+      const name = u.user_metadata?.full_name || u.user_metadata?.name || email.split('@')[0];
+      const initials = name.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+      setUser({ name, initials, email });
+    }).catch(() => {});
+  }, []);
+  return user;
+}
+
+// Signed in, with no SunSynk plant yet: a new account, or every login removed. The frame
+// is the real one, so Account (and Delete account) is a tap away; the pages that read a
+// plant wait, and Live holds the Connect card. Once a login lists a plant the gate's
+// refresh swaps this for App (SOLAR-93).
+const NEEDS_PLANT = ['solar', 'grid', 'inverters'];
+function Setup({ links }) {
+  const user = useUser();
+  const [tab, setTab] = useState(() => {
+    const t = new URLSearchParams(location.search).get('tab');
+    return t === 'settings' || t === 'account' ? t : 'live';
+  });
+  const go = (id) => { setTab(id); toTop(); };
+  const tabs = TABS.map(t => (NEEDS_PLANT.includes(t.id) ? { ...t, locked: true } : t));
+  const dead = links.accounts.filter(a => a.status === 'needs_relink');
+  const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
+  const account = { user, plantCount: 0, alert: dead.length > 0, onAccount: () => go('account'), active: tab === 'account' };
+  return (
+    <Frame tabs={tabs} tab={tab} onTab={go} account={account} head={<PlantMenu fallback="No inverter yet" />}>
+      {tab === 'account' ? <window.AccountTab onPlantConfigSaved={links.refresh} />
+        : tab === 'settings' ? (
+          <div className="settings-page">
+            <div className="page-head"><h1>Settings</h1><p>Your plant’s settings appear once your inverter is connected.</p></div>
+            <div><button type="button" className="save-btn" onClick={() => go('live')}>Connect your inverter</button></div>
+          </div>
+        ) : (
+          <div className="setup-connect">
+            <window.LinkForm framed relink={relink} onLinked={links.refresh} first={!links.accounts.length}
+                             initialUsername={relink ? dead[0].sunsynk_username : undefined} />
+          </div>
+        )}
+    </Frame>
+  );
+}
+
 function App({ links }) {
   // plan, preferences (the last plant viewed) and plants for the signed-in user (api_me)
   const [me, setMe] = useState(null);
@@ -363,17 +415,7 @@ function App({ links }) {
   const openSettings = (section) => {
     setFlashSection(section); setTab(section === 'connection' ? 'account' : 'settings'); toTop();
   };
-  // The signed-in person, for the account menu: name, initials, email.
-  const [user, setUser] = useState({ name: '', initials: '', email: '' });
-  useEffect(() => {
-    window.sb.auth.getSession().then(({ data }) => {
-      const u = data?.session?.user; if (!u) return;
-      const email = u.email || '';
-      const name = u.user_metadata?.full_name || u.user_metadata?.name || email.split('@')[0];
-      const initials = name.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
-      setUser({ name, initials, email });
-    }).catch(() => {});
-  }, []);
+  const user = useUser();
   // Settings with unsaved plant edits holds the plant where it is; a switch asked for
   // meanwhile bumps switchBlocked, and the save bar says why nothing happened.
   const settingsDirty = useRef(false);
@@ -602,5 +644,7 @@ const legalPage = new URLSearchParams(location.search).get('page');
 ReactDOM.createRoot(document.getElementById('root')).render(
   legalPage === 'terms' || legalPage === 'privacy'
     ? <window.LegalPage which={legalPage} />
-    : <window.AuthGate fallback={<BootShell />}><window.LinkGate fallback={<BootShell />}>{(links) => <App links={links} />}</window.LinkGate></window.AuthGate>
+    : <window.AuthGate fallback={<BootShell />}><window.LinkGate fallback={<BootShell />}>
+        {(links) => (links.accounts.some(a => (a.plants || []).length) ? <App links={links} /> : <Setup links={links} />)}
+      </window.LinkGate></window.AuthGate>
 );

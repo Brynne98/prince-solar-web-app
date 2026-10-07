@@ -135,6 +135,8 @@
   .nav button:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,0.04); }
   .nav button[aria-current="page"] { color: var(--text); background: rgba(255,255,255,0.075); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); font-weight: 600; }
   .nav button:disabled { cursor: progress; }
+  /* a page that needs a plant, before one is connected (SOLAR-93) */
+  .nav button.locked, .phonebar button.locked { opacity: .4; cursor: default; }
   .nav .nav-settings { margin-top: auto; }
 
   /* the account: a row at the foot of the sidebar, an avatar in a phone's header */
@@ -253,6 +255,8 @@
     @media (max-width: 359px) { .status-age { display: none; } }
     .status-age .age-date { display: none; }
     .acct-head { display: block; flex: none; }
+    /* no status between them (no inverter yet): the avatar still sits at the right edge */
+    .plant + .acct-head { margin-left: auto; }
     .acct-head .acct-btn { width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 50%; }
     .acct-head .avatar { width: 32px; height: 32px; }
     .acct-head .acct-btn.needs::after { left: auto; right: 1px; top: 1px; box-shadow: 0 0 0 2px var(--bg); }
@@ -1213,6 +1217,8 @@
   @media (prefers-reduced-motion: reduce) { .auth-spin { animation: none; } }
   .login-card .login-link:disabled { color: var(--dim); cursor: default; text-decoration: none; font-variant-numeric: tabular-nums; }
   .login-card .login-link.inline { min-height: 0; display: inline; font-size: inherit; }
+  /* Connect inside the app frame (no inverter yet): the same card, at the top of Live */
+  .setup-connect { display: flex; justify-content: center; padding-block: 8px 24px; }
   /* Connect: SunSynk feeds Prince Solar */
   .link-bridge { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 14px; background: var(--bg); border: 1px solid var(--line); }
   .link-node { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; white-space: nowrap; }

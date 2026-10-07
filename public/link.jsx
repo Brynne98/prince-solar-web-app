@@ -83,7 +83,8 @@ window.disconnectSunsynk = async function disconnectSunsynk(accountId) {
 // The same moment on the Connect screen and inside Settings; one wording for both.
 const NO_PLANT_TEXT = 'signed in, but SunSynk lists no plant for it. The installer usually still owns the plant: ask them to share it with this login in SunSynk Connect (Plant → Share). Your login is saved, so retry once it appears.';
 
-function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, first }) {
+// `framed`: inside the app frame (Setup), which already carries the brand and Sign out.
+function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, first, framed }) {
   const { useState, useEffect, useRef } = React;
   const [username, setUsername] = useState(initialUsername || '');
   const [password, setPassword] = useState('');
@@ -185,7 +186,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, first 
   if (noPlants) {
     return (
       <form className="login-card" onSubmit={submit} noValidate aria-busy={busy}>
-        <window.AuthBrand />
+        {!framed && <window.AuthBrand />}
         <div className="login-title">Connected, but no plant yet</div>
         <div className="login-sub">
           <b>{username.trim()}</b> {NO_PLANT_TEXT}
@@ -202,7 +203,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, first 
 
   return (
     <form className="login-card" onSubmit={submit} noValidate aria-busy={busy}>
-      <window.AuthBrand />
+      {!framed && <window.AuthBrand />}
       {first && !relink && <window.Steps n={2} />}
       <div className="login-title">{relink ? 'Reconnect SunSynk' : 'Connect your inverter'}</div>
       <div className="login-sub">
@@ -238,21 +239,24 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, first 
         {busy ? (finding ? 'Finding your plant…' : 'Checking your login…') : (relink ? 'Reconnect' : 'Connect')}
       </button>
       <div className="login-err" role="alert" aria-live="polite">{err}</div>
-      <div className="login-fine">We never keep your SunSynk password. Disconnect any time in Settings.</div>
-      <div className="login-links">
-        {/* Without a way out, someone signed in to the wrong account is stuck on this screen. */}
-        {onCancel
-          ? <button type="button" className="login-link quiet" onClick={onCancel}>Cancel</button>
-          : <window.SignOutButton className="login-link quiet" />}
-      </div>
+      <div className="login-fine">We never keep your SunSynk password. Disconnect any time in Account.</div>
+      {!framed && (
+        <div className="login-links">
+          {/* Without a way out, someone signed in to the wrong account is stuck on this screen. */}
+          {onCancel
+            ? <button type="button" className="login-link quiet" onClick={onCancel}>Cancel</button>
+            : <window.SignOutButton className="login-link quiet" />}
+        </div>
+      )}
     </form>
   );
 }
 window.LinkForm = LinkForm;
 
 /**
- * Sits inside AuthGate. Shows the dashboard when the user has at least one plant
- * they can see; otherwise the connect form. A login that needs reconnecting never
+ * Sits inside AuthGate. Hands the login list to its child, which shows the dashboard
+ * when a login lists a plant and the Setup frame (Connect on Live) when none does.
+ * A read that failed shows its own card, since it says nothing about the logins. A login that needs reconnecting never
  * hides the dashboard, even when every login has died: the stored readings are
  * still worth seeing, and the app shell shows a banner leading to Settings, where
  * each login reconnects on its own.
@@ -281,14 +285,10 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
 
   if (loading) return fallback;
 
-  const plants = accounts.flatMap(a => a.plants || []);
-  const active = accounts.some(a => a.status === 'active');
-  const needsRelink = accounts.some(a => a.status === 'needs_relink');
-
-  if (!plants.length) {
-    // A read that failed says nothing about the logins, so it must not ask for one: a
-    // household with plants would land on Connect, and a login that just connected would
-    // be asked for again.
+  // A read that failed says nothing about the logins, so it must not ask for one: a
+  // household with plants would land on Connect, and a login that just connected would
+  // be asked for again.
+  if (!accounts.some(a => (a.plants || []).length)) {
     if (error) {
       const retry = async (e) => { e.preventDefault(); setChecking(true); await refresh(); setChecking(false); };
       return (
@@ -304,12 +304,6 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
         </div>
       );
     }
-    return (
-      <div className="login-wrap">
-        <LinkForm relink={needsRelink && !active} onLinked={refresh} first={!accounts.length}
-                  initialUsername={needsRelink && !active ? accounts.find(a => a.status === 'needs_relink')?.sunsynk_username : undefined} />
-      </div>
-    );
   }
   return typeof children === 'function' ? children({ accounts, refresh }) : children;
 };
