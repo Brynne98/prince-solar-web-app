@@ -245,6 +245,8 @@ function fetchDataDays() {
 }
 
 async function fetchEarliest() {
+  // No plant yet (the empty outlines in Setup): there is no first day to ask about.
+  if (window.CURRENT_PLANT == null) return null;
   try { const api = await getJSON('/api/history/earliest'); return api.earliest || null; }
   catch (e) { return null; }
 }
