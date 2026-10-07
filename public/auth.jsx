@@ -8,9 +8,12 @@
 //
 // Four screens, one component, switched by `mode`:
 //   signin    email + password
-//   signup    email + password + confirm. If the project requires email
-//             confirmation, the user is told to check their inbox; otherwise they
-//             land straight in the app (and then on the Connect screen).
+//   signup    email + password, Google first. If the project requires email
+//             confirmation it moves on to `inbox`; otherwise they land straight in
+//             the app (and then on the Connect screen, step 2 of 2).
+//   inbox     "Check your inbox": no form. The emailed link signs them in, and a
+//             sign-in in another tab of this browser reaches this one too
+//             (supabase-js broadcasts it), so the screen moves on by itself.
 //   forgot    email → reset link
 //   recovery  reached from the reset link. Supabase signs the user in with a
 //             short-lived session and fires PASSWORD_RECOVERY; we ask for the new
@@ -170,6 +173,65 @@ function explain(ex) {
   return { text: ex?.message || 'Something went wrong. Try again.' };
 }
 
+/** Sign-up is two steps: this account, then the SunSynk login (link.jsx). */
+const Steps = ({ n }) => (
+  <div className="auth-steps"><span>Step {n} of 2</span><i style={{ '--fill': n * 50 + '%' }} /></div>
+);
+
+const MailIcon = () => (
+  <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="m4 7 8 6 8-6" />
+  </svg>
+);
+
+// A button straight to their webmail, for the addresses where we can tell which one it is.
+const MAIL_APPS = [
+  [/@(gmail|googlemail)\.com$/i, 'Open Gmail', 'https://mail.google.com/'],
+  [/@(outlook|hotmail|live|msn)\.[a-z.]+$/i, 'Open Outlook', 'https://outlook.live.com/mail/'],
+  [/@(yahoo|ymail)\.[a-z.]+$/i, 'Open Yahoo Mail', 'https://mail.yahoo.com/'],
+];
+// Supabase refuses a second confirmation email to one address within 60 s.
+const RESEND_WAIT = 60;
+
+/** After sign-up, until the emailed link is tapped. */
+function InboxCard({ email, onBack, onSignIn }) {
+  const { useState, useEffect } = React;
+  const [wait, setWait] = useState(RESEND_WAIT);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  useEffect(() => {
+    if (wait <= 0) return;
+    const t = setTimeout(() => setWait(w => w - 1), 1000);
+    return () => clearTimeout(t);
+  }, [wait]);
+  const app = MAIL_APPS.find(([re]) => re.test(email));
+  const resend = async () => {
+    setBusy(true); setMsg(null);
+    const { error } = await window.sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: SITE_URL } })
+      .catch(e => ({ error: e }));
+    setBusy(false);
+    if (error) setMsg(explain(error));
+    else { setMsg({ text: 'Sent again.', note: true }); setWait(RESEND_WAIT); }
+  };
+  return (
+    <div className="login-card">
+      <span className="auth-inbox"><MailIcon /></span>
+      <div className="login-title">Check your inbox</div>
+      <div className="login-sub">We sent a link to <b>{email}</b>. Tap it to carry on.</div>
+      {app && <a className="login-google" href={app[2]} target="_blank" rel="noopener">{app[1]}</a>}
+      <div className="auth-wait"><span className="auth-spin" aria-hidden="true" />Waiting for the link…</div>
+      <div className={'login-err' + (msg?.note ? ' login-note' : '')} role="alert" aria-live="polite">{msg?.text}</div>
+      <div className="login-links">
+        <button type="button" className="login-link quiet" onClick={onBack}>Wrong email?</button>
+        <button type="button" className="login-link" onClick={resend} disabled={busy || wait > 0}>
+          {busy ? 'Sending…' : wait > 0 ? `Resend in ${wait}s` : 'Resend link'}
+        </button>
+      </div>
+      <div className="login-fine">Confirmed on another device? <button type="button" className="login-link inline" onClick={onSignIn}>Sign in</button></div>
+    </div>
+  );
+}
+
 function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const { useState } = React;
   const [mode, setMode] = useState(initialMode);
@@ -181,6 +243,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const [err, setErr] = useState(null);
   const [note, setNote] = useState(null);
   const [agree, setAgree] = useState(false);
+  const [sentTo, setSentTo] = useState(null);
 
   // A failed Google round trip lands here signed out with the reason in the URL.
   // The back button restores the page from cache with `busy` still set, so clear it.
@@ -216,7 +279,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
       // Matches the minimum set in Supabase (Auth → Email) and supabase/config.toml.
       else if (newPw && password.length < 8) out['auth-password'] = 'Use at least 8 characters';
     }
-    if (newPw) {
+    if (mode === 'recovery') {
       if (!password2) out['auth-password2'] = 'Confirm your password';
       else if (password !== password2) out['auth-password2'] = 'Passwords don’t match';
     }
@@ -252,10 +315,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         const { data, error } = await window.sb.auth.signUp({ email: addr, password, options: { emailRedirectTo: SITE_URL } });
         if (error) throw error;
         // With email confirmation on, signUp returns a user but no session.
-        if (!data.session) {
-          go('signin');
-          setNote(`Check ${addr} for a confirmation link, then sign in.`);
-        }
+        if (!data.session) { setSentTo(addr); go('inbox'); }
       } else if (mode === 'forgot') {
         const { error } = await window.sb.auth.resetPasswordForEmail(addr, { redirectTo: SITE_URL });
         if (error) throw error;
@@ -286,17 +346,37 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
 
   const copy = {
     signin:   { h: 'Welcome back',          p: null,                                                   cta: 'Sign in',         busy: 'Signing in…' },
-    signup:   { h: 'Create your account',   p: 'Your Prince Solar login. You’ll connect SunSynk next.', cta: 'Create account',  busy: 'Creating account…' },
+    signup:   { h: 'Create your account',   p: null,                                                   cta: 'Create account',  busy: 'Creating account…' },
     forgot:   { h: 'Reset your password',   p: 'We’ll email you a link to choose a new one.',          cta: 'Send reset link', busy: 'Sending…' },
     recovery: { h: 'Choose a new password', p: 'Set a new password to continue.',                      cta: 'Save password',   busy: 'Saving…' },
   }[mode];
+
+  if (mode === 'inbox') {
+    return (
+      <div className="login-wrap">
+        <InboxCard email={sentTo} onBack={() => go('signup')} onSignIn={() => go('signin')} />
+      </div>
+    );
+  }
+
+  const googleButton = (
+    <button type="button" className="login-google" onClick={google} disabled={!!busy} aria-busy={busy === 'google'}>
+      <GoogleMark /> {busy === 'google' ? 'Opening Google…' : 'Continue with Google'}
+    </button>
+  );
 
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit} noValidate aria-busy={!!busy}>
         <AuthBrand />
+        {mode === 'signup' && <Steps n={1} />}
         <div className="login-title">{copy.h}</div>
         {copy.p && <div className="login-sub">{copy.p}</div>}
+        {/* Google first on sign-up: one tap, and no confirmation email to wait for. */}
+        {mode === 'signup' && (<>
+          {googleButton}
+          <div className="login-or"><span>or with email</span></div>
+        </>)}
 
         {mode !== 'recovery' && (
           <div className="auth-field">
@@ -314,7 +394,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
                          placeholder={mode === 'signin' ? 'Your password' : 'Choose a password'}
                          autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} />
         )}
-        {(mode === 'signup' || mode === 'recovery') && (
+        {mode === 'recovery' && (
           <PasswordField id="auth-password2" label="Confirm password" value={password2}
                          error={bad['auth-password2']}
                          onChange={(v) => { setPassword2(v); edited('auth-password2'); }}
@@ -339,15 +419,11 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
           {err?.action === 'signin' && <> <button type="button" className="login-link" onClick={() => go('signin')}>Sign in</button></>}
         </div>
 
-        {(mode === 'signin' || mode === 'signup') && (<>
+        {mode === 'signin' && (<>
           <div className="login-or"><span>or</span></div>
-          <button type="button" className="login-google" onClick={google} disabled={!!busy} aria-busy={busy === 'google'}>
-            <GoogleMark /> {busy === 'google' ? 'Opening Google…' : 'Continue with Google'}
-          </button>
-          {mode === 'signin' && (
-            <div className="login-fine">Continuing with Google creates an account and accepts
-              the <a href="?page=terms" target="_blank" rel="noopener">Terms</a> and <a href="?page=privacy" target="_blank" rel="noopener">Privacy Policy</a>.</div>
-          )}
+          {googleButton}
+          <div className="login-fine">Continuing with Google creates an account and accepts
+            the <a href="?page=terms" target="_blank" rel="noopener">Terms</a> and <a href="?page=privacy" target="_blank" rel="noopener">Privacy Policy</a>.</div>
         </>)}
 
         <div className="login-links">
@@ -399,4 +475,4 @@ function SignOutButton({ className, children = 'Sign out', busyText = 'Signing o
   return <button type="button" className={className} onClick={click} disabled={busy} aria-busy={busy}>{busy ? busyText : children}</button>;
 }
 // Shared with the Connect screen so it looks like the same product.
-Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordField, FieldLabel, invalidProps, SignOutButton });
+Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, Steps, PasswordField, FieldLabel, invalidProps, SignOutButton });

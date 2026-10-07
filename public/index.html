@@ -1196,6 +1196,37 @@
      overrides each browser's own, so the box lines up with the fields' left edge */
   .auth-consent input { flex: none; margin: 2px 0 0; width: 18px; height: 18px; accent-color: var(--pv); color-scheme: dark; }
   .auth-consent a { color: var(--pv); }
+  /* sign-up steps (SOLAR-92): "Step 1 of 2" and a bar, between the brand and the title */
+  .auth-steps { display: flex; align-items: center; gap: 12px; margin: 20px 0 -10px; font-size: 13px; font-weight: 600; color: var(--dim); }
+  .auth-steps i { flex: 1; max-width: 120px; height: 4px; border-radius: 2px; background: var(--line-2); position: relative; overflow: hidden; }
+  .auth-steps i::after { content: ""; position: absolute; inset: 0; width: var(--fill, 0%); background: var(--pv); border-radius: inherit; }
+  .auth-steps + .login-title { margin-top: 0; }
+  /* "Check your inbox" */
+  .auth-inbox { width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; margin-top: 4px;
+    background: rgba(61,220,132,0.08); border: 1px solid rgba(61,220,132,0.25); color: var(--pv); }
+  .auth-inbox + .login-title { margin-top: 0; }
+  .login-sub b { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+  .login-card a.login-google { text-decoration: none; }
+  .auth-wait { display: flex; align-items: center; gap: 12px; font-size: 15px; color: var(--muted); padding: 14px 16px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
+  .auth-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--pv); animation: auth-spin .9s linear infinite; flex: none; }
+  @keyframes auth-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .auth-spin { animation: none; } }
+  .login-card .login-link:disabled { color: var(--dim); cursor: default; text-decoration: none; font-variant-numeric: tabular-nums; }
+  .login-card .login-link.inline { min-height: 0; display: inline; font-size: inherit; }
+  /* Connect: SunSynk feeds Prince Solar */
+  .link-bridge { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 14px; background: var(--bg); border: 1px solid var(--line); }
+  .link-node { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .link-ss { width: 24px; height: 24px; border-radius: 7px; background: var(--panel-2); border: 1px solid var(--line-2); display: grid; place-items: center; font-family: var(--mono); font-size: 11px; color: var(--muted); flex: none; }
+  .link-wire { flex: 1; min-width: 20px; height: 2px; background: repeating-linear-gradient(90deg, var(--dim) 0 4px, transparent 4px 9px); animation: link-flow 1s linear infinite; }
+  @keyframes link-flow { to { background-position: 9px 0; } }
+  @media (prefers-reduced-motion: reduce) { .link-wire { animation: none; } }
+  .link-help { font-size: 14.5px; color: var(--muted); margin-top: -10px; }
+  .link-help summary { cursor: pointer; color: var(--pv); font-weight: 600; min-height: 40px; display: inline-flex; align-items: center; gap: 6px; list-style: none; }
+  .link-help summary::-webkit-details-marker { display: none; }
+  .link-help summary::after { content: "›"; display: inline-block; transition: transform .15s; }
+  .link-help[open] summary::after { transform: rotate(90deg); }
+  .link-help summary:focus-visible { outline: 2px solid var(--pv); outline-offset: 2px; border-radius: 4px; }
+  .link-help p { margin: 2px 0 0; line-height: 1.5; }
   /* legal pages */
   .legal-wrap { min-height: 100dvh; padding: 40px 24px 80px; display: flex; justify-content: center; }
   .legal { max-width: 680px; width: 100%; color: var(--text); }
