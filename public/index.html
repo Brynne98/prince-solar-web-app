@@ -255,6 +255,8 @@
     @media (max-width: 359px) { .status-age { display: none; } }
     .status-age .age-date { display: none; }
     .acct-head { display: block; flex: none; }
+    /* nothing between them (no inverter yet, Connect open): the avatar still sits at the right edge */
+    .plant + .acct-head { margin-left: auto; }
     .acct-head .acct-btn { width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 50%; }
     .acct-head .avatar { width: 32px; height: 32px; }
     .acct-head .acct-btn.needs::after { left: auto; right: 1px; top: 1px; box-shadow: 0 0 0 2px var(--bg); }
@@ -1199,10 +1201,6 @@
   .auth-consent input { flex: none; margin: 2px 0 0; width: 18px; height: 18px; accent-color: var(--pv); color-scheme: dark; }
   .auth-consent a { color: var(--pv); }
   /* sign-up steps (SOLAR-92): "Step 1 of 2" and a bar, between the brand and the title */
-  .auth-steps { display: flex; align-items: center; gap: 12px; margin: 20px 0 -10px; font-size: 13px; font-weight: 600; color: var(--dim); }
-  .auth-steps i { flex: 1; max-width: 120px; height: 4px; border-radius: 2px; background: var(--line-2); position: relative; overflow: hidden; }
-  .auth-steps i::after { content: ""; position: absolute; inset: 0; width: var(--fill, 0%); background: var(--pv); border-radius: inherit; }
-  .auth-steps + .login-title { margin-top: 0; }
   /* "Check your inbox" */
   .auth-inbox { width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; margin-top: 4px;
     background: rgba(61,220,132,0.08); border: 1px solid rgba(61,220,132,0.25); color: var(--pv); }
@@ -1217,40 +1215,54 @@
   .login-card .login-link.inline { min-height: 0; display: inline; font-size: inherit; }
   /* No inverter yet (SOLAR-94): a data page is its own layout as a still, faint outline,
      with one line on what will appear there; Connect opens its own screen over the app. */
-  .setup-stage { position: relative; }
+  /* The outline and the card share one grid cell. The card's layer is one screen tall and
+     sticks under the header, so the card stays centred in view however long the outline is,
+     and a short outline still gets the full screen. */
+  .setup-stage { display: grid; }
+  .setup-stage > * { grid-area: 1 / 1; min-width: 0; }
   .setup-outline { opacity: .35; pointer-events: none; user-select: none; }
   .setup-outline .skel::after { display: none; }
-  .setup-empty { position: absolute; inset: 0; display: flex; justify-content: center; align-items: flex-start; padding: 10vh 4px 0; }
-  .setup-empty-box { position: sticky; top: calc(var(--head-h) + 24px); max-width: 360px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center;
+  .setup-empty { position: sticky; top: calc(var(--head-h) + 14px); align-self: start; z-index: 1; height: calc(100dvh - var(--head-h) - 28px);
+    display: grid; place-items: center; padding: 0 4px; }
+  .setup-empty-box { width: min(380px, 100%); min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center;
     padding: 24px; border-radius: 16px; background: rgba(10,13,18,0.9); border: 1px solid var(--line-2); box-shadow: 0 20px 50px -24px rgba(0,0,0,0.9); }
   .setup-empty-box > .ico { width: 28px; height: 28px; color: var(--pv); }
   .setup-empty-box h2 { margin: 4px 0 0; font-size: 18px; text-wrap: balance; }
   .setup-empty-box p { margin: 0 0 6px; color: var(--muted); line-height: 1.45; font-size: 14px; }
   .setup-btn { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; padding: 10px 16px; border-radius: 10px; font-weight: 700; white-space: nowrap; }
   .setup-head-btn { margin-left: auto; }
-  .connect-screen { position: fixed; inset: 0; z-index: 30; overflow-y: auto; align-items: flex-start; padding-top: 64px; background: var(--bg); }
-  .connect-close { position: fixed; top: 14px; right: 14px; z-index: 31; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
-    border: 1px solid var(--line-2); background: var(--panel); color: var(--text); }
-  .connect-close:hover { border-color: var(--muted); }
-  .connect-close:focus-visible { outline: 2px solid var(--pv); outline-offset: 2px; }
+  /* Connect: the card opens into the form where it stands, as a Settings card. A form taller
+     than the screen scrolls inside its layer rather than spilling under the bottom bar. */
+  .setup-form { width: min(420px, 100%); max-height: 100%; overflow-y: auto; border-radius: 16px; animation: setup-open .26s cubic-bezier(.2,.7,.2,1); }
+  @keyframes setup-open { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .setup-form { animation: none; } }
+  /* The SunSynk login form (link.jsx), on that card and in Account, from the Settings parts */
+  .link-card { padding: 20px 22px 22px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 16px; box-shadow: 0 20px 50px -24px rgba(0,0,0,0.9); }
+  .link-form > .sset-note { margin-bottom: 18px; }
+  .link-form .sset-note b { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+  .link-form .field label { display: flex; justify-content: space-between; gap: 12px; }
+  .link-form .field label span { color: var(--dim); }
+  .link-form .field label .link-bad { color: var(--load); }
+  .link-form .input[aria-invalid="true"] { border-color: var(--load); }
+  .link-form .link-last { margin-bottom: 0; }
+  .link-form .link-last .field-note { margin-top: 8px; }
+  .link-pw { position: relative; }
+  .link-pw .input { padding-right: 44px; }
+  .link-eye { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 40px; height: 36px; display: grid; place-items: center;
+    background: none; border: 0; border-radius: 7px; color: var(--muted); }
+  .link-eye:hover { color: var(--text); }
+  .link-eye:focus-visible { outline: 2px solid var(--pv); outline-offset: -2px; }
+  .link-err { color: var(--load); margin-top: 10px; }
+  .link-err:empty { display: none; }
+  /* Cancel, then the green button, at the right edge */
+  .link-actions { justify-content: flex-end; align-items: stretch; margin-top: 18px; }
+  .link-actions .save-btn { display: inline-flex; align-items: center; gap: 8px; }
   @media (max-width: 599px) {
     .setup-head-btn { padding: 8px 12px; }
     .setup-head-btn span { display: none; }
+    /* the phone's content padding: 10 on top, the 56 px bar plus 10 below */
+    .setup-empty { top: calc(var(--head-h) + 10px); height: calc(100dvh - var(--head-h) - 76px - env(safe-area-inset-bottom, 0px)); }
   }
-  /* Connect: SunSynk feeds Prince Solar */
-  .link-bridge { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 14px; background: var(--bg); border: 1px solid var(--line); }
-  .link-node { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; white-space: nowrap; }
-  .link-ss { width: 24px; height: 24px; border-radius: 7px; background: var(--panel-2); border: 1px solid var(--line-2); display: grid; place-items: center; font-family: var(--mono); font-size: 11px; color: var(--muted); flex: none; }
-  .link-wire { flex: 1; min-width: 20px; height: 2px; background: repeating-linear-gradient(90deg, var(--dim) 0 4px, transparent 4px 9px); animation: link-flow 1s linear infinite; }
-  @keyframes link-flow { to { background-position: 9px 0; } }
-  @media (prefers-reduced-motion: reduce) { .link-wire { animation: none; } }
-  .link-help { font-size: 14.5px; color: var(--muted); margin-top: -10px; }
-  .link-help summary { cursor: pointer; color: var(--pv); font-weight: 600; min-height: 40px; display: inline-flex; align-items: center; gap: 6px; list-style: none; }
-  .link-help summary::-webkit-details-marker { display: none; }
-  .link-help summary::after { content: "›"; display: inline-block; transition: transform .15s; }
-  .link-help[open] summary::after { transform: rotate(90deg); }
-  .link-help summary:focus-visible { outline: 2px solid var(--pv); outline-offset: 2px; border-radius: 4px; }
-  .link-help p { margin: 2px 0 0; line-height: 1.5; }
   /* legal pages */
   .legal-wrap { min-height: 100dvh; padding: 40px 24px 80px; display: flex; justify-content: center; }
   .legal { max-width: 680px; width: 100%; color: var(--text); }

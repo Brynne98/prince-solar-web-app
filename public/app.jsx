@@ -75,7 +75,6 @@ const NAV_ICONS = {
   chevron: '<path d="m6 9 6 6 6-6"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
   plug: '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0V8zM12 18v4"/>',
-  close: '<path d="M18 6 6 18M6 6l12 12"/>',
 };
 // fixed strings from the table above, never data
 const Icon = ({ id }) => <svg className="ico" viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: NAV_ICONS[id] }} />;
@@ -367,32 +366,32 @@ const SETUP_EMPTY = {
   solar: ['Your solar output', 'Each day’s production, and how it compares.'],
   grid: ['Your grid use', 'What you bought, and when the grid went off.'],
   inverters: ['Your equipment', 'Inverters, battery packs and panel strings.'],
+  settings: ['Your plant’s settings', 'Panels, tariff and battery, once your inverter is connected.'],
 };
 
-// Connecting is its own screen over the app, never a form inside a page; ✕ or Esc goes back.
-function ConnectScreen({ links, onClose }) {
-  const dead = links.accounts.filter(a => a.status === 'needs_relink');
-  const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
-  useEffect(() => {
-    const key = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', key);
-    document.body.style.overflow = 'hidden';
-    return () => { document.removeEventListener('keydown', key); document.body.style.overflow = ''; };
-  }, []);
+// Settings' own outline for Setup: its three plant sections, title on the left and a card of
+// fields on the right, as the real page draws them (SOLAR-96).
+function SettingsSkeleton() {
+  const field = <div className="field"><window.Skeleton w={90} h={10} /><window.Skeleton h={40} r={10} style={{ marginTop: 10 }} /></div>;
   return (
-    <div className="login-wrap connect-screen" role="dialog" aria-modal="true" aria-label="Connect your inverter">
-      <button type="button" className="connect-close" onClick={onClose} aria-label="Close"><Icon id="close" /></button>
-      <window.LinkForm framed relink={relink} onLinked={links.refresh} first={!links.accounts.length}
-                       initialUsername={relink ? dead[0].sunsynk_username : undefined} />
+    <div className="settings-page">
+      <div className="page-head"><h1>Settings</h1></div>
+      {['Plant', 'Tariff', 'Battery'].map(t => (
+        <section key={t} className="sec">
+          <div className="sec-intro"><h2 className="sset-title">{t}</h2></div>
+          <div className="sset"><div className="field-row">{field}{field}</div></div>
+        </section>
+      ))}
     </div>
   );
 }
 
 // Signed in, with no SunSynk plant yet: a new account, or every login removed. The frame
-// is the real one, every page opens, and Account (with Delete account) works. A data page
-// shows its own layout as a still, faint outline with one line on what will appear there;
-// Connect inverter (there and in the header) opens ConnectScreen. Once a login lists a
-// plant the gate's refresh swaps this for App (SOLAR-93, SOLAR-94).
+// is the real one, every page opens, and Account (with Delete account) works. Every other
+// page shows its own layout as a still, faint outline, with one card centred in view saying
+// what will appear there (the same card, one size, on each page). Connect inverter, there or
+// in the header, opens that card into the form where it stands; Cancel or Esc folds it back
+// (SOLAR-96). Once a login lists a plant the gate's refresh swaps this for App (SOLAR-93, SOLAR-94).
 function Setup({ links }) {
   const user = useUser();
   const [tab, setTab] = useState(() => {
@@ -400,39 +399,48 @@ function Setup({ links }) {
     return pageOk(TABS, t) ? t : 'live';
   });
   const [connecting, setConnecting] = useState(false);
-  const go = (id) => { setTab(id); toTop(); };
-  const connect = () => setConnecting(true);
-  const account = { user, plantCount: 0, alert: links.accounts.some(a => a.status === 'needs_relink'),
-                    onAccount: () => go('account'), active: tab === 'account' };
+  const go = (id) => { setTab(id); setConnecting(false); toTop(); };
+  // Account has no card, so the header's button opens it on Live.
+  const connect = () => { if (tab === 'account') setTab('live'); setConnecting(true); };
+  useEffect(() => {
+    if (!connecting) return;
+    const key = (e) => { if (e.key === 'Escape') setConnecting(false); };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, [connecting]);
+  const dead = links.accounts.filter(a => a.status === 'needs_relink');
+  const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
+  const account = { user, plantCount: 0, alert: dead.length > 0, onAccount: () => go('account'), active: tab === 'account' };
   const connectBtn = (cls) => (
     <button type="button" className={'save-btn setup-btn ' + cls} onClick={connect} aria-label="Connect inverter"><Icon id="plug" /><span>Connect inverter</span></button>
   );
   const empty = SETUP_EMPTY[tab];
+  const outline = tab === 'settings' ? <SettingsSkeleton /> : <window.TabSkeleton tab={tab} />;
   return (
-    <>
-      <Frame tabs={TABS} tab={tab} onTab={go} account={account} head={<><PlantMenu fallback="No inverter yet" />{connectBtn('setup-head-btn')}</>}>
-        {tab === 'account' ? <window.AccountTab onPlantConfigSaved={links.refresh} />
-          : tab === 'settings' ? (
-            <div className="settings-page">
-              <div className="page-head"><h1>Settings</h1><p>Your plant’s settings appear once your inverter is connected.</p></div>
-              <div>{connectBtn('')}</div>
-            </div>
-          ) : (
-            <div className="setup-stage">
-              <div className="setup-outline" aria-hidden="true" inert=""><window.TabSkeleton tab={tab} /></div>
-              <div className="setup-empty">
+    <Frame tabs={TABS} tab={tab} onTab={go} account={account}
+      head={<><PlantMenu fallback="No inverter yet" />{!connecting && connectBtn('setup-head-btn')}</>}>
+      {tab === 'account' ? <window.AccountTab links={links} />
+        : (
+          <div className="setup-stage">
+            <div className="setup-outline" aria-hidden="true" inert="">{outline}</div>
+            <div className="setup-empty">
+              {connecting ? (
+                <div className="setup-form">
+                  <window.LinkForm relink={relink} onLinked={links.refresh} onCancel={() => setConnecting(false)}
+                                   initialUsername={relink ? dead[0].sunsynk_username : undefined} />
+                </div>
+              ) : (
                 <div className="setup-empty-box">
                   <Icon id={tab} />
                   <h2>{empty[0]}</h2>
                   <p>{empty[1]}</p>
                   {connectBtn('')}
                 </div>
-              </div>
+              )}
             </div>
-          )}
-      </Frame>
-      {connecting && <ConnectScreen links={links} onClose={() => setConnecting(false)} />}
-    </>
+          </div>
+        )}
+    </Frame>
   );
 }
 
@@ -607,7 +615,7 @@ function App({ links }) {
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} />;
   const settingsPage = <window.SettingsTab me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
     flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />;
-  const accountPage = <window.AccountTab onPlantConfigSaved={reloadPlantConfig}
+  const accountPage = <window.AccountTab onPlantConfigSaved={reloadPlantConfig} links={links}
     flash={flashSection} onFlashed={() => setFlashSection(null)} />;
 
   // ---- not-yet-loaded gate ----

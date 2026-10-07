@@ -173,11 +173,6 @@ function explain(ex) {
   return { text: ex?.message || 'Something went wrong. Try again.' };
 }
 
-/** Sign-up is two steps: this account, then the SunSynk login (link.jsx). */
-const Steps = ({ n }) => (
-  <div className="auth-steps"><span>Step {n} of 2</span><i style={{ '--fill': n * 50 + '%' }} /></div>
-);
-
 const MailIcon = () => (
   <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="m4 7 8 6 8-6" />
@@ -369,7 +364,6 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit} noValidate aria-busy={!!busy}>
         <AuthBrand />
-        {mode === 'signup' && <Steps n={1} />}
         <div className="login-title">{copy.h}</div>
         {copy.p && <div className="login-sub">{copy.p}</div>}
         {/* Google first on sign-up: one tap, and no confirmation email to wait for. */}
@@ -475,4 +469,4 @@ function SignOutButton({ className, children = 'Sign out', busyText = 'Signing o
   return <button type="button" className={className} onClick={click} disabled={busy} aria-busy={busy}>{busy ? busyText : children}</button>;
 }
 // Shared with the Connect screen so it looks like the same product.
-Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, Steps, PasswordField, FieldLabel, invalidProps, SignOutButton });
+Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordField, FieldLabel, invalidProps, SignOutButton });

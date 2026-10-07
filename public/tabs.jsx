@@ -1659,9 +1659,11 @@ function SettingsSection({ id, title, note, children }) {
 // which plants the app can see, so the app reloads its plant list afterwards; when
 // the last login goes there is nothing left to show and the page reloads onto the
 // Connect screen.
-function SunSynkConnectionSection({ onChanged }) {
+// `links` is the gate's own list (LinkGate), already read before the page opened, so the
+// section draws at once and its changes reach the rest of the app (SOLAR-96).
+function SunSynkConnectionSection({ onChanged, links }) {
   const { useState } = React;
-  const { loading, accounts, error, refresh } = window.useLinkStatus();
+  const { accounts, error, refresh } = links;
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
   const [mode, setMode] = useState(null); // null | 'add' | account_id being reconnected
@@ -1706,13 +1708,10 @@ function SunSynkConnectionSection({ onChanged }) {
     } catch (e) { setErr(e.message); setBusy(null); setLeaving(null); }
   };
   const n = live.length;
-  const title = <>SunSynk logins{!loading && n > 0 && <span className="sset-count">{n}</span>}</>;
+  const title = <>SunSynk logins{n > 0 && <span className="sset-count">{n}</span>}</>;
   return (
-    <SettingsSection id="connection" title={title} note="The SunSynk logins the app reads your plants through.">
-      {loading ? (
-        // same height as a row, so the section does not jump when the logins land
-        <div className="conn-row"><div className="conn-text"><div className="conn-user dim">Loading…</div><div className="conn-meta">&nbsp;</div></div></div>
-      ) : unread ? (
+    <SettingsSection id="connection" title={title}>
+      {unread ? (
         <div className="conn-row">
           <div className="conn-text"><div className="conn-user">Couldn’t load your logins</div><div className="conn-meta">&nbsp;</div></div>
           <div className="conn-actions"><button type="button" className="ghost-btn" onClick={retry} disabled={checking} aria-busy={checking}>{checking ? 'Checking…' : 'Try again'}</button></div>
@@ -1760,9 +1759,8 @@ function SunSynkConnectionSection({ onChanged }) {
           </div>
         );
       })}
-      {!loading && !unread && (mode === 'add'
+      {!unread && (mode === 'add'
         ? <div className="conn-row conn-add-row"><div className="conn-text">
-            <div className="conn-user">Add login</div>
             {/* Cancel re-reads too: a login with no plant yet is saved but not listed. */}
             <window.LinkForm compact onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
           </div></div>
@@ -2058,7 +2056,7 @@ function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirt
 }
 
 // Account: the person. Sign out is in the account menu only.
-function AccountTab({ onPlantConfigSaved, flash, onFlashed }) {
+function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
   const { useState, useEffect } = React;
   const [email, setEmail] = useState(null);
   useEffect(() => { window.sb.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || null)).catch(() => {}); }, []);
@@ -2069,7 +2067,7 @@ function AccountTab({ onPlantConfigSaved, flash, onFlashed }) {
           <h1>Account</h1>
           {email && <p className="mono">{email}</p>}
         </div>
-        <SunSynkConnectionSection onChanged={onPlantConfigSaved} />
+        <SunSynkConnectionSection onChanged={onPlantConfigSaved} links={links} />
         <DeleteAccountSection email={email} />
         <div className="app-version mono">{window.APP_VERSION}</div>
       </div>

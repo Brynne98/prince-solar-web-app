@@ -83,8 +83,28 @@ window.disconnectSunsynk = async function disconnectSunsynk(accountId) {
 // The same moment on the Connect screen and inside Settings; one wording for both.
 const NO_PLANT_TEXT = 'signed in, but SunSynk lists no plant for it. The installer usually still owns the plant: ask them to share it with this login in SunSynk Connect (Plant → Share). Your login is saved, so retry once it appears.';
 
-// `framed`: inside the app frame (Setup), which already carries the brand and Sign out.
-function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, first, framed }) {
+/** Password input in the app's field style, with a show button. type="button": inside a
+ *  form a bare button submits. */
+function LinkPassword({ value, onChange, invalid }) {
+  const [show, setShow] = React.useState(false);
+  return (
+    <div className="link-pw">
+      <input id="ss-pass" className="input" type={show ? 'text' : 'password'} value={value} autoComplete="off"
+             onChange={(e) => onChange(e.target.value)} {...invalid} />
+      <button type="button" className="link-eye" onClick={() => setShow(v => !v)}
+              aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show}>
+        {show ? <window.EyeOffIcon /> : <window.EyeIcon />}
+      </button>
+    </div>
+  );
+}
+
+// One form for a SunSynk login, built from the app's own Settings parts (SOLAR-96).
+// `compact`: inside Account's SunSynk logins section (Add login, Reconnect). Otherwise the
+// Connect card that opens in place on a page with no inverter yet (Setup), with its title.
+// Either way: one line on which login, the two fields, a note, then Cancel and the green
+// button at the right.
+function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
   const { useState, useEffect, useRef } = React;
   const [username, setUsername] = useState(initialUsername || '');
   const [password, setPassword] = useState('');
@@ -95,7 +115,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, first,
   // Most households use one email for both, so start from the account's own.
   const [ownEmail, setOwnEmail] = useState(null);
   useEffect(() => {
-    if (initialUsername || compact) return;
+    if (initialUsername) return;
     let alive = true;
     window.sb.auth.getSession().then(({ data }) => {
       const email = data.session?.user?.email;
@@ -107,7 +127,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, first,
   }, []);
   const [err, setErr] = useState(null);
   const [noPlants, setNoPlants] = useState(false);
-  // Field id → message, shown on the label line like the sign-in card.
+  // Field id → message, shown on the label line.
   const [bad, setBad] = useState({});
   const edited = (id) => setBad(b => (b[id] ? { ...b, [id]: undefined } : b));
 
@@ -117,7 +137,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, first,
     if (!username.trim()) problems['ss-user'] = 'Enter your email';
     if (!password) problems['ss-pass'] = 'Enter your password';
     if (Object.keys(problems).length) {
-      setBad(problems); setErr(compact ? 'Enter your SunSynk email and password.' : null);
+      setBad(problems); setErr(null);
       setTimeout(() => document.getElementById(Object.keys(problems)[0])?.focus());
       return;
     }
@@ -126,7 +146,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, first,
     try {
       const r = await window.linkSunsynk(username.trim(), password);
       // No plant yet. Nothing on the server looks at this login again, so Retry has to
-      // ask SunSynk afresh: the password stays in memory while the card is up, no longer.
+      // ask SunSynk afresh: the password stays in memory while the form is up, no longer.
       if (r.warning) {
         if (noPlants) setErr('Still no plant on this login.');
         setNoPlants(true);
@@ -143,111 +163,43 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, first,
     }
   };
 
-  // Inside Settings the form sits in the Connection section and borrows its field
-  // styling rather than the sign-in card's. Same submit, same messages.
-  if (compact) {
-    return (
-      <form className="conn-form" onSubmit={submit} noValidate aria-busy={busy}>
-        {noPlants ? (
-          <div className="field-note" style={{ marginTop: 0 }}>
-            <b style={{ color: 'var(--text)' }}>{username.trim()}</b> {NO_PLANT_TEXT}
-          </div>
-        ) : (
-          <div className="field-row">
-            <div className="field">
-              <label htmlFor="ss-user">SunSynk Connect email</label>
-              <input id="ss-user" className="input" type="text" placeholder="you@example.com" value={username}
-                     autoComplete="off" onChange={(e) => { setUsername(e.target.value); edited('ss-user'); }}
-                     readOnly={!!relink} autoFocus={!relink} {...window.invalidProps('ss-user', bad['ss-user'], null)} />
-            </div>
-            <div className="field">
-              <label htmlFor="ss-pass">SunSynk Connect password</label>
-              <input id="ss-pass" className="input" type="password" placeholder="Your SunSynk password" value={password} autoComplete="off"
-                     onChange={(e) => { setPassword(e.target.value); edited('ss-pass'); }} {...window.invalidProps('ss-pass', bad['ss-pass'], null)} />
-            </div>
-          </div>
-        )}
-        <div className="conn-form-actions">
-          <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>
-            {noPlants ? (busy ? 'Checking…' : 'Retry now') : busy ? 'Connecting…' : relink ? 'Reconnect' : 'Connect'}
-          </button>
-          {/* not mid-request: its answer would land after the form had gone */}
-          {onCancel && <button type="button" className="ghost-btn" onClick={onCancel} disabled={busy}>Cancel</button>}
-          {err ? <span className="field-note" style={{ margin: 0, color: 'var(--load)' }}>{err}</span>
-               : <span className="field-note" style={{ margin: 0 }}>Password is exchanged for a token, never stored.</span>}
-        </div>
-      </form>
-    );
-  }
-
-  // The login worked but SunSynk lists no plant for it. Almost always the
-  // installer still owns the plant; nothing here can fix that, so say what will.
-  // A form so Retry is the card's submit button and gets the primary look.
-  if (noPlants) {
-    return (
-      <form className="login-card" onSubmit={submit} noValidate aria-busy={busy}>
-        {!framed && <window.AuthBrand />}
-        <div className="login-title">Connected, but no plant yet</div>
-        <div className="login-sub">
-          <b>{username.trim()}</b> {NO_PLANT_TEXT}
-        </div>
-        <button type="submit" disabled={busy} aria-busy={busy}>{busy ? 'Checking…' : 'Retry now'}</button>
-        <div className="login-err" role="alert" aria-live="polite">{err}</div>
-        <div className="login-links">
-          <button type="button" className="login-link quiet" disabled={busy}
-                  onClick={() => { setNoPlants(false); setPassword(''); setErr(null); }}>Use a different SunSynk login</button>
-        </div>
-      </form>
-    );
-  }
+  const label = (id, text, hint) => (
+    <label htmlFor={id}>{text}{bad[id] ? <span className="link-bad" id={id + '-err'}>{bad[id]}</span> : hint && <span>{hint}</span>}</label>
+  );
+  const invalid = (id) => window.invalidProps(id, bad[id]);
+  const green = noPlants ? (busy ? 'Checking…' : 'Retry now')
+    : busy ? (finding ? 'Finding your plant…' : 'Checking your login…')
+    : relink ? 'Reconnect' : compact ? 'Add login' : 'Connect';
 
   return (
-    <form className="login-card" onSubmit={submit} noValidate aria-busy={busy}>
-      {!framed && <window.AuthBrand />}
-      {first && !relink && <window.Steps n={2} />}
-      <div className="login-title">{relink ? 'Reconnect SunSynk' : 'Connect your inverter'}</div>
-      <div className="login-sub">
-        {relink
-          ? 'SunSynk stopped accepting the saved login, usually after a password change. Sign in again to keep logging. Your history is safe.'
-          : 'Prince Solar reads your system through SunSynk.'}
-      </div>
-      {/* A second email and password reads as signing in again; this shows it is another service. */}
-      {!relink && (
-        <div className="link-bridge" aria-hidden="true">
-          <span className="link-node"><span className="link-ss">SS</span>SunSynk</span>
-          <span className="link-wire" />
-          <span className="link-node"><span className="sun" />Prince Solar</span>
+    <form className={compact ? 'conn-form link-form' : 'link-form link-card'} onSubmit={submit} noValidate aria-busy={busy}>
+      {!compact && <h2 className="sset-title">{noPlants ? 'Connected, but no plant yet' : relink ? 'Reconnect SunSynk' : 'Connect your inverter'}</h2>}
+      {noPlants ? (
+        // The login worked but SunSynk lists no plant for it. Almost always the installer
+        // still owns the plant; nothing here can fix that, so say what will.
+        <p className="sset-note"><b>{username.trim()}</b> {NO_PLANT_TEXT}</p>
+      ) : (<>
+        <p className="sset-note">{relink
+          ? 'SunSynk stopped accepting the saved login, usually after a password change. Your history is safe.'
+          : 'Use the login from the SunSynk Connect app.'}</p>
+        <div className="field">
+          {label('ss-user', 'SunSynk email', ownEmail && username === ownEmail ? 'Your account email' : null)}
+          <input id="ss-user" className="input" type="text" placeholder="you@example.com" value={username} autoComplete="off"
+                 readOnly={!!relink} onChange={(e) => { setUsername(e.target.value); edited('ss-user'); }} {...invalid('ss-user')} />
         </div>
-      )}
-      <div className="auth-field">
-        <window.FieldLabel id="ss-user" label="SunSynk email" error={bad['ss-user']}
-                           hint={ownEmail && username === ownEmail ? 'Your account email' : null} />
-        <input id="ss-user" type="text" placeholder="you@example.com" value={username} autoComplete="off"
-               onChange={(e) => { setUsername(e.target.value); edited('ss-user'); }}
-               {...window.invalidProps('ss-user', bad['ss-user'])} />
-      </div>
-      <window.PasswordField id="ss-pass" label="SunSynk password" value={password} error={bad['ss-pass']}
-                            onChange={(v) => { setPassword(v); edited('ss-pass'); }}
-                            placeholder="Your SunSynk password" autoComplete="off" />
-      {!relink && (
-        <details className="link-help">
-          <summary>Which login?</summary>
-          <p>The one you use in the SunSynk Connect app. Forgot the password? Reset it there, then come back.</p>
-        </details>
-      )}
-      <button type="submit" disabled={busy} aria-busy={busy}>
-        {busy ? (finding ? 'Finding your plant…' : 'Checking your login…') : (relink ? 'Reconnect' : 'Connect')}
-      </button>
-      <div className="login-err" role="alert" aria-live="polite">{err}</div>
-      <div className="login-fine">We never keep your SunSynk password. Disconnect any time in Account.</div>
-      {!framed && (
-        <div className="login-links">
-          {/* Without a way out, someone signed in to the wrong account is stuck on this screen. */}
-          {onCancel
-            ? <button type="button" className="login-link quiet" onClick={onCancel}>Cancel</button>
-            : <window.SignOutButton className="login-link quiet" />}
+        <div className="field link-last">
+          {label('ss-pass', 'SunSynk password')}
+          <LinkPassword value={password} onChange={(v) => { setPassword(v); edited('ss-pass'); }} invalid={invalid('ss-pass')} />
+          <div className="field-note">{compact ? 'We never keep your password.' : 'We never keep your password. Disconnect any time in Account.'}</div>
         </div>
-      )}
+      </>)}
+      <div className="field-note link-err" role="alert" aria-live="polite">{err}</div>
+      <div className="conn-form-actions link-actions">
+        {noPlants
+          ? <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setNoPlants(false); setPassword(''); setErr(null); }}>Use a different login</button>
+          : onCancel && <button type="button" className="ghost-btn" onClick={onCancel} disabled={busy}>Cancel</button>}
+        <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>{green}</button>
+      </div>
     </form>
   );
 }
@@ -305,5 +257,5 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
       );
     }
   }
-  return typeof children === 'function' ? children({ accounts, refresh }) : children;
+  return typeof children === 'function' ? children({ accounts, error, refresh }) : children;
 };
