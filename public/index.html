@@ -111,7 +111,9 @@
      moves nothing (SOLAR-22); a phone keeps scrolling the document */
   @media (min-width: 600px) {
     .frame { height: 100dvh; }
-    .frame-body { overflow-y: auto; overscroll-behavior: none; }
+    /* stable: a short page keeps the scrollbar's room, so moving between pages never
+       shifts the content sideways (SOLAR-95) */
+    .frame-body { overflow-y: auto; overscroll-behavior: none; scrollbar-gutter: stable; }
   }
   /* flex: 1 0 auto: shrinking to the scroll box would push the bottom padding under the last card (SOLAR-25) */
   /* the gap under the last card matches the one above the first (SOLAR-25) */
