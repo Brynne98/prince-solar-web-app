@@ -454,19 +454,22 @@ window.AuthGate = function AuthGate({ children, fallback = null }) {
 };
 
 // Signs out this device only: the wall tablet stays signed in when a phone signs out.
+// supabase-js 2.58 keeps the session when that call fails (offline, a 5xx). Newer
+// releases clear it locally then; _removeSession is that same step (storage, then
+// SIGNED_OUT to every tab), safe to call on the pinned build. SIGNED_OUT is what turns
+// AuthGate to the sign-in screen, so nothing after this should reload the page: a reload
+// blanks it and draws sign-in a second time (SOLAR-98).
+async function signOutHere() {
+  const { error } = await window.sb.auth.signOut({ scope: 'local' }).catch(e => ({ error: e }));
+  if (error) await window.sb.auth._removeSession();
+}
+
 // That still waits on a server round trip before the screen changes, so the button says
 // it is working. It is never reset: the session ends either way, and that unmounts it.
-// supabase-js 2.58 keeps the session when that call fails (offline, a 5xx), which left
-// the button doing nothing. Newer releases clear it locally then; _removeSession is that
-// same step (storage, then SIGNED_OUT to every tab), safe to call on the pinned build.
 function SignOutButton({ className, children = 'Sign out', busyText = 'Signing out…' }) {
   const [busy, setBusy] = React.useState(false);
-  const click = async () => {
-    setBusy(true);
-    const { error } = await window.sb.auth.signOut({ scope: 'local' }).catch(e => ({ error: e }));
-    if (error) await window.sb.auth._removeSession();
-  };
+  const click = async () => { setBusy(true); await signOutHere(); };
   return <button type="button" className={className} onClick={click} disabled={busy} aria-busy={busy}>{busy ? busyText : children}</button>;
 }
 // Shared with the Connect screen so it looks like the same product.
-Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordField, FieldLabel, invalidProps, SignOutButton });
+Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordField, FieldLabel, invalidProps, SignOutButton, signOutHere });

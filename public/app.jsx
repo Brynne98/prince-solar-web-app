@@ -387,8 +387,9 @@ function SettingsSkeleton() {
 // (SOLAR-96). Once a login lists a plant the gate's refresh swaps this for App (SOLAR-93, SOLAR-94).
 function Setup({ links }) {
   const user = useUser();
+  // The remembered page too, so removing the last login on Account stays on Account.
   const [tab, setTab] = useState(() => {
-    const t = tabAlias(new URLSearchParams(location.search).get('tab') || '');
+    const t = tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab') || '');
     return pageOk(TABS, t) ? t : 'live';
   });
   const [connecting, setConnecting] = useState(false);

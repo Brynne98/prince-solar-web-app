@@ -1657,8 +1657,7 @@ function SettingsSection({ id, title, note, children }) {
 // The signed-in user's SunSynk logins: one row each with its plants, a reconnect in
 // place when the token has died, and a remove. Adding or removing a login changes
 // which plants the app can see, so the app reloads its plant list afterwards; when
-// the last login goes there is nothing left to show and the page reloads onto the
-// Connect screen.
+// the last login goes there is nothing left to show and the app turns to its empty pages.
 // `links` is the gate's own list (LinkGate), already read before the page opened, so the
 // section draws at once and its changes reach the rest of the app (SOLAR-96).
 function SunSynkConnectionSection({ onChanged, links }) {
@@ -1697,7 +1696,9 @@ function SunSynkConnectionSection({ onChanged, links }) {
     setBusy(acc.account_id); setErr(null);
     try {
       await window.disconnectSunsynk(acc.account_id);
-      if (last) { location.reload(); return; }
+      // The last login: re-reading the list leaves no plant, so the app turns to its empty
+      // pages in place. A reload here blanked the screen first (SOLAR-98).
+      if (last) { await refresh(); return; }
       setBusy(null); setLeaving(acc.account_id);
       // The row stays folded until the fresh list drops it; clearing it first popped it back.
       // If that read fails the old list stays, so the row stays folded rather than showing
@@ -1753,7 +1754,7 @@ function SunSynkConnectionSection({ onChanged, links }) {
             {confirming === acc.account_id && (
               <ConfirmCard
                 title={<>Remove <b>{acc.sunsynk_username}</b>?</>}
-                text={'History goes too, unless someone else shares the plant.' + (live.length === 1 ? ' Your only login, so the app returns to the Connect screen.' : '')}
+                text={'History goes too, unless someone else shares the plant.' + (live.length === 1 ? ' Your only login, so your pages go empty until you connect again.' : '')}
                 action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
             )}
           </div>
@@ -2018,7 +2019,9 @@ function DeleteAccountSection({ email }) {
   const del = async () => {
     setConfirming(false);
     setBusy(true); setErr(null);
-    try { await window.deleteAccount(); await window.sb.auth.signOut(); location.href = './'; }
+    // The account is gone; signing out here is what moves the screen to sign-in, once.
+    // No reload after it: that blanked the page and drew sign-in again (SOLAR-98).
+    try { await window.deleteAccount(); await window.signOutHere(); }
     catch (e) { setErr(e.message); setBusy(false); }
   };
   return (
