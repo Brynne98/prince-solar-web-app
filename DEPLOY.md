@@ -167,10 +167,12 @@ onto today; that must stay local.
 
 ## Moving to a custom domain
 
-Two places know the origin, neither needs a code change:
+Two places know the origin:
 
-- **Browser → link-sunsynk (CORS).** `supabase secrets set LINK_ALLOWED_ORIGINS=https://app.example.com`
-  then `supabase functions deploy link-sunsynk`. The GitHub Pages origin stays allowed by default.
+- **Browser → link-sunsynk (CORS).** `DEFAULT_ORIGINS` in `link-sunsynk/index.ts` lists
+  princesolarhub.com (with www) and the GitHub Pages origin; a change needs
+  `supabase functions deploy link-sunsynk`. Another origin can be added without a code
+  change: `supabase secrets set LINK_ALLOWED_ORIGINS=https://app.example.com`.
 - **Supabase Auth.** Dashboard → Authentication → URL Configuration: Site URL and
   the redirect list must include the new origin, or confirmation and reset links land on the old one.
 
@@ -189,4 +191,4 @@ does not change with the site's domain.
 | `.github/workflows/pages.yml` | the Pages deploy |
 | `.github/workflows/health.yml` | half-hourly logger check, emails on failure |
 
-Project ref `pmakzojwhouamawgszrc` · site https://brynne98.github.io/prince-solar-web-app
+Project ref `pmakzojwhouamawgszrc` · site https://brynne98.github.io/prince-solar-web-app · domain princesolarhub.com on Cloudflare Pages, both kept live (SOLAR-86)

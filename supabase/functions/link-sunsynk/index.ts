@@ -10,11 +10,13 @@
 // way: no console.log of the body, no error message that includes input.
 import { db, linkAccount } from "../_shared/sunsynk.ts";
 
-// Browser origins allowed to call this. GitHub Pages in production, the two local
-// dev ports otherwise. Anything else is refused at preflight. A custom domain is
+// Browser origins allowed to call this. princesolarhub.com and GitHub Pages in
+// production, the two local dev ports otherwise. Anything else is refused at preflight. A custom domain is
 // added with the LINK_ALLOWED_ORIGINS secret (comma-separated), no redeploy of code:
 //   supabase secrets set LINK_ALLOWED_ORIGINS=https://app.example.com,https://example.com
 const DEFAULT_ORIGINS = [
+  "https://princesolarhub.com",
+  "https://www.princesolarhub.com",
   "https://brynne98.github.io",
   "http://localhost:3003",
   "http://localhost:3011",
