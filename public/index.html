@@ -1266,16 +1266,6 @@
     /* the phone's content padding: 10 on top, the 56 px bar plus 10 below */
     .setup-empty { top: calc(var(--head-h) + 10px); height: calc(100dvh - var(--head-h) - 76px - env(safe-area-inset-bottom, 0px)); }
   }
-  /* legal pages */
-  .legal-wrap { min-height: 100dvh; padding: 40px 24px 80px; display: flex; justify-content: center; }
-  .legal { max-width: 680px; width: 100%; color: var(--text); }
-  .legal h1 { font-size: 28px; letter-spacing: -0.02em; margin: 24px 0 6px; }
-  .legal-meta { color: var(--dim); font-size: 12.5px; margin-bottom: 26px; }
-  .legal section { margin-bottom: 20px; }
-  .legal h2 { font-size: 15px; margin: 0 0 6px; }
-  .legal p { margin: 0; color: var(--muted); line-height: 1.55; font-size: 14.5px; }
-  .legal-links { margin-top: 36px; font-size: 13px; color: var(--dim); }
-  .legal-links a { color: var(--pv); }
   /* danger zone in settings */
   .danger-btn { background: none; border: 1px solid var(--load); color: var(--load); padding: 8px 14px; border-radius: 9px; font-size: 13px; cursor: pointer; }
   /* pull down at the top to reload: the bounce is off, which also took the browser's own (SOLAR-22) */
@@ -1297,7 +1287,6 @@
 <script src="config.js"></script>
 <script type="text/babel" src="auth.jsx"></script>
 <script type="text/babel" src="link.jsx"></script>
-<script type="text/babel" src="legal.jsx"></script>
 <script type="text/babel" src="data.jsx"></script>
 <script type="text/babel" src="components.jsx"></script>
 <script type="text/babel" src="flow.jsx"></script>
