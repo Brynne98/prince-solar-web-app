@@ -1,39 +1,42 @@
 // ============================================================================
 // legal.jsx — Terms of Service and Privacy Policy.
 //
-// PLACEHOLDER COPY. Every paragraph below is a stand-in to be replaced by the real
-// text before paying customers. It is deliberately plain about the one thing that
-// matters most: what we hold about a user's SunSynk account and what we don't.
+// Written for the free testing phase, run by one person (SOLAR-103). Before any
+// paid plan, SOLAR-104 adds what selling needs: physical address, phone, prices,
+// refunds and a PAIA manual.
 // Reachable logged-out at ?page=terms and ?page=privacy, and linked from sign-up.
 // ============================================================================
 
 const LEGAL = {
   terms: {
     title: 'Terms of Service',
-    updated: 'September 2026',
+    updated: '17 October 2026',
     sections: [
-      ['What this is', 'Prince Solar is a monitoring dashboard for solar installations. It reads data that your inverter already reports to its manufacturer’s cloud, keeps a permanent history of it, and shows you what it means. It does not control your inverter.'],
-      ['Your account', 'You need an account to use the service. You are responsible for keeping your password safe and for what happens under your login.'],
-      ['Connecting your inverter', 'To read your data you connect your SunSynk Connect login. We exchange it once for an access token and do not keep the password. You can disconnect at any time from Settings, which deletes the token.'],
-      ['What we promise, and what we don’t', 'We will do our best to keep the service running and the data accurate. We cannot guarantee either: the data comes from your inverter and its manufacturer, and we rely on their systems being available and correct. Do not make safety or financial decisions on this dashboard alone.'],
-      ['Free service', 'The service is currently free. We may introduce paid plans; anything you use today will remain available on a free plan or we will give you notice.'],
-      ['Ending things', 'You can delete your account from Settings at any time, which removes your data. We may suspend accounts that abuse the service.'],
-      ['Changes', 'We may update these terms. We will show you a notice in the app when we do.'],
-      ['Contact', 'Questions: brynneprince98@gmail.com.'],
+      ['What this is', 'Prince Solar shows the readings your inverter already sends to SunSynk, keeps a history of them, and explains what they mean. It does not control your inverter.'],
+      ['Who runs it', 'Brynne Prince, an individual in South Africa. Contact: brynneprince98@gmail.com.'],
+      ['Limits', 'Readings come from your inverter and SunSynk. They can be late, missing or wrong, and the service can be down. Do not make safety, electrical or money decisions on this dashboard alone. As far as the law allows, we are not liable for any loss from using the service, or from it being down or wrong.'],
+      ['Free, in testing', 'The service is free and in testing. Features can change, and the service can stop. Before any charge starts, we tell you in the app and by email, and you choose whether to stay.'],
+      ['Your account', 'Keep your password safe. You are responsible for what happens under your login.'],
+      ['Your SunSynk login', 'When you connect, you allow Prince Solar to read your plant’s data from SunSynk with your own login. We exchange your password once for an access token and do not keep the password. Disconnect in Settings to delete the token.'],
+      ['Ending things', 'Delete your account in Settings at any time; this removes your data. We may suspend accounts that abuse the service.'],
+      ['Changes', 'We may update these terms. The app shows a notice when we do.'],
+      ['Law and disputes', 'South African law applies. If something goes wrong, email us first and we will try to sort it out.'],
     ],
   },
   privacy: {
     title: 'Privacy Policy',
-    updated: 'September 2026',
+    updated: '17 October 2026',
     sections: [
-      ['Who we are', 'Theron and Prince Solutions (Pty) Ltd, South Africa, operating the Prince Solar dashboard. We are the responsible party under POPIA and the controller under GDPR for the personal information described here.'],
-      ['What we collect', 'Your email address and password (stored hashed). Your SunSynk Connect username. An access token for your SunSynk account, encrypted at rest — never your SunSynk password. Your plant’s location, timezone and equipment details as reported by SunSynk. Minute-by-minute energy readings from your inverter. Settings you enter, such as your tariff.'],
-      ['Why', 'To show you your dashboard, keep your history, and detect faults. We do not sell or share your data with anyone, and we do not use it for advertising.'],
-      ['Energy data is personal', 'Minute-level energy readings can reveal when a home is occupied. We treat them as personal information and protect them accordingly.'],
-      ['Where it lives', 'Our database is hosted by Supabase in Frankfurt, Germany. Access tokens are held in an encrypted vault. Only the service itself can read them; no person can retrieve your token from our systems.'],
-      ['How long', 'For as long as you have an account. Deleting your account from Settings removes your token, your plant mapping and, if no one else shares the plant, its readings.'],
-      ['Your rights', 'You may ask what we hold, correct it, or have it deleted. Deleting your account does this in one step. For anything else, contact us. You may also complain to the Information Regulator (South Africa) or your local data protection authority.'],
-      ['Contact', 'brynneprince98@gmail.com.'],
+      ['Who we are', 'Brynne Prince, an individual in South Africa, runs Prince Solar. She is the responsible party and the information officer under POPIA. Contact: brynneprince98@gmail.com.'],
+      ['What we collect', 'Your email address. Your password, stored hashed, if you sign up with email. Your name, email and profile picture from Google, if you sign in with Google. Your SunSynk username and an access token, encrypted, never your SunSynk password. Your plant’s name, location, timezone and equipment, as SunSynk reports them. Your inverter’s readings, every minute. Settings you enter, such as your tariff. Error reports from the app: time, page, app version, error text and browser type.'],
+      ['Required or optional', 'Your email and a SunSynk login are required; without them there is no dashboard. Settings are optional.'],
+      ['Why', 'To show your dashboard, keep your history, detect faults and fix errors in the app. We do not sell your data or use it for advertising.'],
+      ['Energy data is personal', 'Minute-level readings can show when a home is occupied. We treat them as personal information and protect them accordingly.'],
+      ['Who receives it', 'Supabase stores the database. GitHub Pages serves the app. Google handles Google sign-in. SunSynk sends your readings when we ask with your token. Each gets only what its job needs. No one else receives your data.'],
+      ['Outside South Africa', 'The database is in Frankfurt, Germany. EU data protection law (GDPR) protects it there to a standard like POPIA.'],
+      ['How long', 'Minute readings are kept 31 days, then as 5-minute averages while you have an account. Deleting your account removes your token, your plant link and, if no one else shares the plant, its readings. Error reports stay, without a link to you.'],
+      ['If data leaks', 'We tell you and the Information Regulator as soon as reasonably possible.'],
+      ['Your rights', 'You may ask what we hold, correct it, have it deleted, or object to how we use it. Deleting your account deletes it in one step. You may complain to the Information Regulator: inforegulator.org.za, POPIAComplaints@inforegulator.org.za.'],
     ],
   },
 };
@@ -45,7 +48,7 @@ window.LegalPage = function LegalPage({ which }) {
       <div className="legal">
         <window.AuthBrand />
         <h1>{doc.title}</h1>
-        <div className="legal-meta">Last updated {doc.updated} · <span className="legal-flag">placeholder text — not yet reviewed</span></div>
+        <div className="legal-meta">Last updated {doc.updated}</div>
         {doc.sections.map(([h, p]) => (
           <section key={h}><h2>{h}</h2><p>{p}</p></section>
         ))}
