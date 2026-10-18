@@ -251,6 +251,19 @@ function outageRuns(invs, fKey, lastIdx) {
 }
 const outageMinutes = runs => runs.reduce((n, r) => n + (r[1] - r[0] + 1) * 5, 0);
 const OUTAGE_TITLE = 'Five-minute buckets with at least one reading under 50 V or 10 Hz — a blackout, to the nearest bucket';
+// The run holding bucket i as "10:25–19:30", for the hover card; null outside every run.
+function outageAt(runs, i) {
+  const r = runs.find(([a, b]) => i >= a && i <= b);
+  return r ? HM(r[0] * 5) + '–' + HM(Math.min(1440, (r[1] + 1) * 5)) : null;
+}
+// "Grid off 9h" by the date; its square is the band's red, so it names the shading.
+function OutagePill({ mins, what }) {
+  return mins > 0 ? <span className="hv-gap" title={OUTAGE_TITLE}><i className="hv-gap-sq" />{what} off {fmtGap(mins)}</span> : null;
+}
+// The hover card's row for a bucket inside a run, in the band's red.
+function OutageTipRow({ span, what }) {
+  return span ? <div className="tip-row" style={{ color: window.COLORS.load }}><span className="tip-dot tip-sq" style={{ background: window.COLORS.load }} /><span className="tip-l">{what} off</span><span className="tip-v mono">{span}</span></div> : null;
+}
 function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   const C = window.COLORS;
   const earliest = shiftDate(localDateStr(), -DAY_FLOOR_DAYS);
@@ -329,6 +342,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   };
   const outages = isTemp ? [] : outageRuns(shown, fKey, lastIdx);
   const outageMin = outageMinutes(outages);
+  const offWord = kind === 'output' ? 'Output' : 'Grid';
 
   // legend value: hovered bucket, else the latest reading; never a reading from another time
   const valAt = (inv, k) => {
@@ -372,6 +386,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
           <div className="tip-row" key={l}><span className="tip-dot" style={{ background: c }} /><span className="tip-l">{l}</span>
             <span className="tip-v mono">{v == null ? '—' : v}</span></div>
         ))}
+        <OutageTipRow span={outageAt(outages, hp)} what={offWord} />
       </div>
     );
   };
@@ -392,7 +407,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
       {(() => {
         const notes = <>
           {lagNote && <span className="hv-lag mono" title="From SunSynk's history, fetched every six hours; the live numbers above run ahead of it">{lagNote}</span>}
-          {outageMin > 0 && <span className="hv-gap" title={OUTAGE_TITLE}>{fmtGap(outageMin)} out</span>}
+          <OutagePill mins={outageMin} what={offWord} />
         </>;
         return dayPick
           ? (lagNote || outageMin > 0) && <div className="hv-datebar">{notes}</div>

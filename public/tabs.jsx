@@ -751,6 +751,7 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty, 
         <div className="chart-tip" style={{ left: tipLeftFor(x(hp), width, 168), top: 12 }}>
           <div className="tip-time">{HM(points[hp].t)}</div>
           <div className="tip-row"><span className="tip-dot" style={{ background: color }} /><span className="tip-l">{label}</span><span className="tip-v mono">{fmt(v(hp))}</span></div>
+          {outages && <OutageTipRow span={outageAt(outages, Math.round(points[hp].t / 5))} what="Grid" />}
         </div>
       );
     }
@@ -1209,12 +1210,13 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
       </div>
 
       <Card id="grid-day">
-        <SectionTitle right={day && !noReadings && !view.isToday ? <>Imported <b>{fmtKwh(flows.imp)}</b>{flows.exp >= 0.05 && <>, exported <b>{fmtKwh(flows.exp)}</b></>}</> : null}>
+        {/* the right line is always there (blank today) so the date bar under it never shifts on a phone */}
+        <SectionTitle right={day && !noReadings && !view.isToday ? <>Imported <b>{fmtKwh(flows.imp)}</b>{flows.exp >= 0.05 && <>, exported <b>{fmtKwh(flows.exp)}</b></>}</> : NBSP}>
           {titled('GRID', dayWord)}
           <window.InfoDot text={'Above the line is power imported from the grid; below it is power exported.'} />
         </SectionTitle>
         <DateBar pick={pick} earliest={earliest}>
-          {outageMin > 0 && <span className="hv-gap" title={OUTAGE_TITLE}>{fmtGap(outageMin)} out</span>}
+          <OutagePill mins={outageMin} what="Grid" />
         </DateBar>
         {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
           : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="grid" color={CC.grid} label="Grid"

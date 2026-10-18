@@ -556,7 +556,9 @@
   .hv-datepick { display: inline-flex; align-items: center; gap: 8px; height: 100%; padding: 0 12px; background: none; border: 0; color: var(--text); cursor: pointer; }
   .hv-datepick:disabled { cursor: default; }
   .hv-cal { display: block; flex: none; color: var(--muted); }
-  .hv-dateface { font: 600 13px var(--display); letter-spacing: 0.01em; white-space: nowrap; }
+  /* fixed width, so ‹ › stay under the pointer while someone clicks through days */
+  .hv-dateface { font: 600 13px var(--display); letter-spacing: 0.01em; white-space: nowrap;
+    display: inline-block; min-width: 6.9em; text-align: center; font-variant-numeric: tabular-nums; }
   .hv-today-in { display: none; }
   .cal-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; width: 276px; padding: 12px; box-sizing: border-box;
     background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); }
@@ -571,8 +573,9 @@
   .cal-day.on { background: rgba(61,220,132,0.14); border-color: rgba(61,220,132,0.55); color: var(--text); }
   .cal-day:focus-visible, .hv-datepick:focus-visible { outline: 2px solid var(--pv); outline-offset: 1px; }
   .hv-approx { font-size: 11px; color: var(--warn); border: 1px solid var(--line); border-radius: 7px; padding: 1px 7px; margin-left: 2px; cursor: help; white-space: nowrap; }
-  .hv-gap { font-size: 11px; color: var(--warn); border: 1px solid var(--line); border-radius: 7px;
-    padding: 1px 7px; margin-left: 2px; cursor: help; white-space: nowrap; font-family: var(--mono); }
+  .hv-gap { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text);
+    border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; margin-left: 2px; cursor: help; white-space: nowrap; }
+  .hv-gap-sq, .tip-dot.tip-sq { width: 8px; height: 8px; border-radius: 2px; background: var(--load); flex: none; }
   .hv-today { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
     font-size: 12px; padding: 6px 12px; cursor: pointer; transition: .15s; margin-left: auto; }
   .hv-today:hover { border-color: var(--line-2); }
@@ -1008,7 +1011,9 @@
     .hv-datebar { --datebar-h: 40px; }
     .hv-today { min-height: 40px; }
     /* SOLAR-27: arrows at the two ends, the date centred between them as "Fri 2 Oct" */
-    .hv-datebox { display: flex; flex: 1; min-width: 0; justify-content: center; }
+    .hv-datebox { display: flex; flex: 1 0 calc(100% - 2 * var(--datebar-h) - 16px); min-width: 0; justify-content: center; }
+    /* notes ("Grid off 9h", "to 14:20") wrap under the bar, so the arrows never move */
+    .hv-datebar .hv-gap, .hv-datebar .hv-lag { order: 1; margin-left: 0; }
     .hv-datepick { padding: 0 4px; }
     .hv-dateface { font-size: 14px; }
     /* the calendar spans the bar under the date on a phone */
