@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Prince Solar Hub</title>
-<meta name="description" content="Link your SunSynk login once. Prince Solar Hub shows where your power is coming from and going to, right now." />
+<meta name="description" content="Link your SunSynk login. See where your power comes from and where it goes, right now." />
 <link rel="canonical" href="https://princesolarhub.com/" />
 <meta name="theme-color" content="#0a0d12" />
 <meta name="format-detection" content="email=no" />
@@ -528,7 +528,7 @@
       <a href="#top">Live</a>
       <a href="#solar">Solar</a>
       <a href="#grid">Grid</a>
-      <a href="https://app.princesolarhub.com/">Sign in</a>
+      <a class="signin" href="https://app.princesolarhub.com/">Sign in</a>
     </div>
     <a class="btn btn-primary" href="https://app.princesolarhub.com/">Try it free</a>
   </div>
@@ -542,7 +542,7 @@
       <div class="hero-top">
         <h1 class="rise" style="--i:0">See what your <span class="hl">solar</span> is doing, right now.</h1>
         <div class="hero-side">
-          <p class="rise" style="--i:2">Link your SunSynk login once. Prince Solar Hub shows where your power is coming from and going to, and keeps every reading.</p>
+          <p class="rise" style="--i:2">Link your SunSynk login. See where your power comes from and where it goes, and look back at past days. For SunSynk inverters in South Africa.</p>
           <div class="rise" style="--i:3">
             <a class="btn btn-primary" href="https://app.princesolarhub.com/">Try it free <i class="ph-bold ph-arrow-right"></i></a>
           </div>
@@ -561,7 +561,7 @@
         <ul class="points">
           <li><i class="ph-bold ph-check"></i>Solar now, against your panel size</li>
           <li><i class="ph-bold ph-check"></i>Peak of the day and when</li>
-          <li><i class="ph-bold ph-check"></i>Where it went: the house or the battery</li>
+          <li><i class="ph-bold ph-check"></i>Where it went: home or battery</li>
           <li><i class="ph-bold ph-check"></i>Last 30 days, day by day</li>
         </ul>
       </div>
@@ -574,11 +574,11 @@
     <div class="wrap">
       <div class="head-reveal">
         <h2><span class="grid">Grid.</span> What you bought, and when.</h2>
-        <p class="lede">What you bought today and over time, and the hours the house drew from the grid.</p>
+        <p class="lede">Today, this week, month, year and lifetime. Pick any day to see when you bought.</p>
         <ul class="points">
-          <li><i class="ph-bold ph-check"></i>Importing, or the grid off, right now</li>
+          <li><i class="ph-bold ph-check"></i>Importing now, or grid off</li>
           <li><i class="ph-bold ph-check"></i>Peak import of the day and when</li>
-          <li><i class="ph-bold ph-check"></i>Grid off shown plainly in Live</li>
+          <li><i class="ph-bold ph-check"></i>Grid cuts marked on each day, with hours off</li>
           <li><i class="ph-bold ph-check"></i>Last 30 days, day by day</li>
         </ul>
       </div>
@@ -592,7 +592,7 @@
       <div class="closing-card">
         <div>
           <h2>Free while in testing.</h2>
-          <p>Sign up with email or Google, then link your SunSynk Connect login. Your SunSynk password is swapped for a sign-in token and not kept.</p>
+          <p>Sign up with email or Google, then link your SunSynk Connect login.</p>
         </div>
         <a class="btn btn-primary" href="https://app.princesolarhub.com/">Try it free <i class="ph-bold ph-arrow-right"></i></a>
       </div>
@@ -871,6 +871,8 @@ window.DEMO = (() => {
     const [todN, todU] = window.fmtEnergyParts(t.imp);
     const rows = D.days.map(r => r.date === D.today ? { ...r, imp: t.imp } : r);
     const most = rows.reduce((b, r) => (r.imp > b.imp ? r : b));
+    // the example day's grid cut, as 5-minute buckets, shaded as the app's Grid chart does (SOLAR-125)
+    const cut = [D.rows.findIndex(r => r.off), D.rows.findLastIndex(r => r.off)];
     return (
       <div>
         <AppWin page="Grid">
@@ -880,8 +882,8 @@ window.DEMO = (() => {
               <window.StatTile label="TODAY" value={todN} unit={todU} accent="#facc15" sub={t.impPeak ? <>Peak <b>{window.fmtPower(t.impPeak.kw * 1000)}</b> at <b>{HMm(t.impPeak.t)}</b></> : NB} />
             </div>
             <window.Card>
-              <window.SectionTitle>GRID · <span style={{ color: 'var(--text)' }}>today</span></window.SectionTitle>
-              <window.DayLineChart points={points} field="grid" color="#facc15" label="Grid" sums={['Imported', 'Exported']} importScale empty="No grid readings for this day." />
+              <window.SectionTitle right={<window.OutagePill mins={(cut[1] - cut[0] + 1) * 5} what="Grid" />}>GRID · <span style={{ color: 'var(--text)' }}>today</span></window.SectionTitle>
+              <window.DayLineChart points={points} field="grid" color="#facc15" label="Grid" sums={['Imported', 'Exported']} importScale outages={[cut]} empty="No grid readings for this day." />
             </window.Card>
             <window.Card>
               <window.SectionTitle right={<>Most <b>{window.fmtKwh(most.imp)}</b> on {new Date(most.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</>}>IMPORTED · <span style={{ color: 'var(--text)' }}>last 30 days</span></window.SectionTitle>
@@ -961,7 +963,7 @@ window.DEMO = (() => {
       if (!ok) { btn.disabled = false; btn.textContent = 'Notify me'; msg.textContent = 'Couldn’t save that. Try again.'; return; }
       const done = document.createElement('p');
       done.className = 'notify-done';
-      done.textContent = 'You’re on the list. We’ll email you at launch.';
+      done.textContent = 'You’re on the list. We’ll email you when it opens to everyone.';
       wrap.replaceWith(done);
     });
     const wrap = document.createElement('div');
@@ -970,13 +972,15 @@ window.DEMO = (() => {
   };
 
   document.querySelector('.topnav .btn-primary').textContent = 'Sign in';
+  // the button is Sign in now, so the link beside it would say it twice; hidden, not removed, so the links don't slide
+  document.querySelector('.topnav-links .signin').style.visibility = 'hidden';
   const fullNote = document.createElement('p');
   fullNote.className = 'full-note';
-  fullNote.textContent = 'Tester places are full. Get an email when we launch.';
+  fullNote.textContent = 'Tester places are full. Get an email when it opens to everyone.';
   heroCta.replaceChildren(fullNote, notifyForm());
   const card = document.querySelector('.closing-card');
   card.querySelector('h2').textContent = 'Tester places are full.';
-  card.querySelector('p').textContent = 'More places open when we launch. Leave your email and we’ll let you know.';
+  card.querySelector('p').textContent = 'Leave your email and we’ll tell you when it opens to everyone.';
   card.querySelector(':scope > a').replaceWith(notifyForm());
   document.documentElement.classList.remove('places-wait');
 })();
