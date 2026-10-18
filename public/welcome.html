@@ -432,6 +432,10 @@
 
   /* the app, framed: its header strip over a page of real components */
   .appwin-stage { perspective: 1800px; }
+  /* Held open while the demo builds, so Solar and Grid don't move down when it lands. They are
+     still hidden then, but search engines count the move against the page. 740 px is the
+     demo's shortest (desktop); taller layouts grow below the fold (SOLAR-127). */
+  #liveDemo { min-height: 740px; }
   .appwin {
     border-radius: 18px; border: 1px solid var(--line-2); background: var(--bg); overflow: hidden;
     box-shadow: 0 50px 100px -40px rgba(0,0,0,0.8);
