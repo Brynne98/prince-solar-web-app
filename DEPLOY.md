@@ -122,10 +122,11 @@ git add -A && git commit && git push origin main
 Cloudflare Pages publishes `public/` from `main`; its build settings live in the
 Cloudflare dashboard, not in this repo.
 
-`.github/workflows/pages.yml` still runs on pushes under `public/**`: it checks
-`public/` for secrets and republishes the GitHub Pages forwarding page
-(`github-pages-forward/`), which sends old github.io links to princesolarhub.com
-(SOLAR-110). A failed secret check there does not stop Cloudflare; read the run.
+`.github/workflows/secrets-guard.yml` checks `public/` for secrets on every push there.
+A failed check does not stop Cloudflare; read the run. `.github/workflows/pages.yml`
+only republishes the GitHub Pages forwarding page (`github-pages-forward/`), which sends
+old github.io links to princesolarhub.com (SOLAR-110); delete it, and that folder, once
+Pages is unpublished.
 
 ## 5. Verify — do not assume
 
@@ -191,7 +192,8 @@ does not change with the site's domain.
 | `supabase/migrations/` | schema and RPCs |
 | `supabase/functions/` | `poll`, `recover`, `sync-plant-energy`, `alerts-due`, `link-sunsynk` |
 | `supabase/functions/_shared/` | code bundled into every function that imports it; a change here needs those functions redeployed |
-| `.github/workflows/pages.yml` | secret check on `public/`, and the GitHub Pages forwarding page (`github-pages-forward/`) |
+| `.github/workflows/pages.yml` | the GitHub Pages forwarding page (`github-pages-forward/`) |
+| `.github/workflows/secrets-guard.yml` | fails if a secret-looking value lands in `public/` |
 | `.github/workflows/health.yml` | half-hourly logger check, emails on failure |
 
 Project ref `pmakzojwhouamawgszrc` · site https://princesolarhub.com on Cloudflare Pages (SOLAR-86) · the old https://brynne98.github.io/prince-solar-web-app forwards there (SOLAR-110)

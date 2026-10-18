@@ -4,8 +4,7 @@
 # address to the same path, query and #hash on princesolarhub.com. Once Pages is
 # unpublished in the repo settings, delete this workflow and that folder.
 #
-# It still runs on every push to public/, so the secret check below keeps
-# guarding what Cloudflare publishes from the same folder.
+# The secret check on public/ lives in secrets-guard.yml, so it outlives this file.
 #
 # Nothing secret is published. config.js carries the Supabase URL and the
 # publishable key, both public by design; every table is RLS-protected and every
@@ -17,7 +16,6 @@ on:
   push:
     branches: [main]
     paths:
-      - 'public/**'
       - 'github-pages-forward/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
@@ -41,15 +39,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Guard against publishing secrets
-        # Cheap backstop: the repo is public, so fail loudly if a Supabase secret
-        # key or a service_role JWT ever lands in the published folder.
-        run: |
-          if grep -rEl 'sb_secret_[A-Za-z0-9_-]+|service_role' public/; then
-            echo "::error::A secret-looking value is present in public/ — refusing to publish."
-            exit 1
-          fi
-          echo "public/ is clean"
+      # one page serves both the root and every deep link
+      - run: cp github-pages-forward/index.html github-pages-forward/404.html
 
       - uses: actions/configure-pages@v5
 
