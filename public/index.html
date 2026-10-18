@@ -48,8 +48,6 @@
   [hidden] { display: none !important; }
   /* clip, not hidden: overflow-x hidden on body turns it into a scroll container and kills position: sticky further down */
   html, body { margin: 0; overflow-x: clip; max-width: 100%; }
-  /* no rubber-band bounce past the top or bottom (SOLAR-22) */
-  html, body { overscroll-behavior: none; }
   body {
     background:
       radial-gradient(1200px 600px at 80% -10%, rgba(91,157,255,0.06), transparent 60%),
@@ -107,9 +105,12 @@
      raised neutral surface: green is kept for the data. */
   .frame { --rail-w: 208px; --head-h: 60px; display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100dvh; }
   .frame-body { display: flex; flex-direction: column; min-width: 0; }
-  /* with a sidebar, only the page beside it scrolls, so a wheel over the sidebar
-     moves nothing (SOLAR-22); a phone keeps scrolling the document */
-  @media (min-width: 600px) {
+  /* with a sidebar and a mouse or trackpad, only the page beside it scrolls, so a wheel
+     over the sidebar moves nothing, and nothing bounces (SOLAR-22). A touch screen keeps
+     scrolling the document, so it keeps the bounce and the browser's pull-down to
+     reload (SOLAR-108) */
+  @media (min-width: 600px) and (hover: hover) and (pointer: fine) {
+    html, body { overscroll-behavior: none; }
     .frame { height: 100dvh; }
     /* stable: a short page keeps the scrollbar's room, so moving between pages never
        shifts the content sideways (SOLAR-95) */
@@ -1269,11 +1270,6 @@
   }
   /* danger zone in settings */
   .danger-btn { background: none; border: 1px solid var(--load); color: var(--load); padding: 8px 14px; border-radius: 9px; font-size: 13px; cursor: pointer; }
-  /* pull down at the top to reload: the bounce is off, which also took the browser's own (SOLAR-22) */
-  .ptr { position: fixed; top: 0; left: 50%; z-index: 40; width: 38px; height: 38px; margin: -46px 0 0 -19px; border-radius: 50%;
-    display: grid; place-items: center; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--muted); pointer-events: none; opacity: 0; }
-  .ptr.ready { color: var(--text); border-color: var(--muted); }
-  .ptr.go svg { animation: refresh-spin .8s linear infinite; }
 </style>
 </head>
 <body>
@@ -1294,46 +1290,5 @@
 <script type="text/babel" src="chart.jsx"></script>
 <script type="text/babel" src="tabs.jsx"></script>
 <script type="text/babel" src="app.jsx"></script>
-
-<!-- pull down at the top to reload, on any touch screen (SOLAR-22) -->
-<script>
-(() => {
-  const PULL = 70;   // px of finger travel that reloads on release
-  const ptr = document.createElement('div');
-  ptr.className = 'ptr'; ptr.setAttribute('aria-hidden', 'true');
-  ptr.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>';
-  document.body.appendChild(ptr);
-  let startY = null, dy = 0;
-  // at the top only if the page and every scrollable box under the finger are at their top
-  const atTop = (el) => {
-    if (window.scrollY > 0) return false;
-    for (; el && el !== document.body; el = el.parentElement) if (el.scrollTop > 0) return false;
-    return true;
-  };
-  const show = (d) => {
-    const y = Math.min(d, PULL * 1.4);
-    ptr.style.transform = `translateY(${y + 16}px) rotate(${y * 4}deg)`;
-    ptr.style.opacity = Math.min(1, d / PULL);
-    ptr.classList.toggle('ready', d >= PULL);
-  };
-  addEventListener('touchstart', (e) => {
-    startY = e.touches.length === 1 && atTop(e.target) ? e.touches[0].clientY : null; dy = 0;
-  }, { passive: true });
-  addEventListener('touchmove', (e) => {
-    if (startY === null) return;
-    dy = (e.touches[0].clientY - startY) * 0.5;
-    if (dy <= 0) { show(0); return; }
-    show(dy);
-  }, { passive: true });
-  addEventListener('touchend', () => {
-    if (startY === null) return;
-    startY = null;
-    if (dy >= PULL) { ptr.classList.add('go'); location.reload(); return; }
-    ptr.style.transition = 'transform .2s, opacity .2s'; show(0);
-    setTimeout(() => { ptr.style.transition = ''; }, 200);
-  });
-  addEventListener('touchcancel', () => { startY = null; show(0); });
-})();
-</script>
 </body>
 </html>
