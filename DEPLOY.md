@@ -178,6 +178,11 @@ Two places know the origin:
 - **Supabase Auth.** Dashboard → Authentication → URL Configuration: Site URL and
   the redirect list must include the new origin, or confirmation and reset links land on the old one.
 
+- **www.** A Cloudflare Redirect Rule ("www to princesolarhub.com (SOLAR-113)", Rules →
+  Redirect Rules) sends `https://www.princesolarhub.com/*` to `https://princesolarhub.com/${1}`
+  with a 301, keeping the query. Sign-in is stored per site, so without it a www visit
+  looked signed out. The www DNS record must stay proxied for the rule to run.
+
 The cron jobs (0009, 0030) POST to `https://<project-ref>.functions.supabase.co`, which
 does not change with the site's domain.
 
