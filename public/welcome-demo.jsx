@@ -184,7 +184,11 @@
               <window.StatTile label="TODAY" value={todN} unit={todU} accent="#facc15" sub={t.impPeak ? <>Peak <b>{window.fmtPower(t.impPeak.kw * 1000)}</b> at <b>{HMm(t.impPeak.t)}</b></> : NB} />
             </div>
             <window.Card>
-              <window.SectionTitle right={<window.OutagePill mins={(cut[1] - cut[0] + 1) * 5} what="Grid" />}>GRID · <span style={{ color: 'var(--text)' }}>today</span></window.SectionTitle>
+              <window.SectionTitle>GRID · <span style={{ color: 'var(--text)' }}>today</span></window.SectionTitle>
+              {/* the app's date bar, with the grid-off pill beside the date as the app has it (SOLAR-125) */}
+              <window.DateBar pick={{ date: D.today, todayStr: D.today, isToday: true, canPrev: true, canNext: false, setDate: () => {} }} earliest={D.days[0].date}>
+                <window.OutagePill mins={(cut[1] - cut[0] + 1) * 5} what="Grid" />
+              </window.DateBar>
               <window.DayLineChart points={points} field="grid" color="#facc15" label="Grid" sums={['Imported', 'Exported']} importScale outages={[cut]} empty="No grid readings for this day." />
             </window.Card>
             <window.Card>
