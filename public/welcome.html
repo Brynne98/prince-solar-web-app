@@ -508,7 +508,9 @@
   .notify input::placeholder { color: var(--dim); }
   .notify input[aria-invalid="true"] { border-color: var(--bad); }
   .notify .btn { flex: none; }
-  .places-wait .topnav .btn-primary, .places-wait .topnav-links .signin, .places-wait .hero-side > div, .places-wait .closing-card > a { visibility: hidden; }
+  .places-wait .topnav .btn-primary, .places-wait .hero-side > div, .places-wait .closing-card > a { visibility: hidden; }
+  /* out of the row while waiting: when places are full it never shows, so Grid sits next to the button (SOLAR-129) */
+  .places-wait .topnav-links .signin { display: none; }
   /* .hero-side p and .closing-card p would turn it grey. */
   /* under the box; out of the flow, so showing it moves nothing above or below */
   .hero-side .notify-msg, .closing-card .notify-msg { position: absolute; top: 100%; left: 0; margin: 6px 0 0; font-size: 14px; line-height: 1.3; color: var(--bad); }
@@ -789,8 +791,8 @@ window.DEMO = (() => {
   };
 
   document.querySelector('.topnav .btn-primary').textContent = 'Sign in';
-  // the button is Sign in now, so the link beside it would say it twice; hidden, not removed, so the links don't slide
-  document.querySelector('.topnav-links .signin').style.visibility = 'hidden';
+  // the button is Sign in now, so the link beside it would say it twice
+  document.querySelector('.topnav-links .signin').style.display = 'none';
   const fullNote = document.createElement('p');
   fullNote.className = 'full-note';
   fullNote.textContent = 'Tester places are full. Get an email when it opens to everyone.';
