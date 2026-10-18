@@ -122,7 +122,9 @@ git add -A && git commit && git push origin main
 Cloudflare Pages rebuilds `public/` from `main` on every push, usually within half a
 minute; its build settings live in the Cloudflare dashboard, not in this repo.
 
-`.github/workflows/secrets-guard.yml` checks `public/` for secrets on every push there.
+`.github/workflows/secrets-guard.yml` scans the whole repo and its history for secrets with
+gitleaks (`.gitleaks.toml`) on every push to main; GitHub's secret scanning and push
+protection are also on in the repo settings.
 A failed check does not stop Cloudflare; read the run. GitHub Pages is switched off
 (SOLAR-110).
 
@@ -200,7 +202,7 @@ does not change with the site's domain.
 | `supabase/migrations/` | schema and RPCs |
 | `supabase/functions/` | `poll`, `recover`, `sync-plant-energy`, `alerts-due`, `link-sunsynk` |
 | `supabase/functions/_shared/` | code bundled into every function that imports it; a change here needs those functions redeployed |
-| `.github/workflows/secrets-guard.yml` | fails if a secret-looking value lands in `public/` |
+| `.github/workflows/secrets-guard.yml` + `.gitleaks.toml` | fails if a secret is anywhere in the repo or its history |
 | `.github/workflows/health.yml` | half-hourly logger check, emails on failure |
 
 Project ref `pmakzojwhouamawgszrc` · app https://app.princesolarhub.com, showcase https://princesolarhub.com, on Cloudflare Pages (SOLAR-86, SOLAR-116) · GitHub Pages switched off (SOLAR-110)

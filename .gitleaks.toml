@@ -1,0 +1,23 @@
+# Secret scan for the whole repo and its history (SOLAR-119), run by
+# .github/workflows/secrets-guard.yml. The repo is public, so anything committed is public.
+# Starts from gitleaks' own rules (API keys, tokens, private keys for most providers).
+[extend]
+useDefault = true
+
+# Supabase's secret API key. Gives full access to the database, past every row-level
+# security rule. Must only live in Edge Function secrets and local .env files.
+[[rules]]
+id = "supabase-secret-key"
+description = "Supabase secret API key"
+regex = '''sb_secret_[A-Za-z0-9_-]{20,}'''
+keywords = ["sb_secret_"]
+
+# The legacy service_role JWT is caught by gitleaks' own jwt rule.
+
+# The publishable key is public by design: it ships in the app, and every table is
+# behind row-level security. It appears in public/config.js, admin/config.js,
+# the health workflow and DEPLOY.md.
+[allowlist]
+description = "Supabase publishable key (public by design)"
+regexTarget = "match"
+regexes = ['''sb_publishable_[A-Za-z0-9_-]+''']
