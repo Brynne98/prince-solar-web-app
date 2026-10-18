@@ -485,6 +485,20 @@
   .closing-card p { margin: 0; color: var(--muted); max-width: 52ch; }
   @media (max-width: 760px) { .closing-card { grid-template-columns: 1fr; padding: 36px 22px; } }
 
+  /* ---------- tester places (SOLAR-124) ---------- */
+  .places { margin: 12px 0 0; font-size: 14px; color: var(--muted); }
+  .hero-side .full-note { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--text); }
+  .notify { display: flex; gap: 8px; max-width: 420px; }
+  .notify input { flex: 1; min-width: 0; height: 48px; padding: 0 16px; font: inherit; font-size: 16px; color: var(--text);
+    background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; }
+  .notify input::placeholder { color: var(--dim); }
+  .notify input[aria-invalid="true"] { border-color: var(--bad); }
+  .notify .btn { flex: none; }
+  .notify-msg { margin: 8px 0 0; font-size: 14px; color: var(--bad); }
+  .notify-msg:empty { display: none; }
+  .notify-done { margin: 0; font-size: 16px; color: var(--pv); }
+  @media (max-width: 480px) { .notify { flex-direction: column; } .notify input { flex: none; } .notify .btn { justify-content: center; } }
+
   footer { border-top: 1px solid var(--line); padding: 28px 0 40px; font-size: 13.5px; color: var(--dim); }
   footer .wrap { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
   footer .links { margin-left: auto; display: flex; gap: 20px; }
@@ -885,6 +899,67 @@ window.DEMO = (() => {
     for (const e of entries) if (e.isIntersecting) { e.target.classList.add('seen'); seen.unobserve(e.target); }
   }, { threshold: 0.06 });
   document.querySelectorAll('.reveal').forEach((el) => seen.observe(el));
+})();
+</script>
+
+<script src="config.js"></script>
+<script>
+// Tester places (SOLAR-124): places left under Try it free; once full, an email box
+// for the launch replaces the sign-up buttons. If the count can't be read, the page
+// stays as it is and the app's own sign-up screen decides.
+(async () => {
+  const { url, key } = window.SUNSYNK_CONFIG;
+  const rpc = (fn, body) => fetch(`${url}/rest/v1/rpc/${fn}`, {
+    method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+  });
+  let p;
+  try { const r = await rpc('api_tester_places'); if (!r.ok) return; p = await r.json(); } catch { return; }
+  if (typeof p?.left !== 'number') return;
+  const heroCta = document.querySelector('.hero-side > div');
+
+  if (p.left > 0) {
+    const note = document.createElement('p');
+    note.className = 'places';
+    note.textContent = `${p.left} of ${p.places} tester places left`;
+    heroCta.append(note);
+    return;
+  }
+
+  const notifyForm = () => {
+    const form = document.createElement('form');
+    form.className = 'notify'; form.noValidate = true;
+    form.innerHTML = '<input type="email" placeholder="you@example.com" aria-label="Email" autocomplete="email">'
+      + '<button class="btn btn-primary" type="submit">Notify me</button>';
+    const msg = document.createElement('p');
+    msg.className = 'notify-msg'; msg.setAttribute('role', 'alert');
+    const input = form.querySelector('input'), btn = form.querySelector('button');
+    input.addEventListener('input', () => { msg.textContent = ''; input.removeAttribute('aria-invalid'); });
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = input.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { msg.textContent = 'Enter a valid email'; input.setAttribute('aria-invalid', 'true'); return; }
+      btn.disabled = true; btn.textContent = 'Saving…';
+      const ok = await rpc('api_join_waitlist', { p_email: email }).then((r) => r.ok, () => false);
+      if (!ok) { btn.disabled = false; btn.textContent = 'Notify me'; msg.textContent = 'Couldn’t save that. Try again.'; return; }
+      const done = document.createElement('p');
+      done.className = 'notify-done';
+      done.textContent = 'You’re on the list. We’ll email you at launch.';
+      wrap.replaceWith(done);
+    });
+    const wrap = document.createElement('div');
+    wrap.append(form, msg);
+    return wrap;
+  };
+
+  document.querySelector('.topnav .btn-primary').textContent = 'Sign in';
+  const fullNote = document.createElement('p');
+  fullNote.className = 'full-note';
+  fullNote.textContent = 'Tester places are full. Get an email when we launch.';
+  heroCta.replaceChildren(fullNote, notifyForm());
+  const card = document.querySelector('.closing-card');
+  card.querySelector('h2').textContent = 'Tester places are full.';
+  card.querySelector('p').textContent = 'More places open when we launch. Leave your email and we’ll let you know.';
+  card.querySelector(':scope > a').replaceWith(notifyForm());
 })();
 </script>
 </body>

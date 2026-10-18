@@ -278,9 +278,11 @@ max_frequency = "5s"
 # inactivity_timeout = "8h"
 
 # This hook runs before a new user is created and allows developers to reject the request based on the incoming user object.
-# [auth.hook.before_user_created]
-# enabled = true
-# uri = "pg-functions://postgres/auth/before-user-created-hook"
+# Refuses new accounts once tester places are full (0085). Production: switch it on in
+# the dashboard under Auth > Hooks.
+[auth.hook.before_user_created]
+enabled = true
+uri = "pg-functions://postgres/public/hook_tester_places"
 
 # This hook runs before a token is issued and allows you to add additional claims based on the authentication method used.
 # [auth.hook.custom_access_token]

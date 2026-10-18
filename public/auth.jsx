@@ -235,7 +235,50 @@ function explain(ex) {
   if (code === 'over_email_send_rate_limit') return { text: 'Too many emails sent. Wait a few minutes, then try again.' };
   if (code === 'over_request_rate_limit' || ex?.status === 429) return { text: 'Too many tries. Wait a minute, then try again.' };
   if (ex?.name === 'AuthRetryableFetchError' || ex instanceof TypeError) return { text: 'Can’t reach Prince Solar Hub. Check your connection and try again.' };
+  // hook_tester_places (0085) refuses new accounts with this message.
+  if (/Tester places are full/i.test(ex?.message || '')) return { text: 'Tester places are full.', action: 'full' };
   return { text: ex?.message || 'Something went wrong. Try again.' };
+}
+
+/** Sign-up once every tester place is taken: an email box for the launch. */
+function PlacesFullCard({ places, onSignIn }) {
+  const { useState } = React;
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const submit = async (e) => {
+    e.preventDefault();
+    const addr = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) { setMsg('Enter a valid email'); return; }
+    setBusy(true); setMsg(null);
+    // supabase-js query builders are thenables without .catch.
+    const { error } = await Promise.resolve(window.sb.rpc('api_join_waitlist', { p_email: addr })).catch(e => ({ error: e }));
+    setBusy(false);
+    if (error) setMsg(explain(error).text);
+    else setDone(true);
+  };
+  return (
+    <form className="login-card" onSubmit={submit} noValidate aria-busy={busy}>
+      <AuthBrand />
+      <div className="login-title">Tester places are full</div>
+      {done ? (
+        <div className="login-sub">You’re on the list. We’ll email you when Prince Solar Hub opens to everyone.</div>
+      ) : (<>
+        <div className="login-sub">{places ? `All ${places} places are taken. ` : ''}More open when we launch. Leave your email and we’ll let you know.</div>
+        <div className="auth-field">
+          <FieldLabel id="wait-email" label="Email" error={msg} />
+          <input id="wait-email" type="email" placeholder="you@example.com" value={email} autoComplete="email"
+                 onChange={(e) => { setEmail(e.target.value); setMsg(null); }}
+                 {...invalidProps('wait-email', msg)} />
+        </div>
+        <button type="submit" disabled={busy} aria-busy={busy}>{busy ? 'Saving…' : 'Notify me'}</button>
+      </>)}
+      <div className="login-links">
+        <span>Already have an account? <button type="button" className="login-link" onClick={onSignIn}>Sign in</button></span>
+      </div>
+    </form>
+  );
 }
 
 const MailIcon = () => (
@@ -304,6 +347,18 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const [note, setNote] = useState(null);
   const [agree, setAgree] = useState(false);
   const [sentTo, setSentTo] = useState(null);
+  // { places, left } from api_tester_places; null until it answers or if it fails.
+  const [places, setPlaces] = useState(null);
+  React.useEffect(() => {
+    window.sb.rpc('api_tester_places').then(({ data }) => data && setPlaces(data), () => {});
+  }, []);
+  // The hook said no: the count was stale, or this was a new Google account on the sign-in card.
+  const showError = (error) => {
+    const e = explain(error);
+    if (e.action === 'full') { setPlaces(p => ({ places: p?.places ?? 0, left: 0 })); go('signup'); }
+    else if (e.field) flag({ [e.field]: e.text });
+    else setErr(e);
+  };
 
   // A stale email link (confirm, reset) lands here signed out with the reason in the URL.
   // The back button restores the page from cache with `busy` still set, so clear it.
@@ -385,8 +440,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         onRecovered && onRecovered();
       }
     } catch (ex) {
-      const e = explain(ex);
-      if (e.field) flag({ [e.field]: e.text }); else setErr(e);
+      showError(ex);
     } finally {
       setBusy(false);
     }
@@ -398,6 +452,14 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     forgot:   { h: 'Reset your password',   p: 'We’ll email you a link to choose a new one.',          cta: 'Send reset link', busy: 'Sending…' },
     recovery: { h: 'Choose a new password', p: 'Set a new password to continue.',                      cta: 'Save password',   busy: 'Saving…' },
   }[mode];
+
+  if (mode === 'signup' && places?.left === 0) {
+    return (
+      <div className="login-wrap">
+        <PlacesFullCard places={places.places} onSignIn={() => go('signin')} />
+      </div>
+    );
+  }
 
   if (mode === 'inbox') {
     return (
@@ -415,7 +477,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         blocked={mode === 'signup' && !agree}
         onBlocked={() => flag({ 'auth-agree': 'Accept the Terms and Privacy Policy' })}
         onStart={() => { setBusy('google'); setErr(null); setNote(null); setBad({}); }}
-        onDone={(error) => { if (error) { setErr(explain(error)); setBusy(false); } }} />
+        onDone={(error) => { if (error) { showError(error); setBusy(false); } }} />
     </div>
   </>);
 
@@ -425,6 +487,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         <AuthBrand />
         <div className="login-title">{copy.h}</div>
         {copy.p && <div className="login-sub">{copy.p}</div>}
+        {mode === 'signup' && places?.left > 0 && <div className="login-sub">{places.left} of {places.places} tester places left</div>}
         {/* Google first on sign-up: one tap, and no confirmation email to wait for. */}
         {mode === 'signup' && (<>
           {googleButton}
