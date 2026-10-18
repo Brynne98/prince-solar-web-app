@@ -412,7 +412,8 @@
   .topnav-links { display: flex; gap: 24px; margin-left: auto; font-size: 14.5px; color: var(--muted); }
   .topnav-links a { text-decoration: none; transition: color .2s; }
   .topnav-links a:hover { color: var(--text); }
-  .topnav .btn { height: 38px; padding: 0 15px; font-size: 14px; border-radius: 9px; }
+  /* one width for "Try it free" and "Sign in", so the links don't slide when the places count swaps it (SOLAR-129) */
+  .topnav .btn { height: 38px; padding: 0 15px; font-size: 14px; border-radius: 9px; min-width: 100px; justify-content: center; }
   @media (max-width: 760px) { .topnav-links { display: none; } .topnav .btn { margin-left: auto; } }
 
   /* ---------- hero ---------- */
