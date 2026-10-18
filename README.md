@@ -151,8 +151,8 @@ Then, once, in the dashboard:
 `supabase/migrations/0009_schedule.sql` registers the cron jobs. It no-ops anywhere
 `pg_cron` isn't enabled, which is how it stays harmless on the local stack.
 
-The frontend deploys itself: Cloudflare Pages publishes `public/` from `main` at
-princesolarhub.com. There's no build step — the `.jsx` is transpiled in the browser by
+The frontend deploys itself: Cloudflare Pages publishes `public/` from `main`: the app at
+app.princesolarhub.com, the showcase at princesolarhub.com. There's no build step — the `.jsx` is transpiled in the browser by
 Babel standalone. GitHub Pages is off; the old github.io address no longer works.
 
 ---

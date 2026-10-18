@@ -1,7 +1,7 @@
 # Deploying
 
 Runbook for shipping this project. Two independent halves — the frontend goes out via
-Cloudflare Pages at princesolarhub.com, the backend via the Supabase CLI — and **they do
+Cloudflare Pages (app.princesolarhub.com; showcase at princesolarhub.com), the backend via the Supabase CLI — and **they do
 not deploy together**.
 
 > The deploy thread ships and verifies. It does not write feature code. Broken builds,
@@ -129,7 +129,7 @@ A failed check does not stop Cloudflare; read the run. GitHub Pages is switched 
 ## 5. Verify — do not assume
 
 ```bash
-until curl -s "https://princesolarhub.com/config.js?v=$(date +%s)" \
+until curl -s "https://app.princesolarhub.com/config.js?v=$(date +%s)" \
   | grep -q "v1.2.3"; do sleep 20; done
 ```
 
@@ -172,7 +172,7 @@ onto today; that must stay local.
 Two places know the origin:
 
 - **Browser → link-sunsynk (CORS).** `DEFAULT_ORIGINS` in `link-sunsynk/index.ts` lists
-  princesolarhub.com (with www); the GitHub Pages origin was dropped in SOLAR-110. A change needs
+  app.princesolarhub.com only (SOLAR-116); princesolarhub.com no longer runs the app. A change needs
   `supabase functions deploy link-sunsynk`. Another origin can be added without a code
   change: `supabase secrets set LINK_ALLOWED_ORIGINS=https://app.example.com`.
 - **Supabase Auth.** Dashboard → Authentication → URL Configuration: Site URL and
@@ -182,6 +182,11 @@ Two places know the origin:
   Redirect Rules) sends `https://www.princesolarhub.com/*` to `https://princesolarhub.com/${1}`
   with a 301, keeping the query. Sign-in is stored per site, so without it a www visit
   looked signed out. The www DNS record must stay proxied for the rule to run.
+- **Showcase at the apex.** One Pages project answers on both princesolarhub.com and
+  app.princesolarhub.com. A Cloudflare URL rewrite ("apex / shows showcase (SOLAR-116)",
+  Rules → Transform Rules → URL Rewrite) serves `/welcome` when the host is
+  princesolarhub.com and the path is `/`, so visitors and search engines land on the
+  showcase; its sign-in links go to app.princesolarhub.com.
 
 The cron jobs (0009, 0030) POST to `https://<project-ref>.functions.supabase.co`, which
 does not change with the site's domain.
@@ -198,4 +203,4 @@ does not change with the site's domain.
 | `.github/workflows/secrets-guard.yml` | fails if a secret-looking value lands in `public/` |
 | `.github/workflows/health.yml` | half-hourly logger check, emails on failure |
 
-Project ref `pmakzojwhouamawgszrc` · site https://princesolarhub.com on Cloudflare Pages (SOLAR-86) · GitHub Pages switched off (SOLAR-110)
+Project ref `pmakzojwhouamawgszrc` · app https://app.princesolarhub.com, showcase https://princesolarhub.com, on Cloudflare Pages (SOLAR-86, SOLAR-116) · GitHub Pages switched off (SOLAR-110)

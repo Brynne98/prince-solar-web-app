@@ -10,13 +10,12 @@
 // way: no console.log of the body, no error message that includes input.
 import { db, linkAccount } from "../_shared/sunsynk.ts";
 
-// Browser origins allowed to call this. princesolarhub.com (with and without www) in
+// Browser origins allowed to call this. app.princesolarhub.com in
 // production, the two local dev ports otherwise. Anything else is refused at preflight. A custom domain is
 // added with the LINK_ALLOWED_ORIGINS secret (comma-separated), no redeploy of code:
 //   supabase secrets set LINK_ALLOWED_ORIGINS=https://app.example.com,https://example.com
 const DEFAULT_ORIGINS = [
-  "https://princesolarhub.com",
-  "https://www.princesolarhub.com",
+  "https://app.princesolarhub.com",
   "http://localhost:3003",
   "http://localhost:3011",
   "http://127.0.0.1:3003",

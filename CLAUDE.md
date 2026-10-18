@@ -7,8 +7,9 @@
   `ssh -T git@github.com` must answer "Hi Brynne98!" before any push; this machine
   has two GitHub accounts and the wrong key authenticates as the wrong person.
 - **Branch:** `main`. No feature branches; commits land on main.
-- **Frontend host:** Cloudflare Pages at princesolarhub.com (and www), serving
-  `public/`, rebuilt from GitHub `main` on every push (seen 2026-10-18: v0.28.63 was live
+- **Frontend host:** Cloudflare Pages project `prince-solar-web-app`, serving `public/`:
+  the app at app.princesolarhub.com, the showcase at princesolarhub.com (a Cloudflare
+  URL rewrite serves `/welcome` for `/`; www redirects to the apex). Rebuilt from GitHub `main` on every push (seen 2026-10-18: v0.28.63 was live
   20 s after the push). Its settings are in the Cloudflare dashboard, not this repo.
   There is no build step; the JSX is transpiled in the browser. GitHub Pages is off
   (SOLAR-110); the old `brynne98.github.io/prince-solar-web-app` address is a 404.
