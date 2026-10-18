@@ -905,7 +905,17 @@ window.DEMO = (() => {
   const seen = new IntersectionObserver((entries) => {
     for (const e of entries) if (e.isIntersecting) { e.target.classList.add('seen'); seen.unobserve(e.target); }
   }, { threshold: 0.06 });
-  document.querySelectorAll('.reveal').forEach((el) => seen.observe(el));
+  // The live demo is empty until Babel has built it, so Solar sits right under the hero
+  // and would reveal there, then jump down when the demo lands. Reveal only once it's in.
+  const demo = document.getElementById('liveDemo');
+  const watch = () => document.querySelectorAll('.reveal').forEach((el) => seen.observe(el));
+  if (demo.childElementCount) watch();
+  else {
+    const landed = new MutationObserver(() => {
+      if (demo.childElementCount) { landed.disconnect(); watch(); }
+    });
+    landed.observe(demo, { childList: true });
+  }
 })();
 </script>
 
