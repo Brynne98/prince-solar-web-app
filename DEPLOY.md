@@ -119,8 +119,8 @@ curl -s -X POST https://pmakzojwhouamawgszrc.supabase.co/rest/v1/rpc/api_health 
 git add -A && git commit && git push origin main
 ```
 
-Cloudflare Pages publishes `public/` from `main`; its build settings live in the
-Cloudflare dashboard, not in this repo.
+Cloudflare Pages rebuilds `public/` from `main` on every push, usually within half a
+minute; its build settings live in the Cloudflare dashboard, not in this repo.
 
 `.github/workflows/secrets-guard.yml` checks `public/` for secrets on every push there.
 A failed check does not stop Cloudflare; read the run. `.github/workflows/pages.yml`

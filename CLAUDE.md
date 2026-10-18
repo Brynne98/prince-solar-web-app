@@ -8,8 +8,8 @@
   has two GitHub accounts and the wrong key authenticates as the wrong person.
 - **Branch:** `main`. No feature branches; commits land on main.
 - **Frontend host:** Cloudflare Pages at princesolarhub.com (and www), serving
-  `public/`. How Cloudflare builds (from main on push?) is set in its dashboard and
-  not yet confirmed (SOLAR-110); check there before trusting a push to ship it.
+  `public/`, rebuilt from GitHub `main` on every push (seen 2026-10-18: v0.28.63 was live
+  20 s after the push). Its settings are in the Cloudflare dashboard, not this repo.
   There is no build step; the JSX is transpiled in the browser. GitHub Pages only
   forwards old `brynne98.github.io/prince-solar-web-app` links to princesolarhub.com
   (`github-pages-forward/`, SOLAR-110) until it is unpublished.
