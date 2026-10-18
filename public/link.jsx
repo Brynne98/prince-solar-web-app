@@ -156,7 +156,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
       await onLinked(r);
       setPassword(''); setNoPlants(false);
     } catch (ex) {
-      setErr(ex instanceof TypeError ? 'Can’t reach Prince Solar. Check your connection and try again.' : ex.message);
+      setErr(ex instanceof TypeError ? 'Can’t reach Prince Solar Hub. Check your connection and try again.' : ex.message);
     } finally {
       clearTimeout(findTimer.current); setFinding(false);
       setBusy(false);

@@ -163,7 +163,7 @@ function AccountMenu({ user, plantCount, alert, onAccount, active, variant }) {
 function Sidebar({ tabs, tab, onTab, account }) {
   return (
     <aside className="rail">
-      <div className="rail-logo"><span className="sun" aria-hidden="true" /><span className="app-name">Prince Solar</span></div>
+      <div className="rail-logo"><span className="sun" aria-hidden="true" /><span className="app-name">Prince Solar Hub</span></div>
       <nav className="nav" aria-label="Pages">
         {tabs.map(t => (
           <button key={t.id} type="button" className={t.id === 'settings' ? 'nav-settings' : undefined} aria-current={tab === t.id ? 'page' : undefined}

@@ -1,4 +1,4 @@
-// Every email Prince Solar sends, as { subject, html, text }.
+// Every email Prince Solar Hub sends, as { subject, html, text }.
 //
 // Plain TypeScript with no Deno or Node APIs, so an Edge Function can import it and
 // scripts/email-preview.ts can run it under Node to preview and send test mail.
@@ -17,8 +17,8 @@ export const SITE = "https://princesolarhub.com";
 // Email choices are per person, so they belong on Account (logins, delete) rather
 // than Settings (plant, tariff, battery). Relink is on Account too.
 const PREFS = `${SITE}/?tab=account`;
-export const FROM_ACCOUNT = "Prince Solar <noreply@princesolarhub.com>";
-export const FROM_NOTICE = "Prince Solar <hello@princesolarhub.com>";
+export const FROM_ACCOUNT = "Prince Solar Hub <noreply@princesolarhub.com>";
+export const FROM_NOTICE = "Prince Solar Hub <hello@princesolarhub.com>";
 
 export type Email = { subject: string; html: string; text: string };
 
@@ -95,7 +95,7 @@ ${s.sub ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};color:
 <body class="bg" style="margin:0;padding:0;background:#0a0d12">
 <table role="presentation" class="bg" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0d12"><tr><td align="center" style="padding:28px 12px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
-<tr><td style="padding:0 4px 16px"><a href="${SITE}" style="text-decoration:none"><img src="${SITE}/icon-192.png" width="28" height="28" alt="" style="vertical-align:middle;border:0;border-radius:6px"> <span class="t" style="vertical-align:middle;font:700 17px/1 ${SANS};color:#e7ecf2">Prince Solar</span></a></td></tr>
+<tr><td style="padding:0 4px 16px"><a href="${SITE}" style="text-decoration:none"><img src="${SITE}/icon-192.png" width="28" height="28" alt="" style="vertical-align:middle;border:0;border-radius:6px"> <span class="t" style="vertical-align:middle;font:700 17px/1 ${SANS};color:#e7ecf2">Prince Solar Hub</span></a></td></tr>
 <tr><td class="card pad" style="background:#11161d;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:32px 32px 20px">
 <h1 class="t" style="margin:0 0 ${b.sub ? 4 : 16}px;font:700 22px/1.25 ${SANS};letter-spacing:-.02em;color:#e7ecf2">${esc(b.title)}</h1>
 ${b.sub ? `<p class="m" style="margin:0 0 20px;font:400 14px/1.4 ${SANS};color:#9aa5b3">${esc(b.sub)}</p>` : ""}
@@ -135,7 +135,7 @@ function account(subject: string, title: string, lead: string, label: string, ur
 }
 
 export const confirmSignup = (url: string) =>
-  account("Confirm your email", "Confirm your email", "Tap the button to finish setting up Prince Solar.",
+  account("Confirm your email", "Confirm your email", "Tap the button to finish setting up Prince Solar Hub.",
     "Confirm email", url, "Didn't sign up? Ignore this email.");
 
 export const resetPassword = (url: string) =>
@@ -143,7 +143,7 @@ export const resetPassword = (url: string) =>
     "Reset password", url, "Didn't ask for this? Ignore this email. Your password stays the same.");
 
 export const confirmEmailChange = (url: string, newEmail: string) =>
-  account("Confirm your new email", "Confirm your new email", `Tap the button to use <b>${esc(newEmail)}</b> for Prince Solar.`,
+  account("Confirm your new email", "Confirm your new email", `Tap the button to use <b>${esc(newEmail)}</b> for Prince Solar Hub.`,
     "Confirm new email", url, "Didn't ask for this? Ignore this email.");
 
 // Security notices: sent at once, after the change, so there is nothing to confirm.
@@ -168,7 +168,7 @@ export const passwordChanged = (email: string, w: Where) =>
 export const emailChanged = (oldEmail: string, newEmail: string, w: Where) =>
   make("Your email was changed", {
     title: "Your email was changed",
-    parts: [{ p: `Prince Solar now uses <b>${esc(newEmail)}</b> instead of ${esc(oldEmail)}. Changed on ${when(w)}.` },
+    parts: [{ p: `Prince Solar Hub now uses <b>${esc(newEmail)}</b> instead of ${esc(oldEmail)}. Changed on ${when(w)}.` },
       { p: "This is the last email to this address." }, ...notYou],
     footer: [`Questions? Write to <a href="mailto:hello@princesolarhub.com">hello@princesolarhub.com</a>.`, COMPANY],
   });
@@ -176,7 +176,7 @@ export const emailChanged = (oldEmail: string, newEmail: string, w: Where) =>
 export const accountDeleted = (email: string) =>
   make("Your account is deleted", {
     title: "Your account is deleted",
-    parts: [{ p: `The Prince Solar account for <b>${esc(email)}</b> is deleted, with its settings and SunSynk logins. Plant readings go too, unless someone else shares the plant.` },
+    parts: [{ p: `The Prince Solar Hub account for <b>${esc(email)}</b> is deleted, with its settings and SunSynk logins. Plant readings go too, unless someone else shares the plant.` },
       { p: "Your SunSynk account and your inverter are not affected." },
       { note: "You can sign up again any time. Only the last 60 days of history come back from SunSynk." }],
     footer: [COMPANY],
@@ -205,12 +205,12 @@ const NOTICE_FOOTER = (plant: string, what: string, unsubscribeUrl?: string) => 
 // Wording matches link.jsx ("Connect your inverter", "Use the login from the
 // SunSynk Connect app", "We never keep your password").
 export const welcome = () =>
-  make("Welcome to Prince Solar", {
-    title: "Welcome to Prince Solar",
+  make("Welcome to Prince Solar Hub", {
+    title: "Welcome to Prince Solar Hub",
     parts: [
       { p: "One step left: connect your inverter." },
       { steps: [
-        "Open Prince Solar and sign in.",
+        "Open Prince Solar Hub and sign in.",
         "Enter the email and password you use in the <b>SunSynk Connect</b> app.",
         "Live readings start at once. The last 60 days of history follow; we'll email when they're in.",
       ] },
@@ -252,7 +252,7 @@ export const historySynced = (h: History) => {
       { p: `Best day: <b>${esc(h.bestDay.label)}</b>, ${kwh(h.bestDay.kwh).join(" ")} of solar.` },
       ...(gaps > 0 ? [{ note: `SunSynk had nothing for ${gaps} ${gaps === 1 ? "day" : "days"}, shown as ${gaps === 1 ? "a gap" : "gaps"}.` }] : []),
       { p: `Your first monthly report comes on ${esc(h.firstReport)}. Pick weekly or yearly in Account.` },
-      { button: { label: "Open Prince Solar", href: SITE } },
+      { button: { label: "Open Prince Solar Hub", href: SITE } },
     ],
     footer: NOTICE_FOOTER(h.plant, "Sent once"),
   });
@@ -275,7 +275,7 @@ export const sunsynkBack = (plant: string, at: string, lasted: string, refilled:
     parts: [
       { p: `Readings for ${esc(plant)} resumed at <b>${at}</b>, after ${lasted}.` },
       { p: refilled ? "The gap is filled from SunSynk's records." : "SunSynk kept nothing for that time, so it stays as a gap." },
-      { button: { label: "Open Prince Solar", href: SITE } },
+      { button: { label: "Open Prince Solar Hub", href: SITE } },
     ],
     footer: NOTICE_FOOTER(plant, "Plant event", unsubscribeUrl),
   });
@@ -322,7 +322,7 @@ export function report(r: Report): Email {
   if (r.bestDay) parts.push({ p: `Best day: <b>${esc(r.bestDay.label)}</b>, ${kwh(r.bestDay.kwh).join(" ")} of solar.` });
   if (r.yearSoFarKwh != null && r.period !== "year") parts.push({ p: `Year so far: <b>${kwh(r.yearSoFarKwh).join(" ")}</b> of solar.` });
   if (r.gapDays > 0) parts.push({ note: `${r.gapDays} ${r.gapDays === 1 ? "day has" : "days have"} gaps in the readings, so totals may be low.` });
-  parts.push({ button: { label: "Open Prince Solar", href: SITE } });
+  parts.push({ button: { label: "Open Prince Solar Hub", href: SITE } });
   return make(`${r.label}: ${mv} ${mu} of solar`, {
     title: r.label,
     sub: r.plant,
@@ -392,7 +392,7 @@ export function plantEvent(plant: string, e: PlantEvent, unsubscribeUrl: string)
   const relink = e.kind === "needs_relink";
   return make(title, {
     title,
-    parts: [{ p: lead }, { button: relink ? { label: "Reconnect", href: PREFS } : { label: "Open Prince Solar", href: SITE } }],
+    parts: [{ p: lead }, { button: relink ? { label: "Reconnect", href: PREFS } : { label: "Open Prince Solar Hub", href: SITE } }],
     footer: [
       `Plant event for ${P}. Switch these off in <a href="${PREFS}">Account</a>.`,
       `<a href="${unsubscribeUrl}">Unsubscribe</a> · ${COMPANY}`,

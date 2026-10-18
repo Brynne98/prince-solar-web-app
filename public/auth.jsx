@@ -19,12 +19,14 @@
 //             short-lived session and fires PASSWORD_RECOVERY; we ask for the new
 //             password and call updateUser. Until then the app is gated.
 //
-// Sign-in and sign-up also offer "Continue with Google". Supabase runs the OAuth
-// dance and brings the user back to SITE_URL with the session in the URL fragment
-// (implicit flow, same as the emailed links), which supabase-js consumes and strips
-// on load, so the same onAuthStateChange path lights the app up. A Google account
-// whose email already has a password login is linked to it. A denied or failed
-// round trip comes back as #error_description=…, which the sign-in card shows.
+// Sign-in and sign-up also offer "Continue with Google", as Google's own button
+// (SOLAR-122). It signs in through a Google popup on this page and hands back an ID
+// token, which signInWithIdToken trades for a session, so the same onAuthStateChange
+// path lights the app up. Google's popup names this site, not the Supabase host that
+// a redirect would go through. A Google account whose email already has a password
+// login is linked to it. There is no redirect fallback: it would go through
+// supabase.co, which Google's brand check won't accept as ours. If Google's script
+// is blocked, the card says so and email sign-in still works.
 // ============================================================================
 
 window.sb = window.supabase.createClient(
@@ -103,13 +105,76 @@ const GoogleMark = () => (
   </svg>
 );
 
+/** "Continue with Google" (SOLAR-122), in our own look over Google's real button. Signs in through a Google
+ *  popup and passes the ID token to Supabase. Google hashes the nonce we give it into
+ *  the token; Supabase checks the token against the plain one. Google's button only
+ *  comes in its own look (and turns into "Continue as <name>"), so it sits invisible
+ *  on top of ours, stretched to cover it, and takes the click. `blocked` lays a
+ *  click-catcher over both (sign-up before the Terms are ticked), since clicks inside
+ *  Google's frame can't be stopped. */
+function GoogleSignIn({ blocked, onBlocked, onStart, onDone }) {
+  const { useState, useEffect, useRef } = React;
+  const box = useRef(null);
+  const [state, setState] = useState('loading'); // loading | ready | failed
+  // Kept current for Google's callback, which is registered once.
+  const cbs = useRef({});
+  cbs.current = { onStart, onDone };
+
+  useEffect(() => {
+    let alive = true, tries = 0;
+    const raw = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+    const setup = async () => {
+      if (!alive) return;
+      if (!window.google?.accounts?.id) {
+        // async script: wait up to 10 s, then give up on it.
+        if (++tries > 50) return setState('failed');
+        return setTimeout(setup, 200);
+      }
+      const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+      if (!alive) return;
+      window.google.accounts.id.initialize({
+        client_id: window.GOOGLE_CLIENT_ID,
+        nonce: Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join(''),
+        auto_select: false,
+        callback: async ({ credential }) => {
+          cbs.current.onStart();
+          const { error } = await window.sb.auth.signInWithIdToken({ provider: 'google', token: credential, nonce: raw });
+          cbs.current.onDone(error);
+        },
+      });
+      window.google.accounts.id.renderButton(box.current, {
+        type: 'standard', theme: 'filled_black', size: 'large', shape: 'rectangular',
+        text: 'continue_with', logo_alignment: 'center', width: Math.min(400, box.current.offsetWidth || 320),
+      });
+      // Stretch Google's button over ours so every part of ours opens Google.
+      const g = box.current.firstElementChild;
+      if (g && g.offsetWidth && g.offsetHeight) {
+        g.style.transform = `scale(${box.current.offsetWidth / g.offsetWidth}, ${box.current.offsetHeight / g.offsetHeight})`;
+      }
+      setState('ready');
+    };
+    setup();
+    return () => { alive = false; };
+  }, []);
+
+  // Blocked by a privacy setting or extension, or Google is down.
+  if (state === 'failed') return <div className="login-fine">Google sign-in didn’t load. Use your email and password.</div>;
+  return (
+    <div className="gsi-wrap">
+      <div className="login-google" aria-hidden="true"><GoogleMark /> Continue with Google</div>
+      <div ref={box} className="gsi-box" />
+      {blocked && <button type="button" className="gsi-block" onClick={onBlocked} aria-label="Continue with Google" />}
+    </div>
+  );
+}
+
 /** The product's mark, shared by every gate screen. */
 function AuthBrand() {
   return (
     <div className="auth-brand">
       <span className="sun" />
       <div>
-        <div className="auth-brand-name">Prince Solar</div>
+        <div className="auth-brand-name">Prince Solar Hub</div>
         <div className="auth-brand-tag">Your solar history, kept for good.</div>
       </div>
     </div>
@@ -169,7 +234,7 @@ function explain(ex) {
   if (code === 'signup_disabled') return { text: 'New accounts are closed right now.' };
   if (code === 'over_email_send_rate_limit') return { text: 'Too many emails sent. Wait a few minutes, then try again.' };
   if (code === 'over_request_rate_limit' || ex?.status === 429) return { text: 'Too many tries. Wait a minute, then try again.' };
-  if (ex?.name === 'AuthRetryableFetchError' || ex instanceof TypeError) return { text: 'Can’t reach Prince Solar. Check your connection and try again.' };
+  if (ex?.name === 'AuthRetryableFetchError' || ex instanceof TypeError) return { text: 'Can’t reach Prince Solar Hub. Check your connection and try again.' };
   return { text: ex?.message || 'Something went wrong. Try again.' };
 }
 
@@ -240,10 +305,9 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const [agree, setAgree] = useState(false);
   const [sentTo, setSentTo] = useState(null);
 
-  // A failed Google round trip lands here signed out with the reason in the URL.
+  // A stale email link (confirm, reset) lands here signed out with the reason in the URL.
   // The back button restores the page from cache with `busy` still set, so clear it.
   React.useEffect(() => {
-    // Email links (confirm, reset) come back the same way when they are stale.
     const params = new URLSearchParams(location.hash.slice(1) || location.search);
     if (params.get('error_description')) {
       setErr(params.get('error_code') === 'otp_expired'
@@ -328,17 +392,6 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     }
   };
 
-  // Leaves the page on success, so `busy` stays set until the redirect lands.
-  const google = async () => {
-    if (mode === 'signup' && !agree) return flag({ 'auth-agree': 'Accept the Terms and Privacy Policy' });
-    setBusy('google'); setErr(null); setNote(null); setBad({});
-    // select_account: a household shares a tablet, so always offer the account list.
-    const { error } = await window.sb.auth.signInWithOAuth({
-      provider: 'google', options: { redirectTo: SITE_URL, queryParams: { prompt: 'select_account' } },
-    });
-    if (error) { setErr(explain(error)); setBusy(false); }
-  };
-
   const copy = {
     signin:   { h: 'Welcome back',          p: null,                                                   cta: 'Sign in',         busy: 'Signing in…' },
     signup:   { h: 'Create your account',   p: null,                                                   cta: 'Create account',  busy: 'Creating account…' },
@@ -354,11 +407,17 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     );
   }
 
-  const googleButton = (
-    <button type="button" className="login-google" onClick={google} disabled={!!busy} aria-busy={busy === 'google'}>
-      <GoogleMark /> {busy === 'google' ? 'Opening Google…' : 'Continue with Google'}
-    </button>
-  );
+  // Stays mounted while signing in (only hidden), so Google's button isn't drawn twice.
+  const googleButton = (<>
+    {busy === 'google' && <div className="auth-wait"><span className="auth-spin" aria-hidden="true" />Signing in with Google…</div>}
+    <div hidden={busy === 'google'}>
+      <GoogleSignIn
+        blocked={mode === 'signup' && !agree}
+        onBlocked={() => flag({ 'auth-agree': 'Accept the Terms and Privacy Policy' })}
+        onStart={() => { setBusy('google'); setErr(null); setNote(null); setBad({}); }}
+        onDone={(error) => { if (error) { setErr(explain(error)); setBusy(false); } }} />
+    </div>
+  </>);
 
   return (
     <div className="login-wrap">

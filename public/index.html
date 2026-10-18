@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>Prince Solar</title>
+<title>Prince Solar Hub</title>
 <!-- The app stays out of search; the showcase at princesolarhub.com is the one listed (SOLAR-120) -->
 <meta name="robots" content="noindex" />
 <!-- Installable / chromeless on a tablet: Add to Home Screen → runs fullscreen (ideal wall display) -->
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="Prince Solar" />
+<meta name="apple-mobile-web-app-title" content="Prince Solar Hub" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="theme-color" content="#0a0d12" />
 <!-- Safari/iOS turns email addresses in text into blue mailto links; keep them plain -->
@@ -1213,6 +1213,14 @@
   .auth-inbox + .login-title { margin-top: 0; }
   .login-sub b { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
   .login-card a.login-google { text-decoration: none; }
+  /* Google's real button (SOLAR-122) lies invisible over our own look and takes the click */
+  .gsi-wrap { position: relative; }
+  .gsi-box { position: absolute; inset: 0; opacity: 0.01; overflow: hidden; }
+  .gsi-box > div { transform-origin: top left; }
+  .gsi-wrap:hover .login-google { border-color: var(--muted); }
+  .gsi-wrap:focus-within .login-google { outline: 2px solid var(--pv); outline-offset: 2px; }
+  /* sign-up before the Terms are ticked: catches the click Google's frame would take */
+  .login-card .gsi-block { position: absolute; inset: 0; width: 100%; min-height: 0; padding: 0; margin: 0; background: transparent; border: 0; box-shadow: none; cursor: pointer; }
   .auth-wait { display: flex; align-items: center; gap: 12px; font-size: 15px; color: var(--muted); padding: 14px 16px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
   .auth-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--pv); animation: auth-spin .9s linear infinite; flex: none; }
   @keyframes auth-spin { to { transform: rotate(360deg); } }
@@ -1283,6 +1291,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js" integrity="sha384-KX6Y/AMIv9qA8TLCDul2JatZWeyrJVgj3Xu/0r30Nr05xO8md1+wHAgtdsRV9LoE" crossorigin="anonymous"></script>
 
 <!-- config first: auth.jsx and data.jsx both read window.SUNSYNK_CONFIG -->
+<!-- Google's sign-in button (SOLAR-122). No integrity hash: Google updates it in place. -->
+<script src="https://accounts.google.com/gsi/client" async></script>
 <script src="config.js"></script>
 <script type="text/babel" src="auth.jsx"></script>
 <script type="text/babel" src="link.jsx"></script>

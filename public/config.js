@@ -9,9 +9,11 @@
 // Shown in Settings -> About. Bumped on every deploy; semver, so patch for fixes,
 // minor for features, major for a rewrite. Lives here rather than in the JSX so it sits
 // with the other deploy-time config and loads before anything renders.
-window.APP_VERSION = 'v0.28.64';
+window.APP_VERSION = 'v0.28.65';
 // Shown in Settings → About and on error screens.
 window.SUPPORT_EMAIL = 'brynneprince98@gmail.com';
+// Google sign-in client (Google Cloud project prince-solar, "Supabase web"). Public by design.
+window.GOOGLE_CLIENT_ID = '357189209576-890oqvan5eeuc2vash5ralv04k0m0pa2.apps.googleusercontent.com';
 
 window.SUNSYNK_CONFIG = (function () {
   var local = {

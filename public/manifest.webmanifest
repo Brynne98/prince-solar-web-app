@@ -1,6 +1,6 @@
 {
-  "name": "Prince Solar",
-  "short_name": "Prince Solar",
+  "name": "Prince Solar Hub",
+  "short_name": "Prince Solar Hub",
   "description": "Live solar / battery / grid dashboard for SunSynk inverters",
   "start_url": "./?tab=live",
   "display": "fullscreen",
