@@ -444,7 +444,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
             ))}
             {!isTemp && hasF && <text x={m.l + innerW + 10} y={m.t - 9} className="ax" fill={C.soc} fillOpacity="0.55">Hz</text>}
             {outages.map(([a, b], i) => (
-              <rect key={'o' + i} x={x(Math.max(0, a - 0.5))} y={m.t - 8} width={Math.max(2, x(Math.min(lastIdx, b + 0.5)) - x(Math.max(0, a - 0.5)))} height={innerH + 8} fill={C.load} fillOpacity="0.18" />
+              <rect key={'o' + i} x={x(Math.max(0, a - 0.5))} y={m.t} width={Math.max(2, x(Math.min(lastIdx, b + 0.5)) - x(Math.max(0, a - 0.5)))} height={innerH} fill={C.load} fillOpacity="0.18" />
             ))}
             {shown.map((inv, k) => {
               const c = color(k);

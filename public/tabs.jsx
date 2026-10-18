@@ -692,7 +692,7 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty, 
         <defs><GapHatch /></defs>
         {gaps.map(([a, b]) => <rect key={'gap' + a} x={x(a)} y={m.t} width={x(b) - x(a)} height={innerH} fill="url(#gaphatch)" />)}
         {(outages || []).map(([a, b]) => (
-          <rect key={'o' + a} x={xt5(Math.max(t0, a * 5 - 2.5))} y={m.t - 8} width={Math.max(2, xt5(Math.min(t1, b * 5 + 2.5)) - xt5(Math.max(t0, a * 5 - 2.5)))} height={innerH + 8} fill={window.COLORS.load} fillOpacity="0.18" />
+          <rect key={'o' + a} x={xt5(Math.max(t0, a * 5 - 2.5))} y={m.t} width={Math.max(2, xt5(Math.min(t1, b * 5 + 2.5)) - xt5(Math.max(t0, a * 5 - 2.5)))} height={innerH} fill={window.COLORS.load} fillOpacity="0.18" />
         ))}
         {ticks.map((t, k) => (
           <g key={k}>
