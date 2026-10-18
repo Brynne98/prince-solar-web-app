@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Prince Solar</title>
+<meta name="description" content="Link your SunSynk login once. Prince Solar shows where your power is coming from and going to, right now." />
+<meta name="theme-color" content="#0a0d12" />
+<meta name="format-detection" content="email=no" />
+<link rel="icon" type="image/svg+xml" href="icon.svg" />
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-180.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<style>
+  /* Dark only, like the app. Tokens are the app's (index.html :root). */
+  :root {
+    --bg: #0a0d12;
+    --panel: #11161d;
+    --panel-2: #141a22;
+    --line: rgba(255,255,255,0.07);
+    --line-2: rgba(255,255,255,0.12);
+    --text: #e7ecf2;
+    --muted: #9aa5b3;
+    --dim: #7f8da0;
+    --pv: #3ddc84; --batt: #a78bfa; --grid: #facc15; --load: #f87171; --soc: #22d3ee;
+    --ok: #3ddc84;
+    --warn: #f59e0b; --bad: #ef4444;
+    --display: 'Space Grotesk', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  html, body { margin: 0; overflow-x: clip; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(91,157,255,0.06), transparent 60%),
+      radial-gradient(900px 500px at 10% 110%, rgba(52,211,153,0.05), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--display);
+    font-size: 16px;
+    line-height: 1.55;
+  }
+  a { color: inherit; }
+
+  /* ===== copied from the app (index.html), so the demo pieces look exactly like it.
+     Keep in step with index.html when those rules change. ===== */
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .dim { color: var(--muted); }
+  button { font-family: inherit; cursor: pointer; }
+
+  /* ---------- skeletons ---------- */
+  .skel { position: relative; overflow: hidden; background: rgba(255,255,255,0.055); }
+  .skel::after {
+    content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), transparent);
+    animation: skel-sweep 1.5s ease-in-out infinite;
+  }
+  @keyframes skel-sweep { 100% { transform: translateX(100%); } }
+  /* a sweeping highlight is exactly the kind of motion this setting exists to stop */
+  @media (prefers-reduced-motion: reduce) { .skel::after { animation: none; } }
+  .status { margin-left: auto; display: flex; align-items: center; gap: 8px; white-space: nowrap; flex: none; }
+  .status-age { font-size: 12.5px; }
+  .status-word { font-size: 14px; font-weight: 600; }
+  /* every state breathes, in its own colour; --ring is the halo */
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none;
+    --ring: rgba(255,255,255,0.14); box-shadow: 0 0 0 3px var(--ring); animation: status-breathe 2.4s ease-in-out infinite; }
+  .status-live .status-dot { background: var(--pv); --ring: rgba(61,220,132,0.18); }
+  .status-live .status-word { color: var(--pv); }
+  .status-stale .status-dot { background: var(--warn); --ring: rgba(245,158,11,0.18); }
+  .status-stale .status-word, .status-stale .status-age { color: var(--warn); }
+  .status-offline .status-dot { background: var(--bad); --ring: rgba(239,68,68,0.18); }
+  .status-offline .status-word, .status-offline .status-age { color: var(--bad); }
+  .status-idle .status-word { color: var(--muted); }
+  @keyframes status-breathe { 0%, 100% { box-shadow: 0 0 0 3px var(--ring); } 50% { box-shadow: 0 0 0 5px transparent; } }
+  @media (prefers-reduced-motion: reduce) { .status-dot { animation: none; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px; }
+  /* charts want the width more than they want the gutter */
+  .trend-chart-card { padding-left: 12px; padding-right: 12px; }
+  /* the day chart and power flow keep one gutter on all four sides */
+  .chart-card, .flow-card { padding: 12px; }
+  /* the 28px Fullscreen button made the row taller and centring pushed the title down;
+     pin both to the top so the title sits as far from the top edge as from the left */
+  .flow-card .section-title { align-items: flex-start; }
+  .section-title { display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: var(--muted); text-transform: uppercase; margin-bottom: 18px; }
+  .section-right { font-size: 11px; letter-spacing: 0.04em; }
+  .stat-tile { display: flex; flex-direction: column; gap: 0; }
+  .stat-label { font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+  .stat-value { font-family: var(--mono); font-weight: 700; margin-top: 10px; line-height: 1; display: flex; align-items: baseline; }
+  .stat-value .num { font-size: 44px; }
+  .stat-value .unit { font-size: 24px; margin-left: 4px; opacity: 0.85; }
+  .stat-sub { font-size: 13px; color: var(--muted); margin-top: 12px; }
+  .stat-sub b { color: var(--text); font-weight: 600; }
+  .batt-eta { display: block; margin-top: 7px; font-size: 12px; color: var(--soc); font-family: var(--mono); letter-spacing: -0.01em; }
+  .batt-eta b { color: var(--soc); font-weight: 700; }
+  .batt-eta .bel { display: block; }
+  .batt-eta .bel.sub { color: var(--muted); margin-top: 1px; }
+  .meter { height: 7px; border-radius: 4px; background: rgba(255,255,255,0.07); overflow: hidden; margin-top: 14px; position: relative; }
+  .meter.sm { height: 5px; margin-top: 8px; }
+  .meter-fill { height: 100%; border-radius: 4px; transition: width .5s ease; }
+  .live-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  /* battery banner: status (left) + a few labelled stats (right) */
+  .batt-balance { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; padding: 10px 15px; border-radius: 12px;
+    background: rgba(255,255,255,0.02); border: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+  .batt-balance.watch { border-color: rgba(245,158,11,0.45); background: rgba(245,158,11,0.06); }
+  .batt-balance.drifting { border-color: rgba(248,113,113,0.55); background: rgba(248,113,113,0.09); }
+  .bb-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .bb-title { color: var(--text); font-weight: 600; }
+  .bb-status { font-weight: 600; cursor: help; }
+  .bb-div { width: 1px; align-self: stretch; background: var(--line); }
+  .bb-stats { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+  .bb-stat { display: inline-flex; align-items: baseline; gap: 5px; cursor: help; }
+  .bb-k { color: var(--dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .bb-stat b { color: var(--text); font-weight: 600; }
+  .bb-stat.bb-hot b { color: var(--warn); }
+  .chart-card { display: flex; flex-direction: column; min-width: 0; }
+  .hv-root { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+  .stat-col { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  /* five in a row from 1200 px (six for an exporting plant), four from 980 px, three below that, two per row on a phone */
+  .today-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  @media (min-width: 981px) { .today-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  @media (min-width: 1200px) { .today-strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); } }
+  .overview-section { order: -1; }
+  .overview-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+  .overview-head .section-title { margin-bottom: 0; }
+  .cmp-note { font-size: 13px; color: var(--muted); margin: -6px 0 12px; }
+  .mini-stat { padding: 20px 22px; }
+  /* label left, trend arrow right on the same line; a long label wraps, the arrow keeps its corner */
+  .mini-label { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+    display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 2px 8px; }
+  .ml-text { display: flex; align-items: center; min-width: 0; line-height: 1.35; }
+  .mini-label .trend-badge { margin-left: 0; top: 0; line-height: 1.35; text-transform: none; }
+  .mv-unit { font-size: 14px; font-weight: 500; margin-left: 4px; opacity: 0.85; }
+  .mv-unit.pct { margin-left: 1px; }
+  .mini-stat { transition: border-color .15s; }
+  .mini-stat:hover { border-color: var(--line-2); }
+  /* baseline, not flex-end. Aligning the boxes lines up the two fonts' DESCENDER
+     space, and the mono face reserves more of it — so its glyphs ride higher and the
+     badge reads as sitting low. Baselines are where the glyphs actually rest. */
+  .mini-value { font-size: 24px; font-weight: 600; margin-top: 10px; letter-spacing: -0.01em;
+    display: flex; align-items: baseline; flex-wrap: wrap; row-gap: 2px; }
+  /* Baseline alone sits the badge a touch high, box-bottom a touch low. 1px down off
+     the baseline is the middle, and it is a nudge rather than a different rule. */
+  .trend-badge { position: relative; top: 1px; }
+  .mv-num { white-space: nowrap; }
+  /* a tile's second line that is an action ("Set your rate" on Est. saved with no rate yet) */
+  .mini-link { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer;
+    text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
+  .mini-link:hover { color: var(--text); text-decoration-color: currentColor; }
+  /* a Settings card flashes once when a link elsewhere sends you to it */
+  .sset-flash { animation: sset-flash 1.1s ease-out 0.15s 1; }
+  @keyframes sset-flash {
+    0%, 100% { border-color: var(--line); box-shadow: 0 0 0 0 rgba(61,220,132,0); }
+    35% { border-color: var(--pv); box-shadow: 0 0 0 4px rgba(61,220,132,0.18); }
+  }
+  @media (prefers-reduced-motion: reduce) { .sset-flash { animation: none; } }
+  .mini-link:focus-visible { outline: 2px solid var(--line-2); outline-offset: 2px; border-radius: 3px; }
+  /* grid presence chip on the Imported card — green when the mains is live, red when down */
+  /* padding-left leaves room for the dot's 3px glow ring: .mini-sub clips overflow for
+     its ellipsis, so a ring flush against x=0 loses its left edge. */
+  .grid-state { display: inline-flex; align-items: center; gap: 6px; cursor: help; padding-left: 3px; }
+  .grid-state .gs-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .grid-state.on  { color: var(--muted); }
+  .grid-state.on  .gs-dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(61,220,132,0.14); }
+  .grid-state.off { color: var(--load); font-weight: 600; }
+  .grid-state.unknown { color: var(--dim); cursor: default; }
+  .grid-state.unknown .gs-dot { background: var(--dim); opacity: .5; }
+  .grid-state.off .gs-dot { background: var(--load); box-shadow: 0 0 0 3px rgba(248,113,113,0.16); }
+  /* Two lines, then clip. The old single-line ellipsis cut "Set your rate in Settings"
+     to "Set your rate in Se…" on every width; a second line costs 15px and keeps
+     the sentence. Grid rows stretch, so a two-line tile does not misalign its row. */
+  .mini-sub { font-size: 12.5px; color: var(--dim); margin-top: 5px; line-height: 1.35;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+
+  /* ---------- flow svg ---------- */
+  .flow-fs-wrap { width: 100%; }
+  .flow-wrap { width: 100%; }
+  /* slide a whole number of dash-periods so the loop is seamless: 195 = 15 (desktop "2 13") × 13 (mobile "2 11") */
+  @keyframes flow { to { stroke-dashoffset: -195; } }
+  /* the moving dashes are the one piece of continuous motion on the page */
+  @media (prefers-reduced-motion: reduce) { .pflow-lane *, .mflow-links * { animation: none !important; } }
+  /* ---------- power-flow box, shared by both layouts (SOLAR-39) ---------- */
+  /* the type matches the overview cards above (SOLAR-16): label, number and unit */
+  .fbox { border: 1.3px solid var(--line); border-radius: 16px; min-width: 0; overflow: hidden; transition: border-color .2s; }
+  .fbox.off { border-style: dashed; }
+  .fbox-now { display: flex; flex-direction: column; min-width: 0; }
+  .fbox-head { display: flex; align-items: center; gap: 9px; }
+  .fbox-head svg { flex: none; }
+  .fbox-label { font: 500 12px var(--display); letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fbox-val { font: 600 30px var(--mono); letter-spacing: -0.01em; line-height: 1; margin-top: 12px; white-space: nowrap; }
+  .fbox-val .u { font-size: 15px; font-weight: 500; margin-left: 5px; opacity: 0.85; }
+  .fbox-state { font-size: 12.5px; font-weight: 500; color: var(--muted); margin-top: 8px; white-space: nowrap; }
+  .fbox-state b { font: 600 12.5px var(--mono); color: var(--text); margin-left: 5px; }
+  /* the foot sits on the box's bottom edge whatever is above it */
+  .fbox-foot { margin-top: auto; padding-top: 10px; }
+  .fbox-bar { display: flex; gap: 2px; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,0.08); }
+  .fbox-bar i { display: block; height: 100%; border-radius: 3px; min-width: 6px; }   /* a 1% share still reads as a segment */
+  .fbox-split { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 10px; margin-top: 7px; }
+  .fbox-split span { display: flex; flex-direction: column; gap: 2px; }
+  .fbox-split span:last-child:not(:first-child) { align-items: flex-end; }
+  .fbox-split em, .fbox-today span, .fbox-today-h { font: 500 11px var(--display); font-style: normal; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  .fbox-split b { font: 600 12.5px var(--mono); }
+  .fbox-charge { display: flex; align-items: center; gap: 10px; }
+  .fbox-charge .fbox-bar { flex: 1; }
+  .fbox-charge b { font: 700 18px var(--mono); white-space: nowrap; }
+  /* mains there or gone: a green dot, or a hollow grey one */
+  .fbox-grid { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  .fbox-grid i { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ok); }
+  .fbox-grid.off i { box-sizing: border-box; background: none; border: 1.5px solid var(--dim); }
+  .fbox-today { display: flex; flex-direction: column; gap: 12px; }
+  .fbox-today > div:not(.fbox-today-h) { display: flex; flex-direction: column; gap: 3px; }
+  .fbox-today b { font: 600 17px var(--mono); color: var(--text); white-space: nowrap; }
+  .fbox-today b .u { font: 500 11px var(--mono); letter-spacing: 0; text-transform: none; color: var(--muted); margin-left: 4px; }
+
+  /* ---------- wide power-flow: two rows of two, the inverter in a lane between ---------- */
+  .pflow { display: grid; }
+  .pflow-cell { display: grid; min-width: 0; }
+  .pflow .fbox { display: grid; grid-template-columns: minmax(0, 1fr) 148px; }
+  .pflow .fbox-now { padding: 18px 20px 16px; }
+  .pflow .fbox-today { border-left: 1px solid var(--line); background: rgba(255,255,255,0.015); padding: 18px 18px 16px; }
+  .pflow.narrow .fbox { grid-template-columns: minmax(0, 1fr) 116px; }
+  .pflow.narrow .fbox-now { padding: 16px 14px 14px; }
+  .pflow.narrow .fbox-today { padding: 16px 14px 14px; }
+  .pflow.narrow .fbox-val { font-size: 24px; }
+  .pflow.narrow .fbox-val .u { font-size: 14px; }
+  .pflow-lane { position: relative; }
+  .pflow-lane svg { display: block; overflow: visible; }
+  .pflow-inv-label { position: absolute; left: 0; right: 0; text-align: center; font: 700 11px var(--display); letter-spacing: 0.14em; color: var(--text); }
+  /* the summary sentence opens the card, above the diagram */
+  .flow-narrative { font-size: 17px; line-height: 1.35; color: var(--text); text-wrap: pretty; margin-bottom: 14px; }
+  .flow-narrative b { font-weight: 600; }
+
+  /* ---------- mobile power-flow (vertical, card-style nodes) ---------- */
+  .mflow { display: flex; flex-direction: column; }
+  /* on a tablet the stacked layout keeps a phone-ish width instead of stretching the tiles across the card */
+  @media (min-width: 601px) { .mflow { width: 100%; max-width: 620px; margin: 0 auto; } }
+  .mflow-sources { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  /* a tile: the box with today's figures under a rule instead of beside it */
+  .mflow .fbox { display: flex; flex-direction: column; border-radius: 14px; }
+  .mflow .fbox-now { padding: 13px 13px 12px; flex: 1; }
+  .mflow .fbox-head { gap: 7px; }
+  /* under 360 px a tile is narrow: the name needs the room more than the icon does */
+  @media (max-width: 359px) { .mflow .fbox-head svg { display: none; } }
+  .mflow .fbox-val { font-size: 21px; margin-top: 10px; }
+  .mflow .fbox-val .u { font-size: 14px; margin-left: 4px; }
+  .mflow .fbox-state { font-size: 12px; margin-top: 7px; white-space: normal; }
+  .mflow .fbox-state b { font-size: 12px; margin-left: 4px; white-space: nowrap; }
+  .mflow .fbox-charge b { font-size: 15px; }
+  .mflow .fbox-split span { flex-direction: row; align-items: baseline; gap: 5px; }
+  .mflow .fbox-split span:last-child:not(:first-child) { align-items: baseline; }
+  .mflow .fbox-split { justify-content: flex-start; }
+  .mflow .fbox-split em { font-size: 10.5px; }
+  .mflow .fbox-split b { font-size: 12px; }
+  .mflow .fbox-today { border-top: 1px solid var(--line); padding: 9px 13px 10px; gap: 5px; }
+  .mflow .fbox-today-h { display: none; }
+  .mflow .fbox-today > div:not(.fbox-today-h) { flex-direction: row; justify-content: space-between; align-items: baseline; gap: 6px; }
+  .mflow .fbox-today span { font-size: 10.5px; }
+  .mflow .fbox-today b { font-size: 13px; }
+  .mflow .fbox-today b .u { font-size: 10px; margin-left: 3px; }
+  .mflow-links { display: block; width: 100%; height: 72px; overflow: visible; }
+  .mflow-inv { display: flex; flex-direction: column; align-items: center; }
+  .mflow-inv svg { display: block; }
+  .mflow-inv-label { font: 700 12px var(--display); letter-spacing: 0.14em; color: var(--text); margin-top: 8px; }
+  .hv-datebar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  /* the arrows and the date box share one height (--datebar-h) so they read as one control */
+  .hv-datebar { --datebar-h: 32px; }
+  .hv-daynav { box-sizing: border-box; width: var(--datebar-h); height: var(--datebar-h); flex: none; display: inline-flex; align-items: center; justify-content: center;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
+    line-height: 0; cursor: pointer; transition: .15s; padding: 0; }
+  .hv-daynav svg { display: block; }
+  .hv-daynav:hover:not(:disabled) { border-color: var(--line-2); }
+  .hv-daynav:disabled { color: var(--dim); cursor: default; opacity: .45; }
+  /* the date box: "Tue 6 Oct", opening our calendar (SOLAR-72); Today sits inside it only on a phone */
+  .hv-datebox { position: relative; box-sizing: border-box; height: var(--datebar-h); display: inline-flex; align-items: center; gap: 10px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; }
+  .hv-datebox:hover { border-color: var(--line-2); }
+  .hv-datepick { display: inline-flex; align-items: center; gap: 8px; height: 100%; padding: 0 12px; background: none; border: 0; color: var(--text); cursor: pointer; }
+  .hv-datepick:disabled { cursor: default; }
+  .hv-cal { display: block; flex: none; color: var(--muted); }
+  .hv-dateface { font: 600 13px var(--display); letter-spacing: 0.01em; white-space: nowrap; }
+  .hv-today-in { display: none; }
+  .cal-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; width: 276px; padding: 12px; box-sizing: border-box;
+    background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .cal-title { font: 600 14px var(--display); color: var(--text); }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .cal-dow { text-align: center; font: 500 11px var(--display); letter-spacing: 0.08em; color: var(--dim); padding: 4px 0 6px; }
+  .cal-day { height: 34px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--text); font: 500 13px var(--mono); cursor: pointer; padding: 0; }
+  .cal-day:hover:not(:disabled) { background: var(--panel-2); border-color: var(--line-2); }
+  .cal-day:disabled { color: var(--dim); opacity: 0.35; cursor: default; }
+  .cal-day.today { color: var(--pv); }
+  .cal-day.on { background: rgba(61,220,132,0.14); border-color: rgba(61,220,132,0.55); color: var(--text); }
+  .cal-day:focus-visible, .hv-datepick:focus-visible { outline: 2px solid var(--pv); outline-offset: 1px; }
+  .hv-approx { font-size: 11px; color: var(--warn); border: 1px solid var(--line); border-radius: 7px; padding: 1px 7px; margin-left: 2px; cursor: help; white-space: nowrap; }
+  .hv-gap { font-size: 11px; color: var(--warn); border: 1px solid var(--line); border-radius: 7px;
+    padding: 1px 7px; margin-left: 2px; cursor: help; white-space: nowrap; font-family: var(--mono); }
+  .hv-today { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
+    font-size: 12px; padding: 6px 12px; cursor: pointer; transition: .15s; margin-left: auto; }
+  .hv-today:hover { border-color: var(--line-2); }
+  .hv-lag { font-size: 12px; color: var(--dim); }
+  .chart-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .chart-controls-right { display: flex; align-items: center; gap: 10px; }
+  .chart-area { width: 100%; min-width: 0; overflow: hidden; }
+  .chart-svg { display: block; touch-action: pan-y; }
+  .ax { font: 400 11.5px var(--mono); fill: var(--muted); }
+  .ax-hi { fill: var(--text); }
+  .legend-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .legend-chip { display: inline-flex; align-items: center; gap: 7px; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 999px; padding: 6px 13px; font-size: 12.5px; color: var(--text); transition: .15s; }
+  .legend-chip.off { color: var(--dim); }
+  .legend-val { margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--line-2); font-family: var(--mono); font-weight: 600; letter-spacing: -0.01em;
+    display: inline-block; font-variant-numeric: tabular-nums; }
+  .legend-chip.off .legend-val { color: var(--dim); border-color: var(--line); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; }
+  .legend-note { font-size: 12.5px; color: var(--dim); margin-left: 4px; }
+  svg.chart-svg, .chart-area, .hv-root, .trend-chart, .chart-tip, .trend-tip, .chart-legend, .seg-usage {
+    -webkit-user-select: none; user-select: none;
+  }
+  /* stops the long-press "copy/share" bubble on iOS while dragging the chart */
+  svg.chart-svg { -webkit-touch-callout: none; }
+
+  .chart-tip { position: absolute; pointer-events: none; background: rgba(13,17,23,0.96); border: 1px solid var(--line-2);
+    border-radius: 10px; padding: 10px 12px; min-width: 168px; white-space: nowrap; box-shadow: 0 12px 30px rgba(0,0,0,0.5); z-index: 5; }
+  .tip-time { font: 600 12px var(--mono); color: var(--text); margin-bottom: 8px; }
+  .tip-row { display: flex; align-items: center; gap: 7px; font-size: 12px; margin: 3px 0; }
+  .tip-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .tip-l { color: var(--muted); } .tip-v { margin-left: auto; color: var(--text); }
+  .tip-total { margin-top: 5px; border-top: 1px solid var(--line); padding-top: 6px; }
+  .tip-total .tip-l { color: var(--text); font-weight: 600; }
+  /* drag-to-select range totals */
+  .chart-range { position: absolute; left: 8px; top: 8px; background: rgba(13,17,23,0.97); border: 1px solid var(--line-2);
+    border-radius: 10px; padding: 9px 12px; min-width: 180px; box-shadow: 0 12px 30px rgba(0,0,0,0.5); z-index: 6; }
+  .cr-head { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+  .cr-head .tip-time { margin-bottom: 0; }
+  .cr-x { margin-left: auto; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+  .cr-x:hover { color: var(--text); }
+  .solar-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+  .solar-stats .stat-tile { padding: 26px 28px; }
+  .stat-sub .trend-badge { margin: 0 3px 0 0; top: 0; }
+  .solar-tab .section-title .info-dot { margin-left: 8px; }
+  .solar-tab .section-right { text-transform: none; letter-spacing: 0; font-size: 12.5px; font-weight: 400; color: var(--muted); }
+  .solar-tab .section-right b { font-family: var(--mono); font-weight: 600; color: var(--text); }
+  .solar-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
+  .wiw-figs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 16px; margin-top: 18px; }
+  .wiw-figs b { display: block; font: 700 28px var(--mono); line-height: 1; letter-spacing: -0.01em; white-space: nowrap; }
+  .wiw-figs b .u { font-size: 15px; margin-left: 4px; opacity: 0.85; }
+  .wiw-figs span:not(.u) { display: block; margin-top: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+  .solar-note { margin: 0 0 8px; font-size: 13.5px; color: var(--muted); max-width: 60ch; }
+  /* the app's narrow-screen versions of the rules above (index.html, 980px and 600px blocks) */
+  @media (max-width: 980px) { .solar-stats { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 600px) {
+    .solar-stats { gap: 12px; }
+    .solar-stats .stat-tile { padding: 18px; }
+    .solar-tab .section-title { flex-direction: column; align-items: flex-start; gap: 5px; }
+    .wiw-figs { gap: 10px; margin-top: 16px; }
+    .wiw-figs b { font-size: 22px; }
+    .wiw-figs b .u { font-size: 12px; }
+    .wiw-figs span:not(.u) { font-size: 11px; margin-top: 7px; }
+    .stat-value .num { font-size: 34px; }
+    .stat-value .unit { font-size: 18px; }
+    .flow-narrative { font-size: 15.5px; }
+    .today-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .mini-stat { padding: 14px; }
+    .mini-value { font-size: 21px; }
+    .hv-datebar { --datebar-h: 40px; }
+    .hv-datebox { display: flex; flex: 1; min-width: 0; justify-content: center; }
+    .hv-dateface { font-size: 14px; }
+    .cal-pop { left: 50%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); }
+    .legend-chip { padding: 5px 10px; font-size: 11.5px; }
+  }
+  /* ===== end of copied rules ===== */
+
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 0 24px; }
+  @media (max-width: 600px) { .wrap { padding: 0 16px; } }
+  .sun {
+    width: 24px; height: 24px; border-radius: 50%; flex: none;
+    background: radial-gradient(circle at 38% 34%, #ffd56b, #f4a93a 58%, #e07a1f);
+    box-shadow: 0 0 0 4px rgba(244,169,58,0.12);
+  }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 46px; padding: 0 20px; border-radius: 10px;
+    font: 600 15px/1 var(--display); text-decoration: none; white-space: nowrap;
+    transition: transform .2s var(--ease), background .2s, filter .2s;
+  }
+  .btn:active { transform: translateY(1px) scale(0.98); }
+  .btn-primary { background: var(--pv); color: #06210f; box-shadow: 0 10px 30px -14px rgba(61,220,132,0.7); }
+  .btn-primary:hover { filter: brightness(1.06); transform: translateY(-1px); }
+  .btn-primary i { transition: transform .25s var(--ease); }
+  .btn-primary:hover i { transform: translateX(3px); }
+  .btn:focus-visible, .topnav a:focus-visible { outline: 2px solid var(--pv); outline-offset: 3px; }
+
+  /* ---------- top nav ---------- */
+  .topnav {
+    position: sticky; top: 0; z-index: 20;
+    backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%);
+    background: rgba(10,13,18,0.75); border-bottom: 1px solid var(--line);
+  }
+  .topnav .wrap { height: 64px; display: flex; align-items: center; gap: 28px; }
+  .brand { display: flex; align-items: center; gap: 11px; font-weight: 700; font-size: 18px; letter-spacing: -0.01em; text-decoration: none; }
+  .topnav-links { display: flex; gap: 24px; margin-left: auto; font-size: 14.5px; color: var(--muted); }
+  .topnav-links a { text-decoration: none; transition: color .2s; }
+  .topnav-links a:hover { color: var(--text); }
+  .topnav .btn { height: 38px; padding: 0 15px; font-size: 14px; border-radius: 9px; }
+  @media (max-width: 760px) { .topnav-links { display: none; } .topnav .btn { margin-left: auto; } }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 64px 0 24px; }
+  .hero-top { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 48px; align-items: end; margin-bottom: 44px; }
+  .hero h1 { margin: 0; font-size: clamp(40px, 5.6vw, 68px); line-height: 1.02; letter-spacing: -0.035em; font-weight: 700; }
+  .hero h1 .hl { color: var(--pv); }
+  .hero-side p { margin: 0 0 24px; font-size: 18px; color: var(--muted); max-width: 34ch; }
+  @media (max-width: 920px) {
+    .hero { padding: 36px 0 16px; }
+    .hero-top { grid-template-columns: 1fr; gap: 18px; margin-bottom: 32px; }
+  }
+  .rise { opacity: 0; transform: translateY(18px); }
+  .ready .rise { animation: rise .9s var(--ease) forwards; animation-delay: calc(var(--i, 0) * 90ms); }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  /* the app, framed: its header strip over a page of real components */
+  .appwin-stage { perspective: 1800px; }
+  .appwin {
+    border-radius: 18px; border: 1px solid var(--line-2); background: var(--bg); overflow: hidden;
+    box-shadow: 0 50px 100px -40px rgba(0,0,0,0.8);
+  }
+  .hero .appwin { opacity: 0; transform: rotateX(14deg) translateY(50px) scale(0.96); transform-origin: 50% 0; }
+  .ready .hero .appwin { animation: tilt-in 1.3s var(--ease) .35s forwards; }
+  @keyframes tilt-in { to { opacity: 1; transform: none; } }
+  .feature .appwin { transform: translateY(40px) scale(0.98); opacity: 0; transition: transform 1s var(--ease), opacity 1s var(--ease); }
+  .feature.seen .appwin { transform: none; opacity: 1; }
+  .appwin-head { height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+  .appwin-head .plant { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; }
+  .appwin-head .plant i { color: var(--muted); font-size: 14px; }
+  .appwin-head .page { margin-left: 4px; padding-left: 14px; border-left: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+  .appwin-body { padding: 14px; }
+  .appwin-body .stack { display: flex; flex-direction: column; gap: 20px; }
+  /* two tiles here, not the app's six */
+  .appwin .solar-stats { grid-template-columns: 1fr 1fr; }
+  /* the overview strip shows four of the app's five tiles (no rate set, so no Est. saved) */
+  .appwin .today-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 980px) { .appwin .today-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 600px) {
+    .appwin-head { height: 50px; padding: 0 14px; }
+    .appwin-head .plant-word { display: none; }
+    .appwin-body { padding: 10px; }
+  }
+
+  /* ---------- Solar and Grid sections ---------- */
+  .feature { padding: 96px 0 0; }
+  .feature h2 { font-size: clamp(28px, 3.6vw, 44px); letter-spacing: -0.03em; line-height: 1.08; margin: 0 0 12px; }
+  .feature h2 .solar { color: var(--pv); }
+  .feature h2 .grid { color: var(--grid); }
+  .feature .lede { margin: 0 0 18px; font-size: 17px; color: var(--muted); max-width: 52ch; }
+  .points { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0 0 32px; padding: 0; list-style: none; font-size: 14.5px; color: var(--text); }
+  .points li { display: flex; align-items: center; gap: 8px; }
+  .points i { color: var(--pv); font-size: 16px; }
+  .feature.grid-sec .points i { color: var(--grid); }
+  .head-reveal > * { opacity: 0; transform: translateY(20px); transition: opacity .8s var(--ease), transform .8s var(--ease); }
+  .seen .head-reveal > * { opacity: 1; transform: none; }
+  .seen .head-reveal > :nth-child(2) { transition-delay: .08s; }
+  .seen .head-reveal > :nth-child(3) { transition-delay: .16s; }
+  @media (max-width: 600px) { .feature { padding-top: 64px; } .points { flex-direction: column; } }
+
+  /* ---------- closing ---------- */
+  .closing { padding: 96px 0 72px; }
+  .closing-card {
+    border-radius: 18px; padding: 52px 44px;
+    background: radial-gradient(80% 140% at 100% 100%, rgba(244,169,58,0.16), transparent 60%), var(--panel);
+    border: 1px solid var(--line-2);
+    display: grid; grid-template-columns: 1fr auto; gap: 28px; align-items: center;
+    opacity: 0; transform: translateY(28px); transition: opacity .8s var(--ease), transform .8s var(--ease);
+  }
+  .seen .closing-card { opacity: 1; transform: none; }
+  .closing-card h2 { margin: 0 0 10px; font-size: clamp(28px, 3.6vw, 42px); letter-spacing: -0.03em; line-height: 1.08; }
+  .closing-card p { margin: 0; color: var(--muted); max-width: 52ch; }
+  @media (max-width: 760px) { .closing-card { grid-template-columns: 1fr; padding: 36px 22px; } }
+
+  footer { border-top: 1px solid var(--line); padding: 28px 0 40px; font-size: 13.5px; color: var(--dim); }
+  footer .wrap { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
+  footer .links { margin-left: auto; display: flex; gap: 20px; }
+  footer a { text-decoration: none; }
+  footer a:hover { color: var(--text); }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .rise, .head-reveal > *, .hero .appwin, .feature .appwin, .closing-card { opacity: 1 !important; transform: none !important; animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="topnav" aria-label="Main">
+  <div class="wrap">
+    <a class="brand" href="#top"><span class="sun" aria-hidden="true"></span>Prince Solar</a>
+    <div class="topnav-links">
+      <a href="#top">Live</a>
+      <a href="#solar">Solar</a>
+      <a href="#grid">Grid</a>
+      <a href="./">Sign in</a>
+    </div>
+    <a class="btn btn-primary" href="./">Try it free</a>
+  </div>
+</nav>
+
+<main id="top">
+
+  <!-- ===== Live ===== -->
+  <section class="hero">
+    <div class="wrap">
+      <div class="hero-top">
+        <h1 class="rise" style="--i:0">See what your <span class="hl">solar</span> is doing, right now.</h1>
+        <div class="hero-side">
+          <p class="rise" style="--i:2">Link your SunSynk login once. Prince Solar shows where your power is coming from and going to, and keeps every reading.</p>
+          <div class="rise" style="--i:3">
+            <a class="btn btn-primary" href="./">Try it free <i class="ph-bold ph-arrow-right"></i></a>
+          </div>
+        </div>
+      </div>
+      <div id="liveDemo" class="appwin-stage"></div>
+    </div>
+  </section>
+
+  <!-- ===== Solar ===== -->
+  <section class="feature reveal" id="solar">
+    <div class="wrap">
+      <div class="head-reveal">
+        <h2><span class="solar">Solar.</span> What your panels made.</h2>
+        <p class="lede">Today, this week, month, year and lifetime. Pick any day to see its curve.</p>
+        <ul class="points">
+          <li><i class="ph-bold ph-check"></i>Solar now, against your panel size</li>
+          <li><i class="ph-bold ph-check"></i>Peak of the day and when</li>
+          <li><i class="ph-bold ph-check"></i>Where it went: the house or the battery</li>
+          <li><i class="ph-bold ph-check"></i>Last 30 days, day by day</li>
+        </ul>
+      </div>
+      <div id="solarDemo"></div>
+    </div>
+  </section>
+
+  <!-- ===== Grid ===== -->
+  <section class="feature grid-sec reveal" id="grid">
+    <div class="wrap">
+      <div class="head-reveal">
+        <h2><span class="grid">Grid.</span> What you bought, and when.</h2>
+        <p class="lede">What you bought today and over time, and the hours the house drew from the grid.</p>
+        <ul class="points">
+          <li><i class="ph-bold ph-check"></i>Importing, or the grid off, right now</li>
+          <li><i class="ph-bold ph-check"></i>Peak import of the day and when</li>
+          <li><i class="ph-bold ph-check"></i>Grid off shown plainly in Live</li>
+          <li><i class="ph-bold ph-check"></i>Last 30 days, day by day</li>
+        </ul>
+      </div>
+      <div id="gridDemo"></div>
+    </div>
+  </section>
+
+  <!-- ===== closing ===== -->
+  <section class="closing reveal">
+    <div class="wrap">
+      <div class="closing-card">
+        <div>
+          <h2>Free while in testing.</h2>
+          <p>Sign up with email or Google, then link your SunSynk Connect login. Your SunSynk password is swapped for a sign-in token and not kept.</p>
+        </div>
+        <a class="btn btn-primary" href="./">Try it free <i class="ph-bold ph-arrow-right"></i></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Prince Solar</span>
+    <div class="links">
+      <a href="https://brynne98.github.io/prince-solar/terms.html">Terms</a>
+      <a href="https://brynne98.github.io/prince-solar/privacy.html">Privacy</a>
+      <a href="./">Sign in</a>
+    </div>
+  </div>
+</footer>
+
+<!-- Same pinned React and Babel as the app, then the app's own components, in the app's order. -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script>
+// ---------- the example day ----------
+// Shapes only; not anyone's real plant. Worked out in 5-minute steps from a 10 kWh pack,
+// so the charge, the kWh totals and the boxes in the flow all agree. South African
+// installs don't export: spare solar goes to the battery, and once it is full the
+// inverter holds the panels back to what the house uses.
+window.DEMO = (() => {
+  const CAP = 10, RESERVE = 20, MAX_CHARGE = 4, KWP = 7; // kWh, %, kW, kW of panels
+  // A seeded random, so the example day is the same on every visit.
+  let seed = 20260318;
+  const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const STEPS = Array.from({ length: 288 }, (_, k) => k / 12);
+  // Solar: a clear morning, then cumulus from 12:30 that cuts it back in bursts, as on a
+  // Highveld summer afternoon; a little flicker on every reading.
+  let cloud = 0;
+  const SOLAR = STEPS.map(h => {
+    if (h < 5.75 || h > 18.75) return 0;
+    const clear = Math.pow(Math.max(0, Math.sin(Math.PI * (h - 5.75) / 13)), 1.25) * 5.8;
+    if (cloud > 0) cloud--; else if (h > 12.5 && h < 17 && rnd() < 0.22) cloud = 1 + Math.floor(rnd() * 3);
+    const shade = cloud > 0 ? 0.3 + rnd() * 0.35 : 1;
+    return Math.max(0, clear * shade * (0.97 + rnd() * 0.06));
+  });
+  // Home: fridge cycling, kettle and toaster at breakfast, pool pump 09:00 to 16:00, the
+  // geyser element switching on and off 10:30 to 14:30 and again 16:30 to 18:00, cooking and
+  // lights in the evening.
+  const HOME = STEPS.map((h, k) => {
+    let w = 0.38 + (Math.floor(k / 4) % 3 === 0 ? 0.14 : 0) + rnd() * 0.08;
+    if (h >= 6 && h < 8.5) w += 0.35 + rnd() * 0.3;
+    if ([79, 82, 88, 202, 233].includes(k)) w += 2.1;          // kettle
+    if (k === 80) w += 1.0;                                     // toaster
+    if (h >= 9 && h < 16) w += 1.15;                            // pool pump
+    if (h >= 10.5 && h < 14.5 && Math.floor((h - 10.5) * 3) % 3 !== 2) w += 3.0; // geyser element
+    if (h >= 16.5 && h < 18 && Math.floor((h - 16.5) * 4) % 3 !== 2) w += 3.0; // geyser again
+    if (h >= 17 && h < 19.25) w += 1.1 + rnd() * 0.9;           // cooking
+    if (h >= 18 && h < 22.5) w += 0.35;                          // lights, TV
+    return w;
+  });
+  const solarAt = (h) => SOLAR[Math.min(287, Math.floor(h * 12))];
+  const homeAt = (h) => HOME[Math.min(287, Math.floor(h * 12))];
+  const gridOff = (h) => h >= 18 && h < 20.5;
+  // one row per 5 minutes, in kW: solar, battery (+ = powering the house, - = charging),
+  // grid bought, home; charge % at the start of the step
+  const day = (soc0) => {
+    const rows = [];
+    let soc = soc0;
+    for (let k = 0; k < 288; k++) {
+      const h = k / 12, home = homeAt(h), off = gridOff(h), spare = solarAt(h) - home;
+      let batt = 0, grid = 0, pv = solarAt(h);
+      if (spare >= 0) {
+        batt = -Math.min(spare, MAX_CHARGE, (100 - soc) / 100 * CAP * 12);
+        pv = home - batt;
+      } else {
+        if (soc > RESERVE || off) batt = Math.min(-spare, Math.max(0, soc) / 100 * CAP * 12);
+        if (!off) grid = -spare - batt;
+      }
+      rows.push({ pv, batt, grid, home, soc, off });
+      soc -= batt / 12 / CAP * 100;
+    }
+    return { rows, end: soc };
+  };
+  // run the day twice so midnight starts where the day before ended
+  const { rows } = day(day(50).end);
+  const at = (h) => rows[Math.min(287, Math.floor(h * 12))];
+
+  // The last 30 days for the bars: the example day's totals, scaled by the weather.
+  const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const today = ymd(new Date());
+  const fullPv = rows.reduce((s, r) => s + r.pv / 12, 0);
+  const days = Array.from({ length: 30 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - 29 + i);
+    const sun = 0.62 + 0.38 * Math.abs(Math.sin(i * 1.93 + 0.7)) - (i % 9 === 4 ? 0.35 : 0);
+    return { date: ymd(d), pv: +(fullPv * sun).toFixed(1), imp: +(3.2 + (1 - sun) * 9.5).toFixed(1) };
+  });
+
+  return { CAP, RESERVE, KWP, rows, at, days, today };
+})();
+</script>
+<script type="text/babel" src="components.jsx"></script>
+<script type="text/babel" src="flow.jsx"></script>
+<script type="text/babel" src="chart.jsx"></script>
+<script type="text/babel" src="tabs.jsx"></script>
+<script type="text/babel">
+(() => {
+  const D = window.DEMO;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const NB = ' ';
+  const hhmm = (h) => String(Math.floor(h)).padStart(2, '0') + ':' + String(Math.floor((h % 1) * 60 + 1e-6)).padStart(2, '0');
+  const HMm = (m) => hhmm(m / 60);
+  // Same wording as the app's battery time (tabs.jsx fmtDur)
+  const fmtDur = (hrs) => { let h = Math.floor(hrs), m = Math.round((hrs - h) * 60); if (m === 60) { h++; m = 0; } return (h > 0 ? h + 'h ' : '') + String(m).padStart(h > 0 ? 2 : 1, '0') + 'm'; };
+
+  // Totals from midnight to hour h, in kWh, plus where the solar went and the peaks.
+  function totals(h) {
+    const t = { pv: 0, chg: 0, dis: 0, imp: 0, exp: 0, home: 0, toHome: 0, toBatt: 0, toGrid: 0, pvPeak: null, impPeak: null };
+    const n = Math.floor(h * 12);
+    for (let k = 0; k < n; k++) {
+      const r = D.rows[k];
+      t.pv += r.pv / 12; t.home += r.home / 12;
+      if (r.batt < 0) t.chg -= r.batt / 12; else t.dis += r.batt / 12;
+      if (r.grid > 0) t.imp += r.grid / 12; else t.exp -= r.grid / 12;
+      const toBatt = r.batt < 0 ? -r.batt : 0, toGrid = r.grid < 0 ? -r.grid : 0;
+      t.toBatt += toBatt / 12; t.toGrid += toGrid / 12; t.toHome += (r.pv - toBatt - toGrid) / 12;
+      if (r.pv > 0.02 && (!t.pvPeak || r.pv > t.pvPeak.kw)) t.pvPeak = { kw: r.pv, t: k * 5 };
+      if (r.grid > 0.05 && (!t.impPeak || r.grid > t.impPeak.kw)) t.impPeak = { kw: r.grid, t: k * 5 };
+    }
+    return t;
+  }
+
+  // The day's 5-minute points as the app's charts take them, empty after hour h.
+  const pointsTo = (h) => D.rows.map((r, k) => k <= h * 12 ? {
+    t: k * 5, pv: r.pv * 1000, batt: r.batt * 1000, grid: r.off ? 0 : r.grid * 1000, load: r.home * 1000, soc: Math.round(r.soc),
+  } : { t: k * 5, pv: null, batt: null, grid: null, load: null, soc: null });
+
+  // The snapshot the app would hand PowerFlow, at hour h.
+  function snapshot(h) {
+    const now = D.at(h), t = totals(h);
+    const battW = Math.abs(now.batt) * 1000, soc = Math.round(now.soc);
+    const state = now.batt < -0.005 ? 'charging' : now.batt > 0.005 ? 'discharging' : 'idle';
+    let battInfo = null;
+    if (state === 'discharging' && battW >= 200) battInfo = fmtDur(Math.max(0, (soc - D.RESERVE) / 100 * D.CAP) / (battW / 1000)) + ' to empty';
+    if (state === 'charging' && battW >= 200) battInfo = fmtDur((100 - soc) / 100 * D.CAP / (battW / 1000)) + ' to full';
+    return {
+      t, battInfo,
+      agg: {
+        pvNow: now.pv * 1000, loadNow: now.home * 1000,
+        battPower: battW, battOut: now.batt * 1000, battState: state, battSoc: soc,
+        gridPower: now.off ? 0 : now.grid * 1000, gridPresent: !now.off,
+        pvToday: t.pv, battChgToday: t.chg, battDischgToday: t.dis,
+        gridFromToday: t.imp, gridToToday: t.exp, loadToday: t.home,
+      },
+    };
+  }
+
+  // A clock for the example day, going round from `start`. Paused while off screen.
+  function useDayClock(ref, { start, speed }) {
+    const [hour, setHour] = React.useState(reduce ? 18.6 : start);
+    const [visible, setVisible] = React.useState(false);
+    React.useEffect(() => {
+      const io = new IntersectionObserver(([e]) => setVisible(e.isIntersecting), { threshold: 0.15 });
+      io.observe(ref.current);
+      return () => io.disconnect();
+    }, []);
+    React.useEffect(() => {
+      if (reduce || !visible) return;
+      const id = setInterval(() => setHour(h => (h + speed) % 24), 50);
+      return () => clearInterval(id);
+    }, [visible]);
+    return hour;
+  }
+
+  // The app's header strip around a page.
+  const AppWin = ({ page, children }) => (
+    <div className="appwin">
+      <div className="appwin-head">
+        <span className="sun" aria-hidden="true" />
+        <span className="plant">Example <span className="plant-word">plant</span> <i className="ph-bold ph-caret-down" aria-hidden="true" /></span>
+        <span className="page">{page}</span>
+        <div className="status status-live" role="status"><span className="status-dot" /><span className="status-word">Live</span></div>
+      </div>
+      <div className="appwin-body">{children}</div>
+    </div>
+  );
+
+  // ---------- Live: the app's Live page, running the example day ----------
+  function LiveDemo() {
+    const ref = React.useRef(null);
+    const hour = useDayClock(ref, { start: 6, speed: 0.05 }); // an hour a second
+    const s = snapshot(hour);
+    const a = s.agg, t = s.t;
+    const suff = t.home > 0 ? Math.max(0, Math.min(100, Math.round((t.home - t.imp) / t.home * 100))) : null;
+    return (
+      <div ref={ref}>
+        <AppWin page="Live">
+          <div className="live-grid">
+            <window.Card className="flow-card">
+              <window.SectionTitle>POWER FLOW</window.SectionTitle>
+              <window.PowerFlow agg={a} inverters={2} battInfo={s.battInfo} features={{ hasBattery: true, hasGrid: true }} />
+            </window.Card>
+            <div className="overview-section">
+              <div className="overview-head">
+                <window.SectionTitle>OVERVIEW · <span style={{ color: 'var(--text)' }}>today</span></window.SectionTitle>
+              </div>
+              <div className="today-strip">
+                <window.MiniStat label="Made" value={window.fmtEnergySmart(a.pvToday)} color="#3ddc84" />
+                <window.MiniStat label="Home" value={window.fmtEnergySmart(a.loadToday)} color="#f87171" />
+                <window.MiniStat label="Independence" value={suff != null ? suff + '%' : '—'} color="#22d3ee" bar={suff || 0} />
+                <window.MiniStat label="Imported" value={window.fmtEnergySmart(a.gridFromToday)} color="#facc15"
+                  sub={<span className={'grid-state ' + (a.gridPresent ? 'on' : 'off')}><span className="gs-dot" />{a.gridPresent ? 'Grid on' : 'Grid off'}</span>} />
+              </div>
+            </div>
+          </div>
+        </AppWin>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById('liveDemo')).render(<LiveDemo />);
+
+  // Solar and Grid hold still on the example day at 15:00; only Live plays.
+  const STOP = 15;
+
+  // ---------- Solar page ----------
+  function SolarDemo() {
+    const hour = STOP, at = D.at(hour), t = totals(hour);
+    const points = React.useMemo(() => pointsTo(hour), []);
+    const [nowN, nowU] = window.fmtPowerParts(at.pv * 1000);
+    const [todN, todU] = window.fmtEnergyParts(t.pv);
+    const dests = [['Home', t.toHome, '#f87171'], ['Battery', t.toBatt, '#a78bfa'], ['Grid', t.toGrid, '#facc15']].filter(d => d[1] >= 0.05);
+    const made = dests.reduce((s, d) => s + d[1], 0);
+    const rows = D.days.map(r => r.date === D.today ? { ...r, pv: t.pv } : r);
+    const best = rows.reduce((b, r) => (r.pv > b.pv ? r : b));
+    return (
+      <div>
+        <AppWin page="Solar">
+          <div className="stack solar-tab">
+            <div className="solar-stats">
+              <window.StatTile label="SOLAR NOW" value={nowN} unit={nowU} accent="#3ddc84" sub={<><b>{Math.round(at.pv / D.KWP * 100)}%</b> of your {D.KWP} kW of panels</>} />
+              <window.StatTile label="TODAY" value={todN} unit={todU} accent="#3ddc84" sub={t.pvPeak ? <>Peak <b>{window.fmtPower(t.pvPeak.kw * 1000)}</b> at <b>{HMm(t.pvPeak.t)}</b></> : NB} />
+            </div>
+            <window.Card>
+              <window.SectionTitle>SOLAR · <span style={{ color: 'var(--text)' }}>today</span></window.SectionTitle>
+              <window.DayLineChart points={points} field="pv" color="#3ddc84" label="Solar" crop sums={['Made']} empty="No solar yet today." />
+            </window.Card>
+            <window.Card>
+              <window.SectionTitle right={<>Best <b>{window.fmtKwh(best.pv)}</b> on {new Date(best.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</>}>SOLAR · <span style={{ color: 'var(--text)' }}>last 30 days</span></window.SectionTitle>
+              <window.DaysBars rows={rows} field="pv" color="#3ddc84" rgb="61,220,132" word="Solar" label="Solar per day for the last 30 days"
+                today={D.today} selected={D.today} earliest={D.days[0].date} onPick={() => {}} />
+            </window.Card>
+            <window.Card className="wiw">
+              <window.SectionTitle right={made >= 0.05 ? <>Made <b>{window.fmtKwh(made)}</b></> : null}>WHERE IT WENT · <span style={{ color: 'var(--text)' }}>today</span></window.SectionTitle>
+              {made < 0.05 ? <div className="solar-note">No solar yet today.</div> : <>
+                <div className="fbox-bar">{dests.map(([l, v, c]) => <i key={l} style={{ flexGrow: v, background: c }} />)}</div>
+                <div className="wiw-figs">
+                  {dests.map(([l, v, c]) => { const [n, u] = window.fmtEnergyParts(v); return <div key={l}><b style={{ color: c }}>{n}<span className="u">{u}</span></b><span>{l}</span></div>; })}
+                </div>
+              </>}
+            </window.Card>
+          </div>
+        </AppWin>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById('solarDemo')).render(<SolarDemo />);
+
+  // ---------- Grid page ----------
+  // Grid shows the whole example day, to 23:30: bought overnight once the battery reached
+  // its reserve, nothing while solar ran the house, nothing again while load-shedding cut the
+  // grid 18:00 to 20:30, then bought again late in the evening.
+  function GridDemo() {
+    const hour = 23.5, at = D.at(hour), t = totals(hour);
+    const points = React.useMemo(() => pointsTo(hour), []);
+    const w = at.off ? 0 : at.grid * 1000;
+    const [nowN, nowU] = window.fmtPowerParts(w > 5 ? w : 0);
+    const [todN, todU] = window.fmtEnergyParts(t.imp);
+    const rows = D.days.map(r => r.date === D.today ? { ...r, imp: t.imp } : r);
+    const most = rows.reduce((b, r) => (r.imp > b.imp ? r : b));
+    return (
+      <div>
+        <AppWin page="Grid">
+          <div className="stack solar-tab">
+            <div className="solar-stats">
+              <window.StatTile label="GRID NOW" value={nowN} unit={nowU} accent="#facc15" sub={at.off ? <span style={{ color: '#f87171' }}>The grid is off</span> : w > 5 ? 'Importing' : 'Not importing'} />
+              <window.StatTile label="TODAY" value={todN} unit={todU} accent="#facc15" sub={t.impPeak ? <>Peak <b>{window.fmtPower(t.impPeak.kw * 1000)}</b> at <b>{HMm(t.impPeak.t)}</b></> : NB} />
+            </div>
+            <window.Card>
+              <window.SectionTitle>GRID · <span style={{ color: 'var(--text)' }}>today</span></window.SectionTitle>
+              <window.DayLineChart points={points} field="grid" color="#facc15" label="Grid" sums={['Imported', 'Exported']} importScale empty="No grid readings for this day." />
+            </window.Card>
+            <window.Card>
+              <window.SectionTitle right={<>Most <b>{window.fmtKwh(most.imp)}</b> on {new Date(most.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</>}>IMPORTED · <span style={{ color: 'var(--text)' }}>last 30 days</span></window.SectionTitle>
+              <window.DaysBars rows={rows} field="imp" color="#facc15" rgb="250,204,21" word="Imported" label="Energy imported from the grid per day for the last 30 days"
+                today={D.today} selected={D.today} earliest={D.days[0].date} onPick={() => {}} />
+            </window.Card>
+          </div>
+        </AppWin>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById('gridDemo')).render(<GridDemo />);
+})();
+</script>
+
+<script>
+(() => {
+  // Hero entrance waits for fonts so the headline doesn't reflow mid-animation,
+  // but never more than 400 ms: a slow font must not leave the hero blank.
+  Promise.race([document.fonts ? document.fonts.ready : null, new Promise((r) => setTimeout(r, 400))])
+    .then(() => document.body.classList.add('ready'));
+  const seen = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.add('seen'); seen.unobserve(e.target); }
+  }, { threshold: 0.06 });
+  document.querySelectorAll('.reveal').forEach((el) => seen.observe(el));
+})();
+</script>
+</body>
+</html>
