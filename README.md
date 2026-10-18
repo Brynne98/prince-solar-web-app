@@ -153,7 +153,7 @@ Then, once, in the dashboard:
 
 The frontend deploys itself: Cloudflare Pages publishes `public/` from `main` at
 princesolarhub.com. There's no build step — the `.jsx` is transpiled in the browser by
-Babel standalone. GitHub Pages only forwards the old github.io address (see DEPLOY.md).
+Babel standalone. GitHub Pages is off; the old github.io address no longer works.
 
 ---
 
