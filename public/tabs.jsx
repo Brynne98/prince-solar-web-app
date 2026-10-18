@@ -610,7 +610,8 @@ function panelsVerdict(h, snap, now) {
 // `importScale` (Grid): the scale is set by what came in, at least 2 kW, and the side below
 // zero is always a third of it, as on an import day; a bigger export is cut off at the bottom,
 // and the hover and drag totals still give its real size (SOLAR-72).
-function DayLineChart({ points, field, color, label, crop, pct, reserve, empty, sums, importScale }) {
+// `outages` (Grid): runs of 5-minute buckets the grid was down, shaded as on Equipment's supply chart.
+function DayLineChart({ points, field, color, label, crop, pct, reserve, empty, sums, importScale, outages }) {
   const [ref, width, height] = useChartSize([220, 300]);
   const [hover, setHover] = React.useState(null);
   const [sel, setSel] = React.useState(null);    // [i0, i1] the selected range
@@ -690,6 +691,9 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty, 
         onPointerLeave={() => { setHover(null); onUp(); }}>
         <defs><GapHatch /></defs>
         {gaps.map(([a, b]) => <rect key={'gap' + a} x={x(a)} y={m.t} width={x(b) - x(a)} height={innerH} fill="url(#gaphatch)" />)}
+        {(outages || []).map(([a, b]) => (
+          <rect key={'o' + a} x={xt5(Math.max(t0, a * 5 - 2.5))} y={m.t - 8} width={Math.max(2, xt5(Math.min(t1, b * 5 + 2.5)) - xt5(Math.max(t0, a * 5 - 2.5)))} height={innerH + 8} fill={window.COLORS.load} fillOpacity="0.18" />
+        ))}
         {ticks.map((t, k) => (
           <g key={k}>
             <line x1={m.l} x2={m.l + innerW} y1={y(t)} y2={y(t)} stroke={t === 0 ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'} />
@@ -1170,6 +1174,17 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
   const noReadings = dayProblem(view, day, points, silent);
   const peak = importPeak(points);
+  // grid-down runs for the day, from the same history Equipment's supply chart shades
+  const [outages, setOutages] = React.useState([]);
+  React.useEffect(() => {
+    let alive = true;
+    setOutages([]);
+    window.fetchInverterHistory(pick.date)
+      .then(r => { if (alive) setOutages(outageRuns(r || [], ['gmin', 'gmax'], DAY_LAST)); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [pick.date, refreshKey]);
+  const outageMin = outageMinutes(outages);
   const flows = React.useMemo(() => {
     let imp = 0, exp = 0;
     points.forEach(p => { if (p.grid != null) { if (p.grid > 0) imp += p.grid * 5 / 60 / 1000; else exp += -p.grid * 5 / 60 / 1000; } });
@@ -1198,10 +1213,12 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
           {titled('GRID', dayWord)}
           <window.InfoDot text={'Above the line is power imported from the grid; below it is power exported.'} />
         </SectionTitle>
-        <DateBar pick={pick} earliest={earliest} />
+        <DateBar pick={pick} earliest={earliest}>
+          {outageMin > 0 && <span className="hv-gap" title={OUTAGE_TITLE}>{fmtGap(outageMin)} out</span>}
+        </DateBar>
         {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
           : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="grid" color={CC.grid} label="Grid"
-              sums={['Imported', 'Exported']} importScale empty={noReadings || 'No grid readings for this day.'} /></div>}
+              sums={['Imported', 'Exported']} importScale outages={outages} empty={noReadings || 'No grid readings for this day.'} /></div>}
       </Card>
 
       <Card>

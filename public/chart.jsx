@@ -238,6 +238,19 @@ function fitScale(lo, hi, unit) {
 // A tab with a day picker of its own (Grid) passes it as `dayPick`; the chart then follows
 // that day and draws no date arrows of its own, only its lag and outage notes.
 const INV_COLORS = ['#fb923c', '#f472b6', '#60a5fa', '#fbbf24', '#34d399', '#c084fc'];
+// Outage: runs of 5-minute buckets, [first, last], where any inverter's grid (or output) read
+// 0 Hz, or its terminal 0 V. The Grid tab's day chart shades the same runs (SOLAR-125).
+function outageRuns(invs, fKey, lastIdx) {
+  const runs = [];
+  let run = null;
+  for (let i = 0; i <= lastIdx; i++) {
+    const out = invs.some(inv => { const p = inv.points && inv.points[i]; return p && ((p[fKey[0]] != null && p[fKey[0]] < 10) || (p.vmin != null && p.vmin < 50)); });
+    if (out) { if (!run) { run = [i, i]; runs.push(run); } else run[1] = i; } else run = null;
+  }
+  return runs;
+}
+const outageMinutes = runs => runs.reduce((n, r) => n + (r[1] - r[0] + 1) * 5, 0);
+const OUTAGE_TITLE = 'Five-minute buckets with at least one reading under 50 V or 10 Hz — a blackout, to the nearest bucket';
 function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   const C = window.COLORS;
   const earliest = shiftDate(localDateStr(), -DAY_FLOOR_DAYS);
@@ -314,16 +327,8 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
     });
     return segs.map(sg => 'M' + sg.map(q => q[0].toFixed(1) + ' ' + q[2].toFixed(1)).join(' L') + ' L' + [...sg].reverse().map(q => q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' L') + ' Z').join(' ');
   };
-  // outage: buckets where the grid (or the inverter's output) read 0 Hz, or the terminal 0 V
-  const outages = [];
-  if (!isTemp && nInv) {
-    let run = null;
-    for (let i = 0; i <= lastIdx; i++) {
-      const out = shown.some(inv => { const p = inv.points[i]; return p && ((p[fKey[0]] != null && p[fKey[0]] < 10) || (p.vmin != null && p.vmin < 50)); });
-      if (out) { if (!run) { run = [i, i]; outages.push(run); } else run[1] = i; } else run = null;
-    }
-  }
-  const outageMin = outages.reduce((n, r) => n + (r[1] - r[0] + 1) * 5, 0);
+  const outages = isTemp ? [] : outageRuns(shown, fKey, lastIdx);
+  const outageMin = outageMinutes(outages);
 
   // legend value: hovered bucket, else the latest reading; never a reading from another time
   const valAt = (inv, k) => {
@@ -387,7 +392,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
       {(() => {
         const notes = <>
           {lagNote && <span className="hv-lag mono" title="From SunSynk's history, fetched every six hours; the live numbers above run ahead of it">{lagNote}</span>}
-          {outageMin > 0 && <span className="hv-gap" title="Five-minute buckets with at least one reading under 50 V or 10 Hz — a blackout, to the nearest bucket">{fmtGap(outageMin)} out</span>}
+          {outageMin > 0 && <span className="hv-gap" title={OUTAGE_TITLE}>{fmtGap(outageMin)} out</span>}
         </>;
         return dayPick
           ? (lagNote || outageMin > 0) && <div className="hv-datebar">{notes}</div>
