@@ -3,14 +3,14 @@
   "configurations": [
     {
       "name": "dashboard",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "public", "-l", "3003"],
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/build-jsx.js", "--serve", "3003"],
       "port": 3003
     },
     {
       "name": "dashboard-3004",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "public", "-l", "3004"],
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/build-jsx.js", "--serve", "3004"],
       "port": 3004
     }
   ]

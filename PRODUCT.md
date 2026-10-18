@@ -79,7 +79,7 @@ Confirmed functionality:
 
 Technical constraints:
 
-- No build step. React 18 and Babel Standalone from a CDN; JSX transpiled in the browser.
+- React 18 from a CDN. JSX compiled by `npm run build` (Babel, on Cloudflare at deploy); no bundler (SOLAR-131).
   A syntax error blanks the page silently, so every `.jsx` is checked with esbuild before
   a deploy.
 - Frontend is static on Cloudflare Pages (app at app.princesolarhub.com, showcase at princesolarhub.com); backend is Supabase (Postgres, Edge Functions,

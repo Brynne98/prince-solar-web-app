@@ -20,7 +20,7 @@
 
 ## 2. Architecture
 
-In-browser React (Babel standalone, **no build step** — `.jsx` served raw and compiled client-side), on Cloudflare Pages. Backend is Supabase: Postgres, pg_cron, and Deno Edge Functions.
+React in the browser, `.jsx` compiled to `public/build/` by `npm run build` at deploy (SOLAR-131), on Cloudflare Pages. Backend is Supabase: Postgres, pg_cron, and Deno Edge Functions.
 
 ```
 SunSynk Connect cloud  ──5 realtime endpoints/inverter──┐

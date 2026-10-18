@@ -27,11 +27,12 @@ supabase migration list             # Local and Remote columns must match
 grep -rn "TEMPORARY\|console.log\|debugger" public/ supabase/functions/
 ```
 
-Then check the JSX actually parses. There is no build step — the `.jsx` is transpiled in
-the browser by Babel, so a syntax error ships silently and blanks the page:
+Then build. `npm run build` compiles `public/*.jsx` into `public/build/*.js` with the same
+Babel settings the browser used to apply (SOLAR-131). It exits 1 on a syntax error; Cloudflare
+runs the same build and keeps the last good deploy live if it fails:
 
 ```bash
-for f in public/*.jsx; do npx --yes esbuild@0.24.0 --loader:.jsx=jsx --outfile=/dev/null "$f"; done
+npm run build
 ```
 
 A missing function or bad reference will NOT be caught by that — it is a syntax check,
@@ -119,8 +120,9 @@ curl -s -X POST https://pmakzojwhouamawgszrc.supabase.co/rest/v1/rpc/api_health 
 git add -A && git commit && git push origin main
 ```
 
-Cloudflare Pages rebuilds `public/` from `main` on every push, usually within half a
-minute; its build settings live in the Cloudflare dashboard, not in this repo.
+Cloudflare Pages rebuilds from `main` on every push: build command `npm ci && npm run build`,
+output directory `public`. Its build settings live in the Cloudflare dashboard, not in this
+repo. `public/build/` is not in git; the build makes it.
 
 `.github/workflows/secrets-guard.yml` scans the whole repo and its history for secrets with
 gitleaks (`.gitleaks.toml`) on every push to main; GitHub's secret scanning and push

@@ -11,7 +11,8 @@
   the app at app.princesolarhub.com, the showcase at princesolarhub.com (a Cloudflare
   URL rewrite serves `/welcome` for `/`; www redirects to the apex). Rebuilt from GitHub `main` on every push (seen 2026-10-18: v0.28.63 was live
   20 s after the push). Its settings are in the Cloudflare dashboard, not this repo.
-  There is no build step; the JSX is transpiled in the browser. GitHub Pages is off
+  Build command `npm ci && npm run build` compiles `public/*.jsx` into `public/build/` (not in
+  git; SOLAR-131). GitHub Pages is off
   (SOLAR-110); the old `brynne98.github.io/prince-solar-web-app` address is a 404.
 - **Backend host:** Supabase project `pmakzojwhouamawgszrc` (see `public/config.js`).
   The Supabase CLI login stored on this machine reaches it directly.
