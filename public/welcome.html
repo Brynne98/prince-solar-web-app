@@ -489,7 +489,10 @@
 
   /* ---------- tester places (SOLAR-124) ---------- */
   .hero-side .places { margin: 12px 0 0; font-size: 14px; color: var(--muted); }
-  .hero-side .full-note { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--text); }
+  .hero-side .full-note { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--text); max-width: none; }
+  /* The headline sits on the bottom of this column, so the button's slot keeps one height
+     while waiting, with places left, and when full; otherwise the headline jumps. */
+  @media (min-width: 921px) { .hero-side > div { min-height: 84px; } }
   .notify { display: flex; gap: 8px; max-width: 420px; }
   .notify input { flex: 1; min-width: 0; height: 48px; padding: 0 16px; font: inherit; font-size: 16px; color: var(--text);
     background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; }
