@@ -14,6 +14,9 @@
 // goes on the value, never the card.
 
 export const SITE = "https://princesolarhub.com";
+// Email choices are per person, so they belong on Account (logins, delete) rather
+// than Settings (plant, tariff, battery). Relink is on Account too.
+const PREFS = `${SITE}/?tab=account`;
 export const FROM_ACCOUNT = "Prince Solar <noreply@princesolarhub.com>";
 export const FROM_NOTICE = "Prince Solar <hello@princesolarhub.com>";
 
@@ -155,9 +158,9 @@ export const emailChanged = (oldEmail: string, newEmail: string, w: Where) =>
 export const accountDeleted = (email: string) =>
   make("Your account is deleted", {
     title: "Your account is deleted",
-    parts: [{ p: `The Prince Solar account for <b>${esc(email)}</b> is deleted, with all its readings and settings.` },
+    parts: [{ p: `The Prince Solar account for <b>${esc(email)}</b> is deleted, with its settings and SunSynk logins. Plant readings go too, unless someone else shares the plant.` },
       { p: "Your SunSynk account and your inverter are not affected." },
-      { note: "You can sign up again any time. History comes back only as far as SunSynk still keeps it." }],
+      { note: "You can sign up again any time. Only the last 60 days of history come back from SunSynk." }],
     footer: [COMPANY],
   });
 
@@ -175,7 +178,7 @@ export function renderAuthTemplates(): Record<string, Email> {
 // ------------------------------------------------------------- getting started
 
 const NOTICE_FOOTER = (plant: string, what: string, unsubscribeUrl?: string) => [
-  `${what} for ${esc(plant)}. Change which emails you get in <a href="${SITE}/?tab=settings">Settings</a>.`,
+  `${what} for ${esc(plant)}. Change which emails you get in <a href="${PREFS}">Account</a>.`,
   unsubscribeUrl ? `<a href="${unsubscribeUrl}">Unsubscribe</a> · ${COMPANY}` : COMPANY,
 ];
 
@@ -183,8 +186,8 @@ export const welcome = (plant: string) =>
   make(`${plant} is connected`, {
     title: `${plant} is connected`,
     parts: [
-      { p: "Live readings start now. Older history is syncing; we'll email when it's in." },
-      { p: "A monthly report comes on the 1st. Pick weekly or yearly in Settings." },
+      { p: "Live readings start now. The last 60 days of history are syncing; we'll email when they're in." },
+      { p: "A monthly report comes on the 1st. Pick weekly or yearly in Account." },
       { button: { label: "Open Prince Solar", href: SITE } },
     ],
     footer: NOTICE_FOOTER(plant, "Sent once"),
@@ -200,9 +203,9 @@ export const historySynced = (plant: string, days: number, from: string, madeKwh
         { label: "Days", value: String(days), sub: `From ${from}` },
         { label: "Made", value: v, unit: u, tone: "solar", sub: "In that time" },
       ] },
-      { p: "Trends, battery health and your best days now cover all of it." },
+      { p: `Your charts now go back to ${esc(from)}.` },
       ...(gapDays > 0 ? [{ note: `SunSynk had nothing for ${gapDays} ${gapDays === 1 ? "day" : "days"}. Those stay as gaps.` }] : []),
-      { button: { label: "See trends", href: `${SITE}/?tab=trends` } },
+      { button: { label: "Open Prince Solar", href: SITE } },
     ],
     footer: NOTICE_FOOTER(plant, "Sent once"),
   });
@@ -214,7 +217,7 @@ export const sunsynkDown = (plant: string, since: string, unsubscribeUrl: string
     title: "SunSynk is not answering",
     parts: [
       { p: `SunSynk's service stopped answering at <b>${since}</b>, so no new readings are arriving for ${esc(plant)}.` },
-      { p: "Your inverter keeps running as normal. Once SunSynk is back, we fill the gap from what SunSynk kept." },
+      { p: "Your inverter keeps running as normal. Once SunSynk is back, missing minutes are filled from SunSynk where it kept them." },
     ],
     footer: NOTICE_FOOTER(plant, "Plant event", unsubscribeUrl),
   });
@@ -272,13 +275,13 @@ export function report(r: Report): Email {
   if (r.bestDay) parts.push({ p: `Best day: <b>${esc(r.bestDay.label)}</b>, ${kwh(r.bestDay.kwh).join(" ")} of solar.` });
   if (r.yearSoFarKwh != null && r.period !== "year") parts.push({ p: `Year so far: <b>${kwh(r.yearSoFarKwh).join(" ")}</b> of solar.` });
   if (r.gapDays > 0) parts.push({ note: `${r.gapDays} ${r.gapDays === 1 ? "day has" : "days have"} gaps in the readings, so totals may be low.` });
-  parts.push({ button: { label: "Open Prince Solar", href: `${SITE}/?tab=trends` } });
+  parts.push({ button: { label: "Open Prince Solar", href: SITE } });
   return make(`${r.label}: ${mv} ${mu} of solar`, {
     title: r.label,
     sub: r.plant,
     parts,
     footer: [
-      `${EVERY[r.period]} report for ${esc(r.plant)}. Change how often, or switch it off, in <a href="${SITE}/?tab=settings">Settings</a>.`,
+      `${EVERY[r.period]} report for ${esc(r.plant)}. Change how often, or switch it off, in <a href="${PREFS}">Account</a>.`,
       `<a href="${r.unsubscribeUrl}">Unsubscribe</a> · ${COMPANY}`,
     ],
   });
@@ -286,17 +289,29 @@ export function report(r: Report): Email {
 
 // ---------------------------------------------------------------- plant events
 
-// Kinds match api_alerts_due (migrations 0016-0057), plus the "back" and relink mails.
+// Kinds and wording follow api_alerts_due_raw (0057) and its wrapper (0042):
+//  grid_down     3 known minutes with no grid (>100 V); SQL gives no charge, the sender
+//                may add the latest batt_soc
+//  grid_back     grid present again after >=3 absent minutes; SQL gives no duration
+//  grid_seen     a plant marked off-grid shows grid voltage on any phase
+//  soc_overnight 18:00-06:00, at the current draw the battery reaches its reserve
+//                before 06:00 (a forecast, not a low reading)
+//  batt_hot      battery temperature above 35 C
+//  bank_drift    charge % differs by 5 points or more between inverters' batteries
+//  string_dead   11:00-14:59, a string dead for 15 min while another string on the
+//                same inverter makes over 200 W
+//  logger_stale  no new reading for the whole plant for 15 min
+// logger_back and needs_relink have no SQL alert yet; the poller sets needs_relink.
 export type PlantEvent =
-  | { kind: "grid_down"; at: string; chargePct: number | null }
-  | { kind: "grid_back"; at: string; lasted: string }
+  | { kind: "grid_down"; at: string; chargePct?: number }
+  | { kind: "grid_back"; at: string; lasted?: string }
   | { kind: "grid_seen"; at: string }
-  | { kind: "soc_overnight"; at: string; chargePct: number }
+  | { kind: "soc_overnight"; runOutAt: string; reservePct: number }
   | { kind: "batt_hot"; at: string; tempC: number }
-  | { kind: "bank_drift"; bank: string; other: string; diffPct: number }
-  | { kind: "string_dead"; string: string; inverter: string; from: string; to: string }
-  | { kind: "logger_stale"; inverter: string; since: string }
-  | { kind: "logger_back"; inverter: string; at: string; lasted: string }
+  | { kind: "bank_drift"; banks: { name: string; chargePct: number }[] }
+  | { kind: "string_dead"; string: string; inverter: string; since: string }
+  | { kind: "logger_stale"; since: string }
+  | { kind: "logger_back"; at: string; lasted: string }
   | { kind: "needs_relink" };
 
 export function plantEvent(plant: string, e: PlantEvent, unsubscribeUrl: string): Email {
@@ -308,31 +323,31 @@ export function plantEvent(plant: string, e: PlantEvent, unsubscribeUrl: string)
           ? `No grid power since <b>${e.at}</b>.`
           : `No grid power since <b>${e.at}</b>. The battery is running the house at ${e.chargePct}% charge.`];
       case "grid_back":
-        return [`Grid back at ${plant}`, `Grid power returned at <b>${e.at}</b>, after ${e.lasted}.`];
+        return [`Grid back at ${plant}`, `Grid power returned at <b>${e.at}</b>${e.lasted ? `, after ${e.lasted}` : ""}.`];
       case "grid_seen":
-        return [`Grid power seen at ${plant}`, `${P} is set as off-grid, but the inverter saw grid power at <b>${e.at}</b>.`];
+        return [`Grid power seen at ${plant}`, `${P} is marked off-grid, but grid power showed up at <b>${e.at}</b>.`];
       case "soc_overnight":
-        return [`Battery low overnight at ${plant}`, `Charge fell to ${e.chargePct}% at <b>${e.at}</b>, before solar started.`];
+        return [`Battery may run low tonight at ${plant}`, `At the current draw, the battery reaches its ${e.reservePct}% reserve around <b>${e.runOutAt}</b>, before 06:00.`];
       case "batt_hot":
         return [`Battery hot at ${plant}`, `Battery temperature reached ${e.tempC} °C at <b>${e.at}</b>.`];
       case "bank_drift":
-        return [`Batteries out of step at ${plant}`, `${esc(e.bank)} reads ${e.diffPct}% less charge than ${esc(e.other)}.`];
+        return [`Batteries out of step at ${plant}`, `Their charge has moved apart: ${e.banks.map((b) => `${esc(b.name)} ${b.chargePct}%`).join(", ")}.`];
       case "string_dead":
-        return [`Panel string not producing at ${plant}`, `${esc(e.string)} on ${esc(e.inverter)} made nothing from ${e.from} to ${e.to}, while the others did.`];
+        return [`Panel string not producing at ${plant}`, `${esc(e.string)} on ${esc(e.inverter)} has made nothing since <b>${e.since}</b>, while another string on it is producing.`];
       case "logger_stale":
-        return [`Inverter not reporting at ${plant}`, `No readings from ${esc(e.inverter)} since <b>${e.since}</b>.`];
+        return [`No readings from ${plant}`, `No new readings since <b>${e.since}</b>.`];
       case "logger_back":
-        return [`Inverter reporting again at ${plant}`, `Readings from ${esc(e.inverter)} resumed at <b>${e.at}</b>, after ${e.lasted}. The gap stays in your history.`];
+        return [`Readings back at ${plant}`, `Readings resumed at <b>${e.at}</b>, after ${e.lasted}. Missing minutes are filled from SunSynk where it kept them.`];
       case "needs_relink":
-        return ["Reconnect your SunSynk login", "SunSynk stopped accepting the saved login, so new readings aren't arriving. Sign in again to resume."];
+        return ["Reconnect your SunSynk login", "SunSynk stopped accepting the saved login, so new readings aren't arriving. Enter your SunSynk password again in Account to resume."];
     }
   })();
   const relink = e.kind === "needs_relink";
   return make(title, {
     title,
-    parts: [{ p: lead }, { button: relink ? { label: "Reconnect", href: `${SITE}/?tab=settings` } : { label: "Open Prince Solar", href: SITE } }],
+    parts: [{ p: lead }, { button: relink ? { label: "Reconnect", href: PREFS } : { label: "Open Prince Solar", href: SITE } }],
     footer: [
-      `Plant event for ${P}. Switch these off in <a href="${SITE}/?tab=settings">Settings</a>.`,
+      `Plant event for ${P}. Switch these off in <a href="${PREFS}">Account</a>.`,
       `<a href="${unsubscribeUrl}">Unsubscribe</a> · ${COMPANY}`,
     ],
   });

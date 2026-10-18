@@ -39,7 +39,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "email-changed": [FROM_ACCOUNT, emailChanged("you@example.com", "new@example.com", { at: "18 Oct 2026, 14:32", device: "Safari on iPhone" })],
   "account-deleted": [FROM_ACCOUNT, accountDeleted("you@example.com")],
   "welcome": [FROM_NOTICE, welcome(PLANT)],
-  "history-synced": [FROM_NOTICE, historySynced(PLANT, 214, "18 Mar 2026", 5130, 3)],
+  "history-synced": [FROM_NOTICE, historySynced(PLANT, 60, "19 Aug 2026", 1480, 3)],
   "event-sunsynk-down": [FROM_NOTICE, sunsynkDown(PLANT, "09:10", UNSUB)],
   "event-sunsynk-back": [FROM_NOTICE, sunsynkBack(PLANT, "11:42", "2 h 32 min", true, UNSUB)],
   "report-month": [FROM_NOTICE, report({
@@ -61,12 +61,12 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "event-grid-down": [FROM_NOTICE, plantEvent(PLANT, { kind: "grid_down", at: "14:32", chargePct: 62 }, UNSUB)],
   "event-grid-back": [FROM_NOTICE, plantEvent(PLANT, { kind: "grid_back", at: "16:05", lasted: "1 h 33 min" }, UNSUB)],
   "event-grid-seen": [FROM_NOTICE, plantEvent(PLANT, { kind: "grid_seen", at: "09:12" }, UNSUB)],
-  "event-battery-low": [FROM_NOTICE, plantEvent(PLANT, { kind: "soc_overnight", at: "04:40", chargePct: 12 }, UNSUB)],
-  "event-battery-hot": [FROM_NOTICE, plantEvent(PLANT, { kind: "batt_hot", at: "13:20", tempC: 48 }, UNSUB)],
-  "event-banks-drift": [FROM_NOTICE, plantEvent(PLANT, { kind: "bank_drift", bank: "Bank 2", other: "Bank 1", diffPct: 18 }, UNSUB)],
-  "event-string-dead": [FROM_NOTICE, plantEvent(PLANT, { kind: "string_dead", string: "String 3", inverter: "Inverter 2", from: "11:00", to: "14:00" }, UNSUB)],
-  "event-inverter-silent": [FROM_NOTICE, plantEvent(PLANT, { kind: "logger_stale", inverter: "Inverter 1", since: "08:15" }, UNSUB)],
-  "event-inverter-back": [FROM_NOTICE, plantEvent(PLANT, { kind: "logger_back", inverter: "Inverter 1", at: "10:02", lasted: "1 h 47 min" }, UNSUB)],
+  "event-battery-low": [FROM_NOTICE, plantEvent(PLANT, { kind: "soc_overnight", runOutAt: "03:10", reservePct: 20 }, UNSUB)],
+  "event-battery-hot": [FROM_NOTICE, plantEvent(PLANT, { kind: "batt_hot", at: "13:20", tempC: 38 }, UNSUB)],
+  "event-banks-drift": [FROM_NOTICE, plantEvent(PLANT, { kind: "bank_drift", banks: [{ name: "Inverter 1's battery", chargePct: 72 }, { name: "Inverter 2's battery", chargePct: 64 }] }, UNSUB)],
+  "event-string-dead": [FROM_NOTICE, plantEvent(PLANT, { kind: "string_dead", string: "String 3", inverter: "Inverter 2", since: "11:40" }, UNSUB)],
+  "event-inverter-silent": [FROM_NOTICE, plantEvent(PLANT, { kind: "logger_stale", since: "08:15" }, UNSUB)],
+  "event-inverter-back": [FROM_NOTICE, plantEvent(PLANT, { kind: "logger_back", at: "10:02", lasted: "1 h 47 min" }, UNSUB)],
   "event-relink": [FROM_NOTICE, plantEvent(PLANT, { kind: "needs_relink" }, UNSUB)],
 };
 
