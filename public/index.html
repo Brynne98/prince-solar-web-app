@@ -1236,10 +1236,11 @@
      with one line on what will appear there; Connect opens its own screen over the app. */
   /* The outline and the card share one grid cell. The card's layer is one screen tall and
      sticks under the header, so the card stays centred in view however long the outline is,
-     and a short outline still gets the full screen. */
+     and a short outline still gets the full screen. The outline adds no height and is cut at
+     the card's layer, so the page behind doesn't scroll (SOLAR-133). */
   .setup-stage { display: grid; }
   .setup-stage > * { grid-area: 1 / 1; min-width: 0; }
-  .setup-outline { opacity: .35; pointer-events: none; user-select: none; }
+  .setup-outline { opacity: .35; pointer-events: none; user-select: none; contain: size; overflow: hidden; }
   .setup-outline .skel::after { display: none; }
   .setup-empty { position: sticky; top: calc(var(--head-h) + 14px); align-self: start; z-index: 1; height: calc(100dvh - var(--head-h) - 28px);
     display: grid; place-items: center; padding: 0 4px; }
