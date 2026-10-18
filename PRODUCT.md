@@ -82,7 +82,7 @@ Technical constraints:
 - No build step. React 18 and Babel Standalone from a CDN; JSX transpiled in the browser.
   A syntax error blanks the page silently, so every `.jsx` is checked with esbuild before
   a deploy.
-- Frontend is static on GitHub Pages; backend is Supabase (Postgres, Edge Functions,
+- Frontend is static on Cloudflare Pages (princesolarhub.com); backend is Supabase (Postgres, Edge Functions,
   pg_cron). The two ship separately, backend first.
 - Cost per customer is real: ~450 MB per inverter per year, one SunSynk poll per minute
   per inverter, and an app key whose terms for polling other people's accounts are not

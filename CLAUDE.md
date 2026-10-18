@@ -7,9 +7,11 @@
   `ssh -T git@github.com` must answer "Hi Brynne98!" before any push; this machine
   has two GitHub accounts and the wrong key authenticates as the wrong person.
 - **Branch:** `main`. No feature branches; commits land on main.
-- **Frontend host:** GitHub Pages, built by `.github/workflows/pages.yml` from
-  `public/` on every push to main. There is no build step; the JSX is transpiled
-  in the browser.
+- **Frontend host:** Cloudflare Pages at princesolarhub.com (and www), serving
+  `public/` from main; the build is set in the Cloudflare dashboard, not this repo.
+  There is no build step; the JSX is transpiled in the browser. GitHub Pages only
+  forwards old `brynne98.github.io/prince-solar-web-app` links to princesolarhub.com
+  (`github-pages-forward/`, SOLAR-110) until it is unpublished.
 - **Backend host:** Supabase project `pmakzojwhouamawgszrc` (see `public/config.js`).
   The Supabase CLI login stored on this machine reaches it directly.
 - **Issues:** Plane, workspace `brynne98`, project **Prince Solar** (tickets

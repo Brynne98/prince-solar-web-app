@@ -1,7 +1,8 @@
 # Deploying
 
 Runbook for shipping this project. Two independent halves — the frontend goes out via
-GitHub Pages, the backend via the Supabase CLI — and **they do not deploy together**.
+Cloudflare Pages at princesolarhub.com, the backend via the Supabase CLI — and **they do
+not deploy together**.
 
 > The deploy thread ships and verifies. It does not write feature code. Broken builds,
 > leftover debug code, uncommitted work or migration drift get reported, not fixed.
@@ -118,16 +119,18 @@ curl -s -X POST https://pmakzojwhouamawgszrc.supabase.co/rest/v1/rpc/api_health 
 git add -A && git commit && git push origin main
 ```
 
-Pushing to `main` triggers `.github/workflows/pages.yml`.
+Cloudflare Pages publishes `public/` from `main`; its build settings live in the
+Cloudflare dashboard, not in this repo.
 
-**It only fires on changes under `public/**` or the workflow file itself.** A docs- or
-migration-only push deploys nothing, and an empty commit cannot retrigger it — it needs
-a real change under `public/`.
+`.github/workflows/pages.yml` still runs on pushes under `public/**`: it checks
+`public/` for secrets and republishes the GitHub Pages forwarding page
+(`github-pages-forward/`), which sends old github.io links to princesolarhub.com
+(SOLAR-110). A failed secret check there does not stop Cloudflare; read the run.
 
 ## 5. Verify — do not assume
 
 ```bash
-until curl -s "https://brynne98.github.io/prince-solar-web-app/config.js?v=$(date +%s)" \
+until curl -s "https://princesolarhub.com/config.js?v=$(date +%s)" \
   | grep -q "v1.2.3"; do sleep 20; done
 ```
 
@@ -165,12 +168,12 @@ onto today; that must stay local.
 
 ---
 
-## Moving to a custom domain
+## Changing the domain
 
 Two places know the origin:
 
 - **Browser → link-sunsynk (CORS).** `DEFAULT_ORIGINS` in `link-sunsynk/index.ts` lists
-  princesolarhub.com (with www) and the GitHub Pages origin; a change needs
+  princesolarhub.com (with www); the GitHub Pages origin was dropped in SOLAR-110. A change needs
   `supabase functions deploy link-sunsynk`. Another origin can be added without a code
   change: `supabase secrets set LINK_ALLOWED_ORIGINS=https://app.example.com`.
 - **Supabase Auth.** Dashboard → Authentication → URL Configuration: Site URL and
@@ -188,7 +191,7 @@ does not change with the site's domain.
 | `supabase/migrations/` | schema and RPCs |
 | `supabase/functions/` | `poll`, `recover`, `sync-plant-energy`, `alerts-due`, `link-sunsynk` |
 | `supabase/functions/_shared/` | code bundled into every function that imports it; a change here needs those functions redeployed |
-| `.github/workflows/pages.yml` | the Pages deploy |
+| `.github/workflows/pages.yml` | secret check on `public/`, and the GitHub Pages forwarding page (`github-pages-forward/`) |
 | `.github/workflows/health.yml` | half-hourly logger check, emails on failure |
 
-Project ref `pmakzojwhouamawgszrc` · site https://brynne98.github.io/prince-solar-web-app · domain princesolarhub.com on Cloudflare Pages, both kept live (SOLAR-86)
+Project ref `pmakzojwhouamawgszrc` · site https://princesolarhub.com on Cloudflare Pages (SOLAR-86) · the old https://brynne98.github.io/prince-solar-web-app forwards there (SOLAR-110)

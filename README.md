@@ -28,7 +28,7 @@ The backend runs on Supabase. Nothing needs to stay switched on at home.
                     │        │                                 │
                     │        v                                 │
                     │    Postgres  <── api_* functions ────────┼──> browser
-                    │    (RLS, authenticated-only)             │    (GitHub Pages)
+                    │    (RLS, authenticated-only)             │    (Cloudflare Pages)
                     └──────────────────────────────────────────┘
 ```
 
@@ -151,9 +151,9 @@ Then, once, in the dashboard:
 `supabase/migrations/0009_schedule.sql` registers the cron jobs. It no-ops anywhere
 `pg_cron` isn't enabled, which is how it stays harmless on the local stack.
 
-The frontend deploys itself: pushing to `main` triggers `.github/workflows/pages.yml`,
-which publishes `public/` to GitHub Pages. There's no build step — the `.jsx` is
-transpiled in the browser by Babel standalone.
+The frontend deploys itself: Cloudflare Pages publishes `public/` from `main` at
+princesolarhub.com. There's no build step — the `.jsx` is transpiled in the browser by
+Babel standalone. GitHub Pages only forwards the old github.io address (see DEPLOY.md).
 
 ---
 
