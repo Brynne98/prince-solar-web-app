@@ -1,7 +1,7 @@
 // Preview every email with sample data, or send them as test mail.
 //
 //   node scripts/email-preview.mts <out-dir>
-//     Writes each email as <name>.html and <name>-dark.html (the dark scheme forced on),
+//     Writes each email as <name>.html and <name>.txt,
 //     plus index.html listing them, and the three Supabase Auth templates into
 //     supabase/templates/ for pasting into Dashboard -> Authentication -> Emails.
 //
@@ -18,8 +18,8 @@ import type { Email } from "../supabase/functions/_shared/email.ts";
 const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
-  confirmEmailChange, confirmSignup, FROM_ACCOUNT, FROM_NOTICE, plantEvent,
-  renderAuthTemplates, report, resetPassword, SITE,
+  accountDeleted, confirmEmailChange, confirmSignup, emailChanged, FROM_ACCOUNT, FROM_NOTICE, historySynced,
+  passwordChanged, plantEvent, renderAuthTemplates, report, resetPassword, SITE, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
 
 const PLANT = "Home";
@@ -35,6 +35,13 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "confirm-signup": [FROM_ACCOUNT, confirmSignup(LINK)],
   "reset-password": [FROM_ACCOUNT, resetPassword(LINK)],
   "confirm-email-change": [FROM_ACCOUNT, confirmEmailChange(LINK, "new@example.com")],
+  "password-changed": [FROM_ACCOUNT, passwordChanged("you@example.com")],
+  "email-changed": [FROM_ACCOUNT, emailChanged("you@example.com", "new@example.com")],
+  "account-deleted": [FROM_ACCOUNT, accountDeleted("you@example.com")],
+  "welcome": [FROM_NOTICE, welcome(PLANT)],
+  "history-synced": [FROM_NOTICE, historySynced(PLANT, 214, "18 Mar 2026", 5130, 3)],
+  "event-sunsynk-down": [FROM_NOTICE, sunsynkDown(PLANT, "09:10", UNSUB)],
+  "event-sunsynk-back": [FROM_NOTICE, sunsynkBack(PLANT, "11:42", "2 h 32 min", true, UNSUB)],
   "report-month": [FROM_NOTICE, report({
     ...base, period: "month", label: "October 2026", prevLabel: "September",
     change: { made: 12, home: -3, import: -21, independence: 6, saved: 9 },
@@ -85,13 +92,11 @@ if (args[0] === "--send") {
   const out = args[0];
   if (!out) throw new Error("usage: node scripts/email-preview.mts <out-dir>");
   mkdirSync(out, { recursive: true });
-  const forceDark = (h: string) => h.replace("@media (prefers-color-scheme:dark){", "@media all{");
   const items: string[] = [];
   for (const [name, [from, m]] of Object.entries(mails)) {
     writeFileSync(join(out, `${name}.html`), m.html);
-    writeFileSync(join(out, `${name}-dark.html`), forceDark(m.html));
     writeFileSync(join(out, `${name}.txt`), m.text);
-    items.push(`<li><a href="${name}.html">${name}</a> · <a href="${name}-dark.html">dark</a> · <a href="${name}.txt">text</a> — ${from.replace(/</g, "&lt;")} — ${m.subject}</li>`);
+    items.push(`<li><a href="${name}.html">${name}</a> · <a href="${name}.txt">text</a> — ${from.replace(/</g, "&lt;")} — ${m.subject}</li>`);
   }
   writeFileSync(join(out, "index.html"), `<!doctype html><meta charset="utf-8"><title>Emails</title><ul style="font:14px/1.8 system-ui">${items.join("")}</ul>`);
   const tpl = new URL("../supabase/templates/", import.meta.url);

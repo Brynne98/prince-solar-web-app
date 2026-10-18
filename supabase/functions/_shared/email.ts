@@ -10,8 +10,8 @@
 // links with Supabase's Go placeholders ({{ .ConfirmationURL }}) and the output is
 // pasted into Dashboard -> Authentication -> Emails.
 //
-// Look: DESIGN.md, light by default with a dark scheme for clients that honour
-// prefers-color-scheme. Colour goes on the value, never the card.
+// Look: DESIGN.md. Dark only, like the app (decided 2026-10-18, SOLAR-117); colour
+// goes on the value, never the card.
 
 export const SITE = "https://princesolarhub.com";
 export const FROM_ACCOUNT = "Prince Solar <noreply@princesolarhub.com>";
@@ -19,13 +19,12 @@ export const FROM_NOTICE = "Prince Solar <hello@princesolarhub.com>";
 
 export type Email = { subject: string; html: string; text: string };
 
-// Light value colours are darkened versions of the app's, so they pass on white.
 const C = {
-  solar: ["#14894a", "#3ddc84"],
-  home: ["#c43d3d", "#f87171"],
-  grid: ["#8a6a00", "#facc15"],
-  cyan: ["#0b7f93", "#22d3ee"],
-  batt: ["#6d4fd8", "#a78bfa"],
+  solar: "#3ddc84",
+  home: "#f87171",
+  grid: "#facc15",
+  cyan: "#22d3ee",
+  batt: "#a78bfa",
 } as const;
 type Tone = keyof typeof C;
 
@@ -36,17 +35,9 @@ const SANS = "'Space Grotesk',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sa
 const MONO = "'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace";
 
 const STYLE = `
-:root{color-scheme:light dark;supported-color-schemes:light dark}
-body{margin:0;padding:0;background:#f3f5f8}
+:root{color-scheme:dark;supported-color-schemes:dark}
+body{margin:0;padding:0;background:#0a0d12}
 a{color:inherit}
-@media (prefers-color-scheme:dark){
- body,.bg{background:#0a0d12!important}
- .card{background:#11161d!important;border-color:rgba(255,255,255,.07)!important}
- .tile{background:#141a22!important}
- .t{color:#e7ecf2!important}.m{color:#9aa5b3!important}.d{color:#7f8da0!important}
- .rule{border-color:rgba(255,255,255,.07)!important}
- ${Object.entries(C).map(([k, v]) => `.${k}{color:${v[1]}!important}`).join("")}
-}
 @media (max-width:520px){.tile{display:block!important;width:auto!important;margin-bottom:8px!important}.pad{padding:24px 20px!important}}
 `;
 
@@ -61,16 +52,16 @@ type Body = { title: string; sub?: string; parts: Part[]; footer: string[] };
 
 function html(subject: string, b: Body): string {
   const rows = b.parts.map((x) => {
-    if ("p" in x) return `<p class="t" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#11161d">${x.p}</p>`;
-    if ("note" in x) return `<p class="m" style="margin:0 0 16px;font:400 13px/1.5 ${SANS};color:#5b6675">${x.note}</p>`;
+    if ("p" in x) return `<p class="t" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#e7ecf2">${x.p}</p>`;
+    if ("note" in x) return `<p class="m" style="margin:0 0 16px;font:400 13px/1.5 ${SANS};color:#9aa5b3">${x.note}</p>`;
     if ("link" in x)
-      return `<p class="d" style="margin:0 0 8px;font:400 12px/1.5 ${SANS};color:#66717f;word-break:break-all">Or open this link: <a href="${x.link}" style="color:inherit">${x.link}</a></p>`;
+      return `<p class="d" style="margin:0 0 8px;font:400 12px/1.5 ${SANS};color:#7f8da0;word-break:break-all">Or open this link: <a href="${x.link}" style="color:inherit">${x.link}</a></p>`;
     if ("button" in x)
       return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 20px"><tr><td style="border-radius:8px;background:#3ddc84"><a href="${x.button.href}" style="display:inline-block;padding:12px 22px;font:600 15px/1 ${SANS};color:#0a0d12;text-decoration:none;border-radius:8px">${esc(x.button.label)}</a></td></tr></table>`;
-    const cells = x.stats.map((s) => `<td class="tile" width="50%" style="padding:14px 16px;background:#f6f8fa;border-radius:8px;vertical-align:top">
-<div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#5b6675">${esc(s.label)}</div>
-<div class="${s.tone ?? "t"}" style="margin-top:8px;font:700 24px/1.1 ${MONO};font-variant-numeric:tabular-nums;color:${s.tone ? C[s.tone][0] : "#11161d"}">${esc(s.value)}${s.unit ? `<span style="font-size:14px;opacity:.85"> ${esc(s.unit)}</span>` : ""}</div>
-${s.sub ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};color:#66717f">${esc(s.sub)}</div>` : ""}</td>`);
+    const cells = x.stats.map((s) => `<td class="tile" width="50%" style="padding:14px 16px;background:#141a22;border-radius:8px;vertical-align:top">
+<div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(s.label)}</div>
+<div class="${s.tone ?? "t"}" style="margin-top:8px;font:700 24px/1.1 ${MONO};font-variant-numeric:tabular-nums;color:${s.tone ? C[s.tone] : "#e7ecf2"}">${esc(s.value)}${s.unit ? `<span style="font-size:14px;opacity:.85"> ${esc(s.unit)}</span>` : ""}</div>
+${s.sub ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};color:#7f8da0">${esc(s.sub)}</div>` : ""}</td>`);
     const pairs: string[] = [];
     for (let i = 0; i < cells.length; i += 2)
       pairs.push(`<tr>${cells[i]}<td width="8" style="width:8px"></td>${cells[i + 1] ?? '<td class="tile" width="50%"></td>'}</tr><tr><td colspan="3" height="8" style="height:8px"></td></tr>`);
@@ -78,19 +69,19 @@ ${s.sub ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};color:
   });
 
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>${esc(subject)}</title>
+<meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><title>${esc(subject)}</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
 <style>${STYLE}</style></head>
-<body class="bg" style="margin:0;padding:0;background:#f3f5f8">
-<table role="presentation" class="bg" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f8"><tr><td align="center" style="padding:28px 12px">
+<body class="bg" style="margin:0;padding:0;background:#0a0d12">
+<table role="presentation" class="bg" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0d12"><tr><td align="center" style="padding:28px 12px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
-<tr><td style="padding:0 4px 16px"><a href="${SITE}" style="text-decoration:none"><img src="${SITE}/icon-192.png" width="28" height="28" alt="" style="vertical-align:middle;border:0;border-radius:6px"> <span class="t" style="vertical-align:middle;font:700 17px/1 ${SANS};color:#11161d">Prince Solar</span></a></td></tr>
-<tr><td class="card pad" style="background:#ffffff;border:1px solid #e3e7ec;border-radius:12px;padding:32px 32px 20px">
-<h1 class="t" style="margin:0 0 ${b.sub ? 4 : 16}px;font:700 22px/1.25 ${SANS};letter-spacing:-.02em;color:#11161d">${esc(b.title)}</h1>
-${b.sub ? `<p class="m" style="margin:0 0 20px;font:400 14px/1.4 ${SANS};color:#5b6675">${esc(b.sub)}</p>` : ""}
+<tr><td style="padding:0 4px 16px"><a href="${SITE}" style="text-decoration:none"><img src="${SITE}/icon-192.png" width="28" height="28" alt="" style="vertical-align:middle;border:0;border-radius:6px"> <span class="t" style="vertical-align:middle;font:700 17px/1 ${SANS};color:#e7ecf2">Prince Solar</span></a></td></tr>
+<tr><td class="card pad" style="background:#11161d;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:32px 32px 20px">
+<h1 class="t" style="margin:0 0 ${b.sub ? 4 : 16}px;font:700 22px/1.25 ${SANS};letter-spacing:-.02em;color:#e7ecf2">${esc(b.title)}</h1>
+${b.sub ? `<p class="m" style="margin:0 0 20px;font:400 14px/1.4 ${SANS};color:#9aa5b3">${esc(b.sub)}</p>` : ""}
 ${rows.join("\n")}
 </td></tr>
-<tr><td style="padding:16px 4px 0">${b.footer.map((f) => `<p class="d" style="margin:0 0 6px;font:400 12px/1.5 ${SANS};color:#66717f">${f}</p>`).join("")}</td></tr>
+<tr><td style="padding:16px 4px 0">${b.footer.map((f) => `<p class="d" style="margin:0 0 6px;font:400 12px/1.5 ${SANS};color:#7f8da0">${f}</p>`).join("")}</td></tr>
 </table></td></tr></table></body></html>`;
 }
 
@@ -134,6 +125,36 @@ export const confirmEmailChange = (url: string, newEmail: string) =>
   account("Confirm your new email", "Confirm your new email", `Tap the button to use <b>${esc(newEmail)}</b> for Prince Solar.`,
     "Confirm new email", url, "Didn't ask for this? Ignore this email.");
 
+// Security notices: sent after the change, so there is nothing to confirm. The reset
+// button lands on sign-in for now; a link that opens "Forgot password?" needs an app
+// change when these are wired (SOLAR-117).
+const notYou = (what: string) => ({ p: `Not you? Reset your password now, so only you can sign in, and check ${what}.` });
+
+export const passwordChanged = (email: string) =>
+  make("Your password was changed", {
+    title: "Your password was changed",
+    parts: [{ p: `The password for <b>${esc(email)}</b> was just changed.` }, notYou("your linked SunSynk logins"),
+      { button: { label: "Reset password", href: SITE } }],
+    footer: [COMPANY],
+  });
+
+export const emailChanged = (oldEmail: string, newEmail: string) =>
+  make("Your email was changed", {
+    title: "Your email was changed",
+    parts: [{ p: `Prince Solar now uses <b>${esc(newEmail)}</b> instead of ${esc(oldEmail)}. This is the last email to this address.` },
+      notYou("the email on your account"), { button: { label: "Reset password", href: SITE } }],
+    footer: [`Questions? Write to <a href="mailto:hello@princesolarhub.com">hello@princesolarhub.com</a>.`, COMPANY],
+  });
+
+export const accountDeleted = (email: string) =>
+  make("Your account is deleted", {
+    title: "Your account is deleted",
+    parts: [{ p: `The Prince Solar account for <b>${esc(email)}</b> is deleted, with all its readings and settings.` },
+      { p: "Your SunSynk account and your inverter are not affected." },
+      { note: "You can sign up again any time. History comes back only as far as SunSynk still keeps it." }],
+    footer: [COMPANY],
+  });
+
 // Supabase Auth fills these placeholders itself; they must reach it unescaped.
 export function renderAuthTemplates(): Record<string, Email> {
   const URL = "{{ .ConfirmationURL }}";
@@ -144,6 +165,64 @@ export function renderAuthTemplates(): Record<string, Email> {
     email_change: { ...e, html: e.html.replace("NEWEMAIL", "{{ .NewEmail }}"), text: e.text.replace("NEWEMAIL", "{{ .NewEmail }}") },
   };
 }
+
+// ------------------------------------------------------------- getting started
+
+const NOTICE_FOOTER = (plant: string, what: string, unsubscribeUrl?: string) => [
+  `${what} for ${esc(plant)}. Change which emails you get in <a href="${SITE}/?tab=settings">Settings</a>.`,
+  unsubscribeUrl ? `<a href="${unsubscribeUrl}">Unsubscribe</a> · ${COMPANY}` : COMPANY,
+];
+
+export const welcome = (plant: string) =>
+  make(`${plant} is connected`, {
+    title: `${plant} is connected`,
+    parts: [
+      { p: "Live readings start now. Older history is syncing; we'll email when it's in." },
+      { p: "A monthly report comes on the 1st. Pick weekly or yearly in Settings." },
+      { button: { label: "Open Prince Solar", href: SITE } },
+    ],
+    footer: NOTICE_FOOTER(plant, "Sent once"),
+  });
+
+export const historySynced = (plant: string, days: number, from: string, madeKwh: number, gapDays: number) => {
+  const [v, u] = kwh(madeKwh);
+  return make(`${plant}: your history is in`, {
+    title: "Your history is in",
+    sub: plant,
+    parts: [
+      { stats: [
+        { label: "Days", value: String(days), sub: `From ${from}` },
+        { label: "Made", value: v, unit: u, tone: "solar", sub: "In that time" },
+      ] },
+      { p: "Trends, battery health and your best days now cover all of it." },
+      ...(gapDays > 0 ? [{ note: `SunSynk had nothing for ${gapDays} ${gapDays === 1 ? "day" : "days"}. Those stay as gaps.` }] : []),
+      { button: { label: "See trends", href: `${SITE}/?tab=trends` } },
+    ],
+    footer: NOTICE_FOOTER(plant, "Sent once"),
+  });
+};
+
+// SunSynk's own service is down: every plant is affected, not one inverter.
+export const sunsynkDown = (plant: string, since: string, unsubscribeUrl: string) =>
+  make("SunSynk is not answering", {
+    title: "SunSynk is not answering",
+    parts: [
+      { p: `SunSynk's service stopped answering at <b>${since}</b>, so no new readings are arriving for ${esc(plant)}.` },
+      { p: "Your inverter keeps running as normal. Once SunSynk is back, we fill the gap from what SunSynk kept." },
+    ],
+    footer: NOTICE_FOOTER(plant, "Plant event", unsubscribeUrl),
+  });
+
+export const sunsynkBack = (plant: string, at: string, lasted: string, refilled: boolean, unsubscribeUrl: string) =>
+  make("SunSynk is back", {
+    title: "SunSynk is back",
+    parts: [
+      { p: `Readings for ${esc(plant)} resumed at <b>${at}</b>, after ${lasted}.` },
+      { p: refilled ? "The gap is filled from SunSynk's records." : "SunSynk kept nothing for that time, so it stays as a gap." },
+      { button: { label: "Open Prince Solar", href: SITE } },
+    ],
+    footer: NOTICE_FOOTER(plant, "Plant event", unsubscribeUrl),
+  });
 
 // --------------------------------------------------------------------- reports
 
