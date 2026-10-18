@@ -1,0 +1,27 @@
+<!-- Tab icon: the dashboard's own sun.
+     Mirrors the .sun rule in index.html — radial-gradient(circle at 38% 34%,
+     #ffd56b, #f4a93a 58%, #e07a1f) plus its orange glow. Transparent background so
+     it reads on both light and dark browser chrome.
+
+     The glow is deliberately restrained: at 16px a big soft halo just turns into an
+     orange smudge, so it stays a crisp disc with a hint of bloom. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <radialGradient id="face" cx="38%" cy="34%" r="72%">
+      <stop offset="0%"   stop-color="#ffd56b"/>
+      <stop offset="58%"  stop-color="#f4a93a"/>
+      <stop offset="100%" stop-color="#e07a1f"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="60%"  stop-color="#f4a93a" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#f4a93a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- outer bloom, matching the box-shadow's 34px spread -->
+  <circle cx="32" cy="32" r="32" fill="url(#glow)"/>
+  <!-- the 6px ring at 10% opacity -->
+  <circle cx="32" cy="32" r="27" fill="#f4a93a" fill-opacity="0.10"/>
+  <!-- the disc itself -->
+  <circle cx="32" cy="32" r="23" fill="url(#face)"/>
+</svg>
