@@ -125,24 +125,30 @@ export const confirmEmailChange = (url: string, newEmail: string) =>
   account("Confirm your new email", "Confirm your new email", `Tap the button to use <b>${esc(newEmail)}</b> for Prince Solar.`,
     "Confirm new email", url, "Didn't ask for this? Ignore this email.");
 
-// Security notices: sent after the change, so there is nothing to confirm. The reset
-// button lands on sign-in for now; a link that opens "Forgot password?" needs an app
-// change when these are wired (SOLAR-117).
-const notYou = (what: string) => ({ p: `Not you? Reset your password now, so only you can sign in, and check ${what}.` });
+// Security notices: sent at once, after the change, so there is nothing to confirm.
+// Common practice: say when and from what device, and give a "This wasn't me" button
+// on our own domain. It lands on sign-in for now; opening "Forgot password?" directly
+// needs an app change when these are wired (SOLAR-117).
+type Where = { at: string; device?: string }; // "18 Oct 2026, 14:32"; "Chrome on Mac"
+const when = (w: Where) => `<b>${esc(w.at)}</b>${w.device ? `, from ${esc(w.device)}` : ""}`;
+const notYou = [
+  { p: "Not you? Reset your password now, so only you can sign in." },
+  { button: { label: "This wasn't me", href: SITE } },
+  { note: `You can also open princesolarhub.com yourself and choose "Forgot password?".` },
+];
 
-export const passwordChanged = (email: string) =>
+export const passwordChanged = (email: string, w: Where) =>
   make("Your password was changed", {
     title: "Your password was changed",
-    parts: [{ p: `The password for <b>${esc(email)}</b> was just changed.` }, notYou("your linked SunSynk logins"),
-      { button: { label: "Reset password", href: SITE } }],
+    parts: [{ p: `The password for <b>${esc(email)}</b> was changed on ${when(w)}.` }, ...notYou],
     footer: [COMPANY],
   });
 
-export const emailChanged = (oldEmail: string, newEmail: string) =>
+export const emailChanged = (oldEmail: string, newEmail: string, w: Where) =>
   make("Your email was changed", {
     title: "Your email was changed",
-    parts: [{ p: `Prince Solar now uses <b>${esc(newEmail)}</b> instead of ${esc(oldEmail)}. This is the last email to this address.` },
-      notYou("the email on your account"), { button: { label: "Reset password", href: SITE } }],
+    parts: [{ p: `Prince Solar now uses <b>${esc(newEmail)}</b> instead of ${esc(oldEmail)}. Changed on ${when(w)}.` },
+      { p: "This is the last email to this address." }, ...notYou],
     footer: [`Questions? Write to <a href="mailto:hello@princesolarhub.com">hello@princesolarhub.com</a>.`, COMPANY],
   });
 
@@ -241,6 +247,7 @@ export type Report = {
   savedRand: number | null; // null: no tariff set
   change: { made?: number; home?: number; import?: number; independence?: number; saved?: number }; // % vs prevLabel
   bestDay?: { label: string; kwh: number };
+  yearSoFarKwh?: number; // solar made since 1 Jan; left out of the yearly report
   gapDays: number;
   unsubscribeUrl: string;
 };
@@ -263,6 +270,7 @@ export function report(r: Report): Email {
   ];
   const parts: Part[] = [{ stats }];
   if (r.bestDay) parts.push({ p: `Best day: <b>${esc(r.bestDay.label)}</b>, ${kwh(r.bestDay.kwh).join(" ")} of solar.` });
+  if (r.yearSoFarKwh != null && r.period !== "year") parts.push({ p: `Year so far: <b>${kwh(r.yearSoFarKwh).join(" ")}</b> of solar.` });
   if (r.gapDays > 0) parts.push({ note: `${r.gapDays} ${r.gapDays === 1 ? "day has" : "days have"} gaps in the readings, so totals may be low.` });
   parts.push({ button: { label: "Open Prince Solar", href: `${SITE}/?tab=trends` } });
   return make(`${r.label}: ${mv} ${mu} of solar`, {

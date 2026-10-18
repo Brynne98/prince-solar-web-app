@@ -35,8 +35,8 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "confirm-signup": [FROM_ACCOUNT, confirmSignup(LINK)],
   "reset-password": [FROM_ACCOUNT, resetPassword(LINK)],
   "confirm-email-change": [FROM_ACCOUNT, confirmEmailChange(LINK, "new@example.com")],
-  "password-changed": [FROM_ACCOUNT, passwordChanged("you@example.com")],
-  "email-changed": [FROM_ACCOUNT, emailChanged("you@example.com", "new@example.com")],
+  "password-changed": [FROM_ACCOUNT, passwordChanged("you@example.com", { at: "18 Oct 2026, 14:32", device: "Chrome on Mac" })],
+  "email-changed": [FROM_ACCOUNT, emailChanged("you@example.com", "new@example.com", { at: "18 Oct 2026, 14:32", device: "Safari on iPhone" })],
   "account-deleted": [FROM_ACCOUNT, accountDeleted("you@example.com")],
   "welcome": [FROM_NOTICE, welcome(PLANT)],
   "history-synced": [FROM_NOTICE, historySynced(PLANT, 214, "18 Mar 2026", 5130, 3)],
@@ -45,13 +45,13 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "report-month": [FROM_NOTICE, report({
     ...base, period: "month", label: "October 2026", prevLabel: "September",
     change: { made: 12, home: -3, import: -21, independence: 6, saved: 9 },
-    bestDay: { label: "14 Oct", kwh: 34.6 }, gapDays: 2,
+    bestDay: { label: "14 Oct", kwh: 34.6 }, yearSoFarKwh: 7480, gapDays: 2,
   })],
   "report-week": [FROM_NOTICE, report({
     ...base, period: "week", label: "Week of 6 Oct", prevLabel: "last week",
     madeKwh: 191.3, homeKwh: 208.9, importKwh: 47.2, independencePct: 77, savedRand: 495,
     change: { made: 4, home: 1, import: -8, independence: 2, saved: 5 },
-    bestDay: { label: "Thu 9 Oct", kwh: 33.1 },
+    bestDay: { label: "Thu 9 Oct", kwh: 33.1 }, yearSoFarKwh: 7480,
   })],
   "report-year": [FROM_NOTICE, report({
     ...base, period: "year", label: "2026", prevLabel: "2025",
