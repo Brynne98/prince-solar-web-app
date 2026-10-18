@@ -2073,7 +2073,7 @@ function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
         <SunSynkConnectionSection onChanged={onPlantConfigSaved} links={links} />
         <DeleteAccountSection email={email} />
         <div className="app-version mono">
-          {window.APP_VERSION} · <a href="https://brynne98.github.io/prince-solar/terms.html" target="_blank" rel="noopener">Terms</a> · <a href="https://brynne98.github.io/prince-solar/privacy.html" target="_blank" rel="noopener">Privacy</a>
+          {window.APP_VERSION} · <a href="terms.html" target="_blank" rel="noopener">Terms</a> · <a href="privacy.html" target="_blank" rel="noopener">Privacy</a>
         </div>
       </div>
     </SettingsFlash.Provider>

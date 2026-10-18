@@ -682,10 +682,10 @@ function App({ links }) {
   window.reportClientError = report;
 })();
 
-// Terms and privacy live on the shared site with the other apps' pages; old ?page= links go there.
+// Terms and privacy are pages beside the app (terms.html, privacy.html); old ?page= links go there.
 const legalPage = new URLSearchParams(location.search).get('page');
 if (legalPage === 'terms' || legalPage === 'privacy') {
-  location.replace(`https://brynne98.github.io/prince-solar/${legalPage}.html`);
+  location.replace(`${legalPage}.html`);
 } else {
   ReactDOM.createRoot(document.getElementById('root')).render(
     <window.AuthGate fallback={<BootShell />}><window.LinkGate fallback={<BootShell />}>

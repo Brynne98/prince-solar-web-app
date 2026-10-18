@@ -400,7 +400,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
             <input id="auth-agree" type="checkbox" checked={agree}
                    onChange={(e) => { setAgree(e.target.checked); edited('auth-agree'); }}
                    {...invalidProps('auth-agree', bad['auth-agree'])} />
-            <span>I agree to the <a href="https://brynne98.github.io/prince-solar/terms.html" target="_blank" rel="noopener">Terms of Service</a> and <a href="https://brynne98.github.io/prince-solar/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span>
+            <span>I agree to the <a href="terms.html" target="_blank" rel="noopener">Terms of Service</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span>
             {/* The sentence turns red instead of adding a line; this names the problem for screen readers. */}
             {bad['auth-agree'] && <span id="auth-agree-err" className="sr-only">{bad['auth-agree']}</span>}
           </label>
@@ -417,7 +417,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
           <div className="login-or"><span>or</span></div>
           {googleButton}
           <div className="login-fine">Continuing with Google creates an account and accepts
-            the <a href="https://brynne98.github.io/prince-solar/terms.html" target="_blank" rel="noopener">Terms</a> and <a href="https://brynne98.github.io/prince-solar/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>
+            the <a href="terms.html" target="_blank" rel="noopener">Terms</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>
         </>)}
 
         <div className="login-links">
