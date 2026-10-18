@@ -38,8 +38,13 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "password-changed": [FROM_ACCOUNT, passwordChanged("you@example.com", { at: "18 Oct 2026, 14:32", device: "Chrome on Mac" })],
   "email-changed": [FROM_ACCOUNT, emailChanged("you@example.com", "new@example.com", { at: "18 Oct 2026, 14:32", device: "Safari on iPhone" })],
   "account-deleted": [FROM_ACCOUNT, accountDeleted("you@example.com")],
-  "welcome": [FROM_NOTICE, welcome(PLANT)],
-  "history-synced": [FROM_NOTICE, historySynced(PLANT, 60, "19 Aug 2026", 1480, 3)],
+  "welcome": [FROM_NOTICE, welcome()],
+  "history-synced": [FROM_NOTICE, historySynced({
+    plant: PLANT, days: 60, from: "19 Aug", to: "17 Oct", madeKwh: 1484, homeKwh: 1702, importKwh: 431, independencePct: 75,
+    bestDay: { label: "14 Oct", kwh: 34.6 }, firstReport: "1 Nov",
+    // A plausible spring: rising with the season, cloudy dips, three days SunSynk lost.
+    daily: Array.from({ length: 60 }, (_, i) => [17, 18, 41].includes(i) ? null : Math.round((16 + i * 0.22 + (i % 7 === 3 ? -9 : 0) + (i % 11 === 5 ? -6 : 0) + ((i * 37) % 5)) * 10) / 10),
+  })],
   "event-sunsynk-down": [FROM_NOTICE, sunsynkDown(PLANT, "09:10", UNSUB)],
   "event-sunsynk-back": [FROM_NOTICE, sunsynkBack(PLANT, "11:42", "2 h 32 min", true, UNSUB)],
   "report-month": [FROM_NOTICE, report({

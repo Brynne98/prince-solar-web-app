@@ -49,7 +49,9 @@ type Part =
   | { button: { label: string; href: string } }
   | { link: string } // the raw link under a button, for clients that drop buttons
   | { stats: { label: string; value: string; unit?: string; tone?: Tone; sub?: string }[] }
-  | { note: string };
+  | { note: string }
+  | { steps: string[] } // numbered how-to; may hold <b> set by us
+  | { bars: { values: (number | null)[]; from: string; to: string } }; // daily solar kWh; null = no data
 
 type Body = { title: string; sub?: string; parts: Part[]; footer: string[] };
 
@@ -57,6 +59,21 @@ function html(subject: string, b: Body): string {
   const rows = b.parts.map((x) => {
     if ("p" in x) return `<p class="t" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#e7ecf2">${x.p}</p>`;
     if ("note" in x) return `<p class="m" style="margin:0 0 16px;font:400 13px/1.5 ${SANS};color:#9aa5b3">${x.note}</p>`;
+    if ("steps" in x)
+      return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px">${x.steps.map((s, i) =>
+        `<tr><td style="vertical-align:top;padding:0 12px 12px 0"><div style="width:24px;height:24px;border-radius:12px;background:#141a22;border:1px solid rgba(255,255,255,.12);font:700 12px/24px ${MONO};color:#3ddc84;text-align:center">${i + 1}</div></td>` +
+        `<td style="vertical-align:top;padding:2px 0 12px;font:400 15px/1.5 ${SANS};color:#e7ecf2">${s}</td></tr>`).join("")}</table>`;
+    if ("bars" in x) {
+      // A bar per day, drawn with table cells so it survives email clients that drop SVG
+      // and images. A day with no data is a gap, never a zero bar.
+      const max = Math.max(1, ...x.bars.values.map((v) => v ?? 0));
+      const w = (100 / x.bars.values.length).toFixed(3);
+      const cells = x.bars.values.map((v) => `<td width="${w}%" style="vertical-align:bottom;padding:0 1px">${v == null
+        ? `<div style="height:2px;background:rgba(255,255,255,.07)"></div>`
+        : `<div style="height:${Math.max(2, Math.round((v / max) * 64))}px;background:#3ddc84;border-radius:1px"></div>`}</td>`).join("");
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 6px;height:64px"><tr style="height:64px">${cells}</tr></table>` +
+        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr><td style="font:400 12px/1 ${SANS};color:#7f8da0">${esc(x.bars.from)}</td><td align="right" style="font:400 12px/1 ${SANS};color:#7f8da0">${esc(x.bars.to)}</td></tr></table>`;
+    }
     if ("link" in x)
       return `<p class="d" style="margin:0 0 8px;font:400 12px/1.5 ${SANS};color:#7f8da0;word-break:break-all">Or open this link: <a href="${x.link}" style="color:inherit">${x.link}</a></p>`;
     if ("button" in x)
@@ -95,6 +112,7 @@ function text(b: Body): string {
   for (const x of b.parts) {
     if ("p" in x) out.push(strip(x.p), "");
     else if ("note" in x) out.push(strip(x.note), "");
+    else if ("steps" in x) out.push(...x.steps.map((s, i) => `${i + 1}. ${strip(s)}`), "");
     else if ("button" in x) out.push(`${x.button.label}: ${x.button.href}`, "");
     else if ("stats" in x) out.push(...x.stats.map((s) => `${s.label}: ${s.value}${s.unit ? " " + s.unit : ""}${s.sub ? ` (${s.sub})` : ""}`), "");
   }
@@ -182,32 +200,61 @@ const NOTICE_FOOTER = (plant: string, what: string, unsubscribeUrl?: string) => 
   unsubscribeUrl ? `<a href="${unsubscribeUrl}">Unsubscribe</a> · ${COMPANY}` : COMPANY,
 ];
 
-export const welcome = (plant: string) =>
-  make(`${plant} is connected`, {
-    title: `${plant} is connected`,
+// Sent once the email is confirmed, before any inverter is connected. The Connect
+// card opens on Live when a user has no plant, so the button goes straight there.
+// Wording matches link.jsx ("Connect your inverter", "Use the login from the
+// SunSynk Connect app", "We never keep your password").
+export const welcome = () =>
+  make("Welcome to Prince Solar", {
+    title: "Welcome to Prince Solar",
     parts: [
-      { p: "Live readings start now. The last 60 days of history are syncing; we'll email when they're in." },
-      { p: "A monthly report comes on the 1st. Pick weekly or yearly in Account." },
-      { button: { label: "Open Prince Solar", href: SITE } },
+      { p: "One step left: connect your inverter." },
+      { steps: [
+        "Open Prince Solar and sign in.",
+        "Enter the email and password you use in the <b>SunSynk Connect</b> app.",
+        "Live readings start at once. The last 60 days of history follow; we'll email when they're in.",
+      ] },
+      { button: { label: "Connect your inverter", href: SITE } },
+      { note: "We never keep your SunSynk password. It's swapped for a key, then dropped." },
     ],
-    footer: NOTICE_FOOTER(plant, "Sent once"),
+    footer: ["Questions? Reply to this email.", COMPANY],
   });
 
-export const historySynced = (plant: string, days: number, from: string, madeKwh: number, gapDays: number) => {
-  const [v, u] = kwh(madeKwh);
-  return make(`${plant}: your history is in`, {
-    title: "Your history is in",
-    sub: plant,
+export type History = {
+  plant: string;
+  days: number;
+  from: string; // "19 Aug"
+  to: string; // "17 Oct"
+  daily: (number | null)[]; // solar kWh per day, oldest first; null = SunSynk had nothing
+  madeKwh: number;
+  homeKwh: number;
+  independencePct: number;
+  importKwh: number | null; // null: no grid
+  bestDay: { label: string; kwh: number };
+  firstReport: string; // "1 Nov"
+};
+
+export const historySynced = (h: History) => {
+  const [mv, mu] = kwh(h.madeKwh);
+  const gaps = h.daily.filter((d) => d == null).length;
+  return make(`${h.plant}: your last ${h.days} days are in`, {
+    title: `Your last ${h.days} days are in`,
+    sub: `${h.plant} · ${h.from} to ${h.to}`,
     parts: [
       { stats: [
-        { label: "Days", value: String(days), sub: `From ${from}` },
-        { label: "Made", value: v, unit: u, tone: "solar", sub: "In that time" },
+        { label: "Made", value: mv, unit: mu, tone: "solar" },
+        { label: "Home", value: kwh(h.homeKwh)[0], unit: kwh(h.homeKwh)[1], tone: "home" },
+        ...(h.importKwh != null ? [{ label: "Imported", value: kwh(h.importKwh)[0], unit: kwh(h.importKwh)[1], tone: "grid" as Tone }] : []),
+        { label: "Independence", value: `${Math.round(h.independencePct)}%`, tone: "cyan" },
       ] },
-      { p: `Your charts now go back to ${esc(from)}.` },
-      ...(gapDays > 0 ? [{ note: `SunSynk had nothing for ${gapDays} ${gapDays === 1 ? "day" : "days"}. Those stay as gaps.` }] : []),
+      { p: "Solar each day:" },
+      { bars: { values: h.daily, from: h.from, to: h.to } },
+      { p: `Best day: <b>${esc(h.bestDay.label)}</b>, ${kwh(h.bestDay.kwh).join(" ")} of solar.` },
+      ...(gaps > 0 ? [{ note: `SunSynk had nothing for ${gaps} ${gaps === 1 ? "day" : "days"}, shown as ${gaps === 1 ? "a gap" : "gaps"}.` }] : []),
+      { p: `Your first monthly report comes on ${esc(h.firstReport)}. Pick weekly or yearly in Account.` },
       { button: { label: "Open Prince Solar", href: SITE } },
     ],
-    footer: NOTICE_FOOTER(plant, "Sent once"),
+    footer: NOTICE_FOOTER(h.plant, "Sent once"),
   });
 };
 
