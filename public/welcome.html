@@ -15,6 +15,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<!-- Sign-up buttons stay hidden until the tester-places count answers, so they don't flash before the full state swaps in. -->
+<script>document.documentElement.classList.add('places-wait'); setTimeout(() => document.documentElement.classList.remove('places-wait'), 2500);</script>
 <style>
   /* Dark only, like the app. Tokens are the app's (index.html :root). */
   :root {
@@ -486,7 +488,7 @@
   @media (max-width: 760px) { .closing-card { grid-template-columns: 1fr; padding: 36px 22px; } }
 
   /* ---------- tester places (SOLAR-124) ---------- */
-  .places { margin: 12px 0 0; font-size: 14px; color: var(--muted); }
+  .hero-side .places { margin: 12px 0 0; font-size: 14px; color: var(--muted); }
   .hero-side .full-note { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--text); }
   .notify { display: flex; gap: 8px; max-width: 420px; }
   .notify input { flex: 1; min-width: 0; height: 48px; padding: 0 16px; font: inherit; font-size: 16px; color: var(--text);
@@ -494,9 +496,11 @@
   .notify input::placeholder { color: var(--dim); }
   .notify input[aria-invalid="true"] { border-color: var(--bad); }
   .notify .btn { flex: none; }
-  .notify-msg { margin: 8px 0 0; font-size: 14px; color: var(--bad); }
+  .places-wait .topnav .btn-primary, .places-wait .hero-side > div, .places-wait .closing-card > a { visibility: hidden; }
+  /* .hero-side p and .closing-card p would turn it grey. */
+  .hero-side .notify-msg, .closing-card .notify-msg { margin: 8px 0 0; font-size: 14px; color: var(--bad); }
   .notify-msg:empty { display: none; }
-  .notify-done { margin: 0; font-size: 16px; color: var(--pv); }
+  .hero-side .notify-done, .closing-card .notify-done { margin: 0; font-size: 16px; color: var(--pv); }
   @media (max-width: 480px) { .notify { flex-direction: column; } .notify input { flex: none; } .notify .btn { justify-content: center; } }
 
   footer { border-top: 1px solid var(--line); padding: 28px 0 40px; font-size: 13.5px; color: var(--dim); }
@@ -913,8 +917,8 @@ window.DEMO = (() => {
     method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
   });
   let p;
-  try { const r = await rpc('api_tester_places'); if (!r.ok) return; p = await r.json(); } catch { return; }
-  if (typeof p?.left !== 'number') return;
+  try { const r = await rpc('api_tester_places'); if (r.ok) p = await r.json(); } catch {}
+  if (typeof p?.left !== 'number') return document.documentElement.classList.remove('places-wait');
   const heroCta = document.querySelector('.hero-side > div');
 
   if (p.left > 0) {
@@ -922,7 +926,7 @@ window.DEMO = (() => {
     note.className = 'places';
     note.textContent = `${p.left} of ${p.places} tester places left`;
     heroCta.append(note);
-    return;
+    return document.documentElement.classList.remove('places-wait');
   }
 
   const notifyForm = () => {
@@ -960,6 +964,7 @@ window.DEMO = (() => {
   card.querySelector('h2').textContent = 'Tester places are full.';
   card.querySelector('p').textContent = 'More places open when we launch. Leave your email and we’ll let you know.';
   card.querySelector(':scope > a').replaceWith(notifyForm());
+  document.documentElement.classList.remove('places-wait');
 })();
 </script>
 </body>
