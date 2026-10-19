@@ -39,6 +39,10 @@
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   html, body { margin: 0; overflow-x: clip; }
+  /* no bounce with a mouse or trackpad; touch screens keep it and the pull-down reload (same rule as index.html, SOLAR-108) */
+  @media (min-width: 600px) and (hover: hover) and (pointer: fine) {
+    html, body { overscroll-behavior: none; }
+  }
   body {
     background:
       radial-gradient(1200px 600px at 80% -10%, rgba(91,157,255,0.06), transparent 60%),
