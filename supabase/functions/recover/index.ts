@@ -47,7 +47,7 @@
 // the spine fetch ran for a day.
 //
 // ?plant=ID restricts a run to one plant and leaves the round-robin cursor alone.
-import { type Account, db, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
+import { type Account, db, denyUnlessServer, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
 import {
   bucketizeAgg,
   calibrateFeedScale,
@@ -432,6 +432,8 @@ async function dryRun(job: PlantJob, day: string) {
 }
 
 Deno.serve(async (req) => {
+  const denied = denyUnlessServer(req);
+  if (denied) return denied;
   const started = Date.now();
   try {
     const url = new URL(req.url);

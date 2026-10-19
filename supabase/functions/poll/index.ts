@@ -41,6 +41,7 @@ import {
   apiCallCounts,
   apiGet,
   db,
+  denyUnlessServer,
   ensureBootstrapAccount,
   getInverters,
   getInvertersCached,
@@ -456,6 +457,8 @@ function shardOf(accountId: string, shards: number): number {
 }
 
 Deno.serve(async (req) => {
+  const denied = denyUnlessServer(req);
+  if (denied) return denied;
   try {
     const spec = await shardSpec(req);
     // The minute this invocation is logging — fixed before the stagger delay so

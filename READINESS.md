@@ -24,7 +24,7 @@ Dashboard users: one per customer shape (`export@`, `nobatt@`, `shared@`, `famil
 node scripts/mock-sunsynk/server.js &
 supabase functions serve --env-file scripts/mock-sunsynk/mock.env --no-verify-jwt &
 eval "$(supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY|ANON_KEY)=')"; node scripts/mock-sunsynk/seed-users.mjs
-curl -s -X POST http://127.0.0.1:55321/functions/v1/poll -d '{}'
+curl -s -X POST http://127.0.0.1:55321/functions/v1/poll -H "Authorization: Bearer $SERVICE_ROLE_KEY" -d '{}'
 ```
 
 ---

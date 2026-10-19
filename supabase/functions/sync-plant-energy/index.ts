@@ -10,7 +10,7 @@
 //   * monthly rows for every year with data (drives Lifetime / Monthly / Year)
 //   * daily rows for the last N months, default 6 (drives Week, Month, Daily trends
 //     and the Overview comparison arrows)
-import { db, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
+import { db, denyUnlessServer, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
 import { fetchMonthRows, fetchYearRows } from "../_shared/plantfeed.ts";
 
 const DEFAULT_DAILY_MONTHS = 6;
@@ -108,6 +108,8 @@ async function syncPlant(job: PlantJob, dailyMonths: number, started: number) {
 }
 
 Deno.serve(async (req) => {
+  const denied = denyUnlessServer(req);
+  if (denied) return denied;
   const started = Date.now();
   try {
     const url = new URL(req.url);
