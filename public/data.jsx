@@ -37,7 +37,7 @@ const ROUTES = {
   '/api/history/inverters': (q) => ['api_inverter_history', { p_date: q.date || null }],
   '/api/strings/health':    () => ['api_string_health', {}],
   '/api/energy':           (q) => ['api_energy', { p_period: q.period || 'week' }],
-  '/api/db/stats':         () => ['api_db_stats', {}],
+  '/api/plant/days':       () => ['api_plant_days', {}],
   '/api/trends/by-hour':   (q) => ['api_trends_by_hour', { p_days: Number(q.days) || 14 }],
   '/api/trends/daily':     (q) => ['api_trends_daily', { p_days: Number(q.days) || 30 }],
   '/api/trends/compare':   () => ['api_trends_compare', {}],
@@ -56,6 +56,20 @@ async function getJSON(url) {
   if (error) throw new Error(error.message || 'RPC ' + fn + ' failed');
   return data || {};
 }
+
+// One answer per plant shared by every caller for `ms`, so pages opened one after another
+// do not each ask again (SOLAR-140). `rk` is App's refreshKey: a manual refresh or a plant
+// switch bumps it, and a caller holding a newer one asks afresh. A failure is not kept.
+const shared = {};
+function sharedAsk(name, ms, rk, ask) {
+  const k = name + ':' + window.CURRENT_PLANT;
+  const m = shared[k];
+  if (m && m.rk >= (rk || 0) && Date.now() - m.at < ms) return m.p;
+  const p = ask().catch((e) => { if (shared[k] && shared[k].p === p) delete shared[k]; throw e; });
+  shared[k] = { at: Date.now(), rk: rk || 0, p };
+  return p;
+}
+const MIN5 = 5 * 60000;
 
 const isOnline = (s) => s === 1 || s === '1' || s === 'online' || s === true;
 
@@ -157,9 +171,10 @@ function aggregate(invs, totals) {
 }
 
 async function fetchSnapshot() {
-  // api_health carries the poller's last reading time; api_overview only stamps
-  // when it was generated. The header shows the former so a stalled poller is visible.
-  const [api, health] = await Promise.all([getJSON('/api/overview'), getJSON('/api/health').catch(() => ({}))]);
+  // lastTs is the poller's last reading time (0088; it used to take a second call to
+  // api_health); generatedAt only stamps the answer. The header shows the former so a
+  // stalled poller is visible.
+  const api = await getJSON('/api/overview');
   const inverters = (api.inverters || []).map(mapInverter);
   // Battery capacity and reserve are not derived here (SunSynk under-reports Ah/V) —
   // they come from app_config via api_overview, which is also what the phone alerts
@@ -168,7 +183,7 @@ async function fetchSnapshot() {
   const cfg = api.config || {};
   return {
     updated: new Date(api.generatedAt || Date.now()),
-    lastReading: health && health.lastTs ? new Date(health.lastTs * 1000) : null,
+    lastReading: api.lastTs ? new Date(api.lastTs * 1000) : null,
     plant: api.plant || { id: null, name: 'My plant' },
     aggregate: aggregate(inverters, api.totals || {}),
     config: api.config || null,
@@ -247,7 +262,8 @@ function fetchDataDays() {
 async function fetchEarliest() {
   // No plant yet (the empty outlines in Setup): there is no first day to ask about.
   if (window.CURRENT_PLANT == null) return null;
-  try { const api = await getJSON('/api/history/earliest'); return api.earliest || null; }
+  // The first day does not move: one ask per plant and page load. An unknown one is asked again.
+  try { return await sharedAsk('earliest', Infinity, 0, () => getJSON('/api/history/earliest').then((api) => api.earliest || Promise.reject(new Error('none')))); }
   catch (e) { return null; }
 }
 
@@ -256,8 +272,9 @@ async function fetchEarliest() {
 // (min/max) per 5-minute bucket. History-only (SunSynk output/day + grid/day,
 // fetched by recover every 6 h), so it lags the live numbers; `last` on each
 // inverter is the latest bucket with data.
-async function fetchInverterHistory(date) {
-  const api = await getJSON('/api/history/inverters' + (date ? '?date=' + date : ''));
+// Equipment draws two charts from one answer, and Grid's outages read it too.
+async function fetchInverterHistory(date, rk) {
+  const api = await sharedAsk('invhist:' + (date || ''), MIN5, rk, () => getJSON('/api/history/inverters' + (date ? '?date=' + date : '')));
   return api.inverters || [];
 }
 
@@ -268,29 +285,28 @@ async function fetchEnergy(period) {
 }
 
 // ---- /api/trends -> hour-of-day profile from the local log -----------------
-async function fetchHourly(days) {
+// The profile barely moves within the hour; Live asks again when it opens.
+async function fetchHourly(days, rk) {
   const n = days || TYPICAL_DAYS;
-  const byHour = await getJSON('/api/trends/by-hour?days=' + n);
+  const byHour = await sharedAsk('hourly:' + n, 60 * 60000, rk, () => getJSON('/api/trends/by-hour?days=' + n));
   return { days: byHour.days || n, hours: byHour.hours || [] };
 }
-async function fetchTrends(days) {
-  const [byHour, stats] = await Promise.all([
-    fetchHourly(days),
-    getJSON('/api/db/stats').catch(() => null),
-  ]);
-  return { days: byHour.days, hours: byHour.hours, stats };
+// How many days this plant has logged; drives the "collecting your first day" copy.
+async function fetchPlantDays() {
+  const api = await getJSON('/api/plant/days');
+  return api.days ?? null;
 }
 // Last N days of plant kWh totals. Today's row is computed live from agg_minute rather
 // than the daily-synced cache (migration 0013); `expected` is that day's irradiance
 // scaled by the fitted conversion ratio and drives the dotted line (migration 0014).
 // It is absent, not zero, on days with no irradiance on file, so the line breaks.
-async function fetchTrendDaily(days) {
-  const api = await getJSON('/api/trends/daily?days=' + days);
+async function fetchTrendDaily(days, rk) {
+  const api = await sharedAsk('daily:' + days, MIN5, rk, () => getJSON('/api/trends/daily?days=' + days));
   return api.rows || [];
 }
 // period-over-period totals for the Overview trend arrows ({today,week,month}:{cur,prev})
-async function fetchCompare() {
-  return getJSON('/api/trends/compare').catch(() => ({}));
+async function fetchCompare(rk) {
+  return sharedAsk('compare', MIN5, rk, () => getJSON('/api/trends/compare')).catch(() => ({}));
 }
 // each used string's kWh today and its usual share by this time of day (0076, SOLAR-51)
 async function fetchStringHealth() {
@@ -339,6 +355,6 @@ function emptyText(days, fallback) {
 }
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchTrends, fetchTrendDaily, fetchCompare, fetchStringHealth,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchTrendDaily, fetchCompare, fetchStringHealth,
   fetchMe, savePrefs, savePlantConfig, deleteAccount, emptyText, BATT_MAX_KW, TYPICAL_DAYS,
 });

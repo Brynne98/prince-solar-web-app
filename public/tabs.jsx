@@ -90,7 +90,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const [hourly, setHourly] = React.useState(null);
   React.useEffect(() => {
     let alive = true;
-    window.fetchHourly().then((d) => { if (alive) setHourly(d); }).catch(() => {});
+    window.fetchHourly(undefined, refreshKey).then((d) => { if (alive) setHourly(d); }).catch(() => {});
     return () => { alive = false; };
   }, [refreshKey]);
   const hourNow = window.plantHour(tz, snap.updated instanceof Date ? snap.updated : new Date());
@@ -234,7 +234,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
 
   // ---- period-over-period trend arrows on the Overview cards ----
   const [cmp, setCmp] = React.useState(null);
-  React.useEffect(() => { window.fetchCompare().then(setCmp).catch(() => {}); }, [refreshKey]);
+  React.useEffect(() => { window.fetchCompare(refreshKey).then(setCmp).catch(() => {}); }, [refreshKey]);
 
   // ---- period overview: Today / Week / Month / Year / Lifetime ----
   const [period, setPeriod] = React.useState('today');
@@ -880,8 +880,8 @@ function useDaily(refreshKey) {
   const [daily, setDaily] = React.useState(null);
   const load = React.useCallback(() => {
     setDaily(null);
-    window.fetchTrendDaily(30).then(setDaily).catch(() => setDaily(false));
-  }, []);
+    window.fetchTrendDaily(30, refreshKey).then(setDaily).catch(() => setDaily(false));
+  }, [refreshKey]);
   React.useEffect(load, [refreshKey]);
   return [daily, load];
 }
@@ -951,7 +951,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // ---- totals ----
   const [cmp, setCmp] = React.useState(null);
   const [earliest, setEarliest] = React.useState(null);
-  React.useEffect(() => { window.fetchCompare().then(setCmp).catch(() => {}); }, [refreshKey]);
+  React.useEffect(() => { window.fetchCompare(refreshKey).then(setCmp).catch(() => {}); }, [refreshKey]);
   React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
   const tot = periodTotals('pv', a.pvToday, energy, plantToday);
   const EP = window.fmtEnergyParts;
@@ -1071,7 +1071,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
             : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')}</div>
             : <>
               <div className="fbox-bar" role="img" title={destTitle} aria-label={destLabel}>
-                {dests.map(([l, v, c]) => <i key={l} style={{ flexGrow: v, background: c }} />)}
+                {dests.map(([l, v, c]) => <i key={l} style={{ flexGrow: destPct(v), background: c }} />)}
               </div>
               <div className="wiw-figs" aria-hidden="true">
                 {dests.map(([l, v, c]) => {
@@ -1140,7 +1140,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   React.useEffect(() => { ['week', 'month', 'year', 'lifetime'].forEach(p => { if (!energy[p]) onNeedEnergy(p); }); }, [energy]);
   const [cmp, setCmp] = React.useState(null);
   const [earliest, setEarliest] = React.useState(null);
-  React.useEffect(() => { window.fetchCompare().then(setCmp).catch(() => {}); }, [refreshKey]);
+  React.useEffect(() => { window.fetchCompare(refreshKey).then(setCmp).catch(() => {}); }, [refreshKey]);
   React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
 
   // ---- totals: what was bought ----
@@ -1180,7 +1180,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   React.useEffect(() => {
     let alive = true;
     setOutages([]);
-    window.fetchInverterHistory(pick.date)
+    window.fetchInverterHistory(pick.date, refreshKey)
       .then(r => { if (alive) setOutages(outageRuns(r || [], ['gmin', 'gmax'], DAY_LAST)); })
       .catch(() => {});
     return () => { alive = false; };
@@ -1576,8 +1576,11 @@ function InvertersTab({ snap, refreshKey }) {
   React.useEffect(() => {
     const load = () => window.fetchStringHealth().then(setHealth).catch(() => setHealth(false));
     load();
-    const t = setInterval(load, 600000);
-    return () => clearInterval(t);
+    const t = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 600000);
+    // off screen it skips; back on screen it catches up
+    const back = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', back);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', back); };
   }, [refreshKey]);
   // Simple or Detailed is this viewer's own choice, kept across visits
   const [view, setView] = React.useState(() => { try { return localStorage.getItem('synsynk.eqView') === 'detailed' ? 'detailed' : 'simple'; } catch (e) { return 'simple'; } });

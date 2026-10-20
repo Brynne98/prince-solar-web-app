@@ -485,15 +485,26 @@ function App({ links }) {
     catch (e) {
       liveFails.current += 1;
       if (spin || liveFails.current >= 2) setErr(e.message);
-      if (liveFails.current <= 3) liveRetry.current = setTimeout(() => loadLive(false), 10000);
+      if (liveFails.current <= 3) liveRetry.current = setTimeout(() => { if (document.visibilityState === 'visible') loadLive(false); }, 10000);
     }
     finally { if (spin) setTimeout(() => setBusy(b => b - 1), Math.ceil((Date.now() - t0) / 800) * 800 - (Date.now() - t0)); }
   }, []);
   const loadToday = useCallback(async () => {
     try { setToday(await window.fetchDay()); } catch (e) { /* chart shows its own placeholder */ }
   }, []);
+  // Week to Lifetime are finished days plus today, and the pages add today from the live
+  // reading, so the rows change only when the plant's date turns and when the 04:15 sync
+  // swaps the finished day in (0058). Asked again then, or on a manual refresh (SOLAR-140).
+  const snapRef = useRef(null);
+  useEffect(() => { snapRef.current = snap; }, [snap]);
+  const energyStampRef = useRef(null);
+  const energyStamp = () => {
+    const tz = snapRef.current?.config?.timezone, d = new Date();
+    return window.plantDateStr(tz, d) + (window.plantHour(tz, d) >= 5 ? 'b' : 'a');
+  };
   const onNeedEnergy = useCallback((period) => {
     if (energyRef.current[period] || inflight.current[period]) return;
+    if (energyStampRef.current == null) energyStampRef.current = energyStamp();
     inflight.current[period] = true;
     window.fetchEnergy(period)
       .then(rows => setEnergy(e => ({ ...e, [period]: rows })))
@@ -503,7 +514,10 @@ function App({ links }) {
   // Refetch every already-loaded period together so their totals stay current AND
   // mutually consistent (e.g. Year and Lifetime share today's growing total rather
   // than each being frozen at whenever it was first opened). Updates in place — no flicker.
-  const refreshEnergy = useCallback(() => {
+  const refreshEnergy = useCallback((force) => {
+    const stamp = energyStamp();
+    if (!force && stamp === energyStampRef.current) return;
+    energyStampRef.current = stamp;
     Object.keys(energyRef.current).forEach((period) => {
       window.fetchEnergy(period).then(rows => setEnergy(e => ({ ...e, [period]: rows }))).catch(() => {});
     });
@@ -519,7 +533,7 @@ function App({ links }) {
       window.setCurrentPlant(wanted, cfg?.currency);
       setPlantId(wanted);
       // how much history this plant has — drives the "collecting your first day" copy
-      window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
+      window.fetchPlantDays().then(d => { window.PLANT_DAYS = d; }).catch(() => {});
     } catch (e) { setErr(e.message); }
   }, []);
   // Name of the plant just switched to, shown in the status pill until the new
@@ -544,7 +558,7 @@ function App({ links }) {
     setEnergy({}); energyRef.current = {}; setSnap(null); setToday(null);
     // how much history THIS plant has — the empty-state copy reads it
     window.PLANT_DAYS = null; window.SYNC = null; syncDaysRef.current = null;
-    window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
+    window.fetchPlantDays().then(d => { window.PLANT_DAYS = d; }).catch(() => {});
     loadLive(); loadToday(); setRefreshKey(k => k + 1);
   };
   // Fresh-link sync state (0048) rides on every snapshot; the empty-state copy reads
@@ -558,17 +572,17 @@ function App({ links }) {
     const sync = snap?.sync ?? null;
     if (!sync) return;
     if (syncDaysRef.current != null && sync.days !== syncDaysRef.current) {
-      window.fetchTrends().then(t => { window.PLANT_DAYS = t?.stats?.days ?? null; }).catch(() => {});
+      window.fetchPlantDays().then(d => { window.PLANT_DAYS = d; }).catch(() => {});
     }
     syncDaysRef.current = sync.days;
   }, [snap]);
   // A config save can change which plant is shown (a removed login); the data follows it.
   // A reconnected login also clears the banner, so the gate's list is read again.
   const reloadPlantConfig = () => {
-    const before = window.CURRENT_PLANT;
     links.refresh();
     return loadMe().then(() => {
-      if (window.CURRENT_PLANT !== before) setRefreshKey(k => k + 1);
+      // a saved setting can change the shared trend and 30-day answers too, so they are asked again
+      setRefreshKey(k => k + 1);
       loadLive();
     });
   };
@@ -585,9 +599,13 @@ function App({ links }) {
     let a;
     const off = 12000 + ((Number(plantId) || 0) * 7919 % 31) * 1000;
     const next = () => { const ms = 60000 - (Date.now() - off) % 60000; a = setTimeout(tick, ms < 1000 ? ms + 60000 : ms); };
+    // Nothing is asked for while the page is off screen (another tab, minimised, phone on
+    // another app); wake below catches up the moment it is back (SOLAR-140).
     const tick = () => {
-      loadLive(false);
-      if (new Date().getMinutes() % 5 === 0) { loadToday(); refreshEnergy(); }
+      if (document.visibilityState === 'visible') {
+        loadLive(false);
+        if (new Date().getMinutes() % 5 === 0) { loadToday(); refreshEnergy(); }
+      }
       next();
     };
     next();
@@ -601,7 +619,7 @@ function App({ links }) {
     };
   }, [auto, plantId]);
 
-  const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(); setRefreshKey(k => k + 1); };
+  const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(true); setRefreshKey(k => k + 1); };
 
   const go = (id) => { setTab(id); toTop(); };
   const loginDead = links.accounts.some(a => a.status === 'needs_relink');

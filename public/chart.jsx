@@ -278,7 +278,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   React.useEffect(() => {
     let alive = true;
     setInvs(null); setHover(null);
-    window.fetchInverterHistory(date)
+    window.fetchInverterHistory(date, refreshKey)
       .then(r => { if (alive) setInvs(r); })
       .catch(() => { if (alive) setInvs([]); });
     return () => { alive = false; };
