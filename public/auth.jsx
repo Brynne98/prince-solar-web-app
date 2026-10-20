@@ -123,6 +123,13 @@ function GoogleSignIn({ blocked, onBlocked, onStart, onDone }) {
   useEffect(() => {
     let alive = true, tries = 0;
     const raw = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+    // Google's script (276 KB) loads only for the sign-in screen, not on every open
+    // (SOLAR-143). No integrity hash: Google updates it in place (SOLAR-122).
+    if (!document.getElementById('gsi-client')) {
+      const s = document.createElement('script');
+      s.id = 'gsi-client'; s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
+      document.head.appendChild(s);
+    }
     const setup = async () => {
       if (!alive) return;
       if (!window.google?.accounts?.id) {

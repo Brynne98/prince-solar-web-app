@@ -1299,16 +1299,15 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js" integrity="sha384-KX6Y/AMIv9qA8TLCDul2JatZWeyrJVgj3Xu/0r30Nr05xO8md1+wHAgtdsRV9LoE" crossorigin="anonymous"></script>
 
 <!-- config first: auth.jsx and data.jsx both read window.SUNSYNK_CONFIG -->
-<!-- Google's sign-in button (SOLAR-122). No integrity hash: Google updates it in place. -->
-<script src="https://accounts.google.com/gsi/client" async></script>
+<!-- Google's sign-in script is added by auth.jsx when the sign-in screen shows (SOLAR-143). -->
 <script src="config.js"></script>
 <script src="build/auth.js"></script>
 <script src="build/link.js"></script>
 <script src="build/data.js"></script>
 <script src="build/components.js"></script>
-<script src="build/flow.js"></script>
-<script src="build/chart.js"></script>
-<script src="build/tabs.js"></script>
 <script src="build/app.js"></script>
+<!-- The signed-in pages: app.jsx loads these, in this order, once someone is signed in,
+     so the sign-in screen draws without them (SOLAR-143). Not run as a script. -->
+<script id="pages" type="application/json">["build/flow.js", "build/chart.js", "build/tabs.js"]</script>
 </body>
 </html>

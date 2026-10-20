@@ -341,7 +341,8 @@ function BootShell() {
   const tab = pageOk(TABS, saved) ? saved : 'live';
   return (
     <Frame tabs={TABS} tab={tab} busy head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /></>}>
-      {tab !== 'settings' && tab !== 'account' && <window.TabSkeleton tab={tab} />}
+      {/* TabSkeleton is in tabs.js, which loads after sign-in (SOLAR-143) */}
+      {tab !== 'settings' && tab !== 'account' && window.TabSkeleton && <window.TabSkeleton tab={tab} />}
     </Frame>
   );
 }
@@ -706,8 +707,31 @@ if (legalPage === 'terms' || legalPage === 'privacy') {
   location.replace(`${legalPage}.html`);
 } else {
   ReactDOM.createRoot(document.getElementById('root')).render(
-    <window.AuthGate fallback={<BootShell />}><window.LinkGate fallback={<BootShell />}>
-      {(links) => (links.accounts.some(a => (a.plants || []).length) ? <App links={links} /> : <Setup links={links} />)}
-    </window.LinkGate></window.AuthGate>
+    <window.AuthGate fallback={<BootShell />}><SignedIn /></window.AuthGate>
+  );
+}
+
+// flow.js, chart.js and tabs.js (listed in index.html's #pages) load once someone is signed
+// in, while LinkGate fetches their logins, so the sign-in screen draws without them (SOLAR-143).
+// Once per page: signing out and in again reuses the first load.
+let pagesLoad = null;
+const loadPages = () => pagesLoad || (pagesLoad = Promise.all(
+  JSON.parse(document.getElementById('pages').textContent).map(src => new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = false; // fetched together, run in list order
+    s.onload = ok; s.onerror = () => fail(new Error('Could not load ' + src));
+    document.body.appendChild(s);
+  }))
+));
+
+function SignedIn() {
+  const [pages, setPages] = useState('loading'); // loading | ready | failed
+  useEffect(() => { loadPages().then(() => setPages('ready'), () => setPages('failed')); }, []);
+  if (pages === 'failed') return <div className="login-fine">The app didn’t load. Check your connection and reload.</div>;
+  return (
+    <window.LinkGate fallback={<BootShell />}>
+      {(links) => (pages !== 'ready' ? <BootShell />
+        : links.accounts.some(a => (a.plants || []).length) ? <App links={links} /> : <Setup links={links} />)}
+    </window.LinkGate>
   );
 }

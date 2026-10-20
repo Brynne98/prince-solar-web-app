@@ -9,10 +9,14 @@
  *   node scripts/build-jsx.js --serve 3003  build, rebuild on save, serve public/ on 3003
  *
  * Cloudflare Pages runs `npm ci && npm run build` on every push; public/build/ is not in git.
+ * There (CF_PAGES=1) each file is named after its content, app.<hash>.js, and index.html and
+ * welcome.html are rewritten to match, so public/_headers can let browsers keep build/*
+ * for a year (SOLAR-143). Local builds keep the plain names and leave the HTML alone.
  */
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 const Babel = require('@babel/standalone');
 
 const PUB = path.join(__dirname, '..', 'public');
@@ -24,14 +28,20 @@ const options = (filename) => ({
   presets: ['react', 'env'],
   plugins: ['transform-class-properties', 'transform-object-rest-spread', 'transform-flow-strip-types'],
   sourceMaps: true,
+  minified: true, // whitespace out: 475 KB to 302 KB for the app's files (SOLAR-143)
+  comments: false,
 });
+const HASHED = !!process.env.CF_PAGES;
+const built = {}; // name -> file name written, for the HTML rewrite
 
 function compile(file) {
   const name = path.basename(file, '.jsx');
   const { code, map } = Babel.transform(fs.readFileSync(file, 'utf8'), options(name + '.jsx'));
   map.sources = ['../' + name + '.jsx'];
-  fs.writeFileSync(path.join(OUT, name + '.js'), code + '\n//# sourceMappingURL=' + name + '.js.map\n');
-  fs.writeFileSync(path.join(OUT, name + '.js.map'), JSON.stringify(map));
+  const out = HASHED ? name + '.' + crypto.createHash('sha256').update(code).digest('hex').slice(0, 10) : name;
+  fs.writeFileSync(path.join(OUT, out + '.js'), code + '\n//# sourceMappingURL=' + out + '.js.map\n');
+  fs.writeFileSync(path.join(OUT, out + '.js.map'), JSON.stringify(map));
+  built[name] = out + '.js';
 }
 
 const sources = () => fs.readdirSync(PUB).filter(f => f.endsWith('.jsx')).map(f => path.join(PUB, f));
@@ -45,6 +55,16 @@ for (const file of sources()) {
 
 if (serveAt === -1) {
   if (failed) process.exit(1);
+  if (HASHED) {
+    for (const page of ['index.html', 'welcome.html']) {
+      const file = path.join(PUB, page);
+      const html = fs.readFileSync(file, 'utf8').replace(/build\/([\w-]+)\.js/g, (m, name) => {
+        if (!built[name]) { console.error(page + ' names build/' + name + '.js, which was not built'); process.exit(1); }
+        return 'build/' + built[name];
+      });
+      fs.writeFileSync(file, html);
+    }
+  }
   console.log('built', sources().length, 'files into public/build/');
 } else {
   fs.watch(PUB, (event, f) => {
