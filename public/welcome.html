@@ -357,7 +357,27 @@
   .solar-tab .section-right { text-transform: none; letter-spacing: 0; font-size: 12.5px; font-weight: 400; color: var(--muted); }
   .solar-tab .section-right b { font-family: var(--mono); font-weight: 600; color: var(--text); }
   .solar-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
+  .solar-row { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .solar-row > .wiw { width: 100%; max-width: 560px; box-sizing: border-box; }
+  .solar-tab .wiw .section-title { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 5px 12px; margin-bottom: 14px; }
+  /* the app's info tooltip (index.html) */
+  .info-dot { position: relative; display: inline-flex; align-items: center; vertical-align: middle;
+    color: var(--dim); cursor: help; margin-left: 5px; }
+  .info-dot:hover, .info-dot:focus { color: var(--grid); outline: none; }
+  .info-dot::before { content: ''; position: absolute; inset: -12px; }
+  .info-dot svg { display: block; }
+  .info-bubble { display: none; position: absolute; bottom: calc(100% + 9px); left: 50%; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(4px);
+    width: 210px; background: rgba(13,17,23,0.98); border: 1px solid var(--line-2); border-radius: 10px; padding: 10px 12px;
+    font-family: var(--display); font-size: 12px; font-weight: 400; line-height: 1.5; letter-spacing: 0; text-transform: none;
+    color: var(--text); box-shadow: 0 14px 34px rgba(0,0,0,0.55); opacity: 0; visibility: hidden; transition: opacity .15s, transform .15s;
+    z-index: 30; pointer-events: none; }
+  .info-bubble::after { content: ''; position: absolute; top: 100%; left: calc(50% - var(--shift, 0px)); transform: translateX(-50%);
+    border: 6px solid transparent; border-top-color: var(--line-2); }
+  .info-dot:hover .info-bubble, .info-dot:focus .info-bubble { display: block; opacity: 1; visibility: visible; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(0); }
   .wiw-figs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 16px; margin-top: 18px; }
+  /* aligned as the Power Flow solar box's split: first left, last right, middle centred */
+  .wiw-figs > :not(:first-child):not(:last-child) { text-align: center; }
+  .wiw-figs > :last-child:not(:first-child) { text-align: right; }
   .wiw-figs b { display: block; font: 700 28px var(--mono); line-height: 1; letter-spacing: -0.01em; white-space: nowrap; }
   .wiw-figs b .u { font-size: 15px; margin-left: 4px; opacity: 0.85; }
   .wiw-figs span:not(.u) { display: block; margin-top: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }

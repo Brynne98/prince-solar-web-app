@@ -19,14 +19,14 @@ window.DEMO = (() => {
     const shade = cloud > 0 ? 0.3 + rnd() * 0.35 : 1;
     return Math.max(0, clear * shade * (0.97 + rnd() * 0.06));
   });
-  // Home: fridge cycling, kettle and toaster at breakfast, pool pump 09:00 to 16:00, the
-  // geyser element switching on and off 10:30 to 14:30 and again 16:30 to 18:00, cooking and
-  // lights in the evening.
+  // Home: fridge cycling, the geyser on its timer 04:00 to 05:00, breakfast at 07:00, pool pump 09:00
+  // to 16:00, the geyser element switching on and off 10:30 to 14:30 and again 16:30 to 18:00,
+  // a kettle in the afternoon and evening, cooking and lights in the evening.
   const HOME = STEPS.map((h, k) => {
     let w = 0.38 + (Math.floor(k / 4) % 3 === 0 ? 0.14 : 0) + rnd() * 0.08;
-    if (h >= 6 && h < 8.5) w += 0.35 + rnd() * 0.3;
-    if ([79, 82, 88, 202, 233].includes(k)) w += 2.1;          // kettle
-    if (k === 80) w += 1.0;                                     // toaster
+    if (h >= 7 && h < 8.5) w += 0.35 + rnd() * 0.3;            // breakfast, once solar is up
+    if (h >= 4 && h < 5) w += 3.0;                              // geyser timer
+    if ([202, 233].includes(k)) w += 2.1;                       // kettle
     if (h >= 9 && h < 16) w += 1.15;                            // pool pump
     if (h >= 10.5 && h < 14.5 && Math.floor((h - 10.5) * 3) % 3 !== 2) w += 3.0; // geyser element
     if (h >= 16.5 && h < 18 && Math.floor((h - 16.5) * 4) % 3 !== 2) w += 3.0; // geyser again
@@ -36,7 +36,8 @@ window.DEMO = (() => {
   });
   const solarAt = (h) => SOLAR[Math.min(287, Math.floor(h * 12))];
   const homeAt = (h) => HOME[Math.min(287, Math.floor(h * 12))];
-  const gridOff = (h) => h >= 18 && h < 20.5;
+  // load-shedding, 10:00 to 12:30: solar and the battery carry the house, so nothing changes at home
+  const gridOff = (h) => h >= 10 && h < 12.5;
   // one row per 5 minutes, in kW: solar, battery (+ = powering the house, - = charging),
   // grid bought, home; charge % at the start of the step
   const day = (soc0) => {
@@ -44,11 +45,14 @@ window.DEMO = (() => {
     let soc = soc0;
     for (let k = 0; k < 288; k++) {
       const h = k / 12, home = homeAt(h), off = gridOff(h), spare = solarAt(h) - home;
-      // A real inverter never holds the grid at exactly 0: it draws a trickle, 20 to 90 W,
-      // and a big load switching on (kettle, geyser) pulls from the grid for a moment
-      // before the inverter catches up.
-      const jump = k > 0 ? home - homeAt((k - 1) / 12) : 0;
-      const trickle = off ? 0 : 0.02 + rnd() * 0.07 + (jump > 1.5 && rnd() < 0.7 ? jump * (0.25 + rnd() * 0.3) : 0);
+      // A real inverter never holds the grid at exactly 0. In the dark it draws a trickle,
+      // 20 to 90 W, and a big load switching on (kettle) pulls from the grid for a moment
+      // before the inverter catches up. While the sun is up it reads a small export,
+      // 75 to 130 W, as a real plant on its own CT does (538820, 2026-10-19).
+      const dark = solarAt(h) === 0;
+      const jump = k > 0 && dark ? home - homeAt((k - 1) / 12) : 0;
+      const trickle = off ? 0 : !dark ? -(0.075 + rnd() * 0.055)
+        : 0.02 + rnd() * 0.07 + (jump > 1.5 && rnd() < 0.7 ? jump * (0.25 + rnd() * 0.3) : 0);
       let batt = 0, grid = 0, pv = solarAt(h);
       if (spare >= 0) {
         grid = trickle;
@@ -56,7 +60,7 @@ window.DEMO = (() => {
         pv = home - batt - grid;
       } else {
         if (soc > RESERVE || off) batt = Math.min(-spare, Math.max(0, soc) / 100 * CAP * 12);
-        if (!off) { grid = Math.max(-spare - batt, trickle); batt = -spare - grid; }
+        if (!off) { const need = -spare - batt; grid = need > 1e-9 ? Math.max(need, trickle) : trickle; batt = -spare - grid; }
       }
       rows.push({ pv, batt, grid, home, soc, off });
       soc -= batt / 12 / CAP * 100;

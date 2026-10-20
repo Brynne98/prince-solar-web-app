@@ -145,15 +145,18 @@
               <window.DaysBars rows={rows} field="pv" color="#3ddc84" rgb="61,220,132" word="Solar" label="Solar per day for the last 30 days"
                 today={D.today} selected={D.today} earliest={D.days[0].date} onPick={() => {}} />
             </window.Card>
-            <window.Card className="wiw">
-              <window.SectionTitle right={made >= 0.05 ? <>Made <b>{window.fmtKwh(made)}</b></> : null}>WHERE IT WENT · <span style={{ color: 'var(--text)' }}>today</span></window.SectionTitle>
+            {/* the app's Where it went: half-row card with the info dot (tabs.jsx, SOLAR-74) */}
+            <div className="solar-row"><window.Card className="wiw">
+              <window.SectionTitle right={made >= 0.05 ? <>Made <b>{window.fmtKwh(made)}</b></> : null}>WHERE IT WENT · <span style={{ color: 'var(--text)' }}>today</span>
+                <window.InfoDot text={'Solar counts to the house first, then the battery, then the grid.'} />
+              </window.SectionTitle>
               {made < 0.05 ? <div className="solar-note">No solar yet today.</div> : <>
                 <div className="fbox-bar">{dests.map(([l, v, c]) => <i key={l} style={{ flexGrow: v, background: c }} />)}</div>
                 <div className="wiw-figs">
                   {dests.map(([l, v, c]) => { const [n, u] = window.fmtEnergyParts(v); return <div key={l}><b style={{ color: c }}>{n}<span className="u">{u}</span></b><span>{l}</span></div>; })}
                 </div>
               </>}
-            </window.Card>
+            </window.Card></div>
           </div>
         </AppWin>
       </div>
@@ -162,11 +165,10 @@
   ReactDOM.createRoot(document.getElementById('solarDemo')).render(<SolarDemo />);
 
   // ---------- Grid page ----------
-  // Grid shows the whole example day, to 23:30: bought overnight once the battery reached
-  // its reserve, nothing while solar ran the house, nothing again while load-shedding cut the
-  // grid 18:00 to 20:30, then bought again late in the evening.
+  // Grid stops at 15:00 as Solar does: bought overnight once the battery reached its reserve,
+  // then nothing as solar takes over, through load-shedding 10:00 to 12:30.
   function GridDemo() {
-    const hour = 23.5, at = D.at(hour), t = totals(hour);
+    const hour = STOP, at = D.at(hour), t = totals(hour);
     const points = React.useMemo(() => pointsTo(hour), []);
     const w = at.off ? 0 : at.grid * 1000;
     const [nowN, nowU] = window.fmtPowerParts(w > 5 ? w : 0);
@@ -185,10 +187,8 @@
             </div>
             <window.Card>
               <window.SectionTitle>GRID · <span style={{ color: 'var(--text)' }}>today</span></window.SectionTitle>
-              {/* the app's date bar, with the grid-off pill beside the date as the app has it (SOLAR-125) */}
-              <window.DateBar pick={{ date: D.today, todayStr: D.today, isToday: true, canPrev: true, canNext: false, setDate: () => {} }} earliest={D.days[0].date}>
-                <window.OutagePill mins={(cut[1] - cut[0] + 1) * 5} what="Grid" />
-              </window.DateBar>
+              {/* no date bar, as on Solar (SOLAR-142); the grid-off pill shows the load-shedding (SOLAR-125) */}
+              <div className="hv-datebar"><window.OutagePill mins={(cut[1] - cut[0] + 1) * 5} what="Grid" /></div>
               <window.DayLineChart points={points} field="grid" color="#facc15" label="Grid" sums={['Imported', 'Exported']} importScale outages={[cut]} empty="No grid readings for this day." />
             </window.Card>
             <window.Card>
