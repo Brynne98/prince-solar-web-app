@@ -672,6 +672,9 @@
   .solar-row > .wiw { width: 100%; max-width: 560px; box-sizing: border-box; }
   .solar-tab .wiw .section-title { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 5px 12px; margin-bottom: 14px; }
   .wiw-figs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 16px; margin-top: 18px; }
+  /* aligned as the Power Flow solar box's split: first left, last right, middle centred */
+  .wiw-figs > :not(:first-child):not(:last-child) { text-align: center; }
+  .wiw-figs > :last-child:not(:first-child) { text-align: right; }
   .wiw-figs b { display: block; font: 700 28px var(--mono); line-height: 1; letter-spacing: -0.01em; white-space: nowrap; }
   .wiw-figs b .u { font-size: 15px; margin-left: 4px; opacity: 0.85; }
   .wiw-figs span:not(.u) { display: block; margin-top: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }

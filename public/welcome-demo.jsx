@@ -151,7 +151,7 @@
                 <window.InfoDot text={'Solar counts to the house first, then the battery, then the grid.'} />
               </window.SectionTitle>
               {made < 0.05 ? <div className="solar-note">No solar yet today.</div> : <>
-                <div className="fbox-bar">{dests.map(([l, v, c]) => <i key={l} style={{ flexGrow: v, background: c }} />)}</div>
+                <div className="fbox-bar">{dests.map(([l, v, c]) => <i key={l} style={{ flexGrow: v / made * 100, background: c }} />)}</div>
                 <div className="wiw-figs">
                   {dests.map(([l, v, c]) => { const [n, u] = window.fmtEnergyParts(v); return <div key={l}><b style={{ color: c }}>{n}<span className="u">{u}</span></b><span>{l}</span></div>; })}
                 </div>
