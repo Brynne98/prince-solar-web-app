@@ -122,7 +122,7 @@ function text(b: Body): string {
 
 const make = (subject: string, b: Body): Email => ({ subject, html: html(subject, b), text: text(b) });
 
-const COMPANY = "Theron and Prince Solutions (Pty) Ltd, South Africa";
+const COMPANY = "Prince Solar, South Africa";
 
 // ---------------------------------------------------------------- account mail
 
