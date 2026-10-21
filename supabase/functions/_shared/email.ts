@@ -122,7 +122,6 @@ function text(b: Body): string {
 
 const make = (subject: string, b: Body): Email => ({ subject, html: html(subject, b), text: text(b) });
 
-const COMPANY = "Prince Solar, South Africa";
 
 // ---------------------------------------------------------------- account mail
 
@@ -130,7 +129,7 @@ function account(subject: string, title: string, lead: string, label: string, ur
   return make(subject, {
     title,
     parts: [{ p: lead }, { button: { label, href: url } }, { link: url }],
-    footer: [ignore, COMPANY],
+    footer: [ignore],
   });
 }
 
@@ -162,7 +161,7 @@ export const passwordChanged = (email: string, w: Where) =>
   make("Your password was changed", {
     title: "Your password was changed",
     parts: [{ p: `The password for <b>${esc(email)}</b> was changed on ${when(w)}.` }, ...notYou],
-    footer: [COMPANY],
+    footer: [],
   });
 
 export const emailChanged = (oldEmail: string, newEmail: string, w: Where) =>
@@ -170,7 +169,7 @@ export const emailChanged = (oldEmail: string, newEmail: string, w: Where) =>
     title: "Your email was changed",
     parts: [{ p: `Prince Solar Hub now uses <b>${esc(newEmail)}</b> instead of ${esc(oldEmail)}. Changed on ${when(w)}.` },
       { p: "This is the last email to this address." }, ...notYou],
-    footer: [`Questions? Write to <a href="mailto:hello@princesolarhub.com">hello@princesolarhub.com</a>.`, COMPANY],
+    footer: [`Questions? Write to <a href="mailto:hello@princesolarhub.com">hello@princesolarhub.com</a>.`],
   });
 
 export const accountDeleted = (email: string) =>
@@ -179,7 +178,7 @@ export const accountDeleted = (email: string) =>
     parts: [{ p: `The Prince Solar Hub account for <b>${esc(email)}</b> is deleted, with its settings and SunSynk logins. Plant readings go too, unless someone else shares the plant.` },
       { p: "Your SunSynk account and your inverter are not affected." },
       { note: "You can sign up again any time. Only the last 60 days of history come back from SunSynk." }],
-    footer: [COMPANY],
+    footer: [],
   });
 
 // Supabase Auth fills these placeholders itself; they must reach it unescaped.
@@ -197,7 +196,7 @@ export function renderAuthTemplates(): Record<string, Email> {
 
 const NOTICE_FOOTER = (plant: string, what: string, unsubscribeUrl?: string) => [
   `${what} for ${esc(plant)}. Change which emails you get in <a href="${PREFS}">Account</a>.`,
-  unsubscribeUrl ? `<a href="${unsubscribeUrl}">Unsubscribe</a> · ${COMPANY}` : COMPANY,
+  ...(unsubscribeUrl ? [`<a href="${unsubscribeUrl}">Unsubscribe</a>`] : []),
 ];
 
 // Sent once the email is confirmed, before any inverter is connected. The Connect
@@ -217,7 +216,7 @@ export const welcome = () =>
       { button: { label: "Connect your inverter", href: SITE } },
       { note: "We never keep your SunSynk password. It's swapped for a key, then dropped." },
     ],
-    footer: ["Questions? Reply to this email.", COMPANY],
+    footer: ["Questions? Reply to this email."],
   });
 
 export type History = {
@@ -329,7 +328,7 @@ export function report(r: Report): Email {
     parts,
     footer: [
       `${EVERY[r.period]} report for ${esc(r.plant)}. Change how often, or switch it off, in <a href="${PREFS}">Account</a>.`,
-      `<a href="${r.unsubscribeUrl}">Unsubscribe</a> · ${COMPANY}`,
+      `<a href="${r.unsubscribeUrl}">Unsubscribe</a>`,
     ],
   });
 }
@@ -395,7 +394,7 @@ export function plantEvent(plant: string, e: PlantEvent, unsubscribeUrl: string)
     parts: [{ p: lead }, { button: relink ? { label: "Reconnect", href: PREFS } : { label: "Open Prince Solar Hub", href: SITE } }],
     footer: [
       `Plant event for ${P}. Switch these off in <a href="${PREFS}">Account</a>.`,
-      `<a href="${unsubscribeUrl}">Unsubscribe</a> · ${COMPANY}`,
+      `<a href="${unsubscribeUrl}">Unsubscribe</a>`,
     ],
   });
 }
