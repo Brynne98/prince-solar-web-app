@@ -265,11 +265,17 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
 }
 
 // Says on the page when its numbers are old, and why. Grid off is news, not a fault: calm purple.
-function PageNotice({ snap, cutOff, onReconnect }) {
+function PageNotice({ snap, cutOff, onReconnect, relinkedAt }) {
   const now = useNow(15000);
   const s = plantStatus(snap, now);
   const at = readAgo(s.last.getTime(), now); // with the date once it is over a day old
   const a = snap.aggregate || {};
+  // a reading normally lands within a minute; after 15 the plain offline banner is back
+  if (s.status === 'offline' && relinkedAt && now - relinkedAt < 900000) return (
+    <div className="notice stale" role="status">
+      <p><b>Reconnected.</b> Waiting for the first reading.</p>
+    </div>
+  );
   if (s.status === 'offline' && cutOff) return (
     <div className="notice offline" role="alert">
       <p><b>SunSynk login stopped working.</b> Readings paused at {at}.</p>
@@ -620,6 +626,18 @@ function App({ links }) {
     };
   }, [auto, plantId]);
 
+  const plantLogins = links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(plantId)));
+  const plantCutOff = plantLogins.length > 0 && !plantLogins.some(a => a.status === 'active') && !!snap && plantStatus(snap, Date.now()).status === 'offline';
+  // The login came back but no new reading has landed yet: until one does, the banner says
+  // so instead of "No readings since …", which read as a failed reconnect (SOLAR-147).
+  const [relinked, setRelinked] = useState(null);
+  const wasCutOff = useRef(null);
+  useEffect(() => {
+    const was = wasCutOff.current;
+    if (was && was.plantId === plantId && was.cut && !plantCutOff && plantLogins.some(a => a.status === 'active')) setRelinked({ plantId, at: Date.now() });
+    wasCutOff.current = { plantId, cut: plantCutOff };
+  }, [plantCutOff, plantId]);
+
   const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(true); setRefreshKey(k => k + 1); };
 
   const go = (id) => { setTab(id); toTop(); };
@@ -649,9 +667,6 @@ function App({ links }) {
     );
   }
 
-  const plantLogins = links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(plantId)));
-  const plantCutOff = plantLogins.length > 0 && !plantLogins.some(a => a.status === 'active') && !!snap && plantStatus(snap, Date.now()).status === 'offline';
-
   const dataPage = tab !== 'settings' && tab !== 'account';
   const old = dataPage && plantStatus(snap, Date.now()).old;
   return (
@@ -662,7 +677,8 @@ function App({ links }) {
       {err && <div className="notice stale" role="status" title={String(err)}><p><b>Couldn't refresh.</b> Showing the last good reading.</p></div>}
       {/* For the plant on screen. A plant still read through someone else's copy of the
           login stays quiet; a dead login still marks the avatar and Account with a dot. */}
-      {dataPage && <PageNotice snap={snap} cutOff={plantCutOff} onReconnect={() => openSettings('connection')} />}
+      {dataPage && <PageNotice snap={snap} cutOff={plantCutOff} onReconnect={() => openSettings('connection')}
+        relinkedAt={relinked?.plantId === plantId ? relinked.at : null} />}
       <div className={'page' + (old ? ' old' : '')}>
         {tab === 'live' && <window.LiveTab snap={snap} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
           onOpenSettings={openSettings} />}
