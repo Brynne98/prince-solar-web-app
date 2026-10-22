@@ -233,8 +233,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   }, []);
 
   // ---- period-over-period trend arrows on the Overview cards ----
-  const [cmp, setCmp] = React.useState(null);
-  React.useEffect(() => { window.fetchCompare(refreshKey).then(setCmp).catch(() => {}); }, [refreshKey]);
+  const cmp = useCompare(refreshKey, snap);
 
   // ---- period overview: Today / Week / Month / Year / Lifetime ----
   const [period, setPeriod] = React.useState('today');
@@ -875,6 +874,15 @@ function withLiveToday(daily, today, field, live) {
   return (daily || []).filter(r => r.date).map(r => (r.date === today && live != null ? { ...r, [field]: live } : r));
 }
 
+// Period-over-period totals for the trend arrows. "Yesterday up to now" moves with the
+// clock, so it is asked again with each new snapshot, not only on refreshKey; the shared
+// 5-minute cache keeps that to one request per 5 minutes (SOLAR-148).
+function useCompare(refreshKey, snap) {
+  const [cmp, setCmp] = React.useState(null);
+  React.useEffect(() => { window.fetchCompare(refreshKey).then(setCmp).catch(() => {}); }, [refreshKey, snap]);
+  return cmp;
+}
+
 // The last 30 days of plant totals, for a tab's bars: null loading, false failed.
 function useDaily(refreshKey) {
   const [daily, setDaily] = React.useState(null);
@@ -949,9 +957,8 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   React.useEffect(() => { ['week', 'month', 'year', 'lifetime'].forEach(p => { if (!energy[p]) onNeedEnergy(p); }); }, [energy]);
 
   // ---- totals ----
-  const [cmp, setCmp] = React.useState(null);
+  const cmp = useCompare(refreshKey, snap);
   const [earliest, setEarliest] = React.useState(null);
-  React.useEffect(() => { window.fetchCompare(refreshKey).then(setCmp).catch(() => {}); }, [refreshKey]);
   React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
   const tot = periodTotals('pv', a.pvToday, energy, plantToday);
   const EP = window.fmtEnergyParts;
@@ -1138,9 +1145,8 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const plantToday = plantDateStr(tz);
   const sells = (cfg.tariffExport ?? 0) > 0; // same rule as the Overview tile: only plants paid for export
   React.useEffect(() => { ['week', 'month', 'year', 'lifetime'].forEach(p => { if (!energy[p]) onNeedEnergy(p); }); }, [energy]);
-  const [cmp, setCmp] = React.useState(null);
+  const cmp = useCompare(refreshKey, snap);
   const [earliest, setEarliest] = React.useState(null);
-  React.useEffect(() => { window.fetchCompare(refreshKey).then(setCmp).catch(() => {}); }, [refreshKey]);
   React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
 
   // ---- totals: what was bought ----
