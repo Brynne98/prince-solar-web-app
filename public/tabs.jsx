@@ -1093,6 +1093,161 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   );
 }
 
+// ---------------------------------------------------------------- HOME
+// Built like Solar, for what the house used (SOLAR-151): now, today, week, month, year,
+// lifetime, the day's home power, the last 30 days, and where the day's use came from.
+
+function HomeSkeleton() {
+  return (
+    <div className="stack solar-tab">
+      <div className="solar-stats">
+        {['HOME NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'].map(l => <StatTile key={l} label={l} loading sub={NBSP} />)}
+      </div>
+      <Card>
+        <SectionTitle>{titled('HOME', 'today')}</SectionTitle>
+        <DayChartSkeleton />
+      </Card>
+      <Card>
+        <SectionTitle>{titled('HOME', 'last 30 days')}</SectionTitle>
+        <window.Skeleton className="bars-skel" h="auto" r={10} />
+      </Card>
+      <div className="solar-row">
+        <window.Skeleton className="wiw" h={150} r={16} />
+      </div>
+    </div>
+  );
+}
+
+// Where a day's home use came from, from its 5-minute points: solar first, then the
+// battery, and the grid for the rest. Day series: battery + = discharging.
+function homeSplit(points) {
+  let solar = 0, batt = 0, grid = 0;
+  const kwh = 5 / 60 / 1000;
+  points.forEach(p => {
+    if (p.load == null || p.load <= 0) return;
+    const fromSolar = Math.min(p.load, Math.max(0, p.pv || 0));
+    const fromBatt = Math.min(p.load - fromSolar, p.batt != null && p.batt > 0 ? p.batt : 0);
+    solar += fromSolar * kwh; batt += fromBatt * kwh; grid += (p.load - fromSolar - fromBatt) * kwh;
+  });
+  return { solar, batt, grid };
+}
+
+function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
+  const a = snap.aggregate;
+  const cfg = snap.config || {};
+  const feat = snap.features || {};
+  const plantToday = plantDateStr(cfg.timezone);
+  const hasGrid = feat.hasGrid !== false;
+  const hasBatt = feat.hasBattery !== false;
+  React.useEffect(() => { ['week', 'month', 'year', 'lifetime'].forEach(p => { if (!energy[p]) onNeedEnergy(p); }); }, [energy]);
+
+  // ---- totals ----
+  const cmp = useCompare(refreshKey, snap);
+  const [earliest, setEarliest] = React.useState(null);
+  React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
+  const tot = periodTotals('load', a.loadToday, energy, plantToday);
+  const EP = window.fmtEnergyParts;
+  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.load} loading={v == null} sub={sub || NBSP} />; };
+  // less used is better, as on Grid
+  const trend = (k, min, word) => periodTrend(cmp, k, 'load', min, word, true);
+  const [nowN, nowU] = fmtPowerParts(a.loadNow);
+  const ps = window.plantStatus(snap, Date.now());
+  const silent = ps.status === 'offline';
+  const solarNow = a.loadNow > 50 ? Math.round(Math.min(a.loadNow, Math.max(0, a.pvNow || 0)) / a.loadNow * 100) : null;
+  const peakOf = (pts) => {
+    let pk = null;
+    (pts || []).forEach(p => { if (p.load != null && (!pk || p.load > pk.load)) pk = p; });
+    return pk && pk.load > 20 ? pk : null;
+  };
+  const todayPeak = peakOf(today && !today.approx ? today.points : null);
+
+  // ---- the day on the chart ----
+  const [daily, loadDaily] = useDaily(refreshKey);
+  const pick = useDayPicker(earliest, plantToday);
+  const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
+  const noReadings = dayProblem(view, day, points, silent);
+  const peak = peakOf(points);
+
+  // ---- where it came from: shares from the readings, scaled to the day's counter as Solar does ----
+  const est = React.useMemo(() => homeSplit(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
+  const estTotal = est.solar + est.batt + est.grid;
+  const dayRow = !view.isToday && (daily || []).find(r => r.date === pick.date);
+  const usedKwh = view.isToday ? a.loadToday : (dayRow && dayRow.load != null ? dayRow.load : day && day.totals && day.totals.load);
+  const k = usedKwh > 0 && estTotal > 0 ? usedKwh / estTotal : 1;
+  const tenths = (v) => Math.round(v * 10) / 10;
+  const split = { solar: tenths(est.solar * k), batt: tenths(est.batt * k), grid: tenths(est.grid * k) };
+  const big = ['solar', 'batt', 'grid'].reduce((m, x) => (split[x] > split[m] ? x : m), 'solar');
+  split[big] = tenths(split[big] + tenths(estTotal * k) - (split.solar + split.batt + split.grid));
+  const splitTotal = split.solar + split.batt + split.grid;
+  const srcs = [['Solar', split.solar, CC.pv, true], ['Battery', split.batt, CC.batt, hasBatt], ['Grid', split.grid, CC.grid, hasGrid]]
+    .filter(d => d[3] && d[1] >= 0.05);
+  const srcPct = (v) => v / splitTotal * 100;
+  const srcTitle = srcs.map(d => d[0] + ' ' + Math.round(srcPct(d[1])) + '%').join(', ');
+  const srcLabel = srcs.map(d => d[0] + ' ' + fmtKwh(d[1]) + ', ' + Math.round(srcPct(d[1])) + '%').join('; ');
+
+  // ---- last 30 days ----
+  const bars = withLiveToday(daily, plantToday, 'load', a.loadToday);
+  const most = bestDay(bars, 'load', plantToday);
+  const openDay = (d) => { pick.setDate(d); scrollToDay('home-day'); };
+
+  return (
+    <div className="stack solar-tab">
+      <div className="solar-stats">
+        <StatTile label="HOME NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.load}
+          sub={silent ? 'Last reading ' + readAgo(ps.last.getTime(), Date.now()) : solarNow != null ? <><b>{solarNow}%</b> from solar right now</> : NBSP} />
+        {tile('TODAY', a.loadToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.load)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
+        {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
+        {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
+        {tile('THIS YEAR', tot.year)}
+        {tile('LIFETIME', tot.lifetime, lifetimeSince(energy.lifetime, earliest, plantToday))}
+      </div>
+
+      <Card id="home-day">
+        <SectionTitle right={day && !noReadings && !view.isToday && peak ? <>Peak <b>{fmtPower(peak.load)}</b> at <b>{HM(peak.t)}</b></> : null}>
+          {titled('HOME', dayWord)}
+        </SectionTitle>
+        <DateBar pick={pick} earliest={earliest} />
+        {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
+          : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="load" color={CC.load} label="Home" sums={['Used']} empty={noReadings || 'No home readings for this day.'} /></div>}
+      </Card>
+
+      <Card>
+        <SectionTitle right={most && most.load > 0 ? <>Most <b>{fmtKwh(most.load)}</b> on {shortDate(most.date)}</> : null}>
+          {titled('HOME', 'last 30 days')}
+        </SectionTitle>
+        {daily === false
+          ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
+          : !daily ? <window.Skeleton className="bars-skel" h="auto" r={10} />
+          : bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
+          : <DaysBars rows={bars} field="load" color={CC.load} rgb="248,113,113" word="Used" label="Home use per day for the last 30 days"
+              today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
+      </Card>
+
+      <div className="solar-row">
+        <Card className="wiw" {...dim}>
+          <SectionTitle right={day && !noReadings && splitTotal >= 0.05 ? <>Used <b>{fmtKwh(splitTotal)}</b></> : null}>
+            {titled('WHERE IT CAME FROM', dayWord)}
+            <window.InfoDot text={'The house uses solar first, then the battery, then the grid.'} />
+          </SectionTitle>
+          {!day ? <window.Skeleton h={62} r={8} />
+            : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || 'No home readings for this day.'}</div>
+            : <>
+              <div className="fbox-bar" role="img" title={srcTitle} aria-label={srcLabel}>
+                {srcs.map(([l, v, c]) => <i key={l} style={{ flexGrow: srcPct(v), background: c }} />)}
+              </div>
+              <div className="wiw-figs" aria-hidden="true">
+                {srcs.map(([l, v, c]) => {
+                  const [n, u] = EP(v);
+                  return <div key={l}><b style={{ color: c }}>{n}<span className="u">{u}</span></b><span>{l}</span></div>;
+                })}
+              </div>
+            </>}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- GRID
 // Built like Solar: what was bought (now, today, week, month, year, lifetime), the day's grid
 // power both ways, and the last 30 days. The supply's voltage and frequency moved to
@@ -1631,6 +1786,7 @@ function InvertersTab({ snap, refreshKey }) {
 // on one — App draws those for real — so they have no skeleton here.
 function TabSkeleton({ tab }) {
   return tab === 'solar' ? <SolarSkeleton />
+    : tab === 'home' ? <HomeSkeleton />
     : tab === 'grid' ? <GridSkeleton />
     : tab === 'inverters' ? <InvertersSkeleton />
     : <LiveSkeleton />;
@@ -2108,4 +2264,4 @@ function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
   );
 }
 
-Object.assign(window, { LiveTab, SolarTab, GridTab, InvertersTab, SettingsTab, AccountTab, MiniStat, FsEnterIcon, TabSkeleton });
+Object.assign(window, { LiveTab, SolarTab, HomeTab, GridTab, InvertersTab, SettingsTab, AccountTab, MiniStat, FsEnterIcon, TabSkeleton });
