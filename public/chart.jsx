@@ -82,8 +82,19 @@ const DAY_FLOOR_DAYS = 60; // what SunSynk's per-inverter history keeps
 /** Selected day + the arrows' bounds. `earliest` may be null (no lower bound). `today` is the
  *  plant's own date when the caller knows it; otherwise the device's. */
 function useDayPicker(earliest, today) {
+  // back on screen, look at the clock again: the day may have turned while it was away
+  const [, bump] = React.useReducer(n => n + 1, 0);
+  React.useEffect(() => {
+    const back = () => { if (document.visibilityState === 'visible') bump(); };
+    document.addEventListener('visibilitychange', back);
+    return () => document.removeEventListener('visibilitychange', back);
+  }, []);
   const todayStr = today || localDateStr();
   const [date, setDate] = React.useState(todayStr);
+  // The day turned while today was on screen: follow it to the new today. A day picked by
+  // hand stays picked (SOLAR-150).
+  const [was, setWas] = React.useState(todayStr);
+  if (was !== todayStr) { setWas(todayStr); if (date === was) setDate(todayStr); }
   return {
     date, setDate, todayStr, isToday: date === todayStr,
     canPrev: !earliest || date > earliest, canNext: date < todayStr,
