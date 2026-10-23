@@ -631,10 +631,9 @@ function App({ links }) {
   }, [auto, plantId]);
 
   const plantLogins = links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(plantId)));
-  // The logins are read once at open, so one that dies later never showed as cut off and
-  // Reconnect never read as a reconnect. A silent plant reads them again with each answer (SOLAR-149).
+  // useLinkStatus reads the logins again each minute (SOLAR-153), so one that dies later
+  // shows as cut off and Reconnect reads as a reconnect.
   const silent = !!snap && plantStatus(snap, Date.now()).status === 'offline';
-  useEffect(() => { if (silent) links.refresh(); }, [snap]);
   const plantCutOff = plantLogins.length > 0 && !plantLogins.some(a => a.status === 'active') && silent;
   // The login came back but no new reading has landed yet: until one does, the banner says
   // so instead of "No readings since …", which read as a failed reconnect (SOLAR-147).

@@ -47,6 +47,15 @@ window.useLinkStatus = function useLinkStatus() {
     return settle(read);
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
+  // Read again each minute while on screen, and on coming back, so the Logins row, the red
+  // dot and the cut-off banner follow a login that dies, recovers or is reconnected
+  // elsewhere without a reload (SOLAR-153). A hidden page asks nothing (SOLAR-140).
+  useEffect(() => {
+    const tick = () => { if (!document.hidden) refresh(); };
+    const t = setInterval(tick, 60000);
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick); };
+  }, [refresh]);
   return { ...state, refresh };
 };
 
