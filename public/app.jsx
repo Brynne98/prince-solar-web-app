@@ -539,7 +539,18 @@ function App({ links }) {
       const m = await window.fetchMe();
       setMe(m);
       const ids = (m.plants || []).map(p => p.id);
-      const wanted = m.prefs && ids.includes(Number(m.prefs.lastPlant)) ? Number(m.prefs.lastPlant) : (ids[0] ?? null);
+      // An email link names its plant (?plant=); one that isn't the user's falls back quietly.
+      // Its Reconnect button adds section=logins: open Account on the logins, as the in-app Reconnect does.
+      const url = new URL(location.href);
+      const linked = Number(url.searchParams.get('plant'));
+      const logins = url.searchParams.get('section') === 'logins';
+      if (url.searchParams.has('plant') || url.searchParams.has('section')) {
+        url.searchParams.delete('plant'); url.searchParams.delete('section'); history.replaceState(history.state, '', url);
+      }
+      if (logins) openSettings('connection');
+      if (ids.includes(linked)) window.savePrefs({ lastPlant: linked }).catch(() => {});
+      const wanted = ids.includes(linked) ? linked
+        : m.prefs && ids.includes(Number(m.prefs.lastPlant)) ? Number(m.prefs.lastPlant) : (ids[0] ?? null);
       const cfg = (m.plants || []).find(p => p.id === wanted)?.config;
       window.setCurrentPlant(wanted, cfg?.currency);
       setPlantId(wanted);
