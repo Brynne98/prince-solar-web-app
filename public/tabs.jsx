@@ -2227,7 +2227,8 @@ function PasswordSection({ email }) {
     // Matches the minimum set in Supabase (Auth → Email) and supabase/config.toml.
     if (!pw) out['pw-new'] = 'Choose a password';
     else if (pw.length < 8) out['pw-new'] = 'Use at least 8 characters';
-    else if (pw === cur) out['pw-new'] = 'That’s your current password';
+    // No "same as current" check here: matching boxes don't mean the current one is
+    // right. Supabase answers in order: wrong current password, then same_password.
     if (!pw2) out['pw-confirm'] = 'Confirm your password';
     else if (pw !== pw2) out['pw-confirm'] = 'Passwords don’t match';
     return out;
