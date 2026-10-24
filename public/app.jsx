@@ -896,9 +896,14 @@ function App({ links }) {
   }, [snap]);
   // A config save can change which plant is shown (a removed login); the data follows it.
   // A reconnected login also clears the banner, so the gate's list is read again.
-  const reloadPlantConfig = () => {
+  // linked: link-sunsynk's answer when a login was just added. A plant it brings that the
+  // account didn't have yet is opened on Live, where Setting up and First steps are (SOLAR-174).
+  const reloadPlantConfig = (linked) => {
     links.refresh();
+    const had = new Set((me?.plants || []).map(p => p.id));
+    const added = (linked?.plants || []).map(p => Number(p.id)).find(id => !had.has(id));
     return loadMe().then(() => {
+      if (added) { switchPlant(added); go('live'); return; }
       // a saved setting can change the shared trend and 30-day answers too, so they are asked again
       setRefreshKey(k => k + 1);
       loadLive();

@@ -1866,9 +1866,9 @@ function SunSynkConnectionSection({ onChanged, links }) {
     return Math.round(h / 24) + ' days ago';
   };
   // Waits for the fresh list, so the form's "Connecting…" holds until the login is listed.
-  const changed = async () => {
+  const changed = async (linked) => {
     const readError = await refresh();
-    setMode(null); onChanged && onChanged();
+    setMode(null); onChanged && onChanged(linked);
     if (readError) setErr('Connected. Reload the page to see it here.');
   };
   // Removing asks once, inline under the row, in the app's own language rather than a
