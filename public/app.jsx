@@ -82,6 +82,7 @@ const NAV_ICONS = {
   signout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  back: '<path d="m15 6-6 6 6 6"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
   plug: '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0V8zM12 18v4"/>',
 };
@@ -325,10 +326,10 @@ function PageNotice({ snap, cutOff, onReconnect, relinkedAt }) {
 // it counts once confirmed here or changed. Hidden and confirmed are the user's, kept in
 // prefs per plant, so they follow the user to every device; no step means no card.
 const STEPS = {
-  rate: { title: 'Electricity rate', why: 'Shows what solar saved.', go: 'Set rate', how: 'The price per unit on your bill.' },
+  rate: { title: 'Electricity rate', why: 'Shows what solar saved.', go: 'Set rate', how: 'The price per unit on your bill, with VAT.' },
   size: { title: 'Battery size', why: 'Shows how long the battery lasts.', go: 'Set size', how: 'Every battery added together.' },
-  reserve: { title: 'Battery reserve', why: 'Discharging stops at this level.', go: 'Check reserve', how: 'Match the level set on your inverter.' },
-  panels: { title: 'Solar panels', why: 'Shows how hard your panels work.', go: 'Add panels', how: 'Count the panels and read the watts off one label.' },
+  reserve: { title: 'Battery reserve', why: 'Discharging stops at this level.', go: 'Check reserve', how: 'The level your inverter stops at. Match the number set on it.' },
+  panels: { title: 'Solar panels', why: 'Shows how hard your panels work.', go: 'Add panels', how: 'Every panel added together.' },
 };
 function firstSteps(me, plantId) {
   const plant = (me?.plants || []).find(p => p.id === plantId);
@@ -351,60 +352,85 @@ const saveFirstSteps = (me, plantId, patch) => window.savePrefs({
 });
 window.saveFirstSteps = saveFirstSteps;
 
-// One step's boxes. Save stays off until the value is one the database takes.
+// Battery size and panels share one box: a total, or count × size rows that add up. The
+// value being set sits on the switch's line in its own place, so nothing moves as it changes.
+// Panels' rows are saved as panel_groups, as Settings saves them; the battery keeps only kWh.
+const STEP_SUMS = {
+  size: { unit: 'kWh', each: 'kWh', per: 1, ph: '5.12', totPh: '26.5', add: '+ Another battery size', sizeLabel: 'kWh each', ok: (e) => e > 0 },
+  panels: { unit: 'kW', each: 'W', per: 1000, ph: '450', totPh: '9', add: '+ Another panel size', sizeLabel: 'Watts each', ok: (e) => Number.isInteger(e) && e >= 50 && e <= 1000 },
+};
+// typed as text, so a comma keyboard's 5,12 reads as 5.12
+const stepNum = (v) => (v ?? '') === '' ? NaN : Number(String(v).replace(',', '.'));
+const stepFix = (x) => String(+x.toFixed(2));
+
+// One step's boxes. Save stays off until the value is one the database takes. A step opened
+// again (Back, or a step bar) starts from what is saved.
 function StepForm({ id, cfg, busy, onSave, onSkip }) {
-  const first = id === 'reserve' ? String(cfg.battery_reserve_pct ?? 20) : '';
-  const [v, setV] = useState(first);
-  const [rows, setRows] = useState([{ count: '', watts: '' }]);
+  const sum = STEP_SUMS[id];
+  const groups = Array.isArray(cfg.panel_groups) && cfg.panel_groups.length ? cfg.panel_groups : null;
+  const [v, setV] = useState(() => id === 'rate' ? (cfg.tariff_import > 0 ? String(cfg.tariff_import) : '')
+    : id === 'reserve' ? String(cfg.battery_reserve_pct ?? 20)
+    : id === 'size' ? (cfg.battery_kwh > 0 ? String(cfg.battery_kwh) : '')
+    : !groups && cfg.system_kwp > 0 ? String(cfg.system_kwp) : '');
+  const [mode, setMode] = useState(id === 'panels' && groups ? 'rows' : 'total');
+  const [rows, setRows] = useState(() => groups ? groups.map(g => ({ c: String(g.count), e: String(g.watts) })) : [{ c: '1', e: '' }]);
   const box = useRef(null);
-  useEffect(() => { box.current?.querySelector('input')?.focus(); }, []);
-  const whole = (x, lo, hi) => x !== '' && Number.isInteger(Number(x)) && Number(x) >= lo && Number(x) <= hi;
-  const filled = rows.filter(r => r.count !== '' || r.watts !== '');
-  const watts = filled.reduce((s, r) => s + Number(r.count) * Number(r.watts), 0);
-  const ok = id === 'panels' ? filled.length > 0 && filled.every(r => whole(r.count, 1, 2000) && whole(r.watts, 50, 1000))
-    : id === 'reserve' ? whole(v, 5, 50) : v !== '' && Number(v) > 0;
+  useEffect(() => { box.current?.querySelector('input')?.focus(); }, [mode]);
+  const whole = (x, lo, hi) => Number.isInteger(stepNum(x)) && stepNum(x) >= lo && stepNum(x) <= hi;
+  // a row counts once its size is typed; a fresh "1 ×" row on its own changes nothing
+  const filled = rows.filter(r => r.e !== '');
+  const rowsOk = filled.length > 0 && filled.every(r => whole(r.c, 1, 2000) && sum && sum.ok(stepNum(r.e)));
+  const total = !sum ? NaN : mode === 'total' ? (stepNum(v) > 0 ? stepNum(v) : NaN)
+    : rowsOk ? filled.reduce((t, r) => t + stepNum(r.c) * stepNum(r.e) / sum.per, 0) : NaN;
+  const ok = id === 'rate' ? stepNum(v) > 0 : id === 'reserve' ? whole(v, 5, 50) : total > 0;
   const save = (e) => {
     e.preventDefault();
     if (!ok) return;
-    const n = Number(v);
-    onSave(id === 'rate' ? { tariff_import: n } : id === 'size' ? { battery_kwh: n } : id === 'reserve' ? { battery_reserve_pct: n }
-      : { system_kwp: watts / 1000, panel_groups: filled.map(r => ({ count: Number(r.count), watts: Number(r.watts) })) });
+    // the way on screen is the one saved; the other is only kept to switch back to
+    onSave(id === 'rate' ? { tariff_import: stepNum(v) } : id === 'reserve' ? { battery_reserve_pct: stepNum(v) }
+      : id === 'size' ? { battery_kwh: +total.toFixed(3) }
+      : mode === 'total' ? { system_kwp: stepNum(v), panel_groups: null }
+      : { system_kwp: total, panel_groups: filled.map(r => ({ count: stepNum(r.c), watts: stepNum(r.e) })) });
   };
   const setRow = (i, k, x) => setRows(rs => rs.map((r, j) => j === i ? { ...r, [k]: x } : r));
   const sym = window.moneySymbol ? window.moneySymbol() : 'R';
-  const unit = { rate: sym + '/unit', size: 'kWh', reserve: '%' }[id];
+  const field = (value, onChange, label, pre, unit, mode2, ph) => (
+    <div className="fs-in">
+      {pre && <span className="fs-unit">{pre}</span>}
+      <input type="text" inputMode={mode2} autoComplete="off" aria-label={label} placeholder={ph} value={value} onChange={e => onChange(e.target.value)} />
+      {unit && <span className="fs-unit">{unit}</span>}
+    </div>
+  );
   return (
     <form className="fs-form" onSubmit={save} ref={box}>
-      {id === 'panels' ? (
+      {id === 'rate' && field(v, setV, STEPS.rate.title, sym, '/unit', 'decimal', '3.40')}
+      {id === 'reserve' && field(v, setV, STEPS.reserve.title, null, '%', 'numeric', '20')}
+      {sum && (
         <>
-          <div className="panel-list">
-            {rows.map((r, i) => (
-              <div key={i} className="panel-row">
-                <div className="unit-input panel-count">
-                  <input className="input mono" type="number" inputMode="numeric" min="1" max="2000" step="1" placeholder="20" aria-label={'Panels, row ' + (i + 1)}
-                         value={r.count} onChange={e => setRow(i, 'count', e.target.value)} />
-                </div>
-                <span className="panel-of" aria-hidden="true">panels of</span>
-                <div className="unit-input panel-watts">
-                  <input className="input mono" type="number" inputMode="numeric" min="50" max="1000" step="1" placeholder="450" aria-label={'Watts per panel, row ' + (i + 1)}
-                         value={r.watts} onChange={e => setRow(i, 'watts', e.target.value)} />
-                  <span className="unit" aria-hidden="true">W</span>
-                </div>
-                <button type="button" className="panel-del" aria-label={'Remove row ' + (i + 1)} title="Remove"
-                        style={rows.length === 1 ? { visibility: 'hidden' } : undefined}
-                        onClick={() => setRows(rs => rs.filter((_, j) => j !== i))}><TrashIcon /></button>
-              </div>
-            ))}
+          <div className="fs-sumhead">
+            <div className="fs-seg" role="group" aria-label="How to enter it">
+              <button type="button" className={mode === 'total' ? 'on' : ''} aria-pressed={mode === 'total'} onClick={() => setMode('total')}>Total</button>
+              <button type="button" className={mode === 'rows' ? 'on' : ''} aria-pressed={mode === 'rows'} onClick={() => setMode('rows')}>By size</button>
+            </div>
+            <b className={'fs-val mono' + (total > 0 ? ' ' + id : '')} aria-live="polite">{total > 0 ? stepFix(total) : '—'}<small>{sum.unit}</small></b>
           </div>
-          <button type="button" className="panel-add" onClick={() => setRows(rs => [...rs, { count: '', watts: '' }])}>Add another panel size</button>
+          {mode === 'total' ? field(v, setV, STEPS[id].title + ' in total', null, sum.unit, 'decimal', sum.totPh) : (
+            <div className="fs-rows">
+              {rows.map((r, i) => (
+                <div key={i} className="fs-row">
+                  <input className="fs-cnt mono" type="text" inputMode="numeric" autoComplete="off" aria-label={'How many, size ' + (i + 1)}
+                         value={r.c} onChange={e => setRow(i, 'c', e.target.value)} />
+                  <span className="fs-times" aria-hidden="true">×</span>
+                  {field(r.e, x => setRow(i, 'e', x), sum.sizeLabel + ', size ' + (i + 1), null, sum.each, id === 'panels' ? 'numeric' : 'decimal', sum.ph)}
+                  <button type="button" className="fs-rm" aria-label={'Remove size ' + (i + 1)} title="Remove"
+                          style={rows.length === 1 ? { visibility: 'hidden' } : undefined}
+                          onClick={() => setRows(rs => rs.filter((_, j) => j !== i))}><TrashIcon /></button>
+                </div>
+              ))}
+              <button type="button" className="fs-add" onClick={() => setRows(rs => [...rs, { c: '1', e: '' }])}>{sum.add}</button>
+            </div>
+          )}
         </>
-      ) : (
-        <div className={'unit-input' + (id === 'rate' ? ' wide' : '')}>
-          <input className="input mono" type="number" inputMode={id === 'reserve' ? 'numeric' : 'decimal'} aria-label={STEPS[id].title}
-                 step={id === 'rate' ? '0.01' : id === 'size' ? '0.1' : '1'} min={id === 'reserve' ? '5' : '0'} max={id === 'reserve' ? '50' : undefined}
-                 placeholder={{ rate: '3.40', size: '26.5', reserve: '' }[id]} value={v} onChange={e => setV(e.target.value)} />
-          <span className="unit">{unit}</span>
-        </div>
       )}
       <div className="fs-actions">
         <button type="submit" className="save-btn" disabled={!ok || busy}>{busy ? 'Saving…' : 'Save'}</button>
@@ -415,19 +441,31 @@ function StepForm({ id, cfg, busy, onSave, onSkip }) {
 }
 
 // The card, and the step it opens: beside the sidebar ('rail'), or a sheet from the bottom ('phone').
+// Back and the step bars move between steps, done ones too; Skip leaves one for later.
 function FirstSteps({ me, plantId, onSaved, variant }) {
   const [open, setOpen, ref] = usePopover();
   const [skipped, setSkipped] = useState([]);
+  const [cur, setCur] = useState(null);      // the step open; null = the next one waiting
   const [gone, setGone] = useState(false);   // Hide pressed, until prefs come back
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  useEffect(() => { setOpen(false); setSkipped([]); setGone(false); setErr(null); }, [plantId]);
+  useEffect(() => { setOpen(false); setSkipped([]); setCur(null); setGone(false); setErr(null); }, [plantId]);
   const fs = firstSteps(me, plantId);
   if (!fs || !fs.left.length || fs.mine.hidden || gone) return null;
-  const waiting = fs.left.filter(s => !skipped.includes(s.id));
-  const step = (waiting.length ? waiting : fs.left)[0];
-  const n = fs.steps.length, done = n - fs.left.length;
-  const S = STEPS[step.id];
+  const ids = fs.steps.map(s => s.id);
+  // the next step waiting, after `after` where there is one, skipped ones last
+  const nextOf = (left, sk, after) => {
+    const waiting = left.filter(s => !sk.includes(s.id));
+    const pool = waiting.length ? waiting : left;
+    const later = after ? pool.filter(s => ids.indexOf(s.id) > ids.indexOf(after)) : [];
+    return (later[0] || pool[0])?.id;
+  };
+  const nextId = nextOf(fs.left, skipped);
+  const stepId = cur && ids.includes(cur) ? cur : nextId;
+  const at = ids.indexOf(stepId);
+  const n = ids.length, done = n - fs.left.length;
+  const S = STEPS[stepId];
+  const go = (id) => { setErr(null); setCur(id); };
   const hide = () => {
     setGone(true); setOpen(false);
     saveFirstSteps(me, plantId, { hidden: true }).then(onSaved).catch(() => setGone(false));
@@ -435,31 +473,45 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
   // Skip leaves the step for later; past the last one it comes round again.
   const skip = () => {
     setErr(null);
-    if (fs.left.length === 1) { setOpen(false); return; }
-    setSkipped(s => { const t = [...s, step.id]; return fs.left.every(x => t.includes(x.id)) ? [step.id] : t; });
+    const sk = skipped.includes(stepId) ? skipped : [...skipped, stepId];
+    const sk2 = fs.left.every(x => sk.includes(x.id)) ? [stepId] : sk;
+    const next = nextOf(fs.left, sk2, stepId);
+    setSkipped(sk2);
+    if (!next || next === stepId) setOpen(false); else setCur(next);
   };
   const save = async (patch) => {
     setBusy(true); setErr(null);
     try {
       await window.savePlantConfig(plantId, patch);
-      if (step.id === 'reserve') await saveFirstSteps(me, plantId, { reserve: true });
+      if (stepId === 'reserve') await saveFirstSteps(me, plantId, { reserve: true });
       await onSaved();
-      if (fs.left.length === 1) setOpen(false);
+      const left = fs.left.filter(s => s.id !== stepId);
+      if (!left.length) setOpen(false); else setCur(nextOf(left, skipped, stepId));
     } catch (e) { setErr('Couldn’t save. Try again.'); }
     finally { setBusy(false); }
   };
+  const toggle = () => { if (!open) setCur(null); setOpen(o => !o); };
   const segs = <div className="fs-segs" aria-hidden="true">{fs.steps.map((s, i) => <i key={i} className={s.done ? 'on' : ''} />)}</div>;
   const panel = (
     <div className="fs-panel" role="dialog" aria-label={S.title}>
-      <div className="fs-top"><span className="fs-lbl">Step {fs.steps.indexOf(step) + 1} of {n}</span>
-        <button type="button" className="fs-x" aria-label="Close" onClick={() => setOpen(false)}><Icon id="close" /></button></div>
-      {variant === 'phone' && segs}
+      <div className="fs-top">
+        {at > 0 && <button type="button" className="fs-back" onClick={() => go(ids[at - 1])}><Icon id="back" />Back</button>}
+        <span className="fs-lbl">Step {at + 1} of {n}</span>
+        <button type="button" className="fs-x" aria-label="Close" onClick={() => setOpen(false)}><Icon id="close" /></button>
+      </div>
+      <div className="fs-bars">
+        {fs.steps.map((s, i) => (
+          <button key={s.id} type="button" className={(s.done ? 'on' : '') + (s.id === stepId ? ' cur' : '')}
+                  aria-label={'Step ' + (i + 1) + ', ' + STEPS[s.id].title} aria-current={s.id === stepId ? 'step' : undefined} onClick={() => go(s.id)}><i /></button>
+        ))}
+      </div>
       <h2 className="fs-title">{S.title}</h2>
       <p className="fs-how">{S.how}</p>
-      <StepForm key={step.id} id={step.id} cfg={fs.cfg} busy={busy} onSave={save} onSkip={skip} />
+      <StepForm key={stepId} id={stepId} cfg={fs.cfg} busy={busy} onSave={save} onSkip={skip} />
       {err && <p className="fs-err" role="alert">{err}</p>}
     </div>
   );
+  const NS = STEPS[nextId];
   return (
     <div className={'fs-wrap fs-' + variant} ref={ref}>
       <section className={'fs-card' + (open ? ' open' : '')} aria-label="Finish setup">
@@ -467,13 +519,13 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
           <button type="button" className="fs-x" aria-label="Hide" title="Hide" onClick={hide}><Icon id="close" /></button></div>
         {segs}
         <div className="fs-next">
-          <div className="fs-text"><b>{S.title}</b><span>{S.why}</span></div>
-          <button type="button" className="save-btn fs-go" aria-expanded={open} onClick={() => setOpen(o => !o)}>{S.go}</button>
+          <div className="fs-text"><b>{(open ? S : NS).title}</b><span>{(open ? S : NS).why}</span></div>
+          <button type="button" className="save-btn fs-go" aria-expanded={open} onClick={toggle}>{open ? 'Close' : NS.go}</button>
         </div>
       </section>
       {/* the tablet's narrow sidebar: a ring and the count, opening the same step */}
       {variant === 'rail' && (
-        <button type="button" className="fs-mini" aria-expanded={open} aria-label={'Finish setup, ' + done + ' of ' + n + ' done'} onClick={() => setOpen(o => !o)}>
+        <button type="button" className="fs-mini" aria-expanded={open} aria-label={'Finish setup, ' + done + ' of ' + n + ' done'} onClick={toggle}>
           <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7" className="track" /><circle cx="9" cy="9" r="7" className="fill" strokeDasharray={(44 * done / n) + ' 44'} transform="rotate(-90 9 9)" /></svg>
           <span className="mono">{done}/{n}</span>
         </button>

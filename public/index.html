@@ -283,9 +283,9 @@
     .sheet-panel { position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel-2); border-top: 1px solid var(--line-2); border-radius: 16px 16px 0 0;
       padding: 8px 10px calc(14px + env(safe-area-inset-bottom, 0px)); }
     .sheet-grip { width: 36px; height: 4px; border-radius: 2px; background: var(--line-2); margin: 4px auto 10px; }
-    .sheet-panel button { display: flex; align-items: center; gap: 14px; width: 100%; padding: 13px 12px; border: none; background: none; border-radius: 10px;
+    .sheet-panel > button { display: flex; align-items: center; gap: 14px; width: 100%; padding: 13px 12px; border: none; background: none; border-radius: 10px;
       font-size: 15px; text-align: left; color: var(--text); }
-    .sheet-panel button[aria-current="page"] { background: rgba(255,255,255,0.075); font-weight: 600; }
+    .sheet-panel > button[aria-current="page"] { background: rgba(255,255,255,0.075); font-weight: 600; }
   }
 
   /* ---------- cards ---------- */
@@ -1296,7 +1296,7 @@
   /* First steps (SOLAR-170): one card naming the next setting, above Settings in the sidebar
      and docked over the bottom bar on a phone; its step opens beside it or from the bottom */
   .fs-wrap { position: relative; }
-  .nav .fs-wrap { margin-top: auto; margin-bottom: 6px; }
+  .nav .fs-wrap { margin-top: auto; margin-bottom: 10px; }   /* with the nav's 2 px gap, the same 12 px as Settings to the account line */
   .nav .fs-wrap + .nav-settings { margin-top: 0; }
   .fs-card { display: flex; flex-direction: column; gap: 10px; padding: 12px 12px 12px 14px; border-radius: 12px;
     background: rgba(61,220,132,0.05); border: 1px solid rgba(61,220,132,0.22); }
@@ -1316,18 +1316,53 @@
   .fs-text span { font-size: 12px; line-height: 1.45; color: var(--muted); }
   .fs-go { height: 36px; }
   .fs-mini { display: none; }
-  .fs-pop { position: absolute; left: calc(100% + 24px); bottom: 0; z-index: 30; width: 400px; max-width: calc(100vw - var(--rail-w) - 24px);
+  .fs-pop { position: absolute; left: calc(100% + 24px); bottom: 0; z-index: 30; width: 440px; max-width: calc(100vw - var(--rail-w) - 24px);
     background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 16px; padding: 18px 20px 20px; box-shadow: 0 24px 60px rgba(0,0,0,0.55); }
   .fs-panel { display: flex; flex-direction: column; gap: 12px; }
   .fs-panel .fs-x { margin-left: auto; }
   .fs-title { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
   .fs-how { margin: -4px 0 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
-  .fs-form { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .fs-form { display: flex; flex-direction: column; gap: 12px; }
   .fs-actions { display: flex; align-items: center; gap: 6px; }
-  .fs-actions .save-btn { height: 40px; padding: 0 20px; font-size: 14px; }
+  .fs-actions .save-btn { flex: 1; height: 44px; padding: 0 20px; font-size: 14px; }
   .fs-skip { height: 40px; padding: 0 12px; border: none; background: none; color: var(--muted); font-size: 13px; border-radius: 9px; cursor: pointer; }
   .fs-skip:hover { color: var(--text); }
   .fs-err { margin: 0; font-size: 12px; color: var(--load); }
+  .fs-back { display: inline-flex; align-items: center; gap: 4px; height: 28px; margin: -6px 4px -6px -8px; padding: 0 8px; border: none; border-radius: 8px;
+    background: none; color: var(--muted); font-size: 13px; cursor: pointer; }
+  .fs-back:hover { color: var(--text); }
+  .fs-back .ico { width: 14px; height: 14px; }
+  /* the step bars in the panel move between steps */
+  .fs-bars { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; margin-top: -6px; }
+  .fs-bars button { height: 16px; padding: 6px 0; border: none; background: none; cursor: pointer; }
+  .fs-bars i { display: block; height: 4px; border-radius: 4px; background: rgba(255,255,255,0.08); }
+  .fs-bars .cur i { background: rgba(255,255,255,0.35); }
+  .fs-bars .on i { background: var(--pv); }
+  .fs-bars .on.cur i { box-shadow: 0 0 0 2px rgba(61,220,132,0.3); }
+  .fs-in { display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line-2); }
+  .fs-in:focus-within, .fs-cnt:focus { border-color: var(--pv); box-shadow: 0 0 0 3px rgba(61,220,132,0.12); }
+  .fs-in input { flex: 1; width: 100%; min-width: 0; background: none; border: none; outline: none; color: var(--text); font-family: var(--mono); font-size: 20px; font-weight: 600; }
+  .fs-in input::placeholder { color: var(--dim); font-weight: 500; }
+  .fs-unit { font-family: var(--mono); font-size: 14px; color: var(--muted); }
+  /* battery size and panels: Total or By size, the value on the same line */
+  .fs-sumhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .fs-seg { display: inline-grid; grid-auto-flow: column; gap: 2px; padding: 3px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line-2); }
+  .fs-seg button { height: 32px; padding: 0 14px; border: none; border-radius: 7px; background: none; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; }
+  .fs-seg button.on { background: var(--panel-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-2); }
+  .fs-val { font-size: 26px; font-weight: 700; line-height: 1; color: var(--dim); white-space: nowrap; }
+  .fs-val.size { color: var(--batt); }
+  .fs-val.panels { color: var(--pv); }
+  .fs-val small { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 5px; }
+  .fs-rows { display: flex; flex-direction: column; gap: 8px; }
+  .fs-row { display: grid; grid-template-columns: 72px 14px minmax(0, 1fr) 28px; align-items: center; gap: 8px; animation: fs-rowin .18s ease-out; }
+  @keyframes fs-rowin { from { opacity: 0; transform: translateY(-4px); } }
+  @media (prefers-reduced-motion: reduce) { .fs-row { animation: none; } }
+  .fs-cnt { width: 100%; min-width: 0; height: 52px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line-2); color: var(--text);
+    font-size: 20px; font-weight: 600; text-align: center; outline: none; }
+  .fs-times { text-align: center; color: var(--dim); font-family: var(--mono); font-size: 16px; }
+  .fs-rm { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: none; border-radius: 8px; background: none; color: var(--dim); cursor: pointer; }
+  .fs-rm:hover { color: var(--text); }
+  .fs-add { align-self: flex-start; padding: 4px 0; border: none; background: none; color: var(--pv); font-size: 13px; font-weight: 600; cursor: pointer; }
   .fs-phone { display: none; }
   /* tablet: the 84 px sidebar keeps a ring and the count */
   @media (min-width: 600px) and (max-width: 1023px) {
@@ -1350,15 +1385,8 @@
     .fs-phone .fs-go { flex: none; height: 40px; padding: 0 16px; }
     .frame:has(.fs-phone .fs-card) .content { padding-bottom: calc(66px + 140px + env(safe-area-inset-bottom, 0px)); }
     .fs-sheet .sheet-panel { padding: 8px 18px calc(20px + env(safe-area-inset-bottom, 0px)); }
-    .fs-sheet .fs-actions { align-self: stretch; }
-    .fs-sheet .fs-actions .save-btn { flex: 1; }
-    /* the sheet's own buttons, not the page list's */
-    .fs-sheet .sheet-panel button { width: auto; padding: 0 12px; font-size: 13px; }
-    .fs-sheet .sheet-panel .save-btn { padding: 0 20px; font-size: 14px; font-weight: 600; justify-content: center; background: var(--pv); color: #07130c; }
-    .fs-sheet .sheet-panel .fs-skip { color: var(--muted); }
-    .fs-sheet .sheet-panel .fs-x { padding: 0; color: var(--dim); }
-    .fs-sheet .sheet-panel .panel-add { padding: 0; color: var(--pv); font-weight: 600; }
-    .fs-sheet .sheet-panel .panel-del { width: 44px; padding: 0; justify-content: center; }
+    .fs-row { grid-template-columns: 64px 12px minmax(0, 1fr) 44px; }   /* a finger-sized remove */
+    .fs-rm { width: 44px; height: 44px; }
   }
 </style>
 </head>
