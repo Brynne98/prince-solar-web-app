@@ -600,8 +600,8 @@ function panelsVerdict(h, snap, now) {
   return { state, alerts, lines, silent, night };
 }
 
-// One day of one reading as a line across the whole day: solar (which needs a reading over
-// 20 W to count as made), grid power signed (+ bought, − exported), or the battery's charge
+// One day of one reading as a line across the whole day: solar (drawn at 0 W too, SOLAR-179),
+// grid power signed (+ bought, − exported), or the battery's charge
 // on a fixed 0-100% scale with the reserve dashed.
 // The reading under the pointer shows beside it. As on Live, dragging across the chart with
 // a mouse totals the energy between the two times (`sums` names the + and − parts). Callers
@@ -610,7 +610,7 @@ function panelsVerdict(h, snap, now) {
 // zero is always a third of it, as on an import day; a bigger export is cut off at the bottom,
 // and the hover and drag totals still give its real size (SOLAR-72).
 // `outages` (Grid): runs of 5-minute buckets the grid was down, shaded as on Equipment's supply chart.
-function DayLineChart({ points, field, color, label, crop, pct, reserve, empty, sums, importScale, outages }) {
+function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, importScale, outages }) {
   const [ref, width, height] = useChartSize([220, 300]);
   const [hover, setHover] = React.useState(null);
   const [sel, setSel] = React.useState(null);    // [i0, i1] the selected range
@@ -619,10 +619,10 @@ function DayLineChart({ points, field, color, label, crop, pct, reserve, empty, 
   const mobile = width < 560;
   const v = i => points[i][field];
   const has = [];
-  points.forEach((p, i) => { if (p[field] != null && (!crop || p[field] > 20)) has.push(i); });
+  points.forEach((p, i) => { if (p[field] != null) has.push(i); });
   const hp = hover != null && points[hover] && v(hover) != null ? hover : null;
   let body = null, tip = null;
-  if (has.length > 1) {
+  if (has.length) {
     const i0 = 0, i1 = points.length - 1;
     const m = { l: mobile ? 32 : 38, r: 12, t: 24, b: 30 };
     const innerW = Math.max(40, width - m.l - m.r), innerH = height - m.t - m.b;
@@ -1051,7 +1051,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         </SectionTitle>
         <DateBar pick={pick} earliest={earliest} />
         {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
-          : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="pv" color={CC.pv} label="Solar" crop sums={['Made']} empty={noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')} /></div>}
+          : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="pv" color={CC.pv} label="Solar" sums={['Made']} empty={noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')} /></div>}
       </Card>
 
       <Card>
