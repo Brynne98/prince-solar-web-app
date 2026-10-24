@@ -331,11 +331,19 @@ const STEPS = {
   reserve: { title: 'Battery reserve', why: 'Discharging stops at this level.', go: 'Check reserve', how: 'The level your inverter stops at. Match the number set on it.' },
   panels: { title: 'Solar panels', why: 'Shows how hard your panels work.', go: 'Add panels', how: 'Every panel added together.' },
 };
+// The marks hold the plant's linkedAt (0097): a plant removed and added again keeps its id
+// but gets a new link, so marks from before the re-add are dropped and it starts fresh.
+const stepMarks = (me, plant) => {
+  const raw = (me?.prefs?.firstSteps || {})[plant.id] || {};
+  return raw.at === (plant.linkedAt ?? undefined) ? raw : {};
+};
 function firstSteps(me, plantId) {
   const plant = (me?.plants || []).find(p => p.id === plantId);
   if (!plant) return null;
   const c = plant.config || {};
-  const mine = (me.prefs?.firstSteps || {})[plantId] || {};
+  const mine = stepMarks(me, plant);
+  // finished once, finished for good: clearing a setting later does not bring the card back
+  if (mine.done) return { cfg: c, mine, steps: [], left: [] };
   const batt = c.has_battery !== false;   // not yet detected counts as a battery
   const steps = [
     { id: 'rate', done: c.tariff_import > 0 },
@@ -347,9 +355,12 @@ function firstSteps(me, plantId) {
 }
 window.firstSteps = firstSteps;
 // prefs merge one key deep, so the whole firstSteps object goes back with this plant's change
-const saveFirstSteps = (me, plantId, patch) => window.savePrefs({
-  firstSteps: { ...(me.prefs?.firstSteps || {}), [plantId]: { ...((me.prefs?.firstSteps || {})[plantId] || {}), ...patch } },
-});
+const saveFirstSteps = (me, plantId, patch) => {
+  const plant = (me.plants || []).find(p => p.id === plantId) || { id: plantId };
+  return window.savePrefs({
+    firstSteps: { ...(me.prefs?.firstSteps || {}), [plantId]: { ...stepMarks(me, plant), ...patch, at: plant.linkedAt ?? undefined } },
+  });
+};
 window.saveFirstSteps = saveFirstSteps;
 
 // Battery size and panels share one box: a total, or count × size rows that add up. The
@@ -451,6 +462,15 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
   const [err, setErr] = useState(null);
   useEffect(() => { setOpen(false); setSkipped([]); setCur(null); setGone(false); setErr(null); }, [plantId]);
   const fs = firstSteps(me, plantId);
+  // Every step done, here or in Settings: marked done, so it stays away. Both copies of the
+  // card (sidebar and phone) see it; the ref keeps each to one write.
+  const marked = useRef(null);
+  const finished = !!fs && fs.steps.length > 0 && !fs.left.length && !fs.mine.done;
+  useEffect(() => {
+    if (!finished || marked.current === plantId) return;
+    marked.current = plantId;
+    saveFirstSteps(me, plantId, { done: true }).then(onSaved).catch(() => { marked.current = null; });
+  }, [finished, plantId]);
   if (!fs || !fs.left.length || fs.mine.hidden || gone) return null;
   const ids = fs.steps.map(s => s.id);
   // the next step waiting, after `after` where there is one, skipped ones last
