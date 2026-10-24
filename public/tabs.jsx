@@ -1823,7 +1823,8 @@ function SettingsSection({ id, title, note, children }) {
   const flash = React.useContext(SettingsFlash);
   const flashing = flash && flash.id === id;
   const ref = React.useRef(null);
-  React.useEffect(() => { if (flashing) ref.current?.scrollIntoView({ block: 'start' }); }, [flashing]);
+  // A reload on #id scrolls back to it without the flash (SOLAR-165).
+  React.useEffect(() => { if (flashing || location.hash === '#' + id) ref.current?.scrollIntoView({ block: 'start' }); }, [flashing]);
   return (
     <section id={'settings-' + id} className="sec" ref={ref} aria-labelledby={'settings-' + id + '-t'}>
       <div className="sec-intro">

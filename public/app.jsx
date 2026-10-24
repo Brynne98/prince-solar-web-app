@@ -646,8 +646,10 @@ function App({ links }) {
   const [flashSection, setFlashSection] = useState(null); // a Settings section to flash once on arrival
   // "Set your rate", "Set pack size", Reconnect: open the page that holds that section
   // (logins are on Account) and flash it once; the section scrolls itself into view.
+  // The address keeps it as #section, so a reload scrolls back to it (SOLAR-165).
   const openSettings = (section) => {
     setFlashSection(section); setTab(section === 'connection' || section === 'notifications' ? 'account' : 'settings'); toTop();
+    history.replaceState(history.state, '', '#' + section);
   };
   const user = useUser();
   // Settings with unsaved plant edits holds the plant where it is; a switch asked for
@@ -660,7 +662,15 @@ function App({ links }) {
   const inflight = useRef({});
   useEffect(() => { energyRef.current = energy; }, [energy]);
 
-  useEffect(() => { localStorage.setItem('synsynk.tab', tab); }, [tab]);
+  // The address names the page and plant, so a reload opens them; the saved page is for a
+  // bare address (SOLAR-165). ?section= is left for loadMe to read.
+  useEffect(() => {
+    localStorage.setItem('synsynk.tab', tab);
+    const url = new URL(location.href);
+    url.searchParams.set('tab', tab);
+    if (plantId != null) url.searchParams.set('plant', plantId);
+    if (url.href !== location.href) history.replaceState(history.state, '', url);
+  }, [tab, plantId]);
 
   // spin = false on the 60 s auto tick, so the icon only turns for something the
   // person asked for (a click, first load, a plant switch).
@@ -720,14 +730,15 @@ function App({ links }) {
       const m = await window.fetchMe();
       setMe(m);
       const ids = (m.plants || []).map(p => p.id);
-      // An email link names its plant (?plant=); one that isn't the user's falls back quietly.
-      // Its Reconnect button adds section=logins: open Account on the logins, as the in-app Reconnect does.
+      // The address names its plant (?plant=, from an email or a reload); one that isn't the
+      // user's falls back quietly. An email's Reconnect button adds section=logins: open
+      // Account on the logins, as the in-app Reconnect does.
       const url = new URL(location.href);
       const linked = Number(url.searchParams.get('plant'));
       // A report or alert footer adds section=notifications: open Account on the email switches.
       const section = { logins: 'connection', notifications: 'notifications' }[url.searchParams.get('section')];
-      if (url.searchParams.has('plant') || url.searchParams.has('section')) {
-        url.searchParams.delete('plant'); url.searchParams.delete('section'); history.replaceState(history.state, '', url);
+      if (url.searchParams.has('section')) {
+        url.searchParams.delete('section'); history.replaceState(history.state, '', url);
       }
       if (section) openSettings(section);
       if (ids.includes(linked)) window.savePrefs({ lastPlant: linked }).catch(() => {});
@@ -840,7 +851,7 @@ function App({ links }) {
 
   const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(true); setRefreshKey(k => k + 1); };
 
-  const go = (id) => { setTab(id); toTop(); };
+  const go = (id) => { setTab(id); toTop(); if (location.hash) history.replaceState(history.state, '', location.pathname + location.search); };
   const loginDead = links.accounts.some(a => a.status === 'needs_relink');
   const account = { user, plantCount: (me?.plants || []).length, alert: loginDead, onAccount: () => go('account'), active: tab === 'account' };
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} />;
