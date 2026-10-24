@@ -512,6 +512,36 @@ export async function plantsToPoll(): Promise<PlantJob[]> {
 }
 
 /**
+ * One poll shard's jobs (0100): same plants and account choice as plantsToPoll(),
+ * but the shard filter runs in SQL, so a shard reads only its own accounts.
+ * account set = only plants read through that account, whatever the shard.
+ */
+export async function pollJobs(shard: number, shards: number, account?: string): Promise<PlantJob[]> {
+  const rows = await rpc<any[]>("poll_jobs", { p_shard: shard, p_shards: shards, p_account: account ?? null });
+  const accs = new Map<string, Account>();
+  return (rows ?? []).map((r) => {
+    const acc = accs.get(r.account_id) ?? {
+      id: r.account_id, user_id: r.user_id, sunsynk_username: r.sunsynk_username,
+      access_token: r.access_token, access_expires_at: r.access_expires_at,
+    };
+    accs.set(acc.id, acc); // one object per account, as plantsToPoll() gave
+    return {
+      plantId: Number(r.plant_id),
+      plantName: r.plant_name ?? null,
+      timezone: String(r.timezone),
+      battPositiveMeans: r.batt_positive_means ?? null,
+      backfillNext: r.backfill_next ?? null,
+      backfillUntil: r.backfill_until ?? null,
+      backfillTries: Number(r.backfill_tries),
+      tempNext: r.temp_next ?? null,
+      tempTries: Number(r.temp_tries),
+      hasGrid: r.has_grid ?? null,
+      account: acc,
+    };
+  });
+}
+
+/**
  * Round-robin for the batch functions (recover, sync-plant-energy). Each has a
  * time budget shared across every plant; without this, plants late in the list
  * could starve run after run (READINESS P3). The id of the last plant a run

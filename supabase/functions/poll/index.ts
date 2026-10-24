@@ -6,8 +6,9 @@
 // instead of hitting SunSynk at second zero, then polls its accounts in parallel.
 // No body (local dev, manual invoke) means "every account, no delay".
 //
-// The set of plants to log comes from plantsToPoll() — plant_users is the source of
-// truth for what a user can see, so it is also what gets stored. Jobs are grouped by
+// The set of plants to log comes from pollJobs() (0100), which returns only this
+// shard's plants — plant_users is the source of truth for what a user can see, so
+// it is also what gets stored. Jobs are grouped by
 // account so each account's inverter list is fetched once.
 //
 // Per account: fetch every inverter's realtime endpoints, map them with the shared
@@ -47,6 +48,7 @@ import {
   getInvertersCached,
   type PlantJob,
   plantsToPoll,
+  pollJobs,
   RelinkNeeded,
   syncPlants,
 } from "../_shared/sunsynk.ts";
@@ -458,12 +460,6 @@ async function shardSpec(req: Request): Promise<ShardSpec> {
   return { shard, shards, delayMs, account };
 }
 
-/** Stable shard for an account: first 8 hex digits of its uuid, mod shard count. */
-function shardOf(accountId: string, shards: number): number {
-  const hex = accountId.replace(/-/g, "").slice(0, 8);
-  return (parseInt(hex, 16) >>> 0) % shards;
-}
-
 Deno.serve(async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
@@ -473,29 +469,31 @@ Deno.serve(async (req) => {
     // a shard that waits 20 s still stamps the minute the cron tick was for.
     const ts = nowMinuteEpoch();
 
-    let jobs = await plantsToPoll();
+    // Only this shard's plants; the shard hash (first 8 hex digits of the account
+    // uuid, mod shards) runs in SQL.
+    let jobs = await pollJobs(spec.shard, spec.shards, spec.account);
     if (!jobs.length) {
-      // Nothing to poll: a fresh deploy. Link the env-credential account so
-      // logging starts without anyone signing in. Only the empty case pays for
-      // this; on a running deployment it never executes.
-      try {
-        if (await ensureBootstrapAccount()) jobs = await plantsToPoll();
-      } catch (e) {
-        console.warn("bootstrap skipped:", e instanceof Error ? e.message : e);
+      if (!spec.account && !(await plantsToPoll()).length) {
+        // Nothing to poll anywhere: a fresh deploy. Link the env-credential account
+        // so logging starts without anyone signing in. Only an empty shard pays for
+        // the full read; on a running deployment the bootstrap never executes.
+        try {
+          if (await ensureBootstrapAccount()) jobs = await pollJobs(spec.shard, spec.shards);
+        } catch (e) {
+          console.warn("bootstrap skipped:", e instanceof Error ? e.message : e);
+        }
       }
-      if (!jobs.length) return json({ ok: true, ts, ...spec, accounts: 0, note: "no plants to poll" });
+      if (!jobs.length) return json({ ok: true, ts, ...spec, accounts: 0, note: "no accounts in this shard" });
     }
 
-    // Group jobs by account, keep this shard's accounts.
+    // Group jobs by account.
     const byAccount = new Map<string, { acc: Account; jobs: PlantJob[] }>();
     for (const j of jobs) {
       const entry = byAccount.get(j.account.id) ?? { acc: j.account, jobs: [] };
       entry.jobs.push(j);
       byAccount.set(j.account.id, entry);
     }
-    const mine = [...byAccount.values()].filter(({ acc }) =>
-      spec.account ? acc.id === spec.account : shardOf(acc.id, spec.shards) === spec.shard);
-    if (!mine.length) return json({ ok: true, ts, ...spec, accounts: 0, note: "no accounts in this shard" });
+    const mine = [...byAccount.values()];
 
     if (spec.delayMs > 0) await sleep(spec.delayMs);
 
