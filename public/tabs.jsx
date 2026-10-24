@@ -2338,6 +2338,51 @@ function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirt
   );
 }
 
+// Report and alert emails, one switch each (SOLAR-158). A tap saves at once and flips
+// back if the save fails. "SunSynk disconnected" and account emails have no switch.
+// The footer of every report and alert email opens this (section=notifications).
+const EMAIL_SWITCHES = [
+  ['Reports', [['weekly', 'Weekly'], ['monthly', 'Monthly'], ['yearly', 'Yearly']]],
+  ['Alerts', [['grid', 'Grid'], ['battery', 'Battery', 'Too hot or charging unevenly'], ['panels', 'Panels'],
+              ['readings', 'Readings'], ['sunsynk', 'SunSynk', 'Down or back up']]],
+];
+function NotificationsSection({ userId }) {
+  const { useState, useEffect } = React;
+  const [prefs, setPrefs] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [err, setErr] = useState(null);
+  const load = () => {
+    setFailed(false);
+    window.fetchEmailPrefs(userId).then(setPrefs).catch(() => setFailed(true));
+  };
+  useEffect(() => { if (userId) load(); }, [userId]);
+  const flip = async (kind, on) => {
+    setErr(null);
+    setPrefs(p => ({ ...p, [kind]: on }));
+    try { await window.saveEmailPref(userId, kind, on); }
+    catch { setPrefs(p => ({ ...p, [kind]: !on })); setErr('Couldn’t save. Try again.'); }
+  };
+  return (
+    <SettingsSection id="notifications" title="Notifications">
+      {failed ? (
+        <div className="conn-row">
+          <div className="conn-text"><div className="conn-user">Couldn’t load your settings</div></div>
+          <div className="conn-actions"><button type="button" className="ghost-btn" onClick={load}>Try again</button></div>
+        </div>
+      ) : EMAIL_SWITCHES.map(([group, rows]) => (
+        <div className="field" key={group} role="group" aria-label={group}>
+          <label>{group}</label>
+          {rows.map(([kind, label, hint]) => (
+            <Toggle key={kind} label={label} hint={hint} checked={!prefs || prefs[kind]}
+                    onChange={(on) => prefs && flip(kind, on)} />
+          ))}
+        </div>
+      ))}
+      {err && <div className="field-note" role="status" style={{ color: 'var(--load)' }}>{err}</div>}
+    </SettingsSection>
+  );
+}
+
 // Account: the person. Sign out is in the account menu only.
 function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
   const { useState, useEffect } = React;
@@ -2352,6 +2397,7 @@ function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
           {email && <p className="mono">{email}</p>}
         </div>
         <SunSynkConnectionSection onChanged={onPlantConfigSaved} links={links} />
+        <NotificationsSection userId={user?.id} />
         {email && user.app_metadata?.providers?.includes('email') && <PasswordSection email={email} />}
         <DeleteAccountSection email={email} />
         <div className="app-version mono">

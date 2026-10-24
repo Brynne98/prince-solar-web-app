@@ -332,6 +332,18 @@ async function savePlantConfig(plantId, patch) {
   if (error) throw new Error(error.message);
   return data;
 }
+// Which report and alert emails the user wants (0091, SOLAR-158). No row yet means all on.
+const EMAIL_KINDS = ['weekly', 'monthly', 'yearly', 'grid', 'battery', 'panels', 'readings', 'sunsynk'];
+async function fetchEmailPrefs(userId) {
+  const { data, error } = await window.sb.from('email_prefs').select(EMAIL_KINDS.join(',')).eq('user_id', userId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data || Object.fromEntries(EMAIL_KINDS.map(k => [k, true]));
+}
+// One kind per call, so two quick taps on different rows can't undo each other.
+async function saveEmailPref(userId, kind, on) {
+  const { error } = await window.sb.from('email_prefs').upsert({ user_id: userId, [kind]: on });
+  if (error) throw new Error(error.message);
+}
 async function deleteAccount() {
   const { data, error } = await window.sb.rpc('api_account_delete');
   if (error) throw new Error(error.message);
@@ -356,5 +368,5 @@ function emptyText(days, fallback) {
 
 Object.assign(window, {
   fetchSnapshot, fetchDay, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchTrendDaily, fetchCompare, fetchStringHealth,
-  fetchMe, savePrefs, savePlantConfig, deleteAccount, emptyText, BATT_MAX_KW, TYPICAL_DAYS,
+  fetchMe, savePrefs, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount, emptyText, BATT_MAX_KW, TYPICAL_DAYS,
 });

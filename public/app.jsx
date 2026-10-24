@@ -466,7 +466,7 @@ function App({ links }) {
   // "Set your rate", "Set pack size", Reconnect: open the page that holds that section
   // (logins are on Account) and flash it once; the section scrolls itself into view.
   const openSettings = (section) => {
-    setFlashSection(section); setTab(section === 'connection' ? 'account' : 'settings'); toTop();
+    setFlashSection(section); setTab(section === 'connection' || section === 'notifications' ? 'account' : 'settings'); toTop();
   };
   const user = useUser();
   // Settings with unsaved plant edits holds the plant where it is; a switch asked for
@@ -543,11 +543,12 @@ function App({ links }) {
       // Its Reconnect button adds section=logins: open Account on the logins, as the in-app Reconnect does.
       const url = new URL(location.href);
       const linked = Number(url.searchParams.get('plant'));
-      const logins = url.searchParams.get('section') === 'logins';
+      // A report or alert footer adds section=notifications: open Account on the email switches.
+      const section = { logins: 'connection', notifications: 'notifications' }[url.searchParams.get('section')];
       if (url.searchParams.has('plant') || url.searchParams.has('section')) {
         url.searchParams.delete('plant'); url.searchParams.delete('section'); history.replaceState(history.state, '', url);
       }
-      if (logins) openSettings('connection');
+      if (section) openSettings(section);
       if (ids.includes(linked)) window.savePrefs({ lastPlant: linked }).catch(() => {});
       const wanted = ids.includes(linked) ? linked
         : m.prefs && ids.includes(Number(m.prefs.lastPlant)) ? Number(m.prefs.lastPlant) : (ids[0] ?? null);
