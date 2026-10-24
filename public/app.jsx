@@ -37,10 +37,15 @@ function plantStatus(snap, now) {
   // Judged as of the last answer, not the clock: a hidden page stops asking (SOLAR-140),
   // and coming back read red until the catch-up landed (SOLAR-149).
   const ageS = (Math.min(now, snap.updated.getTime()) - last.getTime()) / 1000;
-  const status = (total > 0 && offline >= total) || ageS > 900 ? 'offline' : (offline > 0 || ageS > 180) ? 'stale' : 'live';
+  const bad = (total > 0 && offline >= total) || ageS > 900 ? 'offline' : (offline > 0 || ageS > 180) ? 'stale' : 'live';
+  // A plant's first 60 days are still loading (SOLAR-167): its newest stored day is
+  // the load's, not the inverters', and a slow second inverter isn't news yet.
+  // Say it's loading instead of Offline or Stale; "Fetching history" sits beside it.
+  const loading = !!(snap.sync && snap.sync.pending && (snap.sync.days || 0) < (snap.sync.window || 60));
+  const status = loading && bad !== 'live' ? 'loading' : bad;
   return {
-    status, last, old: ageS > 180,
-    word: { live: 'Live', stale: 'Stale', offline: 'Offline' }[status],
+    status, last, old: status !== 'loading' && ageS > 180,
+    word: { live: 'Live', stale: 'Stale', offline: 'Offline', loading: 'Setting up' }[status],
     detail: offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now),
   };
 }
@@ -277,6 +282,12 @@ function PageNotice({ snap, cutOff, onReconnect, relinkedAt }) {
   if (s.status === 'offline' && relinkedAt && now - relinkedAt < 900000) return (
     <div className="notice stale" role="status">
       <p><b>Reconnected.</b> Waiting for the first reading.</p>
+    </div>
+  );
+  // First load (SOLAR-167): no Offline or Stale banner while the 60 days come in
+  if (s.status === 'loading') return (
+    <div className="notice loading" role="status">
+      <p><b>Getting your last 60 days.</b> Live readings start within a minute.</p>
     </div>
   );
   if (s.status === 'offline' && cutOff) return (

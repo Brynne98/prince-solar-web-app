@@ -198,6 +198,8 @@
   .status-offline .status-dot { background: var(--bad); --ring: rgba(239,68,68,0.18); }
   .status-offline .status-word, .status-offline .status-age { color: var(--bad); }
   .status-idle .status-word { color: var(--muted); }
+  .status-loading .status-dot { background: var(--soc); --ring: rgba(34,211,238,0.18); }
+  .status-loading .status-word { color: var(--soc); }
   @keyframes status-breathe { 0%, 100% { box-shadow: 0 0 0 3px var(--ring); } 50% { box-shadow: 0 0 0 5px transparent; } }
   @media (prefers-reduced-motion: reduce) { .status-dot { animation: none; } }
   /* "Fetching history" beside the status while a fresh plant's 60 days arrive (0048) */
@@ -223,6 +225,7 @@
   .notice.stale { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.07); }
   .notice.offline { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.07); }
   .notice.gridoff { border-color: rgba(167,139,250,0.35); background: rgba(167,139,250,0.08); }
+  .notice.loading { border-color: rgba(34,211,238,0.35); background: rgba(34,211,238,0.07); }
   .page { display: flex; flex-direction: column; }
   .page.old .mini-value, .page.old .stat-value, .page.old .metric-value, .page.old .flow-wrap,
   .page.old .chart-area, .page.old .wiw, .page.old .meter { opacity: 0.45; }
