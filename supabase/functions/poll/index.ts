@@ -443,7 +443,9 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
 // shard, chosen by a stable hash of its uuid, so no two isolates ever work the
 // same account (or refresh the same token) in the same minute.
 // ---------------------------------------------------------------------------
-type ShardSpec = { shard: number; shards: number; delayMs: number };
+// account: poll only this account, now. Linking a plant sends it (plant_bootstrap_kick,
+// 0094) so the first live reading lands at once instead of at the next minute.
+type ShardSpec = { shard: number; shards: number; delayMs: number; account?: string };
 
 const MAX_DELAY_MS = 30_000; // never eat more of the minute than the cron job planned for
 
@@ -452,7 +454,8 @@ async function shardSpec(req: Request): Promise<ShardSpec> {
   const shards = Math.max(1, Math.floor(Number(body.shards) || 1));
   const shard = Math.min(shards - 1, Math.max(0, Math.floor(Number(body.shard) || 0)));
   const delayMs = Math.min(MAX_DELAY_MS, Math.max(0, Math.floor(Number(body.delay_ms) || 0)));
-  return { shard, shards, delayMs };
+  const account = typeof body.account === "string" ? body.account : undefined;
+  return { shard, shards, delayMs, account };
 }
 
 /** Stable shard for an account: first 8 hex digits of its uuid, mod shard count. */
@@ -490,7 +493,8 @@ Deno.serve(async (req) => {
       entry.jobs.push(j);
       byAccount.set(j.account.id, entry);
     }
-    const mine = [...byAccount.values()].filter(({ acc }) => shardOf(acc.id, spec.shards) === spec.shard);
+    const mine = [...byAccount.values()].filter(({ acc }) =>
+      spec.account ? acc.id === spec.account : shardOf(acc.id, spec.shards) === spec.shard);
     if (!mine.length) return json({ ok: true, ts, ...spec, accounts: 0, note: "no accounts in this shard" });
 
     if (spec.delayMs > 0) await sleep(spec.delayMs);

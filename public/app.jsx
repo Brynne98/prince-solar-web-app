@@ -284,12 +284,9 @@ function PageNotice({ snap, cutOff, onReconnect, relinkedAt }) {
       <p><b>Reconnected.</b> Waiting for the first reading.</p>
     </div>
   );
-  // First load (SOLAR-167): no Offline or Stale banner while the 60 days come in
-  if (s.status === 'loading') return (
-    <div className="notice loading" role="status">
-      <p><b>Getting your last 60 days.</b> Live readings start within a minute.</p>
-    </div>
-  );
+  // First load (SOLAR-167): no Offline or Stale banner while the 60 days come in;
+  // the header's "Setting up" and "Fetching history" say it (SOLAR-169)
+  if (s.status === 'loading') return null;
   if (s.status === 'offline' && cutOff) return (
     <div className="notice offline" role="alert">
       <p><b>SunSynk login stopped working.</b> Readings paused at {at}.</p>
