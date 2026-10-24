@@ -116,13 +116,41 @@ function MenuList({ className, label, children }) {
   return <div className={'menu ' + className} role="menu" aria-label={label} ref={ref} onKeyDown={keys}>{children}</div>;
 }
 
-// The plant on screen, left in the header; a menu once there is more than one.
-function PlantMenu({ me, plantId, onPlant, fallback }) {
+// One menu row's state, by the header's rules (SOLAR-182): a dead login reads Reconnect.
+function MenuState({ st, cut, now }) {
+  if (cut) return <span className="pm-state status-offline"><span className="pm-dot" />Reconnect</span>;
+  if (!st || st.lastTs == null) return null;
+  const s = plantStatus({
+    inverters: Array.from({ length: st.inverters || 0 }, (_, i) => ({ status: i < (st.online || 0) ? 'online' : 'offline' })),
+    lastReading: new Date(st.lastTs * 1000), updated: new Date(now), sync: st.sync,
+  }, now);
+  const p = window.syncProgress(st.sync);
+  return (
+    <span className={'pm-state status-' + s.status}>
+      <span className="pm-dot" />{s.word}
+      {p != null && <span className="mono pm-pct">{Math.round(100 * p)}%</span>}
+      {s.status === 'stale' && <span className="mono pm-pct">{window.fmtTime(s.last)}</span>}
+    </span>
+  );
+}
+
+// The plant on screen, left in the header; a menu once there is more than one. Each row
+// says how its plant is doing, asked when the menu opens (SOLAR-182).
+function PlantMenu({ me, plantId, onPlant, fallback, cutOff }) {
   const plants = me?.plants || [];
   const label = (p) => p.name || ('Plant ' + p.id);
   const current = plants.find(p => p.id === plantId);
   const name = current ? label(current) : (fallback || '');
   const [open, setOpen, ref] = usePopover();
+  const [states, setStates] = useState({});
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    window.fetchPlantStates().then(rows => {
+      if (alive) setStates({ at: Date.now(), ...Object.fromEntries(rows.map(r => [r.id, r])) });
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [open]);
   if (plants.length < 2 || !onPlant) return <div className="plant"><span className="plant-btn static"><span className="plant-name">{name}</span></span></div>;
   return (
     <div className="plant" ref={ref}>
@@ -131,12 +159,17 @@ function PlantMenu({ me, plantId, onPlant, fallback }) {
       </button>
       {open && (
         <MenuList className="plant-menu" label="Plants">
-          {plants.map(p => (
-            <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
-                    onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
-              <span className="tick" aria-hidden="true">{p.id === plantId ? '✓' : ''}</span><span className="nm">{label(p)}</span>
-            </button>
-          ))}
+          {plants.map(p => {
+            const st = states[p.id], pct = window.syncProgress(st?.sync);
+            return (
+              <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
+                      onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
+                <span className="tick" aria-hidden="true">{p.id === plantId ? '✓' : ''}</span><span className="nm">{label(p)}</span>
+                <MenuState st={st} cut={cutOff && cutOff(p.id)} now={states.at || Date.now()} />
+                {pct != null && <span className="pm-bar" aria-hidden="true"><i style={{ width: Math.round(100 * pct) + '%' }} /></span>}
+              </button>
+            );
+          })}
         </MenuList>
       )}
     </div>
@@ -248,9 +281,10 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
     );
   }
   const s = plantStatus(snap, now);
+  const sync = window.syncProgress(snap.sync), pct = sync == null ? null : Math.round(100 * sync);
   return (
     <>
-      <div className={'status status-' + s.status} title={'Last reading ' + window.fmtTime(s.last)} role="status">
+      <div className={'status status-' + s.status + (sync != null ? ' fetching' : '')} title={'Last reading ' + window.fmtTime(s.last)} role="status">
         <span className="status-dot" />
         <span className="status-word">{s.word}</span>
         {/* an old reading's date shows from tablet width up; a phone keeps the room for the plant name */}
@@ -258,18 +292,24 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
           return <span className="status-age mono">{p.length === 2 && <span className="age-date">{p[0]}, </span>}{p[p.length - 1]}</span>; })()}
         {/* A freshly linked plant: the last 60 days of readings and temperatures
             arrive in 2-minute rounds (0093). Quiet once both are in (SOLAR-176). */}
-        {window.syncProgress(snap.sync) != null && (() => {
-          const pct = Math.round(100 * window.syncProgress(snap.sync));
-          return (
-            <span className="status-sync">
-              <span className="sync-arc" aria-hidden="true" />Fetching history
-              <span className="sync-pct mono">{pct}%</span>
-            </span>
-          );
-        })()}
+        {sync != null && (
+          <span className="status-sync">
+            <span className="sync-arc" aria-hidden="true" />Fetching history
+            <span className="sync-pct mono">{pct}%</span>
+          </span>
+        )}
       </div>
+      {/* a phone: one pill, a ring filling with the %, in place of the status and refresh (SOLAR-182) */}
+      {sync != null && (
+        <span className="sync-pill mono" role="status" aria-label={'Setting up, fetching history ' + pct + '%'}>
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="8" r="6" className="track" />
+            <circle cx="8" cy="8" r="6" className="fill" strokeDasharray={(37.7 * sync) + ' 37.7'} transform="rotate(-90 8 8)" />
+          </svg>{pct}%
+        </span>
+      )}
       {/* takes the status colour once something is wrong, and reads Retry when nothing reports */}
-      <button type="button" className={'refresh refresh-' + s.status + (busy ? ' busy' : '')} aria-busy={busy} onClick={onRefresh}
+      <button type="button" className={'refresh refresh-' + s.status + (busy ? ' busy' : '') + (sync != null ? ' fetching' : '')} aria-busy={busy} onClick={onRefresh}
               aria-label={s.status === 'offline' ? 'Retry' : 'Refresh'} title={s.status === 'offline' ? 'Retry' : 'Refresh'}>
         <Icon id="refresh" />{s.status === 'offline' && <span className="lbl">Retry</span>}
       </button>
@@ -797,6 +837,9 @@ function App({ links }) {
   const loadToday = useCallback(async () => {
     try { setToday(await window.fetchDay()); } catch (e) { /* chart shows its own placeholder */ }
   }, []);
+  // today has no series yet, or the plant is still on its first load (SOLAR-181)
+  const todayThin = useRef(true);
+  todayThin.current = !today?.points?.length || !!today.approx || window.syncProgress(snap?.sync) != null;
   // Week to Lifetime are finished days plus today, and the pages add today from the live
   // reading, so the rows change only when the plant's date turns and when the 04:15 sync
   // swaps the finished day in (0058). Asked again then, or on a manual refresh (SOLAR-140).
@@ -928,6 +971,8 @@ function App({ links }) {
       if (document.visibilityState === 'visible') {
         loadLive(false);
         if (new Date().getMinutes() % 5 === 0) { loadToday(); refreshEnergy(); }
+        // a plant just added: today's series is asked each minute until it draws (SOLAR-181)
+        else if (todayThin.current) loadToday();
       }
       next();
     };
@@ -962,7 +1007,12 @@ function App({ links }) {
   const go = (id) => { setTab(id); toTop(); if (location.hash) history.replaceState(history.state, '', location.pathname + location.search); };
   const loginDead = links.accounts.some(a => a.status === 'needs_relink');
   const account = { user, plantCount: (me?.plants || []).length, alert: loginDead, onAccount: () => go('account'), active: tab === 'account' };
-  const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} />;
+  // a plant whose every login stopped working reads Reconnect in the menu
+  const loginsCut = (id) => {
+    const ls = links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(id)));
+    return ls.length > 0 && !ls.some(a => a.status === 'active');
+  };
+  const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} />;
   const settingsPage = <window.SettingsTab me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
     flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />;
   const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);

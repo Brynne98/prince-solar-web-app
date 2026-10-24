@@ -299,6 +299,13 @@ async function fetchHourly(days, rk) {
   const byHour = await sharedAsk('hourly:' + n, 60 * 60000, rk, () => getJSON('/api/trends/by-hour?days=' + n));
   return { days: byHour.days || n, hours: byHour.hours || [] };
 }
+// Each of the caller's plants: last reading, inverters online, first-load progress (0101).
+// For the plant menu; no p_plant, so not through getJSON.
+async function fetchPlantStates() {
+  const { data, error } = await window.sb.rpc('api_plant_states');
+  if (error) throw new Error(error.message || 'RPC api_plant_states failed');
+  return data || [];
+}
 // How many days this plant has logged; drives the "collecting your first day" copy.
 async function fetchPlantDays() {
   const api = await getJSON('/api/plant/days');
@@ -389,6 +396,6 @@ function emptyText(days, fallback) {
 }
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchTrendDaily, fetchCompare, fetchStringHealth,
+  fetchSnapshot, fetchDay, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth,
   fetchMe, savePrefs, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount, emptyText, syncProgress, BATT_MAX_KW, TYPICAL_DAYS,
 });
