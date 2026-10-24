@@ -164,7 +164,7 @@ function CalendarPop({ date, todayStr, earliest, days, onPick, onClose }) {
 // The arrows, the calendar and Today reach only days with data (SOLAR-175): ‹ › jump to the
 // nearest one and grey out when there is none. The list is asked again when the calendar opens.
 function DateBar({ pick, earliest, locked, children }) {
-  const { date, setDate, todayStr, isToday } = pick;
+  const { date, setDate, todayStr } = pick;
   const [open, setOpen] = React.useState(false);
   const close = React.useCallback(() => setOpen(false), []);
   const [days, setDays] = React.useState(null);
@@ -173,7 +173,8 @@ function DateBar({ pick, earliest, locked, children }) {
   const list = React.useMemo(() => days ? [...days].filter(k => k <= todayStr && (!earliest || k >= earliest)).sort() : [], [days, todayStr, earliest]);
   // locked: the app is still loading, so the picker shows today and goes nowhere
   const prevDay = locked ? null : list.filter(k => k < date).pop(), nextDay = locked ? null : list.find(k => k > date);
-  const todayOk = !!days && days.has(todayStr);
+  // Today is always shown and goes to the newest day with data; greyed when already there (SOLAR-178)
+  const latest = locked ? null : list[list.length - 1], toLatest = latest && latest !== date;
   return (
     <div className="hv-datebar">
       <button className="hv-daynav" disabled={!prevDay} aria-label="Previous day"
@@ -186,13 +187,13 @@ function DateBar({ pick, earliest, locked, children }) {
           </svg>
           <span className="hv-dateface">{dayFace(date, todayStr)}</span>
         </button>
-        {!isToday && <button className="hv-today hv-today-in" disabled={!todayOk} onClick={() => setDate(todayStr)}>Today</button>}
+        <button className="hv-today hv-today-in" disabled={!toLatest} onClick={() => toLatest && setDate(latest)}>Today</button>
         {open && <CalendarPop date={date} todayStr={todayStr} earliest={earliest} days={days} onPick={setDate} onClose={close} />}
       </div>
       <button className="hv-daynav" disabled={!nextDay} aria-label="Next day"
         onClick={() => nextDay && setDate(nextDay)}><Chevron dir={1} /></button>
       {children}
-      {!isToday && <button className="hv-today hv-today-out" disabled={!todayOk} onClick={() => setDate(todayStr)}>Today</button>}
+      <button className="hv-today hv-today-out" disabled={!toLatest} onClick={() => toLatest && setDate(latest)}>Today</button>
     </div>
   );
 }
@@ -781,8 +782,7 @@ function HistoryView({ today, refreshKey, locked, silent }) {
 
   const legend = [['pv', 'Solar', C.pv], ['batt', 'Battery', C.batt], ['grid', 'Grid', C.grid], ['load', 'Home', C.load], ['soc', 'Charge', C.soc]];
 
-  // The server sends no series until today has about half an hour of readings
-  // (`approx`), so a freshly linked plant sees a blank chart, not a short history.
+  // The server sends no series until today has its first reading (`approx`, 0099).
   // A past day with nothing: still being fetched (fresh link, 0048), before the
   // 60 days the fetch reaches, or a real gap. Say which.
   // While the first load runs (today, back through two weeks, then back to
@@ -794,7 +794,7 @@ function HistoryView({ today, refreshKey, locked, silent }) {
     : 'No readings for this day.';
   const emptyMsg = loading ? 'Loading…'
     : isToday && silent ? 'No readings today.'
-    : isToday && dayData?.approx ? 'Collecting today’s first readings. The chart starts after half an hour.'
+    : isToday && dayData?.approx ? 'Collecting today’s first readings.'
     : isToday ? window.emptyText(window.PLANT_DAYS, 'Loading today’s data…') : pastMsg;
 
   return (
