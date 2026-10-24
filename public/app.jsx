@@ -41,7 +41,7 @@ function plantStatus(snap, now) {
   // A plant's first 60 days are still loading (SOLAR-167): its newest stored day is
   // the load's, not the inverters', and a slow second inverter isn't news yet.
   // Say it's loading instead of Offline or Stale; "Fetching history" sits beside it.
-  const loading = !!(snap.sync && snap.sync.pending && (snap.sync.days || 0) < (snap.sync.window || 60));
+  const loading = window.syncProgress(snap.sync) != null;
   const status = loading && bad !== 'live' ? 'loading' : bad;
   return {
     status, last, old: status !== 'loading' && ageS > 180,
@@ -256,12 +256,12 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
         {/* an old reading's date shows from tablet width up; a phone keeps the room for the plant name */}
         {s.old && (() => { const p = fmtAgo(s.last, now).replace(' ago', '').split(', ');
           return <span className="status-age mono">{p.length === 2 && <span className="age-date">{p[0]}, </span>}{p[p.length - 1]}</span>; })()}
-        {/* A freshly linked plant: the last 60 days arrive over a day or two of
-            six-hourly runs (0048). Quiet once every day has a chart. */}
-        {snap.sync && snap.sync.pending && snap.sync.days < snap.sync.window && (() => {
-          const pct = Math.round(100 * (snap.sync.days || 0) / (snap.sync.window || 60));
+        {/* A freshly linked plant: the last 60 days of readings and temperatures
+            arrive in 2-minute rounds (0093). Quiet once both are in (SOLAR-176). */}
+        {window.syncProgress(snap.sync) != null && (() => {
+          const pct = Math.round(100 * window.syncProgress(snap.sync));
           return (
-            <span className="status-sync" title={`${snap.sync.days} of ${snap.sync.window} days so far`}>
+            <span className="status-sync">
               <span className="sync-arc" aria-hidden="true" />Fetching history
               <span className="sync-pct mono">{pct}%</span>
             </span>

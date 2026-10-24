@@ -350,6 +350,20 @@ async function deleteAccount() {
   return data;
 }
 
+// How far a first load has got, 0..1, or null when nothing is loading (SOLAR-176).
+// Minute days and temperature days of the last 60 count together, since the 60-days
+// email waits for both. Temperatures count only while more than a day behind: every
+// plant falls one day behind at midnight (as first-load-continue, 0093).
+function syncProgress(sync) {
+  if (!sync || !sync.pending) return null;
+  const win = sync.window || 60;
+  const days = Math.min(win, sync.days || 0);
+  const behind = sync.invPending && sync.tempNext
+    ? Math.round((Date.parse(new Date().toLocaleDateString('en-CA')) - Date.parse(sync.tempNext)) / 86400000) : 0;
+  const tempDays = behind > 1 ? Math.max(0, win - behind) : win;
+  return days < win || tempDays < win ? (days + tempDays) / (2 * win) : null;
+}
+
 // What an empty chart should say. A plant with under a day of history is new, and
 // "collecting your first day" is the honest message; anything older is a real gap.
 // While the last 60 days are still being fetched (window.SYNC, from the snapshot)
@@ -368,5 +382,5 @@ function emptyText(days, fallback) {
 
 Object.assign(window, {
   fetchSnapshot, fetchDay, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchTrendDaily, fetchCompare, fetchStringHealth,
-  fetchMe, savePrefs, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount, emptyText, BATT_MAX_KW, TYPICAL_DAYS,
+  fetchMe, savePrefs, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount, emptyText, syncProgress, BATT_MAX_KW, TYPICAL_DAYS,
 });
