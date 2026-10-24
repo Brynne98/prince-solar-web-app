@@ -358,10 +358,10 @@ function emptyText(days, fallback) {
   const sync = window.SYNC;
   const fetching = !!(sync && sync.pending && sync.days < sync.window);
   if (days != null && days < 1) return fetching
-    ? 'Collecting your first day. The last 60 days fill in over the next day.'
+    ? 'Loading the last 60 days.'
     : 'Collecting your first day. Check back tomorrow.';
   if (fetching) return (days != null ? days + ' day' + (days === 1 ? '' : 's') + ' so far. ' : '')
-    + 'The last 60 days fill in over the next day.';
+    + 'Loading the last 60 days.';
   if (days != null && days < 3) return days + ' day' + (days === 1 ? '' : 's') + ' so far. This fills in as history builds.';
   return fallback || 'No data for this range yet.';
 }

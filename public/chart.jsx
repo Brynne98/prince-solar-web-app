@@ -780,12 +780,11 @@ function HistoryView({ today, refreshKey, locked, silent }) {
   // (`approx`), so a freshly linked plant sees a blank chart, not a short history.
   // A past day with nothing: still being fetched (fresh link, 0048), before the
   // 60 days the fetch reaches, or a real gap. Say which.
-  // The walk is oldest-first from the bookmark: a day before it has been walked
-  // (a real gap); a day at or after it is still to come, including the last two
-  // weeks, which the normal sweep fills once the first walked day is in.
+  // While the first load runs (today, back through two weeks, then back to
+  // backfillNext, SOLAR-171), any empty day from backfillNext on may still come.
   const sync = window.SYNC;
   const pastMsg = sync && sync.spinePending && sync.backfillNext && date >= sync.backfillNext
-    ? 'Not fetched yet. Older days come first, more every six hours.'
+    ? 'Not fetched yet.'
     : sync && sync.spinePending && date < shiftDate(todayStr, -DAY_FLOOR_DAYS) ? 'Older than 60 days, so not available.'
     : 'No readings for this day.';
   const emptyMsg = loading ? 'Loading…'

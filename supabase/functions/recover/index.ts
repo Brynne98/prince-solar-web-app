@@ -30,8 +30,9 @@
 // next run.
 //
 // Backfill (0044): a plant whose plant_config carries backfill_next..backfill_until
-// is first walked from that bookmark, per-inverter history only (the plant feed no
-// longer holds those days). A day that answered is banked and the bookmark moves
+// is walked from backfill_until back to backfill_next, newest day first, after the
+// recent window (SOLAR-171), per-inverter history only (the plant feed no longer
+// holds those days). A day that answered is banked and the bookmark moves
 // on, whatever it held (a night of null PV is not a failure). A day where an
 // endpoint failed stops the walk without moving, so the next run retries it; the
 // third failure gives the day up. No serials yet: nothing moves (the first poll
@@ -298,11 +299,16 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
 
 const BACKFILL_MAX_TRIES = 3;
 
-/** Walk the backfill bookmark forward until it passes the end, a day fails, or the budget runs out. */
+/**
+ * Walk the backfill bookmark back from its end, newest day first (SOLAR-171), until
+ * it passes the start, a day fails, or the budget runs out. backfill_until is the
+ * cursor; backfill_next stays put as the floor q_missing_minutes counts from.
+ */
 async function backfillPlant(job: PlantJob, started: number) {
   const { plantId, account, timezone: tz } = job;
-  let day = job.backfillNext!;
-  const until = job.backfillUntil ?? day;
+  const floor = job.backfillNext!;
+  let day = job.backfillUntil ?? floor;
+  const from = day;
   let tries = job.backfillTries;
   const results = [];
   let total = 0;
@@ -311,7 +317,7 @@ async function backfillPlant(job: PlantJob, started: number) {
   const sns = ((await rpc("plant_inverters", { p_plant: plantId })) ?? []) as any[];
   if (!sns.length) return { banked: 0, scanned: null, stoppedEarly: "no inverter serials stored yet; the first poll stores them", days: [] };
 
-  for (; day <= until; day = addDays(tz, day, 1)) {
+  for (; day >= floor; day = addDays(tz, day, -1)) {
     if (Date.now() - started > TIME_BUDGET_MS) { stoppedEarly = `time budget reached at ${day}; next run continues from here`; break; }
     let r: { banked: number; failed?: boolean; reason?: string; error?: string; day: string };
     try {
@@ -323,42 +329,49 @@ async function backfillPlant(job: PlantJob, started: number) {
     if (r.banked > 0 || r.reason || r.error) results.push(r);
 
     const retry = !!r.failed && tries + 1 < BACKFILL_MAX_TRIES;
-    const next = addDays(tz, day, 1);
-    const done = next > until;
+    const next = addDays(tz, day, -1);
+    const done = next < floor;
     const patch = retry ? { backfill_tries: tries + 1 }
       : done ? { backfill_next: null, backfill_until: null, backfill_tries: 0 }
-      : { backfill_next: next, backfill_tries: 0 };
+      : { backfill_until: next, backfill_tries: 0 };
     // Compare-and-set on the day: an overlapping run (link kick vs schedule) must
     // not rewind or double-walk the bookmark. No row matched = the other run moved it.
     const { data: moved, error } = await db.from("plant_config").update(patch)
-      .eq("plant_id", plantId).eq("backfill_next", day).select("plant_id");
+      .eq("plant_id", plantId).eq("backfill_until", day).select("plant_id");
     if (error) throw new Error(`backfill bookmark ${plantId}: ${error.message}`);
     if (!moved?.length) { stoppedEarly = `another run moved the bookmark at ${day}`; break; }
     if (retry) { stoppedEarly = `${day} failed (try ${tries + 1}); next run retries it`; break; }
     tries = 0;
   }
-  return { banked: total, scanned: `${job.backfillNext} .. ${until}`, stoppedEarly, days: results };
+  return { banked: total, scanned: `${from} back to ${floor}`, stoppedEarly, days: results };
 }
 
 async function recoverPlant(job: PlantJob, windowDays: number, started: number) {
   const { plantId, account, timezone: tz } = job;
   const tempsToday = await temperatureToday(job, started);
-  const backfill = job.backfillNext ? await backfillPlant(job, started) : null;
+  const pending = !!job.backfillNext;
   const stats = await rpc("q_stats", { p_plant: plantId });
   const row = Array.isArray(stats) ? stats[0] : stats;
-  if (!row?.first_ts) return { plantId, banked: backfill?.banked ?? 0, backfill, temps: { today: tempsToday }, reason: "no history yet" };
+  if (!row?.first_ts && !pending) return { plantId, banked: 0, backfill: null, temps: { today: tempsToday }, reason: "no history yet" };
 
+  // Today first, then back through the window (SOLAR-171): the days people look at
+  // land before the old ones. While a first load runs the window ignores the first
+  // stored minute, which is only the first poll's; the days before it are the point.
   const today = localDate(tz);
-  const firstLogged = localDate(tz, new Date(Number(row.first_ts) * 1000));
-  let day = addDays(tz, today, -(windowDays - 1));
-  if (day < firstLogged) day = firstLogged;
+  const firstLogged = row?.first_ts ? localDate(tz, new Date(Number(row.first_ts) * 1000)) : today;
+  let floor = addDays(tz, today, -(windowDays - 1));
+  if (!pending && floor < firstLogged) floor = firstLogged;
+  // A first load past midnight: the window moved on but the walk starts where it was set.
+  if (pending && job.backfillUntil && addDays(tz, job.backfillUntil, 1) < floor) floor = addDays(tz, job.backfillUntil, 1);
+  // Half the budget while the walk waits, so days that keep gaps cannot starve it.
+  const windowBudget = pending ? TIME_BUDGET_MS / 2 : TIME_BUDGET_MS;
 
   const results = [];
   let total = 0;
   let stoppedEarly: string | null = null;
 
-  for (; day <= today; day = addDays(tz, day, 1)) {
-    if (Date.now() - started > TIME_BUDGET_MS) {
+  for (let day = today; day >= floor; day = addDays(tz, day, -1)) {
+    if (Date.now() - started > windowBudget) {
       stoppedEarly = `time budget reached at ${day}; remaining days will be picked up next run`;
       break;
     }
@@ -370,6 +383,9 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
       results.push({ day, banked: 0, error: String(e instanceof Error ? e.message : e) });
     }
   }
+
+  // The first load's older days come after the window, newest first.
+  const backfill = pending ? await backfillPlant(job, started) : null;
 
   // The walk goes last, so gap recovery keeps first call on the budget.
   let walk;
