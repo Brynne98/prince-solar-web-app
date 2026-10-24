@@ -363,9 +363,7 @@ const saveFirstSteps = (me, plantId, patch) => {
 };
 window.saveFirstSteps = saveFirstSteps;
 
-// Battery size and panels share one box: a total, or count × size rows that add up. The
-// value being set sits on the switch's line in its own place, so nothing moves as it changes.
-// Panels' rows are saved as panel_groups, as Settings saves them; the battery keeps only kWh.
+// Battery size and panels share one box (SumBox): a total, or count × size rows that add up.
 const STEP_SUMS = {
   size: { unit: 'kWh', each: 'kWh', per: 1, ph: '5.12', totPh: '26.5', add: '+ Another battery size', sizeLabel: 'kWh each', ok: (e) => e > 0 },
   panels: { unit: 'kW', each: 'W', per: 1000, ph: '450', totPh: '9', add: '+ Another panel size', sizeLabel: 'Watts each', ok: (e) => Number.isInteger(e) && e >= 50 && e <= 1000 },
@@ -373,9 +371,80 @@ const STEP_SUMS = {
 // typed as text, so a comma keyboard's 5,12 reads as 5.12
 const stepNum = (v) => (v ?? '') === '' ? NaN : Number(String(v).replace(',', '.'));
 const stepFix = (x) => String(+x.toFixed(2));
+window.stepNum = stepNum;
+
+// What a sum box holds now: its value, whether it can be saved, and (By size) the rows
+// typed. A row counts once its size is typed; a fresh "1 ×" row on its own changes nothing.
+function sumOf(kind, mode, tot, rows) {
+  const sum = STEP_SUMS[kind];
+  if (mode === 'total') {
+    const v = stepNum(tot);
+    return { empty: (tot ?? '') === '', ok: (tot ?? '') === '' || v > 0, value: v > 0 ? v : NaN, filled: [] };
+  }
+  const whole = (x, lo, hi) => Number.isInteger(stepNum(x)) && stepNum(x) >= lo && stepNum(x) <= hi;
+  const filled = rows.filter(r => r.e !== '');
+  const ok = filled.every(r => whole(r.c, 1, 2000) && sum.ok(stepNum(r.e)));
+  // whole products added first, then divided once: 20 × 450 + 6 × 550 is 12.3 kW exactly,
+  // which the database checks panel_groups against (0053)
+  const value = filled.length && ok ? filled.reduce((t, r) => t + stepNum(r.c) * stepNum(r.e), 0) / sum.per : NaN;
+  return { empty: !filled.length, ok, value, filled };
+}
+window.sumOf = sumOf;
+// The large field the steps use: a unit before or after, a numeric keyboard, typed as text.
+function StepField({ id, value, onChange, label, pre, unit, inputMode, ph, invalid, describedBy }) {
+  return (
+    <div className={'fs-in' + (invalid ? ' bad' : '')}>
+      {pre && <span className="fs-unit">{pre}</span>}
+      <input id={id} type="text" inputMode={inputMode} autoComplete="off" aria-label={label} aria-invalid={invalid || undefined}
+             aria-describedby={describedBy} placeholder={ph} value={value} onChange={e => onChange(e.target.value)} />
+      {unit && <span className="fs-unit">{unit}</span>}
+    </div>
+  );
+}
+window.StepField = StepField;
+// Battery size and panels: Total or By size, the value on the switch's line in its own place,
+// so nothing moves as it changes. Controlled: the caller holds mode, total and rows.
+function SumBox({ kind, mode, onMode, tot, onTot, rows, onRows, label }) {
+  const sum = STEP_SUMS[kind];
+  const now = sumOf(kind, mode, tot, rows);
+  const setRow = (i, k, x) => onRows(rows.map((r, j) => j === i ? { ...r, [k]: x } : r));
+  return (
+    <div className="fs-sum">
+      <div className="fs-sumhead">
+        <div className="fs-seg" role="group" aria-label="How to enter it">
+          <button type="button" className={mode === 'total' ? 'on' : ''} aria-pressed={mode === 'total'} onClick={() => onMode('total')}>Total</button>
+          <button type="button" className={mode === 'rows' ? 'on' : ''} aria-pressed={mode === 'rows'} onClick={() => onMode('rows')}>By size</button>
+        </div>
+        <b className={'fs-val mono' + (now.value > 0 ? ' ' + kind : '')} aria-live="polite">{now.value > 0 ? stepFix(now.value) : '—'}<small>{sum.unit}</small></b>
+      </div>
+      {mode === 'total' ? <StepField value={tot} onChange={onTot} label={label + ' in total'} unit={sum.unit} inputMode="decimal" ph={sum.totPh} invalid={!now.ok} /> : (
+        <div className="fs-rows">
+          {rows.map((r, i) => (
+            <div key={i} className="fs-row">
+              <input className="fs-cnt mono" type="text" inputMode="numeric" autoComplete="off" aria-label={'How many, size ' + (i + 1)}
+                     value={r.c} onChange={e => setRow(i, 'c', e.target.value)} />
+              <span className="fs-times" aria-hidden="true">×</span>
+              <StepField value={r.e} onChange={x => setRow(i, 'e', x)} label={sum.sizeLabel + ', size ' + (i + 1)} unit={sum.each}
+                         inputMode={kind === 'panels' ? 'numeric' : 'decimal'} ph={sum.ph} />
+              <button type="button" className="fs-rm" aria-label={'Remove size ' + (i + 1)} title="Remove"
+                      style={rows.length === 1 ? { visibility: 'hidden' } : undefined}
+                      onClick={() => onRows(rows.filter((_, j) => j !== i))}><TrashIcon /></button>
+            </div>
+          ))}
+          <button type="button" className="fs-add" onClick={() => onRows([...rows, { c: '1', e: '' }])}>{sum.add}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+window.SumBox = SumBox;
+// the rows a saved plant opens on: its panel groups, or one empty row
+const rowsFrom = (groups) => Array.isArray(groups) && groups.length ? groups.map(g => ({ c: String(g.count), e: String(g.watts) })) : [{ c: '1', e: '' }];
+window.rowsFrom = rowsFrom;
 
 // One step's boxes. Save stays off until the value is one the database takes. A step opened
 // again (Back, or a step bar) starts from what is saved.
+// Panels' rows are saved as panel_groups, as Settings saves them; the battery keeps only kWh.
 function StepForm({ id, cfg, busy, onSave, onSkip }) {
   const sum = STEP_SUMS[id];
   const groups = Array.isArray(cfg.panel_groups) && cfg.panel_groups.length ? cfg.panel_groups : null;
@@ -384,65 +453,27 @@ function StepForm({ id, cfg, busy, onSave, onSkip }) {
     : id === 'size' ? (cfg.battery_kwh > 0 ? String(cfg.battery_kwh) : '')
     : !groups && cfg.system_kwp > 0 ? String(cfg.system_kwp) : '');
   const [mode, setMode] = useState(id === 'panels' && groups ? 'rows' : 'total');
-  const [rows, setRows] = useState(() => groups ? groups.map(g => ({ c: String(g.count), e: String(g.watts) })) : [{ c: '1', e: '' }]);
+  const [rows, setRows] = useState(() => rowsFrom(groups));
   const box = useRef(null);
   useEffect(() => { box.current?.querySelector('input')?.focus(); }, [mode]);
   const whole = (x, lo, hi) => Number.isInteger(stepNum(x)) && stepNum(x) >= lo && stepNum(x) <= hi;
-  // a row counts once its size is typed; a fresh "1 ×" row on its own changes nothing
-  const filled = rows.filter(r => r.e !== '');
-  const rowsOk = filled.length > 0 && filled.every(r => whole(r.c, 1, 2000) && sum && sum.ok(stepNum(r.e)));
-  const total = !sum ? NaN : mode === 'total' ? (stepNum(v) > 0 ? stepNum(v) : NaN)
-    : rowsOk ? filled.reduce((t, r) => t + stepNum(r.c) * stepNum(r.e) / sum.per, 0) : NaN;
-  const ok = id === 'rate' ? stepNum(v) > 0 : id === 'reserve' ? whole(v, 5, 50) : total > 0;
+  const now = sum ? sumOf(id, mode, v, rows) : null;
+  const ok = id === 'rate' ? stepNum(v) > 0 : id === 'reserve' ? whole(v, 5, 50) : now.value > 0;
   const save = (e) => {
     e.preventDefault();
     if (!ok) return;
     // the way on screen is the one saved; the other is only kept to switch back to
     onSave(id === 'rate' ? { tariff_import: stepNum(v) } : id === 'reserve' ? { battery_reserve_pct: stepNum(v) }
-      : id === 'size' ? { battery_kwh: +total.toFixed(3) }
-      : mode === 'total' ? { system_kwp: stepNum(v), panel_groups: null }
-      : { system_kwp: total, panel_groups: filled.map(r => ({ count: stepNum(r.c), watts: stepNum(r.e) })) });
+      : id === 'size' ? { battery_kwh: +now.value.toFixed(3) }
+      : mode === 'total' ? { system_kwp: now.value, panel_groups: null }
+      : { system_kwp: now.value, panel_groups: now.filled.map(r => ({ count: stepNum(r.c), watts: stepNum(r.e) })) });
   };
-  const setRow = (i, k, x) => setRows(rs => rs.map((r, j) => j === i ? { ...r, [k]: x } : r));
   const sym = window.moneySymbol ? window.moneySymbol() : 'R';
-  const field = (value, onChange, label, pre, unit, mode2, ph) => (
-    <div className="fs-in">
-      {pre && <span className="fs-unit">{pre}</span>}
-      <input type="text" inputMode={mode2} autoComplete="off" aria-label={label} placeholder={ph} value={value} onChange={e => onChange(e.target.value)} />
-      {unit && <span className="fs-unit">{unit}</span>}
-    </div>
-  );
   return (
     <form className="fs-form" onSubmit={save} ref={box}>
-      {id === 'rate' && field(v, setV, STEPS.rate.title, sym, '/unit', 'decimal', '3.40')}
-      {id === 'reserve' && field(v, setV, STEPS.reserve.title, null, '%', 'numeric', '20')}
-      {sum && (
-        <>
-          <div className="fs-sumhead">
-            <div className="fs-seg" role="group" aria-label="How to enter it">
-              <button type="button" className={mode === 'total' ? 'on' : ''} aria-pressed={mode === 'total'} onClick={() => setMode('total')}>Total</button>
-              <button type="button" className={mode === 'rows' ? 'on' : ''} aria-pressed={mode === 'rows'} onClick={() => setMode('rows')}>By size</button>
-            </div>
-            <b className={'fs-val mono' + (total > 0 ? ' ' + id : '')} aria-live="polite">{total > 0 ? stepFix(total) : '—'}<small>{sum.unit}</small></b>
-          </div>
-          {mode === 'total' ? field(v, setV, STEPS[id].title + ' in total', null, sum.unit, 'decimal', sum.totPh) : (
-            <div className="fs-rows">
-              {rows.map((r, i) => (
-                <div key={i} className="fs-row">
-                  <input className="fs-cnt mono" type="text" inputMode="numeric" autoComplete="off" aria-label={'How many, size ' + (i + 1)}
-                         value={r.c} onChange={e => setRow(i, 'c', e.target.value)} />
-                  <span className="fs-times" aria-hidden="true">×</span>
-                  {field(r.e, x => setRow(i, 'e', x), sum.sizeLabel + ', size ' + (i + 1), null, sum.each, id === 'panels' ? 'numeric' : 'decimal', sum.ph)}
-                  <button type="button" className="fs-rm" aria-label={'Remove size ' + (i + 1)} title="Remove"
-                          style={rows.length === 1 ? { visibility: 'hidden' } : undefined}
-                          onClick={() => setRows(rs => rs.filter((_, j) => j !== i))}><TrashIcon /></button>
-                </div>
-              ))}
-              <button type="button" className="fs-add" onClick={() => setRows(rs => [...rs, { c: '1', e: '' }])}>{sum.add}</button>
-            </div>
-          )}
-        </>
-      )}
+      {id === 'rate' && <StepField value={v} onChange={setV} label={STEPS.rate.title} pre={sym} unit="/unit" inputMode="decimal" ph="3.40" />}
+      {id === 'reserve' && <StepField value={v} onChange={setV} label={STEPS.reserve.title} unit="%" inputMode="numeric" ph="20" />}
+      {sum && <SumBox kind={id} mode={mode} onMode={setMode} tot={v} onTot={setV} rows={rows} onRows={setRows} label={STEPS[id].title} />}
       <div className="fs-actions">
         <button type="submit" className="save-btn" disabled={!ok || busy}>{busy ? 'Saving…' : 'Save'}</button>
         <button type="button" className="fs-skip" onClick={onSkip} disabled={busy}>Skip</button>

@@ -1963,63 +1963,53 @@ function SunSynkConnectionSection({ onChanged, links }) {
 // Per-plant numbers live in plant_config and are the user's to edit. Timezone and
 // currency arrive from SunSynk at link time; the rest are theirs. The roof is not asked
 // for: the planned best-day line (BEST_DAY_CURVE.md) would learn from the plant's readings.
-// One form, three sections, one floating save bar.
+// One form, three sections, one floating save bar. The fields are First steps' own
+// (StepField, SumBox in app.jsx, SOLAR-170), so a value is entered the same way in both.
 function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   const { useState, useEffect } = React;
   const plant = (me?.plants || []).find(p => p.id === plantId) || (me?.plants || [])[0];
   const cfg = plant?.config || {};
-  const [f, setF] = useState(cfg);
+  // The battery keeps only its kWh, so it opens on Total; panels open on By size when rows
+  // are saved (panel_groups), else on Total.
+  const fromCfg = (c) => {
+    const groups = Array.isArray(c?.panel_groups) && c.panel_groups.length ? c.panel_groups : null;
+    return {
+      rate: c?.tariff_import > 0 ? String(c.tariff_import) : '',
+      res: String(c?.battery_reserve_pct ?? 20),
+      bMode: 'total', bTot: c?.battery_kwh > 0 ? String(c.battery_kwh) : '', bRows: window.rowsFrom(null),
+      pMode: groups ? 'rows' : 'total', pTot: !groups && c?.system_kwp > 0 ? String(c.system_kwp) : '', pRows: window.rowsFrom(groups),
+    };
+  };
+  const [f, setF] = useState(() => fromCfg(cfg));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
-  // Panel capacity as one Total or By panel. Kept out of f: flipping it alone is not an unsaved
-  // change. A plant with nothing set opens on By panel: a household counts panels, it does not
-  // know its kW, and SunSynk's figure is no longer seeded (0054).
-  const savedList = Array.isArray(cfg?.panel_groups) && cfg.panel_groups.length > 0;
-  const capModeOf = (c) => Array.isArray(c?.panel_groups) && c.panel_groups.length ? 'panels'
-    : c?.system_kwp == null ? 'panels' : 'total';
-  const [capMode, setCapMode] = useState(capModeOf(cfg));
-  const [capEditing, setCapEditing] = useState(null);   // 'total' or the row index typed in and not yet left
-  const listRef = React.useRef(null);
-  useEffect(() => { setF(plant?.config || {}); setCapMode(capModeOf(plant?.config)); }, [plant?.id, JSON.stringify(plant?.config || {})]);
-  const set = (k, v) => setF(x => ({ ...x, [k]: v }));
-  const num = (v) => v === '' || v == null ? null : Number(v);
-  // By panel rows hold what is typed. A row with both boxes empty is skipped; any other needs
-  // whole numbers in the database's range (panel_kwp, 0053), or Save stays off.
-  const whole = (v, lo, hi) => v !== '' && v != null && Number.isInteger(Number(v)) && Number(v) >= lo && Number(v) <= hi;
-  const panelRows = f.panel_groups?.length ? f.panel_groups : [{ count: '', watts: '' }];
-  const filled = (r) => (r.count ?? '') !== '' || (r.watts ?? '') !== '';
-  const filledRows = panelRows.filter(filled);
-  const typedRows = filledRows.map(r => ({ count: Number(r.count), watts: Number(r.watts) }));
-  const rowOk = (r) => whole(r.count, 1, 2000) && whole(r.watts, 50, 1000);
-  const panelWatts = filledRows.filter(rowOk).reduce((s, r) => s + r.count * r.watts, 0);
-  const setRow = (i, k, v) => { setCapEditing(i); set('panel_groups', panelRows.map((r, j) => j === i ? { ...r, [k]: v } : r)); };
-  // after Add or Remove, focus lands on a row's panel count rather than dropping to the page
-  const focusRow = (i) => setTimeout(() => listRef.current?.querySelectorAll('.panel-row')[i]?.querySelector('input')?.focus());
-  // Numbers are compared as numbers, not as typed: 12.60 over a stored 12.6, or a figure
-  // typed and taken back out, is not an unsaved change.
-  const savedKwp = cfg.system_kwp ?? null;
-  // untouched, a stored total is kept whatever it is
-  const totalOk = num(f.system_kwp) === savedKwp || (f.system_kwp ?? '') === '' || Number(f.system_kwp) > 0;
-  const capBad = capMode === 'total' ? !totalOk : !filledRows.every(rowOk);
-  // Capacity counts as changed only as the switch shows it: the Total box, or the filled rows.
-  // Blank rows and edits left behind in the other mode are not a change, so an empty By panel
-  // never saves over a stored Total. Against a saved list, though, the switch itself is the
-  // change: Total on screen means one figure and no list, even at the same kW, and emptying
-  // the rows means no capacity at all.
-  const capDirty = capMode === 'total' ? num(f.system_kwp) !== savedKwp || savedList
-    : filledRows.length ? JSON.stringify(typedRows) !== JSON.stringify(cfg.panel_groups)
-    : savedList;
-  // The other boxes read the same way: what was typed counts as a change only if the number
-  // changed. No `...rest` here: every .jsx is transpiled into the one global scope, and Babel's
-  // rest helper keeps its key list in a shared `_excluded`, so a rest pattern in this file
-  // silently rewrites what Card (components.jsx) strips from its own props.
-  const sansCap = (x) => {
-    const o = { ...x };
-    delete o.system_kwp; delete o.panel_groups;
-    ['tariff_import', 'battery_kwh', 'battery_reserve_pct'].forEach(k => { o[k] = num(o[k]); });
-    return o;
+  const [tried, setTried] = useState(false);   // Save pressed with a box still wrong: its line shows
+  useEffect(() => { setF(fromCfg(plant?.config)); setTried(false); }, [plant?.id, JSON.stringify(plant?.config || {})]);
+  const set = (k) => (v) => setF(x => ({ ...x, [k]: v }));
+  const n = window.stepNum;
+  const whole = (x, lo, hi) => Number.isInteger(n(x)) && n(x) >= lo && n(x) <= hi;
+  const batt = window.sumOf('size', f.bMode, f.bTot, f.bRows);
+  const pan = window.sumOf('panels', f.pMode, f.pTot, f.pRows);
+  // An empty rate is 0 (savings show as zero). A stored reserve outside 5..50, left alone, is kept.
+  const rateOk = f.rate === '' || n(f.rate) >= 0;
+  const resOk = whole(f.res, 5, 50) || n(f.res) === (cfg.battery_reserve_pct ?? 20);
+  // What Save sends: the way on screen for battery and panels, empty meaning none
+  const patch = {
+    tariff_import: f.rate === '' ? 0 : n(f.rate),
+    battery_kwh: batt.empty ? null : +batt.value.toFixed(3),
+    battery_reserve_pct: n(f.res),
+    ...(pan.empty ? { system_kwp: null, panel_groups: null }
+      : f.pMode === 'total' ? { system_kwp: pan.value, panel_groups: null }
+      : { system_kwp: pan.value, panel_groups: pan.filled.map(r => ({ count: n(r.c), watts: n(r.e) })) }),
   };
-  const dirty = capDirty || JSON.stringify(sansCap(f)) !== JSON.stringify(sansCap(cfg));
+  const bad = { rate: !rateOk, res: !resOk, batt: !batt.ok, pan: !pan.ok };
+  // Numbers are compared as numbers, not as typed: 12.60 over a stored 12.6 is not a change.
+  // Switching Total and By size alone is not a change unless what would be saved differs.
+  const groupsOf = (g) => JSON.stringify(Array.isArray(g) && g.length ? g.map(x => ({ count: Number(x.count), watts: Number(x.watts) })) : null);
+  const dirty = Object.values(bad).some(Boolean)
+    || patch.tariff_import !== (cfg.tariff_import ?? 0) || patch.battery_kwh !== (cfg.battery_kwh ?? null)
+    || patch.battery_reserve_pct !== (cfg.battery_reserve_pct ?? 20) || patch.system_kwp !== (cfg.system_kwp ?? null)
+    || groupsOf(patch.panel_groups) !== groupsOf(cfg.panel_groups);
   // App holds the plant still while there are unsaved changes; a switch asked for meanwhile
   // says so in the save bar until the changes are saved or discarded.
   useEffect(() => { onDirty && onDirty(dirty); }, [dirty]);
@@ -2027,67 +2017,41 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   const [blocked, setBlocked] = useState(false);
   useEffect(() => { if (switchBlocked && dirty) setBlocked(true); }, [switchBlocked]);
   useEffect(() => { if (!dirty) setBlocked(false); }, [dirty]);
-  // A box turns red, with one line saying what to enter, once focus leaves a row typed in (or
-  // Save is pressed), so a number part-way typed never flashes an error. Clicking back into a
-  // red box keeps it red until it is changed.
-  const capBlur = (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setCapEditing(null); };
-  const rowShown = (r, i) => i !== capEditing && filled(r);
-  const badRow = panelRows.find((r, i) => rowShown(r, i) && !rowOk(r));
-  const boxMsg = (v, empty, fraction, range) => (v ?? '') === '' ? empty : Number.isInteger(Number(v)) ? range : fraction;
-  const capKw = capMode === 'total' ? (num(f.system_kwp) || 0) : panelWatts / 1000;
-  const capErr = capMode === 'total' ? (capEditing !== 'total' && !totalOk ? 'Enter more than 0 kW.' : null)
-    : !badRow ? null
-    : !whole(badRow.count, 1, 2000) ? boxMsg(badRow.count, 'Enter the number of panels.', 'Enter a whole number of panels.', 'Enter 1 to 2000 panels.')
-    : boxMsg(badRow.watts, 'Enter the watts per panel.', 'Enter a whole number of watts.', 'Enter 50 to 1000 W.');
 
   // South Africa only, for now: no feed-in rate, currency or timezone to set. Those
   // columns keep what SunSynk reported at link time and are never sent from here.
   const save = async () => {
     if (!plant) return;
-    // A capacity box still wrong: Save stays pressable (the bar is shared with Tariff and Battery)
-    // and instead shows the message and puts focus on the box to fix.
-    if (capBad) {
-      setCapEditing(null);
-      setTimeout(() => document.querySelector('#settings-plant input[aria-invalid="true"]')?.focus());
+    // A box still wrong: Save stays pressable (the bar is shared) and instead shows each
+    // wrong box's line and puts focus on the first
+    if (Object.values(bad).some(Boolean)) {
+      setTried(true);
+      setTimeout(() => document.querySelector('.settings-page .fs-in.bad input, .settings-page .sset-err')?.closest('.sset-row')?.querySelector('input')?.focus());
       return;
     }
     setBusy(true); setMsg(null);
     try {
-      // Total clears the list; By panel sends the list and its total, which the database checks
-      // against the list (whole watts over 1000 is already to 3 dp)
-      const patch = {
-        ...(!capDirty ? {} : capMode === 'total' ? { system_kwp: num(f.system_kwp), panel_groups: null }
-          : filledRows.length ? { system_kwp: panelWatts / 1000, panel_groups: typedRows }
-          : { system_kwp: null, panel_groups: null }),
-        tariff_import: num(f.tariff_import) ?? 0,
-        battery_kwh: num(f.battery_kwh),
-        // untouched, a stored reserve outside 5..50 is kept; edited, it is held to 5..50 even if the box was never left
-        battery_reserve_pct: num(f.battery_reserve_pct) === (cfg.battery_reserve_pct ?? null) ? (cfg.battery_reserve_pct ?? 20)
-          : Math.min(50, Math.max(5, Math.round(num(f.battery_reserve_pct) ?? cfg.battery_reserve_pct ?? 20))),
-      };
       await window.savePlantConfig(plant.id, patch);
-      setMsg('Saved.'); onSaved && onSaved();
+      setMsg('Saved.'); setTried(false); onSaved && onSaved();
     } catch (e) { setMsg(e.message); }
     finally { setBusy(false); }
   };
 
   if (!plant) return <SettingsSection id="plant" title="Plant"><div className="field-note">No plant connected yet.</div></SettingsSection>;
-  const sym = window.moneySymbol ? window.moneySymbol() : (f.currency || '');
+  const sym = window.moneySymbol ? window.moneySymbol() : (cfg.currency || '');
+  const err = (on, text) => on && tried ? <p className="sset-err" role="alert">{text}</p> : null;
   return (
     <>
       {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
       <SettingsSection id="tariff" title="Tariff">
         <div className="conn-row sset-row">
-          <label className="conn-text" htmlFor="tariff-import">
+          <div className="conn-text">
             <span className="conn-user">Electricity rate</span>
-            <span className="conn-meta">{f.tariff_import > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}</span>
-          </label>
-          <div className="conn-actions">
-            <div className="unit-input wide">
-              <input id="tariff-import" className="input mono" type="number" inputMode="decimal" step="0.01" min="0" placeholder="3.40" aria-describedby="tariff-import-unit"
-                     value={f.tariff_import ?? ''} onChange={e => set('tariff_import', e.target.value)} />
-              <span id="tariff-import-unit" className="unit">{sym}/unit</span>
-            </div>
+            <span className="conn-meta">{n(f.rate) > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}</span>
+          </div>
+          <div className="conn-actions sset-one">
+            <window.StepField value={f.rate} onChange={set('rate')} label="Electricity rate" pre={sym} unit="/unit" inputMode="decimal" ph="3.40" invalid={tried && bad.rate} />
+            {err(bad.rate, 'Enter a price, like 3.40.')}
           </div>
         </div>
       </SettingsSection>
@@ -2095,100 +2059,44 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
       <SettingsSection id="battery" title="Battery">
         {/* rows like Logins and Account: name and hint on the left, control on the right, a rule between */}
         <div className="conn-row sset-row">
-          <label className="conn-text" htmlFor="batt-kwh">
+          <div className="conn-text">
             <span className="conn-user">Capacity</span>
             <span className="conn-meta">Every battery added together.</span>
-          </label>
-          <div className="conn-actions">
-            <div className="unit-input">
-              <input id="batt-kwh" className="input mono" type="number" inputMode="decimal" step="0.1" min="0" placeholder="26.5" aria-describedby="batt-kwh-unit"
-                     value={f.battery_kwh ?? ''} onChange={e => set('battery_kwh', e.target.value)} />
-              <span id="batt-kwh-unit" className="unit">kWh</span>
-            </div>
+          </div>
+          <div className="sset-sum">
+            <window.SumBox kind="size" mode={f.bMode} onMode={set('bMode')} tot={f.bTot} onTot={set('bTot')} rows={f.bRows} onRows={set('bRows')} label="Battery size" />
+            {err(bad.batt, f.bMode === 'total' ? 'Enter more than 0 kWh.' : 'Enter whole batteries and the kWh of one.')}
           </div>
         </div>
         <div className="conn-row sset-row">
-          <label className="conn-text" htmlFor="batt-reserve">
+          <div className="conn-text">
             <span className="conn-user">Reserve</span>
             <span className="conn-meta">Discharging stops at this level.</span>
-          </label>
-          {/* an edited box settles into 5 to 50 when it loses focus */}
-          <div className="conn-actions">
-            <div className="unit-input">
-              <input id="batt-reserve" className="input mono" type="number" inputMode="numeric" min="5" max="50" step="1" aria-describedby="batt-reserve-unit"
-                     value={f.battery_reserve_pct ?? ''} onChange={e => set('battery_reserve_pct', e.target.value)}
-                     onBlur={e => {
-                       if (num(f.battery_reserve_pct) === (cfg.battery_reserve_pct ?? null)) return;   // untouched: keep a stored value outside the range
-                       const v = Math.round(Number(e.target.value));
-                       set('battery_reserve_pct', e.target.value === '' || isNaN(v) ? (cfg.battery_reserve_pct ?? 20) : Math.min(50, Math.max(5, v)));
-                     }} />
-              <span id="batt-reserve-unit" className="unit">%</span>
-            </div>
+          </div>
+          <div className="conn-actions sset-one">
+            <window.StepField value={f.res} onChange={set('res')} label="Reserve" unit="%" inputMode="numeric" ph="20" invalid={tried && bad.res} />
+            {err(bad.res, 'Enter 5 to 50.')}
           </div>
         </div>
       </SettingsSection>
 
       <SettingsSection id="plant" title="Plant">
         <div className="conn-row sset-row">
-          <div className="conn-text cap-text">
-            {/* the answer sits on the label's line in both modes and at every width, so it reads before the boxes */}
-            <span className="cap-head"><span id="plant-kwp-q" className="conn-user">Solar panels</span>
-              <span className={'cap-kw mono' + (capKw > 0 ? '' : ' empty')} aria-live="polite">{capKw > 0 ? +capKw.toFixed(2) + ' kW' : '— kW'}</span></span>
+          <div className="conn-text">
+            <span className="conn-user">Solar panels</span>
             <span className="conn-meta">What they make in full sun.</span>
           </div>
-          {/* The switch belongs to what it switches, so it sits over the boxes on the left
-              rather than alone at the far edge of a wide card. */}
-          <div className="cap-switch">
-            <Segmented size="sm" value={capMode} onChange={setCapMode}
-              options={[{ value: 'panels', label: 'Panels' }, { value: 'total', label: 'Total kW' }]} />
+          <div className="sset-sum">
+            <window.SumBox kind="panels" mode={f.pMode} onMode={set('pMode')} tot={f.pTot} onTot={set('pTot')} rows={f.pRows} onRows={set('pRows')} label="Solar panels" />
+            {err(bad.pan, f.pMode === 'total' ? 'Enter more than 0 kW.' : 'Enter whole panels and 50 to 1000 W each.')}
           </div>
-          {capMode === 'total' ? (
-            <div className="cap-body cap-total" onBlur={capBlur}>
-              <div className="unit-input">
-                <input className="input mono" type="number" inputMode="decimal" step="0.01" min="0" placeholder="12.6" aria-labelledby="plant-kwp-q plant-kwp-unit"
-                       aria-invalid={!!capErr} aria-describedby={capErr ? 'cap-err' : undefined} value={f.system_kwp ?? ''}
-                       onChange={e => { setCapEditing('total'); set('system_kwp', e.target.value); }} />
-                <span id="plant-kwp-unit" className="unit">kW</span>
-              </div>
-              {capErr && <p id="cap-err" className="cap-err" role="alert">{capErr}</p>}
-            </div>
-          ) : (
-            <div className="cap-body">
-              <div className="panel-list" ref={listRef}>
-                {panelRows.map((r, i) => {
-                  const countBad = rowShown(r, i) && !whole(r.count, 1, 2000), wattsBad = rowShown(r, i) && !whole(r.watts, 50, 1000);
-                  return (
-                    <div key={i} className="panel-row" onBlur={capBlur}>
-                      <div className="unit-input panel-count">
-                        <input className="input mono" type="number" inputMode="numeric" min="1" max="2000" step="1" placeholder="20" aria-label={'Panels, row ' + (i + 1)}
-                               aria-invalid={countBad} aria-describedby={countBad ? 'cap-err' : undefined} value={r.count ?? ''} onChange={e => setRow(i, 'count', e.target.value)} />
-                      </div>
-                      <span className="panel-of" aria-hidden="true">panels of</span>
-                      <div className="unit-input panel-watts">
-                        <input className="input mono" type="number" inputMode="numeric" min="50" max="1000" step="1" placeholder="450" aria-label={'Watts per panel, row ' + (i + 1)}
-                               aria-invalid={wattsBad} aria-describedby={wattsBad ? 'cap-err' : undefined} value={r.watts ?? ''} onChange={e => setRow(i, 'watts', e.target.value)} />
-                        <span className="unit" aria-hidden="true">W</span>
-                      </div>
-                      {/* a lone empty row has nothing to remove; hidden, not gone, so the columns keep their width */}
-                      <button type="button" className="panel-del" aria-label={'Remove row ' + (i + 1)} title="Remove"
-                              style={panelRows.length === 1 && !filled(r) ? { visibility: 'hidden' } : undefined}
-                              onClick={() => { setCapEditing(null); set('panel_groups', panelRows.filter((_, j) => j !== i)); focusRow(Math.max(0, Math.min(i, panelRows.length - 2))); }}><TrashIcon /></button>
-                    </div>
-                  );
-                })}
-              </div>
-              {/* always there, so an error arriving on blur never moves the button being clicked */}
-              <p id="cap-err" className="cap-err" aria-live="polite">{capErr}</p>
-              <button type="button" className="panel-add" onClick={() => { set('panel_groups', [...panelRows, { count: '', watts: '' }]); focusRow(panelRows.length); }}>Add another panel size</button>
-            </div>
-          )}
         </div>
       </SettingsSection>
 
       {(dirty || msg) && (
         <div className={'save-bar' + (dirty ? ' dirty' : '')} role="status">
           <span className="save-text">{!dirty ? msg : blocked ? 'Save or discard before switching plant.' : 'Unsaved changes'}</span>
-          {dirty && <button type="button" className="ghost-btn" onClick={() => { setF(cfg); setCapMode(capModeOf(cfg)); setMsg(null); }} disabled={busy}>Discard</button>}
+          {dirty && <button type="button" className="ghost-btn" onClick={() => { setF(fromCfg(cfg)); setTried(false); setMsg(null); }} disabled={busy}>Discard</button>}
           {dirty && <button type="button" className="save-btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
         </div>
       )}

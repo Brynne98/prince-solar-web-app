@@ -849,45 +849,22 @@
   /* no rules between these rows (the tiles already box each answer); 20px apart, like Display's fields */
   .conn-row.sset-row { border-top: none; padding: 10px 0; }
   .sset-body > .sset-row:last-child { padding-bottom: 0; }
-  .unit-input.wide { width: 150px; }
-  .unit-input.wide .input { padding-right: 66px; }   /* room for "R/unit" */
-  /* a number box with its unit inside it, e.g. "26.5 kWh" */
-  .unit-input { position: relative; width: 128px; }
-  .unit-input .input { padding-right: 46px; -moz-appearance: textfield; }
-  .unit-input .input::-webkit-outer-spin-button, .unit-input .input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  .unit-input .unit { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--dim); pointer-events: none; }
-  .cap-switch { flex-basis: 100%; margin-top: 2px; }   /* the switch leads the boxes it governs */
-  /* panel capacity: the Total box, or the By panel rows, under the row's name and switch */
-  .cap-body { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-  .cap-text { flex: 1 1 auto; min-width: 0; }
-  .sset-row .conn-text > .cap-head { width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-  .cap-kw { font-size: 15px; color: var(--text); font-variant-numeric: tabular-nums; }
-  .cap-kw.empty { color: var(--dim); }
-  .panel-add { background: none; border: none; padding: 0; color: var(--pv); font-size: 13px; font-weight: 600; cursor: pointer; }
-  .panel-add:hover { text-decoration: underline; text-underline-offset: 3px; }
-  .panel-add:focus-visible { outline: 2px solid var(--pv); outline-offset: 3px; border-radius: 3px; }
-  .panel-row > * { animation: conn-in .2s ease-out; }   /* an added row eases in, as a login row does */
-  @media (prefers-reduced-motion: reduce) { .panel-row > * { animation: none; } }
-  .cap-err { margin: 0; font-size: 12px; line-height: 1.5; color: var(--load); }
-  .cap-total { flex-direction: row; align-items: center; gap: 12px; }   /* the error sits beside the box, so it moves nothing */
-  /* By panel: count × watts and a remove per row. The two box columns give way on the narrowest
-     phones rather than push the remove out of the card. */
-  .panel-list { display: grid; grid-template-columns: minmax(0, 76px) min-content minmax(0, 96px) min-content; align-items: center; gap: 8px; width: max-content; max-width: 100%; }
-  .panel-row { display: contents; }
-  .panel-list .unit-input { width: auto; }
-  .panel-of { font-size: 13px; color: var(--muted); white-space: nowrap; }
-  .unit-input.panel-watts .input { padding-right: 32px; }   /* room for "W" */
-  @media (max-width: 355px) { .panel-list { grid-template-columns: minmax(0, 64px) min-content minmax(0, 84px) min-content; } }
-  .panel-del { width: 32px; height: 32px; display: grid; place-items: center; padding: 0; background: none; border: none; border-radius: 7px; color: var(--muted); cursor: pointer; transition: color .15s; }
-  .panel-del:hover { color: var(--text); }
-  .panel-del:focus-visible { outline: 2px solid var(--pv); outline-offset: -2px; }
-  @media (max-width: 600px) { .panel-del { width: 44px; height: 44px; } }   /* a finger-sized remove */
-  .cap-body .cap-err { min-height: 18px; }   /* the error's slot, kept even when there is none */
+  /* the fields are First steps' own (SOLAR-170): one field on the right, or the sum box under the name */
+  .sset-one { flex-direction: column; align-items: flex-end; gap: 6px; }
+  .sset-one .fs-in { width: 300px; height: 48px; }   /* one width for every field in Settings */
+  /* the sum box on the right like the single fields, its switch and value over the box */
+  .sset-sum { flex: none; width: 300px; max-width: 100%; display: flex; flex-direction: column; gap: 8px; }
+  .sset-row:has(> .sset-sum) { align-items: flex-start; }
+  .sset-sum .fs-in, .sset-sum .fs-cnt { height: 48px; }
+  .sset-err { margin: 0; font-size: 12px; line-height: 1.5; color: var(--load); }
   .input[aria-invalid="true"], .input[aria-invalid="true"]:focus { border-color: var(--load); }
   /* reserve's slider runs the row's full width under its name and box, filled to the value */
   /* pick one of a few (Plant, Battery, Display): described tiles across the row, native radios underneath */
   @media (max-width: 600px) {
     .sset-row > .conn-text { flex-basis: 100%; }   /* on a phone each control drops under its name */
+    .sset-one { align-items: stretch; width: 100%; }
+    .sset-one .fs-in { width: 100%; }
+    .sset-sum { width: 100%; }
   }
 
 
@@ -1340,6 +1317,8 @@
   .fs-bars .on i { background: var(--pv); }
   .fs-bars .on.cur i { box-shadow: 0 0 0 2px rgba(61,220,132,0.3); }
   .fs-in { display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line-2); }
+  .fs-sum { display: flex; flex-direction: column; gap: 12px; }
+  .fs-in.bad, .fs-in.bad:focus-within { border-color: var(--load); box-shadow: none; }
   .fs-in:focus-within, .fs-cnt:focus { border-color: var(--pv); box-shadow: 0 0 0 3px rgba(61,220,132,0.12); }
   .fs-in input { flex: 1; width: 100%; min-width: 0; background: none; border: none; outline: none; color: var(--text); font-family: var(--mono); font-size: 20px; font-weight: 600; }
   .fs-in input::placeholder { color: var(--dim); font-weight: 500; }
