@@ -2195,6 +2195,102 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   );
 }
 
+// Change password (SOLAR-155), for a user with an email login; Google-only users have no
+// password, so the section doesn't show. The current password is checked by signing in
+// with it, which also gives the fresh session Supabase wants before a password change.
+// Saving signs out every other device, so whoever had the old password is out.
+// "Reset password" in the password-changed email (?reset=1) arrives with it already open.
+function PasswordSection({ email }) {
+  const { useState, useEffect } = React;
+  // Account mounts again once the plant list arrives, so the ask is only peeked here and
+  // cleared when the form closes.
+  const [open, setOpen] = useState(() => window.resetAsked());
+  const [cur, setCur] = useState('');
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [bad, setBad] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null); // { text, ok }
+  useEffect(() => { if (open) document.getElementById('pw-current')?.focus(); }, [open]);
+
+  const close = () => { window.takeResetAsk(); setOpen(false); setCur(''); setPw(''); setPw2(''); setBad({}); };
+  const flag = (problems) => { setBad(problems); setTimeout(() => document.getElementById(Object.keys(problems)[0])?.focus()); };
+  const edited = (...ids) => setBad(b => {
+    if (!ids.some(id => b[id])) return b;
+    const next = { ...b };
+    ids.forEach(id => delete next[id]);
+    return next;
+  });
+  const check = () => {
+    const out = {};
+    if (!cur) out['pw-current'] = 'Enter your password';
+    // Matches the minimum set in Supabase (Auth → Email) and supabase/config.toml.
+    if (!pw) out['pw-new'] = 'Choose a password';
+    else if (pw.length < 8) out['pw-new'] = 'Use at least 8 characters';
+    else if (pw === cur) out['pw-new'] = 'That’s your current password';
+    if (!pw2) out['pw-confirm'] = 'Confirm your password';
+    else if (pw !== pw2) out['pw-confirm'] = 'Passwords don’t match';
+    return out;
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const problems = check();
+    if (Object.keys(problems).length) return flag(problems);
+    setBusy(true); setMsg(null); setBad({});
+    try {
+      const { error: wrong } = await window.sb.auth.signInWithPassword({ email, password: cur });
+      if (wrong?.code === 'invalid_credentials') return flag({ 'pw-current': 'Wrong password' });
+      if (wrong) throw wrong;
+      const { error } = await window.sb.auth.updateUser({ password: pw });
+      if (error) throw error;
+      const { error: others } = await window.sb.auth.signOut({ scope: 'others' }).catch(ex => ({ error: ex }));
+      close();
+      setMsg(others ? { text: 'Password changed. Other devices are still signed in.' }
+                    : { text: 'Password changed. Other devices are signed out.', ok: true });
+    } catch (ex) {
+      const x = window.explainAuthError(ex);
+      if (x.field) flag({ 'pw-new': x.text });
+      else setMsg({ text: x.text });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const label = (id, text, hint) => (
+    <label htmlFor={id}>{text}{bad[id] ? <span className="link-bad" id={id + '-err'}>{bad[id]}</span> : hint && <span>{hint}</span>}</label>
+  );
+  const field = (id, text, value, set, autoComplete, hint, also = []) => (
+    <div className={'field' + (id === 'pw-confirm' ? ' link-last' : '')}>
+      {label(id, text, hint)}
+      <window.LinkPassword id={id} autoComplete={autoComplete} value={value}
+                           onChange={(v) => { set(v); edited(id, ...also); }} invalid={window.invalidProps(id, bad[id])} />
+    </div>
+  );
+  return (
+    <SettingsSection id="password" title="Password">
+      <div className="conn-row">
+        <div className="conn-text"><div className="conn-meta">Changing it signs out your other devices.</div></div>
+        {!open && <div className="conn-actions"><button type="button" className="ghost-btn" onClick={() => { setMsg(null); setOpen(true); }}>Change password</button></div>}
+        {open && (
+          <form className="conn-form link-form" onSubmit={submit} noValidate aria-busy={busy}>
+            {/* The email, unseen, so a password manager knows which login to update. */}
+            <input type="email" autoComplete="username" value={email || ''} readOnly hidden />
+            {field('pw-current', 'Current password', cur, setCur, 'current-password')}
+            {field('pw-new', 'New password', pw, setPw, 'new-password', '8+ characters', ['pw-confirm'])}
+            {field('pw-confirm', 'Confirm password', pw2, setPw2, 'new-password')}
+            <div className="conn-form-actions">
+              <button type="button" className="ghost-btn" onClick={() => { setMsg(null); close(); }} disabled={busy}>Cancel</button>
+              <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>{busy ? 'Saving…' : 'Save password'}</button>
+            </div>
+          </form>
+        )}
+      </div>
+      {msg && <div className="field-note" role="status" style={msg.ok ? undefined : { color: 'var(--load)' }}>{msg.text}</div>}
+    </SettingsSection>
+  );
+}
+
 function DeleteAccountSection({ email }) {
   const { useState } = React;
   const [busy, setBusy] = useState(false);
@@ -2245,8 +2341,9 @@ function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirt
 // Account: the person. Sign out is in the account menu only.
 function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
   const { useState, useEffect } = React;
-  const [email, setEmail] = useState(null);
-  useEffect(() => { window.sb.auth.getSession().then(({ data }) => setEmail(data?.session?.user?.email || null)).catch(() => {}); }, []);
+  const [user, setUser] = useState(null);
+  useEffect(() => { window.sb.auth.getSession().then(({ data }) => setUser(data?.session?.user || null)).catch(() => {}); }, []);
+  const email = user?.email || null;
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
       <div className="settings-page">
@@ -2255,6 +2352,7 @@ function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
           {email && <p className="mono">{email}</p>}
         </div>
         <SunSynkConnectionSection onChanged={onPlantConfigSaved} links={links} />
+        {email && user.app_metadata?.providers?.includes('email') && <PasswordSection email={email} />}
         <DeleteAccountSection email={email} />
         <div className="app-version mono">
           {window.APP_VERSION} · <a href="terms.html" target="_blank" rel="noopener">Terms</a> · <a href="privacy.html" target="_blank" rel="noopener">Privacy</a>

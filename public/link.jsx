@@ -94,11 +94,11 @@ const NO_PLANT_TEXT = 'signed in, but SunSynk lists no plant for it. The install
 
 /** Password input in the app's field style, with a show button. type="button": inside a
  *  form a bare button submits. */
-function LinkPassword({ value, onChange, invalid }) {
+function LinkPassword({ id = 'ss-pass', autoComplete = 'off', value, onChange, invalid }) {
   const [show, setShow] = React.useState(false);
   return (
     <div className="link-pw">
-      <input id="ss-pass" className="input" type={show ? 'text' : 'password'} value={value} autoComplete="off"
+      <input id={id} className="input" type={show ? 'text' : 'password'} value={value} autoComplete={autoComplete}
              onChange={(e) => onChange(e.target.value)} {...invalid} />
       <button type="button" className="link-eye" onClick={() => setShow(v => !v)}
               aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show}>
@@ -217,6 +217,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
   );
 }
 window.LinkForm = LinkForm;
+window.LinkPassword = LinkPassword;
 
 /**
  * Sits inside AuthGate. Hands the login list to its child, which shows the dashboard

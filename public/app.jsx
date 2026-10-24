@@ -347,7 +347,7 @@ function BootShell() {
   // last sign-out: most likely a new account on its way to Connect SunSynk. A skeleton
   // would flash a dashboard it will never get, so show the empty sign-in backdrop.
   if (!localStorage.getItem('synsynk.tab')) return <div className="login-wrap" />;
-  const saved = tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab'));
+  const saved = window.resetAsked() ? 'account' : tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab'));
   const tab = pageOk(TABS, saved) ? saved : 'live';
   return (
     <Frame tabs={TABS} tab={tab} busy head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /></>}>
@@ -400,7 +400,7 @@ function Setup({ links }) {
   const user = useUser();
   // The remembered page too, so removing the last login on Account stays on Account.
   const [tab, setTab] = useState(() => {
-    const t = tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab') || '');
+    const t = window.resetAsked() ? 'account' : tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab') || '');
     return pageOk(TABS, t) ? t : 'live';
   });
   const [connecting, setConnecting] = useState(false);
@@ -453,7 +453,7 @@ function App({ links }) {
   // plan, preferences (the last plant viewed) and plants for the signed-in user (api_me)
   const [me, setMe] = useState(null);
   const [plantId, setPlantId] = useState(null);
-  const [tab, setTab] = useState(() => tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab')) || 'live');
+  const [tab, setTab] = useState(() => window.resetAsked() ? 'account' : tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab')) || 'live');
   const auto = true; // refresh runs on its own; the header button forces one now
   const [snap, setSnap] = useState(null);
   const [today, setToday] = useState(null);

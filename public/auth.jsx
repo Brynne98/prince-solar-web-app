@@ -53,6 +53,18 @@ function fetchWithRefreshCutoff(url, opts) {
 // Where emailed links (confirmation, password reset) bring the user back to.
 const SITE_URL = location.origin + location.pathname.replace(/\/[^/]*$/, '/');
 
+// "Reset password" in the password-changed email links to ?reset=1 (SOLAR-155). Signed in,
+// it opens Change password on Account; signed out, "Forgot password?". Read once and taken
+// out of the address, so a reload or a later sign-in doesn't open it again.
+let resetPending = new URLSearchParams(location.search).get('reset') === '1';
+if (resetPending) {
+  const u = new URL(location.href);
+  u.searchParams.delete('reset');
+  history.replaceState(null, '', u.pathname + u.search + u.hash);
+}
+window.resetAsked = () => resetPending;
+window.takeResetAsk = () => { const r = resetPending; resetPending = false; return r; };
+
 // Resolves once the initial session lookup is done, so the first render doesn't
 // flash the login form at an already-signed-in user. `recovering` is true from the
 // moment a reset link lands until the user sets a new password.
@@ -578,7 +590,7 @@ window.AuthGate = function AuthGate({ children, fallback = null }) {
   // Keyed apart: the two sit in one spot, so React would otherwise keep the recovery
   // card's mode (and its busy Cancel) after Cancel signs out.
   if (recovering) return <AuthScreen key="recovery" initialMode="recovery" onRecovered={doneRecovering} />;
-  if (!session) return <AuthScreen key="signin" />;
+  if (!session) return <AuthScreen key="signin" initialMode={window.takeResetAsk() ? 'forgot' : 'signin'} />;
   return children;
 };
 
@@ -601,4 +613,4 @@ function SignOutButton({ className, children = 'Sign out', busyText = 'Signing o
   return <button type="button" className={className} onClick={click} disabled={busy} aria-busy={busy}>{busy ? busyText : children}</button>;
 }
 // Shared with the Connect screen so it looks like the same product.
-Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordField, FieldLabel, invalidProps, SignOutButton, signOutHere });
+Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordField, FieldLabel, invalidProps, SignOutButton, signOutHere, explainAuthError: explain });

@@ -901,7 +901,7 @@
   .conn-plants { color: var(--muted); }
   /* the add row: a filled button so it reads as the section's one action, plus a hint */
   .conn-add { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--line); }
-  #settings-delete .conn-row { padding-bottom: 0; }
+  #settings-delete .conn-row, #settings-password .conn-row { padding-bottom: 0; }
   .conn-add-row { padding-bottom: 0; }   /* the open add form ends at the card's own padding */
   .conn-add .save-btn { display: inline-flex; align-items: center; gap: 6px; }
   .conn-meta { font-size: 13px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
@@ -1269,6 +1269,7 @@
   .link-form .input[aria-invalid="true"] { border-color: var(--load); }
   .link-form .link-last { margin-bottom: 0; }
   .link-form .field-row .field { margin-bottom: 0; }
+  .link-form > .field + .field { margin-top: 14px; }   /* Change password: stacked, same gap as a field-row */
   .link-form .link-note { margin-top: 8px; }
   .link-pw { position: relative; }
   .link-pw .input { padding-right: 44px; }
