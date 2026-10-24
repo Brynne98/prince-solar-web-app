@@ -31,6 +31,9 @@ const LINK_LIFE = "This link works once and expires in 1 hour.";
 // unsubscribe: the one-click link for the List-Unsubscribe header the sender adds, so
 // mail apps show their own Unsubscribe next to the sender. It isn't in the body; the
 // body points to the notification settings instead.
+// An email address in body text. Gmail links any address it finds and paints it blue,
+// so give it a link of our own in the text colour.
+const addr = (email: string) => `<a href="mailto:${email}" style="color:#e7ecf2;text-decoration:none;font-weight:700">${email}</a>`;
 // The one help line every email ends with.
 const HELP = `Need help? Email <a href="mailto:hello@princesolarhub.com">hello@princesolarhub.com</a>.`;
 
@@ -53,7 +56,7 @@ const MONO = "'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace";
 
 const STYLE = `
 :root{color-scheme:dark;supported-color-schemes:dark}
-body{margin:0;padding:0;background:#0a0d12}
+body{margin:0;padding:0}
 a{color:inherit}
 @media (max-width:520px){.pad{padding:20px 20px var(--pb-m,8px)!important}}
 @media (max-width:440px){.flow{width:auto!important;display:block!important;margin-right:0!important}}
@@ -184,16 +187,18 @@ ${s.delta ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};colo
 <meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><title>${esc(subject)}</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
 <style>${STYLE}.pad{--pb-m:${Math.max(0, 20 - tail)}px}</style></head>
-<body class="bg" style="margin:0;padding:0;background:#0a0d12">
-<table role="presentation" class="bg" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0d12"><tr><td align="center" style="padding:28px 12px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
-<tr><td style="padding:0 4px 16px"><a href="${APP}" style="text-decoration:none"><img src="${SITE}/icon-192.png" width="28" height="28" alt="" style="vertical-align:middle;border:0;border-radius:6px"> <span class="t" style="vertical-align:middle;font:700 17px/1 ${SANS};color:#e7ecf2">Prince Solar Hub</span></a></td></tr>
-<tr><td class="card pad" style="background:#11161d;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:32px 32px ${Math.max(0, 32 - tail)}px">
+<body style="margin:0;padding:0">
+<!-- The dark frame is only as wide as the email, not the whole mail window: a full-width
+     black (or, once Gmail's dark mode repaints it, white) box looked heavy. -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:16px 8px">
+<table role="presentation" class="bg" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#0a0d12;border-radius:16px">
+<tr><td style="padding:24px 16px 16px 20px"><a href="${APP}" style="text-decoration:none"><img src="${SITE}/icon-192.png" width="28" height="28" alt="" style="vertical-align:middle;border:0;border-radius:6px"> <span class="t" style="vertical-align:middle;font:700 17px/1 ${SANS};color:#e7ecf2">Prince Solar Hub</span></a></td></tr>
+<tr><td style="padding:0 12px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td class="card pad" style="background:#11161d;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:32px 32px ${Math.max(0, 32 - tail)}px">
 <h1 class="t" style="margin:0 0 ${b.sub ? 4 : 16}px;font:700 22px/1.25 ${SANS};letter-spacing:-.02em;color:#e7ecf2">${esc(b.title)}</h1>
 ${b.sub ? `<p class="m" style="margin:0 0 20px;font:400 14px/1.4 ${SANS};color:#9aa5b3">${esc(b.sub)}</p>` : ""}
 ${rows.join("\n")}
-</td></tr>
-<tr><td style="padding:16px 4px 0">${b.footer.map((f) => `<p class="d" style="margin:0 0 6px;font:400 12px/1.5 ${SANS};color:#7f8da0">${f}</p>`).join("")}</td></tr>
+</td></tr></table></td></tr>
+<tr><td style="padding:16px 20px 20px">${b.footer.map((f) => `<p class="d" style="margin:0 0 6px;font:400 12px/1.5 ${SANS};color:#7f8da0">${f.replace(/<a href=/g, '<a style="color:#7f8da0;text-decoration:underline" href=')}</p>`).join("")}</td></tr>
 </table></td></tr></table></body></html>`;
 }
 
@@ -253,14 +258,14 @@ const notYou = [
 export const passwordChanged = (email: string) =>
   make("Your password was changed", {
     title: "Your password was changed",
-    parts: [{ p: `The password for <b>${esc(email)}</b> was just changed.` }, ...notYou],
+    parts: [{ p: `The password for ${addr(esc(email))} was just changed.` }, ...notYou],
     footer: [HELP],
   });
 
 export const accountDeleted = (email: string) =>
   make("Your account is deleted", {
     title: "Your account is deleted",
-    parts: [{ p: `The Prince Solar Hub account for <b>${esc(email)}</b> is deleted, with its settings and its connection to SunSynk. Plant readings go too, unless someone else shares the plant.` },
+    parts: [{ p: `The Prince Solar Hub account for ${addr(esc(email))} is deleted, with its settings and its connection to SunSynk. Plant readings go too, unless someone else shares the plant.` },
       { p: "Your SunSynk account and your inverter are not affected." },
       { note: "You can sign up again any time. Only the last 60 days of history come back from SunSynk." }],
     footer: [HELP],
