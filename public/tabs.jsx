@@ -2324,6 +2324,25 @@ function DeleteAccountSection({ email }) {
 }
 
 // Settings: the plant on screen.
+// The First steps card once hidden (SOLAR-170): here only while it has steps left.
+function FirstStepsSection({ me, plantId, onSaved }) {
+  const [busy, setBusy] = React.useState(false);
+  const fs = window.firstSteps(me, plantId);
+  if (!fs || !fs.mine.hidden || !fs.left.length) return null;
+  const show = () => { setBusy(true); window.saveFirstSteps(me, plantId, { hidden: false }).then(onSaved).finally(() => setBusy(false)); };
+  return (
+    <SettingsSection id="steps" title="First steps">
+      <div className="conn-row sset-row">
+        <div className="conn-text">
+          <span className="conn-user">Finish setup</span>
+          <span className="conn-meta">{fs.left.length === 1 ? '1 step left.' : fs.left.length + ' steps left.'}</span>
+        </div>
+        <div className="conn-actions"><button type="button" className="ghost-btn" onClick={show} disabled={busy}>Show</button></div>
+      </div>
+    </SettingsSection>
+  );
+}
+
 function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirty, switchBlocked }) {
   const plant = (me?.plants || []).find(p => p.id === plantId);
   return (
@@ -2334,6 +2353,7 @@ function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirt
           {plant && <p>For {plant.name || 'Plant ' + plant.id}. Shared with everyone who sees it.</p>}
         </div>
         <PlantSections me={me} plantId={plantId} onSaved={onPlantConfigSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
+        <FirstStepsSection me={me} plantId={plantId} onSaved={onPlantConfigSaved} />
       </div>
     </SettingsFlash.Provider>
   );

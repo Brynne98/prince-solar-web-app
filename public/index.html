@@ -135,11 +135,11 @@
   .rail-logo { height: calc(var(--head-h) - 14px); display: flex; align-items: center; gap: 11px; padding-left: 8px; margin-bottom: 8px;
     font-size: 16px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
   .nav { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; }
-  .nav button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: none; background: none; color: var(--muted);
+  .nav > button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: none; background: none; color: var(--muted);
     border-radius: 9px; font-size: 14.5px; font-weight: 500; text-align: left; }
-  .nav button:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,0.04); }
-  .nav button[aria-current="page"] { color: var(--text); background: rgba(255,255,255,0.075); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); font-weight: 600; }
-  .nav button:disabled { cursor: progress; }
+  .nav > button:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,0.04); }
+  .nav > button[aria-current="page"] { color: var(--text); background: rgba(255,255,255,0.075); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); font-weight: 600; }
+  .nav > button:disabled { cursor: progress; }
   .nav .nav-settings { margin-top: auto; }
 
   /* the account: a row at the foot of the sidebar, an avatar in a phone's header */
@@ -238,8 +238,8 @@
     .rail { padding: 14px 8px; }
     .rail-logo { justify-content: center; padding-left: 0; }
     .rail-logo .app-name { display: none; }
-    .nav button { flex-direction: column; gap: 5px; padding: 9px 2px 8px; font-size: 11.5px; text-align: center; }
-    .nav button .t { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nav > button { flex-direction: column; gap: 5px; padding: 9px 2px 8px; font-size: 11.5px; text-align: center; }
+    .nav > button .t { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .acct-btn { justify-content: center; padding: 8px 0; }
     .acct-rail .who { display: none; }
     .acct-btn.needs::after { left: calc(50% + 8px); }
@@ -1292,6 +1292,74 @@
   }
   /* danger zone in settings */
   .danger-btn { background: none; border: 1px solid var(--load); color: var(--load); padding: 8px 14px; border-radius: 9px; font-size: 13px; cursor: pointer; }
+
+  /* First steps (SOLAR-170): one card naming the next setting, above Settings in the sidebar
+     and docked over the bottom bar on a phone; its step opens beside it or from the bottom */
+  .fs-wrap { position: relative; }
+  .nav .fs-wrap { margin-top: auto; margin-bottom: 6px; }
+  .nav .fs-wrap + .nav-settings { margin-top: 0; }
+  .fs-card { display: flex; flex-direction: column; gap: 10px; padding: 12px 12px 12px 14px; border-radius: 12px;
+    background: rgba(61,220,132,0.05); border: 1px solid rgba(61,220,132,0.22); }
+  .fs-card.open { background: rgba(61,220,132,0.09); border-color: rgba(61,220,132,0.5); }
+  .fs-top { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+  .fs-lbl { font-size: 10px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+  .fs-n { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .fs-x { width: 28px; height: 28px; margin: -4px -6px -4px 0; display: grid; place-items: center; padding: 0; border: none; background: none; border-radius: 8px; color: var(--dim); cursor: pointer; }
+  .fs-x:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+  .fs-x .ico { width: 14px; height: 14px; stroke-width: 2.2; }
+  .fs-segs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
+  .fs-segs i { height: 4px; border-radius: 4px; background: rgba(255,255,255,0.08); }
+  .fs-segs i.on { background: var(--pv); }
+  .fs-next { display: flex; flex-direction: column; gap: 10px; }
+  .fs-text { display: grid; gap: 3px; }
+  .fs-text b { font-size: 15px; font-weight: 600; }
+  .fs-text span { font-size: 12px; line-height: 1.45; color: var(--muted); }
+  .fs-go { height: 36px; }
+  .fs-mini { display: none; }
+  .fs-pop { position: absolute; left: calc(100% + 24px); bottom: 0; z-index: 30; width: 400px; max-width: calc(100vw - var(--rail-w) - 24px);
+    background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 16px; padding: 18px 20px 20px; box-shadow: 0 24px 60px rgba(0,0,0,0.55); }
+  .fs-panel { display: flex; flex-direction: column; gap: 12px; }
+  .fs-panel .fs-x { margin-left: auto; }
+  .fs-title { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  .fs-how { margin: -4px 0 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+  .fs-form { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .fs-actions { display: flex; align-items: center; gap: 6px; }
+  .fs-actions .save-btn { height: 40px; padding: 0 20px; font-size: 14px; }
+  .fs-skip { height: 40px; padding: 0 12px; border: none; background: none; color: var(--muted); font-size: 13px; border-radius: 9px; cursor: pointer; }
+  .fs-skip:hover { color: var(--text); }
+  .fs-err { margin: 0; font-size: 12px; color: var(--load); }
+  .fs-phone { display: none; }
+  /* tablet: the 84 px sidebar keeps a ring and the count */
+  @media (min-width: 600px) and (max-width: 1023px) {
+    .fs-rail .fs-card { display: none; }
+    .fs-mini { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; padding: 9px 2px 8px; border: none; border-radius: 9px;
+      background: rgba(61,220,132,0.08); color: var(--text); font-size: 11.5px; cursor: pointer; }
+    .fs-mini[aria-expanded="true"] { background: rgba(61,220,132,0.16); }
+    .fs-mini svg { width: 20px; height: 20px; }
+    .fs-mini .track { fill: none; stroke: rgba(255,255,255,0.14); stroke-width: 2.2; }
+    .fs-mini .fill { fill: none; stroke: var(--pv); stroke-width: 2.2; stroke-linecap: round; }
+    .fs-pop { left: calc(100% + 20px); }
+  }
+  /* phone: over the bottom bar, the page's last card clear of it */
+  @media (max-width: 599px) {
+    .fs-phone { display: block; position: fixed; left: 12px; right: 12px; bottom: calc(66px + env(safe-area-inset-bottom, 0px)); z-index: 7; }
+    .fs-phone:has(.fs-sheet) { z-index: 25; }   /* the open step covers the bottom bar too */
+    .fs-phone .fs-card { background: #0f1a15; box-shadow: 0 10px 30px rgba(0,0,0,0.45); }
+    .fs-phone .fs-next { flex-direction: row; align-items: center; gap: 12px; }
+    .fs-phone .fs-text { flex: 1; min-width: 0; }
+    .fs-phone .fs-go { flex: none; height: 40px; padding: 0 16px; }
+    .frame:has(.fs-phone .fs-card) .content { padding-bottom: calc(66px + 140px + env(safe-area-inset-bottom, 0px)); }
+    .fs-sheet .sheet-panel { padding: 8px 18px calc(20px + env(safe-area-inset-bottom, 0px)); }
+    .fs-sheet .fs-actions { align-self: stretch; }
+    .fs-sheet .fs-actions .save-btn { flex: 1; }
+    /* the sheet's own buttons, not the page list's */
+    .fs-sheet .sheet-panel button { width: auto; padding: 0 12px; font-size: 13px; }
+    .fs-sheet .sheet-panel .save-btn { padding: 0 20px; font-size: 14px; font-weight: 600; justify-content: center; background: var(--pv); color: #07130c; }
+    .fs-sheet .sheet-panel .fs-skip { color: var(--muted); }
+    .fs-sheet .sheet-panel .fs-x { padding: 0; color: var(--dim); }
+    .fs-sheet .sheet-panel .panel-add { padding: 0; color: var(--pv); font-weight: 600; }
+    .fs-sheet .sheet-panel .panel-del { width: 44px; padding: 0; justify-content: center; }
+  }
 </style>
 </head>
 <body>

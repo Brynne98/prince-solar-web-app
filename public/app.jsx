@@ -81,6 +81,7 @@ const NAV_ICONS = {
   account: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   signout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
   plug: '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0V8zM12 18v4"/>',
 };
@@ -168,16 +169,19 @@ function AccountMenu({ user, plantCount, alert, onAccount, active, variant }) {
   );
 }
 
-function Sidebar({ tabs, tab, onTab, account }) {
+function Sidebar({ tabs, tab, onTab, account, steps }) {
   return (
     <aside className="rail">
       <div className="rail-logo"><span className="sun" aria-hidden="true" /><span className="app-name">Prince Solar Hub</span></div>
       <nav className="nav" aria-label="Pages">
         {tabs.map(t => (
-          <button key={t.id} type="button" className={t.id === 'settings' ? 'nav-settings' : undefined} aria-current={tab === t.id ? 'page' : undefined}
+          <React.Fragment key={t.id}>
+          {t.id === 'settings' && steps && steps('rail')}
+          <button type="button" className={t.id === 'settings' ? 'nav-settings' : undefined} aria-current={tab === t.id ? 'page' : undefined}
                   onClick={onTab && (() => onTab(t.id))} disabled={!onTab}>
             <Icon id={t.id} /><span className="t">{t.label}</span>
           </button>
+          </React.Fragment>
         ))}
       </nav>
       {account && <AccountMenu {...account} variant="rail" />}
@@ -315,6 +319,172 @@ function PageNotice({ snap, cutOff, onReconnect, relinkedAt }) {
   );
 }
 
+// First steps (SOLAR-170): a new plant's rate, battery and panels, one at a time, from a
+// card in the sidebar (docked above the bottom bar on a phone). A step is done once its
+// setting is in plant_config, the same columns Settings edits. The reserve starts at 20, so
+// it counts once confirmed here or changed. Hidden and confirmed are the user's, kept in
+// prefs per plant, so they follow the user to every device; no step means no card.
+const STEPS = {
+  rate: { title: 'Electricity rate', why: 'Shows what solar saved.', go: 'Set rate', how: 'The price per unit on your bill.' },
+  size: { title: 'Battery size', why: 'Shows how long the battery lasts.', go: 'Set size', how: 'Every battery added together.' },
+  reserve: { title: 'Battery reserve', why: 'Discharging stops at this level.', go: 'Check reserve', how: 'Match the level set on your inverter.' },
+  panels: { title: 'Solar panels', why: 'Shows how hard your panels work.', go: 'Add panels', how: 'Count the panels and read the watts off one label.' },
+};
+function firstSteps(me, plantId) {
+  const plant = (me?.plants || []).find(p => p.id === plantId);
+  if (!plant) return null;
+  const c = plant.config || {};
+  const mine = (me.prefs?.firstSteps || {})[plantId] || {};
+  const batt = c.has_battery !== false;   // not yet detected counts as a battery
+  const steps = [
+    { id: 'rate', done: c.tariff_import > 0 },
+    batt && { id: 'size', done: c.battery_kwh > 0 },
+    batt && { id: 'reserve', done: !!mine.reserve || (c.battery_reserve_pct ?? 20) !== 20 },
+    { id: 'panels', done: c.system_kwp > 0 },
+  ].filter(Boolean);
+  return { cfg: c, mine, steps, left: steps.filter(s => !s.done) };
+}
+window.firstSteps = firstSteps;
+// prefs merge one key deep, so the whole firstSteps object goes back with this plant's change
+const saveFirstSteps = (me, plantId, patch) => window.savePrefs({
+  firstSteps: { ...(me.prefs?.firstSteps || {}), [plantId]: { ...((me.prefs?.firstSteps || {})[plantId] || {}), ...patch } },
+});
+window.saveFirstSteps = saveFirstSteps;
+
+// One step's boxes. Save stays off until the value is one the database takes.
+function StepForm({ id, cfg, busy, onSave, onSkip }) {
+  const first = id === 'reserve' ? String(cfg.battery_reserve_pct ?? 20) : '';
+  const [v, setV] = useState(first);
+  const [rows, setRows] = useState([{ count: '', watts: '' }]);
+  const box = useRef(null);
+  useEffect(() => { box.current?.querySelector('input')?.focus(); }, []);
+  const whole = (x, lo, hi) => x !== '' && Number.isInteger(Number(x)) && Number(x) >= lo && Number(x) <= hi;
+  const filled = rows.filter(r => r.count !== '' || r.watts !== '');
+  const watts = filled.reduce((s, r) => s + Number(r.count) * Number(r.watts), 0);
+  const ok = id === 'panels' ? filled.length > 0 && filled.every(r => whole(r.count, 1, 2000) && whole(r.watts, 50, 1000))
+    : id === 'reserve' ? whole(v, 5, 50) : v !== '' && Number(v) > 0;
+  const save = (e) => {
+    e.preventDefault();
+    if (!ok) return;
+    const n = Number(v);
+    onSave(id === 'rate' ? { tariff_import: n } : id === 'size' ? { battery_kwh: n } : id === 'reserve' ? { battery_reserve_pct: n }
+      : { system_kwp: watts / 1000, panel_groups: filled.map(r => ({ count: Number(r.count), watts: Number(r.watts) })) });
+  };
+  const setRow = (i, k, x) => setRows(rs => rs.map((r, j) => j === i ? { ...r, [k]: x } : r));
+  const sym = window.moneySymbol ? window.moneySymbol() : 'R';
+  const unit = { rate: sym + '/unit', size: 'kWh', reserve: '%' }[id];
+  return (
+    <form className="fs-form" onSubmit={save} ref={box}>
+      {id === 'panels' ? (
+        <>
+          <div className="panel-list">
+            {rows.map((r, i) => (
+              <div key={i} className="panel-row">
+                <div className="unit-input panel-count">
+                  <input className="input mono" type="number" inputMode="numeric" min="1" max="2000" step="1" placeholder="20" aria-label={'Panels, row ' + (i + 1)}
+                         value={r.count} onChange={e => setRow(i, 'count', e.target.value)} />
+                </div>
+                <span className="panel-of" aria-hidden="true">panels of</span>
+                <div className="unit-input panel-watts">
+                  <input className="input mono" type="number" inputMode="numeric" min="50" max="1000" step="1" placeholder="450" aria-label={'Watts per panel, row ' + (i + 1)}
+                         value={r.watts} onChange={e => setRow(i, 'watts', e.target.value)} />
+                  <span className="unit" aria-hidden="true">W</span>
+                </div>
+                <button type="button" className="panel-del" aria-label={'Remove row ' + (i + 1)} title="Remove"
+                        style={rows.length === 1 ? { visibility: 'hidden' } : undefined}
+                        onClick={() => setRows(rs => rs.filter((_, j) => j !== i))}><TrashIcon /></button>
+              </div>
+            ))}
+          </div>
+          <button type="button" className="panel-add" onClick={() => setRows(rs => [...rs, { count: '', watts: '' }])}>Add another panel size</button>
+        </>
+      ) : (
+        <div className={'unit-input' + (id === 'rate' ? ' wide' : '')}>
+          <input className="input mono" type="number" inputMode={id === 'reserve' ? 'numeric' : 'decimal'} aria-label={STEPS[id].title}
+                 step={id === 'rate' ? '0.01' : id === 'size' ? '0.1' : '1'} min={id === 'reserve' ? '5' : '0'} max={id === 'reserve' ? '50' : undefined}
+                 placeholder={{ rate: '3.40', size: '26.5', reserve: '' }[id]} value={v} onChange={e => setV(e.target.value)} />
+          <span className="unit">{unit}</span>
+        </div>
+      )}
+      <div className="fs-actions">
+        <button type="submit" className="save-btn" disabled={!ok || busy}>{busy ? 'Saving…' : 'Save'}</button>
+        <button type="button" className="fs-skip" onClick={onSkip} disabled={busy}>Skip</button>
+      </div>
+    </form>
+  );
+}
+
+// The card, and the step it opens: beside the sidebar ('rail'), or a sheet from the bottom ('phone').
+function FirstSteps({ me, plantId, onSaved, variant }) {
+  const [open, setOpen, ref] = usePopover();
+  const [skipped, setSkipped] = useState([]);
+  const [gone, setGone] = useState(false);   // Hide pressed, until prefs come back
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  useEffect(() => { setOpen(false); setSkipped([]); setGone(false); setErr(null); }, [plantId]);
+  const fs = firstSteps(me, plantId);
+  if (!fs || !fs.left.length || fs.mine.hidden || gone) return null;
+  const waiting = fs.left.filter(s => !skipped.includes(s.id));
+  const step = (waiting.length ? waiting : fs.left)[0];
+  const n = fs.steps.length, done = n - fs.left.length;
+  const S = STEPS[step.id];
+  const hide = () => {
+    setGone(true); setOpen(false);
+    saveFirstSteps(me, plantId, { hidden: true }).then(onSaved).catch(() => setGone(false));
+  };
+  // Skip leaves the step for later; past the last one it comes round again.
+  const skip = () => {
+    setErr(null);
+    if (fs.left.length === 1) { setOpen(false); return; }
+    setSkipped(s => { const t = [...s, step.id]; return fs.left.every(x => t.includes(x.id)) ? [step.id] : t; });
+  };
+  const save = async (patch) => {
+    setBusy(true); setErr(null);
+    try {
+      await window.savePlantConfig(plantId, patch);
+      if (step.id === 'reserve') await saveFirstSteps(me, plantId, { reserve: true });
+      await onSaved();
+      if (fs.left.length === 1) setOpen(false);
+    } catch (e) { setErr('Couldn’t save. Try again.'); }
+    finally { setBusy(false); }
+  };
+  const segs = <div className="fs-segs" aria-hidden="true">{fs.steps.map((s, i) => <i key={i} className={s.done ? 'on' : ''} />)}</div>;
+  const panel = (
+    <div className="fs-panel" role="dialog" aria-label={S.title}>
+      <div className="fs-top"><span className="fs-lbl">Step {fs.steps.indexOf(step) + 1} of {n}</span>
+        <button type="button" className="fs-x" aria-label="Close" onClick={() => setOpen(false)}><Icon id="close" /></button></div>
+      {variant === 'phone' && segs}
+      <h2 className="fs-title">{S.title}</h2>
+      <p className="fs-how">{S.how}</p>
+      <StepForm key={step.id} id={step.id} cfg={fs.cfg} busy={busy} onSave={save} onSkip={skip} />
+      {err && <p className="fs-err" role="alert">{err}</p>}
+    </div>
+  );
+  return (
+    <div className={'fs-wrap fs-' + variant} ref={ref}>
+      <section className={'fs-card' + (open ? ' open' : '')} aria-label="Finish setup">
+        <div className="fs-top"><span className="fs-lbl">Finish setup</span><span className="fs-n mono">{done}/{n}</span>
+          <button type="button" className="fs-x" aria-label="Hide" title="Hide" onClick={hide}><Icon id="close" /></button></div>
+        {segs}
+        <div className="fs-next">
+          <div className="fs-text"><b>{S.title}</b><span>{S.why}</span></div>
+          <button type="button" className="save-btn fs-go" aria-expanded={open} onClick={() => setOpen(o => !o)}>{S.go}</button>
+        </div>
+      </section>
+      {/* the tablet's narrow sidebar: a ring and the count, opening the same step */}
+      {variant === 'rail' && (
+        <button type="button" className="fs-mini" aria-expanded={open} aria-label={'Finish setup, ' + done + ' of ' + n + ' done'} onClick={() => setOpen(o => !o)}>
+          <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7" className="track" /><circle cx="9" cy="9" r="7" className="fill" strokeDasharray={(44 * done / n) + ' 44'} transform="rotate(-90 9 9)" /></svg>
+          <span className="mono">{done}/{n}</span>
+        </button>
+      )}
+      {open && (variant === 'phone'
+        ? <div className="sheet fs-sheet" onClick={e => { if (e.target === e.currentTarget) setOpen(false); }}><div className="sheet-panel"><div className="sheet-grip" aria-hidden="true" />{panel}</div></div>
+        : <div className="fs-pop">{panel}</div>)}
+    </div>
+  );
+}
+
 const TABS = [
   { id: 'live', label: 'Live' },
   { id: 'solar', label: 'Solar' },
@@ -332,10 +502,12 @@ const tabAlias = (id) => (id === 'battery' ? 'inverters' : id);
 const toTop = () => { document.querySelector('.frame-body')?.scrollTo({ top: 0 }); window.scrollTo({ top: 0 }); };
 
 // The frame around every page: sidebar, header, content, phone bar.
-function Frame({ tabs, tab, onTab, head, account, busy, children }) {
+// `steps` draws First steps for 'rail' or 'phone'; a phone leaves it off Settings and
+// Account, where it would sit on the save bar.
+function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
   return (
     <div className="frame">
-      <Sidebar tabs={tabs} tab={tab} onTab={onTab} account={account} />
+      <Sidebar tabs={tabs} tab={tab} onTab={onTab} account={account} steps={steps} />
       <div className="frame-body">
         <header className="head">
           {head}
@@ -343,6 +515,7 @@ function Frame({ tabs, tab, onTab, head, account, busy, children }) {
         </header>
         <main className="content" aria-busy={busy || undefined}>{children}</main>
       </div>
+      {steps && tab !== 'settings' && tab !== 'account' && steps('phone')}
       <PhoneBar tabs={tabs} tab={tab} onTab={onTab} />
     </div>
   );
@@ -673,6 +846,7 @@ function App({ links }) {
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} />;
   const settingsPage = <window.SettingsTab me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
     flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />;
+  const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);
   const accountPage = <window.AccountTab onPlantConfigSaved={reloadPlantConfig} links={links}
     flash={flashSection} onFlashed={() => setFlashSection(null)} />;
 
@@ -682,7 +856,7 @@ function App({ links }) {
   // there is no reason to trap someone on Live because the first snapshot hasn't landed.
   if (!snap) {
     return (
-      <Frame tabs={TABS} tab={tab} onTab={go} account={me ? account : null} busy
+      <Frame tabs={TABS} tab={tab} onTab={go} account={me ? account : null} busy steps={steps}
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
           <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} /></>}>
         {err && <div className="notice offline" role="alert"><p><b>Can't reach the server.</b> Retrying every minute.</p></div>}
@@ -697,7 +871,7 @@ function App({ links }) {
   const dataPage = tab !== 'settings' && tab !== 'account';
   const old = dataPage && plantStatus(snap, Date.now()).old;
   return (
-    <Frame tabs={TABS} tab={tab} onTab={go} account={account}
+    <Frame tabs={TABS} tab={tab} onTab={go} account={account} steps={steps}
       head={<>{plantMenu}<HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} /></>}>
       {/* The raw error stays in the title; on screen it was a Postgres or JWT string a
           homeowner cannot act on. */}
