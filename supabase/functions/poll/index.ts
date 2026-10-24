@@ -296,11 +296,16 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   // list is merged with the cache so each inverter keeps its last row and carry
   // run: the freshness gate and tiering then apply on refresh minutes too.
   // The plant list is re-read hourly so a plant added at SunSynk starts logging.
+  // A cached inverter with no status (linking seeds private.inverters without meta)
+  // also takes the live list: meta is written only on a fresh minute, and a slave
+  // that uploads off the refresh minute would otherwise read status 0 for good
+  // (SOLAR-168).
   const refreshMinute = (ts / 60) % REFRESH_EVERY_MIN === 0;
   const plantsMinute = (ts / 60) % PLANTS_EVERY_MIN === 0;
   const cached = await getInvertersCached(acc);
+  const noStatus = cached.some((c) => c.status == null && wanted.has(Number(c.plantId)));
   let all = cached;
-  if (refreshMinute || !cached.length) {
+  if (refreshMinute || noStatus || !cached.length) {
     result.listRefreshed = true;
     const bySn = new Map(cached.map((c) => [c.sn, c]));
     all = (await getInverters(acc)).map((inv) => {
