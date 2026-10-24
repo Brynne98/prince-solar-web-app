@@ -120,11 +120,9 @@ const Chevron = ({ dir }) => (
 // days before `earliest` and days after today are greyed and can't be picked; the days
 // with data come from api_data_days, shared by every date bar.
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-function CalendarPop({ date, todayStr, earliest, onPick, onClose }) {
-  const [days, setDays] = React.useState(null);
+function CalendarPop({ date, todayStr, earliest, days, onPick, onClose }) {
   const [month, setMonth] = React.useState(date.slice(0, 7));
   const ref = React.useRef(null);
-  React.useEffect(() => { let alive = true; window.fetchDataDays().then(d => { if (alive) setDays(d); }); return () => { alive = false; }; }, []);
   // a click outside or Escape closes it
   React.useEffect(() => {
     const down = e => { if (ref.current && !ref.current.parentNode.contains(e.target)) onClose(); };
@@ -137,7 +135,7 @@ function CalendarPop({ date, todayStr, earliest, onPick, onClose }) {
   const lead = (new Date(Date.UTC(y, m - 1, 1)).getUTCDay() + 6) % 7; // blanks before the 1st, Monday first
   const count = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const key = d => month + '-' + String(d).padStart(2, '0');
-  const ok = k => k <= todayStr && (!earliest || k >= earliest) && (k === todayStr || !days || days.has(k));
+  const ok = k => k <= todayStr && (!earliest || k >= earliest) && !!days && days.has(k);
   return (
     <div className="cal-pop" ref={ref} role="dialog" aria-label="Pick a day">
       <div className="cal-head">
@@ -163,16 +161,23 @@ function CalendarPop({ date, todayStr, earliest, onPick, onClose }) {
 
 // ‹ and › sit either side of the date box, which reads "Fri 2 Oct" and opens the calendar
 // (on a phone they sit at the card's two ends, SOLAR-27). Today sits inside the box on a phone.
+// The arrows, the calendar and Today reach only days with data (SOLAR-175): ‹ › jump to the
+// nearest one and grey out when there is none. The list is asked again when the calendar opens.
 function DateBar({ pick, earliest, locked, children }) {
   const { date, setDate, todayStr, isToday } = pick;
-  // locked: the app is still loading, so the picker shows today and goes nowhere
-  const canPrev = pick.canPrev && !locked, canNext = pick.canNext && !locked;
   const [open, setOpen] = React.useState(false);
   const close = React.useCallback(() => setOpen(false), []);
+  const [days, setDays] = React.useState(null);
+  const plant = window.CURRENT_PLANT;
+  React.useEffect(() => { let alive = true; window.fetchDataDays(open).then(d => { if (alive) setDays(d); }); return () => { alive = false; }; }, [open, plant, date]);
+  const list = React.useMemo(() => days ? [...days].filter(k => k <= todayStr && (!earliest || k >= earliest)).sort() : [], [days, todayStr, earliest]);
+  // locked: the app is still loading, so the picker shows today and goes nowhere
+  const prevDay = locked ? null : list.filter(k => k < date).pop(), nextDay = locked ? null : list.find(k => k > date);
+  const todayOk = !!days && days.has(todayStr);
   return (
     <div className="hv-datebar">
-      <button className="hv-daynav" disabled={!canPrev} aria-label="Previous day"
-        onClick={() => canPrev && setDate(shiftDate(date, -1))}><Chevron dir={-1} /></button>
+      <button className="hv-daynav" disabled={!prevDay} aria-label="Previous day"
+        onClick={() => prevDay && setDate(prevDay)}><Chevron dir={-1} /></button>
       <div className="hv-datebox">
         <button type="button" className="hv-datepick" disabled={locked} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(o => !o)}>
           <svg className="hv-cal" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
@@ -181,13 +186,13 @@ function DateBar({ pick, earliest, locked, children }) {
           </svg>
           <span className="hv-dateface">{dayFace(date, todayStr)}</span>
         </button>
-        {!isToday && <button className="hv-today hv-today-in" onClick={() => setDate(todayStr)}>Today</button>}
-        {open && <CalendarPop date={date} todayStr={todayStr} earliest={earliest} onPick={setDate} onClose={close} />}
+        {!isToday && <button className="hv-today hv-today-in" disabled={!todayOk} onClick={() => setDate(todayStr)}>Today</button>}
+        {open && <CalendarPop date={date} todayStr={todayStr} earliest={earliest} days={days} onPick={setDate} onClose={close} />}
       </div>
-      <button className="hv-daynav" disabled={!canNext} aria-label="Next day"
-        onClick={() => canNext && setDate(shiftDate(date, 1))}><Chevron dir={1} /></button>
+      <button className="hv-daynav" disabled={!nextDay} aria-label="Next day"
+        onClick={() => nextDay && setDate(nextDay)}><Chevron dir={1} /></button>
       {children}
-      {!isToday && <button className="hv-today hv-today-out" onClick={() => setDate(todayStr)}>Today</button>}
+      {!isToday && <button className="hv-today hv-today-out" disabled={!todayOk} onClick={() => setDate(todayStr)}>Today</button>}
     </div>
   );
 }

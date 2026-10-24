@@ -251,12 +251,20 @@ async function fetchDay(date) {
 // Earliest date with data (≈ commission date). Bounds the day picker; null if
 // unknown (treated as "no lower limit" by the UI).
 // The days that have any data, as a Set of 'YYYY-MM-DD', for the calendar pop-up (0080).
-// One ask per plant and page load: every date bar shares it.
-const dataDaysCache = {};
-function fetchDataDays() {
-  const k = window.CURRENT_PLANT;
-  if (!dataDaysCache[k]) dataDaysCache[k] = getJSON('/api/data/days').then(d => new Set(Array.isArray(d) ? d : [])).catch(() => { delete dataDaysCache[k]; return null; });
-  return dataDaysCache[k];
+// One ask per plant, shared by every date bar. `fresh` asks again (the calendar opening);
+// while history is still being fetched a saved list is old after a minute, as the import
+// adds days (SOLAR-175). A failed ask keeps the last good list; null only before any came.
+const dataDaysCache = {}, dataDaysGood = {};
+function fetchDataDays(fresh) {
+  const k = window.CURRENT_PLANT, c = dataDaysCache[k], s = window.SYNC;
+  const old = c && s && (s.pending || s.spinePending) && Date.now() - c.at > 60000;
+  if (!c || fresh || old) {
+    const p = getJSON('/api/data/days')
+      .then(d => (dataDaysGood[k] = new Set(Array.isArray(d) ? d : [])))
+      .catch(() => { if (dataDaysCache[k]?.p === p) delete dataDaysCache[k]; return dataDaysGood[k] ?? null; });
+    dataDaysCache[k] = { p, at: Date.now() };
+  }
+  return dataDaysCache[k].p;
 }
 
 async function fetchEarliest() {
