@@ -512,6 +512,19 @@ Deno.serve(async (req) => {
       }
     }));
 
+    // Email state (0102): how each login went, then step the plants just written.
+    // SunSynk's fault and ours are told apart so our own outage is never mailed as
+    // SunSynk's: our errors are rpc failures ("fn: message"); a dead login is left out.
+    const outcomes = results.filter((r) => !r.needsRelink).map((r) => ({
+      account: r.account,
+      outcome: r.error ? (/^[a-z_]+: /.test(r.error) ? "ours" : "sunsynk")
+             : r.inverters > 0 && r.readings === 0 ? "sunsynk" : "ok",
+    }));
+    const stepped = await rpc("email_poll_step", {
+      p_ts: ts, p_outcomes: outcomes, p_plants: [...new Set(results.flatMap((r) => r.plants))],
+    }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
+    if ((stepped as any)?.error || (stepped as any)?.failed?.length) console.warn("email_poll_step:", JSON.stringify(stepped));
+
     const ok = results.filter((r) => !r.error);
     return json({
       ok: ok.length > 0,

@@ -1,21 +1,23 @@
-// `notify` — sends the 17 emails Supabase Auth doesn't (SOLAR-157).
+// `notify` — sends the 17 emails Supabase Auth doesn't (SOLAR-157, SOLAR-183).
 //
-// pg_cron fires this every minute (migration 0092). Each run works out what is due:
-// plant events from email_plant_events, SunSynk down/back from email_sunsynk_state,
-// dead logins from email_relinks, welcome, history synced, account deleted (the
-// email_outbox row api_account_delete leaves), and the weekly, monthly and yearly
-// reports at 07:00 local on Monday, the 1st and 1 January.
+// pg_cron fires this every minute (migration 0092). The emails are already queued
+// when their cause happens (0102): poll steps each plant's state and queues grid,
+// battery, string and readings emails; triggers queue welcome, history, Reconnect
+// and account deleted. Each run here first calls email_sweep() for what only the
+// clock can tell (no readings for 15 min, SunSynk down/back, daily reminders,
+// reports due today), then sends the queue: claim up to BATCH rows (skip locked,
+// so runs can overlap), build each email, send them in one Resend batch call,
+// and mark each row sent, skipped, failed, or queued again with a growing wait.
+// It keeps going until the queue is empty or BUDGET_MS is spent.
 //
-// A send happens once: the row in email_sent (unique per user and key) is claimed
-// before the mail goes to Resend and dropped again if Resend refuses it, so the next
-// minute retries. grid_down, logger_stale and sunsynk_down rows stay open until their
-// "back" email closes them; a user with an open one gets no second "down".
-// Switched-off kinds are skipped with email_wanted (0091); needs_relink, welcome,
-// history and account deleted have no switch.
+// email_claim skips rows whose switch is off (email_wanted, 0091), whose plant the
+// user no longer has, and "back" emails whose "down" never went. needs_relink,
+// welcome, history and account deleted have no switch.
 //
 // Nothing is sent unless the NOTIFY_LIVE secret is "1". Otherwise, and with ?dry=1,
-// the run writes nothing and returns what it would send. ?render=all&plant=<id>
-// returns every template built from that plant's data, for checking by eye.
+// the run writes nothing (no sweep, no claim) and returns the next BATCH it would
+// send. ?render=all&plant=<id> returns every template built from that plant's data,
+// for checking by eye.
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import {
   accountDeleted, type Email, FROM_ACCOUNT, FROM_NOTICE, type History, historySynced, type Period,
@@ -27,29 +29,14 @@ const RESEND_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 // Local tests point this at a stand-in server.
 const RESEND_URL = Deno.env.get("RESEND_URL") ?? "https://api.resend.com/emails";
 const UNSUB = `${Deno.env.get("SUPABASE_URL")}/functions/v1/unsubscribe`;
-// A bug can't spend the Resend quota in one run; whatever is left goes next minute.
-const MAX_SENDS = 40;
-const DOWN_KINDS = ["grid_down", "logger_stale", "sunsynk_down"];
-// email_wanted's switch for each kind; absent = always sent.
-const SWITCH: Record<string, string> = {
-  grid_down: "grid", grid_back: "grid", batt_hot: "battery", bank_drift: "battery", string_dead: "panels",
-  logger_stale: "readings", logger_back: "readings", sunsynk_down: "sunsynk", sunsynk_back: "sunsynk",
-  report_week: "weekly", report_month: "monthly", report_year: "yearly",
-};
+// Resend's batch call takes up to 100 emails.
+const BATCH = 100;
+// The cron call times out at 55 s; stop claiming before that, the rest goes next minute.
+const BUDGET_MS = 40_000;
+// Resend's default limit is 2 calls a second.
+const PACE_MS = 550;
 
-type UserRow = {
-  user_id: string; email: string; confirmed: boolean; plant_id: number | null; plant_name: string | null;
-  account_id: string | null; linked_at: string | null; tz: string;
-};
-type Plant = { id: number; name: string; tz: string; users: UserRow[] };
-// Each user names the plant their own way (plant_users.plant_name).
-const named = (p: Plant, u: UserRow): Plant => ({ ...p, name: u.plant_name || p.name });
-type Out = {
-  user_id: string | null; plant_id: number | null; kind: string; key: string; data: Record<string, unknown>;
-  // Built only once the email is known to be due, wanted and unsent; null = nothing to say, skip.
-  to: string; from: string; build: (unsubscribe: string) => Email | null | Promise<Email | null>; closes?: number;
-};
-type OpenRow = { id: number; user_id: string; plant_id: number | null; kind: string; data: Record<string, number>; sent_at: string };
+type Plant = { id: number; name: string; tz: string };
 
 const json = (b: unknown, status = 200) =>
   new Response(JSON.stringify(b, null, 1), { status, headers: { "Content-Type": "application/json" } });
@@ -114,20 +101,24 @@ async function plantCfg(plant: number) {
   return { tariff: Number(data?.tariff_import) || 0, hasGrid: data?.has_grid !== false };
 }
 
-/** The 60 days SunSynk lets us backfill, ending yesterday. Null when there is nothing in them. */
+/** Up to the 60 days SunSynk lets us backfill, ending yesterday, from the first day
+ *  that has readings. Null when there is no solar in them. */
 async function buildHistory(p: Plant): Promise<History | null> {
   const today = local(p.tz).date;
-  const from = addDays(today, -60), to = addDays(today, -1);
-  const rows = (await dayEnergy(p.id, from, to)).filter(hasData);
+  const to = addDays(today, -1);
+  const rows = (await dayEnergy(p.id, addDays(today, -60), to)).filter(hasData);
   if (!rows.length) return null;
+  const from = rows.reduce((d, r) => (r.period < d ? r.period : d), to);
+  const bestDay = best(rows, "pv_kwh", (d) => fmtDay(d, { day: "numeric", month: "short" }));
+  if (!bestDay) return null;
   const { hasGrid } = await plantCfg(p.id);
   const home = sum(rows, "load_kwh"), imp = sum(rows, "imp_kwh");
   const short = (d: string) => fmtDay(d, { day: "numeric", month: "short" });
   return {
-    plant: p.name, plantId: p.id, days: 60, from: short(from), to: short(to),
+    plant: p.name, plantId: p.id, days: Math.round((Date.parse(to) - Date.parse(from)) / 86400e3) + 1, from: short(from), to: short(to),
     daily: perDay(rows, from, to, "pv_kwh"), madeKwh: sum(rows, "pv_kwh"), homeKwh: home,
     independencePct: independence(home, imp), importKwh: hasGrid ? imp : null,
-    bestDay: best(rows, "pv_kwh", short)!, highestUse: best(rows, "load_kwh", short),
+    bestDay, highestUse: best(rows, "load_kwh", short),
   };
 }
 
@@ -151,7 +142,7 @@ async function buildReport(p: Plant, period: Period, today: string): Promise<Omi
   const all = await dayEnergy(p.id, pFrom, to);
   const cur = all.filter((r) => r.period >= from && hasData(r)), prev = all.filter((r) => r.period <= pTo && hasData(r));
   if (!cur.length) return null;
-  const { tariff } = await plantCfg(p.id);
+  const { tariff, hasGrid } = await plantCfg(p.id);
   const made = sum(cur, "pv_kwh"), home = sum(cur, "load_kwh"), imp = sum(cur, "imp_kwh");
   const pMade = sum(prev, "pv_kwh"), pHome = sum(prev, "load_kwh"), pImp = sum(prev, "imp_kwh");
   const saved = (h: number, i: number) => Math.max(0, h - i) * tariff;
@@ -172,7 +163,7 @@ async function buildReport(p: Plant, period: Period, today: string): Promise<Omi
   const hasPrev = prev.length > 0;
   return {
     plantId: p.id, period, label, prevLabel, plant: p.name,
-    madeKwh: made, homeKwh: home, importKwh: imp, exportKwh: null,
+    madeKwh: made, homeKwh: home, importKwh: hasGrid ? imp : null, exportKwh: null,
     independencePct: independence(home, imp), savedRand: tariff > 0 ? saved(home, imp) : null,
     change: hasPrev ? {
       made: pct(made, pMade), home: pct(home, pHome), import: pct(imp, pImp),
@@ -183,227 +174,169 @@ async function buildReport(p: Plant, period: Period, today: string): Promise<Omi
   };
 }
 
-// ------------------------------------------------------------------- what's due
+// ------------------------------------------------------------------- building
 
-async function due(users: UserRow[], plants: Map<number, Plant>, open: OpenRow[], openFor: (u: string, p: number | null, k: string) => OpenRow | undefined) {
-  const out: Out[] = [];
-  const closeOnly: number[] = [];
-  const firstPlant = new Map<string, Plant>();
-  for (const u of users) if (u.plant_id != null && !firstPlant.has(u.user_id)) firstPlant.set(u.user_id, plants.get(u.plant_id)!);
-  const ev = (p: Plant, u: UserRow, kind: string, key: string, data: Record<string, unknown>, e: PlantEvent, at: number | null, closes?: number) =>
-    out.push({ user_id: u.user_id, plant_id: p.id, kind, key, data, to: u.email, from: FROM_NOTICE, closes,
-      build: async (unsub) => {
-        // Counted only when the email goes: a 30-day scan, not one per minute while it stays hot.
-        if (e.kind === "batt_hot") e.hotDays = await rpc<number>("email_hot_days", { p_plant: p.id });
-        return plantEvent(named(p, u).name, p.id, e, unsub, at == null ? "today" : dayOf(at, p.tz));
-      } });
+type Row = {
+  id: number; user_id: string | null; to_email: string; plant_id: number | null; plant_name: string | null; tz: string;
+  kind: string; key: string; data: Record<string, any>; tries: number; switch: string | null; unsub_token: string | null;
+  batch_key: string | null;
+};
 
-  // Account deleted: the address is all that's left of the user.
-  const { data: outbox } = await db.from("email_outbox").select("id, email");
-  for (const o of outbox ?? []) {
-    out.push({ user_id: null, plant_id: null, kind: "account_deleted", key: `outbox:${o.id}`, data: { outbox: o.id },
-      to: o.email, from: FROM_ACCOUNT, build: () => accountDeleted(o.email) });
-  }
-
-  // Welcome: confirmed, no inverter yet. Users from before 0092 are marked as sent.
-  for (const u of users) {
-    if (u.confirmed && u.plant_id == null) {
-      out.push({ user_id: u.user_id, plant_id: null, kind: "welcome", key: "welcome", data: {}, to: u.email, from: FROM_NOTICE, build: () => welcome() });
+/** The email for one queued row; null = nothing to say (an empty report), skip it. */
+async function build(r: Row, unsub: string): Promise<Email | null> {
+  const d = r.data, tz = r.tz;
+  const p: Plant = { id: r.plant_id ?? 0, name: r.plant_name || "your plant", tz };
+  const ev = (e: PlantEvent, at: number | null) => plantEvent(p.name, p.id, e, unsub, at == null ? "today" : dayOf(at, tz));
+  switch (r.kind) {
+    case "grid_down": return ev({ kind: "grid_down", at: hhmm(d.since, tz), chargePct: d.chargePct ?? undefined }, d.since);
+    case "grid_back": return ev({ kind: "grid_back", at: hhmm(d.at, tz), lasted: lasted(d.since, d.at) }, d.at);
+    case "batt_hot":
+      // Counted only when the email goes: a 30-day scan, not one per minute while it stays hot.
+      return ev({ kind: "batt_hot", at: hhmm(d.at, tz), tempC: d.tempC, hotDays: await rpc<number>("email_hot_days", { p_plant: p.id }) }, d.at);
+    case "bank_drift": return ev({ kind: "bank_drift", banks: d.banks }, null);
+    case "string_dead": return ev({ kind: "string_dead", string: d.string, inverter: d.inverter, since: hhmm(d.since, tz) }, d.since);
+    case "logger_stale": return ev({ kind: "logger_stale", since: hhmm(d.since, tz) }, d.since);
+    case "logger_back": return ev({ kind: "logger_back", at: hhmm(d.at, tz), lasted: lasted(d.since, d.at) }, d.at);
+    case "needs_relink": return plantEvent(p.name, p.id, { kind: "needs_relink" }, "");
+    case "sunsynk_down": return sunsynkDown(p.name, p.id, hhmm(d.since, tz), unsub, dayOf(d.since, tz));
+    case "sunsynk_back": return sunsynkBack(p.name, p.id, hhmm(d.at, tz), lasted(d.since, d.at), unsub, dayOf(d.at, tz));
+    case "welcome": return welcome();
+    case "history": { const h = await buildHistory(p); return h && historySynced(h); }
+    case "report_week": case "report_month": case "report_year": {
+      const rep = await buildReport(p, r.kind.slice(7) as Period, d.today);
+      return rep && report({ ...rep, unsubscribeUrl: unsub });
     }
+    case "account_deleted": return accountDeleted(r.to_email);
   }
-
-  // History synced: the walk is done and the link is over 10 minutes old, so the
-  // bookmarks were seeded before we read them.
-  const done = new Set(await rpc<number[]>("email_history_done"));
-  for (const p of plants.values()) {
-    if (!done.has(p.id)) continue;
-    for (const u of p.users) {
-      if (!u.linked_at || Date.parse(u.linked_at) > Date.now() - 600e3) continue;
-      out.push({ user_id: u.user_id, plant_id: p.id, kind: "history", key: `history:${p.id}`, data: {}, to: u.email, from: FROM_NOTICE,
-        build: async () => { const h = await buildHistory(named(p, u)); return h && historySynced(h); } });
-    }
-  }
-
-  // Plant events.
-  for (const p of plants.values()) {
-    const events = await rpc<{ kind: string; key: string; data: Record<string, any> }[]>("email_plant_events", { p_plant: p.id });
-    for (const { kind, key, data: d } of events) {
-      for (const u of p.users) {
-        switch (kind) {
-          case "grid_down":
-            if (!openFor(u.user_id, p.id, kind)) ev(p, u, kind, key, d, { kind, at: hhmm(d.since, p.tz), chargePct: d.chargePct ?? undefined }, d.since);
-            break;
-          case "grid_on": {
-            const o = openFor(u.user_id, p.id, "grid_down");
-            if (!o) break;
-            const at = Math.max(d.since ?? 0, o.data.since);
-            ev(p, u, "grid_back", `grid_back:${p.id}:${o.data.since}`, { since: o.data.since, at }, { kind: "grid_back", at: hhmm(at, p.tz), lasted: lasted(o.data.since, at) }, at, o.id);
-            break;
-          }
-          case "batt_hot":
-            ev(p, u, kind, key, d, { kind, at: hhmm(d.at, p.tz), tempC: d.tempC }, d.at);
-            break;
-          case "bank_drift":
-            ev(p, u, kind, key, d, { kind, banks: d.banks }, null);
-            break;
-          case "string_dead":
-            ev(p, u, kind, key, d, { kind, string: d.string, inverter: d.inverter, since: hhmm(d.since, p.tz) }, d.since);
-            break;
-          case "logger_stale":
-            if (!openFor(u.user_id, p.id, kind)) ev(p, u, kind, key, d, { kind, since: hhmm(d.since, p.tz) }, d.since);
-            break;
-          case "logger_ok": {
-            const o = openFor(u.user_id, p.id, "logger_stale");
-            if (!o) break;
-            ev(p, u, "logger_back", `logger_back:${p.id}:${o.data.since}`, { since: o.data.since, at: d.at }, { kind: "logger_back", at: hhmm(d.at, p.tz), lasted: lasted(o.data.since, d.at) }, d.at, o.id);
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  // SunSynk down or back: one email per user, about their first plant.
-  const ss = await rpc<{ since: number; down: boolean; up: boolean } | null>("email_sunsynk_state");
-  for (const [uid, p] of firstPlant) {
-    const u = p.users.find((x) => x.user_id === uid)!;
-    const o = openFor(uid, null, "sunsynk_down");
-    if (ss?.down && !o) {
-      out.push({ user_id: uid, plant_id: null, kind: "sunsynk_down", key: `sunsynk_down:${ss.since}`, data: { since: ss.since, plant: p.id }, to: u.email, from: FROM_NOTICE,
-        build: (unsub) => sunsynkDown(named(p, u).name, p.id, hhmm(ss.since, p.tz), unsub, dayOf(ss.since, p.tz)) });
-    } else if (ss?.up && o) {
-      const at = ss.since;
-      out.push({ user_id: uid, plant_id: null, kind: "sunsynk_back", key: `sunsynk_back:${o.data.since}`, data: { since: o.data.since, at }, to: u.email, from: FROM_NOTICE, closes: o.id,
-        build: (unsub) => sunsynkBack(named(p, u).name, p.id, hhmm(at, p.tz), lasted(o.data.since, at), unsub, dayOf(at, p.tz)) });
-    }
-  }
-
-  // A login that died: the user's first plant on it names the email.
-  for (const r of await rpc<{ user_id: string; account_id: string; key: string }[]>("email_relinks")) {
-    const u = users.find((x) => x.user_id === r.user_id && x.account_id === r.account_id) ?? users.find((x) => x.user_id === r.user_id && x.plant_id != null);
-    if (!u) continue;
-    const p = plants.get(u.plant_id!)!;
-    out.push({ user_id: u.user_id, plant_id: p.id, kind: "needs_relink", key: r.key, data: { account: r.account_id }, to: u.email, from: FROM_NOTICE,
-      build: () => plantEvent(named(p, u).name, p.id, { kind: "needs_relink" }, "") });
-  }
-
-  // Reports at 07:00 local: weekly on Monday, monthly on the 1st, yearly on 1 January.
-  for (const p of plants.values()) {
-    const now = local(p.tz);
-    if (now.hour !== 7) continue;
-    const periods: Period[] = [];
-    if (now.dow === 1) periods.push("week");
-    if (now.date.endsWith("-01")) periods.push("month");
-    if (now.date.endsWith("-01-01")) periods.push("year");
-    for (const period of periods) {
-      for (const u of p.users) {
-        out.push({ user_id: u.user_id, plant_id: p.id, kind: `report_${period}`, key: `report_${period}:${p.id}:${now.date}`, data: {}, to: u.email, from: FROM_NOTICE,
-          build: async (unsub) => { const r = await buildReport(named(p, u), period, now.date); return r && report({ ...r, unsubscribeUrl: unsub }); } });
-      }
-    }
-  }
-
-  // A "down" nobody closed in 3 days (plant unlinked, data gone): close it quietly.
-  for (const o of open) if (Date.parse(o.sent_at) < Date.now() - 3 * 86400e3) closeOnly.push(o.id);
-  return { out, closeOnly };
+  throw new Error(`unknown kind ${r.kind}`);
 }
 
 // ------------------------------------------------------------------- sending
 
-async function send(o: Out, mail: Email): Promise<string | null> {
+type Out = { row: Row; mail: Email };
+type Done = {
+  id: number; status: "sent" | "queued" | "failed" | "skipped"; error?: string; retry_s?: number;
+  batch_key?: string; refund?: boolean;
+};
+
+// Temporary failures wait 1, 2, 4 ... 60 minutes; after MAX_TRIES the row fails.
+const MAX_TRIES = 8;
+const retry = (row: Row, error: string, batch_key?: string): Done =>
+  row.tries >= MAX_TRIES ? { id: row.id, status: "failed", error }
+    : { id: row.id, status: "queued", error, retry_s: Math.min(3600, 60 * 2 ** (row.tries - 1)), batch_key };
+// Not tried at all (the run ran out of time): back at once, not counted as a try.
+const later = (row: Row): Done => ({ id: row.id, status: "queued", error: "run out of time", retry_s: 0, refund: true });
+// Resend: 400 and 422 are the email itself (bad address, bad field), so it will
+// never pass. Anything else (429, 5xx, a network failure, and our own 401/403/404
+// from a bad key or address) is retried, and fails only after MAX_TRIES.
+const refused = (status: number) => status === 400 || status === 422;
+
+const payload = (o: Out) => {
   const headers: Record<string, string> = {};
-  if (mail.unsubscribe) {
-    headers["List-Unsubscribe"] = `<${mail.unsubscribe}>`;
+  if (o.mail.unsubscribe) {
+    headers["List-Unsubscribe"] = `<${o.mail.unsubscribe}>`;
     headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click";
   }
-  // A network failure must come back as an error too, so the claim is dropped and retried.
+  return { from: o.row.kind === "account_deleted" ? FROM_ACCOUNT : FROM_NOTICE, to: [o.row.to_email],
+           subject: o.mail.subject, html: o.mail.html, text: o.mail.text, headers };
+};
+
+async function post(url: string, body: unknown, key: string): Promise<{ status: number; error?: string }> {
+  // A network failure comes back as a status too, so the rows are retried.
   try {
-    const res = await fetch(RESEND_URL, {
+    const res = await fetch(url, {
       method: "POST",
-      headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: o.from, to: [o.to], subject: mail.subject, html: mail.html, text: mail.text, headers }),
+      headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json", "Idempotency-Key": key },
+      body: JSON.stringify(body),
     });
-    return res.ok ? null : `resend ${res.status}: ${(await res.text()).slice(0, 200)}`;
+    return res.ok ? { status: res.status } : { status: res.status, error: `resend ${res.status}: ${(await res.text()).slice(0, 200)}` };
   } catch (e) {
-    return `resend: ${e instanceof Error ? e.message : e}`;
+    return { status: 0, error: `resend: ${e instanceof Error ? e.message : e}` };
   }
 }
 
+// Resend allows a few calls a second; batches of up to 100 keep a burst inside it.
+let lastCall = 0;
+async function paced<T>(f: () => Promise<T>): Promise<T> {
+  const wait = lastCall + PACE_MS - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastCall = Date.now();
+  return await f();
+}
+
+/** One batch call. When Resend refuses it, each half again, down to the one email
+ *  it refuses, so a bad address fails only itself and costs ~14 calls, not 100. */
+async function sendBatch(outs: Out[], deadline: number, reuse?: string): Promise<Done[]> {
+  if (!outs.length) return [];
+  if (Date.now() > deadline) return outs.map((o) => later(o.row));
+  // A retry goes under the key its batch had: if Resend took that batch before the
+  // answer was lost, it answers from that and sends nothing twice.
+  const ids = new TextEncoder().encode(outs.map((o) => o.row.id).join("."));
+  const key = reuse ?? "q-" + [...new Uint8Array(await crypto.subtle.digest("SHA-256", ids))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const res = await paced(() => post(`${RESEND_URL}/batch`, outs.map(payload), key));
+  if (!res.error) return outs.map((o) => ({ id: o.row.id, status: "sent" }));
+  // 409: the old key was used with a different body (the batch changed since); a fresh one.
+  if (res.status === 409 && reuse) return await sendBatch(outs, deadline);
+  if (!refused(res.status)) return outs.map((o) => retry(o.row, res.error!, key));
+  if (outs.length === 1) return [{ id: outs[0].row.id, status: "failed", error: res.error }];
+  const half = Math.ceil(outs.length / 2);
+  return [...await sendBatch(outs.slice(0, half), deadline), ...await sendBatch(outs.slice(half), deadline)];
+}
+
 async function run(dry: boolean, withHtml: boolean) {
-  const users = await rpc<UserRow[]>("email_users");
-  const plants = new Map<number, Plant>();
-  for (const u of users) {
-    if (u.plant_id == null) continue;
-    const p = plants.get(u.plant_id) ?? { id: u.plant_id, name: u.plant_name || "your plant", tz: u.tz, users: [] };
-    if (!p.users.some((x) => x.user_id === u.user_id)) p.users.push(u);
-    plants.set(u.plant_id, p);
-  }
-  const { data: openRows, error } = await db.from("email_sent").select("id, user_id, plant_id, kind, data, sent_at").in("kind", DOWN_KINDS).is("closed_at", null);
-  if (error) throw new Error(`email_sent: ${error.message}`);
-  const open = (openRows ?? []) as OpenRow[];
-  const openFor = (u: string, p: number | null, k: string) => open.find((o) => o.user_id === u && o.kind === k && (o.plant_id ?? null) === p);
-
-  const { out, closeOnly } = await due(users, plants, open, openFor);
-  const wanted = new Map<string, boolean>();
+  const started = Date.now();
+  // What only the clock can tell: no readings, SunSynk, daily reminders, reports.
+  const swept = dry ? null : await rpc<Record<string, unknown>>("email_sweep").catch((e) => ({ error: String(e?.message ?? e) }));
   const lines: Record<string, unknown>[] = [];
-  let sent = 0;
+  const count = { sent: 0, queued: 0, failed: 0, skipped: 0 };
 
-  for (const o of out) {
-    if (sent >= MAX_SENDS) { lines.push({ kind: o.kind, key: o.key, skipped: "run cap" }); continue; }
-    // Already sent: the outbox row is its own record; everything else is in email_sent.
-    if (o.user_id) {
-      const { data: had } = await db.from("email_sent").select("id").eq("user_id", o.user_id).eq("key", o.key).maybeSingle();
-      if (had) continue;
-    }
-    const sw = SWITCH[o.kind];
-    if (sw && o.user_id) {
-      const k = `${o.user_id}:${sw}`;
-      if (!wanted.has(k)) wanted.set(k, await rpc<boolean>("email_wanted", { p_user: o.user_id, p_kind: sw }));
-      if (!wanted.get(k)) {
-        // A "back" for someone who switched the kind off since the "down": close it, send nothing.
-        if (o.closes && !dry) await db.from("email_sent").update({ closed_at: new Date().toISOString() }).eq("id", o.closes);
-        continue;
+  const deadline = started + BUDGET_MS + 5_000;
+  while (Date.now() - started < BUDGET_MS) {
+    const rows = await rpc<Row[]>("email_claim", { p_limit: BATCH, p_peek: dry });
+    if (!rows.length) break;
+    const outs: Out[] = [], done: Done[] = [];
+    for (const row of rows) {
+      // Reports cost two reads each; what isn't built in time goes back untouched.
+      if (Date.now() > deadline) { done.push(later(row)); continue; }
+      try {
+        const unsub = row.switch ? `${UNSUB}?t=${dry ? "dry" : row.unsub_token}&k=${row.switch}` : "";
+        const mail = await build(row, unsub);
+        if (!mail) {
+          // History waits for the day sync (plant_energy) to land: try again hourly.
+          // An empty report is final.
+          done.push(row.kind === "history" && row.tries < MAX_TRIES
+            ? { id: row.id, status: "queued", error: "nothing to say yet", retry_s: 3600 }
+            : { id: row.id, status: "skipped", error: "nothing to say" });
+          continue;
+        }
+        outs.push({ row, mail });
+        lines.push({ kind: row.kind, key: row.key, to: row.to_email, subject: mail.subject, ...(withHtml ? { html: mail.html } : {}) });
+      } catch (e) {
+        // One email that can't be built stops nothing else.
+        done.push(retry(row, `build: ${e instanceof Error ? e.message : e}`));
       }
     }
-    const unsub = sw && o.user_id ? (dry ? `${UNSUB}?t=dry&k=${sw}` : `${UNSUB}?t=${await rpc<string>("email_unsub_token", { p_user: o.user_id })}&k=${sw}`) : "";
-    const mail = await o.build(unsub);
-    if (!mail) continue;
-    const line: Record<string, unknown> = { kind: o.kind, key: o.key, to: o.to, subject: mail.subject };
-    if (withHtml) line.html = mail.html;
-    lines.push(line);
-    if (dry) continue;
-
-    let claimed: number | null = null;
-    if (o.user_id) {
-      const { data: row } = await db.from("email_sent")
-        .upsert({ user_id: o.user_id, plant_id: o.plant_id, kind: o.kind, key: o.key, data: o.data,
-                  closed_at: DOWN_KINDS.includes(o.kind) ? null : new Date().toISOString() },
-                { onConflict: "user_id,key", ignoreDuplicates: true })
-        .select("id").maybeSingle();
-      if (!row) { line.skipped = "claimed by another run"; continue; }
-      claimed = row.id;
+    if (dry) break;  // a peek claims nothing, so the next read would be the same rows
+    // Retries go in the batch they went in before, under its key; new rows in fresh batches.
+    const groups = new Map<string, Out[]>();
+    for (const o of outs) {
+      const g = o.row.batch_key ?? "";
+      groups.set(g, [...(groups.get(g) ?? []), o]);
     }
-    const err = await send(o, mail);
-    if (err) {
-      line.error = err;
-      if (claimed) await db.from("email_sent").delete().eq("id", claimed);
-      continue;
-    }
-    sent++;
-    if (o.closes) await db.from("email_sent").update({ closed_at: new Date().toISOString() }).eq("id", o.closes);
-    if (o.kind === "account_deleted") await db.from("email_outbox").delete().eq("id", o.data.outbox as number);
+    for (const [key, group] of groups) done.push(...await sendBatch(group, deadline, key || undefined));
+    for (const x of done) count[x.status]++;
+    await rpc("email_done", { p_results: done });
   }
-  if (!dry && closeOnly.length) await db.from("email_sent").update({ closed_at: new Date().toISOString() }).in("id", closeOnly);
-  return { live: !dry, sent, due: lines };
+  return { live: !dry, swept, ...count, due: lines };
 }
 
 // Every template from one plant's real numbers; event values are samples.
 async function renderAll(plantId: number, today?: string) {
-  const users = (await rpc<UserRow[]>("email_users")).filter((u) => u.plant_id === plantId);
-  if (!users.length) throw new Error(`no users on plant ${plantId}`);
-  const p: Plant = { id: plantId, name: users[0].plant_name || "your plant", tz: users[0].tz, users };
+  const { data: pu } = await db.from("plant_users").select("plant_name").eq("plant_id", plantId).limit(1).maybeSingle();
+  if (!pu) throw new Error(`no users on plant ${plantId}`);
+  const p: Plant = { id: plantId, name: pu.plant_name || "your plant", tz: await rpc<string>("plant_tz", { p_plant: plantId }) };
   const now = Math.floor(Date.now() / 1000), unsub = `${UNSUB}?t=sample&k=grid`;
-  const out: Record<string, Email> = { welcome: welcome(), "account-deleted": accountDeleted(users[0].email) };
+  const out: Record<string, Email> = { welcome: welcome(), "account-deleted": accountDeleted("you@example.com") };
   const h = await buildHistory(p);
   if (h) out["history-synced"] = historySynced(h);
   today ??= local(p.tz).date;

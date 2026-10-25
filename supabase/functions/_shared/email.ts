@@ -331,8 +331,9 @@ export type History = {
 
 export const historySynced = (h: History) => {
   const [mv, mu] = kwh(h.madeKwh);
-  return make(`Your last ${h.days} days at ${h.plant} are in`, {
-    title: `Your last ${h.days} days are in`,
+  const days = h.days === 1 ? "day" : `${h.days} days`;
+  return make(`Your last ${days} at ${h.plant} are in`, {
+    title: `Your last ${days} are in`,
     sub: `${h.plant} · ${h.from} to ${h.to}`,
     parts: [
       { p: `That's as far back as SunSynk lets us go. From now on we keep your readings ourselves, so your history keeps growing.` },
@@ -390,7 +391,7 @@ export type Report = {
   plant: string;
   madeKwh: number;
   homeKwh: number;
-  importKwh: number;
+  importKwh: number | null; // null: no grid, so the tile is left out
   exportKwh: number | null; // null: the plant doesn't export, so the tile is left out
   independencePct: number;
   savedRand: number | null; // null: no tariff set
@@ -417,7 +418,7 @@ export function report(r: Report): Email {
   const stats: Extract<Part, { stats: unknown }>["stats"] = [
     { label: "Made", value: mv, unit: mu, tone: "solar", ...trend(r.change.made, r.prevLabel, "up") },
     { label: "Home", value: kwh(r.homeKwh)[0], unit: kwh(r.homeKwh)[1], tone: "home", ...trend(r.change.home, r.prevLabel, "down") },
-    { label: "Imported", value: kwh(r.importKwh)[0], unit: kwh(r.importKwh)[1], tone: "grid", ...trend(r.change.import, r.prevLabel, "down") },
+    ...(r.importKwh != null ? [{ label: "Imported", value: kwh(r.importKwh)[0], unit: kwh(r.importKwh)[1], tone: "grid" as Tone, ...trend(r.change.import, r.prevLabel, "down") }] : []),
     ...(r.exportKwh != null ? [{ label: "Exported", value: kwh(r.exportKwh)[0], unit: kwh(r.exportKwh)[1], tone: "grid" as Tone }] : []),
     { label: "Independence", value: `${Math.round(r.independencePct)}%`, tone: "cyan", ...trend(r.change.independence, r.prevLabel, "up") },
     ...(r.savedRand != null ? [{ label: "Est. saved", value: rand(r.savedRand), tone: "batt" as Tone, ...trend(r.change.saved, r.prevLabel, "up") }] : []),
@@ -442,20 +443,17 @@ export function report(r: Report): Email {
 
 // ---------------------------------------------------------------- plant events
 
-// Kinds and wording follow api_alerts_due_raw (0057) and its wrapper (0042):
-//  grid_down     3 known minutes with no grid (>100 V); SQL gives no charge, the sender
-//                may add the latest batt_soc
-//  grid_back     grid present again after >=3 absent minutes; SQL gives no duration
-//  grid_seen     a plant marked off-grid shows grid voltage on any phase (no email; dropped 2026-10-24)
-//  soc_overnight (no email; dropped 2026-10-24) 18:00-06:00, at the current draw the battery reaches its reserve
-//                before 06:00 (a forecast, not a low reading)
-//  batt_hot      battery temperature above 40 C (was 35; raised 2026-10-24, the SQL still says 35)
-//  bank_drift    charge % differs by 10 points or more between inverters' batteries for an hour,
-//                at most once a day (was 5 points for 10 min, hourly; changed 2026-10-24, SQL not yet)
-//  string_dead   11:00-14:59, a string dead for 15 min while another string on the
-//                same inverter makes over 200 W
+// Kinds follow the state changes in 0102 (email_plant_step, email_sweep):
+//  grid_down     3 known minutes in a row with no grid (>100 V); once per outage
+//  grid_back     2 known minutes with grid, after a grid_down went out
+//  batt_hot      hottest battery over 40 C; again once a day while it stays over 38 C
+//  bank_drift    charge 10 points or more apart between inverters' own batteries for
+//                an hour; again once a day while it lasts
+//  string_dead   a string dead for 12 samples while another string on the same
+//                inverter makes over 200 W; again once a day until it has voltage
 //  logger_stale  no new reading for the whole plant for 15 min
-// logger_back and needs_relink have no SQL alert yet; the poller sets needs_relink.
+//  logger_back   readings fresh again, after a logger_stale went out
+//  needs_relink  the login turned needs_relink in poll
 export type PlantEvent =
   | { kind: "grid_down"; at: string; chargePct?: number }
   | { kind: "grid_back"; at: string; lasted?: string }
@@ -515,7 +513,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, unsubs
       case "logger_stale":
         return [`No readings from ${plant}`, [
           { label: "Last reading", value: e.since, tone: "home", sub: esc(day) },
-        ], "Your inverters haven't sent a reading to SunSynk for 15 minutes. We'll email you when readings are back."];
+        ], "No new reading from your inverters for 15 minutes. We'll email you when readings are back."];
       case "logger_back":
         return [`Readings back at ${plant}`, [
           { label: "Readings", value: "Back", tone: "solar", sub: `since ${at(e.at)}, after ${span(e.lasted)}` },
