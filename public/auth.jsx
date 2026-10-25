@@ -176,8 +176,9 @@ function GoogleSignIn({ blocked, onBlocked, onStart, onDone }) {
     return () => { alive = false; };
   }, []);
 
-  // Blocked by a privacy setting or extension, or Google is down.
-  if (state === 'failed') return <div className="login-fine">Google sign-in didn’t load. Use your email and password.</div>;
+  // Blocked by a privacy setting or extension, or Google is down: the button goes, a toast says why.
+  useEffect(() => { if (state === 'failed') sayError('Google sign-in didn’t load. Use your email instead.'); }, [state]);
+  if (state === 'failed') return null;
   return (
     <div className="gsi-wrap">
       <div className="login-google" aria-hidden="true"><GoogleMark /> Continue with Google</div>
@@ -245,19 +246,24 @@ function explain(ex) {
   if (code === 'user_already_exists' || code === 'email_exists') return { text: 'That email already has an account.', action: 'signin' };
   if (code === 'weak_password') {
     const reasons = ex.reasons || [];
-    if (reasons.includes('pwned')) return { text: 'That password has appeared in a data leak. Choose another.' };
+    if (reasons.includes('pwned')) return { text: 'That password was in a data leak. Choose another.' };
     return { field: 'auth-password', text: reasons.includes('characters') ? 'Mix letters, numbers and symbols' : 'Choose a longer password' };
   }
   if (code === 'same_password') return { field: 'auth-password', text: 'That’s your current password' };
   if (code === 'email_address_invalid') return { field: 'auth-email', text: 'Use a different email' };
   if (code === 'signup_disabled') return { text: 'New accounts are closed right now.' };
-  if (code === 'over_email_send_rate_limit') return { text: 'Too many emails sent. Wait a few minutes, then try again.' };
-  if (code === 'over_request_rate_limit' || ex?.status === 429) return { text: 'Too many tries. Wait a minute, then try again.' };
-  if (ex?.name === 'AuthRetryableFetchError' || ex instanceof TypeError) return { text: 'Can’t reach Prince Solar Hub. Check your connection and try again.' };
+  if (code === 'over_email_send_rate_limit') return { text: 'Too many emails sent. Try again in a few minutes.' };
+  if (code === 'over_request_rate_limit' || ex?.status === 429) return { text: 'Too many tries. Try again in a minute.' };
+  if (ex?.name === 'AuthRetryableFetchError' || ex instanceof TypeError) return { text: 'Can’t reach Prince Solar Hub. Check your connection.' };
   // hook_tester_places (0085) refuses new accounts with this message.
   if (/Tester places are full/i.test(ex?.message || '')) return { text: 'Tester places are full.', action: 'full' };
-  return { text: ex?.message || 'Something went wrong. Try again.' };
+  // Never the server's own words (SOLAR-163).
+  return { text: 'Something went wrong. Try again.' };
 }
+
+/** A problem that isn't about one field: a red toast at the foot of the screen (SOLAR-163).
+ *  `action` is a follow-up link in the toast, e.g. { label: 'Sign in', onClick }. */
+const sayError = (text, action) => window.toast?.(text, { error: true, action });
 
 /** Sign-up once every tester place is taken: an email box for the launch. */
 function PlacesFullCard({ places, onSignIn }) {
@@ -274,7 +280,7 @@ function PlacesFullCard({ places, onSignIn }) {
     // supabase-js query builders are thenables without .catch.
     const { error } = await Promise.resolve(window.sb.rpc('api_join_waitlist', { p_email: addr })).catch(e => ({ error: e }));
     setBusy(false);
-    if (error) setMsg(explain(error).text);
+    if (error) sayError(explain(error).text);
     else setDone(true);
   };
   return (
@@ -300,57 +306,48 @@ function PlacesFullCard({ places, onSignIn }) {
   );
 }
 
-const MailIcon = () => (
-  <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="m4 7 8 6 8-6" />
-  </svg>
-);
-
-// A button straight to their webmail, for the addresses where we can tell which one it is.
-const MAIL_APPS = [
-  [/@(gmail|googlemail)\.com$/i, 'Open Gmail', 'https://mail.google.com/'],
-  [/@(outlook|hotmail|live|msn)\.[a-z.]+$/i, 'Open Outlook', 'https://outlook.live.com/mail/'],
-  [/@(yahoo|ymail)\.[a-z.]+$/i, 'Open Yahoo Mail', 'https://mail.yahoo.com/'],
-];
-// Supabase refuses a second confirmation email to one address within 60 s.
+// Supabase refuses a second email to one address within 60 s.
 const RESEND_WAIT = 60;
 
-/** After sign-up, until the emailed link is tapped. */
-function InboxCard({ email, onBack, onSignIn }) {
+/** After sign-up (kind 'signup') or a reset request (kind 'reset'), until the emailed link
+ *  is tapped. One screen for both (SOLAR-163). Resend waits out the 60 s, so one tap sends
+ *  one email; it is green once it can be used. */
+function InboxCard({ kind, email, onBack, onSignIn }) {
   const { useState, useEffect } = React;
   const [wait, setWait] = useState(RESEND_WAIT);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null);
   useEffect(() => {
     if (wait <= 0) return;
     const t = setTimeout(() => setWait(w => w - 1), 1000);
     return () => clearTimeout(t);
   }, [wait]);
-  const app = MAIL_APPS.find(([re]) => re.test(email));
-  const resend = async () => {
-    setBusy(true); setMsg(null);
-    const { error } = await window.sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: SITE_URL } })
-      .catch(e => ({ error: e }));
+  const resend = async (e) => {
+    e.preventDefault();
+    if (busy || wait > 0) return;
+    setBusy(true);
+    const { error } = await (kind === 'reset'
+      ? window.sb.auth.resetPasswordForEmail(email, { redirectTo: SITE_URL })
+      : window.sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: SITE_URL } })
+    ).catch(e => ({ error: e }));
     setBusy(false);
-    if (error) setMsg(explain(error));
-    else { setMsg({ text: 'Sent again.', note: true }); setWait(RESEND_WAIT); }
+    if (error) sayError(explain(error).text);
+    else { window.toast?.('Email sent again.'); setWait(RESEND_WAIT); }
   };
   return (
-    <div className="login-card">
-      <span className="auth-inbox"><MailIcon /></span>
+    <form className="login-card" onSubmit={resend} aria-busy={busy}>
+      <AuthBrand />
       <div className="login-title">Check your inbox</div>
       <div className="login-sub">We sent a link to <b>{email}</b>. Tap it to carry on.</div>
-      {app && <a className="login-google" href={app[2]} target="_blank" rel="noopener">{app[1]}</a>}
-      <div className="auth-wait"><span className="auth-spin" aria-hidden="true" />Waiting for the link…</div>
-      <div className={'login-err' + (msg?.note ? ' login-note' : '')} role="alert" aria-live="polite">{msg?.text}</div>
+      <button type="submit" className="auth-resend" disabled={busy || wait > 0} aria-busy={busy}>
+        {busy ? 'Sending…' : wait > 0 ? `Resend in ${wait}s` : 'Resend email'}
+      </button>
       <div className="login-links">
         <button type="button" className="login-link quiet" onClick={onBack}>Wrong email?</button>
-        <button type="button" className="login-link" onClick={resend} disabled={busy || wait > 0}>
-          {busy ? 'Sending…' : wait > 0 ? `Resend in ${wait}s` : 'Resend link'}
-        </button>
+        {kind === 'reset'
+          ? <button type="button" className="login-link quiet" onClick={onSignIn}>Back to sign in</button>
+          : <span>Already confirmed? <button type="button" className="login-link" onClick={onSignIn}>Sign in</button></span>}
       </div>
-      <div className="login-fine">Confirmed on another device? <button type="button" className="login-link inline" onClick={onSignIn}>Sign in</button></div>
-    </div>
+    </form>
   );
 }
 
@@ -362,21 +359,22 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const [password2, setPassword2] = useState('');
   // false, or the button that is waiting ('form' or 'google'); only that one says so.
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-  const [note, setNote] = useState(null);
   const [agree, setAgree] = useState(false);
-  const [sentTo, setSentTo] = useState(null);
+  // Where the link went and why ('signup' or 'reset'), for Check your inbox.
+  const [sent, setSent] = useState(null);
   // { places, left } from api_tester_places; null until it answers or if it fails.
   const [places, setPlaces] = useState(null);
   React.useEffect(() => {
     window.sb.rpc('api_tester_places').then(({ data }) => data && setPlaces(data), () => {});
   }, []);
+  // Signed out, the app frame (and its toast) isn't mounted, so each screen mounts it (SOLAR-163).
+  const toastHost = window.SaveToast ? <window.SaveToast /> : null;
   // The hook said no: the count was stale, or this was a new Google account on the sign-in card.
   const showError = (error) => {
     const e = explain(error);
     if (e.action === 'full') { setPlaces(p => ({ places: p?.places ?? 0, left: 0 })); go('signup'); }
     else if (e.field) flag({ [e.field]: e.text });
-    else setErr(e);
+    else sayError(e.text, e.action === 'signin' ? { label: 'Sign in', onClick: () => go('signin') } : undefined);
   };
 
   // A stale email link (confirm, reset) lands here signed out with the reason in the URL.
@@ -384,7 +382,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   React.useEffect(() => {
     const params = new URLSearchParams(location.hash.slice(1) || location.search);
     if (params.get('error_description')) {
-      setErr(params.get('error_code') === 'otp_expired'
+      sayError(params.get('error_code') === 'otp_expired'
         ? 'That link has expired. Ask for a new one.'
         : 'Sign-in didn’t finish. Try again.');
       history.replaceState(null, '', location.pathname);
@@ -397,7 +395,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   // Field id → its message. Every problem at once, each shown under its own field.
   const [bad, setBad] = useState({});
 
-  const go = (m) => { setMode(m); setErr(null); setNote(null); setBad({}); setPassword(''); setPassword2(''); };
+  const go = (m) => { setMode(m); setBad({}); setPassword(''); setPassword2(''); };
 
   // Replaces the browser's own bubbles (noValidate), which named one field in a popup.
   const check = () => {
@@ -422,7 +420,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
 
   // Focus the first bad field after React commits, so it already reads as invalid.
   const flag = (problems) => {
-    setBad(problems); setErr(null); setNote(null);
+    setBad(problems);
     // Blur first: re-focusing a field that already has focus is silent to a screen reader.
     setTimeout(() => { const el = document.getElementById(Object.keys(problems)[0]); el?.blur(); el?.focus(); });
   };
@@ -439,7 +437,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     const problems = check();
     if (Object.keys(problems).length) return flag(problems);
     const addr = email.trim();
-    setBusy('form'); setErr(null); setNote(null); setBad({});
+    setBusy('form'); setBad({});
     try {
       if (mode === 'signin') {
         const { error } = await window.sb.auth.signInWithPassword({ email: addr, password });
@@ -448,11 +446,11 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         const { data, error } = await window.sb.auth.signUp({ email: addr, password, options: { emailRedirectTo: SITE_URL } });
         if (error) throw error;
         // With email confirmation on, signUp returns a user but no session.
-        if (!data.session) { setSentTo(addr); go('inbox'); }
+        if (!data.session) { setSent({ to: addr, kind: 'signup' }); go('inbox'); }
       } else if (mode === 'forgot') {
         const { error } = await window.sb.auth.resetPasswordForEmail(addr, { redirectTo: SITE_URL });
         if (error) throw error;
-        setNote(`If ${addr} has an account, a reset link is on its way.`);
+        setSent({ to: addr, kind: 'reset' }); go('inbox');
       } else if (mode === 'recovery') {
         const { error } = await window.sb.auth.updateUser({ password });
         if (error) throw error;
@@ -476,6 +474,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     return (
       <div className="login-wrap">
         <PlacesFullCard places={places.places} onSignIn={() => go('signin')} />
+        {toastHost}
       </div>
     );
   }
@@ -483,7 +482,8 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   if (mode === 'inbox') {
     return (
       <div className="login-wrap">
-        <InboxCard email={sentTo} onBack={() => go('signup')} onSignIn={() => go('signin')} />
+        <InboxCard kind={sent.kind} email={sent.to} onBack={() => go(sent.kind === 'reset' ? 'forgot' : 'signup')} onSignIn={() => go('signin')} />
+        {toastHost}
       </div>
     );
   }
@@ -495,7 +495,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
       <GoogleSignIn
         blocked={mode === 'signup' && !agree}
         onBlocked={() => flag({ 'auth-agree': 'Accept the Terms and Privacy Policy' })}
-        onStart={() => { setBusy('google'); setErr(null); setNote(null); setBad({}); }}
+        onStart={() => { setBusy('google'); setBad({}); }}
         onDone={(error) => { if (error) { showError(error); setBusy(false); } }} />
     </div>
   </>);
@@ -507,9 +507,12 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         <div className="login-title">{copy.h}</div>
         {copy.p && <div className="login-sub">{copy.p}</div>}
         {mode === 'signup' && places?.left > 0 && <div className="login-sub">{places.left} of {places.places} tester places left</div>}
-        {/* Google first on sign-up: one tap, and no confirmation email to wait for. */}
-        {mode === 'signup' && (<>
+        {/* Google first on sign-in and sign-up (SOLAR-118): one tap, and no confirmation
+            email to wait for. On sign-in its terms line sits right under it. */}
+        {(mode === 'signin' || mode === 'signup') && (<>
           {googleButton}
+          {mode === 'signin' && <div className="login-fine">Continuing with Google creates an account and accepts
+            the <a href="terms.html" target="_blank" rel="noopener">Terms</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>}
           <div className="login-or"><span>or with email</span></div>
         </>)}
 
@@ -548,23 +551,11 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         )}
         <button type="submit" disabled={!!busy} aria-busy={busy === 'form'}>{busy === 'form' ? copy.busy : copy.cta}</button>
 
-        {/* Always mounted so it works as a live region; empty, it takes no space. */}
-        <div id="auth-msg" className={'login-err' + (note && !err ? ' login-note' : '')} role="alert" aria-live="polite">
-          {err?.text ?? err ?? note}
-          {err?.action === 'signin' && <> <button type="button" className="login-link" onClick={() => go('signin')}>Sign in</button></>}
-        </div>
-
-        {mode === 'signin' && (<>
-          <div className="login-or"><span>or</span></div>
-          {googleButton}
-          <div className="login-fine">Continuing with Google creates an account and accepts
-            the <a href="terms.html" target="_blank" rel="noopener">Terms</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>
-        </>)}
-
+        {/* Grey links that go back on the left, the way forward in green on the right. */}
         <div className="login-links">
           {mode === 'signin' && (<>
-            <button type="button" className="login-link" onClick={() => go('signup')}>Create an account</button>
             <button type="button" className="login-link quiet" onClick={() => go('forgot')}>Forgot password?</button>
+            <button type="button" className="login-link" onClick={() => go('signup')}>Create an account</button>
           </>)}
           {mode === 'signup' && (
             <span>Already have an account? <button type="button" className="login-link" onClick={() => go('signin')}>Sign in</button></span>
@@ -577,6 +568,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
           )}
         </div>
       </form>
+      {toastHost}
     </div>
   );
 }

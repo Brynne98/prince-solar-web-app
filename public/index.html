@@ -1162,8 +1162,6 @@
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .auth-consent input[aria-invalid="true"]:focus-visible { box-shadow: 0 0 0 6px rgba(248,113,113,0.28); }
   .field-hint { color: var(--dim); font-size: 13px; line-height: 1.2; text-align: right; }
-  /* a follow-up link inside an error sentence stays inline, not a 48px row */
-  .login-card .login-err .login-link { min-height: 0; display: inline; font-size: inherit; }
   .field-err { color: var(--load); font-size: 13px; line-height: 1.2; text-align: right; }
   .login-pw { position: relative; display: flex; }
   .login-pw input { flex: 1; padding-right: 56px; min-width: 0; }
@@ -1186,13 +1184,16 @@
   .login-card button[type="submit"]:hover { filter: brightness(1.06); }
   .login-card button[type="submit"]:active { transform: translateY(1px); }
   .login-card button[type="submit"]:disabled { opacity: 0.6; cursor: default; box-shadow: none; }
-  /* server error or note, 10 under the button. Empty, it is zero-height but stays mounted
-     as a live region, so the button keeps the usual 30 to whatever follows. */
-  .login-err { color: var(--load); font-size: 14px; line-height: 1.35; margin-top: -10px; }
-  .login-note { color: var(--muted); }
+  /* Resend on Check your inbox (SOLAR-163): green once it can be used; while it counts
+     down, an outline with the seconds, not a faded green button */
+  .login-card .auth-resend:disabled { opacity: 1; background: transparent; border: 1px solid var(--line-2); color: var(--dim);
+    padding: 15px 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .login-links {
     /* the links are 48px targets; 6 + their 14px of slack reads as 20 above the text, and
-       -14 below cancels the slack so the card's bottom padding shows at its full value */
+       -14 below cancels the slack so the card's bottom padding shows at its full value.
+       margin-top 10: the footer is its own group, 30 under what is above it on every card.
+       Errors are toasts now (SOLAR-163), so nothing sits between the button and here. */
+    margin-top: 10px;
     /* One line wherever the pair fits, phone included. They only stack on a screen too
        narrow to hold both, and wrap does that on its own, so there is no breakpoint to
        keep in step with the card's width. Row gap 0: the 48px targets are the spacing. */
@@ -1238,12 +1239,7 @@
   .auth-consent input { flex: none; margin: 2px 0 0; width: 18px; height: 18px; accent-color: var(--pv); color-scheme: dark; }
   .auth-consent a { color: var(--pv); }
   /* sign-up steps (SOLAR-92): "Step 1 of 2" and a bar, between the brand and the title */
-  /* "Check your inbox" */
-  .auth-inbox { width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; margin-top: 4px;
-    background: rgba(61,220,132,0.08); border: 1px solid rgba(61,220,132,0.25); color: var(--pv); }
-  .auth-inbox + .login-title { margin-top: 0; }
   .login-sub b { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
-  .login-card a.login-google { text-decoration: none; }
   /* Google's real button (SOLAR-122) lies invisible over our own look and takes the click */
   .gsi-wrap { position: relative; }
   .gsi-box { position: absolute; inset: 0; opacity: 0.01; overflow: hidden; }
@@ -1269,7 +1265,9 @@
   .setup-outline { opacity: .35; pointer-events: none; user-select: none; contain: size; overflow: hidden; }
   .setup-outline .skel::after { display: none; }
   .setup-empty { position: sticky; top: calc(var(--head-h) + 14px); align-self: start; z-index: 1; height: calc(100dvh - var(--head-h) - 28px);
-    display: grid; place-items: center; padding: 0 4px; }
+    display: grid; place-items: safe center; padding: 0 4px; overflow-y: auto; }
+  /* safe + auto: on a short or sideways screen the card is taller than its layer; it starts at
+     the top and scrolls, rather than being cut off at both ends (SOLAR-118) */
   .setup-empty-box { width: min(380px, 100%); min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center;
     padding: 24px; border-radius: 16px; background: rgba(10,13,18,0.9); border: 1px solid var(--line-2); box-shadow: 0 20px 50px -24px rgba(0,0,0,0.9); }
   .setup-empty-box > .ico { width: 28px; height: 28px; color: var(--pv); }

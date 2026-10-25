@@ -263,8 +263,7 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
             <window.AuthBrand />
             <div className="login-title">Couldn’t check your SunSynk logins</div>
             <button type="submit" disabled={checking} aria-busy={checking}>{checking ? 'Checking…' : 'Try again'}</button>
-            {/* The real reason, so a report from a phone says which failure it was. */}
-            <div className="login-fine">Error: {error}</div>
+            {/* No server text on screen (SOLAR-163). */}
             <div className="login-links"><window.SignOutButton className="login-link quiet" /></div>
           </form>
         </div>
