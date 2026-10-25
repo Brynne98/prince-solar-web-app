@@ -125,11 +125,13 @@ function MenuState({ st, cut, now }) {
     lastReading: new Date(st.lastTs * 1000), updated: new Date(now), sync: st.sync,
   }, now);
   const p = window.syncProgress(st.sync);
+  // still on its first load: Setting up, even when its readings are live
+  const status = p != null ? 'loading' : s.status, word = p != null ? 'Setting up' : s.word;
   return (
-    <span className={'pm-state status-' + s.status}>
-      <span className="pm-dot" />{s.word}
+    <span className={'pm-state status-' + status}>
+      <span className="pm-dot" />{word}
       {p != null && <span className="mono pm-pct">{Math.round(100 * p)}%</span>}
-      {s.status === 'stale' && <span className="mono pm-pct">{window.fmtTime(s.last)}</span>}
+      {status === 'stale' && <span className="mono pm-pct">{window.fmtTime(s.last)}</span>}
     </span>
   );
 }
