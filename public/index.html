@@ -854,16 +854,18 @@
   .sset .field label.toggle-row .toggle-label { font-size: 14px; }
   .sset .sset-body > .field + .field { margin-top: 20px; }
   /* Notifications: two groups that open to a switch per email (SOLAR-164). */
-  .notif-head { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+  .notif-head { display: flex; align-items: center; gap: 12px; padding: 14px 0; }
   .notif-group:first-child .notif-head { padding-top: 0; }
+  .notif-group:last-child .notif-head:has(+ [hidden]) { padding-bottom: 0; }
   .notif-group + .notif-group { border-top: 1px solid var(--line); }
   .notif-open { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0;
     background: none; border: none; color: inherit; text-align: left; }
   .notif-open svg { flex: none; color: var(--dim); transition: transform .18s; }
   .notif-open[aria-expanded="true"] svg { transform: rotate(90deg); }
   .notif-label { font-size: 15px; font-weight: 500; }
-  .sset .notif-rows { padding: 0 0 8px 26px; }
-  .sset .notif-rows .toggle-row { padding: 11px 0; border-top: 1px solid var(--line); }
+  /* an email sits under its group, indented past the group's name; no rule between emails */
+  .sset .notif-rows { margin: 0 0 14px 42px; }
+  .sset .notif-rows .toggle-row { padding: 8px 0; border-top: none; }
   /* Tariff, Plant and Battery: the login rows' layout (name and hint left, control right).
      The name is a <label> or a <div> of spans, so stack the spans like the login rows' divs. */
   .sset-row .conn-text > span { display: block; }
@@ -902,6 +904,10 @@
   /* the add row: a filled button so it reads as the section's one action, plus a hint */
   .conn-add { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--line); }
   #settings-delete .conn-row, #settings-password .conn-row { padding-bottom: 0; }
+  /* Password is one line and a button: the card's top and bottom match, the line sits on the button's centre */
+  #settings-password .sset { padding-bottom: 18px; }
+  #settings-password .conn-row:not(:has(form)) { align-items: center; }
+  #settings-password .conn-row:not(:has(form)) .conn-meta { margin-top: 0; }
   .conn-add-row { padding-bottom: 0; }   /* the open add form ends at the card's own padding */
   .conn-add .save-btn { display: inline-flex; align-items: center; gap: 6px; }
   .conn-meta { font-size: 13px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
@@ -940,6 +946,7 @@
 
   @media (max-width: 900px) {
     .sset { padding: 16px 15px 20px; border-radius: 14px; }
+    #settings-password .sset { padding-bottom: 16px; }
     .sset .field-row { grid-template-columns: 1fr; }
     /* one button sits beside the text; a dead login's two (Reconnect + Remove) drop under it */
     .conn-row { flex-wrap: wrap; }
