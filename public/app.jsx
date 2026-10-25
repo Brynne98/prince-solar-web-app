@@ -129,7 +129,7 @@ function MenuState({ st, cut, now }) {
   const status = p != null ? 'loading' : s.status, word = p != null ? 'Setting up' : s.word;
   return (
     <span className={'pm-state status-' + status}>
-      <span className="pm-dot" />{word}
+      {p != null ? <span className="sync-arc" aria-hidden="true" /> : <span className="pm-dot" />}{word}
       {p != null && <span className="mono pm-pct">{Math.round(100 * p)}%</span>}
       {status === 'stale' && <span className="mono pm-pct">{window.fmtTime(s.last)}</span>}
     </span>
@@ -138,7 +138,7 @@ function MenuState({ st, cut, now }) {
 
 // The plant on screen, left in the header; a menu once there is more than one. Each row
 // says how its plant is doing, asked when the menu opens (SOLAR-182).
-function PlantMenu({ me, plantId, onPlant, fallback, cutOff }) {
+function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync }) {
   const plants = me?.plants || [];
   const label = (p) => p.name || ('Plant ' + p.id);
   const current = plants.find(p => p.id === plantId);
@@ -162,13 +162,13 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff }) {
       {open && (
         <MenuList className="plant-menu" label="Plants">
           {plants.map(p => {
-            const st = states[p.id], pct = window.syncProgress(st?.sync);
+            // the plant on screen takes the header's progress, so the two % always match
+            const st = p.id === plantId && states[p.id] && currentSync ? { ...states[p.id], sync: currentSync } : states[p.id];
             return (
               <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
                       onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
                 <span className="tick" aria-hidden="true">{p.id === plantId ? '✓' : ''}</span><span className="nm">{label(p)}</span>
                 <MenuState st={st} cut={cutOff && cutOff(p.id)} now={states.at || Date.now()} />
-                {pct != null && <span className="pm-bar" aria-hidden="true"><i style={{ width: Math.round(100 * pct) + '%' }} /></span>}
               </button>
             );
           })}
@@ -301,15 +301,6 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
           </span>
         )}
       </div>
-      {/* a phone: one pill, a ring filling with the %, in place of the status and refresh (SOLAR-182) */}
-      {sync != null && (
-        <span className="sync-pill mono" role="status" aria-label={'Setting up, fetching history ' + pct + '%'}>
-          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="8" cy="8" r="6" className="track" />
-            <circle cx="8" cy="8" r="6" className="fill" strokeDasharray={(37.7 * sync) + ' 37.7'} transform="rotate(-90 8 8)" />
-          </svg>{pct}%
-        </span>
-      )}
       {/* takes the status colour once something is wrong, and reads Retry when nothing reports */}
       <button type="button" className={'refresh refresh-' + s.status + (busy ? ' busy' : '') + (sync != null ? ' fetching' : '')} aria-busy={busy} onClick={onRefresh}
               aria-label={s.status === 'offline' ? 'Retry' : 'Refresh'} title={s.status === 'offline' ? 'Retry' : 'Refresh'}>
@@ -1014,7 +1005,7 @@ function App({ links }) {
     const ls = links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(id)));
     return ls.length > 0 && !ls.some(a => a.status === 'active');
   };
-  const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} />;
+  const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync} />;
   const settingsPage = <window.SettingsTab me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
     flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />;
   const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);

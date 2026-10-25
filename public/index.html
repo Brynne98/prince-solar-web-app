@@ -169,15 +169,12 @@
   .menu-email { padding: 8px 10px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .plant-menu { top: calc(100% + 6px); left: 0; width: 320px; max-width: calc(100vw - 260px); }
   .plant-menu button { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; row-gap: 8px; padding: 10px 12px; white-space: nowrap; }
-  /* each plant's state on the right, a bar under the name while it sets up (SOLAR-182) */
+  /* each plant's state on the right; a turning ring while it sets up (SOLAR-182) */
   .pm-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
   .pm-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
   .pm-pct { font-weight: 500; }
   .pm-state.status-live { color: var(--pv); } .pm-state.status-stale { color: var(--warn); }
   .pm-state.status-offline { color: var(--bad); } .pm-state.status-loading { color: var(--soc); }
-  .pm-bar { grid-column: 2 / 4; height: 3px; border-radius: 2px; background: rgba(34,211,238,0.15); overflow: hidden; }
-  .pm-bar i { display: block; height: 100%; background: var(--soc); }
-  .sync-pill { display: none; }
   .plant-menu button[aria-checked="true"] { background: rgba(255,255,255,0.075); font-weight: 600; }
   .plant-menu .nm { overflow: hidden; text-overflow: ellipsis; }
 
@@ -266,13 +263,9 @@
     .plant-menu { min-width: 0; width: calc(100vw - 20px); max-width: 360px; }
     .status-sync { display: none; }
     .refresh { height: 36px; min-width: 36px; }
-    /* first load: the ring pill takes the place of the status and refresh (SOLAR-182) */
-    .status.fetching, .refresh.fetching { display: none; }
-    .sync-pill { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; flex: none; height: 36px; padding: 0 12px 0 10px; border-radius: 18px;
-      border: 1px solid rgba(34,211,238,0.35); background: rgba(34,211,238,0.08); color: var(--soc); font-size: 13px; font-weight: 600; }
-    .sync-pill circle { fill: none; stroke-width: 2; }
-    .sync-pill .track { stroke: rgba(34,211,238,0.25); }
-    .sync-pill .fill { stroke: var(--soc); stroke-linecap: round; }
+    /* first load: only "Fetching history" and its %, no status word or refresh (SOLAR-182) */
+    .status.fetching .status-dot, .status.fetching .status-word, .status.fetching .status-age, .refresh.fetching { display: none; }
+    .status.fetching .status-sync { display: inline-flex; padding-left: 0; border-left: none; }
     @media (max-width: 399px) { .refresh-offline { padding: 0 10px; } .refresh .lbl { display: none; } }
     /* the plant name needs the room more; the page's banner already says how old the reading is */
     @media (max-width: 359px) { .status-age { display: none; } }
