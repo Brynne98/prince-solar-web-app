@@ -2268,19 +2268,37 @@ function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirt
   );
 }
 
-// Report and alert emails, one switch each (SOLAR-158). A tap saves at once and flips
-// back if the save fails. "SunSynk disconnected" and account emails have no switch.
-// The footer of every report and alert email opens this (section=notifications).
-const EMAIL_SWITCHES = [
-  ['Reports', [['weekly', 'Weekly'], ['monthly', 'Monthly'], ['yearly', 'Yearly']]],
-  ['Alerts', [['grid', 'Grid'], ['battery', 'Battery', 'Too hot or charging unevenly'], ['panels', 'Panels'],
-              ['readings', 'Readings'], ['sunsynk', 'SunSynk', 'Down or back up']]],
+// Report and alert emails (SOLAR-158), in two groups that open to one switch per email
+// (SOLAR-164). A group's switch is on while any email in it is on, and sets them all.
+// A tap saves at once and flips back if the save fails. "SunSynk disconnected" and
+// account emails have no switch. The footer of every report and alert email opens this
+// (section=notifications).
+const EMAIL_GROUPS = [
+  { id: 'reports', label: 'Reports', rows: [
+    ['weekly', 'Weekly', 'Last week, on Mondays'],
+    ['monthly', 'Monthly', 'Last month, on the 1st'],
+    ['yearly', 'Yearly', 'Last year, on 1 January']] },
+  { id: 'alerts', label: 'Alerts', when: 'Sent when it happens', rows: [
+    ['grid', 'Grid', 'The grid goes off, and when it’s back'],
+    ['battery', 'Battery', 'Over 40 °C, or charging unevenly. Once a day while it lasts'],
+    ['panels', 'Panels', 'A string stops while the others make power. Once a day while it lasts'],
+    ['readings', 'Readings', 'Your inverter sends nothing for 15 min, and when it’s back'],
+    ['sunsynk', 'SunSynk', 'SunSynk stops answering, and when it’s back']] },
 ];
+// "All 3 on", "Weekly and Monthly on", "4 of 5 on. Sent when it happens", "Off".
+function emailGroupSummary(g, prefs) {
+  const on = g.rows.filter(([k]) => !prefs || prefs[k]).map(([, label]) => label);
+  if (!on.length) return 'Off';
+  const names = on.length === g.rows.length ? 'All ' + on.length
+    : on.length > 2 ? on.length + ' of ' + g.rows.length : on.join(' and ');
+  return names + ' on' + (g.when ? '. ' + g.when : '');
+}
 function NotificationsSection({ userId }) {
   const { useState, useEffect } = React;
   const [prefs, setPrefs] = useState(null);
   const [failed, setFailed] = useState(false);
   const [err, setErr] = useState(null);
+  const [open, setOpen] = useState({});
   const load = () => {
     setFailed(false);
     window.fetchEmailPrefs(userId).then(setPrefs).catch(() => setFailed(true));
@@ -2292,6 +2310,8 @@ function NotificationsSection({ userId }) {
     try { await window.saveEmailPref(userId, kind, on); }
     catch { setPrefs(p => ({ ...p, [kind]: !on })); setErr('Couldn’t save. Try again.'); }
   };
+  // Each email saves through flip, so a group is its emails' saves, one per kind.
+  const flipGroup = (g, on) => g.rows.forEach(([kind]) => { if (prefs[kind] !== on) flip(kind, on); });
   return (
     <SettingsSection id="notifications" title="Notifications">
       {failed ? (
@@ -2299,15 +2319,33 @@ function NotificationsSection({ userId }) {
           <div className="conn-text"><div className="conn-user">Couldn’t load your settings</div></div>
           <div className="conn-actions"><button type="button" className="ghost-btn" onClick={load}>Try again</button></div>
         </div>
-      ) : EMAIL_SWITCHES.map(([group, rows]) => (
-        <div className="field" key={group} role="group" aria-label={group}>
-          <label>{group}</label>
-          {rows.map(([kind, label, hint]) => (
-            <Toggle key={kind} label={label} hint={hint} checked={!prefs || prefs[kind]}
-                    onChange={(on) => prefs && flip(kind, on)} />
-          ))}
-        </div>
-      ))}
+      ) : <>
+        {EMAIL_GROUPS.map(g => {
+          const anyOn = !prefs || g.rows.some(([kind]) => prefs[kind]);
+          return (
+            <div className="notif-group" key={g.id}>
+              <div className="notif-head">
+                <button type="button" className="notif-open" aria-expanded={!!open[g.id]} aria-controls={'notif-' + g.id}
+                        onClick={() => setOpen(o => ({ ...o, [g.id]: !o[g.id] }))}>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
+                  <span className="toggle-text">
+                    <span className="notif-label">{g.label}</span>
+                    <span className="toggle-hint">{emailGroupSummary(g, prefs)}</span>
+                  </span>
+                </button>
+                <button type="button" className={'switch' + (anyOn ? ' on' : '')} role="switch" aria-checked={anyOn} aria-label={g.label}
+                        onClick={() => prefs && flipGroup(g, !anyOn)}><span className="knob" /></button>
+              </div>
+              <div id={'notif-' + g.id} className="field notif-rows" role="group" aria-label={g.label} hidden={!open[g.id]}>
+                {g.rows.map(([kind, label, hint]) => (
+                  <Toggle key={kind} label={label} hint={hint} checked={!prefs || prefs[kind]}
+                          onChange={(on) => prefs && flip(kind, on)} />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </>}
       {err && <div className="field-note" role="status" style={{ color: 'var(--load)' }}>{err}</div>}
     </SettingsSection>
   );

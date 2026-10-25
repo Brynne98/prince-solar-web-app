@@ -853,6 +853,17 @@
   .sset .field label.toggle-row { display: flex; margin-bottom: 0; letter-spacing: 0; color: var(--text); }
   .sset .field label.toggle-row .toggle-label { font-size: 14px; }
   .sset .sset-body > .field + .field { margin-top: 20px; }
+  /* Notifications: two groups that open to a switch per email (SOLAR-164). */
+  .notif-head { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+  .notif-group:first-child .notif-head { padding-top: 0; }
+  .notif-group + .notif-group { border-top: 1px solid var(--line); }
+  .notif-open { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0;
+    background: none; border: none; color: inherit; text-align: left; }
+  .notif-open svg { flex: none; color: var(--dim); transition: transform .18s; }
+  .notif-open[aria-expanded="true"] svg { transform: rotate(90deg); }
+  .notif-label { font-size: 15px; font-weight: 500; }
+  .sset .notif-rows { padding: 0 0 8px 26px; }
+  .sset .notif-rows .toggle-row { padding: 11px 0; border-top: 1px solid var(--line); }
   /* Tariff, Plant and Battery: the login rows' layout (name and hint left, control right).
      The name is a <label> or a <div> of spans, so stack the spans like the login rows' divs. */
   .sset-row .conn-text > span { display: block; }
