@@ -939,6 +939,22 @@
     background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.45); }
   @media (max-width: 599px) { .save-bar { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); } }
   .save-bar.dirty { border-color: rgba(61,220,132,0.4); }
+  /* what a save did (SOLAR-166): centred on the page, where the save bar was, 2.5 s */
+  .toast-host { position: fixed; left: var(--rail-w, 0px); right: 0; bottom: 24px; z-index: 9; display: flex; justify-content: center; padding: 0 16px; pointer-events: none; }
+  @media (max-width: 599px) { .toast-host { left: 0; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); } }
+  /* a failed Settings save keeps its bar open: the toast sits above it */
+  .frame:has(.save-bar) .toast-host { bottom: 88px; }
+  @media (max-width: 599px) { .frame:has(.save-bar) .toast-host { bottom: calc(192px + env(safe-area-inset-bottom, 0px)); } }
+  /* signed out there is no phone bar to clear */
+  .login-wrap .toast-host { bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .toast { display: flex; align-items: center; gap: 8px; max-width: 560px; padding: 10px 16px 10px 12px; font-size: 14px; line-height: 1.35;
+    background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.45); animation: toast-in .18s ease-out; }
+  .toast .ico { flex: none; width: 18px; height: 18px; stroke: var(--pv); stroke-width: 2.4; }
+  /* a failure, with at most one link */
+  .toast.error { border-color: rgba(248,113,113,0.45); padding-left: 16px; pointer-events: auto; }
+  .toast-act { background: none; border: none; padding: 0; font: inherit; font-weight: 600; color: var(--pv); cursor: pointer; }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+  @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
   .save-text { font-size: 13px; color: var(--muted); margin-right: auto; }
   .save-btn { background: var(--pv); color: #07130c; border: none; padding: 8px 18px; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
   .save-btn:disabled { opacity: .4; cursor: default; }   /* a Save that cannot save must not look like one that can */
@@ -1284,8 +1300,6 @@
     background: none; border: 0; border-radius: 7px; color: var(--muted); }
   .link-eye:hover { color: var(--text); }
   .link-eye:focus-visible { outline: 2px solid var(--pv); outline-offset: -2px; }
-  .link-err { color: var(--load); margin-top: 10px; }
-  .link-err:empty { display: none; }
   /* Cancel, then the green button, at the right edge */
   .link-actions { justify-content: flex-end; align-items: stretch; margin-top: 18px; }
   .link-actions .save-btn { display: inline-flex; align-items: center; gap: 8px; }
@@ -1332,7 +1346,6 @@
   .fs-actions .save-btn { flex: 1; height: 44px; padding: 0 20px; font-size: 14px; }
   .fs-skip { height: 40px; padding: 0 12px; border: none; background: none; color: var(--muted); font-size: 13px; border-radius: 9px; cursor: pointer; }
   .fs-skip:hover { color: var(--text); }
-  .fs-err { margin: 0; font-size: 12px; color: var(--load); }
   .fs-back { display: inline-flex; align-items: center; gap: 4px; height: 28px; margin: -6px 4px -6px -8px; padding: 0 8px; border: none; border-radius: 8px;
     background: none; color: var(--muted); font-size: 13px; cursor: pointer; }
   .fs-back:hover { color: var(--text); }

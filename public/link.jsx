@@ -134,7 +134,8 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
     });
     return () => { alive = false; };
   }, []);
-  const [err, setErr] = useState(null);
+  // A failure that isn't one box's is the red toast (SOLAR-166); a box's stays on its label.
+  const fail = (text) => window.toast(text, { error: true });
   const [noPlants, setNoPlants] = useState(false);
   // Field id → message, shown on the label line.
   const [bad, setBad] = useState({});
@@ -146,18 +147,18 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
     if (!username.trim()) problems['ss-user'] = 'Enter your email';
     if (!password) problems['ss-pass'] = 'Enter your password';
     if (Object.keys(problems).length) {
-      setBad(problems); setErr(null);
+      setBad(problems);
       setTimeout(() => document.getElementById(Object.keys(problems)[0])?.focus());
       return;
     }
-    setBusy(true); setErr(null); setBad({});
+    setBusy(true); setBad({});
     findTimer.current = setTimeout(() => setFinding(true), 2500);
     try {
       const r = await window.linkSunsynk(username.trim(), password);
       // No plant yet. Nothing on the server looks at this login again, so Retry has to
       // ask SunSynk afresh: the password stays in memory while the form is up, no longer.
       if (r.warning) {
-        if (noPlants) setErr('Still no plant on this login.');
+        if (noPlants) fail('Still no plant on this login.');
         setNoPlants(true);
         return;
       }
@@ -165,7 +166,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
       await onLinked(r);
       setPassword(''); setNoPlants(false);
     } catch (ex) {
-      setErr(ex instanceof TypeError ? 'Can’t reach Prince Solar Hub. Check your connection and try again.' : ex.message);
+      fail(ex instanceof TypeError ? 'Can’t reach Prince Solar Hub. Check your connection and try again.' : ex.message);
     } finally {
       clearTimeout(findTimer.current); setFinding(false);
       setBusy(false);
@@ -206,10 +207,9 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
         </div>
         <div className="field-note link-note">{compact ? 'We never keep your password.' : 'We never keep your password. Disconnect any time in Account.'}</div>
       </>)}
-      <div className="field-note link-err" role="alert" aria-live="polite">{err}</div>
       <div className="conn-form-actions link-actions">
         {noPlants
-          ? <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setNoPlants(false); setPassword(''); setErr(null); }}>Use a different login</button>
+          ? <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setNoPlants(false); setPassword(''); }}>Use a different login</button>
           : onCancel && <button type="button" className="ghost-btn" onClick={onCancel} disabled={busy}>Cancel</button>}
         <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>{green}</button>
       </div>

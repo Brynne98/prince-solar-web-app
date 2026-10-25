@@ -1849,14 +1849,14 @@ function SunSynkConnectionSection({ onChanged, links }) {
   const { useState } = React;
   const { accounts, error, refresh } = links;
   const [busy, setBusy] = useState(null);
-  const [err, setErr] = useState(null);
+  const fail = (text) => window.toast(text, { error: true }); // SOLAR-166
   const [mode, setMode] = useState(null); // null | 'add' | account_id being reconnected
   const live = accounts.filter(a => a.status !== 'disabled');
   // A failed read with nothing listed says nothing about the logins; "No login connected"
   // would be a guess. Try again re-reads.
   const unread = !!error && !live.length;
   const [checking, setChecking] = useState(false);
-  const retry = async () => { setChecking(true); setErr(null); await refresh(); setChecking(false); };
+  const retry = async () => { setChecking(true); await refresh(); setChecking(false); };
   // "read 2 min ago": freshness is what a login row is for, not the calendar date
   const ago = (iso) => {
     const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -1867,9 +1867,18 @@ function SunSynkConnectionSection({ onChanged, links }) {
   };
   // Waits for the fresh list, so the form's "Connecting…" holds until the login is listed.
   const changed = async (linked) => {
+    const adding = mode === 'add';
     const readError = await refresh();
     setMode(null); onChanged && onChanged(linked);
-    if (readError) setErr('Connected. Reload the page to see it here.');
+    if (readError) { fail('Connected. Reload the page to see it here.'); return; }
+    window.toast(adding ? 'Login added.' + plantsLine(linked?.plants, 'now in your plant list') : 'Login reconnected.');
+  };
+  // " Plant 495944 is now in your plant list." for one plant, "… and … are …" for more
+  const plantsLine = (plants, what) => {
+    const names = (plants || []).map(p => p.name || p.plant_name || 'Plant ' + (p.id ?? p.plant_id));
+    if (!names.length) return '';
+    const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0];
+    return ' ' + list + (names.length > 1 ? ' are ' : ' is ') + what + '.';
   };
   // Removing asks once, inline under the row, in the app's own language rather than a
   // browser dialog. 'confirming' holds the account_id whose card is open.
@@ -1878,20 +1887,21 @@ function SunSynkConnectionSection({ onChanged, links }) {
   const remove = async (acc) => {
     const last = live.length === 1;
     setConfirming(null);
-    setBusy(acc.account_id); setErr(null);
+    setBusy(acc.account_id);
     try {
       await window.disconnectSunsynk(acc.account_id);
       // The last login: re-reading the list leaves no plant, so the app turns to its empty
       // pages in place. A reload here blanked the screen first (SOLAR-98).
-      if (last) { await refresh(); return; }
+      const gone = 'Login removed.' + plantsLine(acc.plants, 'no longer in your plant list');
+      if (last) { await refresh(); window.toast(gone); return; }
       setBusy(null); setLeaving(acc.account_id);
       // The row stays folded until the fresh list drops it; clearing it first popped it back.
       // If that read fails the old list stays, so the row stays folded rather than showing
       // a login that is gone. Not changed(): an Add form open meanwhile keeps its fields.
       const [readError] = await Promise.all([refresh(), new Promise(r => setTimeout(r, 240))]); // matches .conn-row.leaving
       onChanged && onChanged();
-      if (readError) setErr('Removed. Reload the page to update this list.'); else setLeaving(null);
-    } catch (e) { setErr(e.message); setBusy(null); setLeaving(null); }
+      if (readError) fail('Removed. Reload the page to update this list.'); else { setLeaving(null); window.toast(gone); }
+    } catch (e) { fail('Couldn’t remove the login. Try again.'); setBusy(null); setLeaving(null); }
   };
   const n = live.length;
   const title = <>SunSynk logins{n > 0 && <span className="sset-count">{n}</span>}</>;
@@ -1927,8 +1937,8 @@ function SunSynkConnectionSection({ onChanged, links }) {
               {!plants.length && <div className="conn-meta">No plant shared with this login. Ask your installer to share it in SunSynk Connect.</div>}
             </div>
             <div className="conn-actions">
-              {!ok && mode !== acc.account_id && <button type="button" className="save-btn" onClick={() => { setErr(null); setMode(acc.account_id); }}>Reconnect</button>}
-              <button type="button" className="ghost-btn" onClick={() => { setErr(null); setConfirming(confirming === acc.account_id ? null : acc.account_id); }} disabled={busy === acc.account_id}>
+              {!ok && mode !== acc.account_id && <button type="button" className="save-btn" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
+              <button type="button" className="ghost-btn" onClick={() => setConfirming(confirming === acc.account_id ? null : acc.account_id)} disabled={busy === acc.account_id}>
                 {busy === acc.account_id ? 'Removing…' : 'Remove'}
               </button>
             </div>
@@ -1951,11 +1961,10 @@ function SunSynkConnectionSection({ onChanged, links }) {
             <window.LinkForm compact onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
           </div></div>
         : <div className="conn-add">
-            <button type="button" className="save-btn" onClick={() => { setErr(null); setMode('add'); }}>
+            <button type="button" className="save-btn" onClick={() => setMode('add')}>
               <span aria-hidden="true">+</span> Add login
             </button>
           </div>)}
-      {err && <div className="field-note" style={{ color: 'var(--load)' }}>{err}</div>}
     </SettingsSection>
   );
 }
@@ -1982,7 +1991,6 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   };
   const [f, setF] = useState(() => fromCfg(cfg));
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null);
   const [tried, setTried] = useState(false);   // Save pressed with a box still wrong: its line shows
   useEffect(() => { setF(fromCfg(plant?.config)); setTried(false); }, [plant?.id, JSON.stringify(plant?.config || {})]);
   const set = (k) => (v) => setF(x => ({ ...x, [k]: v }));
@@ -2029,12 +2037,23 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
       setTimeout(() => document.querySelector('.settings-page .fs-in.bad input, .settings-page .sset-err')?.closest('.sset-row')?.querySelector('input')?.focus());
       return;
     }
-    setBusy(true); setMsg(null);
-    try {
-      await window.savePlantConfig(plant.id, patch);
-      setMsg('Saved.'); setTried(false); onSaved && onSaved();
-    } catch (e) { setMsg(e.message); }
-    finally { setBusy(false); }
+    // The toast names what changed, read before the reload replaces cfg
+    const num = (x) => String(+x.toFixed(2));
+    const said = [];
+    if (patch.tariff_import !== (cfg.tariff_import ?? 0)) said.push('rate R' + patch.tariff_import.toFixed(2) + ' a unit');
+    if (patch.battery_reserve_pct !== (cfg.battery_reserve_pct ?? 20)) said.push('reserve ' + patch.battery_reserve_pct + '%');
+    if (patch.battery_kwh !== (cfg.battery_kwh ?? null)) said.push(patch.battery_kwh == null ? 'no battery size' : 'battery ' + num(patch.battery_kwh) + ' kWh');
+    if (patch.system_kwp !== (cfg.system_kwp ?? null) || groupsOf(patch.panel_groups) !== groupsOf(cfg.panel_groups))
+      said.push(patch.system_kwp == null ? 'no panel size' : 'panels ' + num(patch.system_kwp) + ' kWp');
+    setBusy(true);
+    // Failed: the bar keeps the edits, the red toast says so
+    try { await window.savePlantConfig(plant.id, patch); }
+    catch (e) { window.toast('Couldn’t save. Try again.', { error: true }); setBusy(false); return; }
+    setTried(false);
+    // Saving… holds until the reload closes the bar, so the toast takes its place
+    await Promise.resolve(onSaved && onSaved()).catch(() => {});
+    window.toast(said.length ? 'Saved: ' + said.join(', ') + '.' : 'Saved.');
+    setBusy(false);
   };
 
   if (!plant) return <SettingsSection id="plant" title="Plant"><div className="field-note">No plant connected yet.</div></SettingsSection>;
@@ -2093,11 +2112,11 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
         </div>
       </SettingsSection>
 
-      {(dirty || msg) && (
-        <div className={'save-bar' + (dirty ? ' dirty' : '')} role="status">
-          <span className="save-text">{!dirty ? msg : blocked ? 'Save or discard before switching plant.' : 'Unsaved changes'}</span>
-          {dirty && <button type="button" className="ghost-btn" onClick={() => { setF(fromCfg(cfg)); setTried(false); setMsg(null); }} disabled={busy}>Discard</button>}
-          {dirty && <button type="button" className="save-btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>}
+      {dirty && (
+        <div className="save-bar dirty" role="status">
+          <span className="save-text">{blocked ? 'Save or discard before switching plant.' : 'Unsaved changes'}</span>
+          <button type="button" className="ghost-btn" onClick={() => { setF(fromCfg(cfg)); setTried(false); }} disabled={busy}>Discard</button>
+          <button type="button" className="save-btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
         </div>
       )}
     </>
@@ -2119,7 +2138,6 @@ function PasswordSection({ email }) {
   const [pw2, setPw2] = useState('');
   const [bad, setBad] = useState({});
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null); // { text, ok }
   useEffect(() => { if (open) document.getElementById('pw-current')?.focus(); }, [open]);
 
   const close = () => { window.takeResetAsk(); setOpen(false); setCur(''); setPw(''); setPw2(''); setBad({}); };
@@ -2147,7 +2165,7 @@ function PasswordSection({ email }) {
     e.preventDefault();
     const problems = check();
     if (Object.keys(problems).length) return flag(problems);
-    setBusy(true); setMsg(null); setBad({});
+    setBusy(true); setBad({});
     try {
       const { error: wrong } = await window.sb.auth.signInWithPassword({ email, password: cur });
       if (wrong?.code === 'invalid_credentials') return flag({ 'pw-current': 'Wrong password' });
@@ -2156,12 +2174,11 @@ function PasswordSection({ email }) {
       if (error) throw error;
       const { error: others } = await window.sb.auth.signOut({ scope: 'others' }).catch(ex => ({ error: ex }));
       close();
-      setMsg(others ? { text: 'Password changed. Other devices are still signed in.' }
-                    : { text: 'Password changed. Other devices are signed out.', ok: true });
+      window.toast(others ? 'Password changed. Other devices are still signed in.' : 'Password changed. Other devices signed out.');
     } catch (ex) {
       const x = window.explainAuthError(ex);
       if (x.field) flag({ 'pw-new': x.text });
-      else setMsg({ text: x.text });
+      else window.toast(x.text, { error: true });
     } finally {
       setBusy(false);
     }
@@ -2181,7 +2198,7 @@ function PasswordSection({ email }) {
     <SettingsSection id="password" title="Password">
       <div className="conn-row">
         <div className="conn-text"><div className="conn-meta">Changing it signs out your other devices.</div></div>
-        {!open && <div className="conn-actions"><button type="button" className="ghost-btn" onClick={() => { setMsg(null); setOpen(true); }}>Change password</button></div>}
+        {!open && <div className="conn-actions"><button type="button" className="ghost-btn" onClick={() => setOpen(true)}>Change password</button></div>}
         {open && (
           <form className="conn-form link-form" onSubmit={submit} noValidate aria-busy={busy}>
             {/* The email, unseen, so a password manager knows which login to update. */}
@@ -2190,13 +2207,12 @@ function PasswordSection({ email }) {
             {field('pw-new', 'New password', pw, setPw, 'new-password', '8+ characters', ['pw-confirm'])}
             {field('pw-confirm', 'Confirm password', pw2, setPw2, 'new-password')}
             <div className="conn-form-actions">
-              <button type="button" className="ghost-btn" onClick={() => { setMsg(null); close(); }} disabled={busy}>Cancel</button>
+              <button type="button" className="ghost-btn" onClick={close} disabled={busy}>Cancel</button>
               <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>{busy ? 'Saving…' : 'Save password'}</button>
             </div>
           </form>
         )}
       </div>
-      {msg && <div className="field-note" role="status" style={msg.ok ? undefined : { color: 'var(--load)' }}>{msg.text}</div>}
     </SettingsSection>
   );
 }
@@ -2204,15 +2220,14 @@ function PasswordSection({ email }) {
 function DeleteAccountSection({ email }) {
   const { useState } = React;
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const del = async () => {
     setConfirming(false);
-    setBusy(true); setErr(null);
+    setBusy(true);
     // The account is gone; signing out here is what moves the screen to sign-in, once.
     // No reload after it: that blanked the page and drew sign-in again (SOLAR-98).
     try { await window.deleteAccount(); await window.signOutHere(); }
-    catch (e) { setErr(e.message); setBusy(false); }
+    catch (e) { window.toast('Couldn’t delete the account. Try again.', { error: true }); setBusy(false); }
   };
   return (
     <SettingsSection id="delete" title="Delete account" note="Removes your logins and settings. History goes too, unless someone else shares the plant.">
@@ -2221,13 +2236,12 @@ function DeleteAccountSection({ email }) {
           <div className="conn-user">Delete <span className="mono">{email || 'this account'}</span></div>
           <div className="conn-meta">It cannot be undone.</div>
         </div>
-        <div className="conn-actions"><button type="button" className="danger-btn" onClick={() => { setErr(null); setConfirming(c => !c); }} disabled={busy || confirming}>{busy ? 'Deleting…' : 'Delete account'}</button></div>
+        <div className="conn-actions"><button type="button" className="danger-btn" onClick={() => setConfirming(c => !c)} disabled={busy || confirming}>{busy ? 'Deleting…' : 'Delete account'}</button></div>
         {confirming && (
           <ConfirmCard title={<>Delete <b>{email || 'this account'}</b>?</>} text="It cannot be undone."
             action="Delete account" onConfirm={del} onCancel={() => setConfirming(false)} />
         )}
       </div>
-      {err && <div className="field-note" style={{ color: 'var(--load)' }}>{err}</div>}
     </SettingsSection>
   );
 }
@@ -2238,7 +2252,12 @@ function FirstStepsSection({ me, plantId, onSaved }) {
   const [busy, setBusy] = React.useState(false);
   const fs = window.firstSteps(me, plantId);
   if (!fs || !fs.mine.hidden || !fs.left.length) return null;
-  const show = () => { setBusy(true); window.saveFirstSteps(me, plantId, { hidden: false }).then(onSaved).finally(() => setBusy(false)); };
+  // Done, the card is back on screen; failed, the red toast says so
+  const show = () => {
+    setBusy(true);
+    window.saveFirstSteps(me, plantId, { hidden: false }).then(onSaved)
+      .catch(() => window.toast('Couldn’t show First steps. Try again.', { error: true })).finally(() => setBusy(false));
+  };
   return (
     <SettingsSection id="steps" title="First steps">
       <div className="conn-row sset-row">
@@ -2297,21 +2316,24 @@ function NotificationsSection({ userId }) {
   const { useState, useEffect } = React;
   const [prefs, setPrefs] = useState(null);
   const [failed, setFailed] = useState(false);
-  const [err, setErr] = useState(null);
   const [open, setOpen] = useState({});
   const load = () => {
     setFailed(false);
     window.fetchEmailPrefs(userId).then(setPrefs).catch(() => setFailed(true));
   };
   useEffect(() => { if (userId) load(); }, [userId]);
-  const flip = async (kind, on) => {
-    setErr(null);
+  // A save that works shows nothing more than the switch; one that fails names what it was
+  // (the email, or the group a group switch set) in the red toast (SOLAR-166).
+  const flip = async (kind, on, name) => {
     setPrefs(p => ({ ...p, [kind]: on }));
     try { await window.saveEmailPref(userId, kind, on); }
-    catch { setPrefs(p => ({ ...p, [kind]: !on })); setErr('Couldn’t save. Try again.'); }
+    catch {
+      setPrefs(p => ({ ...p, [kind]: !on }));
+      window.toast('Couldn’t save ' + (name || EMAIL_GROUPS.flatMap(g => g.rows).find(([k]) => k === kind)[1]) + '. Try again.', { error: true });
+    }
   };
   // Each email saves through flip, so a group is its emails' saves, one per kind.
-  const flipGroup = (g, on) => g.rows.forEach(([kind]) => { if (prefs[kind] !== on) flip(kind, on); });
+  const flipGroup = (g, on) => g.rows.forEach(([kind]) => { if (prefs[kind] !== on) flip(kind, on, g.label); });
   return (
     <SettingsSection id="notifications" title="Notifications">
       {failed ? (
@@ -2346,7 +2368,6 @@ function NotificationsSection({ userId }) {
           );
         })}
       </>}
-      {err && <div className="field-note" role="status" style={{ color: 'var(--load)' }}>{err}</div>}
     </SettingsSection>
   );
 }

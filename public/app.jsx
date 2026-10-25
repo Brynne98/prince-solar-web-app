@@ -70,6 +70,7 @@ window.WallStatus = WallStatus;
 // narrows the sidebar to an icon rail in CSS; nothing here knows the width.
 
 const NAV_ICONS = {
+  tick: '<polyline points="20 6 9 17 4 12"/>',
   live: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
   solar: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   battery: '<rect x="2" y="7" width="16" height="10" rx="2"/><path d="M22 11v2M6 11v2M10 11v2"/>',
@@ -523,8 +524,7 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
   const [cur, setCur] = useState(null);      // the step open; null = the next one waiting
   const [gone, setGone] = useState(false);   // Hide pressed, until prefs come back
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
-  useEffect(() => { setOpen(false); setSkipped([]); setCur(null); setGone(false); setErr(null); }, [plantId]);
+  useEffect(() => { setOpen(false); setSkipped([]); setCur(null); setGone(false); }, [plantId]);
   const fs = firstSteps(me, plantId);
   // Every step done, here or in Settings: marked done, so it stays away. Both copies of the
   // card (sidebar and phone) see it; the ref keeps each to one write.
@@ -549,14 +549,15 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
   const at = ids.indexOf(stepId);
   const n = ids.length, done = n - fs.left.length;
   const S = STEPS[stepId];
-  const go = (id) => { setErr(null); setCur(id); };
+  const go = (id) => setCur(id);
   const hide = () => {
     setGone(true); setOpen(false);
-    saveFirstSteps(me, plantId, { hidden: true }).then(onSaved).catch(() => setGone(false));
+    // A failed hide brings the card back, and the red toast says so (SOLAR-166)
+    saveFirstSteps(me, plantId, { hidden: true }).then(onSaved)
+      .catch(() => { setGone(false); window.toast('Couldn’t hide First steps. Try again.', { error: true }); });
   };
   // Skip leaves the step for later; past the last one it comes round again.
   const skip = () => {
-    setErr(null);
     const sk = skipped.includes(stepId) ? skipped : [...skipped, stepId];
     const sk2 = fs.left.every(x => sk.includes(x.id)) ? [stepId] : sk;
     const next = nextOf(fs.left, sk2, stepId);
@@ -564,14 +565,14 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
     if (!next || next === stepId) setOpen(false); else setCur(next);
   };
   const save = async (patch) => {
-    setBusy(true); setErr(null);
+    setBusy(true);
     try {
       await window.savePlantConfig(plantId, patch);
       if (stepId === 'reserve') await saveFirstSteps(me, plantId, { reserve: true });
       await onSaved();
       const left = fs.left.filter(s => s.id !== stepId);
       if (!left.length) setOpen(false); else setCur(nextOf(left, skipped, stepId));
-    } catch (e) { setErr('Couldn’t save. Try again.'); }
+    } catch (e) { window.toast('Couldn’t save. Try again.', { error: true }); }
     finally { setBusy(false); }
   };
   const toggle = () => { if (!open) setCur(null); setOpen(o => !o); };
@@ -592,7 +593,6 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
       <h2 className="fs-title">{S.title}</h2>
       <p className="fs-how">{S.how}</p>
       <StepForm key={stepId} id={stepId} cfg={fs.cfg} busy={busy} onSave={save} onSkip={skip} />
-      {err && <p className="fs-err" role="alert">{err}</p>}
     </div>
   );
   const NS = STEPS[nextId];
@@ -653,9 +653,38 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
       </div>
       {steps && tab !== 'settings' && tab !== 'account' && steps('phone')}
       <PhoneBar tabs={tabs} tab={tab} onTab={onTab} />
+      <SaveToast />
     </div>
   );
 }
+
+// What a save did, one line at the foot of the screen for 2.5 s (SOLAR-166):
+// window.toast('Saved: rate R3.45 a unit.'). A new one replaces the last. Every failure
+// that isn't one box's typing mistake is window.toast(text, { error: true, action:
+// { label, onClick } }): red, 6 s, at most one link. Frame mounts the host; the
+// signed-out screens mount their own (window.SaveToast).
+let toastShow = null;
+window.toast = (text, opts = {}) => toastShow && toastShow({ text, ...opts, at: Date.now() });
+function SaveToast() {
+  const [t, setT] = useState(null);
+  useEffect(() => { toastShow = setT; return () => { toastShow = null; }; }, []);
+  useEffect(() => {
+    if (!t) return;
+    const id = setTimeout(() => setT(null), t.error ? 6000 : 2500);
+    return () => clearTimeout(id);
+  }, [t]);
+  return (
+    <div className="toast-host" role={t?.error ? 'alert' : 'status'} aria-live={t?.error ? 'assertive' : 'polite'}>
+      {t && (
+        <div key={t.at} className={'toast' + (t.error ? ' error' : '')}>
+          {!t.error && <Icon id="tick" />}
+          <span>{t.text}{t.action && <> <button type="button" className="toast-act" onClick={() => { setT(null); t.action.onClick(); }}>{t.action.label}</button></>}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+window.SaveToast = SaveToast;
 
 // Shown while the session and the SunSynk link are still being checked, before App
 // mounts. Same frame as App's own not-yet-loaded gate, so the hand-over does not flash.
