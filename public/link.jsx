@@ -91,7 +91,7 @@ window.disconnectSunsynk = async function disconnectSunsynk(accountId) {
 };
 
 // The same moment on the Connect screen and inside Settings; one wording for both.
-const NO_PLANT_TEXT = 'signed in, but SunSynk lists no plant for it. The installer usually still owns the plant: ask them to share it with this login in SunSynk Connect (Plant → Share). Your login is saved, so retry once it appears.';
+const NO_PLANT_TEXT = 'signed in, but no plant is shared with it yet. Your login is saved. Retry any time.';
 
 /** Password input in the app's field style, with a show button. type="button": inside a
  *  form a bare button submits. */
@@ -186,8 +186,8 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
     <form className={compact ? 'conn-form link-form' : 'link-form link-card'} onSubmit={submit} noValidate aria-busy={busy}>
       {!compact && <h2 className="sset-title">{noPlants ? 'Connected, but no plant yet' : relink ? 'Reconnect SunSynk' : 'Connect your inverter'}</h2>}
       {noPlants ? (
-        // The login worked but SunSynk lists no plant for it. Almost always the installer
-        // still owns the plant; nothing here can fix that, so say what will.
+        // The login worked but SunSynk lists no plant for it. Say so and offer Retry; never
+        // send the owner to an installer or SunSynk.
         <p className="sset-note"><b>{username.trim()}</b> {NO_PLANT_TEXT}</p>
       ) : (<>
         <p className="sset-note">{relink
