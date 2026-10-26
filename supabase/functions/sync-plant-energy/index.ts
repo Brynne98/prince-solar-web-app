@@ -12,6 +12,7 @@
 //     and the Overview comparison arrows)
 import { db, denyUnlessServer, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
 import { fetchMonthRows, fetchYearRows } from "../_shared/plantfeed.ts";
+import { reportError, serve } from "../_shared/errors.ts";
 
 const DEFAULT_DAILY_MONTHS = 6;
 const MAX_YEARS_BACK = 10;
@@ -107,7 +108,7 @@ async function syncPlant(job: PlantJob, dailyMonths: number, started: number) {
   return { plantId, gridMul, rows: upserts.length, years: synced.years, months: synced.months };
 }
 
-Deno.serve(async (req) => {
+serve("sync-plant-energy", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
   const started = Date.now();
@@ -146,6 +147,7 @@ Deno.serve(async (req) => {
 
     return json({ ok: true, rows, plants, elapsedMs: Date.now() - started });
   } catch (e) {
+    await reportError("sync-plant-energy", e);
     console.error("sync-plant-energy failed:", e);
     return json({ error: String(e instanceof Error ? e.message : e) }, 500);
   }

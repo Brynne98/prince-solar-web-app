@@ -49,6 +49,7 @@
 //
 // ?plant=ID restricts a run to one plant and leaves the round-robin cursor alone.
 import { type Account, db, denyUnlessServer, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
+import { reportError, serve } from "../_shared/errors.ts";
 import {
   bucketizeAgg,
   calibrateFeedScale,
@@ -447,7 +448,7 @@ async function dryRun(job: PlantJob, day: string) {
   };
 }
 
-Deno.serve(async (req) => {
+serve("recover", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
   const started = Date.now();
@@ -494,6 +495,7 @@ Deno.serve(async (req) => {
 
     return json({ ok: true, banked: total, windowDays, plants, elapsedMs: Date.now() - started });
   } catch (e) {
+    await reportError("recover", e);
     console.error("recover failed:", e);
     return json({ error: String(e instanceof Error ? e.message : e) }, 500);
   }

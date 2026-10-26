@@ -6,11 +6,12 @@
 // works for poll / recover. Auth is a shared bearer token, not a JWT —
 // verify_jwt is off for this function only.
 import { bootstrapPlantId, db } from "../_shared/sunsynk.ts";
+import { serve } from "../_shared/errors.ts";
 
 const json = (b: unknown, status = 200) =>
   new Response(JSON.stringify(b), { status, headers: { "Content-Type": "application/json" } });
 
-Deno.serve(async (req) => {
+serve("alerts-due", async (req) => {
   const expected = Deno.env.get("ALERTS_TOKEN") ?? "";
   const got = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
   if (!expected || got !== expected) return json({ error: "unauthorized" }, 401);

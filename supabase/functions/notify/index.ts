@@ -19,6 +19,7 @@
 // send. ?render=all&plant=<id> returns every template built from that plant's data,
 // for checking by eye.
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
+import { reportError, serve } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, FROM_ACCOUNT, FROM_NOTICE, type History, historySynced, type Period,
   plantEvent, type PlantEvent, report, type Report, sunsynkBack, sunsynkDown, welcome,
@@ -361,7 +362,7 @@ async function renderAll(plantId: number, today?: string) {
   return out;
 }
 
-Deno.serve(async (req) => {
+serve("notify", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
   const url = new URL(req.url);
@@ -370,6 +371,7 @@ Deno.serve(async (req) => {
     const dry = !LIVE || !RESEND_KEY || url.searchParams.get("dry") === "1";
     return json(await run(dry, url.searchParams.get("html") === "1"));
   } catch (e) {
+    await reportError("notify", e);
     console.error("notify failed:", e);
     return json({ error: String(e instanceof Error ? e.message : e) }, 500);
   }
