@@ -2283,7 +2283,7 @@ function DownloadSection() {
     </div>
   );
   return (
-    <SettingsSection id="download" title="Download your data" note="Every minute for the last 31 days, every 5 minutes before that.">
+    <SettingsSection id="download" title="Your data" note="Every minute for the last 31 days, every 5 minutes before that.">
       {row('dl-from', 'From', from, setFrom)}
       {row('dl-to', 'To', to, setTo, true)}
       <div className="conn-row sset-row">
@@ -2309,7 +2309,7 @@ function DeleteAccountSection({ email }) {
     catch (e) { window.toast('Couldn’t delete the account. Try again.', { error: true }); setBusy(false); }
   };
   return (
-    <SettingsSection id="delete" title="Delete account">
+    <SettingsSection id="delete" title="Account deletion">
       <div className="conn-row">
         <div className="conn-text">
           <div className="conn-user">Delete <span className="mono">{email || 'this account'}</span></div>
