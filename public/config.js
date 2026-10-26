@@ -11,7 +11,7 @@
 // with the other deploy-time config and loads before anything renders.
 window.APP_VERSION = 'v0.29.12';
 // Shown in Settings → About and on error screens.
-window.SUPPORT_EMAIL = 'brynneprince98@gmail.com';
+window.SUPPORT_EMAIL = 'hello@princesolarhub.co.za';
 // Google sign-in client (Google Cloud project prince-solar, "Supabase web"). Public by design.
 window.GOOGLE_CLIENT_ID = '357189209576-890oqvan5eeuc2vash5ralv04k0m0pa2.apps.googleusercontent.com';
 
