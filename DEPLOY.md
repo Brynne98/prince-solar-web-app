@@ -85,6 +85,27 @@ supabase functions deploy poll                    # only what changed
 supabase functions deploy alerts-due recover sync-plant-energy
 ```
 
+**New tables, sequences and functions get no access by default** (0108, SOLAR-145).
+Since 0108, and on Supabase from 2026-10-30, a new object in `public` is open to no
+one but its owner, and service_role for functions. The migration that creates it grants
+exactly what the app and the server need, in the same file:
+
+```sql
+create table public.foo (id bigserial primary key, ...);
+alter table public.foo enable row level security;
+create policy foo_read on public.foo for select to authenticated using (...);
+grant select on public.foo to authenticated;            -- only what the app reads or writes
+grant all    on public.foo to service_role;             -- edge functions and cron
+grant usage, select on sequence public.foo_id_seq to service_role;  -- whoever inserts
+
+create function public.api_foo() ... security definer ...;
+grant execute on function public.api_foo() to authenticated;   -- anon only if signed-out pages call it
+```
+
+anon gets nothing unless a signed-out page needs it. A local `supabase db reset` replays
+migrations the same way (`auto_expose_new_tables = false`), so a missing grant shows up
+there as "permission denied" before it reaches production.
+
 **"Only what changed" includes `_shared/`.** Every function bundles the files it
 imports from `supabase/functions/_shared/` at deploy time, so a change there is a
 change to every importer — even if the importer's own `index.ts` is untouched.
