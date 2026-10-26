@@ -133,10 +133,8 @@ const GoogleMark = () => (
  *  popup and passes the ID token to Supabase. Google hashes the nonce we give it into
  *  the token; Supabase checks the token against the plain one. Google's button only
  *  comes in its own look (and turns into "Continue as <name>"), so it sits invisible
- *  on top of ours, stretched to cover it, and takes the click. `blocked` lays a
- *  click-catcher over both (sign-up before the Terms are ticked), since clicks inside
- *  Google's frame can't be stopped. */
-function GoogleSignIn({ blocked, onBlocked, onStart, onDone }) {
+ *  on top of ours, stretched to cover it, and takes the click. */
+function GoogleSignIn({ onStart, onDone }) {
   const { useState, useEffect, useRef } = React;
   const box = useRef(null);
   const [state, setState] = useState('loading'); // loading | ready | failed
@@ -195,7 +193,6 @@ function GoogleSignIn({ blocked, onBlocked, onStart, onDone }) {
     <div className="gsi-wrap">
       <div className="login-google" aria-hidden="true"><GoogleMark /> Continue with Google</div>
       <div ref={box} className="gsi-box" />
-      {blocked && <button type="button" className="gsi-block" onClick={onBlocked} aria-label="Continue with Google" />}
     </div>
   );
 }
@@ -372,7 +369,6 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const [password2, setPassword2] = useState('');
   // false, or the button that is waiting ('form' or 'google'); only that one says so.
   const [busy, setBusy] = useState(false);
-  const [agree, setAgree] = useState(false);
   // Where the link went and why ('signup' or 'reset'), for Check your inbox.
   const [sent, setSent] = useState(null);
   // { places, left } from api_tester_places; null until it answers or if it fails.
@@ -437,7 +433,6 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
       if (!password2) out['auth-password2'] = 'Confirm your password';
       else if (password !== password2) out['auth-password2'] = 'Passwords don’t match';
     }
-    if (mode === 'signup' && !agree) out['auth-agree'] = 'Accept the Terms and Privacy Policy';
     return out;
   };
 
@@ -489,8 +484,8 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   };
 
   const copy = {
-    signin:   { h: 'Welcome back',          p: null,                                                   cta: 'Sign in',         busy: 'Signing in…' },
-    signup:   { h: 'Create your account',   p: null,                                                   cta: 'Create account',  busy: 'Creating account…' },
+    signin:   { h: 'Sign in',               p: null,                                                   cta: 'Sign in',         busy: 'Signing in…' },
+    signup:   { h: 'Create your account',   p: 'Next, you’ll connect SunSynk.',                        cta: 'Create account',  busy: 'Creating account…' },
     forgot:   { h: 'Reset your password',   p: 'We’ll email you a link to choose a new one.',          cta: 'Send reset link', busy: 'Sending…' },
     recovery: { h: 'Choose a new password', p: 'Set a new password to continue.',                      cta: 'Save password',   busy: 'Saving…' },
     expired:  { h: 'That link has expired', p: 'Links last 24 hours. Enter your email and we’ll send a new one.', cta: 'Send a new link', busy: 'Sending…' },
@@ -519,8 +514,6 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     {busy === 'google' && <div className="auth-wait"><span className="auth-spin" aria-hidden="true" />Signing in with Google…</div>}
     <div hidden={busy === 'google'}>
       <GoogleSignIn
-        blocked={mode === 'signup' && !agree}
-        onBlocked={() => flag({ 'auth-agree': 'Accept the Terms and Privacy Policy' })}
         onStart={() => { setBusy('google'); setBad({}); }}
         onDone={(error) => { if (error) { showError(error); setBusy(false); } }} />
     </div>
@@ -565,17 +558,10 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
                          placeholder="Type it again" autoComplete="new-password" />
         )}
 
-        {mode === 'signup' && (
-          <label className={'auth-consent' + (bad['auth-agree'] ? ' invalid' : '')}>
-            <input id="auth-agree" type="checkbox" checked={agree}
-                   onChange={(e) => { setAgree(e.target.checked); edited('auth-agree'); }}
-                   {...invalidProps('auth-agree', bad['auth-agree'])} />
-            <span>I agree to the <a href="terms.html" target="_blank" rel="noopener">Terms of Service</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span>
-            {/* The sentence turns red instead of adding a line; this names the problem for screen readers. */}
-            {bad['auth-agree'] && <span id="auth-agree-err" className="sr-only">{bad['auth-agree']}</span>}
-          </label>
-        )}
         <button type="submit" disabled={!!busy} aria-busy={busy === 'form'}>{busy === 'form' ? copy.busy : copy.cta}</button>
+        {/* covers Google above too (SOLAR-91) */}
+        {mode === 'signup' && <div className="login-fine">By creating an account you agree to
+          the <a href="terms.html" target="_blank" rel="noopener">Terms</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>}
 
         {/* Grey links that go back on the left, the way forward in green on the right. */}
         <div className="login-links">

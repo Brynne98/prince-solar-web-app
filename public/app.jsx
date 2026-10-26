@@ -399,8 +399,8 @@ window.saveFirstSteps = saveFirstSteps;
 
 // Battery size and panels share one box (SumBox): a total, or count × size rows that add up.
 const STEP_SUMS = {
-  size: { unit: 'kWh', each: 'kWh', per: 1, ph: '5.12', totPh: '26.5', add: '+ Another battery size', sizeLabel: 'kWh each', ok: (e) => e > 0 },
-  panels: { unit: 'kW', each: 'W', per: 1000, ph: '450', totPh: '9', add: '+ Another panel size', sizeLabel: 'Watts each', ok: (e) => Number.isInteger(e) && e >= 50 && e <= 1000 },
+  size: { unit: 'kWh', each: 'kWh', per: 1, ph: '5.12', totPh: '26.5', add: 'Add battery size', sizeLabel: 'kWh each', ok: (e) => e > 0 },
+  panels: { unit: 'kW', each: 'W', per: 1000, ph: '450', totPh: '9', add: 'Add panel size', sizeLabel: 'Watts each', ok: (e) => Number.isInteger(e) && e >= 50 && e <= 1000 },
 };
 // typed as text, so a comma keyboard's 5,12 reads as 5.12
 const stepNum = (v) => (v ?? '') === '' ? NaN : Number(String(v).replace(',', '.'));

@@ -47,7 +47,7 @@ function LiveSkeleton() {
     <div className="live-grid">
       <div className="overview-section">
         <div className="overview-head">
-          <div className="section-title">OVERVIEW · <span style={{ color: 'var(--text)' }}>today</span></div>
+          <div className="section-title">OVERVIEW</div>
           <window.Segmented size="sm" value="today" onChange={() => {}}
             options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }]} />
         </div>
@@ -58,7 +58,7 @@ function LiveSkeleton() {
           <MiniStat loading label="Home" />
           <MiniStat loading label="Independence" bar={0} />
           <MiniStat loading label="Imported" sub={' '} />
-          <MiniStat loading label="Est. saved" sub={' '} />
+          <MiniStat loading label="Saved" sub={' '} />
         </div>
       </div>
       <div className="card flow-card">
@@ -262,7 +262,6 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   // few Wh of backflow, so a non-zero counter alone is not a sign the site sells.
   const showExport = hasGrid && rateExp > 0;
   const pending = isAgg && !energy[period];
-  const periodWord = { today: 'today', week: 'this week', month: 'this month', year: 'this year', lifetime: 'lifetime' }[period];
   // trend vs the same elapsed slice of the previous period. Today's is yesterday up to
   // the same time (0077), so it is fair from the first minute and shows all day.
   // "current" = the live value shown in the tile (pPv/pLoad/…) so the arrow stays
@@ -364,7 +363,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
 
       <div className="overview-section">
         <div className="overview-head">
-          <SectionTitle>OVERVIEW · <span style={{ color: 'var(--text)' }}>{periodWord}</span></SectionTitle>
+          <SectionTitle>OVERVIEW</SectionTitle>
           <Segmented size="sm"
             options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }]}
             value={period} onChange={setPeriod} />
@@ -396,12 +395,12 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             )} />}
           {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off" color={CC.grid}
             info="No grid connection. Everything the home uses comes from solar and the battery." />}
-          <MiniStat loading={pending} label="Est. saved" color={CC.batt}
+          <MiniStat loading={pending} label="Saved" color={CC.batt}
             value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
             trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord}
             // no rate yet: the line under the dash opens Settings on Tariff
             sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your rate</button> : undefined}
-            info={'What your home used that didn’t come from the grid, at your electricity rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '.'} />
+            info={'An estimate: what your home used that didn’t come from the grid, at your electricity rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '.'} />
         </div>
       </div>
 
@@ -1962,7 +1961,7 @@ function SunSynkConnectionSection({ onChanged, links }) {
           </div></div>
         : <div className="conn-add">
             <button type="button" className="save-btn" onClick={() => setMode('add')}>
-              <span aria-hidden="true">+</span> Add login
+              Add SunSynk login
             </button>
           </div>)}
     </SettingsSection>

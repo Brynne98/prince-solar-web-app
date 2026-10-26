@@ -191,7 +191,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
         <p className="sset-note"><b>{username.trim()}</b> {NO_PLANT_TEXT}</p>
       ) : (<>
         <p className="sset-note">{relink
-          ? 'SunSynk stopped accepting the saved login, usually after a password change. Your history is safe.'
+          ? 'SunSynk stopped accepting your login. Your history is safe.'
           : 'Use the login from the SunSynk Connect app.'}</p>
         {/* In Account the two fields share one line, as they did before (SOLAR-97); a phone
             stacks them. On the Connect card they stack. */}

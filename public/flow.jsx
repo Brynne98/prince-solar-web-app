@@ -81,9 +81,9 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
     pv: { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun',
       split: [['Home', C.load, sunToHome * sunScale], ['Battery', C.batt, sunToBatt * sunScale], ['Grid', C.grid, gridExport * sunScale]],
       today: today(['Made', agg.pvToday]) },
-    // w stays the magnitude (animation, stroke); val is the signed figure printed on the box,
-    // + = powering the house, as everywhere else in the app.
-    bat: hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: window.battShown(agg.battOut),
+    // w stays the magnitude (animation, stroke). The box prints no sign: the state line
+    // (Full in, Empty in) says which way it flows (SOLAR-91).
+    bat: hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: Math.abs(window.battShown(agg.battOut)),
       icon: 'battery', soc: agg.battSoc, reverse: charging, state: battState, charge: agg.battSoc,
       today: today(['Charged', agg.battChgToday], ['Discharged', agg.battDischgToday]) },
     // flows both ways: an export runs the animation back towards the grid and prints
@@ -91,7 +91,9 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
     grid: hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 0 ? gridExport : gridImport,
       val: gridExport > 0 ? -gridExport : gridImport, icon: 'bolt',
       reverse: gridExport > 0, off: gridOff, known: gridKnown,
-      state: gridOff ? 'Off' : gridExport > 0 ? 'Exporting' : gridImport > 0 ? 'Importing' : 'Not in use',
+      // on and idle is one line, so the Grid on foot below goes (SOLAR-91)
+      state: gridOff ? 'Off' : gridExport > 0 ? 'Exporting' : gridImport > 0 ? 'Importing' : gridKnown ? 'On, not in use' : 'Not in use',
+      idle: gridKnown && !gridOff && !gridExport && !gridImport,
       today: today(['Imported', agg.gridFromToday ?? 0], ['Exported', agg.gridToToday ?? 0]) },
     home: { key: 'home', label: 'Home', color: C.load, w: agg.loadNow, icon: 'home',
       split: [['Solar', C.pv, solarIn], ['Battery', C.batt, battIn], ['Grid', C.grid, gridIn]],
@@ -213,7 +215,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
             </div>
           )}
           {/* mains there or gone: a status, never green-tinted like solar's power */}
-          {n.known && <div className={'fbox-foot fbox-grid' + (n.off ? ' off' : '')}><i />{n.off ? 'Grid off' : 'Grid on'}</div>}
+          {n.known && !n.idle && <div className={'fbox-foot fbox-grid' + (n.off ? ' off' : '')}><i />{n.off ? 'Grid off' : 'Grid on'}</div>}
         </div>
         {n.today.length > 0 && (
           <div className="fbox-today">
@@ -328,9 +330,11 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   if (silentSince) narrative = wall ? <>No readings since {silentSince}.</> : null;
   else if (gridOff) {
     const timeLeft = battRow.k === 'Empty in' ? battRow.v : null;
-    narrative = <><b>The grid is off.</b>{hasBatt && agg.battPower > 5 && !charging
-      ? <> Your <b style={{ color: C.batt }}>battery</b> is powering the home{timeLeft ? <>, with about {timeLeft} left</> : ''}.</>
-      : agg.pvNow > 50 ? <> <b style={{ color: C.pv }}>Solar</b> is powering the home.</> : null}</>;
+    // The page's Grid off banner says it; fullscreen covers the banner (SOLAR-91).
+    const what = hasBatt && agg.battPower > 5 && !charging
+      ? <>Your <b style={{ color: C.batt }}>battery</b> is powering the home{timeLeft ? <>, with about {timeLeft} left</> : ''}.</>
+      : agg.pvNow > 50 ? <><b style={{ color: C.pv }}>Solar</b> is powering the home.</> : null;
+    narrative = wall ? <><b>The grid is off.</b>{what && <> {what}</>}</> : what;
   }
   // Exporting while the battery also feeds the home: solar alone isn't covering it (SOLAR-46).
   // Solar is only named when it is making something; a battery can export after dark (SOLAR-63).
