@@ -8,8 +8,10 @@
   has two GitHub accounts and the wrong key authenticates as the wrong person.
 - **Branch:** `main`. No feature branches; commits land on main.
 - **Frontend host:** Cloudflare Pages project `prince-solar-web-app`, serving `public/`:
-  the app at app.princesolarhub.com, the showcase at princesolarhub.com (a Cloudflare
-  URL rewrite serves `/welcome` for `/`; www redirects to the apex). Rebuilt from GitHub `main` on every push (seen 2026-10-18: v0.28.63 was live
+  the app at app.princesolarhub.co.za, the showcase at princesolarhub.co.za (a Cloudflare
+  URL rewrite serves `/welcome` for `/`; www redirects to the apex). Since 2026-10-26
+  (SOLAR-190) every princesolarhub.com address 301s to the same path on .co.za; keep
+  .com renewing. .co.za is registered at xneelo (company account), DNS on Cloudflare. Rebuilt from GitHub `main` on every push (seen 2026-10-18: v0.28.63 was live
   20 s after the push). Its settings are in the Cloudflare dashboard, not this repo.
   Build command `npm ci && npm run build` compiles `public/*.jsx` into `public/build/` (not in
   git; SOLAR-131). GitHub Pages is off
