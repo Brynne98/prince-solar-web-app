@@ -2189,7 +2189,7 @@ function PasswordSection({ email }) {
   const sendReset = async () => {
     setBusy(true);
     try {
-      const { error } = await window.sb.auth.resetPasswordForEmail(email, { redirectTo: SITE_URL });
+      const { error } = await window.sb.auth.resetPasswordForEmail(email, { redirectTo: RESET_URL });
       if (error) throw error;
       close();
       window.toast(`Reset link sent to ${email}.`);
