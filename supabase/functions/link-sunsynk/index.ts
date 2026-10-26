@@ -67,6 +67,15 @@ Deno.serve(async (req) => {
   }
   if (!username || !password) return json({ error: "username and password are required" }, 400, cors);
 
+  // At most 5 SunSynk logins per user per hour (0107), so one user can't get the
+  // function's address blocked by SunSynk. Refuse if the count can't be read.
+  const { data: allowed, error: limitErr } = await db.rpc("link_attempt", { p_user: userId });
+  if (limitErr) {
+    console.error(`link-sunsynk limit check failed for user ${userId}: ${limitErr.message}`);
+    return json({ error: "could not reach SunSynk" }, 502, cors);
+  }
+  if (!allowed) return json({ error: "too many attempts" }, 429, { ...cors, "Retry-After": "3600" });
+
   try {
     const { accountId, plants } = await linkAccount(userId, username, password);
     password = ""; // done with it

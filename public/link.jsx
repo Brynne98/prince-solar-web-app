@@ -83,6 +83,7 @@ const LINK_ERRORS = {
   'could not reach SunSynk': 'Can’t reach SunSynk right now. Try again in a minute.',
   'sign in first': 'Your session ended. Sign in again.',
   'session invalid': 'Your session ended. Sign in again.',
+  'too many attempts': 'Too many tries. Try again in an hour.',
 };
 
 window.disconnectSunsynk = async function disconnectSunsynk(accountId) {
