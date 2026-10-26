@@ -2229,8 +2229,7 @@ function DownloadSection() {
   const [busy, setBusy] = useState(false);
   const days = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
 
-  const submit = async (e) => {
-    e.preventDefault();
+  const submit = async () => {
     if (!from || !to) return setBad('Pick both dates');
     if (to < from) return setBad('Pick a To date after From');
     if (days(from, to) > 365) return setBad('Pick a year or less');
@@ -2251,25 +2250,29 @@ function DownloadSection() {
     }
   };
 
-  const field = (id, text, value, set) => (
-    <div className="field">
-      <label htmlFor={id}>{text}</label>
-      <input id={id} type="date" className="input" value={value} max={today}
-             onChange={(e) => { set(e.target.value); setBad(null); }} {...window.invalidProps(id, bad, 'dl-err')} />
+  // The same row as every Settings field: name on the left, the box on the right.
+  const row = (id, text, value, set, last) => (
+    <div className="conn-row sset-row">
+      <div className="conn-text"><label htmlFor={id} className="conn-user">{text}</label></div>
+      <div className="conn-actions sset-one">
+        <div className={'fs-in' + (bad ? ' bad' : '')}>
+          <input id={id} type="date" value={value} max={today}
+                 onChange={(e) => { set(e.target.value); setBad(null); }} {...window.invalidProps(id, bad, 'dl-err')} />
+        </div>
+        {last && bad && <p className="sset-err" id="dl-err" role="alert">{bad}</p>}
+      </div>
     </div>
   );
   return (
-    <SettingsSection id="download" title="Download your data" note="Every minute for the last 31 days, every 5 minutes before that. Opens in Excel or Google Sheets.">
-      <form className="conn-form" onSubmit={submit} noValidate aria-busy={busy}>
-        <div className="field-row">
-          {field('dl-from', 'From', from, setFrom)}
-          {field('dl-to', 'To', to, setTo)}
+    <SettingsSection id="download" title="Download your data" note="Every minute for the last 31 days, every 5 minutes before that.">
+      {row('dl-from', 'From', from, setFrom)}
+      {row('dl-to', 'To', to, setTo, true)}
+      <div className="conn-row sset-row">
+        <div className="conn-text"><span className="conn-meta">A CSV file. Opens in Excel or Google Sheets.</span></div>
+        <div className="conn-actions sset-one">
+          <button type="button" className="save-btn" onClick={submit} disabled={busy} aria-busy={busy}>{busy ? 'Preparing…' : 'Download'}</button>
         </div>
-        {bad && <p className="sset-err" id="dl-err" role="alert">{bad}</p>}
-        <div className="conn-form-actions">
-          <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>{busy ? 'Preparing…' : 'Download'}</button>
-        </div>
-      </form>
+      </div>
     </SettingsSection>
   );
 }
