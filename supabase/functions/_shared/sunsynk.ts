@@ -20,7 +20,7 @@
 //     HTTP 200, msg "Success", empty data. Check data.access_token, never msg.
 //   * the access token (stateless JWT) keeps working until its own expiry
 //   * there is no read-only scope; every token is scope=all
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { createClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { createHash, createHmac } from "node:crypto";
 import { type InverterInfo, num, pick } from "./extract.ts";
 

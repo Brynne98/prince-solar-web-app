@@ -5,7 +5,7 @@
 // to it; no sign-in, the per-user token is the proof (email_unsub_token, 0091).
 // A GET changes nothing, because mail scanners open links on their own; it sends
 // the reader to the Notifications section instead. verify_jwt is off for this function.
-import { createClient } from "jsr:@supabase/supabase-js@2";
+import { createClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { serve } from "../_shared/errors.ts";
 
 const db = createClient(
