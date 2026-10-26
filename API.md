@@ -300,6 +300,8 @@ answers on the production key. `type` and `sdate` are required (`400 Parameter �
 without them). With a range of up to 26 days it returns `{ nextToken: null, record: [] }`;
 a 4-month range (Jul–Oct) and `sdate` with a time both return `data: null`. Types 0, 1, 2, 3
 and -1, with or without `plantId`/`sn`, all came back empty for 495944 and 538820, 1–26 Oct.
+A second sweep the same day, types 1–3 in five chunks of up to 26 days from 1 Jul to 26 Oct,
+was empty on both plants too (30 calls).
 Not known yet: what each `type` means, what a record looks like, whether the list is
 per-user or per-plant. `nextToken` suggests token paging, not `page`. Still `404` on this
 host: `/plant/{id}/events`, `/plant/{id}/alarms`, `/inverter/{sn}/events|alarm|alarms|fault|faults`, `/alarms`.
