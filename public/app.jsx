@@ -759,6 +759,7 @@ function Setup({ links }) {
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
   }, [connecting]);
+  useEffect(() => { window.track('screen_viewed', { stage: 'setup', screen: connecting ? 'connect' : tab }); }, [tab, connecting]);
   const dead = links.accounts.filter(a => a.status === 'needs_relink');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
   const account = { user, plantCount: 0, alert: dead.length > 0, onAccount: () => go('account'), active: tab === 'account' };
@@ -827,10 +828,10 @@ function App({ links }) {
   const inflight = useRef({});
   useEffect(() => { energyRef.current = energy; }, [energy]);
 
+  useEffect(() => { window.track('screen_viewed', { stage: 'dashboard', screen: tab }); }, [tab]);
+
   // The address names the page and plant, so a reload opens them; the saved page is for a
   // bare address (SOLAR-165). ?section= is left for loadMe to read.
-  useEffect(() => { window.track('dashboard_viewed', { tab }); }, [tab]);
-
   useEffect(() => {
     localStorage.setItem('synsynk.tab', tab);
     const url = new URL(location.href);

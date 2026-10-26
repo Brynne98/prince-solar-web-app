@@ -364,8 +364,9 @@ function InboxCard({ kind, email, onBack, onSignIn }) {
 }
 
 function AuthScreen({ initialMode = 'signin', onRecovered }) {
-  const { useState } = React;
+  const { useState, useEffect } = React;
   const [mode, setMode] = useState(initialMode);
+  useEffect(() => { window.track('screen_viewed', { stage: 'sign_in', screen: mode }); }, [mode]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [password2, setPassword2] = useState('');

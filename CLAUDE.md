@@ -41,3 +41,11 @@ runbook, including pre-flight checks and the version bump, is in `DEPLOY.md`.
 
 Nothing here is permission to run those. Commit, push and deploy only on
 Brynne's explicit say-so, every time.
+
+## Analytics
+
+- Every new feature sends a PostHog event when it's used: `window.track('name_done', {...})`
+  (snake_case, past tense). Set up in `public/config.js` (SOLAR-85).
+- Never send emails, names, SunSynk logins or readings as event properties. The user is
+  known by their Supabase user id only.
+- New data collected goes in `public/privacy.html`.

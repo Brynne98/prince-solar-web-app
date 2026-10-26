@@ -9,7 +9,7 @@
 // Shown in Settings -> About. Bumped on every deploy; semver, so patch for fixes,
 // minor for features, major for a rewrite. Lives here rather than in the JSX so it sits
 // with the other deploy-time config and loads before anything renders.
-window.APP_VERSION = 'v0.29.11';
+window.APP_VERSION = 'v0.29.12';
 // Shown in Settings → About and on error screens.
 window.SUPPORT_EMAIL = 'brynneprince98@gmail.com';
 // Google sign-in client (Google Cloud project prince-solar, "Supabase web"). Public by design.
@@ -35,12 +35,18 @@ window.SUNSYNK_CONFIG = (function () {
 // (memory persistence: no cookie, so no banner); a signed-in user is known by their
 // Supabase user id only. No screen recording, no click capture: only the named events
 // sent through window.track, and errors. Empty key: nothing is sent.
-window.POSTHOG_KEY = 'phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v';
+window.POSTHOG_KEY = 'phc_ABkqiYsajciVYVKYX4GZMApcDP7QfD7CKQtgE7XPgjxN';
 (function () {
   var ph = window.posthog;
   var on = !!(window.POSTHOG_KEY && ph && ph.init);
+  // Memory persistence mints a new anonymous id each load; start a signed-in user on
+  // their user id (from the saved Supabase session) so identify doesn't merge a new id
+  // onto them every visit.
+  var uid = null;
+  try { uid = JSON.parse(localStorage.getItem('synsynk.auth')).user.id; } catch (e) {}
   if (on) {
     ph.init(window.POSTHOG_KEY, {
+      bootstrap: uid ? { distinctID: uid, isIdentifiedID: true } : {},
       api_host: 'https://eu.i.posthog.com',
       persistence: 'memory',
       autocapture: false, rageclick: false, capture_pageview: false, capture_pageleave: false,
@@ -48,13 +54,14 @@ window.POSTHOG_KEY = 'phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v';
       disable_session_recording: true, disable_surveys: true, disable_web_experiments: true,
       advanced_disable_flags: true, disable_external_dependency_loading: true,
     });
-    ph.register({ app_version: window.APP_VERSION });
+    // The project is shared with the phone apps: filter on app = prince-solar-hub.
+    ph.register({ app: 'prince-solar-hub', app_version: window.APP_VERSION });
   }
   window.track = function (name, props) {
     try { if (on) ph.capture(name, Object.assign({ plant_id: window.CURRENT_PLANT ?? null }, props)); } catch (e) {}
   };
   window.identifyUser = function (id) {
-    try { if (on) { if (id) ph.identify(id); else ph.reset(); } } catch (e) {}
+    try { if (on) { if (!id) ph.reset(); else if (id !== ph.get_distinct_id()) ph.identify(id); } } catch (e) {}
   };
   // A crash in someone's browser is otherwise invisible. Each message once per page
   // load, at most 20, so a render loop can't flood the project.
