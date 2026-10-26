@@ -2264,6 +2264,10 @@ function DownloadSection() {
       a.download = `prince-solar-${from}-to-${to}.csv`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      // agg_minute holds the last 31 days; older days come from agg_5m.
+      const minuteFrom = window.localDateStr(new Date(Date.now() - 30 * 86400000));
+      const resolution = from >= minuteFrom ? 'minute' : to < minuteFrom ? '5min' : 'mixed';
+      window.track('data_download_done', { days: days(from, to) + 1, resolution });
     } catch (ex) {
       window.toast('Couldn’t download. Try again.', { error: true });
     } finally {
