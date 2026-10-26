@@ -57,9 +57,10 @@ function local(tz: string, at = new Date()) {
   return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour), dow: "MonTueWedThuFriSatSun".indexOf(p.weekday) / 3 + 1 };
 }
 const addDays = (d: string, n: number) => new Date(Date.parse(d + "T00:00:00Z") + n * 86400e3).toISOString().slice(0, 10);
-// en-GB writes "Sept"; the app and the mock write "Sep".
+// en-GB writes "Sept"; the app and the mock write "Sep". Whole word only, so
+// "September" stays whole.
 const fmtDay = (d: string, o: Intl.DateTimeFormatOptions) =>
-  new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...o }).format(new Date(d + "T00:00:00Z")).replace("Sept", "Sep");
+  new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...o }).format(new Date(d + "T00:00:00Z")).replace(/\bSept\b/, "Sep");
 const hhmm = (epoch: number, tz: string) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(epoch * 1000));
 /** "today", or the event's date when it was on another local day ("Tue 21 Oct"). */

@@ -2128,6 +2128,8 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
 // with it, which also gives the fresh session Supabase wants before a password change.
 // Saving signs out every other device, so whoever had the old password is out.
 // "Reset password" in the password-changed email (?reset=1) arrives with it already open.
+// Someone else may have changed it, so the form also emails a reset link (SOLAR-186):
+// that needs no current password.
 function PasswordSection({ email }) {
   const { useState, useEffect } = React;
   // Account mounts again once the plant list arrives, so the ask is only peeked here and
@@ -2184,6 +2186,20 @@ function PasswordSection({ email }) {
     }
   };
 
+  const sendReset = async () => {
+    setBusy(true);
+    try {
+      const { error } = await window.sb.auth.resetPasswordForEmail(email, { redirectTo: SITE_URL });
+      if (error) throw error;
+      close();
+      window.toast(`Reset link sent to ${email}.`);
+    } catch (ex) {
+      window.toast(window.explainAuthError(ex).text, { error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const label = (id, text, hint) => (
     <label htmlFor={id}>{text}{bad[id] ? <span className="link-bad" id={id + '-err'}>{bad[id]}</span> : hint && <span>{hint}</span>}</label>
   );
@@ -2203,7 +2219,11 @@ function PasswordSection({ email }) {
           <form className="conn-form link-form" onSubmit={submit} noValidate aria-busy={busy}>
             {/* The email, unseen, so a password manager knows which login to update. */}
             <input type="email" autoComplete="username" value={email || ''} readOnly hidden />
-            {field('pw-current', 'Current password', cur, setCur, 'current-password')}
+            {field('pw-current', 'Current password', cur, setCur, 'current-password',
+              <button type="button" onClick={sendReset} disabled={busy}
+                      style={{ background: 'none', border: 0, padding: 0, font: 'inherit', color: 'inherit', textDecoration: 'underline', textUnderlineOffset: 3, cursor: 'pointer' }}>
+                Email a reset link
+              </button>)}
             {field('pw-new', 'New password', pw, setPw, 'new-password', '8+ characters', ['pw-confirm'])}
             {field('pw-confirm', 'Confirm password', pw2, setPw2, 'new-password')}
             <div className="conn-form-actions">

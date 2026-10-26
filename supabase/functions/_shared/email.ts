@@ -527,6 +527,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, unsubs
   return make(title, {
     title,
     parts: [Array.isArray(cards) ? { stats: cards, stack: true } : cards, ...(note ? [{ p: note }] : []), { button: relink ? { label: "Reconnect", href: LOGINS } : openPage(PAGE[e.kind as Exclude<PlantEvent["kind"], "needs_relink">], plantId) }],
-    footer: ALERT_FOOTER(plant),
+    // Reconnect has no switch, so no "turn them off" line.
+    footer: relink ? [HELP] : ALERT_FOOTER(plant),
   }, unsubscribeUrl);
 }
