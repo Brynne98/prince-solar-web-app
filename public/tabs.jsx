@@ -2217,6 +2217,63 @@ function PasswordSection({ email }) {
   );
 }
 
+// The plant's readings for any range of days as one CSV (SOLAR-191). api_export
+// builds the file; a year at most. Full history (paid) once plans exist: SOLAR-104.
+function DownloadSection() {
+  const { useState } = React;
+  const today = window.localDateStr(new Date());
+  const weekAgo = window.localDateStr(new Date(Date.now() - 6 * 86400000));
+  const [from, setFrom] = useState(weekAgo);
+  const [to, setTo] = useState(today);
+  const [bad, setBad] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const days = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!from || !to) return setBad('Pick both dates');
+    if (to < from) return setBad('Pick a To date after From');
+    if (days(from, to) > 365) return setBad('Pick a year or less');
+    setBad(null); setBusy(true);
+    try {
+      const { data, error } = await window.sb.rpc('api_export', { p_from: from, p_to: to, p_plant: window.CURRENT_PLANT });
+      if (error) throw error;
+      if (!data || data.indexOf('\n') === data.length - 1) { window.toast('No readings for those days.', { error: true }); return; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([data], { type: 'text/csv' }));
+      a.download = `prince-solar-${from}-to-${to}.csv`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (ex) {
+      window.toast('Couldn’t download. Try again.', { error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field = (id, text, value, set) => (
+    <div className="field">
+      <label htmlFor={id}>{text}</label>
+      <input id={id} type="date" className="input" value={value} max={today}
+             onChange={(e) => { set(e.target.value); setBad(null); }} {...window.invalidProps(id, bad, 'dl-err')} />
+    </div>
+  );
+  return (
+    <SettingsSection id="download" title="Download your data" note="Every minute for the last 31 days, every 5 minutes before that. Opens in Excel or Google Sheets.">
+      <form className="conn-form" onSubmit={submit} noValidate aria-busy={busy}>
+        <div className="field-row">
+          {field('dl-from', 'From', from, setFrom)}
+          {field('dl-to', 'To', to, setTo)}
+        </div>
+        {bad && <p className="sset-err" id="dl-err" role="alert">{bad}</p>}
+        <div className="conn-form-actions">
+          <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>{busy ? 'Preparing…' : 'Download'}</button>
+        </div>
+      </form>
+    </SettingsSection>
+  );
+}
+
 function DeleteAccountSection({ email }) {
   const { useState } = React;
   const [busy, setBusy] = useState(false);
@@ -2387,6 +2444,7 @@ function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
         </div>
         <SunSynkConnectionSection onChanged={onPlantConfigSaved} links={links} />
         <NotificationsSection userId={user?.id} />
+        {links?.accounts?.length > 0 && <DownloadSection />}
         {email && user.app_metadata?.providers?.includes('email') && <PasswordSection email={email} />}
         <DeleteAccountSection email={email} />
         <div className="app-version mono">
