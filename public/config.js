@@ -29,3 +29,45 @@ window.SUNSYNK_CONFIG = (function () {
   var isLocal = host === 'localhost' || host === '127.0.0.1' || host === '';
   return isLocal ? local : prod;
 })();
+
+// Usage events and crash reports go to PostHog, EU cloud (SOLAR-85). The project key is
+// public by design, like the publishable key above. Nothing is kept in the browser
+// (memory persistence: no cookie, so no banner); a signed-in user is known by their
+// Supabase user id only. No screen recording, no click capture: only the named events
+// sent through window.track, and errors. Empty key: nothing is sent.
+window.POSTHOG_KEY = 'phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v';
+(function () {
+  var ph = window.posthog;
+  var on = !!(window.POSTHOG_KEY && ph && ph.init);
+  if (on) {
+    ph.init(window.POSTHOG_KEY, {
+      api_host: 'https://eu.i.posthog.com',
+      persistence: 'memory',
+      autocapture: false, rageclick: false, capture_pageview: false, capture_pageleave: false,
+      capture_heatmaps: false, capture_dead_clicks: false, capture_performance: false,
+      disable_session_recording: true, disable_surveys: true, disable_web_experiments: true,
+      advanced_disable_flags: true, disable_external_dependency_loading: true,
+    });
+    ph.register({ app_version: window.APP_VERSION });
+  }
+  window.track = function (name, props) {
+    try { if (on) ph.capture(name, Object.assign({ plant_id: window.CURRENT_PLANT ?? null }, props)); } catch (e) {}
+  };
+  window.identifyUser = function (id) {
+    try { if (on) { if (id) ph.identify(id); else ph.reset(); } } catch (e) {}
+  };
+  // A crash in someone's browser is otherwise invisible. Each message once per page
+  // load, at most 20, so a render loop can't flood the project.
+  var seen = {}, count = 0;
+  var report = function (err) {
+    try {
+      var key = String((err && err.message) || err).slice(0, 200);
+      if (!on || seen[key] || count >= 20) return;
+      seen[key] = true; count++;
+      ph.captureException(err instanceof Error ? err : new Error(key), { page: location.pathname + location.search });
+    } catch (e) {}
+  };
+  window.addEventListener('error', function (e) { report(e.error || e.message); });
+  window.addEventListener('unhandledrejection', function (e) { report(e.reason); });
+  window.reportClientError = report;
+})();
