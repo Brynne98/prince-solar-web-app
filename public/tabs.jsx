@@ -2174,6 +2174,7 @@ function PasswordSection({ email }) {
       if (wrong) throw wrong;
       const { error } = await window.sb.auth.updateUser({ password: pw });
       if (error) throw error;
+      window.track('password_change_done');
       const { error: others } = await window.sb.auth.signOut({ scope: 'others' }).catch(ex => ({ error: ex }));
       close();
       window.toast(others ? 'Password changed. Other devices are still signed in.' : 'Password changed. Other devices signed out.');
@@ -2191,6 +2192,7 @@ function PasswordSection({ email }) {
     try {
       const { error } = await window.sb.auth.resetPasswordForEmail(email, { redirectTo: RESET_URL });
       if (error) throw error;
+      window.track('reset_link_send_done', { from: 'account' });
       close();
       window.toast(`Reset link sent to ${email}.`);
     } catch (ex) {

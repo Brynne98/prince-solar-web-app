@@ -293,7 +293,7 @@ function PlacesFullCard({ places, onSignIn }) {
     const { error } = await Promise.resolve(window.sb.rpc('api_join_waitlist', { p_email: addr })).catch(e => ({ error: e }));
     setBusy(false);
     if (error) sayError(explain(error).text);
-    else setDone(true);
+    else { window.track('waitlist_join_done'); setDone(true); }
   };
   return (
     <form className="login-card" onSubmit={submit} noValidate aria-busy={busy}>
@@ -343,7 +343,7 @@ function InboxCard({ kind, email, onBack, onSignIn }) {
     ).catch(e => ({ error: e }));
     setBusy(false);
     if (error) sayError(explain(error).text);
-    else { window.toast?.('Email sent again.'); setWait(RESEND_WAIT); }
+    else { window.track('email_resend_done', { kind }); window.toast?.('Email sent again.'); setWait(RESEND_WAIT); }
   };
   return (
     <form className="login-card" onSubmit={resend} aria-busy={busy}>
@@ -395,6 +395,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const resend = async (addr) => {
     const { error } = await window.sb.auth.resend({ type: 'signup', email: addr, options: { emailRedirectTo: SITE_URL } });
     if (error) throw error;
+    window.track('email_resend_done', { kind: 'signup', from: 'expired_link' });
     setSent({ to: addr, kind: 'signup', from: mode }); go('inbox');
   };
 

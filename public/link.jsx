@@ -88,6 +88,7 @@ const LINK_ERRORS = {
 window.disconnectSunsynk = async function disconnectSunsynk(accountId) {
   const { error } = await window.sb.rpc('api_link_disconnect', { p_account: accountId });
   if (error) throw new Error(error.message);
+  window.track('login_remove_done');
 };
 
 // The same moment on the Connect screen and inside Settings; one wording for both.

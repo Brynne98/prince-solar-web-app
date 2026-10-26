@@ -345,6 +345,7 @@ async function savePrefs(patch) {
 async function savePlantConfig(plantId, patch) {
   const { data, error } = await window.sb.from('plant_config').update(patch).eq('plant_id', plantId).select().single();
   if (error) throw new Error(error.message);
+  window.track('plant_settings_save_done', { fields: Object.keys(patch) });
   return data;
 }
 // Which report and alert emails the user wants (0091, SOLAR-158). No row yet means all on.
@@ -358,10 +359,12 @@ async function fetchEmailPrefs(userId) {
 async function saveEmailPref(userId, kind, on) {
   const { error } = await window.sb.from('email_prefs').upsert({ user_id: userId, [kind]: on });
   if (error) throw new Error(error.message);
+  window.track('email_pref_change_done', { kind, on });
 }
 async function deleteAccount() {
   const { data, error } = await window.sb.rpc('api_account_delete');
   if (error) throw new Error(error.message);
+  window.track('account_delete_done');
   return data;
 }
 
