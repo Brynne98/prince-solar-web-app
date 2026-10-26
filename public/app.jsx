@@ -361,9 +361,9 @@ function PageNotice({ snap, cutOff, onReconnect, relinkedAt }) {
 // prefs per plant, so they follow the user to every device; no step means no card.
 const STEPS = {
   rate: { title: 'Electricity rate', why: 'Shows what solar saved.', go: 'Set rate', how: 'The price per unit on your bill, with VAT.' },
-  size: { title: 'Battery size', why: 'Shows how long the battery lasts.', go: 'Set size', how: 'Every battery added together.' },
-  reserve: { title: 'Battery reserve', why: 'Discharging stops at this level.', go: 'Check reserve', how: 'The level your inverter stops at. Match the number set on it.' },
-  panels: { title: 'Solar panels', why: 'Shows how hard your panels work.', go: 'Add panels', how: 'Every panel added together.' },
+  size: { title: 'Battery size', why: 'Shows how long the battery lasts.', go: 'Set size', how: 'All batteries together.' },
+  reserve: { title: 'Battery reserve', why: 'The battery stops powering your home at this charge.', go: 'Check reserve', how: 'Match the number set on your inverter.' },
+  panels: { title: 'Solar panels', why: 'Shows how hard your panels work.', go: 'Add panels', how: 'All panels together.' },
 };
 // The marks hold the plant's linkedAt (0097): a plant removed and added again keeps its id
 // but gets a new link, so marks from before the re-add are dropped and it starts fresh.
@@ -509,8 +509,8 @@ function StepForm({ id, cfg, busy, onSave, onSkip }) {
       {id === 'reserve' && <StepField value={v} onChange={setV} label={STEPS.reserve.title} unit="%" inputMode="numeric" ph="20" />}
       {sum && <SumBox kind={id} mode={mode} onMode={setMode} tot={v} onTot={setV} rows={rows} onRows={setRows} label={STEPS[id].title} />}
       <div className="fs-actions">
+        <button type="button" className="ghost-btn" onClick={onSkip} disabled={busy}>Skip</button>
         <button type="submit" className="save-btn" disabled={!ok || busy}>{busy ? 'Saving…' : 'Save'}</button>
-        <button type="button" className="fs-skip" onClick={onSkip} disabled={busy}>Skip</button>
       </div>
     </form>
   );

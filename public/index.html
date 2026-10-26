@@ -827,7 +827,7 @@
   .sec-intro { min-width: 0; }
   .sset { padding: 18px 22px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; min-width: 0; }
   .sset-title { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
-  .sset-note { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+  .sset-note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
   .sset-count { margin-left: 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 500; color: var(--dim); }
   /* the inverter's own answers, folded away under the battery */
   details.adv { margin-top: 12px; border-top: 1px solid var(--line); }
@@ -866,6 +866,7 @@
   /* an email sits under its group, indented past the group's name; no rule between emails */
   .sset .notif-rows { margin: 0 0 14px 42px; }
   .sset .notif-rows .toggle-row { padding: 8px 0; border-top: none; }
+  .sset .toggle-hint { font-size: 13px; }   /* hints are 13px or more (SOLAR-14) */
   /* Tariff, Plant and Battery: the login rows' layout (name and hint left, control right).
      The name is a <label> or a <div> of spans, so stack the spans like the login rows' divs. */
   .sset-row .conn-text > span { display: block; }
@@ -874,11 +875,10 @@
   .sset-body > .sset-row:last-child { padding-bottom: 0; }
   /* the fields are First steps' own (SOLAR-170): one field on the right, or the sum box under the name */
   .sset-one { flex-direction: column; align-items: flex-end; gap: 6px; }
-  .sset-one .fs-in { width: 300px; height: 48px; }   /* one width for every field in Settings */
+  .sset-one .fs-in { width: 300px; }   /* one width for every field in Settings */
   /* the sum box on the right like the single fields, its switch and value over the box */
   .sset-sum { flex: none; width: 300px; max-width: 100%; display: flex; flex-direction: column; gap: 8px; }
   .sset-row:has(> .sset-sum) { align-items: flex-start; }
-  .sset-sum .fs-in, .sset-sum .fs-cnt { height: 48px; }
   .sset-err { margin: 0; font-size: 12px; line-height: 1.5; color: var(--load); }
   .input[aria-invalid="true"], .input[aria-invalid="true"]:focus { border-color: var(--load); }
   /* reserve's slider runs the row's full width under its name and box, filled to the value */
@@ -892,7 +892,7 @@
 
 
   /* just the number, centred under the last section */
-  .app-version { padding-top: 14px; text-align: center; font-size: 11.5px; color: var(--dim); }
+  .app-version { padding-top: 14px; text-align: center; font-size: 12px; color: var(--dim); }
   .app-version a { color: inherit; }
   .conn-row { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-top: 1px solid var(--line); }
   .conn-row:first-child { border-top: none; padding-top: 0; }
@@ -902,7 +902,7 @@
   .conn-user { font-size: 14px; }
   .conn-plants { color: var(--muted); }
   /* the add row: a filled button so it reads as the section's one action, plus a hint */
-  .conn-add { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--line); }
+  .conn-add { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--line); }
   #settings-delete .conn-row, #settings-password .conn-row { padding-bottom: 0; }
   /* Password is one line and a button: the card's top and bottom match, the line sits on the button's centre */
   #settings-password .sset { padding-bottom: 18px; }
@@ -925,7 +925,7 @@
   .conn-row > .conn-form { flex-basis: 100%; }
   .conn-form { margin-top: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.015); }
   .conn-form .field-row { grid-template-columns: 1fr 1fr; gap: 14px 20px; }
-  .conn-form-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  .conn-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
   /* inline confirmation for a destructive row: same inset box, coral edge and tint */
   .confirm-card { margin-top: 4px; border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.06); }
   .confirm-title { font-size: 15px; line-height: 1.4; color: var(--text); }
@@ -959,6 +959,11 @@
   .save-btn { background: var(--pv); color: #07130c; border: none; padding: 8px 18px; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
   .save-btn:disabled { opacity: .4; cursor: default; }   /* a Save that cannot save must not look like one that can */
   .sset .ghost-btn:disabled, .sset .danger-btn:disabled { opacity: .5; }
+  /* Settings and Account: one button size whatever the kind, so a Cancel beside a Save lines up (SOLAR-200) */
+  .settings-page :is(.save-btn, .ghost-btn, .danger-btn), .fs-wrap :is(.save-btn, .ghost-btn) { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 34px; padding: 0 16px; font-size: 13px; line-height: 1; border: 1px solid transparent; }
+  .settings-page .ghost-btn, .fs-wrap .ghost-btn { border-color: var(--line-2); } .settings-page .danger-btn { border-color: var(--load); }
+  .sset-one > button { align-self: flex-end; }   /* a button keeps its own width when the fields go full width */
 
   @media (max-width: 900px) {
     .sset { padding: 16px 15px 20px; border-radius: 14px; }
@@ -971,6 +976,7 @@
     .conn-form .field-row { grid-template-columns: 1fr; }
     .save-bar { flex-wrap: wrap; }
     .save-text { flex-basis: 100%; }
+    .save-bar .ghost-btn { margin-left: auto; }   /* buttons stay at the right edge under the line */
   }
   .field { margin-bottom: 16px; } .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 7px; letter-spacing: 0.04em; }
@@ -1050,7 +1056,7 @@
       text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
     .legend-chip { min-height: 40px; }
     .seg-btn { min-height: 36px; }
-    .ghost-btn, .danger-btn, .flow-fs-btn { min-height: 40px; }
+    .ghost-btn, .danger-btn, .flow-fs-btn, .settings-page :is(.save-btn, .ghost-btn, .danger-btn), .fs-wrap :is(.save-btn, .ghost-btn) { min-height: 40px; }
     .trend-stats { grid-template-columns: 1fr; }
 
     .card { padding: 16px 15px; border-radius: 14px; min-width: 0; }
@@ -1321,7 +1327,7 @@
   .fs-card.open { background: rgba(61,220,132,0.09); border-color: rgba(61,220,132,0.5); }
   .fs-top { display: flex; align-items: center; gap: 8px; min-height: 24px; }
   .fs-lbl { font-size: 10px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
-  .fs-n { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .fs-n { margin-left: auto; font-size: 12px; color: var(--muted); }
   .fs-x { width: 28px; height: 28px; margin: -4px -6px -4px 0; display: grid; place-items: center; padding: 0; border: none; background: none; border-radius: 8px; color: var(--dim); cursor: pointer; }
   .fs-x:hover { color: var(--text); background: rgba(255,255,255,0.05); }
   .fs-x .ico { width: 14px; height: 14px; stroke-width: 2.2; }
@@ -1331,20 +1337,16 @@
   .fs-next { display: flex; flex-direction: column; gap: 10px; }
   .fs-text { display: grid; gap: 3px; }
   .fs-text b { font-size: 15px; font-weight: 600; }
-  .fs-text span { font-size: 12px; line-height: 1.45; color: var(--muted); }
-  .fs-go { height: 36px; }
+  .fs-text span { font-size: 13px; line-height: 1.45; color: var(--muted); }
   .fs-mini { display: none; }
-  .fs-pop { position: absolute; left: calc(100% + 24px); bottom: 0; z-index: 30; width: 400px; max-width: calc(100vw - var(--rail-w) - 24px);
+  .fs-pop { position: absolute; left: calc(100% + 24px); bottom: 0; z-index: 30; width: 320px; max-width: calc(100vw - var(--rail-w) - 24px);
     background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 16px; padding: 18px 20px 20px; box-shadow: 0 24px 60px rgba(0,0,0,0.55); }
   .fs-panel { display: flex; flex-direction: column; gap: 12px; }
   .fs-panel .fs-x { margin-left: auto; }
   .fs-title { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
   .fs-how { margin: -4px 0 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
   .fs-form { display: flex; flex-direction: column; gap: 12px; }
-  .fs-actions { display: flex; align-items: center; gap: 6px; }
-  .fs-actions .save-btn { flex: 1; height: 44px; padding: 0 20px; font-size: 14px; }
-  .fs-skip { height: 40px; padding: 0 12px; border: none; background: none; color: var(--muted); font-size: 13px; border-radius: 9px; cursor: pointer; }
-  .fs-skip:hover { color: var(--text); }
+  .fs-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }   /* Skip, then Save, at the right like every form */
   .fs-back { display: inline-flex; align-items: center; gap: 4px; height: 28px; margin: -6px 4px -6px -8px; padding: 0 8px; border: none; border-radius: 8px;
     background: none; color: var(--muted); font-size: 13px; cursor: pointer; }
   .fs-back:hover { color: var(--text); }
@@ -1356,12 +1358,13 @@
   .fs-bars .cur i { background: rgba(255,255,255,0.35); }
   .fs-bars .on i { background: var(--pv); }
   .fs-bars .on.cur i { box-shadow: 0 0 0 2px rgba(61,220,132,0.3); }
-  .fs-in { display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line-2); }
+  /* every number box (First steps, Settings, Account) looks like the password boxes (SOLAR-200) */
+  .fs-in { display: flex; align-items: center; gap: 6px; height: 41px; padding: 0 12px; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--line-2); }
   .fs-sum { display: flex; flex-direction: column; gap: 12px; }
   .fs-in.bad, .fs-in.bad:focus-within { border-color: var(--load); box-shadow: none; }
-  .fs-in:focus-within, .fs-cnt:focus { border-color: var(--pv); box-shadow: 0 0 0 3px rgba(61,220,132,0.12); }
-  .fs-in input { flex: 1; width: 100%; min-width: 0; background: none; border: none; outline: none; color: var(--text); font-family: var(--mono); font-size: 20px; font-weight: 600; }
-  .fs-in input::placeholder { color: var(--dim); font-weight: 500; }
+  .fs-in:focus-within, .fs-cnt:focus { border-color: var(--grid); }
+  .fs-in input { flex: 1; width: 100%; min-width: 0; background: none; border: none; outline: none; color: var(--text); font-family: var(--mono); font-size: 14px; font-weight: 400; }
+  .fs-in input::placeholder { color: var(--dim); }
   .fs-in input[type="date"] { color-scheme: dark; }   /* the calendar icon and picker in the app's colours */
   .fs-unit { font-family: var(--mono); font-size: 14px; color: var(--muted); }
   /* battery size and panels: Total or By size, the value on the same line */
@@ -1377,8 +1380,10 @@
   .fs-row { display: grid; grid-template-columns: 72px 14px minmax(0, 1fr) 28px; align-items: center; gap: 8px; animation: fs-rowin .18s ease-out; }
   @keyframes fs-rowin { from { opacity: 0; transform: translateY(-4px); } }
   @media (prefers-reduced-motion: reduce) { .fs-row { animation: none; } }
-  .fs-cnt { width: 100%; min-width: 0; height: 52px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line-2); color: var(--text);
-    font-size: 20px; font-weight: 600; text-align: center; outline: none; }
+  .fs-cnt { width: 100%; min-width: 0; height: 41px; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text);
+    font-family: var(--mono); font-size: 14px; font-weight: 400; text-align: center; outline: none; }
+  /* iOS zooms the page into a field whose text is under 16px, so phones get 16px in every box */
+  @media (max-width: 599px) { .input, .fs-in input, .fs-cnt { font-size: 16px; } }
   .fs-times { text-align: center; color: var(--dim); font-family: var(--mono); font-size: 16px; }
   .fs-rm { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: none; border-radius: 8px; background: none; color: var(--dim); cursor: pointer; }
   .fs-rm:hover { color: var(--text); }
@@ -1402,11 +1407,15 @@
     .fs-phone .fs-card { background: #0f1a15; box-shadow: 0 10px 30px rgba(0,0,0,0.45); }
     .fs-phone .fs-next { flex-direction: row; align-items: center; gap: 12px; }
     .fs-phone .fs-text { flex: 1; min-width: 0; }
-    .fs-phone .fs-go { flex: none; height: 40px; padding: 0 16px; }
+    .fs-phone .fs-go { flex: none; }
     .frame:has(.fs-phone .fs-card) .content { padding-bottom: calc(66px + 140px + env(safe-area-inset-bottom, 0px)); }
     .fs-sheet .sheet-panel { padding: 8px 18px calc(20px + env(safe-area-inset-bottom, 0px)); }
     .fs-row { grid-template-columns: 64px 12px minmax(0, 1fr) 44px; }   /* a finger-sized remove */
     .fs-rm { width: 44px; height: 44px; }
+    /* finger-sized close and back; the segments match the app's 36 px on a phone */
+    .fs-x { width: 40px; height: 40px; margin: -10px -12px -10px 0; }
+    .fs-back { height: 40px; margin: -12px 4px -12px -8px; }
+    .fs-seg button { min-height: 36px; }
   }
 </style>
 </head>

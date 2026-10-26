@@ -2044,7 +2044,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
     if (patch.battery_reserve_pct !== (cfg.battery_reserve_pct ?? 20)) said.push('reserve ' + patch.battery_reserve_pct + '%');
     if (patch.battery_kwh !== (cfg.battery_kwh ?? null)) said.push(patch.battery_kwh == null ? 'no battery size' : 'battery ' + num(patch.battery_kwh) + ' kWh');
     if (patch.system_kwp !== (cfg.system_kwp ?? null) || groupsOf(patch.panel_groups) !== groupsOf(cfg.panel_groups))
-      said.push(patch.system_kwp == null ? 'no panel size' : 'panels ' + num(patch.system_kwp) + ' kWp');
+      said.push(patch.system_kwp == null ? 'no panel size' : 'panels ' + num(patch.system_kwp) + ' kW');
     setBusy(true);
     // Failed: the bar keeps the edits, the red toast says so
     try { await window.savePlantConfig(plant.id, patch); }
@@ -2152,7 +2152,7 @@ function PasswordSection({ email }) {
   });
   const check = () => {
     const out = {};
-    if (!cur) out['pw-current'] = 'Enter your current password';
+    if (!cur) out['pw-current'] = 'Enter your password';
     // Matches the minimum set in Supabase (Auth → Email) and supabase/config.toml.
     if (!pw) out['pw-new'] = 'Choose a password';
     else if (pw.length < 8) out['pw-new'] = 'Use at least 8 characters';
@@ -2249,9 +2249,9 @@ function DownloadSection() {
   const days = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
 
   const submit = async () => {
-    if (!from || !to) return setBad('Pick both dates');
-    if (to < from) return setBad('Pick a To date after From');
-    if (days(from, to) > 365) return setBad('Pick a year or less');
+    if (!from || !to) return setBad('Pick both dates.');
+    if (to < from) return setBad('Pick a To date after From.');
+    if (days(from, to) > 365) return setBad('Pick a year or less.');
     setBad(null); setBusy(true);
     try {
       const { data, error } = await window.sb.rpc('api_export', { p_from: from, p_to: to, p_plant: window.CURRENT_PLANT });
@@ -2373,15 +2373,15 @@ function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirt
 // (section=notifications).
 const EMAIL_GROUPS = [
   { id: 'reports', label: 'Reports', rows: [
-    ['weekly', 'Weekly', 'Last week, on Mondays'],
-    ['monthly', 'Monthly', 'Last month, on the 1st'],
-    ['yearly', 'Yearly', 'Last year, on 1 January']] },
+    ['weekly', 'Weekly', 'Last week, on Mondays.'],
+    ['monthly', 'Monthly', 'Last month, on the 1st.'],
+    ['yearly', 'Yearly', 'Last year, on 1 January.']] },
   { id: 'alerts', label: 'Alerts', when: 'Sent when it happens', rows: [
-    ['grid', 'Grid', 'The grid goes off, and when it’s back'],
-    ['battery', 'Battery', 'Over 40 °C, or charging unevenly. Once a day while it lasts'],
-    ['panels', 'Panels', 'A string stops while the others make power. Once a day while it lasts'],
-    ['readings', 'Readings', 'No readings for 15 min, and when they’re back'],
-    ['sunsynk', 'SunSynk', 'SunSynk stops answering, and when it’s back']] },
+    ['grid', 'Grid', 'The grid goes off, and when it’s back.'],
+    ['battery', 'Battery', 'Over 40 °C, or charging unevenly. Once a day while it lasts.'],
+    ['panels', 'Panels', 'A string stops while the others make power. Once a day while it lasts.'],
+    ['readings', 'Readings', 'No readings for 15 min, and when they’re back.'],
+    ['sunsynk', 'SunSynk', 'SunSynk stops answering, and when it’s back.']] },
 ];
 // "All 3 on", "Weekly and Monthly on", "4 of 5 on. Sent when it happens", "Off".
 function emailGroupSummary(g, prefs) {
