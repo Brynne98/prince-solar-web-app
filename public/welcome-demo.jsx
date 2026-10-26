@@ -98,7 +98,7 @@
             </window.Card>
             <div className="overview-section">
               <div className="overview-head">
-                <window.SectionTitle>OVERVIEW · <span style={{ color: 'var(--text)' }}>today</span></window.SectionTitle>
+                <window.SectionTitle>OVERVIEW</window.SectionTitle>
               </div>
               <div className="today-strip">
                 <window.MiniStat label="Made" value={window.fmtEnergySmart(a.pvToday)} color="#3ddc84" />

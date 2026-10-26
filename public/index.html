@@ -1161,12 +1161,7 @@
   /* invalid: red border; invalid and focused: red border plus the ring, so focus stays visible */
   .login-card input:not([type="checkbox"])[aria-invalid="true"] { border-color: var(--load); box-shadow: none; }
   .login-card input:not([type="checkbox"])[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px rgba(248,113,113,0.28); }
-  /* the ring hugs the box, with no green focus glow around it, and the links go red with the
-     rest of the sentence */
-  .auth-consent input[aria-invalid="true"] { outline: 2px solid var(--load); outline-offset: 0; box-shadow: none; }
-  .auth-consent.invalid > span, .auth-consent.invalid a { color: var(--load); }
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .auth-consent input[aria-invalid="true"]:focus-visible { box-shadow: 0 0 0 6px rgba(248,113,113,0.28); }
   .field-hint { color: var(--dim); font-size: 13px; line-height: 1.2; text-align: right; }
   .field-err { color: var(--load); font-size: 13px; line-height: 1.2; text-align: right; }
   .login-pw { position: relative; display: flex; }
@@ -1237,13 +1232,6 @@
     .auth-brand-tag { font-size: 13px; }
     .login-title { font-size: 26px; }
   }
-  /* sign-up consent */
-  /* the whole label ticks the box; 13px of invisible padding makes it a 48px target without moving anything */
-  .auth-consent { display: flex; gap: 12px; align-items: flex-start; font-size: 14px; color: var(--muted); line-height: 1.45; padding-block: 13px; margin-block: -13px; }
-  /* flex: none, or a phone-width sentence squeezes the box narrower than it is tall; margin
-     overrides each browser's own, so the box lines up with the fields' left edge */
-  .auth-consent input { flex: none; margin: 2px 0 0; width: 18px; height: 18px; accent-color: var(--pv); color-scheme: dark; }
-  .auth-consent a { color: var(--pv); }
   /* sign-up steps (SOLAR-92): "Step 1 of 2" and a bar, between the brand and the title */
   .login-sub b { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
   /* Google's real button (SOLAR-122) lies invisible over our own look and takes the click */
@@ -1253,7 +1241,6 @@
   .gsi-wrap:hover .login-google { border-color: var(--muted); }
   .gsi-wrap:focus-within .login-google { outline: 2px solid var(--pv); outline-offset: 2px; }
   /* sign-up before the Terms are ticked: catches the click Google's frame would take */
-  .login-card .gsi-block { position: absolute; inset: 0; width: 100%; min-height: 0; padding: 0; margin: 0; background: transparent; border: 0; box-shadow: none; cursor: pointer; }
   .auth-wait { display: flex; align-items: center; gap: 12px; font-size: 15px; color: var(--muted); padding: 14px 16px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
   .auth-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--pv); animation: auth-spin .9s linear infinite; flex: none; }
   @keyframes auth-spin { to { transform: rotate(360deg); } }
