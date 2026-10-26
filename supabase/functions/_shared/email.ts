@@ -25,8 +25,8 @@ const PREFS = `${APP}/?tab=account&section=notifications`;
 const LOGINS = `${APP}/?tab=account&section=logins`;
 export const FROM_ACCOUNT = "Prince Solar Hub <noreply@princesolarhub.co.za>";
 export const FROM_NOTICE = "Prince Solar Hub <hello@princesolarhub.co.za>";
-// Supabase's link lifetime (Auth -> mailer OTP expiry), default 1 hour.
-const LINK_LIFE = "This link works once and expires in 1 hour.";
+// Supabase's link lifetime (Auth -> mailer OTP expiry): 24 hours since SOLAR-196.
+const LINK_LIFE = "This link works once and expires in 24 hours.";
 
 // unsubscribe: the one-click link for the List-Unsubscribe header the sender adds, so
 // mail apps show their own Unsubscribe next to the sender. It isn't in the body; the
