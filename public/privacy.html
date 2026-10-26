@@ -47,7 +47,9 @@ contacts, files or anything else in your Google account.</p>
 <ul>
 <li><strong>SunSynk login.</strong> We store your SunSynk username. We use your
   SunSynk password to get access tokens. We keep
-  a refresh token, encrypted, and a short-lived access token.</li>
+  a refresh token, encrypted, and a short-lived access token. We note the time
+  of each try to connect a login, to cap tries at five an hour, and delete it
+  soon after the hour is up.</li>
 <li><strong>Plant details.</strong> Your plant's name, location, timezone and
   equipment, as SunSynk reports them.</li>
 <li><strong>Readings.</strong> Your inverter's readings, as often as SunSynk provides

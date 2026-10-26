@@ -7,8 +7,8 @@
 --
 -- link-sunsynk now calls link_attempt(user) before it talks to SunSynk. It
 -- counts every attempt, good or bad, in the last hour. At 5 it answers false and
--- the function refuses with 429. Rows older than an hour are deleted on the next
--- call, so the table stays a few rows per user.
+-- the function refuses with 429. Every call deletes all rows older than an hour,
+-- any user's, so no row outlives the next link by anyone.
 --
 -- private.sunsynk_login_events was the ticket's suggestion, but its rows need an
 -- account, and a rejected login has none. So a table of its own.
@@ -30,7 +30,7 @@ as $$
 begin
   -- One caller at a time per user, so two requests at once can't both get the 5th place.
   perform pg_advisory_xact_lock(hashtext('link_attempt:' || p_user::text));
-  delete from private.link_attempts where user_id = p_user and at < now() - interval '1 hour';
+  delete from private.link_attempts where at < now() - interval '1 hour';
   if (select count(*) from private.link_attempts where user_id = p_user) >= 5 then
     return false;
   end if;
