@@ -9,6 +9,7 @@
 // This is the only place a SunSynk password ever touches the backend. Keep it that
 // way: no console.log of the body, no error message that includes input.
 import { db, linkAccount } from "../_shared/sunsynk.ts";
+import { serve } from "../_shared/errors.ts";
 
 // Browser origins allowed to call this. app.princesolarhub.co.za in
 // production, the two local dev ports otherwise. Anything else is refused at preflight. A custom domain is
@@ -43,7 +44,7 @@ const json = (b: unknown, status: number, cors: Record<string, string>) =>
     headers: { "Content-Type": "application/json", ...cors },
   });
 
-Deno.serve(async (req) => {
+serve("link-sunsynk", async (req) => {
   const cors = corsHeaders(req.headers.get("origin"));
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405, cors);

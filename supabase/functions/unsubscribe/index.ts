@@ -6,6 +6,7 @@
 // A GET changes nothing, because mail scanners open links on their own; it sends
 // the reader to the Notifications section instead. verify_jwt is off for this function.
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { serve } from "../_shared/errors.ts";
 
 const db = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -15,7 +16,7 @@ const db = createClient(
 const SETTINGS = "https://app.princesolarhub.co.za/?tab=account&section=notifications";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-Deno.serve(async (req) => {
+serve("unsubscribe", async (req) => {
   if (req.method === "GET") return Response.redirect(SETTINGS, 303);
   if (req.method !== "POST") return new Response(null, { status: 405, headers: { Allow: "GET, POST" } });
 

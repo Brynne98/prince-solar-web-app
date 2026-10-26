@@ -26,6 +26,7 @@
 //
 // Deliberately NOT ported: the gzipped `raw` payload table. It was 46 MB of the
 // 96 MB SQLite file, has no dashboard consumer, and may embed account identifiers.
+import { reportError, serve } from "../_shared/errors.ts";
 import {
   aggregate,
   DEFAULT_BATT_POSITIVE_MEANS,
@@ -460,7 +461,7 @@ async function shardSpec(req: Request): Promise<ShardSpec> {
   return { shard, shards, delayMs, account };
 }
 
-Deno.serve(async (req) => {
+serve("poll", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
   try {
@@ -538,6 +539,7 @@ Deno.serve(async (req) => {
       results,
     }, ok.length > 0 ? 200 : 502);
   } catch (e) {
+    await reportError("poll", e);
     console.error("poll failed:", e);
     return json({ error: String(e instanceof Error ? e.message : e) }, 500);
   }
