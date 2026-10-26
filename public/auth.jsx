@@ -52,6 +52,8 @@ function fetchWithRefreshCutoff(url, opts) {
 
 // Where emailed links (confirmation, password reset) bring the user back to.
 const SITE_URL = location.origin + location.pathname.replace(/\/[^/]*$/, '/');
+// Reset links come back tagged, so an expired one can be told from a confirmation (SOLAR-198).
+const RESET_URL = SITE_URL + '?link=reset';
 
 // "Reset password" in the password-changed email links to ?reset=1 (SOLAR-155). Signed in,
 // it opens Change password on Account; signed out, "Forgot password?". Read once and taken
@@ -326,7 +328,7 @@ function InboxCard({ kind, email, onBack, onSignIn }) {
     if (busy || wait > 0) return;
     setBusy(true);
     const { error } = await (kind === 'reset'
-      ? window.sb.auth.resetPasswordForEmail(email, { redirectTo: SITE_URL })
+      ? window.sb.auth.resetPasswordForEmail(email, { redirectTo: RESET_URL })
       : window.sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: SITE_URL } })
     ).catch(e => ({ error: e }));
     setBusy(false);
@@ -390,9 +392,11 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   React.useEffect(() => {
     const params = new URLSearchParams(location.hash.slice(1) || location.search);
     if (params.get('error_description')) {
-      // The link carries no email, so the expired card asks for it (SOLAR-196).
-      if (params.get('error_code') === 'otp_expired') go('expired');
-      else sayError('Sign-in didn’t finish. Try again.');
+      // The link carries no email, so the expired card asks for it (SOLAR-196). An expired
+      // reset link goes to Forgot password, which already asks for one (SOLAR-198).
+      if (params.get('error_code') !== 'otp_expired') sayError('Sign-in didn’t finish. Try again.');
+      else if (new URLSearchParams(location.search).get('link') === 'reset') { go('forgot'); sayError('That link has expired.'); }
+      else go('expired');
       history.replaceState(null, '', location.pathname);
     }
     const onShow = (e) => { if (e.persisted) setBusy(false); };
@@ -456,7 +460,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         // With email confirmation on, signUp returns a user but no session.
         if (!data.session) { setSent({ to: addr, kind: 'signup', from: mode }); go('inbox'); }
       } else if (mode === 'forgot') {
-        const { error } = await window.sb.auth.resetPasswordForEmail(addr, { redirectTo: SITE_URL });
+        const { error } = await window.sb.auth.resetPasswordForEmail(addr, { redirectTo: RESET_URL });
         if (error) throw error;
         setSent({ to: addr, kind: 'reset', from: mode }); go('inbox');
       } else if (mode === 'expired') {
