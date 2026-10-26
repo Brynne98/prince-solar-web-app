@@ -135,9 +135,10 @@ spacing:
 components:
   button-primary:
     backgroundColor: "{colors.solar-green}"
-    textColor: "#06210f"
+    textColor: "#07130c"
     rounded: "{rounded.sm}"
-    padding: "8px 18px"
+    padding: "0 16px"
+    height: "34px"
   button-secondary:
     backgroundColor: "{colors.panel}"
     textColor: "{colors.paper-text}"
@@ -147,12 +148,14 @@ components:
     backgroundColor: "transparent"
     textColor: "{colors.muted-text}"
     rounded: "{rounded.sm}"
-    padding: "7px 14px"
+    padding: "0 16px"
+    height: "34px"
   button-danger:
     backgroundColor: "transparent"
     textColor: "{colors.home-coral}"
     rounded: "{rounded.sm}"
-    padding: "8px 14px"
+    padding: "0 16px"
+    height: "34px"
   card:
     backgroundColor: "{colors.panel}"
     rounded: "{rounded.lg}"
@@ -165,7 +168,8 @@ components:
     backgroundColor: "{colors.panel-raised}"
     textColor: "{colors.paper-text}"
     rounded: "{rounded.sm}"
-    padding: "10px 12px"
+    padding: "0 12px"
+    height: "41px"
   chip:
     backgroundColor: "{colors.panel-raised}"
     textColor: "{colors.paper-text}"
@@ -220,8 +224,8 @@ semantic, not decorative.
 
 ### Primary
 - **Solar Green** (`solar-green`): solar production everywhere it appears, and by
-  extension "good": the live status dot, the active tab underline, the active
-  Settings tab, the primary Save and Sign-in buttons, the switch when on,
+  extension "good": the live status dot, the active tab underline, the First steps
+  card and its progress bars, the primary Save and Sign-in buttons, the switch when on,
   positive trend badges, and input focus on the login card. It is the product's one
   accent as well as its first data colour.
 
@@ -229,7 +233,7 @@ semantic, not decorative.
 - **Battery Violet** (`battery-violet`): battery power and battery-side extras in the
   flow diagram. Never used for status; success is always Solar Green.
 - **Grid Amber** (`grid-amber`): grid import and export, and the focus border on
-  Settings inputs. Also the "connected but unverified" dot on a SunSynk account row.
+  every field in Settings, Account and First steps. Also the "connected but unverified" dot on a SunSynk account row.
 - **Home Coral** (`home-coral`): home load, and the warning tone: the danger button,
   the inverter warning strip, negative trend badges, a grid-down chip, error text on
   the login card.
@@ -293,14 +297,16 @@ browser default renders crisper.
 - **Headline** (mono 700, 44px, line-height 1): the hero figure in a stat tile, with
   its unit at 24px and 85% opacity riding the baseline; the unit inherits the 700. On
   phones 34px with an 18px unit. Flow-diagram node values are 21px mono at 700.
-- **Title** (600, 18px, tracking -0.01em): Settings section titles; the login title is
-  22px at 700 with -0.02em.
+- **Title** (600, 18px, tracking -0.01em): the First steps popup title. Settings and
+  Account page titles are 22px with -0.01em; their section titles 15px at 600. The
+  login title is 22px at 700 with -0.02em.
 - **Numeral** (mono 600, 20px, tracking -0.01em): overview mini-stat values, legend-chip
   readouts. Inverter serials are 22px at 700 (18px on phones); tooltip times 12px at 600.
 - **Body** (400, 14px, line-height 1.5): notes and the flow narrative; form labels
   at 12px. Notes run the width of their card.
 - **Small** (400, 13px, line-height 1.5): sub-lines under a value, section notes,
-  hints, confirmation text, save-row text.
+  hints (toggle hints and row hints in Settings included), save-bar text. The version
+  line under the last section is 12px Dim Text, centred.
 - **Label** (500, 12px, tracking 0.12em, uppercase): the micro-label above a stat-tile
   value; mini-stat, metric and throughput labels loosen to 0.06em to 0.1em. Nothing that
   is read as text goes below 12px except chart axes (11.5px) and the flow diagram's
@@ -329,19 +335,23 @@ Density is medium-high: card padding 22px by 24px (16px by 15px on phones), 16px
 18px grid gaps, 14px between small tiles. Section titles sit 18px above their content.
 
 Breakpoints are three: 980px collapses four-up and three-up grids to two columns and
-stacks each tab's pair of cards; 900px turns the Settings tab column into a horizontally
-scrolling row with a faded right edge; 600px is the phone layout, where big-number rows
+stacks each tab's pair of cards; 900px drops each Settings and Account section to one
+column (title over card); 600px is the phone layout, where big-number rows
 go to one column, metric grids stay two-up, the tab bar scrolls sideways, the flow
 diagram becomes a vertical card stack, and the four flow chips become a 2×2 grid. The
 login card caps at 400px and tightens at 480px.
 
 On phones every small control grows to a 40px minimum height (day-nav arrows, the date
-input, legend chips, ghost and danger buttons, Settings tabs) and segments to 36px,
+input, legend chips, ghost and danger buttons, the Settings, Account and First steps
+buttons) and segments to 36px,
 while the topbar shrinks: 38px orb, 23px name, 38px status pill and Refresh, 14px tabs.
 Desktop keeps its sizes.
 
-Settings is tabbed: a 150px column of vertical tabs beside one 720px card, the
-section chosen. On phones the tabs become a horizontal scrolling row above the card.
+Settings and Account are each one scrolling page of sections, max 920px. A section is a
+220px column (title and note) beside its card, 24px apart, 22px top and bottom, with a
+hairline rule above. Below 900px the title sits over the card, 12px apart. The card is
+Panel, hairline, 16px radius, 18px 22px 22px padding (14px radius and 16px 15px 20px
+on phones). Single fields in a row sit at the right at 300px wide, full width on phones.
 
 A fullscreen "wall display" mode drops the card for the bare ground with safe-area
 padding. The live status and an Exit button sit in a bar at the top; the summary sentence
@@ -357,8 +367,9 @@ Flat by default. Depth is tonal: Night Ground, then Panel, then Panel Raised for
 controls, each step separated by a hairline rather than a shadow. Cards cast nothing.
 Hover on a card only strengthens its hairline.
 
-Shadows exist for three jobs: things that float (tooltips, info bubbles and the
-drag-range readout), the login card's front-door presence, and the selected segment in a
+Shadows exist for three jobs: things that float (tooltips, info bubbles, the
+drag-range readout, the save bar, toasts and the First steps popup), the login card's
+front-door presence, and the selected segment in a
 segmented control, which gets a 1px drop to read as lifted from its track. The sun orb
 and status dots use a soft halo ring rather than a shadow.
 
@@ -367,6 +378,9 @@ and status dots use a soft halo ring rather than a shadow.
   readout, on a 96% to 97% opaque near-black surface with a strong hairline.
 - **Bubble** (`box-shadow: 0 14px 34px rgba(0,0,0,0.55)`): the info bubble that opens
   from an info dot.
+- **Sticky** (`box-shadow: 0 10px 30px rgba(0,0,0,0.45)`): the save bar, toasts and
+  the phone's First steps card.
+- **Popup** (`box-shadow: 0 24px 60px rgba(0,0,0,0.55)`): the First steps step popup.
 - **Front door** (`box-shadow: 0 24px 60px -30px rgba(0,0,0,0.9), inset 0 0 0 1px rgba(0,0,0,0.25)`):
   the login card only.
 - **Lifted segment** (`box-shadow: 0 1px 2px rgba(0,0,0,0.3)`): the active button in a
@@ -389,7 +403,7 @@ badges. Dots are circles at 6px to 10px. Meters are 5px to 13px tall with 4px to
 radius. Borders are always 1px hairlines; the one dashed line is the 2px legend key for
 a reference series.
 Cards carry no coloured edge: a tile's subject is carried by the colour of its number.
-The only asymmetric border left is the Settings tab's green left edge when active.
+No asymmetric border is left.
 
 ## Components
 
@@ -408,7 +422,12 @@ The only asymmetric border left is the Settings tab's green left edge when activ
 - **Icon:** 30px square (40px on phones), Panel Raised, hairline, 9px radius: the day-nav
   arrows. The fullscreen button is the same surface at 12px text with 5px 11px padding.
   The password eye is a bare 32px square at 7px radius, muted, Paper Text on hover.
-- **Keyboard focus:** buttons, Settings tabs and the password eye show a 2px Solar Green
+- **Form buttons:** in Settings, Account and First steps every Save, ghost and danger
+  button is one size: 34px tall (40px on phones), `padding: 0 16px`, 13px, 9px radius,
+  1px border (strong hairline on ghost, Home Coral on danger, transparent on Save).
+  Every form puts its buttons at the right, Cancel or Skip before the main button.
+  Disabled Save is 40% opacity.
+- **Keyboard focus:** buttons and the password eye show a 2px Solar Green
   inset outline; fields change border colour instead.
 - **Danger:** no fill, Home Coral border and text, 13px.
 - **Link:** bare green text at 13px 600, underlined on hover with 3px offset; a "quiet"
@@ -444,7 +463,12 @@ The only asymmetric border left is the Settings tab's green left edge when activ
   Text inputs are mono; selects are sans with a custom 12px chevron inset 14px from the
   right and `color-scheme: dark` for a dark native menu. Login inputs sit on Night
   Ground at 11px radius with 12px 14px padding, in Space Grotesk at 14.5px.
-- **Focus:** border turns Grid Amber in Settings; Solar Green with a 3px green ring at 14%
+- **Number boxes** (First steps, Settings, Account): built to match the password
+  boxes. 41px tall, Panel Raised well, strong hairline, 9px radius, 0 12px padding,
+  14px regular mono, a 14px mono muted unit inside the box. Count boxes are the same
+  well with centred text. An invalid box takes a Home Coral border.
+- **Phones:** every text and number box is 16px under 600px, so iOS does not zoom in.
+- **Focus:** border turns Grid Amber in Settings, Account and First steps; Solar Green with a 3px green ring at 14%
   on the login card. No outline on fields.
 - **Autofill:** forced dark with an inset box-shadow so Chrome never paints a white well.
 - **Range:** 6px track at 10% white, 18px Charge Cyan thumb with a 3px ground-coloured
@@ -469,10 +493,15 @@ The only asymmetric border left is the Settings tab's green left edge when activ
 - **Plant switcher:** the plant name in 12.5px mono under the brand, with a 10px muted
   chevron. Transparent at rest so it reads as text; Panel with a strong hairline on
   hover, a Solar Green border on focus.
-- **Settings tabs:** a 150px column of 14px muted buttons with a 2px transparent left
-  edge; hover a 3% wash, active a green left edge and Paper Text. Below 900px the
-  column becomes a horizontal scrolling row with a faded right edge, and the active tab
-  gets a Panel pill instead.
+
+### First steps
+A card in the sidebar, above Settings, naming the next setting to fill in: 12px radius,
+a 10px uppercase label, a step count, 4px progress segments (Solar Green when done), a
+15px 600 step name and a 13px muted line. Open, it tints green at 9% with a 50% green
+edge. On a tablet the 84px sidebar shows a ring and the count instead. The step opens in
+a popup 24px right of the sidebar: 320px wide, Panel Raised, strong hairline, 16px
+radius, 18px 20px 20px padding, Popup shadow, an 18px title and a 13px muted note. On
+phones the card sits over the bottom bar and the step opens as a bottom sheet.
 
 ### Segmented control
 A Panel Raised track with hairline, 10px radius and 3px padding; 13px 500 buttons at 7px
@@ -480,9 +509,12 @@ radius. The selected button is Panel with a 1px lift. Small size is 12px with ti
 padding. On phones an overflowing control scrolls sideways.
 
 ### Save bar
-A row under the Settings card, in the page flow: Panel, strong hairline, 12px radius,
-13px muted text on the left and the primary Save button on the right. With unsaved
-edits the border turns Solar Green at 40%. It never floats or blurs.
+Shown only with unsaved plant changes. It sticks 16px above the foot of the screen
+(above the bottom bar on phones): Panel Raised, strong hairline, 12px radius, Sticky
+shadow, 13px muted text on the left and Cancel then Save at the right. With unsaved
+edits the border turns Solar Green at 40%. Below 900px the text takes its own line and
+the buttons stay at the right under it. What a save did shows as a toast in the same
+place for 2.5 seconds. Neither blurs.
 
 ### Scrollbar
 An 11px transparent track with a 14% white thumb inset 3px from the edge (26% on hover,
