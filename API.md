@@ -295,6 +295,15 @@ per-string V/I fallback needs one call, not two. Not changed in `invhistory.ts` 
 | 2303251204 | 495944 | 284 | 5 min |
 | 2504193036 | 495944 | 1,257 | ~69 s |
 
+**Events list, 26 Oct 2026 (official host, SOLAR-192).** `GET /events?lan=en&type=N&page=1&limit=20&sdate=YYYY-MM-DD&edate=YYYY-MM-DD`
+answers on the production key. `type` and `sdate` are required (`400 Parameter … is required`
+without them). With a range of up to 26 days it returns `{ nextToken: null, record: [] }`;
+a 4-month range (Jul–Oct) and `sdate` with a time both return `data: null`. Types 0, 1, 2, 3
+and -1, with or without `plantId`/`sn`, all came back empty for 495944 and 538820, 1–26 Oct.
+Not known yet: what each `type` means, what a record looks like, whether the list is
+per-user or per-plant. `nextToken` suggests token paging, not `page`. Still `404` on this
+host: `/plant/{id}/events`, `/plant/{id}/alarms`, `/inverter/{sn}/events|alarm|alarms|fault|faults`, `/alarms`.
+
 **`/inverter/{sn}/flow`** on the official host: `404 API not found` (confirmed
 again; the 5 Sep table stands). The five realtime endpoints answered normally in
 the same second, so there is no single-call shortcut on this key.
