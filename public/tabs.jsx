@@ -1808,8 +1808,8 @@ function ConfirmCard({ title, text, action, onConfirm, onCancel }) {
       {title && <div className="confirm-title">{title}</div>}
       <div className="confirm-text">{text}</div>
       <div className="conn-form-actions">
-        <button type="button" className="danger-btn" onClick={onConfirm}>{action}</button>
         <button type="button" className="ghost-btn" onClick={onCancel} autoFocus>Cancel</button>
+        <button type="button" className="danger-btn" onClick={onConfirm}>{action}</button>
       </div>
     </div>
   );
@@ -1919,7 +1919,7 @@ function SunSynkConnectionSection({ onChanged, links }) {
         // Green only while the poller is actually reaching it: the header pill calls
         // 15 minutes without a reading "offline", so a login goes amber at the same age.
         const stale = ok && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
-        const word = !ok ? 'Sign-in expired' : stale ? 'Stale' : 'Connected';
+        const word = !ok ? 'Sign-in expired' : stale ? 'Not updating' : 'Connected';
         const plants = acc.plants || [];
         return (
           <div key={acc.account_id} className={'conn-row' + (leaving === acc.account_id ? ' leaving' : '')}>
@@ -1932,9 +1932,9 @@ function SunSynkConnectionSection({ onChanged, links }) {
               </div>
               <div className="conn-meta">
                 <span className={'conn-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
-                {acc.last_ok_at ? ' · read ' + ago(acc.last_ok_at) : ''}
+                {acc.last_ok_at ? ' · last reading ' + ago(acc.last_ok_at) : ''}
               </div>
-              {!plants.length && <div className="conn-meta">No plant shared with this login. Ask your installer to share it in SunSynk Connect.</div>}
+              {!plants.length && <div className="conn-meta">No plant shared with this login.</div>}
             </div>
             <div className="conn-actions">
               {!ok && mode !== acc.account_id && <button type="button" className="save-btn" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
@@ -1949,7 +1949,7 @@ function SunSynkConnectionSection({ onChanged, links }) {
             {confirming === acc.account_id && (
               <ConfirmCard
                 title={<>Remove <b>{acc.sunsynk_username}</b>?</>}
-                text={'History goes too, unless someone else shares the plant.' + (live.length === 1 ? ' Your only login, so your pages go empty until you connect again.' : '')}
+                text={'This plant’s history is deleted too, unless another account shares it.' + (live.length === 1 ? ' It’s your only login. Your pages stay empty until you add one.' : '')}
                 action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
             )}
           </div>
@@ -2080,7 +2080,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
         <div className="conn-row sset-row">
           <div className="conn-text">
             <span className="conn-user">Capacity</span>
-            <span className="conn-meta">Every battery added together.</span>
+            <span className="conn-meta">All batteries together.</span>
           </div>
           <div className="sset-sum">
             <window.SumBox kind="size" mode={f.bMode} onMode={set('bMode')} tot={f.bTot} onTot={set('bTot')} rows={f.bRows} onRows={set('bRows')} label="Battery size" />
@@ -2090,7 +2090,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
         <div className="conn-row sset-row">
           <div className="conn-text">
             <span className="conn-user">Reserve</span>
-            <span className="conn-meta">Discharging stops at this level.</span>
+            <span className="conn-meta">The battery stops powering your home at this charge.</span>
           </div>
           <div className="conn-actions sset-one">
             <window.StepField value={f.res} onChange={set('res')} label="Reserve" unit="%" inputMode="numeric" ph="20" invalid={tried && bad.res} />
@@ -2099,7 +2099,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
         </div>
       </SettingsSection>
 
-      <SettingsSection id="plant" title="Plant">
+      <SettingsSection id="plant" title="Panels">
         <div className="conn-row sset-row">
           <div className="conn-text">
             <span className="conn-user">Solar panels</span>
@@ -2152,7 +2152,7 @@ function PasswordSection({ email }) {
   });
   const check = () => {
     const out = {};
-    if (!cur) out['pw-current'] = 'Enter your password';
+    if (!cur) out['pw-current'] = 'Enter your current password';
     // Matches the minimum set in Supabase (Auth → Email) and supabase/config.toml.
     if (!pw) out['pw-new'] = 'Choose a password';
     else if (pw.length < 8) out['pw-new'] = 'Use at least 8 characters';
@@ -2213,15 +2213,14 @@ function PasswordSection({ email }) {
   return (
     <SettingsSection id="password" title="Password">
       <div className="conn-row">
-        <div className="conn-text"><div className="conn-meta">Changing it signs out your other devices.</div></div>
+        <div className="conn-text"><div className="conn-user">Sign-in password</div><div className="conn-meta">Changing it signs out your other devices.</div></div>
         {!open && <div className="conn-actions"><button type="button" className="ghost-btn" onClick={() => setOpen(true)}>Change password</button></div>}
         {open && (
           <form className="conn-form link-form" onSubmit={submit} noValidate aria-busy={busy}>
             {/* The email, unseen, so a password manager knows which login to update. */}
             <input type="email" autoComplete="username" value={email || ''} readOnly hidden />
             {field('pw-current', 'Current password', cur, setCur, 'current-password',
-              <button type="button" onClick={sendReset} disabled={busy}
-                      style={{ background: 'none', border: 0, padding: 0, font: 'inherit', color: 'inherit', textDecoration: 'underline', textUnderlineOffset: 3, cursor: 'pointer' }}>
+              <button type="button" className="text-link" onClick={sendReset} disabled={busy}>
                 Email a reset link
               </button>)}
             {field('pw-new', 'New password', pw, setPw, 'new-password', '8+ characters', ['pw-confirm'])}
@@ -2310,15 +2309,15 @@ function DeleteAccountSection({ email }) {
     catch (e) { window.toast('Couldn’t delete the account. Try again.', { error: true }); setBusy(false); }
   };
   return (
-    <SettingsSection id="delete" title="Delete account" note="Removes your logins and settings. History goes too, unless someone else shares the plant.">
+    <SettingsSection id="delete" title="Delete account">
       <div className="conn-row">
         <div className="conn-text">
           <div className="conn-user">Delete <span className="mono">{email || 'this account'}</span></div>
-          <div className="conn-meta">It cannot be undone.</div>
+          <div className="conn-meta">Deletes your logins, settings and email choices.</div>
         </div>
         <div className="conn-actions"><button type="button" className="danger-btn" onClick={() => setConfirming(c => !c)} disabled={busy || confirming}>{busy ? 'Deleting…' : 'Delete account'}</button></div>
         {confirming && (
-          <ConfirmCard title={<>Delete <b>{email || 'this account'}</b>?</>} text="It cannot be undone."
+          <ConfirmCard title={<>Delete <b>{email || 'this account'}</b>?</>} text="Your plants’ history goes too, unless another account shares them. It cannot be undone."
             action="Delete account" onConfirm={del} onCancel={() => setConfirming(false)} />
         )}
       </div>
@@ -2358,7 +2357,7 @@ function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirt
       <div className="settings-page">
         <div className="page-head">
           <h1>Settings</h1>
-          {plant && <p>For {plant.name || 'Plant ' + plant.id}. Shared with everyone who sees it.</p>}
+          {plant && <p>{plant.name || 'Plant ' + plant.id}. Changes apply to everyone on this plant.</p>}
         </div>
         <PlantSections me={me} plantId={plantId} onSaved={onPlantConfigSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
         <FirstStepsSection me={me} plantId={plantId} onSaved={onPlantConfigSaved} />
@@ -2381,7 +2380,7 @@ const EMAIL_GROUPS = [
     ['grid', 'Grid', 'The grid goes off, and when it’s back'],
     ['battery', 'Battery', 'Over 40 °C, or charging unevenly. Once a day while it lasts'],
     ['panels', 'Panels', 'A string stops while the others make power. Once a day while it lasts'],
-    ['readings', 'Readings', 'Your inverter sends nothing for 15 min, and when it’s back'],
+    ['readings', 'Readings', 'No readings for 15 min, and when they’re back'],
     ['sunsynk', 'SunSynk', 'SunSynk stops answering, and when it’s back']] },
 ];
 // "All 3 on", "Weekly and Monthly on", "4 of 5 on. Sent when it happens", "Off".
@@ -2418,7 +2417,7 @@ function NotificationsSection({ userId }) {
     <SettingsSection id="notifications" title="Notifications">
       {failed ? (
         <div className="conn-row">
-          <div className="conn-text"><div className="conn-user">Couldn’t load your settings</div></div>
+          <div className="conn-text"><div className="conn-user">Couldn’t load your email settings</div></div>
           <div className="conn-actions"><button type="button" className="ghost-btn" onClick={load}>Try again</button></div>
         </div>
       ) : <>
