@@ -242,7 +242,7 @@ const FieldLabel = ({ id, label, error, hint }) => (
 function explain(ex) {
   const code = ex?.code;
   if (code === 'invalid_credentials') return { text: 'Email or password is wrong.' };
-  if (code === 'email_not_confirmed') return { text: 'Confirm your email first. The link is in your inbox.' };
+  if (code === 'email_not_confirmed') return { text: 'Confirm your email first.', action: 'resend' };
   if (code === 'user_already_exists' || code === 'email_exists') return { text: 'That email already has an account.', action: 'signin' };
   if (code === 'weak_password') {
     const reasons = ex.reasons || [];
@@ -374,7 +374,15 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     const e = explain(error);
     if (e.action === 'full') { setPlaces(p => ({ places: p?.places ?? 0, left: 0 })); go('signup'); }
     else if (e.field) flag({ [e.field]: e.text });
+    else if (e.action === 'resend') sayError(e.text, { label: 'Send a new link', onClick: () => resend(email.trim()).catch(showError) });
     else sayError(e.text, e.action === 'signin' ? { label: 'Sign in', onClick: () => go('signin') } : undefined);
+  };
+  // A new confirmation link, from the expired-link card or the not-confirmed toast (SOLAR-196).
+  // Supabase answers the same for unknown and already-confirmed emails, so this always moves on.
+  const resend = async (addr) => {
+    const { error } = await window.sb.auth.resend({ type: 'signup', email: addr, options: { emailRedirectTo: SITE_URL } });
+    if (error) throw error;
+    setSent({ to: addr, kind: 'signup', from: mode }); go('inbox');
   };
 
   // A stale email link (confirm, reset) lands here signed out with the reason in the URL.
@@ -382,9 +390,9 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   React.useEffect(() => {
     const params = new URLSearchParams(location.hash.slice(1) || location.search);
     if (params.get('error_description')) {
-      sayError(params.get('error_code') === 'otp_expired'
-        ? 'That link has expired. Ask for a new one.'
-        : 'Sign-in didn’t finish. Try again.');
+      // The link carries no email, so the expired card asks for it (SOLAR-196).
+      if (params.get('error_code') === 'otp_expired') go('expired');
+      else sayError('Sign-in didn’t finish. Try again.');
       history.replaceState(null, '', location.pathname);
     }
     const onShow = (e) => { if (e.persisted) setBusy(false); };
@@ -405,7 +413,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
       if (!email.trim()) out['auth-email'] = 'Enter your email';
       else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) out['auth-email'] = 'Enter a valid email';
     }
-    if (mode !== 'forgot') {
+    if (mode !== 'forgot' && mode !== 'expired') {
       if (!password) out['auth-password'] = mode === 'signin' ? 'Enter your password' : 'Choose a password';
       // Matches the minimum set in Supabase (Auth → Email) and supabase/config.toml.
       else if (newPw && password.length < 8) out['auth-password'] = 'Use at least 8 characters';
@@ -446,11 +454,13 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         const { data, error } = await window.sb.auth.signUp({ email: addr, password, options: { emailRedirectTo: SITE_URL } });
         if (error) throw error;
         // With email confirmation on, signUp returns a user but no session.
-        if (!data.session) { setSent({ to: addr, kind: 'signup' }); go('inbox'); }
+        if (!data.session) { setSent({ to: addr, kind: 'signup', from: mode }); go('inbox'); }
       } else if (mode === 'forgot') {
         const { error } = await window.sb.auth.resetPasswordForEmail(addr, { redirectTo: SITE_URL });
         if (error) throw error;
-        setSent({ to: addr, kind: 'reset' }); go('inbox');
+        setSent({ to: addr, kind: 'reset', from: mode }); go('inbox');
+      } else if (mode === 'expired') {
+        await resend(addr);
       } else if (mode === 'recovery') {
         const { error } = await window.sb.auth.updateUser({ password });
         if (error) throw error;
@@ -468,6 +478,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     signup:   { h: 'Create your account',   p: null,                                                   cta: 'Create account',  busy: 'Creating account…' },
     forgot:   { h: 'Reset your password',   p: 'We’ll email you a link to choose a new one.',          cta: 'Send reset link', busy: 'Sending…' },
     recovery: { h: 'Choose a new password', p: 'Set a new password to continue.',                      cta: 'Save password',   busy: 'Saving…' },
+    expired:  { h: 'That link has expired', p: 'Links last 24 hours. Enter your email and we’ll send a new one.', cta: 'Send a new link', busy: 'Sending…' },
   }[mode];
 
   if (mode === 'signup' && places?.left === 0) {
@@ -482,7 +493,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   if (mode === 'inbox') {
     return (
       <div className="login-wrap">
-        <InboxCard kind={sent.kind} email={sent.to} onBack={() => go(sent.kind === 'reset' ? 'forgot' : 'signup')} onSignIn={() => go('signin')} />
+        <InboxCard kind={sent.kind} email={sent.to} onBack={() => go(sent.from)} onSignIn={() => go('signin')} />
         {toastHost}
       </div>
     );
@@ -524,7 +535,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
                    {...invalidProps('auth-email', bad['auth-email'])} />
           </div>
         )}
-        {mode !== 'forgot' && (
+        {mode !== 'forgot' && mode !== 'expired' && (
           <PasswordField id="auth-password" label={mode === 'recovery' ? 'New password' : 'Password'}
                          value={password} error={bad['auth-password']}
                          onChange={(v) => { setPassword(v); edited('auth-password', 'auth-password2'); }}
@@ -562,6 +573,9 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
           )}
           {mode === 'forgot' && (
             <button type="button" className="login-link quiet" onClick={() => go('signin')}>Back to sign in</button>
+          )}
+          {mode === 'expired' && (
+            <span>Already confirmed? <button type="button" className="login-link" onClick={() => go('signin')}>Sign in</button></span>
           )}
           {mode === 'recovery' && (
             <SignOutButton className="login-link quiet" busyText="Cancelling…">Cancel</SignOutButton>
