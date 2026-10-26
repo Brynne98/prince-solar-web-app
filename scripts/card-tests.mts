@@ -8,7 +8,7 @@ const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const { plantEvent, report, sunsynkDown } = await import(copy);
 
-const U = "https://app.princesolarhub.com/?unsubscribe=t";
+const U = "https://app.princesolarhub.co.za/?unsubscribe=t";
 const bank = (names: string[]) => plantEvent("Home", 538820, { kind: "bank_drift", banks: names.map((name, i) => ({ name, chargePct: 70 - i * 12 })) }, U);
 const cases: [name: string, html: string, wantStack: boolean, cards: number][] = [
   ["grid down, short labels", plantEvent("Home", 538820, { kind: "grid_down", at: "14:32", chargePct: 62 }, U).html, false, 2],

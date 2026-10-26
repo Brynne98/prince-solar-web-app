@@ -12,7 +12,7 @@ const db = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   { auth: { persistSession: false } },
 );
-const SETTINGS = "https://app.princesolarhub.com/?tab=account&section=notifications";
+const SETTINGS = "https://app.princesolarhub.co.za/?tab=account&section=notifications";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 Deno.serve(async (req) => {

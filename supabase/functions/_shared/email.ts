@@ -13,9 +13,9 @@
 // Look: DESIGN.md. Dark only, like the app (decided 2026-10-18, SOLAR-117); colour
 // goes on the value, never the card.
 
-export const SITE = "https://princesolarhub.com";
+export const SITE = "https://princesolarhub.co.za";
 // Buttons open the web app; SITE is the showcase and only hosts the logo.
-export const APP = "https://app.princesolarhub.com";
+export const APP = "https://app.princesolarhub.co.za";
 // Email choices are per person, so they belong on Account (logins, delete) rather
 // than Settings (plant, tariff, battery). Relink is on Account too.
 // The footer's "notification settings" link opens Account's Notifications section (SOLAR-158).
@@ -23,8 +23,8 @@ const PREFS = `${APP}/?tab=account&section=notifications`;
 // Reconnect lands on Account's SunSynk logins section and flashes it, like the app's own
 // Reconnect (openSettings('connection')). ?section= needs SOLAR-156.
 const LOGINS = `${APP}/?tab=account&section=logins`;
-export const FROM_ACCOUNT = "Prince Solar Hub <noreply@princesolarhub.com>";
-export const FROM_NOTICE = "Prince Solar Hub <hello@princesolarhub.com>";
+export const FROM_ACCOUNT = "Prince Solar Hub <noreply@princesolarhub.co.za>";
+export const FROM_NOTICE = "Prince Solar Hub <hello@princesolarhub.co.za>";
 // Supabase's link lifetime (Auth -> mailer OTP expiry), default 1 hour.
 const LINK_LIFE = "This link works once and expires in 1 hour.";
 
@@ -35,7 +35,7 @@ const LINK_LIFE = "This link works once and expires in 1 hour.";
 // so give it a link of our own in the text colour.
 const addr = (email: string) => `<a href="mailto:${email}" style="color:#e7ecf2;text-decoration:none;font-weight:700">${email}</a>`;
 // The one help line every email ends with.
-const HELP = `Need help? Email <a href="mailto:hello@princesolarhub.com">hello@princesolarhub.com</a>.`;
+const HELP = `Need help? Email <a href="mailto:hello@princesolarhub.co.za">hello@princesolarhub.co.za</a>.`;
 
 export type Email = { subject: string; html: string; text: string; unsubscribe?: string };
 
