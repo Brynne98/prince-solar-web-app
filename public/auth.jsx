@@ -77,9 +77,19 @@ window.useSession = function useSession() {
   useEffect(() => {
     let alive = true;
     window.sb.auth.getSession().then(({ data }) => {
+      if (data.session) window.identifyUser(data.session.user.id);
       if (alive) setState(s => ({ ...s, loading: false, session: data.session || null }));
     });
     const { data: sub } = window.sb.auth.onAuthStateChange((event, session) => {
+      // A first sign-in is a sign-up: email confirmed (or Google account made) and signed in
+      // in the same minute, and that minute is now (SOLAR-85).
+      if (event === 'SIGNED_IN' && session) {
+        const u = session.user, last = Date.parse(u.last_sign_in_at);
+        window.identifyUser(u.id);
+        if (Math.abs(last - Date.parse(u.email_confirmed_at || u.created_at)) < 60000 && Date.now() - last < 60000)
+          window.track('sign_up_done', { method: u.app_metadata?.provider });
+      }
+      if (event === 'SIGNED_OUT') window.identifyUser(null);
       if (!alive) return;
       if (event === 'PASSWORD_RECOVERY') setState({ loading: false, session, recovering: true });
       // Whoever signs in next starts on the dashboard, not on the Settings tab the

@@ -73,6 +73,7 @@ window.linkSunsynk = async function linkSunsynk(username, password) {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(LINK_ERRORS[body.error] || 'Couldn’t connect to SunSynk. Check the login and try again.');
+  window.track('plant_linked');
   return body;
 };
 

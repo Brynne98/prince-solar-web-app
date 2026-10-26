@@ -829,6 +829,8 @@ function App({ links }) {
 
   // The address names the page and plant, so a reload opens them; the saved page is for a
   // bare address (SOLAR-165). ?section= is left for loadMe to read.
+  useEffect(() => { window.track('dashboard_viewed', { tab }); }, [tab]);
+
   useEffect(() => {
     localStorage.setItem('synsynk.tab', tab);
     const url = new URL(location.href);
@@ -1084,31 +1086,6 @@ function App({ links }) {
     </Frame>
   );
 }
-
-// A crash in someone's browser used to be invisible. Report it (once per message
-// per session) to client_errors; the table caps a runaway loop at 50/hour.
-(function () {
-  const seen = new Set();
-  const report = (message, stack) => {
-    try {
-      const key = String(message).slice(0, 200);
-      if (seen.has(key) || seen.size > 20 || !window.sb) return;
-      seen.add(key);
-      window.sb.auth.getSession().then(({ data }) => {
-        const uid = data?.session?.user?.id;
-        if (!uid) return;
-        return window.sb.from('client_errors').insert({
-          user_id: uid, plant_id: window.CURRENT_PLANT ?? null, app_version: window.APP_VERSION,
-          page: location.pathname + location.search, message: String(message), stack: stack ? String(stack) : null,
-          user_agent: navigator.userAgent,
-        });
-      }).catch(() => {});
-    } catch (e) {}
-  };
-  window.addEventListener('error', (e) => report(e.message || e.error, e.error && e.error.stack));
-  window.addEventListener('unhandledrejection', (e) => report((e.reason && e.reason.message) || e.reason, e.reason && e.reason.stack));
-  window.reportClientError = report;
-})();
 
 // Terms and privacy are pages beside the app (terms.html, privacy.html); old ?page= links go there.
 const legalPage = new URLSearchParams(location.search).get('page');
