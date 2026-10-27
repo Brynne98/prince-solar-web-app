@@ -144,6 +144,8 @@ begin
   -- Guard a: every plant a login brings counts
   perform pg_temp.eq('free 2nd plant',    public.billing_may_link(ur, 'r@login.test', array[1])->>'reason', 'upgrade_needed');
   perform pg_temp.eq('home 2nd plant',    public.billing_may_link(ua, 'a@login.test', array[1])->>'reason', 'upgrade_needed');
+  q := public.billing_may_link(ua, 'i@login.test', array[1, 1, 2]);
+  perform pg_temp.eq('home + 3 plants, extra priced', (q->>'extraInverters')::int, 2);
   delete from public.plant_users where user_id = ur;
   perform pg_temp.eq('installer on free', public.billing_may_link(ur, 'i@login.test', array[1, 1, 1])->>'reason', 'upgrade_needed');
   perform pg_temp.eq('free 1st plant',    (public.billing_may_link(ur, 'r@login.test', array[1])->>'ok')::boolean, true);
@@ -177,6 +179,9 @@ begin
   perform public.billing_book_removal(uy, 9000024);
   perform pg_temp.eq('extra still billed now', public.billing_extra_inverters(uy), 1);
   perform pg_temp.eq('extra gone next bill',   public.billing_amount_due(uy), 1799);
+  perform public.billing_book_removal(uy, 9000023);
+  perform pg_temp.eq('booked removals not counted: new 3rd covered, 4th extra',
+                     (public.billing_may_link(uy, 'n@login.test', array[1, 2])->>'extraInverters')::int, 2);
 
   -- Cancel = downgrade to Free at period end
   perform public.billing_book_change(ua, 'free');

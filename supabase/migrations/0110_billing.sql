@@ -51,7 +51,8 @@ create table if not exists private.billing (
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
   constraint billing_paid_has_dates check (
-    (plan = 'free') = (period is null and billing_day is null and next_billing_date is null))
+    (plan = 'free') = (period is null and billing_day is null and next_billing_date is null)),
+  constraint billing_free_books_nothing check (plan <> 'free' or (next_plan is null and next_period is null))
 );
 revoke all on table private.billing from public, anon, authenticated;
 grant all on table private.billing to service_role;
@@ -65,6 +66,10 @@ create table if not exists private.free_week_logins (
 );
 revoke all on table private.free_week_logins from public, anon, authenticated;
 grant all on table private.free_week_logins to service_role;
+
+-- guard b looks logins up case-blind
+create index if not exists sunsynk_accounts_username_lower_idx
+  on private.sunsynk_accounts (lower(sunsynk_username));
 
 -- ---------------------------------------------------------------------------
 -- 2. profiles.plan goes
@@ -205,14 +210,19 @@ end $$;
 -- May this user link the plants one SunSynk login brings? p_plant_inverters holds
 -- the inverter count of each new plant, in link order.
 --   {ok: false, reason: 'free_week_used'}  guard b
---   {ok: false, reason: 'upgrade_needed'}  over the Free or Home limit (guard a)
+--   {ok: false, reason: 'upgrade_needed', extraInverters}  over the Free or Home limit
+--                                          (guard a); extraInverters prices the Family quote
 --   {ok: true, extraInverters, dueNow}     on Family, the new inverters past plant 3
+-- Plants booked for removal don't count: they are gone from the billing date.
 create or replace function public.billing_may_link(p_user uuid, p_sunsynk_username text, p_plant_inverters int[])
 returns jsonb language plpgsql stable security definer set search_path = public, private, pg_temp as $$
 declare
   v_plan text := coalesce((select b.plan from private.billing b where b.user_id = p_user), 'free');
-  have int := (select count(*) from public.plant_users where user_id = p_user);
-  extra int := 0;
+  have int := (select count(*) from public.plant_users
+                where user_id = p_user
+                  and plant_id <> all (coalesce((select b.plants_to_remove from private.billing b
+                                                  where b.user_id = p_user), '{}')));
+  extra int;
 begin
   if v_plan = 'free' and (
        exists (select 1 from private.free_week_logins
@@ -221,11 +231,11 @@ begin
                 where lower(sunsynk_username) = lower(p_sunsynk_username) and user_id <> p_user)) then
     return jsonb_build_object('ok', false, 'reason', 'free_week_used');
   end if;
-  if have + coalesce(cardinality(p_plant_inverters), 0) > coalesce(public.billing_plant_limit(v_plan), 2147483647) then
-    return jsonb_build_object('ok', false, 'reason', 'upgrade_needed');
-  end if;
   select coalesce(sum(n), 0) into extra
     from unnest(p_plant_inverters) with ordinality as t(n, i) where have + i > 3;
+  if have + coalesce(cardinality(p_plant_inverters), 0) > coalesce(public.billing_plant_limit(v_plan), 2147483647) then
+    return jsonb_build_object('ok', false, 'reason', 'upgrade_needed', 'extraInverters', extra);
+  end if;
   return jsonb_build_object('ok', true, 'extraInverters', extra,
     'dueNow', case when v_plan = 'family' and extra > 0
                    then (public.billing_upgrade_quote(p_user, 'family', extra))->'dueNow' else '0' end);
@@ -283,13 +293,14 @@ create or replace function public.billing_renew(p_user uuid)
 returns jsonb language plpgsql security definer set search_path = public, private, pg_temp as $$
 declare
   b private.billing;
-  due int := public.billing_amount_due(p_user);
+  due int;
   v_plan text; v_period text;
 begin
   select * into b from private.billing where user_id = p_user for update;
   if b.plan is null or b.plan = 'free' then
     raise exception 'nothing to renew on Free' using errcode = '22023';
   end if;
+  due := public.billing_amount_due(p_user);
   v_plan := coalesce(b.next_plan, b.plan);
   v_period := coalesce(b.next_period, b.period);
   update private.billing
