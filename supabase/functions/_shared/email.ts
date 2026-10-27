@@ -434,7 +434,7 @@ export function report(r: Report): Email {
     parts.push({ chart: { title: r.period === "year" ? "Solar each month" : "Solar each day", side: `Average ${kwh(avg).join(" ")} a ${r.period === "year" ? "month" : "day"}`, bars: r.daily, facts } });
   } else if (facts.length) parts.push({ facts: facts.map((f) => ({ label: f.label, value: `${f.sub ? esc(f.sub) + " · " : ""}${f.value}${f.unit ? " " + f.unit : ""}` })) });
   if (r.freeWeekEnds) {
-    parts.push({ note: "Your free week ends today. From tomorrow Free keeps the last 24 hours, and alerts stay on. Reports stop." });
+    parts.push({ note: `Your free week ends today. From tomorrow ${FREE_RULE}` });
     parts.push({ button: { label: "See plans", href: PLAN } });
   } else parts.push({ button: openPage("live", r.plantId) });
   return make(`${EVERY[r.period]} solar report for ${r.plant}: ${r.label}`, {
@@ -542,6 +542,8 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, unsubs
 // plan changes come from us; Paystack's own receipts are off. Prices are final: the
 // company isn't VAT-registered, so no VAT line. No unsubscribe: these are about money.
 const PLAN = `${APP}/?tab=account&section=plan`;
+// What Free means after its first week, said the same way in every email.
+const FREE_RULE = "we keep only the last 24 hours of readings. Alerts stay on; reports stop.";
 const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;
 export type Plan = keyof typeof PLAN_NAME;
 export type BillPeriod = "monthly" | "yearly";
@@ -552,7 +554,7 @@ export type Receipt = {
   plan: Plan; period: BillPeriod; amount: number; date: string; // "1 Nov 2026"
   card: string; // "Visa ending 4081"
   reference: string; // Paystack reference
-  extraInverters?: number; // billed past the 3rd plant
+  extraInverters?: { n: number; each: number }; // on plants after the 3rd, and the price of one
   next: { amount: number; date: string };
 };
 
@@ -563,7 +565,7 @@ export const paymentReceived = (r: Receipt) =>
     parts: [
       { facts: [
         { label: "Plan", value: planLine(r.plan, r.period) },
-        ...(r.extraInverters ? [{ label: "Extra inverters", value: String(r.extraInverters) }] : []),
+        ...(r.extraInverters ? [{ label: "Extra inverters", value: `${r.extraInverters.n} at ${rand(r.extraInverters.each)} each` }] : []),
         { label: "Paid", value: rand(r.amount) },
         { label: "Card", value: esc(r.card) },
         { label: "Reference", value: esc(r.reference) },
@@ -591,7 +593,7 @@ export const planUpgraded = (u: Upgrade) => {
       { p: u.addedInverters ? "They're billed with your Family plan from today." : u.to === "family" ? "You can add up to 3 plants now." : "Your history is kept from now on." },
       { facts: [
         { label: "Plan", value: planLine(u.to, u.period) },
-        { label: "Paid now", value: `${rand(u.paidNow)} for ${u.daysLeft} ${u.daysLeft === 1 ? "day" : "days"}` },
+        { label: "Paid today", value: `${rand(u.paidNow)} for the ${u.daysLeft === 1 ? "day" : u.daysLeft + " days"} left` },
         { label: "Next payment", value: `${rand(u.next.amount)} on ${u.next.date}` },
       ] },
       { button: u.to === "family" && !u.addedInverters ? { label: "Add a plant", href: LOGINS } : { label: "See your plan", href: PLAN } },
@@ -616,15 +618,15 @@ export const planChangeBooked = (c: Change) => {
   return make(title, {
     title,
     parts: [
-      { p: `Everything stays as it is until then.${cancel ? " After that Free keeps the last 24 hours, and alerts stay on. Reports stop." : ""}` },
+      { p: `Everything stays as it is until then.${cancel ? ` After that you're on Free: ${FREE_RULE}` : ""}` },
       { facts: [
         { label: "Until " + c.on, value: planLine(c.from, c.fromPeriod) },
         { label: "From " + c.on, value: cancel ? "Free" : planLine(c.to, c.toPeriod ?? c.fromPeriod) },
         ...(c.next ? [{ label: "Next payment", value: `${rand(c.next.amount)} on ${c.on}` }] : [{ label: "Next payment", value: "None" }]),
         ...(c.removePlants.length ? [{ label: "Deleted on " + c.on, value: esc(names(c.removePlants)) }] : []),
       ] },
-      ...(c.removePlants.length ? [{ note: "A deleted plant's history goes too." }] : []),
-      { button: { label: cancel ? "Keep my plan" : "See your plan", href: PLAN } },
+      ...(c.removePlants.length ? [{ note: "Their history is deleted too." }] : []),
+      { button: { label: cancel ? `Keep ${PLAN_NAME[c.from]}` : "See your plan", href: PLAN } },
     ],
     footer: [HELP],
   });
@@ -666,7 +668,7 @@ export const movedToFree = (m: MovedToFree) =>
   make("Your account is now on Free", {
     title: "Your account is now on Free",
     parts: [
-      { p: `Payment for ${PLAN_NAME[m.from]} didn't go through. Free keeps the last 24 hours, and alerts stay on.` },
+      { p: `Payment for ${PLAN_NAME[m.from]} didn't go through, so you're on Free: ${FREE_RULE}` },
       { facts: [
         { label: "Still updating", value: esc(m.kept) },
         ...(m.stopped.length ? [{ label: "Stopped", value: esc(names(m.stopped)) }, { label: "Deleted on", value: m.deleteOn }] : []),

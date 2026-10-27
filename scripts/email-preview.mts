@@ -88,7 +88,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
   })],
   // Billing (SOLAR-208)
   "billing-receipt": [FROM_NOTICE, paymentReceived({ plan: "family", period: "monthly", amount: 228, date: "1 Nov 2026", card: "Visa ending 4081",
-    reference: "PSH-7Q2K9X", extraInverters: 1, next: { amount: 228, date: "1 Dec" } })],
+    reference: "PSH-7Q2K9X", extraInverters: { n: 1, each: 49 }, next: { amount: 228, date: "1 Dec" } })],
   "billing-upgraded": [FROM_NOTICE, planUpgraded({ from: "home", to: "family", period: "monthly", paidNow: 43, daysLeft: 16, next: { amount: 179, date: "1 Dec" } })],
   "billing-inverters-added": [FROM_NOTICE, planUpgraded({ from: "family", to: "family", period: "monthly", addedInverters: 2, paidNow: 52, daysLeft: 16, next: { amount: 277, date: "1 Dec" } })],
   "billing-downgrade-booked": [FROM_NOTICE, planChangeBooked({ from: "family", to: "home", fromPeriod: "monthly", on: "1 Dec", removePlants: ["Cabin", "Office"], next: { amount: 99 } })],

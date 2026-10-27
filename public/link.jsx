@@ -136,8 +136,8 @@ function Paywall({ reason, added = 0, onCancel }) {
   const per = paid ? first.period : period;
   return (
     <div className="paywall" role="dialog" aria-labelledby="pw-title">
-      <h2 id="pw-title" className="sset-title">{reason === 'free_week' ? 'Choose a plan' : reason === 'many' ? 'Add these plants' : 'Add another plant'}</h2>
-      <p className="sset-note">{reason === 'free_week' ? 'This login already had its free week.' : (paid ? 'Home' : 'Free') + ' covers one plant.'}</p>
+      <h2 id="pw-title" className="sset-title">{reason === 'free_week' ? 'Choose a plan' : reason === 'many' ? 'This login has more than one plant' : 'Add another plant'}</h2>
+      <p className="sset-note">{reason === 'free_week' ? 'This SunSynk login already had its free week on another account.' : (paid ? 'Home' : 'Free') + ' covers one plant.'}</p>
       {!paid && (
         <div className="segmented seg-sm pw-period" role="group" aria-label="Billing">
           {['monthly', 'yearly'].map(p => (
@@ -146,7 +146,7 @@ function Paywall({ reason, added = 0, onCancel }) {
           ))}
         </div>
       )}
-      {quotes?.error ? <p className="sset-note pw-error">Couldn’t load prices. Try again.</p> : (
+      {quotes?.error ? <p className="sset-note pw-error">Couldn’t load prices. Close this and try again.</p> : (
         <div className="pw-plans">
           {offers.map(p => {
             const q = quotes?.[p];
@@ -158,7 +158,7 @@ function Paywall({ reason, added = 0, onCancel }) {
                   <li>{p === 'family' ? 'Up to 3 plants' : '1 plant'}</li>
                   <li>All history kept</li>
                 </ul>
-                {paid && q && q.dueNow !== q.nextCharge && <div className="pw-due">{rand(q.dueNow)} now, then {rand(q.nextCharge)} from {billDay(q.nextDate)}</div>}
+                {paid && q && q.dueNow !== q.nextCharge && <div className="pw-due">{rand(q.dueNow)} today, then {rand(q.nextCharge)} {perUnit(per)} from {billDay(q.nextDate)}</div>}
                 <button type="button" className={p === 'family' ? 'save-btn' : 'ghost-btn'} disabled={!q}
                         onClick={() => window.startUpgrade(p, per)}>{p === 'family' ? 'Upgrade to Family' : 'Choose Home'}</button>
               </div>
@@ -166,7 +166,7 @@ function Paywall({ reason, added = 0, onCancel }) {
           })}
         </div>
       )}
-      {first && <p className="field-note">More than 3 plants: {rand(first.extraPrice)} {perUnit(per)} per extra inverter.</p>}
+      {first && <p className="field-note">Plants after the 3rd: {rand(first.extraPrice)} {perUnit(per)} for each inverter.</p>}
       <div className="conn-form-actions pw-foot">
         <span className="field-note">Cancel any time.</span>
         <button type="button" className="ghost-btn" onClick={onCancel}>Not now</button>
@@ -295,8 +295,8 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
     const unit = perUnit(cost.period);
     return (
       <div className={(compact ? 'conn-form' : 'link-card') + ' cost-card'} role="alertdialog" aria-labelledby="cost-title">
-        <div id="cost-title" className="confirm-title">Add {cost.n} {cost.n === 1 ? 'inverter' : 'inverters'} at {rand(cost.extraPrice)} {unit}{cost.n === 1 ? '' : ' each'}?</div>
-        <div className="confirm-text">{rand(cost.dueNow)} now, then {rand(cost.nextCharge)} {unit} from {billDay(cost.nextDate)}.</div>
+        <div id="cost-title" className="confirm-title">Add {cost.n === 1 ? '1 inverter' : cost.n + ' inverters'} for {rand(cost.n * cost.extraPrice)} {unit}?</div>
+        <div className="confirm-text">Plants after your 3rd cost {rand(cost.extraPrice)} {unit} for each inverter. {rand(cost.dueNow)} today, then {rand(cost.nextCharge)} {unit} from {billDay(cost.nextDate)}.</div>
         <div className="conn-form-actions">
           <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setCost(null); setPassword(''); onCancel && onCancel(); }}>Cancel</button>
           <button type="button" className="save-btn" disabled={busy} aria-busy={busy} onClick={() => submit(null, true)}>{busy ? 'Adding…' : 'Add plant'}</button>
