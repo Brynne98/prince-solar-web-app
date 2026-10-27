@@ -13,6 +13,7 @@ begin;
 \ir ../../supabase/migrations/0110_billing.sql
 \ir ../../supabase/migrations/0111_free_trim.sql
 \ir ../../supabase/migrations/0112_paused_plants.sql
+\ir ../../supabase/migrations/0113_plan_section.sql
 
 create function pg_temp.eq(label text, got anyelement, want anyelement) returns void language plpgsql as $$
 begin
@@ -280,7 +281,8 @@ insert into public.agg_minute (plant_id, ts)
     from unnest(array[9000061, 9000062, 9000063, 9000021]) p, unnest(array[1, 23, 25, 48, 24 * 20]) h;
 insert into public.plant_energy (plant_id, bucket, period)
   select p, b, d from unnest(array[9000061, 9000062]) p,
-    (values ('day', current_date), ('day', current_date - 1), ('day', current_date - 5), ('month', date_trunc('month', current_date)::date)) v(b, d);
+    (values ('day', public.today_tz('Africa/Johannesburg')), ('day', public.today_tz('Africa/Johannesburg') - 1),
+            ('day', public.today_tz('Africa/Johannesburg') - 5), ('month', date_trunc('month', public.today_tz('Africa/Johannesburg'))::date)) v(b, d);  -- the plant's own day, as the trim uses
 insert into public.grid_off (plant_id, started_at, ended_at, last_off_at, minutes_off) values
   (9000061, now() - interval '3 days', now() - interval '3 days' + interval '1 hour', now() - interval '3 days', 60),
   (9000061, now() - interval '2 hours', null, now() - interval '1 hour', 60);
@@ -296,7 +298,7 @@ begin
   perform pg_temp.eq('shared with a payer keeps all', (select count(*)::int from public.agg_minute where plant_id = 9000063), 5);
   perform pg_temp.eq('family keeps all', (select count(*)::int from public.agg_minute where plant_id = 9000021 and ts > extract(epoch from now() - interval '21 days')), 5);
   perform pg_temp.eq('day totals: today and yesterday', (select array_agg(period order by period) from public.plant_energy where plant_id = 9000061),
-                     array[current_date - 1, current_date]);
+                     array[public.today_tz('Africa/Johannesburg') - 1, public.today_tz('Africa/Johannesburg')]);
   perform pg_temp.eq('other plant totals kept', (select count(*)::int from public.plant_energy where plant_id = 9000062), 4);
   perform pg_temp.eq('old grid-off gone, open one kept', (select count(*)::int from public.grid_off where plant_id = 9000061 and ended_at is null), 1);
   perform pg_temp.eq('grid-off count', (select count(*)::int from public.grid_off where plant_id = 9000061), 1);
@@ -324,6 +326,45 @@ select pg_temp.eq('status lists paused plant',
 select pg_temp.eq('status gives removal date',
   (select (p->>'remove_on') is not null from public.api_link_status() s, jsonb_array_elements(s.plants) p where (p->>'plant_id')::bigint = 9000024), true);
 select set_config('request.jwt.claims', '', true);
+
+-- Plan section (0113), as the signed-in user
+do $$
+declare
+  uy constant uuid := '00000000-0000-0000-0000-0000000000a1';
+  uh constant uuid := '00000000-0000-0000-0000-0000000000e1';
+  ur constant uuid := '00000000-0000-0000-0000-0000000000b1';
+  st jsonb;
+begin
+  perform set_config('request.jwt.claims', json_build_object('sub', uy, 'role', 'authenticated')::text, true);
+  st := public.api_billing_status();
+  perform pg_temp.eq('status plan', st->>'plan', 'family');
+  perform pg_temp.eq('status lists booked plants', jsonb_array_length(st->'removePlants'), 2);
+  st := public.api_billing_keep(9000023);
+  perform pg_temp.eq('keep takes a plant off the list', jsonb_array_length(st->'removePlants'), 1);
+  perform pg_temp.raises('downgrade with too many plants', 'select public.api_billing_change(''home'')', 'remove plants first');
+  -- Remove login on Family: its plants are booked for the billing date, nothing goes now
+  perform pg_temp.eq('remove login books it', public.api_link_remove('00000000-0000-0000-0000-0000000000f7')->>'result', 'booked');
+  perform pg_temp.eq('all its plants booked', jsonb_array_length(public.api_billing_status()->'removePlants'),
+                     (select count(*)::int from public.plant_users where user_id = uy));
+  perform pg_temp.eq('nothing removed yet', (select count(*)::int from public.plant_users where user_id = uy) > 0, true);
+  perform pg_temp.eq('login still active', (select status from private.sunsynk_accounts where id = '00000000-0000-0000-0000-0000000000f7'), 'active');
+  perform pg_temp.raises('not your login', 'select public.api_link_remove(''00000000-0000-0000-0000-000000000099'')', 'not your account');
+  -- A switch booked and undone
+  perform set_config('request.jwt.claims', json_build_object('sub', uh, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('home monthly now', public.api_billing_status()->>'period', 'monthly');
+  perform pg_temp.eq('switch booked', public.api_billing_change('home', 'yearly')->>'nextPeriod', 'yearly');
+  perform pg_temp.eq('undo with current plan', public.api_billing_change('home', 'monthly')->>'nextPeriod', null);
+  perform pg_temp.eq('cancel booked', public.api_billing_change('free')->>'nextPlan', 'free');
+  -- Free: Remove login goes at once
+  insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values ('00000000-0000-0000-0000-0000000000f8', ur, 'r2@login.test');
+  update public.plant_users set account_id = '00000000-0000-0000-0000-0000000000f8' where user_id = ur;
+  perform set_config('request.jwt.claims', json_build_object('sub', ur, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('free remove is at once', public.api_link_remove('00000000-0000-0000-0000-0000000000f8')->>'result', 'removed');
+  perform pg_temp.eq('free plant gone', (select count(*)::int from public.plant_users where user_id = ur), 0);
+  perform set_config('request.jwt.claims', '', true);
+end $$;
+select pg_temp.eq('plan calls for signed-in users', has_function_privilege('authenticated', 'public.api_billing_change(text, text)', 'execute'), true);
+select pg_temp.eq('not for anon', has_function_privilege('anon', 'public.api_billing_status()', 'execute'), false);
 
 -- Only service_role may call the rules
 select pg_temp.eq('authenticated cannot', has_function_privilege('authenticated', 'public.billing_amount_due(uuid)', 'execute'), false);

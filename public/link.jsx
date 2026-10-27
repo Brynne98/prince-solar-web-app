@@ -7,7 +7,7 @@
 // (password changed, SunSynk migration) the account flips to needs_relink and the
 // dashboard shows a banner pointing back here.
 //
-// Two backends, deliberately: api_link_status / api_link_disconnect are RPCs (plain
+// Two backends, deliberately: api_link_status / api_link_remove are RPCs (plain
 // database calls, self-scoped by auth.uid()); the credential exchange is an Edge
 // Function because it has to sign requests with the app secret, which can't live
 // in a browser bundle.
@@ -92,11 +92,6 @@ const LINK_ERRORS = {
   'too many attempts': 'Too many tries. Try again in an hour.',
 };
 
-window.disconnectSunsynk = async function disconnectSunsynk(accountId) {
-  const { error } = await window.sb.rpc('api_link_disconnect', { p_account: accountId });
-  if (error) throw new Error(error.message);
-  window.track('login_remove_done');
-};
 
 // ---- Paywall (SOLAR-208) ------------------------------------------------------
 const rand = (n) => 'R' + Number(n).toLocaleString('en-US');
@@ -104,6 +99,8 @@ const billDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { d
 const perUnit = (period) => (period === 'yearly' ? 'a year' : 'a month');
 const quote = (plan, period, added = 0) => window.sb.rpc('api_billing_quote', { p_plan: plan, p_period: period, p_added: added })
   .then(({ data, error }) => { if (error) throw error; return data; });
+
+window.billingFmt = { rand, billDay, perUnit };
 
 // Paystack (a later part of SOLAR-208) takes over from here.
 window.startUpgrade = async function startUpgrade(plan, period) {
@@ -115,12 +112,13 @@ window.startUpgrade = async function startUpgrade(plan, period) {
  *   reason 'add'        Free or Home with a plant, before the form (onAddPaused: go on, paused)
  *          'free_week'  linked, but the login had its free week on another account: Home fits too
  *          'paused'     Upgrade on a login row with paused plants (`paused`: their names)
+ *          'plans'      See plans in Account's Plan section, on Free: Home fits too
  * `added` = inverters the login brings past the 3rd plant, priced into Family.
  * A paid user's period changes at renewal, so only Free gets the switch.
  */
 function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
   const { useState, useEffect } = React;
-  const offers = reason === 'free_week' ? ['home', 'family'] : ['family'];
+  const offers = reason === 'free_week' || reason === 'plans' ? ['home', 'family'] : ['family'];
   const [period, setPeriod] = useState('monthly');
   const [quotes, setQuotes] = useState(null);
   useEffect(() => { window.track('paywall_shown', { reason }); }, []);
@@ -136,7 +134,7 @@ function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
   const per = paid ? first.period : period;
   return (
     <div className="paywall" role="dialog" aria-labelledby="pw-title">
-      <h2 id="pw-title" className="sset-title">{reason === 'free_week' ? 'Choose a plan'
+      <h2 id="pw-title" className="sset-title">{reason === 'free_week' || reason === 'plans' ? 'Choose a plan'
         : reason === 'paused' ? `Collect data for ${paused.length === 1 ? paused[0] : paused.length + ' paused plants'}`
         : 'Add another plant'}</h2>
       <p className="sset-note">{reason === 'free_week' ? 'This SunSynk login had its free week on another account, so its plant is paused.'
