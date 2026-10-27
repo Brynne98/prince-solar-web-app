@@ -11,6 +11,7 @@ begin;
 \ir ../../supabase/migrations/0108_explicit_grants.sql
 \ir ../../supabase/migrations/0109_waitlist_cap.sql
 \ir ../../supabase/migrations/0110_billing.sql
+\ir ../../supabase/migrations/0111_free_trim.sql
 
 create function pg_temp.eq(label text, got anyelement, want anyelement) returns void language plpgsql as $$
 begin
@@ -236,6 +237,61 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', ur, 'role', 'authenticated')::text, true);
   perform pg_temp.eq('api_me free', public.api_me()->>'plan', 'free');
 end $$;
+
+-- Free trim (0111): 24 hours kept once every account on the plant is Free past its week
+insert into auth.users (id, email) values
+  ('00000000-0000-0000-0000-000000000061', 't1@t.test'), ('00000000-0000-0000-0000-000000000062', 't2@t.test'),
+  ('00000000-0000-0000-0000-000000000063', 't3@t.test');
+insert into private.free_week_logins (sunsynk_username, user_id, started_at) values
+  ('t1@login.test', '00000000-0000-0000-0000-000000000061', now() - interval '10 days'),
+  ('t2@login.test', '00000000-0000-0000-0000-000000000062', now() - interval '2 days'),
+  ('t3@login.test', '00000000-0000-0000-0000-000000000063', now() - interval '10 days');
+insert into public.plant_users (plant_id, user_id) values
+  (9000061, '00000000-0000-0000-0000-000000000061'),   -- Free, week over: trimmed
+  (9000062, '00000000-0000-0000-0000-000000000062'),   -- Free, still in its week
+  (9000063, '00000000-0000-0000-0000-000000000063'),   -- Free, week over, but shared
+  (9000063, '00000000-0000-0000-0000-0000000000a1');   -- ... with a Family account
+insert into public.plant_config (plant_id, timezone, backfill_next, backfill_until, temp_next)
+  values (9000061, 'Africa/Johannesburg', current_date - 50, current_date - 1, current_date - 40);
+insert into public.agg_minute (plant_id, ts)
+  select p, extract(epoch from now() - h * interval '1 hour')::bigint
+    from unnest(array[9000061, 9000062, 9000063, 9000021]) p, unnest(array[1, 23, 25, 48, 24 * 20]) h;
+insert into public.plant_energy (plant_id, bucket, period)
+  select p, b, d from unnest(array[9000061, 9000062]) p,
+    (values ('day', current_date), ('day', current_date - 1), ('day', current_date - 5), ('month', date_trunc('month', current_date)::date)) v(b, d);
+insert into public.grid_off (plant_id, started_at, ended_at, last_off_at, minutes_off) values
+  (9000061, now() - interval '3 days', now() - interval '3 days' + interval '1 hour', now() - interval '3 days', 60),
+  (9000061, now() - interval '2 hours', null, now() - interval '1 hour', 60);
+
+do $$
+declare r jsonb;
+begin
+  perform pg_temp.eq('trimmed set', (select array_agg(x order by x) from public.free_trimmed_plants() x), array[9000061::bigint]);
+  r := private.free_trim();
+  perform pg_temp.eq('trim ran on one plant', (r->>'plants')::int, 1);
+  perform pg_temp.eq('free past week keeps 24 h', (select count(*)::int from public.agg_minute where plant_id = 9000061), 2);
+  perform pg_temp.eq('free in its week keeps all', (select count(*)::int from public.agg_minute where plant_id = 9000062), 5);
+  perform pg_temp.eq('shared with a payer keeps all', (select count(*)::int from public.agg_minute where plant_id = 9000063), 5);
+  perform pg_temp.eq('family keeps all', (select count(*)::int from public.agg_minute where plant_id = 9000021 and ts > extract(epoch from now() - interval '21 days')), 5);
+  perform pg_temp.eq('day totals: today and yesterday', (select array_agg(period order by period) from public.plant_energy where plant_id = 9000061),
+                     array[current_date - 1, current_date]);
+  perform pg_temp.eq('other plant totals kept', (select count(*)::int from public.plant_energy where plant_id = 9000062), 4);
+  perform pg_temp.eq('old grid-off gone, open one kept', (select count(*)::int from public.grid_off where plant_id = 9000061 and ended_at is null), 1);
+  perform pg_temp.eq('grid-off count', (select count(*)::int from public.grid_off where plant_id = 9000061), 1);
+  perform pg_temp.eq('import bookmarks cleared', (select row(backfill_next, backfill_until, temp_next)::text from public.plant_config where plant_id = 9000061), '(,,)');
+  -- A later run deletes what has passed the cutoff since, and a row an hour behind the band is caught too
+  update private.free_trim_done set at = now() - interval '6 hours' where plant_id = 9000061;
+  insert into public.agg_minute (plant_id, ts) values (9000061, extract(epoch from now() - interval '28 hours')::bigint);
+  perform private.free_trim();
+  perform pg_temp.eq('later run trims the band', (select count(*)::int from public.agg_minute where plant_id = 9000061), 2);
+  -- Upgrading leaves the trim
+  insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
+    values ('00000000-0000-0000-0000-000000000061', 'home', 'monthly', 1, current_date + 30);
+  perform pg_temp.eq('upgrade leaves trim', (select count(*)::int from public.free_trimmed_plants()), 0);
+  perform private.free_trim();
+  perform pg_temp.eq('unmarked on leaving', (select count(*)::int from private.free_trim_done where plant_id = 9000061), 0);
+end $$;
+select pg_temp.eq('trim list is server only', has_function_privilege('authenticated', 'public.free_trimmed_plants()', 'execute'), false);
 
 -- Only service_role may call the rules
 select pg_temp.eq('authenticated cannot', has_function_privilege('authenticated', 'public.billing_amount_due(uuid)', 'execute'), false);

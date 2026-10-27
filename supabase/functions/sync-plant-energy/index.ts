@@ -10,7 +10,7 @@
 //   * monthly rows for every year with data (drives Lifetime / Monthly / Year)
 //   * daily rows for the last N months, default 6 (drives Week, Month, Daily trends
 //     and the Overview comparison arrows)
-import { db, denyUnlessServer, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
+import { db, denyUnlessServer, freeTrimmedPlants, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
 import { fetchMonthRows, fetchYearRows } from "../_shared/plantfeed.ts";
 import { reportError, serve } from "../_shared/errors.ts";
 
@@ -124,6 +124,8 @@ serve("sync-plant-energy", async (req) => {
     if (only) jobs = jobs.filter((j) => j.plantId === only);
     if (!jobs.length) return json({ ok: true, rows: 0, reason: only ? `plant ${only} is not linked` : "no linked plants" });
 
+    // A Free plant past its week keeps 24 hours (0111): its day and month totals go.
+    const trimmed = await freeTrimmedPlants();
     const plants = [];
     let rows = 0;
     // Round-robin from the plant the previous run finished on (READINESS P3).
@@ -132,6 +134,10 @@ serve("sync-plant-energy", async (req) => {
       // Always make progress on at least one plant, however small the budget.
       if (done > 0 && Date.now() - started > budgetMs) {
         plants.push({ plantId: job.plantId, rows: 0, reason: "time budget reached before this plant" });
+        continue;
+      }
+      if (trimmed.has(job.plantId)) {
+        plants.push({ plantId: job.plantId, rows: 0, reason: "Free: last 24 hours only" });
         continue;
       }
       try {

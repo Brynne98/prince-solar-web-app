@@ -594,6 +594,12 @@ export async function pollJobs(shard: number, shards: number, account?: string):
  * could starve run after run (READINESS P3). The id of the last plant a run
  * finished is kept in app_config under `key`; the next run starts after it.
  */
+/** Plants on Free past their first week (0111): they keep 24 hours, so nothing fetches older days. */
+export async function freeTrimmedPlants(): Promise<Set<number>> {
+  const ids = await rpc<number[]>("free_trimmed_plants", {});
+  return new Set((ids ?? []).map(Number));
+}
+
 export async function rotateJobs<T extends { plantId: number }>(jobs: T[], key: string): Promise<T[]> {
   if (jobs.length < 2) return jobs;
   const { data } = await db.from("app_config").select("value").eq("key", key).maybeSingle();
