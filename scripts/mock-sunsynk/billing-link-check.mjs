@@ -26,39 +26,45 @@ async function link(u, username, extra = {}) {
   return { status: r.status, body: await r.json().catch(() => null) };
 }
 const accounts = (u) => Number(sql(`select count(*) from private.sunsynk_accounts where user_id = '${u.id}'`));
-const plants = (u) => Number(sql(`select count(*) from public.plant_users where user_id = '${u.id}'`));
+const plants = (u, paused) => Number(sql(`select count(*) from public.plant_users where user_id = '${u.id}' and paused = ${paused}`));
 
 const u1 = await user("free1"), u2 = await user("free2"), u3 = await user("family");
 console.log("Free user");
-let r = await link(u1, "installer@mock");
-check(r.status === 402 && r.body?.error === "upgrade_needed", `installer login (5 plants) refused: ${r.status} ${r.body?.error}`);
-check(accounts(u1) === 0, "refused login leaves no account behind");
-r = await link(u1, "solo@mock");
-check(r.status === 200 && plants(u1) === 1, `first plant linked: ${r.status}`);
+let r = await link(u1, "solo@mock");
+check(r.status === 200 && plants(u1, false) === 1 && !r.body?.paused?.length, `first plant linked, active: ${r.status}`);
 check(sql(`select user_id from private.free_week_logins where sunsynk_username = 'solo@mock'`) === u1.id, "free week recorded for the login");
 r = await link(u1, "solo@mock");
-check(r.status === 200 && plants(u1) === 1, `same login again (relink) still allowed: ${r.status}`);
-r = await link(u1, "brynne@mock");
-check(r.status === 403 && r.body?.error === "free_week_used", `login used elsewhere refused: ${r.status} ${r.body?.error}`);
+check(r.status === 200 && plants(u1, false) === 1, `same login again (relink) still allowed: ${r.status}`);
+r = await link(u1, "installer@mock");
+check(r.status === 200 && r.body?.paused?.length === 4 && plants(u1, false) === 1 && plants(u1, true) === 4,
+  `installer login: its 4 new plants link paused: ${r.status} paused=${JSON.stringify(r.body?.paused)}`);
+check(accounts(u1) === 2, "both logins listed");
 console.log("Second free account");
 r = await link(u2, "solo@mock");
-check(r.status === 403 && r.body?.error === "free_week_used", `same login, new account refused: ${r.status} ${r.body?.error}`);
-check(accounts(u2) === 0, "nothing stored");
+check(r.status === 200 && r.body?.reason === "free_week_used" && plants(u2, true) === 1 && plants(u2, false) === 0,
+  `login that had its free week elsewhere links paused: ${r.status} ${r.body?.reason}`);
+check(sql(`select count(*) from private.free_week_logins where user_id = '${u2.id}'`) === "0", "no second free week");
 
 console.log("Family user");
 const nd = sql(`select (current_date + 15)::date`);
 sql(`insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values ('${u3.id}', 'family', 'monthly', extract(day from current_date + 15)::int, '${nd}')`);
 r = await link(u3, "export@mock");
-check(r.status === 200 && plants(u3) === 2, `2 plants: ${r.status}`);
+check(r.status === 200 && plants(u3, false) === 2, `2 plants: ${r.status}`);
 r = await link(u3, "shared@mock");
-check(r.status === 200 && plants(u3) === 3, `3rd plant covered: ${r.status}`);
+check(r.status === 200 && plants(u3, false) === 3, `3rd plant covered: ${r.status}`);
 r = await link(u3, "nobatt@mock");
 check(r.status === 402 && r.body?.error === "confirm_cost" && r.body?.extraInverters === 1 && r.body?.dueNow > 0 && r.body?.dueNow <= 49,
   `4th plant asks to confirm: ${r.status} ${JSON.stringify(r.body)}`);
-check(plants(u3) === 3, "nothing linked before confirm");
-r = await link(u3, "nobatt@mock", { confirmCost: true });
-check(r.status === 200 && plants(u3) === 4, `4th plant after confirm: ${r.status}`);
-check(Number(sql(`select public.billing_amount_due('${u3.id}')`)) === 228, "next bill R179 + R49");
+check(plants(u3, false) + plants(u3, true) === 3, "nothing linked before an answer");
+r = await link(u3, "nobatt@mock", { confirmCost: "paused" });
+check(r.status === 200 && plants(u3, true) === 1 && plants(u3, false) === 3, `4th plant added paused: ${r.status}`);
+check(Number(sql(`select public.billing_amount_due('${u3.id}')`)) === 179, "paused plant not billed: R179");
+r = await link(u3, "installer@mock");
+check(r.status === 402 && r.body?.extraInverters === 2, `next new plant asks again: ${r.status} ${JSON.stringify(r.body)}`);
+sql(`delete from private.link_attempts where user_id = '${u3.id}'`); // past the 5-an-hour link cap (0107)
+r = await link(u3, "installer@mock", { confirmCost: true });
+check(r.status === 200 && plants(u3, false) === 4, `5th plant after confirm, active: ${r.status}`);
+check(Number(sql(`select public.billing_amount_due('${u3.id}')`)) === 277, "next bill R179 + 2 x R49");
 check(sql(`select count(*) from private.free_week_logins where user_id = '${u3.id}'`) === "0", "paid links record no free week");
 
 for (const u of [u1, u2, u3]) await fetch(`${API}/auth/v1/admin/users/${u.id}`, { method: "DELETE", headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } });

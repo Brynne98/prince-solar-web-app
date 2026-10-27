@@ -15,6 +15,10 @@
 --     the new plan's plant limit: plants go first, then the plan.
 --   - Removing a plant on a paid plan is booked for the billing date too. It is
 --     billed until then, then deleted (purge_plant, run by the billing job).
+--   - A plant the plan doesn't cover still links, as paused (plant_users.paused):
+--     shown in Account, not polled, not billed, no data saved. Free and Home
+--     pause past their one plant on their own; Family plants past the 3rd are
+--     paused when the user declines the R49 cost (decided 2026-10-27).
 --   - The bill falls on the same day of the month every period. In a shorter
 --     month it falls on the last day, then goes back (31 Jan, 28 Feb, 31 Mar).
 --
@@ -56,6 +60,10 @@ create table if not exists private.billing (
 );
 revoke all on table private.billing from public, anon, authenticated;
 grant all on table private.billing to service_role;
+
+-- A plant linked past what the plan covers (see the header). Paused plants don't count
+-- towards the limit or the bill.
+alter table public.plant_users add column if not exists paused boolean not null default false;
 
 -- Guard b. A login stays here after its plant or account is removed, so removing
 -- and adding again never starts a second free week. No foreign key for that reason.
@@ -100,7 +108,7 @@ as $$
              order by pu.linked_at, pu.plant_id)
         from public.plant_users pu
         left join public.plant_config c on c.plant_id = pu.plant_id
-       where pu.user_id = auth.uid()), '[]'::jsonb))
+       where pu.user_id = auth.uid() and not pu.paused), '[]'::jsonb))
 $$;
 revoke all on function public.api_me() from public, anon;
 grant execute on function public.api_me() to authenticated, service_role;
@@ -155,7 +163,7 @@ returns int language sql stable security definer set search_path = public, priva
   select count(*)::int
     from (select plant_id, row_number() over (order by linked_at, plant_id) as n
             from public.plant_users
-           where user_id = p_user and plant_id <> all (p_skip)) p
+           where user_id = p_user and not paused and plant_id <> all (p_skip)) p
     join private.inverters i on i.plant_id = p.plant_id
    where p.n > 3
 $$;
@@ -236,7 +244,7 @@ returns jsonb language plpgsql stable security definer set search_path = public,
 declare
   v_plan text := coalesce((select b.plan from private.billing b where b.user_id = p_user), 'free');
   have int := (select count(*) from public.plant_users
-                where user_id = p_user
+                where user_id = p_user and not paused
                   and plant_id <> all (coalesce((select b.plants_to_remove from private.billing b
                                                   where b.user_id = p_user), '{}')));
   extra int;
@@ -258,25 +266,33 @@ begin
                    then (public.billing_upgrade_quote(p_user, 'family', extra))->'dueNow' else '0' end);
 end $$;
 
--- Backstop for the link check: link-sunsynk checks, then inserts in a second call,
--- so two links at once could both pass. A new plant_users row past the plan's limit
--- fails here. One user at a time, so the second insert counts the first.
+-- Free and Home: a new plant past the plan's one is linked paused. Here, not in
+-- link-sunsynk, so every path that links (link, hourly refresh) and two links at
+-- once all land the same way. One user at a time, so the second insert counts the first.
 create or replace function private.plant_users_plan_limit()
 returns trigger language plpgsql security definer set search_path = public, private, pg_temp as $$
 declare lim int := public.billing_plant_limit(
   coalesce((select plan from private.billing where user_id = new.user_id), 'free'));
 begin
-  if lim is null then return null; end if;
+  if lim is null or new.paused then return new; end if;
   perform pg_advisory_xact_lock(hashtext('plant_users_plan:' || new.user_id::text));
-  if (select count(*) from public.plant_users where user_id = new.user_id) > lim then
-    raise exception 'plan limit: % plant(s)', lim using errcode = '23514';
+  if (select count(*) from public.plant_users where user_id = new.user_id and not paused) >= lim then
+    new.paused := true;
   end if;
-  return null;
+  return new;
 end $$;
 revoke all on function private.plant_users_plan_limit() from public, anon, authenticated;
 drop trigger if exists plant_users_plan_limit on public.plant_users;
-create trigger plant_users_plan_limit after insert on public.plant_users
+create trigger plant_users_plan_limit before insert on public.plant_users
   for each row execute function private.plant_users_plan_limit();
+
+-- Pause or resume the user's plants: link-sunsynk pauses a Family plant past the 3rd
+-- whose cost was declined; an upgrade (Paystack part) resumes.
+create or replace function public.billing_set_paused(p_user uuid, p_plants bigint[], p_paused boolean)
+returns void language sql security definer set search_path = public, private, pg_temp as $$
+  update public.plant_users set paused = p_paused
+   where user_id = p_user and plant_id = any (p_plants) and paused is distinct from p_paused
+$$;
 
 -- A Free link starts the login's free week (guard b). First account wins; a
 -- paid link records nothing.
@@ -305,7 +321,7 @@ begin
     raise exception 'an upgrade starts at once, not at the billing date' using errcode = '22023';
   end if;
   keep := (select count(*) from public.plant_users
-            where user_id = p_user and plant_id <> all (b.plants_to_remove));
+            where user_id = p_user and not paused and plant_id <> all (b.plants_to_remove));
   if keep > coalesce(public.billing_plant_limit(p_plan), 2147483647) then
     raise exception 'remove plants first' using errcode = '22023';
   end if;
@@ -371,7 +387,7 @@ begin
     'billing_step(date, text, int, int)', 'billing_prorate(int, date, date, date)',
     'billing_extra_inverters(uuid, bigint[])', 'billing_amount_due(uuid)',
     'billing_upgrade_quote(uuid, text, int, text, date)', 'billing_may_link(uuid, text, int[])',
-    'billing_free_week_start(uuid, text)',
+    'billing_free_week_start(uuid, text)', 'billing_set_paused(uuid, bigint[], boolean)',
     'billing_book_change(uuid, text, text)', 'billing_book_removal(uuid, bigint)',
     'billing_renew(uuid)']
   loop

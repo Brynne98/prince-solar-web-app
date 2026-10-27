@@ -348,30 +348,39 @@ export async function getInvertersCached(acc: Account): Promise<InverterInfo[]> 
  * stores the refresh token in Vault, records the plants the account can see.
  * Returns the account id and its plants. The password is dropped on return.
  */
-export async function linkAccount(userId: string, username: string, password: string, confirmCost = false) {
+/**
+ * confirmCost: true takes a Family plant past the 3rd at R49 per inverter;
+ * "paused" links it paused instead; false asks first (PlanRefused confirm_cost).
+ * A plant the plan doesn't cover links paused (decided 2026-10-27): shown in Account,
+ * not polled. Returns the plants and which of them are paused.
+ */
+export async function linkAccount(userId: string, username: string, password: string, confirmCost: boolean | "paused" = false) {
   const t = await tokenLogin(username, password);
   const acc: Account = {
     id: "", user_id: userId, sunsynk_username: username,
     access_token: t.access_token, access_expires_at: expiresAt(t.expires_in),
   };
-  // The plan check comes before anything is stored, so a refused login leaves no
-  // account behind for the poller.
+  // The cost question comes before anything is stored, so Cancel leaves no account behind.
   const plants = await getPlants(acc);
   const invs = await getInverters(acc);
   const chk = await planCheck(acc, plants, async () => invs);
-  if (!chk.ok) throw new PlanRefused(chk.reason ?? "upgrade_needed", chk.extraInverters, chk.dueNow);
-  if (chk.extraInverters > 0 && !confirmCost) throw new PlanRefused("confirm_cost", chk.extraInverters, chk.dueNow);
+  if (chk.ok && chk.extraInverters > 0 && confirmCost === false) throw new PlanRefused("confirm_cost", chk.extraInverters, chk.dueNow);
+  // Paused from the start: every new plant of a login that had its free week on
+  // another account; on Family, the plants past the 3rd when the cost was declined.
+  // Free and Home past their one plant pause in the database (0110 trigger).
+  const pause = chk.reason === "free_week_used" ? chk.fresh
+    : chk.ok && confirmCost === "paused" ? chk.fresh.filter((_, i) => chk.active + i + 1 > 3) : [];
 
   acc.id = await rpc<string>("account_upsert", {
     p_user: userId, p_username: username, p_access: t.access_token, p_expires: acc.access_expires_at,
   });
   await rpc("account_refresh_set", { p_account: acc.id, p_refresh: t.refresh_token });
-  await syncPlants(acc, { plants, invs });
-  await rpc("billing_free_week_start", { p_user: userId, p_sunsynk_username: username });
-  return { accountId: acc.id, plants };
+  const active = new Set((await syncPlants(acc, { plants, invs, pause: pause.map((p) => p.id) })).map((p) => p.id));
+  if (chk.reason !== "free_week_used") await rpc("billing_free_week_start", { p_user: userId, p_sunsynk_username: username });
+  return { accountId: acc.id, plants, paused: plants.filter((p) => !active.has(p.id)).map((p) => p.id), reason: chk.reason ?? null };
 }
 
-/** The plan refused a link (SOLAR-208): upgrade_needed, free_week_used or confirm_cost. */
+/** The link needs the user's answer first (SOLAR-208): confirm_cost. */
 export class PlanRefused extends Error {
   constructor(public reason: string, public extraInverters: number, public dueNow: number) {
     super(`plan refused: ${reason}`);
@@ -385,17 +394,18 @@ export class PlanRefused extends Error {
  * plant_users_upsert gives them, so the extras are the same ones billing counts.
  */
 async function planCheck(acc: Account, plants: PlantInfo[], inverters: () => Promise<InverterInfo[]>) {
-  const { data, error } = await db.from("plant_users").select("plant_id").eq("user_id", acc.user_id);
+  const { data, error } = await db.from("plant_users").select("plant_id, paused").eq("user_id", acc.user_id);
   if (error) throw new Error(`plant_users: ${error.message}`);
   const have = new Set((data ?? []).map((r: any) => Number(r.plant_id)));
+  const active = (data ?? []).filter((r: any) => !r.paused).length;
   const fresh = plants.filter((p) => !have.has(p.id)).sort((a, b) => a.id - b.id);
-  if (!fresh.length) return { ok: true, fresh, extraInverters: 0, dueNow: 0 } as const;
+  if (!fresh.length) return { ok: true, fresh, active, extraInverters: 0, dueNow: 0 } as const;
   const invs = await inverters();
   const r = await rpc<{ ok: boolean; reason?: string; extraInverters?: number; dueNow?: number }>("billing_may_link", {
     p_user: acc.user_id, p_sunsynk_username: acc.sunsynk_username,
     p_plant_inverters: fresh.map((p) => invs.filter((i) => Number(i.plantId) === p.id).length),
   });
-  return { ok: r.ok, reason: r.reason, fresh, extraInverters: r.extraInverters ?? 0, dueNow: Number(r.dueNow ?? 0) };
+  return { ok: r.ok, reason: r.reason, fresh, active, extraInverters: r.extraInverters ?? 0, dueNow: Number(r.dueNow ?? 0) };
 }
 
 /**
@@ -413,24 +423,31 @@ async function planCheck(acc: Account, plants: PlantInfo[], inverters: () => Pro
  * for a plant already seeded).
  */
 const MAX_BOOTSTRAP_KICKS = 5;
-export async function syncPlants(acc: Account, linked?: { plants: PlantInfo[]; invs: InverterInfo[] }): Promise<PlantInfo[]> {
-  let plants = linked?.plants ?? await getPlants(acc);
+export async function syncPlants(acc: Account, linked?: { plants: PlantInfo[]; invs: InverterInfo[]; pause: number[] }): Promise<PlantInfo[]> {
+  const all = linked?.plants ?? await getPlants(acc);
   let invs = linked?.invs;
-  // The hourly refresh adds a plant SunSynk shows later only when the plan takes it
-  // at no extra cost; otherwise the user adds it through the app. linkAccount has
-  // already checked its plants.
+  let pause = linked?.pause ?? [];
+  // The hourly refresh links a plant SunSynk shows later paused, unless the plan
+  // takes it at no extra cost; the user sees it in Account and can upgrade.
+  // linkAccount has already checked its plants.
   if (!linked) {
-    const chk = await planCheck(acc, plants, async () => (invs = await getInverters(acc)));
+    const chk = await planCheck(acc, all, async () => (invs = await getInverters(acc)));
     if (!chk.ok || chk.extraInverters > 0) {
-      const skip = new Set(chk.fresh.map((p) => p.id));
-      console.log(`account ${acc.id}: ${skip.size} new plant(s) left out by the plan (${chk.reason ?? "extra cost"})`);
-      plants = plants.filter((p) => !skip.has(p.id));
+      pause = chk.fresh.map((p) => p.id);
+      console.log(`account ${acc.id}: ${pause.length} new plant(s) linked paused (${chk.reason ?? "extra cost"})`);
     }
   }
   await rpc("plant_users_upsert", {
     p_user: acc.user_id, p_account: acc.id,
-    p_rows: plants.map((p) => ({ plant_id: p.id, plant_name: p.name })),
+    p_rows: all.map((p) => ({ plant_id: p.id, plant_name: p.name })),
   });
+  if (pause.length) await rpc("billing_set_paused", { p_user: acc.user_id, p_plants: pause, p_paused: true });
+  // Only plants this user has active go on: a paused plant is not seeded, imported or polled.
+  const { data: pausedRows, error: pausedErr } = await db.from("plant_users").select("plant_id")
+    .eq("user_id", acc.user_id).eq("paused", true).in("plant_id", all.map((p) => p.id));
+  if (pausedErr) throw new Error(`plant_users: ${pausedErr.message}`);
+  const paused = new Set((pausedRows ?? []).map((r: any) => Number(r.plant_id)));
+  const plants = all.filter((p) => !paused.has(p.id));
   const { data: seeded, error } = await db.from("plant_config").select("plant_id")
     .in("plant_id", plants.map((p) => p.id));
   if (error) throw new Error(`plant_config: ${error.message}`);
@@ -523,11 +540,12 @@ export async function plantsToPoll(): Promise<PlantJob[]> {
   const byId = new Map(accounts.map((a) => [a.id, a]));
   const { data, error } = await db
     .from("plant_users").select("plant_id, plant_name, account_id")
-    .in("account_id", [...byId.keys()]);
+    .in("account_id", [...byId.keys()]).eq("paused", false);
   if (error) throw new Error(`plant_users: ${error.message}`);
   const { data: cfgRows } = await db.from("plant_config").select("plant_id, timezone, batt_positive_means, backfill_next, backfill_until, backfill_tries, has_grid, temp_next, temp_tries");
   const cfg = new Map((cfgRows ?? []).map((c: any) => [Number(c.plant_id), c]));
-  // One job per plant even if several users share it. The plant is read through
+  // One job per plant even if several users share it. A plant paused for every user
+  // (0110) has no row here, so it is not polled and no data is saved for it. The plant is read through
   // the EARLIEST-linked active account, and that choice is stable from minute to
   // minute — the inverter cache (freshness gate, carry run) is keyed by account,
   // so a flip would throw it away every time. If that account dies (needs_relink)

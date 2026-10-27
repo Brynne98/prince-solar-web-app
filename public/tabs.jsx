@@ -1870,7 +1870,10 @@ function SunSynkConnectionSection({ onChanged, links }) {
     const readError = await refresh();
     setMode(null); onChanged && onChanged(linked);
     if (readError) { fail('Connected. Reload the page to see it here.'); return; }
-    window.toast(adding ? 'Login added.' + plantsLine(linked?.plants, 'now in your plant list') : 'Login reconnected.');
+    const paused = new Set((linked?.paused || []).map(Number));
+    const on = (linked?.plants || []).filter(p => !paused.has(Number(p.id)));
+    const off = (linked?.plants || []).filter(p => paused.has(Number(p.id)));
+    window.toast(adding ? 'Login added.' + plantsLine(on, 'now in your plant list') + plantsLine(off, 'paused, not on your plan') : 'Login reconnected.');
   };
   // " Plant 495944 is now in your plant list." for one plant, "… and … are …" for more
   const plantsLine = (plants, what) => {
@@ -1920,6 +1923,12 @@ function SunSynkConnectionSection({ onChanged, links }) {
         const stale = ok && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
         const word = !ok ? 'Sign-in expired' : stale ? 'Not updating' : 'Connected';
         const plants = acc.plants || [];
+        // Each plant's state (SOLAR-208): collecting, paused (not on the plan), or booked
+        // for deletion. Paused ones are listed so the owner sees everything on the login.
+        const on = plants.filter(p => !p.paused && !p.remove_on);
+        const off = plants.filter(p => p.paused);
+        const going = plants.filter(p => p.remove_on && !p.paused);
+        const name = p => p.plant_name || 'Plant ' + p.plant_id;
         return (
           <div key={acc.account_id} className={'conn-row' + (leaving === acc.account_id ? ' leaving' : '')}>
             <div className="conn-text">
@@ -1927,21 +1936,27 @@ function SunSynkConnectionSection({ onChanged, links }) {
                   when it was added. */}
               <div className="conn-user">
                 <span className="mono">{acc.sunsynk_username}</span>
-                {plants.length > 0 && <span className="conn-plants"> · {plants.map(p => p.plant_name || 'Plant ' + p.plant_id).join(', ')}</span>}
+                {on.length > 0 && <span className="conn-plants"> · {on.map(name).join(', ')}</span>}
               </div>
               <div className="conn-meta">
                 <span className={'conn-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
                 {acc.last_ok_at ? ' · last reading ' + ago(acc.last_ok_at) : ''}
               </div>
               {!plants.length && <div className="conn-meta">No plant shared with this login.</div>}
+              {off.length > 0 && <div className="conn-meta"><span className="conn-status warn">Paused, not on your plan</span> · {off.map(name).join(', ')}</div>}
+              {going.map(p => <div key={p.plant_id} className="conn-meta"><span className="conn-status warn">Deleted on {new Date(p.remove_on + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span> · {name(p)}</div>)}
             </div>
             <div className="conn-actions">
               {!ok && mode !== acc.account_id && <button type="button" className="save-btn" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
+              {ok && off.length > 0 && mode !== 'upgrade:' + acc.account_id && <button type="button" className="save-btn" onClick={() => setMode('upgrade:' + acc.account_id)}>Upgrade</button>}
               <button type="button" className="ghost-btn" onClick={() => setConfirming(confirming === acc.account_id ? null : acc.account_id)} disabled={busy === acc.account_id}>
                 {busy === acc.account_id ? 'Removing…' : 'Remove'}
               </button>
             </div>
             {/* the reconnect form and the remove card sit under the whole row, full width */}
+            {mode === 'upgrade:' + acc.account_id && (
+              <div className="conn-form"><window.Paywall reason="paused" paused={off.map(name)} added={0} onCancel={() => setMode(null)} /></div>
+            )}
             {mode === acc.account_id && (
               <window.LinkForm compact relink initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
             )}

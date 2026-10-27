@@ -59,13 +59,14 @@ serve("link-sunsynk", async (req) => {
 
   let username = "";
   let password = "";
-  let confirmCost = false;
+  let confirmCost: boolean | "paused" = false;
   try {
     const body = await req.json();
     username = String(body?.username ?? "").trim();
     password = String(body?.password ?? "");
-    // The user saw the R49-per-inverter cost for plants past the 3rd and agreed.
-    confirmCost = body?.confirmCost === true;
+    // The user saw the R49-per-inverter cost for plants past the 3rd: true takes it,
+    // "paused" links those plants paused.
+    confirmCost = body?.confirmCost === true ? true : body?.confirmCost === "paused" ? "paused" : false;
   } catch {
     return json({ error: "body must be JSON" }, 400, cors);
   }
@@ -81,21 +82,21 @@ serve("link-sunsynk", async (req) => {
   if (!allowed) return json({ error: "too many attempts" }, 429, { ...cors, "Retry-After": "3600" });
 
   try {
-    const { accountId, plants } = await linkAccount(userId, username, password, confirmCost);
+    const { accountId, plants, paused, reason } = await linkAccount(userId, username, password, confirmCost);
     password = ""; // done with it
     if (!plants.length) {
       // Linked, but SunSynk returned no plants: the login works but sees nothing —
       // typical when the installer owns the plant and hasn't shared it yet.
-      return json({ ok: true, accountId, plants, warning: "no plants visible on this SunSynk account" }, 200, cors);
+      return json({ ok: true, accountId, plants, paused, warning: "no plants visible on this SunSynk account" }, 200, cors);
     }
-    return json({ ok: true, accountId, plants }, 200, cors);
+    // paused: plants linked but not on the plan; reason says why (upgrade_needed, free_week_used).
+    return json({ ok: true, accountId, plants, paused, reason }, 200, cors);
   } catch (e) {
     password = "";
-    // The plan refused (SOLAR-208). The app opens the paywall, or shows the extra
-    // cost and sends again with confirmCost.
+    // A Family plant past the 3rd (SOLAR-208): the app shows the cost and sends
+    // again with confirmCost true or "paused".
     if (e instanceof PlanRefused) {
-      return json({ error: e.reason, extraInverters: e.extraInverters, dueNow: e.dueNow },
-        e.reason === "free_week_used" ? 403 : 402, cors);
+      return json({ error: e.reason, extraInverters: e.extraInverters, dueNow: e.dueNow }, 402, cors);
     }
     const msg = e instanceof Error ? e.message : String(e);
     // "login rejected: ..." comes from tokenLogin and contains only SunSynk's msg.

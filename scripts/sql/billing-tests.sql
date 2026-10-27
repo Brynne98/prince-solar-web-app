@@ -12,6 +12,7 @@ begin;
 \ir ../../supabase/migrations/0109_waitlist_cap.sql
 \ir ../../supabase/migrations/0110_billing.sql
 \ir ../../supabase/migrations/0111_free_trim.sql
+\ir ../../supabase/migrations/0112_paused_plants.sql
 
 create function pg_temp.eq(label text, got anyelement, want anyelement) returns void language plpgsql as $$
 begin
@@ -143,8 +144,11 @@ begin
   perform pg_temp.eq('3rd covered, 4th extra', (q->>'extraInverters')::int, 3);
 
   -- Guard a: every plant a login brings counts
-  perform pg_temp.raises('insert past the limit fails',
-    format('insert into public.plant_users (plant_id, user_id) values (9000099, %L)', ua), 'plan limit');
+  -- Past the plan's one plant, a new plant links paused (0110 trigger)
+  insert into public.plant_users (plant_id, user_id) values (9000099, ua);
+  perform pg_temp.eq('home 2nd plant links paused', (select paused from public.plant_users where plant_id = 9000099 and user_id = ua), true);
+  perform pg_temp.eq('paused plant not counted', (public.billing_may_link(ua, 'a@login.test', array[1])->>'reason'), 'upgrade_needed');
+  delete from public.plant_users where plant_id = 9000099;
   perform pg_temp.eq('free 2nd plant',    public.billing_may_link(ur, 'r@login.test', array[1])->>'reason', 'upgrade_needed');
   perform pg_temp.eq('home 2nd plant',    public.billing_may_link(ua, 'a@login.test', array[1])->>'reason', 'upgrade_needed');
   q := public.billing_may_link(ua, 'i@login.test', array[1, 1, 2]);
@@ -215,6 +219,24 @@ begin
   perform public.billing_renew(uh);
   perform pg_temp.eq('switch m date', (select period || ' ' || next_billing_date from private.billing where user_id = uh),
                      'monthly 2027-12-01');
+
+  -- Paused plants (0110, 0112): Family declining the cost, not billed, not read
+  insert into public.plant_users (plant_id, user_id, linked_at) values (9000025, uy, '2026-01-05');
+  insert into private.inverters (sn, plant_id) values ('T-25a', 9000025), ('T-25b', 9000025);
+  perform pg_temp.eq('family 5th plant active', (select paused from public.plant_users where plant_id = 9000025), false);
+  perform public.billing_set_paused(uy, array[9000025::bigint], true);
+  perform pg_temp.eq('paused plant not billed', public.billing_extra_inverters(uy), 1);
+  perform set_config('request.jwt.claims', json_build_object('sub', uy, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('readers skip paused', (select count(*)::int from public.my_plant_ids() x where x = 9000025), 0);
+  perform pg_temp.raises('my_plant refuses paused', 'select public.my_plant(9000025)', 'not linked');
+  perform pg_temp.eq('switcher skips paused', (select count(*)::int from jsonb_array_elements(public.api_me()->'plants') p where (p->>'id')::bigint = 9000025), 0);
+  perform set_config('request.jwt.claims', '', true);
+  insert into public.email_queue (user_id, plant_id, kind, key) values (uy, 9000025, 'report_week', 'test:paused'), (uy, 9000021, 'report_week', 'test:active');
+  perform pg_temp.eq('no mail for a paused plant', (select count(*)::int from public.email_queue where key = 'test:paused'), 0);
+  perform pg_temp.eq('mail for an active plant', (select count(*)::int from public.email_queue where key = 'test:active'), 1);
+  perform public.billing_set_paused(uy, array[9000025::bigint], false);
+  perform pg_temp.eq('resumed plant billed', public.billing_extra_inverters(uy), 3);
+  perform public.billing_set_paused(uy, array[9000025::bigint], true);
 
   -- The paywall's reader answers for the signed-in user only
   perform set_config('request.jwt.claims', json_build_object('sub', ur, 'role', 'authenticated')::text, true);
@@ -292,6 +314,16 @@ begin
   perform pg_temp.eq('unmarked on leaving', (select count(*)::int from private.free_trim_done where plant_id = 9000061), 0);
 end $$;
 select pg_temp.eq('trim list is server only', has_function_privilege('authenticated', 'public.free_trimmed_plants()', 'execute'), false);
+
+-- Account lists every plant with its state
+insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values ('00000000-0000-0000-0000-0000000000f7', '00000000-0000-0000-0000-0000000000a1', 'y@login.test');
+update public.plant_users set account_id = '00000000-0000-0000-0000-0000000000f7' where user_id = '00000000-0000-0000-0000-0000000000a1';
+select set_config('request.jwt.claims', json_build_object('sub', '00000000-0000-0000-0000-0000000000a1', 'role', 'authenticated')::text, true);
+select pg_temp.eq('status lists paused plant',
+  (select (p->>'paused')::boolean from public.api_link_status() s, jsonb_array_elements(s.plants) p where (p->>'plant_id')::bigint = 9000025), true);
+select pg_temp.eq('status gives removal date',
+  (select (p->>'remove_on') is not null from public.api_link_status() s, jsonb_array_elements(s.plants) p where (p->>'plant_id')::bigint = 9000024), true);
+select set_config('request.jwt.claims', '', true);
 
 -- Only service_role may call the rules
 select pg_temp.eq('authenticated cannot', has_function_privilege('authenticated', 'public.billing_amount_due(uuid)', 'execute'), false);

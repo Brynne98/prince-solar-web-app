@@ -59,7 +59,7 @@ window.useLinkStatus = function useLinkStatus() {
   return { ...state, refresh };
 };
 
-// The plan refused the link (SOLAR-208): the form opens the paywall or the cost card.
+// A Family plant past the 3rd (SOLAR-208): the form shows the cost card first.
 class PlanError extends Error {
   constructor(body) { super(body.error); this.code = body.error; this.extraInverters = body.extraInverters || 0; this.dueNow = body.dueNow || 0; }
 }
@@ -77,7 +77,7 @@ window.linkSunsynk = async function linkSunsynk(username, password, confirmCost 
     body: JSON.stringify({ username, password, confirmCost }),
   });
   const body = await res.json().catch(() => ({}));
-  if (['upgrade_needed', 'free_week_used', 'confirm_cost'].includes(body.error)) throw new PlanError(body);
+  if (body.error === 'confirm_cost') throw new PlanError(body);
   if (!res.ok) throw new Error(LINK_ERRORS[body.error] || 'Couldn’t connect to SunSynk. Check the login and try again.');
   window.track('plant_linked');
   return body;
@@ -111,14 +111,14 @@ window.startUpgrade = async function startUpgrade(plan, period) {
 };
 
 /**
- * Shown in place of the login form when the plan can't take another plant.
- *   reason 'add'        Free or Home with a plant, adding another
- *          'many'       the login brings more plants than Free covers
- *          'free_week'  the login had its free week on another account: Home fits too
+ * Shown when the plan doesn't cover a plant.
+ *   reason 'add'        Free or Home with a plant, before the form (onAddPaused: go on, paused)
+ *          'free_week'  linked, but the login had its free week on another account: Home fits too
+ *          'paused'     Upgrade on a login row with paused plants (`paused`: their names)
  * `added` = inverters the login brings past the 3rd plant, priced into Family.
  * A paid user's period changes at renewal, so only Free gets the switch.
  */
-function Paywall({ reason, added = 0, onCancel }) {
+function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
   const { useState, useEffect } = React;
   const offers = reason === 'free_week' ? ['home', 'family'] : ['family'];
   const [period, setPeriod] = useState('monthly');
@@ -136,8 +136,12 @@ function Paywall({ reason, added = 0, onCancel }) {
   const per = paid ? first.period : period;
   return (
     <div className="paywall" role="dialog" aria-labelledby="pw-title">
-      <h2 id="pw-title" className="sset-title">{reason === 'free_week' ? 'Choose a plan' : reason === 'many' ? 'This login has more than one plant' : 'Add another plant'}</h2>
-      <p className="sset-note">{reason === 'free_week' ? 'This SunSynk login already had its free week on another account.' : (paid ? 'Home' : 'Free') + ' covers one plant.'}</p>
+      <h2 id="pw-title" className="sset-title">{reason === 'free_week' ? 'Choose a plan'
+        : reason === 'paused' ? `Collect data for ${paused.length === 1 ? paused[0] : paused.length + ' paused plants'}`
+        : 'Add another plant'}</h2>
+      <p className="sset-note">{reason === 'free_week' ? 'This SunSynk login had its free week on another account, so its plant is paused.'
+        : first?.plan === 'family' ? 'Plants after your 3rd are paused until you add them to your plan.'
+        : (paid ? 'Home' : 'Free') + ' covers one plant.'}</p>
       {!paid && (
         <div className="segmented seg-sm pw-period" role="group" aria-label="Billing">
           {['monthly', 'yearly'].map(p => (
@@ -160,7 +164,7 @@ function Paywall({ reason, added = 0, onCancel }) {
                 </ul>
                 {paid && q && q.dueNow !== q.nextCharge && <div className="pw-due">{rand(q.dueNow)} today, then {rand(q.nextCharge)} {perUnit(per)} from {billDay(q.nextDate)}</div>}
                 <button type="button" className={p === 'family' ? 'save-btn' : 'ghost-btn'} disabled={!q}
-                        onClick={() => window.startUpgrade(p, per)}>{p === 'family' ? 'Upgrade to Family' : 'Choose Home'}</button>
+                        onClick={() => window.startUpgrade(p, per)}>{p === 'home' ? 'Choose Home' : q?.plan === 'family' ? 'Add to my plan' : 'Upgrade to Family'}</button>
               </div>
             );
           })}
@@ -169,6 +173,7 @@ function Paywall({ reason, added = 0, onCancel }) {
       {first && <p className="field-note">Plants after the 3rd: {rand(first.extraPrice)} {perUnit(per)} for each inverter.</p>}
       <div className="conn-form-actions pw-foot">
         <span className="field-note">Cancel any time.</span>
+        {onAddPaused && <button type="button" className="ghost-btn" onClick={onAddPaused}>Add it paused</button>}
         <button type="button" className="ghost-btn" onClick={onCancel}>Not now</button>
       </div>
     </div>
@@ -259,16 +264,23 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
         setNoPlants(true);
         return;
       }
+      // Linked, but nothing to show: every plant is paused (a login that had its free
+      // week elsewhere). The paywall says why, in place of the form.
+      const pausedAll = (r.paused || []).length > 0 && (r.paused || []).length === (r.plants || []).length && !hasPlant;
+      if (pausedAll) {
+        setPassword(''); setCost(null);
+        setPaywall({ reason: r.reason === 'free_week_used' ? 'free_week' : 'paused', paused: r.plants.map(p => p.name || 'Plant ' + p.id) });
+        await onLinked(r);
+        return;
+      }
       // Busy until the caller has the new login list, or the screen sits idle before it changes.
       await onLinked(r);
       setPassword(''); setNoPlants(false); setCost(null);
     } catch (ex) {
       if (ex instanceof PlanError) {
-        if (ex.code === 'confirm_cost') {
-          const q = await quote('family', 'monthly', ex.extraInverters).catch(() => null);
-          setCost(q ? { n: ex.extraInverters, ...q } : null);
-          if (!q) fail('Couldn’t load prices. Try again.');
-        } else setPaywall({ reason: ex.code === 'free_week_used' ? 'free_week' : hasPlant ? 'add' : 'many', added: ex.extraInverters });
+        const q = await quote('family', 'monthly', ex.extraInverters).catch(() => null);
+        setCost(q ? { n: ex.extraInverters, ...q } : null);
+        if (!q) fail('Couldn’t load prices. Try again.');
         return;
       }
       fail(ex instanceof TypeError ? 'Can’t reach Prince Solar Hub. Check your connection and try again.' : ex.message);
@@ -288,7 +300,9 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
 
   if (paywall) {
     const close = () => { setPaywall(null); setPassword(''); onCancel && onCancel(); };
-    return <div className={compact ? 'conn-form' : 'link-card'}><Paywall reason={paywall.reason} added={paywall.added} onCancel={close} /></div>;
+    // Before the form, a plant past the plan can still be added, paused.
+    const addPaused = paywall.reason === 'add' ? () => setPaywall(null) : undefined;
+    return <div className={compact ? 'conn-form' : 'link-card'}><Paywall reason={paywall.reason} added={paywall.added} paused={paywall.paused} onCancel={close} onAddPaused={addPaused} /></div>;
   }
 
   if (cost) {
@@ -299,6 +313,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
         <div className="confirm-text">Plants after your 3rd cost {rand(cost.extraPrice)} {unit} for each inverter. {rand(cost.dueNow)} today, then {rand(cost.nextCharge)} {unit} from {billDay(cost.nextDate)}.</div>
         <div className="conn-form-actions">
           <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setCost(null); setPassword(''); onCancel && onCancel(); }}>Cancel</button>
+          <button type="button" className="ghost-btn" disabled={busy} onClick={() => submit(null, 'paused')}>Add it paused</button>
           <button type="button" className="save-btn" disabled={busy} aria-busy={busy} onClick={() => submit(null, true)}>{busy ? 'Adding…' : 'Add plant'}</button>
         </div>
       </div>
@@ -351,6 +366,10 @@ window.LinkPassword = LinkPassword;
  * still worth seeing, and the app shell shows a banner leading to Settings, where
  * each login reconnects on its own.
  */
+// A plant to show: on some login, and not paused (SOLAR-208). Paused plants are listed
+// in Account only, so an account with nothing else stays on the Connect screen.
+window.hasActivePlant = (accounts) => accounts.some(a => (a.plants || []).some(p => !p.paused));
+
 window.LinkGate = function LinkGate({ children, fallback = null }) {
   const [checking, setChecking] = React.useState(false);
   const { loading, accounts, error, refresh } = window.useLinkStatus();
@@ -358,7 +377,7 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
   // the page now and then; a reload inside a drop fails both tries and used to sit on
   // "Couldn't check" until someone tapped it (SOLAR-21). Keep checking while stuck there:
   // every 15 s, and the moment the tablet is back online or on screen.
-  const stuck = !loading && !!error && !accounts.some(a => (a.plants || []).length);
+  const stuck = !loading && !!error && !window.hasActivePlant(accounts);
   React.useEffect(() => {
     if (!stuck) return;
     // One read at a time: a read inside a drop can take its full 20 s.
@@ -378,7 +397,7 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
   // A read that failed says nothing about the logins, so it must not ask for one: a
   // household with plants would land on Connect, and a login that just connected would
   // be asked for again.
-  if (!accounts.some(a => (a.plants || []).length)) {
+  if (!window.hasActivePlant(accounts)) {
     if (error) {
       const retry = async (e) => { e.preventDefault(); setChecking(true); await refresh(); setChecking(false); };
       return (
