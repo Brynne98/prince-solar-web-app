@@ -207,6 +207,23 @@ begin
     'nextDate', b.next_billing_date);
 end $$;
 
+-- The paywall's figures for the signed-in user: their plan and period, and what
+-- p_plan costs now and from the billing date. p_period is read on Free only.
+create or replace function public.api_billing_quote(p_plan text, p_period text default 'monthly', p_added int default 0)
+returns jsonb language plpgsql stable security definer set search_path = public, private, pg_temp as $$
+declare b private.billing;
+begin
+  if auth.uid() is null then raise exception 'sign in first' using errcode = '42501'; end if;
+  select * into b from private.billing where user_id = auth.uid();
+  return jsonb_build_object('plan', coalesce(b.plan, 'free'), 'period', b.period,
+           'extraPrice', public.billing_amount('family', coalesce(b.period, p_period), 1)
+                         - public.billing_amount('family', coalesce(b.period, p_period), 0))
+      || public.billing_upgrade_quote(auth.uid(), p_plan, greatest(p_added, 0),
+           case when coalesce(b.plan, 'free') = 'free' then p_period end);
+end $$;
+revoke all on function public.api_billing_quote(text, text, int) from public, anon;
+grant execute on function public.api_billing_quote(text, text, int) to authenticated, service_role;
+
 -- May this user link the plants one SunSynk login brings? p_plant_inverters holds
 -- the inverter count of each new plant, in link order.
 --   {ok: false, reason: 'free_week_used'}  guard b

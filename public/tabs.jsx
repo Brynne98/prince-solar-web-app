@@ -1957,7 +1957,7 @@ function SunSynkConnectionSection({ onChanged, links }) {
       {!unread && (mode === 'add'
         ? <div className="conn-row conn-add-row"><div className="conn-text">
             {/* Cancel re-reads too: a login with no plant yet is saved but not listed. */}
-            <window.LinkForm compact onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
+            <window.LinkForm compact hasPlant={live.some(a => (a.plants || []).length > 0)} onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
           </div></div>
         : <div className="conn-add">
             <button type="button" className="save-btn" onClick={() => setMode('add')}>

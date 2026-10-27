@@ -59,7 +59,12 @@ window.useLinkStatus = function useLinkStatus() {
   return { ...state, refresh };
 };
 
-window.linkSunsynk = async function linkSunsynk(username, password) {
+// The plan refused the link (SOLAR-208): the form opens the paywall or the cost card.
+class PlanError extends Error {
+  constructor(body) { super(body.error); this.code = body.error; this.extraInverters = body.extraInverters || 0; this.dueNow = body.dueNow || 0; }
+}
+
+window.linkSunsynk = async function linkSunsynk(username, password, confirmCost = false) {
   const { data: { session } } = await window.sb.auth.getSession();
   if (!session) throw new Error(LINK_ERRORS['sign in first']);
   const res = await fetch(`${window.SUNSYNK_CONFIG.url}/functions/v1/link-sunsynk`, {
@@ -69,9 +74,10 @@ window.linkSunsynk = async function linkSunsynk(username, password) {
       Authorization: `Bearer ${session.access_token}`,
       apikey: window.SUNSYNK_CONFIG.key,
     },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, confirmCost }),
   });
   const body = await res.json().catch(() => ({}));
+  if (['upgrade_needed', 'free_week_used', 'confirm_cost'].includes(body.error)) throw new PlanError(body);
   if (!res.ok) throw new Error(LINK_ERRORS[body.error] || 'Couldn’t connect to SunSynk. Check the login and try again.');
   window.track('plant_linked');
   return body;
@@ -91,6 +97,84 @@ window.disconnectSunsynk = async function disconnectSunsynk(accountId) {
   if (error) throw new Error(error.message);
   window.track('login_remove_done');
 };
+
+// ---- Paywall (SOLAR-208) ------------------------------------------------------
+const rand = (n) => 'R' + Number(n).toLocaleString('en-US');
+const billDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+const perUnit = (period) => (period === 'yearly' ? 'a year' : 'a month');
+const quote = (plan, period, added = 0) => window.sb.rpc('api_billing_quote', { p_plan: plan, p_period: period, p_added: added })
+  .then(({ data, error }) => { if (error) throw error; return data; });
+
+// Paystack (a later part of SOLAR-208) takes over from here.
+window.startUpgrade = async function startUpgrade(plan, period) {
+  window.toast('Payments open soon.');
+};
+
+/**
+ * Shown in place of the login form when the plan can't take another plant.
+ *   reason 'add'        Free or Home with a plant, adding another
+ *          'many'       the login brings more plants than Free covers
+ *          'free_week'  the login had its free week on another account: Home fits too
+ * `added` = inverters the login brings past the 3rd plant, priced into Family.
+ * A paid user's period changes at renewal, so only Free gets the switch.
+ */
+function Paywall({ reason, added = 0, onCancel }) {
+  const { useState, useEffect } = React;
+  const offers = reason === 'free_week' ? ['home', 'family'] : ['family'];
+  const [period, setPeriod] = useState('monthly');
+  const [quotes, setQuotes] = useState(null);
+  useEffect(() => { window.track('paywall_shown', { reason }); }, []);
+  useEffect(() => {
+    let alive = true;
+    Promise.all(offers.map(p => quote(p, period, p === 'family' ? added : 0)))
+      .then(qs => alive && setQuotes(Object.fromEntries(qs.map((q, i) => [offers[i], q]))))
+      .catch(() => alive && setQuotes({ error: true }));
+    return () => { alive = false; };
+  }, [period]);
+  const first = quotes && !quotes.error ? quotes[offers[0]] : null;
+  const paid = first && first.plan !== 'free';
+  const per = paid ? first.period : period;
+  return (
+    <div className="paywall" role="dialog" aria-labelledby="pw-title">
+      <h2 id="pw-title" className="sset-title">{reason === 'free_week' ? 'Choose a plan' : reason === 'many' ? 'Add these plants' : 'Add another plant'}</h2>
+      <p className="sset-note">{reason === 'free_week' ? 'This login already had its free week.' : (paid ? 'Home' : 'Free') + ' covers one plant.'}</p>
+      {!paid && (
+        <div className="segmented seg-sm pw-period" role="group" aria-label="Billing">
+          {['monthly', 'yearly'].map(p => (
+            <button type="button" key={p} className={'seg-btn' + (period === p ? ' active' : '')} aria-pressed={period === p}
+                    onClick={() => setPeriod(p)}>{p === 'monthly' ? 'Monthly' : 'Yearly'}</button>
+          ))}
+        </div>
+      )}
+      {quotes?.error ? <p className="sset-note pw-error">Couldn’t load prices. Try again.</p> : (
+        <div className="pw-plans">
+          {offers.map(p => {
+            const q = quotes?.[p];
+            return (
+              <div key={p} className={'pw-plan' + (p === 'family' ? ' pw-main' : '')}>
+                <div className="pw-name">{p === 'family' ? 'Family' : 'Home'}</div>
+                <div className="pw-price"><b>{q ? rand(q.nextCharge) : '…'}</b> {perUnit(per)}</div>
+                <ul className="pw-gives">
+                  <li>{p === 'family' ? 'Up to 3 plants' : '1 plant'}</li>
+                  <li>All history kept</li>
+                </ul>
+                {paid && q && q.dueNow !== q.nextCharge && <div className="pw-due">{rand(q.dueNow)} now, then {rand(q.nextCharge)} from {billDay(q.nextDate)}</div>}
+                <button type="button" className={p === 'family' ? 'save-btn' : 'ghost-btn'} disabled={!q}
+                        onClick={() => window.startUpgrade(p, per)}>{p === 'family' ? 'Upgrade to Family' : 'Choose Home'}</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {first && <p className="field-note">More than 3 plants: {rand(first.extraPrice)} {perUnit(per)} per extra inverter.</p>}
+      <div className="conn-form-actions pw-foot">
+        <span className="field-note">Cancel any time.</span>
+        <button type="button" className="ghost-btn" onClick={onCancel}>Not now</button>
+      </div>
+    </div>
+  );
+}
+window.Paywall = Paywall;
 
 // The same moment on the Connect screen and inside Settings; one wording for both.
 const NO_PLANT_TEXT = 'signed in, but no plant is shared with it yet. Your login is saved. Retry any time.';
@@ -116,8 +200,18 @@ function LinkPassword({ id = 'ss-pass', autoComplete = 'off', value, onChange, i
 // Connect card that opens in place on a page with no inverter yet (Setup), with its title.
 // Either way: one line on which login, the two fields, a note, then Cancel and the green
 // button at the right.
-function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
+function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPlant }) {
   const { useState, useEffect, useRef } = React;
+  // The plan's answer: a paywall reason, or the cost of plants past the 3rd.
+  const [paywall, setPaywall] = useState(null);
+  const [cost, setCost] = useState(null);
+  // Free and Home cover one plant: with one already, the paywall comes before the form.
+  useEffect(() => {
+    if (!hasPlant || relink) return;
+    let alive = true;
+    quote('family', 'monthly').then(q => alive && q.plan !== 'family' && setPaywall({ reason: 'add' })).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const [username, setUsername] = useState(initialUsername || '');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -144,8 +238,8 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
   const [bad, setBad] = useState({});
   const edited = (id) => setBad(b => (b[id] ? { ...b, [id]: undefined } : b));
 
-  const submit = async (e) => {
-    e.preventDefault();
+  const submit = async (e, confirmCost = false) => {
+    e?.preventDefault();
     const problems = {};
     if (!username.trim()) problems['ss-user'] = 'Enter your email';
     if (!password) problems['ss-pass'] = 'Enter your password';
@@ -157,7 +251,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
     setBusy(true); setBad({});
     findTimer.current = setTimeout(() => setFinding(true), 2500);
     try {
-      const r = await window.linkSunsynk(username.trim(), password);
+      const r = await window.linkSunsynk(username.trim(), password, confirmCost);
       // No plant yet. Nothing on the server looks at this login again, so Retry has to
       // ask SunSynk afresh: the password stays in memory while the form is up, no longer.
       if (r.warning) {
@@ -167,8 +261,16 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
       }
       // Busy until the caller has the new login list, or the screen sits idle before it changes.
       await onLinked(r);
-      setPassword(''); setNoPlants(false);
+      setPassword(''); setNoPlants(false); setCost(null);
     } catch (ex) {
+      if (ex instanceof PlanError) {
+        if (ex.code === 'confirm_cost') {
+          const q = await quote('family', 'monthly', ex.extraInverters).catch(() => null);
+          setCost(q ? { n: ex.extraInverters, ...q } : null);
+          if (!q) fail('Couldn’t load prices. Try again.');
+        } else setPaywall({ reason: ex.code === 'free_week_used' ? 'free_week' : hasPlant ? 'add' : 'many', added: ex.extraInverters });
+        return;
+      }
       fail(ex instanceof TypeError ? 'Can’t reach Prince Solar Hub. Check your connection and try again.' : ex.message);
     } finally {
       clearTimeout(findTimer.current); setFinding(false);
@@ -183,6 +285,25 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername }) {
   const green = noPlants ? (busy ? 'Checking…' : 'Retry now')
     : busy ? (finding ? 'Finding your plant…' : 'Checking your login…')
     : relink ? 'Reconnect' : compact ? 'Add login' : 'Connect';
+
+  if (paywall) {
+    const close = () => { setPaywall(null); setPassword(''); onCancel && onCancel(); };
+    return <div className={compact ? 'conn-form' : 'link-card'}><Paywall reason={paywall.reason} added={paywall.added} onCancel={close} /></div>;
+  }
+
+  if (cost) {
+    const unit = perUnit(cost.period);
+    return (
+      <div className={(compact ? 'conn-form' : 'link-card') + ' cost-card'} role="alertdialog" aria-labelledby="cost-title">
+        <div id="cost-title" className="confirm-title">Add {cost.n} {cost.n === 1 ? 'inverter' : 'inverters'} at {rand(cost.extraPrice)} {unit}{cost.n === 1 ? '' : ' each'}?</div>
+        <div className="confirm-text">{rand(cost.dueNow)} now, then {rand(cost.nextCharge)} {unit} from {billDay(cost.nextDate)}.</div>
+        <div className="conn-form-actions">
+          <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setCost(null); setPassword(''); onCancel && onCancel(); }}>Cancel</button>
+          <button type="button" className="save-btn" disabled={busy} aria-busy={busy} onClick={() => submit(null, true)}>{busy ? 'Adding…' : 'Add plant'}</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form className={compact ? 'conn-form link-form' : 'link-form link-card'} onSubmit={submit} noValidate aria-busy={busy}>

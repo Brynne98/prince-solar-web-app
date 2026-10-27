@@ -215,6 +215,19 @@ begin
   perform pg_temp.eq('switch m date', (select period || ' ' || next_billing_date from private.billing where user_id = uh),
                      'monthly 2027-12-01');
 
+  -- The paywall's reader answers for the signed-in user only
+  perform set_config('request.jwt.claims', json_build_object('sub', ur, 'role', 'authenticated')::text, true);
+  q := public.api_billing_quote('family', 'yearly');
+  perform pg_temp.eq('quote free plan',   q->>'plan', 'free');
+  perform pg_temp.eq('quote free yearly', (q->>'dueNow')::int, 1799);
+  perform pg_temp.eq('quote free home',   (public.api_billing_quote('home', 'monthly')->>'dueNow')::int, 99);
+  perform set_config('request.jwt.claims', json_build_object('sub', uy, 'role', 'authenticated')::text, true);
+  q := public.api_billing_quote('family', 'monthly', 2);
+  perform pg_temp.eq('quote keeps own period', q->>'period', 'yearly');
+  perform pg_temp.eq('quote yearly extras (1 now + 2 new)', (q->>'nextCharge')::int, 1799 + 3 * 588);
+  perform set_config('request.jwt.claims', '', true);
+  perform pg_temp.raises('quote signed out', 'select public.api_billing_quote(''family'')', 'sign in first');
+
   -- profiles.plan is gone; api_me reads the plan from billing
   perform pg_temp.eq('profiles.plan gone', (select count(*)::int from information_schema.columns
                        where table_schema = 'public' and table_name = 'profiles' and column_name = 'plan'), 0);
