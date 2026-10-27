@@ -72,6 +72,7 @@ type Part =
   | { callout: string } // a plain-language status line in a coral-edged panel
   | { note: string }
   | { steps: string[] } // numbered how-to; may hold <b> set by us
+  | { plants: { title: string; names: string[]; tone: "keep" | "stop"; count?: false } } // one row per plant, any number; count: false when the title already counts
   | { bars: Bars }; // daily solar kWh; null = no data
 
 // labels: one under each bar (a week); titles: the hover text per bar, where the mail app
@@ -81,6 +82,7 @@ type Delta = { n: number; prev: string; tone?: "good" | "bad" };
 type Bars = { values: (number | null)[]; from: string; to: string; labels?: string[]; titles?: string[] };
 
 type Body = { title: string; sub?: string; parts: Part[]; footer: string[] };
+const PLANT_ROWS = 10;
 
 function drawBars(b: Bars): string {
   // A bar per day, drawn with table cells so it survives email clients that drop SVG
@@ -154,6 +156,22 @@ function html(subject: string, b: Body): string {
       const facts = c.facts.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="table-layout:fixed;border-top:1px solid rgba(255,255,255,.07)">${rowsOf2.join("")}</table>` : "";
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:16px;background:#141a22;border-radius:8px">${head}${drawBars(c.bars)}${facts}</td></tr></table>`;
     }
+    if ("plants" in x) {
+      // One row per plant, so a long name wraps in its own row and many plants stay a
+      // list. Past PLANT_ROWS the rest are counted, not listed: an installer login can
+      // bring dozens.
+      const { title, names, tone, count } = x.plants;
+      const shown = names.length > PLANT_ROWS ? names.slice(0, PLANT_ROWS - 1) : names;
+      const more = names.length - shown.length;
+      const dot = tone === "keep" ? C.solar : C.home;
+      const row = (n: string, i: number) => `<tr><td style="padding:10px 0;${i ? "border-top:1px solid rgba(255,255,255,.07);" : ""}font:500 14px/1.35 ${SANS};color:#e7ecf2">` +
+        `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${dot};margin-right:10px;vertical-align:1px"></span>${n}</td></tr>`;
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:14px 16px 4px;background:#141a22;border-radius:8px">` +
+        `<div style="margin:0 0 4px;font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(title)}${names.length > 1 && count !== false ? ` · ${names.length} plants` : ""}</div>` +
+        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${shown.map((n, i) => row(esc(n), i)).join("")}` +
+        (more ? `<tr><td style="padding:10px 0;border-top:1px solid rgba(255,255,255,.07);font:400 14px/1.35 ${SANS};color:#9aa5b3">and ${more} more, listed in Account</td></tr>` : "") +
+        `</table></td></tr></table>`;
+    }
     if ("callout" in x)
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:14px 16px;background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.4);border-radius:8px;font:500 15px/1.45 ${SANS};color:#e7ecf2">` +
         `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${C.home};margin-right:10px;vertical-align:1px"></span>${x.callout}</td></tr></table>`;
@@ -214,6 +232,7 @@ function text(b: Body): string {
     else if ("bars" in x && x.bars.labels) out.push(x.bars.labels.map((l, i) => `${l} ${x.bars.values[i] == null ? "–" : x.bars.values[i]!.toFixed(0)}`).join(", ") + " kWh", "");
     else if ("chart" in x) out.push(x.chart.title, ...(x.chart.bars.labels ? [x.chart.bars.labels.map((l, i) => `${l} ${x.chart.bars.values[i] == null ? "–" : x.chart.bars.values[i]!.toFixed(0)}`).join(", ") + " kWh"] : []),
       ...x.chart.facts.map((f) => `${f.label}: ${strip(f.value)}${f.unit ? " " + f.unit : ""}${f.sub ? `, ${f.sub}` : ""}`), "");
+    else if ("plants" in x) out.push(`${x.plants.title}${x.plants.names.length > 1 && x.plants.count !== false ? ` (${x.plants.names.length} plants)` : ""}:`, ...x.plants.names.map((n) => `- ${n}`), "");
     else if ("callout" in x) out.push(strip(x.callout), "");
     else if ("facts" in x) out.push(...x.facts.map((f) => `${f.label}: ${strip(f.value)}`), "");
     else if ("stats" in x) out.push(...x.stats.map((s) => `${s.label}: ${s.value}${s.unit ? " " + s.unit : ""}${s.delta ? ` (${deltaText(s.delta)})` : s.sub ? ` (${s.sub})` : ""}`), "");
@@ -646,9 +665,9 @@ export const planChangeBooked = (c: Change) => {
         { label: "Until " + c.on, value: planLine(c.from, c.fromPeriod) },
         { label: "From " + c.on, value: cancel ? "Free" : planLine(c.to, c.toPeriod ?? c.fromPeriod) },
         ...(c.next ? [{ label: "Next payment", value: `${rand(c.next.amount)} on ${c.on}` }] : [{ label: "Next payment", value: "None" }]),
-        ...(c.removePlants.length ? [{ label: "Deleted on " + c.on, value: esc(names(c.removePlants)) }] : []),
       ] },
-      ...(c.removePlants.length ? [{ note: "Their history is deleted too." }] : []),
+      ...(c.removePlants.length ? [{ plants: { title: `Deleted on ${c.on}`, names: c.removePlants, tone: "stop" as const } },
+        { note: c.removePlants.length === 1 ? "Its history is deleted too." : "Their history is deleted too." }] : []),
       { button: { label: cancel ? `Keep ${PLAN_NAME[c.from]}` : "See your plan", href: PLAN } },
     ],
     footer: [HELP],
@@ -693,10 +712,8 @@ export const movedToFree = (m: MovedToFree) =>
     title: "Your account is now on Free",
     parts: [
       { p: `Payment for ${PLAN_NAME[m.from]} didn't go through, so you're on Free: ${FREE_RULE}` },
-      { facts: [
-        { label: "Still updating", value: esc(m.kept) },
-        ...(m.stopped.length ? [{ label: "Stopped", value: esc(names(m.stopped)) }, { label: "Deleted on", value: m.deleteOn }] : []),
-      ] },
+      { plants: { title: "Still updating", names: [m.kept], tone: "keep" } },
+      ...(m.stopped.length ? [{ plants: { title: `Stopped, deleted on ${m.deleteOn}`, names: m.stopped, tone: "stop" as const } }] : []),
       ...(m.stopped.length ? [{ note: "Pay to keep every plant, or choose which plant Free keeps." }] : []),
       { button: { label: m.stopped.length ? "Pay to keep these plants" : "Pay now", href: m.payUrl } },
     ],
@@ -705,11 +722,13 @@ export const movedToFree = (m: MovedToFree) =>
 
 // 3 days before plants are deleted (after a downgrade, cancel or failed payment).
 export const plantsRemovalSoon = (plants: string[], on: string) =>
-  make(`${names(plants)} ${plants.length === 1 ? "is" : "are"} deleted on ${on}`, {
+  // The subject names one or two plants; past that it counts them, so it stays short.
+  make(`${plants.length > 2 ? `${plants.length} plants` : names(plants)} ${plants.length === 1 ? "is" : "are"} deleted on ${on}`, {
     title: `${plants.length === 1 ? "A plant is" : "Plants are"} deleted on ${on}`,
     parts: [
-      { facts: plants.map((p) => ({ label: "Deleted on " + on, value: esc(p) })) },
-      { p: "Their history goes too. Linking a plant again later brings back only the last 60 days from SunSynk." },
+      // The heading already gives the date, so the list only counts.
+      { plants: { title: plants.length === 1 ? "1 plant" : `${plants.length} plants`, names: plants, tone: "stop", count: false } },
+      { p: `${plants.length === 1 ? "Its" : "Their"} history goes too. Linking a plant again later brings back only the last 60 days from SunSynk.` },
       { button: { label: "Choose the plant to keep", href: PLAN } },
     ],
     footer: [HELP],
