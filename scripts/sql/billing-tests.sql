@@ -32,7 +32,7 @@ insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-00000000000a', 'a@t.test'), ('00000000-0000-0000-0000-00000000000f', 'f@t.test'),
   ('00000000-0000-0000-0000-0000000000a1', 'y@t.test'), ('00000000-0000-0000-0000-0000000000b1', 'r@t.test'),
   ('00000000-0000-0000-0000-0000000000c1', 'o@t.test'), ('00000000-0000-0000-0000-0000000000d1', 'j@t.test'),
-  ('00000000-0000-0000-0000-0000000000e1', 'h@t.test');
+  ('00000000-0000-0000-0000-0000000000e1', 'h@t.test'), ('00000000-0000-0000-0000-0000000000f1', 'z@t.test');
 
 insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values
   ('00000000-0000-0000-0000-00000000000a', 'home',   'monthly', 1,  '2026-12-01'),
@@ -153,6 +153,12 @@ begin
   perform pg_temp.eq('login had free week',    public.billing_may_link(ur, 'USED@login.test', array[1])->>'reason', 'free_week_used');
   perform pg_temp.eq('login on other account', public.billing_may_link(ur, 'shared@login.test', array[1])->>'reason', 'free_week_used');
   perform pg_temp.eq('paid user, used login',  (public.billing_may_link(uf, 'used@login.test', array[1])->>'ok')::boolean, true);
+  perform public.billing_free_week_start(ur, 'Fresh@Login.test');
+  perform public.billing_free_week_start(uf, 'paid@login.test');
+  perform pg_temp.eq('free link records the login', (select user_id from private.free_week_logins where sunsynk_username = 'fresh@login.test'), ur);
+  perform pg_temp.eq('paid link records nothing', (select count(*)::int from private.free_week_logins where sunsynk_username = 'paid@login.test'), 0);
+  perform pg_temp.eq('recorded login blocks another free account',
+                     public.billing_may_link('00000000-0000-0000-0000-0000000000f1', 'fresh@login.test', array[1])->>'reason', 'free_week_used');
 
   -- Downgrade at period end: plants go first, then the plan
   perform pg_temp.raises('family -> home with 3 plants',

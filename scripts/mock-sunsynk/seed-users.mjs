@@ -22,6 +22,16 @@ const USERS = {
   "shared@local.test": ["shared@mock"],
 };
 
+import { execFileSync } from "node:child_process";
+
+// Every seed user is on Family (SOLAR-208), so the plan check lets dev link all its
+// logins and the shared ones link twice. Their plants past the 3rd are confirmed.
+function family(id) {
+  execFileSync("supabase", ["db", "query", "--local", `insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
+    values ('${id}', 'family', 'monthly', 1, date_trunc('month', current_date + interval '1 month')::date)
+    on conflict (user_id) do nothing`], { stdio: "ignore" });
+}
+
 const j = async (res) => { const t = await res.text(); try { return JSON.parse(t); } catch { return { raw: t }; } };
 
 async function ensureUser(email) {
@@ -43,12 +53,13 @@ async function session(email) {
 async function link(jwt, username) {
   return j(await fetch(`${API}/functions/v1/link-sunsynk`, {
     method: "POST", headers: { apikey: ANON, Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password: "mock" }),
+    body: JSON.stringify({ username, password: "mock", confirmCost: true }),
   }));
 }
 
 for (const [email, logins] of Object.entries(USERS)) {
   const id = await ensureUser(email);
+  family(id);
   const jwt = await session(email);
   for (const u of logins) {
     const r = await link(jwt, u);

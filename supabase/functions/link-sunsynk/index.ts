@@ -8,7 +8,7 @@
 //
 // This is the only place a SunSynk password ever touches the backend. Keep it that
 // way: no console.log of the body, no error message that includes input.
-import { db, linkAccount } from "../_shared/sunsynk.ts";
+import { db, linkAccount, PlanRefused } from "../_shared/sunsynk.ts";
 import { serve } from "../_shared/errors.ts";
 
 // Browser origins allowed to call this. app.princesolarhub.co.za in
@@ -59,10 +59,13 @@ serve("link-sunsynk", async (req) => {
 
   let username = "";
   let password = "";
+  let confirmCost = false;
   try {
     const body = await req.json();
     username = String(body?.username ?? "").trim();
     password = String(body?.password ?? "");
+    // The user saw the R49-per-inverter cost for plants past the 3rd and agreed.
+    confirmCost = body?.confirmCost === true;
   } catch {
     return json({ error: "body must be JSON" }, 400, cors);
   }
@@ -78,7 +81,7 @@ serve("link-sunsynk", async (req) => {
   if (!allowed) return json({ error: "too many attempts" }, 429, { ...cors, "Retry-After": "3600" });
 
   try {
-    const { accountId, plants } = await linkAccount(userId, username, password);
+    const { accountId, plants } = await linkAccount(userId, username, password, confirmCost);
     password = ""; // done with it
     if (!plants.length) {
       // Linked, but SunSynk returned no plants: the login works but sees nothing —
@@ -88,6 +91,12 @@ serve("link-sunsynk", async (req) => {
     return json({ ok: true, accountId, plants }, 200, cors);
   } catch (e) {
     password = "";
+    // The plan refused (SOLAR-208). The app opens the paywall, or shows the extra
+    // cost and sends again with confirmCost.
+    if (e instanceof PlanRefused) {
+      return json({ error: e.reason, extraInverters: e.extraInverters, dueNow: e.dueNow },
+        e.reason === "free_week_used" ? 403 : 402, cors);
+    }
     const msg = e instanceof Error ? e.message : String(e);
     // "login rejected: ..." comes from tokenLogin and contains only SunSynk's msg.
     const status = /login rejected/i.test(msg) ? 401 : 502;

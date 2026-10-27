@@ -241,6 +241,16 @@ begin
                    then (public.billing_upgrade_quote(p_user, 'family', extra))->'dueNow' else '0' end);
 end $$;
 
+-- A Free link starts the login's free week (guard b). First account wins; a
+-- paid link records nothing.
+create or replace function public.billing_free_week_start(p_user uuid, p_sunsynk_username text)
+returns void language sql security definer set search_path = public, private, pg_temp as $$
+  insert into private.free_week_logins (sunsynk_username, user_id)
+  select lower(p_sunsynk_username), p_user
+   where coalesce((select plan from private.billing where user_id = p_user), 'free') = 'free'
+  on conflict (sunsynk_username) do nothing
+$$;
+
 -- Book a downgrade, cancel (p_plan 'free') or period switch for the billing date.
 -- Upgrades never come here: they start at once.
 create or replace function public.billing_book_change(p_user uuid, p_plan text, p_period text default null)
@@ -324,6 +334,7 @@ begin
     'billing_step(date, text, int, int)', 'billing_prorate(int, date, date, date)',
     'billing_extra_inverters(uuid, bigint[])', 'billing_amount_due(uuid)',
     'billing_upgrade_quote(uuid, text, int, text, date)', 'billing_may_link(uuid, text, int[])',
+    'billing_free_week_start(uuid, text)',
     'billing_book_change(uuid, text, text)', 'billing_book_removal(uuid, bigint)',
     'billing_renew(uuid)']
   loop

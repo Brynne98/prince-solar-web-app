@@ -348,19 +348,54 @@ export async function getInvertersCached(acc: Account): Promise<InverterInfo[]> 
  * stores the refresh token in Vault, records the plants the account can see.
  * Returns the account id and its plants. The password is dropped on return.
  */
-export async function linkAccount(userId: string, username: string, password: string) {
+export async function linkAccount(userId: string, username: string, password: string, confirmCost = false) {
   const t = await tokenLogin(username, password);
-  const accountId = await rpc<string>("account_upsert", {
-    p_user: userId, p_username: username, p_access: t.access_token, p_expires: expiresAt(t.expires_in),
-  });
-  await rpc("account_refresh_set", { p_account: accountId, p_refresh: t.refresh_token });
-
   const acc: Account = {
-    id: accountId, user_id: userId, sunsynk_username: username,
+    id: "", user_id: userId, sunsynk_username: username,
     access_token: t.access_token, access_expires_at: expiresAt(t.expires_in),
   };
-  const plants = await syncPlants(acc);
-  return { accountId, plants };
+  // The plan check comes before anything is stored, so a refused login leaves no
+  // account behind for the poller.
+  const plants = await getPlants(acc);
+  const invs = await getInverters(acc);
+  const chk = await planCheck(acc, plants, async () => invs);
+  if (!chk.ok) throw new PlanRefused(chk.reason ?? "upgrade_needed", chk.extraInverters, chk.dueNow);
+  if (chk.extraInverters > 0 && !confirmCost) throw new PlanRefused("confirm_cost", chk.extraInverters, chk.dueNow);
+
+  acc.id = await rpc<string>("account_upsert", {
+    p_user: userId, p_username: username, p_access: t.access_token, p_expires: acc.access_expires_at,
+  });
+  await rpc("account_refresh_set", { p_account: acc.id, p_refresh: t.refresh_token });
+  await syncPlants(acc, { plants, invs });
+  await rpc("billing_free_week_start", { p_user: userId, p_sunsynk_username: username });
+  return { accountId: acc.id, plants };
+}
+
+/** The plan refused a link (SOLAR-208): upgrade_needed, free_week_used or confirm_cost. */
+export class PlanRefused extends Error {
+  constructor(public reason: string, public extraInverters: number, public dueNow: number) {
+    super(`plan refused: ${reason}`);
+  }
+}
+
+/**
+ * Plan check (0110 billing_may_link) for the plants of `plants` this user doesn't
+ * have yet. Every plant counts (guard a); a login used by another account gets no
+ * free week (guard b). New plants are taken in plant id order, the order
+ * plant_users_upsert gives them, so the extras are the same ones billing counts.
+ */
+async function planCheck(acc: Account, plants: PlantInfo[], inverters: () => Promise<InverterInfo[]>) {
+  const { data, error } = await db.from("plant_users").select("plant_id").eq("user_id", acc.user_id);
+  if (error) throw new Error(`plant_users: ${error.message}`);
+  const have = new Set((data ?? []).map((r: any) => Number(r.plant_id)));
+  const fresh = plants.filter((p) => !have.has(p.id)).sort((a, b) => a.id - b.id);
+  if (!fresh.length) return { ok: true, fresh, extraInverters: 0, dueNow: 0 } as const;
+  const invs = await inverters();
+  const r = await rpc<{ ok: boolean; reason?: string; extraInverters?: number; dueNow?: number }>("billing_may_link", {
+    p_user: acc.user_id, p_sunsynk_username: acc.sunsynk_username,
+    p_plant_inverters: fresh.map((p) => invs.filter((i) => Number(i.plantId) === p.id).length),
+  });
+  return { ok: r.ok, reason: r.reason, fresh, extraInverters: r.extraInverters ?? 0, dueNow: Number(r.dueNow ?? 0) };
 }
 
 /**
@@ -378,8 +413,20 @@ export async function linkAccount(userId: string, username: string, password: st
  * for a plant already seeded).
  */
 const MAX_BOOTSTRAP_KICKS = 5;
-export async function syncPlants(acc: Account): Promise<PlantInfo[]> {
-  const plants = await getPlants(acc);
+export async function syncPlants(acc: Account, linked?: { plants: PlantInfo[]; invs: InverterInfo[] }): Promise<PlantInfo[]> {
+  let plants = linked?.plants ?? await getPlants(acc);
+  let invs = linked?.invs;
+  // The hourly refresh adds a plant SunSynk shows later only when the plan takes it
+  // at no extra cost; otherwise the user adds it through the app. linkAccount has
+  // already checked its plants.
+  if (!linked) {
+    const chk = await planCheck(acc, plants, async () => (invs = await getInverters(acc)));
+    if (!chk.ok || chk.extraInverters > 0) {
+      const skip = new Set(chk.fresh.map((p) => p.id));
+      console.log(`account ${acc.id}: ${skip.size} new plant(s) left out by the plan (${chk.reason ?? "extra cost"})`);
+      plants = plants.filter((p) => !skip.has(p.id));
+    }
+  }
   await rpc("plant_users_upsert", {
     p_user: acc.user_id, p_account: acc.id,
     p_rows: plants.map((p) => ({ plant_id: p.id, plant_name: p.name })),
@@ -405,9 +452,9 @@ export async function syncPlants(acc: Account): Promise<PlantInfo[]> {
     const seededIds = rows.map((r) => r.plant_id);
     const wanted = new Set(seededIds);
     try {
-      const invs = (await getInverters(acc)).filter((i) => i.plantId != null && wanted.has(Number(i.plantId)));
-      if (invs.length) {
-        await rpc("inverters_seed", { p_rows: invs.map((i) => ({ sn: i.sn, plant_id: i.plantId, account_id: acc.id })) });
+      const seed = (invs ?? await getInverters(acc)).filter((i) => i.plantId != null && wanted.has(Number(i.plantId)));
+      if (seed.length) {
+        await rpc("inverters_seed", { p_rows: seed.map((i) => ({ sn: i.sn, plant_id: i.plantId, account_id: acc.id })) });
       }
     } catch (e) {
       // recover refuses to walk a plant with no serials, and the first poll stores them.
