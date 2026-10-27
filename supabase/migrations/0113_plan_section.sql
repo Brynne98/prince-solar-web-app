@@ -40,10 +40,20 @@ begin
   return public.api_billing_status();
 end $$;
 
+-- A plant a booked downgrade depends on can't be kept: undo the downgrade first.
 create or replace function public.api_billing_keep(p_plant bigint)
 returns jsonb language plpgsql security definer set search_path = public, private, pg_temp as $$
+declare b private.billing;
 begin
   if auth.uid() is null then raise exception 'sign in first' using errcode = '42501'; end if;
+  select * into b from private.billing where user_id = auth.uid() for update;
+  if b.next_plan is not null
+     and (select count(*) from public.plant_users
+           where user_id = auth.uid() and not paused
+             and (plant_id = p_plant or plant_id <> all (b.plants_to_remove)))
+         > coalesce(public.billing_plant_limit(b.next_plan), 2147483647) then
+    raise exception 'needed for your plan change' using errcode = '22023';
+  end if;
   update private.billing
      set plants_to_remove = array_remove(plants_to_remove, p_plant),
          remove_on = case when array_remove(plants_to_remove, p_plant) = '{}' then null else remove_on end,

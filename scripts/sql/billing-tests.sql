@@ -348,6 +348,11 @@ begin
                      (select count(*)::int from public.plant_users where user_id = uy));
   perform pg_temp.eq('nothing removed yet', (select count(*)::int from public.plant_users where user_id = uy) > 0, true);
   perform pg_temp.eq('login still active', (select status from private.sunsynk_accounts where id = '00000000-0000-0000-0000-0000000000f7'), 'active');
+  -- With every plant booked, a downgrade to Home fits; then keeping two would break it
+  perform public.api_billing_keep(9000021);
+  perform pg_temp.eq('downgrade books once plants go', public.api_billing_change('home')->>'nextPlan', 'home');
+  perform pg_temp.raises('keep refused when the downgrade needs it', 'select public.api_billing_keep(9000022)', 'needed for your plan change');
+  perform public.api_billing_change('family');
   perform pg_temp.raises('not your login', 'select public.api_link_remove(''00000000-0000-0000-0000-000000000099'')', 'not your account');
   -- A switch booked and undone
   perform set_config('request.jwt.claims', json_build_object('sub', uh, 'role', 'authenticated')::text, true);
@@ -355,6 +360,7 @@ begin
   perform pg_temp.eq('switch booked', public.api_billing_change('home', 'yearly')->>'nextPeriod', 'yearly');
   perform pg_temp.eq('undo with current plan', public.api_billing_change('home', 'monthly')->>'nextPeriod', null);
   perform pg_temp.eq('cancel booked', public.api_billing_change('free')->>'nextPlan', 'free');
+  perform pg_temp.eq('undo cancel', public.api_billing_change('home', 'monthly')->>'nextPlan', null);
   -- Free: Remove login goes at once
   insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values ('00000000-0000-0000-0000-0000000000f8', ur, 'r2@login.test');
   update public.plant_users set account_id = '00000000-0000-0000-0000-0000000000f8' where user_id = ur;

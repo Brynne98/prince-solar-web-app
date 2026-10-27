@@ -2031,7 +2031,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling }) 
           setBusy(acc.account_id);
           for (const p of going) {
             const { error } = await window.sb.rpc('api_billing_keep', { p_plant: p.plant_id });
-            if (error) { fail('Couldn’t keep it. Try again.'); break; }
+            if (error) { fail(/needed for your plan change/.test(error.message) ? 'Your plan change needs this removed. Undo the change in Plan first.' : 'Couldn’t keep it. Try again.'); break; }
           }
           await Promise.all([refresh(), reloadBilling && reloadBilling()]);
           setBusy(null);
