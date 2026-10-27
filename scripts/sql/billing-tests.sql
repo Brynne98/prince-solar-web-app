@@ -142,6 +142,8 @@ begin
   perform pg_temp.eq('3rd covered, 4th extra', (q->>'extraInverters')::int, 3);
 
   -- Guard a: every plant a login brings counts
+  perform pg_temp.raises('insert past the limit fails',
+    format('insert into public.plant_users (plant_id, user_id) values (9000099, %L)', ua), 'plan limit');
   perform pg_temp.eq('free 2nd plant',    public.billing_may_link(ur, 'r@login.test', array[1])->>'reason', 'upgrade_needed');
   perform pg_temp.eq('home 2nd plant',    public.billing_may_link(ua, 'a@login.test', array[1])->>'reason', 'upgrade_needed');
   q := public.billing_may_link(ua, 'i@login.test', array[1, 1, 2]);

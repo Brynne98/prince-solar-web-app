@@ -241,6 +241,26 @@ begin
                    then (public.billing_upgrade_quote(p_user, 'family', extra))->'dueNow' else '0' end);
 end $$;
 
+-- Backstop for the link check: link-sunsynk checks, then inserts in a second call,
+-- so two links at once could both pass. A new plant_users row past the plan's limit
+-- fails here. One user at a time, so the second insert counts the first.
+create or replace function private.plant_users_plan_limit()
+returns trigger language plpgsql security definer set search_path = public, private, pg_temp as $$
+declare lim int := public.billing_plant_limit(
+  coalesce((select plan from private.billing where user_id = new.user_id), 'free'));
+begin
+  if lim is null then return null; end if;
+  perform pg_advisory_xact_lock(hashtext('plant_users_plan:' || new.user_id::text));
+  if (select count(*) from public.plant_users where user_id = new.user_id) > lim then
+    raise exception 'plan limit: % plant(s)', lim using errcode = '23514';
+  end if;
+  return null;
+end $$;
+revoke all on function private.plant_users_plan_limit() from public, anon, authenticated;
+drop trigger if exists plant_users_plan_limit on public.plant_users;
+create trigger plant_users_plan_limit after insert on public.plant_users
+  for each row execute function private.plant_users_plan_limit();
+
 -- A Free link starts the login's free week (guard b). First account wins; a
 -- paid link records nothing.
 create or replace function public.billing_free_week_start(p_user uuid, p_sunsynk_username text)
