@@ -18,8 +18,9 @@ import type { Email } from "../supabase/functions/_shared/email.ts";
 const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
-  accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_NOTICE, historySynced,
-  passwordChanged, plantEvent, renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
+  accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_NOTICE, historySynced, movedToFree,
+  passwordChanged, paymentFailed, paymentReceived, planChangeBooked, plantEvent, plantsRemovalSoon, planUpgraded,
+  renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
 
 const PLANT = "Home";
@@ -79,6 +80,24 @@ const mails: Record<string, [from: string, mail: Email]> = {
     change: { made: 6, home: 2, import: -9, independence: 3, saved: 11 }, bestDay: { label: "3 Jan", kwh: 41.2 }, highestUse: { label: "21 Jun", kwh: 52.3 },
     daily: { from: "Jan", to: "Dec", values: [1040, 930, 890, 720, 610, 520, 560, 680, 790, 880, 920, 880], labels: ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"] },
   })],
+  "report-week-free-ends": [FROM_NOTICE, report({
+    ...base, period: "week", label: "6 – 12 Oct 2026", prevLabel: "last week", freeWeekEnds: true,
+    madeKwh: 191.3, homeKwh: 208.9, importKwh: 47.2, independencePct: 77, savedRand: 495, change: {},
+    bestDay: { label: "Thu 9 Oct", kwh: 33.1 }, highestUse: { label: "Sat 11 Oct", kwh: 38.4 },
+    daily: { from: "Mon 6 Oct", to: "Sun 12 Oct", values: [27.4, 29.8, 18.2, 33.1, 30.6, 24.9, 27.3], labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
+  })],
+  // Billing (SOLAR-208)
+  "billing-receipt": [FROM_NOTICE, paymentReceived({ plan: "family", period: "monthly", amount: 228, date: "1 Nov 2026", card: "Visa ending 4081",
+    reference: "PSH-7Q2K9X", extraInverters: 1, next: { amount: 228, date: "1 Dec" } })],
+  "billing-upgraded": [FROM_NOTICE, planUpgraded({ from: "home", to: "family", period: "monthly", paidNow: 43, daysLeft: 16, next: { amount: 179, date: "1 Dec" } })],
+  "billing-inverters-added": [FROM_NOTICE, planUpgraded({ from: "family", to: "family", period: "monthly", addedInverters: 2, paidNow: 52, daysLeft: 16, next: { amount: 277, date: "1 Dec" } })],
+  "billing-downgrade-booked": [FROM_NOTICE, planChangeBooked({ from: "family", to: "home", fromPeriod: "monthly", on: "1 Dec", removePlants: ["Cabin", "Office"], next: { amount: 99 } })],
+  "billing-cancel-booked": [FROM_NOTICE, planChangeBooked({ from: "home", to: "free", fromPeriod: "monthly", on: "1 Dec", removePlants: [] })],
+  "billing-switch-booked": [FROM_NOTICE, planChangeBooked({ from: "home", to: "home", fromPeriod: "monthly", toPeriod: "yearly", on: "1 Dec", removePlants: [], next: { amount: 999 } })],
+  "billing-failed-1": [FROM_NOTICE, paymentFailed({ plan: "family", period: "monthly", amount: 179, card: "Visa ending 4081", nextTry: "3 Dec", freeOn: "8 Dec", payUrl: `${APP}/#pay` })],
+  "billing-failed-last": [FROM_NOTICE, paymentFailed({ plan: "family", period: "monthly", amount: 179, card: "Visa ending 4081", freeOn: "8 Dec", payUrl: `${APP}/#pay` })],
+  "billing-moved-to-free": [FROM_NOTICE, movedToFree({ from: "family", kept: "Home", stopped: ["Cabin", "Office"], deleteOn: "7 Jan", payUrl: `${APP}/#pay` })],
+  "billing-removal-soon": [FROM_NOTICE, plantsRemovalSoon(["Cabin", "Office"], "7 Jan")],
   "event-grid-down": [FROM_NOTICE, plantEvent(PLANT, PLANT_ID, { kind: "grid_down", at: "14:32", chargePct: 62 }, UNSUB)],
   "event-grid-back": [FROM_NOTICE, plantEvent(PLANT, PLANT_ID, { kind: "grid_back", at: "16:05", lasted: "1 h 33 min" }, UNSUB)],
   "event-battery-hot": [FROM_NOTICE, plantEvent(PLANT, PLANT_ID, { kind: "batt_hot", at: "13:20", tempC: 42, hotDays: 3 }, UNSUB)],
