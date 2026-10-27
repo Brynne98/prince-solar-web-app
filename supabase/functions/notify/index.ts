@@ -21,7 +21,7 @@
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { reportError, serve } from "../_shared/errors.ts";
 import {
-  accountDeleted, type Email, FROM_ACCOUNT, FROM_NOTICE, type History, historySynced, type Period,
+  accountDeleted, type Email, FROM_ACCOUNT, FROM_NOTICE, type History, freeWeekEndsSoon, historySynced, type Period,
   plantEvent, type PlantEvent, report, type Report, sunsynkBack, sunsynkDown, welcome,
 } from "../_shared/email.ts";
 
@@ -206,8 +206,11 @@ async function build(r: Row, unsub: string): Promise<Email | null> {
     case "history": { const h = await buildHistory(p); return h && historySynced(h); }
     case "report_week": case "report_month": case "report_year": {
       const rep = await buildReport(p, r.kind.slice(7) as Period, d.today);
-      return rep && report({ ...rep, unsubscribeUrl: unsub });
+      // The day-7 report of a Free account's first week (0114) says the week ends.
+      return rep && report({ ...rep, freeWeekEnds: d.freeWeekEnds === true, unsubscribeUrl: unsub });
     }
+    case "free_week_soon":
+      return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: tz }));
     case "account_deleted": return accountDeleted(r.to_email);
   }
   throw new Error(`unknown kind ${r.kind}`);

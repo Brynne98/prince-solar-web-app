@@ -14,6 +14,7 @@ begin;
 \ir ../../supabase/migrations/0111_free_trim.sql
 \ir ../../supabase/migrations/0112_paused_plants.sql
 \ir ../../supabase/migrations/0113_plan_section.sql
+\ir ../../supabase/migrations/0114_free_reports.sql
 
 create function pg_temp.eq(label text, got anyelement, want anyelement) returns void language plpgsql as $$
 begin
@@ -371,6 +372,44 @@ begin
 end $$;
 select pg_temp.eq('plan calls for signed-in users', has_function_privilege('authenticated', 'public.api_billing_change(text, text)', 'execute'), true);
 select pg_temp.eq('not for anon', has_function_privilege('anon', 'public.api_billing_status()', 'execute'), false);
+
+-- Free reports (0114): none but the day-7 one; heads-up on day 5
+insert into auth.users (id, email) values
+  ('00000000-0000-0000-0000-000000000071', 'd5@t.test'), ('00000000-0000-0000-0000-000000000072', 'd7@t.test');
+insert into private.free_week_logins (sunsynk_username, user_id, started_at) values
+  ('d5@login.test', '00000000-0000-0000-0000-000000000071', now() - interval '5 days 2 hours'),
+  ('d7@login.test', '00000000-0000-0000-0000-000000000072', now() - interval '7 days 2 hours');
+insert into public.plant_users (plant_id, user_id) values
+  (9000071, '00000000-0000-0000-0000-000000000071'), (9000072, '00000000-0000-0000-0000-000000000072');
+do $$
+begin
+  -- t3 (Free, week over; t1 upgraded above), t2 (Free, in its week): reports held back; Family's go
+  insert into public.email_queue (user_id, plant_id, kind, key, data) values
+    ('00000000-0000-0000-0000-000000000063', 9000063, 'report_week', 'test:free-report', '{}'),
+    ('00000000-0000-0000-0000-000000000062', 9000062, 'report_month', 'test:free-week-report', '{}'),
+    ('00000000-0000-0000-0000-000000000062', 9000062, 'grid_down', 'test:free-alert', '{}'),
+    ('00000000-0000-0000-0000-0000000000a1', 9000021, 'report_week', 'test:paid-report', '{}'),
+    ('00000000-0000-0000-0000-0000000000b1', null, 'report_week', 'test:old-free-report', '{}');
+  perform pg_temp.eq('free past week: no report', (select count(*)::int from public.email_queue where key = 'test:free-report'), 0);
+  perform pg_temp.eq('free in its week: no report', (select count(*)::int from public.email_queue where key = 'test:free-week-report'), 0);
+  perform pg_temp.eq('free: alerts go', (select count(*)::int from public.email_queue where key = 'test:free-alert'), 1);
+  perform pg_temp.eq('paid: reports go', (select count(*)::int from public.email_queue where key = 'test:paid-report'), 1);
+  perform pg_temp.eq('free with no week on record: reports go',
+    (select count(*)::int from public.email_queue where key = 'test:old-free-report'),
+    (select case when exists (select 1 from private.free_week_logins where user_id = '00000000-0000-0000-0000-0000000000b1') then 0 else 1 end));
+  perform private.free_week_mail();
+  perform pg_temp.eq('day 5 heads-up queued', (select count(*)::int from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000071' and kind = 'free_week_soon'), 1);
+  perform pg_temp.eq('day 7 report queued, past the hold-back', (select (data->>'freeWeekEnds')::boolean from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000072' and kind = 'report_week'), true);
+  perform pg_temp.eq('day 7 report on the first plant', (select plant_id from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000072' and kind = 'report_week'), 9000072::bigint);
+  perform pg_temp.eq('nothing for a week long over', (select count(*)::int from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000063' and kind in ('free_week_soon', 'report_week')), 0);
+  perform private.free_week_mail();
+  perform pg_temp.eq('each goes once', (select count(*)::int from public.email_queue
+    where user_id in ('00000000-0000-0000-0000-000000000071', '00000000-0000-0000-0000-000000000072') and kind in ('free_week_soon', 'report_week')), 2);
+end $$;
 
 -- Only service_role may call the rules
 select pg_temp.eq('authenticated cannot', has_function_privilege('authenticated', 'public.billing_amount_due(uuid)', 'execute'), false);
