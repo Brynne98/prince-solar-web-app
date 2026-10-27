@@ -368,8 +368,7 @@ export async function linkAccount(userId: string, username: string, password: st
   // Paused from the start: every new plant of a login that had its free week on
   // another account; on Family, the plants past the 3rd when the cost was declined.
   // Free and Home past their one plant pause in the database (0110 trigger).
-  const pause = chk.reason === "free_week_used" ? chk.fresh
-    : chk.ok && confirmCost === "paused" ? chk.fresh.filter((_, i) => chk.active + i + 1 > 3) : [];
+  const pause = pausedFrom(chk, confirmCost === "paused");
 
   acc.id = await rpc<string>("account_upsert", {
     p_user: userId, p_username: username, p_access: t.access_token, p_expires: acc.access_expires_at,
@@ -378,6 +377,17 @@ export async function linkAccount(userId: string, username: string, password: st
   const active = new Set((await syncPlants(acc, { plants, invs, pause: pause.map((p) => p.id) })).map((p) => p.id));
   if (chk.reason !== "free_week_used") await rpc("billing_free_week_start", { p_user: userId, p_sunsynk_username: username });
   return { accountId: acc.id, plants, paused: plants.filter((p) => !active.has(p.id)).map((p) => p.id), reason: chk.reason ?? null };
+}
+
+/**
+ * New plants that link paused: all of a login that had its free week on another
+ * account; on Family, those past the 3rd when the R49 cost isn't taken. Free and
+ * Home past their one plant pause in the database (0110 trigger).
+ */
+function pausedFrom(chk: Awaited<ReturnType<typeof planCheck>>, costDeclined: boolean): PlantInfo[] {
+  if (chk.reason === "free_week_used") return [...chk.fresh];
+  if (chk.ok && chk.extraInverters > 0 && costDeclined) return chk.fresh.filter((_, i) => chk.active + i + 1 > 3);
+  return [];
 }
 
 /** The link needs the user's answer first (SOLAR-208): confirm_cost. */
@@ -432,10 +442,9 @@ export async function syncPlants(acc: Account, linked?: { plants: PlantInfo[]; i
   // linkAccount has already checked its plants.
   if (!linked) {
     const chk = await planCheck(acc, all, async () => (invs = await getInverters(acc)));
-    if (!chk.ok || chk.extraInverters > 0) {
-      pause = chk.fresh.map((p) => p.id);
-      console.log(`account ${acc.id}: ${pause.length} new plant(s) linked paused (${chk.reason ?? "extra cost"})`);
-    }
+    // Nobody is asked about the cost on a refresh, so it counts as not taken.
+    pause = pausedFrom(chk, true).map((p) => p.id);
+    if (pause.length) console.log(`account ${acc.id}: ${pause.length} new plant(s) linked paused (${chk.reason ?? "extra cost"})`);
   }
   await rpc("plant_users_upsert", {
     p_user: acc.user_id, p_account: acc.id,
@@ -448,6 +457,15 @@ export async function syncPlants(acc: Account, linked?: { plants: PlantInfo[]; i
   if (pausedErr) throw new Error(`plant_users: ${pausedErr.message}`);
   const paused = new Set((pausedRows ?? []).map((r: any) => Number(r.plant_id)));
   const plants = all.filter((p) => !paused.has(p.id));
+  // A paused plant's inverter serials are stored too, so the paywall can price it.
+  // Nothing polls them: plantsToPoll leaves paused plants out.
+  if (paused.size && invs) {
+    const seed = invs.filter((i) => i.plantId != null && paused.has(Number(i.plantId)));
+    if (seed.length) {
+      try { await rpc("inverters_seed", { p_rows: seed.map((i) => ({ sn: i.sn, plant_id: i.plantId, account_id: acc.id })) }); }
+      catch (e) { console.warn(`inverter seed for paused ${[...paused].join(",")}:`, e instanceof Error ? e.message : e); }
+    }
+  }
   const { data: seeded, error } = await db.from("plant_config").select("plant_id")
     .in("plant_id", plants.map((p) => p.id));
   if (error) throw new Error(`plant_config: ${error.message}`);

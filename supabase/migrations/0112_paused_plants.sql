@@ -5,8 +5,9 @@
 -- user sees it in Account and nowhere else:
 --   - my_plant / my_plant_ids, which every api_* reader and the RLS policies go
 --     through, skip a paused plant. So do api_me's plants (the plant switcher).
---   - api_link_status lists every plant with its state: paused, and the removal
---     date when the plant is booked for deletion (private.billing).
+--   - api_link_status lists every plant with its state: paused, the removal date
+--     when the plant is booked for deletion (private.billing), and its inverter
+--     count, so the paywall can price a paused plant.
 --   - email_queue drops plant mail (alerts, reports, history) for a user who has
 --     that plant paused. One trigger, so every sender is covered.
 -- poll skips a plant paused for every account that sees it (plantsToPoll), so no
@@ -60,6 +61,7 @@ as $$
   select a.id, a.sunsynk_username, a.status, a.linked_at, a.last_ok_at,
          coalesce((select jsonb_agg(jsonb_build_object('plant_id', pu.plant_id, 'plant_name', pu.plant_name,
                                                         'paused', pu.paused,
+                                                        'inverters', (select count(*) from private.inverters i where i.plant_id = pu.plant_id),
                                                         'remove_on', case when pu.plant_id = any (b.plants_to_remove) then b.remove_on end)
                                     order by pu.linked_at, pu.plant_id)
                      from public.plant_users pu

@@ -1905,6 +1905,10 @@ function SunSynkConnectionSection({ onChanged, links }) {
       if (readError) fail('Removed. Reload the page to update this list.'); else { setLeaving(null); window.toast(gone); }
     } catch (e) { fail('Couldn’t remove the login. Try again.'); setBusy(null); setLeaving(null); }
   };
+  // Inverters the paused plants add to the bill if collected: those past the 3rd
+  // plant, counting the account's active plants first (Family covers 3).
+  const activeTotal = live.reduce((n, a) => n + (a.plants || []).filter(p => !p.paused).length, 0);
+  const pricedInverters = (paused) => paused.reduce((sum, p, i) => sum + (activeTotal + i + 1 > 3 ? Number(p.inverters) || 0 : 0), 0);
   const n = live.length;
   const title = <>SunSynk logins{n > 0 && <span className="sset-count">{n}</span>}</>;
   return (
@@ -1955,7 +1959,7 @@ function SunSynkConnectionSection({ onChanged, links }) {
             </div>
             {/* the reconnect form and the remove card sit under the whole row, full width */}
             {mode === 'upgrade:' + acc.account_id && (
-              <div className="conn-form"><window.Paywall reason="paused" paused={off.map(name)} added={0} onCancel={() => setMode(null)} /></div>
+              <div className="conn-form"><window.Paywall reason="paused" paused={off.map(name)} added={pricedInverters(off)} onCancel={() => setMode(null)} /></div>
             )}
             {mode === acc.account_id && (
               <window.LinkForm compact relink initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
