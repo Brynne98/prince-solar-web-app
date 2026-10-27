@@ -545,6 +545,8 @@ const PLAN = `${APP}/?tab=account&section=plan`;
 // What Free means after its first week, said the same way in every email.
 const FREE_RULE = "we keep only the last 24 hours of readings. Alerts stay on; reports stop.";
 const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;
+// Who is selling, on every receipt and renewal notice.
+const SELLER = "Prince Solar Hub is run by Theron and Prince Solutions. No VAT is charged.";
 export type Plan = keyof typeof PLAN_NAME;
 export type BillPeriod = "monthly" | "yearly";
 const planLine = (plan: Plan, period?: BillPeriod) => PLAN_NAME[plan] + (period ? `, ${period}` : "");
@@ -573,7 +575,28 @@ export const paymentReceived = (r: Receipt) =>
       ] },
       { button: { label: "See your plan", href: PLAN } },
     ],
-    footer: [HELP],
+    footer: [SELLER, HELP],
+  });
+
+// Yearly plans: notice 40 to 80 business days before the renewal (Consumer Protection
+// Act s14, if a yearly plan counts as fixed-term; to confirm on SOLAR-104). It names any
+// change and says the plan can be stopped before the date.
+export type Renewal = { plan: Plan; amount: number; on: string; change?: string };
+
+export const renewalNotice = (r: Renewal) =>
+  make(`Your yearly ${PLAN_NAME[r.plan]} plan renews on ${r.on}`, {
+    title: `Your yearly plan renews on ${r.on}`,
+    parts: [
+      { p: r.change ? esc(r.change) : "Nothing changes: same plan, same price." },
+      { facts: [
+        { label: "Plan", value: planLine(r.plan, "yearly") },
+        { label: "Renews on", value: r.on },
+        { label: "Amount", value: rand(r.amount) },
+      ] },
+      { p: `To stop it, cancel before ${r.on}. Your plan runs until that date and nothing more is charged.` },
+      { button: { label: "See your plan", href: PLAN } },
+    ],
+    footer: [SELLER, HELP],
   });
 
 // An upgrade starts at once: the difference for the days left is charged now, the
@@ -632,8 +655,9 @@ export const planChangeBooked = (c: Change) => {
   });
 };
 
-// A failed charge is retried on day 1, 3 and 7 after the billing date. Each try that
-// fails sends this, with a link to pay with another card.
+// A failed charge is retried on day 1, 3 and 7 after the billing date. The first email
+// goes as soon as the billing-day charge fails, not at the day-1 retry; each retry that
+// fails sends another, with a link to pay with another card.
 export type Failed = {
   plan: Plan; period: BillPeriod; amount: number; card: string;
   nextTry?: string; // absent after the last try
@@ -687,6 +711,18 @@ export const plantsRemovalSoon = (plants: string[], on: string) =>
       { facts: plants.map((p) => ({ label: "Deleted on " + on, value: esc(p) })) },
       { p: "Their history goes too. Linking a plant again later brings back only the last 60 days from SunSynk." },
       { button: { label: "Choose the plant to keep", href: PLAN } },
+    ],
+    footer: [HELP],
+  });
+
+// Two days before a Free account's first week ends. The day-7 report says it again.
+export const freeWeekEndsSoon = (endsOn: string) =>
+  make(`Your free week ends on ${endsOn}`, {
+    title: `Your free week ends on ${endsOn}`,
+    parts: [
+      { p: `Until then everything works as on a paid plan. From ${endsOn} ${FREE_RULE}` },
+      { p: "To keep all your history, choose Home or Family before then." },
+      { button: { label: "See plans", href: PLAN } },
     ],
     footer: [HELP],
   });
