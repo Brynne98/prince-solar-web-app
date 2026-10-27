@@ -51,11 +51,15 @@ create table if not exists private.billing (
   -- plants deleted on remove_on: booked removals (remove_on = billing date), or the
   -- plants dropped after a failed payment (remove_on = 30 days after Free)
   plants_to_remove  bigint[] not null default '{}',
+  -- never billed: the accounts from before billing (0115). No period or dates, no
+  -- charge, no extra-inverter cost; plan changes and renewal don't apply.
+  comped            boolean not null default false,
   remove_on         date,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
   constraint billing_paid_has_dates check (
-    (plan = 'free') = (period is null and billing_day is null and next_billing_date is null)),
+    case when plan = 'free' or comped then period is null and billing_day is null and next_billing_date is null
+         else period is not null and billing_day is not null and next_billing_date is not null end),
   constraint billing_free_books_nothing check (plan <> 'free' or (next_plan is null and next_period is null))
 );
 revoke all on table private.billing from public, anon, authenticated;
@@ -178,7 +182,7 @@ returns int language sql stable security definer set search_path = public, priva
              public.billing_extra_inverters(p_user,
                case when b.remove_on <= b.next_billing_date then b.plants_to_remove else '{}' end))
       from private.billing b
-     where b.user_id = p_user and b.plan <> 'free' and coalesce(b.next_plan, b.plan) <> 'free'), 0)
+     where b.user_id = p_user and b.plan <> 'free' and not b.comped and coalesce(b.next_plan, b.plan) <> 'free'), 0)
 $$;
 
 -- What an upgrade costs now and what the next charge becomes. p_added = inverters
@@ -261,6 +265,10 @@ begin
   if have + coalesce(cardinality(p_plant_inverters), 0) > coalesce(public.billing_plant_limit(v_plan), 2147483647) then
     return jsonb_build_object('ok', false, 'reason', 'upgrade_needed', 'extraInverters', extra);
   end if;
+  -- Never billed: extra inverters cost nothing, so nothing to confirm.
+  if exists (select 1 from private.billing b where b.user_id = p_user and b.comped) then
+    return jsonb_build_object('ok', true, 'extraInverters', 0, 'dueNow', 0);
+  end if;
   return jsonb_build_object('ok', true, 'extraInverters', extra,
     'dueNow', case when v_plan = 'family' and extra > 0
                    then (public.billing_upgrade_quote(p_user, 'family', extra))->'dueNow' else '0' end);
@@ -317,6 +325,9 @@ begin
   if b.plan is null or b.plan = 'free' then
     raise exception 'nothing to change on Free' using errcode = '22023';
   end if;
+  if b.comped then
+    raise exception 'this plan is free of charge' using errcode = '22023';
+  end if;
   if (rank->>p_plan)::int > (rank->>b.plan)::int then
     raise exception 'an upgrade starts at once, not at the billing date' using errcode = '22023';
   end if;
@@ -343,7 +354,7 @@ begin
   update private.billing
      set plants_to_remove = array(select distinct x from unnest(plants_to_remove || p_plant) x order by x),
          remove_on = next_billing_date, updated_at = now()
-   where user_id = p_user and plan <> 'free';
+   where user_id = p_user and plan <> 'free' and not comped;
   if not found then
     raise exception 'removal on Free is at once' using errcode = '22023';
   end if;
@@ -360,7 +371,7 @@ declare
   v_plan text; v_period text;
 begin
   select * into b from private.billing where user_id = p_user for update;
-  if b.plan is null or b.plan = 'free' then
+  if b.plan is null or b.plan = 'free' or b.comped then
     raise exception 'nothing to renew on Free' using errcode = '22023';
   end if;
   due := public.billing_amount_due(p_user);

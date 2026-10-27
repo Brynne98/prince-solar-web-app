@@ -1882,8 +1882,8 @@ function PlanSection({ billing, reload }) {
   return (
     <SettingsSection id="plan" title="Plan">
       <div className="plan-now">
-        <div className="plan-name">{PLAN_NAME[b.plan]}{paid ? `, ${b.period}` : ''}</div>
-        <div className="conn-meta">{paid
+        <div className="plan-name">{PLAN_NAME[b.plan]}{paid && b.period ? `, ${b.period}` : ''}</div>
+        <div className="conn-meta">{b.comped ? 'Free of charge. Every plant, all history kept.' : paid
           ? <>{rand(b.price)} {unit} · {b.nextPlan === 'free' ? 'no more payments' : <>next payment {rand(b.nextAmount)} on {billDay(b.nextDate)}</>}</>
           : 'One plant. After your first week we keep the last 24 hours.'}</div>
         {b.state === 'past_due' && <div className="conn-meta"><span className="conn-status warn">Payment didn’t go through</span></div>}
@@ -1916,7 +1916,7 @@ function PlanSection({ billing, reload }) {
           text={`It runs until ${billDay(b.nextDate)}. After that you’re on Free: we keep only the last 24 hours of readings. Alerts stay on; reports stop.`}
           action="Cancel plan" onConfirm={() => book('free')} onCancel={() => setMode(null)} />
       )}
-      {!mode && (
+      {!mode && !b.comped && (
         <div className="conn-add">
           {paid ? <>
             {!booked && <button type="button" className="ghost-btn" disabled={busy} onClick={() => book(b.plan, other)}>Switch to {other}</button>}
@@ -1970,7 +1970,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling }) 
   // browser dialog. 'confirming' holds the account_id whose card is open.
   const [confirming, setConfirming] = useState(null);
   const [leaving, setLeaving] = useState(null); // account_id folding away after a remove
-  const paidPlan = billing && billing.plan !== 'free';
+  const paidPlan = billing && billing.plan !== 'free' && !billing.comped; // never billed: remove at once
   const { billDay } = window.billingFmt;
   // On a paid plan a login's plants stay until the billing date, then go (0113).
   const remove = async (acc) => {

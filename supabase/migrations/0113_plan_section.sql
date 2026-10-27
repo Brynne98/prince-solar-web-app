@@ -22,6 +22,7 @@ begin
   select * into b from private.billing where user_id = auth.uid();
   return jsonb_build_object(
     'plan', coalesce(b.plan, 'free'), 'period', b.period, 'state', coalesce(b.state, 'active'),
+    'comped', coalesce(b.comped, false),
     'nextDate', b.next_billing_date,
     'nextAmount', public.billing_amount_due(auth.uid()),
     'price', public.billing_amount(coalesce(b.plan, 'free'), b.period, public.billing_extra_inverters(auth.uid())),
@@ -72,7 +73,7 @@ begin
   end if;
   select * into b from private.billing where user_id = auth.uid();
   -- A login with no plant has nothing to keep until the date.
-  if b.plan is null or b.plan = 'free'
+  if b.plan is null or b.plan = 'free' or b.comped
      or not exists (select 1 from public.plant_users where account_id = p_account and user_id = auth.uid()) then
     perform public.api_link_disconnect(p_account);
     return jsonb_build_object('result', 'removed');

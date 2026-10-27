@@ -416,6 +416,29 @@ select pg_temp.eq('authenticated cannot', has_function_privilege('authenticated'
 select pg_temp.eq('service_role can',     has_function_privilege('service_role', 'public.billing_amount_due(uuid)', 'execute'), true);
 select pg_temp.eq('billing table closed', has_table_privilege('authenticated', 'private.billing', 'select'), false);
 
+-- Accounts from before billing (0115): Family, never billed. Run last: it comps every account.
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000000081', 'old@t.test');
+insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values ('00000000-0000-0000-0000-000000000082', '00000000-0000-0000-0000-000000000081', 'old@login.test');
+insert into public.plant_users (plant_id, user_id, account_id, paused) values
+  (9000081, '00000000-0000-0000-0000-000000000081', '00000000-0000-0000-0000-000000000082', false),
+  (9000082, '00000000-0000-0000-0000-000000000081', '00000000-0000-0000-0000-000000000082', true);
+\ir ../../supabase/migrations/0115_existing_accounts_comped.sql
+do $$
+declare u constant uuid := '00000000-0000-0000-0000-000000000081';
+begin
+  perform pg_temp.eq('existing account on Family', (select plan || ' ' || comped from private.billing where user_id = u), 'family true');
+  perform pg_temp.eq('its plants unpaused', (select count(*)::int from public.plant_users where user_id = u and paused), 0);
+  perform pg_temp.eq('never billed', public.billing_amount_due(u), 0);
+  perform pg_temp.eq('extra plants cost nothing', (public.billing_may_link(u, 'x@login.test', array[1, 1, 1])->>'extraInverters')::int, 0);
+  perform pg_temp.raises('no plan changes', format('select public.billing_book_change(%L, %L)', u, 'home'), 'free of charge');
+  perform pg_temp.raises('no renewal', format('select public.billing_renew(%L)', u), 'nothing to renew');
+  perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('status says comped', (public.api_billing_status()->>'comped')::boolean, true);
+  perform pg_temp.eq('remove login at once', public.api_link_remove('00000000-0000-0000-0000-000000000082')->>'result', 'removed');
+  perform set_config('request.jwt.claims', '', true);
+  perform pg_temp.eq('not trimmed', (select count(*)::int from public.free_trimmed_plants() x where x in (9000081, 9000082)), 0);
+end $$;
+
 \set QUIET off
 select 'PASS' as billing_tests;
 rollback;
