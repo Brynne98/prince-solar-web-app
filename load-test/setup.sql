@@ -18,7 +18,7 @@ begin
     insert into auth.users (id, aud, role, email, email_confirmed_at)
       values (uid, 'authenticated', 'authenticated', 'lt' || k || '@loadtest.invalid', now());
     insert into private.sunsynk_accounts (user_id, sunsynk_username, access_token, access_expires_at, status, provider)
-      values (uid, 'lt' || k, 'fake-token', 4102444800, 'active', 'sunsynk')
+      values (uid, 'lt' || k, 'at:lt' || k, 4102444800000, 'active', 'sunsynk')  -- stack.mjs's token
       returning id into aid;
     insert into public.plant_users (plant_id, user_id, account_id, plant_name)
       values (pid, uid, aid, 'Load test ' || k);
