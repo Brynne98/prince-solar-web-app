@@ -183,7 +183,8 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync }) {
 // header. A dead SunSynk login puts a red dot on the avatar and on Account.
 function AccountMenu({ user, plantCount, alert, onAccount, active, variant }) {
   const [open, setOpen, ref] = usePopover();
-  const sub = alert ? 'Reconnect a login' : plantCount + (plantCount === 1 ? ' plant' : ' plants');
+  // plantCount is null while the plants load: the row shows, its count waits
+  const sub = alert ? 'Reconnect a login' : plantCount == null ? '' : plantCount + (plantCount === 1 ? ' plant' : ' plants');
   return (
     <div className={'acct acct-' + variant} ref={ref}>
       <button type="button" className={'acct-btn' + (alert ? ' needs' : '')} aria-haspopup="menu" aria-expanded={open}
@@ -689,6 +690,7 @@ window.SaveToast = SaveToast;
 // Shown while the session and the SunSynk link are still being checked, before App
 // mounts. Same frame as App's own not-yet-loaded gate, so the hand-over does not flash.
 function BootShell() {
+  const user = useUser();
   // No remembered tab means this browser hasn't shown this account a dashboard since the
   // last sign-out: most likely a new account on its way to Connect SunSynk. A skeleton
   // would flash a dashboard it will never get, so show the empty sign-in backdrop.
@@ -696,16 +698,20 @@ function BootShell() {
   const saved = window.resetAsked() ? 'account' : tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab'));
   const tab = pageOk(TABS, saved) ? saved : 'live';
   return (
-    <Frame tabs={TABS} tab={tab} busy head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /></>}>
+    <Frame tabs={TABS} tab={tab} busy account={{ user, plantCount: null, onAccount: () => {} }}
+      head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /></>}>
       {/* TabSkeleton is in tabs.js, which loads after sign-in (SOLAR-143) */}
       {tab !== 'settings' && tab !== 'account' && window.TabSkeleton && <window.TabSkeleton tab={tab} />}
     </Frame>
   );
 }
 
-// The signed-in person, for the account menu: name, initials, email.
+// The signed-in person, for the account menu: name, initials, email. Kept between
+// BootShell and App so the name doesn't blank out at the hand-over.
+let lastUser = { name: '', initials: '', email: '' };
 function useUser() {
-  const [user, setUser] = useState({ name: '', initials: '', email: '' });
+  const [user, setUserState] = useState(lastUser);
+  const setUser = (u) => { lastUser = u; setUserState(u); };
   useEffect(() => {
     window.sb.auth.getSession().then(({ data }) => {
       const u = data?.session?.user; if (!u) return;
@@ -1032,7 +1038,7 @@ function App({ links }) {
 
   const go = (id) => { setTab(id); toTop(); if (location.hash) history.replaceState(history.state, '', location.pathname + location.search); };
   const loginDead = links.accounts.some(a => a.status === 'needs_relink');
-  const account = { user, plantCount: (me?.plants || []).length, alert: loginDead, onAccount: () => go('account'), active: tab === 'account' };
+  const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, onAccount: () => go('account'), active: tab === 'account' };
   // a plant whose every login stopped working reads Reconnect in the menu
   const loginsCut = (id) => {
     const ls = links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(id)));
@@ -1049,21 +1055,26 @@ function App({ links }) {
   //
   // The whole frame with skeletons where the data will go. Pages stay live while loading:
   // there is no reason to trap someone on Live because the first snapshot hasn't landed.
+  const dataPage = tab !== 'settings' && tab !== 'account';
   if (!snap) {
     return (
-      <Frame tabs={TABS} tab={tab} onTab={go} account={me ? account : null} busy steps={steps}
+      <Frame tabs={TABS} tab={tab} onTab={go} account={account} busy steps={steps}
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
           <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} /></>}>
         {err && <div className="notice offline" role="alert"><p><b>Can't reach the server.</b> Retrying every minute.</p></div>}
-        {/* Settings and Account never touch the snapshot: they draw for real. */}
-        {tab === 'settings' ? settingsPage
-          : tab === 'account' ? accountPage
-          : <window.TabSkeleton tab={tab} />}
+        {null}
+        {/* Settings and Account never touch the snapshot: they draw for real. They sit in
+            the same slots as in the loaded page below, so the first reading doesn't remount
+            them (the Plan section flashed back to its outline). */}
+        <div className="page">
+          {tab === 'settings' && settingsPage}
+          {tab === 'account' && accountPage}
+          {dataPage && <window.TabSkeleton tab={tab} />}
+        </div>
       </Frame>
     );
   }
 
-  const dataPage = tab !== 'settings' && tab !== 'account';
   const old = dataPage && plantStatus(snap, Date.now()).old;
   return (
     <Frame tabs={TABS} tab={tab} onTab={go} account={account} steps={steps}
@@ -1076,14 +1087,14 @@ function App({ links }) {
       {dataPage && <PageNotice snap={snap} cutOff={plantCutOff} onReconnect={() => openSettings('connection')}
         relinkedAt={relinked?.plantId === plantId ? relinked.at : null} />}
       <div className={'page' + (old ? ' old' : '')}>
+        {tab === 'settings' && settingsPage}
+        {tab === 'account' && accountPage}
         {tab === 'live' && <window.LiveTab snap={snap} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
           onOpenSettings={openSettings} />}
         {tab === 'solar' && <window.SolarTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'home' && <window.HomeTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} />}
         {tab === 'grid' && <window.GridTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} refreshKey={refreshKey} />}
-        {tab === 'settings' && settingsPage}
-        {tab === 'account' && accountPage}
       </div>
     </Frame>
   );
