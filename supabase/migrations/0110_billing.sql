@@ -190,7 +190,8 @@ $$;
 -- read on Free, where the first payment is the full price and starts the period.
 create or replace function public.billing_upgrade_quote(
   p_user uuid, p_plan text, p_added int default 0, p_period text default null,
-  p_today date default current_date)
+  -- billing days are South African dates (0116 charges on the same day)
+  p_today date default (now() at time zone 'Africa/Johannesburg')::date)
 returns jsonb language plpgsql stable security definer set search_path = public, private, pg_temp as $$
 declare
   b private.billing;

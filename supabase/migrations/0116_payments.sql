@@ -79,6 +79,9 @@ begin
   if b.state = 'past_due' then raise exception 'settle the failed payment first' using errcode = '22023'; end if;
   v_kind := case when coalesce(b.plan, 'free') = 'free' then 'start' else 'upgrade' end;
   v_period := case when v_kind = 'start' then coalesce(p_period, 'monthly') else b.period end;
+  if v_period not in ('monthly', 'yearly') or p_plan not in ('home', 'family') then
+    raise exception 'unknown plan or period' using errcode = '22023';
+  end if;
   q := public.billing_upgrade_quote(p_user, p_plan, greatest(p_added, 0),
          case when v_kind = 'start' then v_period end, today);
   if (q->>'dueNow')::int <= 0 then
@@ -123,12 +126,12 @@ returns void language plpgsql set search_path = public, private, pg_temp as $$
 declare
   active int := (select count(*) from public.plant_users where user_id = p_user and not paused);
   room int := p_added;
+  resumed bigint[] := '{}';
   r record;
 begin
   for r in select pu.plant_id, (select count(*) from private.inverters i where i.plant_id = pu.plant_id)::int as inv
              from public.plant_users pu
             where pu.user_id = p_user and pu.paused
-              and pu.plant_id <> all (coalesce((select plants_to_remove from private.billing where user_id = p_user), '{}'))
             order by pu.linked_at, pu.plant_id loop
     if active < coalesce(public.billing_plant_limit(p_plan), 3) then
       null;
@@ -139,7 +142,14 @@ begin
     end if;
     update public.plant_users set paused = false where user_id = p_user and plant_id = r.plant_id;
     active := active + 1;
+    resumed := resumed || r.plant_id;
   end loop;
+  -- A plant stopped by a move to Free and now resumed is no longer up for deletion;
+  -- the ones still paused stay booked.
+  update private.billing
+     set plants_to_remove = array(select x from unnest(plants_to_remove) x where x <> all (resumed)),
+         remove_on = case when plants_to_remove <@ resumed then null else remove_on end
+   where user_id = p_user and plants_to_remove && resumed;
 end $$;
 
 -- p_card: Paystack's authorization object; saved when Paystack says it can be charged
@@ -162,6 +172,18 @@ begin
   end if;
   select * into b from private.billing where user_id = c.user_id for update;
   v_from := coalesce(b.plan, 'free');
+  -- Paid on a card page opened earlier, but the account has moved on since: a second
+  -- start, an upgrade after a move to Free or a failed renewal, a second settle. Paystack has the
+  -- money; nothing is applied. The error marks it for a refund from Paystack's dashboard.
+  if (c.kind = 'start' and v_from <> 'free')
+     or (c.kind = 'upgrade' and (v_from = 'free' or b.state = 'past_due' or b.period is distinct from c.period))
+     or (c.kind = 'settle' and b.state is distinct from 'past_due') then
+    update private.billing_charges set status = 'paid', settled_at = now(),
+           error = 'refund: paid after the account changed (' || v_from || ', ' || coalesce(b.state, 'active') || ')'
+     where reference = p_reference;
+    raise warning 'billing charge % paid but not applied: refund it', p_reference;
+    return jsonb_build_object('status', 'paid', 'applied', false);
+  end if;
   update private.billing_charges set status = 'paid', error = null, settled_at = now() where reference = p_reference;
 
   if c.kind = 'start' then
@@ -171,9 +193,7 @@ begin
     on conflict (user_id) do update
       set plan = excluded.plan, period = excluded.period, billing_day = excluded.billing_day,
           next_billing_date = excluded.next_billing_date, next_plan = null, next_period = null,
-          state = 'active', past_due_since = null, updated_at = now(),
-          -- on Free, booked removals only come from a failed payment: paying keeps them
-          plants_to_remove = '{}', remove_on = null;
+          state = 'active', past_due_since = null, updated_at = now();
   elsif c.kind = 'upgrade' then
     update private.billing set plan = c.plan, next_plan = null, updated_at = now()
      where user_id = c.user_id;
@@ -314,6 +334,16 @@ declare
   out jsonb := '[]'::jsonb;
   p bigint;
 begin
+  -- One run at a time: a second run waits, then sees the first one's work (each
+  -- query below reads after the lock), so nothing is renewed or retried twice.
+  perform pg_advisory_xact_lock(hashtext('billing_run'));
+
+  -- A renewal the last run opened but never reported (it timed out or crashed) fails
+  -- now, so the account goes past due and the retries take over.
+  for c in select * from private.billing_charges where kind = 'renewal' and status = 'pending' and created_on < today loop
+    perform public.billing_charge_failed(c.reference, 'not charged: the run stopped');
+  end loop;
+
   -- Unpaid after the last try (day 7): Free.
   for b in select * from private.billing where state = 'past_due' and today - past_due_since >= 8 loop
     perform private.billing_to_free(b.user_id, today);

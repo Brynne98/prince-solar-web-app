@@ -65,7 +65,14 @@ async function chargeCard(c: { reference: string; amount: number; card: string; 
     });
     return await settle(tx);
   } catch (e) {
+    // A timeout can still have taken the money: ask Paystack before calling it failed.
     const msg = e instanceof Error ? e.message : String(e);
+    const tx = await paystack<Tx>("GET", `/transaction/verify/${encodeURIComponent(c.reference)}`).catch(() => null);
+    if (tx) {
+      const r = await settle(tx);
+      if (r) return r;
+      if (tx.status !== "failed") return null; // still open: the webhook settles it
+    }
     await rpc("billing_charge_failed", { p_reference: c.reference, p_error: msg });
     return "failed" as const;
   }

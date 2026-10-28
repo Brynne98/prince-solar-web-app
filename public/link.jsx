@@ -117,10 +117,14 @@ const billingCall = async (route, body) => {
   if (!res.ok) throw new Error(out.error || 'payment failed');
   return out;
 };
-const PLAN_DONE = `${location.pathname}?tab=account&section=plan`;
+// The Plan section, on the plant the user was looking at.
+const planUrl = (extra = '') => {
+  const plant = new URLSearchParams(location.search).get('plant');
+  return `${location.pathname}?tab=account&section=plan${plant ? `&plant=${encodeURIComponent(plant)}` : ''}${extra}`;
+};
 const billingPaid = (plan) => {
   window.track('upgrade_done', plan ? { plan } : {});
-  location.assign(`${PLAN_DONE}&billing=paid`);
+  location.assign(planUrl('&billing=paid'));
 };
 
 window.startUpgrade = async function startUpgrade(plan, period, added = 0) {
@@ -154,7 +158,7 @@ window.billingReturn = async function billingReturn(billingStatus) {
   const q = new URLSearchParams(location.search);
   const ref = q.get('reference'), done = q.get('billing'), pay = q.get('pay');
   if (!ref && !done && !pay) return;
-  history.replaceState(null, '', PLAN_DONE);
+  history.replaceState(null, '', planUrl());
   if (pay) {
     if (billingStatus?.state === 'past_due') await window.settlePayment();
     return;

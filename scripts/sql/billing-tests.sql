@@ -502,6 +502,33 @@ begin
   perform pg_temp.eq('login kept: it still has a plant', (select count(*)::int from private.sunsynk_accounts where user_id = s), 1);
   perform pg_temp.eq('booking cleared', (select cardinality(plants_to_remove) from private.billing where user_id = s), 0);
 
+  -- paying Family after the move to Free resumes the stopped plant and keeps it
+  o := public.billing_charge_open(s, 'family', 'monthly');
+  insert into public.plant_users (plant_id, user_id, account_id, plant_name, linked_at, paused) values
+    (9000095, s, '00000000-0000-0000-0000-000000000094', 'Home three', '2026-01-03', true);
+  update private.billing set plants_to_remove = '{9000095}', remove_on = t + 30 where user_id = s;
+  perform public.billing_charge_paid(o->>'reference', v_card);
+  perform pg_temp.eq('resumed after Free', (select count(*)::int from public.plant_users where user_id = s and paused), 0);
+  perform pg_temp.eq('no longer booked', (select cardinality(plants_to_remove)::text || coalesce(remove_on::text, '-') from private.billing where user_id = s), '0-');
+
+  -- a second card page paid after the first: kept for a refund, nothing applied
+  update private.billing set plan = 'free', period = null, billing_day = null, next_billing_date = null where user_id = s;
+  o := public.billing_charge_open(s, 'home', 'yearly');
+  ref := (public.billing_charge_open(s, 'home', 'monthly'))->>'reference';
+  perform public.billing_charge_paid(o->>'reference', v_card);
+  perform pg_temp.eq('stale start not applied', (public.billing_charge_paid(ref, v_card)->>'applied')::boolean, false);
+  perform pg_temp.eq('first one stands', (select period from private.billing where user_id = s), 'yearly');
+  perform pg_temp.eq('marked for refund', (select error like 'refund:%' from private.billing_charges where reference = ref), true);
+  perform pg_temp.raises('unknown period refused', format('select public.billing_charge_open(%L, %L, %L)', n, 'home', 'weekly'), 'unknown plan or period');
+
+  -- a renewal a run opened but never reported fails on the next run
+  update private.billing set next_billing_date = t where user_id = s;
+  perform public.billing_run(t);
+  perform public.billing_run(t + 1);
+  perform pg_temp.eq('orphaned renewal failed', (select count(*)::int from private.billing_charges
+    where user_id = s and kind = 'renewal' and status = 'failed' and error = 'not charged: the run stopped'), 1);
+  perform pg_temp.eq('then past due from the billing date', (select past_due_since from private.billing where user_id = s), t);
+
   -- no saved card: the renewal fails at once
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values (n, 'home', 'monthly', 5, t);
   perform pg_temp.eq('no card: not sent to Paystack', (select count(*)::int from jsonb_array_elements(public.billing_run(t)) x
