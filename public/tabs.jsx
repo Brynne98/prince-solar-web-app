@@ -1854,7 +1854,13 @@ function PlanSection({ billing, reload }) {
   const { useState } = React;
   const [mode, setMode] = useState(null); // null | 'change' | 'cancel' | 'plans'
   const [busy, setBusy] = useState(false);
-  if (!billing) return null;
+  // Its outline while the plan loads, so the sections below don't jump down.
+  if (!billing) return (
+    <SettingsSection id="plan" title="Plan">
+      <div className="plan-now" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '2px 0 4px' }}><window.Skeleton w={120} h={16} /><window.Skeleton w={220} h={12} /></div>
+      <div className="conn-add"><window.Skeleton w={110} h={34} r={10} /></div>
+    </SettingsSection>
+  );
   const { rand, billDay, perUnit } = window.billingFmt;
   const b = billing;
   const paid = b.plan !== 'free';
@@ -2603,7 +2609,7 @@ function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
       <div className="settings-page">
         <div className="page-head">
           <h1>Account</h1>
-          {email && <p className="mono">{email}</p>}
+          <p className="mono">{email || ' '}</p>{/* its line held while the session loads */}
         </div>
         <PlanSection billing={billing} reload={reloadBilling} />
         <SunSynkConnectionSection onChanged={onPlantConfigSaved} links={links} billing={billing} reloadBilling={reloadBilling} />
