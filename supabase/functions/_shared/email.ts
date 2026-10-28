@@ -561,6 +561,8 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, unsubs
 // plan changes come from us; Paystack's own receipts are off. Prices are final: the
 // company isn't VAT-registered, so no VAT line. No unsubscribe: these are about money.
 const PLAN = `${APP}/?tab=account&section=plan`;
+// "Pay with another card": the Plan section opens Paystack's card page for the failed payment.
+export const PAY_URL = `${PLAN}&pay=1`;
 // What Free means after its first week, said the same way in every email.
 const FREE_RULE = "we keep only the last 24 hours of readings. Alerts stay on; reports stop.";
 const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;
