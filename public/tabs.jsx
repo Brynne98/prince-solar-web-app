@@ -1844,7 +1844,102 @@ function SettingsSection({ id, title, note, children }) {
 // the last login goes there is nothing left to show and the app turns to its empty pages.
 // `links` is the gate's own list (LinkGate), already read before the page opened, so the
 // section draws at once and its changes reach the rest of the app (SOLAR-96).
-function SunSynkConnectionSection({ onChanged, links }) {
+// The plan (SOLAR-208): what it is, the next payment, and changes booked for the billing
+// date. Downgrade, cancel and a monthly/yearly switch wait for that date; going up is an
+// upgrade and charges now (window.startUpgrade). Plants go first, then the plan: a
+// downgrade the plants don't fit is refused, and the note points at the logins below.
+const PLAN_NAME = { free: 'Free', home: 'Home', family: 'Family' };
+const PLAN_RANK = { free: 0, home: 1, family: 2 };
+function PlanSection({ billing, reload }) {
+  const { useState } = React;
+  const [mode, setMode] = useState(null); // null | 'change' | 'cancel' | 'plans'
+  const [busy, setBusy] = useState(false);
+  // Its outline while the plan loads, so the sections below don't jump down.
+  if (!billing) return (
+    <SettingsSection id="plan" title="Plan">
+      <div className="plan-now" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '2px 0 4px' }}><window.Skeleton w={120} h={16} /><window.Skeleton w={220} h={12} /></div>
+      <div className="conn-add"><window.Skeleton w={110} h={34} r={10} /></div>
+    </SettingsSection>
+  );
+  const { rand, billDay, perUnit } = window.billingFmt;
+  const b = billing;
+  const paid = b.plan !== 'free';
+  const unit = perUnit(b.period);
+  const other = b.period === 'yearly' ? 'monthly' : 'yearly';
+  const book = async (plan, period) => {
+    setBusy(true);
+    const { error } = await window.sb.rpc('api_billing_change', { p_plan: plan, p_period: period ?? null });
+    setBusy(false);
+    if (error) {
+      window.toast(/remove plants first/.test(error.message)
+        ? `${PLAN_NAME[plan]} covers ${plan === 'family' ? '3 plants' : 'one plant'}. Remove logins below until that many are left, then try again.`
+        : 'Couldn’t change your plan. Try again.', { error: true });
+      return;
+    }
+    setMode(null);
+    await reload();
+    window.track(plan === b.plan ? 'plan_change_undone' : 'downgrade_done', { plan, period: period ?? b.period });
+  };
+  // A change booked for the billing date, and how to undo it.
+  const booked = !paid || !(b.nextPlan || b.nextPeriod) ? null
+    : b.nextPlan === 'free' ? [`Ends on ${billDay(b.nextDate)}, then you’re on Free.`, `Keep ${PLAN_NAME[b.plan]}`]
+    : b.nextPlan ? [`Moves to ${PLAN_NAME[b.nextPlan]} on ${billDay(b.nextDate)}.`, `Keep ${PLAN_NAME[b.plan]}`]
+    : [`Switches to ${b.nextPeriod} on ${billDay(b.nextDate)}.`, `Stay ${b.period}`];
+  return (
+    <SettingsSection id="plan" title="Plan">
+      <div className="plan-now">
+        <div className="plan-name">{PLAN_NAME[b.plan]}{paid && b.period ? `, ${b.period}` : ''}</div>
+        <div className="conn-meta">{b.comped ? 'Free of charge. Every plant, all history kept.' : paid
+          ? <>{rand(b.price)} {unit} · {b.nextPlan === 'free' ? 'no more payments' : <>next payment {rand(b.nextAmount)} on {billDay(b.nextDate)}</>}</>
+          : 'One plant. After your first week we keep the last 24 hours.'}</div>
+        {b.state === 'past_due' && (
+          <div className="plan-booked">
+            <span className="conn-status warn">Payment didn’t go through</span>
+            <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
+          </div>
+        )}
+        {booked && (
+          <div className="plan-booked">
+            <span className="conn-status warn">{booked[0]}</span>
+            <button type="button" className="ghost-btn" disabled={busy} onClick={() => book(b.plan, b.period)}>{booked[1]}</button>
+          </div>
+        )}
+      </div>
+      {(mode === 'plans' || mode === 'upgrade') && <div className="conn-form"><window.Paywall reason={mode} onCancel={() => setMode(null)} /></div>}
+      {mode === 'change' && (
+        <div className="conn-form plan-choices">
+          {['free', 'home', 'family'].filter(p => p !== b.plan).map(p => (
+            <div key={p} className="plan-choice">
+              <div>
+                <div className="plan-choice-name">{PLAN_NAME[p]}</div>
+                <div className="conn-meta">{p === 'family' ? 'Up to 3 plants, all history kept' : p === 'home' ? '1 plant, all history kept' : '1 plant, last 24 hours kept'}</div>
+              </div>
+              {PLAN_RANK[p] > PLAN_RANK[b.plan]
+                ? <button type="button" className="save-btn" onClick={() => setMode('upgrade')}>Upgrade</button>
+                : <button type="button" className="ghost-btn" disabled={busy} onClick={() => (p === 'free' ? setMode('cancel') : book(p))}>{p === 'free' ? 'Cancel plan' : `Move on ${billDay(b.nextDate)}`}</button>}
+            </div>
+          ))}
+          <div className="conn-form-actions"><button type="button" className="ghost-btn" onClick={() => setMode(null)}>Close</button></div>
+        </div>
+      )}
+      {mode === 'cancel' && (
+        <ConfirmCard title={<>Cancel {PLAN_NAME[b.plan]}?</>}
+          text={`It runs until ${billDay(b.nextDate)}. After that you’re on Free: we keep only the last 24 hours of readings. Alerts stay on; reports stop.`}
+          action="Cancel plan" onConfirm={() => book('free')} onCancel={() => setMode(null)} />
+      )}
+      {!mode && !b.comped && (
+        <div className="conn-add">
+          {paid ? <>
+            {!booked && <button type="button" className="ghost-btn" disabled={busy} onClick={() => book(b.plan, other)}>Switch to {other}</button>}
+            <button type="button" className="ghost-btn" onClick={() => setMode('change')}>Change plan</button>
+          </> : <button type="button" className="save-btn" onClick={() => setMode('plans')}>See plans</button>}
+        </div>
+      )}
+    </SettingsSection>
+  );
+}
+
+function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling }) {
   const { useState } = React;
   const { accounts, error, refresh } = links;
   const [busy, setBusy] = useState(null);
@@ -1870,7 +1965,10 @@ function SunSynkConnectionSection({ onChanged, links }) {
     const readError = await refresh();
     setMode(null); onChanged && onChanged(linked);
     if (readError) { fail('Connected. Reload the page to see it here.'); return; }
-    window.toast(adding ? 'Login added.' + plantsLine(linked?.plants, 'now in your plant list') : 'Login reconnected.');
+    const paused = new Set((linked?.paused || []).map(Number));
+    const on = (linked?.plants || []).filter(p => !paused.has(Number(p.id)));
+    const off = (linked?.plants || []).filter(p => paused.has(Number(p.id)));
+    window.toast(adding ? 'Login added.' + plantsLine(on, 'now in your plant list') + plantsLine(off, 'paused, not on your plan') : 'Login reconnected.');
   };
   // " Plant 495944 is now in your plant list." for one plant, "… and … are …" for more
   const plantsLine = (plants, what) => {
@@ -1883,12 +1981,23 @@ function SunSynkConnectionSection({ onChanged, links }) {
   // browser dialog. 'confirming' holds the account_id whose card is open.
   const [confirming, setConfirming] = useState(null);
   const [leaving, setLeaving] = useState(null); // account_id folding away after a remove
+  const paidPlan = billing && billing.plan !== 'free' && !billing.comped; // never billed: remove at once
+  const { billDay } = window.billingFmt;
+  // On a paid plan a login's plants stay until the billing date, then go (0113).
   const remove = async (acc) => {
     const last = live.length === 1;
     setConfirming(null);
     setBusy(acc.account_id);
     try {
-      await window.disconnectSunsynk(acc.account_id);
+      const { data: res, error } = await window.sb.rpc('api_link_remove', { p_account: acc.account_id });
+      if (error) throw error;
+      if (res?.result === 'booked') {
+        await Promise.all([refresh(), reloadBilling && reloadBilling()]);
+        setBusy(null);
+        window.toast(`Login stays until ${billDay(res.on)}, then it’s deleted.`);
+        return;
+      }
+      window.track('login_remove_done');
       // The last login: re-reading the list leaves no plant, so the app turns to its empty
       // pages in place. A reload here blanked the screen first (SOLAR-98).
       const gone = 'Login removed.' + plantsLine(acc.plants, 'no longer in your plant list');
@@ -1902,6 +2011,10 @@ function SunSynkConnectionSection({ onChanged, links }) {
       if (readError) fail('Removed. Reload the page to update this list.'); else { setLeaving(null); window.toast(gone); }
     } catch (e) { fail('Couldn’t remove the login. Try again.'); setBusy(null); setLeaving(null); }
   };
+  // Inverters the paused plants add to the bill if collected: those past the 3rd
+  // plant, counting the account's active plants first (Family covers 3).
+  const activeTotal = live.reduce((n, a) => n + (a.plants || []).filter(p => !p.paused).length, 0);
+  const pricedInverters = (paused) => paused.reduce((sum, p, i) => sum + (activeTotal + i + 1 > 3 ? Number(p.inverters) || 0 : 0), 0);
   const n = live.length;
   const title = <>SunSynk logins{n > 0 && <span className="sset-count">{n}</span>}</>;
   return (
@@ -1920,6 +2033,21 @@ function SunSynkConnectionSection({ onChanged, links }) {
         const stale = ok && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
         const word = !ok ? 'Sign-in expired' : stale ? 'Not updating' : 'Connected';
         const plants = acc.plants || [];
+        // Each plant's state (SOLAR-208): collecting, paused (not on the plan), or booked
+        // for deletion. Paused ones are listed so the owner sees everything on the login.
+        const on = plants.filter(p => !p.paused && !p.remove_on);
+        const off = plants.filter(p => p.paused);
+        const going = plants.filter(p => p.remove_on && !p.paused);
+        const keep = async () => {
+          setBusy(acc.account_id);
+          for (const p of going) {
+            const { error } = await window.sb.rpc('api_billing_keep', { p_plant: p.plant_id });
+            if (error) { fail(/needed for your plan change/.test(error.message) ? 'Your plan change needs this removed. Undo the change in Plan first.' : 'Couldn’t keep it. Try again.'); break; }
+          }
+          await Promise.all([refresh(), reloadBilling && reloadBilling()]);
+          setBusy(null);
+        };
+        const name = p => p.plant_name || 'Plant ' + p.plant_id;
         return (
           <div key={acc.account_id} className={'conn-row' + (leaving === acc.account_id ? ' leaving' : '')}>
             <div className="conn-text">
@@ -1927,28 +2055,37 @@ function SunSynkConnectionSection({ onChanged, links }) {
                   when it was added. */}
               <div className="conn-user">
                 <span className="mono">{acc.sunsynk_username}</span>
-                {plants.length > 0 && <span className="conn-plants"> · {plants.map(p => p.plant_name || 'Plant ' + p.plant_id).join(', ')}</span>}
+                {on.length > 0 && <span className="conn-plants"> · {on.map(name).join(', ')}</span>}
               </div>
               <div className="conn-meta">
                 <span className={'conn-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
                 {acc.last_ok_at ? ' · last reading ' + ago(acc.last_ok_at) : ''}
               </div>
               {!plants.length && <div className="conn-meta">No plant shared with this login.</div>}
+              {off.length > 0 && <div className="conn-meta"><span className="conn-status warn">Paused, not on your plan</span> · {off.map(name).join(', ')}</div>}
+              {going.map(p => <div key={p.plant_id} className="conn-meta"><span className="conn-status warn">Deleted on {new Date(p.remove_on + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span> · {name(p)}</div>)}
             </div>
             <div className="conn-actions">
               {!ok && mode !== acc.account_id && <button type="button" className="save-btn" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
+              {going.length > 0 && <button type="button" className="ghost-btn" onClick={keep} disabled={busy === acc.account_id}>Keep</button>}
+              {ok && off.length > 0 && mode !== 'upgrade:' + acc.account_id && <button type="button" className="save-btn" onClick={() => setMode('upgrade:' + acc.account_id)}>Upgrade</button>}
               <button type="button" className="ghost-btn" onClick={() => setConfirming(confirming === acc.account_id ? null : acc.account_id)} disabled={busy === acc.account_id}>
                 {busy === acc.account_id ? 'Removing…' : 'Remove'}
               </button>
             </div>
             {/* the reconnect form and the remove card sit under the whole row, full width */}
+            {mode === 'upgrade:' + acc.account_id && (
+              <div className="conn-form"><window.Paywall reason="paused" paused={off.map(name)} added={pricedInverters(off)} onCancel={() => setMode(null)} /></div>
+            )}
             {mode === acc.account_id && (
               <window.LinkForm compact relink initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
             )}
             {confirming === acc.account_id && (
               <ConfirmCard
                 title={<>Remove <b>{acc.sunsynk_username}</b>?</>}
-                text={'This plant’s history is deleted too, unless another account shares it.' + (live.length === 1 ? ' It’s your only login. Your pages stay empty until you add one.' : '')}
+                text={paidPlan && plants.length
+                  ? `It stays until ${billDay(billing.nextDate)}, then it’s deleted with its history, unless another account shares it.`
+                  : 'This plant’s history is deleted too, unless another account shares it.' + (live.length === 1 ? ' It’s your only login. Your pages stay empty until you add one.' : '')}
                 action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
             )}
           </div>
@@ -1957,7 +2094,7 @@ function SunSynkConnectionSection({ onChanged, links }) {
       {!unread && (mode === 'add'
         ? <div className="conn-row conn-add-row"><div className="conn-text">
             {/* Cancel re-reads too: a login with no plant yet is saved but not listed. */}
-            <window.LinkForm compact onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
+            <window.LinkForm compact hasPlant={live.some(a => (a.plants || []).length > 0)} onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
           </div></div>
         : <div className="conn-add">
             <button type="button" className="save-btn" onClick={() => setMode('add')}>
@@ -2461,15 +2598,21 @@ function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
   const { useState, useEffect } = React;
   const [user, setUser] = useState(null);
   useEffect(() => { window.sb.auth.getSession().then(({ data }) => setUser(data?.session?.user || null)).catch(() => {}); }, []);
+  // The plan, read once here: the Plan section shows it and Remove login needs it.
+  const [billing, setBilling] = useState(null);
+  const reloadBilling = () => window.sb.rpc('api_billing_status').then(({ data }) => { if (data) setBilling(data); return data; });
+  // Back from a payment: billingReturn checks it (a paid one reloads the page).
+  useEffect(() => { reloadBilling().then(b => window.billingReturn(b)); }, []);
   const email = user?.email || null;
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
       <div className="settings-page">
         <div className="page-head">
           <h1>Account</h1>
-          {email && <p className="mono">{email}</p>}
+          <p className="mono">{email || ' '}</p>{/* its line held while the session loads */}
         </div>
-        <SunSynkConnectionSection onChanged={onPlantConfigSaved} links={links} />
+        <PlanSection billing={billing} reload={reloadBilling} />
+        <SunSynkConnectionSection onChanged={onPlantConfigSaved} links={links} billing={billing} reloadBilling={reloadBilling} />
         <NotificationsSection userId={user?.id} />
         {links?.accounts?.length > 0 && <DownloadSection />}
         {email && user.app_metadata?.providers?.includes('email') && <PasswordSection email={email} />}

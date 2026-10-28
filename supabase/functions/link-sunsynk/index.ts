@@ -8,41 +8,9 @@
 //
 // This is the only place a SunSynk password ever touches the backend. Keep it that
 // way: no console.log of the body, no error message that includes input.
-import { db, linkAccount } from "../_shared/sunsynk.ts";
+import { db, linkAccount, PlanRefused } from "../_shared/sunsynk.ts";
 import { serve } from "../_shared/errors.ts";
-
-// Browser origins allowed to call this. app.princesolarhub.co.za in
-// production, the two local dev ports otherwise. Anything else is refused at preflight. A custom domain is
-// added with the LINK_ALLOWED_ORIGINS secret (comma-separated), no redeploy of code:
-//   supabase secrets set LINK_ALLOWED_ORIGINS=https://app.example.com,https://example.com
-const DEFAULT_ORIGINS = [
-  "https://app.princesolarhub.co.za",
-  // Until the .com 301 is live (SOLAR-190).
-  "https://app.princesolarhub.com",
-  "http://localhost:3003",
-  "http://localhost:3011",
-  "http://127.0.0.1:3003",
-];
-const ALLOWED_ORIGINS = new Set([
-  ...DEFAULT_ORIGINS,
-  ...(Deno.env.get("LINK_ALLOWED_ORIGINS") ?? "").split(",").map((o) => o.trim()).filter(Boolean),
-]);
-
-function corsHeaders(origin: string | null): Record<string, string> {
-  const allow = origin && ALLOWED_ORIGINS.has(origin) ? origin : "";
-  return {
-    "Access-Control-Allow-Origin": allow,
-    "Access-Control-Allow-Headers": "authorization, content-type, apikey",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    Vary: "Origin",
-  };
-}
-
-const json = (b: unknown, status: number, cors: Record<string, string>) =>
-  new Response(JSON.stringify(b), {
-    status,
-    headers: { "Content-Type": "application/json", ...cors },
-  });
+import { corsHeaders, json } from "../_shared/cors.ts";
 
 serve("link-sunsynk", async (req) => {
   const cors = corsHeaders(req.headers.get("origin"));
@@ -59,10 +27,14 @@ serve("link-sunsynk", async (req) => {
 
   let username = "";
   let password = "";
+  let confirmCost: boolean | "paused" = false;
   try {
     const body = await req.json();
     username = String(body?.username ?? "").trim();
     password = String(body?.password ?? "");
+    // The user saw the R49-per-inverter cost for plants past the 3rd: true takes it,
+    // "paused" links those plants paused.
+    confirmCost = body?.confirmCost === true ? true : body?.confirmCost === "paused" ? "paused" : false;
   } catch {
     return json({ error: "body must be JSON" }, 400, cors);
   }
@@ -78,16 +50,22 @@ serve("link-sunsynk", async (req) => {
   if (!allowed) return json({ error: "too many attempts" }, 429, { ...cors, "Retry-After": "3600" });
 
   try {
-    const { accountId, plants } = await linkAccount(userId, username, password);
+    const { accountId, plants, paused, reason } = await linkAccount(userId, username, password, confirmCost);
     password = ""; // done with it
     if (!plants.length) {
       // Linked, but SunSynk returned no plants: the login works but sees nothing —
       // typical when the installer owns the plant and hasn't shared it yet.
-      return json({ ok: true, accountId, plants, warning: "no plants visible on this SunSynk account" }, 200, cors);
+      return json({ ok: true, accountId, plants, paused, warning: "no plants visible on this SunSynk account" }, 200, cors);
     }
-    return json({ ok: true, accountId, plants }, 200, cors);
+    // paused: plants linked but not on the plan; reason says why (upgrade_needed, free_week_used).
+    return json({ ok: true, accountId, plants, paused, reason }, 200, cors);
   } catch (e) {
     password = "";
+    // A Family plant past the 3rd (SOLAR-208): the app shows the cost and sends
+    // again with confirmCost true or "paused".
+    if (e instanceof PlanRefused) {
+      return json({ error: e.reason, extraInverters: e.extraInverters, dueNow: e.dueNow }, 402, cors);
+    }
     const msg = e instanceof Error ? e.message : String(e);
     // "login rejected: ..." comes from tokenLogin and contains only SunSynk's msg.
     const status = /login rejected/i.test(msg) ? 401 : 502;

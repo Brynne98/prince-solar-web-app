@@ -1,4 +1,5 @@
-// `notify` — sends the 17 emails Supabase Auth doesn't (SOLAR-157, SOLAR-183).
+// `notify` — sends the emails Supabase Auth doesn't (SOLAR-157, SOLAR-183), and the
+// billing emails (SOLAR-208, 0116).
 //
 // pg_cron fires this every minute (migration 0092). The emails are already queued
 // when their cause happens (0102): poll steps each plant's state and queues grid,
@@ -21,8 +22,9 @@
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { reportError, serve } from "../_shared/errors.ts";
 import {
-  accountDeleted, type Email, FROM_ACCOUNT, FROM_NOTICE, type History, historySynced, type Period,
-  plantEvent, type PlantEvent, report, type Report, sunsynkBack, sunsynkDown, welcome,
+  accountDeleted, type Email, FROM_ACCOUNT, FROM_NOTICE, type History, freeWeekEndsSoon, historySynced, movedToFree,
+  PAY_URL, paymentFailed, paymentReceived, type Period, planChangeBooked, plantEvent, type PlantEvent, plantsRemovalSoon,
+  planUpgraded, renewalNotice, report, type Report, sunsynkBack, sunsynkDown, welcome,
 } from "../_shared/email.ts";
 
 const LIVE = Deno.env.get("NOTIFY_LIVE") === "1";
@@ -62,6 +64,8 @@ const addDays = (d: string, n: number) => new Date(Date.parse(d + "T00:00:00Z") 
 // "September" stays whole.
 const fmtDay = (d: string, o: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...o }).format(new Date(d + "T00:00:00Z")).replace(/\bSept\b/, "Sep");
+/** "1 Nov 2026", as the billing emails write a date. */
+const day = (d: string) => fmtDay(d, { day: "numeric", month: "short", year: "numeric" });
 const hhmm = (epoch: number, tz: string) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(epoch * 1000));
 /** "today", or the event's date when it was on another local day ("Tue 21 Oct"). */
@@ -206,9 +210,39 @@ async function build(r: Row, unsub: string): Promise<Email | null> {
     case "history": { const h = await buildHistory(p); return h && historySynced(h); }
     case "report_week": case "report_month": case "report_year": {
       const rep = await buildReport(p, r.kind.slice(7) as Period, d.today);
-      return rep && report({ ...rep, unsubscribeUrl: unsub });
+      // The day-7 report of a Free account's first week (0114) says the week ends.
+      return rep && report({ ...rep, freeWeekEnds: d.freeWeekEnds === true, unsubscribeUrl: unsub });
     }
+    case "free_week_soon":
+      return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: tz }));
     case "account_deleted": return accountDeleted(r.to_email);
+    // Billing (0116): amounts in whole rand, dates as "2026-11-01".
+    case "bill_paid":
+      return paymentReceived({
+        plan: d.plan, period: d.period, amount: d.amount, date: day(d.date), card: d.card, reference: d.reference,
+        extraInverters: d.extra > 0 ? { n: d.extra, each: d.extraEach } : undefined,
+        next: { amount: d.nextAmount, date: day(d.nextDate) },
+      });
+    case "bill_upgraded":
+      return planUpgraded({
+        from: d.from, to: d.to, period: d.period, addedInverters: d.from === d.to ? d.added : undefined,
+        paidNow: d.amount, daysLeft: d.daysLeft, next: { amount: d.nextAmount, date: day(d.nextDate) },
+      });
+    case "bill_change":
+      return planChangeBooked({
+        from: d.from, to: d.to, fromPeriod: d.fromPeriod, toPeriod: d.toPeriod, on: day(d.on),
+        removePlants: d.removePlants, next: d.to === "free" ? undefined : { amount: d.nextAmount },
+      });
+    case "bill_failed":
+      return paymentFailed({
+        plan: d.plan, period: d.period, amount: d.amount, card: d.card,
+        nextTry: d.nextTry ? day(d.nextTry) : undefined, freeOn: day(d.freeOn), payUrl: PAY_URL,
+      });
+    case "bill_free":
+      return movedToFree({ from: d.from, kept: d.kept, stopped: d.stopped, deleteOn: day(d.deleteOn), payUrl: PAY_URL });
+    case "bill_removal_soon": return plantsRemovalSoon(d.plants, day(d.on));
+    case "bill_renewal_notice":
+      return renewalNotice({ plan: d.plan, amount: d.amount, on: day(d.on), change: d.changed ? "Your plan changes on that date, as you booked." : undefined });
   }
   throw new Error(`unknown kind ${r.kind}`);
 }

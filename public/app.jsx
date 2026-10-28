@@ -969,7 +969,8 @@ function App({ links }) {
   const reloadPlantConfig = (linked) => {
     links.refresh();
     const had = new Set((me?.plants || []).map(p => p.id));
-    const added = (linked?.plants || []).map(p => Number(p.id)).find(id => !had.has(id));
+    const paused = new Set((linked?.paused || []).map(Number));
+    const added = (linked?.plants || []).map(p => Number(p.id)).find(id => !had.has(id) && !paused.has(id));
     return loadMe().then(() => {
       if (added) { switchPlant(added); go('live'); return; }
       // a saved setting can change the shared trend and 30-day answers too, so they are asked again
@@ -1118,7 +1119,7 @@ function SignedIn() {
   return (
     <window.LinkGate fallback={<BootShell />}>
       {(links) => (pages !== 'ready' ? <BootShell />
-        : links.accounts.some(a => (a.plants || []).length) ? <App links={links} /> : <Setup links={links} />)}
+        : window.hasActivePlant(links.accounts) ? <App links={links} /> : <Setup links={links} />)}
     </window.LinkGate>
   );
 }

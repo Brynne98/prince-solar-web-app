@@ -1277,6 +1277,28 @@
   .link-card { padding: 20px 22px 22px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 16px; box-shadow: 0 20px 50px -24px rgba(0,0,0,0.9); }
   .link-form > .sset-note { margin-bottom: 18px; }
   .link-form .sset-note b { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+  /* Paywall and the extra-inverter cost card (link.jsx, SOLAR-208), in place of the form */
+  .paywall .pw-period { margin-top: 14px; }
+  .pw-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 14px; }
+  .pw-plan { display: flex; flex-direction: column; gap: 6px; padding: 16px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--panel-2); }
+  .pw-plan.pw-main { border-color: rgba(61,220,132,0.45); }
+  .pw-name { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .pw-price { font-size: 13px; color: var(--dim); }
+  .pw-price b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 22px; font-weight: 700; color: var(--text); }
+  .pw-gives { margin: 2px 0 0; padding: 0; list-style: none; font-size: 13px; line-height: 1.6; color: var(--text); }
+  .pw-due { font-size: 13px; color: var(--muted); }
+  .pw-plan button { margin-top: 8px; align-self: stretch; }
+  .pw-error { margin-top: 14px; }
+  .pw-foot { justify-content: space-between; }
+  .pw-foot .field-note { margin-top: 0; }
+  .cost-card .conn-form-actions { margin-top: 12px; }
+  /* Plan section in Account (SOLAR-208) */
+  .plan-name { font-size: 15px; font-weight: 600; color: var(--text); }
+  .plan-booked { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
+  .plan-choices { display: flex; flex-direction: column; gap: 12px; }
+  .plan-choice { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .plan-choice-name { font-size: 14px; font-weight: 600; color: var(--text); }
+  .plan-now + .conn-add, .plan-now + .conn-form { margin-top: 14px; }
   .link-form .field label { display: flex; justify-content: space-between; gap: 12px; }
   .link-form .field label span { color: var(--dim); }
   .link-form .field label .link-bad { color: var(--load); }

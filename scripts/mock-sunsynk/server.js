@@ -73,6 +73,9 @@ const ACCOUNTS = {
   "export@mock": { plants: [3001, 6002], pageSize: 1 },
   "nobatt@mock": { plants: [6003] },
   "shared@mock": { plants: [6004] },
+  // plan check (billing-link-check.mjs): a login nobody seeds, and an installer login
+  "solo@mock": { plants: [6003] },
+  "installer@mock": { plants: [3001, 5001, 6002, 6003, 6004] },
 };
 
 // ---------------------------------------------------------------------------

@@ -406,6 +406,10 @@ verify_jwt = false
 # One-click unsubscribe from mail clients: no sign-in, a per-user token in the URL.
 verify_jwt = false
 
+[functions.billing]
+# Paystack's webhook has no Supabase session; each route checks its caller.
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

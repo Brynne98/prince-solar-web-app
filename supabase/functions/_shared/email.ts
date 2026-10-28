@@ -72,6 +72,7 @@ type Part =
   | { callout: string } // a plain-language status line in a coral-edged panel
   | { note: string }
   | { steps: string[] } // numbered how-to; may hold <b> set by us
+  | { plants: { title: string; names: string[]; tone: "keep" | "stop"; count?: false } } // one row per plant, any number; count: false when the title already counts
   | { bars: Bars }; // daily solar kWh; null = no data
 
 // labels: one under each bar (a week); titles: the hover text per bar, where the mail app
@@ -81,6 +82,7 @@ type Delta = { n: number; prev: string; tone?: "good" | "bad" };
 type Bars = { values: (number | null)[]; from: string; to: string; labels?: string[]; titles?: string[] };
 
 type Body = { title: string; sub?: string; parts: Part[]; footer: string[] };
+const PLANT_ROWS = 10;
 
 function drawBars(b: Bars): string {
   // A bar per day, drawn with table cells so it survives email clients that drop SVG
@@ -154,6 +156,22 @@ function html(subject: string, b: Body): string {
       const facts = c.facts.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="table-layout:fixed;border-top:1px solid rgba(255,255,255,.07)">${rowsOf2.join("")}</table>` : "";
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:16px;background:#141a22;border-radius:8px">${head}${drawBars(c.bars)}${facts}</td></tr></table>`;
     }
+    if ("plants" in x) {
+      // One row per plant, so a long name wraps in its own row and many plants stay a
+      // list. Past PLANT_ROWS the rest are counted, not listed: an installer login can
+      // bring dozens.
+      const { title, names, tone, count } = x.plants;
+      const shown = names.length > PLANT_ROWS ? names.slice(0, PLANT_ROWS - 1) : names;
+      const more = names.length - shown.length;
+      const dot = tone === "keep" ? C.solar : C.home;
+      const row = (n: string, i: number) => `<tr><td style="padding:10px 0;${i ? "border-top:1px solid rgba(255,255,255,.07);" : ""}font:500 14px/1.35 ${SANS};color:#e7ecf2">` +
+        `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${dot};margin-right:10px;vertical-align:1px"></span>${n}</td></tr>`;
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:14px 16px 4px;background:#141a22;border-radius:8px">` +
+        `<div style="margin:0 0 4px;font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(title)}${names.length > 1 && count !== false ? ` · ${names.length} plants` : ""}</div>` +
+        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${shown.map((n, i) => row(esc(n), i)).join("")}` +
+        (more ? `<tr><td style="padding:10px 0;border-top:1px solid rgba(255,255,255,.07);font:400 14px/1.35 ${SANS};color:#9aa5b3">and ${more} more, listed in Account</td></tr>` : "") +
+        `</table></td></tr></table>`;
+    }
     if ("callout" in x)
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:14px 16px;background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.4);border-radius:8px;font:500 15px/1.45 ${SANS};color:#e7ecf2">` +
         `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${C.home};margin-right:10px;vertical-align:1px"></span>${x.callout}</td></tr></table>`;
@@ -214,6 +232,7 @@ function text(b: Body): string {
     else if ("bars" in x && x.bars.labels) out.push(x.bars.labels.map((l, i) => `${l} ${x.bars.values[i] == null ? "–" : x.bars.values[i]!.toFixed(0)}`).join(", ") + " kWh", "");
     else if ("chart" in x) out.push(x.chart.title, ...(x.chart.bars.labels ? [x.chart.bars.labels.map((l, i) => `${l} ${x.chart.bars.values[i] == null ? "–" : x.chart.bars.values[i]!.toFixed(0)}`).join(", ") + " kWh"] : []),
       ...x.chart.facts.map((f) => `${f.label}: ${strip(f.value)}${f.unit ? " " + f.unit : ""}${f.sub ? `, ${f.sub}` : ""}`), "");
+    else if ("plants" in x) out.push(`${x.plants.title}${x.plants.names.length > 1 && x.plants.count !== false ? ` (${x.plants.names.length} plants)` : ""}:`, ...x.plants.names.map((n) => `- ${n}`), "");
     else if ("callout" in x) out.push(strip(x.callout), "");
     else if ("facts" in x) out.push(...x.facts.map((f) => `${f.label}: ${strip(f.value)}`), "");
     else if ("stats" in x) out.push(...x.stats.map((s) => `${s.label}: ${s.value}${s.unit ? " " + s.unit : ""}${s.delta ? ` (${deltaText(s.delta)})` : s.sub ? ` (${s.sub})` : ""}`), "");
@@ -399,6 +418,7 @@ export type Report = {
   bestDay?: { label: string; kwh: number };
   highestUse?: { label: string; kwh: number }; // the day the home used the most ("Busiest day")
   daily?: Bars; // solar kWh per day (per month for a year)
+  freeWeekEnds?: boolean; // the week report sent at the end of a Free account's first week (SOLAR-208)
   unsubscribeUrl: string;
 };
 
@@ -432,7 +452,10 @@ export function report(r: Report): Email {
     const avg = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 0;
     parts.push({ chart: { title: r.period === "year" ? "Solar each month" : "Solar each day", side: `Average ${kwh(avg).join(" ")} a ${r.period === "year" ? "month" : "day"}`, bars: r.daily, facts } });
   } else if (facts.length) parts.push({ facts: facts.map((f) => ({ label: f.label, value: `${f.sub ? esc(f.sub) + " · " : ""}${f.value}${f.unit ? " " + f.unit : ""}` })) });
-  parts.push({ button: openPage("live", r.plantId) });
+  if (r.freeWeekEnds) {
+    parts.push({ note: `Your free week ends today. From tomorrow ${FREE_RULE}` });
+    parts.push({ button: { label: "See plans", href: PLAN } });
+  } else parts.push({ button: openPage("live", r.plantId) });
   return make(`${EVERY[r.period]} solar report for ${r.plant}: ${r.label}`, {
     title: r.label,
     sub: r.plant,
@@ -531,3 +554,196 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, unsubs
     footer: relink ? [HELP] : ALERT_FOOTER(plant),
   }, unsubscribeUrl);
 }
+
+// --------------------------------------------------------------------- billing
+
+// SOLAR-208. Billing runs on our side (Paystack charge_authorization), so receipts and
+// plan changes come from us; Paystack's own receipts are off. Prices are final: the
+// company isn't VAT-registered, so no VAT line. No unsubscribe: these are about money.
+const PLAN = `${APP}/?tab=account&section=plan`;
+// "Pay with another card": the Plan section opens Paystack's card page for the failed payment.
+export const PAY_URL = `${PLAN}&pay=1`;
+// What Free means after its first week, said the same way in every email.
+const FREE_RULE = "we keep only the last 24 hours of readings. Alerts stay on; reports stop.";
+const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;
+// Who is selling, on every receipt and renewal notice.
+const SELLER = "Prince Solar Hub is run by Theron and Prince Solutions. No VAT is charged.";
+export type Plan = keyof typeof PLAN_NAME;
+export type BillPeriod = "monthly" | "yearly";
+const planLine = (plan: Plan, period?: BillPeriod) => PLAN_NAME[plan] + (period ? `, ${period}` : "");
+const names = (list: string[]) => list.length < 2 ? list.join("") : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+
+export type Receipt = {
+  plan: Plan; period: BillPeriod; amount: number; date: string; // "1 Nov 2026"
+  card: string; // "Visa ending 4081"
+  reference: string; // Paystack reference
+  extraInverters?: { n: number; each: number }; // on plants after the 3rd, and the price of one
+  next: { amount: number; date: string };
+};
+
+export const paymentReceived = (r: Receipt) =>
+  make(`Payment received: ${rand(r.amount)}`, {
+    title: "Payment received",
+    sub: `${rand(r.amount)} on ${r.date}`,
+    parts: [
+      { facts: [
+        { label: "Plan", value: planLine(r.plan, r.period) },
+        ...(r.extraInverters ? [{ label: "Extra inverters", value: `${r.extraInverters.n} at ${rand(r.extraInverters.each)} each` }] : []),
+        { label: "Paid", value: rand(r.amount) },
+        { label: "Card", value: esc(r.card) },
+        { label: "Reference", value: esc(r.reference) },
+        { label: "Next payment", value: `${rand(r.next.amount)} on ${r.next.date}` },
+      ] },
+      { button: { label: "See your plan", href: PLAN } },
+    ],
+    footer: [SELLER, HELP],
+  });
+
+// Yearly plans: notice 40 to 80 business days before the renewal (Consumer Protection
+// Act s14, if a yearly plan counts as fixed-term; to confirm on SOLAR-104). It names any
+// change and says the plan can be stopped before the date.
+export type Renewal = { plan: Plan; amount: number; on: string; change?: string };
+
+export const renewalNotice = (r: Renewal) =>
+  make(`Your yearly ${PLAN_NAME[r.plan]} plan renews on ${r.on}`, {
+    title: `Your yearly plan renews on ${r.on}`,
+    parts: [
+      { p: r.change ? esc(r.change) : "Nothing changes: same plan, same price." },
+      { facts: [
+        { label: "Plan", value: planLine(r.plan, "yearly") },
+        { label: "Renews on", value: r.on },
+        { label: "Amount", value: rand(r.amount) },
+      ] },
+      { p: `To stop it, cancel before ${r.on}. Your plan runs until that date and nothing more is charged.` },
+      { button: { label: "See your plan", href: PLAN } },
+    ],
+    footer: [SELLER, HELP],
+  });
+
+// An upgrade starts at once: the difference for the days left is charged now, the
+// billing date stays (SOLAR-208). Adding inverters past the 3rd plant is the same.
+export type Upgrade = {
+  from: Plan; to: Plan; period: BillPeriod;
+  addedInverters?: number; // set when the change is extra inverters on Family
+  paidNow: number; daysLeft: number;
+  next: { amount: number; date: string };
+};
+
+export const planUpgraded = (u: Upgrade) => {
+  const inverters = u.addedInverters ? `${u.addedInverters} ${u.addedInverters === 1 ? "inverter" : "inverters"}` : "";
+  return make(u.addedInverters ? `${inverters} added to your plan` : `You're on ${PLAN_NAME[u.to]}`, {
+    title: u.addedInverters ? `${inverters} added` : `You're on ${PLAN_NAME[u.to]}`,
+    parts: [
+      { p: u.addedInverters ? "They're billed with your Family plan from today." : u.to === "family" ? "You can add up to 3 plants now." : "Your history is kept from now on." },
+      { facts: [
+        { label: "Plan", value: planLine(u.to, u.period) },
+        { label: "Paid today", value: `${rand(u.paidNow)} for the ${u.daysLeft === 1 ? "day" : u.daysLeft + " days"} left` },
+        { label: "Next payment", value: `${rand(u.next.amount)} on ${u.next.date}` },
+      ] },
+      { button: u.to === "family" && !u.addedInverters ? { label: "Add a plant", href: LOGINS } : { label: "See your plan", href: PLAN } },
+    ],
+    footer: [HELP],
+  });
+};
+
+// Downgrade, cancel (to Free) and a monthly/yearly switch all wait for the billing
+// date. Sent when booked; the plants named are deleted on that date.
+export type Change = {
+  from: Plan; to: Plan; fromPeriod: BillPeriod; toPeriod?: BillPeriod;
+  on: string; // the billing date
+  removePlants: string[];
+  next?: { amount: number }; // absent on Free
+};
+
+export const planChangeBooked = (c: Change) => {
+  const cancel = c.to === "free";
+  const switchOnly = c.from === c.to;
+  const title = cancel ? `${PLAN_NAME[c.from]} ends on ${c.on}` : switchOnly ? `You switch to ${c.toPeriod} on ${c.on}` : `You move to ${PLAN_NAME[c.to]} on ${c.on}`;
+  return make(title, {
+    title,
+    parts: [
+      { p: `Everything stays as it is until then.${cancel ? ` After that you're on Free: ${FREE_RULE}` : ""}` },
+      { facts: [
+        { label: "Until " + c.on, value: planLine(c.from, c.fromPeriod) },
+        { label: "From " + c.on, value: cancel ? "Free" : planLine(c.to, c.toPeriod ?? c.fromPeriod) },
+        ...(c.next ? [{ label: "Next payment", value: `${rand(c.next.amount)} on ${c.on}` }] : [{ label: "Next payment", value: "None" }]),
+      ] },
+      ...(c.removePlants.length ? [{ plants: { title: `Deleted on ${c.on}`, names: c.removePlants, tone: "stop" as const } },
+        { note: c.removePlants.length === 1 ? "Its history is deleted too." : "Their history is deleted too." }] : []),
+      { button: { label: cancel ? `Keep ${PLAN_NAME[c.from]}` : "See your plan", href: PLAN } },
+    ],
+    footer: [HELP],
+  });
+};
+
+// A failed charge is retried on day 1, 3 and 7 after the billing date. The first email
+// goes as soon as the billing-day charge fails, not at the day-1 retry; each retry that
+// fails sends another, with a link to pay with another card.
+export type Failed = {
+  plan: Plan; period: BillPeriod; amount: number; card: string;
+  nextTry?: string; // absent after the last try
+  freeOn: string; // the day the account moves to Free if it stays unpaid
+  payUrl: string;
+};
+
+export const paymentFailed = (f: Failed) =>
+  make(`Your payment of ${rand(f.amount)} didn't go through`, {
+    title: "Your payment didn't go through",
+    parts: [
+      { callout: `${esc(f.card)} was declined for ${rand(f.amount)}.` },
+      { p: f.nextTry
+        ? `We'll try again on ${f.nextTry}. If it's still unpaid on ${f.freeOn}, your account moves to Free.`
+        : `That was the last try. Your account moves to Free on ${f.freeOn} unless it's paid.` },
+      { facts: [
+        { label: "Plan", value: planLine(f.plan, f.period) },
+        { label: "Amount", value: rand(f.amount) },
+        ...(f.nextTry ? [{ label: "Next try", value: f.nextTry }] : []),
+      ] },
+      { button: { label: "Pay with another card", href: f.payUrl } },
+    ],
+    footer: [HELP],
+  });
+
+// Unpaid after the last try: the account is on Free. The first-linked plant stays
+// live; the others stop updating and are deleted after 30 days, unless paid for or
+// swapped for the one kept.
+export type MovedToFree = { from: Plan; kept: string; stopped: string[]; deleteOn: string; payUrl: string };
+
+export const movedToFree = (m: MovedToFree) =>
+  make("Your account is now on Free", {
+    title: "Your account is now on Free",
+    parts: [
+      { p: `Payment for ${PLAN_NAME[m.from]} didn't go through, so you're on Free: ${FREE_RULE}` },
+      { plants: { title: "Still updating", names: [m.kept], tone: "keep" } },
+      ...(m.stopped.length ? [{ plants: { title: `Stopped, deleted on ${m.deleteOn}`, names: m.stopped, tone: "stop" as const } }] : []),
+      ...(m.stopped.length ? [{ note: "Pay to keep every plant, or choose which plant Free keeps." }] : []),
+      { button: { label: m.stopped.length ? "Pay to keep these plants" : "Pay now", href: m.payUrl } },
+    ],
+    footer: [HELP],
+  });
+
+// 3 days before plants are deleted (after a downgrade, cancel or failed payment).
+export const plantsRemovalSoon = (plants: string[], on: string) =>
+  // The subject names one or two plants; past that it counts them, so it stays short.
+  make(`${plants.length > 2 ? `${plants.length} plants` : names(plants)} ${plants.length === 1 ? "is" : "are"} deleted on ${on}`, {
+    title: `${plants.length === 1 ? "A plant is" : "Plants are"} deleted on ${on}`,
+    parts: [
+      // The heading already gives the date, so the list only counts.
+      { plants: { title: plants.length === 1 ? "1 plant" : `${plants.length} plants`, names: plants, tone: "stop", count: false } },
+      { p: `${plants.length === 1 ? "Its" : "Their"} history goes too. Linking a plant again later brings back only the last 60 days from SunSynk.` },
+      { button: { label: "Choose the plant to keep", href: PLAN } },
+    ],
+    footer: [HELP],
+  });
+
+// Two days before a Free account's first week ends. The day-7 report says it again.
+export const freeWeekEndsSoon = (endsOn: string) =>
+  make(`Your free week ends on ${endsOn}`, {
+    title: `Your free week ends on ${endsOn}`,
+    parts: [
+      { p: `Until then everything works as on a paid plan. From ${endsOn} ${FREE_RULE}` },
+      { p: "To keep all your history, choose Home or Family before then." },
+      { button: { label: "See plans", href: PLAN } },
+    ],
+    footer: [HELP],
+  });

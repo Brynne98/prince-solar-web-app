@@ -48,7 +48,7 @@
 // the spine fetch ran for a day.
 //
 // ?plant=ID restricts a run to one plant and leaves the round-robin cursor alone.
-import { type Account, db, denyUnlessServer, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
+import { type Account, db, denyUnlessServer, freeTrimmedPlants, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
 import { reportError, serve } from "../_shared/errors.ts";
 import {
   bucketizeAgg,
@@ -347,7 +347,7 @@ async function backfillPlant(job: PlantJob, started: number) {
   return { banked: total, scanned: `${from} back to ${floor}`, stoppedEarly, days: results };
 }
 
-async function recoverPlant(job: PlantJob, windowDays: number, started: number) {
+async function recoverPlant(job: PlantJob, windowDays: number, started: number, keeps24h = false) {
   const { plantId, account, timezone: tz } = job;
   const tempsToday = await temperatureToday(job, started);
   const pending = !!job.backfillNext;
@@ -385,13 +385,17 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
     }
   }
 
-  // The first load's older days come after the window, newest first.
-  const backfill = pending ? await backfillPlant(job, started) : null;
+  // The first load's older days come after the window, newest first. A Free plant
+  // past its week keeps 24 hours (0111): no first load, no walk over old days.
+  const backfill = pending && !keeps24h ? await backfillPlant(job, started) : null;
 
   // The walk goes last, so gap recovery keeps first call on the budget.
   let walk;
-  try { walk = await temperatureWalk(job, started); }
-  catch (e) { walk = { banked: 0, error: String(e instanceof Error ? e.message : e) }; }
+  if (keeps24h) walk = { banked: 0, reason: "Free: last 24 hours only" };
+  else {
+    try { walk = await temperatureWalk(job, started); }
+    catch (e) { walk = { banked: 0, error: String(e instanceof Error ? e.message : e) }; }
+  }
   const temps = { today: tempsToday, walk };
 
   return {
@@ -471,6 +475,7 @@ serve("recover", async (req) => {
       return json({ ok: true, dry: true, ...(await dryRun(job, day)), elapsedMs: Date.now() - started });
     }
 
+    const trimmed = await freeTrimmedPlants();
     const plants = [];
     let total = 0;
     // Start after the plant the previous run finished on, so a run that hits the
@@ -483,7 +488,9 @@ serve("recover", async (req) => {
         continue;
       }
       try {
-        const r = await recoverPlant(job, windowDays, started);
+        // Today only: yesterday's minutes would land behind the trim's 24 hours.
+        const keeps24h = trimmed.has(job.plantId);
+        const r = await recoverPlant(job, keeps24h ? 1 : windowDays, started, keeps24h);
         total += r.banked;
         plants.push(r);
       } catch (e) {
