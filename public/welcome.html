@@ -164,12 +164,12 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 .stats b small{font-size:12px;font-weight:500;color:#9aa5b3;margin-left:3px}
 
 /* email toast */
-.toast{position:absolute;left:-330px;bottom:24px;width:340px;padding:14px 16px;border-radius:14px;background:linear-gradient(180deg,#151b24,#0e131a);color:#e7ecf2;border:1px solid rgba(255,255,255,.12);box-shadow:0 30px 60px -20px rgba(0,0,0,.6),0 8px 18px -8px rgba(0,0,0,.4);opacity:0;transform:translate(-16px,10px) scale(.97);transition:opacity .4s,transform .55s cubic-bezier(.2,.9,.2,1);z-index:5;pointer-events:none}
+.toast{position:absolute;left:-330px;top:24px;width:340px;padding:14px 16px;border-radius:14px;background:linear-gradient(180deg,#151b24,#0e131a);color:#e7ecf2;border:1px solid rgba(255,255,255,.12);box-shadow:0 30px 60px -20px rgba(0,0,0,.6),0 8px 18px -8px rgba(0,0,0,.4);opacity:0;transform:translate(-16px,10px) scale(.97);transition:opacity .4s,transform .55s cubic-bezier(.2,.9,.2,1);z-index:5;pointer-events:none}
 .toast.on{opacity:1;transform:none}
 .toast .from{display:flex;align-items:center;gap:8px;font-size:12px;color:#9aa5b3}
 .toast .from .orb{width:16px;height:16px;box-shadow:none}
 .toast .from span:last-child{margin-left:auto}
-.toast h4{margin-top:6px;font:600 15px var(--sans)}
+.toast .tt{margin-top:6px;font:600 15px var(--sans)}
 .toast .cards{display:flex;gap:8px;margin-top:9px}
 .toast .cards div{flex:1;padding:8px 10px;border-radius:9px;background:rgba(255,255,255,.05);border:1px solid var(--hair);font-size:11.5px;color:#9aa5b3}
 .toast .cards b{display:block;font:700 16px var(--mono);color:#e7ecf2;margin:2px 0 1px}
@@ -177,8 +177,9 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 
 /* ---------- after the day ---------- */
 .night{position:relative;background:var(--night);font-family:var(--body)}
-section.blk{padding:150px 0 0}
-section#features{padding-top:0}
+section.blk{padding:150px 0 0;scroll-margin-top:-38px}
+/* nav jumps: heading 40px under the 72px bar (phone: 28px under 60px) */
+section#features{padding-top:0;scroll-margin-top:112px}
 .h2{font:600 60px/1.04 var(--display);font-variation-settings:'opsz' 96;letter-spacing:-.035em;text-wrap:balance}
 .h2 em{font-style:normal;color:var(--gold)}
 .lede{margin-top:20px;font-size:20px;line-height:1.5;color:var(--muted);max-width:36em;text-wrap:pretty}
@@ -333,7 +334,7 @@ section#features{padding-top:0}
 .plans{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:56px;align-items:stretch}
 .plan{position:relative;display:flex;flex-direction:column;padding:32px 30px 30px;border-radius:22px;background:var(--panel);border:1px solid var(--hair-2);transition:transform .3s cubic-bezier(.2,.8,.2,1),border-color .3s}
 .plan:hover{transform:translateY(-4px);border-color:rgba(255,255,255,.22)}
-.plan h5{font:600 19px var(--sans)}
+.plan h3{font:600 19px var(--sans)}
 .price{margin-top:18px;font:600 56px/1 var(--display);letter-spacing:-.04em}
 .price small{font:400 17px var(--body);color:var(--muted);margin-left:6px;letter-spacing:0}
 .per{margin-top:8px;font-size:16px;color:var(--muted);min-height:26px}
@@ -411,13 +412,13 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   .scene{grid-template-columns:1fr;gap:0}
   .cardcol{position:absolute;top:0;bottom:0;left:16px;right:16px;padding:0;overflow:clip;pointer-events:none}
   .cardcol .card{top:68px;transform:scale(var(--k,.64));transform-origin:top left;pointer-events:auto}
-  .toast{left:auto;right:20px;bottom:20px;width:330px}
+  .toast{left:12px;right:12px;top:calc(100% + 10px);width:auto}
   .moment{justify-content:flex-end;padding:0 0 36px;min-height:100svh}
   .moment h1{font-size:40px}.moment h2{font-size:36px}
   .moment p{margin-top:12px;font-size:17px}
   .moment .cta{margin-top:18px;flex-wrap:wrap}.moment .stamp{display:none}
   .moment:has(.full-note) p:not(.full-note){display:none}
-  section.blk{padding-top:96px}
+  section.blk{padding-top:96px;scroll-margin-top:-8px}section#features{scroll-margin-top:88px}
   .h2,.dawn .h2{font-size:38px}
   .lede{font-size:18px}
   .plans{grid-template-columns:minmax(0,1fr);gap:28px}
@@ -427,6 +428,8 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   #mail .ib-box,#start .st-row{margin-top:36px}#start .st-cta{margin-top:36px}.period{margin-top:32px}#pricing .plans{margin-top:20px}.dawn .cta{flex-wrap:wrap}
   footer .wrap{flex-wrap:wrap;gap:12px 24px}footer nav{margin-left:0}
 }
+/* short phones: no room under the card, so the alert sits over its top like a phone notification */
+@media (max-width:860px) and (max-height:740px){.toast{top:8px}}
 @media (max-width:480px){.notify{flex-direction:column}.notify .btn{order:2}.notify-msg{position:static;margin:0}}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition-duration:.01s!important}.rv{opacity:1;transform:none;filter:none}}
 
@@ -539,12 +542,12 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 
         <div class="toast" id="toastDown" role="status">
           <div class="from"><span class="orb"></span><span>Prince Solar Hub</span><span class="num">18:00</span></div>
-          <h4>Grid down at Example plant</h4>
+          <p class="tt">Grid down at Example plant</p>
           <div class="cards"><div>Grid<b style="color:var(--home)">Off</b>since 18:00 today</div><div>Battery<b style="color:var(--batt)" id="toastPct">88%</b>running the house</div></div>
         </div>
         <div class="toast" id="toastBack" role="status">
           <div class="from"><span class="orb"></span><span>Prince Solar Hub</span><span class="num">18:45</span></div>
-          <h4>Grid back at Example plant</h4>
+          <p class="tt">Grid back at Example plant</p>
           <div class="cards"><div>Grid<b style="color:var(--grid)">On</b>since 18:45 today</div><div>Outage<b>45m</b>without grid</div></div>
         </div>
       </div>
@@ -647,31 +650,30 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 <section class="blk" id="pricing" data-period="m">
   <div class="wrap">
     <h2 class="h2 rv">Start free. <em>Pay when you want more.</em></h2>
-    <p class="lede rv d1">One plant is one SunSynk login.</p>
+    <p class="lede rv d1">One plant is one SunSynk login, however many inverters it has.</p>
     <div class="period rv d1" role="group" aria-label="Billing period">
       <button type="button" data-p="m" aria-pressed="true">Monthly</button>
       <button type="button" data-p="y" aria-pressed="false">Yearly <span>2 months free</span></button>
     </div>
     <div class="plans">
       <div class="plan rv">
-        <h5>Free</h5>
+        <h3>Free</h3>
         <div class="price">R0</div>
         <div class="per">1 plant</div>
         <ul>
-          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Today, live</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Everything for your first 7 days</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Then the last 24 hours</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Every alert</li>
         </ul>
         <a class="btn ghost" href="https://app.princesolarhub.co.za/?signup">Try it free</a>
       </div>
       <div class="plan rv d1">
-        <h5>Home</h5>
+        <h3>Home</h3>
         <div class="price"><span class="m">R99<small>a month</small></span><span class="y">R999<small>a year</small></span></div>
         <div class="per"><span class="m">About R3 a day</span><span class="y">About R83 a month</span></div>
         <ul>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>1 plant</li>
-          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Every day kept, at a glance</li>
-          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Your SunSynk history brought in</li>
-          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Catch a problem before it costs you</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Every day, kept for good</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Weekly, monthly and yearly reports</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Every alert</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Cancel any time</li>
@@ -679,7 +681,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
         <a class="btn ghost" data-plan="home" href="https://app.princesolarhub.co.za/?signup&amp;plan=home&amp;period=monthly">Get Home</a>
       </div>
       <div class="plan year rv d2">
-        <h5>Family</h5>
+        <h3>Family</h3>
         <div class="price"><span class="m">R179<small>a month</small></span><span class="y">R1,799<small>a year</small></span></div>
         <div class="per"><span class="m">About R60 a plant</span><span class="y">About R150 a month</span></div>
         <ul>
@@ -712,7 +714,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 <!-- ================= CLOSE ================= -->
 <section class="dawn">
   <div class="wrap">
-    <h2 class="h2 rv">See tomorrow <em>clearly.</em></h2>
+    <h2 class="h2 rv">See your solar <em>clearly.</em></h2>
     <p class="lede rv d1">Connect your SunSynk login tonight. Watch the sun come up on your own plant in the morning.</p>
     <div class="cta rv d2"><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a><a class="btn ghost" href="#pricing">See pricing</a></div>
   </div>

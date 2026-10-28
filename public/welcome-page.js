@@ -14,7 +14,7 @@
   if (p.left > 0) {
     const note = document.createElement('p');
     note.className = 'places';
-    note.textContent = `${p.left} of ${p.places} tester places left`;
+    note.textContent = `Free while we test. ${p.left} of ${p.places} places left.`;
     heroCta.after(note);
     return document.documentElement.classList.remove('places-wait');
   }
