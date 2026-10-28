@@ -177,6 +177,7 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 /* ---------- after the day ---------- */
 .night{position:relative;background:var(--night);font-family:var(--body)}
 section.blk{padding:150px 0 0}
+section#features{padding-top:0}
 .h2{font:600 60px/1.04 var(--display);font-variation-settings:'opsz' 96;letter-spacing:-.035em;text-wrap:balance}
 .h2 em{font-style:normal;color:var(--gold)}
 .lede{margin-top:20px;font-size:20px;line-height:1.5;color:var(--muted);max-width:36em;text-wrap:pretty}
@@ -190,7 +191,7 @@ section.blk{padding:150px 0 0}
 #back .lb-h2{font:600 60px/1.04 var(--display);font-variation-settings:'opsz' 96;letter-spacing:-.035em;text-wrap:balance}
 #back .lb-h2 em{font-style:normal;color:var(--gold)}
 #back .sub{margin-top:20px;font-size:20px;color:rgba(243,238,228,.78);max-width:34em;text-wrap:pretty}
-#back .app{position:relative;margin-top:36px;background:radial-gradient(120% 70% at 20% 0,rgba(255,255,255,.045),transparent 60%),linear-gradient(180deg,#141b25,#0c1117);border:1px solid rgba(255,255,255,.11);border-radius:20px;color:#e7ecf2;font-family:var(--sans);box-shadow:0 40px 80px -30px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.06);padding:22px 26px 24px}
+#back .app{position:relative;margin-top:56px;background:radial-gradient(120% 70% at 20% 0,rgba(255,255,255,.045),transparent 60%),linear-gradient(180deg,#141b25,#0c1117);border:1px solid rgba(255,255,255,.11);border-radius:20px;color:#e7ecf2;font-family:var(--sans);box-shadow:0 40px 80px -30px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.06);padding:22px 26px 24px}
 #back .mut{color:#9aa5b3}
 #back .bar{display:flex;align-items:center;gap:14px}
 #back .plant{font-weight:600;font-size:15px;margin-right:auto}
@@ -231,7 +232,7 @@ section.blk{padding:150px 0 0}
 @media(max-width:860px){
   #back .lb-h2{font-size:42px}
   #back .sub{font-size:18px}
-  #back .app{padding:16px 14px 18px;margin-top:32px}
+  #back .app{padding:16px 14px 18px;margin-top:36px}
   #back .bar{flex-wrap:wrap}
   #back .plant{width:100%}
   #back .dnav{width:100%}
@@ -249,7 +250,7 @@ section.blk{padding:150px 0 0}
 
 /* inbox (SOLAR-187): the app's own emails, worded and laid out as sent */
 #mail button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left}
-#mail .ib-box{margin-top:44px;display:grid;grid-template-columns:400px 1fr;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.11);background:linear-gradient(180deg,#121821,#0b1016);box-shadow:0 40px 80px -30px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.06);font-family:var(--sans);color:#e7ecf2}
+#mail .ib-box{margin-top:56px;display:grid;grid-template-columns:400px 1fr;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.11);background:linear-gradient(180deg,#121821,#0b1016);box-shadow:0 40px 80px -30px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.06);font-family:var(--sans);color:#e7ecf2}
 #mail .ib-list{border-right:1px solid var(--hair);display:flex;flex-direction:column}
 #mail .ib-list-head{display:flex;justify-content:space-between;align-items:center;padding:18px 20px 14px;font-size:14px;color:#9aa5b3}
 #mail .ib-list-head b{font:600 15px var(--sans);color:#e7ecf2}
@@ -342,12 +343,12 @@ section.blk{padding:150px 0 0}
 .plan.year{background:linear-gradient(180deg,#2a1f10 0,#16130f 70%);border-color:rgba(242,195,107,.55);box-shadow:0 30px 70px -30px rgba(242,170,70,.45),inset 0 1px 0 rgba(255,220,150,.15)}
 .plan.year:hover{border-color:var(--gold)}
 .plan.year .per{color:var(--gold)}
-.period{display:inline-flex;gap:4px;margin-top:36px;padding:4px;border-radius:999px;background:var(--panel);border:1px solid var(--hair-2)}
+.period{display:inline-flex;gap:4px;margin-top:40px;padding:4px;border-radius:999px;background:var(--panel);border:1px solid var(--hair-2)}
 .period button{height:40px;padding:0 20px;border-radius:999px;border:0;background:transparent;color:var(--muted);font:600 15px var(--sans);cursor:pointer;transition:background .2s,color .2s}
 .period button:hover{color:var(--paper)}
 .period button[aria-pressed="true"]{background:var(--panel-2);color:var(--paper);box-shadow:inset 0 0 0 1px var(--hair-2)}
 .period button span{margin-left:6px;color:var(--gold);font-weight:500}
-#pricing .plans{margin-top:32px}
+#pricing .plans{margin-top:24px}
 #pricing[data-period="m"] .y,#pricing[data-period="y"] .m{display:none}
 .extra{margin:0 0 26px;padding:16px 16px 14px;border-radius:14px;border:1px dashed rgba(242,195,107,.45);background:rgba(242,195,107,.05)}
 .extra div{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:2px 12px;font:600 16px var(--sans);white-space:nowrap}
@@ -356,26 +357,30 @@ section.blk{padding:150px 0 0}
 .tag{position:absolute;top:30px;right:28px;padding:5px 11px;border-radius:999px;background:rgba(242,195,107,.16);color:var(--gold);font-size:13px;font-weight:600}
 
 /* questions */
-.qs{margin-top:44px;border-top:1px solid var(--hair-2);max-width:880px}
-.qs details{border-bottom:1px solid var(--hair)}
-.qs summary{list-style:none;display:flex;justify-content:space-between;align-items:center;gap:24px;padding:24px 0;font:500 21px var(--sans);letter-spacing:-.01em;cursor:pointer}
+#questions .wrap{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:64px;align-items:start}
+.qs{border-top:1px solid var(--hair-2)}
+.qs details{border-bottom:1px solid var(--hair);transition:border-color .3s}
+.qs details.on,.qs:not(.js) details[open]{border-color:rgba(242,195,107,.3)}
+.qs summary{list-style:none;display:flex;justify-content:space-between;align-items:center;gap:24px;padding:24px 0;font:500 21px var(--sans);letter-spacing:-.01em;cursor:pointer;transition:color .25s}
 .qs summary::-webkit-details-marker{display:none}
-.qs summary:hover{color:var(--gold)}
+.qs details.on summary,.qs:not(.js) details[open] summary{color:var(--gold)}
+@media(hover:hover){.qs summary:hover{color:var(--gold)}.qs summary:hover i{border-color:rgba(242,195,107,.5)}}
+.qs summary:focus-visible{outline:2px solid var(--gold);outline-offset:4px;border-radius:6px}
 .qs summary i{flex:none;width:30px;height:30px;border-radius:50%;border:1px solid var(--hair-2);position:relative;transition:transform .3s,background .3s}
 .qs summary i::before,.qs summary i::after{content:"";position:absolute;left:50%;top:50%;width:11px;height:1.6px;margin:-.8px 0 0 -5.5px;background:currentColor}
 .qs summary i::after{transform:rotate(90deg);transition:transform .3s}
-.qs details[open] summary i{background:rgba(242,195,107,.14)}
-.qs details[open] summary i::after{transform:rotate(0)}
-.qs details p{padding:0 60px 26px 0;color:var(--muted);max-width:44em}
+.qs details.on summary i,.qs:not(.js) details[open] summary i{background:rgba(242,195,107,.14);border-color:rgba(242,195,107,.5);transform:rotate(180deg)}
+.qs details.on summary i::after,.qs:not(.js) details[open] summary i::after{transform:rotate(0)}
+.qs details p{overflow:hidden;padding:0 60px 26px 0;color:var(--muted);max-width:44em}
 
 /* close */
-.dawn{position:relative;margin-top:110px;padding:120px 0 0;overflow:hidden;text-align:center}
+.dawn{position:relative;padding:150px 0 0;overflow:hidden;text-align:center}
 .dawn::before{content:"";position:absolute;left:50%;bottom:-420px;width:1700px;height:1000px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(closest-side,rgba(255,206,120,.62),rgba(232,132,48,.3) 40%,rgba(130,60,95,.16) 68%,transparent)}
 .dawn > *{position:relative}
 .dawn .h2{font-size:76px}
 .dawn .lede{margin:20px auto 0}
-.dawn .cta{display:flex;justify-content:center;gap:14px;margin-top:34px}
-footer{position:relative;margin-top:120px;padding:28px 0 100px;border-top:1px solid rgba(255,255,255,.1);font-size:15px;color:var(--ink-soft)}
+.dawn .cta{display:flex;justify-content:center;gap:14px;margin-top:32px}
+footer{position:relative;margin-top:96px;padding:28px 0 48px;border-top:1px solid rgba(255,255,255,.1);font-size:15px;color:var(--ink-soft)}
 footer .wrap{display:flex;align-items:center;gap:28px}
 footer nav{margin-left:auto;display:flex;gap:24px}
 footer a{text-decoration:none}footer a:hover{text-decoration:underline}
@@ -415,8 +420,10 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   .h2,.dawn .h2{font-size:38px}
   .lede{font-size:18px}
   .plans{grid-template-columns:minmax(0,1fr);gap:28px}
+  #questions .wrap{grid-template-columns:minmax(0,1fr);gap:36px}
   .qs summary{font-size:18px}.qs details p{padding-right:0}
-  .dawn{padding-top:80px}.dawn .cta{flex-wrap:wrap}
+  .dawn{padding-top:96px}footer{margin-top:72px;padding-bottom:36px}
+  #mail .ib-box,#start .st-row{margin-top:36px}#start .st-cta{margin-top:36px}.period{margin-top:32px}#pricing .plans{margin-top:20px}.dawn .cta{flex-wrap:wrap}
   footer .wrap{flex-wrap:wrap;gap:12px 24px}footer nav{margin-left:0}
 }
 @media (max-width:480px){.notify{flex-direction:column}.notify .btn{order:2}.notify-msg{position:static;margin:0}}
@@ -1023,6 +1030,38 @@ pr.querySelectorAll('.period button').forEach(b => b.addEventListener('click', (
   pr.querySelectorAll('.period button').forEach(x => x.setAttribute('aria-pressed', x === b));
   pr.querySelectorAll('[data-plan]').forEach(a => a.href = `https://app.princesolarhub.co.za/?plan=${a.dataset.plan}&period=${b.dataset.p === 'y' ? 'yearly' : 'monthly'}`);
 }));
+
+pr.querySelectorAll('[data-plan]').forEach(a => a.addEventListener('click', () => window.track?.('plan_picked', { plan: a.dataset.plan, period: pr.dataset.period === 'y' ? 'yearly' : 'monthly' })));
+
+/* ---------- questions: one open at a time, eased ---------- */
+(() => {
+const qs = [...document.querySelectorAll('.qs details')];
+document.querySelector('.qs').classList.add('js');
+const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const ease = 'cubic-bezier(.2,.8,.2,1)';
+const run = (p, frames, ms) => still ? { finished: Promise.resolve() } : p.animate(frames, { duration: ms, easing: ease });
+const shut = d => {
+  const p = d.querySelector('p');
+  d.classList.remove('on');
+  run(p, [{ height: p.offsetHeight + 'px', paddingBottom: '26px', opacity: 1 }, { height: '0px', paddingBottom: '0px', opacity: 0 }], 260)
+    .finished.then(() => { if (!d.classList.contains('on')) d.open = false; }, () => {}); // cancelled by a reopen
+};
+qs.forEach(d => d.querySelector('summary').addEventListener('click', e => {
+  e.preventDefault();
+  if (d.classList.contains('on')) return shut(d);
+  qs.filter(x => x.classList.contains('on')).forEach(shut);
+  d.open = true; d.classList.add('on');
+  const p = d.querySelector('p');
+  p.getAnimations().forEach(a => a.cancel());
+  run(p, [{ height: '0px', paddingBottom: '0px', opacity: 0, transform: 'translateY(-6px)' }, { height: p.offsetHeight + 'px', paddingBottom: '26px', opacity: 1, transform: 'none' }], 360);
+}));
+// the browser can open one itself (find in page): keep the class and the one-open rule in step
+qs.forEach(d => d.addEventListener('toggle', () => {
+  if (!d.open || d.classList.contains('on')) return;
+  qs.filter(x => x.classList.contains('on')).forEach(shut);
+  d.classList.add('on');
+}));
+})();
 
 /* ---------- inbox: open any of the example emails ---------- */
 (() => {
