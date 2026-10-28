@@ -138,6 +138,7 @@ window.startUpgrade = async function startUpgrade(plan, period, added = 0, newCa
     else if (r.status === 'paid') billingPaid(plan);
     else window.toast('Your payment is still being checked. Look again in a minute.');
   } catch (e) {
+    if (/open soon/.test(e.message)) return window.toast('Paid plans open soon. Nothing was charged.');
     window.toast(/settle the failed payment/.test(e.message) ? 'Pay the payment that didn’t go through first.' : 'Couldn’t start the payment. Try again.', { error: true });
   }
 };
@@ -147,8 +148,8 @@ window.settlePayment = async function settlePayment() {
   try {
     const r = await billingCall('pay', { settle: true });
     location.assign(r.url);
-  } catch {
-    window.toast('Couldn’t start the payment. Try again.', { error: true });
+  } catch (e) {
+    window.toast(/open soon/.test(e.message) ? 'Paid plans open soon. Nothing was charged.' : 'Couldn’t start the payment. Try again.', { error: true });
   }
 };
 

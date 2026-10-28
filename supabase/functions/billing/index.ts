@@ -22,6 +22,7 @@ import { Buffer } from "node:buffer";
 const SECRET = Deno.env.get("PAYSTACK_SECRET_KEY") ?? "";
 // Local tests point this at a stand-in server.
 const PAYSTACK = Deno.env.get("PAYSTACK_URL") ?? "https://api.paystack.co";
+const TEST_KEY_LIVE = SECRET.startsWith("sk_test_") && (Deno.env.get("SUPABASE_URL") ?? "").endsWith(".supabase.co");
 
 type Card = Record<string, unknown>;
 type Tx = { status: string; reference: string; amount: number; currency: string; gateway_response?: string; authorization?: Card };
@@ -140,6 +141,9 @@ serve("billing", async (req) => {
   }
 
   if (route !== "pay") return json({ error: "not found" }, 404, cors);
+  // Paystack's public test cards go through as paid on a test key, so the live project
+  // takes no payment until the live key is set (SOLAR-214). Local runs still test.
+  if (TEST_KEY_LIVE) return json({ error: "paid plans open soon" }, 503, cors);
   // The card page sends the user back here; only an allowed app origin.
   if (!origin || !cors["Access-Control-Allow-Origin"]) return json({ error: "origin not allowed" }, 403, cors);
 
