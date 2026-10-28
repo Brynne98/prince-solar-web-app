@@ -127,9 +127,9 @@ const billingPaid = (plan) => {
   location.assign(planUrl('&billing=paid'));
 };
 
-window.startUpgrade = async function startUpgrade(plan, period, added = 0) {
+window.startUpgrade = async function startUpgrade(plan, period, added = 0, newCard = false) {
   try {
-    let r = await billingCall('pay', { plan, period, added });
+    let r = await billingCall('pay', { plan, period, added, newCard });
     if (r.status === 'failed') {
       window.toast('Your saved card was declined. Enter another card.', { error: true });
       r = await billingCall('pay', { plan, period, added, newCard: true });
@@ -173,6 +173,32 @@ window.billingReturn = async function billingReturn(billingStatus) {
     window.toast('Couldn’t check the payment. Look again in a minute.', { error: true });
   }
 };
+
+// From the website's pricing: ?plan=home&period=yearly. Sign-in drops the query, so it
+// is kept for a day, then the card page opens once the user is signed in. Always the
+// card page, never a silent charge to a saved card: it shows the price to confirm.
+(() => {
+  const q = new URLSearchParams(location.search), plan = q.get('plan');
+  if (plan !== 'home' && plan !== 'family') return;
+  localStorage.setItem('ps.wantPlan', JSON.stringify({ plan, period: q.get('period') === 'yearly' ? 'yearly' : 'monthly', at: Date.now() }));
+  q.delete('plan'); q.delete('period');
+  history.replaceState(null, '', location.pathname + (q.toString() ? `?${q}` : '') + location.hash);
+})();
+window.sb.auth.onAuthStateChange((event, session) => {
+  if (!session || (event !== 'INITIAL_SESSION' && event !== 'SIGNED_IN')) return;
+  let want = null;
+  try { want = JSON.parse(localStorage.getItem('ps.wantPlan')); } catch {}
+  if (!want) return;
+  localStorage.removeItem('ps.wantPlan');
+  if (Date.now() - want.at > 86400000) return;
+  // Outside the callback: an awaited Supabase call inside it waits on the auth lock.
+  setTimeout(async () => {
+    const { data: b } = await window.sb.rpc('api_billing_status');
+    if (b?.plan !== 'free' || b.comped || b.state === 'past_due') return;
+    window.track('website_plan_done', { plan: want.plan, period: want.period });
+    window.startUpgrade(want.plan, want.period, 0, true);
+  });
+});
 
 /**
  * Shown when the plan doesn't cover a plant.
