@@ -1899,7 +1899,7 @@ function PlanSection({ billing, reload }) {
           </div>
         )}
       </div>
-      {mode === 'plans' && <div className="conn-form"><window.Paywall reason="plans" onCancel={() => setMode(null)} /></div>}
+      {(mode === 'plans' || mode === 'upgrade') && <div className="conn-form"><window.Paywall reason={mode} onCancel={() => setMode(null)} /></div>}
       {mode === 'change' && (
         <div className="conn-form plan-choices">
           {['free', 'home', 'family'].filter(p => p !== b.plan).map(p => (
@@ -1909,7 +1909,7 @@ function PlanSection({ billing, reload }) {
                 <div className="conn-meta">{p === 'family' ? 'Up to 3 plants, all history kept' : p === 'home' ? '1 plant, all history kept' : '1 plant, last 24 hours kept'}</div>
               </div>
               {PLAN_RANK[p] > PLAN_RANK[b.plan]
-                ? <button type="button" className="save-btn" onClick={() => window.startUpgrade(p, b.period)}>Upgrade</button>
+                ? <button type="button" className="save-btn" onClick={() => setMode('upgrade')}>Upgrade</button>
                 : <button type="button" className="ghost-btn" disabled={busy} onClick={() => (p === 'free' ? setMode('cancel') : book(p))}>{p === 'free' ? 'Cancel plan' : `Move on ${billDay(b.nextDate)}`}</button>}
             </div>
           ))}

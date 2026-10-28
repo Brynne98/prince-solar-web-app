@@ -206,6 +206,7 @@ window.sb.auth.onAuthStateChange((event, session) => {
  *          'free_week'  linked, but the login had its free week on another account: Home fits too
  *          'paused'     Upgrade on a login row with paused plants (`paused`: their names)
  *          'plans'      See plans in Account's Plan section, on Free: Home fits too
+ *          'upgrade'    Upgrade in Change plan, on Home: the price before the saved card is charged
  * `added` = inverters the login brings past the 3rd plant, priced into Family.
  * A paid user's period changes at renewal, so only Free gets the switch.
  */
@@ -228,6 +229,7 @@ function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
   return (
     <div className="paywall" role="dialog" aria-labelledby="pw-title">
       <h2 id="pw-title" className="sset-title">{reason === 'free_week' || reason === 'plans' ? 'Choose a plan'
+        : reason === 'upgrade' ? 'Upgrade to Family'
         : reason === 'paused' ? `Collect data for ${paused.length === 1 ? paused[0] : paused.length + ' paused plants'}`
         : 'Add another plant'}</h2>
       <p className="sset-note">{reason === 'free_week' ? 'This SunSynk login had its free week on another account, so its plant is paused.'
