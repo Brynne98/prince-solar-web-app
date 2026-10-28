@@ -598,7 +598,8 @@ window.AuthGate = function AuthGate({ children, fallback = null }) {
   // Keyed apart: the two sit in one spot, so React would otherwise keep the recovery
   // card's mode (and its busy Cancel) after Cancel signs out.
   if (recovering) return <AuthScreen key="recovery" initialMode="recovery" onRecovered={doneRecovering} />;
-  if (!session) return <AuthScreen key="signin" initialMode={window.takeResetAsk() ? 'forgot' : 'signin'} />;
+  // ?signup (the showcase's Try it free and plan buttons) opens Create an account
+  if (!session) return <AuthScreen key="signin" initialMode={window.takeResetAsk() ? 'forgot' : new URLSearchParams(location.search).has('signup') ? 'signup' : 'signin'} />;
   return children;
 };
 

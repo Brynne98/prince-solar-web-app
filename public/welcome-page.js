@@ -46,7 +46,8 @@
     return wrap;
   };
 
-  document.querySelector('.top .btn.sun').textContent = 'Sign in';
+  const top = document.querySelector('.top .btn.sun');
+  top.textContent = 'Sign in'; top.href = 'https://app.princesolarhub.co.za';
   // the button is Sign in now, so the link beside it would say it twice
   document.querySelector('.top .signin').style.display = 'none';
   const fullNote = document.createElement('p');
