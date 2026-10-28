@@ -102,9 +102,72 @@ const quote = (plan, period, added = 0) => window.sb.rpc('api_billing_quote', { 
 
 window.billingFmt = { rand, billDay, perUnit };
 
-// Paystack (a later part of SOLAR-208) takes over from here.
-window.startUpgrade = async function startUpgrade(plan, period) {
-  window.toast('Payments open soon.');
+// Paystack (SOLAR-208, the billing function). A saved card is charged at once;
+// otherwise, or after the saved card is declined, Paystack's card page opens and
+// comes back to the Plan section with ?reference=, which billingReturn checks.
+const billingCall = async (route, body) => {
+  const { data: { session } } = await window.sb.auth.getSession();
+  if (!session) throw new Error('Your session ended. Sign in again.');
+  const res = await fetch(`${window.SUNSYNK_CONFIG.url}/functions/v1/billing/${route}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: window.SUNSYNK_CONFIG.key },
+    body: JSON.stringify(body),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || 'payment failed');
+  return out;
+};
+const PLAN_DONE = `${location.pathname}?tab=account&section=plan`;
+const billingPaid = (plan) => {
+  window.track('upgrade_done', plan ? { plan } : {});
+  location.assign(`${PLAN_DONE}&billing=paid`);
+};
+
+window.startUpgrade = async function startUpgrade(plan, period, added = 0) {
+  try {
+    let r = await billingCall('pay', { plan, period, added });
+    if (r.status === 'failed') {
+      window.toast('Your saved card was declined. Enter another card.', { error: true });
+      r = await billingCall('pay', { plan, period, added, newCard: true });
+    }
+    if (r.url) location.assign(r.url);
+    else if (r.status === 'paid') billingPaid(plan);
+    else window.toast('Your payment is still being checked. Look again in a minute.');
+  } catch (e) {
+    window.toast(/settle the failed payment/.test(e.message) ? 'Pay the payment that didn’t go through first.' : 'Couldn’t start the payment. Try again.', { error: true });
+  }
+};
+
+// Pay a failed renewal with another card.
+window.settlePayment = async function settlePayment() {
+  try {
+    const r = await billingCall('pay', { settle: true });
+    location.assign(r.url);
+  } catch {
+    window.toast('Couldn’t start the payment. Try again.', { error: true });
+  }
+};
+
+// Once, when Account opens: back from Paystack's card page (?reference=), after a
+// payment (?billing=paid), or from the "Pay with another card" email (?pay=1).
+window.billingReturn = async function billingReturn(billingStatus) {
+  const q = new URLSearchParams(location.search);
+  const ref = q.get('reference'), done = q.get('billing'), pay = q.get('pay');
+  if (!ref && !done && !pay) return;
+  history.replaceState(null, '', PLAN_DONE);
+  if (pay) {
+    if (billingStatus?.state === 'past_due') await window.settlePayment();
+    return;
+  }
+  if (done === 'paid') { window.toast('Payment received. Your plan is updated.'); return; }
+  try {
+    const { status } = await billingCall('verify', { reference: ref });
+    // A full reload: resumed plants join the plant list.
+    if (status === 'paid') return billingPaid(null);
+    window.toast(status === 'failed' ? 'The payment didn’t go through. Nothing was charged.' : 'Your payment is still being checked. Look again in a minute.', { error: status === 'failed' });
+  } catch {
+    window.toast('Couldn’t check the payment. Look again in a minute.', { error: true });
+  }
 };
 
 /**
@@ -162,7 +225,7 @@ function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
                 </ul>
                 {paid && q && q.dueNow !== q.nextCharge && <div className="pw-due">{rand(q.dueNow)} today, then {rand(q.nextCharge)} {perUnit(per)} from {billDay(q.nextDate)}</div>}
                 <button type="button" className={p === 'family' ? 'save-btn' : 'ghost-btn'} disabled={!q}
-                        onClick={() => window.startUpgrade(p, per)}>{p === 'home' ? 'Choose Home' : q?.plan === 'family' ? 'Add to my plan' : 'Upgrade to Family'}</button>
+                        onClick={() => window.startUpgrade(p, per, p === 'family' ? added : 0)}>{p === 'home' ? 'Choose Home' : q?.plan === 'family' ? 'Add to my plan' : 'Upgrade to Family'}</button>
               </div>
             );
           })}

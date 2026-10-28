@@ -1886,7 +1886,12 @@ function PlanSection({ billing, reload }) {
         <div className="conn-meta">{b.comped ? 'Free of charge. Every plant, all history kept.' : paid
           ? <>{rand(b.price)} {unit} · {b.nextPlan === 'free' ? 'no more payments' : <>next payment {rand(b.nextAmount)} on {billDay(b.nextDate)}</>}</>
           : 'One plant. After your first week we keep the last 24 hours.'}</div>
-        {b.state === 'past_due' && <div className="conn-meta"><span className="conn-status warn">Payment didn’t go through</span></div>}
+        {b.state === 'past_due' && (
+          <div className="plan-booked">
+            <span className="conn-status warn">Payment didn’t go through</span>
+            <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
+          </div>
+        )}
         {booked && (
           <div className="plan-booked">
             <span className="conn-status warn">{booked[0]}</span>
@@ -2589,8 +2594,9 @@ function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
   useEffect(() => { window.sb.auth.getSession().then(({ data }) => setUser(data?.session?.user || null)).catch(() => {}); }, []);
   // The plan, read once here: the Plan section shows it and Remove login needs it.
   const [billing, setBilling] = useState(null);
-  const reloadBilling = () => window.sb.rpc('api_billing_status').then(({ data }) => { if (data) setBilling(data); });
-  useEffect(() => { reloadBilling(); }, []);
+  const reloadBilling = () => window.sb.rpc('api_billing_status').then(({ data }) => { if (data) setBilling(data); return data; });
+  // Back from a payment: billingReturn checks it (a paid one reloads the page).
+  useEffect(() => { reloadBilling().then(b => window.billingReturn(b)); }, []);
   const email = user?.email || null;
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
