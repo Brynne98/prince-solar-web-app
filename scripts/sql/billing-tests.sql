@@ -9,7 +9,6 @@ begin;
 \ir ../../supabase/migrations/0106_profiles_plan_guard.sql
 \ir ../../supabase/migrations/0107_link_attempts.sql
 \ir ../../supabase/migrations/0108_explicit_grants.sql
-\ir ../../supabase/migrations/0109_waitlist_cap.sql
 \ir ../../supabase/migrations/0110_billing.sql
 \ir ../../supabase/migrations/0111_free_trim.sql
 \ir ../../supabase/migrations/0112_paused_plants.sql
