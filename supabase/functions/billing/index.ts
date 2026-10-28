@@ -151,9 +151,16 @@ serve("billing", async (req) => {
     const r = await chargeCard({ reference: o.reference, amount: o.amount, card: o.card, email: o.email ?? user.email ?? "" });
     return json({ status: r ?? "pending", reference: o.reference }, 200, cors);
   }
-  const page = await paystack<{ authorization_url: string }>("POST", "/transaction/initialize", {
-    email: o.email ?? user.email, amount: o.amount * 100, currency: "ZAR", reference: o.reference,
-    channels: ["card"], callback_url: `${origin}/?tab=account&section=plan`,
-  });
-  return json({ url: page.authorization_url, reference: o.reference }, 200, cors);
+  try {
+    const page = await paystack<{ authorization_url: string }>("POST", "/transaction/initialize", {
+      email: o.email ?? user.email, amount: o.amount * 100, currency: "ZAR", reference: o.reference,
+      channels: ["card"], callback_url: `${origin}/?tab=account&section=plan`,
+    });
+    return json({ url: page.authorization_url, reference: o.reference }, 200, cors);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`billing pay ${o.reference}: ${msg}`);
+    await rpc("billing_charge_failed", { p_reference: o.reference, p_error: msg });
+    return json({ error: "could not reach Paystack" }, 502, cors);
+  }
 });
