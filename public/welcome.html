@@ -60,17 +60,18 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 @property --l2{syntax:'<color>';inherits:true;initial-value:#06080e}
 @property --ink{syntax:'<color>';inherits:true;initial-value:#f3eee4}
 @property --ink-soft{syntax:'<color>';inherits:true;initial-value:rgba(243,238,228,.8)}
-.day{position:relative;color:var(--ink);padding-bottom:30vh;transition:--ink .8s ease,--ink-soft .8s ease}
+@property --accent{syntax:'<color>';inherits:true;initial-value:#ffd27a}
+.day{position:relative;color:var(--ink);padding-bottom:30vh;transition:--ink .8s ease,--ink-soft .8s ease,--accent .8s ease}
 .day::after{content:"";position:absolute;left:0;right:0;bottom:0;height:30vh;background:linear-gradient(180deg,rgba(6,8,15,0),var(--night) 80%);z-index:2;pointer-events:none}
 .stage{position:sticky;top:0;height:100vh;margin-bottom:-100vh;overflow:hidden}
 .moment{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:72px 0 0;opacity:0;transition:opacity .6s ease}
 .moment.on{opacity:1}
 .cardcol .card{transition:opacity .6s ease}
 .cardcol .card.gone{opacity:0}
-.moment h1,.moment h2{font:400 84px/0.98 var(--serif);letter-spacing:-.02em;text-wrap:balance;max-width:640px}
-.moment h2{font-size:72px}
-.moment h1 em,.moment h2 em{font-style:italic}
-.moment p{margin-top:22px;font-size:20px;line-height:1.5;color:var(--ink-soft);max-width:30em;text-wrap:pretty}
+.moment h1,.moment h2{font:600 76px/1.04 var(--display);font-variation-settings:'opsz' 96;letter-spacing:-.035em;text-wrap:balance;max-width:640px}
+.moment h2{font-size:64px}
+.moment h1 em,.moment h2 em{font-style:normal;color:var(--accent)}
+.moment p{margin-top:22px;font-family:var(--body);font-size:20px;line-height:1.5;color:var(--ink-soft);max-width:30em;text-wrap:pretty}
 .moment .cta{display:flex;gap:14px;margin-top:32px}
 .moment .stamp{display:block;font:500 15px var(--mono);margin-top:26px;color:var(--ink-soft)}
 .cardcol{align-self:stretch;padding:max(84px,calc(50vh - 259px)) 0 0}
@@ -978,7 +979,7 @@ function skyTo(h) {
   const s = skyAt(h), set = (n, v) => day.style.setProperty(n, v);
   set('--s1', s.c[0]); set('--s2', s.c[1]); set('--s3', s.c[2]); set('--l1', s.c[3]); set('--l2', s.c[4]);
   const dark = s.ink > .5;
-  set('--ink', dark ? '#20160a' : '#f3eee4'); set('--ink-soft', dark ? 'rgba(32,22,10,.78)' : 'rgba(243,238,228,.8)');
+  set('--ink', dark ? '#20160a' : '#f3eee4'); set('--ink-soft', dark ? 'rgba(32,22,10,.78)' : 'rgba(243,238,228,.8)'); set('--accent', dark ? '#7a3f00' : '#ffd27a');
   st.style.opacity = s.stars; $('moon').style.opacity = Math.min(1, s.stars * 1.4);
   const panelLit = Math.max(0, Math.sin(Math.PI * (h - 6.2) / 12.25));
   document.querySelectorAll('#panels path').forEach(e => e.setAttribute('fill', `rgba(${120 + panelLit * 130},${150 + panelLit * 90},${200 - panelLit * 40},${.35 + panelLit * .55})`));
