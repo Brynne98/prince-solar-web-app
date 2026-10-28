@@ -15,6 +15,7 @@ begin;
 \ir ../../supabase/migrations/0112_paused_plants.sql
 \ir ../../supabase/migrations/0113_plan_section.sql
 \ir ../../supabase/migrations/0114_free_reports.sql
+\ir ../../supabase/migrations/0116_payments.sql
 
 create function pg_temp.eq(label text, got anyelement, want anyelement) returns void language plpgsql as $$
 begin
@@ -410,6 +411,131 @@ begin
   perform pg_temp.eq('each goes once', (select count(*)::int from public.email_queue
     where user_id in ('00000000-0000-0000-0000-000000000071', '00000000-0000-0000-0000-000000000072') and kind in ('free_week_soon', 'report_week')), 2);
 end $$;
+
+-- Payments (0116). s = starts on Free with two plants (second paused), then pays;
+-- n = Home with no saved card; k = settles a failed renewal itself.
+insert into auth.users (id, email) values
+  ('00000000-0000-0000-0000-000000000091', 's@t.test'), ('00000000-0000-0000-0000-000000000092', 'n@t.test'),
+  ('00000000-0000-0000-0000-000000000093', 'k@t.test');
+insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values
+  ('00000000-0000-0000-0000-000000000094', '00000000-0000-0000-0000-000000000091', 's@login.test');
+insert into public.plant_users (plant_id, user_id, account_id, plant_name, linked_at) values
+  (9000091, '00000000-0000-0000-0000-000000000091', '00000000-0000-0000-0000-000000000094', 'Home one', '2026-01-01'),
+  (9000092, '00000000-0000-0000-0000-000000000091', '00000000-0000-0000-0000-000000000094', 'Home two', '2026-01-02'),
+  (9000093, '00000000-0000-0000-0000-000000000092', null, 'N', '2026-01-01');
+insert into private.inverters (sn, plant_id) values ('T-91', 9000091), ('T-92', 9000092);
+do $$
+declare
+  s constant uuid := '00000000-0000-0000-0000-000000000091';
+  n constant uuid := '00000000-0000-0000-0000-000000000092';
+  k constant uuid := '00000000-0000-0000-0000-000000000093';
+  v_card constant jsonb := '{"authorization_code": "AUTH_t1", "card_type": "visa ", "last4": "4081", "reusable": true}';
+  t date := private.billing_today();
+  o jsonb; ref text; runs jsonb;
+begin
+  perform pg_temp.eq('s starts with one plant paused', (select count(*)::int from public.plant_users where user_id = s and paused), 1);
+  -- start: Free to Home, full price, period from today
+  o := public.billing_charge_open(s, 'home', 'monthly');
+  perform pg_temp.eq('start costs the full price', (o->>'amount')::int, 99);
+  perform pg_temp.eq('no card yet', o->>'card', null::text);
+  ref := o->>'reference';
+  perform pg_temp.eq('pending until paid', (select plan from private.billing where user_id = s), null::text);
+  perform pg_temp.raises('wrong amount refused', format('select public.billing_charge_paid(%L, null, false, 9800)', ref), 'paid 9800 cents');
+  perform pg_temp.eq('paid', public.billing_charge_paid(ref, v_card, false, 9900)->>'plan', 'home');
+  perform pg_temp.eq('paid twice is fine', (public.billing_charge_paid(ref, v_card)->>'again')::boolean, true);
+  perform pg_temp.eq('billing date one month on', (select next_billing_date from private.billing where user_id = s),
+    public.billing_step(t, 'monthly', extract(day from t)::int, 1));
+  perform pg_temp.eq('card saved', (select card->>'authorization_code' from private.billing where user_id = s), 'AUTH_t1');
+  perform pg_temp.eq('one upgrade email', (select count(*)::int from public.email_queue where user_id = s and kind = 'bill_upgraded'), 1);
+  perform pg_temp.eq('card label', (select data->>'card' from public.email_queue where user_id = s and kind = 'bill_upgraded'), 'Visa ending 4081');
+  perform pg_temp.eq('Home still covers one plant', (select count(*)::int from public.plant_users where user_id = s and paused), 1);
+
+  -- upgrade: Home to Family resumes the paused plant, charges the saved card
+  o := public.billing_charge_open(s, 'family');
+  perform pg_temp.eq('upgrade uses the saved card', o->>'card', 'AUTH_t1');
+  perform pg_temp.eq('upgrade on day 1 is the whole difference', (o->>'amount')::int, 80);
+  perform public.billing_charge_paid(o->>'reference', v_card);
+  perform pg_temp.eq('on Family', (select plan from private.billing where user_id = s), 'family');
+  perform pg_temp.eq('paused plant resumed', (select count(*)::int from public.plant_users where user_id = s and paused), 0);
+  perform pg_temp.eq('date unchanged', (select next_billing_date from private.billing where user_id = s),
+    public.billing_step(t, 'monthly', extract(day from t)::int, 1));
+
+  -- a failed upgrade changes nothing
+  update private.billing set plan = 'home' where user_id = s;
+  o := public.billing_charge_open(s, 'family');
+  perform public.billing_charge_failed(o->>'reference', 'declined');
+  perform pg_temp.eq('failed upgrade: plan stays', (select plan || state from private.billing where user_id = s), 'homeactive');
+  update private.billing set plan = 'family' where user_id = s;
+
+  -- renewal on the billing date, then retries on day 1, 3, 7, then Free on day 8
+  update private.billing set next_billing_date = t where user_id = s;
+  runs := public.billing_run(t);
+  perform pg_temp.eq('renewal charged', (select count(*)::int from jsonb_array_elements(runs) x
+    where x->>'card' = 'AUTH_t1' and (x->>'amount')::int = 179), 1);
+  perform pg_temp.eq('date moved on', (select next_billing_date from private.billing where user_id = s), public.billing_step(t, 'monthly', extract(day from t)::int, 1));
+  ref := (select x->>'reference' from jsonb_array_elements(runs) x where x->>'card' = 'AUTH_t1');
+  perform pg_temp.eq('failure: next try day 1', public.billing_charge_failed(ref, 'declined')->>'nextTry', (t + 1)::text);
+  perform pg_temp.eq('past due', (select state from private.billing where user_id = s), 'past_due');
+  perform pg_temp.eq('nothing on day 2', (select count(*)::int from jsonb_array_elements(public.billing_run(t + 2)) x where x->>'card' = 'AUTH_t1'), 0);
+  runs := public.billing_run(t + 1);
+  perform pg_temp.eq('retry once a day', (select count(*)::int from jsonb_array_elements(public.billing_run(t + 1)) x where x->>'card' = 'AUTH_t1'), 0);
+  ref := (select x->>'reference' from jsonb_array_elements(runs) x where x->>'card' = 'AUTH_t1');
+  perform pg_temp.eq('retry same amount', (select amount from private.billing_charges where reference = ref), 179);
+  update private.billing_charges set created_on = t + 1 where reference = ref;
+  perform pg_temp.eq('day 1 fails: next day 3', public.billing_charge_failed(ref, 'declined')->>'nextTry', (t + 3)::text);
+  ref := (select x->>'reference' from jsonb_array_elements(public.billing_run(t + 3)) x where x->>'card' = 'AUTH_t1');
+  perform pg_temp.eq('day 3 fails: next day 7', public.billing_charge_failed(ref, 'declined')->>'nextTry', (t + 7)::text);
+  ref := (select x->>'reference' from jsonb_array_elements(public.billing_run(t + 7)) x where x->>'card' = 'AUTH_t1');
+  perform pg_temp.eq('day 7 is the last', public.billing_charge_failed(ref, 'declined')->>'nextTry', null::text);
+  perform pg_temp.eq('four failure emails', (select count(*)::int from public.email_queue where user_id = s and kind = 'bill_failed'), 4);
+  perform public.billing_run(t + 8);
+  perform pg_temp.eq('day 8: Free', (select plan || state from private.billing where user_id = s), 'freeactive');
+  perform pg_temp.eq('first plant kept', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = s),
+    '9000091:false,9000092:true');
+  perform pg_temp.eq('second booked for day 38', (select remove_on from private.billing where user_id = s), t + 38);
+  perform pg_temp.eq('moved-to-Free email', (select data->>'kept' || '/' || (data->'stopped'->>0) from public.email_queue where user_id = s and kind = 'bill_free'), 'Home one/Home two');
+  perform public.billing_run(t + 35);
+  perform pg_temp.eq('warned 3 days before', (select data->'plants'->>0 from public.email_queue where user_id = s and kind = 'bill_removal_soon'), 'Home two');
+  perform public.billing_run(t + 38);
+  perform pg_temp.eq('second plant deleted', (select count(*)::int from public.plant_users where user_id = s), 1);
+  perform pg_temp.eq('tombstoned', (select count(*)::int from private.plant_purge where plant_id = 9000092), 1);
+  perform pg_temp.eq('login kept: it still has a plant', (select count(*)::int from private.sunsynk_accounts where user_id = s), 1);
+  perform pg_temp.eq('booking cleared', (select cardinality(plants_to_remove) from private.billing where user_id = s), 0);
+
+  -- no saved card: the renewal fails at once
+  insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values (n, 'home', 'monthly', 5, t);
+  perform pg_temp.eq('no card: not sent to Paystack', (select count(*)::int from jsonb_array_elements(public.billing_run(t)) x
+    where (x->>'amount')::int = 99 and x->>'card' is null), 0);
+  perform pg_temp.eq('no card: past due', (select state from private.billing where user_id = n), 'past_due');
+  perform pg_temp.raises('past due cannot upgrade', format('select public.billing_charge_open(%L, %L)', n, 'family'), 'settle the failed payment first');
+
+  -- settle: pays the failed renewal with another card
+  insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, past_due_since)
+  values (k, 'home', 'yearly', 1, t + 300, 'past_due', t - 2);
+  insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on)
+  values ('psh_k1', k, 'renewal', 'home', 'yearly', 999, 'failed', t - 2, t - 2);
+  o := public.billing_settle_open(k);
+  perform pg_temp.eq('settle amount', (o->>'amount')::int, 999);
+  perform public.billing_charge_paid(o->>'reference', v_card);
+  perform pg_temp.eq('settled: active', (select state || coalesce(past_due_since::text, '-') from private.billing where user_id = k), 'active-');
+  perform pg_temp.eq('receipt', (select count(*)::int from public.email_queue where user_id = k and kind = 'bill_paid'), 1);
+  perform pg_temp.raises('nothing left to settle', format('select public.billing_settle_open(%L)', k), 'nothing to pay');
+
+  -- a booked change is emailed; an undo is not
+  perform set_config('request.jwt.claims', json_build_object('sub', k, 'role', 'authenticated')::text, true);
+  perform public.api_billing_change('free');
+  perform pg_temp.eq('cancel emailed', (select data->>'to' from public.email_queue where user_id = k and kind = 'bill_change'), 'free');
+  perform public.api_billing_change('home', 'yearly');
+  perform pg_temp.eq('undo not emailed', (select count(*)::int from public.email_queue where user_id = k and kind = 'bill_change'), 1);
+  perform set_config('request.jwt.claims', '', true);
+
+  -- yearly renewal notice 60 days before
+  update private.billing set next_billing_date = t + 60 where user_id = k;
+  perform public.billing_run(t);
+  perform pg_temp.eq('renewal notice', (select (data->>'amount')::int from public.email_queue where user_id = k and kind = 'bill_renewal_notice'), 999);
+end $$;
+select pg_temp.eq('authenticated cannot mark paid', has_function_privilege('authenticated', 'public.billing_charge_paid(text, jsonb, boolean, bigint)', 'execute'), false);
+select pg_temp.eq('charges closed', has_table_privilege('authenticated', 'private.billing_charges', 'select'), false);
 
 -- Only service_role may call the rules
 select pg_temp.eq('authenticated cannot', has_function_privilege('authenticated', 'public.billing_amount_due(uuid)', 'execute'), false);
