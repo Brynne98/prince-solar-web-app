@@ -1,24 +1,3 @@
-(() => {
-  // Hero entrance waits for fonts so the headline doesn't reflow mid-animation,
-  // but never more than 400 ms: a slow font must not leave the hero blank.
-  Promise.race([document.fonts ? document.fonts.ready : null, new Promise((r) => setTimeout(r, 400))])
-    .then(() => document.body.classList.add('ready'));
-  const seen = new IntersectionObserver((entries) => {
-    for (const e of entries) if (e.isIntersecting) { e.target.classList.add('seen'); seen.unobserve(e.target); }
-  }, { threshold: 0.06 });
-  // The live demo is empty until React has drawn it, so Solar sits right under the hero
-  // and would reveal there, then jump down when the demo lands. Reveal only once it's in.
-  const demo = document.getElementById('liveDemo');
-  const watch = () => document.querySelectorAll('.reveal').forEach((el) => seen.observe(el));
-  if (demo.childElementCount) watch();
-  else {
-    const landed = new MutationObserver(() => {
-      if (demo.childElementCount) { landed.disconnect(); watch(); }
-    });
-    landed.observe(demo, { childList: true });
-  }
-})();
-
 // Tester places (SOLAR-124): places left under Try it free; once full, an email box
 // for the launch replaces the sign-up buttons. If the count can't be read, the page
 // stays as it is and the app's own sign-up screen decides.
@@ -30,13 +9,13 @@
   let p;
   try { const r = await rpc('api_tester_places'); if (r.ok) p = await r.json(); } catch {}
   if (typeof p?.left !== 'number') return document.documentElement.classList.remove('places-wait');
-  const heroCta = document.querySelector('.hero-side > div');
+  const heroCta = document.querySelector('.moment[data-k="0"] .cta');
 
   if (p.left > 0) {
     const note = document.createElement('p');
     note.className = 'places';
     note.textContent = `${p.left} of ${p.places} tester places left`;
-    heroCta.append(note);
+    heroCta.after(note);
     return document.documentElement.classList.remove('places-wait');
   }
 
@@ -44,7 +23,7 @@
     const form = document.createElement('form');
     form.className = 'notify'; form.noValidate = true;
     form.innerHTML = '<input type="email" placeholder="you@example.com" aria-label="Email" autocomplete="email">'
-      + '<button class="btn btn-primary" type="submit">Notify me</button>';
+      + '<button class="btn sun" type="submit">Notify me</button>';
     const msg = document.createElement('p');
     msg.className = 'notify-msg'; msg.setAttribute('role', 'alert');
     const input = form.querySelector('input'), btn = form.querySelector('button');
@@ -67,16 +46,17 @@
     return wrap;
   };
 
-  document.querySelector('.topnav .btn-primary').textContent = 'Sign in';
+  document.querySelector('.top .btn.sun').textContent = 'Sign in';
   // the button is Sign in now, so the link beside it would say it twice
-  document.querySelector('.topnav-links .signin').style.display = 'none';
+  document.querySelector('.top .signin').style.display = 'none';
   const fullNote = document.createElement('p');
   fullNote.className = 'full-note';
   fullNote.textContent = 'Tester places are full. Get an email when it opens to everyone.';
+  heroCta.style.display = 'block';
   heroCta.replaceChildren(fullNote, notifyForm());
-  const card = document.querySelector('.closing-card');
-  card.querySelector('h2').textContent = 'Tester places are full.';
-  card.querySelector('p').textContent = 'Leave your email and we’ll tell you when it opens to everyone.';
-  card.querySelector(':scope > a').replaceWith(notifyForm());
+  const end = document.querySelector('.dawn');
+  end.querySelector('.h2').textContent = 'Tester places are full.';
+  end.querySelector('.lede').textContent = 'Leave your email and we’ll tell you when it opens to everyone.';
+  end.querySelector('.cta').replaceChildren(notifyForm());
   document.documentElement.classList.remove('places-wait');
 })();
