@@ -413,8 +413,8 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   .scene{grid-template-columns:1fr;gap:0}
   .cardcol{position:absolute;top:0;bottom:0;left:16px;right:16px;padding:0;overflow:clip;pointer-events:none}
   .cardcol .card{top:68px;transform:scale(var(--k,.64));transform-origin:top left;pointer-events:auto}
-  /* the card is drawn small on a phone: the alert sits under it at full size, so its text stays readable */
-  .toast{left:0;bottom:auto;top:calc(100% + 14px / var(--k,.64));width:calc(100% * var(--k,.64));scale:calc(1 / var(--k,.64));transform-origin:top left}
+  /* the card is drawn small on a phone: the alert stays full size, narrower, right-aligned, just over the card's foot */
+  .toast{left:auto;right:0;bottom:auto;top:calc(100% - 56px / var(--k,.64));width:calc(84% * var(--k,.64));scale:calc(1 / var(--k,.64));transform-origin:top right}
   .moment{justify-content:flex-end;padding:0 0 36px;min-height:100svh}
   .moment h1{font-size:40px}.moment h2{font-size:36px}
   .moment p{margin-top:12px;font-size:17px}
@@ -430,8 +430,6 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   #mail .ib-box,#start .st-row{margin-top:36px}#start .st-cta{margin-top:36px}.period{margin-top:32px}#pricing .plans{margin-top:20px}.dawn .cta{flex-wrap:wrap}
   footer .wrap{flex-wrap:wrap;gap:12px 24px}footer nav{margin-left:0}
 }
-/* short phones: no room under the card, so the alert rises over its lower half and the words stay clear */
-@media (max-width:860px) and (max-height:740px){.toast{top:auto;bottom:calc(12px / var(--k,.64));transform-origin:bottom left}}
 &.notify .btn{order:2}.notify-msg{position:static;margin:0}}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition-duration:.01s!important}.rv{opacity:1;transform:none;filter:none}}
 
