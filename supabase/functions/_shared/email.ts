@@ -469,22 +469,23 @@ export function report(r: Report): Email {
 // Kinds follow the state changes in 0102 (email_plant_step, email_sweep):
 //  grid_down     3 known minutes in a row with no grid (>100 V); once per outage
 //  grid_back     2 known minutes with grid, after a grid_down went out
-//  batt_hot      hottest battery over 40 C; again once a day while it stays over 38 C
+//  batt_hot      hottest battery over 45 C for 3 minutes; again once a day until it is 43 C or below
 //  bank_drift    charge 10 points or more apart between inverters' own batteries for
 //                an hour; again once a day while it lasts
 //  string_dead   a string dead for 12 samples while another string on the same
 //                inverter makes over 200 W; again once a day until it has voltage
-//  logger_stale  no new reading for the whole plant for 15 min
+//  logger_stale  no new reading for the whole plant, or from one inverter while the others
+//                report (inverter set), for 15 min
 //  logger_back   readings fresh again, after a logger_stale went out
 //  needs_relink  the login turned needs_relink in poll
 export type PlantEvent =
   | { kind: "grid_down"; at: string; chargePct?: number }
   | { kind: "grid_back"; at: string; lasted?: string }
-  | { kind: "batt_hot"; at: string; tempC: number; hotDays?: number } // hotDays: days over 40 C in the last 30, today included; counted from readings at send time
+  | { kind: "batt_hot"; at: string; tempC: number; hotDays?: number } // hotDays: days over 45 C in the last 30, today included; counted from readings at send time
   | { kind: "bank_drift"; banks: { name: string; chargePct: number }[] } // name: the inverter's name in SunSynk
   | { kind: "string_dead"; string: string; inverter: string; since: string }
-  | { kind: "logger_stale"; since: string }
-  | { kind: "logger_back"; at: string; lasted: string }
+  | { kind: "logger_stale"; since: string; inverter?: string }
+  | { kind: "logger_back"; at: string; lasted: string; inverter?: string }
   | { kind: "needs_relink" };
 
 // day: "today", or the date when the alert reaches the owner on a later day
@@ -521,7 +522,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, unsubs
         return [`Battery hot at ${plant}`, [
           { label: "Battery", value: `${e.tempC}\u00a0°C`, tone: "home", sub: `at ${at(e.at)}` },
         ], "Batteries wear faster when they run hot." + ((e.hotDays ?? 1) > 1
-          ? ` Yours has gone above 40&nbsp;°C on ${e.hotDays} days in the last 30. If it keeps happening, have your battery checked.` : "")];
+          ? ` Yours has gone above 45&nbsp;°C on ${e.hotDays} days in the last 30. If it keeps happening, have your battery checked.` : "")];
       case "bank_drift": {
         const pcts = e.banks.map((b) => b.chargePct);
         return [`Batteries charging unevenly at ${plant}`, [
@@ -534,13 +535,17 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, unsubs
           { label: "Other panels", value: "OK", tone: "solar", sub: "producing as normal" },
         ], `One group of panels on ${esc(e.inverter)} has stopped making power. The rest are still working.`];
       case "logger_stale":
-        return [`No readings from ${plant}`, [
-          { label: "Last reading", value: e.since, tone: "home", sub: esc(day) },
-        ], "No new reading from your inverters for 15 minutes. We'll email you when readings are back."];
+        return e.inverter
+          ? [`No readings from ${e.inverter} at ${plant}`, [
+              { label: "Last reading", value: e.since, tone: "home", sub: esc(day) },
+            ], `No new reading from ${esc(e.inverter)} for 15 minutes. Your other inverters are still reporting. We'll email you when it's back.`]
+          : [`No readings from ${plant}`, [
+              { label: "Last reading", value: e.since, tone: "home", sub: esc(day) },
+            ], "No new reading from your inverters for 15 minutes. We'll email you when readings are back."];
       case "logger_back":
-        return [`Readings back at ${plant}`, [
+        return [e.inverter ? `${e.inverter} back at ${plant}` : `Readings back at ${plant}`, [
           { label: "Readings", value: "Back", tone: "solar", sub: `since ${at(e.at)}, after ${span(e.lasted)}` },
-        ], "Your inverters are sending readings again."];
+        ], e.inverter ? `${esc(e.inverter)} is sending readings again.` : "Your inverters are sending readings again."];
       case "needs_relink":
         return ["Reconnect your SunSynk login", { callout: "Prince Solar Hub is no longer connected to your SunSynk account, so new readings aren't arriving." },
           "This usually happens after your SunSynk password changes. Enter your SunSynk password in Account to reconnect."];

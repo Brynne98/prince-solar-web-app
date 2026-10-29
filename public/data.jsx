@@ -146,7 +146,9 @@ function aggregate(invs, totals) {
     pvNow: totals.pv != null ? totals.pv : sum((x) => x.pvNow),
     pvToday: r1(totals.todayPv != null ? totals.todayPv : sum((x) => x.pvToday)),
     pvTotal: r1(sum((x) => x.pvTotal)),
-    battSoc: totals.soc != null ? totals.soc : Math.round(sum((x) => x.battSoc) / n),
+    // null when no inverter's battery answered this minute (stored as unknown, SOLAR-231)
+    battSoc: totals.soc != null ? totals.soc
+      : invs.some((x) => x.battSoc != null) ? Math.round(sum((x) => x.battSoc) / invs.filter((x) => x.battSoc != null).length) : null,
     battPower: totals.batteryPower != null ? totals.batteryPower : sum((x) => x.battPower),
     // signed, + = powering the house; nets a charging inverter against a discharging one
     battOut: totals.batteryPower != null ? (totals.batteryDirection === 'charging' ? -totals.batteryPower : totals.batteryPower) : sum((x) => x.battOut),

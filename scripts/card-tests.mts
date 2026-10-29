@@ -20,7 +20,7 @@ const cases: [name: string, html: string, wantStack: boolean, cards: number][] =
   ["banks, serial names", bank(["Inverter 2508290475", "Inverter 2512082438"]).html, true, 2],
   ["banks, three short", bank(["Garage", "Kitchen", "Roof"]).html, false, 3],
   ["string dead, long label", plantEvent("Home", 538820, { kind: "string_dead", string: "String 3", inverter: "Inverter 2512082438", since: "11:40" }, U).html, true, 2],
-  ["battery hot, one card", plantEvent("Home", 538820, { kind: "batt_hot", at: "13:20", tempC: 42 }, U).html, true, 1],
+  ["battery hot, one card", plantEvent("Home", 538820, { kind: "batt_hot", at: "13:20", tempC: 47 }, U).html, true, 1],
   ["SunSynk down, one card", sunsynkDown("Home", 538820, "09:10", U).html, true, 1],
   ["report, never stacks", report({ period: "week", label: "6 – 12 Oct 2026", prevLabel: "last week", plant: "Home", plantId: 538820, madeKwh: 191, homeKwh: 209, importKwh: 47, exportKwh: null, independencePct: 77, savedRand: 495, change: { made: 4 }, unsubscribeUrl: U }).html, false, 5],
 ];

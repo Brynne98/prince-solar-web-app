@@ -105,13 +105,22 @@ test('inverter 16 min quiet: header and Equipment both name it', async () => {
   const s = await snap('overview-three-shared-offgrid', (a, i) => { i.S2.readAt = ago(a, 960); });
   eq([ctx.plantStatus(s, at(s)).detail, issues(ctx.equipmentState(s, null, at(s)))], ['1 of 3 inverters offline', ['Inverter S2 isn’t reporting']]);
 });
-// Recorded 2026-10-29 05:17 on 538820: a half-failed SunSynk answer stored the master's
-// battery as 0 % and 0 °C with a valid reading time, between normal minutes at 76 % and 25.8 °C.
-test('half-failed answer (battery 0 %, 0 °C) is not shown as a reading', async () => {
-  const s = await snap('overview-two-shared-grid', (a, i) => { Object.assign(i.M1.battery, { soc: 0, temperature: 0 }); a.totals.soc = 0; });
+// Recorded 2026-10-29 05:17 on 538820: a battery answer came back empty (0 V, 0 %, 0 °C)
+// between normal minutes at 76 % and 25.8 °C. The poller now stores its live fields as
+// unknown (SOLAR-231), so the master's battery reads null for that minute.
+test('empty battery answer: no sensor warning, no 0 °C, plant charge from the slave', async () => {
+  const s = await snap('overview-two-shared-grid', (a, i) => { Object.assign(i.M1.battery, { soc: null, temperature: null, voltage: null, current: null, power: null, signedPower: null }); });
   const st = ctx.equipmentState(s, null, at(s));
-  return st.battTemp !== 0 && s.aggregate.battSoc !== 0;
-}, { gap: 'zeros from a failed SunSynk call are stored as readings' });
+  eq([issues(st), st.battTemp, s.aggregate.battSoc], [[], null, 99]);
+});
+
+test('empty battery answer on a plant with one battery inverter shows no charge, not 0 %', async () => {
+  const s = await snap('overview-two-shared-grid', (a, i) => {
+    a.inverters = [i.M1]; a.totals.soc = null;
+    Object.assign(i.M1.battery, { soc: null, temperature: null, voltage: null, current: null, power: null, signedPower: null });
+  });
+  eq([s.aggregate.battSoc, issues(ctx.equipmentState(s, null, at(s)))], [null, []]);
+});
 
 // ---- Panels -----------------------------------------------------------------------------
 const health = (todayKwh2, edit = () => {}) => {
@@ -137,8 +146,13 @@ test('panels: a string that made nothing while its sibling made 6.5 kWh alerts',
 test('panels: that dead string still alerts on a day the battery was full', async () => {
   const s = await snap('overview-two-shared-grid');
   const v = ctx.panelsVerdict(health(0.01, h => h.inverters.forEach(i => { i.battFull = true; })), s, at(s));
-  return JSON.stringify(v.alerts.map(x => x.kind)) === '["nothing"]';
-}, { gap: 'a full battery skips every one-string inverter, so a dead string is not checked' });
+  eq([v.state, v.alerts.map(x => x.kind)], ['alert', ['nothing']]);
+});
+test('panels: on a full-battery day a string at a third of usual is not called low', async () => {
+  const s = await snap('overview-two-shared-grid');
+  const v = ctx.panelsVerdict(health(2.5, h => h.inverters.forEach(i => { i.battFull = true; })), s, at(s));
+  eq([v.state, v.alerts], ['unchecked', []]);
+});
 
 let fail = 0, gaps = 0;
 for (const c of cases) {

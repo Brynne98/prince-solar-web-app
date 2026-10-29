@@ -143,8 +143,8 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const RESERVE = snap.config?.reserve ?? 20;
   // null until the owner sets the pack size in Settings; no guessing another plant's pack
   const cap = snap.config?.battCapacity ?? null;
-  const availKwh = cap ? Math.max(0, (a.battSoc - RESERVE) / 100 * cap) : null;
-  const headroomKwh = cap ? Math.max(0, (100 - a.battSoc) / 100 * cap) : null;
+  const availKwh = cap && a.battSoc != null ? Math.max(0, (a.battSoc - RESERVE) / 100 * cap) : null;
+  const headroomKwh = cap && a.battSoc != null ? Math.max(0, (100 - a.battSoc) / 100 * cap) : null;
   const fmtDur = (hrs) => { let h = Math.floor(hrs), m = Math.round((hrs - h) * 60); if (m === 60) { h++; m = 0; } return (h > 0 ? h + 'h ' : '') + String(m).padStart(h > 0 ? 2 : 1, '0') + 'm'; };
   const fmtEta = (hrs) => {
     const d = new Date(snap.updated.getTime() + hrs * 3600000);
@@ -599,17 +599,20 @@ function panelsVerdict(h, snap, now) {
   if (used > 1 && h.historyDays >= PANELS_MIN_DAYS && h.todayKwh >= PANELS_MIN_KWH) {
     (h.inverters || []).forEach(hi => {
       const multi = hi.strings.length >= 2;
-      if (!multi && hi.battFull) { skipped++; return; } // a full battery turns the panels down
+      // A full battery turns the panels down, so "less than usual" means nothing that day;
+      // "made nothing" still does (healthy strings made 4.6 kWh or more on full days).
+      const full = !multi && hi.battFull;
+      if (full) skipped++;
       hi.strings.forEach(st => {
         const usual = multi ? st.usualInvShare : st.usualPlantShare;
         const today = multi ? st.todayInvShare : st.todayPlantShare;
         if (usual == null || usual < 0.02) return;
-        compared++;
+        if (!full) compared++;
         const inv = snap.inverters.find(x => x.sn === hi.sn) || { sn: hi.sn };
         if (st.todayKwh < 0.05) {
           alerts.push({ kind: 'nothing', inv, no: st.no, usual, multi });
           broken[hi.sn] = (broken[hi.sn] || 0) + 1;
-        } else if (today != null && today / usual < PANELS_LOW) {
+        } else if (!full && today != null && today / usual < PANELS_LOW) {
           alerts.push({ kind: 'low', inv, no: st.no, usual, today, multi });
         }
       });
@@ -1576,10 +1579,16 @@ function equipmentState(snap, health, now) {
   const liveBatt = withBatt.filter(i => !quiet.includes(i));
   const battStale = hasBatt && withBatt.length > 0 && !liveBatt.length;
   const battAt = battStale ? Math.max(0, ...withBatt.map(i => i.readAt || 0)) || null : null;
-  const temps = liveBatt.map(i => cleanTemp(i.battTemp)).filter(t => t != null);
+  // A battery answer that came back empty is stored as unknown (SOLAR-231): it says
+  // nothing about the sensor this minute.
+  const readBatt = liveBatt.filter(i => i.battSoc != null);
+  const temps = readBatt.map(i => cleanTemp(i.battTemp)).filter(t => t != null);
   const battTemp = temps.length ? Math.max(...temps) : null;
-  // A shared pack has one sensor; the slaves on it read -100 for good (SOLAR-229).
-  const badSensor = hasBatt && liveBatt.length > 0 && (feat.banks === 'shared' ? battTemp == null : liveBatt.some(i => cleanTemp(i.battTemp) == null));
+  // A shared pack has one sensor; the slaves on it read -100 for good (SOLAR-229), so
+  // it is judged only when every inverter on it answered.
+  const badSensor = hasBatt && readBatt.length > 0 && (feat.banks === 'shared'
+    ? readBatt.length === liveBatt.length && battTemp == null
+    : readBatt.some(i => cleanTemp(i.battTemp) == null));
   const hot = hasBatt && battTemp != null && battTemp > 45;
   if (badSensor) issues.push({ title: 'A battery temperature sensor isn’t reading', todo: 'Mention it at the battery’s next service.' });
   if (hot) issues.push({ title: 'The battery is hot, ' + Math.round(battTemp) + ' °C', todo: 'Make sure air can move around it.' });
@@ -1640,7 +1649,7 @@ function EquipmentSimple({ st, now }) {
   return (
     <div className="eq-tiles">
       <EqTile label="Solar panels" state={pvState} value={st.pvParts[0]} unit={st.pvParts[1]} sub={st.pvSub} color={CC.pv} stale={st.allQuiet} />
-      {st.hasBatt && <EqTile label="Battery" state={battState} value={a.battSoc} unit="%" sub="charged" color={CC.batt} stale={st.battStale} />}
+      {st.hasBatt && <EqTile label="Battery" state={battState} value={a.battSoc ?? '—'} unit={a.battSoc != null ? '%' : null} sub="charged" color={CC.batt} stale={st.battStale} />}
       <EqTile label={n === 1 ? 'Inverter' : 'Inverters'} state={invState} value={invValue} sub={invSub} word
         color={!st.quiet.length ? CC.pv : st.allQuiet ? 'var(--dim)' : 'var(--warn)'} />
     </div>
@@ -1727,7 +1736,7 @@ function EqBatteryCard({ st, snap, now }) {
   if (st.battStale) rows.push(['Last reading', st.battAt ? readAgo(st.battAt, now) : '—']);
   else {
     rows.push(['Now', a.battOut > 5 ? 'Powering the house at ' + fmtPower(a.battOut) : a.battOut < -5 ? 'Charging at ' + fmtPower(-a.battOut) : 'Resting']);
-    if (cap > 0) rows.push(['Stored', kwh1(a.battSoc * cap / 100) + ' of ' + fmtKwh(cap)]);
+    if (cap > 0 && a.battSoc != null) rows.push(['Stored', kwh1(a.battSoc * cap / 100) + ' of ' + fmtKwh(cap)]);
     if (st.badSensor) rows.push(['Temperature', 'Sensor not reading', true]);
     else if (st.battTemp != null && (st.battTemp > 45 || st.battTemp < 5)) rows.push(['Temperature', Math.round(st.battTemp) + ' °C, ' + (st.battTemp > 45 ? 'hot' : 'cold'), st.battTemp > 45]);
   }
@@ -1737,7 +1746,7 @@ function EqBatteryCard({ st, snap, now }) {
   return (
     <Card className="eq-card">
       <SectionTitle>BATTERY</SectionTitle>
-      <div className={'eq-big mono' + (st.battStale ? ' stale' : '')} style={{ color: CC.batt }}>{a.battSoc}<span className="u">%</span></div>
+      <div className={'eq-big mono' + (st.battStale ? ' stale' : '')} style={{ color: CC.batt }}>{a.battSoc ?? '—'}{a.battSoc != null && <span className="u">%</span>}</div>
       <div className={'eq-meter' + (st.battStale ? ' stale' : '')}><i style={{ width: soc + '%', background: CC.batt }} /><b style={{ left: reserve + '%' }} /></div>
       <div className="eq-meter-scale"><span style={reserve > 60 ? { right: (100 - reserve) + '%' } : { left: reserve + '%' }}>{reserve}% reserve</span></div>
       <dl className="eq-rows">
@@ -1782,7 +1791,10 @@ function EqSpecCard({ inv, st, now }) {
   ];
   const packs = [];
   const reads = inv.numberOfBatteries > 0 || inv.battSoc > 0;
-  if (st.hasBatt && reads && (!st.shared || inv === st.withBatt[0])) {
+  // under the inverter that reads its sensor: the slaves on a shared pack read -100.
+  // One whose answer came back empty this minute is likely it, so it keeps the pack.
+  const packInv = st.withBatt.find(i => cleanTemp(i.battTemp) != null) || st.withBatt.find(i => i.battSoc == null) || st.withBatt[0];
+  if (st.hasBatt && reads && (!st.shared || inv === packInv)) {
     const label = st.shared ? 'Battery pack, shared' : inv.bank2 ? 'Battery pack 1' : 'Battery pack';
     packs.push({ label, soc: inv.battSoc, v: inv.battVolt, t: cleanTemp(inv.battTemp), n: inv.numberOfBatteries });
     if (inv.bank2) packs.push({ label: 'Battery pack 2', soc: inv.bank2.soc, v: inv.bank2.voltage, t: cleanTemp(inv.bank2.temperature), n: null });
@@ -1800,9 +1812,9 @@ function EqSpecCard({ inv, st, now }) {
         <div key={p.label}>
           <div className="eq-label eq-pack-label">{p.label}</div>
           <div className="eq-pack">
-            <div><b className="mono">{p.soc}%</b><span>Charge</span></div>
+            <div><b className="mono">{p.soc != null ? p.soc + '%' : '—'}</b><span>Charge</span></div>
             <div><b className="mono">{p.v != null ? p.v.toFixed(1) + ' V' : '—'}</b><span>Voltage</span></div>
-            <div><b className="mono">{p.t != null ? Math.round(p.t) + ' °C' : '—'}</b><span>{p.t != null ? 'Temperature' : 'Sensor not reading'}</span></div>
+            <div><b className="mono">{p.t != null ? Math.round(p.t) + ' °C' : '—'}</b><span>{p.t != null || p.soc == null ? 'Temperature' : 'Sensor not reading'}</span></div>
             {p.n != null && <div><b className="mono">{p.n}</b><span>{p.n === 1 ? 'Battery' : 'Batteries'}</span></div>}
           </div>
         </div>
