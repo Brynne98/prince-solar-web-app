@@ -369,10 +369,17 @@ const MAIL=[
  {k:'down',dot:C.home,time:'3 Oct',at:'Sat 3 Oct, 18:00',subject:'Grid down at Example plant',preview:'Grid off since 18:00 today, battery 86%',
   title:'Grid down at Example plant',stack:1,stats:[{l:'Grid',v:'Off',tone:'home',sub:'since 18:00 today'},{l:'Battery',v:'86%',tone:'batt',sub:'running the house'}],btn:'Open Grid',foot:"Alert for Example plant. Don't want these? Turn them off in your notification settings."}
 ];
-const rows=document.getElementById('ib-rows'),view=document.getElementById('ib-view');
+const rows=document.getElementById('ib-rows'),view=document.getElementById('ib-view'),box=view.parentNode,rowEls=[];
+let cur=0;
+// phone: the open email sits right under its row, and the tapped row stays where it was on screen
+function place(y){
+ const r=rowEls[cur];
+ if(innerWidth<=860)r.after(view);else box.append(view);
+ if(y!==undefined)scrollBy({top:r.getBoundingClientRect().top-y,behavior:'instant'});
+}
 function show(i){
- const m=MAIL[i];
- rows.querySelectorAll('.ib-row').forEach((r,j)=>{r.setAttribute('aria-selected',j===i);r.tabIndex=j===i?0:-1});
+ const m=MAIL[i],y=rowEls[i].getBoundingClientRect().top;cur=i;
+ rowEls.forEach((r,j)=>{r.setAttribute('aria-selected',j===i);r.tabIndex=j===i?0:-1});
  let h=`<div class="ib-from"><span class="ib-orb"></span><span><b>Prince Solar Hub</b></span><span>${m.at}</span></div><div class="ib-subj">${m.subject}</div><div class="ib-title">${m.title}</div>${m.sub?`<div class="ib-sub">${m.sub}</div>`:''}`;
  h+=`<div class="ib-stats${m.stack?' ib-stack':''}">${m.stats.map(card).join('')}</div>`;
  if(m.note)h+=`<p class="ib-note">${m.note}</p>`;
@@ -381,13 +388,15 @@ function show(i){
   <div class="ib-facts">${m.facts.map(card).join('')}</div></div>`}
  h+=`<span class="ib-btn">${m.btn}</span><p class="ib-foot">${m.foot}</p>`;
  view.innerHTML=h;
+ place(y);
 }
 MAIL.forEach((m,i)=>{const r=document.createElement('button');r.className='ib-row';r.setAttribute('role','tab');
  r.innerHTML=`<i style="background:${m.dot}"></i><span class="ib-s">${m.subject}</span><span class="ib-t">${m.time}</span><span class="ib-p">${m.preview}</span>`;
  r.onclick=()=>show(i);
- r.onkeydown=e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const n=(i+(e.key==='ArrowDown'?1:-1)+MAIL.length)%MAIL.length;show(n);rows.children[n].focus()}};
- rows.append(r)});
+ r.onkeydown=e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const n=(i+(e.key==='ArrowDown'?1:-1)+MAIL.length)%MAIL.length;show(n);rowEls[n].focus()}};
+ rows.append(r);rowEls.push(r)});
 show(0);
+addEventListener('resize',()=>place());
 })();
 
 
