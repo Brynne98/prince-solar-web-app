@@ -2019,7 +2019,7 @@ async function bookPlan(b, plan, period, reload) {
   const { error } = await window.sb.rpc('api_billing_change', { p_plan: plan, p_period: period ?? null });
   if (error) {
     window.toast(/remove plants first/.test(error.message)
-      ? `${PLAN_NAME[plan]} covers ${plan === 'family' ? '3 plants' : 'one plant'}. Remove logins on the Plant page until that many are left, then try again.`
+      ? `${PLAN_NAME[plan]} covers ${plan === 'family' ? '3 plants' : 'one plant'}. Remove SunSynk logins on Billing until that many are left, then try again.`
       : 'Couldn’t change your plan. Try again.', { error: true });
     return false;
   }
@@ -2219,7 +2219,7 @@ function AdjustPlanPage({ billing, reload, onBack, paused, added }) {
 
 // Billing's plants (SOLAR-250), one row each, grouped by state: Needs you (a dead login),
 // Collecting, Paused (not on the plan) and Deleted on the billing date. An empty group
-// doesn't show; one plant shows no group names. Removing a plant is its login's Remove, on Plant.
+// doesn't show; one plant shows no group names. Removing a plant is its login's Remove, below.
 function BillingPlantsSection({ links, reloadBilling, onCollect, onReconnect }) {
   const [busy, setBusy] = React.useState(null);
   const byId = new Map();
@@ -2269,7 +2269,7 @@ function BillingPlantsSection({ links, reloadBilling, onCollect, onReconnect }) 
   const on = rows.filter(p => state(p) === 'on').length;
   return (
     <SettingsSection id="plants" title={<>Plants<span className="sset-count">{on} of {rows.length} collecting</span></>}
-                     note="Remove a plant with its SunSynk login, on the Plant page.">
+                     note="Remove a plant with its SunSynk login, below.">
       {rows.length === 1 ? row(rows[0]) : groups.map(([label, ps]) => (
         <div key={label} className="plant-group">
           <div className="notif-sub">{label}</div>
@@ -2324,7 +2324,7 @@ function PaymentsSection({ billing }) {
   );
 }
 
-// Plant's Connections: the signed-in user's SunSynk logins, one row each with its plants, a reconnect in
+// Billing's Connections: the signed-in user's SunSynk logins, one row each with its plants, a reconnect in
 // place when the token has died, and a remove. Adding or removing a login changes
 // which plants the app can see, so the app reloads its plant list afterwards; when
 // the last login goes there is nothing left to show and the app turns to its empty pages.
@@ -3046,12 +3046,12 @@ function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved
         <div className="set-main">
           {page !== 'plans' && <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><span aria-hidden="true">←</span> Settings</button>}
           {shown === 'account' && <AccountPage user={user} billing={billing} onBilling={() => onPage('billing')} />}
-          {page === 'billing' && <BillingPage billing={billing} reload={reloadBilling} links={links} onPage={onPage} collecting={activeTotal} />}
+          {page === 'billing' && <BillingPage billing={billing} reload={reloadBilling} links={links} onPage={onPage} collecting={activeTotal} onSaved={onPlantConfigSaved} />}
           {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadBilling} onBack={() => onPage('billing')}
                                                paused={paused.map(p => p.plant_name || 'Plant ' + p.plant_id)} added={added} />}
           {page === 'settings' && (plantSlot || (
             <PlantPage me={me} plantId={plantId} onSaved={onPlantConfigSaved} onDirty={onDirty}
-                       switchBlocked={switchBlocked} links={links} billing={billing} reloadBilling={reloadBilling} />
+                       switchBlocked={switchBlocked} links={links} />
           ))}
         </div>
       </div>
@@ -3086,25 +3086,25 @@ function AccountPage({ user, billing, onBilling }) {
   );
 }
 
-function BillingPage({ billing, reload, links, onPage, collecting }) {
+// Billing holds the plants and the logins they come from (moved from Plant, SOLAR-250).
+function BillingPage({ billing, reload, links, onPage, collecting, onSaved }) {
   return (
     <div className="settings-page">
       <div className="page-head"><h1>Billing</h1><p>Paid by card through Paystack.</p></div>
       <PlanSection billing={billing} reload={reload} onAdjust={() => onPage('plans')} collecting={collecting} />
-      <BillingPlantsSection links={links} reloadBilling={reload} onCollect={() => onPage('plans')} onReconnect={() => onPage('settings', 'connection')} />
+      <BillingPlantsSection links={links} reloadBilling={reload} onCollect={() => onPage('plans')} onReconnect={() => onPage('billing', 'connection')} />
+      {links && <SunSynkConnectionSection onChanged={onSaved} links={links} billing={billing} reloadBilling={reload} />}
       <PaymentsSection billing={billing} />
     </div>
   );
 }
 
-// Plant: the plant on screen (picked in the header). Its system, the logins its readings
-// come from, and its readings as a file.
-function PlantPage({ me, plantId, onSaved, onDirty, switchBlocked, links, billing, reloadBilling }) {
+// Plant: the plant on screen (picked in the header). Its system and its readings as a file.
+function PlantPage({ me, plantId, onSaved, onDirty, switchBlocked, links }) {
   return (
     <div className="settings-page">
       <div className="page-head"><h1>Plant</h1><p>Changes apply to everyone on this plant.</p></div>
       <PlantSections me={me} plantId={plantId} onSaved={onSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
-      {links && <SunSynkConnectionSection onChanged={onSaved} links={links} billing={billing} reloadBilling={reloadBilling} />}
       {links?.accounts?.length > 0 && <DownloadSection />}
       <FirstStepsSection me={me} plantId={plantId} onSaved={onSaved} />
     </div>

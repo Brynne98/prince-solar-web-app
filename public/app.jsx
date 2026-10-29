@@ -718,7 +718,7 @@ const pageOk = (tabs, id) => isSettings(id) || tabs.some(t => t.id === id);
 // A section a link or a button opens, and the page that holds it. The plant's fields are
 // one section since SOLAR-250, so the old ids land on it.
 const SECTION_ALIAS = { tariff: 'system', battery: 'system', plant: 'system' };
-const SECTION_PAGE = { connection: 'settings', system: 'settings', steps: 'settings', notifications: 'account', plan: 'billing', payments: 'billing', plants: 'billing' };
+const SECTION_PAGE = { connection: 'billing', system: 'settings', steps: 'settings', notifications: 'account', plan: 'billing', payments: 'billing', plants: 'billing' };
 // A saved or linked Battery page opens Equipment, where the packs now are.
 const tabAlias = (id) => (id === 'battery' ? 'inverters' : id);
 
@@ -819,7 +819,7 @@ function SettingsSkeleton() {
   return (
     <div className="settings-page">
       <div className="page-head"><h1>Plant</h1></div>
-      {['Your system', 'Connections', 'Your data'].map(t => (
+      {['Your system', 'Your data'].map(t => (
         <section key={t} className="sec">
           <div className="sec-intro"><h2 className="sset-title">{t}</h2></div>
           <div className="sset"><div className="field-row">{field}{field}</div></div>
