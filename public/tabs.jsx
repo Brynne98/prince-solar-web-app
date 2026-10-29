@@ -2362,8 +2362,9 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     return (
       <div key={p.plant_id} className="login-plant">
         <div className="conn-text">
-          <div className="conn-user">{p.plant_name || 'Plant ' + p.plant_id}</div>
-          <div className="conn-meta">{s === 'paused' ? 'Not on your plan. Its readings aren’t saved.' : n ? n + (n === 1 ? ' inverter' : ' inverters') : '\u00a0'}</div>
+          {/* one line: the name and its inverters; a paused plant adds why under it */}
+          <div className="conn-user">{p.plant_name || 'Plant ' + p.plant_id}{n > 0 && <span className="plant-inv"> · {n} {n === 1 ? 'inverter' : 'inverters'}</span>}</div>
+          {s === 'paused' && <div className="conn-meta">Not on your plan. Its readings aren’t saved.</div>}
         </div>
         {word && <span className={'conn-status plant-state ' + tone}>{word}</span>}
         {s === 'paused' && onCollect && <button type="button" className="save-btn" onClick={onCollect}>Collect</button>}
