@@ -1578,7 +1578,8 @@ function equipmentState(snap, health, now) {
   const battAt = battStale ? Math.max(0, ...withBatt.map(i => i.readAt || 0)) || null : null;
   const temps = liveBatt.map(i => cleanTemp(i.battTemp)).filter(t => t != null);
   const battTemp = temps.length ? Math.max(...temps) : null;
-  const badSensor = hasBatt && liveBatt.some(i => cleanTemp(i.battTemp) == null);
+  // A shared pack has one sensor; the slaves on it read -100 for good (SOLAR-229).
+  const badSensor = hasBatt && liveBatt.length > 0 && (feat.banks === 'shared' ? battTemp == null : liveBatt.some(i => cleanTemp(i.battTemp) == null));
   const hot = hasBatt && battTemp != null && battTemp > 45;
   if (badSensor) issues.push({ title: 'A battery temperature sensor isn’t reading', todo: 'Mention it at the battery’s next service.' });
   if (hot) issues.push({ title: 'The battery is hot, ' + Math.round(battTemp) + ' °C', todo: 'Make sure air can move around it.' });
