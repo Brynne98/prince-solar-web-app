@@ -1041,7 +1041,8 @@
   /* No rules inside Settings cards: space alone sets rows apart (SOLAR-250) */
   .settings-page :is(.conn-row, .conn-add, .notif-group + .notif-group, .notif-push, .notif-push .notif-group, .plan-alert, .pay-list, .pay-row, .login-plant + .login-plant) { border-top: none; }
   .settings-page .notif-all { border-bottom: none; }
-  .settings-page #settings-system .conn-row.sset-row { border-top: none; padding: 12px 0; }
+  .settings-page #settings-system .conn-row.sset-row { border-top: none; padding: 0; }
+  .settings-page #settings-system .conn-row.sset-row + .conn-row.sset-row { margin-top: 40px; }
   .settings-page #settings-system .conn-row.sset-row:first-child { padding-top: 0; }
   .settings-page .conn-row { padding: 10px 0; }
   .settings-page .conn-row:first-child { padding-top: 0; }
