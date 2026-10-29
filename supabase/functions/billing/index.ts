@@ -24,6 +24,7 @@ import { Buffer } from "node:buffer";
 const SECRET = Deno.env.get("PAYSTACK_SECRET_KEY") ?? "";
 // Local tests point this at a stand-in server.
 const PAYSTACK = Deno.env.get("PAYSTACK_URL") ?? "https://api.paystack.co";
+const TEST_KEY_LIVE = SECRET.startsWith("sk_test_") && (Deno.env.get("SUPABASE_URL") ?? "").endsWith(".supabase.co");
 
 type Card = Record<string, unknown>;
 type Tx = { status: string; reference: string; amount: number; currency: string; gateway_response?: string; authorization?: Card };
@@ -46,7 +47,7 @@ async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
-/** A card change's R1 goes back at once (0117). A refused refund is logged on the charge. */
+/** A card change's R1 goes back at once (0120). A refused refund is logged on the charge. */
 async function refund(reference: string) {
   const err = await paystack("POST", "/refund", { transaction: reference }).then(() => null, (e) => e.message as string);
   if (err) console.error(`billing refund ${reference}: ${err}`);
@@ -64,7 +65,7 @@ async function settle(tx: Tx, out: { kind?: string } = {}): Promise<"paid" | "fa
     return "paid";
   }
   // Reversed: refunded. A card change's R1 goes back on purpose, often before the
-  // user's /verify (the webhook came first); 0117 answers that it was paid.
+  // user's /verify (the webhook came first); 0120 answers that it was paid.
   if (["failed", "abandoned", "reversed", "reversal-pending"].includes(tx.status)) {
     const r = await rpc<{ status?: string; kind?: string }>("billing_charge_failed",
       { p_reference: tx.reference, p_error: tx.gateway_response || tx.status });
@@ -158,6 +159,9 @@ serve("billing", async (req) => {
   }
 
   if (route !== "pay") return json({ error: "not found" }, 404, cors);
+  // Paystack's public test cards go through as paid on a test key, so the live project
+  // takes no payment until the live key is set (SOLAR-214). Local runs still test.
+  if (TEST_KEY_LIVE) return json({ error: "paid plans open soon" }, 503, cors);
   // The card page sends the user back here; only an allowed app origin.
   if (!origin || !cors["Access-Control-Allow-Origin"]) return json({ error: "origin not allowed" }, 403, cors);
 

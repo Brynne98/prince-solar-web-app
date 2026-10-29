@@ -195,6 +195,12 @@ const NEVER_CARRY: ReadonlySet<string> = new Set([
   "grid_volt_v", "grid_volt_l2_v", "grid_volt_l3_v", "grid_relay_status", "grid_freq_hz",
 ]);
 
+/** Battery columns that hold this instant's value, as opposed to growing totals. */
+const LIVE_BATTERY = [
+  "batt_power_w", "batt_w", "batt_soc", "batt_voltage_v", "batt_current_a", "batt_temp_c",
+  "batt2_soc", "batt2_voltage_v", "batt2_current_a", "batt2_power_w", "batt2_temp_c",
+];
+
 type Fetched = { inv: InverterInfo; raw: RawBundle; carried: boolean; fetched: Set<Endpoint>; sign: string | null };
 
 function canCarry(inv: InverterInfo, inputTime: string | null): boolean {
@@ -276,6 +282,13 @@ function readingRow(f: Fetched, ts: number): Record<string, unknown> {
                : NEVER_CARRY.has(col) ? null
                : (prev[col] ?? null);
     }
+  }
+  // A battery answer can arrive whole but empty: 0 V, 0 A, 0 % and 0 °C beside real
+  // lifetime totals (143 rows on 495944 and 538820 in October, up to 18 minutes in a
+  // row, SOLAR-231). A battery never reads 0 V, so its live fields are unknown that
+  // minute, not zero. Totals only grow and stay as read.
+  if (got("battery") && Number(fresh.batt_voltage_v) === 0) {
+    for (const col of LIVE_BATTERY) row[col] = null;
   }
   // Only stamp the tier clocks when the read succeeded. Stamping on failure told
   // wantEndpoints the value was fresh, so a failed load or output was not retried

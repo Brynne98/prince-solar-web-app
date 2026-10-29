@@ -1,670 +1,756 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>Prince Solar Hub</title>
-<meta name="description" content="Link your SunSynk login. See where your power comes from and where it goes, right now." />
+<title>SunSynk monitoring app for South Africa · Prince Solar Hub</title>
+<meta name="description" content="See your SunSynk solar live, look back at any day, and get an email when the power goes. Free to start." />
 <link rel="canonical" href="https://princesolarhub.co.za/" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Prince Solar Hub" />
+<meta property="og:url" content="https://princesolarhub.co.za/" />
+<meta property="og:title" content="SunSynk monitoring app for South Africa" />
+<meta property="og:description" content="See your solar live. Free to start." />
+<meta property="og:image" content="https://princesolarhub.co.za/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
 <meta name="theme-color" content="#0a0d12" />
 <meta name="format-detection" content="email=no" />
 <link rel="icon" type="image/svg+xml" href="icon.svg" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-180.png" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<!-- Sign-up buttons stay hidden until the tester-places count answers, so they don't flash before the full state swaps in. -->
-<script src="welcome-head.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&family=Geist:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
 <style>
-  /* Dark only, like the app. Tokens are the app's (index.html :root). */
-  :root {
-    --bg: #0a0d12;
-    --panel: #11161d;
-    --panel-2: #141a22;
-    --line: rgba(255,255,255,0.07);
-    --line-2: rgba(255,255,255,0.12);
-    --text: #e7ecf2;
-    --muted: #9aa5b3;
-    --dim: #7f8da0;
-    --pv: #3ddc84; --batt: #a78bfa; --grid: #facc15; --load: #f87171; --soc: #22d3ee;
-    --ok: #3ddc84;
-    --warn: #f59e0b; --bad: #ef4444;
-    --display: 'Space Grotesk', system-ui, sans-serif;
-    --mono: 'JetBrains Mono', ui-monospace, monospace;
-    --ease: cubic-bezier(0.16, 1, 0.3, 1);
-    color-scheme: dark;
-  }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  html, body { margin: 0; overflow-x: clip; }
-  /* no bounce with a mouse or trackpad; touch screens keep it and the pull-down reload (same rule as index.html, SOLAR-108) */
-  @media (min-width: 600px) and (hover: hover) and (pointer: fine) {
-    html, body { overscroll-behavior: none; }
-  }
-  body {
-    background:
-      radial-gradient(1200px 600px at 80% -10%, rgba(91,157,255,0.06), transparent 60%),
-      radial-gradient(900px 500px at 10% 110%, rgba(52,211,153,0.05), transparent 55%),
-      var(--bg);
-    color: var(--text);
-    font-family: var(--display);
-    font-size: 16px;
-    line-height: 1.55;
-  }
-  a { color: inherit; }
+:root{
+  --night:#06080f;--night-2:#0b0f1a;--panel:#11161d;--panel-2:#161c25;--hair:rgba(255,255,255,.08);--hair-2:rgba(255,255,255,.14);
+  --paper:#f3eee4;--muted:#b4ad9f;--dim:#8d8676;
+  --solar:#3ddc84;--batt:#a78bfa;--grid:#facc15;--home:#f87171;--sun:#ffd56b;--sun-mid:#f4a93a;--sun-rim:#e07a1f;--warn:#f59e0b;
+  --gold:#f2c36b;--gold-deep:#d9932f;
+  --ink:#f3eee4;--ink-soft:rgba(243,238,228,.78);
+  --serif:"Instrument Serif",Georgia,serif;--sans:"Space Grotesk",system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,monospace;--display:"Bricolage Grotesque",system-ui,sans-serif;--body:"Geist",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+/* no bounce with a mouse or trackpad; touch screens keep it and the pull-down reload (same rule as index.html, SOLAR-108) */
+@media (min-width:600px) and (hover:hover) and (pointer:fine){html,body{overscroll-behavior:none}}
+html{scroll-behavior:smooth;background:var(--night);color-scheme:dark;scrollbar-color:#3a3428 var(--night)}
+body{background:var(--night);color:var(--paper);font:400 18px/1.55 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:var(--gold);color:#1a1206}
+::-webkit-scrollbar{width:11px}::-webkit-scrollbar-track{background:var(--night)}::-webkit-scrollbar-thumb{background:#3a3428;border-radius:8px;border:3px solid var(--night)}
+a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:6px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.wrap{max-width:1280px;margin:0 auto;padding:0 56px}
 
-  /* ===== copied from the app (index.html), so the demo pieces look exactly like it.
-     Keep in step with index.html when those rules change. ===== */
-  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-  .dim { color: var(--muted); }
-  button { font-family: inherit; cursor: pointer; }
+/* nav */
+.top{position:fixed;inset:0 0 auto 0;z-index:50;transition:background .4s,border-color .4s,color 1s;border-bottom:1px solid transparent;color:var(--ink)}
+.top.solid{background:rgba(8,10,16,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-color:var(--hair);color:var(--paper)}
+.top .wrap{display:flex;align-items:center;height:72px;gap:36px}
+.brand{display:flex;align-items:center;gap:11px;font:600 18px var(--sans);text-decoration:none;letter-spacing:-.01em}
+.orb{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 38% 34%,#fff6d6 0 12%,var(--sun) 30%,var(--sun-mid) 62%,var(--sun-rim) 100%);box-shadow:0 0 18px rgba(255,190,80,.55)}
+.links{display:flex;gap:28px;margin-left:12px}
+.links a,.signin{text-decoration:none;font-size:16px;opacity:.86;transition:opacity .2s}
+.links a:hover,.signin:hover{opacity:1;text-decoration:underline}
+.top .end{margin-left:auto;display:flex;align-items:center;gap:22px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:46px;padding:0 22px;border-radius:12px;font:600 16px var(--sans);text-decoration:none;border:1px solid transparent;cursor:pointer;transition:transform .2s cubic-bezier(.2,.8,.2,1),box-shadow .2s,background .2s}
+.btn.sun{background:linear-gradient(180deg,#ffd877,#f3a83c);color:#241500;box-shadow:0 6px 20px -6px rgba(243,168,60,.7),inset 0 1px 0 rgba(255,255,255,.5)}
+.btn.sun:hover{transform:translateY(-1px);box-shadow:0 10px 28px -8px rgba(243,168,60,.9),inset 0 1px 0 rgba(255,255,255,.5)}
+.btn.ghost{border-color:currentColor;color:inherit;background:transparent;opacity:.9}
+.btn.ghost:hover{opacity:1;background:rgba(127,127,127,.1)}
+.top .btn{height:40px;padding:0 18px;font-size:15px}
 
-  /* ---------- skeletons ---------- */
-  .skel { position: relative; overflow: hidden; background: rgba(255,255,255,0.055); }
-  .skel::after {
-    content: ''; position: absolute; inset: 0; transform: translateX(-100%);
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), transparent);
-    animation: skel-sweep 1.5s ease-in-out infinite;
-  }
-  @keyframes skel-sweep { 100% { transform: translateX(100%); } }
-  /* a sweeping highlight is exactly the kind of motion this setting exists to stop */
-  @media (prefers-reduced-motion: reduce) { .skel::after { animation: none; } }
-  .status { margin-left: auto; display: flex; align-items: center; gap: 8px; white-space: nowrap; flex: none; }
-  .status-age { font-size: 12.5px; }
-  .status-word { font-size: 14px; font-weight: 600; }
-  /* every state breathes, in its own colour; --ring is the halo */
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none;
-    --ring: rgba(255,255,255,0.14); box-shadow: 0 0 0 3px var(--ring); animation: status-breathe 2.4s ease-in-out infinite; }
-  .status-live .status-dot { background: var(--pv); --ring: rgba(61,220,132,0.18); }
-  .status-live .status-word { color: var(--pv); }
-  .status-stale .status-dot { background: var(--warn); --ring: rgba(245,158,11,0.18); }
-  .status-stale .status-word, .status-stale .status-age { color: var(--warn); }
-  .status-offline .status-dot { background: var(--bad); --ring: rgba(239,68,68,0.18); }
-  .status-offline .status-word, .status-offline .status-age { color: var(--bad); }
-  .status-idle .status-word { color: var(--muted); }
-  @keyframes status-breathe { 0%, 100% { box-shadow: 0 0 0 3px var(--ring); } 50% { box-shadow: 0 0 0 5px transparent; } }
-  @media (prefers-reduced-motion: reduce) { .status-dot { animation: none; } }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px; }
-  /* charts want the width more than they want the gutter */
-  .trend-chart-card { padding-left: 12px; padding-right: 12px; }
-  /* the day chart and power flow keep one gutter on all four sides */
-  .chart-card, .flow-card { padding: 12px; }
-  /* the 28px Fullscreen button made the row taller and centring pushed the title down;
-     pin both to the top so the title sits as far from the top edge as from the left */
-  .flow-card .section-title { align-items: flex-start; }
-  .section-title { display: flex; align-items: center; justify-content: space-between;
-    font-size: 12px; font-weight: 600; letter-spacing: 0.16em; color: var(--muted); text-transform: uppercase; margin-bottom: 18px; }
-  .section-right { font-size: 11px; letter-spacing: 0.04em; }
-  .stat-tile { display: flex; flex-direction: column; gap: 0; }
-  .stat-label { font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
-  .stat-value { font-family: var(--mono); font-weight: 700; margin-top: 10px; line-height: 1; display: flex; align-items: baseline; }
-  .stat-value .num { font-size: 44px; }
-  .stat-value .unit { font-size: 24px; margin-left: 4px; opacity: 0.85; }
-  .stat-sub { font-size: 13px; color: var(--muted); margin-top: 12px; }
-  .stat-sub b { color: var(--text); font-weight: 600; }
-  .batt-eta { display: block; margin-top: 7px; font-size: 12px; color: var(--soc); font-family: var(--mono); letter-spacing: -0.01em; }
-  .batt-eta b { color: var(--soc); font-weight: 700; }
-  .batt-eta .bel { display: block; }
-  .batt-eta .bel.sub { color: var(--muted); margin-top: 1px; }
-  .meter { height: 7px; border-radius: 4px; background: rgba(255,255,255,0.07); overflow: hidden; margin-top: 14px; position: relative; }
-  .meter.sm { height: 5px; margin-top: 8px; }
-  .meter-fill { height: 100%; border-radius: 4px; transition: width .5s ease; }
-  .live-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
-  /* battery banner: status (left) + a few labelled stats (right) */
-  .batt-balance { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; padding: 10px 15px; border-radius: 12px;
-    background: rgba(255,255,255,0.02); border: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
-  .batt-balance.watch { border-color: rgba(245,158,11,0.45); background: rgba(245,158,11,0.06); }
-  .batt-balance.drifting { border-color: rgba(248,113,113,0.55); background: rgba(248,113,113,0.09); }
-  .bb-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-  .bb-title { color: var(--text); font-weight: 600; }
-  .bb-status { font-weight: 600; cursor: help; }
-  .bb-div { width: 1px; align-self: stretch; background: var(--line); }
-  .bb-stats { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
-  .bb-stat { display: inline-flex; align-items: baseline; gap: 5px; cursor: help; }
-  .bb-k { color: var(--dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
-  .bb-stat b { color: var(--text); font-weight: 600; }
-  .bb-stat.bb-hot b { color: var(--warn); }
-  .chart-card { display: flex; flex-direction: column; min-width: 0; }
-  .hv-root { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
-  .stat-col { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-  /* five in a row from 1200 px (six for an exporting plant), four from 980 px, three below that, two per row on a phone */
-  .today-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-  @media (min-width: 981px) { .today-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-  @media (min-width: 1200px) { .today-strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); } }
-  .overview-section { order: -1; }
-  .overview-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
-  .overview-head .section-title { margin-bottom: 0; }
-  .cmp-note { font-size: 13px; color: var(--muted); margin: -6px 0 12px; }
-  .mini-stat { padding: 20px 22px; }
-  /* label left, trend arrow right on the same line; a long label wraps, the arrow keeps its corner */
-  .mini-label { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
-    display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 2px 8px; }
-  .ml-text { display: flex; align-items: center; min-width: 0; line-height: 1.35; }
-  .mini-label .trend-badge { margin-left: 0; top: 0; line-height: 1.35; text-transform: none; }
-  .mv-unit { font-size: 14px; font-weight: 500; margin-left: 4px; opacity: 0.85; }
-  .mv-unit.pct { margin-left: 1px; }
-  .mini-stat { transition: border-color .15s; }
-  .mini-stat:hover { border-color: var(--line-2); }
-  /* baseline, not flex-end. Aligning the boxes lines up the two fonts' DESCENDER
-     space, and the mono face reserves more of it — so its glyphs ride higher and the
-     badge reads as sitting low. Baselines are where the glyphs actually rest. */
-  .mini-value { font-size: 24px; font-weight: 600; margin-top: 10px; letter-spacing: -0.01em;
-    display: flex; align-items: baseline; flex-wrap: wrap; row-gap: 2px; }
-  /* Baseline alone sits the badge a touch high, box-bottom a touch low. 1px down off
-     the baseline is the middle, and it is a nudge rather than a different rule. */
-  .trend-badge { position: relative; top: 1px; }
-  .mv-num { white-space: nowrap; }
-  /* a tile's second line that is an action ("Set your rate" on Est. saved with no rate yet) */
-  .mini-link { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer;
-    text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
-  .mini-link:hover { color: var(--text); text-decoration-color: currentColor; }
-  /* a Settings card flashes once when a link elsewhere sends you to it */
-  .sset-flash { animation: sset-flash 1.1s ease-out 0.15s 1; }
-  @keyframes sset-flash {
-    0%, 100% { border-color: var(--line); box-shadow: 0 0 0 0 rgba(61,220,132,0); }
-    35% { border-color: var(--pv); box-shadow: 0 0 0 4px rgba(61,220,132,0.18); }
-  }
-  @media (prefers-reduced-motion: reduce) { .sset-flash { animation: none; } }
-  .mini-link:focus-visible { outline: 2px solid var(--line-2); outline-offset: 2px; border-radius: 3px; }
-  /* grid presence chip on the Imported card — green when the mains is live, red when down */
-  /* padding-left leaves room for the dot's 3px glow ring: .mini-sub clips overflow for
-     its ellipsis, so a ring flush against x=0 loses its left edge. */
-  .grid-state { display: inline-flex; align-items: center; gap: 6px; cursor: help; padding-left: 3px; }
-  .grid-state .gs-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-  .grid-state.on  { color: var(--muted); }
-  .grid-state.on  .gs-dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(61,220,132,0.14); }
-  .grid-state.off { color: var(--load); font-weight: 600; }
-  .grid-state.unknown { color: var(--dim); cursor: default; }
-  .grid-state.unknown .gs-dot { background: var(--dim); opacity: .5; }
-  .grid-state.off .gs-dot { background: var(--load); box-shadow: 0 0 0 3px rgba(248,113,113,0.16); }
-  /* Two lines, then clip. The old single-line ellipsis cut "Set your rate in Settings"
-     to "Set your rate in Se…" on every width; a second line costs 15px and keeps
-     the sentence. Grid rows stretch, so a two-line tile does not misalign its row. */
-  .mini-sub { font-size: 12.5px; color: var(--dim); margin-top: 5px; line-height: 1.35;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* ---------- the day ---------- */
+@property --s1{syntax:'<color>';inherits:true;initial-value:#05070f}
+@property --s2{syntax:'<color>';inherits:true;initial-value:#0b1020}
+@property --s3{syntax:'<color>';inherits:true;initial-value:#171b33}
+@property --l1{syntax:'<color>';inherits:true;initial-value:#0b0e1a}
+@property --l2{syntax:'<color>';inherits:true;initial-value:#06080e}
+@property --ink{syntax:'<color>';inherits:true;initial-value:#f3eee4}
+@property --ink-soft{syntax:'<color>';inherits:true;initial-value:rgba(243,238,228,.8)}
+@property --accent{syntax:'<color>';inherits:true;initial-value:#ffd27a}
+.day{position:relative;color:var(--ink);padding-bottom:30vh;transition:--ink .8s ease,--ink-soft .8s ease,--accent .8s ease}
+.day::after{content:"";position:absolute;left:0;right:0;bottom:0;height:30vh;background:linear-gradient(180deg,rgba(6,8,15,0),var(--night) 80%);z-index:2;pointer-events:none}
+.stage{position:sticky;top:0;height:100vh;margin-bottom:-100vh;overflow:hidden}
+.moment{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:72px 0 0;opacity:0;transition:opacity .6s ease}
+.moment.on{opacity:1}
+.cardcol .card{transition:opacity .6s ease}
+.cardcol .card.gone{opacity:0}
+.moment h1,.moment h2{font:600 76px/1.04 var(--display);font-variation-settings:'opsz' 96;letter-spacing:-.035em;text-wrap:balance;max-width:640px}
+.moment h2{font-size:64px}
+.moment h1 em,.moment h2 em{font-style:normal;color:var(--accent)}
+.moment p{margin-top:22px;font-family:var(--body);font-size:20px;line-height:1.5;color:var(--ink-soft);max-width:30em;text-wrap:pretty}
+.moment .cta{display:flex;gap:14px;margin-top:32px}
+.cardcol{align-self:stretch;padding:max(84px,calc(50vh - 259px)) 0 0}
+.cardcol .card{position:sticky;top:max(84px,calc(50vh - 259px))}
+.sky{position:absolute;inset:0;background:linear-gradient(180deg,var(--s1) 0%,var(--s2) 55%,var(--s3) 100%)}
+#hillFar{fill:var(--l1)}#hillNear,#houseBody{fill:var(--l2)}#door{fill:var(--l1)}
+.stars{position:absolute;inset:0;opacity:var(--stars,1)}
+.stars i{position:absolute;width:2px;height:2px;border-radius:50%;background:#fff}
+.sunorb{position:absolute;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;pointer-events:none;will-change:transform}
+.sunorb b{position:absolute;inset:34px;border-radius:50%;background:radial-gradient(circle at 40% 38%,#fffbe8,var(--sunc) 70%)}
+.moonorb{position:absolute;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;pointer-events:none;will-change:transform;opacity:0;background:radial-gradient(circle at 30% 62%,rgba(150,145,135,.35) 0 7%,transparent 8%),radial-gradient(circle at 62% 38%,rgba(150,145,135,.3) 0 10%,transparent 11%),radial-gradient(circle at 58% 70%,rgba(150,145,135,.25) 0 5%,transparent 6%),radial-gradient(circle at 38% 34%,#fdfaf0,#d8d2c2 72%);box-shadow:0 0 30px 6px rgba(220,225,255,.22),0 0 90px 30px rgba(160,175,230,.12)}
+.sunorb::before{content:"";position:absolute;inset:-140px;border-radius:50%;background:radial-gradient(circle,var(--glow) 0,transparent 62%)}
+.land{position:absolute;left:0;right:0;bottom:0;height:220px;pointer-events:none}
+.land svg{position:absolute;bottom:0;left:0;width:100%;height:100%}
+/* the house stands at the right edge of the words column, clear of the buttons; the column ends at 50% - 28px on wide screens, 100% - 668px below 1280px */
+.house{position:absolute;bottom:58px;left:min(calc(50% - 258px),calc(100% - 898px));width:230px;pointer-events:none}
+.house svg{width:100%;display:block}
+.win{transition:fill .25s}
+
+.scene{position:relative;z-index:3;max-width:1280px;margin:0 auto;padding:0 56px;display:grid;grid-template-columns:1fr 556px;gap:56px;align-items:start}
+.chapters{position:relative;height:440px;margin-top:64px}
+.ch{position:absolute;inset:0 0 auto 0;opacity:0;transform:translateY(18px);transition:opacity .45s cubic-bezier(.2,.8,.2,1),transform .6s cubic-bezier(.2,.8,.2,1);pointer-events:none}
+.ch.on{opacity:1;transform:none;pointer-events:auto}
+.ch h1,.ch h2{font:400 84px/0.98 var(--serif);letter-spacing:-.02em;text-wrap:balance;max-width:640px}
+.ch h2{font-size:72px}
+.ch h1 em,.ch h2 em{font-style:italic}
+.ch p{margin-top:22px;font-size:20px;line-height:1.5;color:var(--ink-soft);max-width:30em;text-wrap:pretty}
+.ch .cta{display:flex;gap:14px;margin-top:32px}
+.ch .fine{margin-top:18px;font-size:15px;color:var(--ink-soft)}
+
+/* app card (shared look) */
+.app{background:radial-gradient(120% 70% at 20% 0,rgba(255,255,255,.045),transparent 60%),linear-gradient(180deg,#141b25,#0c1117);border:1px solid rgba(255,255,255,.11);border-radius:20px;color:#e7ecf2;font-family:var(--sans);box-shadow:0 40px 80px -30px rgba(0,0,0,.65),0 12px 30px -12px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.06)}
+.app .lbl{font:600 11px var(--sans);letter-spacing:.16em;text-transform:uppercase}
+.app .mut{color:#9aa5b3}
+.card{position:relative;width:556px;padding:18px 22px 16px}
+/* the parts that change each scroll frame get their own layers, so the card's shadow and gradients are not redrawn with them (SOLAR-230) */
+.card .live,.card .narr,.card .fb,.card .lane,.card .today,.card .stats{will-change:transform}
+.card-head{display:flex;align-items:center;justify-content:space-between;font-size:14px}
+.card-head .plant{font-weight:600;font-size:15px}
+.live{display:flex;align-items:center;gap:8px;color:#9aa5b3;font-size:13px}
+.live i{width:7px;height:7px;border-radius:50%;background:var(--solar);box-shadow:0 0 0 0 rgba(61,220,132,.5);}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(61,220,132,.5)}70%{box-shadow:0 0 0 8px rgba(61,220,132,0)}100%{box-shadow:0 0 0 0 rgba(61,220,132,0)}}
+.banner{height:0;overflow:hidden;transition:height .35s cubic-bezier(.2,.8,.2,1),margin .35s;margin-top:0}
+.banner.on{height:38px;margin-top:12px}
+.banner div{display:flex;align-items:center;gap:10px;height:38px;padding:0 14px;border-radius:10px;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.35);color:#fecaca;font-size:14px}
+.banner b{color:#fff}
+.card.stepped .flow,.card.stepped .narr,.card.stepped .today,.card.stepped .stats{animation:stepfade .6s ease-out}
+@keyframes stepfade{from{opacity:.3}to{opacity:1}}
+.narr{margin-top:12px;font-size:16px;line-height:1.4;min-height:44px;color:#d7dde6}
+.narr b{font-weight:600}
+.narr.alert{color:#fecaca}
+/* power flow, after the app's: two boxes a side, the inverter in a lane between them */
+.flow{display:grid;grid-template-columns:minmax(0,1fr) 188px minmax(0,1fr);grid-template-rows:118px 118px;row-gap:16px;margin-top:10px}
+.fb{--c:255,255,255;position:relative;display:flex;flex-direction:column;padding:12px 14px 11px;border-radius:14px;border:1px solid rgba(var(--c),.2);background:rgba(255,255,255,.02);transition:border-color .5s,background .5s}
+.fb.on{border-color:rgba(var(--c),.55);background:linear-gradient(180deg,rgba(var(--c),.1),rgba(var(--c),.03))}
+.fb-solar{--c:61,220,132;grid-column:1;grid-row:1}.fb-batt{--c:167,139,250;grid-column:1;grid-row:2}
+.fb-grid{--c:250,204,21;grid-column:3;grid-row:1}.fb-home{--c:248,113,113;grid-column:3;grid-row:2}
+.fb-head{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:#c8d0da}
+.fb-head svg{flex:none}
+.fb .v{margin-top:8px;font:700 26px/1 var(--mono);letter-spacing:-.02em;color:#7f8da0;display:flex;align-items:baseline;gap:5px;transition:color .5s}
+.fb.on .v{color:rgb(var(--c))}
+.fb .v small{font-size:13px;font-weight:500;color:#9aa5b3}
+.fb .s{margin-top:7px;font-size:12.5px;color:#9aa5b3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fb .s b{color:#e7ecf2;font-weight:600}
+.fb-foot{margin-top:auto;display:flex;align-items:center;gap:8px;font:600 11.5px var(--mono)}
+.fb-bar{flex:1;display:flex;gap:2px;height:5px;border-radius:4px;background:rgba(255,255,255,.07);overflow:hidden}
+.fb-bar i{display:block;height:100%;border-radius:4px;transition:flex-grow .4s,width .4s}
+.gpill{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border-radius:999px;font:600 11px var(--sans);color:#c8d0da;background:rgba(255,255,255,.05);border:1px solid var(--hair)}
+.gpill i{width:7px;height:7px;border-radius:50%;background:var(--grid)}
+.fb-grid.off{border-style:dashed;border-color:rgba(248,113,113,.4);background:rgba(248,113,113,.05)}
+.fb-grid.off .gpill{color:#fecaca;border-color:rgba(248,113,113,.35);background:rgba(248,113,113,.1)}
+.fb-grid.off .gpill i{background:var(--home)}
+.fb-grid .fb-foot{display:none}.fb-grid.off .fb-foot{display:flex}.fb-grid.off .s{display:none}
+.fb-grid .slash{opacity:0}.fb-grid.off .slash{opacity:1}
+.lane{grid-column:2;grid-row:1 / span 2;position:relative}
+.lane svg{display:block;width:100%;height:100%;overflow:visible}
+.band{fill:none;stroke-linecap:round;stroke-width:2.5;stroke:rgba(255,255,255,.08);transition:stroke .4s,stroke-width .4s}
+.band.on{stroke-width:11;stroke:rgba(var(--c),.16)}
+.band.cut{stroke-width:2;stroke:rgba(255,255,255,.22);stroke-dasharray:3 7}
+.dots{fill:none;stroke:rgb(var(--c));stroke-width:2.8;stroke-linecap:round;stroke-dasharray:2 13;opacity:0;transition:opacity .4s}
+.dots.on{opacity:1;animation:dots var(--d,2s) linear infinite}
+.dots.rev{animation-direction:reverse}
+@keyframes dots{to{stroke-dashoffset:-195}}
+.inv-label{position:absolute;left:0;right:0;text-align:center;font:600 9.5px var(--sans);letter-spacing:.18em;color:#7f8da0}
+.today{margin-top:14px;padding-top:12px;border-top:1px solid var(--hair)}
+.today-head{display:flex;justify-content:space-between;align-items:baseline;font-size:13px}
+.today svg{display:block;width:100%;height:82px;margin-top:8px;overflow:visible}
+.axis{font:500 10.5px var(--mono);fill:#7f8da0}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);margin-top:12px;padding-top:12px;border-top:1px solid var(--hair)}
+.stats div{font-size:12px;color:#9aa5b3}
+.stats b{display:block;margin-top:3px;font:700 19px var(--mono);color:#e7ecf2}
+.stats b small{font-size:12px;font-weight:500;color:#9aa5b3;margin-left:3px}
+
+/* email toast */
+.toast{position:absolute;left:-330px;bottom:24px;width:340px;padding:14px 16px;border-radius:14px;background:linear-gradient(180deg,#151b24,#0e131a);color:#e7ecf2;border:1px solid rgba(255,255,255,.12);box-shadow:0 30px 60px -20px rgba(0,0,0,.6),0 8px 18px -8px rgba(0,0,0,.4);opacity:0;transform:translate(-16px,10px) scale(.97);transition:opacity .4s,transform .55s cubic-bezier(.2,.9,.2,1);z-index:5;pointer-events:none}
+.toast.on{opacity:1;transform:none}
+.toast .from{display:flex;align-items:center;gap:8px;font-size:12px;color:#9aa5b3}
+.toast .from .orb{width:16px;height:16px;box-shadow:none}
+.toast .from span:last-child{margin-left:auto}
+.toast .tt{margin-top:6px;font:600 15px var(--sans)}
+.toast .cards{display:flex;gap:8px;margin-top:9px}
+.toast .cards div{flex:1;padding:8px 10px;border-radius:9px;background:rgba(255,255,255,.05);border:1px solid var(--hair);font-size:11.5px;color:#9aa5b3}
+.toast .cards b{display:block;font:700 16px var(--mono);color:#e7ecf2;margin:2px 0 1px}
 
 
-  /* ---------- flow svg ---------- */
-  .flow-fs-wrap { width: 100%; }
-  .flow-wrap { width: 100%; }
-  /* slide a whole number of dash-periods so the loop is seamless: 195 = 15 (desktop "2 13") × 13 (mobile "2 11") */
-  @keyframes flow { to { stroke-dashoffset: -195; } }
-  /* the moving dashes are the one piece of continuous motion on the page */
-  @media (prefers-reduced-motion: reduce) { .pflow-lane *, .mflow-links * { animation: none !important; } }
-  /* ---------- power-flow box, shared by both layouts (SOLAR-39) ---------- */
-  /* the type matches the overview cards above (SOLAR-16): label, number and unit */
-  .fbox { border: 1.3px solid var(--line); border-radius: 16px; min-width: 0; overflow: hidden; transition: border-color .2s; }
-  .fbox.off { border-style: dashed; }
-  .fbox-now { display: flex; flex-direction: column; min-width: 0; }
-  .fbox-head { display: flex; align-items: center; gap: 9px; }
-  .fbox-head svg { flex: none; }
-  .fbox-label { font: 500 12px var(--display); letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .fbox-val { font: 600 30px var(--mono); letter-spacing: -0.01em; line-height: 1; margin-top: 12px; white-space: nowrap; }
-  .fbox-val .u { font-size: 15px; font-weight: 500; margin-left: 5px; opacity: 0.85; }
-  .fbox-state { font-size: 12.5px; font-weight: 500; color: var(--muted); margin-top: 8px; white-space: nowrap; }
-  .fbox-state b { font: 600 12.5px var(--mono); color: var(--text); margin-left: 5px; }
-  /* the foot sits on the box's bottom edge whatever is above it */
-  .fbox-foot { margin-top: auto; padding-top: 10px; }
-  .fbox-bar { display: flex; gap: 2px; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,0.08); }
-  .fbox-bar i { display: block; height: 100%; border-radius: 3px; min-width: 6px; }   /* a 1% share still reads as a segment */
-  .fbox-split { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 10px; margin-top: 7px; }
-  .fbox-split span { display: flex; flex-direction: column; gap: 2px; }
-  .fbox-split span:last-child:not(:first-child) { align-items: flex-end; }
-  .fbox-split em, .fbox-today span, .fbox-today-h { font: 500 11px var(--display); font-style: normal; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
-  .fbox-split b { font: 600 12.5px var(--mono); }
-  .fbox-charge { display: flex; align-items: center; gap: 10px; }
-  .fbox-charge .fbox-bar { flex: 1; }
-  .fbox-charge b { font: 700 18px var(--mono); white-space: nowrap; }
-  /* mains there or gone: a green dot, or a hollow grey one */
-  .fbox-grid { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
-  .fbox-grid i { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ok); }
-  .fbox-grid.off i { box-sizing: border-box; background: none; border: 1.5px solid var(--dim); }
-  .fbox-today { display: flex; flex-direction: column; gap: 12px; }
-  .fbox-today > div:not(.fbox-today-h) { display: flex; flex-direction: column; gap: 3px; }
-  .fbox-today b { font: 600 17px var(--mono); color: var(--text); white-space: nowrap; }
-  .fbox-today b .u { font: 500 11px var(--mono); letter-spacing: 0; text-transform: none; color: var(--muted); margin-left: 4px; }
+/* ---------- after the day ---------- */
+.night{position:relative;background:var(--night);font-family:var(--body)}
+section.blk{padding:150px 0 0;scroll-margin-top:-38px}
+/* nav jumps: heading 40px under the 72px bar (phone: 28px under 60px) */
+section#features{padding-top:0;scroll-margin-top:112px}
+.h2{font:600 60px/1.04 var(--display);font-variation-settings:'opsz' 96;letter-spacing:-.035em;text-wrap:balance}
+.h2 em{font-style:normal;color:var(--gold)}
+.lede{margin-top:20px;font-size:20px;line-height:1.5;color:var(--muted);max-width:36em;text-wrap:pretty}
+.rv{opacity:0;transition:opacity .9s ease-out}
+.rv.in{opacity:1}
+.rv.d1{transition-delay:.12s}.rv.d2{transition-delay:.24s}
 
-  /* ---------- wide power-flow: two rows of two, the inverter in a lane between ---------- */
-  .pflow { display: grid; }
-  .pflow-cell { display: grid; min-width: 0; }
-  .pflow .fbox { display: grid; grid-template-columns: minmax(0, 1fr) 148px; }
-  .pflow .fbox-now { padding: 18px 20px 16px; }
-  .pflow .fbox-today { border-left: 1px solid var(--line); background: rgba(255,255,255,0.015); padding: 18px 18px 16px; }
-  .pflow.narrow .fbox { grid-template-columns: minmax(0, 1fr) 116px; }
-  .pflow.narrow .fbox-now { padding: 16px 14px 14px; }
-  .pflow.narrow .fbox-today { padding: 16px 14px 14px; }
-  .pflow.narrow .fbox-val { font-size: 24px; }
-  .pflow.narrow .fbox-val .u { font-size: 14px; }
-  .pflow-lane { position: relative; }
-  .pflow-lane svg { display: block; overflow: visible; }
-  .pflow-inv-label { position: absolute; left: 0; right: 0; text-align: center; font: 700 11px var(--display); letter-spacing: 0.14em; color: var(--text); }
-  /* the summary sentence opens the card, above the diagram */
-  .flow-narrative { font-size: 17px; line-height: 1.35; color: var(--text); text-wrap: pretty; margin-bottom: 14px; }
-  .flow-narrative b { font-weight: 600; }
 
-  /* ---------- mobile power-flow (vertical, card-style nodes) ---------- */
-  .mflow { display: flex; flex-direction: column; }
-  /* on a tablet the stacked layout keeps a phone-ish width instead of stretching the tiles across the card */
-  @media (min-width: 601px) { .mflow { width: 100%; max-width: 620px; margin: 0 auto; } }
-  .mflow-sources { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  /* a tile: the box with today's figures under a rule instead of beside it */
-  .mflow .fbox { display: flex; flex-direction: column; border-radius: 14px; }
-  .mflow .fbox-now { padding: 13px 13px 12px; flex: 1; }
-  .mflow .fbox-head { gap: 7px; }
-  /* under 360 px a tile is narrow: the name needs the room more than the icon does */
-  @media (max-width: 359px) { .mflow .fbox-head svg { display: none; } }
-  .mflow .fbox-val { font-size: 21px; margin-top: 10px; }
-  .mflow .fbox-val .u { font-size: 14px; margin-left: 4px; }
-  .mflow .fbox-state { font-size: 12px; margin-top: 7px; white-space: normal; }
-  .mflow .fbox-state b { font-size: 12px; margin-left: 4px; white-space: nowrap; }
-  .mflow .fbox-charge b { font-size: 15px; }
-  .mflow .fbox-split span { flex-direction: row; align-items: baseline; gap: 5px; }
-  .mflow .fbox-split span:last-child:not(:first-child) { align-items: baseline; }
-  .mflow .fbox-split { justify-content: flex-start; }
-  .mflow .fbox-split em { font-size: 10.5px; }
-  .mflow .fbox-split b { font-size: 12px; }
-  .mflow .fbox-today { border-top: 1px solid var(--line); padding: 9px 13px 10px; gap: 5px; }
-  .mflow .fbox-today-h { display: none; }
-  .mflow .fbox-today > div:not(.fbox-today-h) { flex-direction: row; justify-content: space-between; align-items: baseline; gap: 6px; }
-  .mflow .fbox-today span { font-size: 10.5px; }
-  .mflow .fbox-today b { font-size: 13px; }
-  .mflow .fbox-today b .u { font-size: 10px; margin-left: 3px; }
-  .mflow-links { display: block; width: 100%; height: 72px; overflow: visible; }
-  .mflow-inv { display: flex; flex-direction: column; align-items: center; }
-  .mflow-inv svg { display: block; }
-  .mflow-inv-label { font: 700 12px var(--display); letter-spacing: 0.14em; color: var(--text); margin-top: 8px; }
-  .hv-datebar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-  /* the arrows and the date box share one height (--datebar-h) so they read as one control */
-  .hv-datebar { --datebar-h: 32px; }
-  .hv-daynav { box-sizing: border-box; width: var(--datebar-h); height: var(--datebar-h); flex: none; display: inline-flex; align-items: center; justify-content: center;
-    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
-    line-height: 0; cursor: pointer; transition: .15s; padding: 0; }
-  .hv-daynav svg { display: block; }
-  .hv-daynav:hover:not(:disabled) { border-color: var(--line-2); }
-  .hv-daynav:disabled { color: var(--dim); cursor: default; opacity: .45; }
-  /* the date box: "Tue 6 Oct", opening our calendar (SOLAR-72); Today sits inside it only on a phone */
-  .hv-datebox { position: relative; box-sizing: border-box; height: var(--datebar-h); display: inline-flex; align-items: center; gap: 10px;
-    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; }
-  .hv-datebox:hover { border-color: var(--line-2); }
-  .hv-datepick { display: inline-flex; align-items: center; gap: 8px; height: 100%; padding: 0 12px; background: none; border: 0; color: var(--text); cursor: pointer; }
-  .hv-datepick:disabled { cursor: default; }
-  .hv-cal { display: block; flex: none; color: var(--muted); }
-  .hv-dateface { font: 600 13px var(--display); letter-spacing: 0.01em; white-space: nowrap;
-    display: inline-block; min-width: 6.9em; text-align: center; font-variant-numeric: tabular-nums; }
-  .hv-today-in { display: none; }
-  .cal-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; width: 276px; padding: 12px; box-sizing: border-box;
-    background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); }
-  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-  .cal-title { font: 600 14px var(--display); color: var(--text); }
-  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
-  .cal-dow { text-align: center; font: 500 11px var(--display); letter-spacing: 0.08em; color: var(--dim); padding: 4px 0 6px; }
-  .cal-day { height: 34px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--text); font: 500 13px var(--mono); cursor: pointer; padding: 0; }
-  .cal-day:hover:not(:disabled) { background: var(--panel-2); border-color: var(--line-2); }
-  .cal-day:disabled { color: var(--dim); opacity: 0.35; cursor: default; }
-  .cal-day.today { color: var(--pv); }
-  .cal-day.on { background: rgba(61,220,132,0.14); border-color: rgba(61,220,132,0.55); color: var(--text); }
-  .cal-day:focus-visible, .hv-datepick:focus-visible { outline: 2px solid var(--pv); outline-offset: 1px; }
-  .hv-approx { font-size: 11px; color: var(--warn); border: 1px solid var(--line); border-radius: 7px; padding: 1px 7px; margin-left: 2px; cursor: help; white-space: nowrap; }
-  .hv-gap { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text);
-    border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; margin-left: 2px; cursor: help; white-space: nowrap; }
-  .hv-gap-sq, .tip-dot.tip-sq { width: 8px; height: 8px; border-radius: 2px; background: var(--load); flex: none; }
-  .hv-today { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
-    font-size: 12px; padding: 6px 12px; cursor: pointer; transition: .15s; margin-left: auto; }
-  .hv-today:hover { border-color: var(--line-2); }
-  .hv-lag { font-size: 12px; color: var(--dim); }
-  .chart-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
-  .chart-controls-right { display: flex; align-items: center; gap: 10px; }
-  .chart-area { width: 100%; min-width: 0; overflow: hidden; }
-  .chart-svg { display: block; touch-action: pan-y; }
-  .ax { font: 400 11.5px var(--mono); fill: var(--muted); }
-  .ax-hi { fill: var(--text); }
-  .legend-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-  .legend-chip { display: inline-flex; align-items: center; gap: 7px; background: var(--panel-2); border: 1px solid var(--line);
-    border-radius: 999px; padding: 6px 13px; font-size: 12.5px; color: var(--text); transition: .15s; }
-  .legend-chip.off { color: var(--dim); }
-  .legend-val { margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--line-2); font-family: var(--mono); font-weight: 600; letter-spacing: -0.01em;
-    display: inline-block; font-variant-numeric: tabular-nums; }
-  .legend-chip.off .legend-val { color: var(--dim); border-color: var(--line); }
-  .legend-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; }
-  .legend-note { font-size: 12.5px; color: var(--dim); margin-left: 4px; }
-  svg.chart-svg, .chart-area, .hv-root, .trend-chart, .chart-tip, .trend-tip, .chart-legend, .seg-usage {
-    -webkit-user-select: none; user-select: none;
-  }
-  /* stops the long-press "copy/share" bubble on iOS while dragging the chart */
-  svg.chart-svg { -webkit-touch-callout: none; }
+/* look back at any day (SOLAR-187): solar only, any day of the year */
+#back button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;padding:0;min-width:0}
+#back .lb-h2{font:600 60px/1.04 var(--display);font-variation-settings:'opsz' 96;letter-spacing:-.035em;text-wrap:balance}
+#back .lb-h2 em{font-style:normal;color:var(--gold)}
+#back .sub{margin-top:20px;font-size:20px;color:rgba(243,238,228,.78);max-width:34em;text-wrap:pretty}
+#back .app{position:relative;margin-top:56px;background:radial-gradient(120% 70% at 20% 0,rgba(255,255,255,.045),transparent 60%),linear-gradient(180deg,#141b25,#0c1117);border:1px solid rgba(255,255,255,.11);border-radius:20px;color:#e7ecf2;font-family:var(--sans);box-shadow:0 40px 80px -30px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.06);padding:22px 26px 24px}
+#back .mut{color:#9aa5b3}
+#back .bar{display:flex;align-items:center;gap:14px}
+#back .plant{font-weight:600;font-size:15px;margin-right:auto}
+#back .dnav{display:flex;align-items:center;gap:6px}
+#back .sq{width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.14);display:grid;place-items:center;font-size:18px;color:#c8d0da}
+#back .sq:hover:not(:disabled){background:rgba(255,255,255,.07)}
+#back .sq:disabled{opacity:.3;cursor:default}
+#back .datebox{height:36px;padding:0 16px;border-radius:10px;border:1px solid rgba(255,255,255,.14);display:flex;align-items:center;gap:9px;font:600 15px var(--sans);min-width:140px;justify-content:center;cursor:default}
+#back .datebox svg{display:none}
+#back .body{display:grid;grid-template-columns:280px 1fr;gap:32px;margin-top:16px;padding-top:16px;border-top:1px solid var(--hair)}
+#back .mhead{display:flex;align-items:center;justify-content:space-between;font:600 15px var(--sans)}
+#back .mhead .sq{width:30px;height:30px;border-radius:8px;font-size:16px}
+#back .dow,#back .grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+#back .dow{margin-top:10px;font:600 12px var(--sans);color:#8d99a8;text-align:center}
+#back .grid{margin-top:6px;gap:2px 4px}
+#back .d{height:34px;border-radius:9px;font:500 13px var(--mono);display:grid;place-items:center;color:#e7ecf2}
+#back button.d:hover{background:rgba(255,255,255,.08)}
+#back .d.off{color:#6b7787}
+#back .d.is-today{box-shadow:inset 0 0 0 1.5px var(--solar);color:var(--solar)}
+#back .d.sel{background:var(--gold);color:#1a1206;font-weight:700;box-shadow:none}
+#back .chead{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+#back .chead b{font:600 17px var(--sans)}
+#back #lb-svg{display:block;width:100%;margin-top:12px}
+#back .stats{display:grid;grid-template-columns:repeat(2,1fr);margin-top:12px;padding-top:12px;border-top:1px solid var(--hair)}
+#back .stats div{font-size:13px;color:#9aa5b3}
+#back .stats b{display:block;margin-top:3px;font:700 20px var(--mono);color:#e7ecf2}
+#back .stats b small{font-size:13px;font-weight:500;color:#9aa5b3;margin-left:3px}
+#back .last{margin-top:18px;padding-top:14px;border-top:1px solid var(--hair)}
+#back .lhead{display:flex;justify-content:space-between;align-items:baseline;font-size:14px}
+#back .lhead b{font:600 15px var(--sans)}
+#back .bars{display:flex;align-items:flex-end;gap:5px;height:72px;margin-top:10px}
+#back .bars button{flex:1;height:100%;display:flex;align-items:flex-end;padding:0}
+#back .bars i{display:block;width:100%;border-radius:4px 4px 1px 1px;background:rgba(61,220,132,.32);transition:background .2s}
+#back .bars button:hover i{background:rgba(61,220,132,.55)}
+#back .bars button.best i{background:var(--solar)}
+#back .bars button.sel i{outline:2px solid #fff;outline-offset:2px}
+#back .ax{display:flex;justify-content:space-between;margin-top:8px;font:500 12px var(--mono);color:#8d99a8}
+@media(max-width:860px){
+  #back .lb-h2{font-size:42px}
+  #back .sub{font-size:18px}
+  #back .app{padding:16px 14px 18px;margin-top:36px}
+  #back .bar{flex-wrap:wrap}
+  #back .plant{width:100%}
+  #back .dnav{width:100%}
+  #back .dnav .sq{width:44px;height:44px;flex:none}
+  #back .datebox{flex:1;height:44px;cursor:pointer}
+  #back .datebox svg{display:block}
+  #back .body{display:block;margin-top:16px;padding-top:16px}
+  #back .cal{display:none;position:absolute;left:10px;right:10px;top:122px;z-index:5;padding:14px;border-radius:16px;background:#0f151d;border:1px solid rgba(255,255,255,.18);box-shadow:0 24px 50px rgba(0,0,0,.7)}
+  #back .cal.open{display:block}
+  #back .mhead .sq{width:44px;height:44px}
+  #back .d{height:40px}
+  #back .stats b{font-size:19px}
+  #back .bars{gap:3px}
+}
 
-  .chart-tip { position: absolute; pointer-events: none; background: rgba(13,17,23,0.96); border: 1px solid var(--line-2);
-    border-radius: 10px; padding: 10px 12px; min-width: 168px; white-space: nowrap; box-shadow: 0 12px 30px rgba(0,0,0,0.5); z-index: 5; }
-  .tip-time { font: 600 12px var(--mono); color: var(--text); margin-bottom: 8px; }
-  .tip-row { display: flex; align-items: center; gap: 7px; font-size: 12px; margin: 3px 0; }
-  .tip-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .tip-l { color: var(--muted); } .tip-v { margin-left: auto; color: var(--text); }
-  .tip-total { margin-top: 5px; border-top: 1px solid var(--line); padding-top: 6px; }
-  .tip-total .tip-l { color: var(--text); font-weight: 600; }
-  /* drag-to-select range totals */
-  .chart-range { position: absolute; left: 8px; top: 8px; background: rgba(13,17,23,0.97); border: 1px solid var(--line-2);
-    border-radius: 10px; padding: 9px 12px; min-width: 180px; box-shadow: 0 12px 30px rgba(0,0,0,0.5); z-index: 6; }
-  .cr-head { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
-  .cr-head .tip-time { margin-bottom: 0; }
-  .cr-x { margin-left: auto; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
-  .cr-x:hover { color: var(--text); }
-  .solar-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-  .solar-stats .stat-tile { padding: 26px 28px; }
-  .stat-sub .trend-badge { margin: 0 3px 0 0; top: 0; }
-  .solar-tab .section-title .info-dot { margin-left: 8px; }
-  .solar-tab .section-right { text-transform: none; letter-spacing: 0; font-size: 12.5px; font-weight: 400; color: var(--muted); }
-  .solar-tab .section-right b { font-family: var(--mono); font-weight: 600; color: var(--text); }
-  .solar-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
-  .solar-row { display: grid; grid-template-columns: minmax(0, 1fr); }
-  .solar-row > .wiw { width: 100%; max-width: 560px; box-sizing: border-box; }
-  .solar-tab .wiw .section-title { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 5px 12px; margin-bottom: 14px; }
-  /* the app's info tooltip (index.html) */
-  .info-dot { position: relative; display: inline-flex; align-items: center; vertical-align: middle;
-    color: var(--dim); cursor: help; margin-left: 5px; }
-  .info-dot:hover, .info-dot:focus { color: var(--grid); outline: none; }
-  .info-dot::before { content: ''; position: absolute; inset: -12px; }
-  .info-dot svg { display: block; }
-  .info-bubble { display: none; position: absolute; bottom: calc(100% + 9px); left: 50%; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(4px);
-    width: 210px; background: rgba(13,17,23,0.98); border: 1px solid var(--line-2); border-radius: 10px; padding: 10px 12px;
-    font-family: var(--display); font-size: 12px; font-weight: 400; line-height: 1.5; letter-spacing: 0; text-transform: none;
-    color: var(--text); box-shadow: 0 14px 34px rgba(0,0,0,0.55); opacity: 0; visibility: hidden; transition: opacity .15s, transform .15s;
-    z-index: 30; pointer-events: none; }
-  .info-bubble::after { content: ''; position: absolute; top: 100%; left: calc(50% - var(--shift, 0px)); transform: translateX(-50%);
-    border: 6px solid transparent; border-top-color: var(--line-2); }
-  .info-dot:hover .info-bubble, .info-dot:focus .info-bubble { display: block; opacity: 1; visibility: visible; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(0); }
-  .wiw-figs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 16px; margin-top: 18px; }
-  /* aligned as the Power Flow solar box's split: first left, last right, middle centred */
-  .wiw-figs > :not(:first-child):not(:last-child) { text-align: center; }
-  .wiw-figs > :last-child:not(:first-child) { text-align: right; }
-  .wiw-figs b { display: block; font: 700 28px var(--mono); line-height: 1; letter-spacing: -0.01em; white-space: nowrap; }
-  .wiw-figs b .u { font-size: 15px; margin-left: 4px; opacity: 0.85; }
-  .wiw-figs span:not(.u) { display: block; margin-top: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
-  .solar-note { margin: 0 0 8px; font-size: 13.5px; color: var(--muted); max-width: 60ch; }
-  /* the app's narrow-screen versions of the rules above (index.html, 980px and 600px blocks) */
-  @media (max-width: 980px) { .solar-stats { grid-template-columns: 1fr 1fr; } }
-  @media (max-width: 600px) {
-    .solar-stats { gap: 12px; }
-    .solar-stats .stat-tile { padding: 18px; }
-    .solar-tab .section-title { flex-direction: column; align-items: flex-start; gap: 5px; }
-    .wiw-figs { gap: 10px; margin-top: 16px; }
-    .wiw-figs b { font-size: 22px; }
-    .wiw-figs b .u { font-size: 12px; }
-    .wiw-figs span:not(.u) { font-size: 11px; margin-top: 7px; }
-    .stat-value .num { font-size: 34px; }
-    .stat-value .unit { font-size: 18px; }
-    .flow-narrative { font-size: 15.5px; }
-    .today-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    .mini-stat { padding: 14px; }
-    .mini-value { font-size: 21px; }
-    .hv-datebar { --datebar-h: 40px; }
-    .hv-datebox { display: flex; flex: 1 0 calc(100% - 2 * var(--datebar-h) - 16px); min-width: 0; justify-content: center; }
-    .hv-datebar .hv-gap { order: 1; margin-left: 0; }
-    .hv-datepick { padding: 0 4px; }
-    .hv-dateface { font-size: 14px; }
-    .cal-pop { left: 50%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); }
-    .legend-chip { padding: 5px 10px; font-size: 11.5px; }
-  }
-  /* ===== end of copied rules ===== */
+/* inbox (SOLAR-187): the app's own emails, worded and laid out as sent */
+#mail button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left}
+#mail .ib-box{margin-top:56px;display:grid;grid-template-columns:400px 1fr;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.11);background:linear-gradient(180deg,#121821,#0b1016);box-shadow:0 40px 80px -30px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.06);font-family:var(--sans);color:#e7ecf2}
+#mail .ib-list{border-right:1px solid var(--hair);display:flex;flex-direction:column}
+#mail .ib-list-head{display:flex;justify-content:space-between;align-items:center;padding:18px 20px 14px;font-size:14px;color:#9aa5b3}
+#mail .ib-list-head b{font:600 15px var(--sans);color:#e7ecf2}
+#mail .ib-row{display:grid;grid-template-columns:10px 1fr auto;gap:4px 12px;align-items:baseline;width:100%;padding:14px 20px;border-top:1px solid var(--hair);transition:background .15s}
+#mail .ib-row:hover{background:rgba(255,255,255,.035)}
+#mail .ib-row[aria-selected="true"]{background:rgba(255,255,255,.06)}
+#mail .ib-row i{grid-row:1/3;align-self:center;width:8px;height:8px;border-radius:50%}
+#mail .ib-row .ib-s{font-size:14.5px;font-weight:600;line-height:1.3;color:#e7ecf2}
+#mail .ib-row .ib-t{font:500 12px var(--mono);color:#8d99a8;white-space:nowrap}
+#mail .ib-row .ib-p{grid-column:2/4;font-size:13px;color:#9aa5b3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#mail .ib-list-foot{margin-top:auto;padding:16px 20px;border-top:1px solid var(--hair);font-size:13px;color:#9aa5b3}
+#mail .ib-view{padding:28px 32px 30px}
+#mail .ib-from{display:flex;align-items:center;gap:10px;font-size:13px;color:#9aa5b3}
+#mail .ib-orb{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 38% 34%,#fff6d6 0 12%,#ffd56b 30%,#f4a93a 62%,#e07a1f 100%)}
+#mail .ib-from b{color:#e7ecf2}.ib-from span:last-child{margin-left:auto;font-family:var(--mono)}
+#mail .ib-subj{margin-top:10px;font-size:13px;color:#9aa5b3}
+#mail .ib-title{margin-top:18px;font:700 26px/1.2 var(--sans);letter-spacing:-.01em}
+#mail .ib-sub{margin-top:4px;font-size:14px;color:#9aa5b3}
+#mail .ib-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:20px}
+#mail .ib-stats.ib-stack{grid-template-columns:repeat(2,1fr)}
+#mail .ib-card{padding:13px 15px;border-radius:12px;background:rgba(255,255,255,.035);border:1px solid var(--hair)}
+#mail .ib-card .ib-l{font-size:12.5px;color:#9aa5b3}
+#mail .ib-card .ib-v{margin-top:4px;font:700 24px var(--mono);letter-spacing:-.01em}
+#mail .ib-card .ib-v small{font-size:13px;font-weight:500;color:#9aa5b3;margin-left:3px}
+#mail .ib-card .ib-d{margin-top:4px;font-size:12px;color:#9aa5b3}
+#mail .ib-card .ib-d b{font-weight:600}
+#mail .ib-chart{margin-top:16px;padding:16px 16px 14px;border-radius:12px;background:rgba(255,255,255,.025);border:1px solid var(--hair)}
+#mail .ib-ch{display:flex;justify-content:space-between;font-size:13px;color:#9aa5b3}.ib-ch b{color:#e7ecf2;font-weight:600}
+#mail .ib-bars{display:flex;align-items:flex-end;gap:8px;height:96px;margin-top:22px}
+#mail .ib-bars div{flex:1;position:relative;border-radius:4px 4px 0 0;background:#3a4654}
+#mail .ib-bars div.ib-best{background:var(--solar)}
+#mail .ib-bars div.ib-best::before{content:attr(data-v);position:absolute;bottom:100%;left:50%;transform:translate(-50%,-5px);font:700 11px var(--mono);color:var(--solar);white-space:nowrap}
+#mail .ib-lbls{display:flex;gap:8px;margin-top:7px}.ib-lbls span{flex:1;text-align:center;font:400 11.5px var(--mono);color:#7f8da0}.ib-lbls span.ib-best{color:#e7ecf2;font-weight:700}
+#mail .ib-facts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+#mail .ib-note{margin-top:14px;font-size:14.5px;line-height:1.5;color:#c8d0da;max-width:46ch}
+#mail .ib-btn{display:inline-block;margin-top:20px;padding:10px 16px;border-radius:10px;background:var(--solar);color:#07130c;font-weight:600;font-size:14px}
+#mail .ib-foot{margin-top:18px;font-size:12px;color:#7f8da0}
+@media(max-width:860px){
+ #mail .ib-box{grid-template-columns:1fr}.ib-list{border-right:0;border-bottom:1px solid var(--hair)}
+ #mail .ib-row{padding:13px 16px}.ib-view{padding:20px 16px 22px;min-height:0}.ib-title{font-size:22px}
+ #mail .ib-stats{grid-template-columns:1fr 1fr}.ib-card .ib-v{font-size:21px}
+ #mail #ib-rows .ib-view{border-top:1px solid var(--hair);background:rgba(255,255,255,.025)}
+}
+@media(prefers-reduced-motion:no-preference){.ib-view>*{animation:ibin .35s cubic-bezier(.2,.8,.2,1) both}@keyframes ibin{from{opacity:0;transform:translateY(6px)}}}
 
-  .wrap { max-width: 1240px; margin: 0 auto; padding: 0 24px; }
-  @media (max-width: 600px) { .wrap { padding: 0 16px; } }
-  .sun {
-    width: 24px; height: 24px; border-radius: 50%; flex: none;
-    background: radial-gradient(circle at 38% 34%, #ffd56b, #f4a93a 58%, #e07a1f);
-    box-shadow: 0 0 0 4px rgba(244,169,58,0.12);
-  }
+/* start (SOLAR-187): the three steps, each over the app's own screen */
+#start .st-row{position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:28px;margin-top:56px}
+#start .st-row::before{content:"";position:absolute;left:16%;right:16%;top:17px;height:2px;background:linear-gradient(90deg,var(--gold),rgba(242,195,107,.25))}
+#start .st-n{position:relative;display:grid;place-items:center;width:36px;height:36px;margin:0 auto;border-radius:50%;background:var(--night);border:2px solid var(--gold);font:700 15px var(--mono);color:var(--gold)}
+#start .st-shot{margin-top:22px;height:236px;padding:20px;border-radius:18px;background:radial-gradient(120% 70% at 20% 0,rgba(255,255,255,.045),transparent 60%),linear-gradient(180deg,#141b25,#0c1117);border:1px solid rgba(255,255,255,.11);box-shadow:0 30px 60px -30px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.06);font-family:var(--sans);color:#e7ecf2;display:flex;flex-direction:column;justify-content:center;gap:10px}
+#start .st-h{margin-top:22px;text-align:center;font:600 21px var(--sans);letter-spacing:-.01em}
+#start .st-p{margin-top:6px;text-align:center;font-size:17px;color:var(--muted);max-width:24em;margin-left:auto;margin-right:auto}
+/* the app's own pieces, drawn small */
+#start .st-g,#start .st-go{border:0;cursor:pointer;width:100%;flex:none;transition:filter .15s,transform .1s}
+#start .st-g:hover,#start .st-go:hover{filter:brightness(1.08)}
+#start .st-g:active,#start .st-go:active{transform:scale(.98)}
+#start .st-g{display:flex;align-items:center;justify-content:center;gap:10px;height:44px;border-radius:11px;background:#f3f4f6;color:#1f2937;font:600 15px var(--sans)}
+#start .st-or{display:flex;align-items:center;gap:10px;font-size:12px;color:#7f8da0}#start .st-or::before,#start .st-or::after{content:"";flex:1;height:1px;background:var(--hair-2)}
+#start .st-f{display:block;flex:none;width:100%;height:42px;padding:0 13px;border-radius:10px;border:1px solid var(--hair-2);background:rgba(255,255,255,.03);font:400 14px var(--sans);color:#e7ecf2;outline:none;transition:border-color .15s}
+#start .st-f::placeholder{color:#8d99a8}
+#start .st-f:focus{border-color:rgba(242,195,107,.7)}
+#start .st-ct{font:600 16px var(--sans)}#start .st-cs{font-size:12.5px;color:#9aa5b3;margin-top:-4px}
+#start .st-go{display:flex;align-items:center;justify-content:center;height:40px;border-radius:10px;background:var(--solar);color:#07130c;font:600 14px var(--sans)}
+#start .st-arc{width:11px;height:11px;border-radius:50%;border:2px solid rgba(34,211,238,.25);border-top-color:#22d3ee;animation:stspin .9s linear infinite}
+@keyframes stspin{to{transform:rotate(360deg)}}
+#start .st-imp{display:flex;align-items:center;justify-content:center;gap:12px;font-size:20px;color:#22d3ee}
+#start .st-imp .st-arc{width:20px;height:20px;border-width:3px}
+#start .st-imp b{font:600 20px var(--mono)}
+#start .st-imp-bar{height:6px;margin:6px 8px 0;border-radius:4px;background:rgba(34,211,238,.14);overflow:hidden}
+#start .st-imp-bar i{display:block;width:64%;height:100%;border-radius:4px;background:#22d3ee}
+#start .st-imp-note{text-align:center;font-size:13px;color:#9aa5b3;margin-top:4px}
+#start .st-cta{display:flex;justify-content:center;margin-top:48px}
+@media(max-width:860px){
+  #start .st-row{grid-template-columns:1fr;gap:44px}#start .st-row::before{display:none}
+  #start .st-shot{height:auto;min-height:210px}
+}
+@media(prefers-reduced-motion:reduce){#start .st-arc{animation:none;border-top-color:rgba(34,211,238,.6)}}
 
-  .btn {
-    display: inline-flex; align-items: center; gap: 8px;
-    height: 46px; padding: 0 20px; border: 0; border-radius: 10px;
-    font: 600 15px/1 var(--display); text-decoration: none; white-space: nowrap;
-    transition: transform .2s var(--ease), background .2s, filter .2s;
-  }
-  .btn:active { transform: translateY(1px) scale(0.98); }
-  .btn-primary { background: var(--pv); color: #06210f; box-shadow: 0 10px 30px -14px rgba(61,220,132,0.7); }
-  .btn-primary:hover { filter: brightness(1.06); transform: translateY(-1px); }
-  /* The three Phosphor bold icons as masks, so the page no longer loads the 86 KB icon
-     stylesheet and 150 KB font for them (SOLAR-143). Paths from @phosphor-icons/core 2.1.1. */
-  .ph-bold { display: inline-block; width: 1em; height: 1em; flex: none; background: currentColor;
-    -webkit-mask: var(--ph) center / contain no-repeat; mask: var(--ph) center / contain no-repeat; }
-  .ph-check { --ph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath d='M232.49,80.49l-128,128a12,12,0,0,1-17,0l-56-56a12,12,0,1,1,17-17L96,183,215.51,63.51a12,12,0,0,1,17,17Z'/%3E%3C/svg%3E"); }
-  .ph-arrow-right { --ph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath d='M224.49,136.49l-72,72a12,12,0,0,1-17-17L187,140H40a12,12,0,0,1,0-24H187L135.51,64.48a12,12,0,0,1,17-17l72,72A12,12,0,0,1,224.49,136.49Z'/%3E%3C/svg%3E"); }
-  .ph-caret-down { --ph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath d='M216.49,104.49l-80,80a12,12,0,0,1-17,0l-80-80a12,12,0,0,1,17-17L128,159l71.51-71.52a12,12,0,0,1,17,17Z'/%3E%3C/svg%3E"); }
-  .btn-primary i { transition: transform .25s var(--ease); }
-  .btn-primary:hover i { transform: translateX(3px); }
-  .btn:focus-visible, .topnav a:focus-visible { outline: 2px solid var(--pv); outline-offset: 3px; }
+/* pricing */
+.plans{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:56px;align-items:stretch}
+.plan{position:relative;display:flex;flex-direction:column;padding:32px 30px 30px;border-radius:22px;background:var(--panel);border:1px solid var(--hair-2);transition:transform .3s cubic-bezier(.2,.8,.2,1),border-color .3s}
+.plan:hover{transform:translateY(-4px);border-color:rgba(255,255,255,.22)}
+.plan h3{font:600 19px var(--sans)}
+.price{margin-top:18px;font:600 56px/1 var(--display);letter-spacing:-.04em}
+.price small{font:400 17px var(--body);color:var(--muted);margin-left:6px;letter-spacing:0}
+.per{margin-top:8px;font-size:16px;color:var(--muted);min-height:26px}
+.plan ul{list-style:none;margin:24px 0 30px;display:grid;gap:12px;flex:1;align-content:start}
+.plan li{display:flex;gap:11px;font-size:17px;line-height:1.4}
+.plan li svg{flex:none;margin-top:3px}
+.plan .btn{width:100%}
+.plan.year{background:linear-gradient(180deg,#2a1f10 0,#16130f 70%);border-color:rgba(242,195,107,.55);box-shadow:0 30px 70px -30px rgba(242,170,70,.45),inset 0 1px 0 rgba(255,220,150,.15)}
+.plan.year:hover{border-color:var(--gold)}
+.plan.year .per{color:var(--gold)}
+.period{display:inline-flex;gap:4px;margin-top:40px;padding:4px;border-radius:999px;background:var(--panel);border:1px solid var(--hair-2)}
+.period button{height:40px;padding:0 20px;border-radius:999px;border:0;background:transparent;color:var(--muted);font:600 15px var(--sans);cursor:pointer;transition:background .2s,color .2s}
+.period button:hover{color:var(--paper)}
+.period button[aria-pressed="true"]{background:var(--panel-2);color:var(--paper);box-shadow:inset 0 0 0 1px var(--hair-2)}
+.period button span{margin-left:6px;color:var(--gold);font-weight:500}
+#pricing .plans{margin-top:24px}
+#pricing[data-period="m"] .y,#pricing[data-period="y"] .m{display:none}
+.extra{margin:0 0 26px;padding:16px 16px 14px;border-radius:14px;border:1px dashed rgba(242,195,107,.45);background:rgba(242,195,107,.05)}
+.extra div{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:2px 12px;font:600 16px var(--sans);white-space:nowrap}
+.extra em{font-style:normal;color:var(--gold)}
+.extra p{margin-top:4px;font-size:14.5px;color:var(--muted)}
+.tag{position:absolute;top:30px;right:28px;padding:5px 11px;border-radius:999px;background:rgba(242,195,107,.16);color:var(--gold);font-size:13px;font-weight:600}
 
-  /* ---------- top nav ---------- */
-  .topnav {
-    position: sticky; top: 0; z-index: 20;
-    backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%);
-    background: rgba(10,13,18,0.75); border-bottom: 1px solid var(--line);
-  }
-  .topnav .wrap { height: 64px; display: flex; align-items: center; gap: 28px; }
-  .brand { display: flex; align-items: center; gap: 11px; font-weight: 700; font-size: 18px; letter-spacing: -0.01em; text-decoration: none; }
-  .topnav-links { display: flex; gap: 24px; margin-left: auto; font-size: 14.5px; color: var(--muted); }
-  .topnav-links a { text-decoration: none; transition: color .2s; }
-  .topnav-links a:hover { color: var(--text); }
-  /* one width for "Try it free" and "Sign in", so the links don't slide when the places count swaps it (SOLAR-129) */
-  .topnav .btn { height: 38px; padding: 0 15px; font-size: 14px; border-radius: 9px; min-width: 100px; justify-content: center; }
-  @media (max-width: 760px) { .topnav-links { display: none; } .topnav .btn { margin-left: auto; } }
+/* questions */
+#questions .wrap{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:64px;align-items:start}
+.qs{border-top:1px solid var(--hair-2)}
+.qs details{border-bottom:1px solid var(--hair);transition:border-color .3s}
+.qs details.on,.qs:not(.js) details[open]{border-color:rgba(242,195,107,.3)}
+.qs summary{list-style:none;display:flex;justify-content:space-between;align-items:center;gap:24px;padding:24px 0;font:500 21px var(--sans);letter-spacing:-.01em;cursor:pointer;transition:color .25s}
+.qs summary::-webkit-details-marker{display:none}
+.qs details.on summary,.qs:not(.js) details[open] summary{color:var(--gold)}
+@media(hover:hover){.qs summary:hover{color:var(--gold)}.qs summary:hover i{border-color:rgba(242,195,107,.5)}}
+.qs summary:focus-visible{outline:2px solid var(--gold);outline-offset:4px;border-radius:6px}
+.qs summary i{flex:none;width:30px;height:30px;border-radius:50%;border:1px solid var(--hair-2);position:relative;transition:transform .3s,background .3s}
+.qs summary i::before,.qs summary i::after{content:"";position:absolute;left:50%;top:50%;width:11px;height:1.6px;margin:-.8px 0 0 -5.5px;background:currentColor}
+.qs summary i::after{transform:rotate(90deg);transition:transform .3s}
+.qs details.on summary i,.qs:not(.js) details[open] summary i{background:rgba(242,195,107,.14);border-color:rgba(242,195,107,.5);transform:rotate(180deg)}
+.qs details.on summary i::after,.qs:not(.js) details[open] summary i::after{transform:rotate(0)}
+.qs details p{overflow:hidden;padding:0 60px 26px 0;color:var(--muted);max-width:44em}
 
-  /* ---------- hero ---------- */
-  .hero { padding: 40px 0 24px; }
-  .hero-top { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 48px; align-items: end; margin-bottom: 32px; }
-  .hero h1 { margin: 0; font-size: clamp(40px, 5.6vw, 68px); line-height: 1.02; letter-spacing: -0.035em; font-weight: 700; }
-  .hero h1 .hl { color: var(--pv); }
-  .hero-side p { margin: 0 0 24px; font-size: 18px; color: var(--muted); max-width: 34ch; }
-  @media (max-width: 920px) {
-    .hero { padding: 24px 0 16px; }
-    .hero-top { grid-template-columns: 1fr; gap: 18px; margin-bottom: 24px; }
-  }
-  .rise { opacity: 0; transform: translateY(18px); }
-  .ready .rise { animation: rise .9s var(--ease) forwards; animation-delay: calc(var(--i, 0) * 90ms); }
-  @keyframes rise { to { opacity: 1; transform: none; } }
+/* close */
+.dawn{position:relative;padding:150px 0 0;overflow:hidden;text-align:center}
+.dawn::before{content:"";position:absolute;left:50%;bottom:-420px;width:1700px;height:1000px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(closest-side,rgba(255,206,120,.62),rgba(232,132,48,.3) 40%,rgba(130,60,95,.16) 68%,transparent)}
+.dawn > *{position:relative}
+.dawn .h2{font-size:76px}
+.dawn .lede{margin:20px auto 0}
+.dawn .cta{display:flex;justify-content:center;gap:14px;margin-top:32px}
+footer{position:relative;margin-top:96px;padding:28px 0 48px;border-top:1px solid rgba(255,255,255,.1);font-size:15px;color:var(--ink-soft)}
+footer .wrap{display:flex;align-items:center;gap:28px}
+footer nav{margin-left:auto;display:flex;gap:24px}
+footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 
-  /* the app, framed: its header strip over a page of real components */
-  .appwin-stage { perspective: 1800px; }
-  /* Held open while the demo builds, so Solar and Grid don't move down when it lands. They are
-     still hidden then, but search engines count the move against the page. 740 px is the
-     demo's shortest (desktop); taller layouts grow below the fold (SOLAR-127). */
-  #liveDemo { min-height: 740px; }
-  .appwin {
-    border-radius: 18px; border: 1px solid var(--line-2); background: var(--bg); overflow: hidden;
-    box-shadow: 0 50px 100px -40px rgba(0,0,0,0.8);
-  }
-  .hero .appwin { opacity: 0; transform: rotateX(14deg) translateY(50px) scale(0.96); transform-origin: 50% 0; }
-  .ready .hero .appwin { animation: tilt-in 1.3s var(--ease) .35s forwards; }
-  @keyframes tilt-in { to { opacity: 1; transform: none; } }
-  .feature .appwin { transform: translateY(40px) scale(0.98); opacity: 0; transition: transform 1s var(--ease), opacity 1s var(--ease); }
-  .feature.seen .appwin { transform: none; opacity: 1; }
-  .appwin-head { height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--line); }
-  .appwin-head .plant { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; }
-  .appwin-head .plant i { color: var(--muted); font-size: 14px; }
-  .appwin-head .page { margin-left: 4px; padding-left: 14px; border-left: 1px solid var(--line); color: var(--muted); font-size: 14px; }
-  .appwin-body { padding: 14px; }
-  .appwin-body .stack { display: flex; flex-direction: column; gap: 20px; }
-  /* two tiles here, not the app's six */
-  .appwin .solar-stats { grid-template-columns: 1fr 1fr; }
-  /* the overview strip shows four of the app's five tiles (no rate set, so no Est. saved) */
-  .appwin .today-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  @media (max-width: 980px) { .appwin .today-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 600px) {
-    .appwin-head { height: 50px; padding: 0 14px; }
-    .appwin-head .plant-word { display: none; }
-    .appwin-body { padding: 10px; }
-  }
+@media (max-width:1180px){.scene{grid-template-columns:1fr 480px;gap:32px}.card{transform:scale(.86);transform-origin:top left}.ch h1{font-size:68px}.ch h2{font-size:58px}}
+/* narrower than 1220px the house would reach See pricing; phones bring back a small one */
+@media (max-width:1219px){.house{display:none}}
+@media (max-width:1040px){.scene{grid-template-columns:1fr 412px}.card{transform:scale(.74)}}
 
-  /* ---------- Solar and Grid sections ---------- */
-  .feature { padding: 56px 0 0; }
-  .feature h2 { font-size: clamp(28px, 3.6vw, 44px); letter-spacing: -0.03em; line-height: 1.08; margin: 0 0 12px; }
-  .feature h2 .solar { color: var(--pv); }
-  .feature h2 .grid { color: var(--grid); }
-  .feature .lede { margin: 0 0 18px; font-size: 17px; color: var(--muted); max-width: 52ch; }
-  .points { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0 0 32px; padding: 0; list-style: none; font-size: 14.5px; color: var(--text); }
-  .points li { display: flex; align-items: center; gap: 8px; }
-  .points i { color: var(--pv); font-size: 16px; }
-  .feature.grid-sec .points i { color: var(--grid); }
-  .head-reveal > * { opacity: 0; transform: translateY(20px); transition: opacity .8s var(--ease), transform .8s var(--ease); }
-  .seen .head-reveal > * { opacity: 1; transform: none; }
-  .seen .head-reveal > :nth-child(2) { transition-delay: .08s; }
-  .seen .head-reveal > :nth-child(3) { transition-delay: .16s; }
-  @media (max-width: 600px) { .feature { padding-top: 40px; } .points { flex-direction: column; } }
+/* ---------- phone: the card rides at the top of the day, the words sit under it ---------- */
+@media (max-width:860px){
+  .wrap,.scene{padding:0 16px}
+  .links{display:none}
+  .top .wrap{height:60px;gap:10px}.top .end{gap:12px}.top .btn{height:38px;padding:0 12px}
+  .brand{font-size:15px;gap:8px}.signin{font-size:15px}
+  .scene{grid-template-columns:1fr;gap:0}
+  .cardcol{position:absolute;top:0;bottom:0;left:16px;right:16px;padding:0;overflow:clip;pointer-events:none}
+  .cardcol .card{top:68px;transform:scale(var(--k,.64));transform-origin:top left;pointer-events:auto}
+  /* the card is drawn small on a phone: the alert stays full size, narrower, right-aligned, just over the card's foot */
+  .toast{left:auto;right:0;bottom:auto;top:calc(100% - 56px / var(--k,.64));width:calc(70% * var(--k,.64) / .8);scale:calc(.8 / var(--k,.64));transform-origin:top right}  /* the words sit just above low hills; later moments are shorter so the next words follow sooner */
+  .moment{justify-content:flex-end;padding:0 0 116px;min-height:100svh}
+  /* a small house on the hill, bottom right, under the words */
+  .house{display:block;left:auto;right:16px;bottom:calc(20px + 100lvh - 100svh);width:96px}
+  /* the moon's path runs behind the words here, so it stays dim */
+  .moonorb{filter:opacity(.4)}
+  .moment+.moment{min-height:70svh}
+  /* the stage is the full screen with the address bar hidden; while the bar shows it covers the stage's foot,
+     so hills and house sit that much higher and the near hill's colour fills the strip under them */
+  .land{height:calc(64px + 100lvh - 100svh)}
+  .land svg{top:0;bottom:auto;height:64px}
+  .land::after{content:"";position:absolute;left:0;right:0;top:63px;bottom:0;background:var(--l2)}
+  /* the card's words drawn large, so they read after the card is scaled down; box sub-lines go (the narration says it) */
+  .card-head{font-size:18px}.card-head .plant{font-size:19px}.live{font-size:17px}
+  .narr{font-size:20px;min-height:56px}
+  .fb-head{font-size:17px}.fb .v{font-size:34px}.fb .v small{font-size:17px}.fb .s{display:none}
+  .fb-foot,.gpill{font-size:16px}.gpill{height:26px}.inv-label{font-size:15px}
+  .today-head{font-size:17px}.axis{font-size:16px}
+  .stats div{font-size:16px}.stats b{font-size:24px}.stats b small{font-size:16px}
+  .brand,.signin,footer nav a{display:inline-flex;align-items:center;min-height:44px}.top .btn{height:44px}
+  #mail .ib-stats .ib-card:last-child:nth-child(odd){grid-column:1/-1}
+  .moment h1{font-size:40px}.moment h2{font-size:36px}
+  .moment p{margin-top:12px;font-size:17px}
+  .moment .cta{margin-top:18px;flex-wrap:wrap}
+  section.blk{padding-top:96px;scroll-margin-top:-8px}section#features{scroll-margin-top:88px}
+  .h2,.dawn .h2{font-size:38px}
+  .lede{font-size:18px}
+  .plans{grid-template-columns:minmax(0,1fr);gap:28px}
+  #questions .wrap{grid-template-columns:minmax(0,1fr);gap:36px}
+  .qs summary{font-size:18px}.qs details p{padding-right:0}
+  .dawn{padding-top:96px}footer{margin-top:72px;padding-bottom:36px}
+  #mail .ib-box,#start .st-row{margin-top:36px}#start .st-cta{margin-top:36px}.period{margin-top:32px}#pricing .plans{margin-top:20px}.dawn .cta{flex-wrap:wrap}
+  footer .wrap{flex-wrap:wrap;gap:12px 24px}footer nav{margin-left:0}
+}
+/* short phones: the card keeps the live flow only, so the words under it still fit */
+@media (max-width:860px) and (max-height:760px){.card .today,.card .stats{display:none}}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition-duration:.01s!important}.rv{opacity:1;transform:none;filter:none}}
 
-  /* ---------- closing ---------- */
-  .closing { padding: 56px 0 56px; }
-  .closing-card {
-    border-radius: 18px; padding: 52px 44px;
-    background: radial-gradient(80% 140% at 100% 100%, rgba(244,169,58,0.16), transparent 60%), var(--panel);
-    border: 1px solid var(--line-2);
-    display: grid; grid-template-columns: 1fr auto; gap: 28px; align-items: center;
-    opacity: 0; transform: translateY(28px); transition: opacity .8s var(--ease), transform .8s var(--ease);
-  }
-  .seen .closing-card { opacity: 1; transform: none; }
-  .closing-card h2 { margin: 0 0 10px; font-size: clamp(28px, 3.6vw, 42px); letter-spacing: -0.03em; line-height: 1.08; }
-  .closing-card p { margin: 0; color: var(--muted); max-width: 52ch; }
-  @media (max-width: 760px) { .closing-card { grid-template-columns: 1fr; padding: 36px 22px; } }
-
-  /* ---------- tester places (SOLAR-124) ---------- */
-  .hero-side .places { margin: 12px 0 0; font-size: 14px; color: var(--muted); }
-  .hero-side .full-note { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--text); max-width: none; }
-  /* The headline sits on the bottom of this column, so the button's slot keeps one height
-     while waiting, with places left, and when full; otherwise the headline jumps. */
-  @media (min-width: 921px) { .hero-side > div { min-height: 84px; } }
-  .notify { position: relative; display: flex; gap: 8px; max-width: 420px; }
-  .notify input { flex: 1; min-width: 0; height: 46px; padding: 0 16px; font: inherit; font-size: 16px; color: var(--text);
-    background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; }
-  .notify input::placeholder { color: var(--dim); }
-  .notify input[aria-invalid="true"] { border-color: var(--bad); }
-  .notify .btn { flex: none; }
-  .places-wait .topnav .btn-primary, .places-wait .hero-side > div, .places-wait .closing-card > a { visibility: hidden; }
-  /* out of the row while waiting: when places are full it never shows, so Grid sits next to the button (SOLAR-129) */
-  .places-wait .topnav-links .signin { display: none; }
-  /* .hero-side p and .closing-card p would turn it grey. */
-  /* under the box; out of the flow, so showing it moves nothing above or below */
-  .hero-side .notify-msg, .closing-card .notify-msg { position: absolute; top: 100%; left: 0; margin: 6px 0 0; font-size: 14px; line-height: 1.3; color: var(--bad); }
-  .notify-msg:empty { display: none; }
-  .hero-side .notify-done, .closing-card .notify-done { margin: 0; font-size: 16px; color: var(--pv); }
-  /* stacked on a phone: the error sits between the box and the button */
-  @media (max-width: 480px) { .notify { flex-direction: column; } .notify input { flex: none; } .notify .btn { order: 2; justify-content: center; }
-    .hero-side .notify-msg, .closing-card .notify-msg { position: static; margin: 0; } }
-
-  footer { border-top: 1px solid var(--line); padding: 28px 0 40px; font-size: 13.5px; color: var(--dim); }
-  footer .wrap { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
-  footer .links { margin-left: auto; display: flex; gap: 20px; }
-  footer a { text-decoration: none; }
-  footer a:hover { color: var(--text); }
-
-  @media (prefers-reduced-motion: reduce) {
-    html { scroll-behavior: auto; }
-    .rise, .head-reveal > *, .hero .appwin, .feature .appwin, .closing-card { opacity: 1 !important; transform: none !important; animation: none !important; transition: none !important; }
-  }
 </style>
 </head>
 <body>
 
-<nav class="topnav" aria-label="Main">
+<header class="top" id="top">
   <div class="wrap">
-    <a class="brand" href="#top"><span class="sun" aria-hidden="true"></span>Prince Solar Hub</a>
-    <div class="topnav-links">
-      <a href="#top">Live</a>
-      <a href="#solar">Solar</a>
-      <a href="#grid">Grid</a>
-      <a class="signin" href="https://app.princesolarhub.co.za/">Sign in</a>
-    </div>
-    <a class="btn btn-primary" href="https://app.princesolarhub.co.za/">Try it free</a>
+    <a class="brand" href="#"><span class="orb" aria-hidden="true"></span>Prince Solar Hub</a>
+    <nav class="links" aria-label="Main"><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#questions">Questions</a></nav>
+    <div class="end"><a class="signin" href="https://app.princesolarhub.co.za">Sign in</a><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a></div>
   </div>
-</nav>
+</header>
 
-<main id="top">
+<main>
+<!-- ================= ONE DAY ================= -->
+<section class="day" id="day" aria-label="One day on an example plant">
+  <div class="stage" id="stage" aria-hidden="true">
+    <div class="sky" id="sky"></div>
+    <div class="stars" id="stars" aria-hidden="true"></div>
+    <div class="moonorb" id="moon" aria-hidden="true"></div>
+    <div class="sunorb" id="sun" aria-hidden="true"><b></b></div>
 
-  <!-- ===== Live ===== -->
-  <section class="hero">
-    <div class="wrap">
-      <div class="hero-top">
-        <h1 class="rise" style="--i:0">See what your <span class="hl">solar</span> is doing, right now.</h1>
-        <div class="hero-side">
-          <p class="rise" style="--i:2">Link your SunSynk login. See where your power comes from and where it goes, and look back at past days. For SunSynk inverters in South Africa.</p>
-          <div class="rise" style="--i:3">
-            <a class="btn btn-primary" href="https://app.princesolarhub.co.za/">Try it free <i class="ph-bold ph-arrow-right"></i></a>
+    <div class="land" aria-hidden="true">
+      <svg viewBox="0 0 1440 220" preserveAspectRatio="none">
+        <path id="hillFar" d="M0 120 C180 70 330 110 480 92 C640 72 760 40 930 70 C1090 98 1230 60 1440 84 V220 H0Z"/>
+        <path id="hillNear" d="M0 176 C220 140 420 168 640 150 C860 132 1040 160 1240 140 C1330 132 1390 138 1440 142 V220 H0Z"/>
+      </svg>
+    </div>
+    <div class="house" aria-hidden="true">
+      <svg viewBox="0 0 250 150">
+        <g id="houseBody">
+          <path d="M12 74 L118 14 L224 74 V150 H12Z"/>
+          <rect x="182" y="24" width="14" height="34"/>
+        </g>
+        <g id="panels">
+          <path d="M40 60 L118 18 L196 60 L188 64 L118 26 L48 64Z" opacity=".35"/>
+          <g transform="translate(0 0)">
+            <path d="M54 58 L84 41 L96 47 L66 64Z"/><path d="M88 39 L118 22 L130 28 L100 45Z"/>
+            <path d="M70 67 L100 50 L112 56 L82 73Z" opacity="0"/>
+          </g>
+        </g>
+        <rect class="win" x="40" y="96" width="34" height="26" rx="2"/>
+        <rect class="win" x="98" y="96" width="34" height="26" rx="2"/>
+        <rect class="win" x="160" y="96" width="34" height="26" rx="2"/>
+        <rect x="104" y="128" width="22" height="22" id="door"/>
+      </svg>
+    </div>
+
+  </div>
+    <div class="scene">
+      <div class="moments">
+        <section class="moment" data-k="0">
+          <h1>Watch your solar day <em>as it happens.</em></h1>
+          <p>A clearer view of your SunSynk inverter in South Africa. Live power flow, every day kept, and an email the moment the power goes.</p>
+          <div class="cta"><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a><a class="btn ghost" href="#pricing">See pricing</a></div>
+        </section>
+        <section class="moment" data-k="1">
+          <h2>See the sun <em>arrive.</em></h2>
+          <p>Solar climbs past what the house uses and the rest goes into the battery. The flow updates every minute.</p>
+        </section>
+        <section class="moment" data-k="2">
+          <h2>Catch the <em>peak.</em></h2>
+          <p>9.99 kW at 12:20. Every day is kept, so you can find it again.</p>
+        </section>
+        <section class="moment" data-k="3">
+          <h2>Know when <em>the power goes.</em></h2>
+          <p>Grid off at 18:00. An email lands with your battery charge, another when it's back, and the cut is marked on the day.</p>
+        </section>
+        <section class="moment" data-k="4">
+          <h2>Get through <em>the night.</em></h2>
+          <p>The battery shows the time it has left: <b class="num" id="chEmpty">Empty in 8h</b>. Made <b class="num" id="chMade">54.5 kWh</b> today, one power cut marked. This day stays.</p>
+          <div class="cta"><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a></div>
+        </section>
+      </div>
+
+      <div class="cardcol">
+      <div class="app card" id="card" aria-label="Example plant, live view">
+        <div class="card-head">
+          <span class="plant">Example plant</span>
+          <span class="live"><i></i><span>Live · <span class="num" id="cTime">05:40</span></span></span>
+        </div>
+        <div class="narr" id="narr"></div>
+        <div class="flow">
+          <div class="fb fb-solar" id="tSolar"><div class="fb-head"><svg width="18" height="18" viewBox="-11 -11 22 22"><g stroke="#3ddc84" stroke-width="1.5" stroke-linecap="round"><circle r="4.2" fill="#3ddc84" fill-opacity=".45"/><line x1="6.50" y1="0.00" x2="9.00" y2="0.00"/><line x1="4.60" y1="4.60" x2="6.36" y2="6.36"/><line x1="0.00" y1="6.50" x2="0.00" y2="9.00"/><line x1="-4.60" y1="4.60" x2="-6.36" y2="6.36"/><line x1="-6.50" y1="0.00" x2="-9.00" y2="0.00"/><line x1="-4.60" y1="-4.60" x2="-6.36" y2="-6.36"/><line x1="0.00" y1="-6.50" x2="0.00" y2="-9.00"/><line x1="4.60" y1="-4.60" x2="6.36" y2="-6.36"/></g></svg>Solar</div><div class="v"><span id="vSolar">0</span><small id="uSolar">W</small></div><div class="s" id="sSolar">Waiting for sunrise</div><div class="fb-foot"><span class="fb-bar" id="spSolar"><i style="background:#f87171"></i><i style="background:#a78bfa"></i></span></div></div>
+          <div class="fb fb-batt" id="tBatt"><div class="fb-head"><svg width="18" height="18" viewBox="-11 -11 22 22"><rect x="-9.5" y="-6.5" width="16" height="13" rx="3.2" fill="none" stroke="#a78bfa" stroke-width="1.6"/><rect x="7" y="-3" width="3" height="6" rx="1.4" fill="#a78bfa"/><rect id="iBatt" x="-7.3" y="-4.1" width="6" height="8.2" rx="1.6" fill="#a78bfa"/></svg>Battery</div><div class="v"><span id="vBattW">0</span><small id="uBattW">W</small></div><div class="s" id="sBatt">Resting</div><div class="fb-foot"><span class="fb-bar"><i id="bBatt" style="background:#a78bfa;width:32%"></i></span><b id="vBatt" style="color:#a78bfa">32%</b></div></div>
+          <div class="fb fb-grid" id="tGrid"><div class="fb-head"><svg width="18" height="18" viewBox="-11 -11 22 22"><path d="M 2 -8 L -5 1.5 L -0.5 1.5 L -1.5 8 L 5.5 -2 L 1 -2 Z" fill="none" stroke="#facc15" stroke-width="1.5" stroke-linejoin="round"/><line class="slash" x1="-8" y1="-8" x2="8" y2="8" stroke="#9aa5b3" stroke-width="1.6" stroke-linecap="round"/></svg>Grid</div><div class="v"><span id="vGrid">0</span><small id="uGrid">W</small></div><div class="s" id="sGrid">On, not in use</div><div class="fb-foot"><span class="gpill"><i></i><span id="pGrid">Grid on</span></span></div></div>
+          <div class="fb fb-home on" id="tHome"><div class="fb-head"><svg width="18" height="18" viewBox="-11 -11 22 22"><path d="M -8 8 L -8 -2 L 0 -10 L 8 -2 L 8 8 Z" fill="#f87171" fill-opacity=".18" stroke="#f87171" stroke-width="1.5" stroke-linejoin="round"/><rect x="-2.2" y="1" width="4.4" height="4.4" rx=".6" fill="none" stroke="#f87171" stroke-width="1.2"/></svg>Home</div><div class="v"><span id="vHome">1.13</span><small>kW</small></div><div class="s" id="sHome">From the battery</div><div class="fb-foot"><span class="fb-bar" id="spHome"><i style="background:#3ddc84"></i><i style="background:#a78bfa"></i><i style="background:#facc15"></i></span></div></div>
+          <div class="lane" aria-hidden="true">
+            <span class="inv-label" style="top:68px">INVERTER</span>
+            <svg viewBox="0 0 188 252">
+              <g style="--c:61,220,132"><path class="band" id="lSolarB" d="M 10 59 C 29.5 59, 29.5 114, 49 114"/><path class="dots" id="lSolar" d="M 10 59 C 29.5 59, 29.5 114, 49 114"/></g><g style="--c:167,139,250"><path class="band" id="lBattB" d="M 10 193 C 29.5 193, 29.5 138, 49 138"/><path class="dots" id="lBatt" d="M 10 193 C 29.5 193, 29.5 138, 49 138"/></g><g style="--c:250,204,21"><path class="band" id="lGridB" d="M 178 59 C 158.5 59, 158.5 114, 139 114"/><path class="dots" id="lGrid" d="M 178 59 C 158.5 59, 158.5 114, 139 114"/></g><g style="--c:248,113,113"><path class="band" id="lHomeB" d="M 139 138 C 158.5 138, 158.5 193, 178 193"/><path class="dots" id="lHome" d="M 139 138 C 158.5 138, 158.5 193, 178 193"/></g>
+              <circle cx="94" cy="126" r="34" fill="rgba(255,255,255,.05)" stroke="rgba(255,255,255,.24)" stroke-width="1.3"/>
+              <circle cx="94" cy="126" r="34" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="8"/>
+              <g transform="translate(94 126) scale(.72)" stroke-linecap="round"><line x1="0" y1="-20" x2="0" y2="20" stroke="#e7ecf2" stroke-opacity=".16" stroke-width="1.2"/><line x1="-24" y1="-4" x2="-8" y2="-4" stroke="#a78bfa" stroke-width="2.2"/><line x1="-22" y1="4" x2="-10" y2="4" stroke="#a78bfa" stroke-width="2.2" stroke-dasharray="3 3"/><path d="M 7 3 q 5 -11 9.5 0 q 4.5 11 9.5 0" stroke="#3ddc84" stroke-width="2.2" fill="none"/></g>
+            </svg>
           </div>
         </div>
-      </div>
-      <div id="liveDemo" class="appwin-stage"></div>
-    </div>
-  </section>
-
-  <!-- ===== Solar ===== -->
-  <section class="feature reveal" id="solar">
-    <div class="wrap">
-      <div class="head-reveal">
-        <h2><span class="solar">Solar.</span> What your panels made.</h2>
-        <p class="lede">Today, this week, month, year and lifetime. Pick any day to see its curve.</p>
-        <ul class="points">
-          <li><i class="ph-bold ph-check"></i>Solar now, against your panel size</li>
-          <li><i class="ph-bold ph-check"></i>Peak of the day and when</li>
-          <li><i class="ph-bold ph-check"></i>Where it went: home or battery</li>
-          <li><i class="ph-bold ph-check"></i>Last 30 days, day by day</li>
-        </ul>
-      </div>
-      <div id="solarDemo"></div>
-    </div>
-  </section>
-
-  <!-- ===== Grid ===== -->
-  <section class="feature grid-sec reveal" id="grid">
-    <div class="wrap">
-      <div class="head-reveal">
-        <h2><span class="grid">Grid.</span> What you bought, and when.</h2>
-        <p class="lede">Today, this week, month, year and lifetime. Pick any day to see when you bought.</p>
-        <ul class="points">
-          <li><i class="ph-bold ph-check"></i>Importing now, or grid off</li>
-          <li><i class="ph-bold ph-check"></i>Peak import of the day and when</li>
-          <li><i class="ph-bold ph-check"></i>Grid cuts marked on each day, with hours off</li>
-          <li><i class="ph-bold ph-check"></i>Last 30 days, day by day</li>
-        </ul>
-      </div>
-      <div id="gridDemo"></div>
-    </div>
-  </section>
-
-  <!-- ===== closing ===== -->
-  <section class="closing reveal">
-    <div class="wrap">
-      <div class="closing-card">
-        <div>
-          <h2>Free while in testing.</h2>
-          <p>Sign up with email or Google, then link your SunSynk Connect login.</p>
+        <div class="today">
+          <div class="today-head"><span class="lbl mut">Today</span><span class="mut"><span style="color:var(--solar)">Solar</span> · <span style="color:var(--home)">Home</span></span></div>
+          <svg id="todaySvg" viewBox="0 0 512 82" preserveAspectRatio="none" aria-hidden="true"></svg>
         </div>
-        <a class="btn btn-primary" href="https://app.princesolarhub.co.za/">Try it free <i class="ph-bold ph-arrow-right"></i></a>
+        <div class="stats">
+          <div>Made today<b class="num"><span id="stMade">0.0</span><small>kWh</small></b></div>
+          <div>Home used<b class="num"><span id="stUsed">0.0</span><small>kWh</small></b></div>
+          <div>Peak today<b class="num"><span id="stPeak">0</span><small id="stPeakU">W</small></b></div>
+        </div>
+
+        <div class="toast" id="toastDown" role="status">
+          <div class="from"><span class="orb"></span><span>Prince Solar Hub</span><span class="num">18:00</span></div>
+          <p class="tt">Grid down at Example plant</p>
+          <div class="cards"><div>Grid<b style="color:var(--home)">Off</b>since 18:00 today</div><div>Battery<b style="color:var(--batt)" id="toastPct">88%</b>running the house</div></div>
+        </div>
+        <div class="toast" id="toastBack" role="status">
+          <div class="from"><span class="orb"></span><span>Prince Solar Hub</span><span class="num">18:45</span></div>
+          <p class="tt">Grid back at Example plant</p>
+          <div class="cards"><div>Grid<b style="color:var(--grid)">On</b>since 18:45 today</div><div>Outage<b>45m</b>without grid</div></div>
+        </div>
+      </div>
       </div>
     </div>
-  </section>
-</main>
+</section>
 
-<footer>
-  <div class="wrap">
-    <span>Prince Solar Hub</span>
-    <div class="links">
-      <a href="terms.html">Terms</a>
-      <a href="privacy.html">Privacy</a>
-      <a href="https://app.princesolarhub.co.za/">Sign in</a>
+<div class="night">
+<!-- ================= ANY DAY ================= -->
+<section class="blk" id="features" aria-label="Look back at any day">
+  <div class="wrap" id="back">
+ <h2 class="h2 lb-h2 rv">Look back at <em>any day.</em></h2>
+ <p class="sub rv d1">Every day is kept. Pick a date or tap a bar to see the solar it made, hour by hour.</p>
+ <div class="app rv d2" id="lb-card">
+  <div class="bar">
+   <span class="plant">Example plant</span>
+   <div class="dnav"><button class="sq" id="lb-prev" aria-label="Previous day">&#8249;</button><button class="datebox num" id="lb-dbox" aria-label="Open calendar"><span id="lb-dtext"></span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 7h12M5 1.5v3M11 1.5v3"/></svg></button><button class="sq" id="lb-next" aria-label="Next day">&#8250;</button></div>
+  </div>
+  <div class="body">
+   <div class="cal" id="lb-cal">
+    <div class="mhead"><button class="sq" id="lb-mprev" aria-label="Previous month">&#8249;</button><span id="lb-mname"></span><button class="sq" id="lb-mnext" aria-label="Next month">&#8250;</button></div>
+    <div class="dow"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+    <div class="grid" id="lb-grid"></div>
+   </div>
+   <div class="chart">
+    <div class="chead"><b>Solar made</b><span class="mut" style="font-size:13px" id="lb-cdate"></span></div>
+    <svg id="lb-svg" role="img" aria-label="Solar made, hour by hour"></svg>
+    <div class="stats"><div>Made<b id="lb-sm"></b></div><div>Peak<b id="lb-sp"></b></div></div>
+   </div>
+  </div>
+  <div class="last">
+   <div class="lhead"><b>Last 30 days</b><span class="mut">Solar made each day, kWh</span></div>
+   <div class="bars" id="lb-bars"></div>
+   <div class="ax"><span>28 Sep</span><span>Best: Sat 3 Oct, 54.1</span><span>27 Oct</span></div>
+  </div>
+ </div>
+  </div>
+</section>
+
+<!-- ================= INBOX ================= -->
+<section class="blk" aria-label="Emails">
+  <div class="wrap" id="mail">
+  <h2 class="h2 rv">Hear about it <em>first.</em></h2>
+  <p class="lede rv d1">A report every week, month and year. An email when the power goes, panels stop or the battery runs hot. Switch off any you don't want.</p>
+  <div class="ib-box rv d2">
+    <div class="ib-list" role="tablist" aria-label="Emails from Prince Solar Hub">
+      <div class="ib-list-head"><b>Inbox</b><span>Example plant</span></div>
+      <div id="ib-rows"></div>
+      <p class="ib-list-foot">Every email has its own switch in Settings.</p>
+    </div>
+    <div class="ib-view" id="ib-view" role="tabpanel" aria-live="polite"></div>
+  </div>
+  </div>
+</section>
+
+<!-- ================= START ================= -->
+<section class="blk" aria-label="Getting started">
+  <div class="wrap" id="start">
+  <h2 class="h2 rv">Get started in <em>three steps.</em></h2>
+  <p class="lede rv d1">If you see your system in the SunSynk app, it works here.</p>
+  <div class="st-row rv d2">
+    <div>
+      <span class="st-n">1</span>
+      <div class="st-shot">
+        <button type="button" class="st-g"><svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.2l7.9 6.2C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.2 5.6c4.2-3.9 7.1-9.6 7.1-17z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.2C1 16.6 0 20.2 0 24s1 7.4 2.7 10.8l7.9-6.2z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.2-5.6c-2 1.4-4.7 2.3-8.7 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.2C6.6 42.6 14.6 48 24 48z"/></svg>Continue with Google</button>
+        <div class="st-or">or</div>
+        <input class="st-f" type="email" placeholder="Your email" aria-label="Your email" autocomplete="off">
+      </div>
+      <h3 class="st-h">Make an account</h3>
+      <p class="st-p">With Google or your email.</p>
+    </div>
+    <div>
+      <span class="st-n">2</span>
+      <div class="st-shot">
+        <div class="st-ct">Connect your inverter</div>
+        <div class="st-cs">Use the login from the SunSynk Connect app.</div>
+        <input class="st-f" type="email" placeholder="SunSynk email" aria-label="SunSynk email" autocomplete="off">
+        <input class="st-f" type="password" placeholder="SunSynk password" aria-label="SunSynk password" autocomplete="off">
+        <button type="button" class="st-go">Connect</button>
+      </div>
+      <h3 class="st-h">Connect your inverter</h3>
+      <p class="st-p">Your SunSynk login, once. We never keep your password.</p>
+    </div>
+    <div>
+      <span class="st-n">3</span>
+      <div class="st-shot">
+        <div class="st-imp"><span class="st-arc"></span>Fetching history <b>64%</b></div>
+        <div class="st-imp-bar"><i></i></div>
+        <p class="st-imp-note">Your days from before you joined, coming in from SunSynk.</p>
+      </div>
+      <h3 class="st-h">Your history fills in</h3>
+      <p class="st-p">Live within a minute. Past days arrive while you look around.</p>
     </div>
   </div>
-</footer>
+  <div class="st-cta"><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a></div>
+  </div>
+</section>
 
-<!-- Same pinned React as the app, then the app's own components, built by npm run build, in the app's order. -->
-<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
+<!-- ================= PRICING ================= -->
+<section class="blk" id="pricing" data-period="m">
+  <div class="wrap">
+    <h2 class="h2 rv">Start free. <em>Pay when you want more.</em></h2>
+    <p class="lede rv d1">One plant is one SunSynk login, however many inverters it has.</p>
+    <div class="period rv d1" role="group" aria-label="Billing period">
+      <button type="button" data-p="m" aria-pressed="true">Monthly</button>
+      <button type="button" data-p="y" aria-pressed="false">Yearly <span>2 months free</span></button>
+    </div>
+    <div class="plans">
+      <div class="plan rv">
+        <h3>Free</h3>
+        <div class="price">R0</div>
+        <div class="per">1 plant</div>
+        <ul>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Everything for your first 7 days</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Then the last 24 hours</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Every alert</li>
+        </ul>
+        <a class="btn ghost" href="https://app.princesolarhub.co.za/?signup">Try it free</a>
+      </div>
+      <div class="plan rv d1">
+        <h3>Home</h3>
+        <div class="price"><span class="m">R99<small>a month</small></span><span class="y">R999<small>a year</small></span></div>
+        <div class="per"><span class="m">About R3 a day</span><span class="y">About R83 a month</span></div>
+        <ul>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>1 plant</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Every day, kept for good</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Weekly, monthly and yearly reports</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Every alert</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Cancel any time</li>
+        </ul>
+        <a class="btn ghost" data-plan="home" href="https://app.princesolarhub.co.za/?signup&amp;plan=home&amp;period=monthly">Get Home</a>
+      </div>
+      <div class="plan year rv d2">
+        <h3>Family</h3>
+        <div class="price"><span class="m">R179<small>a month</small></span><span class="y">R1,799<small>a year</small></span></div>
+        <div class="per"><span class="m">About R60 a plant</span><span class="y">About R150 a month</span></div>
+        <ul>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f2c36b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Up to 3 plants</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f2c36b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Your home and the ones you look after</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f2c36b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Everything in Home</li>
+        </ul>
+        <div class="extra"><div><span>Extra inverters</span><em>+R49 a month each</em></div><p>Past 3 plants? Add more in the app.</p></div>
+        <a class="btn sun" data-plan="family" href="https://app.princesolarhub.co.za/?signup&amp;plan=family&amp;period=monthly">Get Family</a>
+      </div>
+    </div>
+  </div>
+</section>
 
-<script src="welcome-day.js"></script>
-<script src="build/components.js"></script>
-<script src="build/flow.js"></script>
-<script src="build/chart.js"></script>
-<script src="build/tabs.js"></script>
-<script src="build/welcome-demo.js"></script>
+<!-- ================= QUESTIONS ================= -->
+<section class="blk" id="questions">
+  <div class="wrap">
+    <h2 class="h2 rv">Questions</h2>
+    <div class="qs rv d1">
+      <details><summary>Will it work with my inverter?<i></i></summary><p>It works with SunSynk. If you see your system in the SunSynk app, it works here.</p></details>
+      <details><summary>How often does it update?<i></i></summary><p>Every minute, the same as the SunSynk app.</p></details>
+      <details><summary>How far back does my history go?<i></i></summary><p>When you connect, your last 60 days come in from SunSynk. From then on, Home and Family keep every day.</p></details>
+      <details><summary>What happens after the free week?<i></i></summary><p>You keep the last 24 hours and every alert. Move to Home or Family to keep every day.</p></details>
+      <details><summary>Can I cancel any time?<i></i></summary><p>Yes. Your plan runs to your billing date, then moves to Free. Nothing more is charged.</p></details>
+      <details><summary>Can I delete my account?<i></i></summary><p>Yes, any time, from Account. Your logins, settings and history go with it. It cannot be undone.</p></details>
+      <details><summary>Do my numbers match the SunSynk app?<i></i></summary><p>Mostly. With two or more inverters, our grid totals can be higher: SunSynk counts the grid on one inverter, we count them all.</p></details>
+      <details><summary>Can I export my data?<i></i></summary><p>Not yet.</p></details>
+      <details><summary>Is there a phone app?<i></i></summary><p>Coming soon. Until then, add the website to your home screen and it opens like an app.</p></details>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CLOSE ================= -->
+<section class="dawn">
+  <div class="wrap">
+    <h2 class="h2 rv">See your solar <em>clearly.</em></h2>
+    <p class="lede rv d1">Connect your SunSynk login tonight. Watch the sun come up on your own plant in the morning.</p>
+    <div class="cta rv d2"><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a><a class="btn ghost" href="#pricing">See pricing</a></div>
+  </div>
+  <footer>
+    <div class="wrap">
+      <a class="brand" href="#"><span class="orb" aria-hidden="true"></span>Prince Solar Hub</a>
+      <span>Theron and Prince Solutions (Pty) Ltd</span>
+      <nav aria-label="Footer"><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="https://app.princesolarhub.co.za">Sign in</a></nav>
+    </div>
+  </footer>
+</section>
+</div>
+</main>
+
+
+<script src="welcome-scene.js"></script>
 <script src="config.js"></script>
-<script src="welcome-page.js"></script>
 </body>
 </html>

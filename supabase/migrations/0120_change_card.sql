@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0117 — change card, and what Account shows of payments (SOLAR-238).
+-- 0120 — change card, and what Account shows of payments (SOLAR-238).
 --
 -- Paystack saves a card only after a payment on it. Change card is a R1 charge on
 -- Paystack's card page (kind 'card'): when it is paid the new card replaces the old

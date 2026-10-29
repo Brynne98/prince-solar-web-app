@@ -140,7 +140,6 @@
   .nav > button:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,0.04); }
   .nav > button[aria-current="page"] { color: var(--text); background: rgba(255,255,255,0.075); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); font-weight: 600; }
   .nav > button:disabled { cursor: progress; }
-  .nav .nav-settings { margin-top: auto; }
 
   /* the account: a row at the foot of the sidebar, an avatar in a phone's header */
   .acct { position: relative; }
@@ -309,15 +308,13 @@
   /* loading stand-in for .flow-wrap: the summary line (app.jsx), then the diagram, which
      the wide layout draws 374px tall at every width; the stacked one (flow.jsx, ≤900px) is about 625px */
   .flow-skel { height: 374px !important; }
-  /* a chart's plot area before it can be drawn, at the heights useChartSize picks */
-  .chart-skel { height: 300px !important; }
-  @media (max-width: 620px) { .chart-skel { height: 220px !important; } }
-  /* the month's bars, likewise */
-  .bars-skel { height: 220px !important; }
-  @media (max-width: 620px) { .bars-skel { height: 192px !important; } }
   /* a tile's second line held open at two lines where the real one wraps (SolarSkeleton) */
   @media (max-width: 600px) { .sub-hold-2 { display: block; height: 34px; } }
   @media (max-width: 900px) { .flow-skel { height: 625px !important; } }
+  /* the summary line before it is written: one line wide, two on a phone, where most wrap */
+  .narr-hold { height: 23px; display: flex; flex-direction: column; justify-content: center; gap: 9px; }
+  .narr-hold .narr-2 { display: none; }
+  @media (max-width: 620px) { .narr-hold { height: 41.5px; } .narr-hold .narr-2 { display: block; } }
   /* legend to plot gets the same gap as date bar to legend */
   .hv-root .legend-row { margin-bottom: 12px; }
   .grow { flex: 1; } .stack { display: flex; flex-direction: column; gap: 20px; }
@@ -1236,7 +1233,7 @@
   .login-sub b { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
   /* Google's real button (SOLAR-122) lies invisible over our own look and takes the click */
   .gsi-wrap { position: relative; }
-  .gsi-box { position: absolute; inset: 0; opacity: 0.01; overflow: hidden; }
+  .gsi-box { position: absolute; inset: 0; opacity: 0; overflow: hidden; }
   .gsi-box > div { transform-origin: top left; }
   .gsi-wrap:hover .login-google { border-color: var(--muted); }
   .gsi-wrap:focus-within .login-google { outline: 2px solid var(--pv); outline-offset: 2px; }
@@ -1354,7 +1351,6 @@
      and docked over the bottom bar on a phone; its step opens beside it or from the bottom */
   .fs-wrap { position: relative; }
   .nav .fs-wrap { margin-top: auto; margin-bottom: 10px; }   /* with the nav's 2 px gap, the same 12 px as Settings to the account line */
-  .nav .fs-wrap + .nav-settings { margin-top: 0; }
   .fs-card { display: flex; flex-direction: column; gap: 10px; padding: 12px 12px 12px 14px; border-radius: 12px;
     background: rgba(61,220,132,0.05); border: 1px solid rgba(61,220,132,0.22); }
   .fs-card.open { background: rgba(61,220,132,0.09); border-color: rgba(61,220,132,0.5); }

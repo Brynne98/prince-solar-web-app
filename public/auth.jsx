@@ -264,8 +264,6 @@ function explain(ex) {
   if (code === 'over_email_send_rate_limit') return { text: 'Too many emails sent. Try again in a few minutes.' };
   if (code === 'over_request_rate_limit' || ex?.status === 429) return { text: 'Too many tries. Try again in a minute.' };
   if (ex?.name === 'AuthRetryableFetchError' || ex instanceof TypeError) return { text: 'Can’t reach Prince Solar Hub. Check your connection.' };
-  // hook_tester_places (0085) refuses new accounts with this message.
-  if (/Tester places are full/i.test(ex?.message || '')) return { text: 'Tester places are full.', action: 'full' };
   // Never the server's own words (SOLAR-163).
   return { text: 'Something went wrong. Try again.' };
 }
@@ -273,47 +271,6 @@ function explain(ex) {
 /** A problem that isn't about one field: a red toast at the foot of the screen (SOLAR-163).
  *  `action` is a follow-up link in the toast, e.g. { label: 'Sign in', onClick }. */
 const sayError = (text, action) => window.toast?.(text, { error: true, action });
-
-/** Sign-up once every tester place is taken: an email box for the launch. */
-function PlacesFullCard({ places, onSignIn }) {
-  const { useState } = React;
-  const [email, setEmail] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
-  const [msg, setMsg] = useState(null);
-  const submit = async (e) => {
-    e.preventDefault();
-    const addr = email.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) { setMsg('Enter a valid email'); return; }
-    setBusy(true); setMsg(null);
-    // supabase-js query builders are thenables without .catch.
-    const { error } = await Promise.resolve(window.sb.rpc('api_join_waitlist', { p_email: addr })).catch(e => ({ error: e }));
-    setBusy(false);
-    if (error) sayError(explain(error).text);
-    else { window.track('waitlist_join_done'); setDone(true); }
-  };
-  return (
-    <form className="login-card" onSubmit={submit} noValidate aria-busy={busy}>
-      <AuthBrand />
-      <div className="login-title">Tester places are full</div>
-      {done ? (
-        <div className="login-sub">You’re on the list. We’ll email you when Prince Solar Hub opens to everyone.</div>
-      ) : (<>
-        <div className="login-sub">{places ? `All ${places} places are taken. ` : ''}More open when we launch. Leave your email and we’ll let you know.</div>
-        <div className="auth-field">
-          <FieldLabel id="wait-email" label="Email" error={msg} />
-          <input id="wait-email" type="email" placeholder="you@example.com" value={email} autoComplete="email"
-                 onChange={(e) => { setEmail(e.target.value); setMsg(null); }}
-                 {...invalidProps('wait-email', msg)} />
-        </div>
-        <button type="submit" disabled={busy} aria-busy={busy}>{busy ? 'Saving…' : 'Notify me'}</button>
-      </>)}
-      <div className="login-links">
-        <span>Already have an account? <button type="button" className="login-link" onClick={onSignIn}>Sign in</button></span>
-      </div>
-    </form>
-  );
-}
 
 // Supabase refuses a second email to one address within 60 s.
 const RESEND_WAIT = 60;
@@ -371,18 +328,11 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const [busy, setBusy] = useState(false);
   // Where the link went and why ('signup' or 'reset'), for Check your inbox.
   const [sent, setSent] = useState(null);
-  // { places, left } from api_tester_places; null until it answers or if it fails.
-  const [places, setPlaces] = useState(null);
-  React.useEffect(() => {
-    window.sb.rpc('api_tester_places').then(({ data }) => data && setPlaces(data), () => {});
-  }, []);
   // Signed out, the app frame (and its toast) isn't mounted, so each screen mounts it (SOLAR-163).
   const toastHost = window.SaveToast ? <window.SaveToast /> : null;
-  // The hook said no: the count was stale, or this was a new Google account on the sign-in card.
   const showError = (error) => {
     const e = explain(error);
-    if (e.action === 'full') { setPlaces(p => ({ places: p?.places ?? 0, left: 0 })); go('signup'); }
-    else if (e.field) flag({ [e.field]: e.text });
+    if (e.field) flag({ [e.field]: e.text });
     else if (e.action === 'resend') sayError(e.text, { label: 'Send a new link', onClick: () => resend(email.trim()).catch(showError) });
     else sayError(e.text, e.action === 'signin' ? { label: 'Sign in', onClick: () => go('signin') } : undefined);
   };
@@ -492,15 +442,6 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     expired:  { h: 'That link has expired', p: 'Links last 24 hours. Enter your email and we’ll send a new one.', cta: 'Send a new link', busy: 'Sending…' },
   }[mode];
 
-  if (mode === 'signup' && places?.left === 0) {
-    return (
-      <div className="login-wrap">
-        <PlacesFullCard places={places.places} onSignIn={() => go('signin')} />
-        {toastHost}
-      </div>
-    );
-  }
-
   if (mode === 'inbox') {
     return (
       <div className="login-wrap">
@@ -526,7 +467,6 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         <AuthBrand />
         <div className="login-title">{copy.h}</div>
         {copy.p && <div className="login-sub">{copy.p}</div>}
-        {mode === 'signup' && places?.left > 0 && <div className="login-sub">{places.left} of {places.places} tester places left</div>}
         {/* Google first on sign-in and sign-up (SOLAR-118): one tap, and no confirmation
             email to wait for. On sign-in its terms line sits right under it. */}
         {(mode === 'signin' || mode === 'signup') && (<>
@@ -598,7 +538,8 @@ window.AuthGate = function AuthGate({ children, fallback = null }) {
   // Keyed apart: the two sit in one spot, so React would otherwise keep the recovery
   // card's mode (and its busy Cancel) after Cancel signs out.
   if (recovering) return <AuthScreen key="recovery" initialMode="recovery" onRecovered={doneRecovering} />;
-  if (!session) return <AuthScreen key="signin" initialMode={window.takeResetAsk() ? 'forgot' : 'signin'} />;
+  // ?signup (the showcase's Try it free and plan buttons) opens Create an account
+  if (!session) return <AuthScreen key="signin" initialMode={window.takeResetAsk() ? 'forgot' : new URLSearchParams(location.search).has('signup') ? 'signup' : 'signin'} />;
   return children;
 };
 

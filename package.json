@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "check": "node scripts/integrity-check.js",
-    "build": "node scripts/build-jsx.js"
+    "build": "node scripts/build-jsx.js",
+    "test": "node scripts/build-jsx.js && node scripts/warning-tests.mjs"
   },
   "engines": {
     "node": ">=18"
