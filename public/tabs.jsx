@@ -2217,69 +2217,6 @@ function AdjustPlanPage({ billing, reload, onBack, paused, added }) {
   );
 }
 
-// Billing's plants (SOLAR-250), one row each, grouped by state: Needs you (a dead login),
-// Collecting, Paused (not on the plan) and Deleted on the billing date. An empty group
-// doesn't show; one plant shows no group names. Removing a plant is its login's Remove, below.
-function BillingPlantsSection({ links, reloadBilling, onCollect, onReconnect }) {
-  const [busy, setBusy] = React.useState(null);
-  const byId = new Map();
-  for (const a of (links?.accounts || []).filter(a => a.status !== 'disabled')) {
-    for (const p of a.plants || []) {
-      const r = byId.get(p.plant_id) || { ...p, logins: [], ok: false };
-      r.logins.push(a.sunsynk_username);
-      r.ok = r.ok || a.status === 'active';
-      byId.set(p.plant_id, r);
-    }
-  }
-  const rows = [...byId.values()];
-  if (!rows.length) return null;
-  const { billDay } = window.billingFmt;
-  const state = (p) => p.paused ? 'paused' : p.remove_on ? 'going' : !p.ok ? 'needs' : 'on';
-  const keep = async (p) => {
-    setBusy(p.plant_id);
-    const { error } = await window.sb.rpc('api_billing_keep', { p_plant: p.plant_id });
-    if (error) window.toast(/needed for your plan change/.test(error.message) ? 'Your plan change needs this removed. Undo the change in Plan first.' : 'Couldn’t keep it. Try again.', { error: true });
-    await Promise.all([links.refresh(), reloadBilling()]);
-    setBusy(null);
-  };
-  const going = rows.find(p => state(p) === 'going');
-  const groups = [['needs', 'Needs you'], ['on', 'Collecting'], ['paused', 'Paused'], ['going', going ? 'Deleted on ' + billDay(going.remove_on) : '']]
-    .map(([id, label]) => [label, rows.filter(p => state(p) === id)]).filter(([, ps]) => ps.length);
-  const inv = (p) => { const n = Number(p.inverters) || 0; return n ? ' · ' + n + (n === 1 ? ' inverter' : ' inverters') : ''; };
-  const row = (p) => {
-    const s = state(p);
-    const [word, tone] = { needs: ['Sign-in expired', 'warn'], on: ['Collecting', 'ok'], paused: ['Paused', 'warn'], going: ['Deleted ' + billDay(p.remove_on), 'bad'] }[s];
-    return (
-      <div key={p.plant_id} className="conn-row plant-row">
-        <div className="conn-text">
-          <div className="conn-user">{p.plant_name || 'Plant ' + p.plant_id}</div>
-          <div className="conn-meta">{s === 'paused' ? 'Not on your plan. Its readings aren’t saved.' : <><span className="mono">{p.logins.join(', ')}</span>{inv(p)}</>}</div>
-        </div>
-        <span className={'conn-status plant-state ' + tone}>{word}</span>
-        {s !== 'on' && (
-          <div className="conn-actions">
-            {s === 'needs' && <button type="button" className="save-btn" onClick={onReconnect}>Reconnect</button>}
-            {s === 'paused' && <button type="button" className="save-btn" onClick={onCollect}>Collect</button>}
-            {s === 'going' && <button type="button" className="ghost-btn" disabled={busy === p.plant_id} onClick={() => keep(p)}>Keep</button>}
-          </div>
-        )}
-      </div>
-    );
-  };
-  const on = rows.filter(p => state(p) === 'on').length;
-  return (
-    <SettingsSection id="plants" title={<>Plants<span className="sset-count">{on} of {rows.length} collecting</span></>}
-                     note="Remove a plant with its SunSynk login, below.">
-      {rows.length === 1 ? row(rows[0]) : groups.map(([label, ps]) => (
-        <div key={label} className="plant-group">
-          <div className="notif-sub">{label}</div>
-          {ps.map(row)}
-        </div>
-      ))}
-    </SettingsSection>
-  );
-}
-
 // The saved card and the money taken (SOLAR-238). Change card opens Paystack's card
 // page for R1, which goes back once the card is saved.
 function PaymentsSection({ billing }) {
@@ -2324,14 +2261,14 @@ function PaymentsSection({ billing }) {
   );
 }
 
-// Billing's Connections: the signed-in user's SunSynk logins, one row each with its plants, a reconnect in
+// Billing's Plants: the signed-in user's SunSynk logins, each with its plants and their state, one row each with its plants, a reconnect in
 // place when the token has died, and a remove. Adding or removing a login changes
 // which plants the app can see, so the app reloads its plant list afterwards; when
 // the last login goes there is nothing left to show and the app turns to its empty pages.
 // `links` is the gate's own list (LinkGate), already read before the page opened, so the
 // section draws at once and its changes reach the rest of the app (SOLAR-96).
 // Plant states (paused, deleted) and their buttons are on Billing since SOLAR-250.
-function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling }) {
+function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, onCollect }) {
   const { useState } = React;
   const { accounts, error, refresh } = links;
   const [busy, setBusy] = useState(null);
@@ -2403,10 +2340,38 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling }) 
       if (readError) fail('Removed. Reload the page to update this list.'); else { setLeaving(null); window.toast(gone); }
     } catch (e) { fail('Couldn’t remove the login. Try again.'); setBusy(null); setLeaving(null); }
   };
-  const n = live.length;
-  const title = <>Connections{n > 0 && <span className="sset-count">{n}</span>}</>;
+  // Each plant once, with its state (SOLAR-208): paused (not on the plan), deleted on the
+  // billing date, collecting while any login that sees it works, else stopped.
+  const plantOk = {};
+  live.forEach(a => (a.plants || []).forEach(p => { plantOk[p.plant_id] = plantOk[p.plant_id] || a.status === 'active'; }));
+  const state = (p) => p.paused ? 'paused' : p.remove_on ? 'going' : plantOk[p.plant_id] ? 'on' : 'off';
+  const allPlants = [...new Map(live.flatMap(a => a.plants || []).map(p => [p.plant_id, p])).values()];
+  const keep = async (p) => {
+    setBusy('keep:' + p.plant_id);
+    const { error } = await window.sb.rpc('api_billing_keep', { p_plant: p.plant_id });
+    if (error) fail(/needed for your plan change/.test(error.message) ? 'Your plan change needs this removed. Undo the change in Plan first.' : 'Couldn’t keep it. Try again.');
+    await Promise.all([refresh(), reloadBilling && reloadBilling()]);
+    setBusy(null);
+  };
+  const plantRow = (p) => {
+    const s = state(p);
+    const [word, tone] = { on: ['Collecting', 'ok'], off: ['Stopped', 'warn'], paused: ['Paused', 'warn'], going: ['Deleted ' + billDay(p.remove_on), 'bad'] }[s];
+    const n = Number(p.inverters) || 0;
+    return (
+      <div key={p.plant_id} className="login-plant">
+        <div className="conn-text">
+          <div className="conn-user">{p.plant_name || 'Plant ' + p.plant_id}</div>
+          <div className="conn-meta">{s === 'paused' ? 'Not on your plan. Its readings aren’t saved.' : n ? n + (n === 1 ? ' inverter' : ' inverters') : '\u00a0'}</div>
+        </div>
+        <span className={'conn-status plant-state ' + tone}>{word}</span>
+        {s === 'paused' && onCollect && <button type="button" className="save-btn" onClick={onCollect}>Collect</button>}
+        {s === 'going' && <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
+      </div>
+    );
+  };
+  const title = <>Plants{allPlants.length > 0 && <span className="sset-count">{allPlants.filter(p => state(p) === 'on').length} of {allPlants.length} collecting</span>}</>;
   return (
-    <SettingsSection id="connection" title={title} note="Where your readings come from.">
+    <SettingsSection id="connection" title={title} note="Each SunSynk login and the plants it brings.">
       {unread ? (
         <div className="conn-row">
           <div className="conn-text"><div className="conn-user">Couldn’t load your logins</div><div className="conn-meta">&nbsp;</div></div>
@@ -2421,17 +2386,15 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling }) 
         const stale = ok && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
         const word = !ok ? 'Sign-in expired' : stale ? 'Not updating' : 'Connected';
         const plants = acc.plants || [];
-        const name = p => p.plant_name || 'Plant ' + p.plant_id;
         return (
           <div key={acc.account_id} className={'conn-row' + (leaving === acc.account_id ? ' leaving' : '')}>
             <div className="conn-text">
-              {/* Line 1: the login. Line 2: is it working, its plants, and the last
-                  reading when that is the news. */}
+              {/* Line 1: the login. Line 2: is it working, and the last reading when that
+                  is the news. Its plants are listed under it. */}
               <div className="conn-user"><span className="mono">{acc.sunsynk_username}</span></div>
               <div className="conn-meta">
                 <span className={'conn-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
-                {' · ' + (plants.length ? plants.map(name).join(', ') : 'No plant shared with this login')}
-                {(!ok || stale) && acc.last_ok_at ? ', last reading ' + ago(acc.last_ok_at) : ''}
+                {(!ok || stale) && acc.last_ok_at ? ' · last reading ' + ago(acc.last_ok_at) : ''}
               </div>
             </div>
             <div className="conn-actions">
@@ -2439,6 +2402,9 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling }) 
               <button type="button" className="ghost-btn" onClick={() => setConfirming(confirming === acc.account_id ? null : acc.account_id)} disabled={busy === acc.account_id}>
                 {busy === acc.account_id ? 'Removing…' : 'Remove'}
               </button>
+            </div>
+            <div className="login-plants">
+              {plants.length ? plants.map(plantRow) : <div className="conn-meta">No plant shared with this login.</div>}
             </div>
             {/* the reconnect form and the remove card sit under the whole row, full width */}
             {mode === acc.account_id && (
@@ -3092,8 +3058,7 @@ function BillingPage({ billing, reload, links, onPage, collecting, onSaved }) {
     <div className="settings-page">
       <div className="page-head"><h1>Billing</h1><p>Paid by card through Paystack.</p></div>
       <PlanSection billing={billing} reload={reload} onAdjust={() => onPage('plans')} collecting={collecting} />
-      <BillingPlantsSection links={links} reloadBilling={reload} onCollect={() => onPage('plans')} onReconnect={() => onPage('billing', 'connection')} />
-      {links && <SunSynkConnectionSection onChanged={onSaved} links={links} billing={billing} reloadBilling={reload} />}
+      {links && <SunSynkConnectionSection onChanged={onSaved} links={links} billing={billing} reloadBilling={reload} onCollect={() => onPage('plans')} />}
       <PaymentsSection billing={billing} />
     </div>
   );

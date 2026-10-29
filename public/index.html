@@ -979,10 +979,18 @@
     .set-list .set-main { display: none; }
   }
   .set-method { color: var(--dim); }
+  /* Billing's Plants: each login, its plants listed under it */
+  .login-plants { flex-basis: 100%; margin-top: 10px; border-left: 2px solid var(--line); padding-left: 14px; }
+  .login-plant { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+  .login-plant + .login-plant { border-top: 1px solid var(--line); }
+  .login-plant .plant-state { font-size: 13px; white-space: nowrap; }
   /* Account actions: one button width */
   #settings-actions .conn-actions > button { min-width: 112px; }
   /* Your system: two fields a row, each name over its box; one column on a phone */
-  #settings-system .sset-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 28px; }
+  #settings-system .sset-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 28px; align-items: start; }
+  /* panels and battery can grow (By size): each takes a full row, its box capped */
+  #settings-system .sset-row:has(> .sset-sum) { grid-column: 1 / -1; }
+  #settings-system .sset-sum { max-width: 420px; }
   #settings-system .conn-row.sset-row { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 10px; padding: 0; }
   #settings-system .sset-row > .conn-text { flex-basis: auto; }
   #settings-system :is(.sset-sum, .sset-one) { width: 100%; align-items: stretch; }
@@ -1009,11 +1017,6 @@
   .plan-now .plan-name { font-size: 18px; margin-top: 2px; }
   .plan-name .conn-status { margin-left: 8px; font-size: 13px; font-weight: 500; vertical-align: 2px; }
   .plan-acts { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
-  .plant-group + .plant-group { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
-  .plant-group .notif-sub { margin-bottom: 4px; }
-  .plant-group .notif-sub + .conn-row { border-top: none; padding-top: 6px; }
-  .plant-row .plant-state { align-self: center; font-size: 13px; white-space: nowrap; }
-  .plant-group:last-child .conn-row:last-child { padding-bottom: 0; }
   /* Adjust plan: the switch, then the three cards, each button over its list */
   .plan-period { align-self: flex-start; margin-top: 8px; }
   .plan-ctx { color: var(--warn) !important; }
