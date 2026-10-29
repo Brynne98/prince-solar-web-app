@@ -19,7 +19,11 @@ keywords = ["sb_secret_"]
 # the health workflow and DEPLOY.md.
 # The PostHog project key (phc_) is public by design too: it can only send events, and every
 # browser loads it. It appears in public/config.js and supabase/functions/_shared/errors.ts (SOLAR-246).
+# The VAPID public key (window.VAPID_PUBLIC in public/config.js) is public by design too: every
+# browser that turns pop-ups on is handed it. Its private half is the VAPID_KEYS function secret
+# (SOLAR-244). Listed as the exact key, so a different value there is still caught.
 [allowlist]
-description = "Supabase publishable key and PostHog project key (public by design)"
+description = "Supabase publishable key, PostHog project key and VAPID public key (public by design)"
 regexTarget = "match"
-regexes = ['''sb_publishable_[A-Za-z0-9_-]+''', '''phc_[A-Za-z0-9]+''']
+regexes = ['''sb_publishable_[A-Za-z0-9_-]+''', '''phc_[A-Za-z0-9]+''',
+           '''BJV8XqKj_ZTALuCxzfsKRYSvHZFnauOhVdKzs1njlexSoV8eabU5lgvt6VyL6l_Quoa9QbO3IEnKaKEvQP0aocg''']
