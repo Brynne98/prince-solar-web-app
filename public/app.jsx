@@ -1124,7 +1124,7 @@ function App({ links }) {
   };
 
   // initial load: who am I and which plant, then the data
-  useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); loadNotifs(); }); }, []);
+  useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); loadNotifs(); window.pushResync().catch(() => {}); }); }, []);
   // auto refresh: live every minute (matches SunSynk's cadence), today and energy every
   // 5th minute. On the clock, not from page load, so devices side by side show the same
   // numbers (SOLAR-33). The second past the minute is the plant's own, 12–42 s, so every
@@ -1182,7 +1182,11 @@ function App({ links }) {
       setNotifs(n => ({ ...n, unread: Math.max(0, n.unread - 1), items: n.items.map(x => (x.id === it.id ? { ...x, read: true } : x)) }));
       window.readNotifications([it.id]).catch(() => {});
     }
-    if (it.plant !== plantId && (me?.plants || []).some(p => p.id === it.plant)) switchPlant(it.plant);
+    if (it.plant !== plantId && (me?.plants || []).some(p => p.id === it.plant)) {
+      // unsaved plant settings hold the plant where it is; the save bar says why
+      if (tab === 'settings' && settingsDirty.current) { switchPlant(it.plant); return; }
+      switchPlant(it.plant);
+    }
     go(it.tab);
     if (it.tab === 'grid' || it.tab === 'solar') setOpenDay({ date: it.day });
   };

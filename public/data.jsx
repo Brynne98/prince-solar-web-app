@@ -425,6 +425,15 @@ async function pushTurnOn() {
   window.track('push_enabled_done');
   return 'on';
 }
+// On load: a browser with pop-ups on sends its address again, so it follows whoever is
+// signed in now (a session that ended without Sign out left it with the last account).
+async function pushResync() {
+  if (pushSupport() !== 'ok' || Notification.permission !== 'granted') return;
+  const sub = await pushSub();
+  if (!sub) return;
+  const j = sub.toJSON();
+  await window.sb.rpc('api_push_sub', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
+}
 // Off here, and on sign-out, so a shared computer stops showing the last account's alerts.
 // The browser's own subscription goes even if the server call fails: the push service
 // then answers "gone" and notify deletes the row.
@@ -478,5 +487,5 @@ function emptyText(days, fallback) {
 Object.assign(window, {
   fetchSnapshot, fetchDay, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth,
   fetchMe, savePrefs, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount,
-  fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, pushSupport, pushState, pushTurnOn, pushTurnOff, emptyText, syncProgress, BATT_MAX_KW, TYPICAL_DAYS,
+  fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, pushSupport, pushState, pushTurnOn, pushTurnOff, pushResync, emptyText, syncProgress, BATT_MAX_KW, TYPICAL_DAYS,
 });

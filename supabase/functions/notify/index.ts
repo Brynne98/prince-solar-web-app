@@ -17,7 +17,8 @@
 //
 // After the emails, the pop-ups (SOLAR-244, 0124): push_claim hands over the alerts
 // due one, with their words and the user's browsers, each tried once. A browser the
-// push service says is gone (404, 410) is deleted. Off when VAPID_KEYS is unset or ?dry=1.
+// push service says is gone (404, 410) is deleted. Off when VAPID_KEYS is unset, NOTIFY_LIVE
+// isn't "1", or ?dry=1. Each pop-up is tried once: the email is the channel that retries.
 //
 // Nothing is sent unless the NOTIFY_LIVE secret is "1". Otherwise, and with ?dry=1,
 // the run writes nothing (no sweep, no claim) and returns the next BATCH it would
@@ -337,8 +338,10 @@ type PushRow = {
 };
 
 let pushServer: Promise<webpush.ApplicationServer> | null = null;
+// A key that fails to load is tried again next run, not kept as a failure.
 const server = () => pushServer ??= webpush.importVapidKeys(JSON.parse(VAPID_KEYS)).then((vapidKeys) =>
-  webpush.ApplicationServer.new({ contactInformation: "mailto:hello@princesolarhub.co.za", vapidKeys }));
+  webpush.ApplicationServer.new({ contactInformation: "mailto:hello@princesolarhub.co.za", vapidKeys }))
+  .catch((e) => { pushServer = null; throw e; });
 
 /** One pop-up to one browser: "ok", "gone" (delete it), or "failed" (left as is). */
 async function pushOne(r: PushRow, s: PushRow["subs"][number]): Promise<"ok" | "gone" | "failed"> {
@@ -362,6 +365,8 @@ async function pushOne(r: PushRow, s: PushRow["subs"][number]): Promise<"ok" | "
 
 async function pushPass(deadline: number) {
   const count = { ok: 0, gone: 0, failed: 0 };
+  // Bad keys stop here, before push_claim marks anything done.
+  await server();
   while (Date.now() < deadline) {
     const rows = await rpc<PushRow[]>("push_claim", { p_limit: 200 });
     if (!rows.length) break;
@@ -474,7 +479,7 @@ serve("notify", async (req) => {
     if (url.searchParams.get("render") === "all") return json(await renderAll(Number(url.searchParams.get("plant")), url.searchParams.get("today") ?? undefined));
     const dryParam = url.searchParams.get("dry") === "1";
     const dry = !LIVE || !RESEND_KEY || dryParam;
-    return json(await run(dry, url.searchParams.get("html") === "1", !!VAPID_KEYS && !dryParam));
+    return json(await run(dry, url.searchParams.get("html") === "1", !!VAPID_KEYS && LIVE && !dryParam));
   } catch (e) {
     await reportError("notify", e);
     console.error("notify failed:", e);

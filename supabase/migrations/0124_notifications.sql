@@ -95,7 +95,7 @@ drop trigger if exists push_prefs_touch on public.push_prefs;
 create trigger push_prefs_touch before update on public.push_prefs
   for each row execute function public.email_prefs_touch();
 
--- This browser turned pop-ups on. An endpoint is one browser profile: a second
+-- This browser has pop-ups on (turned on, or the app loaded with them on). An endpoint is one browser profile: a second
 -- account signing in on it takes it over, so pop-ups follow whoever turned them on last.
 create or replace function public.api_push_sub(p_endpoint text, p_p256dh text, p_auth text, p_platform text default 'web')
 returns void language plpgsql security definer set search_path = '' as $$
@@ -105,7 +105,7 @@ begin
   values (auth.uid(), p_platform, p_endpoint, p_p256dh, p_auth)
   on conflict (endpoint) do update
     set user_id = excluded.user_id, platform = excluded.platform, p256dh = excluded.p256dh,
-        auth = excluded.auth, created_at = now(), last_ok_at = null;
+        auth = excluded.auth;
 end $$;
 
 create or replace function public.api_push_unsub(p_endpoint text)
