@@ -986,8 +986,10 @@
   .login-plant .plant-state { font-size: 13px; white-space: nowrap; }
   /* Account actions: one button width */
   #settings-actions .conn-actions > button { min-width: 112px; }
-  /* the change-password form keeps a field's width, like System's boxes */
-  #settings-password .link-form { max-width: 420px; }
+  /* change password, open: its name top left, the fields fill the rest, no box of their own */
+  #settings-password:has(form) { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; align-items: start; }
+  #settings-password .link-form { margin: 0; padding: 0; border: none; background: none; }
+  @media (max-width: 599px) { #settings-password:has(form) { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
   /* Your system: two fields a row, each name over its box; one column on a phone */
   #settings-system .sset-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 28px; align-items: start; }
   /* panels and battery can grow (By size): each takes a full row, its box capped */
