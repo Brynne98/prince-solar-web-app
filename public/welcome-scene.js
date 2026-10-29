@@ -261,7 +261,8 @@ function skyTo(h) {
 }
 const moments = [...document.querySelectorAll('.moment')];
 function hourAtScroll() {
-  const y = scrollY + innerHeight / 2, mid = e => e.getBoundingClientRect().top + scrollY + e.offsetHeight / 2;
+  // a moment's hour lands where it settles: centred on desktop, its foot on the screen's foot on a phone
+  const y = scrollY + innerHeight / 2, mid = e => e.getBoundingClientRect().top + scrollY + (innerWidth <= 860 ? e.offsetHeight - innerHeight / 2 : e.offsetHeight / 2);
   for (let i = 0; i < moments.length - 1; i++) {
     const a = mid(moments[i]), b = mid(moments[i + 1]);
     if (y <= b) { const t = Math.min(1, Math.max(0, (y - a) / (b - a))); return MO[i][0] + (MO[i + 1][0] - MO[i][0]) * (t * t * (3 - 2 * t)); }
@@ -289,7 +290,15 @@ const cardOut = () => {
 };
 cardOut();
 addEventListener('scroll', () => { inkNav(); kick(); cardOut(); }, { passive: true });
-const fitCard = () => cardEl.style.setProperty('--k', Math.min(1, (innerWidth - 32) / cardEl.offsetWidth).toFixed(3));
+/* phone: the card fits the width, and also leaves room under it for the tallest moment's words */
+const fitCard = () => {
+  let k = Math.min(1, (innerWidth - 32) / cardEl.offsetWidth);
+  if (innerWidth <= 860) {
+    const words = Math.max(...moments.map(m => { const c = [...m.children].filter(e => e.offsetHeight); return c[c.length - 1].getBoundingClientRect().bottom - c[0].getBoundingClientRect().top; }));
+    k = Math.min(k, (innerHeight - 68 - 20 - parseFloat(getComputedStyle(moments[0]).paddingBottom) - words) / cardEl.offsetHeight);
+  }
+  cardEl.style.setProperty('--k', k.toFixed(3));
+};
 fitCard();
 addEventListener('resize', () => { placeSun(hNow); fitCard(); });
 

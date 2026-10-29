@@ -408,8 +408,22 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   .cardcol{position:absolute;top:0;bottom:0;left:16px;right:16px;padding:0;overflow:clip;pointer-events:none}
   .cardcol .card{top:68px;transform:scale(var(--k,.64));transform-origin:top left;pointer-events:auto}
   /* the card is drawn small on a phone: the alert stays full size, narrower, right-aligned, just over the card's foot */
-  .toast{left:auto;right:0;bottom:auto;top:calc(100% - 56px / var(--k,.64));width:calc(84% * var(--k,.64));scale:calc(1 / var(--k,.64));transform-origin:top right}
-  .moment{justify-content:flex-end;padding:0 0 36px;min-height:100svh}
+  .toast{left:auto;right:0;bottom:auto;top:calc(100% - 56px / var(--k,.64));width:calc(70% * var(--k,.64) / .8);scale:calc(.8 / var(--k,.64));transform-origin:top right}
+  /* the card lets the sun and moon show through it a little */
+  .cardcol .app.card{background:radial-gradient(120% 70% at 20% 0,rgba(255,255,255,.045),transparent 60%),linear-gradient(180deg,rgba(20,27,37,.92),rgba(12,17,23,.92))}
+  /* the words sit just above low hills; later moments are shorter so the next words follow sooner */
+  .moment{justify-content:flex-end;padding:0 0 72px;min-height:100svh}
+  .moment+.moment{min-height:70svh}
+  .land{height:64px}
+  /* the card's words drawn large, so they read after the card is scaled down; box sub-lines go (the narration says it) */
+  .card-head{font-size:18px}.card-head .plant{font-size:19px}.live{font-size:17px}
+  .narr{font-size:20px;min-height:56px}
+  .fb-head{font-size:17px}.fb .v{font-size:34px}.fb .v small{font-size:17px}.fb .s{display:none}
+  .fb-foot,.gpill{font-size:16px}.gpill{height:26px}.inv-label{font-size:15px}
+  .today-head{font-size:17px}.axis{font-size:16px}
+  .stats div{font-size:16px}.stats b{font-size:24px}.stats b small{font-size:16px}
+  .brand,.signin,footer nav a{display:inline-flex;align-items:center;min-height:44px}.top .btn{height:44px}
+  #mail .ib-stats .ib-card:last-child:nth-child(odd){grid-column:1/-1}
   .moment h1{font-size:40px}.moment h2{font-size:36px}
   .moment p{margin-top:12px;font-size:17px}
   .moment .cta{margin-top:18px;flex-wrap:wrap}.moment .stamp{display:none}
@@ -423,6 +437,8 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   #mail .ib-box,#start .st-row{margin-top:36px}#start .st-cta{margin-top:36px}.period{margin-top:32px}#pricing .plans{margin-top:20px}.dawn .cta{flex-wrap:wrap}
   footer .wrap{flex-wrap:wrap;gap:12px 24px}footer nav{margin-left:0}
 }
+/* short phones: the card keeps the live flow only, so the words under it still fit */
+@media (max-width:860px) and (max-height:760px){.card .today,.card .stats{display:none}}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition-duration:.01s!important}.rv{opacity:1;transform:none;filter:none}}
 
 </style>
