@@ -2562,9 +2562,9 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   // The plant list is still on its way: the section with its words, and a shimmer in
   // each box's place at its size, so nothing moves when the values land (SOLAR-221).
   if (!me) {
-    const row = (label, dot, meta, sum) => (
+    const row = (label, meta, sum) => (
       <div className="conn-row sset-row">
-        <div className="conn-text"><span className="conn-user"><i className={'sys-dot ' + dot} />{label}</span><span className="conn-meta">{meta}</span></div>
+        <div className="conn-text"><span className="conn-user">{label}</span><span className="conn-meta">{meta}</span></div>
         {sum
           ? <div className="sset-sum"><div className="fs-sum">
               {/* the Total / By size switch is words only, so it draws for real, locked */}
@@ -2576,10 +2576,10 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
     );
     return (
       <SettingsSection id="system" title="Your system" note={SYSTEM_NOTE}>
-        {row('Solar panels', 'pv', 'What they make in full sun.', true)}
-        {row('Battery capacity', 'batt', 'All batteries together.', true)}
-        {row('Battery reserve', 'batt', 'The battery stops powering your home at this charge.')}
-        {row('Electricity rate', 'grid', 'Savings show as zero until this is set.')}
+        {row('Solar panels', 'What they make in full sun.', true)}
+        {row('Battery capacity', 'All batteries together.', true)}
+        {row('Battery reserve', 'The battery stops powering your home at this charge.')}
+        {row('Electricity rate', 'Savings show as zero until this is set.')}
       </SettingsSection>
     );
   }
@@ -2588,11 +2588,11 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   const err = (on, text) => on && tried ? <p className="sset-err" role="alert">{text}</p> : null;
   return (
     <>
-      {/* One section since SOLAR-250: panels, battery, reserve, rate, each dot in its colour */}
+      {/* One section since SOLAR-250: panels, battery, reserve, rate */}
       <SettingsSection id="system" title="Your system" note={SYSTEM_NOTE}>
         <div className="conn-row sset-row">
           <div className="conn-text">
-            <span className="conn-user"><i className="sys-dot pv" />Solar panels</span>
+            <span className="conn-user">Solar panels</span>
             <span className="conn-meta">What they make in full sun.</span>
           </div>
           <div className="sset-sum">
@@ -2602,7 +2602,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
         </div>
         <div className="conn-row sset-row">
           <div className="conn-text">
-            <span className="conn-user"><i className="sys-dot batt" />Battery capacity</span>
+            <span className="conn-user">Battery capacity</span>
             <span className="conn-meta">All batteries together.</span>
           </div>
           <div className="sset-sum">
@@ -2612,7 +2612,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
         </div>
         <div className="conn-row sset-row">
           <div className="conn-text">
-            <span className="conn-user"><i className="sys-dot batt" />Battery reserve</span>
+            <span className="conn-user">Battery reserve</span>
             <span className="conn-meta">The battery stops powering your home at this charge.</span>
           </div>
           <div className="conn-actions sset-one">
@@ -2623,7 +2623,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
         {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
         <div className="conn-row sset-row">
           <div className="conn-text">
-            <span className="conn-user"><i className="sys-dot grid" />Electricity rate</span>
+            <span className="conn-user">Electricity rate</span>
             <span className="conn-meta">{n(f.rate) > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}</span>
           </div>
           <div className="conn-actions sset-one">
