@@ -1048,7 +1048,13 @@
   .settings-page .conn-row:first-child { padding-top: 0; }
   .settings-page .login-plants { border-left: none; margin-top: -2px; padding-left: 18px; }
   .settings-page .login-plant { padding: 4px 0; }
-  .settings-page #settings-connection .conn-row + .conn-row { margin-top: 22px; }
+  /* Billing's Plants: one card per login, its email first and plain to read */
+  .sset-cards { min-width: 0; }
+  .settings-page .sset-cards > .sset + .sset { margin-top: 10px; }
+  .settings-page .sset-cards > .sset.conn-row { padding: 18px 22px 20px; }
+  .login-name { font-size: 15px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+  .settings-page .sset-cards > .conn-add { padding-top: 12px; }
+  @media (max-width: 900px) { .settings-page .sset-cards > .sset.conn-row { padding: 16px 15px 18px; } }
   .settings-page .conn-add, .settings-page .notif-push, .settings-page .plan-alert { padding-top: 8px; }
   /* just the number, centred under the last section */
   .app-version { padding-top: 14px; text-align: center; font-size: 12px; color: var(--dim); }

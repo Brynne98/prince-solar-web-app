@@ -1986,7 +1986,8 @@ function ConfirmCard({ title, text, action, onConfirm, onCancel }) {
 // it scrolls itself into view first.
 const SettingsFlash = React.createContext(null);
 
-function SettingsSection({ id, title, note, children }) {
+// bare: no card of its own; the children bring their own cards (Billing's logins).
+function SettingsSection({ id, title, note, bare, children }) {
   const flash = React.useContext(SettingsFlash);
   const flashing = flash && flash.id === id;
   const ref = React.useRef(null);
@@ -1998,9 +1999,9 @@ function SettingsSection({ id, title, note, children }) {
         <h2 id={'settings-' + id + '-t'} className="sset-title">{title}</h2>
         {note && <p className="sset-note">{note}</p>}
       </div>
-      <div className={'sset' + (flashing ? ' sset-flash' : '')}
+      <div className={(bare ? 'sset-cards' : 'sset') + (flashing ? ' sset-flash' : '')}
            onAnimationEnd={flashing ? (e) => { if (e.target === e.currentTarget) flash.done(); } : undefined}>
-        <div className="sset-body">{children}</div>
+        {bare ? children : <div className="sset-body">{children}</div>}
       </div>
     </section>
   );
@@ -2372,14 +2373,14 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   };
   const title = <>Plants{allPlants.length > 0 && <span className="sset-count">{allPlants.filter(p => state(p) === 'on').length} of {allPlants.length} collecting</span>}</>;
   return (
-    <SettingsSection id="connection" title={title} note="Each SunSynk login and the plants it brings.">
+    <SettingsSection id="connection" title={title} note="Each SunSynk login and the plants it brings." bare>
       {unread ? (
-        <div className="conn-row">
+        <div className="sset conn-row">
           <div className="conn-text"><div className="conn-user">Couldn’t load your logins</div><div className="conn-meta">&nbsp;</div></div>
           <div className="conn-actions"><button type="button" className="ghost-btn" onClick={retry} disabled={checking} aria-busy={checking}>{checking ? 'Checking…' : 'Try again'}</button></div>
         </div>
       ) : !live.length ? (
-        <div className="field-note">No login connected.</div>
+        <div className="sset"><div className="field-note">No login connected.</div></div>
       ) : live.map(acc => {
         const ok = acc.status === 'active';
         // Green only while the poller is actually reaching it: the header pill calls
@@ -2388,17 +2389,15 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         const word = !ok ? 'Sign-in expired' : stale ? 'Not updating' : 'Connected';
         const plants = acc.plants || [];
         return (
-          <div key={acc.account_id} className={'conn-row' + (leaving === acc.account_id ? ' leaving' : '')}>
+          <div key={acc.account_id} className={'sset conn-row synk-card' + (leaving === acc.account_id ? ' leaving' : '')}>
             <div className="conn-text">
-              {/* Line 1: the login. Line 2 only when it has stopped working, with its last
-                  reading. Its plants are listed under it. */}
-              <div className="conn-user"><span className="mono">{acc.sunsynk_username}</span></div>
-              {(!ok || stale) && (
-                <div className="conn-meta">
-                  <span className="conn-status warn">{word}</span>
-                  {acc.last_ok_at ? ' · last reading ' + ago(acc.last_ok_at) : ''}
-                </div>
-              )}
+              {/* Line 1: the login. Line 2: is it working, with the last reading when it
+                  stopped. Its plants are listed under it, saying only Paused or Deleted. */}
+              <div className="conn-user login-name">{acc.sunsynk_username}</div>
+              <div className="conn-meta">
+                <span className={'conn-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
+                {(!ok || stale) && acc.last_ok_at ? ' · last reading ' + ago(acc.last_ok_at) : ''}
+              </div>
             </div>
             <div className="conn-actions">
               {!ok && mode !== acc.account_id && <button type="button" className="save-btn" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
@@ -2425,7 +2424,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         );
       })}
       {!unread && (mode === 'add'
-        ? <div className="conn-row conn-add-row"><div className="conn-text">
+        ? <div className="sset conn-row conn-add-row"><div className="conn-text">
             {/* Cancel re-reads too: a login with no plant yet is saved but not listed. */}
             <window.LinkForm compact hasPlant={live.some(a => (a.plants || []).length > 0)} onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
           </div></div>
