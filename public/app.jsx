@@ -519,7 +519,7 @@ function StepForm({ id, cfg, busy, onSave, onSkip }) {
 }
 
 // The card, and the step it opens: beside the sidebar ('rail'), or a sheet from the bottom ('phone').
-// During the free week a copy sits at the top of Live too ('live', SOLAR-242); after it, no card.
+// After the free week (SOLAR-242), no card.
 // Back and the step bars move between steps, done ones too; Skip leaves one for later.
 function FirstSteps({ me, plantId, onSaved, variant }) {
   const [open, setOpen, ref] = usePopover();
@@ -618,7 +618,7 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
           <span className="mono">{done}/{n}</span>
         </button>
       )}
-      {open && (variant !== 'rail' && (variant === 'phone' || window.matchMedia('(max-width: 599px)').matches)
+      {open && (variant === 'phone'
         ? <div className="sheet fs-sheet" onClick={e => { if (e.target === e.currentTarget) setOpen(false); }}><div className="sheet-panel"><div className="sheet-grip" aria-hidden="true" />{panel}</div></div>
         : <div className="fs-pop">{panel}</div>)}
     </div>
@@ -1092,9 +1092,7 @@ function App({ links }) {
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync} />;
   const settingsPage = <window.SettingsTab me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
     flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />;
-  // On a phone in the free week, Live has its own copy at the top in place of the floating one
-  const steps = me && ((v) => (v === 'phone' && free?.week && tab === 'live') ? null
-    : <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);
+  const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);
   const accountPage = <window.AccountTab onPlantConfigSaved={reloadPlantConfig} links={links}
     flash={flashSection} onFlashed={() => setFlashSection(null)} />;
 
@@ -1138,7 +1136,6 @@ function App({ links }) {
         relinkedAt={relinked?.plantId === plantId ? relinked.at : null} />}
       <div className={'page' + (old ? ' old' : '')}>
         {dataPage && overCard && <FreeWeekOver onDone={() => setOverSeen(true)} />}
-        {tab === 'live' && free?.week && steps('live')}
         {tab === 'settings' && settingsPage}
         {tab === 'account' && accountPage}
         {tab === 'live' && <window.LiveTab snap={snap} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
