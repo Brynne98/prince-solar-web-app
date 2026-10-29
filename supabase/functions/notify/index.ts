@@ -15,6 +15,10 @@
 // user no longer has, and "back" emails whose "down" never went. needs_relink,
 // welcome, history and account deleted have no switch.
 //
+// After the emails, the pop-ups (SOLAR-244, 0124): push_claim hands over the alerts
+// due one, with their words and the user's browsers, each tried once. A browser the
+// push service says is gone (404, 410) is deleted. Off when VAPID_KEYS is unset or ?dry=1.
+//
 // Nothing is sent unless the NOTIFY_LIVE secret is "1". Otherwise, and with ?dry=1,
 // the run writes nothing (no sweep, no claim) and returns the next BATCH it would
 // send. ?render=all&plant=<id> returns every template built from that plant's data,
@@ -26,6 +30,7 @@ import {
   PAY_URL, paymentFailed, paymentReceived, type Period, planChangeBooked, plantEvent, type PlantEvent, plantsRemovalSoon,
   planUpgraded, renewalNotice, report, type Report, sunsynkBack, sunsynkDown, welcome,
 } from "../_shared/email.ts";
+import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
 const LIVE = Deno.env.get("NOTIFY_LIVE") === "1";
 const RESEND_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
@@ -38,6 +43,10 @@ const BATCH = 100;
 const BUDGET_MS = 40_000;
 // Resend's default limit is 2 calls a second.
 const PACE_MS = 550;
+// exportVapidKeys() JSON: {publicKey, privateKey} as JWKs. The public half is VAPID_PUBLIC in public/config.js.
+const VAPID_KEYS = Deno.env.get("VAPID_KEYS") ?? "";
+// Pop-ups sent at once; a stage change can queue thousands in one minute.
+const PUSH_AT_ONCE = 50;
 
 type Plant = { id: number; name: string; tz: string };
 
@@ -320,7 +329,58 @@ async function sendBatch(outs: Out[], deadline: number, reuse?: string): Promise
   return [...await sendBatch(outs.slice(0, half), deadline), ...await sendBatch(outs.slice(half), deadline)];
 }
 
-async function run(dry: boolean, withHtml: boolean) {
+// ------------------------------------------------------------------- pop-ups
+
+type PushRow = {
+  id: number; kind: string; plant_id: number; title: string; body: string; tab: string; day: string | null;
+  subs: { endpoint: string; p256dh: string; auth: string }[];
+};
+
+let pushServer: Promise<webpush.ApplicationServer> | null = null;
+const server = () => pushServer ??= webpush.importVapidKeys(JSON.parse(VAPID_KEYS)).then((vapidKeys) =>
+  webpush.ApplicationServer.new({ contactInformation: "mailto:hello@princesolarhub.co.za", vapidKeys }));
+
+/** One pop-up to one browser: "ok", "gone" (delete it), or "failed" (left as is). */
+async function pushOne(r: PushRow, s: PushRow["subs"][number]): Promise<"ok" | "gone" | "failed"> {
+  // data is fields, not a link, so the phone apps can map them to their own screens.
+  // tag: a Grid back replaces its Grid down on screen, per plant.
+  const msg = JSON.stringify({
+    title: r.title, body: r.body, tag: `${r.plant_id}:${r.kind.split("_")[0]}`,
+    data: { id: r.id, tab: r.tab, plant: r.plant_id, day: r.day },
+  });
+  try {
+    // An alert an hour late is no longer news: the push service drops it after that.
+    await (await server()).subscribe({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } })
+      .pushTextMessage(msg, { ttl: 3600, urgency: webpush.Urgency.High });
+    return "ok";
+  } catch (e) {
+    if (e instanceof webpush.PushMessageError && [404, 410].includes(e.response.status)) return "gone";
+    console.error("push failed:", e instanceof webpush.PushMessageError ? e.toString() : e);
+    return "failed";
+  }
+}
+
+async function pushPass(deadline: number) {
+  const count = { ok: 0, gone: 0, failed: 0 };
+  while (Date.now() < deadline) {
+    const rows = await rpc<PushRow[]>("push_claim", { p_limit: 200 });
+    if (!rows.length) break;
+    const jobs = rows.flatMap((r) => r.subs.map((s) => [r, s] as const));
+    const ok: string[] = [], gone: string[] = [];
+    for (let i = 0; i < jobs.length; i += PUSH_AT_ONCE) {
+      const res = await Promise.all(jobs.slice(i, i + PUSH_AT_ONCE).map(([r, s]) => pushOne(r, s)));
+      res.forEach((x, j) => {
+        count[x]++;
+        if (x === "ok") ok.push(jobs[i + j][1].endpoint);
+        if (x === "gone") gone.push(jobs[i + j][1].endpoint);
+      });
+    }
+    await rpc("push_done", { p_ok: ok, p_gone: gone });
+  }
+  return count;
+}
+
+async function run(dry: boolean, withHtml: boolean, push: boolean) {
   const started = Date.now();
   // What only the clock can tell: no readings, SunSynk, daily reminders, reports.
   const swept = dry ? null : await rpc<Record<string, unknown>>("email_sweep").catch((e) => ({ error: String(e?.message ?? e) }));
@@ -364,7 +424,9 @@ async function run(dry: boolean, withHtml: boolean) {
     for (const x of done) count[x.status]++;
     await rpc("email_done", { p_results: done });
   }
-  return { live: !dry, swept, ...count, due: lines };
+  // The cron call times out at 55 s.
+  const pushed = push ? await pushPass(started + 50_000).catch((e) => ({ error: String(e?.message ?? e) })) : null;
+  return { live: !dry, swept, ...count, pushed, due: lines };
 }
 
 // Every template from one plant's real numbers; event values are samples.
@@ -410,8 +472,9 @@ serve("notify", async (req) => {
   const url = new URL(req.url);
   try {
     if (url.searchParams.get("render") === "all") return json(await renderAll(Number(url.searchParams.get("plant")), url.searchParams.get("today") ?? undefined));
-    const dry = !LIVE || !RESEND_KEY || url.searchParams.get("dry") === "1";
-    return json(await run(dry, url.searchParams.get("html") === "1"));
+    const dryParam = url.searchParams.get("dry") === "1";
+    const dry = !LIVE || !RESEND_KEY || dryParam;
+    return json(await run(dry, url.searchParams.get("html") === "1", !!VAPID_KEYS && !dryParam));
   } catch (e) {
     await reportError("notify", e);
     console.error("notify failed:", e);

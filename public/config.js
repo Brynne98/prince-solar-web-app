@@ -14,6 +14,9 @@ window.APP_VERSION = 'v0.32.1';
 window.SUPPORT_EMAIL = 'hello@princesolarhub.co.za';
 // Google sign-in client (Google Cloud project prince-solar, "Supabase web"). Public by design.
 window.GOOGLE_CLIENT_ID = '357189209576-890oqvan5eeuc2vash5ralv04k0m0pa2.apps.googleusercontent.com';
+// Pop-up alerts (SOLAR-244): the VAPID public key. Public by design; its private half is
+// the VAPID_KEYS secret on the notify function.
+window.VAPID_PUBLIC = 'BJV8XqKj_ZTALuCxzfsKRYSvHZFnauOhVdKzs1njlexSoV8eabU5lgvt6VyL6l_Quoa9QbO3IEnKaKEvQP0aocg';
 
 window.SUNSYNK_CONFIG = (function () {
   var local = {

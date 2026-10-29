@@ -101,6 +101,18 @@ no cookies.</p>
 off in the app (<strong>Account</strong>, <strong>Notifications</strong>) or with the
 unsubscribe link in the email.</p>
 
+<h2>Pop-up alerts</h2>
+<p>The same alerts can pop up on a browser, once you turn them on there
+(<strong>Account</strong>, <strong>Notifications</strong>, <strong>On this browser</strong>). Nothing
+asks before you do. Turning them on stores that browser's push address and
+its keys, so we can send to it. Each pop-up carries the alert's words, your
+plant's name and which page to open. It goes through your browser maker's push
+service (Google for Chrome, Apple for Safari, Mozilla for Firefox), encrypted so
+only your browser can read it.</p>
+<p>Turning pop-ups off, or signing out, deletes that browser's address. So
+does deleting your account. Alerts shown in the app's list are the ones
+we already send by email, kept 30 days in the list.</p>
+
 <h2>Who receives your data</h2>
 <ul>
 <li><strong>Supabase</strong> stores the database and handles sign-in.</li>
@@ -116,6 +128,8 @@ unsubscribe link in the email.</p>
 <li><strong>Paystack</strong> takes payments on a paid plan. It gets your card
   details, email address and the amount.</li>
 <li><strong>PostHog</strong> stores the usage and error reports, in the EU.</li>
+<li><strong>Google, Apple or Mozilla</strong> deliver pop-up alerts, only to a browser
+  where you turned them on. They get the encrypted pop-up.</li>
 <li><strong>SunSynk</strong> sends your readings when we ask with your token.</li>
 </ul>
 <p>Each receives only what its job needs.</p>
@@ -124,7 +138,7 @@ unsubscribe link in the email.</p>
 <p>The database is hosted by Supabase in Frankfurt, Germany. EU data
 protection law (GDPR) protects it there to a standard like POPIA.
 PostHog keeps the usage and error reports in the EU too.
-Cloudflare, Google, Infobip, Resend, Paystack, unpkg, jsDelivr and SunSynk may process data in other
+Cloudflare, Google, Apple, Mozilla, Infobip, Resend, Paystack, unpkg, jsDelivr and SunSynk may process data in other
 countries under their own safeguards.</p>
 
 <h2>How long we keep it</h2>

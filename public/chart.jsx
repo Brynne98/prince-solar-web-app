@@ -80,8 +80,9 @@ function niceDate(s) {
 const DAY_FLOOR_DAYS = 60; // what SunSynk's per-inverter history keeps
 
 /** Selected day + the arrows' bounds. `earliest` may be null (no lower bound). `today` is the
- *  plant's own date when the caller knows it; otherwise the device's. */
-function useDayPicker(earliest, today) {
+ *  plant's own date when the caller knows it; otherwise the device's. `want` ({date}) moves
+ *  it to a day from outside: an alert opened from Notifications (SOLAR-244). */
+function useDayPicker(earliest, today, want) {
   // back on screen, look at the clock again: the day may have turned while it was away
   const [, bump] = React.useReducer(n => n + 1, 0);
   React.useEffect(() => {
@@ -90,7 +91,8 @@ function useDayPicker(earliest, today) {
     return () => document.removeEventListener('visibilitychange', back);
   }, []);
   const todayStr = today || localDateStr();
-  const [date, setDate] = React.useState(todayStr);
+  const [date, setDate] = React.useState(want?.date && want.date <= todayStr ? want.date : todayStr);
+  React.useEffect(() => { if (want?.date && want.date <= todayStr) setDate(want.date); }, [want]);
   // The day turned while today was on screen: follow it to the new today. A day picked by
   // hand stays picked (SOLAR-150).
   const [was, setWas] = React.useState(todayStr);

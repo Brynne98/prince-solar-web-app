@@ -550,6 +550,8 @@ window.AuthGate = function AuthGate({ children, fallback = null }) {
 // AuthGate to the sign-in screen, so nothing after this should reload the page: a reload
 // blanks it and draws sign-in a second time (SOLAR-98).
 async function signOutHere() {
+  // pop-ups stop on this browser with the session (SOLAR-244)
+  await window.pushTurnOff?.('sign_out').catch(() => {});
   const { error } = await window.sb.auth.signOut({ scope: 'local' }).catch(e => ({ error: e }));
   if (error) await window.sb.auth._removeSession();
 }

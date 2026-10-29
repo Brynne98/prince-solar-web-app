@@ -86,6 +86,8 @@ const NAV_ICONS = {
   back: '<path d="m15 6-6 6 6 6"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
   plug: '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0V8zM12 18v4"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  next: '<path d="m9 6 6 6-6 6"/>',
 };
 // fixed strings from the table above, never data
 const Icon = ({ id }) => <svg className="ico" viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: NAV_ICONS[id] }} />;
@@ -271,6 +273,80 @@ function PhoneBar({ tabs, tab, onTab }) {
         </div>
       )}
     </>
+  );
+}
+
+// ---- Notifications (SOLAR-244) ----------------------------------------------
+// A bell in the header with the unread count. It opens the alerts of the last 30 days
+// (api_notifications): a panel under the bell, a full page on a phone. A tap opens the
+// alert's plant and page, on its day for Grid and Solar, and marks it read.
+
+// the icon and colour of each alert switch
+const NOTIF_GLYPH = { grid: 'grid', battery: 'battery', panels: 'solar', readings: 'live', sunsynk: 'live' };
+
+function notifDay(day) {
+  const d = new Date(), today = d.toLocaleDateString('en-CA');
+  d.setDate(d.getDate() - 1);
+  if (day === today) return 'Today';
+  if (day === d.toLocaleDateString('en-CA')) return 'Yesterday';
+  const [y, m, n] = day.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, n)).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).replace(',', '');
+}
+
+function NotifBell({ data, onOpen, onPick, onReadAll, onSettings }) {
+  const [open, setOpen, ref] = usePopover();
+  useEffect(() => { if (open) onOpen(); }, [open]);
+  const unread = data?.unread || 0;
+  const close = () => setOpen(false);
+  const items = data?.items;
+  let day = null;
+  return (
+    <div className="bell" ref={ref}>
+      <button type="button" className="bell-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(o => !o)}
+              aria-label={'Notifications' + (unread ? ', ' + unread + ' unread' : '')}>
+        <Icon id="bell" />{unread > 0 && <span className="bell-count mono" aria-hidden="true">{unread > 99 ? '99+' : unread}</span>}
+      </button>
+      {open && (
+        <div className="notif-panel" role="dialog" aria-label="Notifications">
+          <div className="nl-head">
+            <button type="button" className="nl-back" aria-label="Back" onClick={close}><Icon id="back" /></button>
+            <h2>Notifications</h2>
+            {unread > 0 && <button type="button" className="nl-all" onClick={onReadAll}>Mark all read</button>}
+            <button type="button" className="nl-gear" aria-label="Notification settings" onClick={() => { close(); onSettings(); }}><Icon id="settings" /></button>
+          </div>
+          {items && !items.length && (
+            <div className="nl-empty">
+              <span className="nl-glyph g-readings"><Icon id="bell" /></span>
+              <b>No alerts yet</b>
+              <p>When the grid goes off, a battery runs hot, panels stop or readings stop, it shows here.</p>
+              <button type="button" className="ghost-btn" onClick={() => { close(); onSettings(); }}>Notification settings</button>
+            </div>
+          )}
+          {items && items.length > 0 && <>
+            {items.map(it => {
+              const head = it.day !== day ? <div className="nl-day">{notifDay(it.day)}</div> : null;
+              day = it.day;
+              return (
+                <React.Fragment key={it.id}>
+                  {head}
+                  <button type="button" className={'nl-row' + (it.read ? '' : ' unread')} onClick={() => { close(); onPick(it); }}>
+                    <span className="nl-dot" aria-label={it.read ? undefined : 'Unread'} />
+                    <span className={'nl-glyph g-' + it.switch}><Icon id={NOTIF_GLYPH[it.switch] || 'live'} /></span>
+                    <span className="nl-text">
+                      <span className="nl-title">{it.title}</span>
+                      <span className="nl-body">{it.body}</span>
+                      <span className="nl-where mono">{it.plantName || 'Plant ' + it.plant} · {it.time}</span>
+                    </span>
+                    <span className="nl-chev"><Icon id="next" /></span>
+                  </button>
+                </React.Fragment>
+              );
+            })}
+            <div className="nl-foot">The last 30 days</div>
+          </>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -857,6 +933,13 @@ function App({ links }) {
   const [busy, setBusy] = useState(0);
   const [err, setErr] = useState(null);
   const [flashSection, setFlashSection] = useState(null); // a Settings section to flash once on arrival
+  // The day an alert opens Grid or Solar on: {date}, a new object per tap so a second tap
+  // on the same day still moves the chart. A pop-up's tap brings it as ?day= (sw.js).
+  const [openDay, setOpenDay] = useState(() => {
+    const d = new URLSearchParams(location.search).get('day');
+    return /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? { date: d } : null;
+  });
+  const [notifs, setNotifs] = useState(null);
   // "Set your rate", "Set pack size", Reconnect: open the page that holds that section
   // (logins are on Account) and flash it once; the section scrolls itself into view.
   // The address keeps it as #section, so a reload scrolls back to it (SOLAR-165).
@@ -876,6 +959,20 @@ function App({ links }) {
   useEffect(() => { energyRef.current = energy; }, [energy]);
 
   useEffect(() => { window.track('screen_viewed', { stage: 'dashboard', screen: tab }); }, [tab]);
+
+  const loadNotifs = useCallback(() => { window.fetchNotifications().then(setNotifs).catch(() => {}); }, []);
+  // ?day= and ?opened= (a pop-up's tap) are read once, then leave the address, as ?section= does.
+  useEffect(() => {
+    const url = new URL(location.href);
+    const opened = Number(url.searchParams.get('opened'));
+    if (!url.searchParams.has('day') && !url.searchParams.has('opened')) return;
+    url.searchParams.delete('day'); url.searchParams.delete('opened');
+    history.replaceState(history.state, '', url);
+    if (opened) {
+      window.track('notification_opened', { source: 'push' });
+      window.readNotifications([opened]).then(loadNotifs).catch(() => {});
+    }
+  }, []);
 
   // The address names the page and plant, so a reload opens them; the saved page is for a
   // bare address (SOLAR-165). ?section= is left for loadMe to read.
@@ -1027,7 +1124,7 @@ function App({ links }) {
   };
 
   // initial load: who am I and which plant, then the data
-  useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); }); }, []);
+  useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); loadNotifs(); }); }, []);
   // auto refresh: live every minute (matches SunSynk's cadence), today and energy every
   // 5th minute. On the clock, not from page load, so devices side by side show the same
   // numbers (SOLAR-33). The second past the minute is the plant's own, 12–42 s, so every
@@ -1043,7 +1140,7 @@ function App({ links }) {
     const tick = () => {
       if (document.visibilityState === 'visible') {
         loadLive(false);
-        if (new Date().getMinutes() % 5 === 0) { loadToday(); refreshEnergy(); }
+        if (new Date().getMinutes() % 5 === 0) { loadToday(); refreshEnergy(); loadNotifs(); }
         // a plant just added: today's series is asked each minute until it draws (SOLAR-181)
         else if (todayThin.current) loadToday();
       }
@@ -1051,7 +1148,7 @@ function App({ links }) {
     };
     next();
     // timers sleep with a tablet's screen; catch up the moment it is back or online again
-    const wake = () => { if (document.visibilityState === 'visible') { loadLive(false); loadToday(); refreshEnergy(); } };
+    const wake = () => { if (document.visibilityState === 'visible') { loadLive(false); loadToday(); refreshEnergy(); loadNotifs(); } };
     document.addEventListener('visibilitychange', wake);
     window.addEventListener('online', wake);
     return () => {
@@ -1077,7 +1174,23 @@ function App({ links }) {
 
   const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(true); setRefreshKey(k => k + 1); };
 
-  const go = (id) => { setTab(id); toTop(); if (location.hash) history.replaceState(history.state, '', location.pathname + location.search); };
+  const go = (id) => { setTab(id); setOpenDay(null); toTop(); if (location.hash) history.replaceState(history.state, '', location.pathname + location.search); };
+  // An alert tapped in the list: read, then its plant, page and day.
+  const pickNotif = (it) => {
+    window.track('notification_opened', { source: 'list', kind: it.kind });
+    if (!it.read) {
+      setNotifs(n => ({ ...n, unread: Math.max(0, n.unread - 1), items: n.items.map(x => (x.id === it.id ? { ...x, read: true } : x)) }));
+      window.readNotifications([it.id]).catch(() => {});
+    }
+    if (it.plant !== plantId && (me?.plants || []).some(p => p.id === it.plant)) switchPlant(it.plant);
+    go(it.tab);
+    if (it.tab === 'grid' || it.tab === 'solar') setOpenDay({ date: it.day });
+  };
+  const readAll = () => {
+    setNotifs(n => ({ ...n, unread: 0, items: n.items.map(x => ({ ...x, read: true })) }));
+    window.readNotifications(null).catch(() => {});
+  };
+  const bell = <NotifBell data={notifs} onOpen={loadNotifs} onPick={pickNotif} onReadAll={readAll} onSettings={() => openSettings('notifications')} />;
   const loginDead = links.accounts.some(a => a.status === 'needs_relink');
   // The free week (SOLAR-242): steps left mark the avatar; after it, history locks.
   const free = window.freeState(me);
@@ -1107,7 +1220,7 @@ function App({ links }) {
       <window.FreeCtx.Provider value={free}>
       <Frame tabs={TABS} tab={tab} onTab={go} account={account} busy steps={steps}
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
-          <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} /></>}>
+          <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} />{bell}</>}>
         {err && <div className="notice offline" role="alert"><p><b>Can't reach the server.</b> Retrying every minute.</p></div>}
         {null}
         {/* Settings and Account never touch the snapshot: they draw for real. They sit in
@@ -1127,7 +1240,7 @@ function App({ links }) {
   return (
     <window.FreeCtx.Provider value={free}>
     <Frame tabs={TABS} tab={tab} onTab={go} account={account} steps={steps}
-      head={<>{plantMenu}<HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} /></>}>
+      head={<>{plantMenu}<HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} />{bell}</>}>
       {/* The raw error stays in the title; on screen it was a Postgres or JWT string a
           homeowner cannot act on. */}
       {err && <div className="notice stale" role="status" title={String(err)}><p><b>Couldn't refresh.</b> Showing the last good reading.</p></div>}
@@ -1141,9 +1254,9 @@ function App({ links }) {
         {tab === 'account' && accountPage}
         {tab === 'live' && <window.LiveTab snap={snap} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
           onOpenSettings={openSettings} />}
-        {tab === 'solar' && <window.SolarTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
+        {tab === 'solar' && <window.SolarTab alertDay={openDay} snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'home' && <window.HomeTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} />}
-        {tab === 'grid' && <window.GridTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
+        {tab === 'grid' && <window.GridTab alertDay={openDay} snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} refreshKey={refreshKey} />}
       </div>
       <PlansSheet />

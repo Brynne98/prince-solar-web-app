@@ -369,6 +369,75 @@ async function saveEmailPref(userId, kind, on) {
   if (error) throw new Error(error.message);
   window.track('email_pref_change_done', { kind, on });
 }
+// The alerts of the last 30 days, {pinned, items, unread} (0124, SOLAR-244).
+async function fetchNotifications() {
+  const { data, error } = await window.sb.rpc('api_notifications');
+  if (error) throw new Error(error.message);
+  return data;
+}
+// null marks every one read.
+async function readNotifications(ids) {
+  const { error } = await window.sb.rpc('api_notifications_read', { p_ids: ids });
+  if (error) throw new Error(error.message);
+}
+// Which alerts pop up (push_prefs, 0124). No row yet means all on.
+const PUSH_KINDS = ['grid', 'battery', 'panels', 'readings', 'sunsynk'];
+async function fetchPushPrefs(userId) {
+  const { data, error } = await window.sb.from('push_prefs').select(PUSH_KINDS.join(',')).eq('user_id', userId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data || Object.fromEntries(PUSH_KINDS.map(k => [k, true]));
+}
+async function savePushPref(userId, kind, on) {
+  const { error } = await window.sb.from('push_prefs').upsert({ user_id: userId, [kind]: on });
+  if (error) throw new Error(error.message);
+  window.track('push_pref_change_done', { kind, on });
+}
+
+// Pop-ups on this browser. 'ok' where it can; 'ios' on an iPhone or iPad outside the
+// Home Screen app (Safari has no push there); 'none' elsewhere.
+function pushSupport() {
+  if ('serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window) return 'ok';
+  const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return ios ? 'ios' : 'none';
+}
+async function pushSub() {
+  const reg = await navigator.serviceWorker.getRegistration('/');
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+// 'on' | 'off' | 'blocked' | 'ios' | 'none'
+async function pushState() {
+  const s = pushSupport();
+  if (s !== 'ok') return s;
+  if (Notification.permission === 'denied') return 'blocked';
+  return (await pushSub()) ? 'on' : 'off';
+}
+// The switch is the ask: the browser's own prompt shows only now, never on load.
+async function pushTurnOn() {
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') return perm === 'denied' ? 'blocked' : 'off';
+  const reg = await navigator.serviceWorker.register('/sw.js');
+  await navigator.serviceWorker.ready;
+  const key = Uint8Array.from(atob(window.VAPID_PUBLIC.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+  const j = sub.toJSON();
+  const { error } = await window.sb.rpc('api_push_sub', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
+  if (error) { await sub.unsubscribe().catch(() => {}); throw new Error(error.message); }
+  window.track('push_enabled_done');
+  return 'on';
+}
+// Off here, and on sign-out, so a shared computer stops showing the last account's alerts.
+// The browser's own subscription goes even if the server call fails: the push service
+// then answers "gone" and notify deletes the row.
+async function pushTurnOff(reason = 'switch') {
+  if (pushSupport() !== 'ok') return 'off';
+  const sub = await pushSub();
+  if (!sub) return 'off';
+  // a supabase query has then but no catch
+  try { await window.sb.rpc('api_push_unsub', { p_endpoint: sub.endpoint }); } catch (e) { /* see above */ }
+  await sub.unsubscribe();
+  window.track('push_disabled_done', { reason });
+  return 'off';
+}
 async function deleteAccount() {
   const { data, error } = await window.sb.rpc('api_account_delete');
   if (error) throw new Error(error.message);
@@ -408,5 +477,6 @@ function emptyText(days, fallback) {
 
 Object.assign(window, {
   fetchSnapshot, fetchDay, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth,
-  fetchMe, savePrefs, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount, emptyText, syncProgress, BATT_MAX_KW, TYPICAL_DAYS,
+  fetchMe, savePrefs, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount,
+  fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, pushSupport, pushState, pushTurnOn, pushTurnOff, emptyText, syncProgress, BATT_MAX_KW, TYPICAL_DAYS,
 });

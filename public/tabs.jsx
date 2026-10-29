@@ -1026,7 +1026,7 @@ function SolarSkeleton() {
   );
 }
 
-function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSettings }) {
+function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSettings, alertDay }) {
   const a = snap.aggregate;
   const cfg = snap.config || {};
   const feat = snap.features || {};
@@ -1056,7 +1056,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const [daily, loadDaily] = useDaily(refreshKey);
 
   // ---- the day on the chart ----
-  const pick = useDayPicker(earliest, plantToday); // the plant's date, as the totals and bars use
+  const pick = useDayPicker(earliest, plantToday, alertDay); // the plant's date, as the totals and bars use
   const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
   // A past day with most of 06:00–18:00 missing and no solar in what is there is a logging gap
   const daytime = points.slice(72, 216);
@@ -1379,7 +1379,7 @@ function GridTab(props) {
   return <GridBody {...props} />;
 }
 
-function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSettings }) {
+function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSettings, alertDay }) {
   const a = snap.aggregate;
   const cfg = snap.config || {};
   const tz = cfg.timezone;
@@ -1420,7 +1420,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const silent = ps.status === 'offline';
 
   // ---- the day on the chart: grid power signed, + bought and − exported ----
-  const pick = useDayPicker(earliest, plantToday);
+  const pick = useDayPicker(earliest, plantToday, alertDay);
   const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
   const noReadings = dayProblem(view, day, points, silent);
   const peak = importPeak(points);
@@ -2833,23 +2833,62 @@ function NotificationsSection({ userId }) {
   const [prefs, setPrefs] = useState(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState({});
+  // Pop-ups on this browser (SOLAR-244): its state, then the five alert switches once on.
+  const [push, setPush] = useState(null); // on | off | blocked | ios | none | asking
+  const [pushPrefs, setPushPrefs] = useState(null);
   const load = () => {
     setFailed(false);
     window.fetchEmailPrefs(userId).then(setPrefs).catch(() => setFailed(true));
+    window.fetchPushPrefs(userId).then(setPushPrefs).catch(() => {});
   };
   useEffect(() => { if (userId) load(); }, [userId]);
+  useEffect(() => { window.pushState().then(setPush).catch(() => setPush('off')); }, []);
   // A save that works shows nothing more than the switch; one that fails names what it was
   // (the email, or the group a group switch set) in the red toast (SOLAR-166).
-  const flip = async (kind, on, name) => {
-    setPrefs(p => ({ ...p, [kind]: on }));
-    try { await window.saveEmailPref(userId, kind, on); }
+  const saver = (set, save) => async (kind, on, name) => {
+    set(p => ({ ...p, [kind]: on }));
+    try { await save(userId, kind, on); }
     catch {
-      setPrefs(p => ({ ...p, [kind]: !on }));
+      set(p => ({ ...p, [kind]: !on }));
       window.toast('Couldn’t save ' + (name || EMAIL_GROUPS.flatMap(g => g.rows).find(([k]) => k === kind)[1]) + '. Try again.', { error: true });
     }
   };
-  // Each email saves through flip, so a group is its emails' saves, one per kind.
-  const flipGroup = (g, on) => g.rows.forEach(([kind]) => { if (prefs[kind] !== on) flip(kind, on, g.label); });
+  const flip = saver(setPrefs, window.saveEmailPref);
+  const flipPush = saver(setPushPrefs, window.savePushPref);
+  const togglePush = async () => {
+    const was = push;
+    setPush('asking');
+    try { setPush(await (was === 'on' ? window.pushTurnOff() : window.pushTurnOn())); }
+    catch { setPush(was); window.toast('Couldn’t turn pop-ups ' + (was === 'on' ? 'off' : 'on') + '. Try again.', { error: true }); }
+  };
+  // One group: a row that opens its switches, and a switch for all of them. Each switch
+  // saves through its own flip, so a group is its switches' saves, one per kind.
+  const group = (g, p, flipOne, key) => {
+    const anyOn = !p || g.rows.some(([kind]) => p[kind]);
+    return (
+      <div className="notif-group" key={key}>
+        <div className="notif-head">
+          <button type="button" className="notif-open" aria-expanded={!!open[key]} aria-controls={'notif-' + key}
+                  onClick={() => setOpen(o => ({ ...o, [key]: !o[key] }))}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
+            <span className="toggle-text">
+              <span className="notif-label">{g.label}</span>
+              <span className="toggle-hint">{emailGroupSummary(g, p)}</span>
+            </span>
+          </button>
+          <button type="button" className={'switch' + (anyOn ? ' on' : '')} role="switch" aria-checked={anyOn} aria-label={g.label}
+                  onClick={() => p && g.rows.forEach(([kind]) => { if (p[kind] === anyOn) flipOne(kind, !anyOn, g.label); })}><span className="knob" /></button>
+        </div>
+        <div id={'notif-' + key} className="field notif-rows" role="group" aria-label={g.label} hidden={!open[key]}>
+          {g.rows.map(([kind, label, hint]) => (
+            <Toggle key={kind} label={label} hint={hint} checked={!p || p[kind]}
+                    onChange={(on) => p && flipOne(kind, on)} />
+          ))}
+        </div>
+      </div>
+    );
+  };
+  const alerts = EMAIL_GROUPS.find(g => g.id === 'alerts');
   return (
     <SettingsSection id="notifications" title="Notifications">
       {failed ? (
@@ -2858,32 +2897,23 @@ function NotificationsSection({ userId }) {
           <div className="conn-actions"><button type="button" className="ghost-btn" onClick={load}>Try again</button></div>
         </div>
       ) : <>
-        {EMAIL_GROUPS.map(g => {
-          const anyOn = !prefs || g.rows.some(([kind]) => prefs[kind]);
-          return (
-            <div className="notif-group" key={g.id}>
-              <div className="notif-head">
-                <button type="button" className="notif-open" aria-expanded={!!open[g.id]} aria-controls={'notif-' + g.id}
-                        onClick={() => setOpen(o => ({ ...o, [g.id]: !o[g.id] }))}>
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
-                  <span className="toggle-text">
-                    <span className="notif-label">{g.label}</span>
-                    <span className="toggle-hint">{emailGroupSummary(g, prefs)}</span>
-                  </span>
-                </button>
-                <button type="button" className={'switch' + (anyOn ? ' on' : '')} role="switch" aria-checked={anyOn} aria-label={g.label}
-                        onClick={() => prefs && flipGroup(g, !anyOn)}><span className="knob" /></button>
-              </div>
-              <div id={'notif-' + g.id} className="field notif-rows" role="group" aria-label={g.label} hidden={!open[g.id]}>
-                {g.rows.map(([kind, label, hint]) => (
-                  <Toggle key={kind} label={label} hint={hint} checked={!prefs || prefs[kind]}
-                          onChange={(on) => prefs && flip(kind, on)} />
-                ))}
-              </div>
-            </div>
-          );
-        })}
+        <div className="notif-sub">Email</div>
+        {EMAIL_GROUPS.map(g => group(g, prefs, flip, g.id))}
       </>}
+      {push && push !== 'none' && (
+        <div className={'notif-push ' + push}>
+          <div className="notif-sub">On this browser</div>
+          <Toggle label="Pop-up alerts" hint="The same alerts, shown on this device even when the app is closed."
+                  checked={push === 'on'} onChange={() => push !== 'asking' && push !== 'ios' && togglePush()} />
+          {push === 'blocked' && (
+            <p className="notif-note warn">Your browser blocked pop-ups for this site. Allow notifications for {location.host} in the browser’s site settings, then turn this on again.</p>
+          )}
+          {push === 'ios' && (
+            <p className="notif-note">On iPhone, pop-ups work only from the Home Screen. In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>, and open the app from there. Needs iOS 16.4 or later.</p>
+          )}
+          {push === 'on' && group({ ...alerts, when: null }, pushPrefs, flipPush, 'push')}
+        </div>
+      )}
     </SettingsSection>
   );
 }

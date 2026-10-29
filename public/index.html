@@ -223,6 +223,58 @@
   @keyframes refresh-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .refresh.busy .ico { animation: none; opacity: .5; } }
 
+  /* Notifications (SOLAR-244): a bell right of Refresh with the unread count; a panel
+     under it, a full page on a phone (below) */
+  .bell { position: relative; flex: none; }
+  .bell-btn { position: relative; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px;
+    background: none; border: 1px solid transparent; color: var(--text); }
+  .bell-btn:hover, .bell-btn[aria-expanded="true"] { background: var(--panel-2); border-color: var(--line-2); }
+  .bell-btn .ico { width: 19px; height: 19px; }
+  .bell-count { position: absolute; top: 1px; right: -1px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+    background: var(--bad); color: #fff; font-size: 10.5px; font-weight: 600; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--bg); }
+  .notif-panel { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; width: 400px; max-height: min(640px, calc(100vh - 90px)); overflow-y: auto;
+    background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 14px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); padding-bottom: 4px; }
+  .nl-head { display: flex; align-items: center; gap: 6px; padding: 12px 10px 6px 16px; }
+  .nl-head h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  .nl-all { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 13px; font-weight: 500; padding: 8px 6px; }
+  .nl-gear, .nl-back { width: 36px; height: 36px; display: grid; place-items: center; background: none; border: none; color: var(--muted); border-radius: 9px; flex: none; }
+  .nl-head h2 + .nl-gear { margin-left: auto; }
+  .nl-all:hover, .nl-gear:hover, .nl-back:hover { color: var(--text); }
+  .nl-gear .ico, .nl-back .ico { width: 18px; height: 18px; }
+  .nl-back { display: none; }
+  .nl-day { padding: 12px 16px 4px; font-size: 12.5px; color: var(--dim); font-weight: 500; }
+  .nl-row { display: grid; grid-template-columns: 8px 32px minmax(0, 1fr) 14px; gap: 10px; align-items: start; width: 100%; padding: 9px 14px 9px 10px;
+    background: none; border: none; color: var(--text); text-align: left; }
+  .nl-row:hover, .nl-row:focus-visible { background: rgba(255,255,255,0.04); outline: none; }
+  .nl-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 12px; }
+  .nl-row.unread .nl-dot { background: var(--ok); }
+  .nl-glyph { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; }
+  .nl-glyph .ico { width: 17px; height: 17px; }
+  .g-grid { background: rgba(250,204,21,0.12); color: var(--grid); }
+  .g-battery { background: rgba(167,139,250,0.14); color: var(--batt); }
+  .g-panels { background: rgba(61,220,132,0.12); color: var(--pv); }
+  .g-readings, .g-sunsynk { background: rgba(255,255,255,0.07); color: var(--muted); }
+  .nl-text { display: flex; flex-direction: column; min-width: 0; }
+  .nl-title { font-size: 14.5px; font-weight: 500; line-height: 1.3; }
+  .nl-row.unread .nl-title { font-weight: 600; }
+  .nl-body { font-size: 13px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+  .nl-where { font-size: 12px; color: var(--dim); margin-top: 3px; }
+  .nl-chev { color: #56606e; margin-top: 8px; } .nl-chev .ico { width: 14px; height: 14px; }
+  .nl-foot { padding: 12px 16px; font-size: 12.5px; color: var(--dim); text-align: center; }
+  .nl-empty { padding: 40px 28px 28px; text-align: center; }
+  .nl-empty .nl-glyph { margin: 0 auto 14px; width: 44px; height: 44px; border-radius: 12px; }
+  .nl-empty b { display: block; font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .nl-empty p { margin: 0 0 16px; font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+  @media (max-width: 599px) {
+    .bell-btn { width: 36px; height: 36px; }
+    .notif-panel { position: fixed; inset: 0; z-index: 40; width: auto; max-height: none; border: none; border-radius: 0; box-shadow: none;
+      background: var(--bg); padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); }
+    .nl-head { padding-left: 8px; }
+    .nl-back { display: grid; margin-right: 2px; }
+    /* the header is its own layer (sticky, z-index 5): lift it over the bar and the setup card while the list is open */
+    .head:has(.notif-panel) { z-index: 30; }
+  }
+
   /* the page says when its numbers are old, and why; grid off is calm purple, not a fault */
   .notice { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; padding: 12px 16px; border-radius: 12px; margin-bottom: 18px; border: 1px solid; font-size: 14px; }
   .notice p { margin: 0; flex: 1 1 240px; line-height: 1.45; }
@@ -864,6 +916,16 @@
   .sset .notif-rows { margin: 0 0 14px 42px; }
   .sset .notif-rows .toggle-row { padding: 8px 0; border-top: none; }
   .sset .toggle-hint { font-size: 13px; }   /* hints are 13px or more (SOLAR-14) */
+  /* Email, then On this browser: pop-ups with the same five alert switches (SOLAR-244) */
+  .notif-sub { font-size: 12.5px; color: var(--dim); font-weight: 500; margin: 0 0 4px; }
+  .notif-sub + .notif-group .notif-head { padding-top: 10px; }
+  .notif-push { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
+  .notif-push .notif-group { border-top: 1px solid var(--line); }
+  .notif-push.ios .switch, .notif-push.asking .switch { opacity: .35; }
+  .notif-note { margin: 4px 0 6px; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5;
+    border: 1px solid var(--line-2); background: var(--panel-2); color: #b4bdc8; }
+  .notif-note.warn { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.07); color: #f3d9a6; }
+  .notif-note b { color: var(--text); font-weight: 600; }
   /* Tariff, Plant and Battery: the login rows' layout (name and hint left, control right).
      The name is a <label> or a <div> of spans, so stack the spans like the login rows' divs. */
   .sset-row .conn-text > span { display: block; }
