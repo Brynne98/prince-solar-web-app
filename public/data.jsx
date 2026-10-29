@@ -73,13 +73,18 @@ const MIN5 = 5 * 60000;
 
 const isOnline = (s) => s === 1 || s === '1' || s === 'online' || s === true;
 
+// SunSynk's flag can read 0 for hours while the inverter still uploads (SOLAR-226), so
+// a reading newer than this counts as online. A slave uploads every 5 min; 15 allows
+// two missed uploads. The flag decides only when there is no reading time.
+const READ_FRESH_MS = 15 * 60000;
+
 // ---- /api/overview -> snapshot ---------------------------------------------
-function mapInverter(s) {
+function mapInverter(s, asOf) {
   const out = {
     sn: s.sn,
     alias: s.alias || s.sn,
     model: s.model || '—',
-    status: isOnline(s.status) ? 'online' : 'offline',
+    status: (s.readAt ? asOf - s.readAt * 1000 <= READ_FRESH_MS : isOnline(s.status)) ? 'online' : 'offline',
     soft: s.soft || '—',
     hmi: s.hmi || '—',
     gsn: s.gsn || '—',
@@ -175,7 +180,8 @@ async function fetchSnapshot() {
   // api_health); generatedAt only stamps the answer. The header shows the former so a
   // stalled poller is visible.
   const api = await getJSON('/api/overview');
-  const inverters = (api.inverters || []).map(mapInverter);
+  const asOf = api.generatedAt ? new Date(api.generatedAt).getTime() : Date.now();
+  const inverters = (api.inverters || []).map(s => mapInverter(s, asOf));
   // Battery capacity and reserve are not derived here (SunSynk under-reports Ah/V) —
   // they come from app_config via api_overview, which is also what the phone alerts
   // read. Pass them straight through; null until the first snapshot lands.
