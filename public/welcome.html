@@ -415,11 +415,15 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   .toast{left:auto;right:0;bottom:auto;top:calc(100% - 56px / var(--k,.64));width:calc(70% * var(--k,.64) / .8);scale:calc(.8 / var(--k,.64));transform-origin:top right}  /* the words sit just above low hills; later moments are shorter so the next words follow sooner */
   .moment{justify-content:flex-end;padding:0 0 116px;min-height:100svh}
   /* a small house on the hill, bottom right, under the words */
-  .house{display:block;left:auto;right:16px;bottom:20px;width:96px}
+  .house{display:block;left:auto;right:16px;bottom:calc(20px + 100lvh - 100svh);width:96px}
   /* the moon's path runs behind the words here, so it stays dim */
   .moonorb{filter:opacity(.4)}
   .moment+.moment{min-height:70svh}
-  .land{height:64px}
+  /* the stage is the full screen with the address bar hidden; while the bar shows it covers the stage's foot,
+     so hills and house sit that much higher and the near hill's colour fills the strip under them */
+  .land{height:calc(64px + 100lvh - 100svh)}
+  .land svg{top:0;bottom:auto;height:64px}
+  .land::after{content:"";position:absolute;left:0;right:0;top:63px;bottom:0;background:var(--l2)}
   /* the card's words drawn large, so they read after the card is scaled down; box sub-lines go (the narration says it) */
   .card-head{font-size:18px}.card-head .plant{font-size:19px}.live{font-size:17px}
   .narr{font-size:20px;min-height:56px}
