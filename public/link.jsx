@@ -152,6 +152,17 @@ window.settlePayment = async function settlePayment() {
   }
 };
 
+// Change the saved card (SOLAR-238): R1 on Paystack's card page, refunded once the
+// card is saved. Comes back through billingReturn like any card-page payment.
+window.changeCard = async function changeCard() {
+  try {
+    const r = await billingCall('pay', { card: true });
+    location.assign(r.url);
+  } catch {
+    window.toast('Couldn’t open the card page. Try again.', { error: true });
+  }
+};
+
 // Once, when Account opens: back from Paystack's card page (?reference=), after a
 // payment (?billing=paid), or from the "Pay with another card" email (?pay=1).
 window.billingReturn = async function billingReturn(billingStatus) {
@@ -165,7 +176,13 @@ window.billingReturn = async function billingReturn(billingStatus) {
   }
   if (done === 'paid') { window.toast('Payment received. Your plan is updated.'); return; }
   try {
-    const { status } = await billingCall('verify', { reference: ref });
+    const { status, kind } = await billingCall('verify', { reference: ref });
+    // A card change changes no plan: the caller re-reads the card ('card').
+    if (status === 'paid' && kind === 'card') {
+      window.track('card_change_done');
+      window.toast('Card changed. The R1 check goes back to your card.');
+      return 'card';
+    }
     // A full reload: resumed plants join the plant list.
     if (status === 'paid') return billingPaid(null);
     window.toast(status === 'failed' ? 'The payment didn’t go through. Nothing was charged.' : 'Your payment is still being checked. Look again in a minute.', { error: status === 'failed' });
@@ -205,14 +222,13 @@ window.sb.auth.onAuthStateChange((event, session) => {
  *   reason 'add'        Free or Home with a plant, before the form (onAddPaused: go on, paused)
  *          'free_week'  linked, but the login had its free week on another account: Home fits too
  *          'paused'     Upgrade on a login row with paused plants (`paused`: their names)
- *          'plans'      See plans in Account's Plan section, on Free: Home fits too
- *          'upgrade'    Upgrade in Change plan, on Home: the price before the saved card is charged
+ *          'upgrade'    Upgrade in the Plan section, on Home: the price before the saved card is charged
  * `added` = inverters the login brings past the 3rd plant, priced into Family.
  * A paid user's period changes at renewal, so only Free gets the switch.
  */
 function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
   const { useState, useEffect } = React;
-  const offers = reason === 'free_week' || reason === 'plans' ? ['home', 'family'] : ['family'];
+  const offers = reason === 'free_week' ? ['home', 'family'] : ['family'];
   const [period, setPeriod] = useState('monthly');
   const [quotes, setQuotes] = useState(null);
   useEffect(() => { window.track('paywall_shown', { reason }); }, []);
@@ -228,7 +244,7 @@ function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
   const per = paid ? first.period : period;
   return (
     <div className="paywall" role="dialog" aria-labelledby="pw-title">
-      <h2 id="pw-title" className="sset-title">{reason === 'free_week' || reason === 'plans' ? 'Choose a plan'
+      <h2 id="pw-title" className="sset-title">{reason === 'free_week' ? 'Choose a plan'
         : reason === 'upgrade' ? 'Upgrade to Family'
         : reason === 'paused' ? `Collect data for ${paused.length === 1 ? paused[0] : paused.length + ' paused plants'}`
         : 'Add another plant'}</h2>
