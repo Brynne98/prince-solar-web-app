@@ -181,7 +181,7 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync }) {
 
 // The person: avatar, name and plant count in the sidebar; the avatar alone in a phone's
 // header. A dead SunSynk login puts a red dot on the avatar and on Account.
-function AccountMenu({ user, plantCount, alert, onAccount, active, variant }) {
+function AccountMenu({ user, plantCount, alert, onAccount, onSettings, active, variant }) {
   const [open, setOpen, ref] = usePopover();
   // plantCount is null while the plants load: the row shows, its count shimmers
   const sub = alert ? 'Reconnect a login' : plantCount == null ? '' : plantCount + (plantCount === 1 ? ' plant' : ' plants');
@@ -196,6 +196,10 @@ function AccountMenu({ user, plantCount, alert, onAccount, active, variant }) {
       {open && (
         <MenuList className="acct-menu" label="Account">
           <div className="menu-email">{user.email}</div>
+          {/* Settings left the page list for here (SOLAR-224) */}
+          <button type="button" onClick={() => { setOpen(false); onSettings(); }}>
+            <Icon id="settings" />Plant settings
+          </button>
           <button type="button" onClick={() => { setOpen(false); onAccount(); }}>
             <Icon id="account" />Account{alert && <span className="dot" aria-label="A login needs reconnecting" />}
           </button>
@@ -212,30 +216,27 @@ function Sidebar({ tabs, tab, onTab, account, steps }) {
     <aside className="rail">
       <div className="rail-logo"><span className="sun" aria-hidden="true" /><span className="app-name">Prince Solar Hub</span></div>
       <nav className="nav" aria-label="Pages">
-        {tabs.map(t => (
-          <React.Fragment key={t.id}>
-          {t.id === 'settings' && steps && steps('rail')}
-          <button type="button" className={t.id === 'settings' ? 'nav-settings' : undefined} aria-current={tab === t.id ? 'page' : undefined}
+        {tabs.filter(t => t.id !== 'settings').map(t => (
+          <button key={t.id} type="button" aria-current={tab === t.id ? 'page' : undefined}
                   onClick={onTab && (() => onTab(t.id))} disabled={!onTab}>
             <Icon id={t.id} /><span className="t">{t.label}</span>
           </button>
-          </React.Fragment>
         ))}
+        {steps && steps('rail')}
       </nav>
       {account && <AccountMenu {...account} variant="rail" />}
     </aside>
   );
 }
 
-// Phone: at most five slots, Settings always the last. More than four pages: the first
-// three, then More, which opens a sheet with the rest.
+// Phone: at most five slots. Settings opens from the account menu (SOLAR-224). More than
+// five pages: the first four, then More, which opens a sheet with the rest.
 function PhoneBar({ tabs, tab, onTab }) {
   const [more, setMore] = useState(false);
   const pages = tabs.filter(t => t.id !== 'settings');
-  const settingsTab = tabs.find(t => t.id === 'settings');
-  const split = pages.length > 4;
-  const bar = split ? pages.slice(0, 3) : pages;
-  const rest = split ? pages.slice(3) : [];
+  const split = pages.length > 5;
+  const bar = split ? pages.slice(0, 4) : pages;
+  const rest = split ? pages.slice(4) : [];
   const go = (id) => { setMore(false); onTab && onTab(id); };
   useEffect(() => {
     if (!more) return;
@@ -259,7 +260,6 @@ function PhoneBar({ tabs, tab, onTab }) {
             <Icon id="more" /><span>More</span>
           </button>
         )}
-        {settingsTab && slot(settingsTab)}
       </nav>
       {more && (
         <div className="sheet" onClick={e => { if (e.target === e.currentTarget) setMore(false); }}>
@@ -698,7 +698,7 @@ function BootShell() {
   const saved = window.resetAsked() ? 'account' : tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab'));
   const tab = pageOk(TABS, saved) ? saved : 'live';
   return (
-    <Frame tabs={TABS} tab={tab} busy account={{ user, plantCount: null, onAccount: () => {} }}
+    <Frame tabs={TABS} tab={tab} busy account={{ user, plantCount: null, onAccount: () => {}, onSettings: () => {} }}
       head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /></>}>
       {/* TabSkeleton is in tabs.js, which loads after sign-in (SOLAR-143) */}
       {tab !== 'settings' && tab !== 'account' && window.TabSkeleton && <window.TabSkeleton tab={tab} />}
@@ -768,7 +768,7 @@ function Setup({ links }) {
   useEffect(() => { window.track('screen_viewed', { stage: 'setup', screen: connecting ? 'connect' : tab }); }, [tab, connecting]);
   const dead = links.accounts.filter(a => a.status === 'needs_relink');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
-  const account = { user, plantCount: 0, alert: dead.length > 0, onAccount: () => go('account'), active: tab === 'account' };
+  const account = { user, plantCount: 0, alert: dead.length > 0, onAccount: () => go('account'), onSettings: () => go('settings'), active: tab === 'account' || tab === 'settings' };
   const connectBtn = (cls) => (
     <button type="button" className={'save-btn setup-btn ' + cls} onClick={connect} aria-label="Connect inverter"><Icon id="plug" /><span>Connect inverter</span></button>
   );
@@ -1038,7 +1038,7 @@ function App({ links }) {
 
   const go = (id) => { setTab(id); toTop(); if (location.hash) history.replaceState(history.state, '', location.pathname + location.search); };
   const loginDead = links.accounts.some(a => a.status === 'needs_relink');
-  const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, onAccount: () => go('account'), active: tab === 'account' };
+  const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, onAccount: () => go('account'), onSettings: () => go('settings'), active: tab === 'account' || tab === 'settings' };
   // a plant whose every login stopped working reads Reconnect in the menu
   const loginsCut = (id) => {
     const ls = links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(id)));

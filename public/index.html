@@ -140,7 +140,6 @@
   .nav > button:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,0.04); }
   .nav > button[aria-current="page"] { color: var(--text); background: rgba(255,255,255,0.075); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); font-weight: 600; }
   .nav > button:disabled { cursor: progress; }
-  .nav .nav-settings { margin-top: auto; }
 
   /* the account: a row at the foot of the sidebar, an avatar in a phone's header */
   .acct { position: relative; }
@@ -1328,7 +1327,6 @@
      and docked over the bottom bar on a phone; its step opens beside it or from the bottom */
   .fs-wrap { position: relative; }
   .nav .fs-wrap { margin-top: auto; margin-bottom: 10px; }   /* with the nav's 2 px gap, the same 12 px as Settings to the account line */
-  .nav .fs-wrap + .nav-settings { margin-top: 0; }
   .fs-card { display: flex; flex-direction: column; gap: 10px; padding: 12px 12px 12px 14px; border-radius: 12px;
     background: rgba(61,220,132,0.05); border: 1px solid rgba(61,220,132,0.22); }
   .fs-card.open { background: rgba(61,220,132,0.09); border-color: rgba(61,220,132,0.5); }
