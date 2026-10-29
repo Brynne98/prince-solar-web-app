@@ -293,7 +293,8 @@ function notifDay(day) {
   return new Date(Date.UTC(y, m - 1, n)).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).replace(',', '');
 }
 
-function NotifBell({ data, onOpen, onPick, onReadAll, onSettings }) {
+// disabled: the loading header holds its place, dimmed like Refresh (SOLAR-248)
+function NotifBell({ data, onOpen, onPick, onReadAll, onSettings, disabled }) {
   const [open, setOpen, ref] = usePopover();
   useEffect(() => { if (open) onOpen(); }, [open]);
   const unread = data?.unread || 0;
@@ -302,7 +303,7 @@ function NotifBell({ data, onOpen, onPick, onReadAll, onSettings }) {
   let day = null;
   return (
     <div className="bell" ref={ref}>
-      <button type="button" className="bell-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(o => !o)}
+      <button type="button" className="bell-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(o => !o)} disabled={disabled}
               aria-label={'Notifications' + (unread ? ', ' + unread + ' unread' : '')}>
         <Icon id="bell" />{unread > 0 && <span className="bell-count mono" aria-hidden="true">{unread > 99 ? '99+' : unread}</span>}
       </button>
@@ -779,7 +780,7 @@ function BootShell() {
   const tab = pageOk(TABS, saved) ? saved : 'live';
   return (
     <Frame tabs={TABS} tab={tab} busy account={{ user, plantCount: null, onAccount: () => {}, onSettings: () => {} }}
-      head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /></>}>
+      head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /><NotifBell disabled /></>}>
       {/* TabSkeleton is in tabs.js, which loads after sign-in (SOLAR-143) */}
       {tab !== 'settings' && tab !== 'account' && window.TabSkeleton && <window.TabSkeleton tab={tab} />}
     </Frame>
@@ -1224,7 +1225,7 @@ function App({ links }) {
       <window.FreeCtx.Provider value={free}>
       <Frame tabs={TABS} tab={tab} onTab={go} account={account} busy steps={steps}
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
-          <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} />{bell}</>}>
+          <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} /><NotifBell disabled /></>}>
         {err && <div className="notice offline" role="alert"><p><b>Can't reach the server.</b> Retrying every minute.</p></div>}
         {null}
         {/* Settings and Account never touch the snapshot: they draw for real. They sit in

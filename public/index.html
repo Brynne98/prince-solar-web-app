@@ -226,11 +226,13 @@
   /* Notifications (SOLAR-244): a bell right of Refresh with the unread count; a panel
      under it, a full page on a phone (below) */
   .bell { position: relative; flex: none; }
+  /* the same box as Refresh beside it (SOLAR-248) */
   .bell-btn { position: relative; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px;
-    background: none; border: 1px solid transparent; color: var(--text); }
-  .bell-btn:hover, .bell-btn[aria-expanded="true"] { background: var(--panel-2); border-color: var(--line-2); }
-  .bell-btn .ico { width: 19px; height: 19px; }
-  .bell-count { position: absolute; top: 1px; right: -1px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+    background: var(--panel); border: 1px solid var(--line-2); color: var(--text); transition: border-color .15s; }
+  .bell-btn:hover:not(:disabled), .bell-btn[aria-expanded="true"] { border-color: var(--muted); }
+  .bell-btn:disabled { opacity: .55; }
+  .bell-btn .ico { width: 18px; height: 18px; }
+  .bell-count { position: absolute; top: -6px; right: -6px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
     background: var(--bad); color: #fff; font-size: 10.5px; font-weight: 600; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--bg); }
   .notif-panel { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; width: 400px; max-height: min(640px, calc(100vh - 90px)); overflow-y: auto;
     background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 14px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); padding-bottom: 4px; }
