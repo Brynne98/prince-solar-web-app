@@ -4,7 +4,9 @@
 // Kept at the site root, not in /build: a worker's scope is its folder, and /build
 // files are cached for a year.
 
-// Take the open app over at once, so a tap can steer it without a reload first.
+// A new version takes over at once (it caches nothing, so nothing can go stale), and
+// takes the open app over, so a tap can steer it without a reload first.
+self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
 self.addEventListener('push', (e) => {
@@ -30,7 +32,9 @@ self.addEventListener('notificationclick', (e) => {
     const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const tab = open.find((c) => new URL(c.url).origin === self.location.origin);
     if (tab) {
-      try { await tab.focus(); return await tab.navigate(url.href); } catch (err) { /* not ours to steer: a new window */ }
+      // navigate first: focus can be refused, and must not stop the app opening the alert
+      try { const t = await tab.navigate(url.href); await (t || tab).focus().catch(() => {}); return; }
+      catch (err) { /* not ours to steer: a new window */ }
     }
     return self.clients.openWindow(url.href);
   })());
