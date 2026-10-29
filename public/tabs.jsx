@@ -2391,13 +2391,12 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         return (
           <div key={acc.account_id} className={'sset conn-row synk-card' + (leaving === acc.account_id ? ' leaving' : '')}>
             <div className="conn-text">
-              {/* Line 1: the login. Line 2: is it working, with the last reading when it
-                  stopped. Its plants are listed under it, saying only Paused or Deleted. */}
-              <div className="conn-user login-name">{acc.sunsynk_username}</div>
-              <div className="conn-meta">
-                <span className={'conn-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
-                {(!ok || stale) && acc.last_ok_at ? ' · last reading ' + ago(acc.last_ok_at) : ''}
+              {/* Line 1: the login and whether it works. Line 2 only once it has stopped: the
+                  last reading. Its plants are listed under it, saying only Paused or Deleted. */}
+              <div className="conn-user login-name">
+                {acc.sunsynk_username}<span className={'conn-status login-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
               </div>
+              {(!ok || stale) && acc.last_ok_at && <div className="conn-meta">Last reading {ago(acc.last_ok_at)}</div>}
             </div>
             <div className="conn-actions">
               {!ok && mode !== acc.account_id && <button type="button" className="save-btn" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
