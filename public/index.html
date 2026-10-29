@@ -1038,6 +1038,17 @@
   /* Plant's save bar floats at the foot of the page, after Connections and Your data */
   .settings-page > .save-bar { order: 1; }
 
+  /* No rules inside Settings cards: space alone sets rows apart (SOLAR-250) */
+  .settings-page :is(.conn-row, .conn-add, .notif-group + .notif-group, .notif-push, .notif-push .notif-group, .plan-alert, .pay-list, .pay-row, .login-plant + .login-plant) { border-top: none; }
+  .settings-page .notif-all { border-bottom: none; }
+  .settings-page #settings-system .conn-row.sset-row { border-top: none; padding: 12px 0; }
+  .settings-page #settings-system .conn-row.sset-row:first-child { padding-top: 0; }
+  .settings-page .conn-row { padding: 10px 0; }
+  .settings-page .conn-row:first-child { padding-top: 0; }
+  .settings-page .login-plants { border-left: none; margin-top: -2px; padding-left: 18px; }
+  .settings-page .login-plant { padding: 4px 0; }
+  .settings-page #settings-connection .conn-row + .conn-row { margin-top: 22px; }
+  .settings-page .conn-add, .settings-page .notif-push, .settings-page .plan-alert { padding-top: 8px; }
   /* just the number, centred under the last section */
   .app-version { padding-top: 14px; text-align: center; font-size: 12px; color: var(--dim); }
   .app-version a { color: inherit; }
