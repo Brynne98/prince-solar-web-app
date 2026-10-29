@@ -3012,7 +3012,7 @@ function NotificationsSection({ userId }) {
 // that menu as a list you tap into, and each page has a back link to it; on a desktop
 // 'prefs' shows Account. Adjust plan ('plans') is a page under Billing. The plan is read
 // once here: Billing shows it, Account's Delete and Plant's Remove login need it.
-const SETTINGS_NAV = [['account', 'Account'], ['billing', 'Billing'], ['settings', 'Plant']];
+const SETTINGS_NAV = [['account', 'Account'], ['billing', 'Billing'], ['settings', 'System']];
 function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved, links, flash, onFlashed, onDirty, switchBlocked }) {
   const { useState, useEffect } = React;
   const [user, setUser] = useState(null);
@@ -3103,7 +3103,7 @@ function BillingPage({ billing, reload, links, onPage, collecting, onSaved }) {
 function PlantPage({ me, plantId, onSaved, onDirty, switchBlocked, links }) {
   return (
     <div className="settings-page">
-      <div className="page-head"><h1>Plant</h1><p>Changes apply to everyone on this plant.</p></div>
+      <div className="page-head"><h1>System</h1><p>Changes apply to everyone on this plant.</p></div>
       <PlantSections me={me} plantId={plantId} onSaved={onSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
       {links?.accounts?.length > 0 && <DownloadSection />}
       <FirstStepsSection me={me} plantId={plantId} onSaved={onSaved} />

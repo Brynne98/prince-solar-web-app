@@ -818,7 +818,7 @@ function SettingsSkeleton() {
   const field = <div className="field"><window.Skeleton w={90} h={10} /><window.Skeleton h={40} r={10} style={{ marginTop: 10 }} /></div>;
   return (
     <div className="settings-page">
-      <div className="page-head"><h1>Plant</h1></div>
+      <div className="page-head"><h1>System</h1></div>
       {['Your system', 'Your data'].map(t => (
         <section key={t} className="sec">
           <div className="sec-intro"><h2 className="sset-title">{t}</h2></div>
