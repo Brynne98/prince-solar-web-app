@@ -171,7 +171,6 @@ for (let i = 0; i < 140; i++) { const s = document.createElement('i'); s.style.l
 
 /* ---------- five moments: each one sets the sky and the card once ---------- */
 const MO = [[0, 0], [9.0, 540], [12.333, 740], [18.333, 1100], [21.5, 1290]];
-$('chMade').textContent = D.made[N - 1].toFixed(1) + ' kWh';
 $('chEmpty').textContent = 'Empty in ' + hm((D.soc[1290] - RES) * CAP / -D.bat[1290]);
 const day = $('day'), stage = $('stage'), top = $('top'), cardEl = $('card');
 const card = { tGrid: $('tGrid') };
