@@ -177,8 +177,10 @@ const day = $('day'), stage = $('stage'), top = $('top'), cardEl = $('card');
 const card = { tGrid: $('tGrid') };
 function placeSun(h) {
   const sunEl = $('sun'), W = stage.clientWidth, Hh = stage.clientHeight;
+  // the arc's foot and crown; a phone keeps it in the open sky between the card's foot and the hills
+  const phone = innerWidth <= 860, foot = phone ? Hh - 40 : Hh - 110, crown = phone ? cardEl.getBoundingClientRect().bottom + 56 : 110;
   const t = (h - 5.9) / (18.8 - 5.9), up = Math.min(1, Math.max(0, t));
-  const sx = W * (.06 + .88 * up), sy = Hh - 110 - Math.pow(Math.sin(Math.PI * up), .55) * (Hh - 220);
+  const sx = W * (.06 + .88 * up), sy = foot - Math.pow(Math.sin(Math.PI * up), .55) * (foot - crown);
   sunEl.style.transform = `translate(${sx}px,${sy}px)`;
   sunEl.style.opacity = t > -.02 && t < 1.02 ? 1 : 0;
   const warm = Math.sin(Math.PI * up);
@@ -186,7 +188,7 @@ function placeSun(h) {
   sunEl.style.setProperty('--glow', `rgba(255,${Math.round(150 + warm * 70)},${Math.round(70 + warm * 50)},${(.45 + warm * .2).toFixed(2)})`);
   // the moon crosses the night sky on the same arc
   const moon = $('moon'), mt = ((h < 12 ? h + 24 : h) - 13.3) / 32.7;
-  const mx = W * (.06 + .88 * mt), my = Hh - 110 - Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, mt))), .55) * (Hh - 220);
+  const mx = W * (.06 + .88 * mt), my = foot - Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, mt))), .55) * (foot - crown);
   moon.style.transform = `translate(${mx}px,${my}px)`;
 }
 function inkNav() {
@@ -371,13 +373,17 @@ const MAIL=[
 ];
 const rows=document.getElementById('ib-rows'),view=document.getElementById('ib-view'),box=view.parentNode,rowEls=[];
 let cur=0;
-// phone: the open email sits right under its row, and the tapped row stays where it was on screen
+// phone: the open email sits right under its row; a tapped row then glides up to just under the top bar.
+// Move the email only when it is in the wrong place: re-inserting it replays its fade, and a phone fires
+// resize each time its address bar hides or shows, which made the email flicker on every scroll turn.
 function place(y){
- const r=rowEls[cur];
- if(innerWidth<=860)r.after(view);else box.append(view);
- if(y!==undefined)scrollBy({top:r.getBoundingClientRect().top-y,behavior:'instant'});
+ const r=rowEls[cur],phone=innerWidth<=860;
+ if(phone&&view.previousElementSibling!==r)r.after(view);else if(!phone&&view.parentNode!==box)box.append(view);
+ if(y===undefined||!phone)return;
+ scrollBy({top:r.getBoundingClientRect().top-y,behavior:'instant'});
+ scrollBy({top:r.getBoundingClientRect().top-68,behavior:'smooth'});
 }
-function show(i){
+function show(i,tap){
  const m=MAIL[i],y=rowEls[i].getBoundingClientRect().top;cur=i;
  rowEls.forEach((r,j)=>{r.setAttribute('aria-selected',j===i);r.tabIndex=j===i?0:-1});
  let h=`<div class="ib-from"><span class="ib-orb"></span><span><b>Prince Solar Hub</b></span><span>${m.at}</span></div><div class="ib-subj">${m.subject}</div><div class="ib-title">${m.title}</div>${m.sub?`<div class="ib-sub">${m.sub}</div>`:''}`;
@@ -388,11 +394,11 @@ function show(i){
   <div class="ib-facts">${m.facts.map(card).join('')}</div></div>`}
  h+=`<span class="ib-btn">${m.btn}</span><p class="ib-foot">${m.foot}</p>`;
  view.innerHTML=h;
- place(y);
+ place(tap?y:undefined);
 }
 MAIL.forEach((m,i)=>{const r=document.createElement('button');r.className='ib-row';r.setAttribute('role','tab');
  r.innerHTML=`<i style="background:${m.dot}"></i><span class="ib-s">${m.subject}</span><span class="ib-t">${m.time}</span><span class="ib-p">${m.preview}</span>`;
- r.onclick=()=>show(i);
+ r.onclick=()=>show(i,true);
  r.onkeydown=e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const n=(i+(e.key==='ArrowDown'?1:-1)+MAIL.length)%MAIL.length;show(n);rowEls[n].focus()}};
  rows.append(r);rowEls.push(r)});
 show(0);
