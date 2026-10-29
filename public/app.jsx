@@ -183,7 +183,7 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync }) {
 // header. A dead SunSynk login puts a red dot on the avatar and on Account.
 function AccountMenu({ user, plantCount, alert, onAccount, active, variant }) {
   const [open, setOpen, ref] = usePopover();
-  // plantCount is null while the plants load: the row shows, its count waits
+  // plantCount is null while the plants load: the row shows, its count shimmers
   const sub = alert ? 'Reconnect a login' : plantCount == null ? '' : plantCount + (plantCount === 1 ? ' plant' : ' plants');
   return (
     <div className={'acct acct-' + variant} ref={ref}>
@@ -191,7 +191,7 @@ function AccountMenu({ user, plantCount, alert, onAccount, active, variant }) {
               aria-current={active ? 'page' : undefined} onClick={() => setOpen(o => !o)}
               aria-label={'Account menu' + (alert ? '. A SunSynk login needs reconnecting' : '')}>
         <span className="avatar" aria-hidden="true">{user.initials}</span>
-        {variant === 'rail' && <span className="who" aria-hidden="true"><b>{user.name}</b><span className={alert ? 'warn' : ''}>{sub}</span></span>}
+        {variant === 'rail' && <span className="who" aria-hidden="true"><b>{user.name}</b><span className={alert ? 'warn' : ''} style={sub ? undefined : { position: 'relative' }}>{sub || <>{'\u00a0'}<span className="skel" style={{ position: 'absolute', left: 0, top: 2, width: 52, height: 11, borderRadius: 6 }} /></>}</span></span>}
       </button>
       {open && (
         <MenuList className="acct-menu" label="Account">

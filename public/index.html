@@ -309,15 +309,13 @@
   /* loading stand-in for .flow-wrap: the summary line (app.jsx), then the diagram, which
      the wide layout draws 374px tall at every width; the stacked one (flow.jsx, ≤900px) is about 625px */
   .flow-skel { height: 374px !important; }
-  /* a chart's plot area before it can be drawn, at the heights useChartSize picks */
-  .chart-skel { height: 300px !important; }
-  @media (max-width: 620px) { .chart-skel { height: 220px !important; } }
-  /* the month's bars, likewise */
-  .bars-skel { height: 220px !important; }
-  @media (max-width: 620px) { .bars-skel { height: 192px !important; } }
   /* a tile's second line held open at two lines where the real one wraps (SolarSkeleton) */
   @media (max-width: 600px) { .sub-hold-2 { display: block; height: 34px; } }
   @media (max-width: 900px) { .flow-skel { height: 625px !important; } }
+  /* the summary line before it is written: one line wide, two on a phone, where most wrap */
+  .narr-hold { height: 23px; display: flex; flex-direction: column; justify-content: center; gap: 9px; }
+  .narr-hold .narr-2 { display: none; }
+  @media (max-width: 620px) { .narr-hold { height: 41.5px; } .narr-hold .narr-2 { display: block; } }
   /* legend to plot gets the same gap as date bar to legend */
   .hv-root .legend-row { margin-bottom: 12px; }
   .grow { flex: 1; } .stack { display: flex; flex-direction: column; gap: 20px; }

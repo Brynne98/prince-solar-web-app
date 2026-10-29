@@ -27,15 +27,53 @@ function DayChartSkeleton({ legend }) {
   return (
     <>
       <DateBar pick={pick} earliest={null} locked />
-      {legend && <div className="legend-row" style={{ height: 31 }} aria-hidden="true" />}
-      <window.Skeleton className="chart-skel" h="auto" r={12} />
+      {legend && <div className="legend-row" aria-hidden="true"><span className="legend-chip" style={{ visibility: 'hidden' }}>{NBSP}</span></div>}
+      <PlotSkeleton heights={[220, 300]} />
     </>
   );
+}
+
+// A plot area before it can be drawn, at the height useChartSize gives the real chart at this
+// card's width (DayLineChart 220/300, DaysBars 170/220). The breakpoint is the card's own
+// width, so a CSS rule on the window's width got it wrong at 375px (SOLAR-221).
+function PlotSkeleton({ heights, r = 12 }) {
+  const [ref, , height] = useChartSize(heights);
+  return <div ref={ref}><window.Skeleton h={height} r={r} /></div>;
 }
 
 // A tile's second line, held open while the words for it are still coming: a plain space
 // collapses to a zero-height line box, and the tile lands 17px short of the real one.
 const NBSP = '\u00a0';
+// A card title's right-hand figure ("Best 51.0 kWh on 2 Oct"), held open until it arrives: its
+// bold figure is in the mono face, which sets the line 1.5px taller than the title alone, and
+// on a phone the figure takes a line of its own under the title.
+const RIGHT_HOLD = <b>{NBSP}</b>;
+
+// Where it went / came from, before the day lands: the share bar, then a figure and a label
+// per part, each at the height of the real one (SOLAR-221).
+function WiwBodySkeleton() {
+  return (
+    <>
+      <window.Skeleton className="fbox-bar" h={5} r={3} />
+      <div className="wiw-figs" aria-hidden="true">
+        {[0, 1, 2].map(i => <div key={i}><b><window.Skeleton w="60%" h="1em" r={6} style={{ display: 'inline-block', verticalAlign: 'top' }} /></b><span>{NBSP}</span></div>)}
+      </div>
+    </>
+  );
+}
+// The card's total ("Made 21.3 kWh"), unseen, at a typical width: on a phone the title and the
+// total share a line only when both fit, so the held space has to be as wide as the real one.
+const wiwHold = (word) => <span style={{ visibility: 'hidden' }}>{word} <b>0.0 kWh</b></span>;
+function WiwSkeleton({ title, word, info }) {
+  return (
+    <div className="solar-row">
+      <Card className="wiw">
+        <SectionTitle right={wiwHold(word)}>{titled(title, 'today')}<window.InfoDot text={info} /></SectionTitle>
+        <WiwBodySkeleton />
+      </Card>
+    </div>
+  );
+}
 
 // A readout whose number hasn't arrived. The label is static and draws for real.
 function skelVal(w) {
@@ -57,14 +95,15 @@ function LiveSkeleton() {
           <MiniStat loading label="Made" />
           <MiniStat loading label="Home" />
           <MiniStat loading label="Independence" bar={0} />
-          <MiniStat loading label="Imported" sub={' '} />
-          <MiniStat loading label="Saved" sub={' '} />
+          {/* the grid chip's box sets its line 0.5px taller than plain text */}
+          <MiniStat loading label="Imported" sub={<span className="grid-state" style={{ visibility: 'hidden' }}><span className="gs-dot" />{NBSP}</span>} />
+          <MiniStat loading label="Saved" sub={NBSP} />
         </div>
       </div>
       <div className="card flow-card">
         <SectionTitle right={<button className="flow-fs-btn" disabled><FsEnterIcon /><span>Fullscreen</span></button>}>POWER FLOW</SectionTitle>
         {/* the summary sentence opens the card, one line of its height */}
-        <div className="flow-narrative" style={{ height: 23, display: 'flex', alignItems: 'center' }}><window.Skeleton w={300} h={12} r={6} style={{ maxWidth: '80%' }} /></div>
+        <div className="flow-narrative narr-hold"><window.Skeleton w={300} h={12} r={6} style={{ maxWidth: '80%' }} /><window.Skeleton className="narr-2" w={180} h={12} r={6} style={{ maxWidth: '50%' }} /></div>
         {/* sized in CSS to the diagram's proportions, which change with the card width */}
         <window.Skeleton className="flow-skel" h="auto" r={12} />
       </div>
@@ -443,7 +482,7 @@ function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trend
       {/* a shimmer beats an em-dash: switching to Week/Month refetches, and "—" reads as
           "no data" rather than "fetching" */}
       {loading
-        ? <div className="mini-value"><window.Skeleton w="70%" h={31} /></div>
+        ? <div className="mini-value mono" style={{ position: 'relative' }}>{NBSP}<window.Skeleton w="70%" h="auto" style={{ position: 'absolute', top: 0, bottom: 0, left: 0 }} /></div>
         : <div className="mini-value mono" style={{ color }}><span className="mv-num">{unitSplit(value)}</span></div>}
       {bar != null && !loading && <div className="meter sm"><div className="meter-fill" style={{ width: Math.max(0, Math.min(100, bar)) + '%', background: color }} /></div>}
       {bar != null && loading && <window.Skeleton h={5} r={4} style={{ marginTop: 8 }} />}
@@ -922,25 +961,25 @@ function periodTrend(cmp, k, key, min, word, invert) {
 // Six tiles, the day's chart, the month's bars and the pair of cards under them. PANELS is
 // left out: a plant may report no strings at all, and the card sits below the fold anyway.
 function SolarSkeleton() {
+  // Without a panel size the line is "Set panel capacity", one line: the tab remembers which.
+  const noKwp = (() => { try { return localStorage.getItem('synsynk.kwpSet') === '0'; } catch (e) { return false; } })();
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
         {/* "30% of your 15.9 kW of panels" runs to two lines on a phone, so Solar now
             holds two there; the rest hold one. */}
         {['SOLAR NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME']
-          .map(l => <StatTile key={l} label={l} loading sub={l === 'SOLAR NOW' ? <span className="sub-hold-2">{NBSP}</span> : NBSP} />)}
+          .map(l => <StatTile key={l} label={l} loading sub={l === 'SOLAR NOW' && !noKwp ? <span className="sub-hold-2">{NBSP}</span> : NBSP} />)}
       </div>
       <Card>
         <SectionTitle>{titled('SOLAR', 'today')}</SectionTitle>
         <DayChartSkeleton />
       </Card>
       <Card>
-        <SectionTitle>{titled('SOLAR', 'last 30 days')}</SectionTitle>
-        <window.Skeleton className="bars-skel" h="auto" r={10} />
+        <SectionTitle right={RIGHT_HOLD}>{titled('SOLAR', 'last 30 days')}</SectionTitle>
+        <PlotSkeleton heights={[170, 220]} r={10} />
       </Card>
-      <div className="solar-row">
-        <window.Skeleton className="wiw" h={150} r={16} />
-      </div>
+      <WiwSkeleton title="WHERE IT WENT" word="Made" info="Solar counts to the house first, then the battery, then the grid." />
     </div>
   );
 }
@@ -966,6 +1005,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.pv} loading={v == null} sub={sub || NBSP} />; };
   const trend = (k, min, word) => periodTrend(cmp, k, 'pv', min, word);
   const kwp = cfg.systemKwp;
+  React.useEffect(() => { try { localStorage.setItem('synsynk.kwpSet', kwp > 0 ? '1' : '0'); } catch (e) {} }, [kwp]);
   const [nowN, nowU] = fmtPowerParts(a.pvNow);
 
   // ---- last 30 days (also the day totals Where it went scales to) ----
@@ -1045,21 +1085,21 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
       </div>
 
       <Card id="solar-day">
-        <SectionTitle right={day && !noReadings && !view.isToday && peak ? <>Peak <b>{fmtPower(peak.pv)}</b> at <b>{HM(peak.t)}</b></> : null}>
+        <SectionTitle right={day && !noReadings && !view.isToday && peak ? <>Peak <b>{fmtPower(peak.pv)}</b> at <b>{HM(peak.t)}</b></> : !pick.isToday ? RIGHT_HOLD : null}>
           {titled('SOLAR', dayWord)}
         </SectionTitle>
         <DateBar pick={pick} earliest={earliest} />
-        {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
+        {!day ? <PlotSkeleton heights={[220, 300]} />
           : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="pv" color={CC.pv} label="Solar" sums={['Made']} empty={noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')} /></div>}
       </Card>
 
       <Card>
-        <SectionTitle right={best ? <>Best <b>{fmtKwh(best.pv)}</b> on {shortDate(best.date)}</> : null}>
+        <SectionTitle right={best ? <>Best <b>{fmtKwh(best.pv)}</b> on {shortDate(best.date)}</> : RIGHT_HOLD}>
           {titled('SOLAR', 'last 30 days')}
         </SectionTitle>
         {daily === false
           ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
-          : !daily ? <window.Skeleton className="bars-skel" h="auto" r={10} />
+          : !daily ? <PlotSkeleton heights={[170, 220]} r={10} />
           : bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
           : <DaysBars rows={bars} field="pv" color={CC.pv} rgb="61,220,132" word="Solar" label="Solar per day for the last 30 days"
               today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
@@ -1069,11 +1109,11 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
           header, the share bar, and each part's kWh with its name under it, in its own colour. */}
       <div className="solar-row">
         <Card className="wiw" {...dim}>
-          <SectionTitle right={day && !noReadings && splitTotal >= 0.05 ? <>Made <b>{fmtKwh(splitTotal)}</b></> : null}>
+          <SectionTitle right={day && !noReadings && splitTotal >= 0.05 ? <>Made <b>{fmtKwh(splitTotal)}</b></> : !day ? wiwHold('Made') : null}>
             {titled('WHERE IT WENT', dayWord)}
             <window.InfoDot text={'Solar counts to the house first, then the battery, then the grid.'} />
           </SectionTitle>
-          {!day ? <window.Skeleton h={62} r={8} />
+          {!day ? <WiwBodySkeleton />
             : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')}</div>
             : <>
               <div className="fbox-bar" role="img" title={destTitle} aria-label={destLabel}>
@@ -1100,19 +1140,19 @@ function HomeSkeleton() {
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
-        {['HOME NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'].map(l => <StatTile key={l} label={l} loading sub={NBSP} />)}
+        {/* "40% from solar right now" runs to two lines on a phone, as Solar's first tile does */}
+        {['HOME NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME']
+          .map(l => <StatTile key={l} label={l} loading sub={l === 'HOME NOW' ? <span className="sub-hold-2">{NBSP}</span> : NBSP} />)}
       </div>
       <Card>
         <SectionTitle>{titled('HOME', 'today')}</SectionTitle>
         <DayChartSkeleton />
       </Card>
       <Card>
-        <SectionTitle>{titled('HOME', 'last 30 days')}</SectionTitle>
-        <window.Skeleton className="bars-skel" h="auto" r={10} />
+        <SectionTitle right={RIGHT_HOLD}>{titled('HOME', 'last 30 days')}</SectionTitle>
+        <PlotSkeleton heights={[170, 220]} r={10} />
       </Card>
-      <div className="solar-row">
-        <window.Skeleton className="wiw" h={150} r={16} />
-      </div>
+      <WiwSkeleton title="WHERE IT CAME FROM" word="Used" info="The house uses solar first, then the battery, then the grid." />
     </div>
   );
 }
@@ -1202,21 +1242,21 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
       </div>
 
       <Card id="home-day">
-        <SectionTitle right={day && !noReadings && !view.isToday && peak ? <>Peak <b>{fmtPower(peak.load)}</b> at <b>{HM(peak.t)}</b></> : null}>
+        <SectionTitle right={day && !noReadings && !view.isToday && peak ? <>Peak <b>{fmtPower(peak.load)}</b> at <b>{HM(peak.t)}</b></> : !pick.isToday ? RIGHT_HOLD : null}>
           {titled('HOME', dayWord)}
         </SectionTitle>
         <DateBar pick={pick} earliest={earliest} />
-        {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
+        {!day ? <PlotSkeleton heights={[220, 300]} />
           : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="load" color={CC.load} label="Home" sums={['Used']} empty={noReadings || 'No home readings for this day.'} /></div>}
       </Card>
 
       <Card>
-        <SectionTitle right={most && most.load > 0 ? <>Most <b>{fmtKwh(most.load)}</b> on {shortDate(most.date)}</> : null}>
+        <SectionTitle right={most && most.load > 0 ? <>Most <b>{fmtKwh(most.load)}</b> on {shortDate(most.date)}</> : RIGHT_HOLD}>
           {titled('HOME', 'last 30 days')}
         </SectionTitle>
         {daily === false
           ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
-          : !daily ? <window.Skeleton className="bars-skel" h="auto" r={10} />
+          : !daily ? <PlotSkeleton heights={[170, 220]} r={10} />
           : bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
           : <DaysBars rows={bars} field="load" color={CC.load} rgb="248,113,113" word="Used" label="Home use per day for the last 30 days"
               today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
@@ -1224,11 +1264,11 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
 
       <div className="solar-row">
         <Card className="wiw" {...dim}>
-          <SectionTitle right={day && !noReadings && splitTotal >= 0.05 ? <>Used <b>{fmtKwh(splitTotal)}</b></> : null}>
+          <SectionTitle right={day && !noReadings && splitTotal >= 0.05 ? <>Used <b>{fmtKwh(splitTotal)}</b></> : !day ? wiwHold('Used') : null}>
             {titled('WHERE IT CAME FROM', dayWord)}
             <window.InfoDot text={'The house uses solar first, then the battery, then the grid.'} />
           </SectionTitle>
-          {!day ? <window.Skeleton h={62} r={8} />
+          {!day ? <WiwBodySkeleton />
             : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || 'No home readings for this day.'}</div>
             : <>
               <div className="fbox-bar" role="img" title={srcTitle} aria-label={srcLabel}>
@@ -1260,12 +1300,12 @@ function GridSkeleton() {
         {['GRID NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'].map(l => <StatTile key={l} label={l} loading sub={NBSP} />)}
       </div>
       <Card>
-        <SectionTitle>{titled('GRID', 'today')}</SectionTitle>
+        <SectionTitle right={NBSP}>{titled('GRID', 'today')}<window.InfoDot text={'Above the line is power imported from the grid; below it is power exported.'} /></SectionTitle>
         <DayChartSkeleton />
       </Card>
       <Card>
-        <SectionTitle>{titled('IMPORTED', 'last 30 days')}</SectionTitle>
-        <window.Skeleton className="bars-skel" h="auto" r={10} />
+        <SectionTitle right={RIGHT_HOLD}>{titled('IMPORTED', 'last 30 days')}</SectionTitle>
+        <PlotSkeleton heights={[170, 220]} r={10} />
       </Card>
     </div>
   );
@@ -1378,18 +1418,18 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         <DateBar pick={pick} earliest={earliest}>
           <OutagePill mins={outageMin} what="Grid" />
         </DateBar>
-        {!day ? <window.Skeleton className="chart-skel" h="auto" r={12} />
+        {!day ? <PlotSkeleton heights={[220, 300]} />
           : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="grid" color={CC.grid} label="Grid"
               sums={['Imported', 'Exported']} importScale outages={outages} empty={noReadings || 'No grid readings for this day.'} /></div>}
       </Card>
 
       <Card>
-        <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {shortDate(most.date)}</> : null}>
+        <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {shortDate(most.date)}</> : RIGHT_HOLD}>
           {titled('IMPORTED', 'last 30 days')}
         </SectionTitle>
         {daily === false
           ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
-          : !daily ? <window.Skeleton className="bars-skel" h="auto" r={10} />
+          : !daily ? <PlotSkeleton heights={[170, 220]} r={10} />
           : bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
           : <DaysBars rows={bars} field="imp" color={CC.grid} rgb="250,204,21" word="Imported" label="Energy imported from the grid per day for the last 30 days"
               today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
@@ -1406,16 +1446,86 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 // Detailed (each panel string against its usual, the battery against its reserve, a tile
 // per inverter, spec sheets and the two day charts). The choice is the viewer's, kept.
 
+// The page as InvertersTab draws it with nothing wrong, in the view this viewer last chose,
+// built from the same classes so each piece lands at the real one's height (SOLAR-221).
+// Problem cards are left out: most visits have none. Detailed holds one inverter with two
+// strings; a plant with more grows into them.
 function InvertersSkeleton() {
-  return (
-    <div className="stack">
-      <SectionTitle>EQUIPMENT</SectionTitle>
-      <window.Skeleton h={56} r={12} />
-      <div className="eq-tiles">
-        <window.Skeleton h={120} r={16} />
-        <window.Skeleton h={120} r={16} />
-        <window.Skeleton h={120} r={16} />
+  const detailed = (() => { try { return localStorage.getItem('synsynk.eqView') === 'detailed'; } catch (e) { return false; } })();
+  // a line of text whose words haven't come: a shimmer, and the line's own height held by a space
+  const line = (w, h = 10) => <><window.Skeleton w={w} h={h} r={5} style={{ display: 'inline-block', verticalAlign: 'middle', maxWidth: '70%' }} />{NBSP}</>;
+  const fig = <window.Skeleton w={80} h="1em" r={6} />;
+  const tile = (label, word) => (
+    <section className="card eq-tile" aria-label={label}>
+      <div className="eq-tile-fig"><div className={'eq-fig' + (word ? ' word' : ' mono')}>{fig}</div><div className="eq-fig-sub">{line(60)}</div></div>
+      <div className="eq-tile-text">
+        <span className="eq-tile-label">{label}</span>
+        <span className="eq-tile-state"><i className="eq-dot sm" />{line(90)}</span>
       </div>
+    </section>
+  );
+  const rows = (n) => <dl className="eq-rows">{Array.from({ length: n }, (_, i) => <div key={i}><dt>{line(60)}</dt><dd>{line(110)}</dd></div>)}</dl>;
+  return (
+    <div className="stack eq-tab">
+      <div className="eq-top">
+        <span className="eq-label">Equipment</span>
+        <Segmented size="sm" value={detailed ? 'detailed' : 'simple'} onChange={() => {}} options={[{ value: 'simple', label: 'Simple' }, { value: 'detailed', label: 'Detailed' }]} />
+      </div>
+      <section className="eq-status" aria-label="Status">
+        <div className="eq-head"><i className="eq-dot" />{line(240, 20)}</div>
+        <div className="eq-head-sub">{line(150)}</div>
+      </section>
+      {!detailed ? (
+        <div className="eq-tiles">{tile('Solar panels')}{tile('Battery')}{tile('Inverter', true)}</div>
+      ) : (
+        <>
+          <div className="eq-cards">
+            <Card className="eq-card">
+              <SectionTitle>SOLAR PANELS</SectionTitle>
+              <div className="eq-big mono">{fig}</div>
+              <div className="eq-big-sub">{line(140)}</div>
+              <div className="eq-groups"><div className="eq-group">
+                {[1, 2].map(no => <div className="eq-string" key={no}><span className="eq-string-name">String {no}</span><span className="eq-bar" /><span className="eq-string-kwh mono">{NBSP}</span></div>)}
+              </div></div>
+            </Card>
+            <Card className="eq-card">
+              <SectionTitle>BATTERY</SectionTitle>
+              <div className="eq-big mono">{fig}</div>
+              <div className="eq-meter" />
+              <div className="eq-meter-scale"><span>{NBSP}</span></div>
+              {rows(2)}
+              <div className="eq-foot">{line(120)}</div>
+            </Card>
+            <Card className="eq-card">
+              <SectionTitle>INVERTER</SectionTitle>
+              <div className="eq-inv-tiles one"><div className="eq-inv">
+                <div className="eq-inv-name">{line(90)}</div>
+                <div className="eq-inv-state"><i className="eq-dot sm" />{line(30)}</div>
+                <div className="eq-inv-now mono">{fig}</div>
+                <div className="eq-inv-cap">solar now</div>
+                <div className="eq-inv-today"><span>Today</span><span className="mono">{line(50)}</span></div>
+                <div className="eq-inv-foot">{line(110)}</div>
+              </div></div>
+            </Card>
+          </div>
+          <div className="eq-specs">
+            <Card className="eq-spec">
+              <div className="eq-spec-head"><span>{line(90)}</span></div>
+              <dl className="eq-spec-rows">
+                {['Model', 'Serial number', 'Firmware', 'Last reading'].map(l => <div key={l}><dt>{l}</dt><dd className="mono">{line(100)}</dd></div>)}
+              </dl>
+              <div>
+                <div className="eq-label eq-pack-label">Battery pack</div>
+                <div className="eq-pack">
+                  {['Charge', 'Voltage', 'Temperature', 'Batteries'].map(l => <div key={l}><b className="mono">{line(40, 14)}</b><span>{l}</span></div>)}
+                </div>
+              </div>
+            </Card>
+          </div>
+          <Card className="chart-card"><SectionTitle>TEMPERATURE</SectionTitle><DayChartSkeleton legend /></Card>
+          <Card className="chart-card"><SectionTitle>GRID SUPPLY</SectionTitle><DayChartSkeleton legend /></Card>
+        </>
+      )}
     </div>
   );
 }
@@ -1854,13 +1964,31 @@ function PlanSection({ billing, reload }) {
   const { useState } = React;
   const [mode, setMode] = useState(null); // null | 'change' | 'cancel' | 'plans'
   const [busy, setBusy] = useState(false);
-  // Its outline while the plan loads, so the sections below don't jump down.
-  if (!billing) return (
-    <SettingsSection id="plan" title="Plan">
-      <div className="plan-now" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '2px 0 4px' }}><window.Skeleton w={120} h={16} /><window.Skeleton w={220} h={12} /></div>
-      <div className="conn-add"><window.Skeleton w={110} h={34} r={10} /></div>
-    </SettingsSection>
-  );
+  const kind = !billing ? null : billing.comped ? 'comped' : billing.plan !== 'free' ? 'paid' : 'free';
+  React.useEffect(() => { if (kind) try { localStorage.setItem('synsynk.planKind', kind); } catch (e) {} }, [kind]);
+  // Its outline while the plan loads, so the sections below don't jump down. Built from the
+  // last plan seen on this device (Free if none): its own lines and buttons, unseen under the
+  // shimmer, so it wraps as they do on a phone (SOLAR-221).
+  if (!billing) {
+    const last = (() => { try { return localStorage.getItem('synsynk.planKind'); } catch (e) { return null; } })() || 'free';
+    const cover = <window.Skeleton h="auto" r={8} style={{ position: 'absolute', inset: 0 }} />;
+    const unseen = { visibility: 'hidden' };
+    const btn = (cls, text) => <span style={{ position: 'relative', display: 'inline-block' }}><button type="button" className={cls} style={unseen} tabIndex={-1} aria-hidden="true">{text}</button>{cover}</span>;
+    return (
+      <SettingsSection id="plan" title="Plan">
+        <div className="plan-now">
+          <div className="plan-name"><span style={{ position: 'relative', display: 'inline-block' }}><span style={unseen}>{last === 'free' ? 'Free' : last === 'paid' ? 'Home, monthly' : 'Family'}</span>{cover}</span></div>
+          <div className="conn-meta" style={{ position: 'relative' }}><span style={unseen}>{last === 'comped' ? 'Free of charge. Every plant, all history kept.'
+            : last === 'paid' ? 'R99 per month · next payment R99 on 1 Nov' : 'One plant. After your first week we keep the last 24 hours.'}</span>{cover}</div>
+        </div>
+        {last !== 'comped' && (
+          <div className="conn-add">
+            {last === 'paid' ? <>{btn('ghost-btn', 'Switch to yearly')}{btn('ghost-btn', 'Change plan')}</> : btn('save-btn', 'See plans')}
+          </div>
+        )}
+      </SettingsSection>
+    );
+  }
   const { rand, billDay, perUnit } = window.billingFmt;
   const b = billing;
   const paid = b.plan !== 'free';
@@ -2192,6 +2320,32 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
     setBusy(false);
   };
 
+  // The plant list is still on its way: the three sections with their words, and a shimmer in
+  // each box's place at its size, so nothing moves when the values land (SOLAR-221).
+  if (!me) {
+    const row = (label, meta, sum) => (
+      <div className="conn-row sset-row">
+        <div className="conn-text"><span className="conn-user">{label}</span><span className="conn-meta">{meta}</span></div>
+        {sum
+          ? <div className="sset-sum"><div className="fs-sum">
+              {/* the Total / By size switch is words only, so it draws for real, locked */}
+              <div className="fs-sumhead"><div className="fs-seg"><button type="button" className="on" disabled>Total</button><button type="button" disabled>By size</button></div><b className="fs-val mono">{NBSP}</b></div>
+              <window.Skeleton className="fs-in" w="" h={41} r={9} />
+            </div></div>
+          : <div className="conn-actions sset-one"><window.Skeleton className="fs-in" w="" h={41} r={9} /></div>}
+      </div>
+    );
+    return (
+      <>
+        <SettingsSection id="tariff" title="Tariff">{row('Electricity rate', 'Savings show as zero until this is set.')}</SettingsSection>
+        <SettingsSection id="battery" title="Battery">
+          {row('Capacity', 'All batteries together.', true)}
+          {row('Reserve', 'The battery stops powering your home at this charge.')}
+        </SettingsSection>
+        <SettingsSection id="plant" title="Panels">{row('Solar panels', 'What they make in full sun.', true)}</SettingsSection>
+      </>
+    );
+  }
   if (!plant) return <SettingsSection id="plant" title="Plant"><div className="field-note">No plant connected yet.</div></SettingsSection>;
   const sym = window.moneySymbol ? window.moneySymbol() : (cfg.currency || '');
   const err = (on, text) => on && tried ? <p className="sset-err" role="alert">{text}</p> : null;
@@ -2499,7 +2653,8 @@ function SettingsTab({ me, plantId, onPlantConfigSaved, flash, onFlashed, onDirt
       <div className="settings-page">
         <div className="page-head">
           <h1>Settings</h1>
-          {plant && <p>{plant.name || 'Plant ' + plant.id}. Changes apply to everyone on this plant.</p>}
+          {plant ? <p>{plant.name || 'Plant ' + plant.id}. Changes apply to everyone on this plant.</p>
+            : !me && <p><window.Skeleton w={90} h={10} r={5} style={{ display: 'inline-block' }} /> Changes apply to everyone on this plant.</p>}
         </div>
         <PlantSections me={me} plantId={plantId} onSaved={onPlantConfigSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
         <FirstStepsSection me={me} plantId={plantId} onSaved={onPlantConfigSaved} />

@@ -431,6 +431,8 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
           : <DateBar pick={pick} earliest={earliest}>{notes}</DateBar>;
       })()}
       <div className="legend-row">
+        {/* an unseen chip holds the row's height until the inverters land (SOLAR-221) */}
+        {invs == null && <span className="legend-chip" style={{ visibility: 'hidden' }} aria-hidden="true">{' '}</span>}
         {shown.map((inv, k) => (
           <window.LegendChip key={inv.sn} color={color(k)} label={nInv > 1 ? inv.alias : (isTemp ? 'AC side' : 'Voltage')}
             value={isTemp ? fmtC(valAt(inv, 'ac')) : fmtV(valAt(inv, 'v'))} active />
@@ -557,7 +559,8 @@ function HistoryView({ today, refreshKey, locked, silent }) {
   const cur = (hover != null && pts[hover] && pts[hover].pv != null) ? pts[hover] : (real.length ? real[real.length - 1] : null);
   const chipVal = (k) => {
     // still fetching: keep the value slot so the chips (and the row wrap) hold their size
-    if (!cur) return (loading || (isToday && !dayData)) ? ' ' : null;
+    // at a typical reading's width, unseen: on a phone the chips wrap by their width (SOLAR-221)
+    if (!cur) return (loading || (isToday && !dayData)) ? <span style={{ visibility: 'hidden' }}>{k === 'soc' ? '00%' : '000 W'}</span> : null;
     if (k === 'soc') return cur.soc != null ? cur.soc + '%' : null;
     const v = cur[k];
     return v != null ? window.fmtPower(v) : null;
