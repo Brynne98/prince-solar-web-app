@@ -115,6 +115,8 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 .app .lbl{font:600 11px var(--sans);letter-spacing:.16em;text-transform:uppercase}
 .app .mut{color:#9aa5b3}
 .card{position:relative;width:556px;padding:18px 22px 16px}
+/* the parts that change each scroll frame get their own layers, so the card's shadow and gradients are not redrawn with them (SOLAR-230) */
+.card .live,.card .narr,.card .fb,.card .lane,.card .today,.card .stats{will-change:transform}
 .card-head{display:flex;align-items:center;justify-content:space-between;font-size:14px}
 .card-head .plant{font-weight:600;font-size:15px}
 .live{display:flex;align-items:center;gap:8px;color:#9aa5b3;font-size:13px}

@@ -175,10 +175,23 @@ $('chMade').textContent = D.made[N - 1].toFixed(1) + ' kWh';
 $('chEmpty').textContent = 'Empty in ' + hm((D.soc[1290] - RES) * CAP / -D.bat[1290]);
 const day = $('day'), stage = $('stage'), top = $('top'), cardEl = $('card');
 const card = { tGrid: $('tGrid') };
-function placeSun(h) {
-  const sunEl = $('sun'), W = stage.clientWidth, Hh = stage.clientHeight;
+const moments = [...document.querySelectorAll('.moment')];
+// sizes and positions are read here, once and again when they change, never in a scroll frame:
+// a read after that frame's writes forced a fresh style and layout pass, ~30 ms a frame on a mid-range phone
+let L;
+function measure() {
+  const y = scrollY, r = cardEl.getBoundingClientRect();
+  L = { W: stage.clientWidth, H: stage.clientHeight, dayEnd: day.offsetTop + day.offsetHeight,
+    // the card sticks at its sticky top until its column's foot pushes it up; drawn smaller than its box on a phone
+    cardTop: parseFloat(getComputedStyle(cardEl).top), cardDrawn: r.height,
+    cardLast: cardEl.parentElement.getBoundingClientRect().bottom + y - cardEl.offsetHeight,
+    mo: moments.map(e => ({ top: e.getBoundingClientRect().top + y, h: e.offsetHeight })) };
+}
+function placeSun(h, y, vw) {
+  const sunEl = $('sun'), W = L.W, Hh = L.H;
   // the arc's foot and crown; a phone keeps it in the open sky between the card's foot and the hills
-  const phone = innerWidth <= 860, foot = phone ? Hh - 40 : Hh - 110, crown = phone ? cardEl.getBoundingClientRect().bottom + 56 : 110;
+  const cardFoot = Math.min(L.cardTop, L.cardLast - y) + L.cardDrawn;
+  const phone = vw <= 860, foot = phone ? Hh - 40 : Hh - 110, crown = phone ? cardFoot + 56 : 110;
   const t = (h - 5.9) / (18.8 - 5.9), up = Math.min(1, Math.max(0, t));
   const sx = W * (.06 + .88 * up), sy = foot - Math.pow(Math.sin(Math.PI * up), .55) * (foot - crown);
   sunEl.style.transform = `translate(${sx}px,${sy}px)`;
@@ -191,10 +204,11 @@ function placeSun(h) {
   const mx = W * (.06 + .88 * mt), my = foot - Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, mt))), .55) * (foot - crown);
   moon.style.transform = `translate(${mx}px,${my}px)`;
 }
-function inkNav() {
-  const inDay = scrollY < day.offsetTop + day.offsetHeight - innerHeight;
-  top.style.color = inDay ? top.dataset.ink || '' : '';
-  top.classList.toggle('solid', !inDay);
+let navInk, navWas;
+function inkNav(y, vh) {
+  const inDay = y < L.dayEnd - vh, now = inDay ? navInk : '';
+  if (now === navWas) return;
+  navWas = now; top.style.color = now; top.classList.toggle('solid', !inDay);
 }
 function cardAt(m, h) {
   // live card
@@ -248,50 +262,61 @@ function cardAt(m, h) {
 
 }
 /* the day runs 00:00 to 24:00 with the scroll; sky, sun, moon and the card's numbers and graph move together, eased so they glide */
+// the colours go on the few elements that paint them: set on #day they restyled the whole scene, all 140 stars too
+const sky = $('sky'), ground = [...document.querySelectorAll('.land,.house')], panels = [...document.querySelectorAll('#panels path')], wins = [...document.querySelectorAll('.win')];
+let darkWas, litWas;
 function skyTo(h) {
-  const s = skyAt(h), set = (n, v) => day.style.setProperty(n, v);
-  set('--s1', s.c[0]); set('--s2', s.c[1]); set('--s3', s.c[2]); set('--l1', s.c[3]); set('--l2', s.c[4]);
+  const s = skyAt(h);
+  sky.style.setProperty('--s1', s.c[0]); sky.style.setProperty('--s2', s.c[1]); sky.style.setProperty('--s3', s.c[2]);
+  ground.forEach(e => { e.style.setProperty('--l1', s.c[3]); e.style.setProperty('--l2', s.c[4]); });
   const dark = s.ink > .5;
-  set('--ink', dark ? '#20160a' : '#f3eee4'); set('--ink-soft', dark ? 'rgba(32,22,10,.78)' : 'rgba(243,238,228,.8)'); set('--accent', dark ? '#7a3f00' : '#ffd27a');
+  if (dark !== darkWas) {
+    darkWas = dark; const set = (n, v) => day.style.setProperty(n, v);
+    set('--ink', dark ? '#20160a' : '#f3eee4'); set('--ink-soft', dark ? 'rgba(32,22,10,.78)' : 'rgba(243,238,228,.8)'); set('--accent', dark ? '#7a3f00' : '#ffd27a');
+    navInk = dark ? '#20160a' : '#f3eee4'; navWas = null;
+  }
   st.style.opacity = s.stars; $('moon').style.opacity = Math.min(1, s.stars * 1.4);
   const panelLit = Math.max(0, Math.sin(Math.PI * (h - 6.2) / 12.25));
-  document.querySelectorAll('#panels path').forEach(e => e.setAttribute('fill', `rgba(${120 + panelLit * 130},${150 + panelLit * 90},${200 - panelLit * 40},${.35 + panelLit * .55})`));
+  panels.forEach(e => e.setAttribute('fill', `rgba(${120 + panelLit * 130},${150 + panelLit * 90},${200 - panelLit * 40},${.35 + panelLit * .55})`));
   const lit = h < 6.6 || h > 17.6;
-  document.querySelectorAll('.win').forEach(e => e.setAttribute('fill', lit ? '#ffd27a' : 'rgba(0,0,0,.35)'));
-  placeSun(h);
-  top.dataset.ink = dark ? '#20160a' : '#f3eee4'; inkNav();
+  if (lit !== litWas) { litWas = lit; wins.forEach(e => e.setAttribute('fill', lit ? '#ffd27a' : 'rgba(0,0,0,.35)')); }
 }
-const moments = [...document.querySelectorAll('.moment')];
-function hourAtScroll() {
+function hourAtScroll(y, vh, vw) {
   // a moment's hour lands where it settles: centred on desktop, its foot on the screen's foot on a phone
-  const y = scrollY + innerHeight / 2, mid = e => e.getBoundingClientRect().top + scrollY + (innerWidth <= 860 ? e.offsetHeight - innerHeight / 2 : e.offsetHeight / 2);
-  for (let i = 0; i < moments.length - 1; i++) {
-    const a = mid(moments[i]), b = mid(moments[i + 1]);
-    if (y <= b) { const t = Math.min(1, Math.max(0, (y - a) / (b - a))); return MO[i][0] + (MO[i + 1][0] - MO[i][0]) * (t * t * (3 - 2 * t)); }
+  const c = y + vh / 2, mid = o => o.top + (vw <= 860 ? o.h - vh / 2 : o.h / 2);
+  for (let i = 0; i < L.mo.length - 1; i++) {
+    const a = mid(L.mo[i]), b = mid(L.mo[i + 1]);
+    if (c <= b) { const t = Math.min(1, Math.max(0, (c - a) / (b - a))); return MO[i][0] + (MO[i + 1][0] - MO[i][0]) * (t * t * (3 - 2 * t)); }
   }
   // after the last moment the clock runs on to midnight as that moment leaves
-  const lastM = moments[moments.length - 1], a = mid(lastM), b = a + lastM.offsetHeight / 2;
-  const t = Math.min(1, Math.max(0, (y - a) / (b - a)));
+  const lastM = L.mo[L.mo.length - 1], a = mid(lastM), b = a + lastM.h / 2;
+  const t = Math.min(1, Math.max(0, (c - a) / (b - a)));
   return MO[MO.length - 1][0] + (24 - MO[MO.length - 1][0]) * t;
 }
-let hNow = hourAtScroll(), last = 0, raf = 0;
+/* each moment fades in while it holds the middle of the screen, and out as it leaves */
+const cardOut = (y, vh) => {
+  L.mo.forEach((o, i) => moments[i].classList.toggle('on', Math.abs(o.top - y + o.h / 2 - vh / 2) < vh * .3));
+  const lastM = L.mo[L.mo.length - 1];
+  cardEl.classList.toggle('gone', lastM.top + lastM.h - y < vh * .4);
+};
+let hNow, hDrawn, mDrawn, last = 0, raf = 0;
+// every read comes first, then the writes; the scene redraws only when the hour moved, the card only when the minute did
 function tick(ts) {
-  const target = hourAtScroll(), dt = last ? ts - last : 16; last = ts;
-  hNow = reduce ? target : hNow + (target - hNow) * (1 - Math.exp(-dt / 220));
+  const y = scrollY, vh = innerHeight, vw = innerWidth;
+  const target = hourAtScroll(y, vh, vw), dt = last && ts ? ts - last : 16; last = ts || 0;
+  hNow = reduce || hNow == null ? target : hNow + (target - hNow) * (1 - Math.exp(-dt / 220));
   if (Math.abs(target - hNow) < .002) hNow = target;
-  skyTo(hNow); cardAt(Math.min(N - 1, Math.round(hNow * 60)), hNow);
+  if (hNow !== hDrawn) { hDrawn = hNow; skyTo(hNow); }
+  // every frame: on a phone the arc rides under the card, and the card scrolls away after the day
+  placeSun(hNow, y, vw);
+  const m = Math.min(N - 1, Math.round(hNow * 60));
+  if (m !== mDrawn) { mDrawn = m; cardAt(m, hNow); }
+  inkNav(y, vh); cardOut(y, vh);
   raf = hNow === target ? 0 : requestAnimationFrame(tick);
   if (!raf) last = 0;
 }
 const kick = () => { if (!raf) raf = requestAnimationFrame(tick); };
-skyTo(hNow); cardAt(Math.min(N - 1, Math.round(hNow * 60)), hNow);
-/* each moment fades in while it holds the middle of the screen, and out as it leaves */
-const cardOut = () => {
-  moments.forEach(e => { const r = e.getBoundingClientRect(); e.classList.toggle('on', Math.abs(r.top + r.height / 2 - innerHeight / 2) < innerHeight * .3); });
-  cardEl.classList.toggle('gone', moments[moments.length - 1].getBoundingClientRect().bottom < innerHeight * .4);
-};
-cardOut();
-addEventListener('scroll', () => { inkNav(); kick(); cardOut(); }, { passive: true });
+addEventListener('scroll', kick, { passive: true });
 /* phone: the card fits the width, and also leaves room under it for the tallest moment's words */
 const fitCard = () => {
   let k = Math.min(1, (innerWidth - 32) / cardEl.offsetWidth);
@@ -301,8 +326,11 @@ const fitCard = () => {
   }
   cardEl.style.setProperty('--k', k.toFixed(3));
 };
-fitCard();
-addEventListener('resize', () => { placeSun(hNow); fitCard(); });
+const refit = () => { fitCard(); measure(); hDrawn = mDrawn = null; cancelAnimationFrame(raf); raf = 0; tick(); };
+refit();
+addEventListener('resize', refit);
+// late fonts change the words' heights, and with them where each moment sits
+document.fonts.ready.then(refit);
 
 /* ---------- reveals ---------- */
 const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { rootMargin: '0px 0px -12% 0px' });
