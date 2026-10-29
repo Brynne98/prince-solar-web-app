@@ -1987,7 +1987,8 @@ function ConfirmCard({ title, text, action, onConfirm, onCancel }) {
 const SettingsFlash = React.createContext(null);
 
 // bare: no card of its own; the children bring their own cards (Billing's logins).
-function SettingsSection({ id, title, note, bare, children }) {
+// action: a button at the top right of the section's title (Billing's Add SunSynk login).
+function SettingsSection({ id, title, note, bare, action, children }) {
   const flash = React.useContext(SettingsFlash);
   const flashing = flash && flash.id === id;
   const ref = React.useRef(null);
@@ -1996,8 +1997,11 @@ function SettingsSection({ id, title, note, bare, children }) {
   return (
     <section id={'settings-' + id} className="sec" ref={ref} aria-labelledby={'settings-' + id + '-t'}>
       <div className="sec-intro">
-        <h2 id={'settings-' + id + '-t'} className="sset-title">{title}</h2>
-        {note && <p className="sset-note">{note}</p>}
+        <div>
+          <h2 id={'settings-' + id + '-t'} className="sset-title">{title}</h2>
+          {note && <p className="sset-note">{note}</p>}
+        </div>
+        {action}
       </div>
       <div className={(bare ? 'sset-cards' : 'sset') + (flashing ? ' sset-flash' : '')}
            onAnimationEnd={flashing ? (e) => { if (e.target === e.currentTarget) flash.done(); } : undefined}>
@@ -2050,16 +2054,18 @@ function PlanSection({ billing, reload, onAdjust, collecting }) {
     const last = (() => { try { return localStorage.getItem('synsynk.planKind'); } catch (e) { return null; } })() || 'free';
     return (
       <SettingsSection id="plan" title="Plan">
-        <div className="plan-now" aria-hidden="true">
-          <window.Skeleton w={84} h={11} r={5} />
-          <window.Skeleton w={130} h={20} r={6} style={{ marginTop: 9 }} />
-          <window.Skeleton w={280} h={12} r={5} style={{ marginTop: 9, maxWidth: '100%' }} />
-        </div>
-        {last !== 'comped' && (
-          <div className="plan-acts" aria-hidden="true">
-            <window.Skeleton w={112} h={34} r={9} />{last === 'paid' && <window.Skeleton w={112} h={34} r={9} />}
+        <div className="plan-head">
+          <div className="plan-now" aria-hidden="true">
+            <window.Skeleton w={84} h={11} r={5} />
+            <window.Skeleton w={130} h={20} r={6} style={{ marginTop: 9 }} />
+            <window.Skeleton w={280} h={12} r={5} style={{ marginTop: 9, maxWidth: '100%' }} />
           </div>
-        )}
+          {last !== 'comped' && (
+            <div className="plan-acts" aria-hidden="true">
+              <window.Skeleton w={112} h={34} r={9} />{last === 'paid' && <window.Skeleton w={112} h={34} r={9} />}
+            </div>
+          )}
+        </div>
       </SettingsSection>
     );
   }
@@ -2075,10 +2081,19 @@ function PlanSection({ billing, reload, onAdjust, collecting }) {
   const run = async (fn) => { setBusy(true); await fn(); setBusy(false); };
   return (
     <SettingsSection id="plan" title="Plan">
-      <div className="plan-now">
-        <div className="plan-lbl">Current plan</div>
-        <div className="plan-name">{PLAN_NAME[b.plan]} <span className={'conn-status ' + tone}>{word}</span></div>
-        <div className="conn-meta">{line}</div>
+      {/* the plan top left, its buttons top right */}
+      <div className="plan-head">
+        <div className="plan-now">
+          <div className="plan-lbl">Current plan</div>
+          <div className="plan-name">{PLAN_NAME[b.plan]} <span className={'conn-status ' + tone}>{word}</span></div>
+          <div className="conn-meta">{line}</div>
+        </div>
+        {!b.comped && (
+          <div className="plan-acts">
+            <button type="button" className={paid ? 'ghost-btn' : 'save-btn'} onClick={onAdjust}>Adjust plan</button>
+            {paid && !ending && <button type="button" className="danger-btn" disabled={busy || cancelling} onClick={() => setCancelling(true)}>Cancel plan</button>}
+          </div>
+        )}
       </div>
       {b.state === 'past_due' && (
         <div className="plan-booked plan-alert">
@@ -2090,12 +2105,6 @@ function PlanSection({ billing, reload, onAdjust, collecting }) {
         <div className="plan-booked plan-alert">
           <span className="conn-status warn">{booked[0]}</span>
           <button type="button" className="ghost-btn" disabled={busy} onClick={() => run(() => bookPlan(b, b.plan, b.period, reload))}>{booked[1]}</button>
-        </div>
-      )}
-      {!b.comped && (
-        <div className="plan-acts">
-          <button type="button" className={paid ? 'ghost-btn' : 'save-btn'} onClick={onAdjust}>Adjust plan</button>
-          {paid && !ending && <button type="button" className="danger-btn" disabled={busy || cancelling} onClick={() => setCancelling(true)}>Cancel plan</button>}
         </div>
       )}
       {cancelling && (
@@ -2374,7 +2383,14 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   };
   const title = <>Plants{allPlants.length > 0 && <span className="sset-count">{allPlants.filter(p => state(p) === 'on').length} of {allPlants.length} collecting</span>}</>;
   return (
-    <SettingsSection id="connection" title={title} note="Each SunSynk login and the plants it brings." bare>
+    <SettingsSection id="connection" title={title} note="Each SunSynk login and the plants it brings." bare
+      action={!unread && mode !== 'add' && <button type="button" className="save-btn" onClick={() => setMode('add')}>Add SunSynk login</button>}>
+      {!unread && mode === 'add' && (
+        <div className="sset conn-row conn-add-row"><div className="conn-text">
+          {/* Cancel re-reads too: a login with no plant yet is saved but not listed. */}
+          <window.LinkForm compact hasPlant={live.some(a => (a.plants || []).length > 0)} onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
+        </div></div>
+      )}
       {unread ? (
         <div className="sset conn-row">
           <div className="conn-text"><div className="conn-user">Couldn’t load your logins</div><div className="conn-meta">&nbsp;</div></div>
@@ -2423,16 +2439,6 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
           </div>
         );
       })}
-      {!unread && (mode === 'add'
-        ? <div className="sset conn-row conn-add-row"><div className="conn-text">
-            {/* Cancel re-reads too: a login with no plant yet is saved but not listed. */}
-            <window.LinkForm compact hasPlant={live.some(a => (a.plants || []).length > 0)} onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
-          </div></div>
-        : <div className="conn-add">
-            <button type="button" className="save-btn" onClick={() => setMode('add')}>
-              Add SunSynk login
-            </button>
-          </div>)}
     </SettingsSection>
   );
 }

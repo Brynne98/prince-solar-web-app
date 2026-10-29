@@ -875,7 +875,9 @@
     scroll-margin-top: calc(var(--head-h, 60px) + 12px); }
   .page-head + .sec { margin-top: 16px; }
   .sec + .sec { margin-top: 0; }
-  .sec-intro { min-width: 0; }
+  .sec-intro { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }   /* title top left, a button top right */
+  .sec-intro > div { min-width: 0; }
+  .sec-intro > button { flex: none; white-space: nowrap; }
   .sset { padding: 18px 22px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; min-width: 0; }
   .sset-title { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
   .sset-note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
@@ -1020,7 +1022,8 @@
   .plan-lbl { font-size: 12.5px; color: var(--dim); }
   .plan-now .plan-name { font-size: 18px; margin-top: 2px; }
   .plan-name .conn-status { margin-left: 8px; font-size: 13px; font-weight: 500; vertical-align: 2px; }
-  .plan-acts { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  .plan-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; }
+  .plan-acts { display: flex; gap: 10px; flex-wrap: wrap; }
   /* Adjust plan: the switch, then the three cards, each button over its list */
   .plan-period { align-self: flex-start; margin-top: 8px; }
   .plan-ctx { color: var(--warn) !important; }
