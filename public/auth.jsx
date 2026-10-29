@@ -204,7 +204,7 @@ function AuthBrand() {
       <span className="sun" />
       <div>
         <div className="auth-brand-name">Prince Solar Hub</div>
-        <div className="auth-brand-tag">Your solar history, kept for good.</div>
+        <div className="auth-brand-tag">Every day of your solar, in one place.</div>
       </div>
     </div>
   );
