@@ -15,6 +15,7 @@ begin;
 \ir ../../supabase/migrations/0114_free_reports.sql
 \ir ../../supabase/migrations/0116_payments.sql
 \ir ../../supabase/migrations/0122_free_week_app.sql
+\ir ../../supabase/migrations/0123_reserve_confirmed.sql
 
 create function pg_temp.eq(label text, got anyelement, want anyelement) returns void language plpgsql as $$
 begin
@@ -426,6 +427,11 @@ begin
   perform pg_temp.eq('steps left: size, reserve, panels', private.setup_steps_left('00000000-0000-0000-0000-000000000073', 9000073),
     array['size', 'reserve', 'panels']);
   perform pg_temp.eq('no battery, all set: none left', private.setup_steps_left('00000000-0000-0000-0000-000000000074', 9000074), '{}'::text[]);
+  -- the reserve confirmed on the plant (0123) counts for every account on it
+  update public.plant_config set battery_reserve_confirmed = true where plant_id = 9000073;
+  perform pg_temp.eq('reserve confirmed on the plant', private.setup_steps_left('00000000-0000-0000-0000-000000000073', 9000073),
+    array['size', 'panels']);
+  update public.plant_config set battery_reserve_confirmed = false where plant_id = 9000073;
   perform private.free_week_mail();
   perform pg_temp.eq('day 2 lists only what is left', (select data->'steps' from public.email_queue
     where user_id = '00000000-0000-0000-0000-000000000073' and kind = 'free_week_setup'), '["size", "reserve", "panels"]'::jsonb);

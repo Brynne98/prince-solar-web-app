@@ -2447,7 +2447,9 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
       said.push(patch.system_kwp == null ? 'no panel size' : 'panels ' + num(patch.system_kwp) + ' kW');
     setBusy(true);
     // Failed: the bar keeps the edits, the red toast says so
-    try { await window.savePlantConfig(plant.id, patch); }
+    // A reserve set here is confirmed for First steps too (SOLAR-247)
+    const send = patch.battery_reserve_pct !== (cfg.battery_reserve_pct ?? 20) ? { ...patch, battery_reserve_confirmed: true } : patch;
+    try { await window.savePlantConfig(plant.id, send); }
     catch (e) { window.toast('Couldn’t save. Try again.', { error: true }); setBusy(false); return; }
     setTried(false);
     // Saving… holds until the reload closes the bar, so the toast takes its place

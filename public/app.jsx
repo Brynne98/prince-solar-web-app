@@ -359,8 +359,9 @@ function PageNotice({ snap, cutOff, onReconnect, relinkedAt }) {
 // First steps (SOLAR-170): a new plant's rate, battery and panels, one at a time, from a
 // card in the sidebar (docked above the bottom bar on a phone). A step is done once its
 // setting is in plant_config, the same columns Settings edits. The reserve starts at 20, so
-// it counts once confirmed here or changed. Hidden and confirmed are the user's, kept in
-// prefs per plant, so they follow the user to every device; no step means no card.
+// it counts once confirmed here or changed; the confirmation is on the plant too
+// (battery_reserve_confirmed, SOLAR-247). Hidden is the user's, kept in prefs per plant,
+// so it follows the user to every device; no step means no card.
 const STEPS = {
   rate: { title: 'Electricity rate', why: 'Shows what solar saved.', go: 'Set rate', how: 'The price per unit on your bill, with VAT.' },
   size: { title: 'Battery size', why: 'Shows how long the battery lasts.', go: 'Set size', how: 'All batteries together.' },
@@ -384,7 +385,7 @@ function firstSteps(me, plantId) {
   const steps = [
     { id: 'rate', done: c.tariff_import > 0 },
     batt && { id: 'size', done: c.battery_kwh > 0 },
-    batt && { id: 'reserve', done: !!mine.reserve || (c.battery_reserve_pct ?? 20) !== 20 },
+    batt && { id: 'reserve', done: !!c.battery_reserve_confirmed || (c.battery_reserve_pct ?? 20) !== 20 },
     { id: 'panels', done: c.system_kwp > 0 },
   ].filter(Boolean);
   return { cfg: c, mine, steps, left: steps.filter(s => !s.done) };
@@ -571,8 +572,8 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
   const save = async (patch) => {
     setBusy(true);
     try {
-      await window.savePlantConfig(plantId, patch);
-      if (stepId === 'reserve') await saveFirstSteps(me, plantId, { reserve: true });
+      // Save on the reserve confirms it for everyone on the plant (SOLAR-247)
+      await window.savePlantConfig(plantId, stepId === 'reserve' ? { ...patch, battery_reserve_confirmed: true } : patch);
       await onSaved();
       const left = fs.left.filter(s => s.id !== stepId);
       if (!left.length) setOpen(false); else setCur(nextOf(left, skipped, stepId));
