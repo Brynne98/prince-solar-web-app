@@ -181,15 +181,16 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync }) {
 
 // The person: avatar, name and plant count in the sidebar; the avatar alone in a phone's
 // header. A dead SunSynk login puts a red dot on the avatar and on Account.
-function AccountMenu({ user, plantCount, alert, onAccount, onSettings, active, variant }) {
+// stepsLeft (the free week, SOLAR-242): a dot on the avatar and the count on Plant settings
+function AccountMenu({ user, plantCount, alert, stepsLeft, onAccount, onSettings, active, variant }) {
   const [open, setOpen, ref] = usePopover();
   // plantCount is null while the plants load: the row shows, its count shimmers
   const sub = alert ? 'Reconnect a login' : plantCount == null ? '' : plantCount + (plantCount === 1 ? ' plant' : ' plants');
   return (
     <div className={'acct acct-' + variant} ref={ref}>
-      <button type="button" className={'acct-btn' + (alert ? ' needs' : '')} aria-haspopup="menu" aria-expanded={open}
+      <button type="button" className={'acct-btn' + (alert ? ' needs' : stepsLeft ? ' steps' : '')} aria-haspopup="menu" aria-expanded={open}
               aria-current={active ? 'page' : undefined} onClick={() => setOpen(o => !o)}
-              aria-label={'Account menu' + (alert ? '. A SunSynk login needs reconnecting' : '')}>
+              aria-label={'Account menu' + (alert ? '. A SunSynk login needs reconnecting' : stepsLeft ? '. Setup steps left' : '')}>
         <span className="avatar" aria-hidden="true">{user.initials}</span>
         {variant === 'rail' && <span className="who" aria-hidden="true"><b>{user.name}</b><span className={alert ? 'warn' : ''} style={sub ? undefined : { position: 'relative' }}>{sub || <>{'\u00a0'}<span className="skel" style={{ position: 'absolute', left: 0, top: 2, width: 52, height: 11, borderRadius: 6 }} /></>}</span></span>}
       </button>
@@ -198,7 +199,7 @@ function AccountMenu({ user, plantCount, alert, onAccount, onSettings, active, v
           <div className="menu-email">{user.email}</div>
           {/* Settings left the page list for here (SOLAR-224) */}
           <button type="button" onClick={() => { setOpen(false); onSettings(); }}>
-            <Icon id="settings" />Plant settings
+            <Icon id="settings" />Plant settings{stepsLeft > 0 && <span className="menu-left">{stepsLeft} left</span>}
           </button>
           <button type="button" onClick={() => { setOpen(false); onAccount(); }}>
             <Icon id="account" />Account{alert && <span className="dot" aria-label="A login needs reconnecting" />}
@@ -518,6 +519,7 @@ function StepForm({ id, cfg, busy, onSave, onSkip }) {
 }
 
 // The card, and the step it opens: beside the sidebar ('rail'), or a sheet from the bottom ('phone').
+// During the free week a copy sits at the top of Live too ('live', SOLAR-242); after it, no card.
 // Back and the step bars move between steps, done ones too; Skip leaves one for later.
 function FirstSteps({ me, plantId, onSaved, variant }) {
   const [open, setOpen, ref] = usePopover();
@@ -526,6 +528,7 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
   const [gone, setGone] = useState(false);   // Hide pressed, until prefs come back
   const [busy, setBusy] = useState(false);
   useEffect(() => { setOpen(false); setSkipped([]); setCur(null); setGone(false); }, [plantId]);
+  const over = window.useFreeOver();
   const fs = firstSteps(me, plantId);
   // Every step done, here or in Settings: marked done, so it stays away. Both copies of the
   // card (sidebar and phone) see it; the ref keeps each to one write.
@@ -536,7 +539,7 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
     marked.current = plantId;
     saveFirstSteps(me, plantId, { done: true }).then(onSaved).catch(() => { marked.current = null; });
   }, [finished, plantId]);
-  if (!fs || !fs.left.length || fs.mine.hidden || gone) return null;
+  if (!fs || !fs.left.length || fs.mine.hidden || gone || over) return null;
   const ids = fs.steps.map(s => s.id);
   // the next step waiting, after `after` where there is one, skipped ones last
   const nextOf = (left, sk, after) => {
@@ -615,7 +618,7 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
           <span className="mono">{done}/{n}</span>
         </button>
       )}
-      {open && (variant === 'phone'
+      {open && (variant !== 'rail' && (variant === 'phone' || window.matchMedia('(max-width: 599px)').matches)
         ? <div className="sheet fs-sheet" onClick={e => { if (e.target === e.currentTarget) setOpen(false); }}><div className="sheet-panel"><div className="sheet-grip" aria-hidden="true" />{panel}</div></div>
         : <div className="fs-pop">{panel}</div>)}
     </div>
@@ -799,6 +802,43 @@ function Setup({ links }) {
           </div>
         )}
     </Frame>
+  );
+}
+
+// The day the free week ends, first open after it (SOLAR-242): said once, kept in prefs so
+// it follows the user to every device.
+function FreeWeekOver({ onDone }) {
+  const done = (choice) => {
+    window.track('free_week_card_done', { choice });
+    window.savePrefs({ freeWeekOverSeen: true }).catch(() => {});
+    onDone();
+    if (choice === 'plans') window.openPlans('free_week_card');
+  };
+  return (
+    <section className="card free-over" aria-label="Free week ended">
+      <h2>Your free week has ended</h2>
+      <p>Free keeps the last 24 hours. Upgrade and your last 60 days come back.</p>
+      <div className="free-over-acts">
+        <button type="button" className="ghost-btn" onClick={() => done('later')}>Not now</button>
+        <button type="button" className="save-btn" onClick={() => done('plans')}>See plans</button>
+      </div>
+    </section>
+  );
+}
+
+// Every lock opens this (window.openPlans): the plans, yearly first.
+function PlansSheet() {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const on = () => setOpen(true);
+    window.addEventListener('ps-plans', on);
+    return () => window.removeEventListener('ps-plans', on);
+  }, []);
+  if (!open) return null;
+  return (
+    <div className="plans-sheet" onClick={e => { if (e.target === e.currentTarget) setOpen(false); }}>
+      <div className="plans-panel"><window.Paywall reason="history" onCancel={() => setOpen(false)} /></div>
+    </div>
   );
 }
 
@@ -1038,7 +1078,12 @@ function App({ links }) {
 
   const go = (id) => { setTab(id); toTop(); if (location.hash) history.replaceState(history.state, '', location.pathname + location.search); };
   const loginDead = links.accounts.some(a => a.status === 'needs_relink');
-  const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, onAccount: () => go('account'), onSettings: () => go('settings'), active: tab === 'account' || tab === 'settings' };
+  // The free week (SOLAR-242): steps left mark the avatar; after it, history locks.
+  const free = window.freeState(me);
+  const stepsLeft = free?.week ? (firstSteps(me, plantId)?.left || []).length : 0;
+  const [overSeen, setOverSeen] = useState(false);
+  const overCard = free?.over && !overSeen && !me?.prefs?.freeWeekOverSeen;
+  const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, stepsLeft, onAccount: () => go('account'), onSettings: () => go('settings'), active: tab === 'account' || tab === 'settings' };
   // a plant whose every login stopped working reads Reconnect in the menu
   const loginsCut = (id) => {
     const ls = links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(id)));
@@ -1047,7 +1092,9 @@ function App({ links }) {
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync} />;
   const settingsPage = <window.SettingsTab me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
     flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />;
-  const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);
+  // On a phone in the free week, Live has its own copy at the top in place of the floating one
+  const steps = me && ((v) => (v === 'phone' && free?.week && tab === 'live') ? null
+    : <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);
   const accountPage = <window.AccountTab onPlantConfigSaved={reloadPlantConfig} links={links}
     flash={flashSection} onFlashed={() => setFlashSection(null)} />;
 
@@ -1058,6 +1105,7 @@ function App({ links }) {
   const dataPage = tab !== 'settings' && tab !== 'account';
   if (!snap) {
     return (
+      <window.FreeCtx.Provider value={free}>
       <Frame tabs={TABS} tab={tab} onTab={go} account={account} busy steps={steps}
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
           <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} /></>}>
@@ -1072,11 +1120,13 @@ function App({ links }) {
           {dataPage && <window.TabSkeleton tab={tab} />}
         </div>
       </Frame>
+      </window.FreeCtx.Provider>
     );
   }
 
   const old = dataPage && plantStatus(snap, Date.now()).old;
   return (
+    <window.FreeCtx.Provider value={free}>
     <Frame tabs={TABS} tab={tab} onTab={go} account={account} steps={steps}
       head={<>{plantMenu}<HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} /></>}>
       {/* The raw error stays in the title; on screen it was a Postgres or JWT string a
@@ -1087,6 +1137,8 @@ function App({ links }) {
       {dataPage && <PageNotice snap={snap} cutOff={plantCutOff} onReconnect={() => openSettings('connection')}
         relinkedAt={relinked?.plantId === plantId ? relinked.at : null} />}
       <div className={'page' + (old ? ' old' : '')}>
+        {dataPage && overCard && <FreeWeekOver onDone={() => setOverSeen(true)} />}
+        {tab === 'live' && free?.week && steps('live')}
         {tab === 'settings' && settingsPage}
         {tab === 'account' && accountPage}
         {tab === 'live' && <window.LiveTab snap={snap} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
@@ -1096,7 +1148,9 @@ function App({ links }) {
         {tab === 'grid' && <window.GridTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} refreshKey={refreshKey} />}
       </div>
+      <PlansSheet />
     </Frame>
+    </window.FreeCtx.Provider>
   );
 }
 

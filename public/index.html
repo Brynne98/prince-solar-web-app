@@ -1446,6 +1446,57 @@
     .fs-back { height: 40px; margin: -12px 4px -12px -8px; }
     .fs-seg button { min-height: 36px; }
   }
+
+  /* ---- the free week (SOLAR-242) ---- */
+  .lock-ico { flex: none; }
+  .lock-btn { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 600;
+    color: var(--muted); cursor: pointer; white-space: nowrap; }
+  .lock-btn:hover { color: var(--text); }
+  .locked { display: inline-flex; align-items: baseline; gap: 4px 10px; flex-wrap: wrap; }
+  .locked-v { color: var(--dim); opacity: .55; }
+  .locked-v b { color: inherit; }
+  .locked.blur .locked-v { filter: blur(5px); }
+  .faint-num { display: block; width: 62%; height: 0.8em; margin: 0.1em 0; border-radius: 8px; background: rgba(255,255,255,0.06); }
+  .hist-lock { position: relative; display: grid; gap: 12px; }
+  .hl-shape { display: flex; align-items: flex-end; gap: 6px; height: 110px; }
+  .hl-shape i { flex: 1; border-radius: 4px 4px 2px 2px; background: rgba(255,255,255,0.05); }
+  .hl-line { display: inline-flex; align-items: center; gap: 8px; align-self: start; justify-self: start; padding: 0; border: 0; background: none;
+    font: inherit; font-size: 14px; color: var(--muted); text-align: left; cursor: pointer; }
+  .hl-line b { color: var(--pv); font-weight: 600; white-space: nowrap; }
+  .hl-line:hover b { text-decoration: underline; }
+  .overview-section .hist-lock { padding: 18px 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+  .today-strip.blurred .mini-value { filter: blur(7px); }
+  .today-strip.blurred .trend-badge, .today-strip.blurred .meter { visibility: hidden; }
+  .lock-cta { display: inline-flex; align-items: center; gap: 6px; }
+  .free-over { margin-bottom: 18px; border-color: rgba(61,220,132,0.35); display: grid; gap: 8px; }
+  .free-over h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  .free-over p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
+  .free-over-acts { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+  .grid-off-prompt { border-color: rgba(167,139,250,0.35); background: rgba(167,139,250,0.08); }
+  .grid-off-prompt .mini-link { color: var(--text); font-weight: 600; }
+  .grid-off-prompt .fs-x { margin: -4px -6px -4px 0; }
+  .plans-sheet { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 16px; background: rgba(5,7,10,0.6); }
+  .plans-panel { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 22px 24px; border-radius: 16px;
+    background: var(--panel); border: 1px solid var(--line-2); box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+  .pw-save { margin-left: 6px; padding: 1px 6px; border-radius: 6px; background: rgba(61,220,132,0.14); color: var(--pv); font-size: 11px; font-weight: 600; }
+  .pw-billed { display: block; margin-top: 2px; font-size: 12.5px; color: var(--muted); }
+  .cal-day.shut, .hv-daynav.shut { color: var(--dim); opacity: 0.45; }
+  .cal-day.shut:hover, .hv-daynav.shut:hover { opacity: 0.8; }
+  .acct-btn.steps::after { content: ''; position: absolute; left: 32px; top: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--pv); box-shadow: 0 0 0 2px #0d1117; }
+  .acct-head .acct-btn.steps::after { left: auto; right: 1px; top: 1px; box-shadow: 0 0 0 2px var(--bg); }
+  .menu-left { margin-left: auto; padding-left: 12px; white-space: nowrap; font-size: 12px; color: var(--pv); }
+  .fs-live { margin-bottom: 18px; }
+  .fs-live .fs-card { background: rgba(61,220,132,0.05); border: 1px solid rgba(61,220,132,0.25); }
+  .fs-live .fs-next { flex-direction: row; align-items: center; gap: 12px; }
+  .fs-live .fs-text { flex: 1; min-width: 0; }
+  .fs-live .fs-go { flex: none; }
+  .fs-live .fs-pop { left: auto; right: 0; top: calc(100% + 8px); bottom: auto; max-width: calc(100vw - 32px); }
+  @media (min-width: 600px) and (max-width: 1023px) { .acct-btn.steps::after { left: calc(50% + 8px); } }
+  @media (max-width: 599px) {
+    .hl-shape { height: 80px; gap: 4px; }
+    .plans-sheet { place-items: end stretch; padding: 0; }
+    .plans-panel { width: 100%; border-radius: 16px 16px 0 0; padding: 18px 18px calc(20px + env(safe-area-inset-bottom, 0px)); max-height: 90vh; }
+  }
 </style>
 </head>
 <body>

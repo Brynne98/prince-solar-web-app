@@ -224,13 +224,15 @@ window.sb.auth.onAuthStateChange((event, session) => {
  *   reason 'add'        Free or Home with a plant, before the form (onAddPaused: go on, paused)
  *          'paused'     Upgrade on a login row with paused plants (`paused`: their names)
  *          'upgrade'    Upgrade in the Plan section, on Home: the price before the saved card is charged
+ *          'history'    a lock on Free after its week (SOLAR-242): both plans, yearly first, priced a month
  * `added` = inverters the login brings past the 3rd plant, priced into Family.
  * A paid user's period changes at renewal, so only Free gets the switch.
  */
 function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
   const { useState, useEffect } = React;
-  const offers = ['family'];
-  const [period, setPeriod] = useState('monthly');
+  const history = reason === 'history';
+  const offers = history ? ['home', 'family'] : ['family'];
+  const [period, setPeriod] = useState(history ? 'yearly' : 'monthly');
   const [quotes, setQuotes] = useState(null);
   useEffect(() => { window.track('paywall_shown', { reason }); }, []);
   useEffect(() => {
@@ -245,16 +247,16 @@ function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
   const per = paid ? first.period : period;
   return (
     <div className="paywall" role="dialog" aria-labelledby="pw-title">
-      <h2 id="pw-title" className="sset-title">{reason === 'upgrade' ? 'Upgrade to Family'
+      <h2 id="pw-title" className="sset-title">{history ? 'See every day' : reason === 'upgrade' ? 'Upgrade to Family'
         : reason === 'paused' ? `Collect data for ${paused.length === 1 ? paused[0] : paused.length + ' paused plants'}`
         : 'Add another plant'}</h2>
-      <p className="sset-note">{first?.plan === 'family' ? 'Plants after your 3rd are paused until you add them to your plan.'
+      <p className="sset-note">{history ? 'Free keeps the last 24 hours.' : first?.plan === 'family' ? 'Plants after your 3rd are paused until you add them to your plan.'
         : (paid ? 'Home' : 'Free') + ' covers one plant.'}</p>
       {!paid && (
         <div className="segmented seg-sm pw-period" role="group" aria-label="Billing">
-          {['monthly', 'yearly'].map(p => (
+          {(history ? ['yearly', 'monthly'] : ['monthly', 'yearly']).map(p => (
             <button type="button" key={p} className={'seg-btn' + (period === p ? ' active' : '')} aria-pressed={period === p}
-                    onClick={() => setPeriod(p)}>{p === 'monthly' ? 'Monthly' : 'Yearly'}</button>
+                    onClick={() => setPeriod(p)}>{p === 'monthly' ? 'Monthly' : 'Yearly'}{history && p === 'yearly' && <span className="pw-save">2 months free</span>}</button>
           ))}
         </div>
       )}
@@ -265,10 +267,12 @@ function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
             return (
               <div key={p} className={'pw-plan' + (p === 'family' ? ' pw-main' : '')}>
                 <div className="pw-name">{p === 'family' ? 'Family' : 'Home'}</div>
-                <div className="pw-price"><b>{q ? rand(q.nextCharge) : '…'}</b> {perUnit(per)}</div>
+                {history && per === 'yearly'
+                  ? <div className="pw-price"><b>{q ? rand(Math.round(q.nextCharge / 12)) : '…'}</b> a month{q && <span className="pw-billed">{rand(q.nextCharge)} billed yearly</span>}</div>
+                  : <div className="pw-price"><b>{q ? rand(q.nextCharge) : '…'}</b> {perUnit(per)}</div>}
                 <ul className="pw-gives">
                   <li>{p === 'family' ? 'Up to 3 plants' : '1 plant'}</li>
-                  <li>All history kept</li>
+                  <li>Your full history</li>
                 </ul>
                 {paid && q && q.dueNow !== q.nextCharge && <div className="pw-due">{rand(q.dueNow)} today, then {rand(q.nextCharge)} {perUnit(per)} from {billDay(q.nextDate)}</div>}
                 <button type="button" className={p === 'family' ? 'save-btn' : 'ghost-btn'} disabled={!q}
@@ -282,7 +286,7 @@ function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
       <div className="conn-form-actions pw-foot">
         <span className="field-note">Cancel any time.</span>
         {onAddPaused && <button type="button" className="ghost-btn" onClick={onAddPaused}>Add it paused</button>}
-        <button type="button" className="ghost-btn" onClick={onCancel}>Not now</button>
+        <button type="button" className="ghost-btn" onClick={onCancel}>{history ? 'Stay on Free' : 'Not now'}</button>
       </div>
     </div>
   );

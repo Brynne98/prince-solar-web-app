@@ -14,6 +14,7 @@ begin;
 \ir ../../supabase/migrations/0113_plan_section.sql
 \ir ../../supabase/migrations/0114_free_reports.sql
 \ir ../../supabase/migrations/0116_payments.sql
+\ir ../../supabase/migrations/0122_free_week_app.sql
 
 create function pg_temp.eq(label text, got anyelement, want anyelement) returns void language plpgsql as $$
 begin
@@ -408,6 +409,44 @@ begin
   perform private.free_week_mail();
   perform pg_temp.eq('each goes once', (select count(*)::int from public.email_queue
     where user_id in ('00000000-0000-0000-0000-000000000071', '00000000-0000-0000-0000-000000000072') and kind in ('free_week_soon', 'report_week')), 2);
+end $$;
+
+-- Free week in the app and the day-2 email (0122)
+insert into auth.users (id, email) values
+  ('00000000-0000-0000-0000-000000000073', 'd2@t.test'), ('00000000-0000-0000-0000-000000000074', 'd2done@t.test');
+insert into private.free_week_logins (sunsynk_username, user_id, started_at) values
+  ('d2@login.test', '00000000-0000-0000-0000-000000000073', now() - interval '2 days 2 hours'),
+  ('d2done@login.test', '00000000-0000-0000-0000-000000000074', now() - interval '2 days 2 hours');
+insert into public.plant_users (plant_id, user_id) values
+  (9000073, '00000000-0000-0000-0000-000000000073'), (9000074, '00000000-0000-0000-0000-000000000074');
+insert into public.plant_config (plant_id, tariff_import, has_battery, battery_kwh, battery_reserve_pct, system_kwp) values
+  (9000073, 3.1, true, null, 20, null), (9000074, 3.1, false, null, 20, 8);
+do $$
+begin
+  perform pg_temp.eq('steps left: size, reserve, panels', private.setup_steps_left('00000000-0000-0000-0000-000000000073', 9000073),
+    array['size', 'reserve', 'panels']);
+  perform pg_temp.eq('no battery, all set: none left', private.setup_steps_left('00000000-0000-0000-0000-000000000074', 9000074), '{}'::text[]);
+  perform private.free_week_mail();
+  perform pg_temp.eq('day 2 lists only what is left', (select data->'steps' from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000073' and kind = 'free_week_setup'), '["size", "reserve", "panels"]'::jsonb);
+  perform pg_temp.eq('day 2: nothing left, no email', (select count(*)::int from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000074' and kind = 'free_week_setup'), 0);
+  perform pg_temp.eq('day 5 says Home per month', (select (data->>'perMonth')::int from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000071' and kind = 'free_week_soon'), 83);
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000073","role":"authenticated"}', true);
+  perform pg_temp.eq('api_me: free week end', (public.api_me()->>'freeWeekEndsAt') is not null, true);
+  perform set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}', true);
+  perform pg_temp.eq('api_me: paid has none', public.api_me()->'freeWeekEndsAt', 'null'::jsonb);
+  perform set_config('request.jwt.claims', '', true);
+  -- paying again refetches a trimmed plant's 60 days
+  insert into private.free_trim_done (plant_id) values (9000073);
+  update public.plant_config set backfill_next = null, backfill_until = null where plant_id in (9000073, 9000074);
+  insert into private.billing (user_id, plan) values ('00000000-0000-0000-0000-000000000074', 'free');
+  perform pg_temp.eq('free row: no refill', (select backfill_next from public.plant_config where plant_id = 9000074), null::date);
+  insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
+  values ('00000000-0000-0000-0000-000000000073', 'home', 'yearly', 1, '2027-11-01');
+  perform pg_temp.eq('upgrade refills the trimmed plant', (select backfill_next from public.plant_config where plant_id = 9000073),
+    (now() at time zone 'Africa/Johannesburg')::date - 60);
 end $$;
 
 -- Payments (0116). s = starts on Free with two plants (second paused), then pays;

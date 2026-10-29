@@ -22,7 +22,7 @@
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { reportError, serve } from "../_shared/errors.ts";
 import {
-  accountDeleted, type Email, FROM_ACCOUNT, FROM_NOTICE, type History, freeWeekEndsSoon, historySynced, movedToFree,
+  accountDeleted, type Email, FROM_ACCOUNT, FROM_NOTICE, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, paymentFailed, paymentReceived, type Period, planChangeBooked, plantEvent, type PlantEvent, plantsRemovalSoon,
   planUpgraded, renewalNotice, report, type Report, sunsynkBack, sunsynkDown, welcome,
 } from "../_shared/email.ts";
@@ -214,7 +214,8 @@ async function build(r: Row, unsub: string): Promise<Email | null> {
       return rep && report({ ...rep, freeWeekEnds: d.freeWeekEnds === true, unsubscribeUrl: unsub });
     }
     case "free_week_soon":
-      return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: tz }));
+      return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", timeZone: tz }), p.name, d.days ?? 0, d.perMonth ?? 83);
+    case "free_week_setup": return d.steps?.length ? freeWeekSetup(d.steps) : null;
     case "account_deleted": return accountDeleted(r.to_email);
     // Billing (0116): amounts in whole rand, dates as "2026-11-01".
     case "bill_paid":
@@ -395,6 +396,11 @@ async function renderAll(plantId: number, today?: string) {
     ["reconnect", { kind: "needs_relink" }],
   ];
   for (const [name, e] of ev) out[name] = plantEvent(p.name, p.id, e, e.kind === "needs_relink" ? "" : unsub);
+  // The free week's two emails (0122), from this plant's own day count; steps are a sample.
+  const { count: days } = await db.from("plant_energy").select("period", { count: "exact", head: true })
+    .eq("plant_id", plantId).eq("bucket", "day").lt("period", today);
+  out["free-week-setup"] = freeWeekSetup(["rate", "size", "panels"]);
+  out["free-week-ends-soon"] = freeWeekEndsSoon("Monday", p.name, days ?? 0, 83);
   return out;
 }
 

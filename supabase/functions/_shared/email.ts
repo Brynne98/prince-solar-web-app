@@ -741,14 +741,35 @@ export const plantsRemovalSoon = (plants: string[], on: string) =>
     footer: [HELP],
   });
 
-// Two days before a Free account's first week ends. The day-7 report says it again.
-export const freeWeekEndsSoon = (endsOn: string) =>
-  make(`Your free week ends on ${endsOn}`, {
-    title: `Your free week ends on ${endsOn}`,
+// Two days before a Free account's first week ends (SOLAR-242): what goes, in days. The
+// day-7 report says it again. `days` = day totals the plant holds; 0 when unknown.
+export const freeWeekEndsSoon = (endsOn: string, plant: string, days: number, perMonth: number) => {
+  const title = `On ${endsOn}, ${days > 1 ? `${days} days of history` : "the history"} for ${plant} go${days > 1 ? "" : "es"}`;
+  return make(title, {
+    title,
     parts: [
-      { p: `Until then everything works as on a paid plan. From ${endsOn} ${FREE_RULE}` },
-      { p: "To keep all your history, choose Home or Family before then." },
-      { button: { label: "See plans", href: PLAN } },
+      { p: `Free keeps the last 24 hours. Keep your full history for R${perMonth} a month, billed yearly.` },
+      { button: { label: "Keep my history", href: PLAN } },
+    ],
+    footer: [HELP],
+  });
+};
+
+// Day 2 of the free week, only while setup steps are left (0122): each one left, and
+// where its number is found.
+export type SetupStep = "rate" | "size" | "reserve" | "panels";
+const SETUP_WHERE: Record<SetupStep, string> = {
+  rate: "<b>Electricity rate</b>: the price per unit on your municipal or Eskom bill, with VAT.",
+  size: "<b>Battery size</b>: on the battery's label, or under Equipment in the SunSynk app.",
+  reserve: "<b>Battery reserve</b>: the number set on your inverter.",
+  panels: "<b>Solar panels</b>: how many panels times the watts of each, on your installer's invoice.",
+};
+export const freeWeekSetup = (steps: SetupStep[]) =>
+  make("Two minutes to finish your setup", {
+    title: "Two minutes to finish your setup",
+    parts: [
+      { steps: steps.filter((s) => s in SETUP_WHERE).map((s) => SETUP_WHERE[s]) },
+      { button: { label: "Finish setup", href: APP } },
     ],
     footer: [HELP],
   });

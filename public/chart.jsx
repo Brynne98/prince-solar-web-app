@@ -120,7 +120,8 @@ const Chevron = ({ dir }) => (
 // days before `earliest` and days after today are greyed and can't be picked; the days
 // with data come from api_data_days, shared by every date bar.
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-function CalendarPop({ date, todayStr, earliest, days, onPick, onClose }) {
+// floor (Free after its week, SOLAR-242): days before it show greyed with a lock and open the plans
+function CalendarPop({ date, todayStr, earliest, days, onPick, onClose, floor }) {
   const [month, setMonth] = React.useState(date.slice(0, 7));
   const ref = React.useRef(null);
   // a click outside or Escape closes it
@@ -136,10 +137,13 @@ function CalendarPop({ date, todayStr, earliest, days, onPick, onClose }) {
   const count = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const key = d => month + '-' + String(d).padStart(2, '0');
   const ok = k => k <= todayStr && (!earliest || k >= earliest) && !!days && days.has(k);
+  const shut = k => !!floor && k < floor;
+  // Free can look back two months: what comes back on a paid plan
+  const back = floor ? monthsBack(floor, month) >= 2 : !!earliest && month <= earliest.slice(0, 7);
   return (
     <div className="cal-pop" ref={ref} role="dialog" aria-label="Pick a day">
       <div className="cal-head">
-        <button type="button" className="hv-daynav" aria-label="Previous month" disabled={!!earliest && month <= earliest.slice(0, 7)} onClick={() => shift(-1)}><Chevron dir={-1} /></button>
+        <button type="button" className="hv-daynav" aria-label="Previous month" disabled={back} onClick={() => shift(-1)}><Chevron dir={-1} /></button>
         <span className="cal-title">{MONTHS[m - 1]} {y}</span>
         <button type="button" className="hv-daynav" aria-label="Next month" disabled={month >= todayStr.slice(0, 7)} onClick={() => shift(1)}><Chevron dir={1} /></button>
       </div>
@@ -149,7 +153,10 @@ function CalendarPop({ date, todayStr, earliest, days, onPick, onClose }) {
         {Array.from({ length: count }, (_, i) => {
           const k = key(i + 1);
           return (
-            <button type="button" key={k} disabled={!ok(k)} aria-label={dayFace(k, todayStr)} aria-current={k === date ? 'date' : undefined}
+            shut(k)
+              ? <button type="button" key={k} aria-label={dayFace(k, todayStr) + ', on paid plans'} className="cal-day shut"
+                  onClick={() => { onClose(); window.openPlans('calendar'); }}>{i + 1}</button>
+              : <button type="button" key={k} disabled={!ok(k)} aria-label={dayFace(k, todayStr)} aria-current={k === date ? 'date' : undefined}
               className={'cal-day' + (k === date ? ' on' : '') + (k === todayStr ? ' today' : '')}
               onClick={() => { onPick(k); onClose(); }}>{i + 1}</button>
           );
@@ -163,8 +170,12 @@ function CalendarPop({ date, todayStr, earliest, days, onPick, onClose }) {
 // (on a phone they sit at the card's two ends, SOLAR-27). Today sits inside the box on a phone.
 // The arrows, the calendar and Today reach only days with data (SOLAR-175): ‹ › jump to the
 // nearest one and grey out when there is none. The list is asked again when the calendar opens.
+// Free after its week (SOLAR-242): ‹ past yesterday shows greyed and opens the plans.
+const dayBefore = (k) => { const d = new Date(k + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); };
+const monthsBack = (a, b) => (Number(a.slice(0, 4)) - Number(b.slice(0, 4))) * 12 + Number(a.slice(5, 7)) - Number(b.slice(5, 7));
 function DateBar({ pick, earliest, locked, children }) {
   const { date, setDate, todayStr } = pick;
+  const floor = window.useFreeOver() ? dayBefore(todayStr) : null;
   const [open, setOpen] = React.useState(false);
   const close = React.useCallback(() => setOpen(false), []);
   const [days, setDays] = React.useState(null);
@@ -177,8 +188,10 @@ function DateBar({ pick, earliest, locked, children }) {
   const latest = locked ? null : list[list.length - 1], toLatest = latest && latest !== date;
   return (
     <div className="hv-datebar">
-      <button className="hv-daynav" disabled={!prevDay} aria-label="Previous day"
-        onClick={() => prevDay && setDate(prevDay)}><Chevron dir={-1} /></button>
+      {floor && !locked && (date <= floor || !prevDay)
+        ? <button className="hv-daynav shut" aria-label="Earlier days, on paid plans" onClick={() => window.openPlans('date_arrow')}><Chevron dir={-1} /></button>
+        : <button className="hv-daynav" disabled={!prevDay} aria-label="Previous day"
+            onClick={() => prevDay && setDate(prevDay)}><Chevron dir={-1} /></button>}
       <div className="hv-datebox">
         <button type="button" className="hv-datepick" disabled={locked} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(o => !o)}>
           <svg className="hv-cal" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
@@ -188,7 +201,7 @@ function DateBar({ pick, earliest, locked, children }) {
           <span className="hv-dateface">{dayFace(date, todayStr)}</span>
         </button>
         <button className="hv-today hv-today-in" disabled={!toLatest} onClick={() => toLatest && setDate(latest)}>Today</button>
-        {open && <CalendarPop date={date} todayStr={todayStr} earliest={earliest} days={days} onPick={setDate} onClose={close} />}
+        {open && <CalendarPop date={date} todayStr={todayStr} earliest={earliest} days={days} onPick={setDate} onClose={close} floor={floor} />}
       </div>
       <button className="hv-daynav" disabled={!nextDay} aria-label="Next day"
         onClick={() => nextDay && setDate(nextDay)}><Chevron dir={1} /></button>

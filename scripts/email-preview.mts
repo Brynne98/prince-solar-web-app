@@ -18,7 +18,7 @@ import type { Email } from "../supabase/functions/_shared/email.ts";
 const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
-  accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_NOTICE, freeWeekEndsSoon, historySynced, movedToFree, renewalNotice,
+  accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_NOTICE, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, renewalNotice,
   passwordChanged, paymentFailed, paymentReceived, planChangeBooked, plantEvent, plantsRemovalSoon, planUpgraded,
   renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
@@ -90,7 +90,8 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "billing-receipt": [FROM_NOTICE, paymentReceived({ plan: "family", period: "monthly", amount: 228, date: "1 Nov 2026", card: "Visa ending 4081",
     reference: "PSH-7Q2K9X", extraInverters: { n: 1, each: 49 }, next: { amount: 228, date: "1 Dec" } })],
   "billing-renewal-notice": [FROM_NOTICE, renewalNotice({ plan: "family", amount: 1799, on: "1 Feb 2027" })],
-  "billing-free-week-ends-soon": [FROM_NOTICE, freeWeekEndsSoon("Monday 12 Oct")],
+  "billing-free-week-ends-soon": [FROM_NOTICE, freeWeekEndsSoon("Monday", "Home", 58, 83)],
+  "free-week-setup": [FROM_NOTICE, freeWeekSetup(["rate", "size", "panels"])],
   "billing-upgraded": [FROM_NOTICE, planUpgraded({ from: "home", to: "family", period: "monthly", paidNow: 43, daysLeft: 16, next: { amount: 179, date: "1 Dec" } })],
   "billing-inverters-added": [FROM_NOTICE, planUpgraded({ from: "family", to: "family", period: "monthly", addedInverters: 2, paidNow: 52, daysLeft: 16, next: { amount: 277, date: "1 Dec" } })],
   "billing-downgrade-booked": [FROM_NOTICE, planChangeBooked({ from: "family", to: "home", fromPeriod: "monthly", on: "1 Dec", removePlants: ["Cabin", "Office"], next: { amount: 99 } })],

@@ -155,7 +155,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const silent = ps.status === 'offline';
   let battEta = null, battInfo = null;
   if (!hasBatt || silent) { /* nothing to estimate */ }
-  else if (!cap) { battInfo = 'Set pack size'; } // a link on the flow's battery node
+  else if (!cap) { battInfo = 'Add battery size to see this'; } // a link on the flow's battery node
   // Under 200 W the battery is only trickling and a time would read in days, so it gives none.
   else if (a.battState === 'discharging' && a.battPower >= 200) {
     const hrs = availKwh / (a.battPower / 1000);
@@ -273,6 +273,8 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
 
   // ---- period-over-period trend arrows on the Overview cards ----
   const cmp = useCompare(refreshKey, snap);
+  // Free after its week (SOLAR-242): Today stays; the month's figures blur, the rest is a faint shape
+  const over = window.useFreeOver();
 
   // ---- period overview: Today / Week / Month / Year / Lifetime ----
   const [period, setPeriod] = React.useState('today');
@@ -375,6 +377,8 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const dSaved = (moneyTrend && prev && cSaved != null) ? cSaved - prevSaved : null;
 
   return (
+    <>
+    {over && hasGrid && <GridOffPrompt hasBatt={hasBatt} tz={tz} />}
     <div className="live-grid">
       <div className={'flow-fs-wrap' + (wall ? ' wall' : '') + (wall && idle ? ' idle' : '')} ref={flowRef}>
         {wall && (
@@ -407,9 +411,10 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }]}
             value={period} onChange={setPeriod} />
         </div>
+        {over && period !== 'today' && period !== 'month' ? <window.HistoryLock where={'overview_' + period} /> : <>
         {/* On a phone there is no hover, so a thin comparison base is said on screen. */}
-        {partial && <div className="cmp-note">Arrows compare the {cmpDays} of {cmpRow.span} days with readings on both sides.</div>}
-        <div className="today-strip">
+        {partial && !over && <div className="cmp-note">Arrows compare the {cmpDays} of {cmpRow.span} days with readings on both sides.</div>}
+        <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '')}>
           <MiniStat loading={pending} label="Made" value={window.fmtEnergySmart(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord} />
           <MiniStat loading={pending} label="Home" value={window.fmtEnergySmart(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
             info="What your home used, across all inverters." />
@@ -438,11 +443,41 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
             trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord}
             // no rate yet: the line under the dash opens Settings on Tariff
-            sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Set your rate</button> : undefined}
+            sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Add your rate to see this</button>
+              : over && period === 'month' ? <button type="button" className="lock-btn" onClick={() => window.openPlans('month_saved')}><window.LockIcon />See it</button> : undefined}
             info={'An estimate: what your home used that didn’t come from the grid, at your electricity rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '.'} />
         </div>
+        </>}
       </div>
 
+    </div>
+    </>
+  );
+}
+
+// Free after its week, once the grid has come back (SOLAR-242): how long it was off and
+// what carried the house, then the plans. Once per outage on this device; × puts it away.
+function GridOffPrompt({ hasBatt, tz }) {
+  const [span, setSpan] = React.useState(null);
+  const [seen, setSeen] = React.useState(() => { try { return localStorage.getItem('ps.gridOffSeen'); } catch (e) { return null; } });
+  React.useEffect(() => {
+    let alive = true;
+    window.sb.rpc('api_grid_off_recent', { p_plant: window.CURRENT_PLANT }).then(({ data }) => { if (alive) setSpan(data || null); });
+    return () => { alive = false; };
+  }, [window.CURRENT_PLANT]);
+  if (!span || !span.endedAt || seen === span.endedAt) return null;
+  const from = new Date(span.startedAt), to = new Date(span.endedAt);
+  const mins = (to - from) / 60000;
+  const dur = mins < 90 ? Math.max(1, Math.round(mins)) + ' min' : Math.round(mins / 60) + ' h';
+  const h = window.plantHour(tz, from), today = plantDateStr(tz);
+  const when = (h >= 18 || h < 6) && window.plantHour(tz, to) < 12 && plantDateStr(tz, to) === today ? 'last night'
+    : plantDateStr(tz, to) === today ? 'today' : 'yesterday';
+  const close = () => { try { localStorage.setItem('ps.gridOffSeen', span.endedAt); } catch (e) {} setSeen(span.endedAt); };
+  return (
+    <div className="notice grid-off-prompt" role="status">
+      <p><b>Grid was off {dur} {when}.</b>{hasBatt && ' Your battery carried the house.'}</p>
+      <button type="button" className="mini-link" onClick={() => { close(); window.openPlans('grid_off'); }}>See how it held up →</button>
+      <button type="button" className="fs-x" aria-label="Close" onClick={close}><Icon id="close" /></button>
     </div>
   );
 }
@@ -818,7 +853,11 @@ function bestDay(rows, field, today) {
 // pointer brightens and shows its date and total; clicking one opens that day in the chart
 // above, whose day is outlined here.
 // `rgb` is `color` as "r,g,b", for the lighter fills.
-function DaysBars({ rows, field, color, rgb, word, label, today, selected, earliest, onPick }) {
+// Free after its week (SOLAR-242): the 30 days are a faint shape and a lock
+function DaysBars(props) {
+  return window.useFreeOver() ? <window.HistoryLock where={'days_' + props.field} /> : <DaysBarsChart {...props} />;
+}
+function DaysBarsChart({ rows, field, color, rgb, word, label, today, selected, earliest, onPick }) {
   const [ref, width, height] = useChartSize([170, 220]);
   const [hover, setHover] = React.useState(null);
   const mobile = width < 560;
@@ -1005,7 +1044,9 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const EP = window.fmtEnergyParts;
   // Every tile keeps its second line, empty or not: the trends and the since-date land after
   // the totals, and a row whose tiles had none yet was 29px short until they did.
-  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.pv} loading={v == null} sub={sub || NBSP} />; };
+  // Free after its week (SOLAR-242): every total but Today is a faint shape and a lock
+  const over = window.useFreeOver();
+  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.pv} loading={v == null} sub={sub || NBSP} locked={over && label !== 'TODAY' ? 'solar_totals' : null} />; };
   const trend = (k, min, word) => periodTrend(cmp, k, 'pv', min, word);
   const kwp = cfg.systemKwp;
   React.useEffect(() => { try { localStorage.setItem('synsynk.kwpSet', kwp > 0 ? '1' : '0'); } catch (e) {} }, [kwp]);
@@ -1071,15 +1112,16 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 
   // ---- last 30 days ----
   const bars = withLiveToday(daily, plantToday, 'pv', a.pvToday);
-  const best = bestDay(bars, 'pv', plantToday);
+  const best = over ? null : bestDay(bars, 'pv', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('solar-day'); };
 
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
         <StatTile label="SOLAR NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.pv}
-          sub={silent ? 'Last reading ' + readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>
-            : <button type="button" className="mini-link" onClick={() => onOpenSettings('plant')}>Set panel capacity</button>} />
+          sub={silent ? 'Last reading ' + readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? (over ? <window.Locked where="panel_pct" label="Keep your insights"><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW</window.Locked>
+              : <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>)
+            : <button type="button" className="mini-link" onClick={() => onOpenSettings('plant')}>Add your panels to see this</button>} />
         {tile('TODAY', a.pvToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.pv)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
@@ -1103,7 +1145,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         {daily === false
           ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
           : !daily ? <PlotSkeleton heights={[170, 220]} r={10} />
-          : bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
+          : !over && bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
           : <DaysBars rows={bars} field="pv" color={CC.pv} rgb="61,220,132" word="Solar" label="Solar per day for the last 30 days"
               today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
       </Card>
@@ -1189,7 +1231,9 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
   React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
   const tot = periodTotals('load', a.loadToday, energy, plantToday);
   const EP = window.fmtEnergyParts;
-  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.load} loading={v == null} sub={sub || NBSP} />; };
+  // Free after its week (SOLAR-242): every total but Today is a faint shape and a lock
+  const over = window.useFreeOver();
+  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.load} loading={v == null} sub={sub || NBSP} locked={over && label !== 'TODAY' ? 'home_totals' : null} />; };
   // less used is better, as on Grid
   const trend = (k, min, word) => periodTrend(cmp, k, 'load', min, word, true);
   const [nowN, nowU] = fmtPowerParts(a.loadNow);
@@ -1229,7 +1273,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
 
   // ---- last 30 days ----
   const bars = withLiveToday(daily, plantToday, 'load', a.loadToday);
-  const most = bestDay(bars, 'load', plantToday);
+  const most = over ? null : bestDay(bars, 'load', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('home-day'); };
 
   return (
@@ -1260,7 +1304,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
         {daily === false
           ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
           : !daily ? <PlotSkeleton heights={[170, 220]} r={10} />
-          : bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
+          : !over && bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
           : <DaysBars rows={bars} field="load" color={CC.load} rgb="248,113,113" word="Used" label="Home use per day for the last 30 days"
               today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
       </Card>
@@ -1351,7 +1395,9 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // two-inverter plant reads nothing, so the inverters' own counters undercount.
   const tot = periodTotals('imp', a.gridFromToday, energy, plantToday);
   const EP = window.fmtEnergyParts;
-  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.grid} loading={v == null} sub={sub || NBSP} />; };
+  // Free after its week (SOLAR-242): every total but Today is a faint shape and a lock
+  const over = window.useFreeOver();
+  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.grid} loading={v == null} sub={sub || NBSP} locked={over && label !== 'TODAY' ? 'grid_totals' : null} />; };
   const trend = (k, min, word) => periodTrend(cmp, k, 'imp', min, word, true);
   // Every grid-tied inverter leaks a little backflow, so a plant not paid for export only
   // counts as sending power out above 100 W.
@@ -1398,7 +1444,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // ---- last 30 days ----
   const [daily, loadDaily] = useDaily(refreshKey);
   const bars = withLiveToday(daily, plantToday, 'imp', a.gridFromToday);
-  const most = bestDay(bars, 'imp', plantToday);
+  const most = over ? null : bestDay(bars, 'imp', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('grid-day'); };
 
   return (
@@ -1433,7 +1479,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         {daily === false
           ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
           : !daily ? <PlotSkeleton heights={[170, 220]} r={10} />
-          : bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
+          : !over && bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
           : <DaysBars rows={bars} field="imp" color={CC.grid} rgb="250,204,21" word="Imported" label="Energy imported from the grid per day for the last 30 days"
               today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
       </Card>
@@ -1975,7 +2021,7 @@ function SettingsSection({ id, title, note, children }) {
 // monthly/yearly toggle: a paid plan's period changes on its billing date.
 const PLAN_NAME = { free: 'Free', home: 'Home', family: 'Family' };
 const PLAN_RANK = { free: 0, home: 1, family: 2 };
-const PLAN_GIVES = { free: ['1 plant', 'Last 24 hours kept'], home: ['1 plant', 'All history kept'], family: ['Up to 3 plants', 'All history kept'] };
+const PLAN_GIVES = { free: ['1 plant', 'Last 24 hours'], home: ['1 plant', 'Your full history'], family: ['Up to 3 plants', 'Your full history'] };
 function PlanSection({ billing, reload }) {
   const { useState } = React;
   const [mode, setMode] = useState(null); // null | 'cancel' | 'upgrade'
@@ -1995,7 +2041,7 @@ function PlanSection({ billing, reload }) {
       <SettingsSection id="plan" title="Plan">
         <div className="plan-now">
           <div className="plan-name">{hid('Family')}</div>
-          <div className="conn-meta" style={{ position: 'relative' }}><span style={unseen}>Free of charge. Every plant, all history kept.</span>{cover}</div>
+          <div className="conn-meta" style={{ position: 'relative' }}><span style={unseen}>Free of charge. Every plant, full history.</span>{cover}</div>
         </div>
       </SettingsSection>
     );
@@ -2064,7 +2110,7 @@ function PlanSection({ billing, reload }) {
       {b.comped ? (
         <div className="plan-now">
           <div className="plan-name">{PLAN_NAME[b.plan]}</div>
-          <div className="conn-meta">Free of charge. Every plant, all history kept.</div>
+          <div className="conn-meta">Free of charge. Every plant, full history.</div>
         </div>
       ) : <>
         {b.state === 'past_due' && (
@@ -2622,6 +2668,7 @@ function PasswordSection({ email }) {
 // builds the file; a year at most. Full history (paid) once plans exist: SOLAR-104.
 function DownloadSection() {
   const { useState } = React;
+  const over = window.useFreeOver(); // Free after its week (SOLAR-242): the button is a lock
   const today = window.localDateStr(new Date());
   const weekAgo = window.localDateStr(new Date(Date.now() - 6 * 86400000));
   const [from, setFrom] = useState(weekAgo);
@@ -2675,7 +2722,8 @@ function DownloadSection() {
       <div className="conn-row sset-row">
         <div className="conn-text"><span className="conn-meta">A CSV file. Opens in Excel or Google Sheets.</span></div>
         <div className="conn-actions sset-one">
-          <button type="button" className="save-btn" onClick={submit} disabled={busy} aria-busy={busy}>{busy ? 'Preparing…' : 'Download'}</button>
+          {over ? <button type="button" className="ghost-btn lock-cta" onClick={() => window.openPlans('csv')}><window.LockIcon />Download</button>
+            : <button type="button" className="save-btn" onClick={submit} disabled={busy} aria-busy={busy}>{busy ? 'Preparing…' : 'Download'}</button>}
         </div>
       </div>
     </SettingsSection>

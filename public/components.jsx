@@ -117,7 +117,14 @@ function Card({ children, className = '', style = {}, ...rest }) {
 }
 
 // ---- Big number stat tile (the "4 tabs" the user liked) ---------------------
-function StatTile({ label, value, unit, accent, sub, bar, loading }) {
+// locked: Free after its week (SOLAR-242), a faint shape for the figure and a lock under it
+function StatTile({ label, value, unit, accent, sub, bar, loading, locked }) {
+  if (locked) return (
+    <Card className="stat-tile">
+      <div className="stat-label">{label}</div>
+      <div className="stat-value"><HistoryLock tile /></div>
+      <div className="stat-sub"><button type="button" className="lock-btn" onClick={() => openPlans(locked)}><LockIcon />See every day</button></div>
+    </Card>);
   return (
     <Card className="stat-tile">
       <div className="stat-label">{label}</div>
@@ -278,7 +285,54 @@ function SectionTitle({ children, right }) {
 
 }
 
+// ---- the free week (SOLAR-242) ----------------------------------------------
+// api_me's freeWeekEndsAt (0122) is set only for a Free account with a week on record.
+// { week } inside it, { over } after it; null for paid, comped and older accounts.
+// After it nothing is hidden: the user's own figure shows greyed or blurred with a
+// lock, and where history would be, a faint shape and one line. Each opens the plans.
+function freeState(me, now = Date.now()) {
+  const end = me && me.plan === 'free' && me.freeWeekEndsAt ? Date.parse(me.freeWeekEndsAt) : NaN;
+  if (!Number.isFinite(end)) return null;
+  return now < end ? { week: true } : { over: true };
+}
+const FreeCtx = React.createContext(null);
+const useFreeOver = () => !!(React.useContext(FreeCtx) || {}).over;
+// App listens and opens the plans sheet; `where` names the spot, for analytics only.
+function openPlans(where) {
+  window.track('lock_tapped', { where });
+  window.dispatchEvent(new CustomEvent('ps-plans', { detail: where }));
+}
+const LockIcon = () => (
+  <svg className="lock-ico" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
+    <rect x="3" y="7" width="10" height="7.5" rx="1.6" fill="currentColor" />
+    <path d="M5.25 7V5.1a2.75 2.75 0 0 1 5.5 0V7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+  </svg>
+);
+// The user's own figure, greyed (or blurred), and a lock with `label` that opens the plans.
+function Locked({ where, label, blur, children }) {
+  return (
+    <span className={'locked' + (blur ? ' blur' : '')}>
+      <span className="locked-v" aria-hidden="true">{children}</span>
+      <button type="button" className="lock-btn" onClick={() => openPlans(where)}><LockIcon />{label}</button>
+    </span>
+  );
+}
+// Where history would show: faint bars and the one line. `tile` = a stat tile's value.
+const FAINT = [42, 58, 35, 66, 50, 72, 46, 61, 38, 70, 55, 64, 44, 52];
+function HistoryLock({ where, tile }) {
+  if (tile) return <span className="faint-num" aria-hidden="true" />;
+  return (
+    <div className="hist-lock">
+      <div className="hl-shape" aria-hidden="true">{FAINT.map((h, i) => <i key={i} style={{ height: h + '%' }} />)}</div>
+      <button type="button" className="hl-line" onClick={() => openPlans(where)}>
+        <LockIcon /><span>Free keeps the last 24 hours. <b>See every day →</b></span>
+      </button>
+    </div>
+  );
+}
+
 Object.assign(window, {
+  freeState, FreeCtx, useFreeOver, openPlans, LockIcon, Locked, HistoryLock,
   COLORS, fmtPower, fmtPowerParts, battShown, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
   Card, StatTile, Metric, Badge, Segmented, Toggle, LegendChip, Sparkline, SectionTitle, InfoDot,
   Skeleton, SkeletonTile,
