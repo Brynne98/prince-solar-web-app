@@ -992,7 +992,7 @@
   @media (max-width: 599px) { #settings-password:has(form) { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
   /* Your system: each name on the left, its field fills the right (like change password);
      one column on a phone */
-  #settings-system .conn-row.sset-row { display: grid; grid-template-columns: 38% minmax(0, 1fr); gap: 20px; align-items: start;
+  #settings-system .conn-row.sset-row { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start;
     padding: 14px 0; border-top: 1px solid var(--line); }
   #settings-system .conn-row.sset-row:first-child { border-top: none; padding-top: 0; }
   #settings-system .sset-row > * { align-self: start; }   /* .conn-actions centres itself elsewhere */
@@ -1578,6 +1578,7 @@
   .fs-val small { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 5px; }
   .fs-rows { display: flex; flex-direction: column; gap: 8px; }
   .fs-row { display: grid; grid-template-columns: 72px 14px minmax(0, 1fr) 28px; align-items: center; gap: 8px; animation: fs-rowin .18s ease-out; }
+  .fs-row.solo { grid-template-columns: 72px 14px minmax(0, 1fr); }
   @keyframes fs-rowin { from { opacity: 0; transform: translateY(-4px); } }
   @media (prefers-reduced-motion: reduce) { .fs-row { animation: none; } }
   .fs-cnt { width: 100%; min-width: 0; height: 41px; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text);
@@ -1611,6 +1612,7 @@
     .frame:has(.fs-phone .fs-card) .content { padding-bottom: calc(66px + 140px + env(safe-area-inset-bottom, 0px)); }
     .fs-sheet .sheet-panel { padding: 8px 18px calc(20px + env(safe-area-inset-bottom, 0px)); }
     .fs-row { grid-template-columns: 64px 12px minmax(0, 1fr) 44px; }   /* a finger-sized remove */
+    .fs-row.solo { grid-template-columns: 64px 12px minmax(0, 1fr); }
     .fs-rm { width: 44px; height: 44px; }
     /* finger-sized close and back; the segments match the app's 36 px on a phone */
     .fs-x { width: 40px; height: 40px; margin: -10px -12px -10px 0; }

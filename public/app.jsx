@@ -533,15 +533,15 @@ function SumBox({ kind, mode, onMode, tot, onTot, rows, onRows, label }) {
       {mode === 'total' ? <StepField value={tot} onChange={onTot} label={label + ' in total'} unit={sum.unit} inputMode="decimal" ph={sum.totPh} invalid={!now.ok} /> : (
         <div className="fs-rows">
           {rows.map((r, i) => (
-            <div key={i} className="fs-row">
+            <div key={i} className={'fs-row' + (rows.length === 1 ? ' solo' : '')}>
               <input className="fs-cnt mono" type="text" inputMode="numeric" autoComplete="off" aria-label={'How many, size ' + (i + 1)}
                      value={r.c} onChange={e => setRow(i, 'c', e.target.value)} />
               <span className="fs-times" aria-hidden="true">×</span>
               <StepField value={r.e} onChange={x => setRow(i, 'e', x)} label={sum.sizeLabel + ', size ' + (i + 1)} unit={sum.each}
                          inputMode={kind === 'panels' ? 'numeric' : 'decimal'} ph={sum.ph} />
-              <button type="button" className="fs-rm" aria-label={'Remove size ' + (i + 1)} title="Remove"
-                      style={rows.length === 1 ? { visibility: 'hidden' } : undefined}
-                      onClick={() => onRows(rows.filter((_, j) => j !== i))}><TrashIcon /></button>
+              {/* one size has nothing to remove: no button, and its box takes the room */}
+              {rows.length > 1 && <button type="button" className="fs-rm" aria-label={'Remove size ' + (i + 1)} title="Remove"
+                      onClick={() => onRows(rows.filter((_, j) => j !== i))}><TrashIcon /></button>}
             </div>
           ))}
           <button type="button" className="fs-add" onClick={() => onRows([...rows, { c: '1', e: '' }])}>{sum.add}</button>
