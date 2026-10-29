@@ -1,13 +1,15 @@
 // `billing` — takes money through Paystack (SOLAR-208). The rules are in 0116; this
 // only talks to Paystack and reports back.
 //
-//   POST /billing/pay      the signed-in user, { plan, period?, added?, newCard? }, or
-//                          { settle: true } to pay a failed renewal. Charges the saved
+//   POST /billing/pay      the signed-in user, { plan, period?, added?, newCard? },
+//                          { settle: true } to pay a failed renewal, or { card: true }
+//                          to change the saved card (R1 on the card page, refunded once
+//                          paid; SOLAR-238). Charges the saved
 //                          card when there is one; otherwise answers { url } for
 //                          Paystack's card page, which comes back to the app with
 //                          ?reference=.
 //   POST /billing/verify   the signed-in user, { reference }: asks Paystack whether
-//                          that card-page payment went through.
+//                          that card-page payment went through. Answers { status, kind }.
 //   POST /billing/webhook  Paystack's own notice of a payment (HMAC-signed).
 //   POST /billing/run      pg_cron, daily (0116): renewals and retries.
 //
@@ -45,14 +47,29 @@ async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
-/** Report a Paystack transaction back to 0116. Paid, failed, or still open (null). */
-async function settle(tx: Tx): Promise<"paid" | "failed" | null> {
+/** A card change's R1 goes back at once (0120). A refused refund is logged on the charge. */
+async function refund(reference: string) {
+  const err = await paystack("POST", "/refund", { transaction: reference }).then(() => null, (e) => e.message as string);
+  if (err) console.error(`billing refund ${reference}: ${err}`);
+  await rpc("billing_charge_refunded", { p_reference: reference, p_error: err });
+}
+
+/** Report a Paystack transaction back to 0116. Paid, failed, or still open (null).
+ *  `out.kind`: the paid charge's kind, for /verify. */
+async function settle(tx: Tx, out: { kind?: string } = {}): Promise<"paid" | "failed" | null> {
   if (tx.status === "success" && tx.currency === "ZAR") {
-    await rpc("billing_charge_paid", { p_reference: tx.reference, p_card: tx.authorization ?? null, p_cents: tx.amount });
+    const r = await rpc<{ kind?: string; refund?: boolean }>("billing_charge_paid",
+      { p_reference: tx.reference, p_card: tx.authorization ?? null, p_cents: tx.amount });
+    out.kind = r?.kind;
+    if (r?.kind === "card" && r.refund) await refund(tx.reference);
     return "paid";
   }
-  if (["failed", "abandoned", "reversed"].includes(tx.status)) {
-    await rpc("billing_charge_failed", { p_reference: tx.reference, p_error: tx.gateway_response || tx.status });
+  // Reversed: refunded. A card change's R1 goes back on purpose, often before the
+  // user's /verify (the webhook came first); 0120 answers that it was paid.
+  if (["failed", "abandoned", "reversed", "reversal-pending"].includes(tx.status)) {
+    const r = await rpc<{ status?: string; kind?: string }>("billing_charge_failed",
+      { p_reference: tx.reference, p_error: tx.gateway_response || tx.status });
+    if (r?.status === "paid") { out.kind = r.kind; return "paid"; }
     return "failed";
   }
   return null; // pending, ongoing, send_otp...: the webhook settles it
@@ -136,8 +153,9 @@ serve("billing", async (req) => {
     const ref = String(body.reference ?? "");
     if (!ref.startsWith("psh_")) return json({ error: "unknown reference" }, 400, cors);
     const tx = await paystack<Tx>("GET", `/transaction/verify/${encodeURIComponent(ref)}`);
-    const status = await settle(tx);
-    return json({ status: status ?? "pending" }, 200, cors);
+    const paid: { kind?: string } = {};
+    const status = await settle(tx, paid);
+    return json({ status: status ?? "pending", kind: paid.kind ?? null }, 200, cors);
   }
 
   if (route !== "pay") return json({ error: "not found" }, 404, cors);
@@ -147,8 +165,12 @@ serve("billing", async (req) => {
   // The card page sends the user back here; only an allowed app origin.
   if (!origin || !cors["Access-Control-Allow-Origin"]) return json({ error: "origin not allowed" }, 403, cors);
 
+  // Settle and card change always go to the card page: a new card is the point.
+  const fresh = body.settle === true || body.card === true;
   const { data: open, error } = body.settle === true
     ? await db.rpc("billing_settle_open", { p_user: user.id })
+    : body.card === true
+    ? await db.rpc("billing_card_open", { p_user: user.id })
     : await db.rpc("billing_charge_open", {
       p_user: user.id, p_plan: String(body.plan ?? ""),
       p_period: body.period ? String(body.period) : null, p_added: Number(body.added) || 0,
@@ -158,7 +180,7 @@ serve("billing", async (req) => {
   const o = open as { reference: string; amount: number; email?: string; card?: string | null };
   if (o.amount === 0) return json({ status: "paid", reference: o.reference }, 200, cors);
 
-  if (o.card && body.newCard !== true && body.settle !== true) {
+  if (o.card && body.newCard !== true && !fresh) {
     const r = await chargeCard({ reference: o.reference, amount: o.amount, card: o.card, email: o.email ?? user.email ?? "" });
     return json({ status: r ?? "pending", reference: o.reference }, 200, cors);
   }

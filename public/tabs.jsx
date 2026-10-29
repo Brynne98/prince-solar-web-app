@@ -1971,41 +1971,62 @@ function SettingsSection({ id, title, note, children }) {
 // date. Downgrade, cancel and a monthly/yearly switch wait for that date; going up is an
 // upgrade and charges now (window.startUpgrade). Plants go first, then the plan: a
 // downgrade the plants don't fit is refused, and the note points at the logins below.
+// Every plan side by side, the user's own marked (SOLAR-238). Only Free gets the
+// monthly/yearly toggle: a paid plan's period changes on its billing date.
 const PLAN_NAME = { free: 'Free', home: 'Home', family: 'Family' };
 const PLAN_RANK = { free: 0, home: 1, family: 2 };
+const PLAN_GIVES = { free: ['1 plant', 'Last 24 hours kept'], home: ['1 plant', 'All history kept'], family: ['Up to 3 plants', 'All history kept'] };
 function PlanSection({ billing, reload }) {
   const { useState } = React;
-  const [mode, setMode] = useState(null); // null | 'change' | 'cancel' | 'plans'
+  const [mode, setMode] = useState(null); // null | 'cancel' | 'upgrade'
   const [busy, setBusy] = useState(false);
+  const [view, setView] = useState('monthly'); // Free's price toggle
   const kind = !billing ? null : billing.comped ? 'comped' : billing.plan !== 'free' ? 'paid' : 'free';
   React.useEffect(() => { if (kind) try { localStorage.setItem('synsynk.planKind', kind); } catch (e) {} }, [kind]);
   // Its outline while the plan loads, so the sections below don't jump down. Built from the
   // last plan seen on this device (Free if none): its own lines and buttons, unseen under the
-  // shimmer, so it wraps as they do on a phone (SOLAR-221).
+  // shimmer, so it wraps as they do on a phone (SOLAR-221). The three plan cards since SOLAR-238.
   if (!billing) {
     const last = (() => { try { return localStorage.getItem('synsynk.planKind'); } catch (e) { return null; } })() || 'free';
     const cover = <window.Skeleton h="auto" r={8} style={{ position: 'absolute', inset: 0 }} />;
     const unseen = { visibility: 'hidden' };
-    const btn = (cls, text) => <span style={{ position: 'relative', display: 'inline-block' }}><button type="button" className={cls} style={unseen} tabIndex={-1} aria-hidden="true">{text}</button>{cover}</span>;
-    return (
+    const hid = (el) => <span style={{ position: 'relative', display: 'inline-block' }}><span style={unseen}>{el}</span>{cover}</span>;
+    if (last === 'comped') return (
       <SettingsSection id="plan" title="Plan">
         <div className="plan-now">
-          <div className="plan-name"><span style={{ position: 'relative', display: 'inline-block' }}><span style={unseen}>{last === 'free' ? 'Free' : last === 'paid' ? 'Home, monthly' : 'Family'}</span>{cover}</span></div>
-          <div className="conn-meta" style={{ position: 'relative' }}><span style={unseen}>{last === 'comped' ? 'Free of charge. Every plant, all history kept.'
-            : last === 'paid' ? 'R99 per month · next payment R99 on 1 Nov' : 'One plant. After your first week we keep the last 24 hours.'}</span>{cover}</div>
+          <div className="plan-name">{hid('Family')}</div>
+          <div className="conn-meta" style={{ position: 'relative' }}><span style={unseen}>Free of charge. Every plant, all history kept.</span>{cover}</div>
         </div>
-        {last !== 'comped' && (
-          <div className="conn-add">
-            {last === 'paid' ? <>{btn('ghost-btn', 'Switch to yearly')}{btn('ghost-btn', 'Change plan')}</> : btn('save-btn', 'See plans')}
-          </div>
-        )}
+      </SettingsSection>
+    );
+    return (
+      <SettingsSection id="plan" title="Plan" note={hid(last === 'paid' ? 'Next payment R99 on 1 Nov.' : 'Cancel any time.')}>
+        <div className="plan-top">
+          <span className="field-note">{hid('Prices a month.')}</span>
+          {hid(<button type="button" className="ghost-btn" tabIndex={-1} aria-hidden="true">Switch to yearly</button>)}
+        </div>
+        <div className="plan-grid">
+          {['free', 'home', 'family'].map(p => (
+            <div key={p} className="pw-plan" style={{ position: 'relative' }}>
+              <div style={unseen}>
+                <div className="pw-name">{PLAN_NAME[p]}</div>
+                <div className="pw-price"><b>R179</b> a month</div>
+                <ul className="pw-gives plan-gives">{PLAN_GIVES[p].map(g => <li key={g}>{g}</li>)}</ul>
+                <button type="button" className="ghost-btn" tabIndex={-1} aria-hidden="true">Move on 29 Nov</button>
+              </div>
+              {cover}
+            </div>
+          ))}
+        </div>
+        <p className="field-note plan-foot">{hid('Plants after the 3rd: R49 a month for each inverter.')}</p>
       </SettingsSection>
     );
   }
   const { rand, billDay, perUnit } = window.billingFmt;
   const b = billing;
   const paid = b.plan !== 'free';
-  const unit = perUnit(b.period);
+  const period = paid ? b.period : view;
+  const unit = perUnit(period);
   const other = b.period === 'yearly' ? 'monthly' : 'yearly';
   const book = async (plan, period) => {
     setBusy(true);
@@ -2026,54 +2047,110 @@ function PlanSection({ billing, reload }) {
     : b.nextPlan === 'free' ? [`Ends on ${billDay(b.nextDate)}, then you’re on Free.`, `Keep ${PLAN_NAME[b.plan]}`]
     : b.nextPlan ? [`Moves to ${PLAN_NAME[b.nextPlan]} on ${billDay(b.nextDate)}.`, `Keep ${PLAN_NAME[b.plan]}`]
     : [`Switches to ${b.nextPeriod} on ${billDay(b.nextDate)}.`, `Stay ${b.period}`];
+  const prices = b.prices?.[period] || {};
+  const price = (p) => p === 'free' ? 0 : p === b.plan ? b.price : prices[p];
+  const action = (p) => {
+    if (p === b.plan) return <div className="pw-due plan-when">{paid ? (b.nextPlan || b.nextPeriod ? 'Changes' : 'Renews') + ' ' + billDay(b.nextDate) : 'Free, no card'}</div>;
+    if (PLAN_RANK[p] > PLAN_RANK[b.plan]) {
+      return paid
+        ? <button type="button" className="save-btn" onClick={() => setMode('upgrade')}>Upgrade</button>
+        : <button type="button" className={p === 'family' ? 'save-btn' : 'ghost-btn'} onClick={() => window.startUpgrade(p, view, 0, true)}>Choose {PLAN_NAME[p]}</button>;
+    }
+    if (b.nextPlan === p) return <div className="pw-due plan-when">From {billDay(b.nextDate)}</div>;
+    return <button type="button" className="ghost-btn" disabled={busy} onClick={() => (p === 'free' ? setMode('cancel') : book(p))}>Move on {billDay(b.nextDate)}</button>;
+  };
   return (
-    <SettingsSection id="plan" title="Plan">
-      <div className="plan-now">
-        <div className="plan-name">{PLAN_NAME[b.plan]}{paid && b.period ? `, ${b.period}` : ''}</div>
-        <div className="conn-meta">{b.comped ? 'Free of charge. Every plant, all history kept.' : paid
-          ? <>{rand(b.price)} {unit} · {b.nextPlan === 'free' ? 'no more payments' : <>next payment {rand(b.nextAmount)} on {billDay(b.nextDate)}</>}</>
-          : 'One plant. After your first week we keep the last 24 hours.'}</div>
+    <SettingsSection id="plan" title="Plan" note={b.comped ? null : paid ? `Next payment ${rand(b.nextAmount)} on ${billDay(b.nextDate)}.` : 'Cancel any time.'}>
+      {b.comped ? (
+        <div className="plan-now">
+          <div className="plan-name">{PLAN_NAME[b.plan]}</div>
+          <div className="conn-meta">Free of charge. Every plant, all history kept.</div>
+        </div>
+      ) : <>
         {b.state === 'past_due' && (
-          <div className="plan-booked">
+          <div className="plan-booked plan-alert">
             <span className="conn-status warn">Payment didn’t go through</span>
             <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
           </div>
         )}
         {booked && (
-          <div className="plan-booked">
+          <div className="plan-booked plan-alert">
             <span className="conn-status warn">{booked[0]}</span>
             <button type="button" className="ghost-btn" disabled={busy} onClick={() => book(b.plan, b.period)}>{booked[1]}</button>
           </div>
         )}
-      </div>
-      {(mode === 'plans' || mode === 'upgrade') && <div className="conn-form"><window.Paywall reason={mode} onCancel={() => setMode(null)} /></div>}
-      {mode === 'change' && (
-        <div className="conn-form plan-choices">
-          {['free', 'home', 'family'].filter(p => p !== b.plan).map(p => (
-            <div key={p} className="plan-choice">
-              <div>
-                <div className="plan-choice-name">{PLAN_NAME[p]}</div>
-                <div className="conn-meta">{p === 'family' ? 'Up to 3 plants, all history kept' : p === 'home' ? '1 plant, all history kept' : '1 plant, last 24 hours kept'}</div>
-              </div>
-              {PLAN_RANK[p] > PLAN_RANK[b.plan]
-                ? <button type="button" className="save-btn" onClick={() => setMode('upgrade')}>Upgrade</button>
-                : <button type="button" className="ghost-btn" disabled={busy} onClick={() => (p === 'free' ? setMode('cancel') : book(p))}>{p === 'free' ? 'Cancel plan' : `Move on ${billDay(b.nextDate)}`}</button>}
+        <div className="plan-top">
+          <span className="field-note">Prices {unit}.</span>
+          {!paid ? (
+            <div className="segmented seg-sm" role="group" aria-label="Billing">
+              {['monthly', 'yearly'].map(p => (
+                <button type="button" key={p} className={'seg-btn' + (view === p ? ' active' : '')} aria-pressed={view === p}
+                        onClick={() => setView(p)}>{p === 'monthly' ? 'Monthly' : 'Yearly, save 16%'}</button>
+              ))}
+            </div>
+          ) : !booked && <button type="button" className="ghost-btn" disabled={busy} onClick={() => book(b.plan, other)}>Switch to {other}</button>}
+        </div>
+        <div className="plan-grid">
+          {['free', 'home', 'family'].map(p => (
+            <div key={p} className={'pw-plan' + (p === b.plan ? ' plan-mine' : '') + (p === 'free' ? ' plan-free' : '')}>
+              {p === b.plan && <span className="plan-tag">Your plan</span>}
+              <div className="pw-name">{PLAN_NAME[p]}</div>
+              <div className="pw-price"><b>{rand(price(p) ?? 0)}</b>{p !== 'free' && ' ' + unit}</div>
+              <ul className="pw-gives plan-gives">{PLAN_GIVES[p].map(g => <li key={g}>{g}</li>)}</ul>
+              {action(p)}
             </div>
           ))}
-          <div className="conn-form-actions"><button type="button" className="ghost-btn" onClick={() => setMode(null)}>Close</button></div>
         </div>
-      )}
-      {mode === 'cancel' && (
-        <ConfirmCard title={<>Cancel {PLAN_NAME[b.plan]}?</>}
-          text={`It runs until ${billDay(b.nextDate)}. After that you’re on Free: we keep only the last 24 hours of readings. Alerts stay on; reports stop.`}
-          action="Cancel plan" onConfirm={() => book('free')} onCancel={() => setMode(null)} />
-      )}
-      {!mode && !b.comped && (
-        <div className="conn-add">
-          {paid ? <>
-            {!booked && <button type="button" className="ghost-btn" disabled={busy} onClick={() => book(b.plan, other)}>Switch to {other}</button>}
-            <button type="button" className="ghost-btn" onClick={() => setMode('change')}>Change plan</button>
-          </> : <button type="button" className="save-btn" onClick={() => setMode('plans')}>See plans</button>}
+        <p className="field-note plan-foot">Plants after the 3rd: {rand(prices.extra ?? 0)} {unit} for each inverter.</p>
+        {mode === 'upgrade' && <div className="conn-form"><window.Paywall reason="upgrade" onCancel={() => setMode(null)} /></div>}
+        {mode === 'cancel' && (
+          <ConfirmCard title={<>Cancel {PLAN_NAME[b.plan]}?</>}
+            text={`It runs until ${billDay(b.nextDate)}. After that you’re on Free: we keep only the last 24 hours of readings. Alerts stay on; reports stop.`}
+            action="Cancel plan" onConfirm={() => book('free')} onCancel={() => setMode(null)} />
+        )}
+      </>}
+    </SettingsSection>
+  );
+}
+
+// The saved card and the money taken (SOLAR-238). Change card opens Paystack's card
+// page for R1, which goes back once the card is saved.
+function PaymentsSection({ billing }) {
+  const { useState } = React;
+  const [busy, setBusy] = useState(false);
+  const b = billing;
+  if (!b || b.comped || (b.plan === 'free' && !b.card && !(b.payments || []).length)) return null;
+  const { rand } = window.billingFmt;
+  const c = b.card;
+  const day = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const what = { start: '', upgrade: 'upgrade', renewal: '', settle: 'paid late' };
+  return (
+    <SettingsSection id="payments" title="Payments" note={b.plan !== 'free' ? 'Paystack charges your card on your billing date.' : null}>
+      {c ? (
+        <div className="conn-row">
+          <span className="pay-card" aria-hidden="true">{c.brand === 'mastercard' ? 'MC' : (c.brand || 'card').toUpperCase().slice(0, 4)}</span>
+          <div className="conn-text">
+            <div className="conn-user">{c.name} ending <span className="mono">{c.last4}</span></div>
+            <div className="conn-meta">Expires {String(c.expMonth).padStart(2, '0')}/{String(c.expYear).slice(-2)}</div>
+          </div>
+          {/* past due: Pay with another card in Plan changes it and pays */}
+          {b.plan !== 'free' && b.state !== 'past_due' && (
+            <div className="conn-actions">
+              <button type="button" className="ghost-btn" disabled={busy} aria-busy={busy}
+                      onClick={async () => { setBusy(true); await window.changeCard(); setBusy(false); }}>{busy ? 'Opening…' : 'Change card'}</button>
+            </div>
+          )}
+        </div>
+      ) : <div className="field-note">No card saved.</div>}
+      {(b.payments || []).length > 0 && (
+        <div className="pay-list">
+          {b.payments.map(p => (
+            <div key={p.at} className="pay-row">
+              <span>{day(p.date)}</span>
+              <span className="pay-what">{PLAN_NAME[p.plan]}, {p.period}{what[p.kind] ? ', ' + what[p.kind] : ''}</span>
+              <span className="mono pay-amt">{rand(p.amount)}</span>
+            </div>
+          ))}
         </div>
       )}
     </SettingsSection>
@@ -2770,7 +2847,7 @@ function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
   const [billing, setBilling] = useState(null);
   const reloadBilling = () => window.sb.rpc('api_billing_status').then(({ data }) => { if (data) setBilling(data); return data; });
   // Back from a payment: billingReturn checks it (a paid one reloads the page).
-  useEffect(() => { reloadBilling().then(b => window.billingReturn(b)); }, []);
+  useEffect(() => { reloadBilling().then(b => window.billingReturn(b)).then(r => r === 'card' && reloadBilling()); }, []);
   const email = user?.email || null;
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
@@ -2780,6 +2857,7 @@ function AccountTab({ onPlantConfigSaved, links, flash, onFlashed }) {
           <p className="mono">{email || ' '}</p>{/* its line held while the session loads */}
         </div>
         <PlanSection billing={billing} reload={reloadBilling} />
+        <PaymentsSection billing={billing} />
         <SunSynkConnectionSection onChanged={onPlantConfigSaved} links={links} billing={billing} reloadBilling={reloadBilling} />
         <NotificationsSection userId={user?.id} />
         {links?.accounts?.length > 0 && <DownloadSection />}

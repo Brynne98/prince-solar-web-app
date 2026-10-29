@@ -1292,10 +1292,34 @@
   /* Plan section in Account (SOLAR-208) */
   .plan-name { font-size: 15px; font-weight: 600; color: var(--text); }
   .plan-booked { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
-  .plan-choices { display: flex; flex-direction: column; gap: 12px; }
-  .plan-choice { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
-  .plan-choice-name { font-size: 14px; font-weight: 600; color: var(--text); }
   .plan-now + .conn-add, .plan-now + .conn-form { margin-top: 14px; }
+  /* every plan side by side, the user's own marked (SOLAR-238) */
+  .plan-alert { margin: 0 0 14px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+  .plan-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  #settings-plan .sset-body { container-type: inline-size; }
+  .plan-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+  .plan-grid .pw-plan > button { white-space: nowrap; }
+  @container (max-width: 560px) { .plan-grid { grid-template-columns: minmax(0, 1fr); } }
+  .plan-grid .pw-plan { position: relative; }
+  .plan-grid .pw-plan > :last-child { margin-top: auto; }
+  .plan-grid .pw-plan > button { margin-top: auto; padding-top: 8px; }
+  .pw-plan.plan-mine { border-color: rgba(61,220,132,0.55); background: linear-gradient(180deg, rgba(61,220,132,0.07), var(--panel-2) 60%); }
+  .plan-tag { position: absolute; top: 14px; right: 14px; font-size: 11.5px; font-weight: 600; color: var(--ok); background: rgba(61,220,132,0.1); border: 1px solid rgba(61,220,132,0.3); border-radius: 999px; padding: 2px 9px; }
+  .plan-gives li::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 2px; background: var(--ok); margin-right: 8px; vertical-align: 2px; }
+  .plan-free .plan-gives li::before { background: var(--dim); }
+  .plan-when { padding: 9px 0 1px; }
+  .plan-foot { margin: 12px 0 0; }
+  .plan-foot + .conn-form, .plan-foot + .confirm-card { margin-top: 14px; }
+  .pay-card { width: 46px; height: 30px; border-radius: 6px; background: linear-gradient(135deg, #1d2a44, #2b3d63); border: 1px solid var(--line-2); display: grid; place-items: center; font: italic 700 11px 'Space Grotesk', sans-serif; color: var(--text); letter-spacing: .04em; flex: none; align-self: center; }
+  .pay-list { margin-top: 4px; border-top: 1px solid var(--line); }
+  .pay-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 14px; padding: 10px 0; font-size: 13.5px; border-top: 1px solid var(--line); }
+  .pay-row:first-child { border-top: none; }
+  .pay-row > span:first-child { color: var(--muted); }
+  .pay-amt { font-weight: 600; text-align: right; }
+  @media (max-width: 760px) {
+    .pay-row { grid-template-columns: minmax(0, 1fr) auto; gap: 2px 14px; }
+    .pay-row .pay-what { grid-row: 2; color: var(--dim); font-size: 13px; }
+  }
   .link-form .field label { display: flex; justify-content: space-between; gap: 12px; }
   .link-form .field label span { color: var(--dim); }
   .link-form .field label .link-bad { color: var(--load); }
