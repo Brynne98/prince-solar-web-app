@@ -82,7 +82,6 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 .moment h1 em,.moment h2 em{font-style:normal;color:var(--accent)}
 .moment p{margin-top:22px;font-family:var(--body);font-size:20px;line-height:1.5;color:var(--ink-soft);max-width:30em;text-wrap:pretty}
 .moment .cta{display:flex;gap:14px;margin-top:32px}
-.moment .stamp{display:block;font:500 15px var(--mono);margin-top:26px;color:var(--ink-soft)}
 .cardcol{align-self:stretch;padding:max(84px,calc(50vh - 259px)) 0 0}
 .cardcol .card{position:sticky;top:max(84px,calc(50vh - 259px))}
 .sky{position:absolute;inset:0;background:linear-gradient(180deg,var(--s1) 0%,var(--s2) 55%,var(--s3) 100%)}
@@ -95,7 +94,8 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 .sunorb::before{content:"";position:absolute;inset:-140px;border-radius:50%;background:radial-gradient(circle,var(--glow) 0,transparent 62%)}
 .land{position:absolute;left:0;right:0;bottom:0;height:220px;pointer-events:none}
 .land svg{position:absolute;bottom:0;left:0;width:100%;height:100%}
-.house{position:absolute;bottom:58px;left:max(40px,calc(50% - 584px));width:230px;pointer-events:none}
+/* the house stands at the right edge of the words column, clear of the buttons; the column ends at 50% - 28px on wide screens, 100% - 668px below 1280px */
+.house{position:absolute;bottom:58px;left:min(calc(50% - 258px),calc(100% - 898px));width:230px;pointer-events:none}
 .house svg{width:100%;display:block}
 .win{transition:fill .25s}
 
@@ -109,7 +109,6 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 .ch p{margin-top:22px;font-size:20px;line-height:1.5;color:var(--ink-soft);max-width:30em;text-wrap:pretty}
 .ch .cta{display:flex;gap:14px;margin-top:32px}
 .ch .fine{margin-top:18px;font-size:15px;color:var(--ink-soft)}
-.ch .stamp{display:block;font:500 15px var(--mono);margin-top:26px;color:var(--ink-soft)}
 
 /* app card (shared look) */
 .app{background:radial-gradient(120% 70% at 20% 0,rgba(255,255,255,.045),transparent 60%),linear-gradient(180deg,#141b25,#0c1117);border:1px solid rgba(255,255,255,.11);border-radius:20px;color:#e7ecf2;font-family:var(--sans);box-shadow:0 40px 80px -30px rgba(0,0,0,.65),0 12px 30px -12px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.06)}
@@ -399,7 +398,9 @@ footer .wrap{display:flex;align-items:center;gap:28px}
 footer nav{margin-left:auto;display:flex;gap:24px}
 footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 
-@media (max-width:1180px){.scene{grid-template-columns:1fr 480px;gap:32px}.card{transform:scale(.86);transform-origin:top left}.ch h1{font-size:68px}.ch h2{font-size:58px}.house{display:none}}
+@media (max-width:1180px){.scene{grid-template-columns:1fr 480px;gap:32px}.card{transform:scale(.86);transform-origin:top left}.ch h1{font-size:68px}.ch h2{font-size:58px}}
+/* narrower than 1220px the house would reach See pricing; phones bring back a small one */
+@media (max-width:1219px){.house{display:none}}
 @media (max-width:1040px){.scene{grid-template-columns:1fr 412px}.card{transform:scale(.74)}}
 
 /* ---------- phone: the card rides at the top of the day, the words sit under it ---------- */
@@ -435,7 +436,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   #mail .ib-stats .ib-card:last-child:nth-child(odd){grid-column:1/-1}
   .moment h1{font-size:40px}.moment h2{font-size:36px}
   .moment p{margin-top:12px;font-size:17px}
-  .moment .cta{margin-top:18px;flex-wrap:wrap}.moment .stamp{display:none}
+  .moment .cta{margin-top:18px;flex-wrap:wrap}
   section.blk{padding-top:96px;scroll-margin-top:-8px}section#features{scroll-margin-top:88px}
   .h2,.dawn .h2{font-size:38px}
   .lede{font-size:18px}
@@ -504,7 +505,6 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
           <h1>Watch your solar day <em>as it happens.</em></h1>
           <p>A clearer view of your SunSynk inverter in South Africa. Live power flow, every day kept, and an email the moment the power goes.</p>
           <div class="cta"><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a><a class="btn ghost" href="#pricing">See pricing</a></div>
-          <span class="stamp">Scroll through one day on an example plant.</span>
         </section>
         <section class="moment" data-k="1">
           <h2>See the sun <em>arrive.</em></h2>
