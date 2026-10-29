@@ -183,8 +183,8 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync }) {
 
 // The person: avatar, name and plant count in the sidebar; the avatar alone in a phone's
 // header. A dead SunSynk login puts a red dot on the avatar and on Account.
-// stepsLeft (the free week, SOLAR-242): a dot on the avatar and the count on Plant settings
-function AccountMenu({ user, plantCount, alert, stepsLeft, onAccount, onSettings, active, variant }) {
+// stepsLeft (the free week, SOLAR-242): a dot on the avatar and the count on Settings
+function AccountMenu({ user, plantCount, alert, stepsLeft, onSettings, active, variant }) {
   const [open, setOpen, ref] = usePopover();
   // plantCount is null while the plants load: the row shows, its count shimmers
   const sub = alert ? 'Reconnect a login' : plantCount == null ? '' : plantCount + (plantCount === 1 ? ' plant' : ' plants');
@@ -199,12 +199,11 @@ function AccountMenu({ user, plantCount, alert, stepsLeft, onAccount, onSettings
       {open && (
         <MenuList className="acct-menu" label="Account">
           <div className="menu-email">{user.email}</div>
-          {/* Settings left the page list for here (SOLAR-224) */}
+          {/* Settings left the page list for here (SOLAR-224); Account, Billing and Plant are
+              one Settings area since SOLAR-250 */}
           <button type="button" onClick={() => { setOpen(false); onSettings(); }}>
-            <Icon id="settings" />Plant settings{stepsLeft > 0 && <span className="menu-left">{stepsLeft} left</span>}
-          </button>
-          <button type="button" onClick={() => { setOpen(false); onAccount(); }}>
-            <Icon id="account" />Account{alert && <span className="dot" aria-label="A login needs reconnecting" />}
+            <Icon id="settings" />Settings{stepsLeft > 0 && <span className="menu-left">{stepsLeft} left</span>}
+            {alert && <span className="dot" aria-label="A login needs reconnecting" />}
           </button>
           <hr />
           <window.SignOutButton className="menu-signout"><Icon id="signout" />Sign out</window.SignOutButton>
@@ -711,8 +710,15 @@ const TABS = [
   { id: 'inverters', label: 'Equipment' },
   { id: 'settings', label: 'Settings' },
 ];
-// Account is a page too, reached from the account menu rather than the page list.
-const pageOk = (tabs, id) => id === 'account' || tabs.some(t => t.id === id);
+// The Settings area's pages (SOLAR-250), reached from the account menu rather than the page
+// list: the phone's menu list, Account, Billing, Adjust plan, and Plant ('settings').
+const SETTINGS_PAGES = ['prefs', 'account', 'billing', 'plans', 'settings'];
+const isSettings = (id) => SETTINGS_PAGES.includes(id);
+const pageOk = (tabs, id) => isSettings(id) || tabs.some(t => t.id === id);
+// A section a link or a button opens, and the page that holds it. The plant's fields are
+// one section since SOLAR-250, so the old ids land on it.
+const SECTION_ALIAS = { tariff: 'system', battery: 'system', plant: 'system' };
+const SECTION_PAGE = { connection: 'settings', system: 'settings', steps: 'settings', notifications: 'account', plan: 'billing', payments: 'billing', plants: 'billing' };
 // A saved or linked Battery page opens Equipment, where the packs now are.
 const tabAlias = (id) => (id === 'battery' ? 'inverters' : id);
 
@@ -733,7 +739,7 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
         </header>
         <main className="content" aria-busy={busy || undefined}>{children}</main>
       </div>
-      {steps && tab !== 'settings' && tab !== 'account' && steps('phone')}
+      {steps && !isSettings(tab) && steps('phone')}
       <PhoneBar tabs={tabs} tab={tab} onTab={onTab} />
       <SaveToast />
     </div>
@@ -779,10 +785,10 @@ function BootShell() {
   const saved = window.resetAsked() ? 'account' : tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab'));
   const tab = pageOk(TABS, saved) ? saved : 'live';
   return (
-    <Frame tabs={TABS} tab={tab} busy account={{ user, plantCount: null, onAccount: () => {}, onSettings: () => {} }}
+    <Frame tabs={TABS} tab={tab} busy account={{ user, plantCount: null, onSettings: () => {} }}
       head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /><NotifBell disabled /></>}>
       {/* TabSkeleton is in tabs.js, which loads after sign-in (SOLAR-143) */}
-      {tab !== 'settings' && tab !== 'account' && window.TabSkeleton && <window.TabSkeleton tab={tab} />}
+      {!isSettings(tab) && window.TabSkeleton && <window.TabSkeleton tab={tab} />}
     </Frame>
   );
 }
@@ -806,14 +812,14 @@ function useUser() {
 }
 
 
-// Settings' own outline for Setup: its three plant sections, title on the left and a card of
-// fields on the right, as the real page draws them (SOLAR-96).
+// Plant's own outline for Setup: its sections, title over a card of fields, as the real
+// page draws them (SOLAR-96, SOLAR-250).
 function SettingsSkeleton() {
   const field = <div className="field"><window.Skeleton w={90} h={10} /><window.Skeleton h={40} r={10} style={{ marginTop: 10 }} /></div>;
   return (
     <div className="settings-page">
-      <div className="page-head"><h1>Settings</h1></div>
-      {['Plant', 'Tariff', 'Battery'].map(t => (
+      <div className="page-head"><h1>Plant</h1></div>
+      {['Your system', 'Connections', 'Your data'].map(t => (
         <section key={t} className="sec">
           <div className="sec-intro"><h2 className="sset-title">{t}</h2></div>
           <div className="sset"><div className="field-row">{field}{field}</div></div>
@@ -838,8 +844,8 @@ function Setup({ links }) {
   });
   const [connecting, setConnecting] = useState(false);
   const go = (id) => { setTab(id); setConnecting(false); toTop(); };
-  // Account has no card, so the header's button opens it on Live.
-  const connect = () => { if (tab === 'account') setTab('live'); setConnecting(true); };
+  // Only Plant has the card, so the header's button opens it on Live from the other settings pages.
+  const connect = () => { if (isSettings(tab) && tab !== 'settings') setTab('live'); setConnecting(true); };
   useEffect(() => {
     if (!connecting) return;
     const key = (e) => { if (e.key === 'Escape') setConnecting(false); };
@@ -849,16 +855,12 @@ function Setup({ links }) {
   useEffect(() => { window.track('screen_viewed', { stage: 'setup', screen: connecting ? 'connect' : tab }); }, [tab, connecting]);
   const dead = links.accounts.filter(a => a.status === 'needs_relink');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
-  const account = { user, plantCount: 0, alert: dead.length > 0, onAccount: () => go('account'), onSettings: () => go('settings'), active: tab === 'account' || tab === 'settings' };
+  const account = { user, plantCount: 0, alert: dead.length > 0, onSettings: () => go('prefs'), active: isSettings(tab) };
   const connectBtn = (cls) => (
     <button type="button" className={'save-btn setup-btn ' + cls} onClick={connect} aria-label="Connect inverter"><Icon id="plug" /><span>Connect inverter</span></button>
   );
   const outline = tab === 'settings' ? <SettingsSkeleton /> : <window.TabSkeleton tab={tab} />;
-  return (
-    <Frame tabs={TABS} tab={tab} onTab={go} account={account}
-      head={<><PlantMenu fallback="No inverter yet" />{!connecting && connectBtn('setup-head-btn')}</>}>
-      {tab === 'account' ? <window.AccountTab links={links} />
-        : (
+  const stage = (
           <div className="setup-stage">
             <div className="setup-outline" aria-hidden="true" inert="">{outline}</div>
             <div className="setup-empty">
@@ -878,7 +880,12 @@ function Setup({ links }) {
               )}
             </div>
           </div>
-        )}
+  );
+  // Plant shows its outline and the card inside the Settings area; Account and Billing work.
+  return (
+    <Frame tabs={TABS} tab={tab} onTab={go} account={account}
+      head={<><PlantMenu fallback="No inverter yet" />{!connecting && connectBtn('setup-head-btn')}</>}>
+      {isSettings(tab) ? <window.SettingsArea page={tab} onPage={go} links={links} plantSlot={stage} /> : stage}
     </Frame>
   );
 }
@@ -942,10 +949,11 @@ function App({ links }) {
   });
   const [notifs, setNotifs] = useState(null);
   // "Set your rate", "Set pack size", Reconnect: open the page that holds that section
-  // (logins are on Account) and flash it once; the section scrolls itself into view.
+  // (SECTION_PAGE) and flash it once; the section scrolls itself into view.
   // The address keeps it as #section, so a reload scrolls back to it (SOLAR-165).
-  const openSettings = (section) => {
-    setFlashSection(section); setTab(section === 'connection' || section === 'notifications' ? 'account' : 'settings'); toTop();
+  const openSettings = (asked) => {
+    const section = SECTION_ALIAS[asked] || asked;
+    setFlashSection(section); setTab(SECTION_PAGE[section] || 'settings'); toTop();
     history.replaceState(history.state, '', '#' + section);
   };
   const user = useUser();
@@ -1052,7 +1060,8 @@ function App({ links }) {
       const url = new URL(location.href);
       const linked = Number(url.searchParams.get('plant'));
       // A report or alert footer adds section=notifications: open Account on the email switches.
-      const section = { logins: 'connection', notifications: 'notifications' }[url.searchParams.get('section')];
+      // A payment email or Paystack's return adds section=plan: Billing.
+      const section = { logins: 'connection', notifications: 'notifications', plan: 'plan' }[url.searchParams.get('section')];
       if (url.searchParams.has('section')) {
         url.searchParams.delete('section'); history.replaceState(history.state, '', url);
       }
@@ -1202,24 +1211,24 @@ function App({ links }) {
   const stepsLeft = free?.week ? (firstSteps(me, plantId)?.left || []).length : 0;
   const [overSeen, setOverSeen] = useState(false);
   const overCard = free?.over && !overSeen && !me?.prefs?.freeWeekOverSeen;
-  const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, stepsLeft, onAccount: () => go('account'), onSettings: () => go('settings'), active: tab === 'account' || tab === 'settings' };
+  const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, stepsLeft, onSettings: () => go('prefs'), active: isSettings(tab) };
   // a plant whose every login stopped working reads Reconnect in the menu
   const loginsCut = (id) => {
     const ls = links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(id)));
     return ls.length > 0 && !ls.some(a => a.status === 'active');
   };
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync} />;
-  const settingsPage = <window.SettingsTab me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig}
+  // A page's section, from Billing's Reconnect: openSettings; otherwise the page itself
+  const settingsPage = <window.SettingsArea page={tab} onPage={(p, section) => (section ? openSettings(section) : go(p))}
+    me={me} plantId={plantId} plantPicker={(me?.plants || []).length > 0 ? plantMenu : null} onPlantConfigSaved={reloadPlantConfig} links={links}
     flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />;
   const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);
-  const accountPage = <window.AccountTab onPlantConfigSaved={reloadPlantConfig} links={links}
-    flash={flashSection} onFlashed={() => setFlashSection(null)} />;
 
   // ---- not-yet-loaded gate ----
   //
   // The whole frame with skeletons where the data will go. Pages stay live while loading:
   // there is no reason to trap someone on Live because the first snapshot hasn't landed.
-  const dataPage = tab !== 'settings' && tab !== 'account';
+  const dataPage = !isSettings(tab);
   if (!snap) {
     return (
       <window.FreeCtx.Provider value={free}>
@@ -1228,12 +1237,11 @@ function App({ links }) {
           <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} /><NotifBell disabled /></>}>
         {err && <div className="notice offline" role="alert"><p><b>Can't reach the server.</b> Retrying every minute.</p></div>}
         {null}
-        {/* Settings and Account never touch the snapshot: they draw for real. They sit in
-            the same slots as in the loaded page below, so the first reading doesn't remount
-            them (the Plan section flashed back to its outline). */}
+        {/* The Settings area never touches the snapshot: it draws for real. It sits in
+            the same slot as in the loaded page below, so the first reading doesn't remount
+            it (the Plan section flashed back to its outline). */}
         <div className="page">
-          {tab === 'settings' && settingsPage}
-          {tab === 'account' && accountPage}
+          {!dataPage && settingsPage}
           {dataPage && <window.TabSkeleton tab={tab} />}
         </div>
       </Frame>
@@ -1255,8 +1263,7 @@ function App({ links }) {
         relinkedAt={relinked?.plantId === plantId ? relinked.at : null} />}
       <div className={'page' + (old ? ' old' : '')}>
         {dataPage && overCard && <FreeWeekOver onDone={() => setOverSeen(true)} />}
-        {tab === 'settings' && settingsPage}
-        {tab === 'account' && accountPage}
+        {!dataPage && settingsPage}
         {tab === 'live' && <window.LiveTab snap={snap} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
           onOpenSettings={openSettings} />}
         {tab === 'solar' && <window.SolarTab alertDay={openDay} snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}

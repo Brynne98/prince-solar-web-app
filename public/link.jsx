@@ -117,10 +117,10 @@ const billingCall = async (route, body) => {
   if (!res.ok) throw new Error(out.error || 'payment failed');
   return out;
 };
-// The Plan section, on the plant the user was looking at.
+// The Plan section on Billing, on the plant the user was looking at.
 const planUrl = (extra = '') => {
   const plant = new URLSearchParams(location.search).get('plant');
-  return `${location.pathname}?tab=account&section=plan${plant ? `&plant=${encodeURIComponent(plant)}` : ''}${extra}`;
+  return `${location.pathname}?tab=billing&section=plan${plant ? `&plant=${encodeURIComponent(plant)}` : ''}${extra}`;
 };
 const billingPaid = (plan) => {
   window.track('upgrade_done', plan ? { plan } : {});
