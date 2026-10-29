@@ -57,7 +57,7 @@ serve("link-sunsynk", async (req) => {
       // typical when the installer owns the plant and hasn't shared it yet.
       return json({ ok: true, accountId, plants, paused, warning: "no plants visible on this SunSynk account" }, 200, cors);
     }
-    // paused: plants linked but not on the plan; reason says why (upgrade_needed, free_week_used).
+    // paused: plants linked but not on the plan; reason says why (upgrade_needed).
     return json({ ok: true, accountId, plants, paused, reason }, 200, cors);
   } catch (e) {
     password = "";

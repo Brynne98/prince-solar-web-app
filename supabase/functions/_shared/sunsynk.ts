@@ -365,8 +365,7 @@ export async function linkAccount(userId: string, username: string, password: st
   const invs = await getInverters(acc);
   const chk = await planCheck(acc, plants, async () => invs);
   if (chk.ok && chk.extraInverters > 0 && confirmCost === false) throw new PlanRefused("confirm_cost", chk.extraInverters, chk.dueNow);
-  // Paused from the start: every new plant of a login that had its free week on
-  // another account; on Family, the plants past the 3rd when the cost was declined.
+  // Paused from the start: on Family, the plants past the 3rd when the cost was declined.
   // Free and Home past their one plant pause in the database (0110 trigger).
   const pause = pausedFrom(chk, confirmCost === "paused");
 
@@ -375,17 +374,15 @@ export async function linkAccount(userId: string, username: string, password: st
   });
   await rpc("account_refresh_set", { p_account: acc.id, p_refresh: t.refresh_token });
   const active = new Set((await syncPlants(acc, { plants, invs, pause: pause.map((p) => p.id) })).map((p) => p.id));
-  if (chk.reason !== "free_week_used") await rpc("billing_free_week_start", { p_user: userId, p_sunsynk_username: username });
+  await rpc("billing_free_week_start", { p_user: userId, p_sunsynk_username: username });
   return { accountId: acc.id, plants, paused: plants.filter((p) => !active.has(p.id)).map((p) => p.id), reason: chk.reason ?? null };
 }
 
 /**
- * New plants that link paused: all of a login that had its free week on another
- * account; on Family, those past the 3rd when the R49 cost isn't taken. Free and
- * Home past their one plant pause in the database (0110 trigger).
+ * New plants that link paused: on Family, those past the 3rd when the R49 cost
+ * isn't taken. Free and Home past their one plant pause in the database (0110 trigger).
  */
 function pausedFrom(chk: Awaited<ReturnType<typeof planCheck>>, costDeclined: boolean): PlantInfo[] {
-  if (chk.reason === "free_week_used") return [...chk.fresh];
   if (chk.ok && chk.extraInverters > 0 && costDeclined) return chk.fresh.filter((_, i) => chk.active + i + 1 > 3);
   return [];
 }
@@ -399,8 +396,7 @@ export class PlanRefused extends Error {
 
 /**
  * Plan check (0110 billing_may_link) for the plants of `plants` this user doesn't
- * have yet. Every plant counts (guard a); a login used by another account gets no
- * free week (guard b). New plants are taken in plant id order, the order
+ * have yet. Every plant counts (guard a). New plants are taken in plant id order, the order
  * plant_users_upsert gives them, so the extras are the same ones billing counts.
  */
 async function planCheck(acc: Account, plants: PlantInfo[], inverters: () => Promise<InverterInfo[]>) {
@@ -479,6 +475,16 @@ export async function syncPlants(acc: Account, linked?: { plants: PlantInfo[]; i
       lat: r.value.lat, lon: r.value.lon,
     }));
   if (rows.length) await rpc("plant_config_seed", { p_rows: rows });
+  // Free past its week (0111, SOLAR-241): recover never walks these plants back, so
+  // drop the 60-day bookmarks now rather than show "Fetching history" until the trim.
+  if (rows.length) {
+    const trimmed = await freeTrimmedPlants();
+    const cut = rows.map((r) => r.plant_id).filter((id) => trimmed.has(id));
+    if (cut.length) {
+      const { error } = await db.from("plant_config").update({ backfill_next: null, backfill_until: null, temp_next: null }).in("plant_id", cut);
+      if (error) console.warn(`free bookmarks ${cut.join(",")}: ${error.message}`);
+    }
+  }
   // Plants seeded just now (0044): store their inverter serials so `recover` can
   // ask SunSynk for per-inverter history before the first poll has run, then fire
   // sync-plant-energy and recover for each. Best effort — a failure here leaves

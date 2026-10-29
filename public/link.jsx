@@ -222,7 +222,6 @@ window.sb.auth.onAuthStateChange((event, session) => {
 /**
  * Shown when the plan doesn't cover a plant.
  *   reason 'add'        Free or Home with a plant, before the form (onAddPaused: go on, paused)
- *          'free_week'  linked, but the login had its free week on another account: Home fits too
  *          'paused'     Upgrade on a login row with paused plants (`paused`: their names)
  *          'upgrade'    Upgrade in the Plan section, on Home: the price before the saved card is charged
  * `added` = inverters the login brings past the 3rd plant, priced into Family.
@@ -230,7 +229,7 @@ window.sb.auth.onAuthStateChange((event, session) => {
  */
 function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
   const { useState, useEffect } = React;
-  const offers = reason === 'free_week' ? ['home', 'family'] : ['family'];
+  const offers = ['family'];
   const [period, setPeriod] = useState('monthly');
   const [quotes, setQuotes] = useState(null);
   useEffect(() => { window.track('paywall_shown', { reason }); }, []);
@@ -246,12 +245,10 @@ function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
   const per = paid ? first.period : period;
   return (
     <div className="paywall" role="dialog" aria-labelledby="pw-title">
-      <h2 id="pw-title" className="sset-title">{reason === 'free_week' ? 'Choose a plan'
-        : reason === 'upgrade' ? 'Upgrade to Family'
+      <h2 id="pw-title" className="sset-title">{reason === 'upgrade' ? 'Upgrade to Family'
         : reason === 'paused' ? `Collect data for ${paused.length === 1 ? paused[0] : paused.length + ' paused plants'}`
         : 'Add another plant'}</h2>
-      <p className="sset-note">{reason === 'free_week' ? 'This SunSynk login had its free week on another account, so its plant is paused.'
-        : first?.plan === 'family' ? 'Plants after your 3rd are paused until you add them to your plan.'
+      <p className="sset-note">{first?.plan === 'family' ? 'Plants after your 3rd are paused until you add them to your plan.'
         : (paid ? 'Home' : 'Free') + ' covers one plant.'}</p>
       {!paid && (
         <div className="segmented seg-sm pw-period" role="group" aria-label="Billing">
@@ -375,12 +372,12 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
         setNoPlants(true);
         return;
       }
-      // Linked, but nothing to show: every plant is paused (a login that had its free
-      // week elsewhere). The paywall says why, in place of the form.
+      // Linked, but nothing to show: every plant is paused. The paywall says why, in
+      // place of the form.
       const pausedAll = (r.paused || []).length > 0 && (r.paused || []).length === (r.plants || []).length && !hasPlant;
       if (pausedAll) {
         setPassword(''); setCost(null);
-        setPaywall({ reason: r.reason === 'free_week_used' ? 'free_week' : 'paused', paused: r.plants.map(p => p.name || 'Plant ' + p.id) });
+        setPaywall({ reason: 'paused', paused: r.plants.map(p => p.name || 'Plant ' + p.id) });
         await onLinked(r);
         return;
       }
