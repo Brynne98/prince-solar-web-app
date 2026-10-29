@@ -2355,7 +2355,8 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   };
   const plantRow = (p) => {
     const s = state(p);
-    const [word, tone] = { on: ['Collecting', 'ok'], off: ['Stopped', 'warn'], paused: ['Paused', 'warn'], going: ['Deleted ' + billDay(p.remove_on), 'bad'] }[s];
+    // Only news shows: a working plant says nothing, and a stopped one is its login's line
+    const [word, tone] = { paused: ['Paused', 'warn'], going: ['Deleted ' + billDay(p.remove_on), 'bad'] }[s] || [];
     const n = Number(p.inverters) || 0;
     return (
       <div key={p.plant_id} className="login-plant">
@@ -2363,7 +2364,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
           <div className="conn-user">{p.plant_name || 'Plant ' + p.plant_id}</div>
           <div className="conn-meta">{s === 'paused' ? 'Not on your plan. Its readings aren’t saved.' : n ? n + (n === 1 ? ' inverter' : ' inverters') : '\u00a0'}</div>
         </div>
-        <span className={'conn-status plant-state ' + tone}>{word}</span>
+        {word && <span className={'conn-status plant-state ' + tone}>{word}</span>}
         {s === 'paused' && onCollect && <button type="button" className="save-btn" onClick={onCollect}>Collect</button>}
         {s === 'going' && <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
       </div>
@@ -2389,13 +2390,15 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         return (
           <div key={acc.account_id} className={'conn-row' + (leaving === acc.account_id ? ' leaving' : '')}>
             <div className="conn-text">
-              {/* Line 1: the login. Line 2: is it working, and the last reading when that
-                  is the news. Its plants are listed under it. */}
+              {/* Line 1: the login. Line 2 only when it has stopped working, with its last
+                  reading. Its plants are listed under it. */}
               <div className="conn-user"><span className="mono">{acc.sunsynk_username}</span></div>
-              <div className="conn-meta">
-                <span className={'conn-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
-                {(!ok || stale) && acc.last_ok_at ? ' · last reading ' + ago(acc.last_ok_at) : ''}
-              </div>
+              {(!ok || stale) && (
+                <div className="conn-meta">
+                  <span className="conn-status warn">{word}</span>
+                  {acc.last_ok_at ? ' · last reading ' + ago(acc.last_ok_at) : ''}
+                </div>
+              )}
             </div>
             <div className="conn-actions">
               {!ok && mode !== acc.account_id && <button type="button" className="save-btn" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
