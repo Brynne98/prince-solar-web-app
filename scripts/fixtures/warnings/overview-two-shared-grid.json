@@ -1,0 +1,23 @@
+{
+  "_source": "api_overview for 538820 at 2026-10-29 16:41 SAST, serials and names replaced. Grid on; one shared battery; S1 is the slave (uploads every 5 min, battery temperature -100). String 1 on both inverters has never made power.",
+  "sync": { "days": 60, "window": 60, "pending": false, "tempNext": "2026-10-29", "invPending": false, "backfillNext": null, "spinePending": false, "backfillUntil": null },
+  "plant": { "id": 2, "name": "Plant B" },
+  "config": { "hasGrid": true, "reserve": 20, "currency": "ZAR", "timezone": "Africa/Harare", "systemKwp": 12.6, "hasBattery": true, "battCapacity": 25.6, "batteryBanks": "shared", "featuresSource": "detected", "battPositiveMeans": "discharging" },
+  "lastTs": 1793284860,
+  "totals": { "pv": 202, "soc": 99, "grid": -122, "load": 111, "todayPv": 14.1, "phaseDown": false, "gridPresent": true, "batteryPower": 57, "gridDirection": "exporting", "todayGridExport": 1.37, "todayGridImport": 0, "batteryDirection": "charging" },
+  "inverters": [
+    { "sn": "S1", "alias": "S1", "model": "S2", "status": 1, "readAt": 1793284575, "soft": "1.5.1.6", "hmi": "E.4.4.4", "commType": "RS485",
+      "pv": { "power": 45, "today": 6.3, "total": 1902.2, "stringSlots": 2, "strings": [{ "no": 1, "power": 0, "today": 0, "current": 0, "voltage": 5.5 }, { "no": 2, "power": 45, "today": 0, "current": 0.2, "voltage": 279.6 }] },
+      "grid": { "power": -109, "relay": "1", "voltage": 239, "voltages": [239], "direction": "exporting", "frequency": 49.86, "powerFactor": 1, "todayExport": 0, "todayImport": 0, "totalExport": 0, "totalImport": 0 },
+      "load": { "power": 45, "today": 4.1, "total": 1884.6, "frequency": 49.86 },
+      "output": { "power": 108, "voltage": 239, "voltages": [239], "frequency": 49.9 },
+      "battery": { "soc": 99, "bank2": null, "power": 50, "status": "discharging", "current": 0.94, "voltage": 53.3, "capacity": 200, "signedPower": -50, "temperature": -100, "todayCharged": 3.8, "totalCharged": 1130.5, "todayDischarged": 2.4, "totalDischarged": 1080.9, "numberOfBatteries": null } },
+    { "sn": "M1", "alias": "M1", "model": "M1", "status": 1, "readAt": 1793284795, "soft": "1.5.1.6", "hmi": "E.4.4.4", "commType": "RS485",
+      "pv": { "power": 157, "today": 7.8, "total": 2179.5, "stringSlots": 2, "strings": [{ "no": 1, "power": 0, "today": 0, "current": 0, "voltage": 4.6 }, { "no": 2, "power": 161, "today": 0, "current": 0.5, "voltage": 279.3 }] },
+      "grid": { "power": -13, "relay": "1", "voltage": 239.6, "voltages": [239.6], "direction": "exporting", "frequency": 49.95, "powerFactor": 1, "todayExport": 0.6, "todayImport": 0, "totalExport": 105.5, "totalImport": 295.2 },
+      "load": { "power": 66, "today": 4.1, "total": 1891.4, "frequency": 49.95 },
+      "output": { "power": 117, "voltage": 239.6, "voltages": [239.6], "frequency": 50 },
+      "battery": { "soc": 99, "bank2": null, "power": 107, "status": "charging", "current": -2.03, "voltage": 53.2, "capacity": 200, "signedPower": 107, "temperature": 26.4, "todayCharged": 5.1, "totalCharged": 1302.1, "todayDischarged": 1.7, "totalDischarged": 853.8, "numberOfBatteries": null } }
+  ],
+  "generatedAt": "2026-10-29T14:41:45.734Z"
+}
