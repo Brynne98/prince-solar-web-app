@@ -2795,30 +2795,25 @@ function DownloadSection() {
     }
   };
 
-  // The same row as every Settings field: name on the left, the box on the right.
-  const row = (id, text, value, set, last) => (
-    <div className="conn-row sset-row">
-      <div className="conn-text"><label htmlFor={id} className="conn-user">{text}</label></div>
-      <div className="conn-actions sset-one">
-        <div className={'fs-in' + (bad ? ' bad' : '')}>
-          <input id={id} type="date" value={value} max={today}
-                 onChange={(e) => { set(e.target.value); setBad(null); }} {...window.invalidProps(id, bad, 'dl-err')} />
-        </div>
-        {last && bad && <p className="sset-err" id="dl-err" role="alert">{bad}</p>}
+  // From, To and Download on one line; on a phone they stack.
+  const field = (id, text, value, set) => (
+    <div className="dl-field">
+      <label htmlFor={id} className="conn-meta">{text}</label>
+      <div className={'fs-in' + (bad ? ' bad' : '')}>
+        <input id={id} type="date" value={value} max={today}
+               onChange={(e) => { set(e.target.value); setBad(null); }} {...window.invalidProps(id, bad, 'dl-err')} />
       </div>
     </div>
   );
   return (
-    <SettingsSection id="download" title="Your data" note="Every minute for the last 31 days, every 5 minutes before that.">
-      {row('dl-from', 'From', from, setFrom)}
-      {row('dl-to', 'To', to, setTo, true)}
-      <div className="conn-row sset-row">
-        <div className="conn-text"><span className="conn-meta">A CSV file. Opens in Excel or Google Sheets.</span></div>
-        <div className="conn-actions sset-one">
-          {over ? <button type="button" className="ghost-btn lock-cta" onClick={() => window.openPlans('csv')}><window.LockIcon />Download</button>
-            : <button type="button" className="save-btn" onClick={submit} disabled={busy} aria-busy={busy}>{busy ? 'Preparing…' : 'Download'}</button>}
-        </div>
+    <SettingsSection id="download" title="Your data" note="A CSV file. Every minute for the last 31 days, every 5 minutes before that.">
+      <div className="dl-row">
+        {field('dl-from', 'From', from, setFrom)}
+        {field('dl-to', 'To', to, setTo)}
+        {over ? <button type="button" className="ghost-btn lock-cta" onClick={() => window.openPlans('csv')}><window.LockIcon />Download</button>
+          : <button type="button" className="save-btn" onClick={submit} disabled={busy} aria-busy={busy}>{busy ? 'Preparing…' : 'Download'}</button>}
       </div>
+      {bad && <p className="sset-err" id="dl-err" role="alert">{bad}</p>}
     </SettingsSection>
   );
 }
@@ -3018,7 +3013,7 @@ function NotificationsSection({ userId }) {
 // 'prefs' shows Account. Adjust plan ('plans') is a page under Billing. The plan is read
 // once here: Billing shows it, Account's Delete and Plant's Remove login need it.
 const SETTINGS_NAV = [['account', 'Account'], ['billing', 'Billing'], ['settings', 'Plant']];
-function SettingsArea({ page, onPage, me, plantId, plantPicker, plantSlot, onPlantConfigSaved, links, flash, onFlashed, onDirty, switchBlocked }) {
+function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved, links, flash, onFlashed, onDirty, switchBlocked }) {
   const { useState, useEffect } = React;
   const [user, setUser] = useState(null);
   useEffect(() => { window.sb.auth.getSession().then(({ data }) => setUser(data?.session?.user || null)).catch(() => {}); }, []);
@@ -3055,7 +3050,7 @@ function SettingsArea({ page, onPage, me, plantId, plantPicker, plantSlot, onPla
           {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadBilling} onBack={() => onPage('billing')}
                                                paused={paused.map(p => p.plant_name || 'Plant ' + p.plant_id)} added={added} />}
           {page === 'settings' && (plantSlot || (
-            <PlantPage me={me} plantId={plantId} plantPicker={plantPicker} onSaved={onPlantConfigSaved} onDirty={onDirty}
+            <PlantPage me={me} plantId={plantId} onSaved={onPlantConfigSaved} onDirty={onDirty}
                        switchBlocked={switchBlocked} links={links} billing={billing} reloadBilling={reloadBilling} />
           ))}
         </div>
@@ -3068,12 +3063,12 @@ function SettingsArea({ page, onPage, me, plantId, plantPicker, plantSlot, onPla
 function AccountPage({ user, billing, onBilling }) {
   const email = user?.email || null;
   const providers = user?.app_metadata?.providers || [];
-  const method = providers.includes('google') ? (providers.includes('email') ? 'Google and email' : 'Google') : 'Email';
+  const method = providers.includes('google') ? (providers.includes('email') ? 'Google or password' : 'Google') : 'password';
   return (
     <div className="settings-page">
       <div className="page-head">
         <h1>Account</h1>
-        <p className="mono">{email ? email + ' · ' + method : ' '}</p>{/* its line held while the session loads */}
+        <p>{email ? <>{email}<span className="set-method"> · Signs in with {method}</span></> : '\u00a0'}</p>{/* its line held while the session loads */}
       </div>
       <NotificationsSection userId={user?.id} />
       <SettingsSection id="actions" title="Account actions">
@@ -3102,15 +3097,12 @@ function BillingPage({ billing, reload, links, onPage, collecting }) {
   );
 }
 
-// Plant: the plant on screen, picked top right. Its system, the logins its readings come
-// from, and its readings as a file.
-function PlantPage({ me, plantId, plantPicker, onSaved, onDirty, switchBlocked, links, billing, reloadBilling }) {
+// Plant: the plant on screen (picked in the header). Its system, the logins its readings
+// come from, and its readings as a file.
+function PlantPage({ me, plantId, onSaved, onDirty, switchBlocked, links, billing, reloadBilling }) {
   return (
     <div className="settings-page">
-      <div className="page-head set-head">
-        <div><h1>Plant</h1><p>Changes apply to everyone on this plant.</p></div>
-        {plantPicker && <div className="set-picker">{plantPicker}</div>}
-      </div>
+      <div className="page-head"><h1>Plant</h1><p>Changes apply to everyone on this plant.</p></div>
       <PlantSections me={me} plantId={plantId} onSaved={onSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
       {links && <SunSynkConnectionSection onChanged={onSaved} links={links} billing={billing} reloadBilling={reloadBilling} />}
       {links?.accounts?.length > 0 && <DownloadSection />}

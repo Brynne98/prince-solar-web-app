@@ -871,7 +871,7 @@
   .settings-page { display: flex; flex-direction: column; max-width: 920px; padding-bottom: 24px; }
   .page-head h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
   .page-head p { margin: 0 0 6px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
-  .sec { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 22px 0; border-top: 1px solid var(--line); margin-top: 16px;
+  .sec { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px 0; margin-top: 8px;
     scroll-margin-top: calc(var(--head-h, 60px) + 12px); }
   .page-head + .sec { margin-top: 16px; }
   .sec + .sec { margin-top: 0; }
@@ -978,9 +978,23 @@
     .set-list .set-chev { display: block; }
     .set-list .set-main { display: none; }
   }
-  /* Plant: the title, and the plant picker at the right */
-  .set-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-  .set-picker { flex: none; }
+  .set-method { color: var(--dim); }
+  /* Account actions: one button width */
+  #settings-actions .conn-actions > button { min-width: 112px; }
+  /* Your system: two fields a row, each name over its box; one column on a phone */
+  #settings-system .sset-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 28px; }
+  #settings-system .conn-row.sset-row { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 10px; padding: 0; }
+  #settings-system .sset-row > .conn-text { flex-basis: auto; }
+  #settings-system :is(.sset-sum, .sset-one) { width: 100%; align-items: stretch; }
+  #settings-system .sset-one .fs-in { width: 100%; }
+  /* on Total the box is the value; the sum over it only reads on By size */
+  #settings-system .fs-sumhead:has(.fs-seg > button:first-child.on) .fs-val { display: none; }
+  @media (max-width: 700px) { #settings-system .sset-body { grid-template-columns: minmax(0, 1fr); } }
+  /* Your data: From, To and Download on one line */
+  .dl-row { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+  .dl-field { flex: 1 1 180px; display: flex; flex-direction: column; gap: 6px; }
+  .dl-row > button { flex: none; min-height: 41px; }
+  .dl-row + .sset-err { margin-top: 8px; }
   .sys-dot { display: inline-block; width: 8px; height: 8px; border-radius: 3px; margin-right: 9px; vertical-align: 1px; background: var(--dim); }
   .sys-dot.pv { background: var(--pv); } .sys-dot.batt { background: var(--batt); } .sys-dot.grid { background: var(--grid); }
   /* Account: Delete is off while a paid plan runs, with this note under it */
