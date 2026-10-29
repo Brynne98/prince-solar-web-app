@@ -386,17 +386,17 @@ const MAIL=[
   stats:[{l:'Made',v:'341',u:'kWh',tone:'solar',delta:d(6,'last week',true)},{l:'Home',v:'367',u:'kWh',tone:'home',delta:d(-3,'last week',true)},{l:'Imported',v:'70.0',u:'kWh',tone:'grid',delta:d(-12,'last week',true)},{l:'Independence',v:'81%',tone:'cyan',delta:d(4,'last week',true)},{l:'Est. saved',v:'R1 027',tone:'batt',delta:d(5,'last week',true)}],
   bars:{title:'Solar each day',side:'Average 48.7 kWh a day',labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],vals:[46.2,51.3,38.4,49.8,48.1,55.6,51.6]},
   facts:[{l:'Best day',v:'55.6',u:'kWh',tone:'solar',sub:'Sat 24 Oct'},{l:'Busiest day',v:'58.9',u:'kWh',tone:'home',sub:'Sun 25 Oct'}],
-  btn:'Open Live',foot:"You get this every week. Don't want it? Turn it off in your notification settings."},
+  btn:'Open Live'},
  {k:'panels',dot:C.home,time:'20 Oct',at:'Tue 20 Oct, 11:55',subject:'Some panels stopped producing at Example plant',preview:'PV3 on Inverter 1: no power since 11:42',
   title:'Some panels stopped producing at Example plant',stack:1,stats:[{l:'PV3 · 1',v:'No power',tone:'home',sub:'since 11:42 today'},{l:'Other panels',v:'OK',tone:'solar',sub:'producing as normal'}],
-  note:'One group of panels on Inverter 1 has stopped making power. The rest are still working.',btn:'Open Equipment',foot:"Alert for Example plant. Don't want these? Turn them off in your notification settings."},
+  note:'One group of panels on Inverter 1 has stopped making power. The rest are still working.',btn:'Open Equipment'},
  {k:'hot',dot:C.batt,time:'12 Oct',at:'Mon 12 Oct, 14:21',subject:'Battery hot at Example plant',preview:'Battery 41 °C at 14:20',
   title:'Battery hot at Example plant',stack:1,stats:[{l:'Battery',v:'41&nbsp;°C',tone:'home',sub:'at 14:20 today'}],
-  note:'Batteries wear faster when they run hot.',btn:'Open Equipment',foot:"Alert for Example plant. Don't want these? Turn them off in your notification settings."},
+  note:'Batteries wear faster when they run hot.',btn:'Open Equipment'},
  {k:'back',dot:C.grid,time:'3 Oct',at:'Sat 3 Oct, 18:45',subject:'Grid back at Example plant',preview:'Grid on since 18:45 today, outage 45m',
-  title:'Grid back at Example plant',stack:1,stats:[{l:'Grid',v:'On',tone:'grid',sub:'since 18:45 today'},{l:'Outage',v:'45m',sub:'without grid'}],btn:'Open Grid',foot:"Alert for Example plant. Don't want these? Turn them off in your notification settings."},
+  title:'Grid back at Example plant',stack:1,stats:[{l:'Grid',v:'On',tone:'grid',sub:'since 18:45 today'},{l:'Outage',v:'45m',sub:'without grid'}],btn:'Open Grid'},
  {k:'down',dot:C.home,time:'3 Oct',at:'Sat 3 Oct, 18:00',subject:'Grid down at Example plant',preview:'Grid off since 18:00 today, battery 86%',
-  title:'Grid down at Example plant',stack:1,stats:[{l:'Grid',v:'Off',tone:'home',sub:'since 18:00 today'},{l:'Battery',v:'86%',tone:'batt',sub:'running the house'}],btn:'Open Grid',foot:"Alert for Example plant. Don't want these? Turn them off in your notification settings."}
+  title:'Grid down at Example plant',stack:1,stats:[{l:'Grid',v:'Off',tone:'home',sub:'since 18:00 today'},{l:'Battery',v:'86%',tone:'batt',sub:'running the house'}],btn:'Open Grid'}
 ];
 const rows=document.getElementById('ib-rows'),view=document.getElementById('ib-view'),box=view.parentNode,rowEls=[];
 let cur=0;
@@ -421,7 +421,7 @@ function show(i,tap){
  if(m.bars){const b=m.bars,mx=Math.max(...b.vals),bi=b.vals.indexOf(mx);
   h+=`<div class="ib-chart"><div class="ib-ch"><b>${b.title}</b><span>${b.side}</span></div><div class="ib-bars">${b.vals.map((v,j)=>`<div ${j===bi?`class="ib-best" data-v="${v} kWh"`:''} style="height:${v/mx*100}%"></div>`).join('')}</div><div class="ib-lbls">${b.labels.map((l,j)=>`<span${j===bi?' class="ib-best"':''}>${l}</span>`).join('')}</div>
   <div class="ib-facts">${m.facts.map(card).join('')}</div></div>`}
- h+=`<span class="ib-btn">${m.btn}</span><p class="ib-foot">${m.foot}</p>`;
+ h+=`<button type="button" class="ib-btn">${m.btn}</button>`;
  view.innerHTML=h;view.hidden=false;
  place(tap?y:undefined);
 }

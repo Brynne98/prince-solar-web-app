@@ -193,9 +193,9 @@ section#features{padding-top:0;scroll-margin-top:112px}
 .h2{font:600 60px/1.04 var(--display);font-variation-settings:'opsz' 96;letter-spacing:-.035em;text-wrap:balance}
 .h2 em{font-style:normal;color:var(--gold)}
 .lede{margin-top:20px;font-size:20px;line-height:1.5;color:var(--muted);max-width:36em;text-wrap:pretty}
-.rv{opacity:0;transition:opacity .9s ease-out}
+.rv{opacity:0;transition:opacity .5s ease-out}
 .rv.in{opacity:1}
-.rv.d1{transition-delay:.12s}.rv.d2{transition-delay:.24s}
+.rv.d1{transition-delay:.08s}.rv.d2{transition-delay:.16s}
 
 
 /* look back at any day (SOLAR-187): solar only, any day of the year */
@@ -297,8 +297,7 @@ section#features{padding-top:0;scroll-margin-top:112px}
 #mail .ib-lbls{display:flex;gap:8px;margin-top:7px}.ib-lbls span{flex:1;text-align:center;font:400 11.5px var(--mono);color:#7f8da0}.ib-lbls span.ib-best{color:#e7ecf2;font-weight:700}
 #mail .ib-facts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
 #mail .ib-note{margin-top:14px;font-size:14.5px;line-height:1.5;color:#c8d0da;max-width:46ch}
-#mail .ib-btn{display:inline-block;margin-top:20px;padding:10px 16px;border-radius:10px;background:var(--solar);color:#07130c;font-weight:600;font-size:14px}
-#mail .ib-foot{margin-top:18px;font-size:12px;color:#7f8da0}
+#mail .ib-btn{display:inline-block;margin-top:20px;padding:10px 16px;border:0;border-radius:10px;background:var(--solar);color:#07130c;font:600 14px var(--sans);cursor:pointer;transition:filter .15s}#mail .ib-btn:hover{filter:brightness(1.1)}#mail .ib-btn:active{filter:brightness(.92)}
 @media(max-width:860px){
  #mail .ib-box{grid-template-columns:1fr}.ib-list{border-right:0;border-bottom:1px solid var(--hair)}
  #mail .ib-row{padding:13px 16px}.ib-view{padding:20px 16px 22px;min-height:0}.ib-title{font-size:22px}
@@ -392,7 +391,7 @@ section#features{padding-top:0;scroll-margin-top:112px}
 .dawn .h2{font-size:76px}
 .dawn .lede{margin:20px auto 0}
 .dawn .cta{display:flex;justify-content:center;gap:14px;margin-top:32px}
-footer{position:relative;margin-top:96px;padding:28px 0 48px;border-top:1px solid rgba(255,255,255,.1);font-size:15px;color:var(--ink-soft)}
+footer{position:relative;margin-top:96px;padding:28px 0;border-top:1px solid rgba(255,255,255,.1);font-size:15px;color:var(--ink-soft)}
 footer .wrap{display:flex;align-items:center;gap:28px}
 footer nav{margin-left:auto;display:flex;gap:24px}
 footer a{text-decoration:none}footer a:hover{text-decoration:underline}
@@ -442,7 +441,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   .plans{grid-template-columns:minmax(0,1fr);gap:28px}
   #questions .wrap{grid-template-columns:minmax(0,1fr);gap:36px}
   .qs summary{font-size:18px}.qs details p{padding-right:0}
-  .dawn{padding-top:96px}footer{margin-top:72px;padding-bottom:36px}
+  .dawn{padding-top:96px}footer{margin-top:72px}
   #mail .ib-box,#start .st-row{margin-top:36px}#start .st-cta{margin-top:36px}.period{margin-top:32px}#pricing .plans{margin-top:20px}.dawn .cta{flex-wrap:wrap}
   footer .wrap{flex-wrap:wrap;gap:12px 24px}footer nav{margin-left:0}
 }
@@ -644,17 +643,17 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
         <button type="button" class="st-go">Connect</button>
       </div>
       <h3 class="st-h">Connect your inverter</h3>
-      <p class="st-p">Your SunSynk login, once. We never keep your password.</p>
+      <p class="st-p">Your SunSynk login, once.</p>
     </div>
     <div>
       <span class="st-n">3</span>
       <div class="st-shot">
         <div class="st-imp"><span class="st-arc"></span>Fetching history <b>64%</b></div>
         <div class="st-imp-bar"><i></i></div>
-        <p class="st-imp-note">Your days from before you joined, coming in from SunSynk.</p>
+        <p class="st-imp-note">Bringing in your past days from SunSynk.</p>
       </div>
       <h3 class="st-h">Your history fills in</h3>
-      <p class="st-p">Your past days, already waiting.</p>
+      <p class="st-p">Live in a minute. Past days follow on their own.</p>
     </div>
   </div>
   <div class="st-cta"><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a></div>
@@ -717,9 +716,8 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
     <div class="qs rv d1">
       <details><summary>Will it work with my inverter?<i></i></summary><p>It works with SunSynk. If you see your system in the SunSynk app, it works here.</p></details>
       <details><summary>How often does it update?<i></i></summary><p>Every minute, the same as the SunSynk app.</p></details>
-      <details><summary>How far back does my history go?<i></i></summary><p>When you connect, we bring in your last 60 days from SunSynk. From then on, Home and Family keep every day for good.</p></details>
-      <details><summary>What happens after the free week?<i></i></summary><p>You keep the last 24 hours and every alert. Move to Home or Family to keep every day.</p></details>
-      <details><summary>What counts as a plant?<i></i></summary><p>One SunSynk login, however many inverters it has.</p></details>
+      <details><summary>How far back does my history go?<i></i></summary><p>When you connect, we bring in your last 60 days from SunSynk. From then on, Home and Family plans keep every day for good.</p></details>
+      <details><summary>What happens after the free week?<i></i></summary><p>You keep the last 24 hours and every alert. Move to a Home or Family plan to keep every day.</p></details>
       <details><summary>Can I cancel any time?<i></i></summary><p>Yes. Your plan runs to your billing date, then moves to Free. Nothing more is charged.</p></details>
       <details><summary>Can I delete my account?<i></i></summary><p>Yes, any time, from Account. Your logins, settings and history go with it. It cannot be undone.</p></details>
       <details><summary>Do my numbers match the SunSynk app?<i></i></summary><p>Mostly. With two or more inverters, our grid totals can be higher: SunSynk counts the grid on one inverter, we count them all.</p></details>
