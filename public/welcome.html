@@ -91,7 +91,7 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 .stars i{position:absolute;width:2px;height:2px;border-radius:50%;background:#fff}
 .sunorb{position:absolute;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;pointer-events:none;will-change:transform}
 .sunorb b{position:absolute;inset:34px;border-radius:50%;background:radial-gradient(circle at 40% 38%,#fffbe8,var(--sunc) 70%)}
-.moonorb{position:absolute;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;pointer-events:none;will-change:transform;background:radial-gradient(circle at 30% 62%,rgba(150,145,135,.35) 0 7%,transparent 8%),radial-gradient(circle at 62% 38%,rgba(150,145,135,.3) 0 10%,transparent 11%),radial-gradient(circle at 58% 70%,rgba(150,145,135,.25) 0 5%,transparent 6%),radial-gradient(circle at 38% 34%,#fdfaf0,#d8d2c2 72%);box-shadow:0 0 30px 6px rgba(220,225,255,.22),0 0 90px 30px rgba(160,175,230,.12)}
+.moonorb{position:absolute;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;pointer-events:none;will-change:transform;opacity:0;background:radial-gradient(circle at 30% 62%,rgba(150,145,135,.35) 0 7%,transparent 8%),radial-gradient(circle at 62% 38%,rgba(150,145,135,.3) 0 10%,transparent 11%),radial-gradient(circle at 58% 70%,rgba(150,145,135,.25) 0 5%,transparent 6%),radial-gradient(circle at 38% 34%,#fdfaf0,#d8d2c2 72%);box-shadow:0 0 30px 6px rgba(220,225,255,.22),0 0 90px 30px rgba(160,175,230,.12)}
 .sunorb::before{content:"";position:absolute;inset:-140px;border-radius:50%;background:radial-gradient(circle,var(--glow) 0,transparent 62%)}
 .land{position:absolute;left:0;right:0;bottom:0;height:220px;pointer-events:none}
 .land svg{position:absolute;bottom:0;left:0;width:100%;height:100%}
@@ -415,7 +415,9 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   .toast{left:auto;right:0;bottom:auto;top:calc(100% - 56px / var(--k,.64));width:calc(70% * var(--k,.64) / .8);scale:calc(.8 / var(--k,.64));transform-origin:top right}  /* the words sit just above low hills; later moments are shorter so the next words follow sooner */
   .moment{justify-content:flex-end;padding:0 0 116px;min-height:100svh}
   /* a small house on the hill, bottom right, under the words */
-  .house{display:block;left:auto;right:16px;bottom:44px;width:96px}
+  .house{display:block;left:auto;right:16px;bottom:20px;width:96px}
+  /* the moon's path runs behind the words here, so it stays dim */
+  .moonorb{filter:opacity(.4)}
   .moment+.moment{min-height:70svh}
   .land{height:64px}
   /* the card's words drawn large, so they read after the card is scaled down; box sub-lines go (the narration says it) */
