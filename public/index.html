@@ -990,18 +990,17 @@
   #settings-password:has(form) { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; align-items: start; }
   #settings-password .link-form { margin: 0; padding: 0; border: none; background: none; }
   @media (max-width: 599px) { #settings-password:has(form) { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
-  /* Your system: two fields a row, each name over its box; one column on a phone */
-  #settings-system .sset-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 28px; align-items: start; }
-  /* panels and battery can grow (By size): each takes a full row, its box capped */
-  #settings-system .sset-row:has(> .sset-sum) { grid-column: 1 / -1; }
-  #settings-system .sset-sum { max-width: 420px; }
-  #settings-system .conn-row.sset-row { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 10px; padding: 0; }
+  /* Your system: each name on the left, its field fills the right (like change password);
+     one column on a phone */
+  #settings-system .conn-row.sset-row { display: grid; grid-template-columns: 38% minmax(0, 1fr); gap: 20px; align-items: start;
+    padding: 14px 0; border-top: 1px solid var(--line); }
+  #settings-system .conn-row.sset-row:first-child { border-top: none; padding-top: 0; }
   #settings-system .sset-row > .conn-text { flex-basis: auto; }
   #settings-system :is(.sset-sum, .sset-one) { width: 100%; align-items: stretch; }
   #settings-system .sset-one .fs-in { width: 100%; }
   /* on Total the box is the value; the sum over it only reads on By size */
   #settings-system .fs-sumhead:has(.fs-seg > button:first-child.on) .fs-val { display: none; }
-  @media (max-width: 700px) { #settings-system .sset-body { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 599px) { #settings-system .conn-row.sset-row { grid-template-columns: minmax(0, 1fr); gap: 10px; } }
   /* Your data: From, To and Download on one line */
   .dl-row { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
   .dl-field { flex: 1 1 180px; display: flex; flex-direction: column; gap: 6px; }
