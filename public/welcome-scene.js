@@ -407,6 +407,8 @@ let cur=0;
 function place(y){
  const r=rowEls[cur],phone=innerWidth<=860;
  if(phone&&view.previousElementSibling!==r)r.after(view);else if(!phone&&view.parentNode!==box)box.append(view);
+ // a laptop always shows one email beside the list, so one closed on a phone opens again
+ if(!phone&&view.hidden){view.hidden=false;r.setAttribute('aria-selected',true)}
  if(y===undefined||!phone)return;
  scrollBy({top:r.getBoundingClientRect().top-y,behavior:'instant'});
  scrollBy({top:r.getBoundingClientRect().top-68,behavior:'smooth'});
@@ -421,12 +423,13 @@ function show(i,tap){
   h+=`<div class="ib-chart"><div class="ib-ch"><b>${b.title}</b><span>${b.side}</span></div><div class="ib-bars">${b.vals.map((v,j)=>`<div ${j===bi?`class="ib-best" data-v="${v} kWh"`:''} style="height:${v/mx*100}%"></div>`).join('')}</div><div class="ib-lbls">${b.labels.map((l,j)=>`<span${j===bi?' class="ib-best"':''}>${l}</span>`).join('')}</div>
   <div class="ib-facts">${m.facts.map(card).join('')}</div></div>`}
  h+=`<span class="ib-btn">${m.btn}</span><p class="ib-foot">${m.foot}</p>`;
- view.innerHTML=h;
+ view.innerHTML=h;view.hidden=false;
  place(tap?y:undefined);
 }
 MAIL.forEach((m,i)=>{const r=document.createElement('button');r.className='ib-row';r.setAttribute('role','tab');
  r.innerHTML=`<i style="background:${m.dot}"></i><span class="ib-s">${m.subject}</span><span class="ib-t">${m.time}</span><span class="ib-p">${m.preview}</span>`;
- r.onclick=()=>show(i,true);
+ // phone: tapping the open email's row closes it
+ r.onclick=()=>{if(innerWidth<=860&&i===cur&&!view.hidden){view.hidden=true;r.setAttribute('aria-selected',false);return}show(i,true)};
  r.onkeydown=e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const n=(i+(e.key==='ArrowDown'?1:-1)+MAIL.length)%MAIL.length;show(n);rowEls[n].focus()}};
  rows.append(r);rowEls.push(r)});
 show(0);
