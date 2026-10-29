@@ -2545,10 +2545,10 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
     );
     return (
       <SettingsSection id="system" title="Your system" note={SYSTEM_NOTE}>
-        {row('Solar panels', 'What they make in full sun.', true)}
+        {row('Electricity rate', 'Savings show as zero until this is set.')}
         {row('Battery capacity', 'All batteries together.', true)}
         {row('Battery reserve', 'The battery stops powering your home at this charge.')}
-        {row('Electricity rate', 'Savings show as zero until this is set.')}
+        {row('Solar panels', 'What they make in full sun.', true)}
       </SettingsSection>
     );
   }
@@ -2557,16 +2557,17 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   const err = (on, text) => on && tried ? <p className="sset-err" role="alert">{text}</p> : null;
   return (
     <>
-      {/* One section since SOLAR-250: panels, battery, reserve, rate */}
+      {/* One section since SOLAR-250, in First steps' order: rate, battery, reserve, panels */}
       <SettingsSection id="system" title="Your system" note={SYSTEM_NOTE}>
+        {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
         <div className="conn-row sset-row">
           <div className="conn-text">
-            <span className="conn-user">Solar panels</span>
-            <span className="conn-meta">What they make in full sun.</span>
+            <span className="conn-user">Electricity rate</span>
+            <span className="conn-meta">{n(f.rate) > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}</span>
           </div>
-          <div className="sset-sum">
-            <window.SumBox kind="panels" mode={f.pMode} onMode={set('pMode')} tot={f.pTot} onTot={set('pTot')} rows={f.pRows} onRows={set('pRows')} label="Solar panels" />
-            {err(bad.pan, f.pMode === 'total' ? 'Enter more than 0 kW.' : 'Enter whole panels and 50 to 1000 W each.')}
+          <div className="conn-actions sset-one">
+            <window.StepField value={f.rate} onChange={set('rate')} label="Electricity rate" pre={sym} unit="/unit" inputMode="decimal" ph="3.40" invalid={tried && bad.rate} />
+            {err(bad.rate, 'Enter a price, like 3.40.')}
           </div>
         </div>
         <div className="conn-row sset-row">
@@ -2589,15 +2590,14 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
             {err(bad.res, 'Enter 5 to 50.')}
           </div>
         </div>
-        {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
         <div className="conn-row sset-row">
           <div className="conn-text">
-            <span className="conn-user">Electricity rate</span>
-            <span className="conn-meta">{n(f.rate) > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}</span>
+            <span className="conn-user">Solar panels</span>
+            <span className="conn-meta">What they make in full sun.</span>
           </div>
-          <div className="conn-actions sset-one">
-            <window.StepField value={f.rate} onChange={set('rate')} label="Electricity rate" pre={sym} unit="/unit" inputMode="decimal" ph="3.40" invalid={tried && bad.rate} />
-            {err(bad.rate, 'Enter a price, like 3.40.')}
+          <div className="sset-sum">
+            <window.SumBox kind="panels" mode={f.pMode} onMode={set('pMode')} tot={f.pTot} onTot={set('pTot')} rows={f.pRows} onRows={set('pRows')} label="Solar panels" />
+            {err(bad.pan, f.pMode === 'total' ? 'Enter more than 0 kW.' : 'Enter whole panels and 50 to 1000 W each.')}
           </div>
         </div>
       </SettingsSection>
