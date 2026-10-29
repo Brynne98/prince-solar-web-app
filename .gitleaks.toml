@@ -17,7 +17,9 @@ keywords = ["sb_secret_"]
 # The publishable key is public by design: it ships in the app, and every table is
 # behind row-level security. It appears in public/config.js, admin/config.js,
 # the health workflow and DEPLOY.md.
+# The PostHog project key (phc_) is public by design too: it can only send events, and every
+# browser loads it. It appears in public/config.js and supabase/functions/_shared/errors.ts (SOLAR-246).
 [allowlist]
-description = "Supabase publishable key (public by design)"
+description = "Supabase publishable key and PostHog project key (public by design)"
 regexTarget = "match"
-regexes = ['''sb_publishable_[A-Za-z0-9_-]+''']
+regexes = ['''sb_publishable_[A-Za-z0-9_-]+''', '''phc_[A-Za-z0-9]+''']
