@@ -280,7 +280,7 @@ section#features{padding-top:0;scroll-margin-top:112px}
 #mail .ib-subj{margin-top:10px;font-size:13px;color:#9aa5b3}
 #mail .ib-title{margin-top:18px;font:700 26px/1.2 var(--sans);letter-spacing:-.01em}
 #mail .ib-sub{margin-top:4px;font-size:14px;color:#9aa5b3}
-#mail .ib-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:20px}
+#mail .ib-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px;margin-top:20px}
 #mail .ib-stats.ib-stack{grid-template-columns:repeat(2,1fr)}
 #mail .ib-card{padding:13px 15px;border-radius:12px;background:rgba(255,255,255,.035);border:1px solid var(--hair)}
 #mail .ib-card .ib-l{font-size:12.5px;color:#9aa5b3}
@@ -447,6 +447,8 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 }
 /* short phones: the card keeps the live flow only, so the words under it still fit */
 @media (max-width:860px) and (max-height:760px){.card .today,.card .stats{display:none}}
+/* small phones: header buttons and the Yearly switch keep to one line */
+@media (max-width:374px){.top .wrap{gap:8px}.top .end{gap:8px}.brand{font-size:14px;gap:6px}.signin{font-size:14px}.top .btn{padding:0 10px;font-size:14px}.brand,.signin,.top .btn,.period button{white-space:nowrap}.period button{padding:0 12px;font-size:14px}}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition-duration:.01s!important}.rv{opacity:1;transform:none;filter:none}}
 
 </style>
