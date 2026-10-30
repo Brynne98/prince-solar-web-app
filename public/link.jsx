@@ -322,9 +322,6 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
   // The plan's answer: a paywall reason, or the cost of plants past the 3rd.
   const [paywall, setPaywall] = useState(null);
   const [cost, setCost] = useState(null);
-  // A login with more plants than the plan has room for: the user picks which collect
-  // (SOLAR-251). { r: the link's answer, max, chosen: Set of plant ids }.
-  const [pick, setPick] = useState(null);
   // Free and Home cover one plant: with one already, the paywall comes before the form.
   useEffect(() => {
     if (!hasPlant || relink) return;
@@ -388,15 +385,6 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
         await onLinked(r);
         return;
       }
-      // Some of this login's plants collect, some don't fit: ask which. The first ones
-      // linked are ticked, as the server picked them.
-      const stopped = new Set((r.paused || []).map(Number));
-      const on = (r.plants || []).filter(p => !stopped.has(Number(p.id)));
-      if (stopped.size && on.length && !relink) {
-        setPassword(''); setCost(null);
-        setPick({ r, max: on.length, chosen: new Set(on.map(p => Number(p.id))) });
-        return;
-      }
       // Busy until the caller has the new login list, or the screen sits idle before it changes.
       await onLinked(r);
       setPassword(''); setNoPlants(false); setCost(null);
@@ -427,49 +415,6 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
     // Before the form, a plant past the plan can still be added, paused.
     const addPaused = paywall.reason === 'add' ? () => setPaywall(null) : undefined;
     return <div className={compact ? 'conn-form' : 'link-card'}><Paywall reason={paywall.reason} added={paywall.added} paused={paywall.paused} onCancel={close} onAddPaused={addPaused} /></div>;
-  }
-
-  if (pick) {
-    const { r, max, chosen } = pick;
-    const toggle = (id) => setPick(p => {
-      const c = new Set(p.chosen);
-      if (c.has(id)) c.delete(id); else if (max === 1) { c.clear(); c.add(id); } else if (c.size < max) c.add(id);
-      return { ...p, chosen: c };
-    });
-    const go = async () => {
-      setBusy(true);
-      const was = new Set((r.paused || []).map(Number));
-      const ids = (r.plants || []).map(p => Number(p.id));
-      // Stops first, so the plan has room for the starts. A failure keeps the server's
-      // own pick; Billing shows which plants collect.
-      let failed = false;
-      for (const id of ids.filter(id => !was.has(id) && !chosen.has(id))) failed = failed || !!(await window.sb.rpc('api_plant_stop', { p_plant: id })).error;
-      if (!failed) for (const id of ids.filter(id => was.has(id) && chosen.has(id))) failed = failed || !!(await window.sb.rpc('api_plant_start', { p_plant: id })).error;
-      if (failed) window.toast('Couldn’t save your pick. Change it on Billing.', { error: true });
-      else window.track('plants_picked', { plants: ids.length, collecting: chosen.size });
-      await onLinked(failed ? r : { ...r, paused: ids.filter(id => !chosen.has(id)) });
-      setBusy(false); setPick(null);
-    };
-    return (
-      <div className={(compact ? 'conn-form' : 'link-card') + ' pick-card'} role="dialog" aria-labelledby="pick-title">
-        <h2 id="pick-title" className="sset-title">Pick {max === 1 ? 'the plant' : max + ' plants'} to collect</h2>
-        <p className="sset-note">Your plan has room for {max === 1 ? 'one' : max}. The rest stay stopped.</p>
-        <div className="pick-list" role="group" aria-labelledby="pick-title">
-          {(r.plants || []).map(p => {
-            const id = Number(p.id);
-            return (
-              <label key={id} className="pick-row">
-                <input type={max === 1 ? 'radio' : 'checkbox'} name="pick" checked={chosen.has(id)} disabled={busy || (!chosen.has(id) && max > 1 && chosen.size >= max)} onChange={() => toggle(id)} />
-                <span>{p.name || 'Plant ' + id}</span>
-              </label>
-            );
-          })}
-        </div>
-        <div className="conn-form-actions">
-          <button type="button" className="save-btn" disabled={busy || !chosen.size} aria-busy={busy} onClick={go}>{busy ? 'Saving…' : 'Collect'}</button>
-        </div>
-      </div>
-    );
   }
 
   if (cost) {

@@ -2366,6 +2366,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   // Stop and Start (SOLAR-251): the plan sets how many plants collect. Stopping deletes
   // the plant's readings, so it asks first; a full plan offers the upgrade instead.
   const [stopping, setStopping] = useState(null); // plant_id whose confirm card is open
+  const [shut, setShut] = useState({}); // account_id → its plants folded away
   const [full, setFull] = useState(null);         // plant_id that found the plan full
   const stop = async (p) => {
     setStopping(null); setBusy('stop:' + p.plant_id);
@@ -2450,8 +2451,16 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
               {/* Line 1: the login and whether it works. Line 2 only once it has stopped: the
                   last reading. Its plants are listed under it, saying only Stopped or Deleted. */}
               <div className="conn-user login-name">
-                {acc.sunsynk_username}<span className={'conn-status login-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
+                {plants.length ? (
+                  <button type="button" className="login-open" aria-expanded={!shut[acc.account_id]} aria-controls={'plants-' + acc.account_id}
+                          onClick={() => setShut(o => ({ ...o, [acc.account_id]: !o[acc.account_id] }))}>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
+                    {acc.sunsynk_username}
+                  </button>
+                ) : acc.sunsynk_username}
+                <span className={'conn-status login-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
               </div>
+              {shut[acc.account_id] && <div className="conn-meta">{plants.filter(p => state(p) === 'on').length} of {plants.length} collecting</div>}
               {(!ok || stale) && acc.last_ok_at && <div className="conn-meta">Last reading {ago(acc.last_ok_at)}</div>}
             </div>
             <div className="conn-actions">
@@ -2460,7 +2469,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                 {busy === acc.account_id ? 'Removing…' : 'Remove'}
               </button>
             </div>
-            <div className="login-plants">
+            <div className="login-plants" id={'plants-' + acc.account_id} hidden={!!shut[acc.account_id]}>
               {plants.length ? plants.map(plantRow) : <div className="conn-meta">No plant shared with this login.</div>}
             </div>
             {/* the reconnect form and the remove card sit under the whole row, full width */}

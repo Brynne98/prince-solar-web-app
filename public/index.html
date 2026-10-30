@@ -992,9 +992,12 @@
   .login-plant .plant-state { font-size: 13px; white-space: nowrap; }
   .login-plant { flex-wrap: wrap; }
   .login-plant > .confirm-card { flex-basis: 100%; }
-  .pick-list { display: flex; flex-direction: column; gap: 4px; margin: 12px 0 16px; }
-  .pick-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; cursor: pointer; }
-  .pick-row input { accent-color: var(--pv); width: 16px; height: 16px; margin: 0; }
+  /* the email folds its plants away */
+  .login-open { display: inline-flex; align-items: center; gap: 6px; padding: 0; background: none; border: none;
+    color: inherit; font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+  .login-open svg { flex: none; color: var(--dim); transition: transform .18s; }
+  .login-open[aria-expanded="true"] svg { transform: rotate(90deg); }
+  .login-plants[hidden] { display: none; }
   /* Account actions: one button width */
   #settings-actions .conn-actions > button { min-width: 112px; }
   /* change password, open: its name top left, the fields fill the rest, no box of their own */
