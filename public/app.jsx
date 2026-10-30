@@ -955,6 +955,8 @@ function App({ links }) {
   // plan, preferences (the last plant viewed) and plants for the signed-in user (api_me)
   const [me, setMe] = useState(null);
   const [plantId, setPlantId] = useState(null);
+  const shownPlant = useRef(null);
+  shownPlant.current = plantId;
   const [tab, setTab] = useState(() => window.resetAsked() ? 'account' : tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem('synsynk.tab')) || 'live');
   const auto = true; // refresh runs on its own; the header button forces one now
   const [snap, setSnap] = useState(null);
@@ -1094,6 +1096,11 @@ function App({ links }) {
       const wanted = ids.includes(linked) ? linked
         : m.prefs && ids.includes(Number(m.prefs.lastPlant)) ? Number(m.prefs.lastPlant) : (ids[0] ?? null);
       const cfg = (m.plants || []).find(p => p.id === wanted)?.config;
+      // The plant on screen stopped (SOLAR-251): clear its readings, as a switch does.
+      if (shownPlant.current != null && wanted !== shownPlant.current) {
+        setEnergy({}); energyRef.current = {}; setSnap(null); setToday(null);
+        window.PLANT_DAYS = null; window.SYNC = null; syncDaysRef.current = null;
+      }
       window.setCurrentPlant(wanted, cfg?.currency);
       setPlantId(wanted);
       // how much history this plant has — drives the "collecting your first day" copy

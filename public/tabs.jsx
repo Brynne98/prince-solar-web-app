@@ -2448,7 +2448,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
           <div key={acc.account_id} className={'sset conn-row synk-card' + (leaving === acc.account_id ? ' leaving' : '')}>
             <div className="conn-text">
               {/* Line 1: the login and whether it works. Line 2 only once it has stopped: the
-                  last reading. Its plants are listed under it, saying only Paused or Deleted. */}
+                  last reading. Its plants are listed under it, saying only Stopped or Deleted. */}
               <div className="conn-user login-name">
                 {acc.sunsynk_username}<span className={'conn-status login-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
               </div>

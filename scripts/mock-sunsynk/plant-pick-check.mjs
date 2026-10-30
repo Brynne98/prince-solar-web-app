@@ -56,6 +56,8 @@ check(!r.ok && /no room/.test(r.error), `start on a full plan is refused: ${r.er
 sql(`insert into public.plant_energy (plant_id, bucket, period, pv_kwh) values (${a}, 'day', current_date - 1, 1) on conflict do nothing`);
 check(energyRows(a) > 0, "the collecting plant has readings");
 r = await rpc(u, "api_plant_stop", { p_plant: a });
+check(r.ok && energyRows(a) > 0, "the delete waits for the cron run");
+sql(`call private.plant_wipes()`); // the plant-wipe cron job; pg_cron is off locally
 check(r.ok && energyRows(a) === 0 && stopped(u).split(",").includes(String(a)), `stop deletes its readings: ${JSON.stringify(r.body)}`);
 sql(`insert into public.plant_energy (plant_id, bucket, period, pv_kwh) values (${a}, 'day', current_date - 2, 1) on conflict do nothing`);
 check(energyRows(a) === 0, "a late write for a stopped plant is dropped");

@@ -392,7 +392,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
       // linked are ticked, as the server picked them.
       const stopped = new Set((r.paused || []).map(Number));
       const on = (r.plants || []).filter(p => !stopped.has(Number(p.id)));
-      if (stopped.size && on.length) {
+      if (stopped.size && on.length && !relink) {
         setPassword(''); setCost(null);
         setPick({ r, max: on.length, chosen: new Set(on.map(p => Number(p.id))) });
         return;
@@ -440,11 +440,14 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
       setBusy(true);
       const was = new Set((r.paused || []).map(Number));
       const ids = (r.plants || []).map(p => Number(p.id));
-      // Stops first, so the plan has room for the starts.
-      for (const id of ids.filter(id => !was.has(id) && !chosen.has(id))) await window.sb.rpc('api_plant_stop', { p_plant: id });
-      for (const id of ids.filter(id => was.has(id) && chosen.has(id))) await window.sb.rpc('api_plant_start', { p_plant: id });
-      window.track('plants_picked', { plants: ids.length, collecting: chosen.size });
-      await onLinked({ ...r, paused: ids.filter(id => !chosen.has(id)) });
+      // Stops first, so the plan has room for the starts. A failure keeps the server's
+      // own pick; Billing shows which plants collect.
+      let failed = false;
+      for (const id of ids.filter(id => !was.has(id) && !chosen.has(id))) failed = failed || !!(await window.sb.rpc('api_plant_stop', { p_plant: id })).error;
+      if (!failed) for (const id of ids.filter(id => was.has(id) && chosen.has(id))) failed = failed || !!(await window.sb.rpc('api_plant_start', { p_plant: id })).error;
+      if (failed) window.toast('Couldn’t save your pick. Change it on Billing.', { error: true });
+      else window.track('plants_picked', { plants: ids.length, collecting: chosen.size });
+      await onLinked(failed ? r : { ...r, paused: ids.filter(id => !chosen.has(id)) });
       setBusy(false); setPick(null);
     };
     return (

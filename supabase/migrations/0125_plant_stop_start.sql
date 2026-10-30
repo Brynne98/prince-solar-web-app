@@ -6,7 +6,9 @@
 -- paywall). To collect another plant the user stops one first, or upgrades.
 --   - api_plant_stop: the plant stops collecting for this user. When no other
 --     account still collects it, all its readings are deleted. Settings, logins,
---     inverters and alerts stay, so the plant can start again.
+--     inverters and alerts stay, so the plant can start again. The delete runs
+--     from cron (plant-wipe, every 5 minutes): a big plant takes longer than the
+--     API's 8 s statement limit. Nobody sees a stopped plant's readings meanwhile.
 --   - api_plant_start: the plant collects again, if the plan has room. History is
 --     pulled the way a new link pulls it: 60 days on a paid plan or in the free
 --     week, today only on Free past its week (0111).
@@ -34,6 +36,14 @@ begin
   return null;
 end $$;
 
+-- Plants waiting for their readings to be deleted (api_plant_stop). A start takes
+-- the plant off the list: its readings stay and the history walk fills the gap.
+create table if not exists private.plant_wipe (
+  plant_id     bigint primary key,
+  requested_at timestamptz not null default now()
+);
+alter table private.plant_wipe enable row level security;
+
 -- Every reading a plant has. Under the plant's lock, so an in-flight writer
 -- finishes first and a late one is dropped by the guard.
 create or replace function private.plant_wipe_readings(p_plant bigint)
@@ -44,6 +54,11 @@ as $$
 declare n bigint; total bigint := 0;
 begin
   perform pg_advisory_xact_lock(p_plant);
+  -- Started again while it waited: keep everything.
+  if exists (select 1 from public.plant_users where plant_id = p_plant and not paused) then
+    delete from private.plant_wipe where plant_id = p_plant;
+    return 0;
+  end if;
   delete from public.readings            where plant_id = p_plant; get diagnostics n = row_count; total := total + n;
   delete from public.strings             where plant_id = p_plant; get diagnostics n = row_count; total := total + n;
   delete from public.readings_5m         where plant_id = p_plant; get diagnostics n = row_count; total := total + n;
@@ -60,9 +75,41 @@ begin
   update public.plant_config
      set backfill_next = null, backfill_until = null, backfill_tries = 0, temp_next = null
    where plant_id = p_plant;
+  delete from private.plant_wipe where plant_id = p_plant;
   return total;
 end $$;
 revoke all on function private.plant_wipe_readings(bigint) from public, anon, authenticated;
+
+-- The cron worker: one transaction per plant, like purge_plants (0050).
+create or replace procedure private.plant_wipes()
+language plpgsql
+as $$
+declare
+  ids bigint[];
+  p bigint;
+begin
+  select coalesce(array_agg(plant_id order by requested_at), '{}') into ids from private.plant_wipe;
+  foreach p in array ids loop
+    begin
+      perform private.plant_wipe_readings(p);
+    exception when others then
+      raise warning 'wipe of plant % failed: %', p, sqlerrm;
+    end;
+    commit;
+  end loop;
+end $$;
+
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pg_cron') then
+    raise notice 'pg_cron not enabled here - skipping jobs (expected on the local stack)';
+    return;
+  end if;
+  if exists (select 1 from cron.job where jobname = 'plant-wipe') then
+    perform cron.unschedule('plant-wipe');
+  end if;
+  perform cron.schedule('plant-wipe', '*/5 * * * *', 'call private.plant_wipes()');
+end $$;
 
 -- A plant that starts collecting pulls history the way a new link does: 60 days,
 -- or none on Free past its week (0111). Then recover, sync-plant-energy and a
@@ -75,6 +122,9 @@ set search_path = public, private, pg_temp
 as $$
 declare tz text;
 begin
+  -- After a wipe that is running now, never under it.
+  perform pg_advisory_xact_lock(p_plant);
+  delete from private.plant_wipe where plant_id = p_plant;
   if not exists (select 1 from public.plant_config where plant_id = p_plant) then
     -- Linked stopped, so never seeded (sunsynk.ts syncPlants). South Africa only;
     -- the seed sets the 60-day bookmarks.
@@ -102,7 +152,6 @@ language plpgsql
 security definer
 set search_path = public, private, pg_temp
 as $$
-declare rows bigint := 0;
 begin
   if auth.uid() is null then raise exception 'sign in first' using errcode = '42501'; end if;
   update public.plant_users set paused = true
@@ -111,13 +160,14 @@ begin
     if not exists (select 1 from public.plant_users where user_id = auth.uid() and plant_id = p_plant) then
       raise exception 'plant % is not linked to this user', p_plant using errcode = '42501';
     end if;
-    return jsonb_build_object('stopped', true, 'rows', 0);
+    return jsonb_build_object('stopped', true);
   end if;
   -- A plant someone else still collects keeps its readings: they are theirs too.
+  -- The wipe checks again when it runs.
   if not exists (select 1 from public.plant_users where plant_id = p_plant and not paused) then
-    rows := private.plant_wipe_readings(p_plant);
+    insert into private.plant_wipe (plant_id) values (p_plant) on conflict (plant_id) do nothing;
   end if;
-  return jsonb_build_object('stopped', true, 'rows', rows);
+  return jsonb_build_object('stopped', true);
 end $$;
 
 -- 'no_room' when the plan is full (the app offers the upgrade), 'plan_change'
