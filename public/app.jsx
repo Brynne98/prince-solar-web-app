@@ -439,10 +439,10 @@ function PageNotice({ snap, cutOff, onReconnect, relinkedAt }) {
 // (battery_reserve_confirmed, SOLAR-247). Hidden is the user's, kept in prefs per plant,
 // so it follows the user to every device; no step means no card.
 const STEPS = {
-  rate: { title: 'Electricity rate', why: 'Shows what solar saved.', go: 'Set rate', how: 'The price per unit on your bill, with VAT.' },
-  size: { title: 'Battery size', why: 'Shows how long the battery lasts.', go: 'Set size', how: 'All batteries together.' },
-  reserve: { title: 'Battery reserve', why: 'The battery stops powering your home at this charge.', go: 'Check reserve', how: 'Match the number set on your inverter.' },
-  panels: { title: 'Solar panels', why: 'Shows how hard your panels work.', go: 'Add panels', how: 'All panels together.' },
+  rate: { title: 'Electricity rate', how: 'The price per unit on your bill, with VAT.' },
+  size: { title: 'Battery size', how: 'All batteries together.' },
+  reserve: { title: 'Battery reserve', how: 'Match the number set on your inverter.' },
+  panels: { title: 'Solar panels', how: 'All panels together.' },
 };
 // The marks hold the plant's linkedAt (0097): a plant removed and added again keeps its id
 // but gets a new link, so marks from before the re-add are dropped and it starts fresh.
@@ -598,12 +598,17 @@ function StepForm({ id, cfg, busy, onSave, onSkip }) {
 // The card, and the step it opens: beside the sidebar ('rail'), or a sheet from the bottom ('phone').
 // After the free week (SOLAR-242), no card.
 // Back and the step bars move between steps, done ones too; Skip leaves one for later.
+// The card lists every step (SOLAR-252), led by two already done to show progress so far; a
+// row opens its step, done ones too. A tap on the header folds it to the next step; a
+// phone starts folded.
+const STEPS_DONE = ['Sign up', 'Add inverter'];
 function FirstSteps({ me, plantId, onSaved, variant }) {
   const [open, setOpen, ref] = usePopover();
   const [skipped, setSkipped] = useState([]);
   const [cur, setCur] = useState(null);      // the step open; null = the next one waiting
   const [gone, setGone] = useState(false);   // Hide pressed, until prefs come back
   const [busy, setBusy] = useState(false);
+  const [fold, setFold] = useState(variant === 'phone');   // folded to the next step; a phone starts folded
   useEffect(() => { setOpen(false); setSkipped([]); setCur(null); setGone(false); }, [plantId]);
   const over = window.useFreeOver();
   const fs = firstSteps(me, plantId);
@@ -629,6 +634,7 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
   const stepId = cur && ids.includes(cur) ? cur : nextId;
   const at = ids.indexOf(stepId);
   const n = ids.length, done = n - fs.left.length;
+  const count = (done + STEPS_DONE.length) + '/' + (n + STEPS_DONE.length);
   const S = STEPS[stepId];
   const go = (id) => setCur(id);
   const hide = () => {
@@ -657,7 +663,7 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
     finally { setBusy(false); }
   };
   const toggle = () => { if (!open) setCur(null); setOpen(o => !o); };
-  const segs = <div className="fs-segs" aria-hidden="true">{fs.steps.map((s, i) => <i key={i} className={s.done ? 'on' : ''} />)}</div>;
+  const pick = (id) => { if (open && id === stepId) setOpen(false); else { setCur(id); setOpen(true); } };
   const panel = (
     <div className="fs-panel" role="dialog" aria-label={S.title}>
       <div className="fs-top">
@@ -676,23 +682,38 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
       <StepForm key={stepId} id={stepId} cfg={fs.cfg} busy={busy} onSave={save} onSkip={skip} />
     </div>
   );
-  const NS = STEPS[nextId];
   return (
     <div className={'fs-wrap fs-' + variant} ref={ref}>
       <section className={'fs-card' + (open ? ' open' : '')} aria-label="Finish setup">
-        <div className="fs-top"><span className="fs-lbl">Finish setup</span><span className="fs-n mono">{done}/{n}</span>
+        <div className="fs-top">
+          <button type="button" className="fs-fold" aria-expanded={!fold} onClick={() => setFold(f => !f)}>
+            <span className="fs-lbl">Finish setup</span><span className="fs-n mono">{count}</span><Icon id="chevron" /></button>
           <button type="button" className="fs-x" aria-label="Hide" title="Hide" onClick={hide}><Icon id="close" /></button></div>
-        {segs}
-        <div className="fs-next">
-          <div className="fs-text"><b>{(open ? S : NS).title}</b><span>{(open ? S : NS).why}</span></div>
-          <button type="button" className="save-btn fs-go" aria-expanded={open} onClick={toggle}>{open ? 'Close' : NS.go}</button>
-        </div>
+        <ul className="fs-list">
+          {!fold && STEPS_DONE.map(t => (
+            <li key={t}><div className="fs-item done"><span className="fs-tick"><Icon id="tick" /></span><span className="fs-name">{t}</span></div></li>
+          ))}
+          {fs.steps.map(s => {
+            const here = open ? s.id === stepId : s.id === nextId;
+            if (fold && !here) return null;
+            return (
+              <li key={s.id}>
+                <button type="button" className={'fs-item' + (s.done ? ' done' : '') + (here ? ' cur' : '')}
+                        aria-expanded={open && s.id === stepId} onClick={() => pick(s.id)}>
+                  <span className="fs-tick">{s.done && <Icon id="tick" />}</span>
+                  <span className="fs-name">{STEPS[s.id].title}</span>
+                  <Icon id="next" />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
       </section>
       {/* the tablet's narrow sidebar: a ring and the count, opening the same step */}
       {variant === 'rail' && (
-        <button type="button" className="fs-mini" aria-expanded={open} aria-label={'Finish setup, ' + done + ' of ' + n + ' done'} onClick={toggle}>
+        <button type="button" className="fs-mini" aria-expanded={open} aria-label={'Finish setup, ' + count.replace('/', ' of ') + ' done'} onClick={toggle}>
           <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7" className="track" /><circle cx="9" cy="9" r="7" className="fill" strokeDasharray={(44 * done / n) + ' 44'} transform="rotate(-90 9 9)" /></svg>
-          <span className="mono">{done}/{n}</span>
+          <span className="mono">{count}</span>
         </button>
       )}
       {open && (variant === 'phone'
