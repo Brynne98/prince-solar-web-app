@@ -2024,7 +2024,7 @@ async function bookPlan(b, plan, period, reload) {
   const { error } = await window.sb.rpc('api_billing_change', { p_plan: plan, p_period: period ?? null });
   if (error) {
     window.toast(/remove plants first/.test(error.message)
-      ? `${PLAN_NAME[plan]} covers ${plan === 'family' ? '3 plants' : 'one plant'}. Remove SunSynk logins on Billing until that many are left, then try again.`
+      ? `${PLAN_NAME[plan]} covers ${plan === 'family' ? '3 plants' : 'one plant'}. Stop plants on Billing until that many collect, then try again.`
       : 'Couldn’t change your plan. Try again.', { error: true });
     return false;
   }
@@ -2169,7 +2169,7 @@ function AdjustPlanPage({ billing, reload, onBack, paused, added }) {
     if (p === b.plan) {
       if (!sameView) return b.nextPeriod === view ? <div className="plan-cur">From {billDay(b.nextDate)}</div>
         : <button type="button" className="ghost-btn" disabled={busy} onClick={() => run(() => bookPlan(b, b.plan, view, reload))}>Switch on {billDay(b.nextDate)}</button>;
-      if (p === 'family' && added > 0) return <button type="button" className="save-btn" disabled={!quote} onClick={() => window.startUpgrade('family', period, added)}>Add paused plants</button>;
+      if (p === 'family' && added > 0) return <button type="button" className="save-btn" disabled={!quote} onClick={() => window.startUpgrade('family', period, added)}>Start stopped plants</button>;
       return <div className="plan-cur">Your plan</div>;
     }
     if (!sameView) return null; // a paid plan changes plan in its own period
@@ -2192,7 +2192,7 @@ function AdjustPlanPage({ billing, reload, onBack, paused, added }) {
       <div className="page-head">
         <h1>Pick your plan</h1>
         <p>{paid ? `Moving up starts today. Moving down waits for ${billDay(b.nextDate)}.` : 'Moving up starts today. Cancel any time.'}</p>
-        {paused.length > 0 && <p className="plan-ctx">{names} {paused.length > 1 ? 'are' : 'is'} paused, not on your plan.</p>}
+        {paused.length > 0 && <p className="plan-ctx">{names} {paused.length > 1 ? 'are' : 'is'} stopped.</p>}
       </div>
       {b.comped ? <p className="field-note">Your plan is free of charge: every plant, full history.</p> : <>
         <div className="segmented seg-sm plan-period" role="group" aria-label="Billing">
@@ -2277,7 +2277,7 @@ function PaymentsSection({ billing }) {
 // the last login goes there is nothing left to show and the app turns to its empty pages.
 // `links` is the gate's own list (LinkGate), already read before the page opened, so the
 // section draws at once and its changes reach the rest of the app (SOLAR-96).
-// Plant states (paused, deleted) and their buttons are on Billing since SOLAR-250.
+// Plant states (stopped, deleted) and their buttons are on Billing since SOLAR-250.
 function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, onCollect }) {
   const { useState } = React;
   const { accounts, error, refresh } = links;
@@ -2307,7 +2307,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     const paused = new Set((linked?.paused || []).map(Number));
     const on = (linked?.plants || []).filter(p => !paused.has(Number(p.id)));
     const off = (linked?.plants || []).filter(p => paused.has(Number(p.id)));
-    window.toast(adding ? 'Login added.' + plantsLine(on, 'now in your plant list') + plantsLine(off, 'paused, not on your plan') : 'Login reconnected.');
+    window.toast(adding ? 'Login added.' + plantsLine(on, 'now in your plant list') + plantsLine(off, 'stopped: your plan is full') : 'Login reconnected.');
   };
   // " Plant 495944 is now in your plant list." for one plant, "… and … are …" for more
   const plantsLine = (plants, what) => {
@@ -2363,21 +2363,60 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     await Promise.all([refresh(), reloadBilling && reloadBilling()]);
     setBusy(null);
   };
+  // Stop and Start (SOLAR-251): the plan sets how many plants collect. Stopping deletes
+  // the plant's readings, so it asks first; a full plan offers the upgrade instead.
+  const [stopping, setStopping] = useState(null); // plant_id whose confirm card is open
+  const [full, setFull] = useState(null);         // plant_id that found the plan full
+  const stop = async (p) => {
+    setStopping(null); setBusy('stop:' + p.plant_id);
+    const { error } = await window.sb.rpc('api_plant_stop', { p_plant: p.plant_id });
+    if (error) fail('Couldn’t stop it. Try again.');
+    else { window.track('plant_stop_done'); onChanged && onChanged(); }
+    await refresh();
+    setBusy(null);
+  };
+  const start = async (p) => {
+    setFull(null); setBusy('start:' + p.plant_id);
+    const { error } = await window.sb.rpc('api_plant_start', { p_plant: p.plant_id });
+    if (error && /no room/.test(error.message)) setFull(p.plant_id);
+    else if (error) fail(/plan change/.test(error.message) ? 'Your plan change has no room for it. Undo the change in Plan first.' : 'Couldn’t start it. Try again.');
+    else { window.track('plant_start_done'); onChanged && onChanged(); }
+    await refresh();
+    setBusy(null);
+  };
   const plantRow = (p) => {
     const s = state(p);
-    // Only news shows: a working plant says nothing, and a stopped one is its login's line
-    const [word, tone] = { paused: ['Paused', 'warn'], going: ['Deleted ' + billDay(p.remove_on), 'bad'] }[s] || [];
+    // Only news shows: a working plant says nothing, and a dead login is its login's line
+    const [word, tone] = { paused: ['Stopped', 'warn'], going: ['Deleted ' + billDay(p.remove_on), 'bad'] }[s] || [];
     const n = Number(p.inverters) || 0;
+    const name = p.plant_name || 'Plant ' + p.plant_id;
+    const b = (k) => busy === k + ':' + p.plant_id;
     return (
       <div key={p.plant_id} className="login-plant">
         <div className="conn-text">
-          {/* one line: the name and its inverters; a paused plant adds why under it */}
-          <div className="conn-user">{p.plant_name || 'Plant ' + p.plant_id}{n > 0 && <span className="plant-inv"> · {n} {n === 1 ? 'inverter' : 'inverters'}</span>}</div>
-          {s === 'paused' && <div className="conn-meta">Not on your plan. Its readings aren’t saved.</div>}
+          {/* one line: the name and its inverters */}
+          <div className="conn-user">{name}{n > 0 && <span className="plant-inv"> · {n} {n === 1 ? 'inverter' : 'inverters'}</span>}</div>
         </div>
         {word && <span className={'conn-status plant-state ' + tone}>{word}</span>}
-        {s === 'paused' && onCollect && <button type="button" className="save-btn" onClick={onCollect}>Collect</button>}
-        {s === 'going' && <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
+        {s === 'paused' && <button type="button" className="save-btn" disabled={b('start')} aria-busy={b('start')} onClick={() => start(p)}>{b('start') ? 'Starting…' : 'Start'}</button>}
+        {(s === 'on' || s === 'off') && <button type="button" className="ghost-btn" disabled={b('stop')} onClick={() => setStopping(stopping === p.plant_id ? null : p.plant_id)}>{b('stop') ? 'Stopping…' : 'Stop'}</button>}
+        {s === 'going' && <button type="button" className="ghost-btn" disabled={b('keep')} onClick={() => keep(p)}>Keep</button>}
+        {stopping === p.plant_id && (
+          <ConfirmCard
+            title={<>Stop collecting <b>{name}</b>?</>}
+            text="All its readings are deleted, unless another account shares it. Start it again later to fetch what SunSynk still has."
+            action="Stop and delete" onConfirm={() => stop(p)} onCancel={() => setStopping(null)} />
+        )}
+        {full === p.plant_id && (
+          <div className="conn-form confirm-card" role="alertdialog" aria-label="Your plan is full">
+            <div className="confirm-title">Your plan is full</div>
+            <div className="confirm-text">Stop another plant first, or upgrade.</div>
+            <div className="conn-form-actions">
+              <button type="button" className="ghost-btn" onClick={() => setFull(null)} autoFocus>Cancel</button>
+              {onCollect && <button type="button" className="save-btn" onClick={() => { setFull(null); onCollect(); }}>Upgrade</button>}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -2982,7 +3021,7 @@ function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved
   const paused = plants.filter(p => p.paused);
   const activeTotal = plants.length - paused.length;
   const added = paused.reduce((sum, p, i) => sum + (activeTotal + i + 1 > 3 ? Number(p.inverters) || 0 : 0), 0);
-  const dot = { billing: billing?.state === 'past_due' || paused.length > 0, settings: live.some(a => a.status === 'needs_relink') };
+  const dot = { billing: billing?.state === 'past_due', settings: live.some(a => a.status === 'needs_relink') };
   const shown = page === 'prefs' ? 'account' : page === 'plans' ? 'billing' : page;
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>

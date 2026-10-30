@@ -248,9 +248,9 @@ function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
   return (
     <div className="paywall" role="dialog" aria-labelledby="pw-title">
       <h2 id="pw-title" className="sset-title">{history ? 'See every day' : reason === 'upgrade' ? 'Upgrade to Family'
-        : reason === 'paused' ? `Collect data for ${paused.length === 1 ? paused[0] : paused.length + ' paused plants'}`
+        : reason === 'paused' ? `Collect data for ${paused.length === 1 ? paused[0] : paused.length + ' stopped plants'}`
         : 'Add another plant'}</h2>
-      <p className="sset-note">{history ? 'Free keeps the last 24 hours.' : first?.plan === 'family' ? 'Plants after your 3rd are paused until you add them to your plan.'
+      <p className="sset-note">{history ? 'Free keeps the last 24 hours.' : first?.plan === 'family' ? 'Plants after your 3rd stay stopped until you add them to your plan.'
         : (paid ? 'Home' : 'Free') + ' covers one plant.'}</p>
       {!paid && (
         <div className="segmented seg-sm pw-period" role="group" aria-label="Billing">
@@ -285,7 +285,7 @@ function Paywall({ reason, added = 0, paused = [], onCancel, onAddPaused }) {
       {first && <p className="field-note">Plants after the 3rd: {rand(first.extraPrice)} {perUnit(per)} for each inverter.</p>}
       <div className="conn-form-actions pw-foot">
         <span className="field-note">Cancel any time.</span>
-        {onAddPaused && <button type="button" className="ghost-btn" onClick={onAddPaused}>Add it paused</button>}
+        {onAddPaused && <button type="button" className="ghost-btn" onClick={onAddPaused}>Add it stopped</button>}
         <button type="button" className="ghost-btn" onClick={onCancel}>{history ? 'Stay on Free' : 'Not now'}</button>
       </div>
     </div>
@@ -322,6 +322,9 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
   // The plan's answer: a paywall reason, or the cost of plants past the 3rd.
   const [paywall, setPaywall] = useState(null);
   const [cost, setCost] = useState(null);
+  // A login with more plants than the plan has room for: the user picks which collect
+  // (SOLAR-251). { r: the link's answer, max, chosen: Set of plant ids }.
+  const [pick, setPick] = useState(null);
   // Free and Home cover one plant: with one already, the paywall comes before the form.
   useEffect(() => {
     if (!hasPlant || relink) return;
@@ -385,6 +388,15 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
         await onLinked(r);
         return;
       }
+      // Some of this login's plants collect, some don't fit: ask which. The first ones
+      // linked are ticked, as the server picked them.
+      const stopped = new Set((r.paused || []).map(Number));
+      const on = (r.plants || []).filter(p => !stopped.has(Number(p.id)));
+      if (stopped.size && on.length) {
+        setPassword(''); setCost(null);
+        setPick({ r, max: on.length, chosen: new Set(on.map(p => Number(p.id))) });
+        return;
+      }
       // Busy until the caller has the new login list, or the screen sits idle before it changes.
       await onLinked(r);
       setPassword(''); setNoPlants(false); setCost(null);
@@ -417,6 +429,46 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
     return <div className={compact ? 'conn-form' : 'link-card'}><Paywall reason={paywall.reason} added={paywall.added} paused={paywall.paused} onCancel={close} onAddPaused={addPaused} /></div>;
   }
 
+  if (pick) {
+    const { r, max, chosen } = pick;
+    const toggle = (id) => setPick(p => {
+      const c = new Set(p.chosen);
+      if (c.has(id)) c.delete(id); else if (max === 1) { c.clear(); c.add(id); } else if (c.size < max) c.add(id);
+      return { ...p, chosen: c };
+    });
+    const go = async () => {
+      setBusy(true);
+      const was = new Set((r.paused || []).map(Number));
+      const ids = (r.plants || []).map(p => Number(p.id));
+      // Stops first, so the plan has room for the starts.
+      for (const id of ids.filter(id => !was.has(id) && !chosen.has(id))) await window.sb.rpc('api_plant_stop', { p_plant: id });
+      for (const id of ids.filter(id => was.has(id) && chosen.has(id))) await window.sb.rpc('api_plant_start', { p_plant: id });
+      window.track('plants_picked', { plants: ids.length, collecting: chosen.size });
+      await onLinked({ ...r, paused: ids.filter(id => !chosen.has(id)) });
+      setBusy(false); setPick(null);
+    };
+    return (
+      <div className={(compact ? 'conn-form' : 'link-card') + ' pick-card'} role="dialog" aria-labelledby="pick-title">
+        <h2 id="pick-title" className="sset-title">Pick {max === 1 ? 'the plant' : max + ' plants'} to collect</h2>
+        <p className="sset-note">Your plan has room for {max === 1 ? 'one' : max}. The rest stay stopped.</p>
+        <div className="pick-list" role="group" aria-labelledby="pick-title">
+          {(r.plants || []).map(p => {
+            const id = Number(p.id);
+            return (
+              <label key={id} className="pick-row">
+                <input type={max === 1 ? 'radio' : 'checkbox'} name="pick" checked={chosen.has(id)} disabled={busy || (!chosen.has(id) && max > 1 && chosen.size >= max)} onChange={() => toggle(id)} />
+                <span>{p.name || 'Plant ' + id}</span>
+              </label>
+            );
+          })}
+        </div>
+        <div className="conn-form-actions">
+          <button type="button" className="save-btn" disabled={busy || !chosen.size} aria-busy={busy} onClick={go}>{busy ? 'Saving…' : 'Collect'}</button>
+        </div>
+      </div>
+    );
+  }
+
   if (cost) {
     const unit = perUnit(cost.period);
     return (
@@ -425,7 +477,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
         <div className="confirm-text">Plants after your 3rd cost {rand(cost.extraPrice)} {unit} for each inverter. {rand(cost.dueNow)} today, then {rand(cost.nextCharge)} {unit} from {billDay(cost.nextDate)}.</div>
         <div className="conn-form-actions">
           <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setCost(null); setPassword(''); onCancel && onCancel(); }}>Cancel</button>
-          <button type="button" className="ghost-btn" disabled={busy} onClick={() => submit(null, 'paused')}>Add it paused</button>
+          <button type="button" className="ghost-btn" disabled={busy} onClick={() => submit(null, 'paused')}>Add it stopped</button>
           <button type="button" className="save-btn" disabled={busy} aria-busy={busy} onClick={() => submit(null, true)}>{busy ? 'Adding…' : 'Add plant'}</button>
         </div>
       </div>

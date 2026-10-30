@@ -176,6 +176,10 @@
   .pm-state.status-offline { color: var(--bad); } .pm-state.status-loading { color: var(--soc); }
   .plant-menu button[aria-checked="true"] { background: rgba(255,255,255,0.075); font-weight: 600; }
   .plant-menu .nm { overflow: hidden; text-overflow: ellipsis; }
+  /* each SunSynk login's email above its plants (SOLAR-251) */
+  .plant-menu .pm-login { padding: 8px 12px 4px; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plant-menu [role="group"] + [role="group"] { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
+  .plant-menu .pm-stopped .nm { color: var(--dim); }
 
   /* header: the plant left; status and refresh right */
   /* flex: none: the page under it no longer shrinks, so a shrinkable header was squashed to 39px (SOLAR-25) */
@@ -986,6 +990,11 @@
   .login-plant { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
   .login-plant + .login-plant { border-top: 1px solid var(--line); }
   .login-plant .plant-state { font-size: 13px; white-space: nowrap; }
+  .login-plant { flex-wrap: wrap; }
+  .login-plant > .confirm-card { flex-basis: 100%; }
+  .pick-list { display: flex; flex-direction: column; gap: 4px; margin: 12px 0 16px; }
+  .pick-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; cursor: pointer; }
+  .pick-row input { accent-color: var(--pv); width: 16px; height: 16px; margin: 0; }
   /* Account actions: one button width */
   #settings-actions .conn-actions > button { min-width: 112px; }
   /* change password, open: its name top left, the fields fill the rest, no box of their own */

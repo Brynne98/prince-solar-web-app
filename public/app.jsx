@@ -141,7 +141,9 @@ function MenuState({ st, cut, now }) {
 
 // The plant on screen, left in the header; a menu once there is more than one. Each row
 // says how its plant is doing, asked when the menu opens (SOLAR-182).
-function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync }) {
+// Grouped by SunSynk login (SOLAR-251): each login's email, then its plants. A stopped
+// plant has no readings to open; it reads Stopped and opens Billing, where it starts.
+function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accounts, onStopped }) {
   const plants = me?.plants || [];
   const label = (p) => p.name || ('Plant ' + p.id);
   const current = plants.find(p => p.id === plantId);
@@ -156,7 +158,14 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync }) {
     }).catch(() => {});
     return () => { alive = false; };
   }, [open]);
-  if (plants.length < 2 || !onPlant) return <div className="plant"><span className="plant-btn static"><span className="plant-name">{name}</span></span></div>;
+  // Each plant once, under the first login that brings it.
+  const seen = new Set();
+  const groups = (accounts || []).filter(a => a.status !== 'disabled').map(a => ({
+    login: a.sunsynk_username,
+    plants: (a.plants || []).filter(p => !seen.has(p.plant_id) && seen.add(p.plant_id)),
+  })).filter(g => g.plants.length);
+  const total = groups.reduce((n, g) => n + g.plants.length, 0);
+  if (Math.max(total, plants.length) < 2 || !onPlant) return <div className="plant"><span className="plant-btn static"><span className="plant-name">{name}</span></span></div>;
   return (
     <div className="plant" ref={ref}>
       <button type="button" className="plant-btn" aria-haspopup="menu" aria-expanded={open} aria-label={'Plant: ' + name + '. Switch plant'} onClick={() => setOpen(o => !o)}>
@@ -164,17 +173,32 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync }) {
       </button>
       {open && (
         <MenuList className="plant-menu" label="Plants">
-          {plants.map(p => {
-            // the plant on screen takes the header's progress, so the two % always match
-            const st = p.id === plantId && states[p.id] && currentSync ? { ...states[p.id], sync: currentSync } : states[p.id];
-            return (
-              <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
-                      onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
-                <span className="tick" aria-hidden="true">{p.id === plantId ? '✓' : ''}</span><span className="nm">{label(p)}</span>
-                <MenuState st={st} cut={cutOff && cutOff(p.id)} now={states.at || Date.now()} />
-              </button>
-            );
-          })}
+          {(groups.length ? groups : [{ login: null, plants: plants.map(p => ({ plant_id: p.id })) }]).map(g => (
+            <div key={g.login || ''} role="group" aria-label={g.login || 'Plants'}>
+              {g.login && <div className="pm-login" aria-hidden="true">{g.login}</div>}
+              {g.plants.map(row => {
+                const p = plants.find(x => x.id === row.plant_id);
+                if (!p) {
+                  return (
+                    <button key={row.plant_id} type="button" role="menuitem" className="pm-stopped"
+                            onClick={() => { setOpen(false); onStopped && onStopped(); }}>
+                      <span className="tick" aria-hidden="true" /><span className="nm">{row.plant_name || 'Plant ' + row.plant_id}</span>
+                      <span className="pm-state">Stopped</span>
+                    </button>
+                  );
+                }
+                // the plant on screen takes the header's progress, so the two % always match
+                const st = p.id === plantId && states[p.id] && currentSync ? { ...states[p.id], sync: currentSync } : states[p.id];
+                return (
+                  <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
+                          onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
+                    <span className="tick" aria-hidden="true">{p.id === plantId ? '✓' : ''}</span><span className="nm">{label(p)}</span>
+                    <MenuState st={st} cut={cutOff && cutOff(p.id)} now={states.at || Date.now()} />
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </MenuList>
       )}
     </div>
@@ -1217,7 +1241,8 @@ function App({ links }) {
     const ls = links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(id)));
     return ls.length > 0 && !ls.some(a => a.status === 'active');
   };
-  const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync} />;
+  const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync}
+                               accounts={links.accounts} onStopped={() => openSettings('connection')} />;
   // A page's section, from Billing's Reconnect: openSettings; otherwise the page itself
   const settingsPage = <window.SettingsArea page={tab} onPage={(p, section) => (section ? openSettings(section) : go(p))}
     me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} links={links}
