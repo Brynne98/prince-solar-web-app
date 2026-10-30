@@ -495,10 +495,14 @@ No asymmetric border is left.
   hover, a Solar Green border on focus.
 
 ### First steps
-A card in the sidebar, above Settings, naming the next setting to fill in: 12px radius,
-a 10px uppercase label, a step count, 4px progress segments (Solar Green when done), a
-15px 600 step name and a 13px muted line. Open, it tints green at 9% with a 50% green
-edge. On a tablet the 84px sidebar shows a ring and the count instead. The step opens in
+A card in the sidebar, above Settings, listing every setup step (SOLAR-252): 12px radius,
+a 10px uppercase label and a step count, then one 13.5px row per step. Sign up and Add
+inverter lead, always ticked. A done step has a filled Solar Green tick and dim text; the
+next step has a green ring and a 10% green wash; a row to fill in ends in a chevron and
+opens its step, done ones too. Open, the card tints green at 9% with a 50% green edge. A
+tap on the header folds the list to the next step and back; it starts open in the
+sidebar and folded on a phone. On a
+tablet the 84px sidebar shows a ring and the count instead. The step opens in
 a popup 24px right of the sidebar: 320px wide, Panel Raised, strong hairline, 16px
 radius, 18px 20px 20px padding, Popup shadow, an 18px title and a 13px muted note. On
 phones the card sits over the bottom bar and the step opens as a bottom sheet.
