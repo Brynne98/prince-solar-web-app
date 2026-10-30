@@ -2278,6 +2278,27 @@ function PaymentsSection({ billing }) {
 // `links` is the gate's own list (LinkGate), already read before the page opened, so the
 // section draws at once and its changes reach the rest of the app (SOLAR-96).
 // Plant states (stopped, deleted) and their buttons are on Billing since SOLAR-250.
+// A login's quiet actions: change its password, remove it (SOLAR-251). The header's menus
+// (usePopover, MenuList in app.jsx) do the opening, closing and arrow keys.
+function LoginMenu({ email, busy, onPassword, onRemove }) {
+  const [open, setOpen, ref] = usePopover();
+  const pick = (fn) => () => { setOpen(false); fn(); };
+  return (
+    <div className="login-more" ref={ref}>
+      <button type="button" className="more-btn" aria-haspopup="menu" aria-expanded={open} aria-label={'Options for ' + email}
+              disabled={busy} aria-busy={busy} onClick={() => setOpen(o => !o)}>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1.4" /><circle cx="8" cy="8" r="1.4" /><circle cx="13" cy="8" r="1.4" /></svg>
+      </button>
+      {open && (
+        <MenuList className="login-menu" label={email}>
+          {onPassword && <button type="button" role="menuitem" onClick={pick(onPassword)}>Change password</button>}
+          <button type="button" role="menuitem" className="menu-danger" onClick={pick(onRemove)}>Remove login</button>
+        </MenuList>
+      )}
+    </div>
+  );
+}
+
 function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, onCollect }) {
   const { useState } = React;
   const { accounts, error, refresh } = links;
@@ -2366,7 +2387,6 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   // Stop and Start (SOLAR-251): the plan sets how many plants collect. Stopping deletes
   // the plant's readings, so it asks first; a full plan offers the upgrade instead.
   const [stopping, setStopping] = useState(null); // plant_id whose confirm card is open
-  const [shut, setShut] = useState({}); // account_id → its plants folded away
   const [full, setFull] = useState(null);         // plant_id that found the plan full
   const stop = async (p) => {
     setStopping(null); setBusy('stop:' + p.plant_id);
@@ -2385,33 +2405,37 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     await refresh();
     setBusy(null);
   };
+  // One switch per plant. On means collecting. Turning it off asks first and stays on until
+  // "Stop and delete"; a plant up for deletion on the billing date shows that and Keep instead.
   const plantRow = (p) => {
     const s = state(p);
-    // Only news shows: a working plant says nothing, and a dead login is its login's line
-    const [word, tone] = { paused: ['Stopped', 'warn'], going: ['Deleted ' + billDay(p.remove_on), 'bad'] }[s] || [];
-    const n = Number(p.inverters) || 0;
     const name = p.plant_name || 'Plant ' + p.plant_id;
-    const b = (k) => busy === k + ':' + p.plant_id;
+    const b = busy === 'stop:' + p.plant_id || busy === 'start:' + p.plant_id;
+    const on = s === 'on' || s === 'off';
     return (
-      <div key={p.plant_id} className="login-plant">
-        <div className="conn-text">
-          {/* one line: the name and its inverters */}
-          <div className="conn-user">{name}{n > 0 && <span className="plant-inv"> · {n} {n === 1 ? 'inverter' : 'inverters'}</span>}</div>
-        </div>
-        {word && <span className={'conn-status plant-state ' + tone}>{word}</span>}
-        {s === 'paused' && <button type="button" className="save-btn" disabled={b('start')} aria-busy={b('start')} onClick={() => start(p)}>{b('start') ? 'Starting…' : 'Start'}</button>}
-        {(s === 'on' || s === 'off') && <button type="button" className="ghost-btn" disabled={b('stop')} onClick={() => setStopping(stopping === p.plant_id ? null : p.plant_id)}>{b('stop') ? 'Stopping…' : 'Stop'}</button>}
-        {s === 'going' && <button type="button" className="ghost-btn" disabled={b('keep')} onClick={() => keep(p)}>Keep</button>}
+      <div key={p.plant_id} className={'login-plant' + (on ? '' : ' off')}>
+        <div className="conn-user plant-nm">{name}</div>
+        {s === 'going' ? <>
+          <span className="conn-status plant-state bad">Deleted {billDay(p.remove_on)}</span>
+          <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>
+        </> : (
+          <button type="button" className={'switch' + (on ? ' on' : '')} role="switch" aria-checked={on} aria-label={'Collect ' + name}
+                  disabled={b} aria-busy={b} onClick={() => on ? setStopping(stopping === p.plant_id ? null : p.plant_id) : start(p)}><span className="knob" /></button>
+        )}
         {stopping === p.plant_id && (
           <ConfirmCard
             title={<>Stop collecting <b>{name}</b>?</>}
-            text="All its readings are deleted, unless another account shares it. Start it again later to fetch what SunSynk still has."
+            text="Its readings are deleted, unless another account shares it. Turn it back on to fetch what SunSynk still has."
             action="Stop and delete" onConfirm={() => stop(p)} onCancel={() => setStopping(null)} />
         )}
-        {full === p.plant_id && (
+        {/* Family past its 3rd: the plant's inverters go on the plan (R49 each), as at link */}
+        {full === p.plant_id && billing?.plan === 'family' && (
+          <div className="conn-form"><window.Paywall reason="paused" paused={[name]} added={Number(p.inverters) || 1} onCancel={() => setFull(null)} /></div>
+        )}
+        {full === p.plant_id && billing?.plan !== 'family' && (
           <div className="conn-form confirm-card" role="alertdialog" aria-label="Your plan is full">
             <div className="confirm-title">Your plan is full</div>
-            <div className="confirm-text">Stop another plant first, or upgrade.</div>
+            <div className="confirm-text">Turn another plant off first, or upgrade.</div>
             <div className="conn-form-actions">
               <button type="button" className="ghost-btn" onClick={() => setFull(null)} autoFocus>Cancel</button>
               {onCollect && <button type="button" className="save-btn" onClick={() => { setFull(null); onCollect(); }}>Upgrade</button>}
@@ -2423,8 +2447,8 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   };
   const title = <>Plants{allPlants.length > 0 && <span className="sset-count">{allPlants.filter(p => state(p) === 'on').length} of {allPlants.length} collecting</span>}</>;
   return (
-    <SettingsSection id="connection" title={title} note="Each SunSynk login and the plants it brings." bare
-      action={!unread && mode !== 'add' && <button type="button" className="save-btn" onClick={() => setMode('add')}>Add SunSynk login</button>}>
+    <SettingsSection id="connection" title={title} bare
+      action={!unread && mode !== 'add' && <button type="button" className="save-btn" onClick={() => setMode('add')}>Add login</button>}>
       {!unread && mode === 'add' && (
         <div className="sset conn-row conn-add-row"><div className="conn-text">
           {/* Cancel re-reads too: a login with no plant yet is saved but not listed. */}
@@ -2438,55 +2462,44 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         </div>
       ) : !live.length ? (
         <div className="sset"><div className="field-note">No login connected.</div></div>
-      ) : live.map(acc => {
-        const ok = acc.status === 'active';
-        // Green only while the poller is actually reaching it: the header pill calls
-        // 15 minutes without a reading "offline", so a login goes amber at the same age.
-        const stale = ok && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
-        const word = !ok ? 'Sign-in expired' : stale ? 'Not updating' : 'Connected';
-        const plants = acc.plants || [];
-        return (
-          <div key={acc.account_id} className={'sset conn-row synk-card' + (leaving === acc.account_id ? ' leaving' : '')}>
-            <div className="conn-text">
-              {/* Line 1: the login and whether it works. Line 2 only once it has stopped: the
-                  last reading. Its plants are listed under it, saying only Stopped or Deleted. */}
-              <div className="conn-user login-name">
-                {plants.length ? (
-                  <button type="button" className="login-open" aria-expanded={!shut[acc.account_id]} aria-controls={'plants-' + acc.account_id}
-                          onClick={() => setShut(o => ({ ...o, [acc.account_id]: !o[acc.account_id] }))}>
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
+      ) : (
+        // One card. Each login is a grey caption over its plants, after YNAB and Copilot
+        // Money: its state shows only when it needs something, Remove waits in its menu.
+        <div className="sset login-list">
+          {live.map(acc => {
+            const ok = acc.status === 'active';
+            // Amber at the age the header pill calls offline (15 minutes without a reading)
+            const stale = ok && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
+            const plants = acc.plants || [];
+            return (
+              <div key={acc.account_id} className={'login-grp' + (leaving === acc.account_id ? ' leaving' : '')}>
+                <div className="login-line">
+                  <span className="login-email">
                     {acc.sunsynk_username}
-                  </button>
-                ) : acc.sunsynk_username}
-                <span className={'conn-status login-status' + (ok && !stale ? ' ok' : ' warn')}>{word}</span>
+                    {(!ok || stale) && <span className="warn" title={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : undefined}> · {!ok ? 'Sign-in expired' : 'Not updating'}</span>}
+                  </span>
+                  {!ok && mode !== acc.account_id && <button type="button" className="ghost-btn" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
+                  <LoginMenu email={acc.sunsynk_username} busy={busy === acc.account_id}
+                    onPassword={ok ? () => setMode(acc.account_id) : null}
+                    onRemove={() => setConfirming(acc.account_id)} />
+                </div>
+                {mode === acc.account_id && (
+                  <window.LinkForm compact relink initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
+                )}
+                {confirming === acc.account_id && (
+                  <ConfirmCard
+                    title={<>Remove <b>{acc.sunsynk_username}</b>?</>}
+                    text={paidPlan && plants.length
+                      ? `It stays until ${billDay(billing.nextDate)}, then it’s deleted with its history, unless another account shares it.`
+                      : 'This plant’s history is deleted too, unless another account shares it.' + (live.length === 1 ? ' It’s your only login. Your pages stay empty until you add one.' : '')}
+                    action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
+                )}
+                {plants.length ? plants.map(plantRow) : <div className="conn-meta">No plant shared with this login.</div>}
               </div>
-              {shut[acc.account_id] && <div className="conn-meta">{plants.filter(p => state(p) === 'on').length} of {plants.length} collecting</div>}
-              {(!ok || stale) && acc.last_ok_at && <div className="conn-meta">Last reading {ago(acc.last_ok_at)}</div>}
-            </div>
-            <div className="conn-actions">
-              {!ok && mode !== acc.account_id && <button type="button" className="save-btn" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
-              <button type="button" className="ghost-btn" onClick={() => setConfirming(confirming === acc.account_id ? null : acc.account_id)} disabled={busy === acc.account_id}>
-                {busy === acc.account_id ? 'Removing…' : 'Remove'}
-              </button>
-            </div>
-            <div className="login-plants" id={'plants-' + acc.account_id} hidden={!!shut[acc.account_id]}>
-              {plants.length ? plants.map(plantRow) : <div className="conn-meta">No plant shared with this login.</div>}
-            </div>
-            {/* the reconnect form and the remove card sit under the whole row, full width */}
-            {mode === acc.account_id && (
-              <window.LinkForm compact relink initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
-            )}
-            {confirming === acc.account_id && (
-              <ConfirmCard
-                title={<>Remove <b>{acc.sunsynk_username}</b>?</>}
-                text={paidPlan && plants.length
-                  ? `It stays until ${billDay(billing.nextDate)}, then it’s deleted with its history, unless another account shares it.`
-                  : 'This plant’s history is deleted too, unless another account shares it.' + (live.length === 1 ? ' It’s your only login. Your pages stay empty until you add one.' : '')}
-                action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
-            )}
-          </div>
-        );
-      })}
+            );
+          })}
+        </div>
+      )}
     </SettingsSection>
   );
 }

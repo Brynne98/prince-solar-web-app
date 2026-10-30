@@ -986,18 +986,23 @@
   }
   .set-method { color: var(--dim); }
   /* Billing's Plants: each login, its plants listed under it */
-  .login-plants { flex-basis: 100%; margin-top: 10px; border-left: 2px solid var(--line); padding-left: 14px; }
-  .login-plant { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
-  .login-plant + .login-plant { border-top: 1px solid var(--line); }
+  /* Billing's Plants (SOLAR-251): one card; each login a grey caption over its plants, a switch each */
+  .login-grp + .login-grp { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 10px; }
+  .login-grp.leaving { overflow: hidden; animation: conn-out .24s ease-in forwards; }
+  .login-line { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+  .login-email { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+  .login-email .warn { color: var(--warn); white-space: nowrap; }
+  .login-plant { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-height: 44px; }
+  .login-plant .plant-nm { flex: 1; min-width: 0; font-size: 14.5px; }
+  .login-plant.off .plant-nm { color: var(--dim); }
   .login-plant .plant-state { font-size: 13px; white-space: nowrap; }
-  .login-plant { flex-wrap: wrap; }
-  .login-plant > .confirm-card { flex-basis: 100%; }
-  /* the email folds its plants away */
-  .login-open { display: inline-flex; align-items: center; gap: 6px; padding: 0; background: none; border: none;
-    color: inherit; font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
-  .login-open svg { flex: none; color: var(--dim); transition: transform .18s; }
-  .login-open[aria-expanded="true"] svg { transform: rotate(90deg); }
-  .login-plants[hidden] { display: none; }
+  .login-plant > .confirm-card, .login-grp > .conn-form { flex-basis: 100%; margin: 4px 0 10px; }
+  .switch:disabled { opacity: .5; }
+  .login-more { position: relative; flex: none; }
+  .more-btn { width: 34px; height: 34px; display: grid; place-items: center; background: none; border: none; border-radius: 9px; color: var(--dim); }
+  .more-btn:hover, .more-btn[aria-expanded="true"] { background: var(--panel-2); color: var(--text); }
+  .login-menu { right: 0; top: calc(100% + 4px); min-width: 180px; }
+  .menu button.menu-danger { color: var(--load); }
   /* Account actions: one button width */
   #settings-actions .conn-actions > button { min-width: 112px; }
   /* change password, open: its name top left, the fields fill the rest, no box of their own */
@@ -1055,24 +1060,17 @@
   .settings-page > .save-bar { order: 1; }
 
   /* No rules inside Settings cards: space alone sets rows apart (SOLAR-250) */
-  .settings-page :is(.conn-row, .conn-add, .notif-group + .notif-group, .notif-push, .notif-push .notif-group, .plan-alert, .pay-list, .pay-row, .login-plant + .login-plant) { border-top: none; }
+  .settings-page :is(.conn-row, .conn-add, .notif-group + .notif-group, .notif-push, .notif-push .notif-group, .plan-alert, .pay-list, .pay-row) { border-top: none; }
   .settings-page .notif-all { border-bottom: none; }
   .settings-page #settings-system .conn-row.sset-row { border-top: none; padding: 0; }
   .settings-page #settings-system .conn-row.sset-row + .conn-row.sset-row { margin-top: 40px; }
   .settings-page #settings-system .conn-row.sset-row:first-child { padding-top: 0; }
   .settings-page .conn-row { padding: 10px 0; }
   .settings-page .conn-row:first-child { padding-top: 0; }
-  .settings-page .login-plants { border-left: none; margin-top: 4px; padding-left: 18px; }
-  .settings-page .login-plant { padding: 2px 0; }
-  .plant-inv { color: var(--dim); font-size: 13px; }
-  /* a working login is one line beside a taller button: its plants tuck up under the email */
-  .settings-page .synk-card:not(:has(> .conn-text > .conn-meta)) > .login-plants { margin-top: -10px; }
   /* Billing's Plants: one card per login, its email first and plain to read */
   .sset-cards { min-width: 0; }
   .settings-page .sset-cards > .sset + .sset { margin-top: 8px; }
   .settings-page .sset-cards > .sset.conn-row { padding: 14px 18px; }
-  .login-name { font-size: 15px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
-  .login-status { margin-left: 10px; font-size: 13px; font-weight: 500; }
   .sset-cards .conn-status::before { display: none; }   /* the word alone, no dot */
   .settings-page .sset-cards > .conn-add { padding-top: 12px; }
   @media (max-width: 900px) { .settings-page .sset-cards > .sset.conn-row { padding: 12px 14px; } }
@@ -1080,7 +1078,7 @@
   /* Every Settings row: a switch or button lines up with the top of its name (SOLAR-250) */
   .settings-page .conn-actions, .settings-page .conn-row > .plant-state { align-self: flex-start; }
   .settings-page #settings-actions .conn-row:not(:has(form)) { align-items: flex-start; }
-  .settings-page :is(.notif-head, .notif-open, .login-plant, .toggle-row) { align-items: flex-start; }
+  .settings-page :is(.notif-head, .notif-open, .toggle-row) { align-items: flex-start; }
   /* just the number, centred under the last section */
   .app-version { padding-top: 14px; text-align: center; font-size: 12px; color: var(--dim); }
   .app-version a { color: inherit; }
