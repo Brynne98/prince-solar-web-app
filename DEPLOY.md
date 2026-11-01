@@ -199,7 +199,7 @@ accounts in `PAYSTACK_TEST_USERS` can pay (Paystack test cards), everyone else g
 "Paid plans open soon" (SOLAR-267). When the live key arrives, in this order:
 
 1. Remove the tester's test billing (their plants and readings stay):
-   `psql "$PROD_DB_URL" -v tester=<auth user id> -f scripts/sql/go-live-tester-cleanup.sql`
+   `supabase db query --linked -f scripts/sql/go-live-tester-cleanup.sql`
 2. `supabase secrets set PAYSTACK_SECRET_KEY=<live key>` (paste it yourself).
 3. `supabase secrets unset PAYSTACK_TEST_USERS`
 4. Paystack dashboard, live mode → Settings → API Keys & Webhooks: webhook URL
