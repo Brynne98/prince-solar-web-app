@@ -625,7 +625,7 @@ function StepForm({ id, cfg, busy, onSave, onSkip }) {
 // The card lists every step (SOLAR-252), led by two already done to show progress so far; a
 // row opens its step, done ones too. A tap on the header folds it to the next step; a
 // phone starts folded.
-const STEPS_DONE = ['Sign up', 'Add inverter'];
+const STEPS_DONE = ['Sign up', 'Add plant'];
 function FirstSteps({ me, plantId, onSaved, variant }) {
   const [open, setOpen, ref] = usePopover();
   const [skipped, setSkipped] = useState([]);
@@ -877,7 +877,7 @@ function SettingsSkeleton() {
 // Signed in, with no SunSynk plant yet: a new account, or every login removed. The frame
 // is the real one, every page opens, and Account (with Delete account) works. Every other
 // page shows its own layout as a still, faint outline, with one card centred in view saying
-// what will appear there (the same card, one size, on each page). Connect inverter, there or
+// what will appear there (the same card, one size, on each page). Add plant, there or
 // in the header, opens that card into the form where it stands; Cancel or Esc folds it back
 // (SOLAR-96). Once a login lists a plant the gate's refresh swaps this for App (SOLAR-93, SOLAR-94).
 function Setup({ links }) {
@@ -902,7 +902,7 @@ function Setup({ links }) {
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
   const account = { user, plantCount: 0, alert: dead.length > 0, onSettings: () => go('prefs'), active: isSettings(tab) };
   const connectBtn = (cls) => (
-    <button type="button" className={'save-btn setup-btn ' + cls} onClick={connect} aria-label="Connect inverter"><Icon id="plug" /><span>Connect inverter</span></button>
+    <button type="button" className={'save-btn setup-btn ' + cls} onClick={connect} aria-label="Add plant"><Icon id="plug" /><span>Add plant</span></button>
   );
   const outline = tab === 'settings' ? <SettingsSkeleton /> : <window.TabSkeleton tab={tab} />;
   const stage = (
@@ -918,8 +918,8 @@ function Setup({ links }) {
                 // One card, the same words on every page (SOLAR-97).
                 <div className="setup-empty-box">
                   <Icon id="plug" />
-                  <h2>Connect your inverter</h2>
-                  <p>Your solar, battery, grid and home show here once it’s connected.</p>
+                  <h2>Add your plant</h2>
+                  <p>Your solar, battery, grid and home show here once it’s added.</p>
                   {connectBtn('')}
                 </div>
               )}
@@ -929,7 +929,7 @@ function Setup({ links }) {
   // Plant shows its outline and the card inside the Settings area; Account and Billing work.
   return (
     <Frame tabs={TABS} tab={tab} onTab={go} account={account}
-      head={<><PlantMenu fallback="No inverter yet" />{!connecting && connectBtn('setup-head-btn')}</>}>
+      head={<><PlantMenu fallback="No plant yet" />{!connecting && connectBtn('setup-head-btn')}</>}>
       {isSettings(tab) ? <window.SettingsArea page={tab} onPage={go} links={links} plantSlot={stage} /> : stage}
     </Frame>
   );

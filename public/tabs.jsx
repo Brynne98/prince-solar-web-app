@@ -3379,14 +3379,19 @@ function NotificationsSection({ userId }) {
 // 'prefs' shows Account. Adjust plan ('plans') is a page under Billing. The plan is read
 // once here: Billing shows it, Account's Delete and Plant's Remove login need it.
 const SETTINGS_NAV = [['account', 'Account'], ['billing', 'Billing'], ['settings', 'System']];
+// Setup and App each draw their own SettingsArea, so the first plant switched on or the last
+// one off mounts a new one; it starts from the plan last read, not the Plan outline.
+// Sign-out doesn't reload the page, so it forgets it.
+let billingSeen = null;
+window.sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') billingSeen = null; });
 function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved, links, flash, onFlashed, onDirty, switchBlocked }) {
   const { useState, useEffect } = React;
   const [user, setUser] = useState(null);
   useEffect(() => { window.sb.auth.getSession().then(({ data }) => setUser(data?.session?.user || null)).catch(() => {}); }, []);
-  const [billing, setBilling] = useState(null);
+  const [billing, setBilling] = useState(() => billingSeen);
   // The stopped plant whose "plan is full" sent the user to the plans: extra room is for it.
   const [forPlant, setForPlant] = useState(null);
-  const reloadBilling = () => window.billingRpc('api_billing_status').then(({ data }) => { if (data) setBilling(data); return data; });
+  const reloadBilling = () => window.billingRpc('api_billing_status').then(({ data }) => { if (data) { billingSeen = data; setBilling(data); } return data; });
   // A booked change moves which plants stop on the billing date, shown on the plant rows.
   const reloadPlan = () => Promise.all([reloadBilling(), links?.refresh?.()]).then(([b]) => b);
   // Back from a payment: billingReturn checks it (a paid one reloads the page).

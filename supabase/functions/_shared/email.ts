@@ -344,21 +344,21 @@ const openPage = (tab: keyof typeof PAGES, plantId: number) => ({ label: `Open $
 
 const SETTINGS_FOOTER = (line: string) => [line.replace("notification settings", `<a href="${PREFS}">notification settings</a>`), HELP];
 
-// Sent once the email is confirmed, before any inverter is connected. The Connect
+// Sent once the email is confirmed, before any plant is added. The Add plant
 // card opens on Live when a user has no plant, so the button goes straight there.
-// Wording matches link.jsx ("Connect your inverter", "Use the login from the
+// Wording matches link.jsx ("Add your plant", "Use the login from the
 // SunSynk Connect app", "We never keep your password").
 export const welcome = () =>
   make("Welcome to Prince Solar Hub", {
     title: "Welcome to Prince Solar Hub",
     parts: [
-      { p: "One step left: connect your inverter." },
+      { p: "One step left: add your plant." },
       { steps: [
         "Tap the button below and sign in.",
         "Enter the email and password from your <b>SunSynk Connect</b> app.",
         "Your readings start within a minute and update every minute. Your last 60 days follow, and we'll email you when they're in.",
       ] },
-      { button: { label: "Connect your inverter", href: APP } },
+      { button: { label: "Add your plant", href: APP } },
     ],
     footer: [HELP],
   });

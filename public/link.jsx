@@ -517,7 +517,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
 
   return (
     <form className={compact ? 'conn-form link-form' : 'link-form link-card'} onSubmit={submit} noValidate aria-busy={busy}>
-      {!compact && <h2 className="sset-title">{noPlants ? 'Connected, but no plant yet' : relink ? 'Reconnect SunSynk' : 'Connect your inverter'}</h2>}
+      {!compact && <h2 className="sset-title">{noPlants ? 'Connected, but no plant yet' : relink ? 'Reconnect SunSynk' : 'Add your plant'}</h2>}
       {noPlants ? (
         // The login worked but SunSynk lists no plant for it. Say so and offer Retry; never
         // send the owner to an installer or SunSynk.
