@@ -2536,7 +2536,18 @@ function InvoicesSection({ billing: b }) {
   if (!b || b.comped || !(b.payments || []).length) return null;
   const { rand } = window.billingFmt;
   const day = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-  const what = { start: 'first payment', upgrade: 'upgrade', renewal: '', settle: 'paid late' };
+  // What each payment was for (SOLAR-302). Extra plants bought on the same plan are an
+  // 'upgrade' charge too, so the plan before it tells them apart from a real upgrade.
+  const plants = (n) => `${n} extra ${n === 1 ? 'plant' : 'plants'}`;
+  const what = (p) => {
+    const extra = p.extra > 0 ? ', ' + plants(p.extra) : '';
+    if (p.kind === 'start') return 'first payment' + extra;
+    if (p.kind === 'renewal') return 'renewal' + extra;
+    if (p.kind === 'settle') return 'paid late';
+    if (p.kind === 'switch') return 'switched from monthly'; // the row already says yearly
+    if (p.kind === 'upgrade' && p.added > 0) return (p.prev === p.plan ? '' : 'upgrade, ') + plants(p.added);
+    return p.kind === 'upgrade' ? 'upgrade' : '';
+  };
   return (
     <SettingsSection id="invoices" title="Invoices">
       <table className="pay-table">
@@ -2545,7 +2556,7 @@ function InvoicesSection({ billing: b }) {
           {b.payments.map(p => (
             <tr key={p.at}>
               <td>{day(p.date)}</td>
-              <td className="pay-what">{PLAN_NAME[p.plan]}, {p.period}{what[p.kind] ? ', ' + what[p.kind] : ''}</td>
+              <td className="pay-what">{PLAN_NAME[p.plan]}, {p.period}{what(p) ? ', ' + what(p) : ''}</td>
               <td className="mono">{rand(p.amount)}</td>
               <td>Paid</td>
             </tr>
