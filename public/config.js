@@ -9,7 +9,7 @@
 // Shown in Settings -> About. Bumped on every deploy; semver, so patch for fixes,
 // minor for features, major for a rewrite. Lives here rather than in the JSX so it sits
 // with the other deploy-time config and loads before anything renders.
-window.APP_VERSION = 'v0.37.0';
+window.APP_VERSION = 'v0.37.1';
 // Shown in Settings → About and on error screens.
 window.SUPPORT_EMAIL = 'hello@princesolarhub.co.za';
 // Google sign-in client (Google Cloud project prince-solar, "Supabase web"). Public by design.
@@ -41,7 +41,9 @@ window.SUNSYNK_CONFIG = (function () {
 window.POSTHOG_KEY = 'phc_ABkqiYsajciVYVKYX4GZMApcDP7QfD7CKQtgE7XPgjxN';
 (function () {
   var ph = window.posthog;
-  var on = !!(window.POSTHOG_KEY && ph && ph.init);
+  // Local runs (localhost, 127.0.0.1) send nothing: their test users are not customers (SOLAR-268).
+  var local = /^(localhost|127\.0\.0\.1|)$/.test(location.hostname);
+  var on = !!(window.POSTHOG_KEY && ph && ph.init) && !local;
   // Memory persistence mints a new anonymous id each load; start a signed-in user on
   // their user id (from the saved Supabase session) so identify doesn't merge a new id
   // onto them every visit.

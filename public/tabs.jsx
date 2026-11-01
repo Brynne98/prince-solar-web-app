@@ -2220,7 +2220,8 @@ function AdjustPlanPage({ billing, reload, onBack, paused, forPlant = null }) {
       if (!sameView) return b.nextPeriod === view ? <div className="plan-cur">From {billDay(b.nextDate)}</div>
         : <button type="button" className="ghost-btn" disabled={busy} onClick={() => run(() => bookPlan(b, b.plan, view, reload))}>Switch on {billDay(b.nextDate)}</button>;
       if (p === 'family' && more > held) return <button type="button" className="save-btn" disabled={quote?.dueNow == null}
-        onClick={() => { window.track('extra_plants_done', { count: more, change: 'up' }); window.startUpgrade('family', period, false, more, forPlant ? [forPlant] : null); }}>{quote?.dueNow != null ? 'Pay ' + rand(quote.dueNow) : 'Pay'}</button>;
+        onClick={() => window.startUpgrade('family', period, false, more, forPlant ? [forPlant] : null,
+          { name: 'extra_plants_done', props: { count: more, change: 'up' } })}>{quote?.dueNow != null ? 'Pay ' + rand(quote.dueNow) : 'Pay'}</button>;
       if (p === 'family' && more < held && b.nextExtraPlants === more) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
       if (p === 'family' && more < held) return <button type="button" className="ghost-btn" disabled={busy}
         onClick={() => run(async () => { if (!await bookExtras(b, more, reload)) setMore(shown); })}>Lower on {billDay(b.nextDate)}</button>;

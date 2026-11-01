@@ -129,8 +129,10 @@ const REFUND_NOTE = 'Your plan changed while you paid, so nothing changed. The p
 // extras: the extra plants wanted on Family in all (SOLAR-264); left out, those held.
 // plants: the stopped plants the room is for; once paid they start first, else the oldest.
 // One payment at a time: a second click while one is open does nothing.
+// paidEvent: { name, props } sent once the money is taken, here or back from the card page (SOLAR-268).
 let paying = false;
-window.startUpgrade = async function startUpgrade(plan, period, newCard = false, extras = null, plants = null) {
+const PAID_EVENT = 'ps.paidEvent';
+window.startUpgrade = async function startUpgrade(plan, period, newCard = false, extras = null, plants = null, paidEvent = null) {
   if (paying) return;
   paying = true;
   try {
@@ -139,8 +141,13 @@ window.startUpgrade = async function startUpgrade(plan, period, newCard = false,
       window.toast('Your saved card was declined. Enter another card.', { error: true });
       r = await billingCall('pay', { plan, period, newCard: true, extras, plants });
     }
-    if (r.url) location.assign(r.url);
-    else if (r.status === 'paid') billingPaid(plan);
+    if (r.url) {
+      try { paidEvent ? sessionStorage.setItem(PAID_EVENT, JSON.stringify(paidEvent)) : sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
+      location.assign(r.url);
+    } else if (r.status === 'paid') {
+      if (paidEvent) window.track(paidEvent.name, paidEvent.props);
+      billingPaid(plan);
+    }
     else if (r.status === 'refund') window.toast(REFUND_NOTE, { error: true });
     else window.toast('Your payment is still being checked. Look again in a minute.');
   } catch (e) {
@@ -185,6 +192,9 @@ window.billingReturn = async function billingReturn(billingStatus) {
     return;
   }
   if (done === 'paid') { window.toast('Payment received. Your plan is updated.'); return; }
+  // The event a card-page payment was opened with: sent only if it was paid.
+  let paidEvent = null;
+  try { paidEvent = JSON.parse(sessionStorage.getItem(PAID_EVENT)); sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
   try {
     const { status, kind } = await billingCall('verify', { reference: ref });
     // A card change changes no plan: the caller re-reads the card ('card').
@@ -194,7 +204,7 @@ window.billingReturn = async function billingReturn(billingStatus) {
       return 'card';
     }
     // A full reload: resumed plants join the plant list.
-    if (status === 'paid') return billingPaid(null);
+    if (status === 'paid') { if (paidEvent) window.track(paidEvent.name, paidEvent.props); return billingPaid(null); }
     if (status === 'refund') return window.toast(REFUND_NOTE, { error: true });
     window.toast(status === 'failed' ? 'The payment didn’t go through. Nothing was charged.' : 'Your payment is still being checked. Look again in a minute.', { error: status === 'failed' });
   } catch {
