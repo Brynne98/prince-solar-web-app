@@ -230,11 +230,14 @@ async function fetchInto(raw: RawBundle, eps: Endpoint[], sn: string, acc: Accou
   });
 }
 
+/** device_time on /realtime/input: when the datalogger last uploaded. */
+const inputTimeOf = (input: any): string | null =>
+  (input && Array.isArray(input.pvIV) && input.pvIV[0] && input.pvIV[0].time) || null;
+
 async function fetchInverter(inv: InverterInfo, acc: Account, ts: number, sign: string | null, offGrid = false): Promise<Fetched> {
   const paths = realtimePaths(inv.sn);
   const input = await apiGet(paths.input, acc).catch(() => null);
-  const inputTime: string | null =
-    (input && Array.isArray(input.pvIV) && input.pvIV[0] && input.pvIV[0].time) || null;
+  const inputTime = inputTimeOf(input);
   const raw: RawBundle = { input, grid: null, battery: null, load: null, output: null };
   if (canCarry(inv, inputTime)) return { inv, raw, carried: true, fetched: new Set(), sign };
 
@@ -374,7 +377,10 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   // repair them, because the minute is present, only wrong. Leave it absent instead
   // and let recover bank it from the inverter's own uploads. Absent beats false.
   // (A carry has no input payload by design — it dates itself from the previous row.)
-  const noAnchor = (f: Fetched) => !f.carried && f.raw.input == null;
+  // An input that answers without a time is no anchor either: a logger gone quiet
+  // gets that from SunSynk, with zeros on the other endpoints (2504193036 on
+  // 31 Oct, 12:59-16:03: load 0 for three hours, SOLAR-296).
+  const noAnchor = (f: Fetched) => !f.carried && inputTimeOf(f.raw.input) == null;
   const usable = perInv.filter((f) => !noAnchor(f));
   const noData = perInv.filter(noAnchor).map((f) => f.inv.sn);
   if (noData.length) result.noData = noData;
@@ -394,11 +400,15 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
     .map(({ inv, raw, carried }, i) => (carried ? null : extractMeta(inv, raw, ts, i)))
     .filter((m) => m !== null);
 
-  // One aggregate row per plant on this account.
+  // One aggregate row per plant on this account. A plant with an inverter left out
+  // above sums only the rest, so its row is marked partial: recover replaces it
+  // from the inverters' own uploads, where it would skip a whole row (SOLAR-296).
   const plantIds = [...new Set(readings.map((r) => r.plant_id as number))];
+  const short = new Set(perInv.filter(noAnchor).map((f) => Number(f.inv.plantId)));
   const agg = plantIds.map((plantId) => ({
     plant_id: plantId,
     ...aggregate(readings.filter((r) => r.plant_id === plantId) as any),
+    partial: short.has(Number(plantId)),
   }));
 
   // The whole minute in one transaction (migration 0030): readings and strings
