@@ -1138,6 +1138,17 @@
   .pop-body .field-row { grid-template-columns: minmax(0, 1fr); }
   .pop-dlg { max-height: calc(100dvh - 24px); overflow: auto; }
   .pop-dlg.pop-mid { width: min(560px, calc(100vw - 32px)); }
+  /* working (SOLAR-294): a turning ring on a button while its change saves, and the small
+     pop-up a payment step shows */
+  .spin, :is(.ghost-btn, .save-btn, .danger-btn, .plan-undo)[aria-busy="true"]::after { content: ''; display: inline-block; flex: none; width: 12px; height: 12px;
+    border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sync-spin .7s linear infinite; vertical-align: -2px; }
+  :is(.ghost-btn, .save-btn, .danger-btn, .plan-undo)[aria-busy="true"]::after { margin-left: 8px; }
+  @media (prefers-reduced-motion: reduce) { .spin, [aria-busy="true"]::after { animation-duration: 2s; } }
+  .pop-wait { display: flex; align-items: center; gap: 12px; font-size: 14.5px; }
+  .pop-wait .spin { width: 16px; height: 16px; color: var(--pv); }
+  .pop-dlg:has(.pop-wait) { width: auto; min-width: 240px; }
+  .pop-dlg:focus { outline: none; }   /* a pop-up with nothing to press takes focus itself; no ring round it */
+  .stepper[aria-busy="true"] .mono { opacity: .35; }
   .pop-dlg.pop-wide { width: min(940px, calc(100vw - 32px)); }
   .pop-wide .pop-body { padding: 22px 24px 24px; }
   /* the plan picker inside its pop-up (SOLAR-292): no page padding, a close button top right */

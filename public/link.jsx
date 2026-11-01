@@ -94,7 +94,12 @@ const billDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB',
   { day: 'numeric', month: 'short', year: d.slice(0, 4) === String(new Date().getFullYear()) ? undefined : 'numeric' });
 const perUnit = (period) => (period === 'yearly' ? 'a year' : 'a month');
 // extras: the extra plants wanted on Family in all; null keeps those held (SOLAR-264).
-const quote = (plan, period, extras = null) => window.sb.rpc('api_billing_quote', { p_plan: plan, p_period: period, p_extra: extras })
+// A billing read or change that takes too long ends as an error, so no button or pop-up waits
+// forever (SOLAR-294). The caller says "try again"; a change may still land, so it re-reads.
+const billingRpc = (name, args) => Promise.race([window.sb.rpc(name, args),
+  new Promise(r => setTimeout(() => r({ data: null, error: { message: 'timed out' } }), 15000))]);
+window.billingRpc = billingRpc;
+const quote = (plan, period, extras = null) => billingRpc('api_billing_quote', { p_plan: plan, p_period: period, p_extra: extras })
   .then(({ data, error }) => { if (error) throw error; return data; });
 
 window.billingFmt = { rand, billDay, perUnit };
@@ -109,7 +114,8 @@ const billingCall = async (route, body) => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: window.SUNSYNK_CONFIG.key },
     body: JSON.stringify(body),
-  });
+    signal: AbortSignal.timeout(30000),   // a payment that hasn't started in 30 s says so (SOLAR-294)
+  }).catch(e => { throw new Error(/abort|timeout/i.test(e.name) ? 'timed out' : e.message); });
   const out = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(out.error || 'payment failed');
   return out;
@@ -124,6 +130,16 @@ const billingPaid = (plan) => {
   location.assign(planUrl('&billing=paid'));
 };
 
+// A payment step that ran out of time may still have gone through, so it doesn't say "try again".
+const SLOW_NOTE = 'This is taking too long. Check Billing in a minute before you try again.';
+// While a payment step runs, a small pop-up says so, so a slow one never looks frozen (SOLAR-294).
+// It has no close: every step ends, the slowest after 30 s. Returns the function that closes it.
+const working = (text) => {
+  const el = document.body.appendChild(document.createElement('div'));
+  const root = ReactDOM.createRoot(el);
+  root.render(<Dialog keep label={text} onClose={() => {}}><div className="pop-wait" role="status"><span className="spin" aria-hidden="true" />{text}</div></Dialog>);
+  return () => { root.unmount(); el.remove(); };
+};
 // Paid after the plan or extra plants changed: nothing applied, refunded by hand (0127).
 const REFUND_NOTE = 'Your plan changed while you paid, so nothing changed. The payment will be refunded.';
 // extras: the extra plants wanted on Family in all (SOLAR-264); left out, those held.
@@ -179,7 +195,11 @@ function PayReview({ title, due, then, card, onDone }) {
 // true: pay. Nothing to review (no saved card: Paystack's page shows the price; nothing due;
 // a refused change, which the pay call explains) also answers true.
 const reviewPay = async (plan, period, extras) => {
-  const [{ data: b }, q] = await Promise.all([window.sb.rpc('api_billing_status'), quote(plan, period, extras)]);
+  const stop = working('Checking the price…');
+  // Nothing is charged yet, so a failed or slow read just says try again, never pays without the review.
+  const [{ data: b, error }, q] = await Promise.all([billingRpc('api_billing_status'), quote(plan, period, extras)])
+    .catch(() => { throw new Error('price check'); }).finally(stop);
+  if (error) throw new Error('price check');
   if (!b?.card || !q?.dueNow) return true;
   const name = plan === 'family' ? 'Family' : 'Home';
   const more = (extras ?? q.extraPlants) - q.extraPlants;
@@ -200,11 +220,15 @@ window.startUpgrade = async function startUpgrade(plan, period, newCard = false,
   paying = true;
   try {
     if (!newCard && !await reviewPay(plan, period, extras)) return;
-    let r = await billingCall('pay', { plan, period, newCard, extras, plants });
-    if (r.status === 'failed') {
-      window.toast('Your saved card was declined. Enter another card.', { error: true });
-      r = await billingCall('pay', { plan, period, newCard: true, extras, plants });
-    }
+    const stop = working(newCard ? 'Opening the card page…' : 'Taking payment…');
+    let r;
+    try {
+      r = await billingCall('pay', { plan, period, newCard, extras, plants });
+      if (r.status === 'failed') {
+        window.toast('Your saved card was declined. Enter another card.', { error: true });
+        r = await billingCall('pay', { plan, period, newCard: true, extras, plants });
+      }
+    } finally { if (!r?.url && r?.status !== 'paid') stop(); }   // a new page is on its way: keep it up
     if (r.url) {
       try { paidEvent ? sessionStorage.setItem(PAID_EVENT, JSON.stringify(paidEvent)) : sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
       location.assign(r.url);
@@ -216,7 +240,8 @@ window.startUpgrade = async function startUpgrade(plan, period, newCard = false,
     else window.toast('Your payment is still being checked. Look again in a minute.');
   } catch (e) {
     if (/open soon/.test(e.message)) return window.toast('Paid plans open soon. Nothing was charged.');
-    window.toast(/settle the failed payment/.test(e.message) ? 'Pay the payment that didn’t go through first.' : 'Couldn’t start the payment. Try again.', { error: true });
+    window.toast(/settle the failed payment/.test(e.message) ? 'Pay the payment that didn’t go through first.'
+      : e.message === 'timed out' ? SLOW_NOTE : 'Couldn’t start the payment. Try again.', { error: true });
   } finally {
     paying = false;
   }
@@ -224,21 +249,25 @@ window.startUpgrade = async function startUpgrade(plan, period, newCard = false,
 
 // Pay a failed renewal with another card.
 window.settlePayment = async function settlePayment() {
+  const stop = working('Opening the card page…');
   try {
     const r = await billingCall('pay', { settle: true });
     location.assign(r.url);
   } catch (e) {
-    window.toast(/open soon/.test(e.message) ? 'Paid plans open soon. Nothing was charged.' : 'Couldn’t start the payment. Try again.', { error: true });
+    stop();
+    window.toast(/open soon/.test(e.message) ? 'Paid plans open soon. Nothing was charged.' : e.message === 'timed out' ? SLOW_NOTE : 'Couldn’t start the payment. Try again.', { error: true });
   }
 };
 
 // Change the saved card (SOLAR-238): R1 on Paystack's card page, refunded once the
 // card is saved. Comes back through billingReturn like any card-page payment.
 window.changeCard = async function changeCard() {
+  const stop = working('Opening the card page…');
   try {
     const r = await billingCall('pay', { card: true });
     location.assign(r.url);
   } catch (e) {
+    stop();
     if (/open soon/.test(e.message)) return window.toast('Paid plans open soon. Nothing was charged.');
     window.toast('Couldn’t open the card page. Try again.', { error: true });
   }

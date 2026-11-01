@@ -2044,8 +2044,9 @@ function tooManyPlants(plan, extra, on) {
 }
 // Books a change for the billing date, or undoes one. True once booked.
 async function bookPlan(b, plan, period, reload, on) {
-  const { error } = await window.sb.rpc('api_billing_change', { p_plan: plan, p_period: period ?? null });
+  const { error } = await window.billingRpc('api_billing_change', { p_plan: plan, p_period: period ?? null });
   if (error) {
+    reload();   // a change that ran out of time may still have landed
     window.toast(/remove plants first/.test(error.message)
       ? tooManyPlants(plan, b.nextExtraPlants ?? b.extraPlants ?? 0, on)
       : 'Couldn’t change your plan. Try again.', { error: true });
@@ -2069,8 +2070,9 @@ function bookedChange(b) {
 // Sets the extra plants from the billing date (SOLAR-264): fewer than held books a drop,
 // as many as held undoes one. More is a payment (window.startUpgrade). True once saved.
 async function bookExtras(b, count, reload, on) {
-  const { error } = await window.sb.rpc('api_billing_extras', { p_count: count });
+  const { error } = await window.billingRpc('api_billing_extras', { p_count: count });
   if (error) {
+    reload();
     window.toast(/remove plants first/.test(error.message) ? tooManyPlants('family', count, on)
       : /plan change/.test(error.message) ? 'Your plan changes on its billing date. Keep it first.'
       : 'Couldn’t change your extra plants. Try again.', { error: true });
@@ -2123,7 +2125,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   // What the price is made of: Family's base plus R49 for each extra plant paid for.
   const list = paid && b.plan === 'family' && b.prices?.[b.period];
   const extra = list ? b.extraPlants || 0 : 0;
-  const run = async (fn) => { setBusy(true); await fn(); setBusy(false); };
+  const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
   return (
     <SettingsSection id="plan" title="Plan">
       {/* the plan top left, its buttons top right */}
@@ -2154,7 +2156,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
       {booked && (
         <div className="plan-booked plan-alert">
           {/* the undo is a link in the notice, so Adjust plan stays the card's one button (SOLAR-283) */}
-          <span className="conn-status warn">{booked[0]} <button type="button" className="plan-undo" disabled={busy} onClick={() => run(() => undoBooked(b, reload))}>{booked[1]}</button></span>
+          <span className="conn-status warn">{booked[0]} <button type="button" className="plan-undo" disabled={busy} aria-busy={busy} onClick={() => run(() => undoBooked(b, reload))}>{booked[1]}</button></span>
         </div>
       )}
     </SettingsSection>
@@ -2220,13 +2222,16 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
   const needs = (n) => paid && (b.plan === 'home' || n > held);
   const qKey = (n) => [b?.plan, b?.state, b?.nextDate, held, period, n].join(':');
   const [quotes, setQuotes] = useState({});
+  const [failed, setFailed] = useState({}); // qKey → true when its price couldn't be read (SOLAR-294)
+  const [waiting, setWaiting] = useState(false); // a tapped count still waiting for its price
   const asked = React.useRef({});   // qKey → its request, once per key
   const wanted = React.useRef(null); // the count last tapped
   const ask = (n) => {
     const k = qKey(n);
-    if (!asked.current[k]) asked.current[k] = window.sb.rpc('api_billing_quote', { p_plan: 'family', p_period: period, p_extra: n })
+    if (!asked.current[k]) asked.current[k] = window.billingRpc('api_billing_quote', { p_plan: 'family', p_period: period, p_extra: n })
       .then(({ data, error }) => {
-        if (error) { delete asked.current[k]; return null; }
+        if (error) { delete asked.current[k]; setFailed(f => ({ ...f, [k]: true })); return null; }
+        setFailed(f => ({ ...f, [k]: false }));
         setQuotes(q => ({ ...q, [k]: data }));
         return data;
       });
@@ -2237,8 +2242,10 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
     wanted.current = n;
     const show = () => { setMore(n); window.track('plan_extra_count_done', { count: n }); };
     if (!needs(n) || quotes[qKey(n)]) return show();
+    setWaiting(true);
     ask(n).then(q => {
       if (wanted.current !== n) return;
+      setWaiting(false);
       if (q) show(); else window.toast('Couldn’t get the price. Try again.', { error: true });
     });
   };
@@ -2270,7 +2277,7 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
   const price = (p) => p === 'free' ? 0 : p === 'family' ? (prices.family ?? 0) + more * (prices.extra ?? 0)
     : p === b.plan && sameView ? b.price : prices[p];
   const famMine = b.plan === 'family' && sameView;
-  const run = async (fn) => { setBusy(true); await fn(); setBusy(false); };
+  const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
   const booked = bookedChange(b);
   // The line under a price
   const note = (p) => {
@@ -2283,26 +2290,31 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
     if (p === 'family' && b.plan === 'home' && price('family') > price('home')) return `${rand(price('family') - price('home'))} more than Home`;
     return ' ';
   };
+  // Family's price still loading: a busy button; it couldn't be read: a button to ask again.
+  const priceMissing = !quote && (failed[qKey(more)]
+    ? <button type="button" className="ghost-btn" onClick={() => { setFailed(f => ({ ...f, [qKey(more)]: false })); ask(more); }}>Get the price again</button>
+    : needs(more) && <button type="button" className="save-btn" disabled aria-busy="true">Getting the price</button>);
   const action = (p) => {
     if (p === b.plan) {
       if (!sameView) return b.nextPeriod === view ? <div className="plan-cur">From {billDay(b.nextDate)}</div>
-        : <button type="button" className="ghost-btn" disabled={busy} onClick={() => run(() => bookPlan(b, b.plan, view, reload, on))}>Switch on {billDay(b.nextDate)}</button>;
-      if (p === 'family' && more > held) return <button type="button" className="save-btn" disabled={quote?.dueNow == null}
+        : <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'switch'} onClick={() => run(() => bookPlan(b, b.plan, view, reload, on), 'switch')}>Switch on {billDay(b.nextDate)}</button>;
+      if (p === 'family' && more > held) return priceMissing || <button type="button" className="save-btn" disabled={quote?.dueNow == null}
         onClick={() => window.startUpgrade('family', period, false, more, forPlant ? [forPlant] : null,
           { name: 'extra_plants_done', props: { count: more, change: 'up' } })}>{quote?.dueNow != null ? 'Pay ' + rand(quote.dueNow) : 'Pay'}</button>;
       if (p === 'family' && more < held && b.nextExtraPlants === more) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
-      if (p === 'family' && more < held) return <button type="button" className="ghost-btn" disabled={busy}
-        onClick={() => run(async () => { if (!await bookExtras(b, more, reload, on)) setMore(shown); })}>Lower on {billDay(b.nextDate)}</button>;
+      if (p === 'family' && more < held) return <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'lower'}
+        onClick={() => run(async () => { if (!await bookExtras(b, more, reload, on)) setMore(shown); }, 'lower')}>Lower on {billDay(b.nextDate)}</button>;
       return null; // "Your plan" sits in the card's corner
     }
     if (!sameView) return null; // a paid plan changes plan in its own period
     if (PLAN_RANK[p] > PLAN_RANK[b.plan]) {
+      if (paid && p === 'family' && priceMissing) return priceMissing;
       return <button type="button" className="save-btn" disabled={paid && p === 'family' && quote?.dueNow == null}
                      onClick={() => window.startUpgrade(p, period, !paid, p === 'family' ? more : null, forPlant ? [forPlant] : null)}>Upgrade</button>;
     }
     if (b.nextPlan === p) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
-    return <button type="button" className="ghost-btn" disabled={busy || cancelling}
-                   onClick={() => (p === 'free' ? setCancelling(true) : run(() => bookPlan(b, p, null, reload, on)))}>Downgrade</button>;
+    return <button type="button" className="ghost-btn" disabled={!!busy || cancelling} aria-busy={busy === 'down:' + p}
+                   onClick={() => (p === 'free' ? setCancelling(true) : run(() => bookPlan(b, p, null, reload, on), 'down:' + p))}>Downgrade</button>;
   };
   // Under the button on a phone: when the picked plan starts, if its own note doesn't say.
   const when = (p) => (note(p).trim() || (p === b.plan || !sameView ? ''
@@ -2311,7 +2323,7 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
     <div className="plan-more">
       <div className="plan-more-row">
         <span>Extra plants</span>
-        <span className="stepper">
+        <span className="stepper" aria-busy={waiting}>
           <button type="button" aria-label="One plant fewer" disabled={more === 0} onClick={() => pick(more - 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
           <span className="mono" aria-live="polite">{more}</span>
           <button type="button" aria-label="One plant more" onClick={() => pick(more + 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10M7 2v10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
@@ -2378,7 +2390,7 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
         </div>}
         {cancelling && (
           <ConfirmCard modal title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
-            busy={busy} onConfirm={() => run(async () => { await bookPlan(b, 'free', null, reload, on); setCancelling(false); })} onCancel={() => setCancelling(false)} />
+            busy={!!busy} onConfirm={() => run(async () => { await bookPlan(b, 'free', null, reload, on); setCancelling(false); })} onCancel={() => setCancelling(false)} />
         )}
       </>}
     </div>
@@ -2576,7 +2588,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const allPlants = [...new Map(live.flatMap(a => a.plants || []).map(p => [p.plant_id, p])).values()];
   const keep = async (p) => {
     setBusy('keep:' + p.plant_id);
-    const { error } = await window.sb.rpc('api_billing_keep', { p_plant: p.plant_id });
+    const { error } = await window.billingRpc('api_billing_keep', { p_plant: p.plant_id });
     if (error) fail(/needed for your plan change/.test(error.message) ? `Your booked change needs this removed. Tap ${(billing && bookedChange(billing)?.[1]) || 'Keep'} in Plan first.` : 'Couldn’t keep it. Try again.');
     await Promise.all([refresh(), reloadBilling && reloadBilling()]);
     setBusy(null);
@@ -3269,7 +3281,7 @@ function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved
   const [billing, setBilling] = useState(null);
   // The stopped plant whose "plan is full" sent the user to the plans: extra room is for it.
   const [forPlant, setForPlant] = useState(null);
-  const reloadBilling = () => window.sb.rpc('api_billing_status').then(({ data }) => { if (data) setBilling(data); return data; });
+  const reloadBilling = () => window.billingRpc('api_billing_status').then(({ data }) => { if (data) setBilling(data); return data; });
   // Back from a payment: billingReturn checks it (a paid one reloads the page).
   useEffect(() => { reloadBilling().then(b => window.billingReturn(b)).then(r => r === 'card' && reloadBilling()); }, []);
   // Every plant on the logins once (a plant can be on two).
