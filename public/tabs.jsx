@@ -1970,7 +1970,8 @@ function TabSkeleton({ tab }) {
 // that opened it cannot fire the deletion; Escape closes it the way a dialog would.
 // preventScroll: autoFocus made the browser scroll Cancel into view, so the page jumped (SOLAR-258).
 const focusNoScroll = (el) => el && el.focus({ preventScroll: true });
-function ConfirmCard({ title, text, action, onConfirm, onCancel, cancelLabel = 'Cancel' }) {
+// busy: the change is on its way; the card stays, buttons off, until it lands (SOLAR-281).
+function ConfirmCard({ title, text, action, onConfirm, onCancel, cancelLabel = 'Cancel', busy = false }) {
   const cancel = React.useRef(null);
   React.useEffect(() => focusNoScroll(cancel.current), []);
   return (
@@ -1979,8 +1980,8 @@ function ConfirmCard({ title, text, action, onConfirm, onCancel, cancelLabel = '
       {title && <div className="confirm-title">{title}</div>}
       <div className="confirm-text">{text}</div>
       <div className="conn-form-actions">
-        <button type="button" className="ghost-btn" onClick={onCancel} ref={cancel}>{cancelLabel}</button>
-        <button type="button" className="danger-btn" onClick={onConfirm}>{action}</button>
+        <button type="button" className="ghost-btn" onClick={onCancel} ref={cancel} disabled={busy}>{cancelLabel}</button>
+        <button type="button" className="danger-btn" onClick={onConfirm} disabled={busy} aria-busy={busy}>{action}</button>
       </div>
     </div>
   );
@@ -2170,7 +2171,7 @@ function CancelSection({ billing: b, reload }) {
       </div>
       {cancelling && (
         <ConfirmCard title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
-          onConfirm={async () => { setCancelling(false); setBusy(true); await bookPlan(b, 'free', null, reload); setBusy(false); }}
+          busy={busy} onConfirm={async () => { setBusy(true); await bookPlan(b, 'free', null, reload); setBusy(false); setCancelling(false); }}
           onCancel={() => setCancelling(false)} />
       )}
     </SettingsSection>
@@ -2197,21 +2198,42 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
   const shown = b?.plan === 'family' ? b.nextExtraPlants ?? held : 0;
   const [more, setMore] = useState(shown);
   useEffect(() => { setMore(shown); }, [shown]);
-  const pick = (n) => { setMore(n); window.track('plan_extra_count_done', { count: n }); };
   // Family's real charge today (the saved card pays it at once): on an upgrade from Home, or
-  // for more extra plants on Family.
-  const [quote, setQuote] = useState(null);
+  // for more extra plants on Family. A count that needs a quote shows only once its quote is
+  // in, so the count, price, line and Pay change together; the next count up is fetched
+  // ahead, so a tap is usually at once (SOLAR-281).
   const period = paid ? b.period : view;
-  const quoted = paid && (b.plan === 'home' || more > held);
+  const needs = (n) => paid && (b.plan === 'home' || n > held);
+  const qKey = (n) => [b?.plan, b?.state, b?.nextDate, held, period, n].join(':');
+  const [quotes, setQuotes] = useState({});
+  const asked = React.useRef({});   // qKey → its request, once per key
+  const wanted = React.useRef(null); // the count last tapped
+  const ask = (n) => {
+    const k = qKey(n);
+    if (!asked.current[k]) asked.current[k] = window.sb.rpc('api_billing_quote', { p_plan: 'family', p_period: period, p_extra: n })
+      .then(({ data, error }) => {
+        if (error) { delete asked.current[k]; return null; }
+        setQuotes(q => ({ ...q, [k]: data }));
+        return data;
+      });
+    return asked.current[k];
+  };
+  const quote = quotes[qKey(more)] || null;
+  const pick = (n) => {
+    wanted.current = n;
+    const show = () => { setMore(n); window.track('plan_extra_count_done', { count: n }); };
+    if (!needs(n) || quotes[qKey(n)]) return show();
+    ask(n).then(q => {
+      if (wanted.current !== n) return;
+      if (q) show(); else window.toast('Couldn’t get the price. Try again.', { error: true });
+    });
+  };
   useEffect(() => { window.track('plan_page_shown', { plan: b?.plan }); }, []);
   useEffect(() => {
-    if (!quoted) return;
-    let alive = true;
-    setQuote(null);
-    window.sb.rpc('api_billing_quote', { p_plan: 'family', p_period: period, p_extra: more })
-      .then(({ data, error }) => alive && !error && setQuote(data));
-    return () => { alive = false; };
-  }, [quoted, period, more]);
+    if (!b) return;
+    if (needs(more)) ask(more);
+    if (needs(more + 1)) ask(more + 1);
+  }, [b, period, more]);
   const back = <button type="button" className="back-link" onClick={onBack}><span aria-hidden="true">←</span> Billing</button>;
   if (!b) return (
     <div className="settings-page">
@@ -2315,7 +2337,7 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
         </div>
         {cancelling && (
           <ConfirmCard title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
-            onConfirm={() => { setCancelling(false); run(() => bookPlan(b, 'free', null, reload, on)); }} onCancel={() => setCancelling(false)} />
+            busy={busy} onConfirm={() => run(async () => { await bookPlan(b, 'free', null, reload, on); setCancelling(false); })} onCancel={() => setCancelling(false)} />
         )}
       </>}
     </div>

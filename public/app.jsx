@@ -1272,7 +1272,9 @@ function App({ links }) {
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync}
                                accounts={links.accounts} onStopped={() => openSettings('connection')} />;
   // A page's section, from Billing's Reconnect: openSettings; otherwise the page itself
-  const settingsPage = <window.SettingsArea page={tab} onPage={(p, section) => (section ? openSettings(section) : go(p))}
+  // key: the loading and loaded pages put it at different child positions; without it the
+  // first reading remounted it and Billing's Plan drew its outline twice (SOLAR-281).
+  const settingsPage = <window.SettingsArea key="settings" page={tab} onPage={(p, section) => (section ? openSettings(section) : go(p))}
     me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} links={links}
     flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />;
   const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);
