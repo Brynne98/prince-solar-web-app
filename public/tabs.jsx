@@ -2351,14 +2351,14 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   const action = (p) => {
     if (p === b.plan) {
       if (!sameView) return b.nextPeriod === view ? <div className="plan-cur">From {billDay(b.nextDate)}</div>
-        : <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'switch'} onClick={() => run(() => bookPlan(b, b.plan, view, reload), 'switch')}>Switch on {billDay(b.nextDate)}</button>;
+        : <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'switch'} onClick={() => run(() => bookPlan(b, b.plan, view, reload), 'switch')}>Switch</button>;
       if (p === 'family' && more > held) return priceMissing || <button type="button" className="save-btn" disabled={quote?.dueNow == null}
         onClick={() => window.startUpgrade('family', period, false, more, forPlant ? [forPlant] : null,
-          { name: 'extra_plants_done', props: { count: more, change: 'up' } })}>{quote?.dueNow != null ? 'Pay ' + rand(quote.dueNow) : 'Pay'}</button>;
+          { name: 'extra_plants_done', props: { count: more, change: 'up' } })}>Pay</button>;
       if (p === 'family' && more < held && b.nextExtraPlants === more) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
       if (p === 'family' && more < held) return <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'lower'}
         onClick={() => (plants.length > planRoom('family', more) ? setPicking({ plan: 'family', extra: more })
-          : run(async () => { if (!await bookExtras(b, more, reload)) setMore(shown); }, 'lower'))}>Lower on {billDay(b.nextDate)}</button>;
+          : run(async () => { if (!await bookExtras(b, more, reload)) setMore(shown); }, 'lower'))}>{held - more === 1 ? 'Remove plant' : 'Remove plants'}</button>;
       return null; // "Your plan" sits in the card's corner
     }
     if (!sameView) return null; // a paid plan changes plan in its own period
@@ -2455,7 +2455,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
         ))}
         {picking && (
           <KeepPicker b={b} room={planRoom(picking.plan, picking.extra ?? b.nextExtraPlants ?? b.extraPlants)} logins={logins} busy={!!busy}
-            action={picking.extra != null ? 'Lower on ' + billDay(b.nextDate) : 'Downgrade'}
+            action={picking.extra == null ? 'Downgrade' : held - picking.extra === 1 ? 'Remove plant' : 'Remove plants'}
             onPick={(keep) => run(async () => {
               const ok = picking.extra != null ? await bookExtras(b, picking.extra, reload, keep) : await bookPlan(b, picking.plan, null, reload, keep);
               if (!ok && picking.extra != null) setMore(shown);

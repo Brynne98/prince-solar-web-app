@@ -187,7 +187,7 @@ function PayReview({ title, due, then, card, onDone }) {
       <div className="pay-review-ln"><span>Card</span><b>{card}</b></div>
       <div className="pay-review-acts">
         <button type="button" className="ghost-btn" ref={cancel} onClick={() => onDone(false)}>Cancel</button>
-        <button type="button" className="save-btn" onClick={() => onDone(true)}>Pay {rand(due)}</button>
+        <button type="button" className="save-btn" onClick={() => onDone(true)}>Pay</button>
       </div>
     </Dialog>
   );
