@@ -486,7 +486,7 @@ export function report(r: Report): Email {
 //  string_dead   a string dead for 12 samples while another string on the same
 //                inverter makes over 200 W; again once a day until it has voltage
 //  logger_stale  no new reading for the whole plant, or from one inverter while the others
-//                report (inverter set), for 15 min
+//                report (inverter set), for 30 min
 //  logger_back   readings fresh again, after a logger_stale went out
 //  needs_relink  the login turned needs_relink in poll
 export type PlantEvent =
@@ -549,10 +549,10 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
         return e.inverter
           ? [`No readings from ${e.inverter} at ${plant}`, [
               { label: "Last reading", value: e.since, tone: "home", sub: esc(day) },
-            ], `No new reading from ${esc(e.inverter)} for 15 minutes. Your other inverters are still reporting. We'll email you when it's back.`]
+            ], `No new reading from ${esc(e.inverter)} for 30 minutes. Your other inverters are still reporting. We'll email you when it's back.`]
           : [`No readings from ${plant}`, [
               { label: "Last reading", value: e.since, tone: "home", sub: esc(day) },
-            ], "No new reading from your inverters for 15 minutes. We'll email you when readings are back."];
+            ], "No new reading from your inverters for 30 minutes. We'll email you when readings are back."];
       case "logger_back":
         return [e.inverter ? `${e.inverter} back at ${plant}` : `Readings back at ${plant}`, [
           { label: "Readings", value: "Back", tone: "solar", sub: `since ${at(e.at)}, after ${span(e.lasted)}` },
@@ -663,11 +663,13 @@ export const planUpgraded = (u: Upgrade) => {
 };
 
 // Downgrade, cancel (to Free) and a monthly/yearly switch all wait for the billing
-// date. Sent when booked; the plants named are deleted on that date.
+// date. Sent when booked; the plants named collect until that date and are deleted on
+// deleteOn (SOLAR-295), or on that date when no deleteOn is given.
 export type Change = {
   from: Plan; to: Plan; fromPeriod: BillPeriod; toPeriod?: BillPeriod;
   on: string; // the billing date
   removePlants: string[];
+  deleteOn?: string;
   next?: { amount: number }; // absent on Free
 };
 
@@ -684,7 +686,7 @@ export const planChangeBooked = (c: Change) => {
         { label: "From " + c.on, value: cancel ? "Free" : planLine(c.to, c.toPeriod ?? c.fromPeriod) },
         ...(c.next ? [{ label: "Next payment", value: `${rand(c.next.amount)} on ${c.on}` }] : [{ label: "Next payment", value: "None" }]),
       ] },
-      ...(c.removePlants.length ? [{ plants: { title: `Deleted on ${c.on}`, names: c.removePlants, tone: "stop" as const } },
+      ...(c.removePlants.length ? [{ plants: { title: `Deleted on ${c.deleteOn ?? c.on}`, names: c.removePlants, tone: "stop" as const } },
         { note: c.removePlants.length === 1 ? "Its history is deleted too." : "Their history is deleted too." }] : []),
       { button: { label: cancel ? `Keep ${PLAN_NAME[c.from]}` : "See your plan", href: PLAN } },
     ],

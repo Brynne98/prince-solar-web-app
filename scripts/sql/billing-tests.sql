@@ -154,9 +154,9 @@ begin
   perform pg_temp.eq('free link records the login', (select user_id from private.free_week_logins where sunsynk_username = 'fresh@login.test'), ur);
   perform pg_temp.eq('paid link records it too', (select count(*)::int from private.free_week_logins where sunsynk_username = 'paid@login.test'), 1);
 
-  -- Downgrade at period end: plants go first, then the plan
-  perform pg_temp.raises('family -> home with 3 plants',
-    format('select public.billing_book_change(%L, %L)', uf, 'home'), 'remove plants first');
+  -- Downgrade at period end. With 3 plants it books; the 2 not picked stop on the date (0136).
+  perform public.billing_book_change(uf, 'home');
+  perform pg_temp.eq('family -> home with 3 plants books', (select cardinality(private.billing_drops(b)) from private.billing b where user_id = uf), 2);
   perform public.billing_book_removal(uf, 9000012);
   perform public.billing_book_removal(uf, 9000013);
   perform public.billing_book_change(uf, 'home');
@@ -322,7 +322,8 @@ begin
   perform pg_temp.eq('status lists booked plants', jsonb_array_length(st->'removePlants'), 2);
   st := public.api_billing_keep(9000023);
   perform pg_temp.eq('keep takes a plant off the list', jsonb_array_length(st->'removePlants'), 1);
-  perform pg_temp.raises('downgrade with too many plants', 'select public.api_billing_change(''home'')', 'remove plants first');
+  perform pg_temp.eq('downgrade with too many plants books (0136)', public.api_billing_change('home')->>'nextPlan', 'home');
+  perform public.api_billing_change('family');
   -- Remove login on Family: its plants are booked for the billing date, nothing goes now
   perform pg_temp.eq('remove login books it', public.api_link_remove('00000000-0000-0000-0000-0000000000f7')->>'result', 'booked');
   perform pg_temp.eq('all its plants booked', jsonb_array_length(public.api_billing_status()->'removePlants'),
@@ -355,7 +356,7 @@ begin
   perform pg_temp.eq('free plant gone', (select count(*)::int from public.plant_users where user_id = ur), 0);
   perform set_config('request.jwt.claims', '', true);
 end $$;
-select pg_temp.eq('plan calls for signed-in users', has_function_privilege('authenticated', 'public.api_billing_change(text, text)', 'execute'), true);
+select pg_temp.eq('plan calls for signed-in users', has_function_privilege('authenticated', 'public.api_billing_change(text, text, bigint[])', 'execute'), true);
 select pg_temp.eq('not for anon', has_function_privilege('anon', 'public.api_billing_status()', 'execute'), false);
 
 -- Free reports (0114): none but the day-7 one; heads-up on day 5

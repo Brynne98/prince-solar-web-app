@@ -259,7 +259,7 @@ async function build(r: Row): Promise<Email | null> {
     case "bill_change":
       return planChangeBooked({
         from: d.from, to: d.to, fromPeriod: d.fromPeriod, toPeriod: d.toPeriod, on: day(d.on),
-        removePlants: d.removePlants, next: d.to === "free" ? undefined : { amount: d.nextAmount },
+        removePlants: d.removePlants, deleteOn: d.deleteOn ? day(d.deleteOn) : undefined, next: d.to === "free" ? undefined : { amount: d.nextAmount },
       });
     case "bill_kept": return planKept({ plan: d.plan, period: d.period, next: { amount: d.nextAmount, date: day(d.on) } });
     case "bill_failed":

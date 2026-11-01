@@ -2029,27 +2029,28 @@ function SettingsSection({ id, title, note, bare, action, children }) {
 // The plan (SOLAR-208), on Billing since SOLAR-250: what it is, its price and renewal, then
 // Adjust plan (a page of its own) and Cancel plan. Downgrade, cancel and a monthly/yearly
 // switch wait for the billing date; going up is an upgrade and charges now
-// (window.startUpgrade). Plants go first, then the plan: a downgrade the plants don't fit
-// is refused, and the toast points at the logins on Plant.
+// (window.startUpgrade). A downgrade with more plants than the new plan covers first picks
+// the plants it keeps (SOLAR-295): the others collect until the billing date, then stop.
 const PLAN_NAME = { free: 'Free', home: 'Home', family: 'Family' };
 const PLAN_RANK = { free: 0, home: 1, family: 2 };
 const longDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-// The refusal when the plan has no room for the plants still collecting (on: their count,
-// when the caller knows it).
-function tooManyPlants(plan, extra, on) {
-  const room = plan === 'family' ? 3 + extra : 1;
-  const covers = `${PLAN_NAME[plan]} covers ${room} plant${room > 1 ? 's' : ''}`;
-  return on > room ? `${covers} and you have ${on} on. Turn ${on - room} off in Plants on Billing, then try again.`
-    : `${covers}. Turn plants off in Plants on Billing, then try again.`;
-}
-// Books a change for the billing date, or undoes one. True once booked.
-async function bookPlan(b, plan, period, reload, on) {
-  const { error } = await window.billingRpc('api_billing_change', { p_plan: plan, p_period: period ?? null });
+const planRoom = (plan, extra) => (plan === 'family' ? 3 + (extra || 0) : 1);
+// The plants a downgrade picks from, under their logins as Billing lists them: collecting
+// and not up for deletion, except those that stop on the billing date (drop), which can
+// still be picked. A plant two logins share shows under the first.
+const pickableLogins = (links) => {
+  const seen = new Set();
+  return (links?.accounts || []).filter(a => a.status !== 'disabled').map(a => ({ ...a,
+    plants: (a.plants || []).filter(p => !p.paused && (!p.remove_on || p.drop) && !seen.has(p.plant_id) && seen.add(p.plant_id)) }))
+    .filter(a => a.plants.length);
+};
+// Books a change for the billing date, or undoes one. keep: the plants picked to stay
+// (none: the first linked). True once booked.
+async function bookPlan(b, plan, period, reload, keep) {
+  const { error } = await window.billingRpc('api_billing_change', { p_plan: plan, p_period: period ?? null, p_keep: keep ?? null });
   if (error) {
     reload();   // a change that ran out of time may still have landed
-    window.toast(/remove plants first/.test(error.message)
-      ? tooManyPlants(plan, b.nextExtraPlants ?? b.extraPlants ?? 0, on)
-      : 'Couldn’t change your plan. Try again.', { error: true });
+    window.toast('Couldn’t change your plan. Try again.', { error: true });
     return false;
   }
   await reload();
@@ -2069,12 +2070,11 @@ function bookedChange(b) {
 }
 // Sets the extra plants from the billing date (SOLAR-264): fewer than held books a drop,
 // as many as held undoes one. More is a payment (window.startUpgrade). True once saved.
-async function bookExtras(b, count, reload, on) {
-  const { error } = await window.billingRpc('api_billing_extras', { p_count: count });
+async function bookExtras(b, count, reload, keep) {
+  const { error } = await window.billingRpc('api_billing_extras', { p_count: count, p_keep: keep ?? null });
   if (error) {
     reload();
-    window.toast(/remove plants first/.test(error.message) ? tooManyPlants('family', count, on)
-      : /plan change/.test(error.message) ? 'Your plan changes on its billing date. Keep it first.'
+    window.toast(/plan change/.test(error.message) ? 'Your plan changes on its billing date. Keep it first.'
       : 'Couldn’t change your extra plants. Try again.', { error: true });
     return false;
   }
@@ -2086,6 +2086,51 @@ async function bookExtras(b, count, reload, on) {
 const undoBooked = (b, reload) => (!b.nextPlan && !b.nextPeriod && b.nextExtraPlants != null
   ? bookExtras(b, b.extraPlants, reload) : bookPlan(b, b.plan, b.period, reload));
 const cancelText = (b) => `It runs until ${window.billingFmt.billDay(b.nextDate)}. After that you’re on Free: we keep only the last 24 hours of readings. Alerts stay on; reports stop.`;
+const plusDays = (d, n) => { const t = new Date(d + 'T00:00:00'); t.setDate(t.getDate() + n); return t.toLocaleDateString('en-CA'); };
+
+// A downgrade's pick (SOLAR-295): the plants the new plan keeps, each with the switch and
+// under the login Billing shows it with. One on for Home and Free; Family's room for Family.
+// Starts from the plants kept now: those not stopping, then link order.
+function KeepPicker({ b, room, logins, title, text, action, cancelLabel = 'Cancel', danger = false, busy, onPick, onCancel }) {
+  const { useState } = React;
+  const { billDay } = window.billingFmt;
+  const plants = logins.flatMap(a => a.plants);
+  const [keep, setKeep] = useState(() => [...plants.filter(p => !p.drop), ...plants.filter(p => p.drop)].slice(0, room).map(p => p.plant_id));
+  const one = room === 1;
+  // only plants still listed: the list re-reads while this is open
+  const picked = keep.filter(id => plants.some(p => p.plant_id === id));
+  const toggle = (id) => setKeep(k => k.includes(id) ? k.filter(x => x !== id) : one ? [id] : picked.length < room ? [...picked, id] : k);
+  return (
+    <window.Dialog label={action} onClose={() => { if (!busy) onCancel(); }}>
+      <div className="confirm-title">{title || (one ? 'Pick the plant to keep' : `Pick ${room} plants to keep`)}</div>
+      {text && <div className="confirm-text">{text}</div>}
+      <div className="login-list keep-picks">
+        {logins.map(a => (
+          <div key={a.account_id} className="login-grp">
+            <div className="login-line"><span className="login-email">{a.sunsynk_username}</span></div>
+            {a.plants.map(p => {
+              const on = keep.includes(p.plant_id);
+              const name = p.plant_name || 'Plant ' + p.plant_id;
+              return (
+                <div key={p.plant_id} className={'login-plant' + (on ? '' : ' off')}>
+                  <div className="conn-user plant-nm">{name}</div>
+                  <button type="button" className={'switch' + (on ? ' on' : '')} role="switch" aria-checked={on} aria-label={'Keep ' + name}
+                          disabled={busy || (!one && !on && picked.length >= room)} onClick={() => toggle(p.plant_id)}><span className="knob" /></button>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <div className="confirm-text keep-note">Others collect until {billDay(b.nextDate)}, then stop. Their history is deleted on {billDay(plusDays(b.nextDate, 30))}.</div>
+      <div className="conn-form-actions">
+        <button type="button" className="ghost-btn" onClick={onCancel} disabled={busy}>{cancelLabel}</button>
+        <button type="button" className={danger ? 'danger-btn' : 'save-btn'} disabled={busy || picked.length !== room} aria-busy={busy}
+                onClick={() => onPick(picked)}>{action}</button>
+      </div>
+    </window.Dialog>
+  );
+}
 
 function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   const { useState } = React;
@@ -2163,7 +2208,8 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   );
 }
 // Cancellation, last on Billing as on most billing pages: a paid plan not already ending.
-function CancelSection({ billing: b, reload }) {
+function CancelSection({ billing: b, reload, logins = [] }) {
+  const plants = logins.flatMap(a => a.plants);
   const { useState } = React;
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -2176,11 +2222,16 @@ function CancelSection({ billing: b, reload }) {
           <button type="button" className="danger-btn" disabled={busy || cancelling} onClick={() => setCancelling(true)}>Cancel</button>
         </div>
       </div>
-      {cancelling && (
+      {cancelling && (plants.length > 1 ? (
+        <KeepPicker b={b} room={1} logins={logins} title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b) + ' Pick the plant to keep.'}
+          action="Cancel plan" danger cancelLabel={'Keep ' + PLAN_NAME[b.plan]} busy={busy}
+          onPick={async (keep) => { setBusy(true); await bookPlan(b, 'free', null, reload, keep); setBusy(false); setCancelling(false); }}
+          onCancel={() => setCancelling(false)} />
+      ) : (
         <ConfirmCard modal title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
           busy={busy} onConfirm={async () => { setBusy(true); await bookPlan(b, 'free', null, reload); setBusy(false); setCancelling(false); }}
           onCancel={() => setCancelling(false)} />
-      )}
+      ))}
     </SettingsSection>
   );
 }
@@ -2191,7 +2242,8 @@ function CancelSection({ billing: b, reload }) {
 // plants past the 3rd, R49 a plant (SOLAR-264): more is paid today, fewer waits for the
 // billing date.
 const PLAN_TAG = { free: 'See your solar today', home: 'One house, every day kept', family: 'Up to 3 plants' };
-function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
+function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null }) {
+  const plants = logins.flatMap(a => a.plants);
   const { useState, useEffect } = React;
   const b = billing;
   const paid = !!b && b.plan !== 'free' && !b.comped;
@@ -2200,6 +2252,8 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
   useEffect(() => { if (paid) setView(b.period); }, [paid, b?.period]);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  // A downgrade that needs a pick first (SOLAR-295): { plan, extra }
+  const [picking, setPicking] = useState(null);
   // Phones: one line per plan to pick, then one button for the picked plan (SOLAR-292).
   const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 599px)').matches);
   useEffect(() => {
@@ -2297,13 +2351,14 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
   const action = (p) => {
     if (p === b.plan) {
       if (!sameView) return b.nextPeriod === view ? <div className="plan-cur">From {billDay(b.nextDate)}</div>
-        : <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'switch'} onClick={() => run(() => bookPlan(b, b.plan, view, reload, on), 'switch')}>Switch on {billDay(b.nextDate)}</button>;
+        : <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'switch'} onClick={() => run(() => bookPlan(b, b.plan, view, reload), 'switch')}>Switch on {billDay(b.nextDate)}</button>;
       if (p === 'family' && more > held) return priceMissing || <button type="button" className="save-btn" disabled={quote?.dueNow == null}
         onClick={() => window.startUpgrade('family', period, false, more, forPlant ? [forPlant] : null,
           { name: 'extra_plants_done', props: { count: more, change: 'up' } })}>{quote?.dueNow != null ? 'Pay ' + rand(quote.dueNow) : 'Pay'}</button>;
       if (p === 'family' && more < held && b.nextExtraPlants === more) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
       if (p === 'family' && more < held) return <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'lower'}
-        onClick={() => run(async () => { if (!await bookExtras(b, more, reload, on)) setMore(shown); }, 'lower')}>Lower on {billDay(b.nextDate)}</button>;
+        onClick={() => (plants.length > planRoom('family', more) ? setPicking({ plan: 'family', extra: more })
+          : run(async () => { if (!await bookExtras(b, more, reload)) setMore(shown); }, 'lower'))}>Lower on {billDay(b.nextDate)}</button>;
       return null; // "Your plan" sits in the card's corner
     }
     if (!sameView) return null; // a paid plan changes plan in its own period
@@ -2314,7 +2369,9 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
     }
     if (b.nextPlan === p) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
     return <button type="button" className="ghost-btn" disabled={!!busy || cancelling} aria-busy={busy === 'down:' + p}
-                   onClick={() => (p === 'free' ? setCancelling(true) : run(() => bookPlan(b, p, null, reload, on), 'down:' + p))}>Downgrade</button>;
+                   onClick={() => (p === 'free' ? setCancelling(true)
+                     : plants.length > planRoom(p, b.nextExtraPlants ?? b.extraPlants) ? setPicking({ plan: p })
+                     : run(() => bookPlan(b, p, null, reload), 'down:' + p))}>Downgrade</button>;
   };
   // Under the button on a phone: when the picked plan starts, if its own note doesn't say.
   const when = (p) => (note(p).trim() || (p === b.plan || !sameView ? ''
@@ -2388,9 +2445,22 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
             </div>
           ))}
         </div>}
-        {cancelling && (
+        {cancelling && (plants.length > 1 ? (
+          <KeepPicker b={b} room={1} logins={logins} title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b) + ' Pick the plant to keep.'}
+            action="Cancel plan" danger cancelLabel={'Keep ' + PLAN_NAME[b.plan]} busy={!!busy}
+            onPick={(keep) => run(async () => { await bookPlan(b, 'free', null, reload, keep); setCancelling(false); })} onCancel={() => setCancelling(false)} />
+        ) : (
           <ConfirmCard modal title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
-            busy={!!busy} onConfirm={() => run(async () => { await bookPlan(b, 'free', null, reload, on); setCancelling(false); })} onCancel={() => setCancelling(false)} />
+            busy={!!busy} onConfirm={() => run(async () => { await bookPlan(b, 'free', null, reload); setCancelling(false); })} onCancel={() => setCancelling(false)} />
+        ))}
+        {picking && (
+          <KeepPicker b={b} room={planRoom(picking.plan, picking.extra ?? b.nextExtraPlants ?? b.extraPlants)} logins={logins} busy={!!busy}
+            action={picking.extra != null ? 'Lower on ' + billDay(b.nextDate) : 'Downgrade'}
+            onPick={(keep) => run(async () => {
+              const ok = picking.extra != null ? await bookExtras(b, picking.extra, reload, keep) : await bookPlan(b, picking.plan, null, reload, keep);
+              if (!ok && picking.extra != null) setMore(shown);
+              setPicking(null);
+            })} onCancel={() => setPicking(null)} />
         )}
       </>}
     </div>
@@ -3282,6 +3352,8 @@ function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved
   // The stopped plant whose "plan is full" sent the user to the plans: extra room is for it.
   const [forPlant, setForPlant] = useState(null);
   const reloadBilling = () => window.billingRpc('api_billing_status').then(({ data }) => { if (data) setBilling(data); return data; });
+  // A booked change moves which plants stop on the billing date, shown on the plant rows.
+  const reloadPlan = () => Promise.all([reloadBilling(), links?.refresh?.()]).then(([b]) => b);
   // Back from a payment: billingReturn checks it (a paid one reloads the page).
   useEffect(() => { reloadBilling().then(b => window.billingReturn(b)).then(r => r === 'card' && reloadBilling()); }, []);
   // Every plant on the logins once (a plant can be on two).
@@ -3305,11 +3377,11 @@ function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved
         <div className="set-main">
           <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><span aria-hidden="true">←</span> Settings</button>
           {shown === 'account' && <AccountPage user={user} billing={billing} onBilling={() => onPage('billing')} />}
-          {(page === 'billing' || page === 'plans') && <BillingPage billing={billing} reload={reloadBilling} links={links} onPage={onPage} freeWeekEndsAt={me?.freeWeekEndsAt} onSaved={onPlantConfigSaved}
+          {(page === 'billing' || page === 'plans') && <BillingPage billing={billing} reload={reloadBilling} reloadPlan={reloadPlan} links={links} onPage={onPage} freeWeekEndsAt={me?.freeWeekEndsAt} onSaved={onPlantConfigSaved}
                                               onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}
           {/* Adjust plan opens over Billing, not as a page of its own (SOLAR-292) */}
-          {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadBilling} onBack={() => onPage('billing')} forPlant={forPlant}
-                                               on={plants.filter(p => !p.paused && !p.remove_on).length} />}
+          {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadPlan} onBack={() => onPage('billing')} forPlant={forPlant}
+                                               logins={pickableLogins(links)} />}
           {page === 'settings' && (plantSlot || (
             <PlantPage me={me} plantId={plantId} onSaved={onPlantConfigSaved} onDirty={onDirty}
                        switchBlocked={switchBlocked} links={links} />
@@ -3348,15 +3420,15 @@ function AccountPage({ user, billing, onBilling }) {
 }
 
 // Billing holds the plants and the logins they come from (moved from Plant, SOLAR-250).
-function BillingPage({ billing, reload, links, onPage, freeWeekEndsAt, onSaved, onCollect }) {
+function BillingPage({ billing, reload, reloadPlan, links, onPage, freeWeekEndsAt, onSaved, onCollect }) {
   return (
     <div className="settings-page">
       <div className="page-head"><h1>Billing</h1></div>
-      <PlanSection billing={billing} reload={reload} onAdjust={() => onCollect(null)} freeWeekEndsAt={freeWeekEndsAt} />
+      <PlanSection billing={billing} reload={reloadPlan} onAdjust={() => onCollect(null)} freeWeekEndsAt={freeWeekEndsAt} />
       {links && <SunSynkConnectionSection onChanged={onSaved} links={links} billing={billing} reloadBilling={reload} onCollect={(id) => onCollect(id ?? null)} />}
       <PaymentsSection billing={billing} />
       <InvoicesSection billing={billing} />
-      <CancelSection billing={billing} reload={reload} />
+      <CancelSection billing={billing} reload={reloadPlan} logins={pickableLogins(links)} />
     </div>
   );
 }
