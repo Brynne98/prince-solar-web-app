@@ -1972,12 +1972,13 @@ function TabSkeleton({ tab }) {
 const focusNoScroll = (el) => el && el.focus({ preventScroll: true });
 // busy: the change is on its way; the card stays, buttons off, until it lands (SOLAR-281).
 // modal: over the page in a Dialog rather than in place under its row.
-function ConfirmCard({ title, text, action, onConfirm, onCancel, cancelLabel = 'Cancel', busy = false, modal = false }) {
+function ConfirmCard({ title, text, children, action, onConfirm, onCancel, cancelLabel = 'Cancel', busy = false, modal = false }) {
   const cancel = React.useRef(null);
   React.useEffect(() => focusNoScroll(cancel.current), []);
   const body = <>
     {title && <div className="confirm-title">{title}</div>}
     <div className="confirm-text">{text}</div>
+    {children}
     <div className="conn-form-actions">
       <button type="button" className="ghost-btn" onClick={onCancel} ref={cancel} disabled={busy}>{cancelLabel}</button>
       <button type="button" className="danger-btn" onClick={onConfirm} disabled={busy} aria-busy={busy}>{action}</button>
@@ -2647,11 +2648,20 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   // Remove login deletes the login and its plants now, on every plan (0139). The plan and
   // the room paid for don't change: that's billing's, not the login's.
   const removeText = (acc) => {
-    const names = (acc.plants || []).map(p => p.plant_name || 'Plant ' + p.plant_id);
-    return !names.length ? 'It has no plants.'
-      : names.length === 1 ? `${names[0]} and its history are deleted now, unless another account shares it.`
-      : `${names.slice(0, -1).join(', ')} and ${names.at(-1)} are deleted now with their history, unless another account shares them.`;
+    const n = (acc.plants || []).length;
+    return !n ? 'It has no plants.'
+      : n === 1 ? 'This plant and its history will be deleted straight away, unless another account shares it.'
+      : 'These plants and their history will be deleted straight away, unless another account shares them.';
   };
+  const removeList = (acc) => !!acc.plants?.length && (
+    <div className="login-list keep-picks">
+      {acc.plants.map(p => (
+        <div key={p.plant_id} className="login-plant">
+          <div className="conn-user plant-nm">{p.plant_name || 'Plant ' + p.plant_id}</div>
+        </div>
+      ))}
+    </div>
+  );
   const remove = async (acc) => {
     const last = live.length === 1;
     setConfirming(null);
@@ -2808,8 +2818,11 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                 {confirming === acc.account_id && (
                   <ConfirmCard modal
                     title={<>Remove <b>{acc.sunsynk_username}</b>?</>}
-                    text={removeText(acc) + (live.length === 1 ? ' It’s your only login. Your pages stay empty until you add one.' : '')}
-                    action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
+                    text={removeText(acc)}
+                    action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)}>
+                    {removeList(acc)}
+                    {live.length === 1 && <div className="confirm-text keep-note">It’s your only login. Your pages stay empty until you add one.</div>}
+                  </ConfirmCard>
                 )}
                 {plants.length ? plants.map(plantRow) : <div className="conn-meta">No plant shared with this login.</div>}
               </div>
