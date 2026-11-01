@@ -2059,7 +2059,7 @@ function bookedChange(b) {
   return b.nextPlan === 'free' ? [`Ends on ${billDay(b.nextDate)}, then you’re on Free.`, `Keep ${PLAN_NAME[b.plan]}`]
     : b.nextPlan ? [`Moves to ${PLAN_NAME[b.nextPlan]} on ${billDay(b.nextDate)}` + then, `Keep ${PLAN_NAME[b.plan]}`]
     : b.nextPeriod ? [`Switches to ${b.nextPeriod} on ${billDay(b.nextDate)}` + then, `Stay ${b.period}`]
-    : [`Extra plants drop to ${b.nextExtraPlants} on ${billDay(b.nextDate)}` + then, `Keep ${b.extraPlants}`];
+    : [`Extra plants drop to ${b.nextExtraPlants} on ${billDay(b.nextDate)}` + then, `Keep ${b.extraPlants} extra plant${b.extraPlants === 1 ? '' : 's'}`];
 }
 // Sets the extra plants from the billing date (SOLAR-264): fewer than held books a drop,
 // as many as held undoes one. More is a payment (window.startUpgrade). True once saved.
@@ -2148,8 +2148,8 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
       )}
       {booked && (
         <div className="plan-booked plan-alert">
-          <span className="conn-status warn">{booked[0]}</span>
-          <button type="button" className="ghost-btn" disabled={busy} onClick={() => run(() => undoBooked(b, reload))}>{booked[1]}</button>
+          {/* the undo is a link in the notice, so Adjust plan stays the card's one button (SOLAR-283) */}
+          <span className="conn-status warn">{booked[0]} <button type="button" className="plan-undo" disabled={busy} onClick={() => run(() => undoBooked(b, reload))}>{booked[1]}</button></span>
         </div>
       )}
     </SettingsSection>

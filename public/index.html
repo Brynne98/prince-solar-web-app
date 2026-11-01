@@ -1492,6 +1492,8 @@
   /* Plan section in Account (SOLAR-208) */
   .plan-name { font-size: 15px; font-weight: 600; color: var(--text); }
   .plan-booked { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
+  .plan-undo { background: none; border: none; padding: 0; font: inherit; font-weight: 500; color: var(--text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--muted); cursor: pointer; }
+  .plan-undo:disabled { opacity: .5; cursor: default; }
   .plan-now + .conn-add, .plan-now + .conn-form { margin-top: 14px; }
   /* every plan side by side, the user's own marked (SOLAR-238) */
   .plan-alert { margin: 14px 0 0; padding-top: 14px; border-top: 1px solid var(--line); }
