@@ -177,7 +177,10 @@ async function buildReport(p: Plant, period: Period, today: string): Promise<Omi
     };
   }
   const hasPrev = prev.length > 0;
+  // History that starts after the period starts gets a note (SOLAR-273).
+  const first = cur.reduce((d, r) => (r.period < d ? r.period : d), to);
   return {
+    ...(first > from ? { partialFrom: fmtDay(first, { day: "numeric", month: "short" }) } : {}),
     plantId: p.id, period, label, prevLabel, plant: p.name,
     madeKwh: made, homeKwh: home, importKwh: hasGrid ? imp : null, exportKwh: null,
     independencePct: independence(home, imp), savedRand: tariff > 0 ? saved(home, imp) : null,
@@ -188,6 +191,21 @@ async function buildReport(p: Plant, period: Period, today: string): Promise<Omi
     } : {},
     bestDay: best(cur, "pv_kwh", dayLabel), highestUse: best(cur, "load_kwh", dayLabel), daily,
   };
+}
+
+/** A report waits while the plant's history is still loading or the user's 60-days
+ *  email hasn't gone, so it isn't built from a few days (SOLAR-273). Two days on it
+ *  goes anyway: a plant whose history never finishes still gets its reports. */
+async function historyPending(row: Row): Promise<boolean> {
+  if (!row.user_id || !row.plant_id || local(row.tz).date > addDays(row.data.today, 2)) return false;
+  const [{ data: link }, { data: cfg }, { count }] = await Promise.all([
+    db.from("plant_users").select("linked_at").eq("user_id", row.user_id).eq("plant_id", row.plant_id).maybeSingle(),
+    db.from("plant_config").select("backfill_next").eq("plant_id", row.plant_id).maybeSingle(),
+    db.from("email_queue").select("id", { count: "exact", head: true }).eq("user_id", row.user_id).eq("plant_id", row.plant_id)
+      .eq("kind", "history").in("status", ["queued", "sending"]),
+  ]);
+  // Right after a link the import bookmark isn't set yet and reads as done.
+  return (link != null && Date.now() - Date.parse(link.linked_at) < 600e3) || cfg?.backfill_next != null || (count ?? 0) > 0;
 }
 
 // ------------------------------------------------------------------- building
@@ -407,6 +425,10 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
       // Reports cost two reads each; what isn't built in time goes back untouched.
       if (Date.now() > deadline) { done.push(later(row)); continue; }
       try {
+        if (row.kind.startsWith("report_") && !dry && await historyPending(row)) {
+          done.push({ id: row.id, status: "queued", error: "waits for history", retry_s: 600, refund: true });
+          continue;
+        }
         const unsub = row.switch ? `${UNSUB}?t=${dry ? "dry" : row.unsub_token}&k=${row.switch}` : "";
         const mail = await build(row, unsub);
         if (!mail) {

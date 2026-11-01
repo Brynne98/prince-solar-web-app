@@ -65,6 +65,13 @@ const mails: Record<string, [from: string, mail: Email]> = {
         titles: values.map((v, i) => `${i + 1} Oct: ${v == null ? "no data" : v + " kWh"}`) } };
     })(),
   })],
+  "report-month-partial": [FROM_NOTICE, report({
+    ...base, period: "month", label: "October 2026", prevLabel: "September", partialFrom: "20 Oct",
+    madeKwh: 301.6, homeKwh: 338.4, importKwh: 79.5, independencePct: 77, savedRand: 790, change: {},
+    bestDay: { label: "27 Oct", kwh: 31.2 }, highestUse: { label: "25 Oct", kwh: 36.8 },
+    daily: { from: "1 Oct", to: "31 Oct", values: Array.from({ length: 31 }, (_, i) => i < 19 ? null : [26.1, 27.4, 24.0, 28.8, 19.5, 30.2, 25.7, 31.2, 29.0, 27.9, 22.6, 29.2][i - 19]),
+      labels: Array.from({ length: 31 }, (_, i) => (i % 7 === 0 ? String(i + 1) : "")) },
+  })],
   "report-week": [FROM_NOTICE, report({
     ...base, period: "week", label: "6 – 12 Oct 2026", prevLabel: "last week",
     madeKwh: 191.3, homeKwh: 208.9, importKwh: 47.2, independencePct: 77, savedRand: 495,
