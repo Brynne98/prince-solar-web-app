@@ -1996,8 +1996,13 @@ function SettingsSection({ id, title, note, bare, action, children }) {
   const flash = React.useContext(SettingsFlash);
   const flashing = flash && flash.id === id;
   const ref = React.useRef(null);
-  // A reload on #id scrolls back to it without the flash (SOLAR-165).
-  React.useEffect(() => { if (flashing || location.hash === '#' + id) ref.current?.scrollIntoView({ block: 'start' }); }, [flashing]);
+  // A reload on #id scrolls back to it without the flash (SOLAR-165). Only on arrival:
+  // the flash ending must not scroll again, or the page jumps once the cards above load (SOLAR-275).
+  const arrived = React.useRef(false);
+  React.useEffect(() => {
+    if (flashing || (!arrived.current && location.hash === '#' + id)) ref.current?.scrollIntoView({ block: 'start' });
+    arrived.current = true;
+  }, [flashing]);
   return (
     <section id={'settings-' + id} className="sec" ref={ref} aria-labelledby={'settings-' + id + '-t'}>
       <div className="sec-intro">
@@ -2008,7 +2013,7 @@ function SettingsSection({ id, title, note, bare, action, children }) {
         {action}
       </div>
       <div className={(bare ? 'sset-cards' : 'sset') + (flashing ? ' sset-flash' : '')}
-           onAnimationEnd={flashing ? (e) => { if (e.target === e.currentTarget) flash.done(); } : undefined}>
+           onAnimationEnd={flashing ? (e) => { if (e.animationName === 'sset-flash') flash.done(); } : undefined}>
         {bare ? children : <div className="sset-body">{children}</div>}
       </div>
     </section>
