@@ -2974,14 +2974,15 @@ function DeleteAccountRow({ email, billing, onBilling }) {
         <div className="conn-user">Delete account</div>
         <div className="conn-meta">Deletes your logins, settings and email choices.</div>
       </div>
-      <div className="conn-actions"><button type="button" className="danger-btn" onClick={() => setConfirming(c => !c)} disabled={blocked || busy || confirming}>{busy ? 'Deleting…' : 'Delete'}</button></div>
-      {blocked && (
+      <div className="conn-actions"><button type="button" className="danger-btn" onClick={() => setConfirming(c => !c)} disabled={busy || (confirming && !blocked)}>{busy ? 'Deleting…' : 'Delete'}</button></div>
+      {/* Tapping Delete on a blocked account shows why, in place of the confirm (SOLAR-274) */}
+      {blocked && confirming && (
         <div className="set-warn">
           <span>{owed ? <>Pay the failed payment before you delete your account.</> : <>Cancel your <b>{PLAN_NAME[billing.plan]} plan</b> before you delete your account.</>}</span>
           <button type="button" className="text-link" onClick={onBilling}>Go to Billing</button>
         </div>
       )}
-      {confirming && (
+      {!blocked && confirming && (
         <ConfirmCard title={<>Delete <b>{email || 'this account'}</b>?</>} text="Your plants’ history goes too, unless another account shares them. It cannot be undone."
           action="Delete account" onConfirm={del} onCancel={() => setConfirming(false)} />
       )}
