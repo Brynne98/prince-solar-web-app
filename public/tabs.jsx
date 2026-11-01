@@ -2438,9 +2438,11 @@ function LoginMenu({ email, busy, onPassword, onRemove }) {
   const pick = (fn) => () => { setOpen(false); fn(); };
   return (
     <div className="login-more" ref={ref}>
-      <button type="button" className="more-btn" aria-haspopup="menu" aria-expanded={open} aria-label={'Options for ' + email}
+      {/* a word, not three dots, so it reads as a button (SOLAR-285) */}
+      <button type="button" className="ghost-btn" aria-haspopup="menu" aria-expanded={open} aria-label={'Manage ' + email}
               disabled={busy} aria-busy={busy} onClick={() => setOpen(o => !o)}>
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1.4" /><circle cx="8" cy="8" r="1.4" /><circle cx="13" cy="8" r="1.4" /></svg>
+        Manage
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" /></svg>
       </button>
       {open && (
         <MenuList className="login-menu" label={email}>
@@ -2601,13 +2603,15 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
       </div>
     );
   };
-  // A plant up for deletion still collects until its date.
-  const title = <>Plants{allPlants.length > 0 && <span className="sset-count">{allPlants.filter(p => !p.paused && ['on', 'going'].includes(state(p))).length} of {allPlants.length} collecting</span>}</>;
   // Free and Home collect one plant, Family 3 plus the extra bought. With that taken, Add login
   // still opens the form: the server links the new plants stopped, and each one's switch offers
   // the upgrade (SOLAR-272). A stopped plant leaves room, as on the server (SOLAR-259).
   const collecting = allPlants.filter(p => !p.paused).length;
-  const planFull = !!billing && !billing.comped && collecting >= (billing.plan === 'family' ? 3 + (billing.extraPlants || 0) : 1);
+  const limit = billing && !billing.comped ? (billing.plan === 'family' ? 3 + (billing.extraPlants || 0) : 1) : null;
+  const planFull = limit != null && collecting >= limit;
+  // Plants on out of what the plan allows, so it shows the room left (SOLAR-285); none when
+  // free of charge. A plant up for deletion still collects until its date.
+  const title = <>Plants{limit != null && allPlants.length > 0 && <span className="sset-count">{allPlants.filter(p => !p.paused && ['on', 'going'].includes(state(p))).length} of {limit} on your plan</span>}</>;
   return (
     <SettingsSection id="connection" title={title} bare
       action={!unread && mode !== 'add' && <button type="button" className="save-btn" onClick={() => { if (planFull) window.track('add_login_full_done', { plan: billing.plan }); setMode('add'); }}>Add login</button>}>
@@ -2633,9 +2637,10 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         <div className="sset login-list">
           {live.map(acc => {
             const ok = acc.status === 'active';
-            // Amber at the age the header pill calls offline (15 minutes without a reading)
-            const stale = ok && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
             const plants = acc.plants || [];
+            // Amber at the age the header pill calls offline (15 minutes without a reading). A login
+            // with no plant is never read, so its age means nothing (SOLAR-285).
+            const stale = ok && plants.length > 0 && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
             return (
               <div key={acc.account_id} className={'login-grp' + (leaving === acc.account_id ? ' leaving' : '')}>
                 <div className="login-line">
