@@ -190,13 +190,39 @@ begin
                                          from private.billing where user_id = ua), 'free--');
   perform pg_temp.raises('renew on free', format('select public.billing_renew(%L)', ua), 'nothing to renew');
 
-  -- Monthly -> yearly at renewal: no day maths, date stays, then a year on
-  perform public.billing_book_change(uj, 'home', 'yearly');
-  perform pg_temp.eq('switch kept to period end', (select period from private.billing where user_id = uj), 'monthly');
-  perform pg_temp.eq('switch due', public.billing_amount_due(uj), 999);
-  perform public.billing_renew(uj);
-  perform pg_temp.eq('switch y date', (select period || ' ' || next_billing_date from private.billing where user_id = uj),
-                     'yearly 2028-03-31');
+  -- Monthly -> yearly is paid now, the year starts on the billing date (0138): no day maths,
+  -- date stays, then a year on with no second charge
+  perform pg_temp.raises('switch not booked', format('select public.billing_book_change(%L, ''home'', ''yearly'')', uj), 'paid now');
+  q := public.billing_upgrade_quote(uj, 'home', 0, 'yearly');
+  perform pg_temp.eq('switch quote', q->>'dueNow' || ' ' || (q->>'startsOn') || ' ' || (q->>'nextDate'), '999 2027-03-31 2028-03-31');
+  q := public.billing_charge_open(uj, 'home', 'yearly');
+  perform pg_temp.eq('switch charge', (select kind || ' ' || period || ' ' || amount || ' ' || billing_date
+                                         from private.billing_charges where reference = q->>'reference'), 'switch yearly 999 2027-03-31');
+  -- a double tap opens two; the second paid goes back
+  perform set_config('t.switch2', public.billing_charge_open(uj, 'home', 'yearly')->>'reference', true);
+  perform public.billing_charge_paid(q->>'reference');
+  perform pg_temp.eq('second switch refunded', public.billing_charge_paid(current_setting('t.switch2'))->>'refund', 'true');
+  perform pg_temp.eq('switch kept to period end', (select period || ' ' || next_period || ' ' || prepaid_on
+                                                     from private.billing where user_id = uj), 'monthly yearly 2027-03-31');
+  perform pg_temp.eq('switch receipt', (select data->>'amount' || ' ' || (data->>'startsOn') || ' ' || (data->>'nextDate')
+                                          from public.email_queue where user_id = uj and kind = 'bill_switched'), '999 2027-03-31 2028-03-31');
+  -- no undo, no other change, no second switch until the year starts
+  perform pg_temp.raises('switch no undo', format('select public.billing_book_change(%L, ''home'', ''monthly'')', uj), 'year is paid');
+  perform pg_temp.raises('switch no cancel', format('select public.billing_book_change(%L, ''free'')', uj), 'year is paid');
+  perform pg_temp.raises('switch no upgrade', format('select public.billing_charge_open(%L, ''family'')', uj), 'year is paid');
+  perform pg_temp.raises('switch once', format('select public.billing_charge_open(%L, ''home'', ''yearly'')', uj), 'year is paid');
+  -- a move to Free (a lost dispute left unpaid) ends the paid year; undone after
+  begin
+    perform private.billing_to_free(uj, '2026-11-20');
+    perform pg_temp.eq('free ends the paid year', (select plan || ' ' || coalesce(prepaid_on::text, '-') from private.billing where user_id = uj), 'free -');
+    raise exception 'undo' using errcode = 'T0001';
+  exception when sqlstate 'T0001' then null;
+  end;
+  q := public.billing_renew(uj);
+  perform pg_temp.eq('switch renewal free', (q->>'charge')::int, 0);
+  perform pg_temp.eq('switch y date', (select period || ' ' || next_billing_date || ' ' || coalesce(prepaid_on::text, '-')
+                                         from private.billing where user_id = uj), 'yearly 2028-03-31 -');
+  perform pg_temp.eq('switch y due', public.billing_amount_due(uj), 999);
   -- Yearly -> monthly
   perform public.billing_book_change(uh, 'home', 'monthly');
   perform pg_temp.eq('switch m due', public.billing_amount_due(uh), 99);
@@ -336,17 +362,17 @@ begin
   perform pg_temp.raises('keep refused when the downgrade needs it', 'select public.api_billing_keep(9000022)', 'needed for your plan change');
   perform public.api_billing_change('family');
   perform pg_temp.raises('not your login', 'select public.api_link_remove(''00000000-0000-0000-0000-000000000099'')', 'not your account');
-  -- A switch booked and undone
+  -- A switch to yearly is paid, not booked (0138); a cancel booked and undone
   perform set_config('request.jwt.claims', json_build_object('sub', uh, 'role', 'authenticated')::text, true);
   perform pg_temp.eq('home monthly now', public.api_billing_status()->>'period', 'monthly');
-  perform pg_temp.eq('switch booked', public.api_billing_change('home', 'yearly')->>'nextPeriod', 'yearly');
-  perform pg_temp.eq('undo with current plan', public.api_billing_change('home', 'monthly')->>'nextPeriod', null);
+  perform pg_temp.raises('switch not booked by the app', 'select public.api_billing_change(''home'', ''yearly'')', 'paid now');
+  perform pg_temp.eq('switch quote for the app', (select q->>'dueNow' || ' ' || (q->>'switch') from public.api_billing_quote('home', 'yearly') q), '999 true');
   perform pg_temp.eq('cancel booked', public.api_billing_change('free')->>'nextPlan', 'free');
   perform pg_temp.eq('undo cancel', public.api_billing_change('home', 'monthly')->>'nextPlan', null);
   -- Each undo of a booked change is emailed; an undo with nothing booked is not (0134).
-  perform pg_temp.eq('undo emails', (select count(*) from public.email_queue where user_id = uh and kind = 'bill_kept'), 2::bigint);
+  perform pg_temp.eq('undo emails', (select count(*) from public.email_queue where user_id = uh and kind = 'bill_kept'), 1::bigint);
   perform public.api_billing_change('home', 'monthly');
-  perform pg_temp.eq('undo with nothing booked sends nothing', (select count(*) from public.email_queue where user_id = uh and kind = 'bill_kept'), 2::bigint);
+  perform pg_temp.eq('undo with nothing booked sends nothing', (select count(*) from public.email_queue where user_id = uh and kind = 'bill_kept'), 1::bigint);
   perform pg_temp.eq('undo email data', (select data->>'plan' || ' ' || (data->>'nextAmount') from public.email_queue where user_id = uh and kind = 'bill_kept' limit 1), 'home 99');
   -- Free: Remove login goes at once
   insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values ('00000000-0000-0000-0000-0000000000f8', ur, 'r2@login.test');

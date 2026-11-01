@@ -688,6 +688,29 @@ export const planUpgraded = (u: Upgrade) => {
   });
 };
 
+// Monthly to yearly on the same plan is paid now (SOLAR-298). The month paid runs out;
+// the year starts on the billing date, so the next payment is a year after it.
+export type Switched = Receipt & { startsOn: string };
+
+export const planSwitched = (s: Switched) => {
+  const extra = s.extraPlants ? s.extraPlants.n * s.extraPlants.each : 0;
+  return make(`Your yearly plan starts on ${s.startsOn}`, {
+    title: `Your yearly plan starts on ${s.startsOn}`,
+    parts: [
+      { items: {
+        rows: [
+          planItem(s.plan, "yearly", `from ${s.startsOn}`, rand(s.amount - extra)),
+          ...(s.extraPlants ? [{ icon: "plus" as const, name: extraN(s.extraPlants.n), sub: `${rand(s.extraPlants.each)} each`, value: rand(extra) }] : []),
+        ],
+        total: { label: "Paid today", value: rand(s.amount) },
+        meta: [`${s.date} · ${esc(s.card)}`, `Reference ${esc(s.reference)}`, `Next payment ${rand(s.next.amount)} on ${s.next.date}`],
+      } },
+      { button: { label: "See your plan", href: PLAN } },
+    ],
+    footer: [SELLER, HELP],
+  });
+};
+
 // Downgrade, cancel (to Free) and a monthly/yearly switch all wait for the billing
 // date. Sent when booked; the plants named collect until that date and are deleted on
 // deleteOn (SOLAR-295), or on that date when no deleteOn is given.

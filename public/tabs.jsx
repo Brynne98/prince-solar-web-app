@@ -2061,6 +2061,8 @@ async function bookPlan(b, plan, period, reload, keep) {
 function bookedChange(b) {
   const { billDay, rand, perUnit } = window.billingFmt;
   if (b.plan === 'free' || b.comped || !(b.nextPlan || b.nextPeriod || b.nextExtraPlants != null)) return null;
+  // a paid switch to yearly (SOLAR-298): nothing to undo
+  if (b.prepaidOn) return [`Switches to yearly on ${billDay(b.nextDate)}. Paid.`, null];
   // the price from the billing date (nextAmount), as the booked change leaves it
   const then = `, ${rand(b.nextAmount)} ${perUnit(b.nextPeriod || b.period)}.`;
   return b.nextPlan === 'free' ? [`Ends on ${billDay(b.nextDate)}, then you’re on Free.`, `Keep ${PLAN_NAME[b.plan]}`]
@@ -2201,7 +2203,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
       {booked && (
         <div className="plan-booked plan-alert">
           {/* the undo is a link in the notice, so Adjust plan stays the card's one button (SOLAR-283) */}
-          <span className="conn-status warn">{booked[0]} <button type="button" className="plan-undo" disabled={busy} aria-busy={busy} onClick={() => run(() => undoBooked(b, reload))}>{booked[1]}</button></span>
+          <span className="conn-status warn">{booked[0]} {booked[1] && <button type="button" className="plan-undo" disabled={busy} aria-busy={busy} onClick={() => run(() => undoBooked(b, reload))}>{booked[1]}</button>}</span>
         </div>
       )}
     </SettingsSection>
@@ -2349,8 +2351,12 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
     ? <button type="button" className="ghost-btn" onClick={() => { setFailed(f => ({ ...f, [qKey(more)]: false })); ask(more); }}>Get the price again</button>
     : needs(more) && <button type="button" className="save-btn" disabled aria-busy="true">Getting the price</button>);
   const action = (p) => {
+    if (b.prepaidOn && !(p === b.plan && !sameView)) return null; // a paid year changes nothing until it starts (SOLAR-298)
     if (p === b.plan) {
       if (!sameView) return b.nextPeriod === view ? <div className="plan-cur">From {billDay(b.nextDate)}</div>
+        // monthly to yearly is paid now (SOLAR-298); yearly to monthly is booked
+        : view === 'yearly' ? <button type="button" className="ghost-btn" onClick={() => window.startUpgrade(b.plan, 'yearly', false, null, null,
+            { name: 'yearly_switch_done', props: { plan: b.plan } })}>Switch</button>
         : <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'switch'} onClick={() => run(() => bookPlan(b, b.plan, view, reload), 'switch')}>Switch</button>;
       if (p === 'family' && more > held) return priceMissing || <button type="button" className="save-btn" disabled={quote?.dueNow == null}
         onClick={() => window.startUpgrade('family', period, false, more, forPlant ? [forPlant] : null,
@@ -2408,7 +2414,10 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
                     onClick={() => setView(p)}>{p === 'monthly' ? 'Monthly' : 'Yearly, save 16%'}</button>
           ))}
         </div>
-        {!sameView && <p className="field-note">{b.nextPeriod === view ? `Your plan changes to ${view} on ${billDay(b.nextDate)}.` : `A switch to ${view} starts on your billing date, ${billDay(b.nextDate)}.`}</p>}
+        {(!sameView || b.prepaidOn) && <p className="field-note">{b.prepaidOn ?`Your year is paid. It starts on ${billDay(b.nextDate)}.`
+          : b.nextPeriod === view ? `Your plan changes to ${view} on ${billDay(b.nextDate)}.`
+          : view === 'yearly' ? `Pay for the year now. It starts on ${billDay(b.nextDate)}.`
+          : `A switch to ${view} starts on your billing date, ${billDay(b.nextDate)}.`}</p>}
         {narrow ? <>
           <div className="plan-picks" role="group" aria-label="Plans">
             {['free', 'home', 'family'].map(p => (

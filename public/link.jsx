@@ -125,8 +125,9 @@ const planUrl = (extra = '') => {
   const plant = new URLSearchParams(location.search).get('plant');
   return `${location.pathname}?tab=billing&section=plan${plant ? `&plant=${encodeURIComponent(plant)}` : ''}${extra}`;
 };
-const billingPaid = (plan) => {
-  window.track('upgrade_done', plan ? { plan } : {});
+// switched: a paid switch to yearly (SOLAR-298) is not an upgrade; its own event goes.
+const billingPaid = (plan, switched = false) => {
+  if (!switched) window.track('upgrade_done', plan ? { plan } : {});
   location.assign(planUrl('&billing=paid'));
 };
 
@@ -176,12 +177,13 @@ window.Dialog = Dialog;
 
 // The saved card is charged without Paystack's page, so the amount, the next bill and the
 // card are shown first (SOLAR-276). Centred on a desktop, from the bottom on a phone.
-function PayReview({ title, due, then, card, onDone }) {
+function PayReview({ title, note, due, then, card, onDone }) {
   const cancel = React.useRef(null);
   React.useEffect(() => { cancel.current?.focus(); }, []);
   return (
     <Dialog label={title} onClose={() => onDone(false)}>
       <h2 id="pay-review-t" className="pay-review-t">{title}</h2>
+      {note && <p className="field-note">{note}</p>}
       <div className="pay-review-ln due"><span>Due today</span><b>{rand(due)}</b></div>
       <div className="pay-review-ln"><span>{then[0]}</span><b>{then[1]}</b></div>
       <div className="pay-review-ln"><span>Card</span><b>{card}</b></div>
@@ -203,13 +205,15 @@ const reviewPay = async (plan, period, extras) => {
   if (!b?.card || !q?.dueNow) return true;
   const name = plan === 'family' ? 'Family' : 'Home';
   const more = (extras ?? q.extraPlants) - q.extraPlants;
-  const title = q.plan === plan && more > 0 ? `Add ${more} ${more === 1 ? 'plant' : 'plants'} to ${name}` : `Upgrade to ${name}`;
+  // A switch to yearly (SOLAR-298) is paid now and starts on the billing date.
+  const title = q.switch ? 'Switch to yearly'
+    : q.plan === plan && more > 0 ? `Add ${more} ${more === 1 ? 'plant' : 'plants'} to ${name}` : `Upgrade to ${name}`;
   const ok = await new Promise(resolve => {
     const el = document.body.appendChild(document.createElement('div'));
     const root = ReactDOM.createRoot(el);
     const done = (yes) => { root.unmount(); el.remove(); resolve(yes); };
-    root.render(<PayReview title={title} due={q.dueNow} card={`${b.card.name} •••• ${b.card.last4}`}
-      then={[`Then from ${billDay(q.nextDate)}`, `${rand(q.nextCharge)} ${perUnit(q.period || period)}`]} onDone={done} />);
+    root.render(<PayReview title={title} note={q.switch ? `Your year starts ${billDay(q.startsOn)}.` : null} due={q.dueNow} card={`${b.card.name} •••• ${b.card.last4}`}
+      then={[`Then from ${billDay(q.nextDate)}`, `${rand(q.nextCharge)} ${perUnit(q.switch ? 'yearly' : q.period || period)}`]} onDone={done} />);
   });
   window.track('pay_review_done', { plan, choice: ok ? 'pay' : 'cancel' });
   return ok;
@@ -234,13 +238,14 @@ window.startUpgrade = async function startUpgrade(plan, period, newCard = false,
       location.assign(r.url);
     } else if (r.status === 'paid') {
       if (paidEvent) window.track(paidEvent.name, paidEvent.props);
-      billingPaid(plan);
+      billingPaid(plan, paidEvent?.name === 'yearly_switch_done');
     }
     else if (r.status === 'refund') window.toast(REFUND_NOTE, { error: true });
     else window.toast('Your payment is still being checked. Look again in a minute.');
   } catch (e) {
     if (/open soon/.test(e.message)) return window.toast('Paid plans open soon. Nothing was charged.');
     window.toast(/settle the failed payment/.test(e.message) ? 'Pay the payment that didn’t go through first.'
+      : /year is paid/.test(e.message) ? 'Your year is paid. Your plan stays as it is until it starts.'
       : e.message === 'timed out' ? SLOW_NOTE : 'Couldn’t start the payment. Try again.', { error: true });
   } finally {
     paying = false;
@@ -297,7 +302,7 @@ window.billingReturn = async function billingReturn(billingStatus) {
       return 'card';
     }
     // A full reload: resumed plants join the plant list.
-    if (status === 'paid') { if (paidEvent) window.track(paidEvent.name, paidEvent.props); return billingPaid(null); }
+    if (status === 'paid') { if (paidEvent) window.track(paidEvent.name, paidEvent.props); return billingPaid(null, kind === 'switch'); }
     if (status === 'refund') return window.toast(REFUND_NOTE, { error: true });
     window.toast(status === 'failed' ? 'The payment didn’t go through. Nothing was charged.' : 'Your payment is still being checked. Look again in a minute.', { error: status === 'failed' });
   } catch {

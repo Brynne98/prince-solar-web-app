@@ -19,7 +19,7 @@ const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
   accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, renewalNotice,
-  passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, planKept, plantEvent, plantsRemovalSoon, planUpgraded,
+  passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, planKept, plantEvent, plantsRemovalSoon, planSwitched, planUpgraded,
   renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
 
@@ -98,6 +98,8 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "billing-renewal-notice": [FROM_BILLING, renewalNotice({ plan: "family", amount: 1799, on: "1 Feb 2027" })],
   "billing-free-week-ends-soon": [FROM_BILLING, freeWeekEndsSoon("Monday", "Home", 58, 83)],
   "free-week-setup": [FROM_HELLO, freeWeekSetup(["rate", "size", "panels"])],
+  "billing-switched": [FROM_BILLING, planSwitched({ plan: "home", period: "yearly", amount: 999, date: "1 Nov 2026", card: "Visa ending 4081",
+    reference: "psh_3f9a2c71", startsOn: "1 Dec 2026", next: { amount: 999, date: "1 Dec 2027" } })],
   "billing-upgraded": [FROM_BILLING, planUpgraded({ from: "home", to: "family", period: "monthly", paidNow: 43, daysLeft: 16, next: { amount: 179, date: "1 Dec" } })],
   "billing-plants-added": [FROM_BILLING, planUpgraded({ from: "family", to: "family", period: "monthly", addedPlants: 2, paidNow: 52, daysLeft: 16, next: { amount: 277, date: "1 Dec" } })],
   "billing-downgrade-booked": [FROM_BILLING, planChangeBooked({ from: "family", to: "home", fromPeriod: "monthly", on: "1 Dec", removePlants: ["Cabin", "Office"], next: { amount: 99 } })],

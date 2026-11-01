@@ -29,7 +29,7 @@ import { reportError, serve } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, plantsRemovalSoon,
-  planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome,
+  planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -255,6 +255,12 @@ async function build(r: Row): Promise<Email | null> {
       return planUpgraded({
         from: d.from, to: d.to, period: d.period, addedPlants: d.from === d.to ? d.added : undefined,
         paidNow: d.amount, daysLeft: d.daysLeft, next: { amount: d.nextAmount, date: day(d.nextDate) },
+      });
+    case "bill_switched":
+      return planSwitched({
+        plan: d.plan, period: "yearly", amount: d.amount, date: day(d.date), card: d.card, reference: d.reference,
+        extraPlants: d.extra > 0 ? { n: d.extra, each: d.extraEach } : undefined,
+        startsOn: day(d.startsOn), next: { amount: d.nextAmount, date: day(d.nextDate) },
       });
     case "bill_change":
       return planChangeBooked({
