@@ -1014,7 +1014,13 @@
   #settings-password:has(form), #settings-add-login { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; align-items: start; }
   #settings-password .link-form, #settings-add-login > .link-form, #settings-add-login > .conn-form { margin: 0; padding: 0; border: none; background: none; }
   #settings-add-login .field-row { grid-template-columns: minmax(0, 1fr); }   /* stacked, as in Change password */
-  @media (max-width: 599px) { #settings-password:has(form), #settings-add-login { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+  /* one column when the section is narrow, not only the screen: beside the Settings menu at
+     600-900px the fields were squeezed to 160px (SOLAR-277) */
+  .settings-page .sec { container-type: inline-size; }
+  @container (max-width: 599px) { #settings-password:has(form), #settings-add-login { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+  /* the open Add login card keeps the padding of the cards around it, not the tighter login rows' (SOLAR-277) */
+  .settings-page .sset-cards > #settings-add-login { padding: 18px 22px 22px; }
+  @media (max-width: 900px) { .settings-page .sset-cards > #settings-add-login { padding: 16px 15px 20px; } }
   /* Your system: each name on the left, its field fills the right (like change password);
      one column on a phone */
   #settings-system .conn-row.sset-row { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start;
