@@ -2082,7 +2082,6 @@ const cancelText = (b) => `It runs until ${window.billingFmt.billDay(b.nextDate)
 function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   const { useState } = React;
   const [busy, setBusy] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
   const kind = !billing ? null : billing.comped ? 'comped' : billing.plan !== 'free' ? 'paid' : 'free';
   React.useEffect(() => { if (kind) try { localStorage.setItem('synsynk.planKind', kind); } catch (e) {} }, [kind]);
   // Its outline while the plan loads, from the last plan seen on this device, so the
@@ -2093,15 +2092,10 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
       <SettingsSection id="plan" title="Plan">
         <div className="plan-head">
           <div className="plan-now" aria-hidden="true">
-            <window.Skeleton w={84} h={11} r={5} />
-            <window.Skeleton w={130} h={20} r={6} style={{ marginTop: 9 }} />
+            <window.Skeleton w={130} h={20} r={6} />
             <window.Skeleton w={280} h={12} r={5} style={{ marginTop: 9, maxWidth: '100%' }} />
           </div>
-          {last !== 'comped' && (
-            <div className="plan-acts" aria-hidden="true">
-              <window.Skeleton w={112} h={34} r={9} />{last === 'paid' && <window.Skeleton w={112} h={34} r={9} />}
-            </div>
-          )}
+          {last !== 'comped' && <div className="plan-acts" aria-hidden="true"><window.Skeleton w={112} h={34} r={9} /></div>}
         </div>
       </SettingsSection>
     );
@@ -2114,9 +2108,10 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   // The free week (api_me, 0122): a Free account sees full history until it ends.
   const weekEnds = b.plan === 'free' && !b.comped && freeWeekEndsAt && Date.parse(freeWeekEndsAt) > Date.now()
     ? new Date(freeWeekEndsAt).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }) : null;
-  const [word, tone] = b.state === 'past_due' ? ['Payment failed', 'warn'] : ending ? ['Ending', 'warn'] : ['Active', 'ok'];
+  // A word beside the name only when something is wrong; an active plan needs none.
+  const word = b.state === 'past_due' ? 'Payment failed' : ending ? 'Ending' : null;
   const line = b.comped ? 'Free of charge. Every plant, full history.'
-    : paid ? <><span className="mono">{rand(b.price)}</span> {perUnit(b.period)} for {b.plan === 'family' ? `up to ${3 + (b.extraPlants || 0)} plants` : '1 plant'}.{/* past due and ending say their date below */}{b.state !== 'past_due' && !ending && <> Renews on {longDay(b.nextDate)}.</>}</>
+    : paid ? <><span className="mono">{rand(b.price)}</span> {perUnit(b.period)} for {b.plan === 'family' ? `up to ${3 + (b.extraPlants || 0)} plants` : '1 plant'}.</>
     : weekEnds ? `Free week until ${billDay(weekEnds)}. Then 1 plant and the last 24 hours.`
     : '1 plant and the last 24 hours. No card needed.';
   // What the price is made of: Family's base plus R49 for each extra plant paid for.
@@ -2128,19 +2123,19 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
       {/* the plan top left, its buttons top right */}
       <div className="plan-head">
         <div className="plan-now">
-          <div className="plan-lbl">Current plan</div>
-          <div className="plan-name">{PLAN_NAME[b.plan]} <span className={'conn-status ' + tone}>{word}</span></div>
-          <div className="conn-meta">{line}</div>
+          <div className="plan-name">{PLAN_NAME[b.plan]}{word && <span className="conn-status warn">{word}</span>}</div>
+          <div className="plan-line">{line}</div>
           {extra > 0 && (
             <div className="conn-meta plan-break">
               Family <span className="mono">{rand(list.family)}</span> + {extra === 1 ? '1 extra plant' : extra + ' extra plants'} <span className="mono">{rand(extra * list.extra)}</span>
             </div>
           )}
+          {/* past due and ending say their date below */}
+          {paid && b.state !== 'past_due' && !ending && <div className="conn-meta">Renews on {longDay(b.nextDate)}.</div>}
         </div>
         {!b.comped && (
           <div className="plan-acts">
             <button type="button" className={paid ? 'ghost-btn' : 'save-btn'} onClick={onAdjust}>Adjust plan</button>
-            {paid && !ending && <button type="button" className="danger-btn" disabled={busy || cancelling} onClick={() => setCancelling(true)}>Cancel plan</button>}
           </div>
         )}
       </div>
@@ -2156,9 +2151,27 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
           <button type="button" className="ghost-btn" disabled={busy} onClick={() => run(() => undoBooked(b, reload))}>{booked[1]}</button>
         </div>
       )}
+    </SettingsSection>
+  );
+}
+// Cancellation, last on Billing as on most billing pages: a paid plan not already ending.
+function CancelSection({ billing: b, reload }) {
+  const { useState } = React;
+  const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  if (!b || b.comped || b.plan === 'free' || b.nextPlan === 'free') return null;
+  return (
+    <SettingsSection id="cancel" title="Cancellation">
+      <div className="conn-row">
+        <div className="conn-text"><div className="conn-user">Cancel plan</div></div>
+        <div className="conn-actions">
+          <button type="button" className="danger-btn" disabled={busy || cancelling} onClick={() => setCancelling(true)}>Cancel</button>
+        </div>
+      </div>
       {cancelling && (
         <ConfirmCard title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
-          onConfirm={() => { setCancelling(false); run(() => bookPlan(b, 'free', null, reload)); }} onCancel={() => setCancelling(false)} />
+          onConfirm={async () => { setCancelling(false); setBusy(true); await bookPlan(b, 'free', null, reload); setBusy(false); }}
+          onCancel={() => setCancelling(false)} />
       )}
     </SettingsSection>
   );
@@ -2341,13 +2354,10 @@ function PaymentsSection({ billing }) {
   const { useState } = React;
   const [busy, setBusy] = useState(false);
   const b = billing;
-  if (!b || b.comped || (b.plan === 'free' && !b.card && !(b.payments || []).length)) return null;
-  const { rand } = window.billingFmt;
+  if (!b || b.comped || (b.plan === 'free' && !b.card)) return null;
   const c = b.card;
-  const day = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-  const what = { start: 'first payment', upgrade: 'upgrade', renewal: '', settle: 'paid late' };
   return (
-    <SettingsSection id="payments" title="Payment" note={b.plan !== 'free' && b.nextPlan !== 'free' ? 'Paystack charges your card on your billing date.' : null}>
+    <SettingsSection id="payments" title="Payment" note={b.plan !== 'free' && b.nextPlan !== 'free' ? 'Your card pays for renewals and upgrades.' : null}>
       {c ? (
         <div className="conn-row">
           <CardLogo brand={c.brand} />
@@ -2364,17 +2374,30 @@ function PaymentsSection({ billing }) {
           )}
         </div>
       ) : <div className="field-note">No card saved.</div>}
-      {(b.payments || []).length > 0 && (
-        <div className="pay-list">
+    </SettingsSection>
+  );
+}
+// The last six card payments (api_billing_status lists paid ones only). No PDF yet (SOLAR-265).
+function InvoicesSection({ billing: b }) {
+  if (!b || b.comped || !(b.payments || []).length) return null;
+  const { rand } = window.billingFmt;
+  const day = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const what = { start: 'first payment', upgrade: 'upgrade', renewal: '', settle: 'paid late' };
+  return (
+    <SettingsSection id="invoices" title="Invoices">
+      <table className="pay-table">
+        <thead><tr><th>Date</th><th>Plan</th><th>Total</th><th>Status</th></tr></thead>
+        <tbody>
           {b.payments.map(p => (
-            <div key={p.at} className="pay-row">
-              <span>{day(p.date)}</span>
-              <span className="pay-what">{PLAN_NAME[p.plan]}, {p.period}{what[p.kind] ? ', ' + what[p.kind] : ''}</span>
-              <span className="mono pay-amt">{rand(p.amount)}</span>
-            </div>
+            <tr key={p.at}>
+              <td>{day(p.date)}</td>
+              <td className="pay-what">{PLAN_NAME[p.plan]}, {p.period}{what[p.kind] ? ', ' + what[p.kind] : ''}</td>
+              <td className="mono">{rand(p.amount)}</td>
+              <td>Paid</td>
+            </tr>
           ))}
-        </div>
-      )}
+        </tbody>
+      </table>
     </SettingsSection>
   );
 }
@@ -3235,10 +3258,12 @@ function AccountPage({ user, billing, onBilling }) {
 function BillingPage({ billing, reload, links, onPage, freeWeekEndsAt, onSaved, onCollect }) {
   return (
     <div className="settings-page">
-      <div className="page-head"><h1>Billing</h1><p>{billing?.comped ? '\u00a0' : 'Paid by card through Paystack.'}</p>{/* comped: the plan says it is free */}</div>
+      <div className="page-head"><h1>Billing</h1></div>
       <PlanSection billing={billing} reload={reload} onAdjust={() => onCollect(null)} freeWeekEndsAt={freeWeekEndsAt} />
       {links && <SunSynkConnectionSection onChanged={onSaved} links={links} billing={billing} reloadBilling={reload} onCollect={(id) => onCollect(id ?? null)} />}
       <PaymentsSection billing={billing} />
+      <InvoicesSection billing={billing} />
+      <CancelSection billing={billing} reload={reload} />
     </div>
   );
 }
