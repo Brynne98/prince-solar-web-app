@@ -83,6 +83,7 @@ type Part =
   | { note: string }
   | { steps: string[] } // numbered how-to; may hold <b> set by us
   | { plants: { title: string; names: string[]; tone: "keep" | "stop"; count?: false } } // one row per plant, any number; count: false when the title already counts
+  | { items: { rows: Item[]; total?: { label: string; value: string }; meta?: string[] } } // billing: what is paid for, as receipt rows
   | { bars: Bars }; // daily solar kWh; null = no data
 
 // labels: one under each bar (a week); titles: the hover text per bar, where the mail app
@@ -93,6 +94,22 @@ type Bars = { values: (number | null)[]; from: string; to: string; labels?: stri
 
 type Body = { title: string; sub?: string; parts: Part[]; footer: string[] };
 const PLANT_ROWS = 10;
+
+// Billing rows (SOLAR-297), like a store receipt: an icon tile, the name, a grey detail
+// under it, the price on the right. Space separates the rows, no lines. Plant lists use
+// the same row with a coloured dot.
+type Item = { icon: "plan" | "plus" | "back" | "keep" | "stop"; name: string; sub?: string; value?: string };
+const tileIcon = (icon: Item["icon"]) =>
+  icon === "plan" ? `<img src="${SITE}/icon-192.png" width="18" height="18" alt="" style="display:inline-block;vertical-align:middle;border:0;border-radius:4px">`
+    : icon === "plus" ? `<span style="font:700 17px/1 ${SANS};color:${C.solar}">+</span>`
+    : icon === "back" ? `<span style="font:700 15px/1 ${SANS};color:#9aa5b3">&#8617;</span>`
+    : `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${icon === "keep" ? C.solar : C.home};vertical-align:middle"></span>`;
+const itemRow = (r: Item) => `<tr><td width="32" style="width:32px;padding:6px 12px 6px 0;vertical-align:middle">` +
+  `<div style="width:32px;height:32px;border-radius:8px;background:#141a22;text-align:center;line-height:32px">${tileIcon(r.icon)}</div></td>` +
+  `<td style="padding:6px 0;vertical-align:middle"><div style="font:700 14px/1.3 ${SANS};color:#e7ecf2">${r.name}</div>` +
+  (r.sub ? `<div style="margin-top:2px;font:400 12px/1.4 ${SANS};color:#7f8da0">${r.sub}</div>` : "") + `</td>` +
+  (r.value != null ? `<td align="right" style="padding:6px 0 6px 12px;vertical-align:middle;white-space:nowrap;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2">${r.value}</td>` : "") +
+  `</tr>`;
 
 function drawBars(b: Bars): string {
   // A bar per day, drawn with table cells so it survives email clients that drop SVG
@@ -173,22 +190,25 @@ function html(subject: string, b: Body): string {
       const { title, names, tone, count } = x.plants;
       const shown = names.length > PLANT_ROWS ? names.slice(0, PLANT_ROWS - 1) : names;
       const more = names.length - shown.length;
-      const dot = tone === "keep" ? C.solar : C.home;
-      const row = (n: string, i: number) => `<tr><td style="padding:10px 0;${i ? "border-top:1px solid rgba(255,255,255,.07);" : ""}font:500 14px/1.35 ${SANS};color:#e7ecf2">` +
-        `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${dot};margin-right:10px;vertical-align:1px"></span>${n}</td></tr>`;
-      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:14px 16px 4px;background:#141a22;border-radius:8px">` +
-        `<div style="margin:0 0 4px;font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(title)}${names.length > 1 && count !== false ? ` · ${names.length} plants` : ""}</div>` +
-        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${shown.map((n, i) => row(esc(n), i)).join("")}` +
-        (more ? `<tr><td style="padding:10px 0;border-top:1px solid rgba(255,255,255,.07);font:400 14px/1.35 ${SANS};color:#9aa5b3">and ${more} more, listed in Account</td></tr>` : "") +
-        `</table></td></tr></table>`;
+      return `<div style="margin:0 0 6px;font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(title)}${names.length > 1 && count !== false ? ` · ${names.length} plants` : ""}</div>` +
+        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px">${shown.map((n) => itemRow({ icon: tone, name: esc(n) })).join("")}` +
+        (more ? `<tr><td></td><td style="padding:6px 0;font:400 14px/1.35 ${SANS};color:#9aa5b3">and ${more} more, listed in Account</td></tr>` : "") +
+        `</table>`;
+    }
+    if ("items" in x) {
+      const { rows, total, meta } = x.items;
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 ${meta ? 10 : 16}px">${rows.map(itemRow).join("")}` +
+        (total ? `<tr><td colspan="2" style="padding:12px 0 0;font:700 14px/1.3 ${SANS};color:#e7ecf2">${esc(total.label)}</td>` +
+          `<td align="right" style="padding:12px 0 0;white-space:nowrap;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2">${total.value}</td></tr>` : "") +
+        `</table>` + (meta ? `<p class="d" style="margin:0 0 16px;font:400 12px/1.6 ${SANS};color:#7f8da0">${meta.join("<br>")}</p>` : "");
     }
     if ("callout" in x)
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:14px 16px;background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.4);border-radius:8px;font:500 15px/1.45 ${SANS};color:#e7ecf2">` +
         `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${C.home};margin-right:10px;vertical-align:1px"></span>${x.callout}</td></tr></table>`;
     if ("facts" in x)
-      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;border-top:1px solid rgba(255,255,255,.07)">${x.facts.map((f) =>
-        `<tr><td style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.07);font:400 14px/1.3 ${SANS};color:#9aa5b3">${esc(f.label)}</td>` +
-        `<td align="right" style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.07);font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2">${f.value}</td></tr>`).join("")}</table>`;
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px">${x.facts.map((f) =>
+        `<tr><td style="padding:6px 0;font:400 14px/1.3 ${SANS};color:#9aa5b3">${esc(f.label)}</td>` +
+        `<td align="right" style="padding:6px 0;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2">${f.value}</td></tr>`).join("")}</table>`;
     if ("button" in x)
       return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 12px"><tr><td style="border-radius:8px;background:#3ddc84"><a href="${x.button.href}" style="display:inline-block;padding:12px 22px;font:600 15px/1 ${SANS};color:#0a0d12;text-decoration:none;border-radius:8px">${esc(x.button.label)}</a></td></tr></table>
 <p class="d" style="margin:0 0 20px;font:400 12px/1.5 ${SANS};color:#7f8da0">Trouble with the button? <a href="${x.button.href}" style="color:inherit">Click here</a> instead.</p>`;
@@ -243,6 +263,8 @@ function text(b: Body): string {
       ...x.chart.facts.map((f) => `${f.label}: ${strip(f.value)}${f.unit ? " " + f.unit : ""}${f.sub ? `, ${f.sub}` : ""}`), "");
     else if ("plants" in x) out.push(`${x.plants.title}${x.plants.names.length > 1 && x.plants.count !== false ? ` (${x.plants.names.length} plants)` : ""}:`, ...x.plants.names.map((n) => `- ${n}`), "");
     else if ("callout" in x) out.push(strip(x.callout), "");
+    else if ("items" in x) out.push(...x.items.rows.map((r) => `${strip(r.name)}${r.sub ? ` (${strip(r.sub)})` : ""}${r.value ? `: ${strip(r.value)}` : ""}`),
+      ...(x.items.total ? [`${x.items.total.label}: ${strip(x.items.total.value)}`] : []), ...(x.items.meta ?? []).map(strip), "");
     else if ("facts" in x) out.push(...x.facts.map((f) => `${f.label}: ${strip(f.value)}`), "");
     else if ("stats" in x) out.push(...x.stats.map((s) => `${s.label}: ${s.value}${s.unit ? " " + s.unit : ""}${s.delta ? ` (${deltaText(s.delta)})` : s.sub ? ` (${s.sub})` : ""}`), "");
   }
@@ -586,7 +608,13 @@ const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;
 const SELLER = "Prince Solar Hub is run by Theron and Prince Solutions. No VAT is charged.";
 export type Plan = keyof typeof PLAN_NAME;
 export type BillPeriod = "monthly" | "yearly";
-const planLine = (plan: Plan, period?: BillPeriod) => PLAN_NAME[plan] + (period ? `, ${period}` : "");
+// The plan as a receipt row: "Family plan", "Monthly · from 1 Dec", its price on the right.
+const PERIOD = { monthly: "Monthly", yearly: "Yearly" } as const;
+const planItem = (plan: Plan, period?: BillPeriod, when?: string, value?: string): Item => {
+  const sub = [plan === "free" ? "" : period ? PERIOD[period] : "", when ?? ""].filter(Boolean).join(" · ");
+  return { icon: "plan", name: `${PLAN_NAME[plan]} plan`, sub: sub ? sub[0].toUpperCase() + sub.slice(1) : undefined, value };
+};
+const extraN = (n: number) => `${n} extra ${n === 1 ? "plant" : "plants"}`;
 const names = (list: string[]) => list.length < 2 ? list.join("") : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
 
 export type Receipt = {
@@ -597,23 +625,25 @@ export type Receipt = {
   next: { amount: number; date: string };
 };
 
-export const paymentReceived = (r: Receipt) =>
-  make(`Payment received: ${rand(r.amount)}`, {
+export const paymentReceived = (r: Receipt) => {
+  const extra = r.extraPlants ? r.extraPlants.n * r.extraPlants.each : 0;
+  return make(`Payment received: ${rand(r.amount)}`, {
     title: "Payment received",
-    sub: `${rand(r.amount)} on ${r.date}`,
     parts: [
-      { facts: [
-        { label: "Plan", value: planLine(r.plan, r.period) },
-        ...(r.extraPlants ? [{ label: "Extra plants", value: `${r.extraPlants.n} at ${rand(r.extraPlants.each)} each` }] : []),
-        { label: "Paid", value: rand(r.amount) },
-        { label: "Card", value: esc(r.card) },
-        { label: "Reference", value: esc(r.reference) },
-        { label: "Next payment", value: `${rand(r.next.amount)} on ${r.next.date}` },
-      ] },
+      { items: {
+        rows: [
+          // The plan's own price is what is left after the extra plants.
+          planItem(r.plan, r.period, undefined, extra > 0 && extra < r.amount ? rand(r.amount - extra) : r.extraPlants ? undefined : rand(r.amount)),
+          ...(r.extraPlants ? [{ icon: "plus" as const, name: extraN(r.extraPlants.n), sub: `${rand(r.extraPlants.each)} each`, value: rand(extra) }] : []),
+        ],
+        total: { label: "Paid", value: rand(r.amount) },
+        meta: [`${r.date} · ${esc(r.card)}`, `Reference ${esc(r.reference)}`, `Next payment ${rand(r.next.amount)} on ${r.next.date}`],
+      } },
       { button: { label: "See your plan", href: PLAN } },
     ],
     footer: [SELLER, HELP],
   });
+};
 
 // Yearly plans: notice 40 to 80 business days before the renewal (Consumer Protection
 // Act s14, if a yearly plan counts as fixed-term; to confirm on SOLAR-104). It names any
@@ -625,11 +655,7 @@ export const renewalNotice = (r: Renewal) =>
     title: `Your yearly plan renews on ${r.on}`,
     parts: [
       { p: r.change ? esc(r.change) : "Nothing changes: same plan, same price." },
-      { facts: [
-        { label: "Plan", value: planLine(r.plan, "yearly") },
-        { label: "Renews on", value: r.on },
-        { label: "Amount", value: rand(r.amount) },
-      ] },
+      { items: { rows: [planItem(r.plan, "yearly", `renews ${r.on}`, rand(r.amount))] } },
       { p: `To stop it, cancel before ${r.on}. Your plan runs until that date and nothing more is charged.` },
       { button: { label: "See your plan", href: PLAN } },
     ],
@@ -651,11 +677,11 @@ export const planUpgraded = (u: Upgrade) => {
     title: u.addedPlants ? `${plants} added` : `You're on ${PLAN_NAME[u.to]}`,
     parts: [
       { p: u.addedPlants ? "They're billed with your Family plan from today." : u.to === "family" ? "You can add up to 3 plants now." : "Your history is kept from now on." },
-      { facts: [
-        { label: "Plan", value: planLine(u.to, u.period) },
-        { label: "Paid today", value: `${rand(u.paidNow)} for the ${u.daysLeft === 1 ? "day" : u.daysLeft + " days"} left` },
-        { label: "Next payment", value: `${rand(u.next.amount)} on ${u.next.date}` },
-      ] },
+      { items: {
+        rows: [u.addedPlants ? { icon: "plus" as const, name: plants, sub: `On your ${PLAN_NAME[u.to]} plan` } : planItem(u.to, u.period, "from today")],
+        total: { label: "Paid today", value: rand(u.paidNow) },
+        meta: [`For the ${u.daysLeft === 1 ? "day" : u.daysLeft + " days"} left this period`, `Next payment ${rand(u.next.amount)} on ${u.next.date}`],
+      } },
       { button: u.to === "family" && !u.addedPlants ? { label: "Add a plant", href: LOGINS } : { label: "See your plan", href: PLAN } },
     ],
     footer: [HELP],
@@ -681,11 +707,10 @@ export const planChangeBooked = (c: Change) => {
     title,
     parts: [
       { p: `Everything stays as it is until then.${cancel ? ` After that you're on Free: ${FREE_RULE}` : ""}` },
-      { facts: [
-        { label: "Until " + c.on, value: planLine(c.from, c.fromPeriod) },
-        { label: "From " + c.on, value: cancel ? "Free" : planLine(c.to, c.toPeriod ?? c.fromPeriod) },
-        ...(c.next ? [{ label: "Next payment", value: `${rand(c.next.amount)} on ${c.on}` }] : [{ label: "Next payment", value: "None" }]),
-      ] },
+      { items: {
+        rows: [planItem(c.from, c.fromPeriod, `until ${c.on}`), planItem(c.to, c.toPeriod ?? c.fromPeriod, `from ${c.on}`, c.next ? rand(c.next.amount) : "R0")],
+        meta: [c.next ? `Next payment ${rand(c.next.amount)} on ${c.on}` : "Nothing more is charged."],
+      } },
       ...(c.removePlants.length ? [{ plants: { title: `Deleted on ${c.deleteOn ?? c.on}`, names: c.removePlants, tone: "stop" as const } },
         { note: c.removePlants.length === 1 ? "Its history is deleted too." : "Their history is deleted too." }] : []),
       { button: { label: cancel ? `Keep ${PLAN_NAME[c.from]}` : "See your plan", href: PLAN } },
@@ -702,10 +727,7 @@ export const planKept = (k: Kept) =>
     title: `You're staying on ${PLAN_NAME[k.plan]}`,
     parts: [
       { p: "The change you booked is undone." },
-      { facts: [
-        { label: "Plan", value: planLine(k.plan, k.period) },
-        { label: "Next payment", value: `${rand(k.next.amount)} on ${k.next.date}` },
-      ] },
+      { items: { rows: [planItem(k.plan, k.period, undefined, rand(k.next.amount))], meta: [`Next payment ${rand(k.next.amount)} on ${k.next.date}`] } },
       { button: { label: "See your plan", href: PLAN } },
     ],
     footer: [HELP],
@@ -730,11 +752,7 @@ export const paymentFailed = (f: Failed) =>
       { p: f.nextTry
         ? `We'll try again on ${f.nextTry}. If it's still unpaid on ${f.freeOn}, your account moves to Free.`
         : `That was the last try. Your account moves to Free on ${f.freeOn} unless it's paid.` },
-      { facts: [
-        { label: "Plan", value: planLine(f.plan, f.period) },
-        { label: "Amount", value: rand(f.amount) },
-        ...(f.nextTry ? [{ label: "Next try", value: f.nextTry }] : []),
-      ] },
+      { items: { rows: [planItem(f.plan, f.period, "unpaid", rand(f.amount))], ...(f.nextTry ? { meta: [`Next try ${f.nextTry}`] } : {}) } },
       { button: { label: "Pay with another card", href: f.payUrl } },
     ],
     footer: [HELP],
@@ -750,11 +768,7 @@ export const paymentRefunded = (r: Refund) =>
     parts: [
       { p: r.why === "price" ? "The price changed while you paid, so nothing changed. Pay the new price on your plan."
         : "Your plan changed while you paid, so nothing changed." },
-      { facts: [
-        { label: "Refund", value: rand(r.amount) },
-        { label: "Paid on", value: r.date },
-        { label: "Reference", value: esc(r.reference) },
-      ] },
+      { items: { rows: [{ icon: "back", name: "Refund", sub: `Paid ${r.date} · Reference ${esc(r.reference)}`, value: rand(r.amount) }] } },
       { button: { label: "See your plan", href: PLAN } },
     ],
     footer: [HELP],
