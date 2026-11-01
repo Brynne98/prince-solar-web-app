@@ -19,7 +19,7 @@ const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
   accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_NOTICE, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, renewalNotice,
-  passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, plantEvent, plantsRemovalSoon, planUpgraded,
+  passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, planKept, plantEvent, plantsRemovalSoon, planUpgraded,
   renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
 
@@ -96,6 +96,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "billing-plants-added": [FROM_NOTICE, planUpgraded({ from: "family", to: "family", period: "monthly", addedPlants: 2, paidNow: 52, daysLeft: 16, next: { amount: 277, date: "1 Dec" } })],
   "billing-downgrade-booked": [FROM_NOTICE, planChangeBooked({ from: "family", to: "home", fromPeriod: "monthly", on: "1 Dec", removePlants: ["Cabin", "Office"], next: { amount: 99 } })],
   "billing-cancel-booked": [FROM_NOTICE, planChangeBooked({ from: "home", to: "free", fromPeriod: "monthly", on: "1 Dec", removePlants: [] })],
+  "billing-change-kept": [FROM_NOTICE, planKept({ plan: "home", period: "monthly", next: { amount: 99, date: "1 Dec" } })],
   "billing-switch-booked": [FROM_NOTICE, planChangeBooked({ from: "home", to: "home", fromPeriod: "monthly", toPeriod: "yearly", on: "1 Dec", removePlants: [], next: { amount: 999 } })],
   "billing-failed-1": [FROM_NOTICE, paymentFailed({ plan: "family", period: "monthly", amount: 179, card: "Visa ending 4081", nextTry: "3 Dec", freeOn: "8 Dec", payUrl: `${APP}/#pay` })],
   "billing-refund": [FROM_NOTICE, paymentRefunded({ amount: 72, date: "3 Dec", reference: "psh_0123", why: "price" })],

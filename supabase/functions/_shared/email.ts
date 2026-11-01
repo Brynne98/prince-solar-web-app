@@ -681,6 +681,23 @@ export const planChangeBooked = (c: Change) => {
   });
 };
 
+// Keep: a booked change undone, so the plan carries on as it is (SOLAR-271).
+export type Kept = { plan: Plan; period: BillPeriod; next: { amount: number; date: string } };
+
+export const planKept = (k: Kept) =>
+  make(`You're staying on ${PLAN_NAME[k.plan]}`, {
+    title: `You're staying on ${PLAN_NAME[k.plan]}`,
+    parts: [
+      { p: "The change you booked is undone." },
+      { facts: [
+        { label: "Plan", value: planLine(k.plan, k.period) },
+        { label: "Next payment", value: `${rand(k.next.amount)} on ${k.next.date}` },
+      ] },
+      { button: { label: "See your plan", href: PLAN } },
+    ],
+    footer: [HELP],
+  });
+
 // A failed charge is retried on day 1, 3 and 7 after the billing date. The first email
 // goes as soon as the billing-day charge fails, not at the day-1 retry; each retry that
 // fails sends another, with a link to pay with another card.

@@ -28,7 +28,7 @@ import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { reportError, serve } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, FROM_ACCOUNT, FROM_NOTICE, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
-  PAY_URL, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, plantEvent, type PlantEvent, plantsRemovalSoon,
+  PAY_URL, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, plantsRemovalSoon,
   planUpgraded, renewalNotice, report, type Report, sunsynkBack, sunsynkDown, welcome,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
@@ -244,6 +244,7 @@ async function build(r: Row, unsub: string): Promise<Email | null> {
         from: d.from, to: d.to, fromPeriod: d.fromPeriod, toPeriod: d.toPeriod, on: day(d.on),
         removePlants: d.removePlants, next: d.to === "free" ? undefined : { amount: d.nextAmount },
       });
+    case "bill_kept": return planKept({ plan: d.plan, period: d.period, next: { amount: d.nextAmount, date: day(d.on) } });
     case "bill_failed":
       return paymentFailed({
         plan: d.plan, period: d.period, amount: d.amount, card: d.card,

@@ -342,6 +342,11 @@ begin
   perform pg_temp.eq('undo with current plan', public.api_billing_change('home', 'monthly')->>'nextPeriod', null);
   perform pg_temp.eq('cancel booked', public.api_billing_change('free')->>'nextPlan', 'free');
   perform pg_temp.eq('undo cancel', public.api_billing_change('home', 'monthly')->>'nextPlan', null);
+  -- Each undo of a booked change is emailed; an undo with nothing booked is not (0134).
+  perform pg_temp.eq('undo emails', (select count(*) from public.email_queue where user_id = uh and kind = 'bill_kept'), 2::bigint);
+  perform public.api_billing_change('home', 'monthly');
+  perform pg_temp.eq('undo with nothing booked sends nothing', (select count(*) from public.email_queue where user_id = uh and kind = 'bill_kept'), 2::bigint);
+  perform pg_temp.eq('undo email data', (select data->>'plan' || ' ' || (data->>'nextAmount') from public.email_queue where user_id = uh and kind = 'bill_kept' limit 1), 'home 99');
   -- Free: Remove login goes at once
   insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values ('00000000-0000-0000-0000-0000000000f8', ur, 'r2@login.test');
   update public.plant_users set account_id = '00000000-0000-0000-0000-0000000000f8' where user_id = ur;
