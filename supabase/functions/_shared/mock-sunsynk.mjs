@@ -71,6 +71,51 @@ const PLANTS = {
       { sn: "B6006A", alias: "Beach", share: 1, upload: 60, ct: true, model: "SUNSYNK-8K-SG01LP1" },
     ],
   },
+  // Plants only one login each sees, so several logins can be linked side by side without
+  // one taking another's plants (a plant shows under the login linked last).
+  6007: {
+    name: "Townhouse", tz: "Africa/Johannesburg", currency: "ZAR", lat: -29.86, lon: 31.02,
+    kwp: 5.5, battKwh: 10, gridMode: "import", phases: 1, battSign: "discharging", banks: "per-inverter",
+    loadBase: 500, inverters: [
+      { sn: "T6007A", alias: "Townhouse", share: 1, upload: 60, ct: true, model: "SUNSYNK-5K-SG04LP1" },
+    ],
+  },
+  6008: {
+    name: "Farmhouse", tz: "Africa/Johannesburg", currency: "ZAR", lat: -29.12, lon: 26.21,
+    kwp: 10, battKwh: 20, gridMode: "import", phases: 1, battSign: "discharging", banks: "per-inverter",
+    loadBase: 800, inverters: [
+      { sn: "H6008A", alias: "House", share: 1, upload: 60, ct: true, model: "SUNSYNK-8K-SG01LP1" },
+    ],
+  },
+  6009: {
+    name: "Borehole", tz: "Africa/Johannesburg", currency: "ZAR", lat: -29.13, lon: 26.22,
+    kwp: 3, battKwh: 5, gridMode: "off", phases: 1, battSign: "discharging", banks: "per-inverter",
+    loadBase: 250, inverters: [
+      { sn: "P6009A", alias: "Pump", share: 1, upload: 60, ct: false, model: "SUNSYNK-3.6K-SG04LP1" },
+    ],
+  },
+  6010: {
+    name: "Office", tz: "Africa/Johannesburg", currency: "ZAR", lat: -26.1, lon: 28.05,
+    kwp: 20, battKwh: 30, gridMode: "export", phases: 3, battSign: "discharging", banks: "per-inverter",
+    loadBase: 1500, inverters: [
+      { sn: "O6010A", alias: "Office", share: 1, upload: 60, ct: true, model: "SUNSYNK-12K-SG04LP3" },
+    ],
+  },
+  6011: {
+    name: "Warehouse", tz: "Africa/Johannesburg", currency: "ZAR", lat: -26.2, lon: 28.15,
+    kwp: 30, battKwh: 40, gridMode: "import", phases: 3, battSign: "discharging", banks: "per-inverter",
+    loadBase: 2000, inverters: [
+      { sn: "W6011A", alias: "Bay 1", share: 0.5, upload: 60, ct: true, model: "SUNSYNK-12K-SG04LP3" },
+      { sn: "W6011B", alias: "Bay 2", share: 0.5, upload: 60, ct: true, model: "SUNSYNK-12K-SG04LP3" },
+    ],
+  },
+  6012: {
+    name: "Shop", tz: "Africa/Johannesburg", currency: "ZAR", lat: -33.96, lon: 22.46,
+    kwp: 6, battKwh: 10, gridMode: "import", phases: 1, battSign: "discharging", banks: "per-inverter",
+    loadBase: 600, inverters: [
+      { sn: "K6012A", alias: "Shop", share: 1, upload: 60, ct: true, model: "SUNSYNK-5K-SG04LP1" },
+    ],
+  },
 };
 
 // SunSynk logins. pageSize forces pagination for the accounts that carry it.
@@ -85,6 +130,9 @@ const ACCOUNTS = {
   "installer@mock": { plants: [3001, 5001, 6002, 6003, 6004] },
   "flat@mock": { plants: [6005] },
   "beach@mock": { plants: [6006] },
+  "home@mock": { plants: [6007] },
+  "farm@mock": { plants: [6008, 6009] },
+  "business@mock": { plants: [6010, 6011, 6012] },
 };
 
 // ---------------------------------------------------------------------------
