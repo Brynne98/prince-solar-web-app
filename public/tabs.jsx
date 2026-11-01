@@ -2341,13 +2341,13 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
         </div>
         {!sameView && <p className="field-note">{b.nextPeriod === view ? `Your plan changes to ${view} on ${billDay(b.nextDate)}.` : `A switch to ${view} starts on your billing date, ${billDay(b.nextDate)}.`}</p>}
         {narrow ? <>
-          <div className="plan-lines" role="group" aria-label="Plans">
+          <div className="plan-picks" role="group" aria-label="Plans">
             {['free', 'home', 'family'].map(p => (
               <button type="button" key={p} aria-pressed={sel === p} onClick={() => setSel(p)}
-                      className={'plan-line' + (p === b.plan ? ' plan-mine' : '') + (sel === p ? ' on' : '')}>
+                      className={'plan-pick' + (p === b.plan ? ' plan-mine' : '') + (sel === p ? ' on' : '')}>
                 <span className="plan-dot" aria-hidden="true" />
-                <span className="plan-line-txt"><b>{PLAN_NAME[p]}{p === b.plan && <em>Your plan</em>}</b><small>{PLAN_TAG[p]}</small></span>
-                <span className="plan-line-price mono">{rand(price(p) ?? 0)}</span>
+                <span className="plan-pick-txt"><b>{PLAN_NAME[p]}{p === b.plan && <em>Your plan</em>}</b><small>{PLAN_TAG[p]}</small></span>
+                <span className="plan-pick-price mono">{rand(price(p) ?? 0)}</span>
               </button>
             ))}
           </div>

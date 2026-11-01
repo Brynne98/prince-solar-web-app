@@ -140,11 +140,13 @@ const PAID_EVENT = 'ps.paidEvent';
 // the lock's plans.
 function Dialog({ label, onClose, keep = false, size = null, children }) {
   const ref = React.useRef(null);
-  const [back] = React.useState(() => document.activeElement); // read at first render, before a child takes focus
+  // What had focus, read at first render before a child takes it, and whether it showed a ring
+  // (a keyboard user): only then does it get one back on close.
+  const [back] = React.useState(() => ({ el: document.activeElement, ring: !!document.activeElement?.matches?.(':focus-visible') }));
   React.useEffect(() => {
     const d = ref.current;
     d.showModal();
-    return () => { if (d.open) d.close(); if (back && back.isConnected) back.focus({ preventScroll: true }); };
+    return () => { if (d.open) d.close(); if (back.el && back.el.isConnected) back.el.focus({ preventScroll: true, focusVisible: back.ring }); };
   }, []);
   return (
     <dialog ref={ref} className={'pop-dlg' + (size ? ' pop-' + size : '')} aria-label={label}
