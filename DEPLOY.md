@@ -192,6 +192,23 @@ onto today; that must stay local.
 
 ---
 
+## Going live
+
+Until the Paystack account is verified, production runs on the test key: only the
+accounts in `PAYSTACK_TEST_USERS` can pay (Paystack test cards), everyone else gets
+"Paid plans open soon" (SOLAR-267). When the live key arrives, in this order:
+
+1. Remove the tester's test billing (their plants and readings stay):
+   `psql "$PROD_DB_URL" -v tester=<auth user id> -f scripts/sql/go-live-tester-cleanup.sql`
+2. `supabase secrets set PAYSTACK_SECRET_KEY=<live key>` (paste it yourself).
+3. `supabase secrets unset PAYSTACK_TEST_USERS`
+4. Paystack dashboard, live mode → Settings → API Keys & Webhooks: webhook URL
+   `https://pmakzojwhouamawgszrc.supabase.co/functions/v1/billing/webhook`. Test and live
+   modes keep separate URLs; without it refunds and disputes never arrive.
+
+Tester events (`upgrade_done` and the rest) are in PostHog under the tester's user id;
+filter that id out of sales numbers.
+
 ## Changing the domain
 
 Two places know the origin:
