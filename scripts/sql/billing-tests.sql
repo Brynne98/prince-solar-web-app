@@ -1,34 +1,27 @@
--- Billing rule tests (SOLAR-208 part 1). Applies the migrations the local database
--- lacks, runs every case inside one transaction, then rolls it all back.
+-- Billing rule tests (SOLAR-208 part 1, rules as of 0130). Needs the local database at
+-- the latest migration. Runs every case inside one transaction, then rolls it all back.
 --   psql "$DB_URL" -v ON_ERROR_STOP=1 -f scripts/sql/billing-tests.sql
 -- Exit code decides: any wrong case raises.
 \set QUIET on
 begin;
-\ir ../../supabase/migrations/0104_api_export.sql
-\ir ../../supabase/migrations/0105_api_export_fast.sql
-\ir ../../supabase/migrations/0106_profiles_plan_guard.sql
-\ir ../../supabase/migrations/0107_link_attempts.sql
-\ir ../../supabase/migrations/0110_billing.sql
-\ir ../../supabase/migrations/0111_free_trim.sql
-\ir ../../supabase/migrations/0112_paused_plants.sql
-\ir ../../supabase/migrations/0113_plan_section.sql
-\ir ../../supabase/migrations/0114_free_reports.sql
-\ir ../../supabase/migrations/0116_payments.sql
-\ir ../../supabase/migrations/0122_free_week_app.sql
-\ir ../../supabase/migrations/0123_reserve_confirmed.sql
 
+-- Wrong cases are collected and reported together at the end.
+create temp table fails (n serial, what text);
 create function pg_temp.eq(label text, got anyelement, want anyelement) returns void language plpgsql as $$
 begin
-  if got is distinct from want then raise exception 'FAIL %: got %, want %', label, got, want; end if;
+  if got is distinct from want then insert into pg_temp.fails (what) values (format('%s: got %s, want %s', label, got, want)); end if;
 end $$;
 create function pg_temp.raises(label text, stmt text, want text) returns void language plpgsql as $$
 begin
-  execute stmt;
-  raise exception 'FAIL %: no error, want "%"', label, want;
-exception when others then
-  if sqlerrm like 'FAIL %' or position(want in sqlerrm) = 0 then
-    raise exception 'FAIL %: got "%", want "%"', label, sqlerrm, want;
-  end if;
+  begin
+    execute stmt;
+  exception when others then
+    if position(want in sqlerrm) = 0 then
+      insert into pg_temp.fails (what) values (format('%s: got "%s", want "%s"', label, sqlerrm, want));
+    end if;
+    return;
+  end;
+  insert into pg_temp.fails (what) values (format('%s: no error, want "%s"', label, want));
 end $$;
 
 -- Users: a = Home monthly, f = Family monthly 3 plants, y = Family yearly 4 plants,
@@ -39,12 +32,13 @@ insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000000c1', 'o@t.test'), ('00000000-0000-0000-0000-0000000000d1', 'j@t.test'),
   ('00000000-0000-0000-0000-0000000000e1', 'h@t.test'), ('00000000-0000-0000-0000-0000000000f1', 'z@t.test');
 
-insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values
-  ('00000000-0000-0000-0000-00000000000a', 'home',   'monthly', 1,  '2026-12-01'),
-  ('00000000-0000-0000-0000-00000000000f', 'family', 'monthly', 1,  '2026-12-01'),
-  ('00000000-0000-0000-0000-0000000000a1', 'family', 'yearly',  1,  '2027-11-01'),
-  ('00000000-0000-0000-0000-0000000000d1', 'home',   'monthly', 31, '2027-03-31'),
-  ('00000000-0000-0000-0000-0000000000e1', 'home',   'yearly',  1,  '2027-11-01');
+-- y holds 1 extra plant (0129): room for its 4.
+insert into private.billing (user_id, plan, period, billing_day, next_billing_date, extra_plants) values
+  ('00000000-0000-0000-0000-00000000000a', 'home',   'monthly', 1,  '2026-12-01', 0),
+  ('00000000-0000-0000-0000-00000000000f', 'family', 'monthly', 1,  '2026-12-01', 0),
+  ('00000000-0000-0000-0000-0000000000a1', 'family', 'yearly',  1,  '2027-11-01', 1),
+  ('00000000-0000-0000-0000-0000000000d1', 'home',   'monthly', 31, '2027-03-31', 0),
+  ('00000000-0000-0000-0000-0000000000e1', 'home',   'yearly',  1,  '2027-11-01', 0);
 
 insert into public.plant_users (plant_id, user_id, linked_at) values
   (9000001, '00000000-0000-0000-0000-00000000000a', '2026-01-01'),
@@ -128,23 +122,20 @@ begin
   perform pg_temp.raises('family -> home is no upgrade',
     format('select public.billing_upgrade_quote(%L, %L)', uf, 'home'), 'not an upgrade');
 
-  -- A 4th plant mid-period on Family: 2 inverters x R49 = R98, 16 of 30 days left
-  perform pg_temp.eq('family 3 plants, 0 extra', public.billing_extra_inverters(uf), 0);
-  q := public.billing_may_link(uf, 'new@login.test', array[2]);
-  perform pg_temp.eq('4th plant ok',        (q->>'ok')::boolean, true);
-  perform pg_temp.eq('4th plant inverters', (q->>'extraInverters')::int, 2);
-  q := public.billing_upgrade_quote(uf, 'family', 2, null, '2026-11-15');
-  perform pg_temp.eq('4th plant due now',   (q->>'dueNow')::int, 52);
-  perform pg_temp.eq('4th plant next',      (q->>'nextCharge')::int, 277);
-  -- Yearly Family: the 4th plant is already there, 1 inverter at R588 a year
+  -- Room (0129): Free and Home 1, Family 3 + the extra plants bought, R49 a plant
+  perform pg_temp.eq('room free',           public.billing_room('free'), 1);
+  perform pg_temp.eq('room home',           public.billing_room('home'), 1);
+  perform pg_temp.eq('room family + 2',     public.billing_room('family', 2), 5);
+  -- 1 extra plant mid-period on Family: R49, 16 of 30 days left
+  perform pg_temp.eq('4th plant ok',        (public.billing_may_link(uf, 'new@login.test', array[2])->>'ok')::boolean, false);
+  q := public.billing_upgrade_quote(uf, 'family', 1, null, '2026-11-15');
+  perform pg_temp.eq('4th plant due now',   (q->>'dueNow')::int, public.billing_prorate(49, '2026-11-15', '2026-11-01', '2026-12-01'));
+  perform pg_temp.eq('4th plant next',      (q->>'nextCharge')::int, 228);
+  -- Yearly Family with 1 extra plant: R588 a year
   perform pg_temp.eq('yearly 4 plants due', public.billing_amount_due(uy), 2387);
-  -- Two plants at once onto 2: the first is covered, the second is extra
   insert into public.plant_users (plant_id, user_id, linked_at) values (9000041, uo, '2026-01-01');
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
     values (uo, 'family', 'monthly', 1, '2026-12-01');
-  insert into public.plant_users (plant_id, user_id, linked_at) values (9000042, uo, '2026-01-02');
-  q := public.billing_may_link(uo, 'x@login.test', array[1, 3]);
-  perform pg_temp.eq('3rd covered, 4th extra', (q->>'extraInverters')::int, 3);
 
   -- Guard a: every plant a login brings counts
   -- Past the plan's one plant, a new plant links paused (0110 trigger)
@@ -154,21 +145,14 @@ begin
   delete from public.plant_users where plant_id = 9000099;
   perform pg_temp.eq('free 2nd plant',    public.billing_may_link(ur, 'r@login.test', array[1])->>'reason', 'upgrade_needed');
   perform pg_temp.eq('home 2nd plant',    public.billing_may_link(ua, 'a@login.test', array[1])->>'reason', 'upgrade_needed');
-  q := public.billing_may_link(ua, 'i@login.test', array[1, 1, 2]);
-  perform pg_temp.eq('home + 3 plants, extra priced', (q->>'extraInverters')::int, 2);
   delete from public.plant_users where user_id = ur;
   perform pg_temp.eq('installer on free', public.billing_may_link(ur, 'i@login.test', array[1, 1, 1])->>'reason', 'upgrade_needed');
   perform pg_temp.eq('free 1st plant',    (public.billing_may_link(ur, 'r@login.test', array[1])->>'ok')::boolean, true);
-  -- Guard b: one free week per login
-  perform pg_temp.eq('login had free week',    public.billing_may_link(ur, 'USED@login.test', array[1])->>'reason', 'free_week_used');
-  perform pg_temp.eq('login on other account', public.billing_may_link(ur, 'shared@login.test', array[1])->>'reason', 'free_week_used');
-  perform pg_temp.eq('paid user, used login',  (public.billing_may_link(uf, 'used@login.test', array[1])->>'ok')::boolean, true);
+  -- The free week: one per account, started by its first link on any plan (0121, 0127)
   perform public.billing_free_week_start(ur, 'Fresh@Login.test');
   perform public.billing_free_week_start(uf, 'paid@login.test');
   perform pg_temp.eq('free link records the login', (select user_id from private.free_week_logins where sunsynk_username = 'fresh@login.test'), ur);
-  perform pg_temp.eq('paid link records nothing', (select count(*)::int from private.free_week_logins where sunsynk_username = 'paid@login.test'), 0);
-  perform pg_temp.eq('recorded login blocks another free account',
-                     public.billing_may_link('00000000-0000-0000-0000-0000000000f1', 'fresh@login.test', array[1])->>'reason', 'free_week_used');
+  perform pg_temp.eq('paid link records it too', (select count(*)::int from private.free_week_logins where sunsynk_username = 'paid@login.test'), 1);
 
   -- Downgrade at period end: plants go first, then the plan
   perform pg_temp.raises('family -> home with 3 plants',
@@ -191,13 +175,10 @@ begin
   perform pg_temp.raises('not your plant',
     format('select public.billing_book_removal(%L, 9000041)', ur), 'not your plant');
 
-  -- Removing an extra plant on Family: billed to period end, then dropped
+  -- Removing a plant on Family: the room bought stays billed until it is lowered (0129)
   perform public.billing_book_removal(uy, 9000024);
-  perform pg_temp.eq('extra still billed now', public.billing_extra_inverters(uy), 1);
-  perform pg_temp.eq('extra gone next bill',   public.billing_amount_due(uy), 1799);
+  perform pg_temp.eq('room still billed', public.billing_amount_due(uy), 2387);
   perform public.billing_book_removal(uy, 9000023);
-  perform pg_temp.eq('booked removals not counted: new 3rd covered, 4th extra',
-                     (public.billing_may_link(uy, 'n@login.test', array[1, 2])->>'extraInverters')::int, 2);
 
   -- Cancel = downgrade to Free at period end
   perform public.billing_book_change(ua, 'free');
@@ -223,12 +204,10 @@ begin
   perform pg_temp.eq('switch m date', (select period || ' ' || next_billing_date from private.billing where user_id = uh),
                      'monthly 2027-12-01');
 
-  -- Paused plants (0110, 0112): Family declining the cost, not billed, not read
+  -- Stopped plants (0110, 0112, 0129): past the room a plant links stopped, not read
   insert into public.plant_users (plant_id, user_id, linked_at) values (9000025, uy, '2026-01-05');
   insert into private.inverters (sn, plant_id) values ('T-25a', 9000025), ('T-25b', 9000025);
-  perform pg_temp.eq('family 5th plant active', (select paused from public.plant_users where plant_id = 9000025), false);
-  perform public.billing_set_paused(uy, array[9000025::bigint], true);
-  perform pg_temp.eq('paused plant not billed', public.billing_extra_inverters(uy), 1);
+  perform pg_temp.eq('family 5th plant links stopped', (select paused from public.plant_users where plant_id = 9000025), true);
   perform set_config('request.jwt.claims', json_build_object('sub', uy, 'role', 'authenticated')::text, true);
   perform pg_temp.eq('readers skip paused', (select count(*)::int from public.my_plant_ids() x where x = 9000025), 0);
   perform pg_temp.raises('my_plant refuses paused', 'select public.my_plant(9000025)', 'not linked');
@@ -237,9 +216,9 @@ begin
   insert into public.email_queue (user_id, plant_id, kind, key) values (uy, 9000025, 'report_week', 'test:paused'), (uy, 9000021, 'report_week', 'test:active');
   perform pg_temp.eq('no mail for a paused plant', (select count(*)::int from public.email_queue where key = 'test:paused'), 0);
   perform pg_temp.eq('mail for an active plant', (select count(*)::int from public.email_queue where key = 'test:active'), 1);
-  perform public.billing_set_paused(uy, array[9000025::bigint], false);
-  perform pg_temp.eq('resumed plant billed', public.billing_extra_inverters(uy), 3);
-  perform public.billing_set_paused(uy, array[9000025::bigint], true);
+  perform set_config('request.jwt.claims', json_build_object('sub', uy, 'role', 'authenticated')::text, true);
+  perform pg_temp.raises('no room to start it', 'select public.api_plant_start(9000025)', 'no room');
+  perform set_config('request.jwt.claims', '', true);
 
   -- The paywall's reader answers for the signed-in user only
   perform set_config('request.jwt.claims', json_build_object('sub', ur, 'role', 'authenticated')::text, true);
@@ -248,7 +227,7 @@ begin
   perform pg_temp.eq('quote free yearly', (q->>'dueNow')::int, 1799);
   perform pg_temp.eq('quote free home',   (public.api_billing_quote('home', 'monthly')->>'dueNow')::int, 99);
   perform set_config('request.jwt.claims', json_build_object('sub', uy, 'role', 'authenticated')::text, true);
-  q := public.api_billing_quote('family', 'monthly', 2);
+  q := public.api_billing_quote('family', 'monthly', 3);
   perform pg_temp.eq('quote keeps own period', q->>'period', 'yearly');
   perform pg_temp.eq('quote yearly extras (1 now + 2 new)', (q->>'nextCharge')::int, 1799 + 3 * 588);
   perform set_config('request.jwt.claims', '', true);
@@ -519,13 +498,13 @@ begin
   ref := (select x->>'reference' from jsonb_array_elements(runs) x where x->>'card' = 'AUTH_t1');
   perform pg_temp.eq('failure: next try day 1', public.billing_charge_failed(ref, 'declined')->>'nextTry', (t + 1)::text);
   perform pg_temp.eq('past due', (select state from private.billing where user_id = s), 'past_due');
-  perform pg_temp.eq('nothing on day 2', (select count(*)::int from jsonb_array_elements(public.billing_run(t + 2)) x where x->>'card' = 'AUTH_t1'), 0);
   runs := public.billing_run(t + 1);
   perform pg_temp.eq('retry once a day', (select count(*)::int from jsonb_array_elements(public.billing_run(t + 1)) x where x->>'card' = 'AUTH_t1'), 0);
   ref := (select x->>'reference' from jsonb_array_elements(runs) x where x->>'card' = 'AUTH_t1');
   perform pg_temp.eq('retry same amount', (select amount from private.billing_charges where reference = ref), 179);
   update private.billing_charges set created_on = t + 1 where reference = ref;
   perform pg_temp.eq('day 1 fails: next day 3', public.billing_charge_failed(ref, 'declined')->>'nextTry', (t + 3)::text);
+  perform pg_temp.eq('nothing on day 2', (select count(*)::int from jsonb_array_elements(public.billing_run(t + 2)) x where x->>'card' = 'AUTH_t1'), 0);
   ref := (select x->>'reference' from jsonb_array_elements(public.billing_run(t + 3)) x where x->>'card' = 'AUTH_t1');
   perform pg_temp.eq('day 3 fails: next day 7', public.billing_charge_failed(ref, 'declined')->>'nextTry', (t + 7)::text);
   ref := (select x->>'reference' from jsonb_array_elements(public.billing_run(t + 7)) x where x->>'card' = 'AUTH_t1');
@@ -564,13 +543,13 @@ begin
   perform pg_temp.eq('marked for refund', (select error like 'refund:%' from private.billing_charges where reference = ref), true);
   perform pg_temp.raises('unknown period refused', format('select public.billing_charge_open(%L, %L, %L)', n, 'home', 'weekly'), 'unknown plan or period');
 
-  -- a renewal a run opened but never reported fails on the next run
+  -- a renewal a run handed out but never reported is handed out again on the next run (0128)
   update private.billing set next_billing_date = t where user_id = s;
   perform public.billing_run(t);
-  perform public.billing_run(t + 1);
-  perform pg_temp.eq('orphaned renewal failed', (select count(*)::int from private.billing_charges
-    where user_id = s and kind = 'renewal' and status = 'failed' and error = 'not charged: the run stopped'), 1);
-  perform pg_temp.eq('then past due from the billing date', (select past_due_since from private.billing where user_id = s), t);
+  ref := (select reference from private.billing_charges where user_id = s and kind = 'renewal' and status = 'pending');
+  perform pg_temp.eq('orphaned renewal handed out again',
+    (select count(*)::int from jsonb_array_elements(public.billing_run(t + 1)) x where x->>'reference' = ref), 1);
+  perform pg_temp.eq('still active while it is open', (select state from private.billing where user_id = s), 'active');
 
   -- no saved card: the renewal fails at once
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values (n, 'home', 'monthly', 5, t);
@@ -604,7 +583,7 @@ begin
   perform public.billing_run(t);
   perform pg_temp.eq('renewal notice', (select (data->>'amount')::int from public.email_queue where user_id = k and kind = 'bill_renewal_notice'), 999);
 end $$;
-select pg_temp.eq('authenticated cannot mark paid', has_function_privilege('authenticated', 'public.billing_charge_paid(text, jsonb, boolean, bigint)', 'execute'), false);
+select pg_temp.eq('authenticated cannot mark paid', has_function_privilege('authenticated', 'public.billing_charge_paid(text, jsonb, boolean, bigint, text, timestamptz)', 'execute'), false);
 select pg_temp.eq('charges closed', has_table_privilege('authenticated', 'private.billing_charges', 'select'), false);
 
 -- Only service_role may call the rules
@@ -612,29 +591,35 @@ select pg_temp.eq('authenticated cannot', has_function_privilege('authenticated'
 select pg_temp.eq('service_role can',     has_function_privilege('service_role', 'public.billing_amount_due(uuid)', 'execute'), true);
 select pg_temp.eq('billing table closed', has_table_privilege('authenticated', 'private.billing', 'select'), false);
 
--- Accounts from before billing (0115): Family, never billed. Run last: it comps every account.
+-- Comped (0115, switched by hand with billing_set_comped since 0130): Family, never billed.
 insert into auth.users (id, email) values ('00000000-0000-0000-0000-000000000081', 'old@t.test');
 insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values ('00000000-0000-0000-0000-000000000082', '00000000-0000-0000-0000-000000000081', 'old@login.test');
 insert into public.plant_users (plant_id, user_id, account_id, paused) values
   (9000081, '00000000-0000-0000-0000-000000000081', '00000000-0000-0000-0000-000000000082', false),
   (9000082, '00000000-0000-0000-0000-000000000081', '00000000-0000-0000-0000-000000000082', true);
-\ir ../../supabase/migrations/0115_existing_accounts_comped.sql
 do $$
 declare u constant uuid := '00000000-0000-0000-0000-000000000081';
 begin
-  perform pg_temp.eq('existing account on Family', (select plan || ' ' || comped from private.billing where user_id = u), 'family true');
-  perform pg_temp.eq('its plants unpaused', (select count(*)::int from public.plant_users where user_id = u and paused), 0);
+  perform public.billing_set_comped(u, true);
+  perform pg_temp.eq('comped account on Family', (select plan || ' ' || comped from private.billing where user_id = u), 'family true');
   perform pg_temp.eq('never billed', public.billing_amount_due(u), 0);
-  perform pg_temp.eq('extra plants cost nothing', (public.billing_may_link(u, 'x@login.test', array[1, 1, 1])->>'extraInverters')::int, 0);
+  perform pg_temp.eq('no limit', (public.billing_may_link(u, 'x@login.test', array[1, 1, 1])->>'ok')::boolean, true);
   perform pg_temp.raises('no plan changes', format('select public.billing_book_change(%L, %L)', u, 'home'), 'free of charge');
   perform pg_temp.raises('no renewal', format('select public.billing_renew(%L)', u), 'nothing to renew');
   perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
   perform pg_temp.eq('status says comped', (public.api_billing_status()->>'comped')::boolean, true);
+  perform public.api_plant_start(9000082);
+  perform pg_temp.eq('a stopped plant starts', (select count(*)::int from public.plant_users where user_id = u and paused), 0);
   perform pg_temp.eq('remove login at once', public.api_link_remove('00000000-0000-0000-0000-000000000082')->>'result', 'removed');
   perform set_config('request.jwt.claims', '', true);
   perform pg_temp.eq('not trimmed', (select count(*)::int from public.free_trimmed_plants() x where x in (9000081, 9000082)), 0);
 end $$;
 
 \set QUIET off
+do $$ begin
+  if exists (select 1 from pg_temp.fails) then
+    raise exception E'billing tests failed:\n%', (select string_agg(what, E'\n' order by n) from pg_temp.fails);
+  end if;
+end $$;
 select 'PASS' as billing_tests;
 rollback;

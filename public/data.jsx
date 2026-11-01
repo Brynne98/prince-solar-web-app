@@ -264,6 +264,8 @@ async function fetchDay(date) {
 // adds days (SOLAR-175). A failed ask keeps the last good list; null only before any came.
 const dataDaysCache = {}, dataDaysGood = {};
 function fetchDataDays(fresh) {
+  // No plant yet (the empty outlines in Setup): no days to ask about, and the ask would fail.
+  if (window.CURRENT_PLANT == null) return Promise.resolve(null);
   const k = window.CURRENT_PLANT, c = dataDaysCache[k], s = window.SYNC;
   const old = c && s && (s.pending || s.spinePending) && Date.now() - c.at > 60000;
   if (!c || fresh || old) {

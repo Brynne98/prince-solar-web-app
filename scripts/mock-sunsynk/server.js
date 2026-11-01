@@ -64,6 +64,21 @@ const PLANTS = {
       { sn: "S6004B", alias: "Inverter 2", share: 0.5, upload: 60, ct: true, model: "SUNSYNK-8K-SG01LP1" },
     ],
   },
+  // Two plants no seeded user holds, so a test user has them alone (the free-week trim needs that).
+  6005: {
+    name: "Granny flat", tz: "Africa/Johannesburg", currency: "ZAR", lat: -25.75, lon: 28.19,
+    kwp: 5, battKwh: 10, gridMode: "import", phases: 1, battSign: "discharging", banks: "per-inverter",
+    loadBase: 400, inverters: [
+      { sn: "F6005A", alias: "Flat", share: 1, upload: 60, ct: true, model: "SUNSYNK-5K-SG04LP1" },
+    ],
+  },
+  6006: {
+    name: "Beach house", tz: "Africa/Johannesburg", currency: "ZAR", lat: -34.05, lon: 23.37,
+    kwp: 8, battKwh: 15, gridMode: "import", phases: 1, battSign: "discharging", banks: "per-inverter",
+    loadBase: 700, inverters: [
+      { sn: "B6006A", alias: "Beach", share: 1, upload: 60, ct: true, model: "SUNSYNK-8K-SG01LP1" },
+    ],
+  },
 };
 
 // SunSynk logins. pageSize forces pagination for the accounts that carry it.
@@ -76,6 +91,8 @@ const ACCOUNTS = {
   // plan check (billing-link-check.mjs): a login nobody seeds, and an installer login
   "solo@mock": { plants: [6003] },
   "installer@mock": { plants: [3001, 5001, 6002, 6003, 6004] },
+  "flat@mock": { plants: [6005] },
+  "beach@mock": { plants: [6006] },
 };
 
 // ---------------------------------------------------------------------------

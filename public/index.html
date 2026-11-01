@@ -216,7 +216,7 @@
   .sync-arc { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(34,211,238,0.25); border-top-color: var(--soc); animation: sync-spin 0.9s linear infinite; flex: none; }
   @keyframes sync-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .sync-arc { animation: none; border-top-color: rgba(34,211,238,0.6); } }
-  .refresh { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; min-width: 38px; padding: 0 10px; flex: none;
+  .refresh { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; min-width: 38px; padding: 0; flex: none;
     border-radius: 10px; background: var(--panel); border: 1px solid var(--line-2); color: var(--text); font-size: 14px; font-weight: 500; transition: border-color .15s; }
   .refresh:hover:not(:disabled) { border-color: var(--muted); }
   .refresh:disabled { opacity: .55; cursor: progress; }
@@ -993,7 +993,8 @@
   .login-email { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
   .login-email .warn { color: var(--warn); white-space: nowrap; }
   .login-plant { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-height: 44px; }
-  .login-plant .plant-nm { flex: 1; min-width: 0; font-size: 14.5px; }
+  /* the name holds the row's 44px, so the row doesn't shrink up when a question opens under it */
+  .login-plant .plant-nm { flex: 1; min-width: 0; font-size: 14.5px; min-height: 44px; display: flex; align-items: center; }
   .login-plant.off .plant-nm { color: var(--dim); }
   .login-plant .plant-state { font-size: 13px; white-space: nowrap; }
   .login-plant > .confirm-card, .login-grp > .conn-form { flex-basis: 100%; margin: 4px 0 10px; }
@@ -1071,7 +1072,7 @@
   .sset-cards { min-width: 0; }
   .settings-page .sset-cards > .sset + .sset { margin-top: 8px; }
   .settings-page .sset-cards > .sset.conn-row { padding: 14px 18px; }
-  .sset-cards .conn-status::before { display: none; }   /* the word alone, no dot */
+  .sset-cards .conn-status::before, .plan-name .conn-status::before, .plan-booked .conn-status::before { display: none; }   /* the word alone, no dot */
   .settings-page .sset-cards > .conn-add { padding-top: 12px; }
   @media (max-width: 900px) { .settings-page .sset-cards > .sset.conn-row { padding: 12px 14px; } }
   .settings-page .conn-add, .settings-page .notif-push, .settings-page .plan-alert { padding-top: 8px; }
@@ -1477,7 +1478,6 @@
   .pw-error { margin-top: 14px; }
   .pw-foot { justify-content: space-between; }
   .pw-foot .field-note { margin-top: 0; }
-  .cost-card .conn-form-actions { margin-top: 12px; }
   /* Plan section in Account (SOLAR-208) */
   .plan-name { font-size: 15px; font-weight: 600; color: var(--text); }
   .plan-booked { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
@@ -1489,10 +1489,32 @@
   .plan-grid .pw-plan { position: relative; }
   .plan-grid .pw-plan > :last-child { margin-top: auto; }
   .plan-grid .pw-plan > button { margin-top: auto; padding-top: 8px; }
+  /* Pick your plan: each row (name, tagline, price, note, button, list) lines up across the cards (SOLAR-261) */
+  .plan-grid.plan-cards > .pw-plan { display: grid; grid-row: span 6; grid-template-rows: subgrid; row-gap: 4px; }
+  .plan-grid.plan-cards .pw-plan > button { margin-top: 12px; padding-top: 0; }   /* the 8px top above pushed the label low */
+  .plan-grid.plan-cards .pw-plan > .plan-list { grid-row: 6; margin-top: 0; }
+  /* SOLAR-264: bigger name and price, "Your plan" in the corner, ticks, Family's extra plants counter under its list */
+  .plan-cards .pw-plan .pw-name { font-size: 16px; color: var(--text); }
+  .plan-cards .pw-plan .pw-price b { font-size: 26px; }
+  .plan-mine-tag { position: absolute; top: 18px; right: 18px; font-size: 12px; font-weight: 600; color: var(--ok); }
+  .plan-cards .plan-gives li:not(.plan-also) { display: flex; align-items: baseline; gap: 8px; }
+  .plan-cards .plan-gives li:not(.plan-also)::before, .plan-cards.plan-grid .plan-free .plan-gives li::before { flex: none; width: 10px; height: 6px; margin: 0; border-radius: 0; background: none;
+    border-left: 2px solid var(--ok); border-bottom: 2px solid var(--ok); transform: rotate(-45deg) translateY(-2px); }
+  .plan-cards.plan-grid .plan-free .plan-gives li::before { border-color: var(--dim); }
+  .plan-more { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+  .plan-more-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
+  .stepper { display: inline-flex; align-items: center; border: 1px solid var(--line-2); border-radius: 9px; overflow: hidden; }
+  .stepper button { width: 36px; height: 34px; padding: 0; background: none; border: none; color: var(--text); display: grid; place-items: center;
+    margin: 0; align-self: center; }   /* .pw-plan button gives every card button an 8px top margin */
+  .stepper svg { width: 14px; height: 14px; }
+  .stepper button:disabled { color: var(--dim); opacity: .5; cursor: default; }
+  .stepper .mono { min-width: 28px; text-align: center; font-size: 14px; font-weight: 600; }
   .pw-plan.plan-mine { border-color: rgba(61,220,132,0.55); background: linear-gradient(180deg, rgba(61,220,132,0.07), var(--panel-2) 60%); }
   .plan-gives li::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 2px; background: var(--ok); margin-right: 8px; vertical-align: 2px; }
   .plan-free .plan-gives li::before { background: var(--dim); }
   .plan-foot { margin: 12px 0 0; }
+  .add-cost { margin: 0 0 12px; }
+  .pay-logo { padding: 0; background: none; }
   .plan-foot + .conn-form, .plan-foot + .confirm-card { margin-top: 14px; }
   .pay-card { width: 46px; height: 30px; border-radius: 6px; background: linear-gradient(135deg, #1d2a44, #2b3d63); border: 1px solid var(--line-2); display: grid; place-items: center; font: italic 700 11px 'Space Grotesk', sans-serif; color: var(--text); letter-spacing: .04em; flex: none; align-self: center; }
   .pay-list { margin-top: 4px; border-top: 1px solid var(--line); }
@@ -1550,6 +1572,10 @@
   .fs-item:hover { background: rgba(255,255,255,0.05); }
   .fs-item.cur { background: rgba(61,220,132,0.1); }
   .fs-item.done { color: var(--dim); }
+  /* a done step's line draws across when it is ticked; rows already done load with it drawn (SOLAR-260) */
+  .fs-name { background: linear-gradient(currentColor, currentColor) no-repeat 0 55% / 0 1px; transition: background-size .45s ease; }
+  .fs-item.done .fs-name { background-size: 100% 1px; }
+  @media (prefers-reduced-motion: reduce) { .fs-name { transition: none; } }
   .fs-fold { flex: 1; display: flex; align-items: center; gap: 8px; min-height: 32px; margin: -4px 0; padding: 0; border: none; background: none; color: inherit; font: inherit; cursor: pointer; }
   .fs-fold .fs-n { margin-left: auto; }
   .fs-fold .ico { width: 16px; height: 16px; color: var(--muted); transform: rotate(180deg); transition: transform .18s ease; }
@@ -1562,6 +1588,8 @@
   .fs-tick .ico { width: 11px; height: 11px; stroke-width: 3.2; }
   .fs-name { flex: 1; min-width: 0; }
   .fs-item > .ico { width: 14px; height: 14px; color: var(--dim); }
+  /* the name only as wide as its text, so the line stops at the last letter; the arrow keeps right */
+  .fs-item .fs-name { flex: 0 1 auto; } .fs-item > .ico { margin-left: auto; }
   .fs-item.cur > .ico { color: var(--pv); }
   @media (max-width: 599px) { .fs-item { min-height: 40px; } .fs-fold { min-height: 40px; margin: -8px 0; } }
   .fs-mini { display: none; }

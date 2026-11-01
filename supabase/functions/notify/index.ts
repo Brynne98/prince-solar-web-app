@@ -28,7 +28,7 @@ import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { reportError, serve } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, FROM_ACCOUNT, FROM_NOTICE, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
-  PAY_URL, paymentFailed, paymentReceived, type Period, planChangeBooked, plantEvent, type PlantEvent, plantsRemovalSoon,
+  PAY_URL, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, plantEvent, type PlantEvent, plantsRemovalSoon,
   planUpgraded, renewalNotice, report, type Report, sunsynkBack, sunsynkDown, welcome,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
@@ -231,12 +231,12 @@ async function build(r: Row, unsub: string): Promise<Email | null> {
     case "bill_paid":
       return paymentReceived({
         plan: d.plan, period: d.period, amount: d.amount, date: day(d.date), card: d.card, reference: d.reference,
-        extraInverters: d.extra > 0 ? { n: d.extra, each: d.extraEach } : undefined,
+        extraPlants: d.extra > 0 ? { n: d.extra, each: d.extraEach } : undefined,
         next: { amount: d.nextAmount, date: day(d.nextDate) },
       });
     case "bill_upgraded":
       return planUpgraded({
-        from: d.from, to: d.to, period: d.period, addedInverters: d.from === d.to ? d.added : undefined,
+        from: d.from, to: d.to, period: d.period, addedPlants: d.from === d.to ? d.added : undefined,
         paidNow: d.amount, daysLeft: d.daysLeft, next: { amount: d.nextAmount, date: day(d.nextDate) },
       });
     case "bill_change":
@@ -248,7 +248,12 @@ async function build(r: Row, unsub: string): Promise<Email | null> {
       return paymentFailed({
         plan: d.plan, period: d.period, amount: d.amount, card: d.card,
         nextTry: d.nextTry ? day(d.nextTry) : undefined, freeOn: day(d.freeOn), payUrl: PAY_URL,
+        disputed: d.disputed ? day(d.disputed) : undefined,
       });
+    case "bill_refund":
+      return paymentRefunded({ amount: d.amount, date: day(d.date), reference: d.reference, why: d.why === "price" ? "price" : "changed" });
+    case "bill_mail_failed":
+      return billMailFailed({ kind: String(d.kind), key: String(d.key), user: String(d.user ?? ""), error: String(d.error ?? "") });
     case "bill_free":
       return movedToFree({ from: d.from, kept: d.kept, stopped: d.stopped, deleteOn: day(d.deleteOn), payUrl: PAY_URL });
     case "bill_removal_soon": return plantsRemovalSoon(d.plants, day(d.on));

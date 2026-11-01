@@ -582,7 +582,7 @@ export type Receipt = {
   plan: Plan; period: BillPeriod; amount: number; date: string; // "1 Nov 2026"
   card: string; // "Visa ending 4081"
   reference: string; // Paystack reference
-  extraInverters?: { n: number; each: number }; // on plants after the 3rd, and the price of one
+  extraPlants?: { n: number; each: number }; // plants after the 3rd paid for, and the price of one
   next: { amount: number; date: string };
 };
 
@@ -593,7 +593,7 @@ export const paymentReceived = (r: Receipt) =>
     parts: [
       { facts: [
         { label: "Plan", value: planLine(r.plan, r.period) },
-        ...(r.extraInverters ? [{ label: "Extra inverters", value: `${r.extraInverters.n} at ${rand(r.extraInverters.each)} each` }] : []),
+        ...(r.extraPlants ? [{ label: "Extra plants", value: `${r.extraPlants.n} at ${rand(r.extraPlants.each)} each` }] : []),
         { label: "Paid", value: rand(r.amount) },
         { label: "Card", value: esc(r.card) },
         { label: "Reference", value: esc(r.reference) },
@@ -626,26 +626,26 @@ export const renewalNotice = (r: Renewal) =>
   });
 
 // An upgrade starts at once: the difference for the days left is charged now, the
-// billing date stays (SOLAR-208). Adding inverters past the 3rd plant is the same.
+// billing date stays (SOLAR-208). Adding extra plants past the 3rd is the same.
 export type Upgrade = {
   from: Plan; to: Plan; period: BillPeriod;
-  addedInverters?: number; // set when the change is extra inverters on Family
+  addedPlants?: number; // set when the change is extra plants on Family
   paidNow: number; daysLeft: number;
   next: { amount: number; date: string };
 };
 
 export const planUpgraded = (u: Upgrade) => {
-  const inverters = u.addedInverters ? `${u.addedInverters} ${u.addedInverters === 1 ? "inverter" : "inverters"}` : "";
-  return make(u.addedInverters ? `${inverters} added to your plan` : `You're on ${PLAN_NAME[u.to]}`, {
-    title: u.addedInverters ? `${inverters} added` : `You're on ${PLAN_NAME[u.to]}`,
+  const plants = u.addedPlants ? `${u.addedPlants} extra ${u.addedPlants === 1 ? "plant" : "plants"}` : "";
+  return make(u.addedPlants ? `${plants} added to your plan` : `You're on ${PLAN_NAME[u.to]}`, {
+    title: u.addedPlants ? `${plants} added` : `You're on ${PLAN_NAME[u.to]}`,
     parts: [
-      { p: u.addedInverters ? "They're billed with your Family plan from today." : u.to === "family" ? "You can add up to 3 plants now." : "Your history is kept from now on." },
+      { p: u.addedPlants ? "They're billed with your Family plan from today." : u.to === "family" ? "You can add up to 3 plants now." : "Your history is kept from now on." },
       { facts: [
         { label: "Plan", value: planLine(u.to, u.period) },
         { label: "Paid today", value: `${rand(u.paidNow)} for the ${u.daysLeft === 1 ? "day" : u.daysLeft + " days"} left` },
         { label: "Next payment", value: `${rand(u.next.amount)} on ${u.next.date}` },
       ] },
-      { button: u.to === "family" && !u.addedInverters ? { label: "Add a plant", href: LOGINS } : { label: "See your plan", href: PLAN } },
+      { button: u.to === "family" && !u.addedPlants ? { label: "Add a plant", href: LOGINS } : { label: "See your plan", href: PLAN } },
     ],
     footer: [HELP],
   });
@@ -689,13 +689,14 @@ export type Failed = {
   nextTry?: string; // absent after the last try
   freeOn: string; // the day the account moves to Free if it stays unpaid
   payUrl: string;
+  disputed?: string; // the bank took a payment back (a lost dispute, 0130): the day it was paid
 };
 
 export const paymentFailed = (f: Failed) =>
   make(`Your payment of ${rand(f.amount)} didn't go through`, {
     title: "Your payment didn't go through",
     parts: [
-      { callout: `${esc(f.card)} was declined for ${rand(f.amount)}.` },
+      { callout: f.disputed ? `Your bank took back the ${rand(f.amount)} paid on ${f.disputed}.` : `${esc(f.card)} was declined for ${rand(f.amount)}.` },
       { p: f.nextTry
         ? `We'll try again on ${f.nextTry}. If it's still unpaid on ${f.freeOn}, your account moves to Free.`
         : `That was the last try. Your account moves to Free on ${f.freeOn} unless it's paid.` },
@@ -707,6 +708,39 @@ export const paymentFailed = (f: Failed) =>
       { button: { label: "Pay with another card", href: f.payUrl } },
     ],
     footer: [HELP],
+  });
+
+// A payment we refund (0130): it applied nothing, because the plan or the price changed
+// while the user paid. Not sent for the R1 card check.
+export type Refund = { amount: number; date: string; reference: string; why: "price" | "changed" };
+
+export const paymentRefunded = (r: Refund) =>
+  make(`${rand(r.amount)} is on its way back to your card`, {
+    title: `${rand(r.amount)} is on its way back to your card`,
+    parts: [
+      { p: r.why === "price" ? "The price changed while you paid, so nothing changed. Pay the new price on your plan."
+        : "Your plan changed while you paid, so nothing changed." },
+      { facts: [
+        { label: "Refund", value: rand(r.amount) },
+        { label: "Paid on", value: r.date },
+        { label: "Reference", value: esc(r.reference) },
+      ] },
+      { button: { label: "See your plan", href: PLAN } },
+    ],
+    footer: [HELP],
+  });
+
+// To hello@ (Brynne): a bill email failed after its last try, so the user never heard.
+export const billMailFailed = (m: { kind: string; key: string; user: string; error: string }) =>
+  make(`Bill email not sent: ${m.kind}`, {
+    title: "A bill email was not sent",
+    parts: [{ facts: [
+      { label: "Email", value: esc(m.kind) },
+      { label: "Key", value: esc(m.key) },
+      { label: "User", value: esc(m.user) },
+      { label: "Error", value: esc(m.error) },
+    ] }],
+    footer: [],
   });
 
 // Unpaid after the last try: the account is on Free. The first-linked plant stays

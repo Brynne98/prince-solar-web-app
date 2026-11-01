@@ -19,7 +19,7 @@ const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
   accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_NOTICE, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, renewalNotice,
-  passwordChanged, paymentFailed, paymentReceived, planChangeBooked, plantEvent, plantsRemovalSoon, planUpgraded,
+  passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, plantEvent, plantsRemovalSoon, planUpgraded,
   renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
 
@@ -88,16 +88,18 @@ const mails: Record<string, [from: string, mail: Email]> = {
   })],
   // Billing (SOLAR-208)
   "billing-receipt": [FROM_NOTICE, paymentReceived({ plan: "family", period: "monthly", amount: 228, date: "1 Nov 2026", card: "Visa ending 4081",
-    reference: "PSH-7Q2K9X", extraInverters: { n: 1, each: 49 }, next: { amount: 228, date: "1 Dec" } })],
+    reference: "PSH-7Q2K9X", extraPlants: { n: 1, each: 49 }, next: { amount: 228, date: "1 Dec" } })],
   "billing-renewal-notice": [FROM_NOTICE, renewalNotice({ plan: "family", amount: 1799, on: "1 Feb 2027" })],
   "billing-free-week-ends-soon": [FROM_NOTICE, freeWeekEndsSoon("Monday", "Home", 58, 83)],
   "free-week-setup": [FROM_NOTICE, freeWeekSetup(["rate", "size", "panels"])],
   "billing-upgraded": [FROM_NOTICE, planUpgraded({ from: "home", to: "family", period: "monthly", paidNow: 43, daysLeft: 16, next: { amount: 179, date: "1 Dec" } })],
-  "billing-inverters-added": [FROM_NOTICE, planUpgraded({ from: "family", to: "family", period: "monthly", addedInverters: 2, paidNow: 52, daysLeft: 16, next: { amount: 277, date: "1 Dec" } })],
+  "billing-plants-added": [FROM_NOTICE, planUpgraded({ from: "family", to: "family", period: "monthly", addedPlants: 2, paidNow: 52, daysLeft: 16, next: { amount: 277, date: "1 Dec" } })],
   "billing-downgrade-booked": [FROM_NOTICE, planChangeBooked({ from: "family", to: "home", fromPeriod: "monthly", on: "1 Dec", removePlants: ["Cabin", "Office"], next: { amount: 99 } })],
   "billing-cancel-booked": [FROM_NOTICE, planChangeBooked({ from: "home", to: "free", fromPeriod: "monthly", on: "1 Dec", removePlants: [] })],
   "billing-switch-booked": [FROM_NOTICE, planChangeBooked({ from: "home", to: "home", fromPeriod: "monthly", toPeriod: "yearly", on: "1 Dec", removePlants: [], next: { amount: 999 } })],
   "billing-failed-1": [FROM_NOTICE, paymentFailed({ plan: "family", period: "monthly", amount: 179, card: "Visa ending 4081", nextTry: "3 Dec", freeOn: "8 Dec", payUrl: `${APP}/#pay` })],
+  "billing-refund": [FROM_NOTICE, paymentRefunded({ amount: 72, date: "3 Dec", reference: "psh_0123", why: "price" })],
+  "billing-failed-disputed": [FROM_NOTICE, paymentFailed({ plan: "home", period: "monthly", amount: 99, card: "Visa ending 4081", nextTry: "4 Dec", freeOn: "11 Dec", payUrl: `${APP}/#pay`, disputed: "10 Nov" })],
   "billing-failed-last": [FROM_NOTICE, paymentFailed({ plan: "family", period: "monthly", amount: 179, card: "Visa ending 4081", freeOn: "8 Dec", payUrl: `${APP}/#pay` })],
   "billing-moved-to-free": [FROM_NOTICE, movedToFree({ from: "family", kept: "Home", stopped: ["Cabin", "Office"], deleteOn: "7 Jan", payUrl: `${APP}/#pay` })],
   "billing-removal-soon": [FROM_NOTICE, plantsRemovalSoon(["Cabin", "Office"], "7 Jan")],
