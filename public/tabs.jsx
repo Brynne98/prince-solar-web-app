@@ -2761,7 +2761,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const title = <>Plants{limit != null && allPlants.length > 0 && <span className="sset-count">{allPlants.filter(p => !p.paused && ['on', 'going'].includes(state(p))).length} of {limit} on your plan</span>}</>;
   return (
     <SettingsSection id="connection" title={title} bare
-      action={!unread && mode !== 'add' && <button type="button" className="save-btn" onClick={() => { if (planFull) window.track('add_login_full_done', { plan: billing.plan }); setMode('add'); }}>Add login</button>}>
+      action={!unread && <button type="button" className="save-btn" onClick={() => { if (planFull) window.track('add_login_full_done', { plan: billing.plan }); setMode('add'); }}>Add login</button>}>
       {!unread && mode === 'add' && (
         // A form over the page (SOLAR-286). Cancel re-reads too: a login with no plant yet is saved but not listed.
         <window.Dialog keep label="Add login" onClose={() => { setMode(null); refresh(); }}>
