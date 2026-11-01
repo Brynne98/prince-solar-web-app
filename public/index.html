@@ -1082,7 +1082,8 @@
   /* Billing's Plants: one card per login, its email first and plain to read */
   .sset-cards { min-width: 0; }
   .settings-page .sset-cards > .sset + .sset { margin-top: 8px; }
-  .settings-page .sset-cards > .sset.conn-row { padding: 14px 18px; }
+  /* a card here that is also a .conn-row keeps the top border the row rules above strip (SOLAR-279) */
+  .settings-page .sset-cards > .sset.conn-row { padding: 14px 18px; border-top: 1px solid var(--line); }
   .sset-cards .conn-status::before, .plan-name .conn-status::before, .plan-booked .conn-status::before { display: none; }   /* the word alone, no dot */
   .settings-page .sset-cards > .conn-add { padding-top: 12px; }
   @media (max-width: 900px) { .settings-page .sset-cards > .sset.conn-row { padding: 12px 14px; } }
@@ -1713,6 +1714,14 @@
   .plans-sheet { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 16px; background: rgba(5,7,10,0.6); }
   .plans-panel { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 22px 24px; border-radius: 16px;
     background: var(--panel); border: 1px solid var(--line-2); box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+  /* the review before a saved card is charged (SOLAR-276) */
+  .plans-panel.pay-review { width: min(380px, 100%); }
+  .pay-review-t { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+  .pay-review-ln { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 13.5px; color: var(--muted); }
+  .pay-review-ln b { font-family: var(--mono); font-weight: 600; color: var(--text); text-align: right; }
+  .pay-review-ln.due { font-size: 14.5px; color: var(--text); }
+  .pay-review-ln.due b { font-size: 16px; }
+  .pay-review-acts { display: flex; justify-content: flex-end; gap: 10px; padding-top: 18px; border-top: 1px solid var(--line); }
   .pw-save { margin-left: 6px; padding: 1px 6px; border-radius: 6px; background: rgba(61,220,132,0.14); color: var(--pv); font-size: 11px; font-weight: 600; }
   .pw-billed { display: block; margin-top: 2px; font-size: 12.5px; color: var(--muted); }
   .cal-day.shut, .hv-daynav.shut { color: var(--dim); opacity: 0.45; }
@@ -1725,6 +1734,9 @@
     .hl-shape { height: 80px; gap: 4px; }
     .plans-sheet { place-items: end stretch; padding: 0; }
     .plans-panel { width: 100%; border-radius: 16px 16px 0 0; padding: 18px 18px calc(20px + env(safe-area-inset-bottom, 0px)); max-height: 90vh; }
+    .plans-panel.pay-review { width: 100%; }
+    .pay-review-acts { flex-direction: column-reverse; }
+    .pay-review-acts button { padding: 12px 16px; font-size: 14px; }
   }
 </style>
 </head>

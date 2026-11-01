@@ -132,10 +132,52 @@ const REFUND_NOTE = 'Your plan changed while you paid, so nothing changed. The p
 // paidEvent: { name, props } sent once the money is taken, here or back from the card page (SOLAR-268).
 let paying = false;
 const PAID_EVENT = 'ps.paidEvent';
+
+// The saved card is charged without Paystack's page, so the amount, the next bill and the
+// card are shown first (SOLAR-276). Centred on a desktop, from the bottom on a phone.
+function PayReview({ title, due, then, card, onDone }) {
+  const cancel = React.useRef(null);
+  React.useEffect(() => { cancel.current?.focus(); }, []);
+  return (
+    <div className="plans-sheet" onClick={e => { if (e.target === e.currentTarget) onDone(false); }}
+         onKeyDown={e => { if (e.key === 'Escape') onDone(false); }}>
+      <div className="plans-panel pay-review" role="alertdialog" aria-labelledby="pay-review-t">
+        <h2 id="pay-review-t" className="pay-review-t">{title}</h2>
+        <div className="pay-review-ln due"><span>Due today</span><b>{rand(due)}</b></div>
+        <div className="pay-review-ln"><span>{then[0]}</span><b>{then[1]}</b></div>
+        <div className="pay-review-ln"><span>Card</span><b>{card}</b></div>
+        <div className="pay-review-acts">
+          <button type="button" className="ghost-btn" ref={cancel} onClick={() => onDone(false)}>Cancel</button>
+          <button type="button" className="save-btn" onClick={() => onDone(true)}>Pay {rand(due)}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+// true: pay. Nothing to review (no saved card: Paystack's page shows the price; nothing due;
+// a refused change, which the pay call explains) also answers true.
+const reviewPay = async (plan, period, extras) => {
+  const [{ data: b }, q] = await Promise.all([window.sb.rpc('api_billing_status'), quote(plan, period, extras)]);
+  if (!b?.card || !q?.dueNow) return true;
+  const name = plan === 'family' ? 'Family' : 'Home';
+  const more = (extras ?? q.extraPlants) - q.extraPlants;
+  const title = q.plan === plan && more > 0 ? `Add ${more} ${more === 1 ? 'plant' : 'plants'} to ${name}` : `Upgrade to ${name}`;
+  const ok = await new Promise(resolve => {
+    const el = document.body.appendChild(document.createElement('div'));
+    const root = ReactDOM.createRoot(el);
+    const done = (yes) => { root.unmount(); el.remove(); resolve(yes); };
+    root.render(<PayReview title={title} due={q.dueNow} card={`${b.card.name} •••• ${b.card.last4}`}
+      then={[`Then from ${billDay(q.nextDate)}`, `${rand(q.nextCharge)} ${perUnit(q.period || period)}`]} onDone={done} />);
+  });
+  window.track('pay_review_done', { plan, choice: ok ? 'pay' : 'cancel' });
+  return ok;
+};
+
 window.startUpgrade = async function startUpgrade(plan, period, newCard = false, extras = null, plants = null, paidEvent = null) {
   if (paying) return;
   paying = true;
   try {
+    if (!newCard && !await reviewPay(plan, period, extras)) return;
     let r = await billingCall('pay', { plan, period, newCard, extras, plants });
     if (r.status === 'failed') {
       window.toast('Your saved card was declined. Enter another card.', { error: true });
