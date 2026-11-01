@@ -507,7 +507,7 @@ await attack("G7a", "book Home (or Free) then link new plants: they stay active 
 await attack("G7b", "Family: book removal of a login, link others: more than 3 collect until the date", async () => {
   const a = await family("g7b");
   const r = await link(a, "solo@mock");                                    // 6003
-  const rm = await rpc(a, "api_link_remove", { p_account: r.data.accountId });     // booked
+  const rm = await rpc(a, "api_link_remove", { p_account: r.data.accountId });     // removed now (0139)
   await link(a, "shared@mock", { confirmCost: true });                     // 6004
   await link(a, "export@mock", { confirmCost: true });                     // 3001, 6002
   await link(a, "brynne@mock", { confirmCost: true });                     // 5001

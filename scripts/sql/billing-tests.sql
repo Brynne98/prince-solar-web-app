@@ -347,19 +347,14 @@ begin
   perform pg_temp.eq('status plan', st->>'plan', 'family');
   perform pg_temp.eq('status lists booked plants', jsonb_array_length(st->'removePlants'), 2);
   st := public.api_billing_keep(9000023);
-  perform pg_temp.eq('keep takes a plant off the list', jsonb_array_length(st->'removePlants'), 1);
+  perform pg_temp.eq('keep takes the login''s plants off the list (0139)', jsonb_array_length(st->'removePlants'), 0);
   perform pg_temp.eq('downgrade with too many plants books (0136)', public.api_billing_change('home')->>'nextPlan', 'home');
   perform public.api_billing_change('family');
-  -- Remove login on Family: its plants are booked for the billing date, nothing goes now
-  perform pg_temp.eq('remove login books it', public.api_link_remove('00000000-0000-0000-0000-0000000000f7')->>'result', 'booked');
-  perform pg_temp.eq('all its plants booked', jsonb_array_length(public.api_billing_status()->'removePlants'),
-                     (select count(*)::int from public.plant_users where user_id = uy));
-  perform pg_temp.eq('nothing removed yet', (select count(*)::int from public.plant_users where user_id = uy) > 0, true);
-  perform pg_temp.eq('login still active', (select status from private.sunsynk_accounts where id = '00000000-0000-0000-0000-0000000000f7'), 'active');
-  -- With every plant booked, a downgrade to Home fits; then keeping two would break it
-  perform public.api_billing_keep(9000021);
-  perform pg_temp.eq('downgrade books once plants go', public.api_billing_change('home')->>'nextPlan', 'home');
-  perform pg_temp.raises('keep refused when the downgrade needs it', 'select public.api_billing_keep(9000022)', 'needed for your plan change');
+  -- Remove login on Family: the login and its plants go now, as on Free (0139)
+  perform pg_temp.eq('remove login now', public.api_link_remove('00000000-0000-0000-0000-0000000000f7')->>'result', 'removed');
+  perform pg_temp.eq('its plants gone', (select count(*)::int from public.plant_users where account_id = '00000000-0000-0000-0000-0000000000f7'), 0);
+  perform pg_temp.eq('login gone', (select count(*)::int from private.sunsynk_accounts where id = '00000000-0000-0000-0000-0000000000f7'), 0);
+  perform pg_temp.eq('nothing left on the delete list', jsonb_array_length(public.api_billing_status()->'removePlants'), 0);
   perform public.api_billing_change('family');
   perform pg_temp.raises('not your login', 'select public.api_link_remove(''00000000-0000-0000-0000-000000000099'')', 'not your account');
   -- A switch to yearly is paid, not booked (0138); a cancel booked and undone

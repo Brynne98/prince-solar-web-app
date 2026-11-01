@@ -248,17 +248,14 @@ const CASES = [
     if (await K.due(u) !== 228) bad.push(`next bill R${await K.due(u)}, want R228`);
     return bad;
   } },
-  { id: 'X4', title: 'lowering waits for the billing date and never goes below the plants past the 3rd', async run(K) {
+  { id: 'X4', title: 'lowering waits for the billing date; with 5 collecting it books and the last linked stops on the date (0136)', async run(K) {
     const bad = [], u = await K.user('family');
     const o = await K.open(u, 'family', null, 2); await K.paid(o.v.reference);
     await K.link(u, [1, 2, 3, 4, 5].map((i) => ({ id: P(i) })));
-    if ((await K.extras(u, 1)).ok) bad.push('lowered to 1 with 5 collecting');
-    await K.as(u, `select public.api_plant_stop(${P(5)})`);
-    const l = await K.extras(u, 1); if (!l.ok) return [...bad, 'lowering refused: ' + l.err];
+    const l = await K.extras(u, 1); if (!l.ok) return ['lowering with 5 collecting refused: ' + l.err];
     if ((await K.row(u)).extra_plants !== 2) bad.push('lowered at once');
     if (await K.due(u) !== 228) bad.push(`next bill R${await K.due(u)}, want R228`);
-    const s = await K.as(u, `select public.api_plant_start(${P(5)})`);
-    if (s.ok) bad.push('a 5th started with the drop to 4 booked');
+    if (await K.active(u) !== 5) bad.push(`${await K.active(u)} collect before the date, want 5`);
     const r = await K.row(u); await K.today(r.next_billing_date); await K.run(r.next_billing_date);
     const after = await K.row(u);
     if (after.extra_plants !== 1 || after.next_extra_plants !== null) bad.push(`after the date: ${after.extra_plants} extras, ${after.next_extra_plants} booked`);

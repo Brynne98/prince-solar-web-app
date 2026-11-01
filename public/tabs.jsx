@@ -2628,22 +2628,22 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   // browser dialog. 'confirming' holds the account_id whose card is open.
   const [confirming, setConfirming] = useState(null);
   const [leaving, setLeaving] = useState(null); // account_id folding away after a remove
-  const paidPlan = billing && billing.plan !== 'free' && !billing.comped; // never billed: remove at once
   const { billDay } = window.billingFmt;
-  // On a paid plan a login's plants stay until the billing date, then go (0113).
+  // Remove login deletes the login and its plants now, on every plan (0139). The plan and
+  // the room paid for don't change: that's billing's, not the login's.
+  const removeText = (acc) => {
+    const names = (acc.plants || []).map(p => p.plant_name || 'Plant ' + p.plant_id);
+    return !names.length ? 'It has no plants.'
+      : names.length === 1 ? `${names[0]} and its history are deleted now, unless another account shares it.`
+      : `${names.slice(0, -1).join(', ')} and ${names.at(-1)} are deleted now with their history, unless another account shares them.`;
+  };
   const remove = async (acc) => {
     const last = live.length === 1;
     setConfirming(null);
     setBusy(acc.account_id);
     try {
-      const { data: res, error } = await window.sb.rpc('api_link_remove', { p_account: acc.account_id });
+      const { error } = await window.sb.rpc('api_link_remove', { p_account: acc.account_id });
       if (error) throw error;
-      if (res?.result === 'booked') {
-        await Promise.all([refresh(), reloadBilling && reloadBilling()]);
-        setBusy(null);
-        window.toast(`Login stays until ${billDay(res.on)}, then it’s deleted.`);
-        return;
-      }
       window.track('login_remove_done');
       // The last login: re-reading the list leaves no plant, so the app turns to its empty
       // pages in place. A reload here blanked the screen first (SOLAR-98).
@@ -2668,7 +2668,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const keep = async (p) => {
     setBusy('keep:' + p.plant_id);
     const { error } = await window.billingRpc('api_billing_keep', { p_plant: p.plant_id });
-    if (error) fail(/needed for your plan change/.test(error.message) ? `Your booked change needs this removed. Tap ${(billing && bookedChange(billing)?.[1]) || 'Keep'} in Plan first.` : 'Couldn’t keep it. Try again.');
+    if (error) fail('Couldn’t keep it. Try again.');
     await Promise.all([refresh(), reloadBilling && reloadBilling()]);
     setBusy(null);
   };
@@ -2793,9 +2793,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                 {confirming === acc.account_id && (
                   <ConfirmCard modal
                     title={<>Remove <b>{acc.sunsynk_username}</b>?</>}
-                    text={paidPlan && plants.length
-                      ? `It stays until ${billDay(billing.nextDate)}, then it’s deleted with its history, unless another account shares it.`
-                      : 'This plant’s history is deleted too, unless another account shares it.' + (live.length === 1 ? ' It’s your only login. Your pages stay empty until you add one.' : '')}
+                    text={removeText(acc) + (live.length === 1 ? ' It’s your only login. Your pages stay empty until you add one.' : '')}
                     action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)} />
                 )}
                 {plants.length ? plants.map(plantRow) : <div className="conn-meta">No plant shared with this login.</div>}

@@ -511,11 +511,14 @@ async function doRemove(H, U) {
     const accs = [...new Set([...U.plantLogin.entries()].filter(([id]) => o.has(id)).map(([, a]) => a))];
     if (!accs.length) return;
     const acc = rng.pick(accs);
-    const r = await db.u(U.id, `select public.api_link_remove('${acc}')`);
+    // Remove login deletes the login and its plants now, on every plan (0139).
     const ids = (await db.json(`select coalesce(jsonb_agg(plant_id), '[]') from public.plant_users where user_id = '${U.id}' and account_id = '${acc}'`));
+    const r = await db.u(U.id, `select public.api_link_remove('${acc}')`);
     if (!r.ok) { fail(ctx, 'remove login: raised on a paid plan', r.err); return; }
-    if (ids.length && r.v.result !== 'booked') fail(ctx, 'remove login on a paid plan did not book', r.v);
-    if (ids.length) { ids.forEach((id) => o.bookRemoval(id)); }
+    if (r.v.result !== 'removed') fail(ctx, 'remove login on a paid plan did not remove now', r.v);
+    o.plants = o.plants.filter((p) => !ids.includes(p.id));
+    ids.forEach((id) => { o.rm.delete(id); o.freeRm.delete(id); U.plantLogin.delete(id); });
+    if (o.rm.size === 0) o.rmOn = null;
     inc(cov.allowed, 'remove login');
     await check(H, U, 'remove login');
     return;
