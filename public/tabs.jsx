@@ -2444,7 +2444,7 @@ function LoginMenu({ email, busy, onPassword, onRemove }) {
   return (
     <div className="login-more" ref={ref}>
       {/* a word, not three dots, so it reads as a button (SOLAR-285) */}
-      <button type="button" className="ghost-btn" aria-haspopup="menu" aria-expanded={open} aria-label={'Manage ' + email}
+      <button type="button" className="login-manage" aria-haspopup="menu" aria-expanded={open} aria-label={'Manage ' + email}
               disabled={busy} aria-busy={busy} onClick={() => setOpen(o => !o)}>
         Manage
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" /></svg>

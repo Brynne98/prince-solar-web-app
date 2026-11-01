@@ -995,12 +995,12 @@
   .set-method { color: var(--dim); }
   /* Billing's Plants: each login, its plants listed under it */
   /* Billing's Plants (SOLAR-251): one card; each login a grey caption over its plants, a switch each */
-  .login-grp + .login-grp { margin-top: 20px; }   /* space, not a line, between logins; plants indent under theirs (SOLAR-286) */
+  .login-grp + .login-grp { margin-top: 18px; }   /* space between logins, a line under each one's name (SOLAR-289) */
   .login-grp.leaving { overflow: hidden; animation: conn-out .24s ease-in forwards; }
-  .login-line { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+  .login-line { display: flex; align-items: center; gap: 8px; min-height: 36px; border-bottom: 1px solid var(--line); margin-bottom: 2px; }
   .login-email { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
   .login-email .warn { color: var(--warn); white-space: nowrap; }
-  .login-plant { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-height: 44px; padding-left: 16px; }
+  .login-plant { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-height: 44px; }
   /* the name holds the row's 44px, so the row doesn't shrink up when a question opens under it */
   .login-plant .plant-nm { flex: 1; min-width: 0; font-size: 14.5px; min-height: 44px; display: flex; align-items: center; }
   /* 36px rows on desktop so plants under one login sit as close as a login to its plant; phones keep 44px to tap (SOLAR-286) */
@@ -1011,7 +1011,9 @@
   .login-more { position: relative; flex: none; }
   .more-btn { width: 34px; height: 34px; display: grid; place-items: center; background: none; border: none; border-radius: 9px; color: var(--dim); }
   .more-btn:hover, .more-btn[aria-expanded="true"] { background: var(--panel-2); color: var(--text); }
-  .login-more > .ghost-btn[aria-expanded="true"] { color: var(--text); }
+  /* Manage: grey text, no box, so the plants stay the loudest thing on the card (SOLAR-289) */
+  .login-manage { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 4px 6px; border: none; border-radius: 7px; background: none; color: var(--dim); font-size: 12.5px; }
+  .login-manage:hover, .login-manage[aria-expanded="true"] { background: var(--panel-2); color: var(--text); }
   .login-menu { right: 0; top: calc(100% + 4px); min-width: 180px; }
   .menu button.menu-danger { color: var(--load); }
   /* Account actions: one button width */
