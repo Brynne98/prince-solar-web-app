@@ -2553,14 +2553,18 @@ function InvoicesSection({ billing: b }) {
       <table className="pay-table">
         <thead><tr><th>Date</th><th>Plan</th><th>Total</th><th>Status</th></tr></thead>
         <tbody>
-          {b.payments.map(p => (
+          {b.payments.map(p => {
+            const line = `${PLAN_NAME[p.plan]}, ${p.period}${what(p) ? ', ' + what(p) : ''}`;
+            return (
             <tr key={p.at}>
-              <td>{day(p.date)}</td>
-              <td className="pay-what">{PLAN_NAME[p.plan]}, {p.period}{what(p) ? ', ' + what(p) : ''}</td>
+              {/* on a phone the Plan column drops and the plan goes under the date */}
+              <td>{day(p.date)}<span className="pay-what-sub">{line}</span></td>
+              <td className="pay-what">{line}</td>
               <td className="mono">{rand(p.amount)}</td>
               <td>Paid</td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </SettingsSection>

@@ -1584,7 +1584,11 @@
   .pay-table th { text-align: left; font-weight: 500; color: var(--dim); padding: 0 12px 8px 0; }
   .pay-table td { padding: 8px 12px 8px 0; color: var(--text); }
   .pay-table td.pay-what { color: var(--muted); }
-  @media (max-width: 600px) { .pay-table :is(th, td):nth-child(2) { display: none; } }   /* the plan drops on a phone */
+  .pay-what-sub { display: none; }
+  @media (max-width: 600px) {
+    .pay-table :is(th, td):nth-child(2) { display: none; }   /* the plan drops on a phone… */
+    .pay-what-sub { display: block; margin-top: 2px; font-size: 12px; line-height: 1.35; color: var(--dim); }   /* …and goes under the date (SOLAR-302) */
+  }
   #settings-cancel .conn-row { align-items: center; } #settings-cancel .conn-actions { align-self: center; }
   .link-form .field label { display: flex; justify-content: space-between; gap: 12px; }
   .link-form .field label span { color: var(--dim); }
