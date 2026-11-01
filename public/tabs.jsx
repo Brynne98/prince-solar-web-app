@@ -2028,12 +2028,20 @@ function SettingsSection({ id, title, note, bare, action, children }) {
 const PLAN_NAME = { free: 'Free', home: 'Home', family: 'Family' };
 const PLAN_RANK = { free: 0, home: 1, family: 2 };
 const longDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+// The refusal when the plan has no room for the plants still collecting (on: their count,
+// when the caller knows it).
+function tooManyPlants(plan, extra, on) {
+  const room = plan === 'family' ? 3 + extra : 1;
+  const covers = `${PLAN_NAME[plan]} covers ${room} plant${room > 1 ? 's' : ''}`;
+  return on > room ? `${covers} and you have ${on} on. Turn ${on - room} off in Plants on Billing, then try again.`
+    : `${covers}. Turn plants off in Plants on Billing, then try again.`;
+}
 // Books a change for the billing date, or undoes one. True once booked.
-async function bookPlan(b, plan, period, reload) {
+async function bookPlan(b, plan, period, reload, on) {
   const { error } = await window.sb.rpc('api_billing_change', { p_plan: plan, p_period: period ?? null });
   if (error) {
     window.toast(/remove plants first/.test(error.message)
-      ? `${PLAN_NAME[plan]} covers ${plan === 'family' ? 3 + (b.extraPlants || 0) + ' plants' : 'one plant'}. Stop plants on Billing until that many collect, then try again.`
+      ? tooManyPlants(plan, b.nextExtraPlants ?? b.extraPlants ?? 0, on)
       : 'Couldn’t change your plan. Try again.', { error: true });
     return false;
   }
@@ -2054,10 +2062,10 @@ function bookedChange(b) {
 }
 // Sets the extra plants from the billing date (SOLAR-264): fewer than held books a drop,
 // as many as held undoes one. More is a payment (window.startUpgrade). True once saved.
-async function bookExtras(b, count, reload) {
+async function bookExtras(b, count, reload, on) {
   const { error } = await window.sb.rpc('api_billing_extras', { p_count: count });
   if (error) {
-    window.toast(/remove plants first/.test(error.message) ? 'Stop plants on Billing first, then try again.'
+    window.toast(/remove plants first/.test(error.message) ? tooManyPlants('family', count, on)
       : /plan change/.test(error.message) ? 'Your plan changes on its billing date. Keep it first.'
       : 'Couldn’t change your extra plants. Try again.', { error: true });
     return false;
@@ -2162,7 +2170,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
 // plants past the 3rd, R49 a plant (SOLAR-264): more is paid today, fewer waits for the
 // billing date.
 const PLAN_TAG = { free: 'See your solar today', home: 'One house, every day kept', family: 'Up to 3 plants' };
-function AdjustPlanPage({ billing, reload, onBack, paused, forPlant = null }) {
+function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
   const { useState, useEffect } = React;
   const b = billing;
   const paid = !!b && b.plan !== 'free' && !b.comped;
@@ -2207,7 +2215,6 @@ function AdjustPlanPage({ billing, reload, onBack, paused, forPlant = null }) {
     : p === b.plan && sameView ? b.price : prices[p];
   const famMine = b.plan === 'family' && sameView;
   const run = async (fn) => { setBusy(true); await fn(); setBusy(false); };
-  const names = paused.length > 1 ? paused.slice(0, -1).join(', ') + ' and ' + paused[paused.length - 1] : paused[0];
   const booked = bookedChange(b);
   // The line under a price
   const note = (p) => {
@@ -2223,13 +2230,13 @@ function AdjustPlanPage({ billing, reload, onBack, paused, forPlant = null }) {
   const action = (p) => {
     if (p === b.plan) {
       if (!sameView) return b.nextPeriod === view ? <div className="plan-cur">From {billDay(b.nextDate)}</div>
-        : <button type="button" className="ghost-btn" disabled={busy} onClick={() => run(() => bookPlan(b, b.plan, view, reload))}>Switch on {billDay(b.nextDate)}</button>;
+        : <button type="button" className="ghost-btn" disabled={busy} onClick={() => run(() => bookPlan(b, b.plan, view, reload, on))}>Switch on {billDay(b.nextDate)}</button>;
       if (p === 'family' && more > held) return <button type="button" className="save-btn" disabled={quote?.dueNow == null}
         onClick={() => window.startUpgrade('family', period, false, more, forPlant ? [forPlant] : null,
           { name: 'extra_plants_done', props: { count: more, change: 'up' } })}>{quote?.dueNow != null ? 'Pay ' + rand(quote.dueNow) : 'Pay'}</button>;
       if (p === 'family' && more < held && b.nextExtraPlants === more) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
       if (p === 'family' && more < held) return <button type="button" className="ghost-btn" disabled={busy}
-        onClick={() => run(async () => { if (!await bookExtras(b, more, reload)) setMore(shown); })}>Lower on {billDay(b.nextDate)}</button>;
+        onClick={() => run(async () => { if (!await bookExtras(b, more, reload, on)) setMore(shown); })}>Lower on {billDay(b.nextDate)}</button>;
       return null; // "Your plan" sits in the card's corner
     }
     if (!sameView) return null; // a paid plan changes plan in its own period
@@ -2239,7 +2246,7 @@ function AdjustPlanPage({ billing, reload, onBack, paused, forPlant = null }) {
     }
     if (b.nextPlan === p) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
     return <button type="button" className="ghost-btn" disabled={busy || cancelling}
-                   onClick={() => (p === 'free' ? setCancelling(true) : run(() => bookPlan(b, p, null, reload)))}>Downgrade</button>;
+                   onClick={() => (p === 'free' ? setCancelling(true) : run(() => bookPlan(b, p, null, reload, on)))}>Downgrade</button>;
   };
   const gives = {
     free: [null, ['1 plant', 'The last 24 hours', 'Alerts']],
@@ -2251,8 +2258,7 @@ function AdjustPlanPage({ billing, reload, onBack, paused, forPlant = null }) {
       {back}
       <div className="page-head">
         <h1>Pick your plan</h1>
-        {!b.comped && <p>{paid ? `Moving up starts today. Moving down waits for ${billDay(b.nextDate)}.` : 'Moving up starts today. Cancel any time.'}</p>}
-        {paused.length > 0 && <p className="plan-ctx">{names} {paused.length > 1 ? 'are' : 'is'} stopped.</p>}
+        {!b.comped && <p>{paid ? `Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Upgrades start today. Cancel any time.'}</p>}
       </div>
       {b.comped ? <p className="field-note">Your plan is free of charge: every plant, full history.</p> : <>
         <div className="segmented seg-sm plan-period" role="group" aria-label="Billing">
@@ -2296,9 +2302,8 @@ function AdjustPlanPage({ billing, reload, onBack, paused, forPlant = null }) {
         </div>
         {cancelling && (
           <ConfirmCard title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
-            onConfirm={() => { setCancelling(false); run(() => bookPlan(b, 'free', null, reload)); }} onCancel={() => setCancelling(false)} />
+            onConfirm={() => { setCancelling(false); run(() => bookPlan(b, 'free', null, reload, on)); }} onCancel={() => setCancelling(false)} />
         )}
-        <p className="field-note plan-foot">Paid by card through Paystack.</p>
       </>}
     </div>
   );
@@ -3167,7 +3172,6 @@ function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved
   // Every plant on the logins once (a plant can be on two).
   const live = (links?.accounts || []).filter(a => a.status !== 'disabled');
   const plants = [...new Map(live.flatMap(a => a.plants || []).map(p => [p.plant_id, p])).values()];
-  const paused = plants.filter(p => p.paused);
   const dot = { billing: billing?.state === 'past_due', settings: live.some(a => a.status === 'needs_relink') };
   const shown = page === 'prefs' ? 'account' : page === 'plans' ? 'billing' : page;
   return (
@@ -3189,7 +3193,7 @@ function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved
           {page === 'billing' && <BillingPage billing={billing} reload={reloadBilling} links={links} onPage={onPage} freeWeekEndsAt={me?.freeWeekEndsAt} onSaved={onPlantConfigSaved}
                                               onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}
           {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadBilling} onBack={() => onPage('billing')} forPlant={forPlant}
-                                               paused={paused.map(p => p.plant_name || 'Plant ' + p.plant_id)} />}
+                                               on={plants.filter(p => !p.paused && !p.remove_on).length} />}
           {page === 'settings' && (plantSlot || (
             <PlantPage me={me} plantId={plantId} onSaved={onPlantConfigSaved} onDirty={onDirty}
                        switchBlocked={switchBlocked} links={links} />
