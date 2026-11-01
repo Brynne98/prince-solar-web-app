@@ -893,6 +893,13 @@ function Setup({ links }) {
   const [me, setMe] = useState(null);
   useEffect(() => { window.fetchMe().then(setMe).catch(() => {}); }, []);
   const go = (id) => { setTab(id); setConnecting(false); toTop(); };
+  // The address names the page here too, as in App, so a reload stays on it.
+  useEffect(() => {
+    localStorage.setItem('synsynk.tab', tab);
+    const url = new URL(location.href);
+    url.searchParams.set('tab', tab);
+    if (url.href !== location.href) history.replaceState(history.state, '', url);
+  }, [tab]);
   // Only Plant has the card, so the header's button opens it on Live from the other settings pages.
   const connect = () => { if (isSettings(tab) && tab !== 'settings') setTab('live'); setConnecting(true); };
   useEffect(() => {
@@ -915,8 +922,8 @@ function Setup({ links }) {
   const turnOnBtn = (cls) => (
     <button type="button" className={'save-btn setup-btn ' + cls} onClick={turnOn} aria-label="Turn on a plant"><Icon id="power" /><span>Turn on a plant</span></button>
   );
-  // App opens on the page the address names, and Setup's page never reaches the address. A
-  // plant just added opens on Live, as in App (SOLAR-174); one switched back on stays put.
+  // App opens on the page the address names. A plant just added opens on Live, as in App
+  // (SOLAR-174); one switched back on stays put.
   const linked = (r) => {
     const paused = new Set((r?.paused || []).map(Number));
     const added = (r?.plants || []).map(p => Number(p.id)).find(id => !paused.has(id));
