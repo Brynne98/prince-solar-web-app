@@ -2516,7 +2516,7 @@ function PaymentsSection({ billing }) {
         <div className="conn-row">
           <CardLogo brand={c.brand} />
           <div className="conn-text">
-            <div className="conn-user">{c.name} ending <span className="mono">{c.last4}</span></div>
+            <div className="conn-user">{c.name} •••• <span className="mono">{c.last4}</span></div>
             <div className="conn-meta">Expires {String(c.expMonth).padStart(2, '0')}/{String(c.expYear).slice(-2)}</div>
           </div>
           {/* past due: Pay with another card in Plan changes it and pays */}

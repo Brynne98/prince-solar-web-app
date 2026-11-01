@@ -619,7 +619,7 @@ const names = (list: string[]) => list.length < 2 ? list.join("") : `${list.slic
 
 export type Receipt = {
   plan: Plan; period: BillPeriod; amount: number; date: string; // "1 Nov 2026"
-  card: string; // "Visa ending 4081"
+  card: string; // "Visa •••• 4081"
   reference: string; // Paystack reference
   extraPlants?: { n: number; each: number }; // plants after the 3rd paid for, and the price of one
   next: { amount: number; date: string };
