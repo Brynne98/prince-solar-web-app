@@ -27,9 +27,9 @@
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { reportError, serve } from "../_shared/errors.ts";
 import {
-  accountDeleted, type Email, FROM_ACCOUNT, FROM_NOTICE, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
+  accountDeleted, type Email, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, plantsRemovalSoon,
-  planUpgraded, renewalNotice, report, type Report, sunsynkBack, sunsynkDown, welcome,
+  planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -37,7 +37,6 @@ const LIVE = Deno.env.get("NOTIFY_LIVE") === "1";
 const RESEND_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 // Local tests point this at a stand-in server.
 const RESEND_URL = Deno.env.get("RESEND_URL") ?? "https://api.resend.com/emails";
-const UNSUB = `${Deno.env.get("SUPABASE_URL")}/functions/v1/unsubscribe`;
 // Resend's batch call takes up to 100 emails.
 const BATCH = 100;
 // The cron call times out at 55 s; stop claiming before that, the rest goes next minute.
@@ -139,7 +138,7 @@ async function buildHistory(p: Plant): Promise<History | null> {
 }
 
 /** The finished week, month or year before `today`, against the one before it. Null when it has no readings. */
-async function buildReport(p: Plant, period: Period, today: string): Promise<Omit<Report, "unsubscribeUrl"> | null> {
+async function buildReport(p: Plant, period: Period, today: string): Promise<Report | null> {
   let from: string, to: string, pFrom: string, pTo: string, label: string, prevLabel: string;
   const [y, m] = today.split("-").map(Number);
   if (period === "week") {
@@ -217,10 +216,10 @@ type Row = {
 };
 
 /** The email for one queued row; null = nothing to say (an empty report), skip it. */
-async function build(r: Row, unsub: string): Promise<Email | null> {
+async function build(r: Row): Promise<Email | null> {
   const d = r.data, tz = r.tz;
   const p: Plant = { id: r.plant_id ?? 0, name: r.plant_name || "your plant", tz };
-  const ev = (e: PlantEvent, at: number | null) => plantEvent(p.name, p.id, e, unsub, at == null ? "today" : dayOf(at, tz));
+  const ev = (e: PlantEvent, at: number | null) => plantEvent(p.name, p.id, e, at == null ? "today" : dayOf(at, tz));
   switch (r.kind) {
     case "grid_down": return ev({ kind: "grid_down", at: hhmm(d.since, tz), chargePct: d.chargePct ?? undefined }, d.since);
     case "grid_back": return ev({ kind: "grid_back", at: hhmm(d.at, tz), lasted: lasted(d.since, d.at) }, d.at);
@@ -232,14 +231,14 @@ async function build(r: Row, unsub: string): Promise<Email | null> {
     case "logger_stale": return ev({ kind: "logger_stale", since: hhmm(d.since, tz), inverter: d.inverter ?? undefined }, d.since);
     case "logger_back": return ev({ kind: "logger_back", at: hhmm(d.at, tz), lasted: lasted(d.since, d.at), inverter: d.inverter ?? undefined }, d.at);
     case "needs_relink": return plantEvent(p.name, p.id, { kind: "needs_relink" }, "");
-    case "sunsynk_down": return sunsynkDown(p.name, p.id, hhmm(d.since, tz), unsub, dayOf(d.since, tz));
-    case "sunsynk_back": return sunsynkBack(p.name, p.id, hhmm(d.at, tz), lasted(d.since, d.at), unsub, dayOf(d.at, tz));
+    case "sunsynk_down": return sunsynkDown(p.name, p.id, hhmm(d.since, tz), dayOf(d.since, tz));
+    case "sunsynk_back": return sunsynkBack(p.name, p.id, hhmm(d.at, tz), lasted(d.since, d.at), dayOf(d.at, tz));
     case "welcome": return welcome();
     case "history": { const h = await buildHistory(p); return h && historySynced(h); }
     case "report_week": case "report_month": case "report_year": {
       const rep = await buildReport(p, r.kind.slice(7) as Period, d.today);
       // The day-7 report of a Free account's first week (0114) says the week ends.
-      return rep && report({ ...rep, freeWeekEnds: d.freeWeekEnds === true, unsubscribeUrl: unsub });
+      return rep && report({ ...rep, freeWeekEnds: d.freeWeekEnds === true });
     }
     case "free_week_soon":
       return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", timeZone: tz }), p.name, d.days ?? 0, d.perMonth ?? 83);
@@ -303,13 +302,8 @@ const later = (row: Row): Done => ({ id: row.id, status: "queued", error: "run o
 const refused = (status: number) => status === 400 || status === 422;
 
 const payload = (o: Out) => {
-  const headers: Record<string, string> = {};
-  if (o.mail.unsubscribe) {
-    headers["List-Unsubscribe"] = `<${o.mail.unsubscribe}>`;
-    headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click";
-  }
-  return { from: o.row.kind === "account_deleted" ? FROM_ACCOUNT : FROM_NOTICE, to: [o.row.to_email],
-           subject: o.mail.subject, html: o.mail.html, text: o.mail.text, headers };
+  return { from: senderFor(o.row.kind), reply_to: REPLY_TO, to: [o.row.to_email],
+           subject: o.mail.subject, html: o.mail.html, text: o.mail.text };
 };
 
 async function post(url: string, body: unknown, key: string): Promise<{ status: number; error?: string }> {
@@ -429,8 +423,7 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
           done.push({ id: row.id, status: "queued", error: "waits for history", retry_s: 600, refund: true });
           continue;
         }
-        const unsub = row.switch ? `${UNSUB}?t=${dry ? "dry" : row.unsub_token}&k=${row.switch}` : "";
-        const mail = await build(row, unsub);
+        const mail = await build(row);
         if (!mail) {
           // History waits for the day sync (plant_energy) to land: try again hourly.
           // An empty report is final.
@@ -467,17 +460,17 @@ async function renderAll(plantId: number, today?: string) {
   const { data: pu } = await db.from("plant_users").select("plant_name").eq("plant_id", plantId).limit(1).maybeSingle();
   if (!pu) throw new Error(`no users on plant ${plantId}`);
   const p: Plant = { id: plantId, name: pu.plant_name || "your plant", tz: await rpc<string>("plant_tz", { p_plant: plantId }) };
-  const now = Math.floor(Date.now() / 1000), unsub = `${UNSUB}?t=sample&k=grid`;
+  const now = Math.floor(Date.now() / 1000);
   const out: Record<string, Email> = { welcome: welcome(), "account-deleted": accountDeleted("you@example.com") };
   const h = await buildHistory(p);
   if (h) out["history-synced"] = historySynced(h);
   today ??= local(p.tz).date;
   for (const period of ["week", "month", "year"] as Period[]) {
     const r = await buildReport(p, period, today);
-    if (r) out[`report-${period}`] = report({ ...r, unsubscribeUrl: unsub });
+    if (r) out[`report-${period}`] = report(r);
   }
-  out["sunsynk-down"] = sunsynkDown(p.name, p.id, hhmm(now - 1500, p.tz), unsub);
-  out["sunsynk-back"] = sunsynkBack(p.name, p.id, hhmm(now, p.tz), lasted(now - 1500, now), unsub);
+  out["sunsynk-down"] = sunsynkDown(p.name, p.id, hhmm(now - 1500, p.tz));
+  out["sunsynk-back"] = sunsynkBack(p.name, p.id, hhmm(now, p.tz), lasted(now - 1500, now));
   const ev: [string, PlantEvent][] = [
     ["grid-down", { kind: "grid_down", at: hhmm(now - 240, p.tz), chargePct: 62 }],
     ["grid-back", { kind: "grid_back", at: hhmm(now, p.tz), lasted: lasted(now - 5580, now) }],
@@ -490,7 +483,7 @@ async function renderAll(plantId: number, today?: string) {
     ["inverter-readings-back", { kind: "logger_back", at: hhmm(now, p.tz), lasted: lasted(now - 6420, now), inverter: "Inverter 2" }],
     ["reconnect", { kind: "needs_relink" }],
   ];
-  for (const [name, e] of ev) out[name] = plantEvent(p.name, p.id, e, e.kind === "needs_relink" ? "" : unsub);
+  for (const [name, e] of ev) out[name] = plantEvent(p.name, p.id, e);
   // The free week's two emails (0122), from this plant's own day count; steps are a sample.
   const { count: days } = await db.from("plant_energy").select("period", { count: "exact", head: true })
     .eq("plant_id", plantId).eq("bucket", "day").lt("period", today);

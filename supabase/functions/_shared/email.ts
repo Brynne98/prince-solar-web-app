@@ -3,8 +3,10 @@
 // Plain TypeScript with no Deno or Node APIs, so an Edge Function can import it and
 // scripts/email-preview.ts can run it under Node to preview and send test mail.
 //
-// Senders (SOLAR-84): account mail comes from noreply@, reports and plant events from
-// hello@ so a reply reaches the support inbox (SOLAR-114).
+// Senders (SOLAR-287): one address per kind of mail, so Gmail judges each kind on its own
+// history; see senderFor(). Replies go to hello@, the support inbox (SOLAR-114). No mail
+// carries a List-Unsubscribe header: alerts and reports are switched off in the app, and the
+// header made them look like a mailing list to Gmail.
 //
 // Account mail is sent by Supabase Auth, not by us: renderAuthTemplates() fills the
 // links with Supabase's Go placeholders ({{ .ConfirmationURL }}) and the output is
@@ -24,20 +26,28 @@ const PREFS = `${APP}/?tab=account&section=notifications`;
 // Reconnect (openSettings('connection')). ?section= needs SOLAR-156.
 const LOGINS = `${APP}/?tab=account&section=logins`;
 export const FROM_ACCOUNT = "Prince Solar Hub <noreply@princesolarhub.co.za>";
-export const FROM_NOTICE = "Prince Solar Hub <hello@princesolarhub.co.za>";
+export const FROM_ALERTS = "Prince Solar Hub <alerts@princesolarhub.co.za>";
+export const FROM_BILLING = "Prince Solar Hub <billing@princesolarhub.co.za>";
+export const FROM_REPORTS = "Prince Solar Hub <reports@princesolarhub.co.za>";
+export const FROM_HELLO = "Prince Solar Hub <hello@princesolarhub.co.za>";
+export const REPLY_TO = "hello@princesolarhub.co.za";
+// The sender for a mail_queue kind. Account mail Supabase Auth sends itself uses noreply@ too.
+export const senderFor = (kind: string) =>
+  kind === "account_deleted" ? FROM_ACCOUNT
+    : kind.startsWith("bill_") || kind === "free_week_soon" ? FROM_BILLING
+    : kind.startsWith("report_") ? FROM_REPORTS
+    : kind === "welcome" || kind === "history" || kind === "free_week_setup" ? FROM_HELLO
+    : FROM_ALERTS;
 // Supabase's link lifetime (Auth -> mailer OTP expiry): 24 hours since SOLAR-196.
 const LINK_LIFE = "This link works once and expires in 24 hours.";
 
-// unsubscribe: the one-click link for the List-Unsubscribe header the sender adds, so
-// mail apps show their own Unsubscribe next to the sender. It isn't in the body; the
-// body points to the notification settings instead.
 // An email address in body text. Gmail links any address it finds and paints it blue,
 // so give it a link of our own in the text colour.
 const addr = (email: string) => `<a href="mailto:${email}" style="color:#e7ecf2;text-decoration:none;font-weight:700">${email}</a>`;
 // The one help line every email ends with.
 const HELP = `Need help? Email <a href="mailto:hello@princesolarhub.co.za">hello@princesolarhub.co.za</a>.`;
 
-export type Email = { subject: string; html: string; text: string; unsubscribe?: string };
+export type Email = { subject: string; html: string; text: string };
 
 const C = {
   solar: "#3ddc84",
@@ -206,10 +216,9 @@ ${s.delta ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};colo
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
 <style>${STYLE}.pad{--pb-m:${Math.max(0, 20 - tail)}px}</style></head>
 <body style="margin:0;padding:0">
-<!-- The dark frame is only as wide as the email, not the whole mail window: a full-width
-     black (or, once Gmail's dark mode repaints it, white) box looked heavy. -->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:16px 8px">
-<table role="presentation" class="bg" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#0a0d12;border-radius:16px">
+<!-- The dark fills the whole mail window, with the lighter card in the middle (SOLAR-287). -->
+<table role="presentation" class="bg" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0d12"><tr><td align="center" style="padding:16px 8px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
 <tr><td style="padding:24px 16px 16px 20px"><a href="${APP}" style="text-decoration:none"><img src="${SITE}/icon-192.png" width="28" height="28" alt="" style="vertical-align:middle;border:0;border-radius:6px"> <span class="t" style="vertical-align:middle;font:700 17px/1 ${SANS};color:#e7ecf2">Prince Solar Hub</span></a></td></tr>
 <tr><td style="padding:0 12px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td class="card pad" style="background:#11161d;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:32px 32px ${Math.max(0, 32 - tail)}px">
 <h1 class="t" style="margin:0 0 ${b.sub ? 4 : 16}px;font:700 22px/1.25 ${SANS};letter-spacing:-.02em;color:#e7ecf2">${esc(b.title)}</h1>
@@ -241,7 +250,7 @@ function text(b: Body): string {
   return out.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
 }
 
-const make = (subject: string, b: Body, unsubscribe?: string): Email => ({ subject, html: html(subject, b), text: text(b), ...(unsubscribe ? { unsubscribe } : {}) });
+const make = (subject: string, b: Body): Email => ({ subject, html: html(subject, b), text: text(b) });
 
 
 // ---------------------------------------------------------------- account mail
@@ -376,7 +385,7 @@ export const historySynced = (h: History) => {
 };
 
 // SunSynk's own service is down: every plant is affected, not one inverter.
-export const sunsynkDown = (plant: string, plantId: number, since: string, unsubscribeUrl: string, day = "today") =>
+export const sunsynkDown = (plant: string, plantId: number, since: string, day = "today") =>
   make("SunSynk is not answering", {
     title: "SunSynk is not answering",
     parts: [
@@ -385,9 +394,9 @@ export const sunsynkDown = (plant: string, plantId: number, since: string, unsub
       { button: openPage("live", plantId) },
     ],
     footer: ALERT_FOOTER(plant),
-  }, unsubscribeUrl);
+  });
 
-export const sunsynkBack = (plant: string, plantId: number, at: string, lasted: string, unsubscribeUrl: string, day = "today") =>
+export const sunsynkBack = (plant: string, plantId: number, at: string, lasted: string, day = "today") =>
   make("SunSynk is back", {
     title: "SunSynk is back",
     parts: [
@@ -396,7 +405,7 @@ export const sunsynkBack = (plant: string, plantId: number, at: string, lasted: 
       { button: openPage("live", plantId) },
     ],
     footer: ALERT_FOOTER(plant),
-  }, unsubscribeUrl);
+  });
 
 // --------------------------------------------------------------------- reports
 
@@ -420,7 +429,6 @@ export type Report = {
   daily?: Bars; // solar kWh per day (per month for a year)
   freeWeekEnds?: boolean; // the week report sent at the end of a Free account's first week (SOLAR-208)
   partialFrom?: string; // first day with data, when after the period starts: "20 Oct" (SOLAR-273)
-  unsubscribeUrl: string;
 };
 
 const kwh = (n: number): [string, string] => (n >= 1000 ? [(n / 1000).toFixed(2), "MWh"] : [n.toFixed(n < 100 ? 1 : 0), "kWh"]);
@@ -464,7 +472,7 @@ export function report(r: Report): Email {
     sub: r.plant,
     parts,
     footer: SETTINGS_FOOTER(`You get this every ${r.period}. Don't want it? Turn it off in your notification settings.`),
-  }, r.unsubscribeUrl);
+  });
 }
 
 // ---------------------------------------------------------------- plant events
@@ -506,7 +514,7 @@ const PAGE: Record<Exclude<PlantEvent["kind"], "needs_relink">, keyof typeof PAG
 };
 const span = (d: string) => d.replace(/ h /, "h ").replace(/ min$/, "m");
 const ALERT_FOOTER = (plant: string) => SETTINGS_FOOTER(`Alert for ${esc(plant)}. Don't want these? Turn them off in your notification settings.`);
-export function plantEvent(plant: string, plantId: number, e: PlantEvent, unsubscribeUrl: string, day = "today"): Email {
+export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = "today"): Email {
   const P = esc(plant);
   const at = (time: string) => `${time} ${day}`;
   const [title, cards, note]: [string, Part | Card[], string?] = (() => {
@@ -551,7 +559,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, unsubs
         ], e.inverter ? `${esc(e.inverter)} is sending readings again.` : "Your inverters are sending readings again."];
       case "needs_relink":
         return ["Reconnect your SunSynk login", { callout: "Prince Solar Hub is no longer connected to your SunSynk account, so new readings aren't arriving." },
-          "This usually happens after your SunSynk password changes. Enter your SunSynk password in Account to reconnect."];
+          "This usually happens after your SunSynk password changes. Enter your SunSynk password in Billing to reconnect."];
     }
   })();
   const relink = e.kind === "needs_relink";
@@ -560,7 +568,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, unsubs
     parts: [Array.isArray(cards) ? { stats: cards, stack: true } : cards, ...(note ? [{ p: note }] : []), { button: relink ? { label: "Reconnect", href: LOGINS } : openPage(PAGE[e.kind as Exclude<PlantEvent["kind"], "needs_relink">], plantId) }],
     // Reconnect has no switch, so no "turn them off" line.
     footer: relink ? [HELP] : ALERT_FOOTER(plant),
-  }, unsubscribeUrl);
+  });
 }
 
 // --------------------------------------------------------------------- billing
