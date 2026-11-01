@@ -750,6 +750,7 @@
   .wiw-figs b .u { font-size: 15px; margin-left: 4px; opacity: 0.85; }
   .wiw-figs span:not(.u) { display: block; margin-top: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
   .solar-note { margin: 0 0 8px; font-size: 13.5px; color: var(--muted); max-width: 60ch; }
+  .solar-note:last-child { margin-bottom: 0; }   /* a note that ends its card adds no space under it (SOLAR-284) */
   /* Equipment (SOLAR-75): one headline, a coral-edged card per problem, then Simple (a tile
      each: one figure, one word) or Detailed (string bars, battery meter, inverter tiles,
      spec sheets). */
@@ -886,7 +887,7 @@
   .sec-intro { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }   /* title top left, a button top right */
   .sec-intro > div { min-width: 0; }
   .sec-intro > button { flex: none; white-space: nowrap; }
-  .sset { padding: 18px 22px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; min-width: 0; }
+  .sset { padding: 20px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; min-width: 0; }
   .sset-title { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
   .sset-note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
   .sset-count { margin-left: 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 500; color: var(--dim); }
@@ -941,6 +942,9 @@
   /* no rules between these rows (the tiles already box each answer); 20px apart, like Display's fields */
   .conn-row.sset-row { border-top: none; padding: 10px 0; }
   .sset-body > .sset-row:last-child { padding-bottom: 0; }
+  /* no margin at a card's top or bottom edge, so the space above and below its content is the padding alone (SOLAR-284) */
+  .sset-body > :first-child, .dl-field > :first-child { margin-top: 0; }
+  .sset-body > :last-child, .sset-body > :last-child > :last-child { margin-bottom: 0; }
   /* the fields are First steps' own (SOLAR-170): one field on the right, or the sum box under the name */
   .sset-one { flex-direction: column; align-items: flex-end; gap: 6px; }
   .sset-one .fs-in { width: 300px; }   /* one width for every field in Settings */
@@ -1019,8 +1023,8 @@
   .settings-page .sec { container-type: inline-size; }
   @container (max-width: 599px) { #settings-password:has(form), #settings-add-login { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
   /* the open Add login card keeps the padding of the cards around it, not the tighter login rows' (SOLAR-277) */
-  .settings-page .sset-cards > #settings-add-login { padding: 18px 22px 22px; }
-  @media (max-width: 900px) { .settings-page .sset-cards > #settings-add-login { padding: 16px 15px 20px; } }
+  .settings-page .sset-cards > #settings-add-login { padding: 20px 22px; }
+  @media (max-width: 900px) { .settings-page .sset-cards > #settings-add-login { padding: 18px 15px; } }
   /* Your system: each name on the left, its field fills the right (like change password);
      one column on a phone */
   #settings-system .conn-row.sset-row { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start;
@@ -1165,7 +1169,7 @@
   .sset-one > button { align-self: flex-end; }   /* a button keeps its own width when the fields go full width */
 
   @media (max-width: 900px) {
-    .sset { padding: 16px 15px 20px; border-radius: 14px; }
+    .sset { padding: 18px 15px; border-radius: 14px; }
     .sset .field-row { grid-template-columns: 1fr; }
     /* one button sits beside the text; a dead login's two (Reconnect + Remove) drop under it */
     .conn-row { flex-wrap: wrap; }
