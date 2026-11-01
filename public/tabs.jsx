@@ -2548,21 +2548,22 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   };
   // A plant up for deletion still collects until its date.
   const title = <>Plants{allPlants.length > 0 && <span className="sset-count">{allPlants.filter(p => !p.paused && ['on', 'going'].includes(state(p))).length} of {allPlants.length} collecting</span>}</>;
-  // Free and Home collect one plant. With it taken, Add login opens the plans instead of a
-  // form that can't add one (SOLAR-257). A stopped plant leaves room, as on the server (SOLAR-259).
-  const noRoom = !!billing && !billing.comped && billing.plan !== 'family' && allPlants.some(p => !p.paused);
+  // Free and Home collect one plant, Family 3 plus the extra bought. With that taken, Add login
+  // still opens the form: the server links the new plants stopped, and each one's switch offers
+  // the upgrade (SOLAR-272). A stopped plant leaves room, as on the server (SOLAR-259).
   const collecting = allPlants.filter(p => !p.paused).length;
-  // Family with its room taken: Add login fills only the room bought (SOLAR-264).
-  const familyFull = billing?.plan === 'family' && !billing.comped && collecting >= 3 + (billing.extraPlants || 0);
+  const planFull = !!billing && !billing.comped && collecting >= (billing.plan === 'family' ? 3 + (billing.extraPlants || 0) : 1);
   return (
     <SettingsSection id="connection" title={title} bare
-      action={!unread && mode !== 'add' && <button type="button" className="save-btn" onClick={() => { if (noRoom && onCollect) { window.track('add_login_plans_done', { plan: billing.plan }); onCollect(); } else setMode('add'); }}>Add login</button>}>
+      action={!unread && mode !== 'add' && <button type="button" className="save-btn" onClick={() => { if (planFull) window.track('add_login_full_done', { plan: billing.plan }); setMode('add'); }}>Add login</button>}>
       {!unread && mode === 'add' && (
-        <div className="sset conn-row conn-add-row"><div className="conn-text">
-          {familyFull && <p className="field-note add-cost">Your plan is full, so new plants are added stopped.</p>}
+        // Laid out like Change password: its name top left, the fields fill the rest (SOLAR-272).
+        <div className="sset conn-row conn-add-row" id="settings-add-login">
+          <div className="conn-text"><div className="conn-user">Add login</div>
+            {planFull && <div className="conn-meta">Your plan is full, so new plants are added stopped.</div>}</div>
           {/* Cancel re-reads too: a login with no plant yet is saved but not listed. */}
           <window.LinkForm compact hasPlant={allPlants.some(p => !p.paused)} onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
-        </div></div>
+        </div>
       )}
       {unread ? (
         <div className="sset conn-row">

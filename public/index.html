@@ -1007,9 +1007,10 @@
   /* Account actions: one button width */
   #settings-actions .conn-actions > button { min-width: 112px; }
   /* change password, open: its name top left, the fields fill the rest, no box of their own */
-  #settings-password:has(form) { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; align-items: start; }
-  #settings-password .link-form { margin: 0; padding: 0; border: none; background: none; }
-  @media (max-width: 599px) { #settings-password:has(form) { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+  #settings-password:has(form), #settings-add-login { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; align-items: start; }
+  #settings-password .link-form, #settings-add-login > .link-form, #settings-add-login > .conn-form { margin: 0; padding: 0; border: none; background: none; }
+  #settings-add-login .field-row { grid-template-columns: minmax(0, 1fr); }   /* stacked, as in Change password */
+  @media (max-width: 599px) { #settings-password:has(form), #settings-add-login { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
   /* Your system: each name on the left, its field fills the right (like change password);
      one column on a phone */
   #settings-system .conn-row.sset-row { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start;
