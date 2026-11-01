@@ -966,9 +966,9 @@ function PlansSheet() {
   }, []);
   if (!open) return null;
   return (
-    <div className="plans-sheet" onClick={e => { if (e.target === e.currentTarget) setOpen(false); }}>
-      <div className="plans-panel"><window.Paywall reason="history" onCancel={() => setOpen(false)} /></div>
-    </div>
+    <window.Dialog size="mid" label="Plans" onClose={() => setOpen(false)}>
+      <window.Paywall reason="history" onCancel={() => setOpen(false)} />
+    </window.Dialog>
   );
 }
 

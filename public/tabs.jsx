@@ -2198,6 +2198,15 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
   useEffect(() => { if (paid) setView(b.period); }, [paid, b?.period]);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  // Phones: one line per plan to pick, then one button for the picked plan (SOLAR-292).
+  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 599px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 599px)'), h = (e) => setNarrow(e.matches);
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, []);
+  const [sel, setSel] = useState(b?.plan || 'free');
+  useEffect(() => { if (b?.plan) setSel(b.plan); }, [b?.plan]);
   // Extra plants on Family, from the number paid for, or a drop booked (SOLAR-264).
   const held = b?.plan === 'family' ? b.extraPlants || 0 : 0;
   const shown = b?.plan === 'family' ? b.nextExtraPlants ?? held : 0;
@@ -2239,9 +2248,16 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
     if (needs(more)) ask(more);
     if (needs(more + 1)) ask(more + 1);
   }, [b, period, more]);
-  const back = <button type="button" className="back-link" onClick={onBack}><span aria-hidden="true">←</span> Billing</button>;
-  if (!b) return (
-    <div className="settings-page">
+  // It can't close while a change is saving, so the result is never lost from view.
+  const close = () => { if (!busy) onBack(); };
+  const pop = (body) => <window.Dialog size="wide" label="Pick your plan" onClose={close}>{body}</window.Dialog>;
+  const back = (
+    <button type="button" className="pop-x" aria-label="Close" disabled={busy} onClick={close}>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+    </button>
+  );
+  if (!b) return pop(
+    <div className="settings-page plan-pop">
       {back}
       <div className="page-head"><h1>Pick your plan</h1></div>
       <div className="plan-grid plan-cards" aria-hidden="true">{[0, 1, 2].map(i => <window.Skeleton key={i} h={260} r={14} />)}</div>
@@ -2288,13 +2304,29 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
     return <button type="button" className="ghost-btn" disabled={busy || cancelling}
                    onClick={() => (p === 'free' ? setCancelling(true) : run(() => bookPlan(b, p, null, reload, on)))}>Downgrade</button>;
   };
+  // Under the button on a phone: when the picked plan starts, if its own note doesn't say.
+  const when = (p) => (note(p).trim() || (p === b.plan || !sameView ? ''
+    : PLAN_RANK[p] < PLAN_RANK[b.plan] ? `Starts on ${billDay(b.nextDate)}` : 'Starts today'));
+  const extras = (
+    <div className="plan-more">
+      <div className="plan-more-row">
+        <span>Extra plants</span>
+        <span className="stepper">
+          <button type="button" aria-label="One plant fewer" disabled={more === 0} onClick={() => pick(more - 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
+          <span className="mono" aria-live="polite">{more}</span>
+          <button type="button" aria-label="One plant more" onClick={() => pick(more + 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10M7 2v10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
+        </span>
+      </div>
+      <div className="plan-note">{rand(prices.extra ?? 0)} {unit} for each plant after your 3rd.</div>
+    </div>
+  );
   const gives = {
     free: [null, ['1 plant', 'The last 24 hours', 'Alerts']],
     home: ['Free', ['Full history', 'Reports by email']],
     family: ['Home', ['Up to 3 plants']],
   };
-  return (
-    <div className="settings-page">
+  return pop(
+    <div className="settings-page plan-pop">
       {back}
       <div className="page-head">
         <h1>Pick your plan</h1>
@@ -2308,7 +2340,23 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
           ))}
         </div>
         {!sameView && <p className="field-note">{b.nextPeriod === view ? `Your plan changes to ${view} on ${billDay(b.nextDate)}.` : `A switch to ${view} starts on your billing date, ${billDay(b.nextDate)}.`}</p>}
-        <div className="plan-grid plan-cards">
+        {narrow ? <>
+          <div className="plan-lines" role="group" aria-label="Plans">
+            {['free', 'home', 'family'].map(p => (
+              <button type="button" key={p} aria-pressed={sel === p} onClick={() => setSel(p)}
+                      className={'plan-line' + (p === b.plan ? ' plan-mine' : '') + (sel === p ? ' on' : '')}>
+                <span className="plan-dot" aria-hidden="true" />
+                <span className="plan-line-txt"><b>{PLAN_NAME[p]}{p === b.plan && <em>Your plan</em>}</b><small>{PLAN_TAG[p]}</small></span>
+                <span className="plan-line-price mono">{rand(price(p) ?? 0)}</span>
+              </button>
+            ))}
+          </div>
+          {sel === 'family' && extras}
+          <div className="plan-go">
+            {when(sel) && <div className="plan-note">{when(sel)}</div>}
+            {action(sel)}
+          </div>
+        </> : <div className="plan-grid plan-cards">
           {['free', 'home', 'family'].map(p => (
             <div key={p} className={'pw-plan' + (p === b.plan ? ' plan-mine' : '') + (p === 'free' ? ' plan-free' : '')}>
               {p === b.plan && <span className="plan-mine-tag">Your plan</span>}
@@ -2323,23 +2371,11 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
                 {gives[p][1].map(g => <li key={g}>{g}</li>)}
               </ul>
               {/* right under Family's list, not on a row of its own, so the gap above it is the card's own */}
-              {p === 'family' && (
-                <div className="plan-more">
-                  <div className="plan-more-row">
-                    <span>Extra plants</span>
-                    <span className="stepper">
-                      <button type="button" aria-label="One plant fewer" disabled={more === 0} onClick={() => pick(more - 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
-                      <span className="mono" aria-live="polite">{more}</span>
-                      <button type="button" aria-label="One plant more" onClick={() => pick(more + 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10M7 2v10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
-                    </span>
-                  </div>
-                  <div className="plan-note">{rand(prices.extra ?? 0)} {unit} for each plant after your 3rd.</div>
-                </div>
-              )}
+              {p === 'family' && extras}
               </div>
             </div>
           ))}
-        </div>
+        </div>}
         {cancelling && (
           <ConfirmCard modal title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
             busy={busy} onConfirm={() => run(async () => { await bookPlan(b, 'free', null, reload, on); setCancelling(false); })} onCancel={() => setCancelling(false)} />
@@ -3047,11 +3083,17 @@ function DeleteAccountRow({ email, billing, onBilling }) {
       </div>
       <div className="conn-actions"><button type="button" className="danger-btn" onClick={() => setConfirming(c => !c)} disabled={busy || (confirming && !blocked)}>{busy ? 'Deleting…' : 'Delete'}</button></div>
       {/* Tapping Delete on a blocked account shows why, in place of the confirm (SOLAR-274) */}
+      {/* a plan to cancel or a payment to settle first: said in a pop-up when Delete is pressed (SOLAR-292) */}
       {blocked && confirming && (
-        <div className="set-warn">
-          <span>{owed ? <>Pay the failed payment before you delete your account.</> : <>Cancel your <b>{PLAN_NAME[billing.plan]} plan</b> before you delete your account.</>}</span>
-          <button type="button" className="text-link" onClick={onBilling}>Go to Billing</button>
-        </div>
+        <window.Dialog label={owed ? 'Pay the failed payment first' : 'Cancel your plan first'} onClose={() => setConfirming(false)}>
+          <div className="confirm-title">{owed ? 'Pay the failed payment first' : 'Cancel your plan first'}</div>
+          <div className="confirm-text">{owed ? 'Pay it in Billing, then you can delete your account.'
+            : <>Your <b>{PLAN_NAME[billing.plan]}</b> plan is still running. Cancel it in Billing, then you can delete your account.</>}</div>
+          <div className="conn-form-actions">
+            <button type="button" className="ghost-btn" onClick={() => setConfirming(false)}>Close</button>
+            <button type="button" className="save-btn" onClick={onBilling}>Go to Billing</button>
+          </div>
+        </window.Dialog>
       )}
       {!blocked && confirming && (
         <ConfirmCard modal title={<>Delete <b>{email || 'this account'}</b>?</>} text="Your plants’ history goes too, unless another account shares them. It cannot be undone."
@@ -3249,10 +3291,11 @@ function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved
           ))}
         </nav>
         <div className="set-main">
-          {page !== 'plans' && <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><span aria-hidden="true">←</span> Settings</button>}
+          <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><span aria-hidden="true">←</span> Settings</button>
           {shown === 'account' && <AccountPage user={user} billing={billing} onBilling={() => onPage('billing')} />}
-          {page === 'billing' && <BillingPage billing={billing} reload={reloadBilling} links={links} onPage={onPage} freeWeekEndsAt={me?.freeWeekEndsAt} onSaved={onPlantConfigSaved}
+          {(page === 'billing' || page === 'plans') && <BillingPage billing={billing} reload={reloadBilling} links={links} onPage={onPage} freeWeekEndsAt={me?.freeWeekEndsAt} onSaved={onPlantConfigSaved}
                                               onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}
+          {/* Adjust plan opens over Billing, not as a page of its own (SOLAR-292) */}
           {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadBilling} onBack={() => onPage('billing')} forPlant={forPlant}
                                                on={plants.filter(p => !p.paused && !p.remove_on).length} />}
           {page === 'settings' && (plantSlot || (

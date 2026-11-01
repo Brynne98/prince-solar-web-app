@@ -136,8 +136,9 @@ const PAID_EVENT = 'ps.paidEvent';
 // A question over the page (SOLAR-286): the browser's own modal dialog dims the page, keeps
 // focus inside and closes on Escape. A click on the dimmed page outside it closes it too,
 // unless keep (a form: a stray tap must not throw away what was typed). Closing hands focus
-// back to what had it, e.g. the plant's switch.
-function Dialog({ label, onClose, keep = false, children }) {
+// back to what had it, e.g. the plant's switch. size: 'wide' for the plan cards, 'mid' for
+// the lock's plans.
+function Dialog({ label, onClose, keep = false, size = null, children }) {
   const ref = React.useRef(null);
   const [back] = React.useState(() => document.activeElement); // read at first render, before a child takes focus
   React.useEffect(() => {
@@ -146,8 +147,8 @@ function Dialog({ label, onClose, keep = false, children }) {
     return () => { if (d.open) d.close(); if (back && back.isConnected) back.focus({ preventScroll: true }); };
   }, []);
   return (
-    <dialog ref={ref} className="pop-dlg" aria-label={label}
-            onCancel={(e) => { e.preventDefault(); onClose(); }}
+    <dialog ref={ref} className={'pop-dlg' + (size ? ' pop-' + size : '')} aria-label={label}
+            onCancel={(e) => { e.preventDefault(); if (e.target === ref.current) onClose(); }}   // only its own Escape, not one from a pop-up opened over it
             onClick={(e) => { if (!keep && e.target === ref.current) onClose(); }}>
       <div className="pop-body">{children}</div>
     </dialog>
