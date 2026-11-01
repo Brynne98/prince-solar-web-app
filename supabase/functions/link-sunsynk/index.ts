@@ -41,7 +41,7 @@ serve("link-sunsynk", async (req) => {
     return json({ error: "SunSynk rejected those credentials" }, 401, cors);
   }
 
-  // At most 5 SunSynk logins per user per hour (0107), so one user can't get the
+  // At most 5 failed SunSynk logins per user per hour (0107, 0135), so one user can't get the
   // function's address blocked by SunSynk. Refuse if the count can't be read.
   const { data: allowed, error: limitErr } = await db.rpc("link_attempt", { p_user: userId });
   if (limitErr) {
@@ -53,6 +53,9 @@ serve("link-sunsynk", async (req) => {
   try {
     const { accountId, plants, paused, reason } = await linkAccount(userId, username, password);
     password = ""; // done with it
+    // A good link gives its try back, so only failed tries count (0135).
+    const { error: refundErr } = await db.rpc("link_succeeded", { p_user: userId });
+    if (refundErr) console.error(`link-sunsynk refund failed for user ${userId}: ${refundErr.message}`);
     if (!plants.length) {
       // Linked, but SunSynk returned no plants: the login works but sees nothing —
       // typical when the installer owns the plant and hasn't shared it yet.
