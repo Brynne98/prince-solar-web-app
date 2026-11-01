@@ -496,7 +496,7 @@ begin
     public.billing_step(t, 'monthly', extract(day from t)::int, 1));
   perform pg_temp.eq('card saved', (select card->>'authorization_code' from private.billing where user_id = s), 'AUTH_t1');
   perform pg_temp.eq('one upgrade email', (select count(*)::int from public.email_queue where user_id = s and kind = 'bill_upgraded'), 1);
-  perform pg_temp.eq('card label', (select data->>'card' from public.email_queue where user_id = s and kind = 'bill_upgraded'), 'Visa ending 4081');
+  perform pg_temp.eq('card label', (select data->>'card' from public.email_queue where user_id = s and kind = 'bill_upgraded'), 'Visa •••• 4081');
   perform pg_temp.eq('Home still covers one plant', (select count(*)::int from public.plant_users where user_id = s and paused), 1);
 
   -- upgrade: Home to Family resumes the paused plant, charges the saved card

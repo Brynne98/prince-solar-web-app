@@ -11,6 +11,9 @@
 alter table private.billing_charges add column if not exists plants bigint[];
 
 drop function if exists public.billing_charge_open(uuid, text, text, int);
+-- The 4th argument was renamed p_extra -> p_added after this ran in production, and a
+-- rename needs a drop: without it a fresh setup stops here (SOLAR-301).
+drop function if exists public.billing_charge_open(uuid, text, text, int, bigint[]);
 create or replace function public.billing_charge_open(
   p_user uuid, p_plan text, p_period text default null, p_added int default 0, p_plants bigint[] default null)
 returns jsonb language plpgsql security definer set search_path = public, private, pg_temp as $$
