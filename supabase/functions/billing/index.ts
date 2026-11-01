@@ -24,7 +24,7 @@ import { serve } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { payClosed } from "./gate.ts";
+import { payClosed } from "../_shared/gate.ts";
 
 const SECRET = Deno.env.get("PAYSTACK_SECRET_KEY") ?? "";
 // Local tests point this at a stand-in server.

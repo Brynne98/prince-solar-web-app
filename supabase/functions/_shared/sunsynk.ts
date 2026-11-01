@@ -25,6 +25,11 @@ import { createHash, createHmac } from "node:crypto";
 import { type InverterInfo, num, pick } from "./extract.ts";
 
 const API_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? "https://openapi.sunsynk.net";
+// Fake logins (name@mock, SOLAR-270) go to the mock: locally the mock server is API_BASE
+// already; in production the mock-sunsynk function, which only testers can link
+// (link-sunsynk). Its tokens are "at:<login>" and "rt:<login>", unlike any SunSynk token.
+const MOCK_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? `${Deno.env.get("SUPABASE_URL")}/functions/v1/mock-sunsynk`;
+const baseFor = (loginOrToken: string) => (loginOrToken.endsWith("@mock") ? MOCK_BASE : API_BASE);
 const APP_KEY = Deno.env.get("SUNSYNK_APP_KEY") ?? "";
 const APP_SECRET = Deno.env.get("SUNSYNK_APP_SECRET") ?? "";
 const CLIENT_ID = "openapi";
@@ -126,7 +131,7 @@ function signedHeaders(method: string, pathWithQuery: string, body?: string, bea
 
 async function postToken(payload: Record<string, string>): Promise<any> {
   const body = JSON.stringify(payload);
-  const res = await fetch(`${API_BASE}/oauth/token`, {
+  const res = await fetch(`${baseFor(payload.username ?? payload.refresh_token ?? "")}/oauth/token`, {
     method: "POST",
     headers: signedHeaders("POST", "/oauth/token", body),
     body,
@@ -220,7 +225,7 @@ const countCall = (acc: Account) => apiCallCounts.set(acc.id, (apiCallCounts.get
 export async function apiGet(pathname: string, acc: Account): Promise<any> {
   const doFetch = async (tok: string) => {
     countCall(acc);
-    return fetch(`${API_BASE}${pathname}`, { headers: signedHeaders("GET", pathname, undefined, tok) });
+    return fetch(`${baseFor(tok)}${pathname}`, { headers: signedHeaders("GET", pathname, undefined, tok) });
   };
 
   let res = await doFetch(await accessTokenFor(acc));

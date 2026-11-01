@@ -11,6 +11,7 @@
 import { db, linkAccount } from "../_shared/sunsynk.ts";
 import { serve } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
+import { mockClosed } from "../_shared/gate.ts";
 
 serve("link-sunsynk", async (req) => {
   const cors = corsHeaders(req.headers.get("origin"));
@@ -35,6 +36,10 @@ serve("link-sunsynk", async (req) => {
     return json({ error: "body must be JSON" }, 400, cors);
   }
   if (!username || !password) return json({ error: "username and password are required" }, 400, cors);
+  // A fake login (SOLAR-270) answers as SunSynk would to a wrong one, except for testers.
+  if (mockClosed(username, Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("PAYSTACK_TEST_USERS") ?? "", userId)) {
+    return json({ error: "SunSynk rejected those credentials" }, 401, cors);
+  }
 
   // At most 5 SunSynk logins per user per hour (0107), so one user can't get the
   // function's address blocked by SunSynk. Refuse if the count can't be read.

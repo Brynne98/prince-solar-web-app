@@ -198,11 +198,13 @@ Until the Paystack account is verified, production runs on the test key: only th
 accounts in `PAYSTACK_TEST_USERS` can pay (Paystack test cards), everyone else gets
 "Paid plans open soon" (SOLAR-267). When the live key arrives, in this order:
 
-1. Remove the tester's test billing (their plants and readings stay):
+1. Remove the tester's test billing and every fake SunSynk login (`name@mock`, SOLAR-270)
+   with its fake plants (the tester's real plants and readings stay):
    `supabase db query --linked -f scripts/sql/go-live-tester-cleanup.sql`
 2. `supabase secrets set PAYSTACK_SECRET_KEY=<live key>` (paste it yourself).
 3. `supabase secrets unset PAYSTACK_TEST_USERS`
-4. Paystack dashboard, live mode → Settings → API Keys & Webhooks: webhook URL
+4. `supabase functions delete mock-sunsynk` (fake SunSynk, SOLAR-270).
+5. Paystack dashboard, live mode → Settings → API Keys & Webhooks: webhook URL
    `https://pmakzojwhouamawgszrc.supabase.co/functions/v1/billing/webhook`. Test and live
    modes keep separate URLs; without it refunds and disputes never arrive.
 
