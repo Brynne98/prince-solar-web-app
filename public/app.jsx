@@ -904,6 +904,18 @@ function Setup({ links }) {
   const connectBtn = (cls) => (
     <button type="button" className={'save-btn setup-btn ' + cls} onClick={connect} aria-label="Add plant"><Icon id="plug" /><span>Add plant</span></button>
   );
+  // App opens on the page the address names, and Setup's page never reaches the address. A
+  // plant just added opens on Live, as in App (SOLAR-174); one switched back on stays put.
+  const linked = (r) => {
+    const paused = new Set((r?.paused || []).map(Number));
+    const added = (r?.plants || []).map(p => Number(p.id)).find(id => !paused.has(id));
+    if (added) {
+      const url = new URL(location.href);
+      url.searchParams.set('tab', 'live'); url.searchParams.set('plant', added);
+      history.replaceState(history.state, '', url);
+    }
+    return links.refresh();
+  };
   const outline = tab === 'settings' ? <SettingsSkeleton /> : <window.TabSkeleton tab={tab} />;
   const stage = (
           <div className="setup-stage">
@@ -911,7 +923,7 @@ function Setup({ links }) {
             <div className="setup-empty">
               {connecting ? (
                 <div className="setup-form">
-                  <window.LinkForm relink={relink} onLinked={links.refresh} onCancel={() => setConnecting(false)}
+                  <window.LinkForm relink={relink} onLinked={linked} onCancel={() => setConnecting(false)}
                                    initialUsername={relink ? dead[0].sunsynk_username : undefined} />
                 </div>
               ) : (
@@ -930,7 +942,7 @@ function Setup({ links }) {
   return (
     <Frame tabs={TABS} tab={tab} onTab={go} account={account}
       head={<><PlantMenu fallback="No plant yet" />{!connecting && connectBtn('setup-head-btn')}</>}>
-      {isSettings(tab) ? <window.SettingsArea page={tab} onPage={go} links={links} plantSlot={stage} /> : stage}
+      {isSettings(tab) ? <window.SettingsArea page={tab} onPage={go} links={links} plantSlot={stage} onPlantConfigSaved={linked} /> : stage}
     </Frame>
   );
 }
