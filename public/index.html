@@ -995,17 +995,18 @@
   .set-method { color: var(--dim); }
   /* Billing's Plants: each login, its plants listed under it */
   /* Billing's Plants (SOLAR-251): one card; each login a grey caption over its plants, a switch each */
-  .login-grp + .login-grp { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 10px; }
+  .login-grp + .login-grp { margin-top: 20px; }   /* space, not a line, between logins; plants indent under theirs (SOLAR-286) */
   .login-grp.leaving { overflow: hidden; animation: conn-out .24s ease-in forwards; }
   .login-line { display: flex; align-items: center; gap: 8px; min-height: 34px; }
   .login-email { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
   .login-email .warn { color: var(--warn); white-space: nowrap; }
-  .login-plant { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-height: 44px; }
+  .login-plant { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-height: 44px; padding-left: 16px; }
   /* the name holds the row's 44px, so the row doesn't shrink up when a question opens under it */
   .login-plant .plant-nm { flex: 1; min-width: 0; font-size: 14.5px; min-height: 44px; display: flex; align-items: center; }
+  /* 36px rows on desktop so plants under one login sit as close as a login to its plant; phones keep 44px to tap (SOLAR-286) */
+  @media (min-width: 901px) { .login-plant, .login-plant .plant-nm { min-height: 36px; } }
   .login-plant.off .plant-nm { color: var(--dim); }
   .login-plant .plant-state { font-size: 13px; white-space: nowrap; }
-  .login-plant > .confirm-card, .login-grp > .conn-form { flex-basis: 100%; margin: 4px 0 10px; }
   .switch:disabled { opacity: .5; }
   .login-more { position: relative; flex: none; }
   .more-btn { width: 34px; height: 34px; display: grid; place-items: center; background: none; border: none; border-radius: 9px; color: var(--dim); }
@@ -1015,17 +1016,6 @@
   .menu button.menu-danger { color: var(--load); }
   /* Account actions: one button width */
   #settings-actions .conn-actions > button { min-width: 112px; }
-  /* change password, open: its name top left, the fields fill the rest, no box of their own */
-  #settings-password:has(form), #settings-add-login { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; align-items: start; }
-  #settings-password .link-form, #settings-add-login > .link-form, #settings-add-login > .conn-form { margin: 0; padding: 0; border: none; background: none; }
-  #settings-add-login .field-row { grid-template-columns: minmax(0, 1fr); }   /* stacked, as in Change password */
-  /* one column when the section is narrow, not only the screen: beside the Settings menu at
-     600-900px the fields were squeezed to 160px (SOLAR-277) */
-  .settings-page .sec { container-type: inline-size; }
-  @container (max-width: 599px) { #settings-password:has(form), #settings-add-login { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
-  /* the open Add login card keeps the padding of the cards around it, not the tighter login rows' (SOLAR-277) */
-  .settings-page .sset-cards > #settings-add-login { padding: 20px 22px; }
-  @media (max-width: 900px) { .settings-page .sset-cards > #settings-add-login { padding: 18px 15px; } }
   /* Your system: each name on the left, its field fills the right (like change password);
      one column on a phone */
   #settings-system .conn-row.sset-row { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start;
@@ -1111,7 +1101,6 @@
   .sset-body > .conn-row:last-child { padding-bottom: 0; }
   /* an action row is one line and a button: the line sits on the button's centre */
   #settings-actions .conn-row:not(:has(form)) { align-items: center; }
-  .conn-add-row { padding-bottom: 0; }   /* the open add form ends at the card's own padding */
   .conn-add .save-btn { display: inline-flex; align-items: center; gap: 6px; }
   .conn-meta { font-size: 13px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
   .conn-status::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--grid); }
@@ -1135,6 +1124,21 @@
   .confirm-title { font-size: 15px; line-height: 1.4; color: var(--text); }
   .confirm-title b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 700; }
   .confirm-text { margin-top: 4px; font-size: 14px; line-height: 1.5; color: var(--text); }
+  /* a question over the page (Dialog, SOLAR-286); a sheet from the bottom on phones */
+  .pop-dlg { padding: 0; width: min(420px, calc(100vw - 32px)); border: 1px solid var(--line-2); border-radius: 16px; background: var(--panel-2); color: var(--text); box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+  .pop-dlg::backdrop { background: rgba(4,6,9,0.62); }
+  .pop-body { padding: 20px; }
+  .pop-body .confirm-title { font-size: 16px; font-weight: 600; }
+  .pop-body .confirm-text { margin-top: 8px; font-size: 13.5px; color: var(--muted); }
+  .pop-body .conn-form-actions { margin-top: 18px; }
+  /* a form inside: no box of its own, fields stacked */
+  .pop-body .conn-form { margin: 14px 0 0; padding: 0; border: none; background: none; animation: none; }
+  .pop-body .field-row { grid-template-columns: minmax(0, 1fr); }
+  .pop-dlg { max-height: calc(100dvh - 24px); overflow: auto; }
+  @media (max-width: 900px) {
+    .pop-dlg { margin: auto auto 12px; width: calc(100vw - 24px); max-width: none; border-radius: 18px; }
+    .pop-body .conn-form-actions { flex-direction: column-reverse; align-items: stretch; }
+  }
 
   .confirm-card .conn-form-actions { margin-top: 12px; }
 
@@ -1718,7 +1722,6 @@
   .plans-panel { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 22px 24px; border-radius: 16px;
     background: var(--panel); border: 1px solid var(--line-2); box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
   /* the review before a saved card is charged (SOLAR-276) */
-  .plans-panel.pay-review { width: min(380px, 100%); }
   .pay-review-t { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
   .pay-review-ln { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 13.5px; color: var(--muted); }
   .pay-review-ln b { font-family: var(--mono); font-weight: 600; color: var(--text); text-align: right; }
@@ -1737,7 +1740,6 @@
     .hl-shape { height: 80px; gap: 4px; }
     .plans-sheet { place-items: end stretch; padding: 0; }
     .plans-panel { width: 100%; border-radius: 16px 16px 0 0; padding: 18px 18px calc(20px + env(safe-area-inset-bottom, 0px)); max-height: 90vh; }
-    .plans-panel.pay-review { width: 100%; }
     .pay-review-acts { flex-direction: column-reverse; }
     .pay-review-acts button { padding: 12px 16px; font-size: 14px; }
   }

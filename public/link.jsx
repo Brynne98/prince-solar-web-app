@@ -133,25 +133,44 @@ const REFUND_NOTE = 'Your plan changed while you paid, so nothing changed. The p
 let paying = false;
 const PAID_EVENT = 'ps.paidEvent';
 
+// A question over the page (SOLAR-286): the browser's own modal dialog dims the page, keeps
+// focus inside and closes on Escape. A click on the dimmed page outside it closes it too,
+// unless keep (a form: a stray tap must not throw away what was typed). Closing hands focus
+// back to what had it, e.g. the plant's switch.
+function Dialog({ label, onClose, keep = false, children }) {
+  const ref = React.useRef(null);
+  const [back] = React.useState(() => document.activeElement); // read at first render, before a child takes focus
+  React.useEffect(() => {
+    const d = ref.current;
+    d.showModal();
+    return () => { if (d.open) d.close(); if (back && back.isConnected) back.focus({ preventScroll: true }); };
+  }, []);
+  return (
+    <dialog ref={ref} className="pop-dlg" aria-label={label}
+            onCancel={(e) => { e.preventDefault(); onClose(); }}
+            onClick={(e) => { if (!keep && e.target === ref.current) onClose(); }}>
+      <div className="pop-body">{children}</div>
+    </dialog>
+  );
+}
+window.Dialog = Dialog;
+
 // The saved card is charged without Paystack's page, so the amount, the next bill and the
 // card are shown first (SOLAR-276). Centred on a desktop, from the bottom on a phone.
 function PayReview({ title, due, then, card, onDone }) {
   const cancel = React.useRef(null);
   React.useEffect(() => { cancel.current?.focus(); }, []);
   return (
-    <div className="plans-sheet" onClick={e => { if (e.target === e.currentTarget) onDone(false); }}
-         onKeyDown={e => { if (e.key === 'Escape') onDone(false); }}>
-      <div className="plans-panel pay-review" role="alertdialog" aria-labelledby="pay-review-t">
-        <h2 id="pay-review-t" className="pay-review-t">{title}</h2>
-        <div className="pay-review-ln due"><span>Due today</span><b>{rand(due)}</b></div>
-        <div className="pay-review-ln"><span>{then[0]}</span><b>{then[1]}</b></div>
-        <div className="pay-review-ln"><span>Card</span><b>{card}</b></div>
-        <div className="pay-review-acts">
-          <button type="button" className="ghost-btn" ref={cancel} onClick={() => onDone(false)}>Cancel</button>
-          <button type="button" className="save-btn" onClick={() => onDone(true)}>Pay {rand(due)}</button>
-        </div>
+    <Dialog label={title} onClose={() => onDone(false)}>
+      <h2 id="pay-review-t" className="pay-review-t">{title}</h2>
+      <div className="pay-review-ln due"><span>Due today</span><b>{rand(due)}</b></div>
+      <div className="pay-review-ln"><span>{then[0]}</span><b>{then[1]}</b></div>
+      <div className="pay-review-ln"><span>Card</span><b>{card}</b></div>
+      <div className="pay-review-acts">
+        <button type="button" className="ghost-btn" ref={cancel} onClick={() => onDone(false)}>Cancel</button>
+        <button type="button" className="save-btn" onClick={() => onDone(true)}>Pay {rand(due)}</button>
       </div>
-    </div>
+    </Dialog>
   );
 }
 // true: pay. Nothing to review (no saved card: Paystack's page shows the price; nothing due;
@@ -375,7 +394,7 @@ function LinkPassword({ id = 'ss-pass', autoComplete = 'off', value, onChange, i
 // Connect card that opens in place on a page with no inverter yet (Setup), with its title.
 // Either way: one line on which login, the two fields, a note, then Cancel and the green
 // button at the right.
-function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPlant }) {
+function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUsername, hasPlant }) {
   const { useState, useEffect, useRef } = React;
   // The plan's answer: a paywall reason.
   const [paywall, setPaywall] = useState(null);
@@ -452,7 +471,7 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
   const invalid = (id) => window.invalidProps(id, bad[id]);
   const green = noPlants ? (busy ? 'Checking…' : 'Retry now')
     : busy ? (finding ? 'Finding your plant…' : 'Checking your login…')
-    : relink ? 'Reconnect' : compact ? 'Add login' : 'Connect';
+    : relink ? (changing ? 'Save password' : 'Reconnect') : compact ? 'Add login' : 'Connect';
 
   if (paywall) {
     const close = () => { setPaywall(null); setPassword(''); onCancel && onCancel(); };
@@ -467,9 +486,10 @@ function LinkForm({ relink, onLinked, compact, onCancel, initialUsername, hasPla
         // send the owner to an installer or SunSynk.
         <p className="sset-note"><b>{username.trim()}</b> {NO_PLANT_TEXT}</p>
       ) : (<>
-        <p className="sset-note">{relink
+        {/* changing: a new SunSynk password for a login that still works, so nothing stopped */}
+        {!changing && <p className="sset-note">{relink
           ? 'SunSynk stopped accepting your login. Your history is safe.'
-          : 'Use the login from the SunSynk Connect app.'}</p>
+          : 'Use the login from the SunSynk Connect app.'}</p>}
         {/* In Account the two fields share one line, as they did before (SOLAR-97); a phone
             stacks them. On the Connect card they stack. */}
         <div className={compact ? 'field-row' : undefined}>

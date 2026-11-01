@@ -1971,18 +1971,23 @@ function TabSkeleton({ tab }) {
 // preventScroll: autoFocus made the browser scroll Cancel into view, so the page jumped (SOLAR-258).
 const focusNoScroll = (el) => el && el.focus({ preventScroll: true });
 // busy: the change is on its way; the card stays, buttons off, until it lands (SOLAR-281).
-function ConfirmCard({ title, text, action, onConfirm, onCancel, cancelLabel = 'Cancel', busy = false }) {
+// modal: over the page in a Dialog rather than in place under its row.
+function ConfirmCard({ title, text, action, onConfirm, onCancel, cancelLabel = 'Cancel', busy = false, modal = false }) {
   const cancel = React.useRef(null);
   React.useEffect(() => focusNoScroll(cancel.current), []);
+  const body = <>
+    {title && <div className="confirm-title">{title}</div>}
+    <div className="confirm-text">{text}</div>
+    <div className="conn-form-actions">
+      <button type="button" className="ghost-btn" onClick={onCancel} ref={cancel} disabled={busy}>{cancelLabel}</button>
+      <button type="button" className="danger-btn" onClick={onConfirm} disabled={busy} aria-busy={busy}>{action}</button>
+    </div>
+  </>;
+  if (modal) return <window.Dialog label={action} onClose={() => { if (!busy) onCancel(); }}>{body}</window.Dialog>;
   return (
     <div className="conn-form confirm-card" role="alertdialog" aria-label={action}
          onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}>
-      {title && <div className="confirm-title">{title}</div>}
-      <div className="confirm-text">{text}</div>
-      <div className="conn-form-actions">
-        <button type="button" className="ghost-btn" onClick={onCancel} ref={cancel} disabled={busy}>{cancelLabel}</button>
-        <button type="button" className="danger-btn" onClick={onConfirm} disabled={busy} aria-busy={busy}>{action}</button>
-      </div>
+      {body}
     </div>
   );
 }
@@ -2170,7 +2175,7 @@ function CancelSection({ billing: b, reload }) {
         </div>
       </div>
       {cancelling && (
-        <ConfirmCard title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
+        <ConfirmCard modal title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
           busy={busy} onConfirm={async () => { setBusy(true); await bookPlan(b, 'free', null, reload); setBusy(false); setCancelling(false); }}
           onCancel={() => setCancelling(false)} />
       )}
@@ -2336,7 +2341,7 @@ function AdjustPlanPage({ billing, reload, onBack, on, forPlant = null }) {
           ))}
         </div>
         {cancelling && (
-          <ConfirmCard title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
+          <ConfirmCard modal title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
             busy={busy} onConfirm={() => run(async () => { await bookPlan(b, 'free', null, reload, on); setCancelling(false); })} onCancel={() => setCancelling(false)} />
         )}
       </>}
@@ -2573,7 +2578,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     const swap = s === 'going' && p.paused && (!billing || billing.plan === 'free' || p.free_removal);
     const sw = (
       <button type="button" className={'switch' + (on ? ' on' : '')} role="switch" aria-checked={on} aria-label={'Collect ' + name}
-              disabled={b} aria-busy={b} onClick={() => on ? setStopping(stopping === p.plant_id ? null : p.plant_id) : start(p)}><span className="knob" /></button>
+              disabled={b} aria-busy={b} onClick={() => on ? setStopping(p.plant_id) : start(p)}><span className="knob" /></button>
     );
     return (
       <div key={p.plant_id} className={'login-plant' + (on ? '' : ' off')}>
@@ -2583,7 +2588,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
           {swap ? sw : <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
         </> : sw}
         {stopping === p.plant_id && (
-          <ConfirmCard
+          <ConfirmCard modal
             title={<>Stop collecting <b>{name}</b>?</>}
             text="All its history is deleted, unless another account shares it. Turn it back on later and only the last 60 days come back from SunSynk."
             action="Stop and delete" onConfirm={() => stop(p)} onCancel={() => setStopping(null)} />
@@ -2591,14 +2596,14 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         {/* No room: the plans live on their own page, not in this list (SOLAR-264). On Family
             the plans page buys extra plants, R49 a plant; Free and Home upgrade there. */}
         {full === p.plant_id && (
-          <div className="conn-form confirm-card" role="alertdialog" aria-label="Your plan is full">
+          <window.Dialog label="Your plan is full" onClose={() => setFull(null)}>
             <div className="confirm-title">Your plan is full</div>
             <div className="confirm-text">{billing?.plan === 'family' ? 'Turn another plant off first, or add this one to your plan.' : 'Turn another plant off first, or upgrade.'}</div>
             <div className="conn-form-actions">
               <button type="button" className="ghost-btn" onClick={() => setFull(null)} ref={focusNoScroll}>Cancel</button>
               {onCollect && <button type="button" className="save-btn" onClick={() => { setFull(null); onCollect(p.plant_id); }}>Upgrade</button>}
             </div>
-          </div>
+          </window.Dialog>
         )}
       </div>
     );
@@ -2616,13 +2621,12 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     <SettingsSection id="connection" title={title} bare
       action={!unread && mode !== 'add' && <button type="button" className="save-btn" onClick={() => { if (planFull) window.track('add_login_full_done', { plan: billing.plan }); setMode('add'); }}>Add login</button>}>
       {!unread && mode === 'add' && (
-        // Laid out like Change password: its name top left, the fields fill the rest (SOLAR-272).
-        <div className="sset conn-row conn-add-row" id="settings-add-login">
-          <div className="conn-text"><div className="conn-user">Add login</div>
-            {planFull && <div className="conn-meta">Your plan is full, so new plants are added stopped.</div>}</div>
-          {/* Cancel re-reads too: a login with no plant yet is saved but not listed. */}
+        // A form over the page (SOLAR-286). Cancel re-reads too: a login with no plant yet is saved but not listed.
+        <window.Dialog keep label="Add login" onClose={() => { setMode(null); refresh(); }}>
+          <div className="confirm-title">Add login</div>
+          {planFull && <div className="confirm-text">Your plan is full, so new plants are added stopped.</div>}
           <window.LinkForm compact hasPlant={allPlants.some(p => !p.paused)} onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
-        </div>
+        </window.Dialog>
       )}
       {unread ? (
         <div className="sset conn-row">
@@ -2654,10 +2658,13 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                     onRemove={() => setConfirming(acc.account_id)} />
                 </div>
                 {mode === acc.account_id && (
-                  <window.LinkForm compact relink initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
+                  <window.Dialog keep label={ok ? 'Change SunSynk password' : 'Reconnect'} onClose={() => setMode(null)}>
+                    <div className="confirm-title">{ok ? 'Change SunSynk password' : 'Reconnect'}</div>
+                    <window.LinkForm compact relink changing={ok} initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
+                  </window.Dialog>
                 )}
                 {confirming === acc.account_id && (
-                  <ConfirmCard
+                  <ConfirmCard modal
                     title={<>Remove <b>{acc.sunsynk_username}</b>?</>}
                     text={paidPlan && plants.length
                       ? `It stays until ${billDay(billing.nextDate)}, then it’s deleted with its history, unless another account shares it.`
@@ -2924,8 +2931,11 @@ function PasswordRow({ email }) {
   return (
       <div className="conn-row" id="settings-password">
         <div className="conn-text"><div className="conn-user">Change password</div><div className="conn-meta">Signs out your other devices.</div></div>
-        {!open && <div className="conn-actions"><button type="button" className="ghost-btn" onClick={() => setOpen(true)}>Change</button></div>}
+        <div className="conn-actions"><button type="button" className="ghost-btn" onClick={() => setOpen(true)}>Change</button></div>
         {open && (
+          <window.Dialog keep label="Change password" onClose={() => { if (!busy) close(); }}>
+          <div className="confirm-title">Change password</div>
+          <div className="confirm-text">Signs out your other devices.</div>
           <form className="conn-form link-form" onSubmit={submit} noValidate aria-busy={busy}>
             {/* The email, unseen, so a password manager knows which login to update. */}
             <input type="email" autoComplete="username" value={email || ''} readOnly hidden />
@@ -2937,6 +2947,7 @@ function PasswordRow({ email }) {
               <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>{busy ? 'Saving…' : 'Save password'}</button>
             </div>
           </form>
+          </window.Dialog>
         )}
       </div>
   );
@@ -3043,7 +3054,7 @@ function DeleteAccountRow({ email, billing, onBilling }) {
         </div>
       )}
       {!blocked && confirming && (
-        <ConfirmCard title={<>Delete <b>{email || 'this account'}</b>?</>} text="Your plants’ history goes too, unless another account shares them. It cannot be undone."
+        <ConfirmCard modal title={<>Delete <b>{email || 'this account'}</b>?</>} text="Your plants’ history goes too, unless another account shares them. It cannot be undone."
           action="Delete account" onConfirm={del} onCancel={() => setConfirming(false)} />
       )}
     </div>
