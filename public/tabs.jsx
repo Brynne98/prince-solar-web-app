@@ -2168,7 +2168,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   const word = b.state === 'past_due' ? 'Payment failed' : ending ? 'Ending' : null;
   const line = b.comped ? 'Free of charge. Every plant, full history.'
     : paid ? <><span className="mono">{rand(b.price)}</span> {perUnit(b.period)} for {b.plan === 'family' ? `up to ${3 + (b.extraPlants || 0)} plants` : '1 plant'}.</>
-    : weekEnds ? `Free week until ${billDay(weekEnds)}. Then 1 plant and the last 24 hours.`
+    : weekEnds ? `Free week until ${billDay(weekEnds)}.`
     : '1 plant and the last 24 hours. No card needed.';
   // What the price is made of: Family's base plus R49 for each extra plant paid for.
   const list = paid && b.plan === 'family' && b.prices?.[b.period];
@@ -3378,15 +3378,18 @@ function NotificationsSection({ userId }) {
 // once here: Billing shows it, Account's Delete and Plant's Remove login need it.
 const SETTINGS_NAV = [['account', 'Account'], ['billing', 'Billing'], ['settings', 'System']];
 // Setup and App each draw their own SettingsArea, so the first plant switched on or the last
-// one off mounts a new one; it starts from the plan last read, not the Plan outline.
-// Sign-out doesn't reload the page, so it forgets it.
+// one off mounts a new one; it starts from the plan last read, not the Plan outline. The
+// free week's end too, so Plan's line doesn't drop it until the new screen reads api_me.
+// Sign-out doesn't reload the page, so it forgets them.
 let billingSeen = null;
-window.sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') billingSeen = null; });
+let weekEndSeen;
+window.sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') { billingSeen = null; weekEndSeen = undefined; } });
 function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved, links, flash, onFlashed, onDirty, switchBlocked }) {
   const { useState, useEffect } = React;
   const [user, setUser] = useState(null);
   useEffect(() => { window.sb.auth.getSession().then(({ data }) => setUser(data?.session?.user || null)).catch(() => {}); }, []);
   const [billing, setBilling] = useState(() => billingSeen);
+  if (me) weekEndSeen = me.freeWeekEndsAt;
   // The stopped plant whose "plan is full" sent the user to the plans: extra room is for it.
   const [forPlant, setForPlant] = useState(null);
   const reloadBilling = () => window.billingRpc('api_billing_status').then(({ data }) => { if (data) { billingSeen = data; setBilling(data); } return data; });
@@ -3415,7 +3418,7 @@ function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved
         <div className="set-main">
           <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><span aria-hidden="true">←</span> Settings</button>
           {shown === 'account' && <AccountPage user={user} billing={billing} onBilling={() => onPage('billing')} />}
-          {(page === 'billing' || page === 'plans') && <BillingPage billing={billing} reload={reloadBilling} reloadPlan={reloadPlan} links={links} onPage={onPage} freeWeekEndsAt={me?.freeWeekEndsAt} onSaved={onPlantConfigSaved}
+          {(page === 'billing' || page === 'plans') && <BillingPage billing={billing} reload={reloadBilling} reloadPlan={reloadPlan} links={links} onPage={onPage} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} onSaved={onPlantConfigSaved}
                                               onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}
           {/* Adjust plan opens over Billing, not as a page of its own (SOLAR-292) */}
           {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadPlan} onBack={() => onPage('billing')} forPlant={forPlant}
