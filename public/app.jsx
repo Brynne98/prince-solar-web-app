@@ -86,6 +86,7 @@ const NAV_ICONS = {
   back: '<path d="m15 6-6 6 6 6"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
   plug: '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0V8zM12 18v4"/>',
+  power: '<path d="M12 2v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/>',
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   next: '<path d="m9 6 6 6-6 6"/>',
 };
@@ -888,6 +889,9 @@ function Setup({ links }) {
     return pageOk(TABS, t) ? t : 'live';
   });
   const [connecting, setConnecting] = useState(false);
+  // Billing's Plan says when the free week ends; it runs from the first login, plant on or not.
+  const [me, setMe] = useState(null);
+  useEffect(() => { window.fetchMe().then(setMe).catch(() => {}); }, []);
   const go = (id) => { setTab(id); setConnecting(false); toTop(); };
   // Only Plant has the card, so the header's button opens it on Live from the other settings pages.
   const connect = () => { if (isSettings(tab) && tab !== 'settings') setTab('live'); setConnecting(true); };
@@ -901,8 +905,15 @@ function Setup({ links }) {
   const dead = links.accounts.filter(a => a.status === 'needs_relink');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
   const account = { user, plantCount: 0, alert: dead.length > 0, onSettings: () => go('prefs'), active: isSettings(tab) };
+  // Every plant on a working login switched off: turning one on comes first, adding one second.
+  const plantsOff = !relink && links.accounts.some(a => a.status !== 'disabled' && (a.plants || []).length > 0);
+  const [flash, setFlash] = useState(null);
+  const turnOn = () => { window.track('setup_turn_on_done'); setConnecting(false); setFlash('connection'); setTab('billing'); toTop(); };
   const connectBtn = (cls) => (
-    <button type="button" className={'save-btn setup-btn ' + cls} onClick={connect} aria-label="Add plant"><Icon id="plug" /><span>Add plant</span></button>
+    <button type="button" className={(plantsOff ? 'ghost-btn' : 'save-btn') + ' setup-btn ' + cls} onClick={connect} aria-label="Add plant"><Icon id="plug" /><span>Add plant</span></button>
+  );
+  const turnOnBtn = (cls) => (
+    <button type="button" className={'save-btn setup-btn ' + cls} onClick={turnOn} aria-label="Turn on a plant"><Icon id="power" /><span>Turn on a plant</span></button>
   );
   // App opens on the page the address names, and Setup's page never reaches the address. A
   // plant just added opens on Live, as in App (SOLAR-174); one switched back on stays put.
@@ -926,6 +937,13 @@ function Setup({ links }) {
                   <window.LinkForm relink={relink} onLinked={linked} onCancel={() => setConnecting(false)}
                                    initialUsername={relink ? dead[0].sunsynk_username : undefined} />
                 </div>
+              ) : plantsOff ? (
+                <div className="setup-empty-box">
+                  <Icon id="power" />
+                  <h2>Your plants are off</h2>
+                  <p>Turn one on, or add another, to see your solar, battery, grid and home here.</p>
+                  <div className="setup-btns">{turnOnBtn('')}{connectBtn('')}</div>
+                </div>
               ) : (
                 // One card, the same words on every page (SOLAR-97).
                 <div className="setup-empty-box">
@@ -941,8 +959,12 @@ function Setup({ links }) {
   // Plant shows its outline and the card inside the Settings area; Account and Billing work.
   return (
     <Frame tabs={TABS} tab={tab} onTab={go} account={account}
-      head={<><PlantMenu fallback="No plant yet" />{!connecting && connectBtn('setup-head-btn')}</>}>
-      {isSettings(tab) ? <window.SettingsArea page={tab} onPage={go} links={links} plantSlot={stage} onPlantConfigSaved={linked} /> : stage}
+      head={<><PlantMenu fallback={plantsOff ? 'Plants off' : 'No plant yet'} />
+        {!connecting && (plantsOff
+          ? <span className="setup-head-btns">{turnOnBtn('setup-head-btn')}{connectBtn('setup-head-btn')}</span>
+          : connectBtn('setup-head-btn'))}</>}>
+      {isSettings(tab) ? <window.SettingsArea page={tab} onPage={go} me={me} links={links} plantSlot={stage} onPlantConfigSaved={linked}
+                                              flash={flash} onFlashed={() => setFlash(null)} /> : stage}
     </Frame>
   );
 }

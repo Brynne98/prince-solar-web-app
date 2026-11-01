@@ -2820,9 +2820,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                     title={<>Remove <b>{acc.sunsynk_username}</b>?</>}
                     text={removeText(acc)}
                     action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)}>
-                    {removeList(acc)}
-                    {live.length === 1 && <div className="confirm-text keep-note">It’s your only login. Your pages stay empty until you add one.</div>}
-                  </ConfirmCard>
+                    {removeList(acc)}                  </ConfirmCard>
                 )}
                 {plants.length ? plants.map(plantRow) : <div className="conn-meta">No plant shared with this login.</div>}
               </div>

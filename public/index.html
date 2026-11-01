@@ -1517,6 +1517,9 @@
   .setup-empty-box p { margin: 0 0 6px; color: var(--muted); line-height: 1.45; font-size: 14px; }
   .setup-btn { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; padding: 10px 16px; border-radius: 10px; font-weight: 700; white-space: nowrap; }
   .setup-head-btn { margin-left: auto; }
+  .setup-head-btns { margin-left: auto; display: flex; gap: 8px; }
+  .setup-head-btns .setup-head-btn { margin-left: 0; }
+  .setup-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
   /* Connect: the card opens into the form where it stands, as a Settings card. A form taller
      than the screen scrolls inside its layer rather than spilling under the bottom bar. */
   .setup-form { width: min(420px, 100%); max-height: 100%; overflow-y: auto; border-radius: 16px; animation: setup-open .26s cubic-bezier(.2,.7,.2,1); }
