@@ -252,7 +252,7 @@ function explain(ex) {
   const code = ex?.code;
   if (code === 'invalid_credentials') return { text: 'Email or password is wrong.' };
   if (code === 'email_not_confirmed') return { text: 'Confirm your email first.', action: 'resend' };
-  if (code === 'user_already_exists' || code === 'email_exists') return { text: 'That email already has an account.', action: 'signin' };
+  if (code === 'user_already_exists' || code === 'email_exists') return { text: 'That email already has an account.' };
   if (code === 'weak_password') {
     const reasons = ex.reasons || [];
     if (reasons.includes('pwned')) return { text: 'That password was in a data leak. Choose another.' };
@@ -334,7 +334,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     const e = explain(error);
     if (e.field) flag({ [e.field]: e.text });
     else if (e.action === 'resend') sayError(e.text, { label: 'Send a new link', onClick: () => resend(email.trim()).catch(showError) });
-    else sayError(e.text, e.action === 'signin' ? { label: 'Sign in', onClick: () => go('signin') } : undefined);
+    else sayError(e.text);
   };
   // A new confirmation link, from the expired-link card or the not-confirmed toast (SOLAR-196).
   // Supabase answers the same for unknown and already-confirmed emails, so this always moves on.
@@ -414,6 +414,9 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
       } else if (mode === 'signup') {
         const { data, error } = await window.sb.auth.signUp({ email: addr, password, options: { emailRedirectTo: SITE_URL } });
         if (error) throw error;
+        // An email that already has an account gets a fake user with no identities and no
+        // email, so the inbox card would wait for nothing (SOLAR-266).
+        if (data.user?.identities?.length === 0) throw { code: 'user_already_exists' };
         // With email confirmation on, signUp returns a user but no session.
         if (!data.session) { setSent({ to: addr, kind: 'signup', from: mode }); go('inbox'); }
       } else if (mode === 'forgot') {
