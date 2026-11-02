@@ -232,7 +232,7 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
                 return (
                   <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
                           onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
-                    <span className="tick" aria-hidden="true">{p.id === plantId ? '✓' : ''}</span><span className="nm">{label(p)}</span>
+                    <span className="tick" aria-hidden="true">{p.id === plantId ? '✓' : ''}</span><span className="nm">{window.plantLabel(p)}</span>
                     <MenuState st={st} cut={cutOff && cutOff(p.id)} now={states.at || Date.now()} />
                   </button>
                 );
