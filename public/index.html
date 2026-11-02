@@ -700,7 +700,7 @@
   .segmented { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; }
   .seg-btn { background: none; border: none; color: var(--muted); padding: 7px 15px; border-radius: 7px; font-size: 13px; font-weight: 500; transition: .12s; }
   .seg-sm .seg-btn { padding: 5px 11px; font-size: 12.5px; }
-  .seg-btn:hover { color: var(--text); } .seg-btn.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+  .seg-btn:hover:not(:disabled) { color: var(--text); } .seg-btn:disabled { cursor: default; } .seg-btn.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
   .ghost-btn { background: none; border: 1px solid var(--line-2); color: var(--muted); padding: 7px 14px; border-radius: 9px; font-size: 12.5px; transition: .15s; }
   .ghost-btn:hover { color: var(--text); } .ghost-btn.active { border-color: var(--pv); color: var(--pv); }
 
@@ -1029,7 +1029,7 @@
   #settings-system :is(.sset-sum, .sset-one) { width: 100%; align-items: stretch; }
   #settings-system .sset-one .fs-in { width: 100%; }
   /* on Total the box is the value; the sum over it only reads on By size */
-  #settings-system .fs-sumhead:has(.fs-seg > button:first-child.on) .fs-val { display: none; }
+  #settings-system .fs-sumhead:has(.seg-btn:first-child.active) .fs-val { display: none; }
   @media (max-width: 599px) { #settings-system .conn-row.sset-row { grid-template-columns: minmax(0, 1fr); gap: 10px; } }
   /* Your data: From, To and Download on one line */
   .dl-row { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
@@ -1280,6 +1280,19 @@
     border: 6px solid transparent; border-top-color: var(--line-2); }
   .info-dot:hover .info-bubble, .info-dot:focus .info-bubble { display: block; opacity: 1; visibility: visible; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(0); }
   @starting-style { .info-dot:hover .info-bubble, .info-dot:focus .info-bubble { opacity: 0; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(4px); } }
+  /* Tip: the same bubble over a figure or a word, fixed to the window at --tx/--ty (placeTip) */
+  .tip { cursor: help; }
+  .tip:focus { outline: none; }
+  .tip:focus-visible { outline: 2px solid var(--pv); outline-offset: 2px; border-radius: 4px; }
+  .tip > .info-bubble { position: fixed; left: var(--tx, 50%); top: var(--ty, 0); bottom: auto; transform: translate(-50%, calc(-100% + 4px)); }
+  .tip > .info-bubble::after { left: calc(50% + var(--arrow, 0px)); }
+  .tip:hover > .info-bubble, .tip:focus > .info-bubble { display: block; opacity: 1; visibility: visible; transform: translate(-50%, -100%); }
+  @starting-style { .tip:hover > .info-bubble, .tip:focus > .info-bubble { opacity: 0; transform: translate(-50%, calc(-100% + 4px)); } }
+  /* at the top of the screen it opens downwards */
+  .tip.below > .info-bubble { transform: translate(-50%, -4px); }
+  .tip.below:hover > .info-bubble, .tip.below:focus > .info-bubble { transform: translate(-50%, 0); }
+  @starting-style { .tip.below:hover > .info-bubble, .tip.below:focus > .info-bubble { transform: translate(-50%, -4px); } }
+  .tip.below > .info-bubble::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: var(--line-2); }
 
   @media (max-width: 980px) {
     .stat-col { grid-template-columns: 1fr 1fr; }
@@ -1415,17 +1428,8 @@
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .field-hint { color: var(--dim); font-size: 13px; line-height: 1.2; text-align: right; }
   .field-err { color: var(--load); font-size: 13px; line-height: 1.2; text-align: right; }
-  .login-pw { position: relative; display: flex; }
-  .login-pw input { flex: 1; padding-right: 56px; min-width: 0; }
-  .login-card .login-eye {
-    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
-    display: flex; align-items: center; justify-content: center;
-    width: 48px; height: 48px; padding: 0;
-    background: none; border: 0; border-radius: 8px;
-    color: var(--muted); cursor: pointer; transition: color .15s;
-  }
-  .login-card .login-eye:hover { color: var(--text); }
-  .login-card .login-eye:focus-visible { outline: 2px solid var(--pv); outline-offset: -2px; }
+  .login-card .pw-box input { padding-right: 56px; }
+  .login-card .pw-eye { right: 4px; width: 48px; height: 48px; border-radius: 8px; }
   .login-card button[type="submit"] {
     margin-top: 10px;
     background: var(--pv); color: #06210f; border: 0; border-radius: 12px; padding: 16px 18px;
@@ -1605,12 +1609,13 @@
   .link-form .field-row .field { margin-bottom: 0; }
   .link-form > .field + .field { margin-top: 14px; }   /* Change password: stacked, same gap as a field-row */
   .link-form .link-note { margin-top: 8px; }
-  .link-pw { position: relative; }
-  .link-pw .input { padding-right: 44px; }
-  .link-eye { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 40px; height: 36px; display: grid; place-items: center;
-    background: none; border: 0; border-radius: 7px; color: var(--muted); }
-  .link-eye:hover { color: var(--text); }
-  .link-eye:focus-visible { outline: 2px solid var(--pv); outline-offset: -2px; }
+  /* PasswordInput, everywhere; the sign-in card's is bigger (above) */
+  .pw-box { position: relative; display: flex; }
+  .pw-box input { flex: 1; min-width: 0; padding-right: 44px; }
+  .pw-eye { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 40px; height: 36px; display: grid; place-items: center; padding: 0;
+    background: none; border: 0; border-radius: 7px; color: var(--muted); cursor: pointer; transition: color .15s; }
+  .pw-eye:hover { color: var(--text); }
+  .pw-eye:focus-visible { outline: 2px solid var(--pv); outline-offset: -2px; }
   /* Cancel, then the green button, at the right edge */
   .link-actions { justify-content: flex-end; align-items: stretch; margin-top: 18px; }
   .link-actions .save-btn { display: inline-flex; align-items: center; gap: 8px; }
@@ -1689,14 +1694,21 @@
   .fs-in:focus-within, .fs-cnt:focus { border-color: var(--grid); }
   .fs-in input { flex: 1; width: 100%; min-width: 0; background: none; border: none; outline: none; color: var(--text); font-family: var(--mono); font-size: 14px; font-weight: 400; }
   .fs-in input::placeholder { color: var(--dim); }
-  .fs-in input[type="date"] { color-scheme: dark; }   /* the calendar icon and picker in the app's colours */
-  .fs-select select { flex: 1; width: 100%; min-width: 0; height: 100%; background: none; border: none; outline: none; color: var(--text); font: inherit; font-size: 14px; color-scheme: dark; cursor: pointer; }
+  /* PickMenu and DayField: a field that opens our own menu or calendar */
+  .pick { position: relative; }
+  .pick-btn { width: 100%; gap: 8px; color: var(--text); font: 400 14px var(--display); text-align: left; cursor: pointer; }
+  .pick-btn:hover, .pick-btn[aria-expanded="true"] { border-color: var(--grid); }
+  .pick-btn:focus-visible { outline: 2px solid var(--pv); outline-offset: 1px; }
+  .pick-btn .ico { width: 16px; height: 16px; margin-left: auto; color: var(--muted); flex: none; }
+  .pick-val { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pick-menu { top: calc(100% + 6px); left: 0; right: 0; max-height: 300px; overflow-y: auto; }
+  .pick-menu button { display: grid; grid-template-columns: 18px minmax(0, 1fr); white-space: nowrap; }
+  .pick-menu button[aria-checked="true"] { background: rgba(255,255,255,0.075); font-weight: 600; }
+  .pick-menu .nm { overflow: hidden; text-overflow: ellipsis; }
+  .pick .cal-pop { left: 0; transform: none; }   /* under its field's left edge, at every width */
   .fs-unit { font-family: var(--mono); font-size: 14px; color: var(--muted); }
   /* battery size and panels: Total or By size, the value on the same line */
   .fs-sumhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .fs-seg { display: inline-grid; grid-auto-flow: column; gap: 2px; padding: 3px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line-2); }
-  .fs-seg button { height: 32px; padding: 0 14px; border: none; border-radius: 7px; background: none; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; }
-  .fs-seg button.on { background: var(--panel-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-2); }
   .fs-val { font-size: 26px; font-weight: 700; line-height: 1; color: var(--dim); white-space: nowrap; }
   .fs-val.size { color: var(--batt); }
   .fs-val.panels { color: var(--pv); }
@@ -1736,10 +1748,9 @@
     .fs-row { grid-template-columns: 64px 12px minmax(0, 1fr) 44px; }   /* a finger-sized remove */
     .fs-row.solo { grid-template-columns: 64px 12px minmax(0, 1fr); }
     .fs-rm { width: 44px; height: 44px; }
-    /* finger-sized close and back; the segments match the app's 36 px on a phone */
+    /* finger-sized close and back */
     .fs-x { width: 40px; height: 40px; margin: -10px -12px -10px 0; }
     .fs-back { height: 40px; margin: -12px 4px -12px -8px; }
-    .fs-seg button { min-height: 36px; }
   }
 
   /* ---- the free week (SOLAR-242) ---- */

@@ -223,24 +223,29 @@ function AuthBrand() {
   );
 }
 
-/** Labelled password input with a reveal toggle. type="button" on the eye matters:
- *  inside a form a bare <button> submits, so revealing would sign in half-typed. */
+/** Every password box in the app: the input and its show button. type="button" on the eye
+ *  matters: inside a form a bare <button> submits, so revealing would sign in half-typed.
+ *  `aria` is the input's invalid and describedby. */
+function PasswordInput({ id, value, onChange, placeholder, autoComplete = 'off', className, aria }) {
+  const [show, setShow] = React.useState(false);
+  return (
+    <div className="pw-box">
+      <input id={id} className={className} type={show ? 'text' : 'password'} placeholder={placeholder} value={value}
+             autoComplete={autoComplete} onChange={(e) => onChange(e.target.value)} {...aria} />
+      <button type="button" className="pw-eye" onClick={() => setShow(v => !v)}
+              aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show}>
+        {show ? <EyeOffIcon /> : <EyeIcon />}
+      </button>
+    </div>
+  );
+}
+/** The sign-in card's: PasswordInput under its label line. */
 function PasswordField({ id, label, value, onChange, placeholder, autoComplete, error, hint }) {
-  const { useState } = React;
-  const [show, setShow] = useState(false);
   return (
     <div className="auth-field">
       <FieldLabel id={id} label={label} error={error} hint={hint} />
-      <div className="login-pw">
-        <input id={id} type={show ? 'text' : 'password'} placeholder={placeholder} value={value}
-               autoComplete={autoComplete} onChange={(e) => onChange(e.target.value)} required minLength={6}
-               {...(error ? invalidProps(id, error) : hint ? { 'aria-describedby': `${id}-hint` } : {})} />
-        <button type="button" className="login-eye" onClick={() => setShow(v => !v)}
-                title={show ? 'Hide password' : 'Show password'}
-                aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show}>
-          {show ? <EyeOffIcon /> : <EyeIcon />}
-        </button>
-      </div>
+      <PasswordInput id={id} value={value} onChange={onChange} placeholder={placeholder} autoComplete={autoComplete}
+                     aria={error ? invalidProps(id, error) : hint ? { 'aria-describedby': `${id}-hint` } : {}} />
     </div>
   );
 }
@@ -580,4 +585,4 @@ function SignOutButton({ className, children = 'Sign out', busyText = 'Signing o
   return <button type="button" className={className} onClick={click} disabled={busy} aria-busy={busy}>{busy ? busyText : children}</button>;
 }
 // Shared with the Connect screen so it looks like the same product.
-Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordField, FieldLabel, invalidProps, SignOutButton, signOutHere, explainAuthError: explain });
+Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordInput, PasswordField, FieldLabel, invalidProps, SignOutButton, signOutHere, explainAuthError: explain });

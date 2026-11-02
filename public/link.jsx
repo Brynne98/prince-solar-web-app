@@ -368,12 +368,9 @@ function Paywall({ reason, paused = [], plantIds = null, onCancel }) {
       <p className="sset-note">{history ? 'Free keeps the last 24 hours.' : first?.plan === 'family' ? 'Plants after your 3rd stay stopped until you add them to your plan.'
         : (paid ? 'Home' : 'Free') + ' covers one plant.'}</p>
       {!paid && (
-        <div className="segmented seg-sm pw-period" role="group" aria-label="Billing">
-          {(history ? ['yearly', 'monthly'] : ['monthly', 'yearly']).map(p => (
-            <button type="button" key={p} className={'seg-btn' + (period === p ? ' active' : '')} aria-pressed={period === p}
-                    onClick={() => setPeriod(p)}>{p === 'monthly' ? 'Monthly' : 'Yearly'}{history && p === 'yearly' && <span className="pw-save">2 months free</span>}</button>
-          ))}
-        </div>
+        <window.Segmented size="sm" className="pw-period" label="Billing" value={period} onChange={setPeriod}
+          options={(history ? ['yearly', 'monthly'] : ['monthly', 'yearly']).map(p => ({ value: p,
+            label: <>{p === 'monthly' ? 'Monthly' : 'Yearly'}{history && p === 'yearly' && <span className="pw-save">2 months free</span>}</> }))} />
       )}
       {quotes?.error ? <p className="sset-note pw-error">Couldn’t load prices. Close this and try again.</p> : (
         <div className="pw-plans">
@@ -409,22 +406,6 @@ window.Paywall = Paywall;
 
 // The same moment on the Connect screen and inside Settings; one wording for both.
 const NO_PLANT_TEXT = 'signed in, but no plant is shared with it yet. Your login is saved. Retry any time.';
-
-/** Password input in the app's field style, with a show button. type="button": inside a
- *  form a bare button submits. */
-function LinkPassword({ id = 'ss-pass', autoComplete = 'off', value, onChange, invalid }) {
-  const [show, setShow] = React.useState(false);
-  return (
-    <div className="link-pw">
-      <input id={id} className="input" type={show ? 'text' : 'password'} value={value} autoComplete={autoComplete}
-             onChange={(e) => onChange(e.target.value)} {...invalid} />
-      <button type="button" className="link-eye" onClick={() => setShow(v => !v)}
-              aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show}>
-        {show ? <window.EyeOffIcon /> : <window.EyeIcon />}
-      </button>
-    </div>
-  );
-}
 
 // One form for a SunSynk login, built from the app's own Settings parts (SOLAR-96).
 // `compact`: inside Account's SunSynk logins section (Add login, Reconnect). Otherwise the
@@ -537,7 +518,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
           </div>
           <div className="field link-last">
             {label('ss-pass', 'SunSynk password')}
-            <LinkPassword value={password} onChange={(v) => { setPassword(v); edited('ss-pass'); }} invalid={invalid('ss-pass')} />
+            <window.PasswordInput id="ss-pass" className="input" value={password} onChange={(v) => { setPassword(v); edited('ss-pass'); }} aria={invalid('ss-pass')} />
           </div>
         </div>
         <div className="field-note link-note">{compact ? 'We never keep your password.' : 'We never keep your password. Disconnect any time in Account.'}</div>
@@ -552,8 +533,6 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
   );
 }
 window.LinkForm = LinkForm;
-window.LinkPassword = LinkPassword;
-
 /**
  * Sits inside AuthGate. Hands the login list to its child, which shows the dashboard
  * when a login lists a plant and the Setup frame (Connect on Live) when none does.

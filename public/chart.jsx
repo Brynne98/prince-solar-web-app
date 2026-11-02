@@ -117,37 +117,37 @@ const Chevron = ({ dir }) => (
     <path d={dir < 0 ? 'M8.5 3 4.5 7l4 4' : 'M5.5 3l4 4-4 4'} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+const CalIcon = () => (
+  <svg className="hv-cal" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+    <rect x="1.75" y="2.75" width="12.5" height="11.5" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    <path d="M1.75 6.5h12.5M5 1.5v2.5M11 1.5v2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  </svg>
+);
 
 // Our own calendar (SOLAR-72): a month at a time, Monday first. Days with nothing logged,
 // days before `earliest` and days after today are greyed and can't be picked; the days
 // with data come from api_data_days, shared by every date bar.
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-// floor (Free after its week, SOLAR-242): days before it show greyed with a lock and open the plans
-function CalendarPop({ date, todayStr, earliest, days, onPick, onClose, floor }) {
+// floor (Free after its week, SOLAR-242): days before it show greyed with a lock and open the plans.
+// A range's two ends (Your data) pass latest, the last day it may pick, and allDays: a day
+// with no readings is still a fine end. Its opener closes it (usePopover).
+function CalendarPop({ date, todayStr, earliest, latest = todayStr, days, allDays, onPick, onClose, floor }) {
   const [month, setMonth] = React.useState(date.slice(0, 7));
-  const ref = React.useRef(null);
-  // a click outside or Escape closes it
-  React.useEffect(() => {
-    const down = e => { if (ref.current && !ref.current.parentNode.contains(e.target)) onClose(); };
-    const key = e => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('pointerdown', down); document.addEventListener('keydown', key);
-    return () => { document.removeEventListener('pointerdown', down); document.removeEventListener('keydown', key); };
-  }, [onClose]);
   const [y, m] = month.split('-').map(Number);
   const shift = n => { const d = new Date(Date.UTC(y, m - 1 + n, 1)); setMonth(d.toISOString().slice(0, 7)); };
   const lead = (new Date(Date.UTC(y, m - 1, 1)).getUTCDay() + 6) % 7; // blanks before the 1st, Monday first
   const count = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const key = d => month + '-' + String(d).padStart(2, '0');
-  const ok = k => k <= todayStr && (!earliest || k >= earliest) && !!days && days.has(k);
+  const ok = k => k <= latest && (!earliest || k >= earliest) && (allDays || (!!days && days.has(k)));
   const shut = k => !!floor && k < floor;
   // Free can look back two months: what comes back on a paid plan
   const back = floor ? monthsBack(floor, month) >= 2 : !!earliest && month <= earliest.slice(0, 7);
   return (
-    <div className="cal-pop" ref={ref} role="dialog" aria-label="Pick a day">
+    <div className="cal-pop" role="dialog" aria-label="Pick a day">
       <div className="cal-head">
         <button type="button" className="hv-daynav" aria-label="Previous month" disabled={back} onClick={() => shift(-1)}><Chevron dir={-1} /></button>
         <span className="cal-title">{MONTHS[m - 1]} {y}</span>
-        <button type="button" className="hv-daynav" aria-label="Next month" disabled={month >= todayStr.slice(0, 7)} onClick={() => shift(1)}><Chevron dir={1} /></button>
+        <button type="button" className="hv-daynav" aria-label="Next month" disabled={month >= latest.slice(0, 7)} onClick={() => shift(1)}><Chevron dir={1} /></button>
       </div>
       <div className="cal-grid">
         {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <span key={'h' + i} className="cal-dow" aria-hidden="true">{d}</span>)}
@@ -178,7 +178,7 @@ const monthsBack = (a, b) => (Number(a.slice(0, 4)) - Number(b.slice(0, 4))) * 1
 function DateBar({ pick, earliest, locked, children }) {
   const { date, setDate, todayStr } = pick;
   const floor = window.useFreeOver() ? dayBefore(todayStr) : null;
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen, box] = usePopover();
   const close = React.useCallback(() => setOpen(false), []);
   const [days, setDays] = React.useState(null);
   const plant = window.CURRENT_PLANT;
@@ -194,12 +194,9 @@ function DateBar({ pick, earliest, locked, children }) {
         ? <button className="hv-daynav shut" aria-label="Earlier days, on paid plans" onClick={() => window.openPlans('date_arrow')}><Chevron dir={-1} /></button>
         : <button className="hv-daynav" disabled={!prevDay} aria-label="Previous day"
             onClick={() => prevDay && setDate(prevDay)}><Chevron dir={-1} /></button>}
-      <div className="hv-datebox">
+      <div className="hv-datebox" ref={box}>
         <button type="button" className="hv-datepick" disabled={locked} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(o => !o)}>
-          <svg className="hv-cal" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-            <rect x="1.75" y="2.75" width="12.5" height="11.5" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-            <path d="M1.75 6.5h12.5M5 1.5v2.5M11 1.5v2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-          </svg>
+          <CalIcon />
           <span className="hv-dateface">{dayFace(date, todayStr)}</span>
         </button>
         <button className="hv-today hv-today-in" disabled={!toLatest} onClick={() => toLatest && setDate(latest)}>Today</button>
@@ -290,7 +287,7 @@ function outageAt(runs, i) {
 }
 // "Grid off 9h" by the date; its square is the band's red, so it names the shading.
 function OutagePill({ mins, what }) {
-  return mins > 0 ? <span className="hv-gap" title={OUTAGE_TITLE}><i className="hv-gap-sq" />{what} off {fmtGap(mins)}</span> : null;
+  return mins > 0 ? <window.Tip className="hv-gap" text={OUTAGE_TITLE}><i className="hv-gap-sq" />{what} off {fmtGap(mins)}</window.Tip> : null;
 }
 // The hover card's row for a bucket inside a run, in the band's red.
 function OutageTipRow({ span, what }) {
@@ -438,7 +435,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
     <div className="hv-root">
       {(() => {
         const notes = <>
-          {lagNote && <span className="hv-lag mono" title="From SunSynk's history, fetched every six hours; the live numbers above run ahead of it">{lagNote}</span>}
+          {lagNote && <window.Tip className="hv-lag mono" text="From SunSynk's history, fetched every six hours; the live numbers above run ahead of it">{lagNote}</window.Tip>}
           <OutagePill mins={outageMin} what={offWord} />
         </>;
         return dayPick
@@ -839,3 +836,4 @@ function HistoryView({ today, refreshKey, locked, silent }) {
 }
 
 window.HistoryView = HistoryView;
+Object.assign(window, { CalendarPop, CalIcon, dayFace }); // Your data's From and To (tabs.js)

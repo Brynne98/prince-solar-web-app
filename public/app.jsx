@@ -55,11 +55,11 @@ function plantStatus(snap, now) {
 function WallStatus({ snap }) {
   const s = plantStatus(snap, useNow(15000));
   return (
-    <span className={'wall-status status-' + s.status} title={'last reading ' + window.fmtTime(s.last)}>
+    <window.Tip className={'wall-status below status-' + s.status} text={'Last reading ' + window.fmtTime(s.last)}>
       <span className="status-dot" />
       <span className="status-word">{s.word}</span>
       <span className="status-detail mono">{s.detail}</span>
-    </span>
+    </window.Tip>
   );
 }
 window.WallStatus = WallStatus;
@@ -119,6 +119,29 @@ function MenuList({ className, label, children }) {
     items[n]?.focus(); e.preventDefault();
   };
   return <div className={'menu ' + className} role="menu" aria-label={label} ref={ref} onKeyDown={keys}>{children}</div>;
+}
+// A choice in a form: a field-sized button that opens a MenuList, the chosen row ticked.
+// The app's own, never the browser's <select>, so it looks the same everywhere.
+function PickMenu({ id, label, value, options, onPick }) {
+  const [open, setOpen, ref] = usePopover();
+  const cur = options.find(o => o.value === value);
+  return (
+    <div className="pick" ref={ref}>
+      <button type="button" id={id} className="fs-in pick-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(o => !o)}>
+        <span className="pick-val">{cur ? cur.label : ''}</span><Icon id="chevron" />
+      </button>
+      {open && (
+        <MenuList className="pick-menu" label={label}>
+          {options.map(o => (
+            <button key={o.value} type="button" role="menuitemradio" aria-checked={o.value === value}
+                    onClick={() => { setOpen(false); ref.current.querySelector('button').focus(); if (o.value !== value) onPick(o.value); }}>
+              <span aria-hidden="true">{o.value === value ? '✓' : ''}</span><span className="nm">{o.label}</span>
+            </button>
+          ))}
+        </MenuList>
+      )}
+    </div>
+  );
 }
 
 // One menu row's state, by the header's rules (SOLAR-182): a dead login reads Reconnect.
@@ -257,6 +280,29 @@ function Sidebar({ tabs, tab, onTab, account, steps }) {
   );
 }
 
+// A sheet up from the bottom of a phone. A tap on the dimmed page or Escape closes it; focus
+// goes into it on open, unless something inside took it first, and back to `opener` (a
+// selector) on Escape. `label` makes the panel the dialog; leave it out when the content is one.
+function Sheet({ label, onClose, opener, className = '', children }) {
+  const ref = useRef(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    if (!ref.current.contains(document.activeElement)) ref.current.querySelector('button')?.focus();
+    const key = e => { if (e.key === 'Escape') { close.current(); opener && document.querySelector(opener)?.focus(); } };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, []);
+  return (
+    <div className={'sheet' + (className ? ' ' + className : '')} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="sheet-panel" ref={ref} {...(label ? { role: 'dialog', 'aria-label': label } : {})}>
+        <div className="sheet-grip" aria-hidden="true" />
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // Phone: at most five slots. Settings opens from the account menu (SOLAR-224). More than
 // five pages (App's six, with Plant settings): the first four, then More, which opens a
 // sheet with the rest.
@@ -266,13 +312,6 @@ function PhoneBar({ tabs, tab, onTab }) {
   const bar = split ? tabs.slice(0, 4) : tabs;
   const rest = split ? tabs.slice(4) : [];
   const go = (id) => { setMore(false); onTab && onTab(id); };
-  useEffect(() => {
-    if (!more) return;
-    const key = e => { if (e.key === 'Escape') { setMore(false); document.querySelector('.phonebar .bar-more')?.focus(); } };
-    document.addEventListener('keydown', key);
-    document.querySelector('.sheet button')?.focus();
-    return () => document.removeEventListener('keydown', key);
-  }, [more]);
   const slot = (t) => (
     <button key={t.id} type="button" aria-current={tab === t.id ? 'page' : undefined} onClick={() => go(t.id)} disabled={!onTab}>
       <Icon id={t.id} /><span>{t.label}</span>
@@ -289,14 +328,7 @@ function PhoneBar({ tabs, tab, onTab }) {
           </button>
         )}
       </nav>
-      {more && (
-        <div className="sheet" onClick={e => { if (e.target === e.currentTarget) setMore(false); }}>
-          <div className="sheet-panel" role="dialog" aria-label="More pages">
-            <div className="sheet-grip" aria-hidden="true" />
-            {rest.map(slot)}
-          </div>
-        </div>
-      )}
+      {more && <Sheet label="More pages" onClose={() => setMore(false)} opener=".phonebar .bar-more">{rest.map(slot)}</Sheet>}
     </>
   );
 }
@@ -383,7 +415,7 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
     return (
       <>
         <div className="status status-idle" role="status"><span className="status-dot" /><span className="status-word">{idleWord}</span></div>
-        <button type="button" className={'refresh' + (busy ? ' busy' : '')} aria-label="Refresh" title="Refresh" disabled><Icon id="refresh" /></button>
+        <button type="button" className={'refresh' + (busy ? ' busy' : '')} aria-label="Refresh" disabled><Icon id="refresh" /></button>
       </>
     );
   }
@@ -391,7 +423,7 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
   const sync = window.syncProgress(snap.sync), pct = sync == null ? null : Math.round(100 * sync);
   return (
     <>
-      <div className={'status status-' + s.status + (sync != null ? ' fetching' : '')} title={'Last reading ' + window.fmtTime(s.last)} role="status">
+      <window.Tip as="div" className={'status below status-' + s.status + (sync != null ? ' fetching' : '')} text={'Last reading ' + window.fmtTime(s.last)} role="status">
         <span className="status-dot" />
         <span className="status-word">{s.word}</span>
         {/* an old reading's date shows from tablet width up; a phone keeps the room for the plant name */}
@@ -405,10 +437,10 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
             <span className="sync-pct mono">{pct}%</span>
           </span>
         )}
-      </div>
+      </window.Tip>
       {/* takes the status colour once something is wrong, and reads Retry when nothing reports */}
       <button type="button" className={'refresh refresh-' + s.status + (busy ? ' busy' : '') + (sync != null ? ' fetching' : '')} aria-busy={busy} onClick={onRefresh}
-              aria-label={s.status === 'offline' ? 'Retry' : 'Refresh'} title={s.status === 'offline' ? 'Retry' : 'Refresh'}>
+              aria-label={s.status === 'offline' ? 'Retry' : 'Refresh'}>
         <Icon id="refresh" />{s.status === 'offline' && <span className="lbl">Retry</span>}
       </button>
     </>
@@ -543,6 +575,8 @@ function StepField({ id, value, onChange, label, pre, unit, inputMode, ph, inval
 window.StepField = StepField;
 // Battery size and panels: Total or By size, the value on the switch's line in its own place,
 // so nothing moves as it changes. Controlled: the caller holds mode, total and rows.
+const SUM_MODES = [{ value: 'total', label: 'Total' }, { value: 'rows', label: 'By size' }];
+window.SUM_MODES = SUM_MODES;
 function SumBox({ kind, mode, onMode, tot, onTot, rows, onRows, label }) {
   const sum = STEP_SUMS[kind];
   const now = sumOf(kind, mode, tot, rows);
@@ -550,10 +584,7 @@ function SumBox({ kind, mode, onMode, tot, onTot, rows, onRows, label }) {
   return (
     <div className="fs-sum">
       <div className="fs-sumhead">
-        <div className="fs-seg" role="group" aria-label="How to enter it">
-          <button type="button" className={mode === 'total' ? 'on' : ''} aria-pressed={mode === 'total'} onClick={() => onMode('total')}>Total</button>
-          <button type="button" className={mode === 'rows' ? 'on' : ''} aria-pressed={mode === 'rows'} onClick={() => onMode('rows')}>By size</button>
-        </div>
+        <window.Segmented size="sm" label="How to enter it" value={mode} onChange={onMode} options={SUM_MODES} />
         <b className={'fs-val mono' + (now.value > 0 ? ' ' + kind : '')} aria-live="polite">{now.value > 0 ? stepFix(now.value) : '—'}<small>{sum.unit}</small></b>
       </div>
       {mode === 'total' ? <StepField value={tot} onChange={onTot} label={label + ' in total'} unit={sum.unit} inputMode="decimal" ph={sum.totPh} invalid={!now.ok} /> : (
@@ -566,7 +597,7 @@ function SumBox({ kind, mode, onMode, tot, onTot, rows, onRows, label }) {
               <StepField value={r.e} onChange={x => setRow(i, 'e', x)} label={sum.sizeLabel + ', size ' + (i + 1)} unit={sum.each}
                          inputMode={kind === 'panels' ? 'numeric' : 'decimal'} ph={sum.ph} />
               {/* one size has nothing to remove: no button, and its box takes the room */}
-              {rows.length > 1 && <button type="button" className="fs-rm" aria-label={'Remove size ' + (i + 1)} title="Remove"
+              {rows.length > 1 && <button type="button" className="fs-rm" aria-label={'Remove size ' + (i + 1)}
                       onClick={() => onRows(rows.filter((_, j) => j !== i))}><TrashIcon /></button>}
             </div>
           ))}
@@ -714,7 +745,7 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
         <div className="fs-top">
           <button type="button" className="fs-fold" aria-expanded={!fold} onClick={() => setFold(f => !f)}>
             <span className="fs-lbl">Finish setup</span><span className="fs-n mono">{count}</span><Icon id="chevron" /></button>
-          <button type="button" className="fs-x" aria-label="Hide" title="Hide" onClick={hide}><Icon id="close" /></button></div>
+          <button type="button" className="fs-x" aria-label="Hide" onClick={hide}><Icon id="close" /></button></div>
         <ul className="fs-list">
           {!fold && STEPS_DONE.map(t => (
             <li key={t}><div className="fs-item done"><span className="fs-tick"><Icon id="tick" /></span><span className="fs-name">{t}</span></div></li>
@@ -743,7 +774,7 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
         </button>
       )}
       {open && (variant === 'phone'
-        ? <div className="sheet fs-sheet" onClick={e => { if (e.target === e.currentTarget) setOpen(false); }}><div className="sheet-panel"><div className="sheet-grip" aria-hidden="true" />{panel}</div></div>
+        ? <Sheet className="fs-sheet" onClose={() => setOpen(false)}>{panel}</Sheet>
         : <div className="fs-pop">{panel}</div>)}
     </div>
   );

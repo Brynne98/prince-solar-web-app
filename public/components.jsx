@@ -162,22 +162,32 @@ function Badge({ tone = 'neutral', children, dot }) {
 }
 
 // ---- Segmented control ------------------------------------------------------
-function Segmented({ options, value, onChange, size = 'md' }) {
+// Every pick-one-of-a-few in the app is this one. disabled: drawn for real while its page loads.
+function Segmented({ options, value, onChange, size = 'md', label, className = '', disabled }) {
   return (
-    <div className={'segmented seg-' + size}>
+    <div className={'segmented seg-' + size + (className ? ' ' + className : '')} role="group" aria-label={label}>
       {options.map((o) => {
         const val = typeof o === 'string' ? o : o.value;
         const lab = typeof o === 'string' ? o : o.label;
         return (
           <button key={val} type="button" className={'seg-btn' + (val === value ? ' active' : '')} aria-pressed={val === value}
-          onClick={() => onChange(val)}>{lab}</button>);
+          disabled={disabled} onClick={() => onChange(val)}>{lab}</button>);
 
       })}
     </div>);
 
 }
 
-// ---- Toggle (switch) --------------------------------------------------------
+// ---- Switch, and Toggle: a switch with its label --------------------------
+// Every on/off in the app is this one. `label` names it when no <label> wraps it.
+function Switch({ on, onChange, label, disabled, busy }) {
+  return (
+    <button type="button" className={'switch' + (on ? ' on' : '')} role="switch" aria-checked={on} aria-label={label}
+            disabled={disabled} aria-busy={busy || undefined} onClick={() => onChange(!on)}>
+      <span className="knob" />
+    </button>);
+
+}
 function Toggle({ checked, onChange, label, hint }) {
   return (
     <label className="toggle-row">
@@ -185,9 +195,7 @@ function Toggle({ checked, onChange, label, hint }) {
         <span className="toggle-label">{label}</span>
         {hint && <span className="toggle-hint">{hint}</span>}
       </span>
-      <button className={'switch' + (checked ? ' on' : '')} onClick={() => onChange(!checked)} role="switch" aria-checked={checked}>
-        <span className="knob" />
-      </button>
+      <Switch on={checked} onChange={onChange} />
     </label>);
 
 }
@@ -253,18 +261,39 @@ function SkeletonTile({ label }) {
   );
 }
 
+// On open, shift the 210px bubble so it stays 8px inside the window (SOLAR-26).
+const placeBubble = (e) => {
+  const r = e.currentTarget.getBoundingClientRect(), half = 105, mid = r.left + r.width / 2;
+  const shift = Math.max(8 + half - mid, Math.min(0, window.innerWidth - 8 - half - mid));
+  e.currentTarget.style.setProperty('--shift', Math.round(shift) + 'px');
+};
+// InfoDot's bubble on anything: hover, a tap or focus opens it. Every hint in the app is
+// one of the two, never the browser's title, which a phone can't open. Its bubble is fixed
+// to the window, so a box that clips (the flow's, a bar) can't cut it off; it follows on scroll.
+const placeTip = (el) => {
+  const r = el.getBoundingClientRect(), half = 105, mid = r.left + r.width / 2;
+  const x = Math.max(8 + half, Math.min(window.innerWidth - 8 - half, mid));
+  el.style.setProperty('--tx', Math.round(x) + 'px');
+  el.style.setProperty('--ty', Math.round(el.classList.contains('below') ? r.bottom + 9 : r.top - 9) + 'px');
+  el.style.setProperty('--arrow', Math.round(mid - x) + 'px');
+};
+document.addEventListener('scroll', () => document.querySelectorAll('.tip:hover, .tip:focus').forEach(placeTip), true);
+function Tip({ text, as: Tag = 'span', className = '', children, ...rest }) {
+  const id = React.useId();
+  if (!text) return <Tag className={className || undefined} {...rest}>{children}</Tag>;
+  const place = (e) => placeTip(e.currentTarget);
+  return (
+    <Tag className={'tip ' + className} tabIndex={0} aria-describedby={id} onMouseEnter={place} onFocus={place} {...rest}>
+      {children}<span id={id} className="info-bubble" role="tooltip">{text}</span>
+    </Tag>);
+
+}
 function InfoDot({ text }) {
   // aria-describedby ties the bubble to the dot, so a screen reader on the dot hears the
   // explanation instead of an unnamed note.
   const id = React.useId();
-  // On open, shift the 210px bubble so it stays 8px inside the window (SOLAR-26).
-  const place = (e) => {
-    const r = e.currentTarget.getBoundingClientRect(), half = 105, mid = r.left + r.width / 2;
-    const shift = Math.max(8 + half - mid, Math.min(0, window.innerWidth - 8 - half - mid));
-    e.currentTarget.style.setProperty('--shift', Math.round(shift) + 'px');
-  };
   return (
-    <span className="info-dot" tabIndex={0} aria-label="More about this" aria-describedby={id} onMouseEnter={place} onFocus={place}>
+    <span className="info-dot" tabIndex={0} aria-label="More about this" aria-describedby={id} onMouseEnter={placeBubble} onFocus={placeBubble}>
       <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
         <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.3" />
         <path d="M6.1 6.3a1.95 1.95 0 1 1 2.8 1.75c-.55.3-.9.65-.9 1.25v.35" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
@@ -334,7 +363,7 @@ function HistoryLock({ where, tile }) {
 Object.assign(window, {
   freeState, FreeCtx, useFreeOver, openPlans, LockIcon, Locked, HistoryLock,
   COLORS, fmtPower, fmtPowerParts, battShown, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
-  Card, StatTile, Metric, Badge, Segmented, Toggle, LegendChip, Sparkline, SectionTitle, InfoDot,
+  Card, StatTile, Metric, Badge, Segmented, Switch, Toggle, LegendChip, Sparkline, SectionTitle, InfoDot, Tip,
   Skeleton, SkeletonTile,
   fmtEnergySmart, fmtRandSmart, fmtEnergyParts, fmtMoney, fmtMoneySmart, moneySymbol
 });

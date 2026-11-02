@@ -384,7 +384,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         {wall && (
           <div className="wall-bar">
             <window.WallStatus snap={snap} />
-            <button className="flow-fs-btn wall-exit" title="Exit fullscreen (Esc)"
+            <button className="flow-fs-btn wall-exit"
               onClick={() => { if (Date.now() - revealedAt.current > 400) exitWall(); }}>
               <FsExitIcon /><span>Exit</span>
             </button>
@@ -430,12 +430,12 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             ) : (
               // Presence, not usage: mains voltage is there even when you draw nothing
               // from it, so this stays ON through a sunny self-powered afternoon.
-              <span className={'grid-state ' + (a.gridPresent ? 'on' : 'off')}
-                    title={a.gridPresent
+              <window.Tip className={'grid-state ' + (a.gridPresent ? 'on' : 'off')}
+                    text={a.gridPresent
                       ? 'The grid is live, even when you’re not using it.'
                       : 'No power from the grid.'}>
                 <span className="gs-dot" />{a.gridPresent ? (a.phaseDown ? 'Phase down' : 'Grid on') : 'Grid off'}
-              </span>
+              </window.Tip>
             )} />}
           {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off" color={CC.grid}
             info="No grid connection. Everything the home uses comes from solar and the battery." />}
@@ -486,7 +486,7 @@ function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt }) {
   const usable = Number.isFinite(delta);
   if (!Number.isFinite(pct) && !usable) return null;  // grew from zero and no kWh figure to show
   const mag = Math.abs(pct);
-  if (mag < 0.05) return <span className="trend-badge flat" title={(title || 'vs previous period') + ' — no change'}>0{unit}</span>; // dead flat: neutral, no arrow
+  if (mag < 0.05) return <window.Tip className="trend-badge flat" text={(title || 'vs previous period') + ' — no change'}>0{unit}</window.Tip>; // dead flat: neutral, no arrow
   const up = pct >= 0;
   const good = invert ? !up : up;
   // Hybrid: show the % normally, but when it explodes off a near-zero baseline
@@ -499,7 +499,7 @@ function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt }) {
   } else {
     label = (mag < 1 ? mag.toFixed(1) : String(Math.round(mag))) + unit; // decimal under 1% so a tiny change isn't shown as "0%"
   }
-  return <span className={'trend-badge ' + (good ? 'good' : 'bad')} title={title || 'vs previous period'}>{up ? '▲' : '▼'} {label}</span>;
+  return <window.Tip className={'trend-badge ' + (good ? 'good' : 'bad')} text={title || 'vs previous period'}>{up ? '▲' : '▼'} {label}</window.Tip>;
 }
 // "14.2 kWh" → the number, then a smaller unit, so the figure reads first
 function unitSplit(v) {
@@ -1161,9 +1161,9 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
           {!day ? <WiwBodySkeleton />
             : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')}</div>
             : <>
-              <div className="fbox-bar" role="img" title={destTitle} aria-label={destLabel}>
+              <window.Tip as="div" className="fbox-bar" role="img" text={destTitle} aria-label={destLabel}>
                 {dests.map(([l, v, c]) => <i key={l} style={{ flexGrow: destPct(v), background: c }} />)}
-              </div>
+              </window.Tip>
               <div className="wiw-figs" aria-hidden="true">
                 {dests.map(([l, v, c]) => {
                   const [n, u] = EP(v);
@@ -1318,9 +1318,9 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
           {!day ? <WiwBodySkeleton />
             : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || 'No home readings for this day.'}</div>
             : <>
-              <div className="fbox-bar" role="img" title={srcTitle} aria-label={srcLabel}>
+              <window.Tip as="div" className="fbox-bar" role="img" text={srcTitle} aria-label={srcLabel}>
                 {srcs.map(([l, v, c]) => <i key={l} style={{ flexGrow: srcPct(v), background: c }} />)}
-              </div>
+              </window.Tip>
               <div className="wiw-figs" aria-hidden="true">
                 {srcs.map(([l, v, c]) => {
                   const [n, u] = EP(v);
@@ -1972,7 +1972,9 @@ function TabSkeleton({ tab }) {
 const focusNoScroll = (el) => el && el.focus({ preventScroll: true });
 // busy: the change is on its way; the card stays, buttons off, until it lands (SOLAR-281).
 // modal: over the page in a Dialog rather than in place under its row.
-function ConfirmCard({ title, text, children, action, onConfirm, onCancel, cancelLabel = 'Cancel', busy = false, modal = false }) {
+// danger: the action is red, as it undoes something; otherwise green. No action: Cancel alone.
+// label names a modal one, the action's words by default.
+function ConfirmCard({ title, text, children, action, onConfirm, onCancel, cancelLabel = 'Cancel', busy = false, modal = false, danger = true, label }) {
   const cancel = React.useRef(null);
   React.useEffect(() => focusNoScroll(cancel.current), []);
   const body = <>
@@ -1981,10 +1983,10 @@ function ConfirmCard({ title, text, children, action, onConfirm, onCancel, cance
     {children}
     <div className="conn-form-actions">
       <button type="button" className="ghost-btn" onClick={onCancel} ref={cancel} disabled={busy}>{cancelLabel}</button>
-      <button type="button" className="danger-btn" onClick={onConfirm} disabled={busy} aria-busy={busy}>{action}</button>
+      {action && <button type="button" className={danger ? 'danger-btn' : 'save-btn'} onClick={onConfirm} disabled={busy} aria-busy={busy}>{action}</button>}
     </div>
   </>;
-  if (modal) return <window.Dialog label={action} onClose={() => { if (!busy) onCancel(); }}>{body}</window.Dialog>;
+  if (modal) return <window.Dialog label={label || action} onClose={() => { if (!busy) onCancel(); }}>{body}</window.Dialog>;
   return (
     <div className="conn-form confirm-card" role="alertdialog" aria-label={action}
          onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}>
@@ -2117,8 +2119,7 @@ function KeepPicker({ b, room, logins, title, text, action, cancelLabel = 'Cance
               return (
                 <div key={p.plant_id} className={'login-plant' + (on ? '' : ' off')}>
                   <div className="conn-user plant-nm">{name}</div>
-                  <button type="button" className={'switch' + (on ? ' on' : '')} role="switch" aria-checked={on} aria-label={'Keep ' + name}
-                          disabled={busy || (!one && !on && picked.length >= room)} onClick={() => toggle(p.plant_id)}><span className="knob" /></button>
+                  <window.Switch on={on} label={'Keep ' + name} disabled={busy || (!one && !on && picked.length >= room)} onChange={() => toggle(p.plant_id)} />
                 </div>
               );
             })}
@@ -2430,12 +2431,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
         {!b.comped && <p>{paid ? `Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Upgrades start today. Cancel any time.'}</p>}
       </div>
       {b.comped ? <p className="field-note">Your plan is free of charge: every plant, full history.</p> : <>
-        <div className="segmented seg-sm plan-period" role="group" aria-label="Billing">
-          {['monthly', 'yearly'].map(p => (
-            <button type="button" key={p} className={'seg-btn' + (view === p ? ' active' : '')} aria-pressed={view === p}
-                    onClick={() => setView(p)}>{p === 'monthly' ? 'Monthly' : 'Yearly, save 16%'}</button>
-          ))}
-        </div>
+        <Segmented size="sm" className="plan-period" label="Billing" value={view} onChange={setView}
+                   options={[{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly, save 16%' }]} />
         {(!sameView || b.prepaidOn) && <p className="field-note">{b.prepaidOn ?`Your year is paid. It starts on ${billDay(b.nextDate)}.`
           : b.nextPeriod === view ? `Your plan changes to ${view} on ${billDay(b.nextDate)}.`
           : view === 'yearly' ? `Pay for the year now. It starts on ${billDay(b.nextDate)}.`
@@ -2781,10 +2778,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     // A stopped plant the move to Free booked comes back only by swapping it in: its switch,
     // not Keep, on Free (0131) and after paying again (0133).
     const swap = s === 'going' && p.paused && (!billing || billing.plan === 'free' || p.free_removal);
-    const sw = (
-      <button type="button" className={'switch' + (on ? ' on' : '')} role="switch" aria-checked={on} aria-label={'Collect ' + name}
-              disabled={b} aria-busy={b} onClick={() => on ? setStopping(p.plant_id) : start(p)}><span className="knob" /></button>
-    );
+    const sw = <window.Switch on={on} label={'Collect ' + name} disabled={b} busy={b} onChange={() => on ? setStopping(p.plant_id) : start(p)} />;
     return (
       <div key={p.plant_id} className={'login-plant' + (on ? '' : ' off')}>
         <div className="conn-user plant-nm">{name}</div>
@@ -2801,14 +2795,9 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         {/* No room: the plans live on their own page, not in this list (SOLAR-264). On Family
             the plans page buys extra plants, R49 a plant; Free and Home upgrade there. */}
         {full === p.plant_id && (
-          <window.Dialog label="Your plan is full" onClose={() => setFull(null)}>
-            <div className="confirm-title">Your plan is full</div>
-            <div className="confirm-text">{billing?.plan === 'family' ? 'Turn another plant off first, or add this one to your plan.' : 'Turn another plant off first, or upgrade.'}</div>
-            <div className="conn-form-actions">
-              <button type="button" className="ghost-btn" onClick={() => setFull(null)} ref={focusNoScroll}>Cancel</button>
-              {onCollect && <button type="button" className="save-btn" onClick={() => { setFull(null); onCollect(p.plant_id); }}>Upgrade</button>}
-            </div>
-          </window.Dialog>
+          <ConfirmCard modal danger={false} label="Your plan is full" title="Your plan is full"
+            text={billing?.plan === 'family' ? 'Turn another plant off first, or add this one to your plan.' : 'Turn another plant off first, or upgrade.'}
+            action={onCollect && 'Upgrade'} onConfirm={() => { setFull(null); onCollect(p.plant_id); }} onCancel={() => setFull(null)} />
         )}
       </div>
     );
@@ -2855,7 +2844,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                 <div className="login-line">
                   <span className="login-email">
                     {acc.sunsynk_username}
-                    {(!ok || stale) && <span className="warn" title={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : undefined}> · {!ok ? 'Sign-in expired' : 'Not updating'}</span>}
+                    {(!ok || stale) && <window.Tip className="warn" text={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : null}> · {!ok ? 'Sign-in expired' : 'Not updating'}</window.Tip>}
                   </span>
                   {!ok && mode !== acc.account_id && <button type="button" className="ghost-btn" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
                   <LoginMenu email={acc.sunsynk_username} busy={busy === acc.account_id}
@@ -2988,7 +2977,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
         {sum
           ? <div className="sset-sum"><div className="fs-sum">
               {/* the Total / By size switch is words only, so it draws for real, locked */}
-              <div className="fs-sumhead"><div className="fs-seg"><button type="button" className="on" disabled>Total</button><button type="button" disabled>By size</button></div><b className="fs-val mono">{NBSP}</b></div>
+              <div className="fs-sumhead"><Segmented size="sm" label="How to enter it" value="total" onChange={() => {}} options={window.SUM_MODES} disabled /><b className="fs-val mono">{NBSP}</b></div>
               <window.Skeleton className="fs-in" w="" h={41} r={9} />
             </div></div>
           : <div className="conn-actions sset-one"><window.Skeleton className="fs-in" w="" h={41} r={9} /></div>}
@@ -3132,8 +3121,8 @@ function PasswordRow({ email }) {
   const field = (id, text, value, set, autoComplete, hint, also = []) => (
     <div className={'field' + (id === 'pw-confirm' ? ' link-last' : '')}>
       {label(id, text, hint)}
-      <window.LinkPassword id={id} autoComplete={autoComplete} value={value}
-                           onChange={(v) => { set(v); edited(id, ...also); }} invalid={window.invalidProps(id, bad[id])} />
+      <window.PasswordInput id={id} className="input" autoComplete={autoComplete} value={value}
+                            onChange={(v) => { set(v); edited(id, ...also); }} aria={window.invalidProps(id, bad[id])} />
     </div>
   );
   return (
@@ -3158,6 +3147,22 @@ function PasswordRow({ email }) {
           </window.Dialog>
         )}
       </div>
+  );
+}
+
+const shiftDay = (k, n) => { const d = new Date(k + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+// One end of a range: a field-sized button reading "Fri 2 Oct" that opens the app's calendar.
+function DayField({ id, value, todayStr, earliest, latest, bad, onPick }) {
+  const [open, setOpen, ref] = usePopover();
+  const close = React.useCallback(() => setOpen(false), []);
+  return (
+    <div className="pick" ref={ref}>
+      <button type="button" id={id} className={'fs-in pick-btn' + (bad ? ' bad' : '')} aria-haspopup="dialog" aria-expanded={open}
+              onClick={() => setOpen(o => !o)} {...window.invalidProps(id, bad, 'dl-err')}>
+        <window.CalIcon /><span className="pick-val">{window.dayFace(value, todayStr)}</span>
+      </button>
+      {open && <window.CalendarPop date={value} todayStr={todayStr} earliest={earliest} latest={latest} allDays onPick={onPick} onClose={close} />}
+    </div>
   );
 }
 
@@ -3203,16 +3208,16 @@ function DownloadSection({ plants, plantId, ready }) {
     }
   };
 
-  // From, To and Download on one line; on a phone they stack.
-  const field = (id, text, value, set) => (
+  // From, To and Download on one line; on a phone they stack. The two calendars keep the
+  // range in order and a year at most; a day with no readings is still a fine end.
+  const field = (id, text, value, set, earliest, latest) => (
     <div className="dl-field">
       <label htmlFor={id} className="conn-meta">{text}</label>
-      <div className={'fs-in' + (bad ? ' bad' : '')}>
-        <input id={id} type="date" value={value} max={today}
-               onChange={(e) => { set(e.target.value); setBad(null); }} {...window.invalidProps(id, bad, 'dl-err')} />
-      </div>
+      <DayField id={id} value={value} todayStr={today} earliest={earliest} latest={latest} bad={bad}
+                onPick={(k) => { set(k); setBad(null); }} />
     </div>
   );
+  const yearTo = shiftDay(from, 365);
   return (
     <SettingsSection id="download" title="Your data" note="A CSV file. Every minute for the last 31 days, every 5 minutes before that.">
       <div className="dl-row">
@@ -3220,17 +3225,13 @@ function DownloadSection({ plants, plantId, ready }) {
           <div className="dl-field">
             <label htmlFor="dl-plant" className="conn-meta">Plant</label>
             {/* which plant is on screen comes with api_me: until then the picker shimmers */}
-            {!ready ? <window.Skeleton className="fs-in" w="" h={41} r={9} /> : (
-              <div className="fs-in fs-select">
-                <select id="dl-plant" value={plant} onChange={(e) => setPlant(Number(e.target.value))}>
-                  {plants.map(p => <option key={p.id} value={p.id}>{p.name || 'Plant ' + p.id}</option>)}
-                </select>
-              </div>
-            )}
+            {!ready ? <window.Skeleton className="fs-in" w="" h={41} r={9} />
+              : <PickMenu id="dl-plant" label="Plants" value={plant} onPick={setPlant}
+                          options={plants.map(p => ({ value: p.id, label: p.name || 'Plant ' + p.id }))} />}
           </div>
         )}
-        {field('dl-from', 'From', from, setFrom)}
-        {field('dl-to', 'To', to, setTo)}
+        {field('dl-from', 'From', from, setFrom, shiftDay(to, -365), to)}
+        {field('dl-to', 'To', to, setTo, from, yearTo < today ? yearTo : today)}
         {/* the plan isn't known yet, so neither is the lock: the button's place shimmers */}
         {!ready ? <window.Skeleton w={104} h={41} r={9} style={{ flex: 'none' }} />
           : over ? <button type="button" className="ghost-btn lock-cta" onClick={() => window.openPlans('csv')}><window.LockIcon />Download</button>
@@ -3276,15 +3277,11 @@ function DeleteAccountRow({ email, billing, onBilling }) {
       {/* Tapping Delete on a blocked account shows why, in place of the confirm (SOLAR-274) */}
       {/* a plan to cancel or a payment to settle first: said in a pop-up when Delete is pressed (SOLAR-292) */}
       {blocked && confirming && (
-        <window.Dialog label={owed ? 'Pay the failed payment first' : 'Cancel your plan first'} onClose={() => setConfirming(false)}>
-          <div className="confirm-title">{owed ? 'Pay the failed payment first' : 'Cancel your plan first'}</div>
-          <div className="confirm-text">{owed ? 'Pay it in Billing, then you can delete your account.'
-            : <>Your <b>{PLAN_NAME[billing.plan]}</b> plan is still running. Cancel it in Billing, then you can delete your account.</>}</div>
-          <div className="conn-form-actions">
-            <button type="button" className="ghost-btn" onClick={() => setConfirming(false)}>Close</button>
-            <button type="button" className="save-btn" onClick={onBilling}>Go to Billing</button>
-          </div>
-        </window.Dialog>
+        <ConfirmCard modal danger={false} label={owed ? 'Pay the failed payment first' : 'Cancel your plan first'}
+          title={owed ? 'Pay the failed payment first' : 'Cancel your plan first'}
+          text={owed ? 'Pay it in Billing, then you can delete your account.'
+            : <>Your <b>{PLAN_NAME[billing.plan]}</b> plan is still running. Cancel it in Billing, then you can delete your account.</>}
+          cancelLabel="Close" action="Go to Billing" onConfirm={onBilling} onCancel={() => setConfirming(false)} />
       )}
       {!blocked && confirming && (
         <ConfirmCard modal title={<>Delete <b>{email || 'this account'}</b>?</>} text="Your plants’ history goes too, unless another account shares them. It cannot be undone."
@@ -3395,8 +3392,8 @@ function NotificationsSection({ userId }) {
               <span className="toggle-hint">{wait ? skelLine(g.when ? 190 : 70, 11) : emailGroupSummary(g, p)}</span>
             </span>
           </button>
-          {wait ? skelSwitch : <button type="button" className={'switch' + (anyOn ? ' on' : '')} role="switch" aria-checked={anyOn} aria-label={g.label}
-                  onClick={() => p && g.rows.forEach(([kind]) => { if (p[kind] === anyOn) flipOne(kind, !anyOn, g.label); })}><span className="knob" /></button>}
+          {wait ? skelSwitch : <window.Switch on={anyOn} label={g.label}
+                  onChange={() => p && g.rows.forEach(([kind]) => { if (p[kind] === anyOn) flipOne(kind, !anyOn, g.label); })} />}
         </div>
         <div id={'notif-' + key} className="field notif-rows" role="group" aria-label={g.label} hidden={!open[key]}>
           {g.rows.map(([kind, label, hint]) => wait ? (
@@ -3428,8 +3425,8 @@ function NotificationsSection({ userId }) {
             <span className="notif-label">All emails</span>
             <span className="toggle-hint">{loading ? skelLine(60, 11) : onCount === every.length ? 'All ' + onCount + ' on' : onCount ? onCount + ' of ' + every.length + ' on' : 'Off'}</span>
           </span>
-          {loading ? skelSwitch : <button type="button" className={'switch' + (allOn ? ' on' : '')} role="switch" aria-checked={allOn} aria-label="All emails"
-                  onClick={() => prefs && every.forEach(([kind]) => { if (prefs[kind] === allOn) flip(kind, !allOn, 'All emails'); })}><span className="knob" /></button>}
+          {loading ? skelSwitch : <window.Switch on={allOn} label="All emails"
+                  onChange={() => prefs && every.forEach(([kind]) => { if (prefs[kind] === allOn) flip(kind, !allOn, 'All emails'); })} />}
         </div>
         {EMAIL_GROUPS.map(g => group(g, prefs, flip, g.id, loading))}
       </>}

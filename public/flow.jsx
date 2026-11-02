@@ -212,10 +212,10 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
           {n.state && <div className="fbox-state">{n.state}</div>}
           {n.split && splitFoot(n.split)}
           {n.charge != null && (
-            <div className="fbox-foot fbox-charge" title={usualTitle}>
+            <window.Tip as="div" className="fbox-foot fbox-charge" text={usualTitle}>
               <div className="fbox-bar"><i style={{ width: Math.max(0, Math.min(100, n.charge)) + '%', background: n.color }} /></div>
               <b style={{ color: n.color }}>{n.charge}%</b>
-            </div>
+            </window.Tip>
           )}
           {/* mains there or gone: a status, never green-tinted like solar's power */}
           {n.known && !n.idle && <div className={'fbox-foot fbox-grid' + (n.off ? ' off' : '')}><i />{n.off ? 'Grid off' : 'Grid on'}</div>}
