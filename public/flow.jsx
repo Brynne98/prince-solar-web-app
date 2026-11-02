@@ -223,7 +223,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
         {n.today.length > 0 && (
           <div className="fbox-today">
             <div className="fbox-today-h">Today</div>
-            {n.today.map(([k, kwh]) => <div key={k}><span>{k}</span><b>{(Math.round(Number(kwh) * 10) / 10).toFixed(1)}<span className="u">kWh</span></b></div>)}
+            {n.today.map(([k, kwh]) => <div key={k}><span>{k}</span><b>{window.fmtEnergyParts(Number(kwh))[0]}<span className="u">{window.fmtEnergyParts(Number(kwh))[1]}</span></b></div>)}
           </div>
         )}
       </div>

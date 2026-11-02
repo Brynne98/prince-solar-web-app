@@ -42,6 +42,15 @@ runbook, including pre-flight checks and the version bump, is in `DEPLOY.md`.
 Nothing here is permission to run those. Commit, push and deploy only on
 Brynne's explicit say-so, every time.
 
+## Reuse before you build
+
+- Before writing any UI or helper, read `COMPONENTS.md`. If something there is close,
+  use it or add a prop to it; a second version of the same thing is a bug.
+- A new shared piece goes in the file `COMPONENTS.md` says it belongs to, and gets a
+  line in `COMPONENTS.md` in the same change.
+- `npm test` runs `scripts/reuse-check.mjs`. When you remake something it doesn't catch
+  yet, add a rule for it there.
+
 ## Analytics
 
 - Every new feature sends a PostHog event when it's used: `window.track('name_done', {...})`

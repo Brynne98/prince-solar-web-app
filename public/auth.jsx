@@ -226,6 +226,17 @@ function AuthBrand() {
 /** Every password box in the app: the input and its show button. type="button" on the eye
  *  matters: inside a form a bare <button> submits, so revealing would sign in half-typed.
  *  `aria` is the input's invalid and describedby. */
+/** The signed-out card: a form under the brand, with its title and a line under it (sub). */
+function AuthCard({ title, sub, onSubmit, busy, noValidate, children }) {
+  return (
+    <form className="login-card" onSubmit={onSubmit} noValidate={noValidate} aria-busy={!!busy}>
+      <AuthBrand />
+      <div className="login-title">{title}</div>
+      {sub && <div className="login-sub">{sub}</div>}
+      {children}
+    </form>
+  );
+}
 function PasswordInput({ id, value, onChange, placeholder, autoComplete = 'off', className, aria }) {
   const [show, setShow] = React.useState(false);
   return (
@@ -248,6 +259,25 @@ function PasswordField({ id, label, value, onChange, placeholder, autoComplete, 
                      aria={error ? invalidProps(id, error) : hint ? { 'aria-describedby': `${id}-hint` } : {}} />
     </div>
   );
+}
+
+/** A form's field errors: field id → its message, every problem at once, each on its own field.
+ *  flag(problems) shows them and focuses the first; edited(...ids) clears only those fields'. */
+function useFieldErrors() {
+  const [bad, setBad] = React.useState({});
+  // Focus the first bad field after React commits, so it already reads as invalid. Blur first:
+  // re-focusing a field that already has focus is silent to a screen reader.
+  const flag = (problems) => {
+    setBad(problems);
+    setTimeout(() => { const el = document.getElementById(Object.keys(problems)[0]); el?.blur(); el?.focus(); });
+  };
+  const edited = (...ids) => setBad(b => {
+    if (!ids.some(id => b[id])) return b;
+    const next = { ...b };
+    ids.forEach(id => delete next[id]);
+    return next;
+  });
+  return { bad, setBad, flag, edited };
 }
 
 /** Marks a field invalid and ties it to its message (`describedBy` defaults to the label-line one). */
@@ -318,10 +348,7 @@ function InboxCard({ kind, email, onBack, onSignIn }) {
     else { window.track('email_resend_done', { kind }); window.toast?.('Email sent again.'); setWait(RESEND_WAIT); }
   };
   return (
-    <form className="login-card" onSubmit={resend} aria-busy={busy}>
-      <AuthBrand />
-      <div className="login-title">Check your inbox</div>
-      <div className="login-sub">We sent a link to <b>{email}</b>. Tap it to carry on.</div>
+    <AuthCard title="Check your inbox" sub={<>We sent a link to <b>{email}</b>. Tap it to carry on.</>} onSubmit={resend} busy={busy}>
       <button type="submit" className="auth-resend" disabled={busy || wait > 0} aria-busy={busy}>
         {busy ? 'Sending…' : wait > 0 ? `Resend in ${wait}s` : 'Resend email'}
       </button>
@@ -331,7 +358,7 @@ function InboxCard({ kind, email, onBack, onSignIn }) {
           ? <button type="button" className="login-link quiet" onClick={onSignIn}>Back to sign in</button>
           : <span>Already confirmed? <button type="button" className="login-link" onClick={onSignIn}>Sign in</button></span>}
       </div>
-    </form>
+    </AuthCard>
   );
 }
 
@@ -380,8 +407,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     return () => window.removeEventListener('pageshow', onShow);
   }, []);
 
-  // Field id → its message. Every problem at once, each shown under its own field.
-  const [bad, setBad] = useState({});
+  const { bad, setBad, flag, edited } = useFieldErrors();
 
   const go = (m) => { setMode(m); setBad({}); setPassword(''); setPassword2(''); };
 
@@ -405,19 +431,6 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     return out;
   };
 
-  // Focus the first bad field after React commits, so it already reads as invalid.
-  const flag = (problems) => {
-    setBad(problems);
-    // Blur first: re-focusing a field that already has focus is silent to a screen reader.
-    setTimeout(() => { const el = document.getElementById(Object.keys(problems)[0]); el?.blur(); el?.focus(); });
-  };
-  // Editing a field clears only its own message.
-  const edited = (...ids) => setBad(b => {
-    if (!ids.some(id => b[id])) return b;
-    const next = { ...b };
-    ids.forEach(id => delete next[id]);
-    return next;
-  });
 
   const submit = async (e) => {
     e.preventDefault();
@@ -484,10 +497,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
 
   return (
     <div className="login-wrap">
-      <form className="login-card" onSubmit={submit} noValidate aria-busy={!!busy}>
-        <AuthBrand />
-        <div className="login-title">{copy.h}</div>
-        {copy.p && <div className="login-sub">{copy.p}</div>}
+      <AuthCard title={copy.h} sub={copy.p} onSubmit={submit} noValidate busy={busy}>
         {/* Google first on sign-in and sign-up (SOLAR-118): one tap, and no confirmation
             email to wait for. On sign-in its terms line sits right under it. */}
         {(mode === 'signin' || mode === 'signup') && (<>
@@ -544,7 +554,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
             <SignOutButton className="login-link quiet" busyText="Cancelling…">Cancel</SignOutButton>
           )}
         </div>
-      </form>
+      </AuthCard>
       {toastHost}
     </div>
   );
@@ -582,7 +592,7 @@ async function signOutHere() {
 function SignOutButton({ className, children = 'Sign out', busyText = 'Signing out…' }) {
   const [busy, setBusy] = React.useState(false);
   const click = async () => { setBusy(true); await signOutHere(); };
-  return <button type="button" className={className} onClick={click} disabled={busy} aria-busy={busy}>{busy ? busyText : children}</button>;
+  return <window.BusyButton className={className} onClick={click} busy={busy} busyText={busyText}>{children}</window.BusyButton>;
 }
 // Shared with the Connect screen so it looks like the same product.
-Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, PasswordInput, PasswordField, FieldLabel, invalidProps, SignOutButton, signOutHere, explainAuthError: explain });
+Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, AuthCard, PasswordInput, PasswordField, FieldLabel, useFieldErrors, invalidProps, SignOutButton, signOutHere, explainAuthError: explain });

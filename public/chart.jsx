@@ -45,29 +45,7 @@ function niceScale(min, max, targetTicks) {
   return { lo, hi, ticks };
 }
 
-// Local YYYY-MM-DD (matches the server's localDate(); the dashboard runs on one
-// machine, so browser-local and server-local agree).
-function localDateStr(d = new Date()) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-function shiftDate(s, days) {
-  const [y, m, d] = s.split('-').map(Number);
-  return localDateStr(new Date(y, m - 1, d + days));
-}
-/** "12 min" / "2h 33m" — spoken, not decimal hours, like everything else here. */
-function fmtGap(mins) {
-  if (mins < 60) return mins + ' min';
-  const h = Math.floor(mins / 60), m = mins % 60;
-  return m ? h + 'h ' + m + 'm' : h + 'h';
-}
 
-function niceDate(s) {
-  const [y, m, d] = s.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-}
 
 
 // ---------------------------- SHARED DAY-CHART FRAME ----------------------------
@@ -105,10 +83,7 @@ function useDayPicker(earliest, today, want) {
 
 // "Fri 2 Oct", and the year too when it is not this year: the phone's face for the date.
 function dayFace(s, todayStr) {
-  const [y, m, d] = s.split('-').map(Number);
-  const opts = { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' };
-  if (y !== Number(todayStr.slice(0, 4))) opts.year = 'numeric';
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-GB', opts).replace(',', '');
+  return dayText(s, { weekday: 'short', day: 'numeric', month: 'short', year: s.slice(0, 4) === todayStr.slice(0, 4) ? undefined : 'numeric' });
 }
 
 // A drawn chevron, so it sits in the middle of its box; the ‹ › glyphs sat on the text baseline.
@@ -287,11 +262,39 @@ function outageAt(runs, i) {
 }
 // "Grid off 9h" by the date; its square is the band's red, so it names the shading.
 function OutagePill({ mins, what }) {
-  return mins > 0 ? <window.Tip className="hv-gap" text={OUTAGE_TITLE}><i className="hv-gap-sq" />{what} off {fmtGap(mins)}</window.Tip> : null;
+  return mins > 0 ? <window.Tip className="hv-gap" text={OUTAGE_TITLE}><i className="hv-gap-sq" />{what} off {window.fmtDuration(mins)}</window.Tip> : null;
+}
+// A series from index `from` to `to` as an SVG path: x(i) across, yAt(i) down, which is null
+// where there is no reading, so the line breaks there rather than bridging the gap.
+function seriesPath(from, to, x, yAt) {
+  let d = '', pen = false;
+  for (let i = from; i <= to; i++) {
+    const v = yAt(i);
+    if (v == null) { pen = false; continue; }
+    d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + v.toFixed(1) + ' ';
+    pen = true;
+  }
+  return d;
+}
+// The same series filled down to `base` (the y of zero), one closed shape per unbroken run.
+function seriesArea(from, to, x, yAt, base) {
+  const runs = []; let run = null;
+  for (let i = from; i <= to; i++) {
+    const v = yAt(i);
+    if (v == null) { run = null; continue; }
+    if (!run) runs.push(run = []);
+    run.push(x(i).toFixed(1) + ' ' + v.toFixed(1));
+  }
+  const b = base.toFixed(1);
+  return runs.map(r => 'M' + r.join(' L') + ` L${r[r.length - 1].split(' ')[0]} ${b} L${r[0].split(' ')[0]} ${b} Z`).join(' ');
+}
+// A day chart with nothing to draw: a shimmer at its height while it loads, else why it's empty.
+function ChartPlaceholder({ height, loading, text }) {
+  return loading ? <window.Skeleton h={height} r={12} /> : <div className="chart-empty" style={{ height }}>{text}</div>;
 }
 // The hover card's row for a bucket inside a run, in the band's red.
 function OutageTipRow({ span, what }) {
-  return span ? <div className="tip-row" style={{ color: window.COLORS.load }}><span className="tip-dot tip-sq" style={{ background: window.COLORS.load }} /><span className="tip-l">{what} off</span><span className="tip-v mono">{span}</span></div> : null;
+  return span ? <window.TipRow sq color={window.COLORS.load} label={what + ' off'}>{span}</window.TipRow> : null;
 }
 function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   const C = window.COLORS;
@@ -350,15 +353,8 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   const y = v => m.t + innerH - ((v - ys.lo) / (ys.hi - ys.lo)) * innerH;
   const yf = v => m.t + innerH - ((v - fs.lo) / (fs.hi - fs.lo)) * innerH;
 
-  const line = (pts, k, yFn, ok) => {
-    let d = '', pen = false;
-    pts.forEach((p, i) => {
-      if (i > lastIdx || p[k] == null || (ok && !ok(p[k]))) { pen = false; return; }
-      d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + yFn(p[k]).toFixed(1) + ' ';
-      pen = true;
-    });
-    return d;
-  };
+  const line = (pts, k, yFn, ok) => seriesPath(0, Math.min(pts.length - 1, lastIdx), x,
+    i => pts[i][k] == null || (ok && !ok(pts[i][k])) ? null : yFn(pts[i][k]));
   // band between two keys, as closed segments that break at nulls
   const band = (pts, kLo, kHi, yFn, ok) => {
     const segs = []; let seg = null;
@@ -412,8 +408,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
       <div className="chart-tip" style={{ left: tipLeftFor(px, width), top: 24 }}>
         <div className="tip-time">{HM(hp * 5)}</div>
         {rows.map(([l, v, c]) => (
-          <div className="tip-row" key={l}><span className="tip-dot" style={{ background: c }} /><span className="tip-l">{l}</span>
-            <span className="tip-v mono">{v == null ? '—' : v}</span></div>
+          <window.TipRow key={l} color={c} label={l}>{v == null ? '—' : v}</window.TipRow>
         ))}
         <OutageTipRow span={outageAt(outages, hp)} what={offWord} />
       </div>
@@ -426,7 +421,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
     ? 'Today’s readings arrive every six hours.'
     : sync && sync.invPending && sync.tempNext && date >= sync.tempNext
       ? (sync.tempNext > earliest
-          ? `Not fetched yet. Up to ${niceDate(shiftDate(sync.tempNext, -1))} so far, more every six hours.`
+          ? `Not fetched yet. Up to ${dayText(shiftDate(sync.tempNext, -1))} so far, more every six hours.`
           : 'Not fetched yet. Older days come first, more every six hours.')
       : date < earliest ? 'Older than 60 days, so not available.'
       : 'No readings for this day.';
@@ -455,10 +450,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
         {!isTemp && fInv && <window.LegendChip color={C.soc} label={freqLabel} value={fmtHz(fVal)} active />}
       </div>
       <div className="chart-area" ref={ref} style={{ position: 'relative', height }}>
-        {nInv === 0 ? (
-          invs == null ? <window.Skeleton h={height} r={12} />
-            : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height, color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: '0 16px' }}>{emptyMsg}</div>
-        ) : (
+        {nInv === 0 ? <ChartPlaceholder height={height} loading={invs == null} text={emptyMsg} /> : (
           <svg width={width} height={height} className="chart-svg" style={{ cursor: 'crosshair' }}
             onMouseMove={onMove} onMouseLeave={() => setHover(null)}
             onTouchStart={e => e.touches[0] && setHover(idxFromPointer(e.touches[0].clientX, e.currentTarget, m, innerW, lastIdx))}
@@ -601,42 +593,15 @@ function HistoryView({ today, refreshKey, locked, silent }) {
     // Cloud-recovered (est) points render exactly like measured ones — the
     // "cloud-filled" pill and the hover tooltip carry the provenance. Lines
     // still BREAK at nulls (minutes with no data anywhere): those can't be drawn.
-    const line = (key, color) => {
-      let d = '', pen = false;
-      pts.forEach((p, i) => {
-        if (p[key] == null) { pen = false; return; }
-        d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p[key]).toFixed(1) + ' ';
-        pen = true;
-      });
-      return <path d={d} fill="none" stroke={color} strokeWidth="1.1" strokeLinejoin="round" strokeLinecap="round" />;
-    };
-
+    const at = (key, yFn = y) => i => pts[i][key] == null ? null : yFn(pts[i][key]);
+    const line = (key, color) => <path d={seriesPath(0, pts.length - 1, x, at(key))} fill="none" stroke={color} strokeWidth="1.1" strokeLinejoin="round" strokeLinecap="round" />;
     const areaFill = (key, color) => {
-      const segs = [];
-      let seg = null;
-      pts.forEach((p, i) => {
-        if (p[key] == null) { seg = null; return; }
-        if (!seg) { seg = []; segs.push(seg); }
-        seg.push([i, p[key]]);
-      });
-      if (!segs.length) return null;
-      const d = segs.map((s) => {
-        const path = s.map(([i, v], k) => (k ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)).join(' ');
-        return `${path} L ${x(s[s.length - 1][0]).toFixed(1)} ${y(0).toFixed(1)} L ${x(s[0][0]).toFixed(1)} ${y(0).toFixed(1)} Z`;
-      }).join(' ');
-      return <path d={d} fill={color} fillOpacity="0.13" />;
+      const d = seriesArea(0, pts.length - 1, x, at(key), y(0));
+      return d ? <path d={d} fill={color} fillOpacity="0.13" /> : null;
     };
 
     // SOC line — overlaid on the power series, mapped to the independent right axis
-    let socD = '';
-    if (vis.soc) {
-      let pen = false;
-      pts.forEach((p, i) => {
-        if (p.soc == null) { pen = false; return; }
-        socD += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + ysoc(p.soc).toFixed(1) + ' ';
-        pen = true;
-      });
-    }
+    const socD = vis.soc ? seriesPath(0, pts.length - 1, x, at('soc', ysoc)) : '';
 
     const gaps = gapRuns(0, lastIdx, i => pts[i].pv == null);
 
@@ -757,8 +722,7 @@ function HistoryView({ today, refreshKey, locked, silent }) {
             marks them in the data if that ever wants surfacing again */}
         <div className="tip-time">{HM(p.t)}</div>
         {rows.map(([l, v, c, u]) => (
-          <div className="tip-row" key={l}><span className="tip-dot" style={{ background: c }} /><span className="tip-l">{l}</span>
-            <span className="tip-v mono">{u === 'W' ? window.fmtPower(v) : v + ' ' + u}</span></div>
+          <window.TipRow key={l} color={c} label={l}>{u === 'W' ? window.fmtPower(v) : v + ' ' + u}</window.TipRow>
         ))}
       </div>
     );
@@ -779,18 +743,18 @@ function HistoryView({ today, refreshKey, locked, silent }) {
       const bt = p.batt || 0; if (bt < 0) bChg += -bt / 1000 * dt; else bDis += bt / 1000 * dt; // chart: −batt = charging
     }
     const t0 = pts[a].t, t1 = pts[b].t, mins = t1 - t0;
-    const dur = mins >= 60 ? `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m` : `${mins}m`;
+    const dur = window.fmtDuration(mins);
     const soc0 = pts[a].soc, soc1 = pts[b].soc;
     const dSoc = (soc0 != null && soc1 != null) ? soc1 - soc0 : null;
     const f = v => v.toFixed(2);
     return (
       <div className="chart-range">
         <div className="cr-head"><span className="tip-time">{HM(t0)} – {HM(t1)} · {dur}</span><button className="cr-x" onClick={() => setSel(null)} aria-label="Clear">×</button></div>
-        <div className="tip-row"><span className="tip-dot" style={{ background: C.pv }} /><span className="tip-l">Generated</span><span className="tip-v mono">{f(gen)} kWh</span></div>
-        <div className="tip-row"><span className="tip-dot" style={{ background: C.load }} /><span className="tip-l">Home</span><span className="tip-v mono">{f(cons)} kWh</span></div>
-        <div className="tip-row"><span className="tip-dot" style={{ background: C.grid }} /><span className="tip-l">Grid in / out</span><span className="tip-v mono">{f(gImp)} / {f(gExp)} kWh</span></div>
-        <div className="tip-row"><span className="tip-dot" style={{ background: C.batt }} /><span className="tip-l">Batt chg / dis</span><span className="tip-v mono">{f(bChg)} / {f(bDis)} kWh</span></div>
-        {dSoc != null && <div className="tip-row"><span className="tip-dot" style={{ background: C.soc }} /><span className="tip-l">Charge</span><span className="tip-v mono">{soc0}% → {soc1}% ({dSoc >= 0 ? '+' : ''}{dSoc}%)</span></div>}
+        <window.TipRow color={C.pv} label="Generated">{f(gen)} kWh</window.TipRow>
+        <window.TipRow color={C.load} label="Home">{f(cons)} kWh</window.TipRow>
+        <window.TipRow color={C.grid} label="Grid in / out">{f(gImp)} / {f(gExp)} kWh</window.TipRow>
+        <window.TipRow color={C.batt} label="Batt chg / dis">{f(bChg)} / {f(bDis)} kWh</window.TipRow>
+        {dSoc != null && <window.TipRow color={C.soc} label="Charge">{soc0}% → {soc1}% ({dSoc >= 0 ? '+' : ''}{dSoc}%)</window.TipRow>}
       </div>
     );
   }
@@ -824,10 +788,8 @@ function HistoryView({ today, refreshKey, locked, silent }) {
 
       <div className="chart-area" ref={ref} style={{ position: 'relative', height: height }}>
         {hasData ? renderDay()
-          : (loading || (isToday && !dayData))
-            // still fetching: hold the chart's shape rather than printing "Loading…"
-            ? <window.Skeleton h={height} r={12} />
-            : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: height, color: 'var(--muted)', fontSize: 13 }}>{emptyMsg}</div>}
+          // still fetching: hold the chart's shape rather than printing "Loading…"
+          : <ChartPlaceholder height={height} loading={loading || (isToday && !dayData)} text={emptyMsg} />}
         {tooltip()}
         {rangeSummary()}
       </div>
@@ -836,4 +798,4 @@ function HistoryView({ today, refreshKey, locked, silent }) {
 }
 
 window.HistoryView = HistoryView;
-Object.assign(window, { CalendarPop, CalIcon, dayFace }); // Your data's From and To (tabs.js)
+Object.assign(window, { CalendarPop, CalIcon, dayFace, seriesPath, seriesArea }); // Your data's From and To (tabs.js)

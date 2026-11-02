@@ -40,6 +40,32 @@ function fmtPlantTime(d, tz) {
   try { return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: tz || undefined }); }
   catch (e) { return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); }
 }
+// Local YYYY-MM-DD (matches the server's localDate(); the dashboard runs on one
+// machine, so browser-local and server-local agree).
+function localDateStr(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function shiftDate(s, days) {
+  const [y, m, d] = s.split('-').map(Number);
+  return localDateStr(new Date(y, m - 1, d + days));
+}
+// A YYYY-MM-DD as words, "Fri 2 Oct" by default; opts for others ("2 October 2026").
+// Read as UTC so the day never shifts with the device's zone.
+function dayText(s, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-GB', { ...opts, timeZone: 'UTC' }).replace(',', '');
+}
+/** Whole minutes as "12 min" / "2h 33m": spoken, not decimal hours, like everything else here. */
+function fmtDuration(mins) {
+  if (mins < 60) return mins + ' min';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m ? h + 'h ' + m + 'm' : h + 'h';
+}
+// A plant's name, from any of its shapes (api_me's {id, name}, a login's {plant_id, plant_name}).
+const plantLabel = (p) => p.name || p.plant_name || 'Plant ' + (p.id ?? p.plant_id);
 function fmtKwh(k) {
   if (k == null || isNaN(k)) return '—';
   return (Math.round(k * 10) / 10).toLocaleString('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' kWh';
@@ -116,6 +142,11 @@ function Card({ children, className = '', style = {}, ...rest }) {
 
 }
 
+// A bar filled to pct (0..100) in color. small: the mini tiles' thinner one.
+const Meter = ({ pct, color, small }) => (
+  <div className={'meter' + (small ? ' sm' : '')}><div className="meter-fill" style={{ width: Math.max(0, Math.min(100, pct)) + '%', background: color }} /></div>
+);
+
 // ---- Big number stat tile (the "4 tabs" the user liked) ---------------------
 // locked: Free after its week (SOLAR-242), a faint shape for the figure and a lock under it
 function StatTile({ label, value, unit, accent, sub, bar, loading, locked }) {
@@ -136,29 +167,11 @@ function StatTile({ label, value, unit, accent, sub, bar, loading, locked }) {
             <span className="num">{value}</span>{unit && <span className="unit">{unit}</span>}
           </div>}
       {bar != null &&
-      <div className="meter"><div className="meter-fill" style={{ width: Math.max(0, Math.min(100, bar)) + '%', background: accent }} /></div>
+      <Meter pct={bar} color={accent} />
       }
       {sub && <div className="stat-sub">{sub}</div>}
     </Card>);
 
-}
-
-// ---- Small label / readout row ---------------------------------------------
-function Metric({ label, value, unit, accent, mono = true }) {
-  return (
-    <div className="metric">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value" style={{ color: accent || 'var(--text)' }}>
-        <span className={mono ? 'mono' : ''}>{value}</span>
-        {unit && <span className="metric-unit">{unit}</span>}
-      </div>
-    </div>);
-
-}
-
-// ---- Badge ------------------------------------------------------------------
-function Badge({ tone = 'neutral', children, dot }) {
-  return <span className={'badge badge-' + tone}>{dot && <i className="badge-dot" />}{children}</span>;
 }
 
 // ---- Segmented control ------------------------------------------------------
@@ -180,7 +193,9 @@ function Segmented({ options, value, onChange, size = 'md', label, className = '
 
 // ---- Switch, and Toggle: a switch with its label --------------------------
 // Every on/off in the app is this one. `label` names it when no <label> wraps it.
-function Switch({ on, onChange, label, disabled, busy }) {
+// loading: its value still on its way, so a shimmer in its place.
+function Switch({ on, onChange, label, disabled, busy, loading }) {
+  if (loading) return <Skeleton w={42} h={24} r={14} style={{ flex: 'none' }} />;
   return (
     <button type="button" className={'switch' + (on ? ' on' : '')} role="switch" aria-checked={on} aria-label={label}
             disabled={disabled} aria-busy={busy || undefined} onClick={() => onChange(!on)}>
@@ -188,16 +203,38 @@ function Switch({ on, onChange, label, disabled, busy }) {
     </button>);
 
 }
-function Toggle({ checked, onChange, label, hint }) {
+function Toggle({ checked, onChange, label, hint, loading }) {
+  const Row = loading ? 'div' : 'label';
   return (
-    <label className="toggle-row">
+    <Row className="toggle-row">
       <span className="toggle-text">
         <span className="toggle-label">{label}</span>
         {hint && <span className="toggle-hint">{hint}</span>}
       </span>
-      <Switch on={checked} onChange={onChange} />
-    </label>);
+      <Switch on={checked} onChange={onChange} loading={loading} />
+    </Row>);
 
+}
+
+// A button whose request is on its way: off, marked busy, and saying so (busyText, e.g.
+// "Saving…") in place of its words until it lands.
+function BusyButton({ busy, busyText, disabled, type = 'button', className, onClick, children }) {
+  return (
+    <button type={type} className={className} onClick={onClick} disabled={!!busy || disabled} aria-busy={!!busy}>
+      {busy && busyText ? busyText : children}
+    </button>
+  );
+}
+
+// One line of a chart's hover card: the series' dot, its name, its value (children).
+// sq: a square dot, and the row in the dot's colour (an outage).
+function TipRow({ color, label, sq, children }) {
+  return (
+    <div className="tip-row" style={sq ? { color } : undefined}>
+      <span className={'tip-dot' + (sq ? ' tip-sq' : '')} style={{ background: color }} />
+      <span className="tip-l">{label}</span><span className="tip-v mono">{children}</span>
+    </div>
+  );
 }
 
 // ---- Legend chip (clickable series toggle) ----------------------------------
@@ -212,55 +249,16 @@ function LegendChip({ color, label, value, active, onClick }) {
 
 }
 
-// ---- tiny inline sparkline --------------------------------------------------
-function Sparkline({ data, color, width = 120, height = 32, fill = true }) {
-  const vals = data.filter((v) => v != null);
-  if (!vals.length) return <svg width={width} height={height} />;
-  const max = Math.max(...vals, 1),min = Math.min(...vals, 0);
-  const rng = max - min || 1;
-  const step = width / (data.length - 1);
-  let d = '',area = '';
-  data.forEach((v, i) => {
-    if (v == null) return;
-    const x = i * step,y = height - (v - min) / rng * (height - 4) - 2;
-    d += (d ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
-    area += (area ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
-  });
-  area += `L ${width} ${height} L 0 ${height} Z`;
-  const gid = 'sg' + color.replace('#', '');
-  return (
-    <svg width={width} height={height} className="sparkline">
-      {fill && <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stopColor={color} stopOpacity="0.28" />
-        <stop offset="100%" stopColor={color} stopOpacity="0" />
-      </linearGradient></defs>}
-      {fill && <path d={area} fill={`url(#${gid})`} />}
-      <path d={d} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>);
-
+// ---- Skeleton ---------------------------------------------------------------
+// A shimmering block standing in for content that hasn't arrived, so the page keeps its
+// shape instead of collapsing to a spinner. `as` for a span inside a line of text.
+function Skeleton({ w = '100%', h = 14, r = 7, style = {}, className = '', as: Tag = 'div' }) {
+  return <Tag className={'skel ' + className} style={{ width: w, height: h, borderRadius: r, ...style }} />;
 }
 
+// A line of text still on its way, inline in the line's place. max: the widest it gets.
+const SkelLine = ({ w, h = 12, max = '100%' }) => <Skeleton w={w} h={h} r={5} style={{ display: 'inline-block', verticalAlign: 'middle', maxWidth: max }} />;
 // ---- Info tooltip dot -------------------------------------------------------
-// Skeleton placeholder. A shimmering block standing in for content that hasn't
-// arrived, so the page keeps its shape instead of collapsing to a spinner.
-function Skeleton({ w = '100%', h = 14, r = 7, style = {}, className = '' }) {
-  return <div className={'skel ' + className} style={{ width: w, height: h, borderRadius: r, ...style }} />;
-}
-
-// A stat tile's worth of skeleton — label line, value line, matching the real card so
-// nothing jumps when the data lands.
-// The LABEL is static text, so it renders for real — only the value shimmers. Heights
-// are measured off the live card (.mini-label 14px, .mini-value 26px) so the tile lands
-// at the same 95px either way and nothing shifts when the number arrives.
-function SkeletonTile({ label }) {
-  return (
-    <Card className="mini-stat">
-      <div className="mini-label">{label}</div>
-      <div className="mini-value"><Skeleton w="72%" h={26} /></div>
-    </Card>
-  );
-}
-
 // On open, shift the 210px bubble so it stays 8px inside the window (SOLAR-26).
 const placeBubble = (e) => {
   const r = e.currentTarget.getBoundingClientRect(), half = 105, mid = r.left + r.width / 2;
@@ -362,8 +360,8 @@ function HistoryLock({ where, tile }) {
 
 Object.assign(window, {
   freeState, FreeCtx, useFreeOver, openPlans, LockIcon, Locked, HistoryLock,
-  COLORS, fmtPower, fmtPowerParts, battShown, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
-  Card, StatTile, Metric, Badge, Segmented, Switch, Toggle, LegendChip, Sparkline, SectionTitle, InfoDot, Tip,
-  Skeleton, SkeletonTile,
+  COLORS, fmtPower, fmtPowerParts, battShown, localDateStr, shiftDate, dayText, fmtDuration, plantLabel, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
+  Card, StatTile, Segmented, Switch, Toggle, LegendChip, SectionTitle, InfoDot, Tip,
+  Skeleton, SkelLine, BusyButton, TipRow, Meter,
   fmtEnergySmart, fmtRandSmart, fmtEnergyParts, fmtMoney, fmtMoneySmart, moneySymbol
 });

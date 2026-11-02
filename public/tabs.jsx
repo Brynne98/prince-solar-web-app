@@ -4,12 +4,15 @@
 // Week/Month/Year aggregates come from the live `energy` cache owned by <App>;
 // `onNeedEnergy(period)` asks App to lazily fetch a period it hasn't loaded yet.
 // ============================================================================
-const { Card, StatTile, Metric, Badge, Segmented, Toggle, SectionTitle, Sparkline,
+const { Card, StatTile, Segmented, Toggle, SectionTitle,
   fmtPower, fmtPowerParts, battShown, fmtKwh, fmtRand, cleanTemp, COLORS: CC } = window;
 
 const FsEnterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" /></svg>;
 const TrashIcon = () => <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.6 9h6.8l.6-9M6.75 7v4M9.25 7v4" /></svg>;
 const FsExitIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" /></svg>;
+
+// The Overview's periods, for its switch and its loading copy alike.
+const PERIODS = [{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }];
 
 // ---------------------------------------------------------------- LIVE
 // ---- loading skeletons ------------------------------------------------------
@@ -87,7 +90,7 @@ function LiveSkeleton() {
         <div className="overview-head">
           <div className="section-title">OVERVIEW</div>
           <window.Segmented size="sm" value="today" onChange={() => {}}
-            options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }]} />
+            options={PERIODS} />
         </div>
         {/* The real tiles in loading mode, with the same meter and second line the live
             ones carry, so the row lands at the same height. */}
@@ -145,7 +148,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const cap = snap.config?.battCapacity ?? null;
   const availKwh = cap && a.battSoc != null ? Math.max(0, (a.battSoc - RESERVE) / 100 * cap) : null;
   const headroomKwh = cap && a.battSoc != null ? Math.max(0, (100 - a.battSoc) / 100 * cap) : null;
-  const fmtDur = (hrs) => { let h = Math.floor(hrs), m = Math.round((hrs - h) * 60); if (m === 60) { h++; m = 0; } return (h > 0 ? h + 'h ' : '') + String(m).padStart(h > 0 ? 2 : 1, '0') + 'm'; };
+  const fmtDur = (hrs) => window.fmtDuration(Math.round(hrs * 60));
   const fmtEta = (hrs) => {
     const d = new Date(snap.updated.getTime() + hrs * 3600000);
     return window.fmtPlantTime(d, tz) + ', ' + d.toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz || undefined });
@@ -347,10 +350,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const pct = (c, p) => {
     // nothing logged on the other side: no arrow at all, not even a "0%"
     if (c == null || p == null || !prevHasData) return null;
-    // Zero then zero is no change. Zero then something has no meaningful percentage,
-    // so hand the badge Infinity and let it fall back to the absolute kWh change.
-    if (p === 0) return c === 0 ? 0 : Infinity;
-    return ((c - p) / p) * 100;
+    return changePct(c, p);
   };
   const tGen = prev ? pct(cPv, prev.pv) : null;
   const tCon = prev ? pct(cLoad, prev.load) : null;
@@ -396,7 +396,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
               <FsEnterIcon /><span>Fullscreen</span>
             </button>
           }>POWER FLOW</SectionTitle>}
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} silentSince={silent ? readAgo(ps.last.getTime(), Date.now()) : null} />
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} silentSince={silent ? window.readAgo(ps.last.getTime(), Date.now()) : null} />
         </Card>
       </div>
 
@@ -408,21 +408,21 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         <div className="overview-head">
           <SectionTitle>OVERVIEW</SectionTitle>
           <Segmented size="sm"
-            options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }]}
+            options={PERIODS}
             value={period} onChange={setPeriod} />
         </div>
         {over && period !== 'today' && period !== 'month' ? <window.HistoryLock where={'overview_' + period} /> : <>
         {/* On a phone there is no hover, so a thin comparison base is said on screen. */}
         {partial && !over && <div className="cmp-note">Arrows compare the {cmpDays} of {cmpRow.span} days with readings on both sides.</div>}
         <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '')}>
-          <MiniStat loading={pending} label="Made" value={window.fmtEnergySmart(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord} />
-          <MiniStat loading={pending} label="Home" value={window.fmtEnergySmart(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
+          <MiniStat loading={pending} label="Made" value={window.fmtEnergyParts(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord} />
+          <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
             info="What your home used, across all inverters." />
-          <MiniStat loading={pending} label="Independence" value={pSuff != null ? pSuff + '%' : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
+          <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
             info="How much of what your home used didn’t come from the grid." />
-          {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergySmart(pExp)} color={CC.grid}
+          {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergyParts(pExp)} color={CC.grid}
             info="Sent to the grid, paid at your feed-in rate." />}
-          {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergySmart(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
+          {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
             sub={silent ? undefined : a.gridPresent == null ? (
               // No inverter has reported mains voltage yet; a blank here read as a
               // chip that failed to load.
@@ -468,13 +468,13 @@ function GridOffPrompt({ hasBatt, tz }) {
   if (!span || !span.endedAt || seen === span.endedAt) return null;
   const from = new Date(span.startedAt), to = new Date(span.endedAt);
   const mins = (to - from) / 60000;
-  const dur = mins < 90 ? Math.max(1, Math.round(mins)) + ' min' : Math.round(mins / 60) + ' h';
+  const dur = window.fmtDuration(Math.max(1, Math.round(mins)));
   const h = window.plantHour(tz, from), today = plantDateStr(tz);
   const when = (h >= 18 || h < 6) && window.plantHour(tz, to) < 12 && plantDateStr(tz, to) === today ? 'last night'
     : plantDateStr(tz, to) === today ? 'today' : 'yesterday';
   const close = () => { try { localStorage.setItem('ps.gridOffSeen', span.endedAt); } catch (e) {} setSeen(span.endedAt); };
   return (
-    <div className="notice grid-off-prompt" role="status">
+    <div className="notice gridoff grid-off-prompt" role="status">
       <p><b>Grid was off {dur} {when}.</b>{hasBatt && ' Your battery carried the house.'}</p>
       <button type="button" className="mini-link" onClick={() => { close(); window.openPlans('grid_off'); }}>See how it held up →</button>
       <button type="button" className="fs-x" aria-label="Close" onClick={close}><Icon id="close" /></button>
@@ -501,11 +501,8 @@ function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt }) {
   }
   return <window.Tip className={'trend-badge ' + (good ? 'good' : 'bad')} text={title || 'vs previous period'}>{up ? '▲' : '▼'} {label}</window.Tip>;
 }
-// "14.2 kWh" → the number, then a smaller unit, so the figure reads first
-function unitSplit(v) {
-  const m = typeof v === 'string' && /^(.*?)\s?(kWh|MWh|GWh|kW|W|%)$/.exec(v);
-  return m ? <>{m[1]}<span className={'mv-unit' + (m[2] === '%' ? ' pct' : '')}>{m[2]}</span></> : v;
-}
+// value: text, or [number, unit] (fmtEnergyParts) for the number, then a smaller unit, so the figure reads first
+const unitSplit = (v) => (Array.isArray(v) && v[1] ? <>{v[0]}<span className={'mv-unit' + (v[1] === '%' ? ' pct' : '')}>{v[1]}</span></> : Array.isArray(v) ? v[0] : v);
 function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendTitle, trendDelta, trendDeltaFmt, loading }) {
   return (
     <Card className="mini-stat">
@@ -519,7 +516,7 @@ function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trend
       {loading
         ? <div className="mini-value mono" style={{ position: 'relative' }}>{NBSP}<window.Skeleton w="70%" h="auto" style={{ position: 'absolute', top: 0, bottom: 0, left: 0 }} /></div>
         : <div className="mini-value mono" style={{ color }}><span className="mv-num">{unitSplit(value)}</span></div>}
-      {bar != null && !loading && <div className="meter sm"><div className="meter-fill" style={{ width: Math.max(0, Math.min(100, bar)) + '%', background: color }} /></div>}
+      {bar != null && !loading && <window.Meter small pct={bar} color={color} />}
       {bar != null && loading && <window.Skeleton h={5} r={4} style={{ marginTop: 8 }} />}
       {sub && <div className="mini-sub mono">{sub}</div>}
     </Card>
@@ -537,10 +534,6 @@ function plantDateStr(tz, d = new Date()) {
   try { if (tz) return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); } catch (e) {}
   return window.localDateStr(d);
 }
-const shortDate = (s, opts = { weekday: 'short', day: 'numeric', month: 'short' }) => {
-  const [y, m, d] = s.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('en-GB', opts);
-};
 
 // Every total is the days before today plus today's live figure, and the current month is
 // rebuilt from its days: the nightly sync (02:15 UTC) writes today's cached row, and the
@@ -583,13 +576,60 @@ function lifetimeSince(rows, earliest, today) {
   if (i < 0) return null;
   const ym = years[i] + '-' + rows[i].date;
   return 'since ' + (earliest && earliest.startsWith(ym)
-    ? shortDate(earliest, { day: 'numeric', month: 'short', year: 'numeric' })
-    : shortDate(ym + '-01', { month: 'short', year: 'numeric' }));
+    ? window.dayText(earliest, { day: 'numeric', month: 'short', year: 'numeric' })
+    : window.dayText(ym + '-01', { month: 'short', year: 'numeric' }));
 }
 
 // Where a day's solar went inside the house, from its 5-minute points: the house first,
 // then the battery. What is left is export, backflow or rounding, and none of those are
 // this tab's subject — the grid has its own tab.
+// A day's split from the 5-minute readings, scaled to the day's own counter (total) and
+// rounded to the 0.1 kWh shown. Any rounding gap goes to the largest part, so the figures on
+// screen add up to the total exactly (16.4, not 6.8 + 8.9 + 0.8 = 16.5).
+function scaleParts(est, total) {
+  const keys = Object.keys(est);
+  const sum = keys.reduce((t, x) => t + est[x], 0);
+  const k = total > 0 && sum > 0 ? total / sum : 1;
+  const tenths = (v) => Math.round(v * 10) / 10;
+  const out = Object.fromEntries(keys.map(x => [x, tenths(est[x] * k)]));
+  const big = keys.reduce((m, x) => (out[x] > out[m] ? x : m), keys[0]);
+  out[big] = tenths(out[big] + tenths(sum * k) - keys.reduce((t, x) => t + out[x], 0));
+  return out;
+}
+// Where a day's energy went or came from: one bar of its parts ([name, kWh, colour]), then
+// each part's kWh with its name under it. total: what the shares are of.
+function ShareBar({ parts, total }) {
+  const pct = (v) => v / total * 100;
+  // The bar's hover title has the shares; the figures under it are aria-hidden, so the
+  // bar's own label carries the kWh as well, or a screen reader hears only the proportions.
+  return (
+    <>
+      <window.Tip as="div" className="fbox-bar" role="img" text={parts.map(d => d[0] + ' ' + Math.round(pct(d[1])) + '%').join(', ')}
+                  aria-label={parts.map(d => d[0] + ' ' + fmtKwh(d[1]) + ', ' + Math.round(pct(d[1])) + '%').join('; ')}>
+        {parts.map(([l, v, c]) => <i key={l} style={{ flexGrow: pct(v), background: c }} />)}
+      </window.Tip>
+      <div className="wiw-figs" aria-hidden="true">
+        {parts.map(([l, v, c]) => {
+          const [n, u] = window.fmtEnergyParts(v);
+          return <div key={l}><b style={{ color: c }}>{n}<span className="u">{u}</span></b><span>{l}</span></div>;
+        })}
+      </div>
+    </>
+  );
+}
+// Solar, Home and Grid's last-30-days card body: why there are no bars yet, or the bars.
+function DaysPanel({ daily, onRetry, over, rows, ...bars }) {
+  if (daily === false) return <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={onRetry}>Try again</button></div>;
+  if (!daily) return <PlotSkeleton heights={[170, 220]} r={10} />;
+  if (!over && rows.length < 2) return <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>;
+  return <DaysBars rows={rows} {...bars} />;
+}
+// The total tiles of Solar, Home and Grid (now, today, week…): a kWh figure in the page's
+// colour. locked: the lock's place on a plan past its free week; Today is never locked.
+const totalTile = (accent, locked) => (label, v, sub) => {
+  const [n, u] = window.fmtEnergyParts(v);
+  return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null} sub={sub || NBSP} locked={locked && label !== 'TODAY' ? locked : null} />;
+};
 function solarSplit(points) {
   let home = 0, batt = 0, grid = 0;
   const kwh = 5 / 60 / 1000;
@@ -667,8 +707,7 @@ function panelsVerdict(h, snap, now) {
     const quiet = silent.includes(inv);
     return {
       sn: inv.sn, name: invName(inv), kwh: quiet ? null : inv.pvToday,
-      sub: quiet ? (inv.readAt ? 'No readings since ' + (now - inv.readAt > 36 * 3600e3
-          ? new Date(inv.readAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' : '') + window.fmtTime(new Date(inv.readAt)) : 'No readings')
+      sub: quiet ? (inv.readAt ? 'No readings since ' + window.readAgo(inv.readAt, now) : 'No readings')
         : broken[inv.sn] ? (n - broken[inv.sn]) + ' of ' + n + ' strings working'
         : n + (n === 1 ? ' string' : ' strings'),
     };
@@ -720,18 +759,11 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
     const t0 = 0, t1 = 1440;
     const x = i => m.l + ((points[i].t - t0) / Math.max(5, t1 - t0)) * innerW;
     const y = val => m.t + innerH - ((val - lo) / (hi - lo)) * innerH;
-    // runs of readings; a missing bucket breaks the line
-    const runs = [];
-    for (let i = i0; i <= i1; i++) {
-      if (v(i) == null) { runs.push(null); continue; }
-      if (!runs.length || runs[runs.length - 1] == null) runs.push([]);
-      runs[runs.length - 1].push(i);
-    }
+    // a missing bucket breaks the line
     const gaps = gapRuns(i0, i1, i => v(i) == null);
-    const P = i => x(i).toFixed(1) + ' ' + y(v(i)).toFixed(1);
-    const base = y(0).toFixed(1);
-    const line = runs.filter(Boolean).map(r => 'M' + r.map(P).join(' L')).join(' ');
-    const area = runs.filter(Boolean).map(r => `M${x(r[0]).toFixed(1)} ${base} L` + r.map(P).join(' L') + ` L${x(r[r.length - 1]).toFixed(1)} ${base} Z`).join(' ');
+    const yAt = i => v(i) == null ? null : y(v(i));
+    const line = window.seriesPath(i0, i1, x, yAt);
+    const area = window.seriesArea(i0, i1, x, yAt, y(0));
     const step = mobile ? 360 : 180;
     const xt = [];
     for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) xt.push(t);
@@ -817,15 +849,15 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
       tip = (
         <div className="chart-range">
           <div className="cr-head"><span className="tip-time">{HM(points[a].t)} – {HM(points[b].t)} · {dur}</span><button className="cr-x" onClick={() => setSel(null)} aria-label="Clear">×</button></div>
-          <div className="tip-row"><span className="tip-dot" style={{ background: color }} /><span className="tip-l">{sums[0]}</span><span className="tip-v mono">{pos.toFixed(2)} kWh</span></div>
-          {sums[1] && <div className="tip-row"><span className="tip-dot" style={{ background: color }} /><span className="tip-l">{sums[1]}</span><span className="tip-v mono">{neg.toFixed(2)} kWh</span></div>}
+          <window.TipRow color={color} label={sums[0]}>{pos.toFixed(2)} kWh</window.TipRow>
+          {sums[1] && <window.TipRow color={color} label={sums[1]}>{neg.toFixed(2)} kWh</window.TipRow>}
         </div>
       );
     } else if (hp != null && !drag) {
       tip = (
         <div className="chart-tip" style={{ left: tipLeftFor(x(hp), width, 168), top: 12 }}>
           <div className="tip-time">{HM(points[hp].t)}</div>
-          <div className="tip-row"><span className="tip-dot" style={{ background: color }} /><span className="tip-l">{label}</span><span className="tip-v mono">{fmt(v(hp))}</span></div>
+          <window.TipRow color={color} label={label}>{fmt(v(hp))}</window.TipRow>
           {outages && <OutageTipRow span={outageAt(outages, Math.round(points[hp].t / 5))} what="Grid" />}
         </div>
       );
@@ -833,7 +865,7 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
   }
   return (
     <div className="chart-area" ref={ref} style={{ position: 'relative', height }}>
-      {body || <div className="solar-empty" style={{ height }}>{empty}</div>}
+      {body || <div className="chart-empty" style={{ height }}>{empty}</div>}
       {tip}
     </div>
   );
@@ -871,7 +903,7 @@ function DaysBarsChart({ rows, field, color, rgb, word, label, today, selected, 
   const idxAt = (clientX, el) => Math.max(0, Math.min(rows.length - 1, Math.floor((clientX - el.getBoundingClientRect().left - m.l) / slot)));
   const can = (r) => !earliest || r.date >= earliest;
   const h = hover != null ? rows[hover] : null;
-  const dateLabel = (r, opts) => shortDate(r.date, opts || { day: 'numeric', month: 'short' });
+  const dateLabel = (r, opts) => window.dayText(r.date, opts || { day: 'numeric', month: 'short' });
   const fill = (a) => 'rgba(' + rgb + ',' + a + ')';
   return (
     <div className="chart-area" ref={ref} style={{ position: 'relative', height }}>
@@ -905,8 +937,8 @@ function DaysBarsChart({ rows, field, color, rgb, word, label, today, selected, 
       </svg>
       {h && (
         <div className="chart-tip" style={{ left: tipLeftFor(m.l + slot * hover + slot / 2, width, 168), top: 8 }}>
-          <div className="tip-time">{shortDate(h.date)}</div>
-          <div className="tip-row"><span className="tip-dot" style={{ background: color }} /><span className="tip-l">{word}</span><span className="tip-v mono">{fmtKwh(h[field])}{h.date === today ? ' so far' : ''}</span></div>
+          <div className="tip-time">{window.dayText(h.date)}</div>
+          <window.TipRow color={color} label={word}>{fmtKwh(h[field])}{h.date === today ? ' so far' : ''}</window.TipRow>
           {can(h) && h.date !== selected && <div className="tip-hint">{mobile ? 'Tap' : 'Click'} to see this day</div>}
         </div>
       )}
@@ -935,7 +967,7 @@ function useShownDay(pick, today, refreshKey) {
   const view = ready || shownRef.current || { isToday: pick.isToday, date: pick.date, data: null };
   const dim = { 'aria-busy': !ready, style: { opacity: ready ? 1 : 0.45, transition: 'opacity .15s' } };
   const day = view.data;
-  return { view, dim, day, points: (day && day.points) || [], dayWord: view.isToday ? 'today' : shortDate(view.date) };
+  return { view, dim, day, points: (day && day.points) || [], dayWord: view.isToday ? 'today' : window.dayText(view.date) };
 }
 
 // A day with nothing to draw, in words, or null. `approx` means no 5-minute readings (before
@@ -981,6 +1013,10 @@ function scrollToDay(id) {
   card && card.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
 }
 
+// Change as a percentage. Zero then zero is no change; zero then something has no meaningful
+// percentage, so it is Infinity and the badge falls back to the absolute kWh change.
+const changePct = (c, p) => (p === 0 ? (c === 0 ? 0 : Infinity) : ((c - p) / p) * 100);
+
 const titled = (title, word) => <>{title} · <span style={{ color: 'var(--text)' }}>{word}</span></>;
 
 // A week or month tile's trend, with the Live overview's pairing: matched days before today,
@@ -993,7 +1029,7 @@ function periodTrend(cmp, k, key, min, word, invert) {
   const c = r.cur[key], p = r.prev[key];
   const logged = (r.prev.pv || 0) > 0 || (r.prev.load || 0) > 0;
   if (!(p > 0) && !(invert && logged)) return null;
-  const pct = p > 0 ? ((c - p) / p) * 100 : (c === 0 ? 0 : Infinity);
+  const pct = changePct(c, p);
   // "▲ 12% vs last month"; a jump the badge shows as kWh reads "▲ 14 kWh more than last month"
   const asKwh = !Number.isFinite(pct) || Math.abs(pct) >= 200;
   const words = asKwh ? (c > p ? ' more than ' : ' less than ') + word : ' vs ' + word;
@@ -1041,12 +1077,11 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const [earliest, setEarliest] = React.useState(null);
   React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
   const tot = periodTotals('pv', a.pvToday, energy, plantToday);
-  const EP = window.fmtEnergyParts;
   // Every tile keeps its second line, empty or not: the trends and the since-date land after
   // the totals, and a row whose tiles had none yet was 29px short until they did.
   // Free after its week (SOLAR-242): every total but Today is a faint shape and a lock
   const over = window.useFreeOver();
-  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.pv} loading={v == null} sub={sub || NBSP} locked={over && label !== 'TODAY' ? 'solar_totals' : null} />; };
+  const tile = totalTile(CC.pv, over && 'solar_totals');
   const trend = (k, min, word) => periodTrend(cmp, k, 'pv', min, word);
   const kwp = cfg.systemKwp;
   React.useEffect(() => { try { localStorage.setItem('synsynk.kwpSet', kwp > 0 ? '1' : '0'); } catch (e) {} }, [kwp]);
@@ -1080,29 +1115,17 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // readings give the shares; scaling them to this total makes the card add up to the TODAY
   // tile. Tested 30 Sep–5 Oct: the readings land within ~1 kWh of it once the grid is
   // counted, so the scale moves each part about 2% at most (SOLAR-49).
-  const estTotal = est.home + est.batt + est.grid;
   const dayRow = !view.isToday && (daily || []).find(r => r.date === pick.date);
   const madeKwh = view.isToday ? a.pvToday : (dayRow && dayRow.pv != null ? dayRow.pv : day && day.totals && day.totals.pv);
-  const k = madeKwh > 0 && estTotal > 0 ? madeKwh / estTotal : 1;
-  // Round each part to the 0.1 kWh shown, then give any rounding gap to the largest part, so the
-  // three figures on screen add up to the total exactly (16.4, not 6.8 + 8.9 + 0.8 = 16.5).
-  const tenths = (v) => Math.round(v * 10) / 10;
-  const split = { home: tenths(est.home * k), batt: tenths(est.batt * k), grid: tenths(est.grid * k) };
-  const big = ['home', 'batt', 'grid'].reduce((m, x) => (split[x] > split[m] ? x : m), 'home');
-  split[big] = tenths(split[big] + tenths(est.home * k + est.batt * k + est.grid * k) - (split.home + split.batt + split.grid));
+  const split = scaleParts(est, madeKwh);
   const splitTotal = split.home + split.batt + split.grid;
   // A destination is shown only once it holds something: a 0.0 kWh column would be a
   // zero-width segment under a full-width label, and "the battery got none of it" is said
   // better by its absence than by a zero.
   const dests = [['Home', split.home, CC.load, true], ['Battery', split.batt, CC.batt, hasBatt], ['Grid', split.grid, CC.grid, hasGrid]]
     .filter(d => d[3] && d[1] >= 0.05);
-  const destPct = (v) => v / splitTotal * 100;
   // The percentages were a permanent column until 2026-09-19; the bar says the same thing,
-  // so they moved to the bar's hover title rather than being printed twice. The label row
-  // below is aria-hidden, so the bar's own label has to carry the kWh as well as the
-  // shares, or a screen reader hears the proportions and never the figures.
-  const destTitle = dests.map(d => d[0] + ' ' + Math.round(destPct(d[1])) + '%').join(', ');
-  const destLabel = dests.map(d => d[0] + ' ' + fmtKwh(d[1]) + ', ' + Math.round(destPct(d[1])) + '%').join('; ');
+  // so they moved to the bar's hover title rather than being printed twice.
   // No money on this card. It answers one question — where the day's sun went — and the parts
   // sum to the day's solar, grid included (left out until SOLAR-49, so they didn't). Est. saved is (load - import) x rate, which is the electricity the
   // house USED and did not buy; it cannot divide into a generation split, so beside these rows
@@ -1119,7 +1142,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
     <div className="stack solar-tab">
       <div className="solar-stats">
         <StatTile label="SOLAR NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.pv}
-          sub={silent ? 'Last reading ' + readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? (over ? <window.Locked where="panel_pct" label="Keep your insights"><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW</window.Locked>
+          sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? (over ? <window.Locked where="panel_pct" label="Keep your insights"><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW</window.Locked>
               : <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>)
             : <button type="button" className="mini-link" onClick={() => onOpenSettings('plant')}>Add your panels to see this</button>} />
         {tile('TODAY', a.pvToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.pv)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
@@ -1139,15 +1162,11 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
       </Card>
 
       <Card>
-        <SectionTitle right={best ? <>Best <b>{fmtKwh(best.pv)}</b> on {shortDate(best.date)}</> : RIGHT_HOLD}>
+        <SectionTitle right={best ? <>Best <b>{fmtKwh(best.pv)}</b> on {window.dayText(best.date)}</> : RIGHT_HOLD}>
           {titled('SOLAR', 'last 30 days')}
         </SectionTitle>
-        {daily === false
-          ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
-          : !daily ? <PlotSkeleton heights={[170, 220]} r={10} />
-          : !over && bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
-          : <DaysBars rows={bars} field="pv" color={CC.pv} rgb="61,220,132" word="Solar" label="Solar per day for the last 30 days"
-              today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
+        <DaysPanel daily={daily} onRetry={loadDaily} over={over} rows={bars} rows={bars} field="pv" color={CC.pv} rgb="61,220,132" word="Solar" label="Solar per day for the last 30 days"
+          today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />
       </Card>
 
       {/* Where it went: a plain card like the rest of the page (SOLAR-74). The day's solar in the
@@ -1160,17 +1179,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
           </SectionTitle>
           {!day ? <WiwBodySkeleton />
             : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')}</div>
-            : <>
-              <window.Tip as="div" className="fbox-bar" role="img" text={destTitle} aria-label={destLabel}>
-                {dests.map(([l, v, c]) => <i key={l} style={{ flexGrow: destPct(v), background: c }} />)}
-              </window.Tip>
-              <div className="wiw-figs" aria-hidden="true">
-                {dests.map(([l, v, c]) => {
-                  const [n, u] = EP(v);
-                  return <div key={l}><b style={{ color: c }}>{n}<span className="u">{u}</span></b><span>{l}</span></div>;
-                })}
-              </div>
-            </>}
+            : <ShareBar parts={dests} total={splitTotal} />}
         </Card>
       </div>
     </div>
@@ -1230,10 +1239,9 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
   const [earliest, setEarliest] = React.useState(null);
   React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
   const tot = periodTotals('load', a.loadToday, energy, plantToday);
-  const EP = window.fmtEnergyParts;
   // Free after its week (SOLAR-242): every total but Today is a faint shape and a lock
   const over = window.useFreeOver();
-  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.load} loading={v == null} sub={sub || NBSP} locked={over && label !== 'TODAY' ? 'home_totals' : null} />; };
+  const tile = totalTile(CC.load, over && 'home_totals');
   // less used is better, as on Grid
   const trend = (k, min, word) => periodTrend(cmp, k, 'load', min, word, true);
   const [nowN, nowU] = fmtPowerParts(a.loadNow);
@@ -1256,20 +1264,12 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
 
   // ---- where it came from: shares from the readings, scaled to the day's counter as Solar does ----
   const est = React.useMemo(() => homeSplit(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
-  const estTotal = est.solar + est.batt + est.grid;
   const dayRow = !view.isToday && (daily || []).find(r => r.date === pick.date);
   const usedKwh = view.isToday ? a.loadToday : (dayRow && dayRow.load != null ? dayRow.load : day && day.totals && day.totals.load);
-  const k = usedKwh > 0 && estTotal > 0 ? usedKwh / estTotal : 1;
-  const tenths = (v) => Math.round(v * 10) / 10;
-  const split = { solar: tenths(est.solar * k), batt: tenths(est.batt * k), grid: tenths(est.grid * k) };
-  const big = ['solar', 'batt', 'grid'].reduce((m, x) => (split[x] > split[m] ? x : m), 'solar');
-  split[big] = tenths(split[big] + tenths(estTotal * k) - (split.solar + split.batt + split.grid));
+  const split = scaleParts(est, usedKwh);
   const splitTotal = split.solar + split.batt + split.grid;
   const srcs = [['Solar', split.solar, CC.pv, true], ['Battery', split.batt, CC.batt, hasBatt], ['Grid', split.grid, CC.grid, hasGrid]]
     .filter(d => d[3] && d[1] >= 0.05);
-  const srcPct = (v) => v / splitTotal * 100;
-  const srcTitle = srcs.map(d => d[0] + ' ' + Math.round(srcPct(d[1])) + '%').join(', ');
-  const srcLabel = srcs.map(d => d[0] + ' ' + fmtKwh(d[1]) + ', ' + Math.round(srcPct(d[1])) + '%').join('; ');
 
   // ---- last 30 days ----
   const bars = withLiveToday(daily, plantToday, 'load', a.loadToday);
@@ -1280,7 +1280,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
     <div className="stack solar-tab">
       <div className="solar-stats">
         <StatTile label="HOME NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.load}
-          sub={silent ? 'Last reading ' + readAgo(ps.last.getTime(), Date.now()) : solarNow != null ? <><b>{solarNow}%</b> from solar right now</> : NBSP} />
+          sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : solarNow != null ? <><b>{solarNow}%</b> from solar right now</> : NBSP} />
         {tile('TODAY', a.loadToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.load)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
@@ -1298,15 +1298,11 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
       </Card>
 
       <Card>
-        <SectionTitle right={most && most.load > 0 ? <>Most <b>{fmtKwh(most.load)}</b> on {shortDate(most.date)}</> : RIGHT_HOLD}>
+        <SectionTitle right={most && most.load > 0 ? <>Most <b>{fmtKwh(most.load)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
           {titled('HOME', 'last 30 days')}
         </SectionTitle>
-        {daily === false
-          ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
-          : !daily ? <PlotSkeleton heights={[170, 220]} r={10} />
-          : !over && bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
-          : <DaysBars rows={bars} field="load" color={CC.load} rgb="248,113,113" word="Used" label="Home use per day for the last 30 days"
-              today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
+        <DaysPanel daily={daily} onRetry={loadDaily} over={over} rows={bars} rows={bars} field="load" color={CC.load} rgb="248,113,113" word="Used" label="Home use per day for the last 30 days"
+          today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />
       </Card>
 
       <div className="solar-row">
@@ -1317,17 +1313,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
           </SectionTitle>
           {!day ? <WiwBodySkeleton />
             : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || 'No home readings for this day.'}</div>
-            : <>
-              <window.Tip as="div" className="fbox-bar" role="img" text={srcTitle} aria-label={srcLabel}>
-                {srcs.map(([l, v, c]) => <i key={l} style={{ flexGrow: srcPct(v), background: c }} />)}
-              </window.Tip>
-              <div className="wiw-figs" aria-hidden="true">
-                {srcs.map(([l, v, c]) => {
-                  const [n, u] = EP(v);
-                  return <div key={l}><b style={{ color: c }}>{n}<span className="u">{u}</span></b><span>{l}</span></div>;
-                })}
-              </div>
-            </>}
+            : <ShareBar parts={srcs} total={splitTotal} />}
         </Card>
       </div>
     </div>
@@ -1394,10 +1380,9 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // Today is the logger's own integral, as Live's Imported tile uses: one inverter's CT on a
   // two-inverter plant reads nothing, so the inverters' own counters undercount.
   const tot = periodTotals('imp', a.gridFromToday, energy, plantToday);
-  const EP = window.fmtEnergyParts;
   // Free after its week (SOLAR-242): every total but Today is a faint shape and a lock
   const over = window.useFreeOver();
-  const tile = (label, v, sub) => { const [n, u] = EP(v); return <StatTile label={label} value={n} unit={u} accent={CC.grid} loading={v == null} sub={sub || NBSP} locked={over && label !== 'TODAY' ? 'grid_totals' : null} />; };
+  const tile = totalTile(CC.grid, over && 'grid_totals');
   const trend = (k, min, word) => periodTrend(cmp, k, 'imp', min, word, true);
   // Every grid-tied inverter leaks a little backflow, so a plant not paid for export only
   // counts as sending power out above 100 W.
@@ -1450,7 +1435,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
-        <StatTile label="GRID NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.grid} sub={silent ? 'Last reading ' + readAgo(ps.last.getTime(), Date.now()) : nowSub} />
+        <StatTile label="GRID NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.grid} sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : nowSub} />
         {tile('TODAY', a.gridFromToday, sells ? <>Exported <b>{fmtKwh(a.gridToToday)}</b></> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
@@ -1473,15 +1458,11 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
       </Card>
 
       <Card>
-        <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {shortDate(most.date)}</> : RIGHT_HOLD}>
+        <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
           {titled('IMPORTED', 'last 30 days')}
         </SectionTitle>
-        {daily === false
-          ? <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={loadDaily}>Try again</button></div>
-          : !daily ? <PlotSkeleton heights={[170, 220]} r={10} />
-          : !over && bars.length < 2 ? <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>
-          : <DaysBars rows={bars} field="imp" color={CC.grid} rgb="250,204,21" word="Imported" label="Energy imported from the grid per day for the last 30 days"
-              today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />}
+        <DaysPanel daily={daily} onRetry={loadDaily} over={over} rows={bars} rows={bars} field="imp" color={CC.grid} rgb="250,204,21" word="Imported" label="Energy imported from the grid per day for the last 30 days"
+          today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />
       </Card>
     </div>
   );
@@ -1502,7 +1483,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 function InvertersSkeleton() {
   const detailed = (() => { try { return localStorage.getItem('synsynk.eqView') === 'detailed'; } catch (e) { return false; } })();
   // a line of text whose words haven't come: a shimmer, and the line's own height held by a space
-  const line = (w, h = 10) => <><window.Skeleton w={w} h={h} r={5} style={{ display: 'inline-block', verticalAlign: 'middle', maxWidth: '70%' }} />{NBSP}</>;
+  const line = (w, h = 10) => <><window.SkelLine w={w} h={h} max="70%" />{NBSP}</>;
   const fig = <window.Skeleton w={80} h="1em" r={6} />;
   const tile = (label, word) => (
     <section className="card eq-tile" aria-label={label}>
@@ -1579,11 +1560,6 @@ function InvertersSkeleton() {
   );
 }
 
-// How long ago a reading was, the way the cards say it.
-const readAgo = (t, now) => now - t > 36 * 3600e3
-  ? new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' + window.fmtTime(new Date(t))
-  : window.fmtTime(new Date(t));
-const kwh1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
 const EQ_FOLD = 6; // strings shown per inverter before "Show all"
 
 // Everything both views read: who is quiet, the problems, the battery's checks and today's
@@ -1599,7 +1575,7 @@ function equipmentState(snap, health, now) {
   const allQuiet = quiet.length > 0 && quiet.length === invs.length;
   const reads = invs.map(i => i.readAt).filter(Boolean);
   const lastAt = reads.length ? Math.max(...reads) : null;
-  const since = t => t ? 'Since ' + readAgo(t, now) : '';
+  const since = t => t ? 'Since ' + window.readAgo(t, now) : '';
   const verdict = health && !allQuiet ? panelsVerdict(health, snap, now) : null;
   const hour = window.plantHour(tz, new Date(now));
   const night = verdict ? verdict.night : (hour >= 18 || hour < 6) && !(a.pvNow > 20);
@@ -1676,7 +1652,7 @@ function EqTile({ label, state, value, unit, sub, color, stale, word }) {
 
 function EquipmentSimple({ st, now }) {
   const { a, verdict } = st;
-  const last = t => t ? 'Last reading ' + readAgo(t, now) : 'Not reporting';
+  const last = t => t ? 'Last reading ' + window.readAgo(t, now) : 'Not reporting';
   const alerts = verdict && verdict.state === 'alert' ? verdict.alerts : [];
   const pvState = st.allQuiet ? ['stale', last(st.lastAt)]
     : st.quiet.length ? ['stale', 'Not all reporting']
@@ -1748,15 +1724,15 @@ function EqPanelsCard({ st, snap, health, now }) {
                 {(groups.length > 1 || g.quiet) && (
                   <div className="eq-group-head">
                     <span>{invName(g.inv)}</span>
-                    <span className={'mono' + (g.quiet ? ' warn' : '')}>{g.quiet ? (g.inv.readAt ? 'Not reporting since ' + readAgo(g.inv.readAt, now) : 'Not reporting') : fmtKwh(g.kwh)}</span>
+                    <span className={'mono' + (g.quiet ? ' warn' : '')}>{g.quiet ? (g.inv.readAt ? 'Not reporting since ' + window.readAgo(g.inv.readAt, now) : 'Not reporting') : fmtKwh(g.kwh)}</span>
                   </div>
                 )}
                 {(folded ? g.rows.slice(0, EQ_FOLD) : g.rows).map(r => (
                   <div className={'eq-string' + (r.alert ? ' weak' : '')} key={r.no}>
                     <span className="eq-string-name">String {r.no}</span>
                     <span className="eq-bar"><i style={{ width: pct(r.kwh) }} />{r.usual != null && <b style={{ left: pct(r.usual) }} />}</span>
-                    <span className="eq-string-kwh mono">{kwh1(r.kwh)}</span>
-                    {r.alert && <span className="eq-string-why">{r.alert.kind === 'nothing' ? 'Made nothing today' : 'Usually ' + kwh1(r.usual) + ' kWh by now'}</span>}
+                    <span className="eq-string-kwh mono">{window.fmtEnergyParts(r.kwh)[0]}</span>
+                    {r.alert && <span className="eq-string-why">{r.alert.kind === 'nothing' ? 'Made nothing today' : 'Usually ' + window.fmtKwh(r.usual) + ' by now'}</span>}
                   </div>
                 ))}
                 {folded && <button type="button" className="mini-link eq-fold" onClick={() => setOpen(o => Object.assign({}, o, { [g.inv.sn]: true }))}>Show all {g.rows.length} strings</button>}
@@ -1779,10 +1755,10 @@ function EqBatteryCard({ st, snap, now }) {
   const reserve = cfg.reserve ?? 20;
   const cap = cfg.battCapacity;
   const rows = [];
-  if (st.battStale) rows.push(['Last reading', st.battAt ? readAgo(st.battAt, now) : '—']);
+  if (st.battStale) rows.push(['Last reading', st.battAt ? window.readAgo(st.battAt, now) : '—']);
   else {
     rows.push(['Now', a.battOut > 5 ? 'Powering the house at ' + fmtPower(a.battOut) : a.battOut < -5 ? 'Charging at ' + fmtPower(-a.battOut) : 'Resting']);
-    if (cap > 0 && a.battSoc != null) rows.push(['Stored', kwh1(a.battSoc * cap / 100) + ' of ' + fmtKwh(cap)]);
+    if (cap > 0 && a.battSoc != null) rows.push(['Stored', window.fmtEnergyParts(a.battSoc * cap / 100)[0] + ' of ' + fmtKwh(cap)]);
     if (st.badSensor) rows.push(['Temperature', 'Sensor not reading', true]);
     else if (st.battTemp != null && (st.battTemp > 45 || st.battTemp < 5)) rows.push(['Temperature', Math.round(st.battTemp) + ' °C, ' + (st.battTemp > 45 ? 'hot' : 'cold'), st.battTemp > 45]);
   }
@@ -1818,7 +1794,7 @@ function EqInvertersCard({ st, now }) {
               <div className="eq-inv-now mono" style={{ color: down ? 'var(--dim)' : CC.pv }}>{n}{u && <span className="u">{u}</span>}</div>
               <div className="eq-inv-cap">solar now</div>
               <div className="eq-inv-today"><span>Today</span><span className="mono">{fmtKwh(inv.pvToday)}</span></div>
-              <div className="eq-inv-foot">{down ? (inv.readAt ? 'Since ' + readAgo(inv.readAt, now) : NBSP) : inv.readAt ? 'Last reading ' + window.fmtAgo(new Date(inv.readAt), now) : NBSP}</div>
+              <div className="eq-inv-foot">{down ? (inv.readAt ? 'Since ' + window.readAgo(inv.readAt, now) : NBSP) : inv.readAt ? 'Last reading ' + window.fmtAgo(new Date(inv.readAt), now) : NBSP}</div>
             </div>
           );
         })}
@@ -1833,7 +1809,7 @@ function EqSpecCard({ inv, st, now }) {
   const down = st.quiet.includes(inv);
   const rows = [
     ['Model', inv.model], ['Serial number', inv.sn], ['Firmware', inv.soft],
-    ['Last reading', inv.readAt ? readAgo(inv.readAt, now) : '—'],
+    ['Last reading', inv.readAt ? window.readAgo(inv.readAt, now) : '—'],
   ];
   const packs = [];
   const reads = inv.numberOfBatteries > 0 || inv.battSoc > 0;
@@ -1974,19 +1950,20 @@ const focusNoScroll = (el) => el && el.focus({ preventScroll: true });
 // modal: over the page in a Dialog rather than in place under its row.
 // danger: the action is red, as it undoes something; otherwise green. No action: Cancel alone.
 // label names a modal one, the action's words by default.
-function ConfirmCard({ title, text, children, action, onConfirm, onCancel, cancelLabel = 'Cancel', busy = false, modal = false, danger = true, label }) {
+// confirmDisabled: the action waits on a choice in the children (KeepPicker's plants).
+function ConfirmCard({ title, text, children, action, onConfirm, onCancel, cancelLabel = 'Cancel', busy = false, modal = false, danger = true, label, confirmDisabled }) {
   const cancel = React.useRef(null);
   React.useEffect(() => focusNoScroll(cancel.current), []);
   const body = <>
     {title && <div className="confirm-title">{title}</div>}
-    <div className="confirm-text">{text}</div>
+    {text && <div className="confirm-text">{text}</div>}
     {children}
     <div className="conn-form-actions">
       <button type="button" className="ghost-btn" onClick={onCancel} ref={cancel} disabled={busy}>{cancelLabel}</button>
-      {action && <button type="button" className={danger ? 'danger-btn' : 'save-btn'} onClick={onConfirm} disabled={busy} aria-busy={busy}>{action}</button>}
+      {action && <window.BusyButton className={danger ? 'danger-btn' : 'save-btn'} onClick={onConfirm} busy={busy} disabled={confirmDisabled}>{action}</window.BusyButton>}
     </div>
   </>;
-  if (modal) return <window.Dialog label={label || action} onClose={() => { if (!busy) onCancel(); }}>{body}</window.Dialog>;
+  if (modal) return <window.Dialog label={label || action} busy={busy} onClose={onCancel}>{body}</window.Dialog>;
   return (
     <div className="conn-form confirm-card" role="alertdialog" aria-label={action}
          onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}>
@@ -2029,6 +2006,33 @@ function SettingsSection({ id, title, note, bare, action, children }) {
   );
 }
 
+// One line of a Settings card: its name and a note under it at the left, its control at the
+// right (action, in actionClass's box). lead: before the name (a card's logo). children: after
+// the row's parts, such as the dialog its button opens. hidden: a loading outline.
+function SettingRow({ label, note, action, actionClass = 'conn-actions', lead, id, className = '', hidden, children }) {
+  return (
+    <div className={'conn-row' + (className ? ' ' + className : '')} id={id} aria-hidden={hidden || undefined}>
+      {lead}
+      <div className="conn-text">
+        <div className="conn-user">{label}</div>
+        {note != null && note !== false && <div className="conn-meta">{note}</div>}
+      </div>
+      {action && <div className={actionClass}>{action}</div>}
+      {children}
+    </div>
+  );
+}
+
+// A plant under its login: the name, then its switch or state (children). off: greyed, not collecting.
+function PlantLine({ name, off, children }) {
+  return (
+    <div className={'login-plant' + (off ? ' off' : '')}>
+      <div className="conn-user plant-nm">{name}</div>
+      {children}
+    </div>
+  );
+}
+
 // The plan (SOLAR-208), on Billing since SOLAR-250: what it is, its price and renewal, then
 // Adjust plan (a page of its own) and Cancel plan. Downgrade, cancel and a monthly/yearly
 // switch wait for the billing date; going up is an upgrade and charges now
@@ -2036,7 +2040,6 @@ function SettingsSection({ id, title, note, bare, action, children }) {
 // the plants it keeps (SOLAR-295): the others collect until the billing date, then stop.
 const PLAN_NAME = { free: 'Free', home: 'Home', family: 'Family' };
 const PLAN_RANK = { free: 0, home: 1, family: 2 };
-const longDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 const planRoom = (plan, extra) => (plan === 'family' ? 3 + (extra || 0) : 1);
 // The plants a downgrade picks from, under their logins as Billing lists them: collecting
 // and not up for deletion, except those that stop on the billing date (drop), which can
@@ -2047,18 +2050,26 @@ const pickableLogins = (links) => {
     plants: (a.plants || []).filter(p => !p.paused && (!p.remove_on || p.drop) && !seen.has(p.plant_id) && seen.add(p.plant_id)) }))
     .filter(a => a.plants.length);
 };
-// Books a change for the billing date, or undoes one. keep: the plants picked to stay
-// (none: the first linked). True once booked.
-async function bookPlan(b, plan, period, reload, keep) {
-  const { error } = await window.billingRpc('api_billing_change', { p_plan: plan, p_period: period ?? null, p_keep: keep ?? null });
+// Sends a change for the billing date, then reads the plan again. Failed: the toast says
+// failed(error) and it re-reads anyway, as a change that ran out of time may still have landed.
+// True once saved.
+async function billingChange(rpc, args, reload, failed) {
+  const { error } = await window.billingRpc(rpc, args);
   if (error) {
-    reload();   // a change that ran out of time may still have landed
-    window.toast('Couldn’t change your plan. Try again.', { error: true });
+    reload();
+    window.toast(failed(error), { error: true });
     return false;
   }
   await reload();
-  window.track(plan === b.plan ? 'plan_change_undone' : 'downgrade_done', { plan, period: period ?? b.period });
   return true;
+}
+// Books a change for the billing date, or undoes one. keep: the plants picked to stay
+// (none: the first linked). True once booked.
+async function bookPlan(b, plan, period, reload, keep) {
+  const ok = await billingChange('api_billing_change', { p_plan: plan, p_period: period ?? null, p_keep: keep ?? null }, reload,
+    () => 'Couldn’t change your plan. Try again.');
+  if (ok) window.track(plan === b.plan ? 'plan_change_undone' : 'downgrade_done', { plan, period: period ?? b.period });
+  return ok;
 }
 // A change booked for the billing date: what it says, and the button that undoes it.
 function bookedChange(b) {
@@ -2076,22 +2087,15 @@ function bookedChange(b) {
 // Sets the extra plants from the billing date (SOLAR-264): fewer than held books a drop,
 // as many as held undoes one. More is a payment (window.startUpgrade). True once saved.
 async function bookExtras(b, count, reload, keep) {
-  const { error } = await window.billingRpc('api_billing_extras', { p_count: count, p_keep: keep ?? null });
-  if (error) {
-    reload();
-    window.toast(/plan change/.test(error.message) ? 'Your plan changes on its billing date. Keep it first.'
-      : 'Couldn’t change your extra plants. Try again.', { error: true });
-    return false;
-  }
-  await reload();
-  window.track('extra_plants_done', { count, change: count < b.extraPlants ? 'down' : 'undo' });
-  return true;
+  const ok = await billingChange('api_billing_extras', { p_count: count, p_keep: keep ?? null }, reload,
+    (e) => /plan change/.test(e.message) ? 'Your plan changes on its billing date. Keep it first.' : 'Couldn’t change your extra plants. Try again.');
+  if (ok) window.track('extra_plants_done', { count, change: count < b.extraPlants ? 'down' : 'undo' });
+  return ok;
 }
 // Undo whatever is booked: the extras alone, or the plan and period.
 const undoBooked = (b, reload) => (!b.nextPlan && !b.nextPeriod && b.nextExtraPlants != null
   ? bookExtras(b, b.extraPlants, reload) : bookPlan(b, b.plan, b.period, reload));
 const cancelText = (b) => `It runs until ${window.billingFmt.billDay(b.nextDate)}. After that you’re on Free: we keep only the last 24 hours of readings. Alerts stay on; reports stop.`;
-const plusDays = (d, n) => { const t = new Date(d + 'T00:00:00'); t.setDate(t.getDate() + n); return t.toLocaleDateString('en-CA'); };
 
 // A downgrade's pick (SOLAR-295): the plants the new plan keeps, each with the switch and
 // under the login Billing shows it with. One on for Home and Free; Family's room for Family.
@@ -2106,34 +2110,39 @@ function KeepPicker({ b, room, logins, title, text, action, cancelLabel = 'Cance
   const picked = keep.filter(id => plants.some(p => p.plant_id === id));
   const toggle = (id) => setKeep(k => k.includes(id) ? k.filter(x => x !== id) : one ? [id] : picked.length < room ? [...picked, id] : k);
   return (
-    <window.Dialog label={action} onClose={() => { if (!busy) onCancel(); }}>
-      <div className="confirm-title">{title || (one ? 'Pick the plant to keep' : `Pick ${room} plants to keep`)}</div>
-      {text && <div className="confirm-text">{text}</div>}
+    <ConfirmCard modal title={title || (one ? 'Pick the plant to keep' : `Pick ${room} plants to keep`)} text={text} action={action}
+      cancelLabel={cancelLabel} danger={danger} busy={busy} confirmDisabled={picked.length !== room}
+      onConfirm={() => onPick(picked)} onCancel={onCancel}>
       <div className="login-list keep-picks">
         {logins.map(a => (
           <div key={a.account_id} className="login-grp">
             <div className="login-line"><span className="login-email">{a.sunsynk_username}</span></div>
             {a.plants.map(p => {
               const on = keep.includes(p.plant_id);
-              const name = p.plant_name || 'Plant ' + p.plant_id;
+              const name = window.plantLabel(p);
               return (
-                <div key={p.plant_id} className={'login-plant' + (on ? '' : ' off')}>
-                  <div className="conn-user plant-nm">{name}</div>
+                <PlantLine key={p.plant_id} name={name} off={!on}>
                   <window.Switch on={on} label={'Keep ' + name} disabled={busy || (!one && !on && picked.length >= room)} onChange={() => toggle(p.plant_id)} />
-                </div>
+                </PlantLine>
               );
             })}
           </div>
         ))}
       </div>
-      <div className="confirm-text keep-note">Others collect until {billDay(b.nextDate)}, then stop. Their history is deleted on {billDay(plusDays(b.nextDate, 30))}.</div>
-      <div className="conn-form-actions">
-        <button type="button" className="ghost-btn" onClick={onCancel} disabled={busy}>{cancelLabel}</button>
-        <button type="button" className={danger ? 'danger-btn' : 'save-btn'} disabled={busy || picked.length !== room} aria-busy={busy}
-                onClick={() => onPick(picked)}>{action}</button>
-      </div>
-    </window.Dialog>
+      <div className="confirm-text keep-note">Others collect until {billDay(b.nextDate)}, then stop. Their history is deleted on {billDay(window.shiftDate(b.nextDate, 30))}.</div>
+    </ConfirmCard>
   );
+}
+
+// Cancel plan, from Billing or Adjust plan: with more than one plant it first picks the one
+// Free keeps. onConfirm(keep), keep undefined when there was nothing to pick.
+function CancelPlanDialog({ b, logins, busy, onConfirm, onCancel }) {
+  const title = <>Cancel {PLAN_NAME[b.plan]}?</>, keepLabel = 'Keep ' + PLAN_NAME[b.plan];
+  return logins.flatMap(a => a.plants).length > 1
+    ? <KeepPicker b={b} room={1} logins={logins} title={title} text={cancelText(b) + ' Pick the plant to keep.'}
+        action="Cancel plan" danger cancelLabel={keepLabel} busy={busy} onPick={onConfirm} onCancel={onCancel} />
+    : <ConfirmCard modal title={title} text={cancelText(b)} action="Cancel plan" cancelLabel={keepLabel}
+        busy={busy} onConfirm={() => onConfirm()} onCancel={onCancel} />;
 }
 
 function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
@@ -2169,7 +2178,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   // A word beside the name only when something is wrong; an active plan needs none.
   const word = b.state === 'past_due' ? 'Payment failed' : ending ? 'Ending' : null;
   const line = b.comped ? 'Free of charge. Every plant, full history.'
-    : paid ? <><span className="mono">{rand(b.price)}</span> {perUnit(b.period)} for {b.plan === 'family' ? `up to ${3 + (b.extraPlants || 0)} plants` : '1 plant'}.</>
+    : paid ? <><span className="mono">{rand(b.price)}</span> {perUnit(b.period)} for {b.plan === 'family' ? `up to ${planRoom('family', b.extraPlants)} plants` : '1 plant'}.</>
     : weekEnds ? `Free week until ${billDay(weekEnds)}.`
     : '1 plant and the last 24 hours. No card needed.';
   // What the price is made of: Family's base plus R49 for each extra plant paid for.
@@ -2189,7 +2198,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
             </div>
           )}
           {/* past due and ending say their date below */}
-          {paid && b.state !== 'past_due' && !ending && <div className="conn-meta">Renews on {longDay(b.nextDate)}.</div>}
+          {paid && b.state !== 'past_due' && !ending && <div className="conn-meta">Renews on {window.dayText(b.nextDate, { day: 'numeric', month: 'long', year: 'numeric' })}.</div>}
         </div>
         {!b.comped && (
           <div className="plan-acts">
@@ -2222,41 +2231,24 @@ const shapeOf = (b) => ({
   inv: b.comped ? 0 : (b.payments || []).length,
   cancel: !(b.comped || b.plan === 'free' || b.nextPlan === 'free'),
 });
-const skelLine = (w, h = 12) => <window.Skeleton w={w} h={h} r={5} style={{ display: 'inline-block', verticalAlign: 'middle', maxWidth: '100%' }} />;
 
 // Cancellation, last on Billing as on most billing pages: a paid plan not already ending.
 function CancelSection({ billing: b, reload, logins = [] }) {
-  const plants = logins.flatMap(a => a.plants);
   const { useState } = React;
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   if (!b) return billShape().cancel ? (
     <SettingsSection id="cancel" title="Cancellation">
-      <div className="conn-row" aria-hidden="true">
-        <div className="conn-text"><div className="conn-user">Cancel plan</div></div>
-        <div className="conn-actions"><window.Skeleton w={112} h={34} r={9} /></div>
-      </div>
+      <SettingRow hidden label="Cancel plan" action={<window.Skeleton w={112} h={34} r={9} />} />
     </SettingsSection>
   ) : null;
   if (b.comped || b.plan === 'free' || b.nextPlan === 'free') return null;
   return (
     <SettingsSection id="cancel" title="Cancellation">
-      <div className="conn-row">
-        <div className="conn-text"><div className="conn-user">Cancel plan</div></div>
-        <div className="conn-actions">
-          <button type="button" className="danger-btn" disabled={busy || cancelling} onClick={() => setCancelling(true)}>Cancel</button>
-        </div>
-      </div>
-      {cancelling && (plants.length > 1 ? (
-        <KeepPicker b={b} room={1} logins={logins} title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b) + ' Pick the plant to keep.'}
-          action="Cancel plan" danger cancelLabel={'Keep ' + PLAN_NAME[b.plan]} busy={busy}
-          onPick={async (keep) => { setBusy(true); await bookPlan(b, 'free', null, reload, keep); setBusy(false); setCancelling(false); }}
-          onCancel={() => setCancelling(false)} />
-      ) : (
-        <ConfirmCard modal title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
-          busy={busy} onConfirm={async () => { setBusy(true); await bookPlan(b, 'free', null, reload); setBusy(false); setCancelling(false); }}
-          onCancel={() => setCancelling(false)} />
-      ))}
+      <SettingRow label="Cancel plan"
+        action={<button type="button" className="danger-btn" disabled={busy || cancelling} onClick={() => setCancelling(true)}>Cancel</button>} />
+      {cancelling && <CancelPlanDialog b={b} logins={logins} busy={busy} onCancel={() => setCancelling(false)}
+        onConfirm={async (keep) => { setBusy(true); await bookPlan(b, 'free', null, reload, keep); setBusy(false); setCancelling(false); }} />}
     </SettingsSection>
   );
 }
@@ -2339,7 +2331,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   const pop = (body) => <window.Dialog size="wide" label="Pick your plan" onClose={close}>{body}</window.Dialog>;
   const back = (
     <button type="button" className="pop-x" aria-label="Close" disabled={busy} onClick={close}>
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+      <Icon id="close" />
     </button>
   );
   if (!b) return pop(
@@ -2473,14 +2465,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
             </div>
           ))}
         </div>}
-        {cancelling && (plants.length > 1 ? (
-          <KeepPicker b={b} room={1} logins={logins} title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b) + ' Pick the plant to keep.'}
-            action="Cancel plan" danger cancelLabel={'Keep ' + PLAN_NAME[b.plan]} busy={!!busy}
-            onPick={(keep) => run(async () => { await bookPlan(b, 'free', null, reload, keep); setCancelling(false); })} onCancel={() => setCancelling(false)} />
-        ) : (
-          <ConfirmCard modal title={<>Cancel {PLAN_NAME[b.plan]}?</>} text={cancelText(b)} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
-            busy={!!busy} onConfirm={() => run(async () => { await bookPlan(b, 'free', null, reload); setCancelling(false); })} onCancel={() => setCancelling(false)} />
-        ))}
+        {cancelling && <CancelPlanDialog b={b} logins={logins} busy={!!busy} onCancel={() => setCancelling(false)}
+          onConfirm={(keep) => run(async () => { await bookPlan(b, 'free', null, reload, keep); setCancelling(false); })} />}
         {picking && (
           <KeepPicker b={b} room={planRoom(picking.plan, picking.extra ?? b.nextExtraPlants ?? b.extraPlants)} logins={logins} busy={!!busy}
             action={picking.extra == null ? 'Downgrade' : held - picking.extra === 1 ? 'Remove plant' : 'Remove plants'}
@@ -2532,15 +2518,9 @@ function PaymentsSection({ billing }) {
     return s.pay ? (
       <SettingsSection id="payments" title="Payment" note={s.payNote ? 'Your card pays for renewals and upgrades.' : null}>
         {s.card ? (
-          <div className="conn-row" aria-hidden="true">
-            <window.Skeleton w={46} h={30} r={5} style={{ flex: 'none' }} />
-            <div className="conn-text">
-              <div className="conn-user">{skelLine(150)}</div>
-              <div className="conn-meta">{skelLine(90)}</div>
-            </div>
-            {s.update && <div className="conn-actions"><window.Skeleton w={84} h={34} r={9} /></div>}
-          </div>
-        ) : <div className="field-note" aria-hidden="true">{skelLine(110)}</div>}
+          <SettingRow hidden lead={<window.Skeleton w={46} h={30} r={5} style={{ flex: 'none' }} />}
+            label={<window.SkelLine w={150} />} note={<window.SkelLine w={90} />} action={s.update && <window.Skeleton w={84} h={34} r={9} />} />
+        ) : <div className="field-note" aria-hidden="true"><window.SkelLine w={110} /></div>}
       </SettingsSection>
     ) : null;
   }
@@ -2549,20 +2529,13 @@ function PaymentsSection({ billing }) {
   return (
     <SettingsSection id="payments" title="Payment" note={b.plan !== 'free' && b.nextPlan !== 'free' ? 'Your card pays for renewals and upgrades.' : null}>
       {c ? (
-        <div className="conn-row">
-          <CardLogo brand={c.brand} />
-          <div className="conn-text">
-            <div className="conn-user">{c.name} •••• <span className="mono">{c.last4}</span></div>
-            <div className="conn-meta">Expires {String(c.expMonth).padStart(2, '0')}/{String(c.expYear).slice(-2)}</div>
-          </div>
-          {/* past due: Pay with another card in Plan changes it and pays */}
-          {b.plan !== 'free' && b.state !== 'past_due' && (
-            <div className="conn-actions">
-              <button type="button" className="ghost-btn" disabled={busy} aria-busy={busy}
-                      onClick={async () => { setBusy(true); await window.changeCard(); setBusy(false); }}>{busy ? 'Opening…' : 'Update'}</button>
-            </div>
-          )}
-        </div>
+        // past due: Pay with another card in Plan changes it and pays
+        <SettingRow lead={<CardLogo brand={c.brand} />} label={<>{c.name} •••• <span className="mono">{c.last4}</span></>}
+          note={`Expires ${String(c.expMonth).padStart(2, '0')}/${String(c.expYear).slice(-2)}`}
+          action={b.plan !== 'free' && b.state !== 'past_due' && (
+            <window.BusyButton className="ghost-btn" busy={busy} busyText="Opening…"
+                    onClick={async () => { setBusy(true); await window.changeCard(); setBusy(false); }}>Update</window.BusyButton>
+          )} />
       ) : <div className="field-note">No card saved.</div>}
     </SettingsSection>
   );
@@ -2577,7 +2550,7 @@ function InvoicesSection({ billing: b }) {
           <thead><tr><th>Date</th><th>Plan</th><th>Total</th><th>Status</th></tr></thead>
           <tbody>
             {Array.from({ length: n }, (_, i) => (
-              <tr key={i}><td>{skelLine(80)}</td><td className="pay-what">{skelLine(140)}</td><td>{skelLine(56)}</td><td>{skelLine(32)}</td></tr>
+              <tr key={i}><td>{<window.SkelLine w={80} />}</td><td className="pay-what">{<window.SkelLine w={140} />}</td><td>{<window.SkelLine w={56} />}</td><td>{<window.SkelLine w={32} />}</td></tr>
             ))}
           </tbody>
         </table>
@@ -2586,7 +2559,7 @@ function InvoicesSection({ billing: b }) {
   }
   if (b.comped || !(b.payments || []).length) return null;
   const { rand } = window.billingFmt;
-  const day = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const day = (d) => window.dayText(d, { day: 'numeric', month: 'short', year: 'numeric' });
   // What each payment was for (SOLAR-302). Extra plants bought on the same plan are an
   // 'upgrade' charge too, so the plan before it tells them apart from a real upgrade.
   const plants = (n) => `${n} extra ${n === 1 ? 'plant' : 'plants'}`;
@@ -2640,7 +2613,7 @@ function LoginMenu({ email, busy, onPassword, onRemove }) {
       <button type="button" className="login-manage" aria-haspopup="menu" aria-expanded={open} aria-label={'Manage ' + email}
               disabled={busy} aria-busy={busy} onClick={() => setOpen(o => !o)}>
         Manage
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" /></svg>
+        <Icon id="chevron" />
       </button>
       {open && (
         <MenuList className="login-menu" label={email}>
@@ -2665,13 +2638,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const [checking, setChecking] = useState(false);
   const retry = async () => { setChecking(true); await refresh(); setChecking(false); };
   // "read 2 min ago": freshness is what a login row is for, not the calendar date
-  const ago = (iso) => {
-    const s = (Date.now() - new Date(iso).getTime()) / 1000;
-    if (s < 90) return 'just now';
-    const m = Math.round(s / 60); if (m < 90) return m + ' min ago';
-    const h = Math.round(m / 60); if (h < 36) return h + ' h ago';
-    return Math.round(h / 24) + ' days ago';
-  };
+  const ago = (iso) => window.fmtAgo(new Date(iso), Date.now());
   // Waits for the fresh list, so the form's "Connecting…" holds until the login is listed.
   const changed = async (linked) => {
     const wasAdding = mode === 'add';
@@ -2685,7 +2652,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   };
   // " Plant 495944 is now in your plant list." for one plant, "… and … are …" for more
   const plantsLine = (plants, what) => {
-    const names = (plants || []).map(p => p.name || p.plant_name || 'Plant ' + (p.id ?? p.plant_id));
+    const names = (plants || []).map(p => window.plantLabel(p));
     if (!names.length) return '';
     const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0];
     return ' ' + list + (names.length > 1 ? ' are ' : ' is ') + what + '.';
@@ -2706,9 +2673,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const removeList = (acc) => !!acc.plants?.length && (
     <div className="login-list keep-picks">
       {acc.plants.map(p => (
-        <div key={p.plant_id} className="login-plant">
-          <div className="conn-user plant-nm">{p.plant_name || 'Plant ' + p.plant_id}</div>
-        </div>
+        <PlantLine key={p.plant_id} name={window.plantLabel(p)} />
       ))}
     </div>
   );
@@ -2772,7 +2737,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   // "Stop and delete"; a plant up for deletion on the billing date shows that and Keep instead.
   const plantRow = (p) => {
     const s = state(p);
-    const name = p.plant_name || 'Plant ' + p.plant_id;
+    const name = window.plantLabel(p);
     const b = busy === 'stop:' + p.plant_id || busy === 'start:' + p.plant_id;
     const on = s === 'on' || s === 'off';
     // A stopped plant the move to Free booked comes back only by swapping it in: its switch,
@@ -2780,8 +2745,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     const swap = s === 'going' && p.paused && (!billing || billing.plan === 'free' || p.free_removal);
     const sw = <window.Switch on={on} label={'Collect ' + name} disabled={b} busy={b} onChange={() => on ? setStopping(p.plant_id) : start(p)} />;
     return (
-      <div key={p.plant_id} className={'login-plant' + (on ? '' : ' off')}>
-        <div className="conn-user plant-nm">{name}</div>
+      <PlantLine key={p.plant_id} name={name} off={!on}>
         {s === 'going' ? <>
           <span className="conn-status plant-state bad">Deleted {billDay(p.remove_on)}</span>
           {swap ? sw : <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
@@ -2799,14 +2763,14 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
             text={billing?.plan === 'family' ? 'Turn another plant off first, or add this one to your plan.' : 'Turn another plant off first, or upgrade.'}
             action={onCollect && 'Upgrade'} onConfirm={() => { setFull(null); onCollect(p.plant_id); }} onCancel={() => setFull(null)} />
         )}
-      </div>
+      </PlantLine>
     );
   };
   // Free and Home collect one plant, Family 3 plus the extra bought. With that taken, Add login
   // still opens the form: the server links the new plants stopped, and each one's switch offers
   // the upgrade (SOLAR-272). A stopped plant leaves room, as on the server (SOLAR-259).
   const collecting = allPlants.filter(p => !p.paused).length;
-  const limit = billing && !billing.comped ? (billing.plan === 'family' ? 3 + (billing.extraPlants || 0) : 1) : null;
+  const limit = billing && !billing.comped ? planRoom(billing.plan, billing.extraPlants) : null;
   const planFull = limit != null && collecting >= limit;
   // Plants on out of what the plan allows, so it shows the room left (SOLAR-285); none when
   // free of charge. A plant up for deletion still collects until its date.
@@ -2816,17 +2780,12 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
       action={!unread && <button type="button" className="save-btn" onClick={() => { if (planFull) window.track('add_login_full_done', { plan: billing.plan }); setMode('add'); }}>Add login</button>}>
       {!unread && mode === 'add' && (
         // A form over the page (SOLAR-286). Cancel re-reads too: a login with no plant yet is saved but not listed.
-        <window.Dialog keep label="Add login" onClose={() => { setMode(null); refresh(); }}>
-          <div className="confirm-title">Add login</div>
-          {planFull && <div className="confirm-text">Your plan is full, so new plants are added stopped.</div>}
-          <window.LinkForm compact hasPlant={allPlants.some(p => !p.paused)} onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
-        </window.Dialog>
+        <window.LinkDialog title="Add login" note={planFull && 'Your plan is full, so new plants are added stopped.'}
+          hasPlant={allPlants.some(p => !p.paused)} onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
       )}
       {unread ? (
-        <div className="sset conn-row">
-          <div className="conn-text"><div className="conn-user">Couldn’t load your logins</div><div className="conn-meta">&nbsp;</div></div>
-          <div className="conn-actions"><button type="button" className="ghost-btn" onClick={retry} disabled={checking} aria-busy={checking}>{checking ? 'Checking…' : 'Try again'}</button></div>
-        </div>
+        <SettingRow className="sset" label="Couldn’t load your logins" note={NBSP}
+          action={<window.BusyButton className="ghost-btn" onClick={retry} busy={checking} busyText="Checking…">Try again</window.BusyButton>} />
       ) : !live.length ? (
         <div className="sset"><div className="field-note">No login connected.</div></div>
       ) : (
@@ -2852,10 +2811,8 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                     onRemove={() => setConfirming(acc.account_id)} />
                 </div>
                 {mode === acc.account_id && (
-                  <window.Dialog keep label={ok ? 'Change SunSynk password' : 'Reconnect'} onClose={() => setMode(null)}>
-                    <div className="confirm-title">{ok ? 'Change SunSynk password' : 'Reconnect'}</div>
-                    <window.LinkForm compact relink changing={ok} initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
-                  </window.Dialog>
+                  <window.LinkDialog title={ok ? 'Change SunSynk password' : 'Reconnect'} relink changing={ok}
+                    initialUsername={acc.sunsynk_username} onLinked={changed} onCancel={() => setMode(null)} />
                 )}
                 {confirming === acc.account_id && (
                   <ConfirmCard modal
@@ -2887,13 +2844,9 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   // The battery keeps only its kWh, so it opens on Total; panels open on By size when rows
   // are saved (panel_groups), else on Total.
   const fromCfg = (c) => {
-    const groups = Array.isArray(c?.panel_groups) && c.panel_groups.length ? c.panel_groups : null;
-    return {
-      rate: c?.tariff_import > 0 ? String(c.tariff_import) : '',
-      res: String(c?.battery_reserve_pct ?? 20),
-      bMode: 'total', bTot: c?.battery_kwh > 0 ? String(c.battery_kwh) : '', bRows: window.rowsFrom(null),
-      pMode: groups ? 'rows' : 'total', pTot: !groups && c?.system_kwp > 0 ? String(c.system_kwp) : '', pRows: window.rowsFrom(groups),
-    };
+    const t = window.cfgFields(c);
+    return { rate: t.rate, res: t.reserve, bMode: 'total', bTot: t.size, bRows: window.rowsFrom(null),
+      pMode: t.groups ? 'rows' : 'total', pTot: t.panels, pRows: window.rowsFrom(t.groups) };
   };
   const [f, setF] = useState(() => fromCfg(cfg));
   const [busy, setBusy] = useState(false);
@@ -2905,20 +2858,17 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   if (loaded !== shownCfg) { setLoaded(shownCfg); setF(fromCfg(plant?.config)); setTried(false); }
   const set = (k) => (v) => setF(x => ({ ...x, [k]: v }));
   const n = window.stepNum;
-  const whole = (x, lo, hi) => Number.isInteger(n(x)) && n(x) >= lo && n(x) <= hi;
   const batt = window.sumOf('size', f.bMode, f.bTot, f.bRows);
   const pan = window.sumOf('panels', f.pMode, f.pTot, f.pRows);
   // An empty rate is 0 (savings show as zero). A stored reserve outside 5..50, left alone, is kept.
   const rateOk = f.rate === '' || n(f.rate) >= 0;
-  const resOk = whole(f.res, 5, 50) || n(f.res) === (cfg.battery_reserve_pct ?? 20);
+  const resOk = window.wholeNum(f.res, 5, 50) || n(f.res) === (cfg.battery_reserve_pct ?? 20);
   // What Save sends: the way on screen for battery and panels, empty meaning none
   const patch = {
     tariff_import: f.rate === '' ? 0 : n(f.rate),
     battery_kwh: batt.empty ? null : +batt.value.toFixed(3),
     battery_reserve_pct: n(f.res),
-    ...(pan.empty ? { system_kwp: null, panel_groups: null }
-      : f.pMode === 'total' ? { system_kwp: pan.value, panel_groups: null }
-      : { system_kwp: pan.value, panel_groups: pan.filled.map(r => ({ count: n(r.c), watts: n(r.e) })) }),
+    ...window.panelsPatch(pan, f.pMode),
   };
   const bad = { rate: !rateOk, res: !resOk, batt: !batt.ok, pan: !pan.ok };
   // Numbers are compared as numbers, not as typed: 12.60 over a stored 12.6 is not a change.
@@ -2972,16 +2922,14 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   // each box's place at its size, so nothing moves when the values land (SOLAR-221).
   if (!me) {
     const row = (label, meta, sum) => (
-      <div className="conn-row sset-row">
-        <div className="conn-text"><span className="conn-user">{label}</span><span className="conn-meta">{meta}</span></div>
-        {sum
-          ? <div className="sset-sum"><div className="fs-sum">
+      <SettingRow className="sset-row" label={label} note={meta} actionClass={sum ? 'sset-sum' : 'conn-actions sset-one'}
+        action={sum
+          ? <div className="fs-sum">
               {/* the Total / By size switch is words only, so it draws for real, locked */}
               <div className="fs-sumhead"><Segmented size="sm" label="How to enter it" value="total" onChange={() => {}} options={window.SUM_MODES} disabled /><b className="fs-val mono">{NBSP}</b></div>
               <window.Skeleton className="fs-in" w="" h={41} r={9} />
-            </div></div>
-          : <div className="conn-actions sset-one"><window.Skeleton className="fs-in" w="" h={41} r={9} /></div>}
-      </div>
+            </div>
+          : <window.Skeleton className="fs-in" w="" h={41} r={9} />} />
     );
     return (
       <SettingsSection id="system" title="Your system" note={SYSTEM_NOTE}>
@@ -3000,53 +2948,34 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
       {/* One section since SOLAR-250, in First steps' order: rate, battery, reserve, panels */}
       <SettingsSection id="system" title="Your system" note={SYSTEM_NOTE}>
         {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
-        <div className="conn-row sset-row">
-          <div className="conn-text">
-            <span className="conn-user">Electricity rate</span>
-            <span className="conn-meta">{n(f.rate) > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}</span>
-          </div>
-          <div className="conn-actions sset-one">
+        <SettingRow className="sset-row" label="Electricity rate" actionClass="conn-actions sset-one"
+          note={n(f.rate) > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}
+          action={<>
             <window.StepField value={f.rate} onChange={set('rate')} label="Electricity rate" pre={sym} unit="/unit" inputMode="decimal" ph="3.40" invalid={tried && bad.rate} />
             {err(bad.rate, 'Enter a price, like 3.40.')}
-          </div>
-        </div>
-        <div className="conn-row sset-row">
-          <div className="conn-text">
-            <span className="conn-user">Battery capacity</span>
-            <span className="conn-meta">All batteries together.</span>
-          </div>
-          <div className="sset-sum">
+          </>} />
+        <SettingRow className="sset-row" label="Battery capacity" note="All batteries together." actionClass="sset-sum"
+          action={<>
             <window.SumBox kind="size" mode={f.bMode} onMode={set('bMode')} tot={f.bTot} onTot={set('bTot')} rows={f.bRows} onRows={set('bRows')} label="Battery size" />
             {err(bad.batt, f.bMode === 'total' ? 'Enter more than 0 kWh.' : 'Enter whole batteries and the kWh of one.')}
-          </div>
-        </div>
-        <div className="conn-row sset-row">
-          <div className="conn-text">
-            <span className="conn-user">Battery reserve</span>
-            <span className="conn-meta">The battery stops powering your home at this charge.</span>
-          </div>
-          <div className="conn-actions sset-one">
+          </>} />
+        <SettingRow className="sset-row" label="Battery reserve" note="The battery stops powering your home at this charge." actionClass="conn-actions sset-one"
+          action={<>
             <window.StepField value={f.res} onChange={set('res')} label="Reserve" unit="%" inputMode="numeric" ph="20" invalid={tried && bad.res} />
             {err(bad.res, 'Enter 5 to 50.')}
-          </div>
-        </div>
-        <div className="conn-row sset-row">
-          <div className="conn-text">
-            <span className="conn-user">Solar panels</span>
-            <span className="conn-meta">What they make in full sun.</span>
-          </div>
-          <div className="sset-sum">
+          </>} />
+        <SettingRow className="sset-row" label="Solar panels" note="What they make in full sun." actionClass="sset-sum"
+          action={<>
             <window.SumBox kind="panels" mode={f.pMode} onMode={set('pMode')} tot={f.pTot} onTot={set('pTot')} rows={f.pRows} onRows={set('pRows')} label="Solar panels" />
             {err(bad.pan, f.pMode === 'total' ? 'Enter more than 0 kW.' : 'Enter whole panels and 50 to 1000 W each.')}
-          </div>
-        </div>
+          </>} />
       </SettingsSection>
 
       {dirty && (
         <div className="save-bar dirty" role="status">
           <span className="save-text">{blocked ? 'Save or discard before switching plant.' : 'Unsaved changes'}</span>
           <button type="button" className="ghost-btn" onClick={() => { setF(fromCfg(cfg)); setTried(false); }} disabled={busy}>Discard</button>
-          <button type="button" className="save-btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+          <window.BusyButton className="save-btn" onClick={save} busy={busy} busyText="Saving…">Save</window.BusyButton>
         </div>
       )}
     </>
@@ -3066,18 +2995,11 @@ function PasswordRow({ email }) {
   const [cur, setCur] = useState('');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
-  const [bad, setBad] = useState({});
+  const { bad, setBad, flag, edited } = window.useFieldErrors();
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (open) document.getElementById('pw-current')?.focus(); }, [open]);
 
   const close = () => { window.takeResetAsk(); setOpen(false); setCur(''); setPw(''); setPw2(''); setBad({}); };
-  const flag = (problems) => { setBad(problems); setTimeout(() => document.getElementById(Object.keys(problems)[0])?.focus()); };
-  const edited = (...ids) => setBad(b => {
-    if (!ids.some(id => b[id])) return b;
-    const next = { ...b };
-    ids.forEach(id => delete next[id]);
-    return next;
-  });
   const check = () => {
     const out = {};
     if (!cur) out['pw-current'] = 'Enter your password';
@@ -3115,22 +3037,18 @@ function PasswordRow({ email }) {
     }
   };
 
-  const label = (id, text, hint) => (
-    <label htmlFor={id}>{text}{bad[id] ? <span className="link-bad" id={id + '-err'}>{bad[id]}</span> : hint && <span>{hint}</span>}</label>
-  );
   const field = (id, text, value, set, autoComplete, hint, also = []) => (
     <div className={'field' + (id === 'pw-confirm' ? ' link-last' : '')}>
-      {label(id, text, hint)}
+      <window.FieldLabel id={id} label={text} error={bad[id]} hint={hint} />
       <window.PasswordInput id={id} className="input" autoComplete={autoComplete} value={value}
                             onChange={(v) => { set(v); edited(id, ...also); }} aria={window.invalidProps(id, bad[id])} />
     </div>
   );
   return (
-      <div className="conn-row" id="settings-password">
-        <div className="conn-text"><div className="conn-user">Change password</div><div className="conn-meta">Signs out your other devices.</div></div>
-        <div className="conn-actions"><button type="button" className="ghost-btn" onClick={() => setOpen(true)}>Change</button></div>
+      <SettingRow id="settings-password" label="Change password" note="Signs out your other devices."
+        action={<button type="button" className="ghost-btn" onClick={() => setOpen(true)}>Change</button>}>
         {open && (
-          <window.Dialog keep label="Change password" onClose={() => { if (!busy) close(); }}>
+          <window.Dialog keep busy={busy} label="Change password" onClose={close}>
           <div className="confirm-title">Change password</div>
           <div className="confirm-text">Signs out your other devices.</div>
           <form className="conn-form link-form" onSubmit={submit} noValidate aria-busy={busy}>
@@ -3141,16 +3059,15 @@ function PasswordRow({ email }) {
             {field('pw-confirm', 'Confirm password', pw2, setPw2, 'new-password')}
             <div className="conn-form-actions">
               <button type="button" className="ghost-btn" onClick={close} disabled={busy}>Cancel</button>
-              <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>{busy ? 'Saving…' : 'Save password'}</button>
+              <window.BusyButton type="submit" className="save-btn" busy={busy} busyText="Saving…">Save password</window.BusyButton>
             </div>
           </form>
           </window.Dialog>
         )}
-      </div>
+      </SettingRow>
   );
 }
 
-const shiftDay = (k, n) => { const d = new Date(k + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 // One end of a range: a field-sized button reading "Fri 2 Oct" that opens the app's calendar.
 function DayField({ id, value, todayStr, earliest, latest, bad, onPick }) {
   const [open, setOpen, ref] = usePopover();
@@ -3217,7 +3134,7 @@ function DownloadSection({ plants, plantId, ready }) {
                 onPick={(k) => { set(k); setBad(null); }} />
     </div>
   );
-  const yearTo = shiftDay(from, 365);
+  const yearTo = window.shiftDate(from, 365);
   return (
     <SettingsSection id="download" title="Your data" note="A CSV file. Every minute for the last 31 days, every 5 minutes before that.">
       <div className="dl-row">
@@ -3227,15 +3144,15 @@ function DownloadSection({ plants, plantId, ready }) {
             {/* which plant is on screen comes with api_me: until then the picker shimmers */}
             {!ready ? <window.Skeleton className="fs-in" w="" h={41} r={9} />
               : <PickMenu id="dl-plant" label="Plants" value={plant} onPick={setPlant}
-                          options={plants.map(p => ({ value: p.id, label: p.name || 'Plant ' + p.id }))} />}
+                          options={plants.map(p => ({ value: p.id, label: window.plantLabel(p) }))} />}
           </div>
         )}
-        {field('dl-from', 'From', from, setFrom, shiftDay(to, -365), to)}
+        {field('dl-from', 'From', from, setFrom, window.shiftDate(to, -365), to)}
         {field('dl-to', 'To', to, setTo, from, yearTo < today ? yearTo : today)}
         {/* the plan isn't known yet, so neither is the lock: the button's place shimmers */}
         {!ready ? <window.Skeleton w={104} h={41} r={9} style={{ flex: 'none' }} />
           : over ? <button type="button" className="ghost-btn lock-cta" onClick={() => window.openPlans('csv')}><window.LockIcon />Download</button>
-          : <button type="button" className="save-btn" onClick={submit} disabled={busy} aria-busy={busy}>{busy ? 'Preparing…' : 'Download'}</button>}
+          : <window.BusyButton className="save-btn" onClick={submit} busy={busy} busyText="Preparing…">Download</window.BusyButton>}
       </div>
       {bad && <p className="sset-err" id="dl-err" role="alert">{bad}</p>}
     </SettingsSection>
@@ -3268,12 +3185,8 @@ function DeleteAccountRow({ email, billing, onBilling }) {
     }
   };
   return (
-    <div className="conn-row" id="settings-delete">
-      <div className="conn-text">
-        <div className="conn-user">Delete account</div>
-        <div className="conn-meta">Deletes your logins, settings and email choices.</div>
-      </div>
-      <div className="conn-actions"><button type="button" className="danger-btn" onClick={() => setConfirming(c => !c)} disabled={busy || (confirming && !blocked)}>{busy ? 'Deleting…' : 'Delete'}</button></div>
+    <SettingRow id="settings-delete" label="Delete account" note="Deletes your logins, settings and email choices."
+      action={<window.BusyButton className="danger-btn" onClick={() => setConfirming(c => !c)} busy={busy} busyText="Deleting…" disabled={confirming && !blocked}>Delete</window.BusyButton>}>
       {/* Tapping Delete on a blocked account shows why, in place of the confirm (SOLAR-274) */}
       {/* a plan to cancel or a payment to settle first: said in a pop-up when Delete is pressed (SOLAR-292) */}
       {blocked && confirming && (
@@ -3287,7 +3200,7 @@ function DeleteAccountRow({ email, billing, onBilling }) {
         <ConfirmCard modal title={<>Delete <b>{email || 'this account'}</b>?</>} text="Your plants’ history goes too, unless another account shares them. It cannot be undone."
           action="Delete account" onConfirm={del} onCancel={() => setConfirming(false)} />
       )}
-    </div>
+    </SettingRow>
   );
 }
 
@@ -3305,13 +3218,8 @@ function FirstStepsSection({ me, plantId, onSaved }) {
   };
   return (
     <SettingsSection id="steps" title="First steps">
-      <div className="conn-row sset-row">
-        <div className="conn-text">
-          <span className="conn-user">Finish setup</span>
-          <span className="conn-meta">{fs.left.length === 1 ? '1 step left.' : fs.left.length + ' steps left.'}</span>
-        </div>
-        <div className="conn-actions"><button type="button" className="ghost-btn" onClick={show} disabled={busy}>Show</button></div>
-      </div>
+      <SettingRow className="sset-row" label="Finish setup" note={fs.left.length === 1 ? '1 step left.' : fs.left.length + ' steps left.'}
+        action={<button type="button" className="ghost-btn" onClick={show} disabled={busy}>Show</button>} />
     </SettingsSection>
   );
 }
@@ -3376,7 +3284,6 @@ function NotificationsSection({ userId }) {
   };
   // The email choices still on their way: each switch and its summary shimmer in place.
   const loading = !prefs && !failed;
-  const skelSwitch = <window.Skeleton w={42} h={24} r={14} style={{ flex: 'none' }} />;
   // One group: a row that opens its switches, and a switch for all of them. Each switch
   // saves through its own flip, so a group is its switches' saves, one per kind.
   const group = (g, p, flipOne, key, wait) => {
@@ -3386,20 +3293,18 @@ function NotificationsSection({ userId }) {
         <div className="notif-head">
           <button type="button" className="notif-open" aria-expanded={!!open[key]} aria-controls={'notif-' + key}
                   onClick={() => setOpen(o => ({ ...o, [key]: !o[key] }))}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
+            <Icon id="next" />
             <span className="toggle-text">
               <span className="notif-label">{g.label}</span>
-              <span className="toggle-hint">{wait ? skelLine(g.when ? 190 : 70, 11) : emailGroupSummary(g, p)}</span>
+              <span className="toggle-hint">{wait ? <window.SkelLine w={g.when ? 190 : 70} h={11} /> : emailGroupSummary(g, p)}</span>
             </span>
           </button>
-          {wait ? skelSwitch : <window.Switch on={anyOn} label={g.label}
-                  onChange={() => p && g.rows.forEach(([kind]) => { if (p[kind] === anyOn) flipOne(kind, !anyOn, g.label); })} />}
+          <window.Switch loading={wait} on={anyOn} label={g.label}
+                  onChange={() => p && g.rows.forEach(([kind]) => { if (p[kind] === anyOn) flipOne(kind, !anyOn, g.label); })} />
         </div>
         <div id={'notif-' + key} className="field notif-rows" role="group" aria-label={g.label} hidden={!open[key]}>
-          {g.rows.map(([kind, label, hint]) => wait ? (
-            <div key={kind} className="toggle-row"><span className="toggle-text"><span className="toggle-label">{label}</span><span className="toggle-hint">{hint}</span></span>{skelSwitch}</div>
-          ) : (
-            <Toggle key={kind} label={label} hint={hint} checked={!p || p[kind]}
+          {g.rows.map(([kind, label, hint]) => (
+            <Toggle key={kind} label={label} hint={hint} checked={!p || p[kind]} loading={wait}
                     onChange={(on) => p && flipOne(kind, on)} />
           ))}
         </div>
@@ -3414,19 +3319,16 @@ function NotificationsSection({ userId }) {
   return (
     <SettingsSection id="notifications" title="Notifications" note="Account emails always go out.">
       {failed ? (
-        <div className="conn-row">
-          <div className="conn-text"><div className="conn-user">Couldn’t load your email settings</div></div>
-          <div className="conn-actions"><button type="button" className="ghost-btn" onClick={load}>Try again</button></div>
-        </div>
+        <SettingRow label="Couldn’t load your email settings" action={<button type="button" className="ghost-btn" onClick={load}>Try again</button>} />
       ) : <>
         <div className="notif-sub">Email</div>
         <div className="notif-head notif-all">
           <span className="toggle-text">
             <span className="notif-label">All emails</span>
-            <span className="toggle-hint">{loading ? skelLine(60, 11) : onCount === every.length ? 'All ' + onCount + ' on' : onCount ? onCount + ' of ' + every.length + ' on' : 'Off'}</span>
+            <span className="toggle-hint">{loading ? <window.SkelLine w={60} h={11} /> : onCount === every.length ? 'All ' + onCount + ' on' : onCount ? onCount + ' of ' + every.length + ' on' : 'Off'}</span>
           </span>
-          {loading ? skelSwitch : <window.Switch on={allOn} label="All emails"
-                  onChange={() => prefs && every.forEach(([kind]) => { if (prefs[kind] === allOn) flip(kind, !allOn, 'All emails'); })} />}
+          <window.Switch loading={loading} on={allOn} label="All emails"
+                  onChange={() => prefs && every.forEach(([kind]) => { if (prefs[kind] === allOn) flip(kind, !allOn, 'All emails'); })} />
         </div>
         {EMAIL_GROUPS.map(g => group(g, prefs, flip, g.id, loading))}
       </>}
@@ -3434,7 +3336,7 @@ function NotificationsSection({ userId }) {
       {push === null && (
         <div className="notif-push" aria-hidden="true">
           <div className="notif-sub">On this browser</div>
-          <div className="toggle-row"><span className="toggle-text"><span className="toggle-label">Pop-up alerts</span><span className="toggle-hint">The same alerts, shown on this device even when the app is closed.</span></span>{skelSwitch}</div>
+          <Toggle loading label="Pop-up alerts" hint="The same alerts, shown on this device even when the app is closed." />
         </div>
       )}
       {push && push !== 'none' && (
@@ -3501,7 +3403,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
             <button key={id} type="button" aria-current={shown === id ? 'page' : undefined} onClick={() => onPage(id)}>
               <span>{label}</span>
               {dot[id] && <span className="dot" aria-label={billing?.state === 'past_due' ? 'Needs you' : 'A login needs reconnecting'} />}
-              <svg className="set-chev" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
+              <Icon id="next" className="set-chev" />
             </button>
           ))}
         </nav>
@@ -3532,7 +3434,7 @@ function AccountPage({ user, billing, plants, plantId, ready, onBilling }) {
     <div className="settings-page">
       <div className="page-head">
         <h1>Account</h1>
-        <p>{email ? <>{email}<span className="set-method"> · Signs in with {method}</span></> : skelLine(260)}</p>
+        <p>{email ? <>{email}<span className="set-method"> · Signs in with {method}</span></> : <window.SkelLine w={260} />}</p>
       </div>
       <NotificationsSection userId={user?.id} />
       {plants.length > 0 && <DownloadSection plants={plants} plantId={plantId} ready={ready} />}
@@ -3540,15 +3442,9 @@ function AccountPage({ user, billing, plants, plantId, ready, onBilling }) {
         {email && providers.includes('email') && <PasswordRow email={email} />}
         {/* the session is still being read: the row a password account had last time, held */}
         {!user && hadPassword() && (
-          <div className="conn-row" aria-hidden="true">
-            <div className="conn-text"><div className="conn-user">Change password</div><div className="conn-meta">Signs out your other devices.</div></div>
-            <div className="conn-actions"><window.Skeleton w={112} h={34} r={9} /></div>
-          </div>
+          <SettingRow hidden label="Change password" note="Signs out your other devices." action={<window.Skeleton w={112} h={34} r={9} />} />
         )}
-        <div className="conn-row">
-          <div className="conn-text"><div className="conn-user">Sign out</div><div className="conn-meta">On this device.</div></div>
-          <div className="conn-actions"><window.SignOutButton className="ghost-btn" /></div>
-        </div>
+        <SettingRow label="Sign out" note="On this device." action={<window.SignOutButton className="ghost-btn" />} />
         <DeleteAccountRow email={email} billing={billing} onBilling={onBilling} />
       </SettingsSection>
       <div className="app-version mono">
@@ -3580,7 +3476,7 @@ function PlantSettings({ me, plantId, onSaved, onDirty, switchBlocked, flash, on
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
       <div className="settings-page">
-        <div className="page-head"><h1>{!me ? skelLine(180, 22) : plant?.name || 'Plant settings'}</h1><p>Changes apply to everyone on this plant.</p></div>
+        <div className="page-head"><h1>{!me ? <window.SkelLine w={180} h={22} /> : plant?.name || 'Plant settings'}</h1><p>Changes apply to everyone on this plant.</p></div>
         <PlantSections me={me} plantId={plantId} onSaved={onSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
         <FirstStepsSection me={me} plantId={plantId} onSaved={onSaved} />
       </div>

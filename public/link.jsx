@@ -13,6 +13,29 @@
 // in a browser bundle.
 // ============================================================================
 
+// A database call that takes longer than ms ends as a 'timed out' error, so nothing waits forever.
+const withTimeout = (call, ms) => Promise.race([call,
+  new Promise(r => setTimeout(() => r({ data: null, error: { message: 'timed out' } }), ms))]);
+// A POST to one of our Edge Functions as the signed-in user: [response, its JSON or {}].
+const edgePost = async (path, body, signal) => {
+  const { data: { session } } = await window.sb.auth.getSession();
+  if (!session) throw new Error('Your session ended. Sign in again.');
+  const res = await fetch(`${window.SUNSYNK_CONFIG.url}/functions/v1/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: window.SUNSYNK_CONFIG.key },
+    body: JSON.stringify(body),
+    signal,
+  });
+  return [res, await res.json().catch(() => ({}))];
+};
+// Draws node in a root of its own on the body, outside the app; returns the function that removes it.
+const mountNode = (node) => {
+  const el = document.body.appendChild(document.createElement('div'));
+  const root = ReactDOM.createRoot(el);
+  root.render(node);
+  return () => { root.unmount(); el.remove(); };
+};
+
 /**
  * Status of the signed-in user's SunSynk link(s). `refresh()` reads it again and resolves
  * once the newest read has landed, with that read's error or null, so a button can stay
@@ -27,10 +50,7 @@ window.useLinkStatus = function useLinkStatus() {
     // Ten seconds, then it counts as a failed read. Raced here rather than with an abort
     // signal: supabase-js waits on the stored session before the request even starts, and
     // a stall there never reaches the signal.
-    const attempt = () => {
-      const timedOut = new Promise(r => setTimeout(() => r({ data: null, error: { message: 'timed out' } }), 10000));
-      return Promise.race([window.sb.rpc('api_link_status'), timedOut]).catch(e => ({ data: null, error: e }));
-    };
+    const attempt = () => withTimeout(window.sb.rpc('api_link_status'), 10000).catch(e => ({ data: null, error: e }));
     // One quiet second try: a phone opening the app can stall or fail the first read
     // while its network and stored session wake up, and a retry then loads (SOLAR-21).
     const read = attempt().then(r => (r.error ? attempt() : r)).then(({ data, error }) => {
@@ -60,18 +80,7 @@ window.useLinkStatus = function useLinkStatus() {
 };
 
 window.linkSunsynk = async function linkSunsynk(username, password) {
-  const { data: { session } } = await window.sb.auth.getSession();
-  if (!session) throw new Error(LINK_ERRORS['sign in first']);
-  const res = await fetch(`${window.SUNSYNK_CONFIG.url}/functions/v1/link-sunsynk`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.access_token}`,
-      apikey: window.SUNSYNK_CONFIG.key,
-    },
-    body: JSON.stringify({ username, password }),
-  });
-  const body = await res.json().catch(() => ({}));
+  const [res, body] = await edgePost('link-sunsynk', { username, password });
   if (!res.ok) throw new Error(LINK_ERRORS[body.error] || 'Couldn’t connect to SunSynk. Check the login and try again.');
   window.track('plant_linked');
   return body;
@@ -90,14 +99,12 @@ const LINK_ERRORS = {
 // ---- Paywall (SOLAR-208) ------------------------------------------------------
 const rand = (n) => 'R' + Number(n).toLocaleString('en-US');
 // "30 Nov"; a date in another year carries it ("31 Oct 2027"), so a yearly date doesn't read as this year's.
-const billDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB',
-  { day: 'numeric', month: 'short', year: d.slice(0, 4) === String(new Date().getFullYear()) ? undefined : 'numeric' });
+const billDay = (d) => window.dayText(d, { day: 'numeric', month: 'short', year: d.slice(0, 4) === String(new Date().getFullYear()) ? undefined : 'numeric' });
 const perUnit = (period) => (period === 'yearly' ? 'a year' : 'a month');
 // extras: the extra plants wanted on Family in all; null keeps those held (SOLAR-264).
 // A billing read or change that takes too long ends as an error, so no button or pop-up waits
 // forever (SOLAR-294). The caller says "try again"; a change may still land, so it re-reads.
-const billingRpc = (name, args) => Promise.race([window.sb.rpc(name, args),
-  new Promise(r => setTimeout(() => r({ data: null, error: { message: 'timed out' } }), 15000))]);
+const billingRpc = (name, args) => withTimeout(window.sb.rpc(name, args), 15000);
 window.billingRpc = billingRpc;
 const quote = (plan, period, extras = null) => billingRpc('api_billing_quote', { p_plan: plan, p_period: period, p_extra: extras })
   .then(({ data, error }) => { if (error) throw error; return data; });
@@ -108,15 +115,9 @@ window.billingFmt = { rand, billDay, perUnit };
 // otherwise, or after the saved card is declined, Paystack's card page opens and
 // comes back to the Plan section with ?reference=, which billingReturn checks.
 const billingCall = async (route, body) => {
-  const { data: { session } } = await window.sb.auth.getSession();
-  if (!session) throw new Error('Your session ended. Sign in again.');
-  const res = await fetch(`${window.SUNSYNK_CONFIG.url}/functions/v1/billing/${route}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: window.SUNSYNK_CONFIG.key },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30000),   // a payment that hasn't started in 30 s says so (SOLAR-294)
-  }).catch(e => { throw new Error(/abort|timeout/i.test(e.name) ? 'timed out' : e.message); });
-  const out = await res.json().catch(() => ({}));
+  // a payment that hasn't started in 30 s says so (SOLAR-294)
+  const [res, out] = await edgePost('billing/' + route, body, AbortSignal.timeout(30000))
+    .catch(e => { throw new Error(/abort|timeout/i.test(e.name) ? 'timed out' : e.message); });
   if (!res.ok) throw new Error(out.error || 'payment failed');
   return out;
 };
@@ -133,14 +134,12 @@ const billingPaid = (plan, switched = false) => {
 
 // A payment step that ran out of time may still have gone through, so it doesn't say "try again".
 const SLOW_NOTE = 'This is taking too long. Check Billing in a minute before you try again.';
+// The toast for a payment step that failed: paid plans not open yet, too slow, or fallback.
+const payFailed = (e, fallback) => (/open soon/.test(e.message) ? window.toast('Paid plans open soon. Nothing was charged.')
+  : window.toast(e.message === 'timed out' ? SLOW_NOTE : fallback, { error: true }));
 // While a payment step runs, a small pop-up says so, so a slow one never looks frozen (SOLAR-294).
 // It has no close: every step ends, the slowest after 30 s. Returns the function that closes it.
-const working = (text) => {
-  const el = document.body.appendChild(document.createElement('div'));
-  const root = ReactDOM.createRoot(el);
-  root.render(<Dialog keep label={text} onClose={() => {}}><div className="pop-wait" role="status"><span className="spin" aria-hidden="true" />{text}</div></Dialog>);
-  return () => { root.unmount(); el.remove(); };
-};
+const working = (text) => mountNode(<Dialog busy label={text}><div className="pop-wait" role="status"><span className="spin" aria-hidden="true" />{text}</div></Dialog>);
 // Paid after the plan or extra plants changed: nothing applied, refunded by hand (0127).
 const REFUND_NOTE = 'Your plan changed while you paid, so nothing changed. The payment will be refunded.';
 // extras: the extra plants wanted on Family in all (SOLAR-264); left out, those held.
@@ -154,8 +153,8 @@ const PAID_EVENT = 'ps.paidEvent';
 // focus inside and closes on Escape. A click on the dimmed page outside it closes it too,
 // unless keep (a form: a stray tap must not throw away what was typed). Closing hands focus
 // back to what had it, e.g. the plant's switch. size: 'wide' for the plan cards, 'mid' for
-// the lock's plans.
-function Dialog({ label, onClose, keep = false, size = null, children }) {
+// the lock's plans. busy: a change is on its way, so nothing closes it until it lands.
+function Dialog({ label, onClose, keep = false, busy = false, size = null, children }) {
   const ref = React.useRef(null);
   // What had focus, read at first render before a child takes it, and whether it showed a ring
   // (a keyboard user): only then does it get one back on close.
@@ -167,8 +166,8 @@ function Dialog({ label, onClose, keep = false, size = null, children }) {
   }, []);
   return (
     <dialog ref={ref} className={'pop-dlg' + (size ? ' pop-' + size : '')} aria-label={label}
-            onCancel={(e) => { e.preventDefault(); if (e.target === ref.current) onClose(); }}   // only its own Escape, not one from a pop-up opened over it
-            onClick={(e) => { if (!keep && e.target === ref.current) onClose(); }}>
+            onCancel={(e) => { e.preventDefault(); if (!busy && e.target === ref.current) onClose(); }}   // only its own Escape, not one from a pop-up opened over it
+            onClick={(e) => { if (!keep && !busy && e.target === ref.current) onClose(); }}>
       <div className="pop-body">{children}</div>
     </dialog>
   );
@@ -209,10 +208,9 @@ const reviewPay = async (plan, period, extras) => {
   const title = q.switch ? 'Switch to yearly'
     : q.plan === plan && more > 0 ? `Add ${more} ${more === 1 ? 'plant' : 'plants'} to ${name}` : `Upgrade to ${name}`;
   const ok = await new Promise(resolve => {
-    const el = document.body.appendChild(document.createElement('div'));
-    const root = ReactDOM.createRoot(el);
-    const done = (yes) => { root.unmount(); el.remove(); resolve(yes); };
-    root.render(<PayReview title={title} note={q.switch ? `Your year starts ${billDay(q.startsOn)}.` : null} due={q.dueNow} card={`${b.card.name} •••• ${b.card.last4}`}
+    let close;
+    const done = (yes) => { close(); resolve(yes); };
+    close = mountNode(<PayReview title={title} note={q.switch ? `Your year starts ${billDay(q.startsOn)}.` : null} due={q.dueNow} card={`${b.card.name} •••• ${b.card.last4}`}
       then={[`Then from ${billDay(q.nextDate)}`, `${rand(q.nextCharge)} ${perUnit(q.switch ? 'yearly' : q.period || period)}`]} onDone={done} />);
   });
   window.track('pay_review_done', { plan, choice: ok ? 'pay' : 'cancel' });
@@ -243,10 +241,9 @@ window.startUpgrade = async function startUpgrade(plan, period, newCard = false,
     else if (r.status === 'refund') window.toast(REFUND_NOTE, { error: true });
     else window.toast('Your payment is still being checked. Look again in a minute.');
   } catch (e) {
-    if (/open soon/.test(e.message)) return window.toast('Paid plans open soon. Nothing was charged.');
-    window.toast(/settle the failed payment/.test(e.message) ? 'Pay the payment that didn’t go through first.'
+    payFailed(e, /settle the failed payment/.test(e.message) ? 'Pay the payment that didn’t go through first.'
       : /year is paid/.test(e.message) ? 'Your year is paid. Your plan stays as it is until it starts.'
-      : e.message === 'timed out' ? SLOW_NOTE : 'Couldn’t start the payment. Try again.', { error: true });
+      : 'Couldn’t start the payment. Try again.');
   } finally {
     paying = false;
   }
@@ -260,7 +257,7 @@ window.settlePayment = async function settlePayment() {
     location.assign(r.url);
   } catch (e) {
     stop();
-    window.toast(/open soon/.test(e.message) ? 'Paid plans open soon. Nothing was charged.' : e.message === 'timed out' ? SLOW_NOTE : 'Couldn’t start the payment. Try again.', { error: true });
+    payFailed(e, 'Couldn’t start the payment. Try again.');
   }
 };
 
@@ -273,8 +270,7 @@ window.changeCard = async function changeCard() {
     location.assign(r.url);
   } catch (e) {
     stop();
-    if (/open soon/.test(e.message)) return window.toast('Paid plans open soon. Nothing was charged.');
-    window.toast('Couldn’t open the card page. Try again.', { error: true });
+    payFailed(e, 'Couldn’t open the card page. Try again.');
   }
 };
 
@@ -439,19 +435,14 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
   const fail = (text) => window.toast(text, { error: true });
   const [noPlants, setNoPlants] = useState(false);
   // Field id → message, shown on the label line.
-  const [bad, setBad] = useState({});
-  const edited = (id) => setBad(b => (b[id] ? { ...b, [id]: undefined } : b));
+  const { bad, setBad, flag, edited } = window.useFieldErrors();
 
   const submit = async (e) => {
     e?.preventDefault();
     const problems = {};
     if (!username.trim()) problems['ss-user'] = 'Enter your email';
     if (!password) problems['ss-pass'] = 'Enter your password';
-    if (Object.keys(problems).length) {
-      setBad(problems);
-      setTimeout(() => document.getElementById(Object.keys(problems)[0])?.focus());
-      return;
-    }
+    if (Object.keys(problems).length) return flag(problems);
     setBusy(true); setBad({});
     findTimer.current = setTimeout(() => setFinding(true), 2500);
     try {
@@ -468,7 +459,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
       const pausedAll = (r.paused || []).length > 0 && (r.paused || []).length === (r.plants || []).length && !hasPlant;
       if (pausedAll) {
         setPassword('');
-        setPaywall({ reason: 'paused', paused: r.plants.map(p => p.name || 'Plant ' + p.id), ids: r.paused });
+        setPaywall({ reason: 'paused', paused: r.plants.map(p => window.plantLabel(p)), ids: r.paused });
         await onLinked(r);
         return;
       }
@@ -483,9 +474,6 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
     }
   };
 
-  const label = (id, text, hint) => (
-    <label htmlFor={id}>{text}{bad[id] ? <span className="link-bad" id={id + '-err'}>{bad[id]}</span> : hint && <span>{hint}</span>}</label>
-  );
   const invalid = (id) => window.invalidProps(id, bad[id]);
   const green = noPlants ? (busy ? 'Checking…' : 'Retry now')
     : busy ? (finding ? 'Finding your plant…' : 'Checking your login…')
@@ -512,12 +500,12 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
             stacks them. On the Connect card they stack. */}
         <div className={compact ? 'field-row' : undefined}>
           <div className="field">
-            {label('ss-user', 'SunSynk email', ownEmail && username === ownEmail ? 'Your account email' : null)}
+            <window.FieldLabel id="ss-user" label="SunSynk email" error={bad['ss-user']} hint={ownEmail && username === ownEmail ? 'Your account email' : null} />
             <input id="ss-user" className="input" type="text" placeholder="you@example.com" value={username} autoComplete="off"
                    readOnly={!!relink} onChange={(e) => { setUsername(e.target.value); edited('ss-user'); }} {...invalid('ss-user')} />
           </div>
           <div className="field link-last">
-            {label('ss-pass', 'SunSynk password')}
+            <window.FieldLabel id="ss-pass" label="SunSynk password" error={bad['ss-pass']} />
             <window.PasswordInput id="ss-pass" className="input" value={password} onChange={(v) => { setPassword(v); edited('ss-pass'); }} aria={invalid('ss-pass')} />
           </div>
         </div>
@@ -527,12 +515,25 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
         {noPlants
           ? <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setNoPlants(false); setPassword(''); }}>Use a different login</button>
           : onCancel && <button type="button" className="ghost-btn" onClick={onCancel} disabled={busy}>Cancel</button>}
-        <button type="submit" className="save-btn" disabled={busy} aria-busy={busy}>{green}</button>
+        <window.BusyButton type="submit" className="save-btn" busy={busy}>{green}</window.BusyButton>
       </div>
     </form>
   );
 }
 window.LinkForm = LinkForm;
+
+// The link form over the page, as Add plant, Add login and Reconnect open it. Closing it is
+// its Cancel. note: a line above the form.
+function LinkDialog({ title, note, onCancel, ...form }) {
+  return (
+    <window.Dialog keep label={title} onClose={onCancel}>
+      <div className="confirm-title">{title}</div>
+      {note && <div className="confirm-text">{note}</div>}
+      <LinkForm compact onCancel={onCancel} {...form} />
+    </window.Dialog>
+  );
+}
+window.LinkDialog = LinkDialog;
 /**
  * Sits inside AuthGate. Hands the login list to its child, which shows the dashboard
  * when a login lists a plant and the Setup frame (Connect on Live) when none does.
@@ -577,13 +578,11 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
       const retry = async (e) => { e.preventDefault(); setChecking(true); await refresh(); setChecking(false); };
       return (
         <div className="login-wrap">
-          <form className="login-card" onSubmit={retry} aria-busy={checking}>
-            <window.AuthBrand />
-            <div className="login-title">Couldn’t check your SunSynk logins</div>
-            <button type="submit" disabled={checking} aria-busy={checking}>{checking ? 'Checking…' : 'Try again'}</button>
+          <window.AuthCard title="Couldn’t check your SunSynk logins" onSubmit={retry} busy={checking}>
+            <window.BusyButton type="submit" busy={checking} busyText="Checking…">Try again</window.BusyButton>
             {/* No server text on screen (SOLAR-163). */}
             <div className="login-links"><window.SignOutButton className="login-link quiet" /></div>
-          </form>
+          </window.AuthCard>
         </div>
       );
     }

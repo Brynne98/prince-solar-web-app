@@ -52,9 +52,13 @@ async function getJSON(url) {
   if (!route) throw new Error('No RPC mapped for ' + path);
 
   const [fn, params] = route(q);
-  const { data, error } = await window.sb.rpc(fn, { ...params, p_plant: window.CURRENT_PLANT });
-  if (error) throw new Error(error.message || 'RPC ' + fn + ' failed');
-  return data || {};
+  return must(window.sb.rpc(fn, { ...params, p_plant: window.CURRENT_PLANT }), {}, 'RPC ' + fn + ' failed');
+}
+// A Supabase call's data, or its error thrown. fallback stands in for no data.
+async function must(call, fallback, failed = 'failed') {
+  const { data, error } = await call;
+  if (error) throw new Error(error.message || failed);
+  return fallback !== undefined && !data ? fallback : data;
 }
 
 // One answer per plant shared by every caller for `ms`, so pages opened one after another
@@ -312,9 +316,7 @@ async function fetchHourly(days, rk) {
 // Each of the caller's plants: last reading, inverters online, first-load progress (0101).
 // For the plant menu; no p_plant, so not through getJSON.
 async function fetchPlantStates() {
-  const { data, error } = await window.sb.rpc('api_plant_states');
-  if (error) throw new Error(error.message || 'RPC api_plant_states failed');
-  return data || [];
+  return must(window.sb.rpc('api_plant_states'), [], 'RPC api_plant_states failed');
 }
 // How many days this plant has logged; drives the "collecting your first day" copy.
 async function fetchPlantDays() {
@@ -343,57 +345,40 @@ async function fetchStringHealth() {
 // battery, roof). `prefs` is the per-user display state that used to live in
 // localStorage and therefore vanished on a new device.
 async function fetchMe() {
-  const { data, error } = await window.sb.rpc('api_me');
-  if (error) throw new Error(error.message);
-  return data || { plan: 'free', freeWeekEndsAt: null, prefs: {}, plants: [] };
+  return must(window.sb.rpc('api_me'), { plan: 'free', freeWeekEndsAt: null, prefs: {}, plants: [] });
 }
 async function savePrefs(patch) {
-  const { data, error } = await window.sb.rpc('api_prefs_set', { p_prefs: patch });
-  if (error) throw new Error(error.message);
-  return data || {};
+  return must(window.sb.rpc('api_prefs_set', { p_prefs: patch }), {});
 }
 async function savePlantConfig(plantId, patch) {
-  const { data, error } = await window.sb.from('plant_config').update(patch).eq('plant_id', plantId).select().single();
-  if (error) throw new Error(error.message);
+  const data = await must(window.sb.from('plant_config').update(patch).eq('plant_id', plantId).select().single());
   window.track('plant_settings_save_done', { fields: Object.keys(patch) });
   return data;
 }
-// Which report and alert emails the user wants (0091, SOLAR-158). No row yet means all on.
-const EMAIL_KINDS = ['weekly', 'monthly', 'yearly', 'grid', 'battery', 'panels', 'readings', 'sunsynk'];
-async function fetchEmailPrefs(userId) {
-  const { data, error } = await window.sb.from('email_prefs').select(EMAIL_KINDS.join(',')).eq('user_id', userId).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data || Object.fromEntries(EMAIL_KINDS.map(k => [k, true]));
-}
+// A user's on/off switches in table, one column per kind. No row yet means all on.
+const fetchFlags = (table, kinds, userId) => must(window.sb.from(table).select(kinds.join(',')).eq('user_id', userId).maybeSingle(),
+  Object.fromEntries(kinds.map(k => [k, true])));
 // One kind per call, so two quick taps on different rows can't undo each other.
-async function saveEmailPref(userId, kind, on) {
-  const { error } = await window.sb.from('email_prefs').upsert({ user_id: userId, [kind]: on });
-  if (error) throw new Error(error.message);
-  window.track('email_pref_change_done', { kind, on });
+async function saveFlag(table, event, userId, kind, on) {
+  await must(window.sb.from(table).upsert({ user_id: userId, [kind]: on }));
+  window.track(event, { kind, on });
 }
+// Which report and alert emails the user wants (0091, SOLAR-158).
+const EMAIL_KINDS = ['weekly', 'monthly', 'yearly', 'grid', 'battery', 'panels', 'readings', 'sunsynk'];
+const fetchEmailPrefs = (userId) => fetchFlags('email_prefs', EMAIL_KINDS, userId);
+const saveEmailPref = (userId, kind, on) => saveFlag('email_prefs', 'email_pref_change_done', userId, kind, on);
 // The alerts of the last 30 days, {pinned, items, unread} (0124, SOLAR-244).
 async function fetchNotifications() {
-  const { data, error } = await window.sb.rpc('api_notifications');
-  if (error) throw new Error(error.message);
-  return data;
+  return must(window.sb.rpc('api_notifications'));
 }
 // null marks every one read.
 async function readNotifications(ids) {
-  const { error } = await window.sb.rpc('api_notifications_read', { p_ids: ids });
-  if (error) throw new Error(error.message);
+  await must(window.sb.rpc('api_notifications_read', { p_ids: ids }));
 }
-// Which alerts pop up (push_prefs, 0124). No row yet means all on.
+// Which alerts pop up (push_prefs, 0124).
 const PUSH_KINDS = ['grid', 'battery', 'panels', 'readings', 'sunsynk'];
-async function fetchPushPrefs(userId) {
-  const { data, error } = await window.sb.from('push_prefs').select(PUSH_KINDS.join(',')).eq('user_id', userId).maybeSingle();
-  if (error) throw new Error(error.message);
-  return data || Object.fromEntries(PUSH_KINDS.map(k => [k, true]));
-}
-async function savePushPref(userId, kind, on) {
-  const { error } = await window.sb.from('push_prefs').upsert({ user_id: userId, [kind]: on });
-  if (error) throw new Error(error.message);
-  window.track('push_pref_change_done', { kind, on });
-}
+const fetchPushPrefs = (userId) => fetchFlags('push_prefs', PUSH_KINDS, userId);
+const savePushPref = (userId, kind, on) => saveFlag('push_prefs', 'push_pref_change_done', userId, kind, on);
 
 // Pop-ups on this browser. 'ok' where it can; 'ios' on an iPhone or iPad outside the
 // Home Screen app (Safari has no push there); 'none' elsewhere.
@@ -450,8 +435,7 @@ async function pushTurnOff(reason = 'switch') {
   return 'off';
 }
 async function deleteAccount() {
-  const { data, error } = await window.sb.rpc('api_account_delete');
-  if (error) throw new Error(error.message);
+  const data = await must(window.sb.rpc('api_account_delete'));
   window.track('account_delete_done');
   return data;
 }
@@ -465,7 +449,7 @@ function syncProgress(sync) {
   const win = sync.window || 60;
   const days = Math.min(win, sync.days || 0);
   const behind = sync.invPending && sync.tempNext
-    ? Math.round((Date.parse(new Date().toLocaleDateString('en-CA')) - Date.parse(sync.tempNext)) / 86400000) : 0;
+    ? Math.round((Date.parse(window.localDateStr()) - Date.parse(sync.tempNext)) / 86400000) : 0;
   const tempDays = behind > 1 ? Math.max(0, win - behind) : win;
   return days < win || tempDays < win ? (days + tempDays) / (2 * win) : null;
 }

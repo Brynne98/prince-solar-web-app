@@ -30,6 +30,10 @@
     --bg: #0a0d12;
     --panel: #11161d;
     --panel-2: #141a22;
+    /* what floats over the page: menus and pop-ups, then the larger dialogs, then hover cards */
+    --pop-shadow: 0 12px 32px rgba(0,0,0,0.45);
+    --dlg-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    --tip-bg: rgba(13,17,23,0.97);
     --line: rgba(255,255,255,0.07);
     --line-2: rgba(255,255,255,0.12);
     --text: #e7ecf2;
@@ -157,12 +161,19 @@
   .acct-head { display: none; }
 
   /* menus: the plant list and the account */
-  .menu { position: absolute; z-index: 20; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 11px; padding: 6px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); }
+  /* One surface for everything that floats: the rules below add only their place and size */
+  .menu, .notif-panel, .cal-pop, .fs-pop, .pop-dlg, .save-bar, .toast, .chart-tip, .chart-range, .info-bubble { border: 1px solid var(--line-2); box-shadow: var(--pop-shadow); }
+  .menu, .notif-panel, .fs-pop, .pop-dlg, .save-bar, .toast { background: var(--panel-2); }
+  .chart-tip, .chart-range, .info-bubble { background: var(--tip-bg); }
+  .fs-pop, .pop-dlg { box-shadow: var(--dlg-shadow); }
+  .menu { position: absolute; z-index: 20; border-radius: 11px; padding: 6px; }
   .menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: none; background: none; border-radius: 7px; color: var(--text); font-size: 14px; text-align: left; }
   .menu button:hover, .menu button:focus-visible { background: rgba(255,255,255,0.06); outline: none; }
   .menu button .ico { width: 16px; height: 16px; color: var(--muted); }
   .menu hr { border: none; border-top: 1px solid var(--line); margin: 4px 0; }
-  .menu .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bad); margin-left: auto; }
+  /* the small status dots: one size, each its own colour */
+  .menu .dot, .pm-dot, .gs-dot, .fbox-grid i, .set-nav .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .menu .dot { background: var(--bad); margin-left: auto; }
   .acct-menu { left: 0; right: 0; bottom: calc(100% + 6px); }
   /* who is signed in, above Account and Sign out (back in SOLAR-97) */
   .menu-email { padding: 8px 10px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -170,12 +181,13 @@
   .plant-menu button { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; row-gap: 8px; padding: 10px 12px; white-space: nowrap; }
   /* each plant's state on the right; a turning ring while it sets up (SOLAR-182) */
   .pm-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
-  .pm-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .pm-dot { background: currentColor; }
   .pm-pct { font-weight: 500; }
   .pm-state.status-live { color: var(--pv); } .pm-state.status-stale { color: var(--warn); }
   .pm-state.status-offline { color: var(--bad); } .pm-state.status-loading { color: var(--soc); }
-  .plant-menu button[aria-checked="true"] { background: rgba(255,255,255,0.075); font-weight: 600; }
-  .plant-menu .nm { overflow: hidden; text-overflow: ellipsis; }
+  /* the picked row and a long name, in every menu that picks one (plants, Your data's plant) */
+  .menu button[aria-checked="true"] { background: rgba(255,255,255,0.075); font-weight: 600; }
+  .menu .nm { overflow: hidden; text-overflow: ellipsis; }
   /* each SunSynk login's email above its plants (SOLAR-251) */
   .plant-menu .pm-login { padding: 8px 12px 4px; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .plant-menu [role="group"] + [role="group"] { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
@@ -213,33 +225,31 @@
   @media (prefers-reduced-motion: reduce) { .status-dot { animation: none; } }
   /* "Fetching history" beside the status while a fresh plant's 60 days arrive (0048) */
   .status-sync { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--soc); padding-left: 9px; border-left: 1px solid var(--line-2); }
-  .sync-arc { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(34,211,238,0.25); border-top-color: var(--soc); animation: sync-spin 0.9s linear infinite; flex: none; }
-  @keyframes sync-spin { to { transform: rotate(360deg); } }
+  .sync-arc { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(34,211,238,0.25); border-top-color: var(--soc); animation: spin 0.9s linear infinite; flex: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .sync-arc { animation: none; border-top-color: rgba(34,211,238,0.6); } }
-  .refresh { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; min-width: 38px; padding: 0; flex: none;
-    border-radius: 10px; background: var(--panel); border: 1px solid var(--line-2); color: var(--text); font-size: 14px; font-weight: 500; transition: border-color .15s; }
-  .refresh:hover:not(:disabled) { border-color: var(--muted); }
-  .refresh:disabled { opacity: .55; cursor: progress; }
+  /* the header's square buttons: Refresh and the bell share one box (SOLAR-248) */
+  .refresh, .bell-btn { height: 38px; min-width: 38px; padding: 0; flex: none; border-radius: 10px;
+    background: var(--panel); border: 1px solid var(--line-2); color: var(--text); transition: border-color .15s; }
+  .refresh:hover:not(:disabled), .bell-btn:hover:not(:disabled), .bell-btn[aria-expanded="true"] { border-color: var(--muted); }
+  .refresh:disabled, .bell-btn:disabled { opacity: .55; }
+  .refresh { display: inline-flex; align-items: center; justify-content: center; gap: 7px; font-size: 14px; font-weight: 500; }
+  .refresh:disabled { cursor: progress; }
   .refresh-stale { color: var(--warn); border-color: rgba(245,158,11,0.45); }
   .refresh-offline { color: var(--bad); border-color: rgba(239,68,68,0.5); padding: 0 14px; }
   /* spins for as long as a snapshot fetch is in flight (app.jsx holds it ≥ 800 ms) */
-  .refresh.busy .ico { animation: refresh-spin .8s linear infinite; }
-  @keyframes refresh-spin { to { transform: rotate(360deg); } }
+  .refresh.busy .ico { animation: spin .8s linear infinite; }
   @media (prefers-reduced-motion: reduce) { .refresh.busy .ico { animation: none; opacity: .5; } }
 
   /* Notifications (SOLAR-244): a bell right of Refresh with the unread count; a panel
      under it, a full page on a phone (below) */
   .bell { position: relative; flex: none; }
-  /* the same box as Refresh beside it (SOLAR-248) */
-  .bell-btn { position: relative; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px;
-    background: var(--panel); border: 1px solid var(--line-2); color: var(--text); transition: border-color .15s; }
-  .bell-btn:hover:not(:disabled), .bell-btn[aria-expanded="true"] { border-color: var(--muted); }
-  .bell-btn:disabled { opacity: .55; }
+  .bell-btn { position: relative; display: grid; place-items: center; width: 38px; }
   .bell-btn .ico { width: 18px; height: 18px; }
   .bell-count { position: absolute; top: -6px; right: -6px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
     background: var(--bad); color: #fff; font-size: 10.5px; font-weight: 600; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--bg); }
   .notif-panel { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; width: 400px; max-height: min(640px, calc(100vh - 90px)); overflow-y: auto;
-    background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 14px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); padding-bottom: 4px; }
+    border-radius: 14px; padding-bottom: 4px; }
   .nl-head { display: flex; align-items: center; gap: 6px; padding: 12px 10px 6px 16px; }
   .nl-head h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
   .nl-all { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 13px; font-weight: 500; padding: 8px 6px; }
@@ -272,7 +282,7 @@
   .nl-empty b { display: block; font-size: 16px; font-weight: 600; margin-bottom: 6px; }
   .nl-empty p { margin: 0 0 16px; font-size: 13.5px; color: var(--muted); line-height: 1.5; }
   @media (max-width: 599px) {
-    .bell-btn { width: 36px; height: 36px; }
+    .bell-btn { width: 36px; }
     .notif-panel { position: fixed; inset: 0; z-index: 40; width: auto; max-height: none; border: none; border-radius: 0; box-shadow: none;
       background: var(--bg); padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); }
     .nl-head { padding-left: 8px; }
@@ -289,7 +299,7 @@
   .notice.offline { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.07); }
   .notice.gridoff { border-color: rgba(167,139,250,0.35); background: rgba(167,139,250,0.08); }
   .page { display: flex; flex-direction: column; }
-  .page.old .mini-value, .page.old .stat-value, .page.old .metric-value, .page.old .flow-wrap,
+  .page.old .mini-value, .page.old .stat-value, .page.old .flow-wrap,
   .page.old .chart-area, .page.old .wiw, .page.old .meter { opacity: 0.45; }
 
   /* phone-only pieces, hidden wider */
@@ -319,7 +329,7 @@
     .plant-btn { font-size: 15.5px; padding: 6px 8px; }
     .plant-menu { min-width: 0; width: calc(100vw - 20px); max-width: 360px; }
     .status-sync { display: none; }
-    .refresh { height: 36px; min-width: 36px; }
+    .refresh, .bell-btn { height: 36px; min-width: 36px; }
     /* first load: only "Fetching history" and its %, no status word or refresh (SOLAR-182) */
     .status.fetching .status-dot, .status.fetching .status-word, .status.fetching .status-age, .refresh.fetching { display: none; }
     .status.fetching .status-sync { display: inline-flex; padding-left: 0; border-left: none; }
@@ -357,7 +367,6 @@
   /* ---------- cards ---------- */
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px; }
   /* charts want the width more than they want the gutter */
-  .trend-chart-card { padding-left: 12px; padding-right: 12px; }
   /* the day chart and power flow keep one gutter on all four sides */
   .chart-card, .flow-card { padding: 12px; }
   /* the 28px Fullscreen button made the row taller and centring pushed the title down;
@@ -399,22 +408,8 @@
   /* ---------- live layout ---------- */
   .live-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
   /* battery banner: status (left) + a few labelled stats (right) */
-  .batt-balance { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; padding: 10px 15px; border-radius: 12px;
-    background: rgba(255,255,255,0.02); border: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
-  .batt-balance.watch { border-color: rgba(245,158,11,0.45); background: rgba(245,158,11,0.06); }
-  .batt-balance.drifting { border-color: rgba(248,113,113,0.55); background: rgba(248,113,113,0.09); }
-  .bb-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-  .bb-title { color: var(--text); font-weight: 600; }
-  .bb-status { font-weight: 600; cursor: help; }
-  .bb-div { width: 1px; align-self: stretch; background: var(--line); }
-  .bb-stats { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
-  .bb-stat { display: inline-flex; align-items: baseline; gap: 5px; cursor: help; }
-  .bb-k { color: var(--dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
-  .bb-stat b { color: var(--text); font-weight: 600; }
-  .bb-stat.bb-hot b { color: var(--warn); }
   .chart-card { display: flex; flex-direction: column; min-width: 0; }
   .hv-root { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
-  .stat-col { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
   /* five in a row from 1200 px (six for an exporting plant), four from 980 px, three below that, two per row on a phone */
   .today-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
   @media (min-width: 981px) { .today-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
@@ -461,7 +456,6 @@
   /* padding-left leaves room for the dot's 3px glow ring: .mini-sub clips overflow for
      its ellipsis, so a ring flush against x=0 loses its left edge. */
   .grid-state { display: inline-flex; align-items: center; gap: 6px; cursor: help; padding-left: 3px; }
-  .grid-state .gs-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
   .grid-state.on  { color: var(--muted); }
   .grid-state.on  .gs-dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(61,220,132,0.14); }
   .grid-state.off { color: var(--load); font-weight: 600; }
@@ -541,7 +535,7 @@
   .fbox-charge b { font: 700 18px var(--mono); white-space: nowrap; }
   /* mains there or gone: a green dot, or a hollow grey one */
   .fbox-grid { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
-  .fbox-grid i { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ok); }
+  .fbox-grid i { background: var(--ok); }
   .fbox-grid.off i { box-sizing: border-box; background: none; border: 1.5px solid var(--dim); }
   .fbox-today { display: flex; flex-direction: column; gap: 12px; }
   .fbox-today > div:not(.fbox-today-h) { display: flex; flex-direction: column; gap: 3px; }
@@ -605,10 +599,6 @@
   .trend-badge.flat { color: var(--dim); font-weight: 500; }
 
   /* ---------- chart ---------- */
-  .hv-waste { font-size: 12.5px; color: var(--muted); margin-top: 12px; line-height: 1.45; }
-  .hv-waste b { font-weight: 600; }
-  .hv-waste-sub { color: var(--dim); }
-  .hv-waste-none { opacity: 0.78; }
   .hv-datebar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
   /* the arrows and the date box share one height (--datebar-h) so they read as one control */
   .hv-datebar, .pick { --datebar-h: 32px; }   /* .pick: the calendar's month arrows in Your data */
@@ -630,7 +620,7 @@
   .hv-dateface { display: inline-block; min-width: 6.9em; text-align: center; }
   .hv-today-in { display: none; }
   .cal-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; width: 276px; padding: 12px; box-sizing: border-box;
-    background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); }
+    background: var(--panel); border-radius: 12px; }
   .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
   .cal-title { font: 600 14px var(--display); color: var(--text); }
   .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
@@ -641,7 +631,6 @@
   .cal-day.today { color: var(--pv); }
   .cal-day.on { background: rgba(61,220,132,0.14); border-color: rgba(61,220,132,0.55); color: var(--text); }
   .cal-day:focus-visible, .hv-datepick:focus-visible { outline: 2px solid var(--pv); outline-offset: 1px; }
-  .hv-approx { font-size: 11px; color: var(--warn); border: 1px solid var(--line); border-radius: 7px; padding: 1px 7px; margin-left: 2px; cursor: help; white-space: nowrap; }
   .hv-gap { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text);
     border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; margin-left: 2px; cursor: help; white-space: nowrap; }
   .hv-gap-sq, .tip-dot.tip-sq { width: 8px; height: 8px; border-radius: 2px; background: var(--load); flex: none; }
@@ -650,9 +639,8 @@
   .hv-today:hover { border-color: var(--line-2); }
   .hv-today:disabled { color: var(--dim); border-color: var(--line); cursor: default; opacity: .45; }
   .hv-lag { font-size: 12px; color: var(--dim); }
-  .chart-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
-  .chart-controls-right { display: flex; align-items: center; gap: 10px; }
   .chart-area { width: 100%; min-width: 0; overflow: hidden; }
+  .chart-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; text-align: center; padding: 0 16px; }
   .chart-svg { display: block; touch-action: pan-y; }
   .ax { font: 400 11.5px var(--mono); fill: var(--muted); }
   .ax-hi { fill: var(--text); }
@@ -664,37 +652,29 @@
     display: inline-block; font-variant-numeric: tabular-nums; }
   .legend-chip.off .legend-val { color: var(--dim); border-color: var(--line); }
   .legend-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid; }
-  .legend-note { font-size: 12.5px; color: var(--dim); margin-left: 4px; }
-  .legend-mode { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; }
   /* Dragging across a chart otherwise text-selects the axis labels and tooltip, so the
      plot fills with blue highlight while you're trying to read a range. Charts are
      interactive surfaces, not prose — nothing here is worth selecting. */
-  svg.chart-svg, .chart-area, .hv-root, .trend-chart, .chart-tip, .trend-tip, .chart-legend, .seg-usage {
+  svg.chart-svg, .chart-area, .hv-root, .chart-tip {
     -webkit-user-select: none; user-select: none;
   }
   /* stops the long-press "copy/share" bubble on iOS while dragging the chart */
   svg.chart-svg { -webkit-touch-callout: none; }
 
-  .chart-tip { position: absolute; pointer-events: none; background: rgba(13,17,23,0.96); border: 1px solid var(--line-2);
-    border-radius: 10px; padding: 10px 12px; min-width: 168px; white-space: nowrap; box-shadow: 0 12px 30px rgba(0,0,0,0.5); z-index: 5; }
+  .chart-tip { position: absolute; pointer-events: none;
+    border-radius: 10px; padding: 10px 12px; min-width: 168px; white-space: nowrap; z-index: 5; }
   .tip-time { font: 600 12px var(--mono); color: var(--text); margin-bottom: 8px; }
   .tip-row { display: flex; align-items: center; gap: 7px; font-size: 12px; margin: 3px 0; }
   .tip-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   .tip-l { color: var(--muted); } .tip-v { margin-left: auto; color: var(--text); }
-  .tip-total { margin-top: 5px; border-top: 1px solid var(--line); padding-top: 6px; }
-  .tip-total .tip-l { color: var(--text); font-weight: 600; }
   /* drag-to-select range totals */
-  .chart-range { position: absolute; left: 8px; top: 8px; background: rgba(13,17,23,0.97); border: 1px solid var(--line-2);
-    border-radius: 10px; padding: 9px 12px; min-width: 180px; box-shadow: 0 12px 30px rgba(0,0,0,0.5); z-index: 6; }
+  .chart-range { position: absolute; left: 8px; top: 8px;
+    border-radius: 10px; padding: 9px 12px; min-width: 180px; z-index: 6; }
   .cr-head { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
   .cr-head .tip-time { margin-bottom: 0; }
   .cr-x { margin-left: auto; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
   .cr-x:hover { color: var(--text); }
   /* lives in the SVG's empty top margin — bottom-right overlapped the last x-axis label */
-  .chart-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-top: 18px;
-    border-top: 1px solid var(--line); padding-top: 18px; }
-  .sum-cell { } .sum-label { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
-  .sum-value { font-size: 22px; font-weight: 600; margin-top: 6px; } .sum-sub { font-size: 11px; color: var(--dim); margin-top: 3px; }
 
   /* ---------- segmented / buttons ---------- */
   .segmented { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; }
@@ -704,24 +684,9 @@
   .ghost-btn { background: none; border: 1px solid var(--line-2); color: var(--muted); padding: 7px 14px; border-radius: 9px; font-size: 12.5px; transition: .15s; }
   .ghost-btn:hover { color: var(--text); } .ghost-btn.active { border-color: var(--pv); color: var(--pv); }
 
-  /* ---------- metric / badge ---------- */
-  .metric-label { font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-  .metric-value { font-size: 20px; font-weight: 600; margin-top: 5px; }
-  .metric-unit { font-size: 13px; color: var(--muted); margin-left: 2px; font-family: var(--mono); }
-  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em;
-    text-transform: uppercase; padding: 4px 11px; border-radius: 999px; border: 1px solid; }
-  .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  /* a dead SunSynk login: on the Settings tab and its Logins entry */
-  .alert-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--bad); margin-left: 6px; vertical-align: middle; }
-  .badge-ok { color: var(--ok); border-color: rgba(61,220,132,0.4); background: rgba(61,220,132,0.08); }
-  .badge-warn { color: var(--load); border-color: rgba(248,113,113,0.4); background: rgba(248,113,113,0.08); }
-  .badge-neutral { color: var(--muted); border-color: var(--line-2); }
 
   /* ---------- grids used by tabs ---------- */
   .trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-  .quad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .hint-line { font-size: 13.5px; color: var(--dim); margin-top: 16px; line-height: 1.5; }
 
   /* solar tab, and the Battery and Grid tabs, which are built the same way */
   .solar-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
@@ -737,7 +702,6 @@
   .solar-row .section-title { flex-direction: column; align-items: flex-start; gap: 5px; }
   /* below the sticky header, not under it (SOLAR-275) */
   #solar-day, #battery-day, #grid-day, #home-day { scroll-margin-top: calc(var(--head-h, 60px) + 16px); }
-  .solar-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
   .tip-hint { font-size: 12px; color: var(--dim); margin-top: 6px; }
   /* Where it went: a plain card, half the row (SOLAR-74). Its title keeps "Made" beside it at every width. */
   .solar-row > .wiw { width: 100%; max-width: 560px; box-sizing: border-box; }
@@ -871,8 +835,6 @@
   }
   @media (min-width: 900px) { .eq-problems { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .eq-problems > :only-child { grid-column: 1 / -1; }
-  .solar-best { margin-top: 10px; font-size: 13px; color: var(--muted); }
-  .solar-best b { font-family: var(--mono); font-weight: 600; color: var(--text); }
 
   /* ---------- settings: Account, Billing, Plant ----------
      One scrolling page each, in one area with a side menu (SOLAR-250). A section is its
@@ -892,11 +854,6 @@
   .sset-note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
   .sset-count { margin-left: 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 500; color: var(--dim); }
   /* the inverter's own answers, folded away under the battery */
-  details.adv { margin-top: 12px; border-top: 1px solid var(--line); }
-  details.adv summary { cursor: pointer; color: var(--muted); font-size: 13.5px; padding: 14px 0 4px; list-style: none; }
-  details.adv summary::-webkit-details-marker { display: none; }
-  details.adv summary::before { content: '▸ '; } details.adv[open] summary::before { content: '▾ '; }
-  details.adv summary:hover { color: var(--text); }
   .sset .field-row { grid-template-columns: 1fr 1fr; gap: 14px 20px; }
   .sset .field { margin-bottom: 0; }
   .sset .field-row .field-note { margin-top: 8px; }
@@ -906,9 +863,6 @@
   .sset .toggle-row { padding: 14px 0; }
   .sset .field > label:not(.toggle-row) + .toggle-row { border-top: none; padding-top: 6px; }
   .sset .field > .toggle-row:last-of-type { padding-bottom: 0; }
-  .sset-choice .toggle-label { color: var(--text); }
-  .sset-choice .segmented { margin-top: 12px; }
-  .sset-choice .seg-btn { white-space: nowrap; }
   /* Toggle is a <label>, and .field label is display:block; put the row back to flex */
   .sset .field label.toggle-row { display: flex; margin-bottom: 0; letter-spacing: 0; color: var(--text); }
   .sset .field label.toggle-row .toggle-label { font-size: 14px; }
@@ -920,7 +874,7 @@
   .notif-group + .notif-group { border-top: 1px solid var(--line); }
   .notif-open { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0;
     background: none; border: none; color: inherit; text-align: left; }
-  .notif-open svg { flex: none; color: var(--dim); transition: transform .18s; }
+  .notif-open svg { flex: none; width: 16px; height: 16px; stroke-width: 2.4; color: var(--dim); transition: transform .18s; }
   .notif-open[aria-expanded="true"] svg { transform: rotate(90deg); }
   .notif-label { font-size: 15px; font-weight: 500; }
   /* an email sits under its group, indented past the group's name; no rule between emails */
@@ -974,8 +928,8 @@
   .set-nav button > span:first-child { flex: 1; }
   .set-nav button:hover { color: var(--text); }
   .set-nav button[aria-current="page"] { background: var(--panel-2); border-color: var(--line-2); color: var(--text); }
-  .set-nav .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; }
-  .set-chev { display: none; flex: none; color: var(--dim); }
+  .set-nav .dot { background: var(--warn); }
+  .set-chev { display: none; flex: none; width: 16px; height: 16px; stroke-width: 2.4; color: var(--dim); }
   .set-main { min-width: 0; }
   .set-main > .settings-page { padding-top: 2px; }
   .back-link { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px; padding: 4px 0; background: none; border: none;
@@ -997,7 +951,6 @@
   /* Billing's Plants: each login, its plants listed under it */
   /* Billing's Plants (SOLAR-251): one card; each login a grey caption over its plants, a switch each */
   .login-grp + .login-grp { margin-top: 18px; }   /* space between logins, a line under each one's name (SOLAR-289) */
-  .login-grp.leaving { overflow: hidden; animation: conn-out .24s ease-in forwards; }
   .login-line { display: flex; align-items: center; gap: 8px; min-height: 36px; border-bottom: 1px solid var(--line); margin-bottom: 2px; }
   .login-email { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
   .login-email .warn { color: var(--warn); white-space: nowrap; }
@@ -1010,10 +963,9 @@
   .login-plant .plant-state { font-size: 13px; white-space: nowrap; }
   .switch:disabled { opacity: .5; }
   .login-more { position: relative; flex: none; }
-  .more-btn { width: 34px; height: 34px; display: grid; place-items: center; background: none; border: none; border-radius: 9px; color: var(--dim); }
-  .more-btn:hover, .more-btn[aria-expanded="true"] { background: var(--panel-2); color: var(--text); }
   /* Manage: grey text, no box, so the plants stay the loudest thing on the card (SOLAR-289) */
   .login-manage { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 4px 6px; border: none; border-radius: 7px; background: none; color: var(--dim); font-size: 12.5px; }
+  .login-manage .ico { width: 12px; height: 12px; stroke-width: 3.2; }
   .login-manage:hover, .login-manage[aria-expanded="true"] { background: var(--panel-2); color: var(--text); }
   .login-menu { right: 0; top: calc(100% + 4px); min-width: 180px; }
   .menu button.menu-danger { color: var(--load); }
@@ -1037,10 +989,6 @@
   .dl-row > button { flex: none; min-height: 41px; }
   .dl-row + .sset-err { margin-top: 8px; }
   /* Account: Delete is off while a paid plan runs, with this note under it */
-  .set-warn { flex-basis: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 9px 12px;
-    border: 1px solid rgba(245,158,11,0.35); background: rgba(245,158,11,0.06); border-radius: 10px; font-size: 13px; line-height: 1.5; color: var(--muted); }
-  .set-warn b { color: var(--text); font-weight: 600; }
-  .set-warn .text-link { background: none; border: none; padding: 0; font: inherit; font-weight: 600; color: var(--pv); cursor: pointer; white-space: nowrap; }
   /* All emails: one switch over both groups, ruled off from them */
   .notif-all { min-height: 44px; border-bottom: 1px solid var(--line-2); }
   .notif-all .toggle-text { flex: 1; min-width: 0; }
@@ -1069,7 +1017,7 @@
   .settings-page > .save-bar { order: 1; }
 
   /* No rules inside Settings cards: space alone sets rows apart (SOLAR-250) */
-  .settings-page :is(.conn-row, .conn-add, .notif-group + .notif-group, .notif-push, .notif-push .notif-group, .plan-alert) { border-top: none; }
+  .settings-page :is(.conn-row, .notif-group + .notif-group, .notif-push, .notif-push .notif-group, .plan-alert) { border-top: none; }
   .settings-page .notif-all { border-bottom: none; }
   .settings-page #settings-system .conn-row.sset-row { border-top: none; padding: 0; }
   .settings-page #settings-system .conn-row.sset-row + .conn-row.sset-row { margin-top: 40px; }
@@ -1082,9 +1030,8 @@
   /* a card here that is also a .conn-row keeps the top border the row rules above strip (SOLAR-279) */
   .settings-page .sset-cards > .sset.conn-row { padding: 14px 18px; border-top: 1px solid var(--line); }
   .sset-cards .conn-status::before, .plan-name .conn-status::before, .plan-booked .conn-status::before { display: none; }   /* the word alone, no dot */
-  .settings-page .sset-cards > .conn-add { padding-top: 12px; }
   @media (max-width: 900px) { .settings-page .sset-cards > .sset.conn-row { padding: 12px 14px; } }
-  .settings-page .conn-add, .settings-page .notif-push, .settings-page .plan-alert { padding-top: 8px; }
+  .settings-page .notif-push, .settings-page .plan-alert { padding-top: 8px; }
   /* Every Settings row: a switch or button lines up with the top of its name (SOLAR-250) */
   .settings-page .conn-actions, .settings-page .conn-row > .plant-state { align-self: flex-start; }
   .settings-page #settings-actions .conn-row:not(:has(form)) { align-items: flex-start; }
@@ -1094,17 +1041,12 @@
   .app-version a { color: inherit; }
   .conn-row { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-top: 1px solid var(--line); }
   .conn-row:first-child { border-top: none; padding-top: 0; }
-  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--grid); flex: none; }
-  .conn-dot.ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(61,220,132,0.18); }
   .conn-text { flex: 1; min-width: 0; }
   .conn-user { font-size: 14px; }
-  .conn-plants { color: var(--muted); }
   /* the add row: a filled button so it reads as the section's one action, plus a hint */
-  .conn-add { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--line); }
   .sset-body > .conn-row:last-child { padding-bottom: 0; }
   /* an action row is one line and a button: the line sits on the button's centre */
   #settings-actions .conn-row:not(:has(form)) { align-items: center; }
-  .conn-add .save-btn { display: inline-flex; align-items: center; gap: 6px; }
   .conn-meta { font-size: 13px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
   .conn-status::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--grid); }
   .conn-status.ok { color: var(--ok); } .conn-status.ok::before { background: var(--ok); }
@@ -1116,7 +1058,7 @@
   @keyframes conn-in { from { opacity: 0; transform: translateY(-4px); } }
   @keyframes conn-out { from { max-height: 200px; } to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; border-color: transparent; } }
   .conn-row > .conn-text, .conn-row > .conn-actions, .conn-form { animation: conn-in .2s ease-out; } /* the row's rule itself stays put */
-  .conn-row.leaving { overflow: hidden; animation: conn-out .24s ease-in forwards; }
+  .conn-row.leaving, .login-grp.leaving { overflow: hidden; animation: conn-out .24s ease-in forwards; }
   @media (prefers-reduced-motion: reduce) { .conn-row > .conn-text, .conn-row > .conn-actions, .conn-form, .conn-row.leaving { animation: none; } }
   .conn-row > .conn-form { flex-basis: 100%; }
   .conn-form { margin-top: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.015); }
@@ -1128,7 +1070,7 @@
   .confirm-title b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 700; }
   .confirm-text { margin-top: 4px; font-size: 14px; line-height: 1.5; color: var(--text); }
   /* a question over the page (Dialog, SOLAR-286), centred on every screen (SOLAR-291) */
-  .pop-dlg { padding: 0; width: min(420px, calc(100vw - 32px)); border: 1px solid var(--line-2); border-radius: 16px; background: var(--panel-2); color: var(--text); box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+  .pop-dlg { padding: 0; width: min(420px, calc(100vw - 32px)); border-radius: 16px; color: var(--text); }
   .pop-dlg::backdrop { background: rgba(4,6,9,0.62); }
   .pop-body { padding: 20px; }
   .pop-body .confirm-title { font-size: 16px; font-weight: 600; }
@@ -1142,7 +1084,7 @@
   /* working (SOLAR-294): a turning ring on a button while its change saves, and the small
      pop-up a payment step shows */
   .spin, :is(.ghost-btn, .save-btn, .danger-btn, .plan-undo)[aria-busy="true"]::after { content: ''; display: inline-block; flex: none; width: 12px; height: 12px;
-    border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: sync-spin .7s linear infinite; vertical-align: -2px; }
+    border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
   :is(.ghost-btn, .save-btn, .danger-btn, .plan-undo)[aria-busy="true"]::after { margin-left: 8px; }
   @media (prefers-reduced-motion: reduce) { .spin, [aria-busy="true"]::after { animation-duration: 2s; } }
   .pop-wait { display: flex; align-items: center; gap: 12px; font-size: 14.5px; }
@@ -1157,6 +1099,7 @@
   .plan-pop .page-head { padding-right: 40px; }
   /* sticky, so it stays in view when the picker scrolls on a short screen */
   .pop-x { position: sticky; top: 0; z-index: 1; align-self: flex-end; margin: -8px -10px -26px 0; width: 34px; height: 34px; display: grid; place-items: center; border: none; border-radius: 9px; background: var(--panel-2); color: var(--dim); cursor: pointer; }
+  .pop-x .ico { width: 16px; height: 16px; stroke-width: 2.7; }
   .pop-x:disabled { opacity: .4; cursor: default; }
   .pop-x:hover { background: var(--panel); color: var(--text); }
   /* phones: one line per plan, then the picked plan's button */
@@ -1186,7 +1129,7 @@
 
   /* unsaved plant changes: one bar floating at the foot of the screen (above a phone's bar) */
   .save-bar { position: sticky; bottom: 16px; z-index: 4; display: flex; align-items: center; gap: 10px; margin-top: 16px; padding: 10px 12px 10px 16px;
-    background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.45); }
+    border-radius: 12px; }
   @media (max-width: 599px) { .save-bar { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); } }
   .save-bar.dirty { border-color: rgba(61,220,132,0.4); }
   /* what a save did (SOLAR-166): centred on the page, where the save bar was, 2.5 s */
@@ -1200,7 +1143,7 @@
   /* signed out there is no phone bar to clear */
   .login-wrap .toast-host { bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
   .toast { display: flex; align-items: center; gap: 8px; max-width: 560px; padding: 10px 16px 10px 12px; font-size: 14px; line-height: 1.35;
-    background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.45); animation: toast-in .18s ease-out; }
+    border-radius: 12px; animation: toast-in .18s ease-out; }
   .toast .ico { flex: none; width: 18px; height: 18px; stroke: var(--pv); stroke-width: 2.4; }
   /* a failure, with at most one link */
   .toast.error { border-color: rgba(248,113,113,0.45); padding-left: 16px; pointer-events: auto; }
@@ -1221,7 +1164,6 @@
     .sset { padding: 18px 15px; border-radius: 14px; }
     .sset .field-row { grid-template-columns: 1fr; }
     /* one button sits beside the text; a dead login's two (Reconnect + Remove) drop under it */
-    .conn-row { flex-wrap: wrap; }
     .conn-actions:has(> :nth-child(2)) { width: 100%; }
     .conn-actions:has(> :nth-child(2)) > * { flex: 1; }
     .conn-form .field-row { grid-template-columns: 1fr; }
@@ -1259,7 +1201,6 @@
   .knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: .18s; }
   .switch.on .knob { left: 21px; }
 
-  .sparkline { display: block; }
 
   /* info tooltip */
   .info-dot { position: relative; display: inline-flex; align-items: center; vertical-align: middle;
@@ -1272,9 +1213,9 @@
      horizontal scrollbar under a dot near the right edge (SOLAR-26). Open, it is nudged by
      --shift to stay on screen, and the arrow moves back by the same so it still points at the dot. */
   .info-bubble { display: none; position: absolute; bottom: calc(100% + 9px); left: 50%; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(4px);
-    width: 210px; background: rgba(13,17,23,0.98); border: 1px solid var(--line-2); border-radius: 10px; padding: 10px 12px;
+    width: 210px; border-radius: 10px; padding: 10px 12px;
     font-family: var(--display); font-size: 12px; font-weight: 400; line-height: 1.5; letter-spacing: 0; text-transform: none;
-    color: var(--text); box-shadow: 0 14px 34px rgba(0,0,0,0.55); opacity: 0; visibility: hidden; transition: opacity .15s, transform .15s;
+    color: var(--text); opacity: 0; visibility: hidden; transition: opacity .15s, transform .15s;
     z-index: 30; pointer-events: none; }
   .info-bubble::after { content: ''; position: absolute; top: 100%; left: calc(50% - var(--shift, 0px)); transform: translateX(-50%);
     border: 6px solid transparent; border-top-color: var(--line-2); }
@@ -1295,10 +1236,9 @@
   .tip.below > .info-bubble::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: var(--line-2); }
 
   @media (max-width: 980px) {
-    .stat-col { grid-template-columns: 1fr 1fr; }
     .solar-stats { grid-template-columns: 1fr 1fr; }
     .solar-row { grid-template-columns: minmax(0, 1fr); }
-    .trio, .quad, .duo, .field-row { grid-template-columns: 1fr 1fr; }
+    .trio, .field-row { grid-template-columns: 1fr 1fr; }
   }
 
   /* ---------- phones ---------- */
@@ -1318,19 +1258,18 @@
     .hv-today-in { display: inline-flex; align-items: center; min-height: 0; margin-left: 0; background: none; border: 0; border-left: 1px solid var(--line-2);
       border-radius: 0; padding: 2px 0 2px 10px; color: var(--soc); font: 500 12px var(--display);
       text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
-    .legend-chip { min-height: 40px; }
-    .seg-btn { min-height: 36px; }
+    .legend-chip { min-height: 40px; padding: 5px 10px; font-size: 11.5px; }
+    .seg-btn { min-height: 36px; padding: 6px 10px; }
     .ghost-btn, .danger-btn, .flow-fs-btn, .settings-page :is(.save-btn, .ghost-btn, .danger-btn), .fs-wrap :is(.save-btn, .ghost-btn) { min-height: 40px; }
-    .trend-stats { grid-template-columns: 1fr; }
 
     .card { padding: 16px 15px; border-radius: 14px; min-width: 0; }
     .chart-card, .flow-card { padding: 15px; }
     /* let grid/flex items shrink below their content so wide children scroll instead of widening the page */
-    .live-grid > *, .stack > *, .duo > * { min-width: 0; }
+    .live-grid > *, .stack > * { min-width: 0; }
 
     /* big-number rows stack; metric grids stay 2-up */
-    .stat-col, .trio, .duo { grid-template-columns: 1fr; }
-    .quad, .solar-stats, .field-row { grid-template-columns: 1fr 1fr; }
+    .trio { grid-template-columns: 1fr; }
+    .solar-stats, .field-row { grid-template-columns: 1fr 1fr; }
     /* five overview tiles in a two-up grid orphan the last one; an odd last tile spans */
     .today-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .today-strip > :last-child:nth-child(odd) { grid-column: 1 / -1; }
@@ -1347,9 +1286,6 @@
     .stat-value .num { font-size: 34px; }
     .stat-value .unit { font-size: 18px; }
 
-    /* chart: smaller pills */
-    .legend-chip { padding: 5px 10px; font-size: 11.5px; }
-
     /* power-flow: the summary sentence a step smaller on a phone */
     .flow-narrative { font-size: 15.5px; }
 
@@ -1360,22 +1296,16 @@
     .overview-head { flex-direction: column; align-items: stretch; gap: 10px; }
     .overview-head .segmented { display: flex; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
     .overview-head .segmented::-webkit-scrollbar { display: none; }
-    .seg-btn { padding: 6px 10px; }
 
-    .hv-approx { font-size: 11px; padding: 1px 6px; }
 
     /* battery banner on phones: status on row 1, stats forced to their own row
        below via flex-basis:100% (margin-auto alone doesn't wrap reliably) */
-    .batt-balance { font-size: 12px; gap: 6px 14px; }
-    .bb-div { display: none; }
-    .bb-stats { flex-basis: 100%; gap: 10px 18px; }
 
     /* a phone is not a wall display, so no Fullscreen button there
        (Exit stays, for a desktop window narrowed while in wall mode) */
     .flow-fs-btn:not(.wall-exit) { display: none; }
 
     /* trend card sub-nav: stack the label above its control on phones */
-    .trend-subnav { flex-direction: column; align-items: flex-start; gap: 8px; }
   }
   /* --- login gate ------------------------------------------------------- */
   /* ---- auth + connect screens ------------------------------------------------
@@ -1414,7 +1344,7 @@
   .login-sub { font-size: 16px; color: var(--muted); line-height: 1.5; margin-top: -10px; margin-bottom: 10px; }
   .auth-field { display: flex; flex-direction: column; gap: 10px; }
   .auth-label-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-  .auth-field > label, .auth-label-row > label { font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+  .auth-field > label, .auth-field .auth-label-row > label { font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
   .login-card input {
     background: var(--bg); border: 1px solid var(--line-2); border-radius: 12px;
     padding: 15px 18px; color: var(--text); font-family: var(--display); font-size: 16px;
@@ -1425,14 +1355,13 @@
   /* invalid: red border; invalid and focused: red border plus the ring, so focus stays visible */
   .login-card input:not([type="checkbox"])[aria-invalid="true"] { border-color: var(--load); box-shadow: none; }
   .login-card input:not([type="checkbox"])[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px rgba(248,113,113,0.28); }
-  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .field-hint { color: var(--dim); font-size: 13px; line-height: 1.2; text-align: right; }
   .field-err { color: var(--load); font-size: 13px; line-height: 1.2; text-align: right; }
   .login-card .pw-box input { padding-right: 56px; }
   .login-card .pw-eye { right: 4px; width: 48px; height: 48px; border-radius: 8px; }
   .login-card button[type="submit"] {
     margin-top: 10px;
-    background: var(--pv); color: #06210f; border: 0; border-radius: 12px; padding: 16px 18px;
+    background: var(--pv); color: #07130c; border: 0; border-radius: 12px; padding: 16px 18px;
     font-family: var(--display); font-size: 16px; font-weight: 700; letter-spacing: 0.005em; cursor: pointer;
     box-shadow: 0 8px 22px -10px rgba(61,220,132,0.7);
     transition: transform .12s, filter .12s;
@@ -1497,8 +1426,7 @@
   .gsi-wrap:focus-within .login-google { outline: 2px solid var(--pv); outline-offset: 2px; }
   /* sign-up before the Terms are ticked: catches the click Google's frame would take */
   .auth-wait { display: flex; align-items: center; gap: 12px; font-size: 15px; color: var(--muted); padding: 14px 16px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
-  .auth-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--pv); animation: auth-spin .9s linear infinite; flex: none; }
-  @keyframes auth-spin { to { transform: rotate(360deg); } }
+  .auth-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--pv); animation: spin .9s linear infinite; flex: none; }
   @media (prefers-reduced-motion: reduce) { .auth-spin { animation: none; } }
   .login-card .login-link:disabled { color: var(--dim); cursor: default; text-decoration: none; font-variant-numeric: tabular-nums; }
   .login-card .login-link.inline { min-height: 0; display: inline; font-size: inherit; }
@@ -1554,7 +1482,7 @@
   .plan-booked { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
   .plan-undo { background: none; border: none; padding: 0; font: inherit; font-weight: 500; color: var(--text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--muted); cursor: pointer; }
   .plan-undo:disabled { opacity: .5; cursor: default; }
-  .plan-now + .conn-add, .plan-now + .conn-form { margin-top: 14px; }
+  .plan-now + .conn-form { margin-top: 14px; }
   /* every plan side by side, the user's own marked (SOLAR-238) */
   .plan-alert { margin: 14px 0 0; padding-top: 14px; border-top: 1px solid var(--line); }
   .plan-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
@@ -1585,7 +1513,6 @@
   .pw-plan.plan-mine { border-color: rgba(61,220,132,0.55); background: linear-gradient(180deg, rgba(61,220,132,0.07), var(--panel-2) 60%); }
   .plan-gives li::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 2px; background: var(--ok); margin-right: 8px; vertical-align: 2px; }
   .plan-free .plan-gives li::before { background: var(--dim); }
-  .add-cost { margin: 0 0 12px; }
   .pay-logo { padding: 0; background: none; }
   .plan-cards + .confirm-card { margin-top: 16px; }
   .pay-card { width: 46px; height: 30px; border-radius: 6px; background: linear-gradient(135deg, #1d2a44, #2b3d63); border: 1px solid var(--line-2); display: grid; place-items: center; font: italic 700 11px 'Space Grotesk', sans-serif; color: var(--text); letter-spacing: .04em; flex: none; align-self: center; }
@@ -1600,10 +1527,10 @@
     .pay-what-sub { display: block; margin-top: 2px; font-size: 12px; line-height: 1.35; color: var(--dim); }   /* …and goes under the date (SOLAR-302) */
   }
   #settings-cancel .conn-row { align-items: center; } #settings-cancel .conn-actions { align-self: center; }
-  .link-form .field label { display: flex; justify-content: space-between; gap: 12px; }
-  .link-form .field label span { color: var(--dim); }
-  .link-form .field label .link-bad { color: var(--load); }
-  .link-form .field label .text-link { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  /* FieldLabel in a Settings form: the .field label's size, the hint or error at its right */
+  .field .auth-label-row { font-size: 12px; color: var(--muted); letter-spacing: 0.04em; margin-bottom: 7px; }
+  .field .auth-label-row > label { margin-bottom: 0; }
+  .field .auth-label-row > :is(.field-hint, .field-err) { font-size: inherit; line-height: inherit; }
   .link-form .input[aria-invalid="true"] { border-color: var(--load); }
   .link-form .link-last { margin-bottom: 0; }
   .link-form .field-row .field { margin-bottom: 0; }
@@ -1669,7 +1596,7 @@
   @media (max-width: 599px) { .fs-item { min-height: 40px; } .fs-fold { min-height: 40px; margin: -8px 0; } }
   .fs-mini { display: none; }
   .fs-pop { position: absolute; left: calc(100% + 24px); bottom: 0; z-index: 30; width: 320px; max-width: calc(100vw - var(--rail-w) - 24px);
-    background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 16px; padding: 18px 20px 20px; box-shadow: 0 24px 60px rgba(0,0,0,0.55); }
+    border-radius: 16px; padding: 18px 20px 20px; }
   .fs-panel { display: flex; flex-direction: column; gap: 12px; }
   .fs-panel .fs-x { margin-left: auto; }
   .fs-title { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
@@ -1703,8 +1630,6 @@
   .pick-val { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pick-menu { top: calc(100% + 6px); left: 0; right: 0; max-height: 300px; overflow-y: auto; }
   .pick-menu button { display: grid; grid-template-columns: 18px minmax(0, 1fr); white-space: nowrap; }
-  .pick-menu button[aria-checked="true"] { background: rgba(255,255,255,0.075); font-weight: 600; }
-  .pick-menu .nm { overflow: hidden; text-overflow: ellipsis; }
   .pick .cal-pop { left: 0; transform: none; }   /* under its field's left edge, at every width */
   .fs-unit { font-family: var(--mono); font-size: 14px; color: var(--muted); }
   /* battery size and panels: Total or By size, the value on the same line */
@@ -1778,7 +1703,6 @@
   .free-over h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
   .free-over p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
   .free-over-acts { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
-  .grid-off-prompt { border-color: rgba(167,139,250,0.35); background: rgba(167,139,250,0.08); }
   .grid-off-prompt .mini-link { color: var(--text); font-weight: 600; }
   .grid-off-prompt .fs-x { margin: -4px -6px -4px 0; }
   /* the review before a saved card is charged (SOLAR-276) */

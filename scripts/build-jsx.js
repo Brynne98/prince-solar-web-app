@@ -3,7 +3,7 @@
  * Compiles public/*.jsx to public/build/*.js, so browsers no longer download Babel and
  * compile on every visit (SOLAR-131). Same Babel and the same settings that
  * <script type="text/babel"> used, so the output runs exactly as before, including the
- * one shared global scope (see the no-object-rest rule for files after components.jsx).
+ * one shared global scope (so Babel's per-file `_excluded` lists are renamed per file).
  *
  *   node scripts/build-jsx.js               build once; exit 1 on a syntax error
  *   node scripts/build-jsx.js --serve 3003  build, rebuild on save, serve public/ on 3003
@@ -36,7 +36,11 @@ const built = {}; // name -> file name written, for the HTML rewrite
 
 function compile(file) {
   const name = path.basename(file, '.jsx');
-  const { code, map } = Babel.transform(fs.readFileSync(file, 'utf8'), options(name + '.jsx'));
+  let { code, map } = Babel.transform(fs.readFileSync(file, 'utf8'), options(name + '.jsx'));
+  // Babel lists the keys a `...rest` leaves out in a top-level `var _excluded`. Every file
+  // shares one global scope, so the last file's list replaced the others' and Card's rest
+  // kept className. Each file gets its own name.
+  code = code.replace(/\b_excluded(\d*)\b/g, `_excluded_${name.replace(/\W/g, '_')}$1`);
   map.sources = ['../' + name + '.jsx'];
   const out = HASHED ? name + '.' + crypto.createHash('sha256').update(code).digest('hex').slice(0, 10) : name;
   fs.writeFileSync(path.join(OUT, out + '.js'), code + '\n//# sourceMappingURL=' + out + '.js.map\n');
