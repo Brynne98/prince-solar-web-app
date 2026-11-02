@@ -1191,6 +1191,8 @@
   .save-bar.dirty { border-color: rgba(61,220,132,0.4); }
   /* what a save did (SOLAR-166): centred on the page, where the save bar was, 2.5 s */
   .toast-host { position: fixed; left: var(--rail-w, 0px); right: 0; bottom: 24px; z-index: 9; display: flex; justify-content: center; padding: 0 16px; pointer-events: none; }
+  /* undo the browser's popover box: no centring, frame or fill (display above keeps it drawn) */
+  .toast-host[popover] { top: auto; width: auto; height: auto; margin: 0; border: 0; background: none; color: inherit; overflow: visible; }
   @media (max-width: 599px) { .toast-host { left: 0; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); } }
   /* a failed Settings save keeps its bar open: the toast sits above it */
   .frame:has(.save-bar) .toast-host { bottom: 88px; }

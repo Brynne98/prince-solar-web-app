@@ -801,14 +801,19 @@ let toastShow = null;
 window.toast = (text, opts = {}) => toastShow && toastShow({ text, ...opts, at: Date.now() });
 function SaveToast() {
   const [t, setT] = useState(null);
+  const host = useRef(null);
   useEffect(() => { toastShow = setT; return () => { toastShow = null; }; }, []);
   useEffect(() => {
     if (!t) return;
+    // A pop-up's backdrop sits in the top layer over everything else; showing the host as a
+    // popover again puts each new toast above whatever pop-up is open.
+    const h = host.current;
+    if (h?.showPopover) { if (h.matches(':popover-open')) h.hidePopover(); h.showPopover(); }
     const id = setTimeout(() => setT(null), t.error ? 6000 : 2500);
     return () => clearTimeout(id);
   }, [t]);
   return (
-    <div className="toast-host" role={t?.error ? 'alert' : 'status'} aria-live={t?.error ? 'assertive' : 'polite'}>
+    <div ref={host} popover="manual" className="toast-host" role={t?.error ? 'alert' : 'status'} aria-live={t?.error ? 'assertive' : 'polite'}>
       {t && (
         <div key={t.at} className={'toast' + (t.error ? ' error' : '')}>
           {!t.error && <Icon id="tick" />}
@@ -892,7 +897,15 @@ function Setup({ links }) {
   // Billing's Plan says when the free week ends; it runs from the first login, plant on or not.
   const [me, setMe] = useState(null);
   useEffect(() => { window.fetchMe().then(setMe).catch(() => {}); }, []);
-  const go = (id) => { setTab(id); setConnecting(false); toTop(); };
+  const go = (id) => { setTab(id); setConnecting(false); toTop(); if (location.hash) history.replaceState(history.state, '', location.pathname + location.search); };
+  // No plant is on screen here: a ?plant= left from App (its login removed, its plant
+  // stopped) leaves the address. linked() sets it again for the plant a login brings.
+  useEffect(() => {
+    const url = new URL(location.href);
+    if (!url.searchParams.has('plant')) return;
+    url.searchParams.delete('plant');
+    history.replaceState(history.state, '', url);
+  }, []);
   // The address names the page here too, as in App, so a reload stays on it.
   useEffect(() => {
     localStorage.setItem('synsynk.tab', tab);
@@ -916,9 +929,18 @@ function Setup({ links }) {
   const plantsOff = !relink && links.accounts.some(a => a.status !== 'disabled' && (a.plants || []).length > 0);
   const [flash, setFlash] = useState(null);
   const turnOn = () => { window.track('setup_turn_on_done'); setConnecting(false); setFlash('connection'); setTab('billing'); toTop(); };
-  const connectBtn = (cls) => (
-    <button type="button" className={(plantsOff ? 'ghost-btn' : 'save-btn') + ' setup-btn ' + cls} onClick={connect} aria-label="Add plant"><Icon id="plug" /><span>Add plant</span></button>
+  const connectBtn = (cls, onClick = connect) => (
+    <button type="button" className={(plantsOff ? 'ghost-btn' : 'save-btn') + ' setup-btn ' + cls} onClick={onClick} aria-label="Add plant"><Icon id="plug" /><span>Add plant</span></button>
   );
+  // The header's Add plant with plants off: the form over the page, so Cancel leaves you where
+  // you were. A plant that comes on goes to Live; one added stopped (plan full) keeps the form
+  // open on its paywall.
+  const [adding, setAdding] = useState(false);
+  const addedFromHead = (r) => {
+    const paused = new Set((r?.paused || []).map(Number));
+    if ((r?.plants || []).some(p => !paused.has(Number(p.id)))) { setAdding(false); setTab('live'); }
+    return linked(r);
+  };
   const turnOnBtn = (cls) => (
     <button type="button" className={'save-btn setup-btn ' + cls} onClick={turnOn} aria-label="Turn on a plant"><Icon id="power" /><span>Turn on a plant</span></button>
   );
@@ -934,44 +956,48 @@ function Setup({ links }) {
     }
     return links.refresh();
   };
-  const outline = tab === 'settings' ? <SettingsSkeleton /> : <window.TabSkeleton tab={tab} />;
+  const card = connecting ? (
+    <div className="setup-form">
+      <window.LinkForm relink={relink} onLinked={linked} onCancel={() => setConnecting(false)}
+                       initialUsername={relink ? dead[0].sunsynk_username : undefined} />
+    </div>
+  ) : plantsOff ? (
+    <div className="setup-empty-box">
+      <Icon id="power" />
+      <h2>Your plants are off</h2>
+      <p>Turn one on, or add another, to see your solar, battery, grid and home here.</p>
+      <div className="setup-btns">{turnOnBtn('')}{connectBtn('')}</div>
+    </div>
+  ) : (
+    // One card, the same words on every page (SOLAR-97).
+    <div className="setup-empty-box">
+      <Icon id="plug" />
+      <h2>Add your plant</h2>
+      <p>Your solar, battery, grid and home show here once it’s added.</p>
+      {connectBtn('')}
+    </div>
+  );
   const stage = (
-          <div className="setup-stage">
-            <div className="setup-outline" aria-hidden="true" inert="">{outline}</div>
-            <div className="setup-empty">
-              {connecting ? (
-                <div className="setup-form">
-                  <window.LinkForm relink={relink} onLinked={linked} onCancel={() => setConnecting(false)}
-                                   initialUsername={relink ? dead[0].sunsynk_username : undefined} />
-                </div>
-              ) : plantsOff ? (
-                <div className="setup-empty-box">
-                  <Icon id="power" />
-                  <h2>Your plants are off</h2>
-                  <p>Turn one on, or add another, to see your solar, battery, grid and home here.</p>
-                  <div className="setup-btns">{turnOnBtn('')}{connectBtn('')}</div>
-                </div>
-              ) : (
-                // One card, the same words on every page (SOLAR-97).
-                <div className="setup-empty-box">
-                  <Icon id="plug" />
-                  <h2>Add your plant</h2>
-                  <p>Your solar, battery, grid and home show here once it’s added.</p>
-                  {connectBtn('')}
-                </div>
-              )}
-            </div>
-          </div>
+    <div className="setup-stage">
+      <div className="setup-outline" aria-hidden="true" inert="">{tab === 'settings' ? <SettingsSkeleton /> : <window.TabSkeleton tab={tab} />}</div>
+      <div className="setup-empty">{card}</div>
+    </div>
   );
   // Plant shows its outline and the card inside the Settings area; Account and Billing work.
   return (
     <Frame tabs={TABS} tab={tab} onTab={go} account={account}
       head={<><PlantMenu fallback={plantsOff ? 'Plants off' : 'No plant yet'} />
         {!connecting && (plantsOff
-          ? <span className="setup-head-btns">{turnOnBtn('setup-head-btn')}{connectBtn('setup-head-btn')}</span>
+          ? <span className="setup-head-btns">{turnOnBtn('setup-head-btn')}{connectBtn('setup-head-btn', () => setAdding(true))}</span>
           : connectBtn('setup-head-btn'))}</>}>
       {isSettings(tab) ? <window.SettingsArea page={tab} onPage={go} me={me} links={links} plantSlot={stage} onPlantConfigSaved={linked}
                                               flash={flash} onFlashed={() => setFlash(null)} /> : stage}
+      {adding && (
+        <window.Dialog keep label="Add plant" onClose={() => setAdding(false)}>
+          <div className="confirm-title">Add plant</div>
+          <window.LinkForm compact onLinked={addedFromHead} onCancel={() => setAdding(false)} />
+        </window.Dialog>
+      )}
     </Frame>
   );
 }

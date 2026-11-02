@@ -64,6 +64,13 @@ if (resetPending) {
   u.searchParams.delete('reset');
   history.replaceState(null, '', u.pathname + u.search + u.hash);
 }
+// Takes those params (and the #section, with hash) out of the address, leaving the rest.
+const dropFromAddress = (keys, hash = false) => {
+  const u = new URL(location.href);
+  keys.forEach(k => u.searchParams.delete(k));
+  if (hash) u.hash = '';
+  if (u.href !== location.href) history.replaceState(null, '', u.pathname + u.search + u.hash);
+};
 window.resetAsked = () => resetPending;
 window.takeResetAsk = () => { const r = resetPending; resetPending = false; return r; };
 
@@ -84,6 +91,8 @@ window.useSession = function useSession() {
       // A first sign-in is a sign-up: email confirmed (or Google account made) and signed in
       // in the same minute, and that minute is now (SOLAR-85).
       if (event === 'SIGNED_IN' && session) {
+        // ?signup has opened its screen; left in, the next sign-out would open Create an account
+        dropFromAddress(['signup']);
         const u = session.user, last = Date.parse(u.last_sign_in_at);
         window.identifyUser(u.id);
         if (Math.abs(last - Date.parse(u.email_confirmed_at || u.created_at)) < 60000 && Date.now() - last < 60000)
@@ -93,8 +102,12 @@ window.useSession = function useSession() {
       if (!alive) return;
       if (event === 'PASSWORD_RECOVERY') setState({ loading: false, session, recovering: true });
       // Whoever signs in next starts on the dashboard, not on the Settings tab the
-      // last person signed out from.
-      else if (event === 'SIGNED_OUT') { localStorage.removeItem('synsynk.tab'); setState({ loading: false, session: null, recovering: false }); }
+      // last person signed out from: the address loses its page and plant too.
+      else if (event === 'SIGNED_OUT') {
+        localStorage.removeItem('synsynk.tab');
+        dropFromAddress(['tab', 'plant', 'section'], true);
+        setState({ loading: false, session: null, recovering: false });
+      }
       else setState(s => ({ ...s, loading: false, session: session || null,
                               recovering: event === 'SIGNED_OUT' ? false : s.recovering }));
     });
