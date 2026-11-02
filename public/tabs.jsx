@@ -2857,7 +2857,11 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   const [f, setF] = useState(() => fromCfg(cfg));
   const [busy, setBusy] = useState(false);
   const [tried, setTried] = useState(false);   // Save pressed with a box still wrong: its line shows
-  useEffect(() => { setF(fromCfg(plant?.config)); setTried(false); }, [plant?.id, JSON.stringify(plant?.config || {})]);
+  // Another plant, or its saved values changed: the boxes take them in this render, not in an
+  // effect after it, which drew one frame of the old boxes as unsaved changes and flashed the save bar.
+  const shownCfg = (plant?.id ?? '') + JSON.stringify(plant?.config || {});
+  const [loaded, setLoaded] = useState(shownCfg);
+  if (loaded !== shownCfg) { setLoaded(shownCfg); setF(fromCfg(plant?.config)); setTried(false); }
   const set = (k) => (v) => setF(x => ({ ...x, [k]: v }));
   const n = window.stepNum;
   const whole = (x, lo, hi) => Number.isInteger(n(x)) && n(x) >= lo && n(x) <= hi;
@@ -3113,7 +3117,9 @@ function DownloadSection({ plants, plantId }) {
   const over = window.useFreeOver(); // Free after its week (SOLAR-242): the button is a lock
   const today = window.localDateStr(new Date());
   const weekAgo = window.localDateStr(new Date(Date.now() - 6 * 86400000));
-  const [plant, setPlant] = useState(() => (plants.some(p => p.id === plantId) ? plantId : plants[0].id));
+  // The plant on screen until one is picked; it's still loading when a reload opens Account.
+  const [picked, setPlant] = useState(null);
+  const plant = plants.some(p => p.id === picked) ? picked : plants.some(p => p.id === plantId) ? plantId : plants[0].id;
   const [from, setFrom] = useState(weekAgo);
   const [to, setTo] = useState(today);
   const [bad, setBad] = useState(null);
@@ -3414,6 +3420,8 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
   // Every plant on the logins once (a plant can be on two).
   const live = (links?.accounts || []).filter(a => a.status !== 'disabled');
   const plants = [...new Map(live.flatMap(a => a.plants || []).map(p => [p.plant_id, p])).values()];
+  // Account's Your data: the plants on, from the logins, which are here before api_me answers.
+  const onPlants = plants.filter(p => !p.paused).map(p => ({ id: Number(p.plant_id), name: p.plant_name }));
   // Billing holds the logins too, so a dead one marks it as a failed payment does.
   const relink = live.some(a => a.status === 'needs_relink');
   const dot = { billing: billing?.state === 'past_due' || relink };
@@ -3433,7 +3441,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
         </nav>
         <div className="set-main">
           <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><span aria-hidden="true">←</span> Settings</button>
-          {shown === 'account' && <AccountPage user={user} billing={billing} plants={me?.plants || []} plantId={plantId} onBilling={() => onPage('billing')} />}
+          {shown === 'account' && <AccountPage user={user} billing={billing} plants={onPlants} plantId={plantId} onBilling={() => onPage('billing')} />}
           {(page === 'billing' || page === 'plans') && <BillingPage billing={billing} reload={reloadBilling} reloadPlan={reloadPlan} links={links} onPage={onPage} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} onSaved={onPlantConfigSaved}
                                               onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}
           {/* Adjust plan opens over Billing, not as a page of its own (SOLAR-292) */}
