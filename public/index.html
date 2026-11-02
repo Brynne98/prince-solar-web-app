@@ -437,8 +437,9 @@
      the baseline is the middle, and it is a nudge rather than a different rule. */
   .trend-badge { position: relative; top: 1px; }
   .mv-num { white-space: nowrap; }
-  /* a tile's second line that is an action ("Set your rate" on Est. saved with no rate yet) */
-  .mini-link { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer;
+  /* a tile's second line that is an action ("Set your rate" on Est. saved with no rate yet).
+     A button centers its words, and this one fills the tile, so the line is set back to the left. */
+  .mini-link { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer; text-align: left;
     text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
   .mini-link:hover { color: var(--text); text-decoration-color: currentColor; }
   /* a Settings card flashes once when a link elsewhere sends you to it */
