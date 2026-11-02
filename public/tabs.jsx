@@ -2211,13 +2211,33 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
     </SettingsSection>
   );
 }
+// Which of Billing's lower sections showed last on this device, as Plan keeps its kind: while
+// the plan loads they draw as outlines in their places rather than popping in under it.
+const BILL_SHAPE = 'synsynk.billShape';
+const billShape = () => { try { return JSON.parse(localStorage.getItem(BILL_SHAPE)) || {}; } catch (e) { return {}; } };
+const shapeOf = (b) => ({
+  pay: !b.comped && !(b.plan === 'free' && !b.card), card: !!b.card,
+  payNote: b.plan !== 'free' && b.nextPlan !== 'free', update: b.plan !== 'free' && b.state !== 'past_due',
+  inv: b.comped ? 0 : (b.payments || []).length,
+  cancel: !(b.comped || b.plan === 'free' || b.nextPlan === 'free'),
+});
+const skelLine = (w, h = 12) => <window.Skeleton w={w} h={h} r={5} style={{ display: 'inline-block', verticalAlign: 'middle', maxWidth: '100%' }} />;
+
 // Cancellation, last on Billing as on most billing pages: a paid plan not already ending.
 function CancelSection({ billing: b, reload, logins = [] }) {
   const plants = logins.flatMap(a => a.plants);
   const { useState } = React;
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  if (!b || b.comped || b.plan === 'free' || b.nextPlan === 'free') return null;
+  if (!b) return billShape().cancel ? (
+    <SettingsSection id="cancel" title="Cancellation">
+      <div className="conn-row" aria-hidden="true">
+        <div className="conn-text"><div className="conn-user">Cancel plan</div></div>
+        <div className="conn-actions"><window.Skeleton w={112} h={34} r={9} /></div>
+      </div>
+    </SettingsSection>
+  ) : null;
+  if (b.comped || b.plan === 'free' || b.nextPlan === 'free') return null;
   return (
     <SettingsSection id="cancel" title="Cancellation">
       <div className="conn-row">
@@ -2510,7 +2530,24 @@ function PaymentsSection({ billing }) {
   const { useState } = React;
   const [busy, setBusy] = useState(false);
   const b = billing;
-  if (!b || b.comped || (b.plan === 'free' && !b.card)) return null;
+  if (!b) {
+    const s = billShape();
+    return s.pay ? (
+      <SettingsSection id="payments" title="Payment" note={s.payNote ? 'Your card pays for renewals and upgrades.' : null}>
+        {s.card ? (
+          <div className="conn-row" aria-hidden="true">
+            <window.Skeleton w={46} h={30} r={5} style={{ flex: 'none' }} />
+            <div className="conn-text">
+              <div className="conn-user">{skelLine(150)}</div>
+              <div className="conn-meta">{skelLine(90)}</div>
+            </div>
+            {s.update && <div className="conn-actions"><window.Skeleton w={84} h={34} r={9} /></div>}
+          </div>
+        ) : <div className="field-note" aria-hidden="true">{skelLine(110)}</div>}
+      </SettingsSection>
+    ) : null;
+  }
+  if (b.comped || (b.plan === 'free' && !b.card)) return null;
   const c = b.card;
   return (
     <SettingsSection id="payments" title="Payment" note={b.plan !== 'free' && b.nextPlan !== 'free' ? 'Your card pays for renewals and upgrades.' : null}>
@@ -2535,7 +2572,22 @@ function PaymentsSection({ billing }) {
 }
 // The last six card payments (api_billing_status lists paid ones only). No PDF yet (SOLAR-265).
 function InvoicesSection({ billing: b }) {
-  if (!b || b.comped || !(b.payments || []).length) return null;
+  if (!b) {
+    const n = billShape().inv || 0;
+    return n > 0 ? (
+      <SettingsSection id="invoices" title="Invoices">
+        <table className="pay-table" aria-hidden="true">
+          <thead><tr><th>Date</th><th>Plan</th><th>Total</th><th>Status</th></tr></thead>
+          <tbody>
+            {Array.from({ length: n }, (_, i) => (
+              <tr key={i}><td>{skelLine(80)}</td><td className="pay-what">{skelLine(140)}</td><td>{skelLine(56)}</td><td>{skelLine(32)}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </SettingsSection>
+    ) : null;
+  }
+  if (b.comped || !(b.payments || []).length) return null;
   const { rand } = window.billingFmt;
   const day = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   // What each payment was for (SOLAR-302). Extra plants bought on the same plan are an
@@ -3112,7 +3164,7 @@ function PasswordRow({ email }) {
 // A plant's readings for any range of days as one CSV (SOLAR-191). api_export
 // builds the file; a year at most. Full history (paid) once plans exist: SOLAR-104.
 // On Account, so it picks its own plant, starting on the one on screen; one plant, no picker.
-function DownloadSection({ plants, plantId }) {
+function DownloadSection({ plants, plantId, ready }) {
   const { useState } = React;
   const over = window.useFreeOver(); // Free after its week (SOLAR-242): the button is a lock
   const today = window.localDateStr(new Date());
@@ -3167,16 +3219,21 @@ function DownloadSection({ plants, plantId }) {
         {plants.length > 1 && (
           <div className="dl-field">
             <label htmlFor="dl-plant" className="conn-meta">Plant</label>
-            <div className="fs-in fs-select">
-              <select id="dl-plant" value={plant} onChange={(e) => setPlant(Number(e.target.value))}>
-                {plants.map(p => <option key={p.id} value={p.id}>{p.name || 'Plant ' + p.id}</option>)}
-              </select>
-            </div>
+            {/* which plant is on screen comes with api_me: until then the picker shimmers */}
+            {!ready ? <window.Skeleton className="fs-in" w="" h={41} r={9} /> : (
+              <div className="fs-in fs-select">
+                <select id="dl-plant" value={plant} onChange={(e) => setPlant(Number(e.target.value))}>
+                  {plants.map(p => <option key={p.id} value={p.id}>{p.name || 'Plant ' + p.id}</option>)}
+                </select>
+              </div>
+            )}
           </div>
         )}
         {field('dl-from', 'From', from, setFrom)}
         {field('dl-to', 'To', to, setTo)}
-        {over ? <button type="button" className="ghost-btn lock-cta" onClick={() => window.openPlans('csv')}><window.LockIcon />Download</button>
+        {/* the plan isn't known yet, so neither is the lock: the button's place shimmers */}
+        {!ready ? <window.Skeleton w={104} h={41} r={9} style={{ flex: 'none' }} />
+          : over ? <button type="button" className="ghost-btn lock-cta" onClick={() => window.openPlans('csv')}><window.LockIcon />Download</button>
           : <button type="button" className="save-btn" onClick={submit} disabled={busy} aria-busy={busy}>{busy ? 'Preparing…' : 'Download'}</button>}
       </div>
       {bad && <p className="sset-err" id="dl-err" role="alert">{bad}</p>}
@@ -3320,9 +3377,12 @@ function NotificationsSection({ userId }) {
     try { setPush(await (was === 'on' ? window.pushTurnOff() : window.pushTurnOn())); }
     catch { setPush(was); window.toast('Couldn’t turn pop-ups ' + (was === 'on' ? 'off' : 'on') + '. Try again.', { error: true }); }
   };
+  // The email choices still on their way: each switch and its summary shimmer in place.
+  const loading = !prefs && !failed;
+  const skelSwitch = <window.Skeleton w={42} h={24} r={14} style={{ flex: 'none' }} />;
   // One group: a row that opens its switches, and a switch for all of them. Each switch
   // saves through its own flip, so a group is its switches' saves, one per kind.
-  const group = (g, p, flipOne, key) => {
+  const group = (g, p, flipOne, key, wait) => {
     const anyOn = !p || g.rows.some(([kind]) => p[kind]);
     return (
       <div className="notif-group" key={key}>
@@ -3332,14 +3392,16 @@ function NotificationsSection({ userId }) {
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
             <span className="toggle-text">
               <span className="notif-label">{g.label}</span>
-              <span className="toggle-hint">{emailGroupSummary(g, p)}</span>
+              <span className="toggle-hint">{wait ? skelLine(g.when ? 190 : 70, 11) : emailGroupSummary(g, p)}</span>
             </span>
           </button>
-          <button type="button" className={'switch' + (anyOn ? ' on' : '')} role="switch" aria-checked={anyOn} aria-label={g.label}
-                  onClick={() => p && g.rows.forEach(([kind]) => { if (p[kind] === anyOn) flipOne(kind, !anyOn, g.label); })}><span className="knob" /></button>
+          {wait ? skelSwitch : <button type="button" className={'switch' + (anyOn ? ' on' : '')} role="switch" aria-checked={anyOn} aria-label={g.label}
+                  onClick={() => p && g.rows.forEach(([kind]) => { if (p[kind] === anyOn) flipOne(kind, !anyOn, g.label); })}><span className="knob" /></button>}
         </div>
         <div id={'notif-' + key} className="field notif-rows" role="group" aria-label={g.label} hidden={!open[key]}>
-          {g.rows.map(([kind, label, hint]) => (
+          {g.rows.map(([kind, label, hint]) => wait ? (
+            <div key={kind} className="toggle-row"><span className="toggle-text"><span className="toggle-label">{label}</span><span className="toggle-hint">{hint}</span></span>{skelSwitch}</div>
+          ) : (
             <Toggle key={kind} label={label} hint={hint} checked={!p || p[kind]}
                     onChange={(on) => p && flipOne(kind, on)} />
           ))}
@@ -3364,13 +3426,20 @@ function NotificationsSection({ userId }) {
         <div className="notif-head notif-all">
           <span className="toggle-text">
             <span className="notif-label">All emails</span>
-            <span className="toggle-hint">{onCount === every.length ? 'All ' + onCount + ' on' : onCount ? onCount + ' of ' + every.length + ' on' : 'Off'}</span>
+            <span className="toggle-hint">{loading ? skelLine(60, 11) : onCount === every.length ? 'All ' + onCount + ' on' : onCount ? onCount + ' of ' + every.length + ' on' : 'Off'}</span>
           </span>
-          <button type="button" className={'switch' + (allOn ? ' on' : '')} role="switch" aria-checked={allOn} aria-label="All emails"
-                  onClick={() => prefs && every.forEach(([kind]) => { if (prefs[kind] === allOn) flip(kind, !allOn, 'All emails'); })}><span className="knob" /></button>
+          {loading ? skelSwitch : <button type="button" className={'switch' + (allOn ? ' on' : '')} role="switch" aria-checked={allOn} aria-label="All emails"
+                  onClick={() => prefs && every.forEach(([kind]) => { if (prefs[kind] === allOn) flip(kind, !allOn, 'All emails'); })}><span className="knob" /></button>}
         </div>
-        {EMAIL_GROUPS.map(g => group(g, prefs, flip, g.id))}
+        {EMAIL_GROUPS.map(g => group(g, prefs, flip, g.id, loading))}
       </>}
+      {/* This browser's pop-up state is still being read: its row, with the switch shimmering */}
+      {push === null && (
+        <div className="notif-push" aria-hidden="true">
+          <div className="notif-sub">On this browser</div>
+          <div className="toggle-row"><span className="toggle-text"><span className="toggle-label">Pop-up alerts</span><span className="toggle-hint">The same alerts, shown on this device even when the app is closed.</span></span>{skelSwitch}</div>
+        </div>
+      )}
       {push && push !== 'none' && (
         <div className={'notif-push ' + push}>
           <div className="notif-sub">On this browser</div>
@@ -3382,7 +3451,7 @@ function NotificationsSection({ userId }) {
           {push === 'ios' && (
             <p className="notif-note">On iPhone, pop-ups work only from the Home Screen. In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>, and open the app from there. Needs iOS 16.4 or later.</p>
           )}
-          {push === 'on' && group({ ...alerts, when: null }, pushPrefs, flipPush, 'push')}
+          {push === 'on' && group({ ...alerts, when: null }, pushPrefs, flipPush, 'push', loading)}
         </div>
       )}
     </SettingsSection>
@@ -3441,7 +3510,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
         </nav>
         <div className="set-main">
           <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><span aria-hidden="true">←</span> Settings</button>
-          {shown === 'account' && <AccountPage user={user} billing={billing} plants={onPlants} plantId={plantId} onBilling={() => onPage('billing')} />}
+          {shown === 'account' && <AccountPage user={user} billing={billing} plants={onPlants} plantId={plantId} ready={!!me} onBilling={() => onPage('billing')} />}
           {(page === 'billing' || page === 'plans') && <BillingPage billing={billing} reload={reloadBilling} reloadPlan={reloadPlan} links={links} onPage={onPage} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} onSaved={onPlantConfigSaved}
                                               onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}
           {/* Adjust plan opens over Billing, not as a page of its own (SOLAR-292) */}
@@ -3454,21 +3523,31 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
 }
 
 // Account: the person. Email and sign-in method, emails, their plants' readings as a file,
-// then the account's actions.
-function AccountPage({ user, billing, plants, plantId, onBilling }) {
+// then the account's actions. ready: api_me has answered, so Your data knows if it's locked.
+const HAD_PASSWORD = 'synsynk.hasPassword';
+const hadPassword = () => { try { return localStorage.getItem(HAD_PASSWORD) !== '0'; } catch (e) { return true; } };
+function AccountPage({ user, billing, plants, plantId, ready, onBilling }) {
   const email = user?.email || null;
   const providers = user?.app_metadata?.providers || [];
+  React.useEffect(() => { if (user) try { localStorage.setItem(HAD_PASSWORD, providers.includes('email') ? '1' : '0'); } catch (e) {} }, [user]);
   const method = providers.includes('google') ? (providers.includes('email') ? 'Google or password' : 'Google') : 'password';
   return (
     <div className="settings-page">
       <div className="page-head">
         <h1>Account</h1>
-        <p>{email ? <>{email}<span className="set-method"> · Signs in with {method}</span></> : '\u00a0'}</p>{/* its line held while the session loads */}
+        <p>{email ? <>{email}<span className="set-method"> · Signs in with {method}</span></> : skelLine(260)}</p>
       </div>
       <NotificationsSection userId={user?.id} />
-      {plants.length > 0 && <DownloadSection plants={plants} plantId={plantId} />}
+      {plants.length > 0 && <DownloadSection plants={plants} plantId={plantId} ready={ready} />}
       <SettingsSection id="actions" title="Account actions">
         {email && providers.includes('email') && <PasswordRow email={email} />}
+        {/* the session is still being read: the row a password account had last time, held */}
+        {!user && hadPassword() && (
+          <div className="conn-row" aria-hidden="true">
+            <div className="conn-text"><div className="conn-user">Change password</div><div className="conn-meta">Signs out your other devices.</div></div>
+            <div className="conn-actions"><window.Skeleton w={112} h={34} r={9} /></div>
+          </div>
+        )}
         <div className="conn-row">
           <div className="conn-text"><div className="conn-user">Sign out</div><div className="conn-meta">On this device.</div></div>
           <div className="conn-actions"><window.SignOutButton className="ghost-btn" /></div>
@@ -3484,6 +3563,7 @@ function AccountPage({ user, billing, plants, plantId, onBilling }) {
 
 // Billing holds the plants and the logins they come from (moved from Plant, SOLAR-250).
 function BillingPage({ billing, reload, reloadPlan, links, onPage, freeWeekEndsAt, onSaved, onCollect }) {
+  React.useEffect(() => { if (billing) try { localStorage.setItem(BILL_SHAPE, JSON.stringify(shapeOf(billing))); } catch (e) {} }, [billing]);
   return (
     <div className="settings-page">
       <div className="page-head"><h1>Billing</h1></div>
@@ -3503,7 +3583,7 @@ function PlantSettings({ me, plantId, onSaved, onDirty, switchBlocked, flash, on
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
       <div className="settings-page">
-        <div className="page-head"><h1>{plant?.name || 'Plant settings'}</h1><p>Changes apply to everyone on this plant.</p></div>
+        <div className="page-head"><h1>{!me ? skelLine(180, 22) : plant?.name || 'Plant settings'}</h1><p>Changes apply to everyone on this plant.</p></div>
         <PlantSections me={me} plantId={plantId} onSaved={onSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
         <FirstStepsSection me={me} plantId={plantId} onSaved={onSaved} />
       </div>
