@@ -3105,13 +3105,15 @@ function PasswordRow({ email }) {
   );
 }
 
-// The plant's readings for any range of days as one CSV (SOLAR-191). api_export
+// A plant's readings for any range of days as one CSV (SOLAR-191). api_export
 // builds the file; a year at most. Full history (paid) once plans exist: SOLAR-104.
-function DownloadSection() {
+// On Account, so it picks its own plant, starting on the one on screen; one plant, no picker.
+function DownloadSection({ plants, plantId }) {
   const { useState } = React;
   const over = window.useFreeOver(); // Free after its week (SOLAR-242): the button is a lock
   const today = window.localDateStr(new Date());
   const weekAgo = window.localDateStr(new Date(Date.now() - 6 * 86400000));
+  const [plant, setPlant] = useState(() => (plants.some(p => p.id === plantId) ? plantId : plants[0].id));
   const [from, setFrom] = useState(weekAgo);
   const [to, setTo] = useState(today);
   const [bad, setBad] = useState(null);
@@ -3124,7 +3126,7 @@ function DownloadSection() {
     if (days(from, to) > 365) return setBad('Pick a year or less.');
     setBad(null); setBusy(true);
     try {
-      const { data, error } = await window.sb.rpc('api_export', { p_from: from, p_to: to, p_plant: window.CURRENT_PLANT });
+      const { data, error } = await window.sb.rpc('api_export', { p_from: from, p_to: to, p_plant: plant });
       if (error) throw error;
       if (!data || data.indexOf('\n') === data.length - 1) { window.toast('No readings for those days.', { error: true }); return; }
       const a = document.createElement('a');
@@ -3156,6 +3158,16 @@ function DownloadSection() {
   return (
     <SettingsSection id="download" title="Your data" note="A CSV file. Every minute for the last 31 days, every 5 minutes before that.">
       <div className="dl-row">
+        {plants.length > 1 && (
+          <div className="dl-field">
+            <label htmlFor="dl-plant" className="conn-meta">Plant</label>
+            <div className="fs-in fs-select">
+              <select id="dl-plant" value={plant} onChange={(e) => setPlant(Number(e.target.value))}>
+                {plants.map(p => <option key={p.id} value={p.id}>{p.name || 'Plant ' + p.id}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
         {field('dl-from', 'From', from, setFrom)}
         {field('dl-to', 'To', to, setTo)}
         {over ? <button type="button" className="ghost-btn lock-cta" onClick={() => window.openPlans('csv')}><window.LockIcon />Download</button>
@@ -3372,12 +3384,13 @@ function NotificationsSection({ userId }) {
 }
 
 // ---------------------------------------------------------------- SETTINGS AREA
-// One area, three pages (SOLAR-250): Account (the person), Billing (the plan, plants and
-// card) and Plant (the plant on screen). A side menu on a desktop. On a phone 'prefs' is
-// that menu as a list you tap into, and each page has a back link to it; on a desktop
-// 'prefs' shows Account. Adjust plan ('plans') is a page under Billing. The plan is read
-// once here: Billing shows it, Account's Delete and Plant's Remove login need it.
-const SETTINGS_NAV = [['account', 'Account'], ['billing', 'Billing'], ['settings', 'System']];
+// One area, two pages, both the account's (SOLAR-250): Account (the person) and Billing
+// (the plan, plants and card). The plant on screen has its own page in the list
+// (PlantSettings). A side menu on a desktop. On a phone 'prefs' is that menu as a list you
+// tap into, and each page has a back link to it; on a desktop 'prefs' shows Account. Adjust
+// plan ('plans') is a page under Billing. The plan is read once here: Billing shows it,
+// Account's Delete needs it.
+const SETTINGS_NAV = [['account', 'Account'], ['billing', 'Billing']];
 // Setup and App each draw their own SettingsArea, so the first plant switched on or the last
 // one off mounts a new one; it starts from the plan last read, not the Plan outline. The
 // free week's end too, so Plan's line doesn't drop it until the new screen reads api_me.
@@ -3385,7 +3398,7 @@ const SETTINGS_NAV = [['account', 'Account'], ['billing', 'Billing'], ['settings
 let billingSeen = null;
 let weekEndSeen;
 window.sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') { billingSeen = null; weekEndSeen = undefined; } });
-function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved, links, flash, onFlashed, onDirty, switchBlocked }) {
+function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, flash, onFlashed }) {
   const { useState, useEffect } = React;
   const [user, setUser] = useState(null);
   useEffect(() => { window.sb.auth.getSession().then(({ data }) => setUser(data?.session?.user || null)).catch(() => {}); }, []);
@@ -3401,7 +3414,9 @@ function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved
   // Every plant on the logins once (a plant can be on two).
   const live = (links?.accounts || []).filter(a => a.status !== 'disabled');
   const plants = [...new Map(live.flatMap(a => a.plants || []).map(p => [p.plant_id, p])).values()];
-  const dot = { billing: billing?.state === 'past_due', settings: live.some(a => a.status === 'needs_relink') };
+  // Billing holds the logins too, so a dead one marks it as a failed payment does.
+  const relink = live.some(a => a.status === 'needs_relink');
+  const dot = { billing: billing?.state === 'past_due' || relink };
   const shown = page === 'prefs' ? 'account' : page === 'plans' ? 'billing' : page;
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
@@ -3411,31 +3426,28 @@ function SettingsArea({ page, onPage, me, plantId, plantSlot, onPlantConfigSaved
           {SETTINGS_NAV.map(([id, label]) => (
             <button key={id} type="button" aria-current={shown === id ? 'page' : undefined} onClick={() => onPage(id)}>
               <span>{label}</span>
-              {dot[id] && <span className="dot" aria-label={id === 'billing' ? 'Needs you' : 'A login needs reconnecting'} />}
+              {dot[id] && <span className="dot" aria-label={billing?.state === 'past_due' ? 'Needs you' : 'A login needs reconnecting'} />}
               <svg className="set-chev" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
             </button>
           ))}
         </nav>
         <div className="set-main">
           <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><span aria-hidden="true">←</span> Settings</button>
-          {shown === 'account' && <AccountPage user={user} billing={billing} onBilling={() => onPage('billing')} />}
+          {shown === 'account' && <AccountPage user={user} billing={billing} plants={me?.plants || []} plantId={plantId} onBilling={() => onPage('billing')} />}
           {(page === 'billing' || page === 'plans') && <BillingPage billing={billing} reload={reloadBilling} reloadPlan={reloadPlan} links={links} onPage={onPage} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} onSaved={onPlantConfigSaved}
                                               onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}
           {/* Adjust plan opens over Billing, not as a page of its own (SOLAR-292) */}
           {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadPlan} onBack={() => onPage('billing')} forPlant={forPlant}
                                                logins={pickableLogins(links)} />}
-          {page === 'settings' && (plantSlot || (
-            <PlantPage me={me} plantId={plantId} onSaved={onPlantConfigSaved} onDirty={onDirty}
-                       switchBlocked={switchBlocked} links={links} />
-          ))}
         </div>
       </div>
     </SettingsFlash.Provider>
   );
 }
 
-// Account: the person. Email and sign-in method, emails, then the account's actions.
-function AccountPage({ user, billing, onBilling }) {
+// Account: the person. Email and sign-in method, emails, their plants' readings as a file,
+// then the account's actions.
+function AccountPage({ user, billing, plants, plantId, onBilling }) {
   const email = user?.email || null;
   const providers = user?.app_metadata?.providers || [];
   const method = providers.includes('google') ? (providers.includes('email') ? 'Google or password' : 'Google') : 'password';
@@ -3446,6 +3458,7 @@ function AccountPage({ user, billing, onBilling }) {
         <p>{email ? <>{email}<span className="set-method"> · Signs in with {method}</span></> : '\u00a0'}</p>{/* its line held while the session loads */}
       </div>
       <NotificationsSection userId={user?.id} />
+      {plants.length > 0 && <DownloadSection plants={plants} plantId={plantId} />}
       <SettingsSection id="actions" title="Account actions">
         {email && providers.includes('email') && <PasswordRow email={email} />}
         <div className="conn-row">
@@ -3475,16 +3488,19 @@ function BillingPage({ billing, reload, reloadPlan, links, onPage, freeWeekEndsA
   );
 }
 
-// Plant: the plant on screen (picked in the header). Its system and its readings as a file.
-function PlantPage({ me, plantId, onSaved, onDirty, switchBlocked, links }) {
+// Plant settings: the plant on screen (picked in the header), a page in the list beside
+// Equipment rather than in the account's Settings. Titled with the plant's name.
+function PlantSettings({ me, plantId, onSaved, onDirty, switchBlocked, flash, onFlashed }) {
+  const plant = (me?.plants || []).find(p => p.id === plantId);
   return (
-    <div className="settings-page">
-      <div className="page-head"><h1>System</h1><p>Changes apply to everyone on this plant.</p></div>
-      <PlantSections me={me} plantId={plantId} onSaved={onSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
-      {links?.accounts?.length > 0 && <DownloadSection />}
-      <FirstStepsSection me={me} plantId={plantId} onSaved={onSaved} />
-    </div>
+    <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
+      <div className="settings-page">
+        <div className="page-head"><h1>{plant?.name || 'Plant settings'}</h1><p>Changes apply to everyone on this plant.</p></div>
+        <PlantSections me={me} plantId={plantId} onSaved={onSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
+        <FirstStepsSection me={me} plantId={plantId} onSaved={onSaved} />
+      </div>
+    </SettingsFlash.Provider>
   );
 }
 
-Object.assign(window, { LiveTab, SolarTab, HomeTab, GridTab, InvertersTab, SettingsArea, MiniStat, FsEnterIcon, TabSkeleton });
+Object.assign(window, { LiveTab, SolarTab, HomeTab, GridTab, InvertersTab, SettingsArea, PlantSettings, MiniStat, FsEnterIcon, TabSkeleton });
