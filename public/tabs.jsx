@@ -3159,7 +3159,7 @@ function DayField({ id, value, todayStr, earliest, latest, bad, onPick }) {
     <div className="pick" ref={ref}>
       <button type="button" id={id} className={'fs-in pick-btn' + (bad ? ' bad' : '')} aria-haspopup="dialog" aria-expanded={open}
               onClick={() => setOpen(o => !o)} {...window.invalidProps(id, bad, 'dl-err')}>
-        <window.CalIcon /><span className="pick-val">{window.dayFace(value, todayStr)}</span>
+        <window.CalIcon /><span className="pick-val day-face">{window.dayFace(value, todayStr)}</span>
       </button>
       {open && <window.CalendarPop date={value} todayStr={todayStr} earliest={earliest} latest={latest} allDays onPick={onPick} onClose={close} />}
     </div>

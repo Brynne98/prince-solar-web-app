@@ -194,7 +194,7 @@ function DateBar({ pick, earliest, locked, children }) {
         ? <button className="hv-daynav shut" aria-label="Earlier days, on paid plans" onClick={() => window.openPlans('date_arrow')}><Chevron dir={-1} /></button>
         : <button className="hv-daynav" disabled={!prevDay} aria-label="Previous day"
             onClick={() => prevDay && setDate(prevDay)}><Chevron dir={-1} /></button>}
-      <div className="hv-datebox" ref={box}>
+      <div className={'hv-datebox' + (open ? ' open' : '')} ref={box}>
         <button type="button" className="hv-datepick" disabled={locked} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(o => !o)}>
           <CalIcon />
           <span className="hv-dateface">{dayFace(date, todayStr)}</span>

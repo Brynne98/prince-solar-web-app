@@ -611,7 +611,7 @@
   .hv-waste-none { opacity: 0.78; }
   .hv-datebar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
   /* the arrows and the date box share one height (--datebar-h) so they read as one control */
-  .hv-datebar { --datebar-h: 32px; }
+  .hv-datebar, .pick { --datebar-h: 32px; }   /* .pick: the calendar's month arrows in Your data */
   .hv-daynav { box-sizing: border-box; width: var(--datebar-h); height: var(--datebar-h); flex: none; display: inline-flex; align-items: center; justify-content: center;
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
     line-height: 0; cursor: pointer; transition: .15s; padding: 0; }
@@ -621,13 +621,13 @@
   /* the date box: "Tue 6 Oct", opening our calendar (SOLAR-72); Today sits inside it only on a phone */
   .hv-datebox { position: relative; box-sizing: border-box; height: var(--datebar-h); display: inline-flex; align-items: center; gap: 10px;
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; }
-  .hv-datebox:hover { border-color: var(--line-2); }
+  .hv-datebox:hover, .hv-datebox.open { border-color: var(--grid); }   /* as Your data's From and To */
   .hv-datepick { display: inline-flex; align-items: center; gap: 8px; height: 100%; padding: 0 12px; background: none; border: 0; color: var(--text); cursor: pointer; }
   .hv-datepick:disabled { cursor: default; }
   .hv-cal { display: block; flex: none; color: var(--muted); }
   /* fixed width, so ‹ › stay under the pointer while someone clicks through days */
-  .hv-dateface { font: 600 13px var(--display); letter-spacing: 0.01em; white-space: nowrap;
-    display: inline-block; min-width: 6.9em; text-align: center; font-variant-numeric: tabular-nums; }
+  .hv-dateface, .day-face { font: 600 13px var(--display); letter-spacing: 0.01em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .hv-dateface { display: inline-block; min-width: 6.9em; text-align: center; }
   .hv-today-in { display: none; }
   .cal-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; width: 276px; padding: 12px; box-sizing: border-box;
     background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); }
@@ -1304,14 +1304,14 @@
   /* ---------- phones ---------- */
   @media (max-width: 600px) {
     /* thumb-sized targets on phones (36px inside the segmented track), desktop unchanged */
-    .hv-datebar { --datebar-h: 40px; }
+    .hv-datebar, .pick { --datebar-h: 40px; }
     .hv-today { min-height: 40px; }
     /* SOLAR-27: arrows at the two ends, the date centred between them as "Fri 2 Oct" */
     .hv-datebox { display: flex; flex: 1 0 calc(100% - 2 * var(--datebar-h) - 16px); min-width: 0; justify-content: center; }
     /* notes ("Grid off 9h", "to 14:20") wrap under the bar, so the arrows never move */
     .hv-datebar .hv-gap, .hv-datebar .hv-lag { order: 1; margin-left: 0; }
     .hv-datepick { padding: 0 4px; }
-    .hv-dateface { font-size: 14px; }
+    .hv-dateface, .day-face { font-size: 14px; }
     /* the calendar spans the bar under the date on a phone */
     .cal-pop { left: 50%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); }
     .hv-today-out { display: none; }
