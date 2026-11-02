@@ -345,7 +345,7 @@ async function fetchStringHealth() {
 async function fetchMe() {
   const { data, error } = await window.sb.rpc('api_me');
   if (error) throw new Error(error.message);
-  return data || { plan: 'free', prefs: {}, plants: [] };
+  return data || { plan: 'free', freeWeekEndsAt: null, prefs: {}, plants: [] };
 }
 async function savePrefs(patch) {
   const { data, error } = await window.sb.rpc('api_prefs_set', { p_prefs: patch });

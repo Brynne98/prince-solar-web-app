@@ -2141,8 +2141,9 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   const kind = !billing ? null : billing.comped ? 'comped' : billing.plan !== 'free' ? 'paid' : 'free';
   React.useEffect(() => { if (kind) try { localStorage.setItem('synsynk.planKind', kind); } catch (e) {} }, [kind]);
   // Its outline while the plan loads, from the last plan seen on this device, so the
-  // sections below don't jump down (SOLAR-221).
-  if (!billing) {
+  // sections below don't jump down (SOLAR-221). Free waits for api_me too (undefined until
+  // it answers): its line depends on whether the free week is still on.
+  if (!billing || (kind === 'free' && freeWeekEndsAt === undefined)) {
     const last = (() => { try { return localStorage.getItem('synsynk.planKind'); } catch (e) { return null; } })() || 'free';
     return (
       <SettingsSection id="plan" title="Plan">
