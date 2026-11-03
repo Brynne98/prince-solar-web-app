@@ -525,13 +525,12 @@
   .fbox-foot { margin-top: auto; padding-top: 10px; }
   .fbox-bar { display: flex; gap: 2px; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,0.08); }
   .fbox-bar i { display: block; height: 100%; border-radius: 3px; min-width: 6px; }   /* a 1% share still reads as a segment */
-  .fbox-split { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 10px; margin-top: 7px; }
+  .fbox-split { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 10px; margin-bottom: 7px; }
   .fbox-split span { display: flex; flex-direction: column; gap: 2px; }
   .fbox-split span:last-child:not(:first-child) { align-items: flex-end; }
-  .fbox-split em, .fbox-today span, .fbox-today-h { font: 500 11px var(--display); font-style: normal; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  .fbox-split em, .fbox-charge em, .fbox-today span, .fbox-today-h { font: 500 11px var(--display); font-style: normal; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
   .fbox-split b { font: 600 12.5px var(--mono); }
-  .fbox-charge { display: flex; align-items: center; gap: 10px; }
-  .fbox-charge .fbox-bar { flex: 1; }
+  .fbox-charge-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; }
   .fbox-charge b { font: 700 18px var(--mono); white-space: nowrap; }
   /* mains there or gone: a green dot, or a hollow grey one */
   .fbox-grid { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
@@ -581,10 +580,12 @@
   .mflow .fbox-split { justify-content: flex-start; }
   .mflow .fbox-split em { font-size: 10.5px; }
   .mflow .fbox-split b { font-size: 12px; }
-  .mflow .fbox-today { border-top: 1px solid var(--line); padding: 9px 13px 10px; gap: 5px; }
+  /* two rows tall even with one (Made, Used), so side-by-side boxes keep their bars and rules level */
+  .mflow .fbox-today { border-top: 1px solid var(--line); padding: 9px 13px 10px; gap: 5px; min-height: 60px; }
   .mflow .fbox-today-h { display: none; }
-  .mflow .fbox-today > div:not(.fbox-today-h) { flex-direction: row; justify-content: space-between; align-items: baseline; gap: 6px; }
-  .mflow .fbox-today span { font-size: 10.5px; }
+  .mflow .fbox-today > div:not(.fbox-today-h) { flex-direction: row; justify-content: space-between; align-items: baseline; gap: 4px; }
+  /* tighter tracking: "Discharged 12.0 kWh" ran 5px past the box edge at 375px wide */
+  .mflow .fbox-today span { font-size: 10.5px; letter-spacing: 0.04em; }
   .mflow .fbox-today b { font-size: 13px; }
   .mflow .fbox-today b .u { font-size: 10px; margin-left: 3px; }
   .mflow-links { display: block; width: 100%; height: 72px; overflow: visible; }
