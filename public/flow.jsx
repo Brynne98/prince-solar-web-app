@@ -55,7 +55,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
     // "Set pack size" stands alone, a link to Settings (SOLAR-23)
     if (battInfo) return { k: '', v: battInfo, on: onBattInfo };
     // under 200 W there is no time (tabs.jsx), but the power is still moving (SOLAR-44)
-    return { k: charging ? 'Charging slowly' : agg.battState === 'discharging' ? 'Discharging' : 'Resting', v: '' };
+    // a 0 W battery can still report "discharging"; it reads as Resting, like the flow line
+    return { k: charging ? 'Charging slowly' : agg.battState === 'discharging' && agg.battPower > 5 ? 'Discharging' : 'Resting', v: '' };
   })();
   // Free after its week (SOLAR-242): the time to full or empty shows greyed, with a lock
   const over = window.useFreeOver();
@@ -183,13 +184,14 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
     exact.map((v, i) => i).sort((a, b) => (exact[b] - pct[b]) - (exact[a] - pct[a]))
       .forEach(i => { if (left > 0) { pct[i]++; left--; } });
     return (
+      // shares above the bar, so the bar sits on the box's bottom line like the battery's
       <div className="fbox-foot">
-        <div className="fbox-bar">{on.map(p => <i key={p[0]} style={{ flexGrow: p[2], background: p[1] }} />)}</div>
         {on.length > 0 && (
           <div className="fbox-split">
             {on.map((p, i) => <span key={p[0]}><em>{p[0]}</em><b style={{ color: p[1] }}>{pct[i]}%</b></span>)}
           </div>
         )}
+        <div className="fbox-bar">{on.map(p => <i key={p[0]} style={{ flexGrow: p[2], background: p[1] }} />)}</div>
       </div>
     );
   };
@@ -212,9 +214,10 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
           {n.state && <div className="fbox-state">{n.state}</div>}
           {n.split && splitFoot(n.split)}
           {n.charge != null && (
+            // the charge on a row above the bar, so the bar sits on the same line as Solar's and Home's
             <window.Tip as="div" className="fbox-foot fbox-charge" text={usualTitle}>
+              <div className="fbox-charge-row"><em>Charge</em><b style={{ color: n.color }}>{n.charge}%</b></div>
               <div className="fbox-bar"><i style={{ width: Math.max(0, Math.min(100, n.charge)) + '%', background: n.color }} /></div>
-              <b style={{ color: n.color }}>{n.charge}%</b>
             </window.Tip>
           )}
           {/* mains there or gone: a status, never green-tinted like solar's power */}

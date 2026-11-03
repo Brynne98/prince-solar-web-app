@@ -481,7 +481,7 @@
      the rest, every size taken from the screen. */
   .flow-fs-wrap.wall { --wall-pad: clamp(16px, 3vmin, 48px);
     position: fixed; inset: 0; z-index: 1000; overflow: hidden; background: var(--bg);
-    display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); gap: clamp(8px, 1.5vmin, 24px);
+    display: grid; grid-template-rows: auto auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); gap: clamp(8px, 1.5vmin, 24px);
     padding: max(var(--wall-pad), env(safe-area-inset-top)) max(var(--wall-pad), env(safe-area-inset-right))
              max(var(--wall-pad), env(safe-area-inset-bottom)) max(var(--wall-pad), env(safe-area-inset-left));
     font-size: clamp(14px, 1.6vmin + 4px, 24px); }
@@ -498,14 +498,20 @@
   .wall.idle .wall-exit:not(:focus-visible) { opacity: 0; visibility: hidden; }
   .wall.idle, .wall.idle * { cursor: none !important; }
   @media (prefers-reduced-motion: reduce) { .wall .wall-exit { transition: none; } }
-  .wall .flow-card { background: none; border: 0; border-radius: 0; padding: 0; min-height: 0; }
+  .wall .flow-card { background: none; border: 0; border-radius: 0; padding: 0; min-height: 0; grid-row: -2; }
+  /* Today's cards between the bar and the flow, one row (SOLAR-309); none on a phone */
+  .wall .today-strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: start; }
+  @media (max-width: 600px) { .wall .today-strip { display: none; } }
   .wall .flow-wrap { height: 100%; display: flex; flex-direction: column; justify-content: center; }
-  .wall .flow-narrative { flex: none; text-align: center; text-wrap: balance;
+  /* left, on the diagram's own left edge: as wide as the zoomed layout, centred like it */
+  .wall .flow-narrative { flex: none; text-align: left; text-wrap: balance; max-width: 100%; margin-inline: auto;
+    width: calc(var(--wall-w, 1100px) * var(--wall-zoom, 1));
     font-size: clamp(18px, 2vmin + 8px, 40px); margin-bottom: clamp(10px, 2.5vmin, 36px); }
   /* both layouts are HTML at screen sizes; tabs.jsx sets the zoom that fills the room */
   .wall .pflow { flex: none; width: 1100px; max-width: none; margin: 0 auto; zoom: var(--wall-zoom, 1); }
   .wall .mflow { flex: none; width: 440px; max-width: none; margin: 0 auto; zoom: var(--wall-zoom, 1); }
   /* slide a whole number of dash-periods so the loop is seamless: 195 = 15 (desktop "2 13") × 13 (mobile "2 11") */
+  .wall:has(.mflow) { --wall-w: 440px; }
   @keyframes flow { to { stroke-dashoffset: -195; } }
   /* the moving dashes are the one piece of continuous motion on the page */
   @media (prefers-reduced-motion: reduce) { .pflow-lane *, .mflow-links * { animation: none !important; } }
@@ -525,13 +531,12 @@
   .fbox-foot { margin-top: auto; padding-top: 10px; }
   .fbox-bar { display: flex; gap: 2px; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,0.08); }
   .fbox-bar i { display: block; height: 100%; border-radius: 3px; min-width: 6px; }   /* a 1% share still reads as a segment */
-  .fbox-split { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 10px; margin-top: 7px; }
+  .fbox-split { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 10px; margin-bottom: 7px; }
   .fbox-split span { display: flex; flex-direction: column; gap: 2px; }
   .fbox-split span:last-child:not(:first-child) { align-items: flex-end; }
-  .fbox-split em, .fbox-today span, .fbox-today-h { font: 500 11px var(--display); font-style: normal; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  .fbox-split em, .fbox-charge em, .fbox-today span, .fbox-today-h { font: 500 11px var(--display); font-style: normal; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
   .fbox-split b { font: 600 12.5px var(--mono); }
-  .fbox-charge { display: flex; align-items: center; gap: 10px; }
-  .fbox-charge .fbox-bar { flex: 1; }
+  .fbox-charge-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; }
   .fbox-charge b { font: 700 18px var(--mono); white-space: nowrap; }
   /* mains there or gone: a green dot, or a hollow grey one */
   .fbox-grid { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
@@ -581,10 +586,12 @@
   .mflow .fbox-split { justify-content: flex-start; }
   .mflow .fbox-split em { font-size: 10.5px; }
   .mflow .fbox-split b { font-size: 12px; }
-  .mflow .fbox-today { border-top: 1px solid var(--line); padding: 9px 13px 10px; gap: 5px; }
+  /* two rows tall even with one (Made, Used), so side-by-side boxes keep their bars and rules level */
+  .mflow .fbox-today { border-top: 1px solid var(--line); padding: 9px 13px 10px; gap: 5px; min-height: 60px; }
   .mflow .fbox-today-h { display: none; }
-  .mflow .fbox-today > div:not(.fbox-today-h) { flex-direction: row; justify-content: space-between; align-items: baseline; gap: 6px; }
-  .mflow .fbox-today span { font-size: 10.5px; }
+  .mflow .fbox-today > div:not(.fbox-today-h) { flex-direction: row; justify-content: space-between; align-items: baseline; gap: 4px; }
+  /* tighter tracking: "Discharged 12.0 kWh" ran 5px past the box edge at 375px wide */
+  .mflow .fbox-today span { font-size: 10.5px; letter-spacing: 0.04em; }
   .mflow .fbox-today b { font-size: 13px; }
   .mflow .fbox-today b .u { font-size: 10px; margin-left: 3px; }
   .mflow-links { display: block; width: 100%; height: 72px; overflow: visible; }
