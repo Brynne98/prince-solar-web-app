@@ -1396,7 +1396,7 @@ function App({ links }) {
             it (the Plan section flashed back to its outline). */}
         <div className="page">
           {!dataPage && settingsPage}
-          {dataPage && <window.TabSkeleton tab={tab} />}
+          {dataPage && <window.TabSkeleton tab={tab} cfg={(me?.plants || []).find(p => p.id === plantId)?.config} />}
         </div>
       </Frame>
       </window.FreeCtx.Provider>

@@ -93,7 +93,10 @@ function skelVal(w) {
   return <window.Skeleton w={w} h={19} r={5} style={{ display: 'inline-block', verticalAlign: 'top', marginTop: 3 }} />;
 }
 
-function LiveSkeleton() {
+// cfg: the plant's saved settings from api_me, so the row holds the cards LiveTab will draw
+function LiveSkeleton({ cfg }) {
+  const grid = cfg?.has_grid !== false;
+  const exp = grid && cfg?.tariff_export > 0;
   return (
     <div className="live-grid">
       <div className="overview-section">
@@ -109,7 +112,8 @@ function LiveSkeleton() {
           <MiniStat loading label="Home" info={OV_INFO.home} />
           <MiniStat loading label="Independence" info={OV_INFO.suff} bar={0} />
           {/* the grid chip's box sets its line 0.5px taller than plain text */}
-          <MiniStat loading label="Imported" info={OV_INFO.imp} sub={<span className="grid-state" style={{ visibility: 'hidden' }}><span className="gs-dot" />{NBSP}</span>} />
+          {grid ? <MiniStat loading label="Imported" info={OV_INFO.imp} sub={<span className="grid-state" style={{ visibility: 'hidden' }}><span className="gs-dot" />{NBSP}</span>} /> : <MiniStat loading label="Grid" info={OV_INFO.grid} />}
+          {exp && <MiniStat loading label="Exported" info={OV_INFO.exp} />}
           <MiniStat loading label="Saved" info={OV_INFO.saved} sub={NBSP} />
         </div>
       </div>
@@ -435,10 +439,8 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             info={OV_INFO.made} />
           <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord} trendNote={trendNote}
             info={OV_INFO.home} />
-          <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord} trendNote={trendNote}
+          <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff ?? undefined} trend={tSuff} trendTitle={cmpWord} trendNote={trendNote}
             info={OV_INFO.suff} />
-          {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergyParts(pExp)} color={CC.grid}
-            info={OV_INFO.exp} />}
           {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord} trendNote={trendNote}
             info={OV_INFO.imp}
             sub={silent ? undefined : a.gridPresent == null ? (
@@ -457,6 +459,9 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             )} />}
           {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off" color={CC.grid}
             info={OV_INFO.grid} />}
+          {/* after Imported, the order Power flow uses */}
+          {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergyParts(pExp)} color={CC.grid}
+            info={OV_INFO.exp} />}
           <MiniStat loading={pending} label="Saved" color={CC.batt}
             value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
             trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord} trendNote={trendNote}
@@ -1948,12 +1953,12 @@ function InvertersTab({ snap, refreshKey }) {
 
 // The shape to hold while the first snapshot is on its way. Trends and Settings never wait
 // on one — App draws those for real — so they have no skeleton here.
-function TabSkeleton({ tab }) {
+function TabSkeleton({ tab, cfg }) {
   return tab === 'solar' ? <SolarSkeleton />
     : tab === 'home' ? <HomeSkeleton />
     : tab === 'grid' ? <GridSkeleton />
     : tab === 'inverters' ? <InvertersSkeleton />
-    : <LiveSkeleton />;
+    : <LiveSkeleton cfg={cfg} />;
 }
 
 // ---------------------------------------------------------------- SETTINGS / ACCOUNT
