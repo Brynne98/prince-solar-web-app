@@ -419,8 +419,9 @@
   .overview-head .section-title { margin-bottom: 0; }
   .mini-stat { padding: 20px 22px; }
   /* label left, trend arrow right on the same line; a long label wraps, the arrow keeps its corner */
-  .mini-label { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
-    display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 2px 8px; }
+  /* tracking and gap kept tight so "Independence (?) ▼ 10%" fits one line in a ~200 px card */
+  .mini-label { font-size: 12px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 2px 6px; }
   .ml-text { display: flex; align-items: center; min-width: 0; line-height: 1.35; }
   .mini-label .trend-badge { margin-left: 0; top: 0; line-height: 1.35; text-transform: none; }
   .mv-unit { font-size: 14px; font-weight: 500; margin-left: 4px; opacity: 0.85; }
@@ -1264,8 +1265,6 @@
     .legend-chip { min-height: 40px; padding: 5px 10px; font-size: 11.5px; }
     /* no (?) on a phone's Overview cards: the label and its arrow keep one line */
     .mini-stat .info-dot { display: none; }
-    /* tighter tracking: "Independence ▼ 10%" was 1 px too wide for a 375 px phone */
-    .mini-label { letter-spacing: 0.06em; column-gap: 6px; }
     /* Live's chips in one row, name over value, so five never wrap 2-2-1 */
     .hv-root .legend-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
     .hv-root .legend-chip { flex-direction: column; justify-content: center; gap: 3px; padding: 7px 2px; font-size: 10.5px; min-width: 0; }
