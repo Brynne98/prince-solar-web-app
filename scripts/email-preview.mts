@@ -18,7 +18,7 @@ import type { Email } from "../supabase/functions/_shared/email.ts";
 const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
-  accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, renewalNotice,
+  accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, offerEnds, renewalNotice,
   passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, planKept, plantEvent, plantsRemovalSoon, planSwitched, planUpgraded,
   renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
@@ -104,6 +104,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "billing-receipt": [FROM_BILLING, paymentReceived({ plan: "family", period: "monthly", amount: 228, date: "1 Nov 2026", card: "Visa •••• 4081",
     reference: "PSH-7Q2K9X", extraPlants: { n: 1, each: 49 }, next: { amount: 228, date: "1 Dec" } })],
   "billing-renewal-notice": [FROM_BILLING, renewalNotice({ plan: "family", amount: 1799, on: "1 Feb 2027" })],
+  "billing-offer-ends": [FROM_BILLING, offerEnds({ plan: "home", period: "monthly", was: 49, amount: 99, on: "3 Mar", card: "Visa ending 4242" })],
   "billing-free-week-ends-soon": [FROM_BILLING, freeWeekEndsSoon("Monday", "Home", 58, 83)],
   "free-week-setup": [FROM_HELLO, freeWeekSetup(["rate", "size", "panels"])],
   "billing-switched": [FROM_BILLING, planSwitched({ plan: "home", period: "yearly", amount: 999, date: "1 Nov 2026", card: "Visa •••• 4081",

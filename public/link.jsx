@@ -109,7 +109,19 @@ window.billingRpc = billingRpc;
 const quote = (plan, period, extras = null) => billingRpc('api_billing_quote', { p_plan: plan, p_period: period, p_extra: extras })
   .then(({ data, error }) => { if (error) throw error; return data; });
 
-window.billingFmt = { rand, billDay, perUnit };
+// Offers (SOLAR-330). offer: its terms from the server (api_billing_status.offer, quote.offerTerms),
+// or null. The line under an offer price: how long it lasts and what comes after.
+const offerName = (o) => (o.id === 'launch' ? 'launch price' : 'offer price');
+const offerLine = (o, list, period) => !o ? null
+  : o.until ? `Until ${billDay(o.until)}. Then ${rand(list)} ${perUnit(period)}.`
+  : o.months && !o.held ? `For your first ${period === 'yearly' ? 'year' : o.months + ' months'}. Then ${rand(list)} ${perUnit(period)}.`
+  : `${o.id === 'launch' ? 'Launch price. ' : ''}Yours while you stay.`;
+// Who can still join: the cap, before joining.
+const offerCap = (o) => (o && !o.held && o.cap ? `${o.id === 'launch' ? 'Launch price' : 'Offer'} for the first ${o.cap} members.` : null);
+// The list price struck out before an offer price; nothing when they're the same.
+const Was = ({ list, price }) => (list > price ? <s className="pw-was">{rand(list)}</s> : null);
+
+window.billingFmt = { rand, billDay, perUnit, offerName, offerLine, offerCap, Was };
 
 // Paystack (SOLAR-208, the billing function). A saved card is charged at once;
 // otherwise, or after the saved card is declined, Paystack's card page opens and
@@ -376,21 +388,22 @@ function Paywall({ reason, paused = [], plantIds = null, onCancel }) {
               <div key={p} className={'pw-plan' + (p === 'family' ? ' pw-main' : '')}>
                 <div className="pw-name">{p === 'family' ? 'Family' : 'Home'}</div>
                 {history && per === 'yearly'
-                  ? <div className="pw-price"><b>{q ? rand(Math.round(q.nextCharge / 12)) : '…'}</b> a month{q && <span className="pw-billed">{rand(q.nextCharge)} billed yearly</span>}</div>
-                  : <div className="pw-price"><b>{q ? rand(q.nextCharge) : '…'}</b> {perUnit(per)}</div>}
+                  ? <div className="pw-price">{q && <Was list={Math.round(q.listCharge / 12)} price={Math.round(q.nextCharge / 12)} />}<b>{q ? rand(Math.round(q.nextCharge / 12)) : '…'}</b> a month{q && <span className="pw-billed">{rand(q.nextCharge)} billed yearly</span>}</div>
+                  : <div className="pw-price">{q && <Was list={q.listCharge} price={q.nextCharge} />}<b>{q ? rand(q.nextCharge) : '…'}</b> {perUnit(per)}</div>}
+                {q?.offerTerms && q.listCharge > q.nextCharge && <div className="pw-offer">{offerLine(q.offerTerms, q.listCharge, per)}</div>}
                 <ul className="pw-gives">
                   <li>{p === 'family' ? 'Up to 3 plants' : '1 plant'}</li>
                   <li>Your full history</li>
                 </ul>
                 {paid && q && q.dueNow != null && q.dueNow !== q.nextCharge && <div className="pw-due">{rand(q.dueNow)} today, then {rand(q.nextCharge)} {perUnit(per)} from {billDay(q.nextDate)}</div>}
                 <button type="button" className={p === 'family' ? 'save-btn' : 'ghost-btn'} disabled={!q || (paid && q.dueNow == null)}
-                        onClick={() => window.startUpgrade(p, per, false, q?.plan === 'family' ? (q.extraPlants || 0) + Math.max(paused.length, 1) : null, plantIds)}>{p === 'home' ? 'Choose Home' : q?.plan === 'family' ? 'Add to my plan' : 'Upgrade to Family'}</button>
+                        onClick={() => (q?.offer && window.track('offer_picked', { offer: q.offer, plan: p, period: per }), window.startUpgrade(p, per, false, q?.plan === 'family' ? (q.extraPlants || 0) + Math.max(paused.length, 1) : null, plantIds))}>{p === 'home' ? 'Choose Home' : q?.plan === 'family' ? 'Add to my plan' : 'Upgrade to Family'}</button>
               </div>
             );
           })}
         </div>
       )}
-      {first && <p className="field-note">{rand(first.extraPrice)} {perUnit(per)} for each plant after your 3rd.</p>}
+      {first && <p className="field-note">{rand(first.extraPrice)} {perUnit(per)} for each plant after your 3rd.{offerCap(first.offerTerms) && ' ' + offerCap(first.offerTerms)}</p>}
       <div className="conn-form-actions pw-foot">
         <span className="field-note">Cancel any time.</span>
         <button type="button" className="ghost-btn" onClick={onCancel}>{history ? 'Stay on Free' : 'Not now'}</button>

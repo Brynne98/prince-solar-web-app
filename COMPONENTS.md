@@ -73,6 +73,7 @@ Formatting and dates (also `components.jsx`):
 | `LinkForm` | The SunSynk sign-in form, inline (`compact`) or as a card. |
 | `LinkDialog` | `LinkForm` in a `Dialog` with a `title` and `note`: add a plant, re-link, change login. |
 | `Paywall`, `PayReview` | Picking and paying for a plan. |
+| `billingFmt.offerLine`, `offerCap`, `Was` | An offer price (SOLAR-330): its terms under the price, the members cap, the list price struck out. |
 | `withTimeout(call, ms)` | A Supabase call that must give up: after `ms` it resolves as `{ data: null, error: { message: 'timed out' } }`. |
 | `edgePost(path, body, signal)` | A POST to one of our edge functions as the signed-in user; returns `[response, json]`. |
 | `mountNode(node)` | Render something into its own root outside the app (dialogs opened from plain code). |
