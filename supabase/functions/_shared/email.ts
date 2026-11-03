@@ -606,6 +606,8 @@ const PLAN = `${APP}/?tab=account&section=plan`;
 export const PAY_URL = `${PLAN}&pay=1`;
 // What Free means after its first week, said the same way in every email.
 const FREE_RULE = "we keep only the last 24 hours of readings. Alerts stay on; reports stop.";
+// After a paid plan, readings stay 30 days first (SOLAR-329, 0145).
+const PAID_FREE_RULE = "we keep your readings for 30 days, then only the last 24 hours. Alerts stay on; reports stop.";
 const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;
 // Who is selling, on every receipt and renewal notice.
 const SELLER = "Prince Solar Hub is run by Theron and Prince Solutions. No VAT is charged.";
@@ -732,7 +734,7 @@ export const planChangeBooked = (c: Change) => {
   return make(title, {
     title,
     parts: [
-      { p: `Everything stays as it is until then.${cancel ? ` After that you're on Free: ${FREE_RULE}` : ""}` },
+      { p: `Everything stays as it is until then.${cancel ? ` After that you're on Free: ${PAID_FREE_RULE}` : ""}` },
       { items: {
         rows: [planItem(c.from, c.fromPeriod, `until ${c.on}`), planItem(c.to, c.toPeriod ?? c.fromPeriod, `from ${c.on}`, c.next ? rand(c.next.amount) : "R0")],
         meta: [c.next ? `Next payment ${rand(c.next.amount)} on ${c.on}` : "Nothing more is charged."],
@@ -822,7 +824,7 @@ export const movedToFree = (m: MovedToFree) =>
   make("Your account is now on Free", {
     title: "Your account is now on Free",
     parts: [
-      { p: `Payment for ${PLAN_NAME[m.from]} didn't go through, so you're on Free: ${FREE_RULE}` },
+      { p: `Payment for ${PLAN_NAME[m.from]} didn't go through, so you're on Free: ${PAID_FREE_RULE}` },
       { plants: { title: "Still updating", names: [m.kept], tone: "keep" } },
       ...(m.stopped.length ? [{ plants: { title: `Stopped, deleted on ${m.deleteOn}`, names: m.stopped, tone: "stop" as const } }] : []),
       ...(m.stopped.length ? [{ note: "Pay to keep every plant, or choose which plant Free keeps." }] : []),

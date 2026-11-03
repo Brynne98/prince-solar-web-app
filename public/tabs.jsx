@@ -2120,7 +2120,7 @@ async function bookExtras(b, count, reload, keep) {
 // Undo whatever is booked: the extras alone, or the plan and period.
 const undoBooked = (b, reload) => (!b.nextPlan && !b.nextPeriod && b.nextExtraPlants != null
   ? bookExtras(b, b.extraPlants, reload) : bookPlan(b, b.plan, b.period, reload));
-const cancelText = (b) => `It runs until ${window.billingFmt.billDay(b.nextDate)}. After that you’re on Free: we keep only the last 24 hours of readings. Alerts stay on; reports stop.`;
+const cancelText = (b) => `It runs until ${window.billingFmt.billDay(b.nextDate)}. After that you’re on Free: we keep your readings for 30 days, then only the last 24 hours. Alerts stay on; reports stop.`;
 
 // A downgrade's pick (SOLAR-295): the plants the new plan keeps, each with the switch and
 // under the login Billing shows it with. One on for Home and Free; Family's room for Family.
