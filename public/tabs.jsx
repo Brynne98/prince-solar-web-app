@@ -2359,7 +2359,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
     ? <button type="button" className="ghost-btn" onClick={() => { setFailed(f => ({ ...f, [qKey(more)]: false })); ask(more); }}>Get the price again</button>
     : needs(more) && <button type="button" className="save-btn" disabled aria-busy="true">Getting the price</button>);
   const action = (p) => {
-    if (b.prepaidOn && !(p === b.plan && !sameView)) return null; // a paid year changes nothing until it starts (SOLAR-298)
+    // a paid year changes nothing until it starts (SOLAR-298); a quiet line holds the button's row
+    if (b.prepaidOn && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
     if (p === b.plan) {
       if (!sameView) return b.nextPeriod === view ? <div className="plan-cur">From {billDay(b.nextDate)}</div>
         // monthly to yearly is paid now (SOLAR-298); yearly to monthly is booked
@@ -2376,7 +2377,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
       // in the button's place, so the card for your plan has no empty row (SOLAR-303)
       return <div className="plan-cur">{paid ? (booked ? 'Changes ' : 'Renews ') + billDay(b.nextDate) : 'No card needed'}</div>;
     }
-    if (!sameView) return null; // a paid plan changes plan in its own period
+    // a paid plan changes plan in its own period
+    if (!sameView) return <div className="plan-cur plan-wait">Change on {b.period === 'yearly' ? 'Yearly' : 'Monthly'}</div>;
     if (PLAN_RANK[p] > PLAN_RANK[b.plan]) {
       if (paid && p === 'family' && priceMissing) return priceMissing;
       return <button type="button" className="save-btn" disabled={paid && p === 'family' && quote?.dueNow == null}
@@ -2415,10 +2417,6 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
       {b.comped ? <p className="field-note">Your plan is free of charge: every plant, full history.</p> : <>
         <Segmented size="sm" className="plan-period" label="Billing" value={view} onChange={setView}
                    options={[{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly, save 16%' }]} />
-        {(!sameView || b.prepaidOn) && <p className="field-note">{b.prepaidOn ?`Your year is paid. It starts on ${billDay(b.nextDate)}.`
-          : b.nextPeriod === view ? `Your plan changes to ${view} on ${billDay(b.nextDate)}.`
-          : view === 'yearly' ? `Pay for the year now. It starts on ${billDay(b.nextDate)}.`
-          : `A switch to ${view} starts on your billing date, ${billDay(b.nextDate)}.`}</p>}
         {/* One paywall on every screen: three cards side by side, stacked on phones (SOLAR-303, SOLAR-304) */}
         <div className="plan-grid plan-cards">
           {['free', 'home', 'family'].map(p => (
