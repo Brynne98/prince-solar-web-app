@@ -200,7 +200,8 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const rememberWall = on => { try { on ? localStorage.setItem('synsynk.flowFs', '1') : localStorage.removeItem('synsynk.flowFs'); } catch (e) {} };
   const enterWall = () => {
     const el = flowRef.current; if (!el) return;
-    setWall(true); rememberWall(true);
+    // the cards above the flow are Today's (SOLAR-309)
+    setWall(true); rememberWall(true); setPeriod('today');
     const req = el.requestFullscreen || el.webkitRequestFullscreen;
     try { const p = req && req.call(el); if (p && p.catch) p.catch(() => {}); } catch (e) {}
   };
@@ -383,11 +384,11 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const cmpBase = { today: 'vs yesterday at this time', week: 'vs last week', month: 'vs last month', year: 'vs last year' }[period];
   // nothing logged on the other side: no arrows, and no note about them either
   const partial = !!(cmpBase && cmpRow && !useLive && prevHasData && cmpDays < (cmpRow.span || 0));
+  const cmpWord = partial ? cmpBase + ', ' + cmpDays + ' of ' + cmpRow.span + ' days compared' : cmpBase;
   // The same, said under each card's (?): phones have no hover for the arrow's own tip.
   const cmpFrom = { today: 'yesterday at this time', week: 'last week', month: 'last month', year: 'last year' }[period];
   const trendNote = cmpFrom && ('The arrow shows the change from ' + cmpFrom
     + (partial ? ', over the ' + cmpDays + ' of ' + cmpRow.span + ' days with readings in both.' : '.'));
-  const cmpWord = partial ? cmpBase + ', ' + cmpDays + ' of ' + cmpRow.span + ' days compared' : cmpBase;
   // Est. saved trend: avoided import at today's rate, both sides from the paired
   // compare rows (they carry no export). A plant paid for export gets no arrow, since
   // the tile's figure includes feed-in and the arrow could not.
@@ -398,20 +399,62 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const tSaved = moneyTrend ? pct(cSaved, prevSaved) : null;
   const dSaved = (moneyTrend && prev && cSaved != null) ? cSaved - prevSaved : null;
 
+  // Overview's cards, drawn under the chart and, in fullscreen, above the flow (SOLAR-309)
+  const strip = (
+    <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '')}>
+      <MiniStat loading={pending} label="Made" value={window.fmtEnergyParts(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord} trendNote={trendNote}
+        info={OV_INFO.made} />
+      <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord} trendNote={trendNote}
+        info={OV_INFO.home} />
+      <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff ?? undefined} trend={tSuff} trendTitle={cmpWord} trendNote={trendNote}
+        info={OV_INFO.suff} />
+      {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord} trendNote={trendNote}
+        info={OV_INFO.imp}
+        sub={silent ? undefined : a.gridPresent == null ? (
+          // No inverter has reported mains voltage yet; a blank here read as a
+          // chip that failed to load.
+          <span className="grid-state unknown"><span className="gs-dot" />Grid unknown</span>
+        ) : (
+          // Presence, not usage: mains voltage is there even when you draw nothing
+          // from it, so this stays ON through a sunny self-powered afternoon.
+          <window.Tip className={'grid-state ' + (a.gridPresent ? 'on' : 'off')}
+                text={a.gridPresent
+                  ? 'The grid is live, even when you’re not using it.'
+                  : 'No power from the grid.'}>
+            <span className="gs-dot" />{a.gridPresent ? (a.phaseDown ? 'Phase down' : 'Grid on') : 'Grid off'}
+          </window.Tip>
+        )} />}
+      {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off" color={CC.grid}
+        info={OV_INFO.grid} />}
+      {/* after Imported, the order Power flow uses */}
+      {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergyParts(pExp)} color={CC.grid}
+        info={OV_INFO.exp} />}
+      <MiniStat loading={pending} label="Saved" color={CC.batt}
+        value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
+        trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord} trendNote={trendNote}
+        // no rate yet: the line under the dash opens Settings on Tariff
+        sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Add your rate to see this</button>
+          : over && period === 'month' ? <button type="button" className="lock-btn" onClick={() => window.openPlans('month_saved')}><window.LockIcon />See it</button> : undefined}
+        info={rateExp > 0 ? OV_INFO.saved.slice(0, -1) + ', plus what you exported at your feed-in rate.' : OV_INFO.saved} />
+    </div>
+  );
+
   return (
     <>
     {over && hasGrid && <GridOffPrompt hasBatt={hasBatt} tz={tz} />}
     <div className="live-grid">
       <div className={'flow-fs-wrap' + (wall ? ' wall' : '') + (wall && idle ? ' idle' : '')} ref={flowRef}>
         {wall && (
+          // Exit on the left, so the status sits flush right whether Exit shows or hides
           <div className="wall-bar">
-            <window.WallStatus snap={snap} />
             <button className="flow-fs-btn wall-exit"
               onClick={() => { if (Date.now() - revealedAt.current > 400) exitWall(); }}>
               <FsExitIcon /><span>Exit</span>
             </button>
+            <window.WallStatus snap={snap} />
           </div>
         )}
+        {wall && strip}
         <Card className="flow-card">
           {!wall && <SectionTitle right={
             <button className="flow-fs-btn" onClick={enterWall}>
@@ -433,44 +476,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             options={PERIODS}
             value={period} onChange={setPeriod} />
         </div>
-        {over && period !== 'today' && period !== 'month' ? <window.HistoryLock where={'overview_' + period} /> : <>
-        <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '')}>
-          <MiniStat loading={pending} label="Made" value={window.fmtEnergyParts(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord} trendNote={trendNote}
-            info={OV_INFO.made} />
-          <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord} trendNote={trendNote}
-            info={OV_INFO.home} />
-          <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff ?? undefined} trend={tSuff} trendTitle={cmpWord} trendNote={trendNote}
-            info={OV_INFO.suff} />
-          {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord} trendNote={trendNote}
-            info={OV_INFO.imp}
-            sub={silent ? undefined : a.gridPresent == null ? (
-              // No inverter has reported mains voltage yet; a blank here read as a
-              // chip that failed to load.
-              <span className="grid-state unknown"><span className="gs-dot" />Grid unknown</span>
-            ) : (
-              // Presence, not usage: mains voltage is there even when you draw nothing
-              // from it, so this stays ON through a sunny self-powered afternoon.
-              <window.Tip className={'grid-state ' + (a.gridPresent ? 'on' : 'off')}
-                    text={a.gridPresent
-                      ? 'The grid is live, even when you’re not using it.'
-                      : 'No power from the grid.'}>
-                <span className="gs-dot" />{a.gridPresent ? (a.phaseDown ? 'Phase down' : 'Grid on') : 'Grid off'}
-              </window.Tip>
-            )} />}
-          {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off" color={CC.grid}
-            info={OV_INFO.grid} />}
-          {/* after Imported, the order Power flow uses */}
-          {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergyParts(pExp)} color={CC.grid}
-            info={OV_INFO.exp} />}
-          <MiniStat loading={pending} label="Saved" color={CC.batt}
-            value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
-            trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord} trendNote={trendNote}
-            // no rate yet: the line under the dash opens Settings on Tariff
-            sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Add your rate to see this</button>
-              : over && period === 'month' ? <button type="button" className="lock-btn" onClick={() => window.openPlans('month_saved')}><window.LockIcon />See it</button> : undefined}
-            info={rateExp > 0 ? OV_INFO.saved.slice(0, -1) + ', plus what you exported at your feed-in rate.' : OV_INFO.saved} />
-        </div>
-        </>}
+        {over && period !== 'today' && period !== 'month' ? <window.HistoryLock where={'overview_' + period} /> : strip}
       </div>
 
     </div>
