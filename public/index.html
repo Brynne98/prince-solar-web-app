@@ -500,18 +500,24 @@
   @media (prefers-reduced-motion: reduce) { .wall .wall-exit { transition: none; } }
   .wall .flow-card { background: none; border: 0; border-radius: 0; padding: 0; min-height: 0; grid-row: -2; }
   /* Today's cards between the bar and the flow, one row (SOLAR-309); none on a phone */
-  .wall .today-strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: start; }
+  .wall .today-strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+  /* drawn like the flow's boxes and at their zoom: clear, outlined in the card's colour */
+  .wall .mini-stat { --z: var(--wall-zoom, 1); background: transparent; border-color: color-mix(in srgb, var(--c, var(--line-2)) 22%, transparent);
+    padding: calc(18px * var(--z)) calc(20px * var(--z)) calc(16px * var(--z)); border-radius: calc(16px * var(--z)); }
+  .wall .mini-label, .wall .mini-label .trend-badge { font-size: calc(12px * var(--z)); }
+  .wall .mini-value { font-size: calc(30px * var(--z)); margin-top: calc(10px * var(--z)); }
+  .wall .mini-sub { font-size: calc(12.5px * var(--z)); }
   @media (max-width: 600px) { .wall .today-strip { display: none; } }
   .wall .flow-wrap { height: 100%; display: flex; flex-direction: column; justify-content: center; }
   /* left, on the diagram's own left edge: as wide as the zoomed layout, centred like it */
   .wall .flow-narrative { flex: none; text-align: left; text-wrap: balance; max-width: 100%; margin-inline: auto;
+  .wall:has(.mflow) { --wall-w: 440px; }
     width: calc(var(--wall-w, 1100px) * var(--wall-zoom, 1));
     font-size: clamp(18px, 2vmin + 8px, 40px); margin-bottom: clamp(10px, 2.5vmin, 36px); }
   /* both layouts are HTML at screen sizes; tabs.jsx sets the zoom that fills the room */
   .wall .pflow { flex: none; width: 1100px; max-width: none; margin: 0 auto; zoom: var(--wall-zoom, 1); }
   .wall .mflow { flex: none; width: 440px; max-width: none; margin: 0 auto; zoom: var(--wall-zoom, 1); }
   /* slide a whole number of dash-periods so the loop is seamless: 195 = 15 (desktop "2 13") × 13 (mobile "2 11") */
-  .wall:has(.mflow) { --wall-w: 440px; }
   @keyframes flow { to { stroke-dashoffset: -195; } }
   /* the moving dashes are the one piece of continuous motion on the page */
   @media (prefers-reduced-motion: reduce) { .pflow-lane *, .mflow-links * { animation: none !important; } }
@@ -604,6 +610,8 @@
   .trend-badge.good { color: #3ddc84; }
   .trend-badge.bad { color: #f87171; }
   .trend-badge.flat { color: var(--dim); font-weight: 500; }
+  /* the badge keeps one line; its sentence wraps inside the bubble's width */
+  .trend-badge .info-bubble { white-space: normal; font-weight: 400; }
 
   /* ---------- chart ---------- */
   .hv-datebar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -1204,6 +1212,7 @@
   .info-bubble { display: none; position: absolute; bottom: calc(100% + 9px); left: 50%; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(4px);
     width: 210px; border-radius: 10px; padding: 10px 12px;
     font-family: var(--display); font-size: 12px; font-weight: 400; line-height: 1.5; letter-spacing: 0; text-transform: none;
+  @starting-style { .info-dot:hover .info-bubble, .info-dot:focus .info-bubble { opacity: 0; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(4px); } }
     color: var(--text); opacity: 0; visibility: hidden; transition: opacity .15s, transform .15s;
     z-index: 30; pointer-events: none; }
   /* the pointer is a turned square in the bubble's own fill, its two outer sides bordered,
@@ -1212,7 +1221,6 @@
     width: 10px; height: 10px; margin-left: -5px; background: var(--tip-bg);
     border: solid var(--line-2); border-width: 0 1px 1px 0; transform: rotate(45deg); }
   .info-dot:hover .info-bubble, .info-dot:focus .info-bubble { display: block; opacity: 1; visibility: visible; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(0); }
-  @starting-style { .info-dot:hover .info-bubble, .info-dot:focus .info-bubble { opacity: 0; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(4px); } }
   .info-bubble .ib-note { display: block; margin-top: 6px; color: var(--muted); }
   .info-dot.below .info-bubble { bottom: auto; top: calc(100% + 9px); }
   .info-dot.below .info-bubble::after { top: auto; bottom: calc(100% - 5px); border-width: 1px 0 0 1px; }

@@ -273,6 +273,8 @@ const placeTip = (el) => {
   const r = el.getBoundingClientRect(), half = 105, mid = r.left + r.width / 2;
   const x = Math.max(8 + half, Math.min(window.innerWidth - 8 - half, mid));
   el.style.setProperty('--tx', Math.round(x) + 'px');
+  // near the top a bubble above covers the header and controls, so it opens downward
+  el.classList.toggle('below', r.top < 200);
   el.style.setProperty('--ty', Math.round(el.classList.contains('below') ? r.bottom + 9 : r.top - 9) + 'px');
   el.style.setProperty('--arrow', Math.round(mid - x) + 'px');
 };

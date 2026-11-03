@@ -380,15 +380,12 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const dImp = prev ? (cImp - prev.imp) : null;
   const prevSuff = (prev && prev.load > 0) ? suff(prev.load, prev.imp) : null;
   const tSuff = (cSuff != null && prevSuff != null) ? (cSuff - prevSuff) : null;
-  // "vs last year, 40 of 120 days compared" — say when the arrow rests on a subset
-  const cmpBase = { today: 'vs yesterday at this time', week: 'vs last week', month: 'vs last month', year: 'vs last year' }[period];
-  // nothing logged on the other side: no arrows, and no note about them either
-  const partial = !!(cmpBase && cmpRow && !useLive && prevHasData && cmpDays < (cmpRow.span || 0));
-  const cmpWord = partial ? cmpBase + ', ' + cmpDays + ' of ' + cmpRow.span + ' days compared' : cmpBase;
-  // The same, said under each card's (?): phones have no hover for the arrow's own tip.
   const cmpFrom = { today: 'yesterday at this time', week: 'last week', month: 'last month', year: 'last year' }[period];
-  const trendNote = cmpFrom && ('The arrow shows the change from ' + cmpFrom
-    + (partial ? ', over the ' + cmpDays + ' of ' + cmpRow.span + ' days with readings in both.' : '.'));
+  // nothing logged on the other side: no arrows, and no note about them either
+  const partial = !!(cmpFrom && cmpRow && !useLive && prevHasData && cmpDays < (cmpRow.span || 0));
+  // "from last year, over the 40 of 120 days with readings in both": the arrow's tip and the
+  // (?) say the same sentence, with Change or No change in front (MiniStat)
+  const cmpPhrase = cmpFrom && ('from ' + cmpFrom + (partial ? ', over the ' + cmpDays + ' of ' + cmpRow.span + ' days with readings in both' : ''));
   // Est. saved trend: avoided import at today's rate, both sides from the paired
   // compare rows (they carry no export). A plant paid for export gets no arrow, since
   // the tile's figure includes feed-in and the arrow could not.
@@ -402,13 +399,13 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   // Overview's cards, drawn under the chart and, in fullscreen, above the flow (SOLAR-309)
   const strip = (
     <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '')}>
-      <MiniStat loading={pending} label="Made" value={window.fmtEnergyParts(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord} trendNote={trendNote}
+      <MiniStat loading={pending} label="Made" value={window.fmtEnergyParts(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendFrom={cmpPhrase}
         info={OV_INFO.made} />
-      <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord} trendNote={trendNote}
+      <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendFrom={cmpPhrase}
         info={OV_INFO.home} />
-      <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff ?? undefined} trend={tSuff} trendTitle={cmpWord} trendNote={trendNote}
+      <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff ?? undefined} trend={tSuff} trendFrom={cmpPhrase}
         info={OV_INFO.suff} />
-      {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord} trendNote={trendNote}
+      {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendFrom={cmpPhrase}
         info={OV_INFO.imp}
         sub={silent ? undefined : a.gridPresent == null ? (
           // No inverter has reported mains voltage yet; a blank here read as a
@@ -431,7 +428,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         info={OV_INFO.exp} />}
       <MiniStat loading={pending} label="Saved" color={CC.batt}
         value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
-        trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord} trendNote={trendNote}
+        trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendFrom={cmpPhrase}
         // no rate yet: the line under the dash opens Settings on Tariff
         sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Add your rate to see this</button>
           : over && period === 'month' ? <button type="button" className="lock-btn" onClick={() => window.openPlans('month_saved')}><window.LockIcon />See it</button> : undefined}
@@ -510,12 +507,13 @@ function GridOffPrompt({ hasBatt, tz }) {
     </div>
   );
 }
-function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt }) {
+// tip: the whole sentence for the hover, when the caller has one (Overview's cards)
+function TrendBadge({ pct, unit = '%', invert, title, tip, delta, deltaFmt }) {
   if (pct == null) return null;                       // only hide when there is no prior period
   const usable = Number.isFinite(delta);
   if (!Number.isFinite(pct) && !usable) return null;  // grew from zero and no kWh figure to show
   const mag = Math.abs(pct);
-  if (mag < 0.05) return <window.Tip className="trend-badge flat" text={(title || 'vs previous period') + ' — no change'}>0{unit}</window.Tip>; // dead flat: neutral, no arrow
+  if (mag < 0.05) return <window.Tip className="trend-badge flat" text={tip || (title || 'vs previous period') + ' — no change'}>0{unit}</window.Tip>; // dead flat: neutral, no arrow
   const up = pct >= 0;
   const good = invert ? !up : up;
   // Hybrid: show the % normally, but when it explodes off a near-zero baseline
@@ -528,19 +526,21 @@ function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt }) {
   } else {
     label = (mag < 1 ? mag.toFixed(1) : String(Math.round(mag))) + unit; // decimal under 1% so a tiny change isn't shown as "0%"
   }
-  return <window.Tip className={'trend-badge ' + (good ? 'good' : 'bad')} text={title || 'vs previous period'}>{up ? '▲' : '▼'} {label}</window.Tip>;
+  return <window.Tip className={'trend-badge ' + (good ? 'good' : 'bad')} text={tip || title || 'vs previous period'}>{up ? '▲' : '▼'} {label}</window.Tip>;
 }
 // value: text, or [number, unit] (fmtEnergyParts) for the number, then a smaller unit, so the figure reads first
 const unitSplit = (v) => (Array.isArray(v) && v[1] ? <>{v[0]}<span className={'mv-unit' + (v[1] === '%' ? ' pct' : '')}>{v[1]}</span></> : Array.isArray(v) ? v[0] : v);
-function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendTitle, trendNote, trendDelta, trendDeltaFmt, loading }) {
-  // the note joins the (?) only while TrendBadge draws an arrow
+function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendFrom, trendDelta, trendDeltaFmt, loading }) {
+  // the note joins the (?) only while TrendBadge draws a badge, and is its hover text too
   const arrow = !loading && trend != null && (Number.isFinite(trend) || Number.isFinite(trendDelta));
+  const flat = Number.isFinite(trend) && Math.abs(trend) < 0.05;   // TrendBadge's "0%"
+  const trendNote = trendFrom && (flat ? 'No change ' : 'Change ') + trendFrom + '.';
   return (
-    <Card className="mini-stat">
+    <Card className="mini-stat" style={color ? { '--c': color } : undefined}>
       {/* the trend arrow sits on the label's line, top right, so it fits at every width */}
       <div className="mini-label">
         <span className="ml-text">{label}{info && <window.InfoDot text={arrow && trendNote ? <>{info}<span className="ib-note">{trendNote}</span></> : info} />}</span>
-        {!loading && <TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} title={trendTitle} delta={trendDelta} deltaFmt={trendDeltaFmt} />}
+        {!loading && <TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} tip={trendNote} delta={trendDelta} deltaFmt={trendDeltaFmt} />}
       </div>
       {/* a shimmer beats an em-dash: switching to Week/Month refetches, and "—" reads as
           "no data" rather than "fetching" */}
