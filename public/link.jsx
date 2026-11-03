@@ -397,13 +397,13 @@ function Paywall({ reason, paused = [], plantIds = null, onCancel }) {
                 </ul>
                 {paid && q && q.dueNow != null && q.dueNow !== q.nextCharge && <div className="pw-due">{rand(q.dueNow)} today, then {rand(q.nextCharge)} {perUnit(per)} from {billDay(q.nextDate)}</div>}
                 <button type="button" className={p === 'family' ? 'save-btn' : 'ghost-btn'} disabled={!q || (paid && q.dueNow == null)}
-                        onClick={() => (q?.offer && window.track('offer_picked', { offer: q.offer, plan: p, period: per }), window.startUpgrade(p, per, false, q?.plan === 'family' ? (q.extraPlants || 0) + Math.max(paused.length, 1) : null, plantIds))}>{p === 'home' ? 'Choose Home' : q?.plan === 'family' ? 'Add to my plan' : 'Upgrade to Family'}</button>
+                        onClick={() => (q?.offer && window.track('offer_pick_done', { offer: q.offer, plan: p, period: per }), window.startUpgrade(p, per, false, q?.plan === 'family' ? (q.extraPlants || 0) + Math.max(paused.length, 1) : null, plantIds))}>{p === 'home' ? 'Choose Home' : q?.plan === 'family' ? 'Add to my plan' : 'Upgrade to Family'}</button>
               </div>
             );
           })}
         </div>
       )}
-      {first && <p className="field-note">{rand(first.extraPrice)} {perUnit(per)} for each plant after your 3rd.{offerCap(first.offerTerms) && ' ' + offerCap(first.offerTerms)}</p>}
+      {first && <p className="field-note"><Was list={first.listExtraPrice} price={first.extraPrice} />{rand(first.extraPrice)} {perUnit(per)} for each plant after your 3rd.{offerCap(first.offerTerms) && ' ' + offerCap(first.offerTerms)}</p>}
       <div className="conn-form-actions pw-foot">
         <span className="field-note">Cancel any time.</span>
         <button type="button" className="ghost-btn" onClick={onCancel}>{history ? 'Stay on Free' : 'Not now'}</button>

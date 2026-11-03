@@ -2425,7 +2425,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
     if (PLAN_RANK[p] > PLAN_RANK[b.plan]) {
       if (paid && p === 'family' && priceMissing) return priceMissing;
       return <button type="button" className="save-btn" disabled={paid && p === 'family' && quote?.dueNow == null}
-                     onClick={() => (b.offer && window.track('offer_picked', { offer: b.offer.id, plan: p, period }), window.startUpgrade(p, period, !paid, p === 'family' ? more : null, forPlant ? [forPlant] : null))}>Upgrade</button>;
+                     onClick={() => (b.offer && window.track('offer_pick_done', { offer: b.offer.id, plan: p, period }), window.startUpgrade(p, period, !paid, p === 'family' ? more : null, forPlant ? [forPlant] : null))}>Upgrade</button>;
     }
     if (b.nextPlan === p) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
     return <button type="button" className="ghost-btn" disabled={!!busy || cancelling} aria-busy={busy === 'down:' + p}

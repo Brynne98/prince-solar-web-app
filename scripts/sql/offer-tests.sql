@@ -62,7 +62,7 @@ begin
   perform pg_temp.eq('new account at list', pg_temp.start(pg_temp.uid(9004), 'home', 'monthly'), 99);
 end $$;
 
--- A quote held while the last place goes is still honoured.
+-- A card page opened before the last place went: that payment keeps its price, the renewals don't.
 select set_config('t.today', '2026-12-01', true) \g /dev/null
 insert into private.offers (id, home_monthly, home_yearly, family_monthly, family_yearly, extra_monthly, extra_yearly, opens_on, max_payers)
 values ('t_one', 39, 390, 79, 790, 19, 190, '2026-11-15', 1);
@@ -74,7 +74,9 @@ begin
   perform pg_temp.eq('both quoted R39', (q5->>'amount')::int + (q6->>'amount')::int, 78);
   perform public.billing_charge_paid(q5->>'reference', '{"authorization_code":"A","reusable":true}', true);
   perform pg_temp.eq('late payer applied', public.billing_charge_paid(q6->>'reference', '{"authorization_code":"B","reusable":true}', true)->>'applied', null);
-  perform pg_temp.eq('late payer holds', (select offer_id from private.billing where user_id = u6), 't_one');
+  perform pg_temp.eq('late payer holds none', (select offer_id from private.billing where user_id = u6), null::text);
+  perform pg_temp.eq('late payer renews at list', public.billing_amount_due(u6), 99);
+  perform pg_temp.eq('cap held', (select count(*)::int from private.offer_members where offer_id = 't_one'), 1);
   perform pg_temp.eq('next quote list', (public.billing_upgrade_quote(pg_temp.uid(9007), 'home', 0, 'monthly')->>'nextCharge')::int, 99);
 end $$;
 update private.offers set joins_until = date '2000-01-01' where id = 't_one';

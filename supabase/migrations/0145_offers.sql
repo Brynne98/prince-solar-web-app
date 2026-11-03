@@ -4,7 +4,8 @@
 -- while fewer than max_payers have joined), and how long the price lasts (months from
 -- joining; null = while the plan stays paid).
 -- - An account joins when its first payment from Free is paid, at the offer it was quoted
---   (billing_charges.offer_id), even if the last place went meanwhile.
+--   (billing_charges.offer_id), while a place is left. If the last place went meanwhile,
+--   that payment keeps its quoted price and the renewals are at the usual price.
 -- - offer_members keeps every account that ever joined: max_payers counts them all, and a
 --   place given up never reopens. An account joins an offer once.
 -- - Back to Free (cancel reached its date, failed payments, any route): the offer goes.
@@ -370,7 +371,11 @@ begin
               next_billing_date = excluded.next_billing_date, extra_plants = excluded.extra_plants,
               next_plan = null, next_period = null, next_extra_plants = null,
               state = 'active', past_due_since = null, updated_at = now();
-        if c.offer_id is not null then
+        -- The cap holds at payment: a card page opened before the last place went pays its
+        -- quoted price this once, then the usual price. The lock makes two last payers queue.
+        if c.offer_id is not null then perform pg_advisory_xact_lock(hashtext('offer:' || c.offer_id)); end if;
+        if c.offer_id is not null and exists (select 1 from private.offers o where o.id = c.offer_id
+             and (o.max_payers is null or (select count(*) from private.offer_members m where m.offer_id = o.id) < o.max_payers)) then
           update private.billing b2
              set offer_id = c.offer_id,
                  offer_until = (select (today + make_interval(months => o.months))::date from private.offers o
@@ -495,15 +500,29 @@ end $$;
 
 -- prices: at the account's offer (quoted on Free, held on a paid plan); listPrices: list;
 -- offer: its terms, or null. price: the plan held, at the offer held today.
+-- nextTry and freeOn are back (0132): 0138 dropped them and Billing's past-due line read
+-- "Pay by" with no date.
 create or replace function public.api_billing_status()
 returns jsonb language plpgsql stable security definer set search_path = public, private, pg_temp as $$
 declare
   b private.billing;
   v_offer text := private.billing_offer_now(auth.uid());
+  slot int;
+  next_try date;
 begin
   if auth.uid() is null then raise exception 'sign in first' using errcode = '42501'; end if;
   select * into b from private.billing where user_id = auth.uid();
+  -- past due: the next day the run tries the card (the morning run; tomorrow once today's is made),
+  -- and Free the day after the last try, day 8 at the earliest (as bill_failed says)
+  if b.state = 'past_due' then
+    slot := private.billing_try_slot(b.user_id, b.past_due_since);
+    next_try := case when slot is not null then greatest(b.past_due_since + slot, private.billing_today()
+      + case when exists (select 1 from private.billing_charges x where x.user_id = b.user_id and x.kind = 'renewal'
+                           and x.created_on = private.billing_today()) then 1 else 0 end) end;
+  end if;
   return jsonb_build_object(
+    'nextTry', next_try,
+    'freeOn', case when b.state = 'past_due' then greatest(b.past_due_since + 8, next_try + 1) end,
     'plan', coalesce(b.plan, 'free'), 'period', b.period, 'state', coalesce(b.state, 'active'),
     'comped', coalesce(b.comped, false),
     'nextDate', b.next_billing_date,
