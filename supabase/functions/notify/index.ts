@@ -138,7 +138,7 @@ async function buildHistory(p: Plant): Promise<History | null> {
 }
 
 /** The finished week, month or year before `today`, against the one before it. Null when it has no readings. */
-async function buildReport(p: Plant, period: Period, today: string): Promise<Report | null> {
+async function buildReport(p: Plant, period: Period, today: string, linkedOn?: string): Promise<Report | null> {
   let from: string, to: string, pFrom: string, pTo: string, label: string, prevLabel: string;
   const [y, m] = today.split("-").map(Number);
   if (period === "week") {
@@ -155,7 +155,11 @@ async function buildReport(p: Plant, period: Period, today: string): Promise<Rep
     label = String(y - 1); prevLabel = String(y - 2);
   }
   const all = await dayEnergy(p.id, pFrom, to);
-  const cur = all.filter((r) => r.period >= from && hasData(r)), prev = all.filter((r) => r.period <= pTo && hasData(r));
+  // A plant added partway through counts from the day it was added, not from its 60-day
+  // import, and has no earlier period of its own to compare with (SOLAR-305).
+  const start = linkedOn && linkedOn > from ? linkedOn : from;
+  const cur = all.filter((r) => r.period >= start && hasData(r));
+  const prev = start > from ? [] : all.filter((r) => r.period <= pTo && hasData(r));
   if (!cur.length) return null;
   const { tariff, hasGrid } = await plantCfg(p.id);
   const made = sum(cur, "pv_kwh"), home = sum(cur, "load_kwh"), imp = sum(cur, "imp_kwh");
@@ -179,7 +183,7 @@ async function buildReport(p: Plant, period: Period, today: string): Promise<Rep
   // History that starts after the period starts gets a note (SOLAR-273).
   const first = cur.reduce((d, r) => (r.period < d ? r.period : d), to);
   return {
-    ...(first > from ? { partialFrom: fmtDay(first, { day: "numeric", month: "short" }) } : {}),
+    ...(first > from ? { partialFrom: fmtDay(first, { day: "numeric", month: "short" }), partialWhy: start > from ? "added" as const : "history" as const } : {}),
     plantId: p.id, period, label, prevLabel, plant: p.name,
     madeKwh: made, homeKwh: home, importKwh: hasGrid ? imp : null, exportKwh: null,
     independencePct: independence(home, imp), savedRand: tariff > 0 ? saved(home, imp) : null,
@@ -236,7 +240,9 @@ async function build(r: Row): Promise<Email | null> {
     case "welcome": return welcome();
     case "history": { const h = await buildHistory(p); return h && historySynced(h); }
     case "report_week": case "report_month": case "report_year": {
-      const rep = await buildReport(p, r.kind.slice(7) as Period, d.today);
+      const { data: pu } = await db.from("plant_users").select("linked_at").eq("user_id", r.user_id).eq("plant_id", r.plant_id).maybeSingle();
+      const linkedOn = pu?.linked_at ? new Date(pu.linked_at).toLocaleDateString("en-CA", { timeZone: tz }) : undefined;
+      const rep = await buildReport(p, r.kind.slice(7) as Period, d.today, linkedOn);
       // The day-7 report of a Free account's first week (0114) says the week ends.
       return rep && report({ ...rep, freeWeekEnds: d.freeWeekEnds === true });
     }

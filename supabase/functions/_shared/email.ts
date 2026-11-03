@@ -450,7 +450,8 @@ export type Report = {
   highestUse?: { label: string; kwh: number }; // the day the home used the most ("Busiest day")
   daily?: Bars; // solar kWh per day (per month for a year)
   freeWeekEnds?: boolean; // the week report sent at the end of a Free account's first week (SOLAR-208)
-  partialFrom?: string; // first day with data, when after the period starts: "20 Oct" (SOLAR-273)
+  partialFrom?: string; // first day counted, when after the period starts: "20 Oct" (SOLAR-273)
+  partialWhy?: "added" | "history"; // the plant was added then (SOLAR-305), or its history starts then
 };
 
 const kwh = (n: number): [string, string] => (n >= 1000 ? [(n / 1000).toFixed(2), "MWh"] : [n.toFixed(n < 100 ? 1 : 0), "kWh"]);
@@ -475,7 +476,9 @@ export function report(r: Report): Email {
     ...(r.savedRand != null ? [{ label: "Est. saved", value: rand(r.savedRand), tone: "batt" as Tone, ...trend(r.change.saved, r.prevLabel, "up") }] : []),
   ];
   const parts: Part[] = [];
-  if (r.partialFrom) parts.push({ note: `Covers ${r.partialFrom} onwards, when your history starts. Next ${r.period}'s report covers the full ${r.period}.` });
+  // A Free account's day-7 report is its last, so it promises no next one.
+  if (r.partialFrom) parts.push({ note: `Covers ${r.partialFrom} onwards, when ${r.partialWhy === "added" ? "you added this plant" : "your history starts"}.` +
+    (r.freeWeekEnds ? "" : ` Next ${r.period}'s report covers the full ${r.period}.`) });
   parts.push({ stats });
   const facts: Extract<Part, { chart: unknown }>["chart"]["facts"] = [];
   if (r.bestDay) facts.push({ label: "Best day", value: kwh(r.bestDay.kwh)[0], unit: kwh(r.bestDay.kwh)[1], tone: "solar", sub: r.bestDay.label });

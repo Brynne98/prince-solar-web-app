@@ -71,6 +71,14 @@ const mails: Record<string, [from: string, mail: Email]> = {
     daily: { from: "1 Oct", to: "31 Oct", values: Array.from({ length: 31 }, (_, i) => i < 19 ? null : [26.1, 27.4, 24.0, 28.8, 19.5, 30.2, 25.7, 31.2, 29.0, 27.9, 22.6, 29.2][i - 19]),
       labels: Array.from({ length: 31 }, (_, i) => (i % 7 === 0 ? String(i + 1) : "")) },
   })],
+  // A plant added on Thursday: counts from then, nothing to compare (SOLAR-305).
+  "report-week-added": [FROM_REPORTS, report({
+    ...base, period: "week", label: "2 – 8 Nov 2026", prevLabel: "last week", partialFrom: "5 Nov", partialWhy: "added",
+    madeKwh: 108.4, homeKwh: 121.7, importKwh: 13.3, independencePct: 89, savedRand: 270, change: {},
+    bestDay: { label: "Sat 7 Nov", kwh: 30.1 }, highestUse: { label: "Sun 8 Nov", kwh: 34.0 },
+    daily: { from: "Mon 2 Nov", to: "Sun 8 Nov", values: [null, null, null, 26.2, 24.9, 30.1, 27.2],
+      labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
+  })],
   "report-week": [FROM_REPORTS, report({
     ...base, period: "week", label: "6 – 12 Oct 2026", prevLabel: "last week",
     madeKwh: 191.3, homeKwh: 208.9, importKwh: 47.2, independencePct: 77, savedRand: 495,
