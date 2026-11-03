@@ -536,7 +536,7 @@ function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trend
   const flat = Number.isFinite(trend) && Math.abs(trend) < 0.05;   // TrendBadge's "0%"
   const trendNote = trendFrom && (flat ? 'No change ' : 'Change ') + trendFrom + '.';
   return (
-    <Card className="mini-stat" style={color ? { '--c': color } : undefined}>
+    <Card className="mini-stat">
       {/* the trend arrow sits on the label's line, top right, so it fits at every width */}
       <div className="mini-label">
         <span className="ml-text">{label}{info && <window.InfoDot text={arrow && trendNote ? <>{info}<span className="ib-note">{trendNote}</span></> : info} />}</span>
