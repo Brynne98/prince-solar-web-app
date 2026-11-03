@@ -264,6 +264,8 @@ const placeBubble = (e) => {
   const r = e.currentTarget.getBoundingClientRect(), half = 105, mid = r.left + r.width / 2;
   const shift = Math.max(8 + half - mid, Math.min(0, window.innerWidth - 8 - half - mid));
   e.currentTarget.style.setProperty('--shift', Math.round(shift) + 'px');
+  // near the top the sticky header would cover it, so it opens downward instead
+  e.currentTarget.classList.toggle('below', r.top < 200);
 };
 // InfoDot's bubble on anything: hover, a tap or focus opens it. Every hint in the app is
 // one of the two, never the browser's title, which a phone can't open. Its bubble is fixed

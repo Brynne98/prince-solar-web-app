@@ -417,7 +417,6 @@
   .overview-section { order: -1; }
   .overview-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
   .overview-head .section-title { margin-bottom: 0; }
-  .cmp-note { font-size: 13px; color: var(--muted); margin: -6px 0 12px; }
   .mini-stat { padding: 20px 22px; }
   /* label left, trend arrow right on the same line; a long label wraps, the arrow keeps its corner */
   .mini-label { font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
@@ -1189,7 +1188,7 @@
   /* info tooltip */
   .info-dot { position: relative; display: inline-flex; align-items: center; vertical-align: middle;
     color: var(--dim); cursor: help; margin-left: 5px; }
-  .info-dot:hover, .info-dot:focus { color: var(--grid); outline: none; }
+  .info-dot:hover, .info-dot:focus { color: var(--muted); outline: none; }
   /* a 13px glyph is too small to tap; the invisible pad makes the hit area ~37px */
   .info-dot::before { content: ''; position: absolute; inset: -12px; }
   .info-dot svg { display: block; }
@@ -1201,10 +1200,16 @@
     font-family: var(--display); font-size: 12px; font-weight: 400; line-height: 1.5; letter-spacing: 0; text-transform: none;
     color: var(--text); opacity: 0; visibility: hidden; transition: opacity .15s, transform .15s;
     z-index: 30; pointer-events: none; }
-  .info-bubble::after { content: ''; position: absolute; top: 100%; left: calc(50% - var(--shift, 0px)); transform: translateX(-50%);
-    border: 6px solid transparent; border-top-color: var(--line-2); }
+  /* the pointer is a turned square in the bubble's own fill, its two outer sides bordered,
+     so it reads as part of the bubble rather than a block on its edge */
+  .info-bubble::after { content: ''; position: absolute; top: calc(100% - 5px); left: calc(50% - var(--shift, 0px));
+    width: 10px; height: 10px; margin-left: -5px; background: var(--tip-bg);
+    border: solid var(--line-2); border-width: 0 1px 1px 0; transform: rotate(45deg); }
   .info-dot:hover .info-bubble, .info-dot:focus .info-bubble { display: block; opacity: 1; visibility: visible; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(0); }
   @starting-style { .info-dot:hover .info-bubble, .info-dot:focus .info-bubble { opacity: 0; transform: translateX(calc(-50% + var(--shift, 0px))) translateY(4px); } }
+  .info-bubble .ib-note { display: block; margin-top: 6px; color: var(--muted); }
+  .info-dot.below .info-bubble { bottom: auto; top: calc(100% + 9px); }
+  .info-dot.below .info-bubble::after { top: auto; bottom: calc(100% - 5px); border-width: 1px 0 0 1px; }
   /* Tip: the same bubble over a figure or a word, fixed to the window at --tx/--ty (placeTip) */
   .tip { cursor: help; }
   .tip:focus { outline: none; }
@@ -1217,7 +1222,7 @@
   .tip.below > .info-bubble { transform: translate(-50%, -4px); }
   .tip.below:hover > .info-bubble, .tip.below:focus > .info-bubble { transform: translate(-50%, 0); }
   @starting-style { .tip.below:hover > .info-bubble, .tip.below:focus > .info-bubble { transform: translate(-50%, -4px); } }
-  .tip.below > .info-bubble::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: var(--line-2); }
+  .tip.below > .info-bubble::after { top: auto; bottom: calc(100% - 5px); border-width: 1px 0 0 1px; }
 
   @media (max-width: 980px) {
     .solar-stats { grid-template-columns: 1fr 1fr; }

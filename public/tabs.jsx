@@ -13,6 +13,16 @@ const FsExitIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="n
 
 // The Overview's periods, for its switch and its loading copy alike.
 const PERIODS = [{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }];
+// What each Overview card is, for its (?) here and in the loading row alike.
+const OV_INFO = {
+  made: 'What your panels made, across all inverters.',
+  home: 'What your home used, across all inverters.',
+  suff: 'How much of what your home used didn’t come from the grid.',
+  exp: 'Sent to the grid, paid at your feed-in rate.',
+  imp: 'What you bought from the grid.',
+  grid: 'No grid connection. Everything the home uses comes from solar and the battery.',
+  saved: 'An estimate: what your home used that didn’t come from the grid, at your electricity rate.',
+};
 
 // ---------------------------------------------------------------- LIVE
 // ---- loading skeletons ------------------------------------------------------
@@ -95,12 +105,12 @@ function LiveSkeleton() {
         {/* The real tiles in loading mode, with the same meter and second line the live
             ones carry, so the row lands at the same height. */}
         <div className="today-strip">
-          <MiniStat loading label="Made" />
-          <MiniStat loading label="Home" />
-          <MiniStat loading label="Independence" bar={0} />
+          <MiniStat loading label="Made" info={OV_INFO.made} />
+          <MiniStat loading label="Home" info={OV_INFO.home} />
+          <MiniStat loading label="Independence" info={OV_INFO.suff} bar={0} />
           {/* the grid chip's box sets its line 0.5px taller than plain text */}
-          <MiniStat loading label="Imported" sub={<span className="grid-state" style={{ visibility: 'hidden' }}><span className="gs-dot" />{NBSP}</span>} />
-          <MiniStat loading label="Saved" sub={NBSP} />
+          <MiniStat loading label="Imported" info={OV_INFO.imp} sub={<span className="grid-state" style={{ visibility: 'hidden' }}><span className="gs-dot" />{NBSP}</span>} />
+          <MiniStat loading label="Saved" info={OV_INFO.saved} sub={NBSP} />
         </div>
       </div>
       <div className="card flow-card">
@@ -365,6 +375,10 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const cmpBase = { today: 'vs yesterday at this time', week: 'vs last week', month: 'vs last month', year: 'vs last year' }[period];
   // nothing logged on the other side: no arrows, and no note about them either
   const partial = !!(cmpBase && cmpRow && !useLive && prevHasData && cmpDays < (cmpRow.span || 0));
+  // The same, said under each card's (?): phones have no hover for the arrow's own tip.
+  const cmpFrom = { today: 'yesterday at this time', week: 'last week', month: 'last month', year: 'last year' }[period];
+  const trendNote = cmpFrom && ('The arrow shows the change from ' + cmpFrom
+    + (partial ? ', over the ' + cmpDays + ' of ' + cmpRow.span + ' days with readings in both.' : '.'));
   const cmpWord = partial ? cmpBase + ', ' + cmpDays + ' of ' + cmpRow.span + ' days compared' : cmpBase;
   // Est. saved trend: avoided import at today's rate, both sides from the paired
   // compare rows (they carry no export). A plant paid for export gets no arrow, since
@@ -412,17 +426,17 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             value={period} onChange={setPeriod} />
         </div>
         {over && period !== 'today' && period !== 'month' ? <window.HistoryLock where={'overview_' + period} /> : <>
-        {/* On a phone there is no hover, so a thin comparison base is said on screen. */}
-        {partial && !over && <div className="cmp-note">Arrows compare the {cmpDays} of {cmpRow.span} days with readings on both sides.</div>}
         <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '')}>
-          <MiniStat loading={pending} label="Made" value={window.fmtEnergyParts(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord} />
-          <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord}
-            info="What your home used, across all inverters." />
-          <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord}
-            info="How much of what your home used didn’t come from the grid." />
+          <MiniStat loading={pending} label="Made" value={window.fmtEnergyParts(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendTitle={cmpWord} trendNote={trendNote}
+            info={OV_INFO.made} />
+          <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendTitle={cmpWord} trendNote={trendNote}
+            info={OV_INFO.home} />
+          <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff || 0} trend={tSuff} trendTitle={cmpWord} trendNote={trendNote}
+            info={OV_INFO.suff} />
           {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergyParts(pExp)} color={CC.grid}
-            info="Sent to the grid, paid at your feed-in rate." />}
-          {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord}
+            info={OV_INFO.exp} />}
+          {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendTitle={cmpWord} trendNote={trendNote}
+            info={OV_INFO.imp}
             sub={silent ? undefined : a.gridPresent == null ? (
               // No inverter has reported mains voltage yet; a blank here read as a
               // chip that failed to load.
@@ -438,14 +452,14 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
               </window.Tip>
             )} />}
           {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off" color={CC.grid}
-            info="No grid connection. Everything the home uses comes from solar and the battery." />}
+            info={OV_INFO.grid} />}
           <MiniStat loading={pending} label="Saved" color={CC.batt}
             value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
-            trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord}
+            trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendTitle={cmpWord} trendNote={trendNote}
             // no rate yet: the line under the dash opens Settings on Tariff
             sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Add your rate to see this</button>
               : over && period === 'month' ? <button type="button" className="lock-btn" onClick={() => window.openPlans('month_saved')}><window.LockIcon />See it</button> : undefined}
-            info={'An estimate: what your home used that didn’t come from the grid, at your electricity rate' + (rateExp > 0 ? ', plus what you exported at your feed-in rate' : '') + '.'} />
+            info={rateExp > 0 ? OV_INFO.saved.slice(0, -1) + ', plus what you exported at your feed-in rate.' : OV_INFO.saved} />
         </div>
         </>}
       </div>
@@ -503,12 +517,14 @@ function TrendBadge({ pct, unit = '%', invert, title, delta, deltaFmt }) {
 }
 // value: text, or [number, unit] (fmtEnergyParts) for the number, then a smaller unit, so the figure reads first
 const unitSplit = (v) => (Array.isArray(v) && v[1] ? <>{v[0]}<span className={'mv-unit' + (v[1] === '%' ? ' pct' : '')}>{v[1]}</span></> : Array.isArray(v) ? v[0] : v);
-function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendTitle, trendDelta, trendDeltaFmt, loading }) {
+function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendTitle, trendNote, trendDelta, trendDeltaFmt, loading }) {
+  // the note joins the (?) only while TrendBadge draws an arrow
+  const arrow = !loading && trend != null && (Number.isFinite(trend) || Number.isFinite(trendDelta));
   return (
     <Card className="mini-stat">
       {/* the trend arrow sits on the label's line, top right, so it fits at every width */}
       <div className="mini-label">
-        <span className="ml-text">{label}{info && <window.InfoDot text={info} />}</span>
+        <span className="ml-text">{label}{info && <window.InfoDot text={arrow && trendNote ? <>{info}<span className="ib-note">{trendNote}</span></> : info} />}</span>
         {!loading && <TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} title={trendTitle} delta={trendDelta} deltaFmt={trendDeltaFmt} />}
       </div>
       {/* a shimmer beats an em-dash: switching to Week/Month refetches, and "—" reads as
