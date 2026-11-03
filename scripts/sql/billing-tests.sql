@@ -4,6 +4,8 @@
 -- Exit code decides: any wrong case raises.
 \set QUIET on
 begin;
+-- list prices: offers closed (0145); offer cases are in offer-tests.sql
+update private.offers set joins_until = date '2000-01-01';
 
 -- Wrong cases are collected and reported together at the end.
 create temp table fails (n serial, what text);

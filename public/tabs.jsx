@@ -2126,7 +2126,22 @@ async function bookExtras(b, count, reload, keep) {
 // Undo whatever is booked: the extras alone, or the plan and period.
 const undoBooked = (b, reload) => (!b.nextPlan && !b.nextPeriod && b.nextExtraPlants != null
   ? bookExtras(b, b.extraPlants, reload) : bookPlan(b, b.plan, b.period, reload));
+<<<<<<< HEAD
 const cancelText = (b) => `It runs until ${window.billingFmt.billDay(b.nextDate)}. After that you’re on Free: we keep your readings for 30 days, then only the last 24 hours. Alerts stay on; reports stop.`;
+=======
+// A plan's price at list prices, with Family's extra plants (SOLAR-330).
+const listPrice = (b, plan, period, extra = 0) => {
+  const lp = b.listPrices?.[period] || {};
+  return plan === 'free' ? 0 : plan === 'family' ? (lp.family ?? 0) + extra * (lp.extra ?? 0) : lp[plan];
+};
+const cancelText = (b) => {
+  const { billDay, rand, perUnit, offerName } = window.billingFmt;
+  const text = `It runs until ${billDay(b.nextDate)}. After that you’re on Free: we keep only the last 24 hours of readings. Alerts stay on; reports stop.`;
+  // an offer goes with the plan: coming back costs the list price
+  const list = b.offer?.held && listPrice(b, b.plan, b.period, b.extraPlants || 0);
+  return list > b.price ? `${text} Your ${offerName(b.offer)} of ${rand(b.price)} ${perUnit(b.period)} goes too; ${PLAN_NAME[b.plan]} costs ${rand(list)} if you come back.` : text;
+};
+>>>>>>> main
 
 // A downgrade's pick (SOLAR-295): the plants the new plan keeps, each with the switch and
 // under the login Billing shows it with. One on for Home and Free; Family's room for Family.
@@ -2228,6 +2243,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
               Family <span className="mono">{rand(list.family)}</span> + {extra === 1 ? '1 extra plant' : extra + ' extra plants'} <span className="mono">{rand(extra * list.extra)}</span>
             </div>
           )}
+          {paid && b.offer?.held && <div className="conn-meta pw-offer">{window.billingFmt.offerLine(b.offer, listPrice(b, b.plan, b.period, b.extraPlants || 0), b.period)}</div>}
           {/* past due and ending say their date below */}
           {paid && b.state !== 'past_due' && !ending && <div className="conn-meta">Renews on {window.dayText(b.nextDate, { day: 'numeric', month: 'long', year: 'numeric' })}.</div>}
         </div>
@@ -2363,7 +2379,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
       <div className="plan-grid plan-cards" aria-hidden="true">{[0, 1, 2].map(i => <window.Skeleton key={i} h={260} r={14} />)}</div>
     </div>
   );
-  const { rand, billDay, perUnit } = window.billingFmt;
+  const { rand, billDay, perUnit, offerLine, offerCap, Was } = window.billingFmt;
   const unit = perUnit(view);
   const prices = b.prices?.[view] || {};
   const sameView = !paid || view === b.period;
@@ -2413,7 +2429,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
     if (PLAN_RANK[p] > PLAN_RANK[b.plan]) {
       if (paid && p === 'family' && priceMissing) return priceMissing;
       return <button type="button" className="save-btn" disabled={paid && p === 'family' && quote?.dueNow == null}
-                     onClick={() => window.startUpgrade(p, period, !paid, p === 'family' ? more : null, forPlant ? [forPlant] : null)}>Upgrade</button>;
+                     onClick={() => (b.offer && window.track('offer_pick_done', { offer: b.offer.id, plan: p, period }), window.startUpgrade(p, period, !paid, p === 'family' ? more : null, forPlant ? [forPlant] : null))}>Upgrade</button>;
     }
     if (b.nextPlan === p) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
     return <button type="button" className="ghost-btn" disabled={!!busy || cancelling} aria-busy={busy === 'down:' + p}
@@ -2455,7 +2471,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
               {p === b.plan && <div className="plan-band">Your plan</div>}
               <div className="pw-name">{PLAN_NAME[p]}</div>
               <div className="plan-tagline">{PLAN_TAG[p]}</div>
-              <div className="pw-price"><b>{rand(price(p) ?? 0)}</b>{p !== 'free' && ' ' + unit}</div>
+              <div className="pw-price"><Was list={listPrice(b, p, view, p === 'family' ? more : 0)} price={price(p) ?? 0} /><b>{rand(price(p) ?? 0)}</b>{p !== 'free' && ' ' + unit}
+                {b.offer && listPrice(b, p, view, p === 'family' ? more : 0) > (price(p) ?? 0) && <span className="pw-billed pw-offer">{offerLine(b.offer, listPrice(b, p, view, p === 'family' ? more : 0), view)}</span>}</div>
               <div className="plan-note">{note(p)}</div>
               {action(p)}
               <ul className="pw-gives plan-gives">
@@ -2464,7 +2481,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
             </div>
           ))}
         </div>
-        <p className="plan-foot">Prices in rand. Cancel any time.</p>
+        <p className="plan-foot">{offerCap(b.offer) && offerCap(b.offer) + ' '}Prices in rand. Cancel any time.</p>
         {cancelling && <CancelPlanDialog b={b} logins={logins} busy={!!busy} onCancel={() => setCancelling(false)}
           onConfirm={(keep) => run(async () => { await bookPlan(b, 'free', null, reload, keep); setCancelling(false); })} />}
         {picking && (

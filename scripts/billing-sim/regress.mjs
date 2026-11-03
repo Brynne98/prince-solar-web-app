@@ -17,6 +17,8 @@ export async function regress(db, { only = null, log = () => {} } = {}) {
     await db.exec(`begin;
 set local lock_timeout = '30s';
 create or replace function private.billing_today() returns date language sql stable as $$ select current_setting('sim.today')::date $$;
+-- the oracle prices at list: offers closed (0145)
+update private.offers set joins_until = date '2000-01-01';
 create or replace function public.plant_bootstrap_kick(p_plant bigint) returns void language plpgsql as $$ begin return; end $$;
 create or replace function private.plant_start_fill(p_plant bigint) returns void language plpgsql as $$ begin return; end $$;
 select set_config('sim.today', '2027-03-10', true);`);

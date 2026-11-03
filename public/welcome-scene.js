@@ -343,6 +343,35 @@ pr.querySelectorAll('.period button').forEach(b => b.addEventListener('click', (
 
 pr.querySelectorAll('[data-plan]').forEach(a => a.addEventListener('click', () => window.track?.('plan_picked', { plan: a.dataset.plan, period: pr.dataset.period === 'y' ? 'yearly' : 'monthly' })));
 
+/* ---------- an open offer (SOLAR-330): the list prices above stay if this can't be read ---------- */
+addEventListener('DOMContentLoaded', async () => {
+  const cfg = window.SUNSYNK_CONFIG;
+  if (!cfg) return;
+  let r;
+  try {
+    const res = await fetch(`${cfg.url}/rest/v1/rpc/api_offer`, { method: 'POST', headers: { apikey: cfg.key, 'Content-Type': 'application/json' }, body: '{}' });
+    r = res.ok ? await res.json() : null;
+  } catch (e) { return; }
+  if (!r?.offer) return;
+  const R = (n) => 'R' + Math.round(n).toLocaleString('en-US');
+  const at = { m: r.prices.monthly, y: r.prices.yearly }, was = { m: r.listPrices.monthly, y: r.listPrices.yearly };
+  const unit = { m: 'a month', y: 'a year' };
+  for (const k of ['m', 'y']) {
+    for (const p of ['home', 'family']) {
+      pr.querySelector(`.price[data-offer="${p}"] .${k}`).innerHTML = `<s>${R(was[k][p])}</s>${R(at[k][p])}<small>${unit[k]}</small>`;
+      pr.querySelector(`.per[data-offer="${p}"] .${k}`).textContent = k === 'y' ? `About ${R(at.y[p] / 12)} a month`
+        : p === 'home' ? `About ${R(at.m.home / 30)} a day` : `About ${R(at.m.family / 3)} a plant`;
+    }
+    pr.querySelector(`[data-offer="extra"] .${k}`).textContent = `+${R(at[k].extra)} a plant ${unit[k]}`;
+  }
+  // Free keeps its price level with the struck-out prices beside it
+  pr.querySelector('.price[data-offer="free"]').innerHTML = '<s aria-hidden="true" style="visibility:hidden">R0</s>R0';
+  const o = r.offer, band = pr.querySelector('.offer-band');
+  band.textContent = [o.id === 'launch' ? 'Launch price' : 'Offer price', o.cap ? ` for the first ${o.cap} members` : '', '. ',
+    o.months ? `For your first ${o.months} months, then the usual price.` : 'Join now and keep it while you stay.'].join('');
+  band.hidden = false;
+});
+
 /* ---------- questions: one open at a time, eased ---------- */
 (() => {
 const qs = [...document.querySelectorAll('.qs details')];

@@ -29,7 +29,7 @@ import { reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, plantsRemovalSoon,
-  planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback,
+  offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -289,6 +289,8 @@ async function build(r: Row): Promise<Email | null> {
     case "bill_removal_soon": return plantsRemovalSoon(d.plants, day(d.on));
     case "bill_renewal_notice":
       return renewalNotice({ plan: d.plan, amount: d.amount, on: day(d.on), change: d.changed ? "Your plan changes on that date, as you booked." : undefined });
+    case "bill_offer_ends":
+      return offerEnds({ plan: d.plan, period: d.period, was: d.was, amount: d.amount, on: day(d.on), card: d.card ?? undefined });
     case "winback": return winback({ from: d.from, keepUntil: day(d.keepUntil) });
   }
   throw new Error(`unknown kind ${r.kind}`);

@@ -667,6 +667,21 @@ export const renewalNotice = (r: Renewal) =>
     footer: [SELLER, HELP],
   });
 
+// An offer price that lasts some months ends: sent up to 30 days before the first charge
+// at the usual price (SOLAR-330).
+export type OfferEnds = { plan: Plan; period: BillPeriod; was: number; amount: number; on: string; card?: string };
+export const offerEnds = (o: OfferEnds) =>
+  make(`${PLAN_NAME[o.plan]} goes to ${rand(o.amount)} ${o.period === "yearly" ? "a year" : "a month"} on ${o.on}`, {
+    title: `Your offer price ends on ${o.on}`,
+    parts: [
+      { p: `You've paid ${rand(o.was)} ${o.period === "yearly" ? "a year" : "a month"}. From ${o.on}, ${PLAN_NAME[o.plan]} is the usual price.${o.card ? ` We charge your ${esc(o.card)}.` : ""}` },
+      { items: { rows: [planItem(o.plan, o.period, `from ${o.on}`, rand(o.amount))] } },
+      { p: `Nothing else changes. To stop it, cancel before ${o.on}.` },
+      { button: { label: "See your plan", href: PLAN } },
+    ],
+    footer: [SELLER, HELP],
+  });
+
 // An upgrade starts at once: the difference for the days left is charged now, the
 // billing date stays (SOLAR-208). Adding extra plants past the 3rd is the same.
 export type Upgrade = {
