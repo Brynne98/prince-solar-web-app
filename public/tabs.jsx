@@ -2258,7 +2258,7 @@ function CancelSection({ billing: b, reload, logins = [] }) {
 // the other period only its own card offers the switch. Family's Extra plants buys room for
 // plants past the 3rd, R49 a plant (SOLAR-264): more is paid today, fewer waits for the
 // billing date.
-const PLAN_TAG = { free: 'See your solar today', home: 'One house, every day kept', family: 'Up to 3 plants' };
+const PLAN_TAG = { free: 'See your solar today', home: 'One house, every day kept', family: 'More than one house' };
 function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null }) {
   const plants = logins.flatMap(a => a.plants);
   const { useState, useEffect } = React;
@@ -2271,15 +2271,6 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   const [cancelling, setCancelling] = useState(false);
   // A downgrade that needs a pick first (SOLAR-295): { plan, extra }
   const [picking, setPicking] = useState(null);
-  // Phones: one line per plan to pick, then one button for the picked plan (SOLAR-292).
-  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 599px)').matches);
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 599px)'), h = (e) => setNarrow(e.matches);
-    mq.addEventListener('change', h);
-    return () => mq.removeEventListener('change', h);
-  }, []);
-  const [sel, setSel] = useState(b?.plan || 'free');
-  useEffect(() => { if (b?.plan) setSel(b.plan); }, [b?.plan]);
   // Extra plants on Family, from the number paid for, or a drop booked (SOLAR-264).
   const held = b?.plan === 'family' ? b.extraPlants || 0 : 0;
   const shown = b?.plan === 'family' ? b.nextExtraPlants ?? held : 0;
@@ -2350,16 +2341,18 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   const famMine = b.plan === 'family' && sameView;
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
   const booked = bookedChange(b);
+  // What Family's price is made of, when nothing more pressing goes under it (SOLAR-303)
+  const famLine = more ? `3 plants, plus ${more} extra at ${rand(prices.extra ?? 0)}` : `Extra plants ${rand(prices.extra ?? 0)} ${unit} each`;
   // The line under a price
   const note = (p) => {
-    if (p === 'family' && famMine && more < held) return b.nextExtraPlants === more ? ' ' : `From ${billDay(b.nextDate)}`;
+    if (p === 'family' && famMine && more < held) return b.nextExtraPlants === more ? famLine : `From ${billDay(b.nextDate)}`;
     if (p === 'family' && famMine && more > held && quote?.refused) return quote.refused === 'past_due' ? 'Pay the failed payment first' : 'Keep your plan first';
     if (p === 'family' && famMine && more > held) return quote ? `${rand(quote.dueNow)} today, then from ${billDay(quote.nextDate)}` : ' ';
-    if (p === b.plan && sameView) return paid ? (booked ? 'Changes ' : 'Renews ') + billDay(b.nextDate) : 'No card needed';
+    if (p === b.plan && sameView) return p === 'family' ? famLine : ' '; // the renew date sits in the button's place
     if (p === 'family' && paid && quote?.refused === 'past_due' && sameView) return 'Pay the failed payment first';
     if (p === 'family' && paid && quote && quote.dueNow != null && sameView && quote.dueNow !== quote.nextCharge) return `${rand(quote.dueNow)} today, then from ${billDay(quote.nextDate)}`;
     if (p === 'family' && b.plan === 'home' && price('family') > price('home')) return `${rand(price('family') - price('home'))} more than Home`;
-    return ' ';
+    return p === 'family' ? famLine : ' ';
   };
   // Family's price still loading: a busy button; it couldn't be read: a button to ask again.
   const priceMissing = !quote && (failed[qKey(more)]
@@ -2380,7 +2373,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
       if (p === 'family' && more < held) return <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'lower'}
         onClick={() => (plants.length > planRoom('family', more) ? setPicking({ plan: 'family', extra: more })
           : run(async () => { if (!await bookExtras(b, more, reload)) setMore(shown); }, 'lower'))}>{held - more === 1 ? 'Remove plant' : 'Remove plants'}</button>;
-      return null; // "Your plan" sits in the card's corner
+      // in the button's place, so the card for your plan has no empty row (SOLAR-303)
+      return <div className="plan-cur">{paid ? (booked ? 'Changes ' : 'Renews ') + billDay(b.nextDate) : 'No card needed'}</div>;
     }
     if (!sameView) return null; // a paid plan changes plan in its own period
     if (PLAN_RANK[p] > PLAN_RANK[b.plan]) {
@@ -2394,33 +2388,29 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
                      : plants.length > planRoom(p, b.nextExtraPlants ?? b.extraPlants) ? setPicking({ plan: p })
                      : run(() => bookPlan(b, p, null, reload), 'down:' + p))}>Downgrade</button>;
   };
-  // Under the button on a phone: when the picked plan starts, if its own note doesn't say.
-  const when = (p) => (note(p).trim() || (p === b.plan || !sameView ? ''
-    : PLAN_RANK[p] < PLAN_RANK[b.plan] ? `Starts on ${billDay(b.nextDate)}` : 'Starts today'));
-  const extras = (
-    <div className="plan-more">
-      <div className="plan-more-row">
-        <span>Extra plants</span>
-        <span className="stepper" aria-busy={waiting}>
-          <button type="button" aria-label="One plant fewer" disabled={more === 0} onClick={() => pick(more - 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
-          <span className="mono" aria-live="polite">{more}</span>
-          <button type="button" aria-label="One plant more" onClick={() => pick(more + 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10M7 2v10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
-        </span>
-      </div>
-      <div className="plan-note">{rand(prices.extra ?? 0)} {unit} for each plant after your 3rd.</div>
-    </div>
+  // Family's plants line: 3 included, the counter for extra ones beside it
+  const plantsLine = (
+    <span className="plan-plants">
+      <span><span className="mono">3</span> plants <span className="plan-plus">+ extra</span></span>
+      <span className="stepper" aria-busy={waiting}>
+        <button type="button" aria-label="One plant fewer" disabled={more === 0} onClick={() => pick(more - 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
+        <span className="mono" aria-live="polite">{more}</span>
+        <button type="button" aria-label="One plant more" onClick={() => pick(more + 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10M7 2v10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
+      </span>
+    </span>
   );
+  // The same four lines on every card, so the cards end level; false is a line the plan lacks
   const gives = {
-    free: [null, ['1 plant', 'The last 24 hours', 'Alerts']],
-    home: ['Free', ['Full history', 'Reports by email']],
-    family: ['Home', ['Up to 3 plants']],
+    free: [['1 plant', true], ['The last 24 hours', true], ['Alerts', true], ['Reports by email', false]],
+    home: [['1 plant', true], ['Full history', true], ['Alerts', true], ['Reports by email', true]],
+    family: [[plantsLine, true], ['Full history', true], ['Alerts', true], ['Reports by email', true]],
   };
   return pop(
     <div className="settings-page plan-pop">
       {back}
       <div className="page-head">
         <h1>Pick your plan</h1>
-        {!b.comped && <p>{paid ? `Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Upgrades start today. Cancel any time.'}</p>}
+        {!b.comped && <p>{paid ? `Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Upgrades start today.'}</p>}
       </div>
       {b.comped ? <p className="field-note">Your plan is free of charge: every plant, full history.</p> : <>
         <Segmented size="sm" className="plan-period" label="Billing" value={view} onChange={setView}
@@ -2429,42 +2419,23 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
           : b.nextPeriod === view ? `Your plan changes to ${view} on ${billDay(b.nextDate)}.`
           : view === 'yearly' ? `Pay for the year now. It starts on ${billDay(b.nextDate)}.`
           : `A switch to ${view} starts on your billing date, ${billDay(b.nextDate)}.`}</p>}
-        {narrow ? <>
-          <div className="plan-picks" role="group" aria-label="Plans">
-            {['free', 'home', 'family'].map(p => (
-              <button type="button" key={p} aria-pressed={sel === p} onClick={() => setSel(p)}
-                      className={'plan-pick' + (p === b.plan ? ' plan-mine' : '') + (sel === p ? ' on' : '')}>
-                <span className="plan-dot" aria-hidden="true" />
-                <span className="plan-pick-txt"><b>{PLAN_NAME[p]}{p === b.plan && <em>Your plan</em>}</b><small>{PLAN_TAG[p]}</small></span>
-                <span className="plan-pick-price mono">{rand(price(p) ?? 0)}</span>
-              </button>
-            ))}
-          </div>
-          {sel === 'family' && extras}
-          <div className="plan-go">
-            {when(sel) && <div className="plan-note">{when(sel)}</div>}
-            {action(sel)}
-          </div>
-        </> : <div className="plan-grid plan-cards">
+        {/* One paywall on every screen: three cards side by side, stacked on phones (SOLAR-303, SOLAR-304) */}
+        <div className="plan-grid plan-cards">
           {['free', 'home', 'family'].map(p => (
-            <div key={p} className={'pw-plan' + (p === b.plan ? ' plan-mine' : '') + (p === 'free' ? ' plan-free' : '')}>
-              {p === b.plan && <span className="plan-mine-tag">Your plan</span>}
+            <div key={p} className={'pw-plan' + (p === b.plan ? ' plan-mine' : '')}>
+              {p === b.plan && <div className="plan-band">Your plan</div>}
               <div className="pw-name">{PLAN_NAME[p]}</div>
               <div className="plan-tagline">{PLAN_TAG[p]}</div>
               <div className="pw-price"><b>{rand(price(p) ?? 0)}</b>{p !== 'free' && ' ' + unit}</div>
               <div className="plan-note">{note(p)}</div>
               {action(p)}
-              <div className="plan-list">
               <ul className="pw-gives plan-gives">
-                {gives[p][0] && <li className="plan-also">Everything in {gives[p][0]}, and</li>}
-                {gives[p][1].map(g => <li key={g}>{g}</li>)}
+                {gives[p].map(([g, has], i) => <li key={i} className={has ? undefined : 'plan-off'}>{g}</li>)}
               </ul>
-              {/* right under Family's list, not on a row of its own, so the gap above it is the card's own */}
-              {p === 'family' && extras}
-              </div>
             </div>
           ))}
-        </div>}
+        </div>
+        <p className="plan-foot">Prices in rand. Cancel any time.</p>
         {cancelling && <CancelPlanDialog b={b} logins={logins} busy={!!busy} onCancel={() => setCancelling(false)}
           onConfirm={(keep) => run(async () => { await bookPlan(b, 'free', null, reload, keep); setCancelling(false); })} />}
         {picking && (
