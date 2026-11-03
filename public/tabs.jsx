@@ -2126,9 +2126,6 @@ async function bookExtras(b, count, reload, keep) {
 // Undo whatever is booked: the extras alone, or the plan and period.
 const undoBooked = (b, reload) => (!b.nextPlan && !b.nextPeriod && b.nextExtraPlants != null
   ? bookExtras(b, b.extraPlants, reload) : bookPlan(b, b.plan, b.period, reload));
-<<<<<<< HEAD
-const cancelText = (b) => `It runs until ${window.billingFmt.billDay(b.nextDate)}. After that you’re on Free: we keep your readings for 30 days, then only the last 24 hours. Alerts stay on; reports stop.`;
-=======
 // A plan's price at list prices, with Family's extra plants (SOLAR-330).
 const listPrice = (b, plan, period, extra = 0) => {
   const lp = b.listPrices?.[period] || {};
@@ -2136,12 +2133,11 @@ const listPrice = (b, plan, period, extra = 0) => {
 };
 const cancelText = (b) => {
   const { billDay, rand, perUnit, offerName } = window.billingFmt;
-  const text = `It runs until ${billDay(b.nextDate)}. After that you’re on Free: we keep only the last 24 hours of readings. Alerts stay on; reports stop.`;
+  const text = `It runs until ${billDay(b.nextDate)}. After that you’re on Free: we keep your readings for 30 days, then only the last 24 hours. Alerts stay on; reports stop.`;
   // an offer goes with the plan: coming back costs the list price
   const list = b.offer?.held && listPrice(b, b.plan, b.period, b.extraPlants || 0);
   return list > b.price ? `${text} Your ${offerName(b.offer)} of ${rand(b.price)} ${perUnit(b.period)} goes too; ${PLAN_NAME[b.plan]} costs ${rand(list)} if you come back.` : text;
 };
->>>>>>> main
 
 // A downgrade's pick (SOLAR-295): the plants the new plan keeps, each with the switch and
 // under the login Billing shows it with. One on for Home and Free; Family's room for Family.
