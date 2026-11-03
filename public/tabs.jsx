@@ -292,13 +292,18 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   // ---- period overview: Today / Week / Month / Year / Lifetime ----
   const [period, setPeriod] = React.useState('today');
   const isAgg = period === 'week' || period === 'month' || period === 'year' || period === 'lifetime';
-  React.useEffect(() => { if (isAgg && !energy[period]) onNeedEnergy(period); }, [period, energy]);
+  // Year and Lifetime total this month from its days, as on the Solar tab, so they need both
+  const needs = !isAgg ? [] : period === 'year' || period === 'lifetime' ? [period, 'month'] : [period];
+  React.useEffect(() => { needs.forEach(p => { if (!energy[p]) onNeedEnergy(p); }); }, [period, energy]);
+  const pending = needs.some(p => !energy[p]);
+  // the Solar, Home and Grid tabs' totals: the days before today plus today's live figure
   const heavy = React.useMemo(() => {
-    if (!isAgg) return null;
-    const rows = energy[period];
-    if (!rows) return null;
-    return rows.reduce((o, d) => ({ pv: o.pv + (d.pv || 0), load: o.load + (d.load || 0), imp: o.imp + (d.imp || 0), exp: o.exp + (d.exp || 0), chg: o.chg + (d.chg || 0), dischg: o.dischg + (d.dischg || 0) }), { pv: 0, load: 0, imp: 0, exp: 0, chg: 0, dischg: 0 });
-  }, [period, energy]);
+    if (!isAgg || pending) return null;
+    const plantToday = plantDateStr(tz);
+    // a day with a missing figure totals NaN there; here it reads as "—", like no data
+    const tot = (key, now) => { const v = periodTotals(key, now, energy, plantToday)[period]; return Number.isFinite(v) ? v : null; };
+    return { pv: tot('pv', a.pvToday), load: tot('load', a.loadToday), imp: tot('imp', a.gridFromToday), exp: tot('exp', a.gridToToday) };
+  }, [period, energy, pending, tz, a.pvToday, a.loadToday, a.gridFromToday, a.gridToToday]);
   const rate = snap.config?.tariffImport ?? 0;
   const rateExp = snap.config?.tariffExport ?? 0;
   let pPv, pLoad, pImp, pExp;
@@ -308,14 +313,13 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   else { pPv = pLoad = pImp = pExp = null; } // aggregate period still loading
   // clamp to 0–100: import can exceed load when the grid charges the battery,
   // which would otherwise drive this negative (and break the bar).
-  const pSuff = (pLoad != null && pLoad > 0) ? Math.max(0, Math.min(100, Math.round(((pLoad - pImp) / pLoad) * 100))) : null;
+  const pSuff = (pLoad != null && pLoad > 0 && pImp != null) ? Math.max(0, Math.min(100, Math.round(((pLoad - pImp) / pLoad) * 100))) : null;
   // avoided purchases at the import rate, plus anything sold at the feed-in rate
-  const pSaved = (pLoad != null) ? Math.max(0, pLoad - pImp) * rate + (pExp || 0) * rateExp : null;
+  const pSaved = (pLoad != null && pImp != null) ? Math.max(0, pLoad - pImp) * rate + (pExp || 0) * rateExp : null;
   // Show an Exported tile when this plant sells (a feed-in rate is set, or it has exported)
   // Only plants paid for export get an Exported tile. Every grid-tied inverter leaks a
   // few Wh of backflow, so a non-zero counter alone is not a sign the site sells.
   const showExport = hasGrid && rateExp > 0;
-  const pending = isAgg && !energy[period];
   // trend vs the same elapsed slice of the previous period. Today's is yesterday up to
   // the same time (0077), so it is fair from the first minute and shows all day.
   // "current" = the live value shown in the tile (pPv/pLoad/…) so the arrow stays
