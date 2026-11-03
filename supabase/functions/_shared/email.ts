@@ -606,7 +606,7 @@ const PLAN = `${APP}/?tab=account&section=plan`;
 export const PAY_URL = `${PLAN}&pay=1`;
 // What Free means after its first week, said the same way in every email.
 const FREE_RULE = "we keep only the last 24 hours of readings. Alerts stay on; reports stop.";
-// After a paid plan, readings stay 30 days first (SOLAR-329, 0145).
+// After a paid plan, readings stay 30 days first (SOLAR-329, 0146).
 const PAID_FREE_RULE = "we keep your readings for 30 days, then only the last 24 hours. Alerts stay on; reports stop.";
 const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;
 // Who is selling, on every receipt and renewal notice.

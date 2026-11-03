@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0145 — a paid plan's readings stay 30 days after it ends (SOLAR-329).
+-- 0146 — a paid plan's readings stay 30 days after it ends (SOLAR-329).
 --
 -- private.billing.keep_until: set when a Home or Family plan (not comped) moves to
 -- Free. A cancelled plan that runs out (state active): its end date + 30, the day
