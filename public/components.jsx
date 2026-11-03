@@ -242,7 +242,6 @@ function LegendChip({ color, label, value, active, onClick }) {
   const valStyle = active ? { color } : {};
   return (
     <button className={'legend-chip' + (active ? '' : ' off')} onClick={onClick}>
-      <span className="legend-dot" style={{ background: active ? color : 'transparent', borderColor: color }} />
       {label}
       {value != null && <span className="legend-val" style={valStyle}>{value}</span>}
     </button>);
