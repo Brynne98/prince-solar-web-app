@@ -20,7 +20,7 @@
 // verify_jwt is off: Paystack has no Supabase session. Each route checks its caller.
 // Secret: PAYSTACK_SECRET_KEY (test key until the company account is live).
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
-import { serve } from "../_shared/errors.ts";
+import { serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
@@ -123,6 +123,12 @@ async function settle(tx: Tx, out: { kind?: string } = {}): Promise<"paid" | "fa
       return "refund";
     }
     if (r?.kind === "card" && r.refund) await refund(tx.reference);
+    // A first payment from Free after the "come back" email (SOLAR-328, 0144). Only a
+    // count: a failure here never stops the payment being reported.
+    if (r?.kind === "start") {
+      const { data: w } = await db.rpc("winback_return", { p_reference: tx.reference }).maybeSingle<{ user_id: string; email_id: number; days: number; at: string }>();
+      if (w) await track("winback_resubscribed_done", w.user_id, String(w.email_id), w.at, { days: w.days });
+    }
     return "paid";
   }
   // Reversed: refunded. A card change's R1 goes back on purpose, often before the

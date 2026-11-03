@@ -25,11 +25,11 @@
 // send. ?render=all&plant=<id> returns every template built from that plant's data,
 // for checking by eye.
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
-import { reportError, serve } from "../_shared/errors.ts";
+import { reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, plantsRemovalSoon,
-  planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome,
+  planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -289,6 +289,7 @@ async function build(r: Row): Promise<Email | null> {
     case "bill_removal_soon": return plantsRemovalSoon(d.plants, day(d.on));
     case "bill_renewal_notice":
       return renewalNotice({ plan: d.plan, amount: d.amount, on: day(d.on), change: d.changed ? "Your plan changes on that date, as you booked." : undefined });
+    case "winback": return winback({ from: d.from, keepUntil: day(d.keepUntil) });
   }
   throw new Error(`unknown kind ${r.kind}`);
 }
@@ -461,6 +462,13 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
     for (const [key, group] of groups) done.push(...await sendBatch(group, deadline, key || undefined));
     for (const x of done) count[x.status]++;
     await rpc("email_done", { p_results: done });
+    // SOLAR-328: counted once it has gone, by user id only.
+    for (const x of done) {
+      const row = x.status === "sent" ? rows.find((r) => r.id === x.id) : undefined;
+      if (row?.kind === "winback" && row.user_id) {
+        await track("winback_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), { plan: row.data.from });
+      }
+    }
   }
   // The cron call times out at 55 s.
   const pushed = push ? await pushPass(started + 50_000).catch((e) => ({ error: String(e?.message ?? e) })) : null;

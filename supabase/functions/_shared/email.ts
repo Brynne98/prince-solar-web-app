@@ -36,7 +36,7 @@ export const senderFor = (kind: string) =>
   kind === "account_deleted" ? FROM_ACCOUNT
     : kind.startsWith("bill_") || kind === "free_week_soon" ? FROM_BILLING
     : kind.startsWith("report_") ? FROM_REPORTS
-    : kind === "welcome" || kind === "history" || kind === "free_week_setup" ? FROM_HELLO
+    : kind === "welcome" || kind === "history" || kind === "free_week_setup" || kind === "winback" ? FROM_HELLO
     : FROM_ALERTS;
 // Supabase's link lifetime (Auth -> mailer OTP expiry): 24 hours since SOLAR-196.
 const LINK_LIFE = "This link works once and expires in 24 hours.";
@@ -827,6 +827,19 @@ export const movedToFree = (m: MovedToFree) =>
       ...(m.stopped.length ? [{ plants: { title: `Stopped, deleted on ${m.deleteOn}`, names: m.stopped, tone: "stop" as const } }] : []),
       ...(m.stopped.length ? [{ note: "Pay to keep every plant, or choose which plant Free keeps." }] : []),
       { button: { label: m.stopped.length ? "Pay to keep these plants" : "Pay now", href: m.payUrl } },
+    ],
+    footer: [HELP],
+  });
+
+// Once, when a cancelled plan ends on its date (SOLAR-328, 0144). Readings are kept 30
+// days after (SOLAR-329). No switch to turn it off: it goes once per plan that ends.
+export const winback = (w: { from: Plan; keepUntil: string }) =>
+  make("Sorry to see you go", {
+    title: "Sorry to see you go",
+    parts: [
+      { p: `Your ${PLAN_NAME[w.from]} plan has ended. You're on Free now. We keep your readings until ${w.keepUntil} in case you change your mind. After that, Free keeps the last 24 hours.` },
+      { p: "Come back any time." },
+      { button: { label: "Pick a plan", href: PLAN } },
     ],
     footer: [HELP],
   });
