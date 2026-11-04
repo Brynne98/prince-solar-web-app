@@ -82,8 +82,10 @@ select pg_temp.ok(not exists (select 1 from private.plant_wipe where plant_id = 
               and not exists (select 1 from private.plant_purge where plant_id = 990502), 'remove cleared both queues');
 
 -- Started again before the wipe ran: everything stays.
+insert into auth.users (id, email, email_confirmed_at, aud, role)
+values ('00000000-0000-0000-0000-00000000c501', 'w1@example.test', now(), 'authenticated', 'authenticated');
 insert into public.plant_users (plant_id, user_id, plant_name, linked_at)
-select 990501, id, 'Restarted', now() from auth.users limit 1;
+values (990501, '00000000-0000-0000-0000-00000000c501', 'Restarted', now());
 insert into public.readings select (jsonb_populate_record(null::public.readings, to_jsonb(x) || '{"plant_id": 990501, "sn": "T990501"}')).* from public.readings x where plant_id <> 990501 limit 1;
 insert into private.plant_wipe (plant_id) values (990501);
 select pg_temp.ok(private.plant_wipe_readings(990501) = 0 and pg_temp.n('public.readings', 990501) = 1, 'a plant collecting again keeps its readings');
