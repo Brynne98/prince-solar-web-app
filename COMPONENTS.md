@@ -119,7 +119,7 @@ a row of on/off settings (email and push preferences); `saveFlag` sends its own 
 | Name | Use it for |
 |---|---|
 | `MiniStat` | A small stat with trend, info and `loading`. |
-| `ShareBar` | One bar split into coloured shares of a total. |
+| `SharePie` | A hollow pie of a day's parts with their sum in the middle and each part's kWh beside it. `dayFlows` gives the parts. |
 | `DaysPanel` | The per-day bars with retry and the free-week lock. |
 | `TabSkeleton` | A whole tab while it loads. |
 | `ConfirmCard` | Any "are you sure". Inline or `modal`; `danger`, `busy`, `confirmDisabled`. Use instead of `confirm()`. |

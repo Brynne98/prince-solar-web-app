@@ -66,25 +66,20 @@ const RIGHT_HOLD = <b>{NBSP}</b>;
 // per part, each at the height of the real one (SOLAR-221).
 function WiwBodySkeleton() {
   return (
-    <>
-      <window.Skeleton className="fbox-bar" h={5} r={3} />
-      <div className="wiw-figs" aria-hidden="true">
-        {[0, 1, 2].map(i => <div key={i}><b><window.Skeleton w="60%" h="1em" r={6} style={{ display: 'inline-block', verticalAlign: 'top' }} /></b><span>{NBSP}</span></div>)}
+    <div className="pie-wrap" aria-hidden="true">
+      <svg className="pie" viewBox="0 0 150 150"><circle className="pie-track" cx="75" cy="75" r="61" /></svg>
+      <div className="pie-figs">
+        {[0, 1].map(i => <div key={i}><span>{NBSP}</span><b><window.Skeleton w="4.5em" h="1em" r={6} style={{ display: 'inline-block', verticalAlign: 'top' }} /></b></div>)}
       </div>
-    </>
+    </div>
   );
 }
-// The card's total ("Made 21.3 kWh"), unseen, at a typical width: on a phone the title and the
-// total share a line only when both fit, so the held space has to be as wide as the real one.
-const wiwHold = (word) => <span style={{ visibility: 'hidden' }}>{word} <b>0.0 kWh</b></span>;
-function WiwSkeleton({ title, word, info }) {
+function WiwSkeleton({ title, info }) {
   return (
-    <div className="solar-row">
-      <Card className="wiw">
-        <SectionTitle right={wiwHold(word)}>{titled(title, 'today')}<window.InfoDot text={info} /></SectionTitle>
-        <WiwBodySkeleton />
-      </Card>
-    </div>
+    <Card className="wiw">
+      <SectionTitle>{titled(title, 'today')}<window.InfoDot text={info} /></SectionTitle>
+      <WiwBodySkeleton />
+    </Card>
   );
 }
 
@@ -611,41 +606,65 @@ function lifetimeSince(rows, earliest, today) {
     : window.dayText(ym + '-01', { month: 'short', year: 'numeric' }));
 }
 
-// Where a day's solar went inside the house, from its 5-minute points: the house first,
-// then the battery. What is left is export, backflow or rounding, and none of those are
-// this tab's subject — the grid has its own tab.
-// A day's split from the 5-minute readings, scaled to the day's own counter (total) and
-// rounded to the 0.1 kWh shown. Any rounding gap goes to the largest part, so the figures on
-// screen add up to the total exactly (16.4, not 6.8 + 8.9 + 0.8 = 16.5).
-function scaleParts(est, total) {
-  const keys = Object.keys(est);
-  const sum = keys.reduce((t, x) => t + est[x], 0);
-  const k = total > 0 && sum > 0 ? total / sum : 1;
-  const tenths = (v) => Math.round(v * 10) / 10;
-  const out = Object.fromEntries(keys.map(x => [x, tenths(est[x] * k)]));
-  const big = keys.reduce((m, x) => (out[x] > out[m] ? x : m), keys[0]);
-  out[big] = tenths(out[big] + tenths(sum * k) - keys.reduce((t, x) => t + out[x], 0));
-  return out;
+// The day's flows from its 5-minute points, worked out once so Solar, Home and Grid show the
+// same number for the same flow (SOLAR-332; each card used to scale its own estimate to its
+// own counter, so solar to the house read 11.4 kWh on Solar and 14.5 on Home). Solar serves
+// the house first, then the battery, then the grid; the house takes solar, then the battery,
+// then the grid. Day series: battery + = discharging, grid + = imported. Each flow is capped
+// by what was measured, so the parts come in under the counters by the inverter's losses.
+function dayFlows(points) {
+  const f = { pvHome: 0, pvBatt: 0, pvGrid: 0, battHome: 0, gridHome: 0, gridBatt: 0 };
+  const kwh = 5 / 60 / 1000;
+  points.forEach(p => {
+    if (p.load == null) return;
+    const pv = Math.max(0, p.pv || 0), load = Math.max(0, p.load);
+    const chg = p.batt != null && p.batt < 0 ? -p.batt : 0, dis = p.batt != null && p.batt > 0 ? p.batt : 0;
+    const imp = p.grid != null && p.grid > 0 ? p.grid : 0, exp = p.grid != null && p.grid < 0 ? -p.grid : 0;
+    const pvHome = Math.min(pv, load);
+    const pvBatt = Math.min(pv - pvHome, chg);
+    const battHome = Math.min(load - pvHome, dis);
+    const gridHome = Math.min(load - pvHome - battHome, imp);
+    f.pvHome += pvHome * kwh; f.pvBatt += pvBatt * kwh;
+    f.pvGrid += Math.min(pv - pvHome - pvBatt, exp) * kwh;
+    f.battHome += battHome * kwh; f.gridHome += gridHome * kwh;
+    f.gridBatt += Math.max(0, Math.min(imp - gridHome, chg - pvBatt)) * kwh;
+  });
+  // rounded to the 0.1 kWh shown, so a flow is the same figure wherever it appears
+  Object.keys(f).forEach(k => { f[k] = Math.round(f[k] * 10) / 10; });
+  return f;
 }
-// Where a day's energy went or came from: one bar of its parts ([name, kWh, colour]), then
-// each part's kWh with its name under it. total: what the shares are of.
-function ShareBar({ parts, total }) {
-  const pct = (v) => v / total * 100;
-  // The bar's hover title has the shares; the figures under it are aria-hidden, so the
-  // bar's own label carries the kWh as well, or a screen reader hears only the proportions.
+const WIW_INFO = {
+  solar: 'Solar goes to the house first, then the battery, then the grid. Worked out from readings every 5 minutes, so it can come in a little under Today.',
+  home: 'The house uses solar first, then the battery, then the grid. Worked out from readings every 5 minutes, so it can come in a little under Today.',
+  grid: 'Imported power goes to the house first, then the battery. Worked out from readings every 5 minutes, so it can come in a little under Today.',
+};
+// Where a day's energy went or came from (SOLAR-332): a hollow pie of its parts
+// ([name, kWh, colour]) with their sum in the middle, and each part's kWh beside it.
+function SharePie({ parts, word }) {
+  const total = parts.reduce((t, d) => t + d[1], 0);
+  const R = 61, C = 2 * Math.PI * R, gap = parts.length > 1 ? 3 : 0;
+  const [n, u] = window.fmtEnergyParts(total);
+  let at = 0;
   return (
-    <>
-      <window.Tip as="div" className="fbox-bar" role="img" text={parts.map(d => d[0] + ' ' + Math.round(pct(d[1])) + '%').join(', ')}
-                  aria-label={parts.map(d => d[0] + ' ' + fmtKwh(d[1]) + ', ' + Math.round(pct(d[1])) + '%').join('; ')}>
-        {parts.map(([l, v, c]) => <i key={l} style={{ flexGrow: pct(v), background: c }} />)}
-      </window.Tip>
-      <div className="wiw-figs" aria-hidden="true">
+    <div className="pie-wrap">
+      <svg className="pie" viewBox="0 0 150 150" role="img" aria-label={word + ' ' + fmtKwh(total) + ': ' + parts.map(d => d[0] + ' ' + fmtKwh(d[1])).join(', ')}>
+        <circle className="pie-track" cx="75" cy="75" r={R} />
         {parts.map(([l, v, c]) => {
-          const [n, u] = window.fmtEnergyParts(v);
-          return <div key={l}><b style={{ color: c }}>{n}<span className="u">{u}</span></b><span>{l}</span></div>;
+          const len = v / total * C;
+          const arc = <circle key={l} cx="75" cy="75" r={R} stroke={c} strokeDasharray={Math.max(0, len - gap) + ' ' + C} strokeDashoffset={-at} transform="rotate(-90 75 75)" />;
+          at += len;
+          return arc;
+        })}
+        <text x="75" y="74" className="pie-num">{n}<tspan className="pie-u" dx="3">{u}</tspan></text>
+        <text x="75" y="94" className="pie-word">{word}</text>
+      </svg>
+      <div className="pie-figs" aria-hidden="true">
+        {parts.map(([l, v, c]) => {
+          const [a, b] = window.fmtEnergyParts(v);
+          return <div key={l}><span>{l}</span><b style={{ color: c }}>{a}<span className="u">{b}</span></b></div>;
         })}
       </div>
-    </>
+    </div>
   );
 }
 // Solar, Home and Grid's last-30-days card body: why there are no bars yet, or the bars.
@@ -661,19 +680,6 @@ const totalTile = (accent, locked) => (label, v, sub) => {
   const [n, u] = window.fmtEnergyParts(v);
   return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null} sub={sub || NBSP} locked={locked && label !== 'TODAY' ? locked : null} />;
 };
-function solarSplit(points) {
-  let home = 0, batt = 0, grid = 0;
-  const kwh = 5 / 60 / 1000;
-  points.forEach(p => {
-    if (p.pv == null || p.load == null) return;
-    const pv = Math.max(0, p.pv), toHome = Math.min(pv, Math.max(0, p.load));
-    const toBatt = Math.min(pv - toHome, p.batt != null && p.batt < 0 ? -p.batt : 0); // day series: − = charging
-    // whatever solar is left that minute and went out of the meter (grid − = exporting)
-    const toGrid = Math.min(pv - toHome - toBatt, p.grid != null && p.grid < 0 ? -p.grid : 0);
-    home += toHome * kwh; batt += toBatt * kwh; grid += toGrid * kwh;
-  });
-  return { home, batt, grid };
-}
 
 // ---------------------------------------------------------------- PANELS
 // Is every panel string doing its usual share? (SOLAR-51, mocked with all ten states first.)
@@ -1084,11 +1090,13 @@ function SolarSkeleton() {
         <SectionTitle>{titled('SOLAR', 'today')}</SectionTitle>
         <DayChartSkeleton />
       </Card>
-      <Card>
-        <SectionTitle right={RIGHT_HOLD}>{titled('SOLAR', 'last 30 days')}</SectionTitle>
-        <PlotSkeleton heights={[170, 220]} r={10} />
-      </Card>
-      <WiwSkeleton title="WHERE IT WENT" word="Made" info="Solar counts to the house first, then the battery, then the grid." />
+      <div className="solar-row">
+        <WiwSkeleton title="WHERE IT WENT" info={WIW_INFO.solar} />
+        <Card>
+          <SectionTitle right={RIGHT_HOLD}>{titled('SOLAR', 'last 30 days')}</SectionTitle>
+          <PlotSkeleton heights={[170, 220]} r={10} />
+        </Card>
+      </div>
     </div>
   );
 }
@@ -1141,20 +1149,13 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // the Today tile always shows today's peak, whichever day the chart is on, so the tiles
   // keep their height and a scroll to the chart lands where it aimed
   const todayPeak = peakOf(today && !today.approx ? today.points : null);
-  const est = React.useMemo(() => solarSplit(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
-  // The day's solar as the tiles and bars show it (SunSynk's own counter). The 5-minute
-  // readings give the shares; scaling them to this total makes the card add up to the TODAY
-  // tile. Tested 30 Sep–5 Oct: the readings land within ~1 kWh of it once the grid is
-  // counted, so the scale moves each part about 2% at most (SOLAR-49).
-  const dayRow = !view.isToday && (daily || []).find(r => r.date === pick.date);
-  const madeKwh = view.isToday ? a.pvToday : (dayRow && dayRow.pv != null ? dayRow.pv : day && day.totals && day.totals.pv);
-  const split = scaleParts(est, madeKwh);
-  const splitTotal = split.home + split.batt + split.grid;
+  const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
   // A destination is shown only once it holds something: a 0.0 kWh column would be a
   // zero-width segment under a full-width label, and "the battery got none of it" is said
   // better by its absence than by a zero.
-  const dests = [['Home', split.home, CC.load, true], ['Battery', split.batt, CC.batt, hasBatt], ['Grid', split.grid, CC.grid, hasGrid]]
+  const dests = [['Home', flows.pvHome, CC.load, true], ['Battery', flows.pvBatt, CC.batt, hasBatt], ['Grid', flows.pvGrid, CC.grid, hasGrid]]
     .filter(d => d[3] && d[1] >= 0.05);
+  const splitTotal = dests.reduce((t, d) => t + d[1], 0);
   // The percentages were a permanent column until 2026-09-19; the bar says the same thing,
   // so they moved to the bar's hover title rather than being printed twice.
   // No money on this card. It answers one question — where the day's sun went — and the parts
@@ -1192,25 +1193,21 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
           : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="pv" color={CC.pv} label="Solar" sums={['Made']} empty={noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')} /></div>}
       </Card>
 
-      <Card>
-        <SectionTitle right={best ? <>Best <b>{fmtKwh(best.pv)}</b> on {window.dayText(best.date)}</> : RIGHT_HOLD}>
-          {titled('SOLAR', 'last 30 days')}
-        </SectionTitle>
-        <DaysPanel daily={daily} onRetry={loadDaily} over={over} rows={bars} rows={bars} field="pv" color={CC.pv} rgb="61,220,132" word="Solar" label="Solar per day for the last 30 days"
-          today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />
-      </Card>
-
-      {/* Where it went: a plain card like the rest of the page (SOLAR-74). The day's solar in the
-          header, the share bar, and each part's kWh with its name under it, in its own colour. */}
+      {/* Where it went beside the 30 days, under the day it describes (SOLAR-332): a hollow
+          pie of the day's solar with each part's kWh beside it, in its own colour. */}
       <div className="solar-row">
         <Card className="wiw" {...dim}>
-          <SectionTitle right={day && !noReadings && splitTotal >= 0.05 ? <>Made <b>{fmtKwh(splitTotal)}</b></> : !day ? wiwHold('Made') : null}>
-            {titled('WHERE IT WENT', dayWord)}
-            <window.InfoDot text={'Solar counts to the house first, then the battery, then the grid.'} />
-          </SectionTitle>
+          <SectionTitle>{titled('WHERE IT WENT', dayWord)}<window.InfoDot text={WIW_INFO.solar} /></SectionTitle>
           {!day ? <WiwBodySkeleton />
             : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')}</div>
-            : <ShareBar parts={dests} total={splitTotal} />}
+            : <SharePie parts={dests} word="Made" />}
+        </Card>
+        <Card>
+          <SectionTitle right={best ? <>Best <b>{fmtKwh(best.pv)}</b> on {window.dayText(best.date)}</> : RIGHT_HOLD}>
+            {titled('SOLAR', 'last 30 days')}
+          </SectionTitle>
+          <DaysPanel daily={daily} onRetry={loadDaily} over={over} rows={bars} field="pv" color={CC.pv} rgb="61,220,132" word="Solar" label="Solar per day for the last 30 days"
+            today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />
         </Card>
       </div>
     </div>
@@ -1233,27 +1230,15 @@ function HomeSkeleton() {
         <SectionTitle>{titled('HOME', 'today')}</SectionTitle>
         <DayChartSkeleton />
       </Card>
-      <Card>
-        <SectionTitle right={RIGHT_HOLD}>{titled('HOME', 'last 30 days')}</SectionTitle>
-        <PlotSkeleton heights={[170, 220]} r={10} />
-      </Card>
-      <WiwSkeleton title="WHERE IT CAME FROM" word="Used" info="The house uses solar first, then the battery, then the grid." />
+      <div className="solar-row">
+        <WiwSkeleton title="WHERE IT CAME FROM" info={WIW_INFO.home} />
+        <Card>
+          <SectionTitle right={RIGHT_HOLD}>{titled('HOME', 'last 30 days')}</SectionTitle>
+          <PlotSkeleton heights={[170, 220]} r={10} />
+        </Card>
+      </div>
     </div>
   );
-}
-
-// Where a day's home use came from, from its 5-minute points: solar first, then the
-// battery, and the grid for the rest. Day series: battery + = discharging.
-function homeSplit(points) {
-  let solar = 0, batt = 0, grid = 0;
-  const kwh = 5 / 60 / 1000;
-  points.forEach(p => {
-    if (p.load == null || p.load <= 0) return;
-    const fromSolar = Math.min(p.load, Math.max(0, p.pv || 0));
-    const fromBatt = Math.min(p.load - fromSolar, p.batt != null && p.batt > 0 ? p.batt : 0);
-    solar += fromSolar * kwh; batt += fromBatt * kwh; grid += (p.load - fromSolar - fromBatt) * kwh;
-  });
-  return { solar, batt, grid };
 }
 
 function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
@@ -1293,14 +1278,11 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
   const noReadings = dayProblem(view, day, points, silent);
   const peak = peakOf(points);
 
-  // ---- where it came from: shares from the readings, scaled to the day's counter as Solar does ----
-  const est = React.useMemo(() => homeSplit(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
-  const dayRow = !view.isToday && (daily || []).find(r => r.date === pick.date);
-  const usedKwh = view.isToday ? a.loadToday : (dayRow && dayRow.load != null ? dayRow.load : day && day.totals && day.totals.load);
-  const split = scaleParts(est, usedKwh);
-  const splitTotal = split.solar + split.batt + split.grid;
-  const srcs = [['Solar', split.solar, CC.pv, true], ['Battery', split.batt, CC.batt, hasBatt], ['Grid', split.grid, CC.grid, hasGrid]]
+  // ---- where it came from: the same flows Solar and Grid show (SOLAR-332) ----
+  const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
+  const srcs = [['Solar', flows.pvHome, CC.pv, true], ['Battery', flows.battHome, CC.batt, hasBatt], ['Grid', flows.gridHome, CC.grid, hasGrid]]
     .filter(d => d[3] && d[1] >= 0.05);
+  const splitTotal = srcs.reduce((t, d) => t + d[1], 0);
 
   // ---- last 30 days ----
   const bars = withLiveToday(daily, plantToday, 'load', a.loadToday);
@@ -1328,23 +1310,19 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
           : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="load" color={CC.load} label="Home" sums={['Used']} empty={noReadings || 'No home readings for this day.'} /></div>}
       </Card>
 
-      <Card>
-        <SectionTitle right={most && most.load > 0 ? <>Most <b>{fmtKwh(most.load)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
-          {titled('HOME', 'last 30 days')}
-        </SectionTitle>
-        <DaysPanel daily={daily} onRetry={loadDaily} over={over} rows={bars} rows={bars} field="load" color={CC.load} rgb="248,113,113" word="Used" label="Home use per day for the last 30 days"
-          today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />
-      </Card>
-
       <div className="solar-row">
         <Card className="wiw" {...dim}>
-          <SectionTitle right={day && !noReadings && splitTotal >= 0.05 ? <>Used <b>{fmtKwh(splitTotal)}</b></> : !day ? wiwHold('Used') : null}>
-            {titled('WHERE IT CAME FROM', dayWord)}
-            <window.InfoDot text={'The house uses solar first, then the battery, then the grid.'} />
-          </SectionTitle>
+          <SectionTitle>{titled('WHERE IT CAME FROM', dayWord)}<window.InfoDot text={WIW_INFO.home} /></SectionTitle>
           {!day ? <WiwBodySkeleton />
             : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || 'No home readings for this day.'}</div>
-            : <ShareBar parts={srcs} total={splitTotal} />}
+            : <SharePie parts={srcs} word="Used" />}
+        </Card>
+        <Card>
+          <SectionTitle right={most && most.load > 0 ? <>Most <b>{fmtKwh(most.load)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
+            {titled('HOME', 'last 30 days')}
+          </SectionTitle>
+          <DaysPanel daily={daily} onRetry={loadDaily} over={over} rows={bars} field="load" color={CC.load} rgb="248,113,113" word="Used" label="Home use per day for the last 30 days"
+            today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />
         </Card>
       </div>
     </div>
@@ -1367,10 +1345,13 @@ function GridSkeleton() {
         <SectionTitle right={NBSP}>{titled('GRID', 'today')}<window.InfoDot text={'Above the line is power imported from the grid; below it is power exported.'} /></SectionTitle>
         <DayChartSkeleton />
       </Card>
-      <Card>
-        <SectionTitle right={RIGHT_HOLD}>{titled('IMPORTED', 'last 30 days')}</SectionTitle>
-        <PlotSkeleton heights={[170, 220]} r={10} />
-      </Card>
+      <div className="solar-row">
+        <WiwSkeleton title="WHERE IT WENT" info={WIW_INFO.grid} />
+        <Card>
+          <SectionTitle right={RIGHT_HOLD}>{titled('GRID', 'last 30 days')}</SectionTitle>
+          <PlotSkeleton heights={[170, 220]} r={10} />
+        </Card>
+      </div>
     </div>
   );
 }
@@ -1402,6 +1383,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const tz = cfg.timezone;
   const plantToday = plantDateStr(tz);
   const sells = (cfg.tariffExport ?? 0) > 0; // same rule as the Overview tile: only plants paid for export
+  const hasBatt = (snap.features || {}).hasBattery !== false;
   React.useEffect(() => { ['week', 'month', 'year', 'lifetime'].forEach(p => { if (!energy[p]) onNeedEnergy(p); }); }, [energy]);
   const cmp = useCompare(refreshKey, snap);
   const [earliest, setEarliest] = React.useState(null);
@@ -1451,11 +1433,11 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
     return () => { alive = false; };
   }, [pick.date, refreshKey]);
   const outageMin = outageMinutes(outages);
-  const flows = React.useMemo(() => {
-    let imp = 0, exp = 0;
-    points.forEach(p => { if (p.grid != null) { if (p.grid > 0) imp += p.grid * 5 / 60 / 1000; else exp += -p.grid * 5 / 60 / 1000; } });
-    return { imp, exp };
-  }, [day]); // eslint-disable-line react-hooks/exhaustive-deps
+  // where the day's imports went: the same flows Solar and Home show (SOLAR-332)
+  const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dests = [['Home', flows.gridHome, CC.load, true], ['Battery', flows.gridBatt, CC.batt, hasBatt]]
+    .filter(d => d[3] && d[1] >= 0.05);
+  const splitTotal = dests.reduce((t, d) => t + d[1], 0);
 
   // ---- last 30 days ----
   const [daily, loadDaily] = useDaily(refreshKey);
@@ -1476,7 +1458,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 
       <Card id="grid-day">
         {/* the right line is always there (blank today) so the date bar under it never shifts on a phone */}
-        <SectionTitle right={day && !noReadings && !view.isToday ? <>Imported <b>{fmtKwh(flows.imp)}</b>{flows.exp >= 0.05 && <>, exported <b>{fmtKwh(flows.exp)}</b></>}</> : NBSP}>
+        <SectionTitle right={day && !noReadings && !view.isToday && peak ? <>Peak <b>{fmtPower(peak.grid)}</b> at <b>{HM(peak.t)}</b></> : NBSP}>
           {titled('GRID', dayWord)}
           <window.InfoDot text={'Above the line is power imported from the grid; below it is power exported.'} />
         </SectionTitle>
@@ -1488,13 +1470,21 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
               sums={['Imported', 'Exported']} importScale outages={outages} empty={noReadings || 'No grid readings for this day.'} /></div>}
       </Card>
 
-      <Card>
-        <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
-          {titled('IMPORTED', 'last 30 days')}
-        </SectionTitle>
-        <DaysPanel daily={daily} onRetry={loadDaily} over={over} rows={bars} rows={bars} field="imp" color={CC.grid} rgb="250,204,21" word="Imported" label="Energy imported from the grid per day for the last 30 days"
-          today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />
-      </Card>
+      <div className="solar-row">
+        <Card className="wiw" {...dim}>
+          <SectionTitle>{titled('WHERE IT WENT', dayWord)}<window.InfoDot text={WIW_INFO.grid} /></SectionTitle>
+          {!day ? <WiwBodySkeleton />
+            : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || (!points.some(p => p.grid != null) ? 'No grid readings for this day.' : view.isToday ? 'Nothing imported yet today.' : 'Nothing imported on this day.')}</div>
+            : <SharePie parts={dests} word="Imported" />}
+        </Card>
+        <Card>
+          <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
+            {titled('GRID', 'last 30 days')}
+          </SectionTitle>
+          <DaysPanel daily={daily} onRetry={loadDaily} over={over} rows={bars} field="imp" color={CC.grid} rgb="250,204,21" word="Imported" label="Energy imported from the grid per day for the last 30 days"
+            today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />
+        </Card>
+      </div>
     </div>
   );
 }

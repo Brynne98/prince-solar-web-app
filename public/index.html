@@ -713,21 +713,25 @@
   .solar-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 20px; align-items: stretch; }
   .solar-row > * { min-width: 0; }
   .solar-row > :only-child { grid-column: 1 / -1; }
-  /* the half-width cards stack their figure under the title at every width, as the phone does (SOLAR-49) */
-  .solar-row .section-title { flex-direction: column; align-items: flex-start; gap: 5px; }
   /* below the sticky header, not under it (SOLAR-275) */
   #solar-day, #battery-day, #grid-day, #home-day { scroll-margin-top: calc(var(--head-h, 60px) + 16px); }
   .tip-hint { font-size: 12px; color: var(--dim); margin-top: 6px; }
-  /* Where it went: a plain card, half the row (SOLAR-74). Its title keeps "Made" beside it at every width. */
-  .solar-row > .wiw { width: 100%; max-width: 560px; box-sizing: border-box; }
+  /* Where it went, beside the 30 days (SOLAR-332): a hollow pie with the day's sum in its
+     middle and each part's kWh beside it. The card stretches to the row; the pie sits centred. */
+  .solar-tab .wiw { display: flex; flex-direction: column; }
   .solar-tab .wiw .section-title { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 5px 12px; margin-bottom: 14px; }
-  .wiw-figs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 16px; margin-top: 18px; }
-  /* aligned as the Power Flow solar box's split: first left, last right, middle centred */
-  .wiw-figs > :not(:first-child):not(:last-child) { text-align: center; }
-  .wiw-figs > :last-child:not(:first-child) { text-align: right; }
-  .wiw-figs b { display: block; font: 700 28px var(--mono); line-height: 1; letter-spacing: -0.01em; white-space: nowrap; }
-  .wiw-figs b .u { font-size: 15px; margin-left: 4px; opacity: 0.85; }
-  .wiw-figs span:not(.u) { display: block; margin-top: 8px; font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+  .pie-wrap { flex: 1; display: flex; align-items: center; gap: 28px; }
+  .pie { width: 150px; height: 150px; flex: none; }
+  .pie circle { fill: none; stroke-width: 18; }
+  .pie-track { stroke: rgba(255,255,255,0.06); }
+  .pie-num { text-anchor: middle; font: 700 24px var(--mono); fill: var(--text); }
+  .pie-u { font-size: 12px; opacity: 0.85; }
+  .pie-word { text-anchor: middle; font: 500 10px var(--display); letter-spacing: 0.12em; text-transform: uppercase; fill: var(--muted); }
+  .pie-figs { flex: 1; min-width: 0; display: grid; gap: 18px; }
+  .pie-figs > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .pie-figs span:not(.u) { font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+  .pie-figs b { font: 700 22px var(--mono); line-height: 1; white-space: nowrap; }
+  .pie-figs b .u { font-size: 13px; margin-left: 4px; opacity: 0.85; }
   .solar-note { margin: 0 0 8px; font-size: 13.5px; color: var(--muted); max-width: 60ch; }
   .solar-note:last-child { margin-bottom: 0; }   /* a note that ends its card adds no space under it (SOLAR-284) */
   /* Equipment (SOLAR-75): one headline, a coral-edged card per problem, then Simple (a tile
@@ -1289,10 +1293,12 @@
     .solar-stats .stat-tile { padding: 18px; }
     .solar-tab .section-title { flex-direction: column; align-items: flex-start; gap: 5px; }
     .solar-row { gap: 14px; }
-    .wiw-figs { gap: 10px; margin-top: 16px; }
-    .wiw-figs b { font-size: 22px; }
-    .wiw-figs b .u { font-size: 12px; }
-    .wiw-figs span:not(.u) { font-size: 11px; margin-top: 7px; }
+    .pie { width: 120px; height: 120px; }
+    .pie-wrap { gap: 20px; }
+    .pie-figs { gap: 14px; }
+    .pie-figs b { font-size: 19px; }
+    .pie-figs b .u { font-size: 12px; }
+    .pie-figs span:not(.u) { font-size: 11px; }
     .stat-value .num { font-size: 34px; }
     .stat-value .unit { font-size: 18px; }
 
