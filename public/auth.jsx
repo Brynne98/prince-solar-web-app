@@ -503,7 +503,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         {(mode === 'signin' || mode === 'signup') && (<>
           {googleButton}
           {mode === 'signin' && <div className="login-fine">Continuing with Google creates an account and accepts
-            the <a href="terms.html" target="_blank" rel="noopener">Terms</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>}
+            the <a href="terms.html" target="_blank" rel="noopener">Terms</a>, which limit what we owe you, and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>}
           <div className="login-or"><span>or with email</span></div>
         </>)}
 
@@ -533,7 +533,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         <button type="submit" disabled={!!busy} aria-busy={busy === 'form'}>{busy === 'form' ? copy.busy : copy.cta}</button>
         {/* covers Google above too (SOLAR-91) */}
         {mode === 'signup' && <div className="login-fine">By creating an account you agree to
-          the <a href="terms.html" target="_blank" rel="noopener">Terms</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>}
+          the <a href="terms.html" target="_blank" rel="noopener">Terms</a>, which limit what we owe you, and the <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>}
 
         {/* Grey links that go back on the left, the way forward in green on the right. */}
         <div className="login-links">
