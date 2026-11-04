@@ -378,6 +378,12 @@ const saveEmailPref = (userId, kind, on) => saveFlag('email_prefs', 'email_pref_
 async function fetchNotifications() {
   return must(window.sb.rpc('api_notifications'));
 }
+// Every alert, one row per alert with when it went back (0152, SOLAR-327): {items, more,
+// unread}. from: a Date or null; kind: an alert switch or null; before: the last item shown.
+async function fetchAlerts({ from, kind, unread, before }) {
+  return must(window.sb.rpc('api_alerts', { p_from: from ? from.toISOString() : null, p_switch: kind || null,
+    p_unread: !!unread, p_before: before ? before.id : null, p_before_ts: before ? before.ts : null }));
+}
 // null marks every one read.
 async function readNotifications(ids) {
   await must(window.sb.rpc('api_notifications_read', { p_ids: ids }));
