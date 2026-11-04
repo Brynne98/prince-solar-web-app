@@ -337,10 +337,10 @@ section#features{padding-top:0;scroll-margin-top:112px}
 #faults .fl-head{display:flex;align-items:center;gap:10px;margin-top:16px;font:600 22px var(--sans);letter-spacing:-.01em}
 #faults .fl-dot,#faults .fl-tile i{flex:none;width:9px;height:9px;border-radius:50%;background:var(--solar);transition:background .3s}
 #faults .warn .fl-dot,#faults .fl-tile.warn i{background:var(--warn)}
-#faults .fl-issue{display:grid;grid-template-rows:0fr;transition:grid-template-rows .35s cubic-bezier(.2,.8,.2,1),margin .35s;margin-top:0}
+#faults .fl-issue{display:grid;grid-template-rows:0fr;transition:grid-template-rows .35s cubic-bezier(.2,.8,.2,1)}
 #faults .fl-issue>div{overflow:hidden}
-#faults .warn .fl-issue{grid-template-rows:1fr;margin-top:14px}
-#faults .fl-issue section{padding:14px 16px;border-radius:14px;border:1px solid rgba(248,113,113,.42);background:rgba(248,113,113,.06)}
+#faults .warn .fl-issue{grid-template-rows:1fr}
+#faults .fl-issue section{margin-top:14px;padding:14px 16px;border-radius:14px;border:1px solid rgba(248,113,113,.42);background:rgba(248,113,113,.06)}
 #faults .fl-issue header{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
 #faults .fl-issue b{display:block;font:600 16px var(--sans)}
 #faults .fl-issue p{margin-top:4px;font-size:14.5px;color:#c8d0da}
@@ -790,7 +790,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   <div class="wrap split" id="batt">
   <div>
     <h2 class="h2 rv">Know how long <em>the battery lasts.</em></h2>
-    <p class="lede rv d1">Counted down to your reserve every minute, as the house uses more or less.</p>
+    <p class="lede rv d1">Down to your reserve, every minute. Cook supper and watch it drop.</p>
   </div>
   <div class="app demo rv d2">
     <div class="demo-top"><span class="plant">Example plant</span><span class="mut num" id="bt-clock">18:00</span></div>
@@ -810,7 +810,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   <div class="wrap split rev" id="faults">
   <div>
     <h2 class="h2 rv">Catch faults <em>early.</em></h2>
-    <p class="lede rv d1">Panels stop, the battery runs hot, an inverter goes quiet. You see it that day, with what to check.</p>
+    <p class="lede rv d1">Panels stop or the battery runs hot? See it that day, with what to check.</p>
     <div class="chips rv d2" id="fl-picks" role="group" aria-label="Show an example"></div>
   </div>
   <div class="app demo rv d2" id="fl-card" aria-live="polite">
@@ -841,7 +841,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 <section class="blk" aria-label="Savings">
   <div class="wrap" id="save">
   <h2 class="h2 rv">See what <em>it saves you.</em></h2>
-  <p class="lede rv d1">Rand saved and how much of your home ran on its own power, compared with the week, month or year before.</p>
+  <p class="lede rv d1">Rand saved, and how much of the house ran on your own power.</p>
   <div class="app demo sv-card rv d2">
     <div class="demo-top"><span class="plant">Example plant</span><div class="seg" id="sv-seg" role="group" aria-label="Period"><button type="button" data-k="week" aria-pressed="false">Week</button><button type="button" data-k="month" aria-pressed="true">Month</button><button type="button" data-k="year" aria-pressed="false">Year</button></div></div>
     <div class="sv-body">
@@ -871,7 +871,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 <section class="blk" aria-label="Wall view">
   <div class="wrap" id="wall">
   <h2 class="h2 rv">Put it <em>on the wall.</em></h2>
-  <p class="lede rv d1">Full screen on a TV or tablet. Everyone at home sees where the power comes from.</p>
+  <p class="lede rv d1">Full screen on a TV or tablet, for the whole house to see.</p>
   <div class="room rv d2" aria-hidden="true">
     <div class="tv"><div class="screen"><div class="stage-in" id="w-in">
       <div class="w-top"><b>Example plant</b><span class="w-clock" id="w-clock">12:40</span></div>
@@ -887,8 +887,8 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 <section class="blk" aria-label="Every plant in one place">
   <div class="wrap split" id="plants">
   <div>
-    <h2 class="h2 rv">Every plant <em>in one place.</em></h2>
-    <p class="lede rv d1">Your home, your parents' home and the holiday house. One login, one tap between them.</p>
+    <h2 class="h2 rv">Keep every plant <em>in one place.</em></h2>
+    <p class="lede rv d1">Your home, your parents' and the holiday house. One tap between them.</p>
   </div>
   <div class="app demo rv d2" id="pl-card" style="position:relative">
     <div class="demo-top"><button type="button" class="pl-pick" id="pl-pick" aria-haspopup="listbox" aria-expanded="false"><span id="pl-name">Home</span><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m4 6 4 4 4-4"/></svg></button><span class="mut num" id="pl-time">13:05</span></div>
@@ -1022,7 +1022,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
     <div class="cta rv d2"><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a><a class="btn ghost" href="#pricing">See pricing</a></div>
     <div class="get rv d2">
       <div class="get-t">
-        <h3>Phone apps are on the way</h3>
+        <h3>Phone apps are coming</h3>
         <p>Until then, add the website to your home screen and it opens like an app.</p>
         <div class="stores">
           <span class="store" aria-label="Coming soon to the App Store"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg><span><small>Coming soon to the</small><b>App Store</b></span></span>

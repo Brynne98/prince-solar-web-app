@@ -556,7 +556,7 @@ const S = [
   { k: 'Panels stopped', title: 'Some panels made nothing today', todo: 'Check the breaker or isolator for your panels.', since: 'Since 11:42', tiles: T(['3.06', look], ['58', chg], ['All on', ok]) },
   { k: 'Panels weak', title: 'Some panels are making less than usual', todo: 'Check for shade, dirt or a tripped breaker.', since: 'Today', tiles: T(['3.91', look], ['61', chg], ['All on', ok]) },
   { k: 'Battery hot', title: 'The battery is hot, 46 °C', todo: 'Make sure air can move around it.', since: 'Since 13:20', tiles: T(['4.82', ok], ['64', look], ['All on', ok]) },
-  { k: 'Uneven batteries', title: 'Batteries charging unevenly', todo: 'Pack 1 is at 72%, pack 2 at 60%. If the gap keeps growing, have them checked.', since: 'For over an hour', tiles: T(['4.82', ok], ['66', look], ['All on', ok]) },
+  { k: 'Uneven batteries', title: 'Batteries charging unevenly', todo: 'Pack 1 is at 72%, pack 2 at 60%. The gap has grown all week.', since: 'For over an hour', tiles: T(['4.82', ok], ['66', look], ['All on', ok]) },
   { k: 'Inverter quiet', title: 'Inverter 2 isn’t reporting', todo: 'Check it is on and its Wi-Fi dongle shows a light.', since: 'Last reading 40 min ago', tiles: T(['2.47', ok], ['64', chg], ['1 of 2', look]) },
 ];
 let cur = 0;
