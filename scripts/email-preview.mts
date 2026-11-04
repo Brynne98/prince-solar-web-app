@@ -18,7 +18,7 @@ import type { Email } from "../supabase/functions/_shared/email.ts";
 const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
-  accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, offerEnds, renewalNotice, winback,
+  accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, offerEnds, renewalNotice, winback, needAHand,
   passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, planKept, plantEvent, plantsRemovalSoon, planSwitched, planUpgraded,
   renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
@@ -108,6 +108,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "billing-free-week-ends-soon": [FROM_BILLING, freeWeekEndsSoon("Monday", "Home", 58, 83)],
   "free-week-setup": [FROM_HELLO, freeWeekSetup(["rate", "size", "panels"])],
   "winback": [FROM_HELLO, winback({ from: "home", keepUntil: "3 Jan 2027" })],
+  "need-a-hand": [FROM_HELLO, needAHand()],
   "billing-switched": [FROM_BILLING, planSwitched({ plan: "home", period: "yearly", amount: 999, date: "1 Nov 2026", card: "Visa •••• 4081",
     reference: "psh_3f9a2c71", startsOn: "1 Dec 2026", next: { amount: 999, date: "1 Dec 2027" } })],
   "billing-upgraded": [FROM_BILLING, planUpgraded({ from: "home", to: "family", period: "monthly", paidNow: 43, daysLeft: 16, next: { amount: 179, date: "1 Dec" } })],
