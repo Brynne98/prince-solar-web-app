@@ -78,21 +78,27 @@ update private.billing set next_plan = 'free' where user_id = '00000000-0000-000
 select pg_temp.ok(pg_temp.kinds() = 'bill_change', 'renewal gives way to a booked cancel');
 update private.billing set next_plan = null where user_id = '00000000-0000-0000-0000-00000000c001';
 
--- Moved to Free (the keep_until trigger, 0146), Farm stopped and deleted in 30 days.
+-- Moved to Free, Farm stopped and deleted in 30 days.
 update public.plant_users set paused = true where plant_id = 990202 and user_id = '00000000-0000-0000-0000-00000000c001';
 update private.billing set plan = 'free', period = null, billing_day = null, next_billing_date = null, extra_plants = 0,
        plants_to_remove = '{990202}', remove_on = (select d + 30 from t)
  where user_id = '00000000-0000-0000-0000-00000000c001';
+select pg_temp.ok(pg_temp.kinds() = '', 'on Free after a cancel that ended (no bill_free email): nothing');
+insert into public.email_queue (user_id, kind, key, data, priority)
+values ('00000000-0000-0000-0000-00000000c001', 'bill_free', 'bill_free:t', '{}', 1);
 select pg_temp.ok(pg_temp.kinds() = 'bill_free', 'moved to Free shows');
 select pg_temp.ok(pg_temp.pin('bill_free')->'kept' = '["Kloof St"]' and pg_temp.pin('bill_free')->'stopped' = '["Farm"]', 'moved to Free: kept and stopped plants');
 update private.billing set remove_on = (select d + 2 from t) where user_id = '00000000-0000-0000-0000-00000000c001';
 select pg_temp.ok(pg_temp.kinds() = 'bill_removal_soon,bill_free', 'on Free, deleted soon shows too');
-update private.billing set keep_until = (select d - 1 from t), plants_to_remove = '{}', remove_on = null where user_id = '00000000-0000-0000-0000-00000000c001';
-select pg_temp.ok(pg_temp.kinds() = '', 'moved to Free goes once readings are no longer kept');
+-- a plant booked for deletion that is no longer linked: an empty list, not null
+delete from public.plant_users where plant_id = 990202 and user_id = '00000000-0000-0000-0000-00000000c001';
+select pg_temp.ok(pg_temp.pin('bill_removal_soon')->'plants' = '[]', 'deleted soon: unlinked plants give an empty list');
+update private.billing set plants_to_remove = '{}', remove_on = null where user_id = '00000000-0000-0000-0000-00000000c001';
+update public.email_queue set created_at = now() - interval '31 days' where kind = 'bill_free' and user_id = '00000000-0000-0000-0000-00000000c001';
+select pg_temp.ok(pg_temp.kinds() = '', 'moved to Free goes 30 days after its email');
 
 -- The free week, for an account that never paid.
 update private.billing set keep_until = null where user_id = '00000000-0000-0000-0000-00000000c001';
-delete from public.plant_users where plant_id = 990202 and user_id = '00000000-0000-0000-0000-00000000c001';
 insert into private.free_week_logins (sunsynk_username, user_id, started_at)
 values ('n1', '00000000-0000-0000-0000-00000000c001', now() - interval '4 days 23 hours');
 select pg_temp.ok(pg_temp.kinds() = '', 'free week: nothing before day 5');

@@ -1434,11 +1434,16 @@ function App({ links }) {
     setNotifs(n => ({ ...n, unread: 0, items: n.items.map(x => ({ ...x, read: true })) }));
     window.readNotifications(null).catch(() => {});
   };
-  // Billing notices (SOLAR-212). An undo re-reads the list, so the notice goes.
+  // Billing notices (SOLAR-212). An undo re-reads the list, so the notice goes, and tells
+  // an open Billing page (ps-billing) to re-read the plan. Before tabs.js is here, Billing.
   const noticeAct = {
     plan: () => openSettings('plan'),
     plans: () => window.openPlans('notice'),
-    undo: (n) => window.undoBooked(n, loadNotifs).then(ok => ok && window.toast(`You’re staying on ${PLAN_NAME[n.plan]}`)),
+    undo: (n) => (window.undoBooked ? window.undoBooked(n, loadNotifs).then(ok => {
+      if (!ok) return;
+      window.dispatchEvent(new Event('ps-billing'));
+      window.toast('The change you booked is undone.');
+    }) : openSettings('plan')),
   };
   const notices = (notifs?.pinned || []).map(n => {
     const t = billNotice(n, noticeAct);
@@ -1483,6 +1488,7 @@ function App({ links }) {
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
           <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} /><NotifBell disabled /></>}>
         {err && <div className="notice offline" role="alert"><p><b>Can't reach the server.</b> Retrying every minute.</p></div>}
+        <BillBanners notices={notices} />
         {null}
         {/* The Settings area never touches the snapshot: it draws for real. It sits in
             the same slot as in the loaded page below, so the first reading doesn't remount

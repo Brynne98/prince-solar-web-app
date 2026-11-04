@@ -3388,6 +3388,12 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
   const reloadPlan = () => Promise.all([reloadBilling(), links?.refresh?.()]).then(([b]) => b);
   // Back from a payment: billingReturn checks it (a paid one reloads the page).
   useEffect(() => { reloadBilling().then(b => window.billingReturn(b)).then(r => r === 'card' && reloadBilling()); }, []);
+  // a change undone from the Notifications list (SOLAR-212)
+  useEffect(() => {
+    const again = () => reloadBilling();
+    window.addEventListener('ps-billing', again);
+    return () => window.removeEventListener('ps-billing', again);
+  }, []);
   // Every plant on the logins once (a plant can be on two).
   const live = (links?.accounts || []).filter(a => a.status !== 'disabled');
   const plants = [...new Map(live.flatMap(a => a.plants || []).map(p => [p.plant_id, p])).values()];

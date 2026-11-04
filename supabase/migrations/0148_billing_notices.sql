@@ -8,8 +8,8 @@
 --
 --   bill_failed          past due: amount, nextTry (null after the last try), freeOn
 --   bill_removal_soon    plants deleted within 3 days, as bill_removal_soon's email
---   bill_free            a paid plan moved to Free, while readings are still kept
---                        (keep_until, 0146): kept and stopped plants, deleteOn
+--   bill_free            moved to Free by a failed payment, for 30 days after its
+--                        email: kept and stopped plants, deleteOn
 --   bill_change          a change booked for the billing date (cancel, downgrade,
 --                        monthly/yearly switch, fewer extra plants): what undoes it
 --   bill_renewal_notice  yearly, up to 60 days before the date, as its email; not
@@ -44,11 +44,13 @@ begin
 
   if b.remove_on > today and b.remove_on <= today + 3 and cardinality(b.plants_to_remove) > 0 then
     out := out || jsonb_build_object('kind', 'bill_removal_soon', 'on', b.remove_on,
-      'plants', (select jsonb_agg(coalesce(pu.plant_name, 'Plant ' || pu.plant_id) order by pu.linked_at)
-                   from plant_users pu where pu.user_id = me and pu.plant_id = any (b.plants_to_remove)));
+      'plants', coalesce((select jsonb_agg(coalesce(pu.plant_name, 'Plant ' || pu.plant_id) order by pu.linked_at)
+                   from plant_users pu where pu.user_id = me and pu.plant_id = any (b.plants_to_remove)), '[]'));
   end if;
 
-  if b.plan = 'free' and b.keep_until >= today then
+  -- after a failed payment only (bill_free's email), not a cancel that ended (winback)
+  if b.plan = 'free' and exists (select 1 from email_queue q where q.user_id = me and q.kind = 'bill_free'
+                                   and q.created_at > now() - interval '30 days') then
     out := out || jsonb_build_object('kind', 'bill_free', 'deleteOn', b.remove_on,
       'kept', (select jsonb_agg(coalesce(pu.plant_name, 'Plant ' || pu.plant_id) order by pu.linked_at)
                  from plant_users pu where pu.user_id = me and not pu.paused),
