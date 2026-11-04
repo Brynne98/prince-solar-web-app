@@ -326,6 +326,9 @@
   @media (max-width: 599px) {
     .bill-banner { grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 10px 12px; }
     .bill-banner .ghost-btn { grid-column: 2; justify-self: end; }
+    /* the X's room is kept beside the text only, so the button reaches the edge as on the other banner */
+    .bill-banner.closable { padding-right: 14px; }
+    .bill-banner.closable p { padding-right: 38px; }
   }
   /* touch screens: the notice buttons take a full 44 px tap */
   @media (pointer: coarse) {
