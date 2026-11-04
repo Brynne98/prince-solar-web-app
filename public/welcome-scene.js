@@ -511,24 +511,36 @@ svg.innerHTML = `<defs><linearGradient id="bt-g" x1="0" y1="0" x2="0" y2="1"><st
   + `<g clip-path="url(#bt-clip)"><path d="${line} L510 ${Y(0)} L10 ${Y(0)}Z" fill="url(#bt-g)"/><path d="${line}" fill="none" stroke="#a78bfa" stroke-width="2.5"/></g>`
   + `<line id="bt-now" y1="4" y2="${Y(0)}" stroke="rgba(255,255,255,.3)"/><circle id="bt-dot" r="5.5" fill="#a78bfa" stroke="#0c1117" stroke-width="2.5"/>`
   + [18, 22, 26, 30].map((h, i) => `<text x="${X(h * 60)}" y="144" text-anchor="${i ? 'middle' : 'start'}" class="axis">${hm(h * 60)}</text>`).join('');
-let i = 0, hold = 0;
-function show(n) {
+let i = 0, hold = 0, at = { x: 0, y: 0 }, raf = 0;
+function place(x, y) {
+  at = { x, y };
+  g('cr').setAttribute('width', x);
+  ['x1', 'x2'].forEach(a => g('now').setAttribute(a, x));
+  g('dot').setAttribute('cx', x); g('dot').setAttribute('cy', y);
+}
+// linear over one step, so steps join into one steady movement; back to the start it jumps
+function glide(x, y, ms) {
+  cancelAnimationFrame(raf);
+  if (!ms || x < at.x) return place(x, y);
+  const from = at, t0 = performance.now();
+  const f = t => { const k = Math.min(1, (t - t0) / ms); place(from.x + (x - from.x) * k, from.y + (y - from.y) * k); if (k < 1) raf = requestAnimationFrame(f); };
+  raf = requestAnimationFrame(f);
+}
+function show(n, ms) {
   i = n;
-  const p = pts[n], left = (p.soc - RES) / 100 * CAP / p.k, end = p.m + left * 60, x = X(p.m);
+  const p = pts[n], left = (p.soc - RES) / 100 * CAP / p.k, end = p.m + left * 60;
   g('clock').textContent = hm(p.m);
   g('left').innerHTML = dur(left).replace(/ ([hm])/g, '<small>$1</small>');
   g('at').textContent = 'Reaches the ' + RES + '% reserve ' + (end >= 30 * 60 ? 'after sunrise' : 'at ' + hm(end));
   g('soc').textContent = Math.round(p.soc) + '%';
   g('load').textContent = p.k.toFixed(1) + ' kW';
   g('load').classList.toggle('hi', p.k >= 3);
-  g('cr').setAttribute('width', x);
-  ['x1', 'x2'].forEach(a => g('now').setAttribute(a, x));
-  g('dot').setAttribute('cx', x); g('dot').setAttribute('cy', Y(p.soc));
+  glide(X(p.m), Y(p.soc), ms);
   g('range').value = n;
   g('range').setAttribute('aria-valuetext', hm(p.m) + ', empty in ' + dur(left));
 }
 g('range').max = pts.length - 1;
-const stop = autoplay(svg.parentNode, 160, () => { if (i === pts.length - 1 && hold++ < 16) return; hold = 0; show((i + 1) % pts.length); });
+const stop = autoplay(svg.parentNode, 160, () => { if (i === pts.length - 1 && hold++ < 16) return; hold = 0; show((i + 1) % pts.length, 160); });
 g('range').addEventListener('input', e => { stop(); show(+e.target.value); });
 show(calm ? 6 : 0);
 })();
@@ -554,7 +566,15 @@ function show(n) {
   card.classList.toggle('warn', !!s.title);
   document.getElementById('fl-head').textContent = s.title ? '1 thing needs a look' : 'Everything is working';
   if (s.title) [['title', s.title], ['todo', s.todo], ['since', s.since]].forEach(([k, v]) => document.getElementById('fl-' + k).textContent = v);
-  tiles.innerHTML = s.tiles.map(([l, c, v, u, [tone, word]]) => `<div class="fl-tile ${tone}"><div class="v" style="color:${c}">${v}${u ? `<small>${u}</small>` : ''}</div><div class="l">${l}</div><div class="s"><i></i>${word}</div></div>`).join('');
+  if (!tiles.children.length) tiles.innerHTML = s.tiles.map(() => '<div class="fl-tile"><div class="v"></div><div class="l"></div><div class="s"><i></i><span></span></div></div>').join('');
+  s.tiles.forEach(([l, c, v, u, [tone, word]], j) => {
+    const t = tiles.children[j];
+    t.className = 'fl-tile ' + tone;
+    t.querySelector('.v').style.color = c;
+    t.querySelector('.v').innerHTML = v + (u ? `<small>${u}</small>` : '');
+    t.querySelector('.l').textContent = l;
+    t.querySelector('.s span').textContent = word;
+  });
   [...picks.children].forEach((b, j) => b.setAttribute('aria-pressed', j === n));
 }
 S.forEach((s, n) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = s.k; b.addEventListener('click', () => { stop(); show(n); }); picks.appendChild(b); });
@@ -568,9 +588,9 @@ const svg = document.getElementById('sv-svg'), seg = document.getElementById('sv
 if (!svg) return;
 const g = id => document.getElementById('sv-' + id);
 const P = {
-  week: { saved: 312, prev: 294, ind: 84, indPrev: 81, n: 7, k1: '19-25 Oct', k2: '12-18 Oct', from: 'the week before', ax: ['Mon', 'Thu', 'Sun'] },
-  month: { saved: 1284, prev: 1146, ind: 81, indPrev: 78, n: 31, k1: 'October', k2: 'September', from: 'September', ax: ['1', '15', '31'] },
-  year: { saved: 14870, prev: 13640, ind: 79, indPrev: 77, n: 12, k1: '2025', k2: '2024', from: '2024', ax: ['Jan', 'Jun', 'Dec'] },
+  week: { saved: 1027, prev: 978, ind: 81, indPrev: 77, n: 7, k1: '19-25 Oct', k2: '12-18 Oct', from: 'the week before', ax: [[0, 'Mon'], [3, 'Thu'], [6, 'Sun']] },
+  month: { saved: 4509, prev: 4208, ind: 81, indPrev: 78, n: 31, k1: 'October', k2: 'September', from: 'September', ax: [[0, '1'], [14, '15'], [30, '31']] },
+  year: { saved: 48960, prev: 43410, ind: 79, indPrev: 77, n: 12, k1: '2025', k2: '2024', from: '2024', ax: [[0, 'Jan'], [5, 'Jun'], [11, 'Dec']] },
 };
 // each day's or month's share, uneven like real weather, summed so the line ends on the total
 const run = (n, total, seed) => { const v = Array.from({ length: n }, (_, i) => 1 + .32 * Math.sin(i * 1.9 + seed) + .18 * Math.sin(i * 4.3 + seed * 2)); const s = v.reduce((a, b) => a + b, 0); let c = 0; return v.map(x => c += x / s * total); };
@@ -587,7 +607,7 @@ function draw(k, anim) {
     + `<path id="sv-line" d="${path(a)}" fill="none" stroke="#a78bfa" stroke-width="2.8" stroke-linejoin="round"/>`
     + `<text x="498" y="${Y(p.saved) + 4}" class="axis" style="fill:#a78bfa;font-weight:700">${rand(p.saved)}</text>`
     + `<text x="498" y="${Y(p.prev) + (Y(p.prev) - Y(p.saved) < 14 ? 16 : 4)}" class="axis">${rand(p.prev)}</text>`
-    + p.ax.map((t, i) => `<text x="${20 + i * 235}" y="206" text-anchor="${['start', 'middle', 'end'][i]}" class="axis">${t}</text>`).join('');
+    + p.ax.map(([at, t], i) => `<text x="${X(at).toFixed(1)}" y="206" text-anchor="${['start', 'middle', 'end'][i]}" class="axis">${t}</text>`).join('');
   const up = n => (n >= 0 ? '↑ ' : '↓ ') + Math.abs(n) + '%';
   g('st').innerHTML = `<b>${up(Math.round((p.saved / p.prev - 1) * 100))}</b> on ${p.from}`;
   g('it').innerHTML = `<b>${up(p.ind - p.indPrev)}</b> on ${p.from}`;
@@ -637,7 +657,7 @@ const S = [
   { t: '21:30', narr: 'The battery runs the house through the night.', solar: 0, batt: 0.72, grid: 0, home: 0.72, soc: 71 },
 ];
 const kw = v => v < 1 ? [Math.round(v * 1000), 'W'] : [v.toFixed(2), 'kW'];
-const lane = (k, on, rev, v) => { w('l' + k + 'B').classList.toggle('on', on); const d = w('l' + k); d.classList.toggle('on', on); d.classList.toggle('rev', !!rev); d.style.setProperty('--d', (2.4 - Math.min(1.6, v * .25)).toFixed(2) + 's'); };
+const lane = (k, on, rev, v) => { w('l' + k + 'B').classList.toggle('on', on); const d = w('l' + k); d.classList.toggle('on', on); d.classList.toggle('rev', !!rev); };
 const grow = (id, parts) => { const t = parts.reduce((a, b) => a + b, 0) || 1; [...w(id).children].forEach((e, i) => { e.style.flexGrow = parts[i] / t; e.style.flexBasis = 0; }); };
 let cur = 0;
 function show(n) {
@@ -676,21 +696,24 @@ const card = document.getElementById('pl-card');
 if (!card) return;
 const menu = document.getElementById('pl-menu'), pick = document.getElementById('pl-pick'), view = document.getElementById('pl-view');
 const PL = [
-  { name: 'Home', st: ['Live', '#3ddc84'], now: 4.82, batt: 64, made: 31.4, peak: 9.9 },
-  { name: 'Mum and Dad', st: ['Grid off', '#f87171'], now: 3.1, batt: 81, made: 22.7, peak: 6.4, note: 'Grid off since 12:10. The battery is running the house.' },
-  { name: 'Holiday house', st: ['Live', '#3ddc84'], now: 1.96, batt: 98, made: 12.3, peak: 3.1 },
+  { name: 'Home', st: ['Live', '#3ddc84'], batt: 64, peak: 6.2 },
+  { name: 'Mum and Dad', st: ['Grid off', '#f87171'], batt: 81, peak: 4.4, note: 'Grid off since 12:10. The battery is running the house.' },
+  { name: 'Holiday house', st: ['Live', '#3ddc84'], batt: 98, peak: 2.6 },
 ];
+// kW at minute m of the day: a sun arc 06:00 to 18:40 with passing cloud
+const kwAt = (p, m) => Math.max(0, Math.sin(Math.PI * (m - 360) / 760)) * p.peak * (.88 + .12 * Math.sin(m / 23));
+PL.forEach(p => { p.now = kwAt(p, 785); let e = 0; for (let m = 360; m < 785; m += 5) e += (kwAt(p, m) + kwAt(p, m + 5)) / 2 * 5 / 60; p.made = e; });
 menu.innerHTML = PL.map((p, i) => `<button type="button" role="option" data-i="${i}"><b>${p.name}</b><span><i style="background:${p.st[1]}"></i>${p.st[0]}</span><em>${p.now.toFixed(2)} kW</em></button>`).join('');
 const rows = [...menu.children];
 // solar so far today, 06:00 to now (13:05), against a whole day's width
-const curve = p => { const pts = []; for (let m = 360; m <= 785; m += 10) { const x = (m - 360) / 760, v = Math.max(0, Math.sin(Math.PI * x)) * p.peak * (.88 + .12 * Math.sin(m / 23)); pts.push([20 + x * 480, 92 - v / 10 * 80]); } return pts; };
+const curve = p => { const pts = []; for (let m = 360; m <= 785; m += 5) pts.push([20 + (m - 360) / 760 * 480, 92 - kwAt(p, m) / 7 * 80]); return pts; };
 let cur = 0, timers = [];
 function render(n) {
   cur = n;
   const p = PL[n], c = curve(p), d = c.map(([x, y], i) => (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1)).join(' ');
   document.getElementById('pl-name').textContent = p.name;
   rows.forEach((r, i) => r.setAttribute('aria-selected', i === n));
-  view.innerHTML = `<div class="pl-stats"><div>Solar now<b style="color:var(--solar)">${p.now.toFixed(2)}<small>kW</small></b></div><div>Battery<b style="color:var(--batt)">${p.batt}<small>%</small></b></div><div>Made today<b>${p.made}<small>kWh</small></b></div></div>`
+  view.innerHTML = `<div class="pl-stats"><div>Solar now<b style="color:var(--solar)">${p.now.toFixed(2)}<small>kW</small></b></div><div>Battery<b style="color:var(--batt)">${p.batt}<small>%</small></b></div><div>Made today<b>${p.made.toFixed(1)}<small>kWh</small></b></div></div>`
     + `<p class="pl-note">${p.note || ''}</p>`
     + `<div class="pl-ch"><span>Solar today</span><span class="num">06:00 to now</span></div>`
     + `<svg class="pl-svg" viewBox="0 0 520 100" aria-hidden="true"><defs><linearGradient id="pl-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3ddc84" stop-opacity=".35"/><stop offset="1" stop-color="#3ddc84" stop-opacity="0"/></linearGradient></defs><line x1="20" x2="500" y1="92" y2="92" stroke="rgba(255,255,255,.1)"/><path d="${d} L${c[c.length - 1][0].toFixed(1)} 92 L20 92Z" fill="url(#pl-g)"/><path d="${d}" fill="none" stroke="#3ddc84" stroke-width="2.4"/></svg>`;

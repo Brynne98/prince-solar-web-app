@@ -533,6 +533,38 @@ section#features{padding-top:0;scroll-margin-top:112px}
 .qs details p{overflow:hidden;padding:0 60px 26px 0;color:var(--muted);max-width:44em}
 
 /* close */
+.get{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:40px;max-width:900px;margin:88px auto 0;padding:0 56px 0 52px;border-radius:28px;overflow:hidden;text-align:left;border:1px solid var(--hair-2);background:radial-gradient(70% 90% at 85% 100%,rgba(61,220,132,.07),transparent 70%),linear-gradient(180deg,rgba(22,28,38,.82),rgba(10,13,19,.9));backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 40px 80px -40px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.06)}
+.get-t{align-self:center;padding:48px 0}
+.get h3{font:600 34px/1.08 var(--display);font-variation-settings:'opsz' 96;letter-spacing:-.03em;text-wrap:balance}
+.get-t p{margin-top:12px;font-size:17px;color:var(--muted);max-width:30em}
+.stores{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}
+.store{min-width:186px;display:inline-flex;align-items:center;gap:11px;height:54px;padding:0 20px 0 16px;border-radius:13px;background:#07090d;border:1px solid rgba(255,255,255,.2);color:var(--paper)}
+.store svg{width:24px;height:24px;flex:none;fill:currentColor}
+.store small{display:block;font-size:12px;line-height:1.1;color:var(--muted)}
+.store b{display:block;font:600 18px/1.15 var(--sans);letter-spacing:-.01em}
+/* the app on a phone, rising out of the panel's foot */
+.get-phone{align-self:end;height:330px;margin-top:40px;padding:10px 10px 0;border-radius:40px 40px 0 0;background:#050608;box-shadow:0 0 0 1px rgba(255,255,255,.1),0 -20px 50px -20px rgba(0,0,0,.6)}
+.ph-screen{height:100%;text-align:left;padding:12px 16px 0;border-radius:31px 31px 0 0;background:radial-gradient(120% 60% at 20% 0,rgba(255,255,255,.05),transparent 60%),linear-gradient(180deg,#141b25,#0c1117);color:#e7ecf2;font-family:var(--sans)}
+.ph-top{position:relative;display:flex;justify-content:space-between;font:600 12px var(--sans);color:#c8d0da}
+.ph-top i{position:absolute;left:50%;top:-2px;width:72px;height:20px;margin-left:-36px;border-radius:12px;background:#050608}
+.ph-head{display:flex;justify-content:space-between;align-items:center;margin-top:22px;font-size:14px}
+.ph-live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#9aa5b3}
+.ph-live i{width:7px;height:7px;border-radius:50%;background:var(--solar)}
+@media (prefers-reduced-motion:no-preference){.ph-live i{animation:pulse 2s infinite}}
+.ph-row{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:6px 8px;margin-top:10px;padding:11px 13px;border-radius:14px;border:1px solid rgba(var(--c),.4);background:linear-gradient(180deg,rgba(var(--c),.1),rgba(var(--c),.03))}
+.ph-row span{font-size:12.5px;font-weight:600;color:#c8d0da}
+.ph-row b{font:700 20px/1 var(--mono);color:rgb(var(--c))}
+.ph-row b small{font-size:12px;font-weight:500;color:#9aa5b3;margin-left:3px}
+.ph-row em{grid-column:1/-1;height:5px;border-radius:4px;background:rgba(var(--c),.18);overflow:hidden}
+.ph-row em i{display:block;height:100%;border-radius:4px;background:rgb(var(--c))}
+@media(max-width:860px){
+  .get{grid-template-columns:minmax(0,1fr);gap:0;margin-top:56px;padding:0 20px;border-radius:22px;text-align:center}
+  .get-t{padding:32px 0 0}.get h3{font-size:28px}.get-t p{font-size:16px;margin-left:auto;margin-right:auto}
+  .stores{justify-content:center;margin-top:22px}
+  .get-phone{justify-self:center;width:230px;height:250px;margin-top:32px}
+}
+@media(max-width:374px){.store{padding:0 14px 0 12px;gap:9px}.store b{font-size:16px}}
+
 .dawn{position:relative;padding:150px 0 0;overflow:hidden;text-align:center}
 .dawn::before{content:"";position:absolute;left:50%;bottom:-420px;width:1700px;height:1000px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(closest-side,rgba(255,206,120,.62),rgba(232,132,48,.3) 40%,rgba(130,60,95,.16) 68%,transparent)}
 .dawn > *{position:relative}
@@ -809,7 +841,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 <section class="blk" aria-label="Savings">
   <div class="wrap" id="save">
   <h2 class="h2 rv">See what <em>it saves you.</em></h2>
-  <p class="lede rv d1">Rand saved and how much of your home ran on its own power, compared with last month or last year.</p>
+  <p class="lede rv d1">Rand saved and how much of your home ran on its own power, compared with the week, month or year before.</p>
   <div class="app demo sv-card rv d2">
     <div class="demo-top"><span class="plant">Example plant</span><div class="seg" id="sv-seg" role="group" aria-label="Period"><button type="button" data-k="week" aria-pressed="false">Week</button><button type="button" data-k="month" aria-pressed="true">Month</button><button type="button" data-k="year" aria-pressed="false">Year</button></div></div>
     <div class="sv-body">
@@ -988,6 +1020,23 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
     <h2 class="h2 rv">See your solar <em>clearly.</em></h2>
     <p class="lede rv d1">Connect tonight. Watch tomorrow's sun rise on your own roof.</p>
     <div class="cta rv d2"><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a><a class="btn ghost" href="#pricing">See pricing</a></div>
+    <div class="get rv d2">
+      <div class="get-t">
+        <h3>Phone apps are on the way</h3>
+        <p>Until then, add the website to your home screen and it opens like an app.</p>
+        <div class="stores">
+          <span class="store" aria-label="Coming soon to the App Store"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg><span><small>Coming soon to the</small><b>App Store</b></span></span>
+          <span class="store" aria-label="Coming soon to Google Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.018 13.298l-3.919 2.218-3.515-3.493 3.543-3.521 3.891 2.202a1.49 1.49 0 0 1 0 2.594zM1.337.924a1.486 1.486 0 0 0-.112.568v21.017c0 .217.045.419.124.6l11.155-11.087L1.337.924zm12.207 10.065l3.258-3.238L3.45.195a1.466 1.466 0 0 0-.946-.179l11.04 10.973zm0 2.067l-11 10.933c.298.036.612-.016.906-.183l13.324-7.54-3.23-3.21z"/></svg><span><small>Coming soon to</small><b>Google Play</b></span></span>
+        </div>
+      </div>
+      <div class="get-phone" aria-hidden="true"><div class="ph-screen">
+        <div class="ph-top"><span>12:40</span><i></i></div>
+        <div class="ph-head"><b>Example plant</b><span class="ph-live"><i></i>Live</span></div>
+        <div class="ph-row" style="--c:61,220,132"><span>Solar</span><b>6.42<small>kW</small></b></div>
+        <div class="ph-row" style="--c:167,139,250"><span>Battery</span><b>74<small>%</small></b><em><i style="width:74%"></i></em></div>
+        <div class="ph-row" style="--c:248,113,113"><span>Home</span><b>1.51<small>kW</small></b></div>
+      </div></div>
+    </div>
   </div>
   <footer>
     <div class="wrap">
