@@ -21,3 +21,9 @@ ul { padding-left: 22px; }
 li { margin: 6px 0; }
 strong { color: var(--text); }
 a { color: var(--pv); text-underline-offset: 3px; }
+/* A part the reader must see first, such as the limits on liability (CPA s49). */
+.notice { border: 1px solid rgba(244,169,58,0.45); border-radius: 12px; padding: 4px 18px 8px; margin: 24px 0; background: rgba(244,169,58,0.06); }
+.notice h2 { margin-top: 16px; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+th, td { text-align: left; vertical-align: top; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line); color: #c9d1db; }
+th { color: var(--text); }

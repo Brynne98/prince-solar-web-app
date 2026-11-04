@@ -499,11 +499,9 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     <div className="login-wrap">
       <AuthCard title={copy.h} sub={copy.p} onSubmit={submit} noValidate busy={busy}>
         {/* Google first on sign-in and sign-up (SOLAR-118): one tap, and no confirmation
-            email to wait for. On sign-in its terms line sits right under it. */}
+            email to wait for. */}
         {(mode === 'signin' || mode === 'signup') && (<>
           {googleButton}
-          {mode === 'signin' && <div className="login-fine">Continuing with Google creates an account and accepts
-            the <a href="terms.html" target="_blank" rel="noopener">Terms</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>}
           <div className="login-or"><span>or with email</span></div>
         </>)}
 
@@ -531,8 +529,8 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         )}
 
         <button type="submit" disabled={!!busy} aria-busy={busy === 'form'}>{busy === 'form' ? copy.busy : copy.cta}</button>
-        {/* covers Google above too (SOLAR-91) */}
-        {mode === 'signup' && <div className="login-fine">By creating an account you agree to
+        {/* covers Google above too (SOLAR-91); on sign-in, Google can create an account */}
+        {(mode === 'signin' || mode === 'signup') && <div className="login-fine">By continuing, you agree to
           the <a href="terms.html" target="_blank" rel="noopener">Terms</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>}
 
         {/* Grey links that go back on the left, the way forward in green on the right. */}
