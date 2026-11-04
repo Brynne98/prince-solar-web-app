@@ -307,23 +307,29 @@
   /* billing banners (SOLAR-212): a raised panel, the status in the glyph and a hairline of
      its tone; the one action is a quiet button, so a fault never wears the solar green */
   .bill-banners { display: grid; gap: 10px; margin-bottom: 18px; }
-  .bill-banner { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 14px; align-items: center;
-    padding: 12px 12px 12px 14px; border-radius: 14px; background: var(--panel-2); border: 1px solid; }
+  .bill-banner { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 14px; align-items: center;
+    padding: 12px 14px; border-radius: 14px; background: var(--panel-2); border: 1px solid; }
+  .bill-banner.closable { padding-right: 52px; }
   .bill-banner.bad { border-color: rgba(239,68,68,0.32); }
   .bill-banner.warn { border-color: rgba(245,158,11,0.3); }
   .bill-banner p { margin: 0; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .bill-banner p b { font-size: 14.5px; font-weight: 600; line-height: 1.3; }
   .bill-banner p span { font-size: 13px; color: var(--muted); line-height: 1.45; }
-  .bill-banner-acts { display: flex; align-items: center; gap: 4px; }
   .bill-banner .ghost-btn { color: var(--text); white-space: nowrap; }
   .bill-banner.bad .ghost-btn { border-color: rgba(239,68,68,0.45); }
   .bill-banner.warn .ghost-btn { border-color: rgba(245,158,11,0.4); }
-  .bill-banner-x { width: 32px; height: 32px; display: grid; place-items: center; background: none; border: none; color: var(--muted); border-radius: 8px; }
+  /* a 44 px tap area round a 16 px icon, pinned to the corner */
+  .bill-banner-x { position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; display: grid; place-items: center;
+    background: none; border: none; color: var(--muted); border-radius: 10px; touch-action: manipulation; }
   .bill-banner-x:hover { color: var(--text); background: rgba(255,255,255,0.05); }
   .bill-banner-x .ico { width: 16px; height: 16px; }
   @media (max-width: 599px) {
     .bill-banner { grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 10px 12px; }
-    .bill-banner-acts { grid-column: 2; justify-content: space-between; }
+    .bill-banner .ghost-btn { grid-column: 2; justify-self: start; }
+  }
+  /* touch screens: the notice buttons take a full 44 px tap */
+  @media (pointer: coarse) {
+    .bill-banner .ghost-btn, .nl-act { min-height: 44px; touch-action: manipulation; }
   }
   .page { display: flex; flex-direction: column; }
   .page.old .mini-value, .page.old .stat-value, .page.old .flow-wrap,

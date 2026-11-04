@@ -431,13 +431,12 @@ function BillBanners({ notices }) {
   return (
     <div className="bill-banners">
       {shown.map(n => (
-        <div key={n.kind} className={'bill-banner ' + n.tone} role={n.closable ? 'status' : 'alert'}>
+        <div key={n.kind} className={'bill-banner ' + n.tone + (n.closable ? ' closable' : '')} role={n.closable ? 'status' : 'alert'}>
           <span className={'nl-glyph g-' + n.tone}><Icon id={n.icon} /></span>
           <p><b>{n.title}</b><span>{n.lead || n.body}</span></p>
-          <div className="bill-banner-acts">
-            <button type="button" className="ghost-btn" onClick={() => n.act('banner')}>{n.button}</button>
-            {n.closable && <button type="button" className="bill-banner-x" aria-label="Close" onClick={() => close(n)}><Icon id="close" /></button>}
-          </div>
+          <button type="button" className="ghost-btn" onClick={() => n.act('banner')}>{n.button}</button>
+          {/* top right at every width, out of the flow, so a wrap never moves it */}
+          {n.closable && <button type="button" className="bill-banner-x" aria-label="Close" onClick={() => close(n)}><Icon id="close" /></button>}
         </div>
       ))}
     </div>
