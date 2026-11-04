@@ -271,8 +271,10 @@
   .g-panels { background: rgba(61,220,132,0.12); color: var(--pv); }
   .g-readings, .g-sunsynk { background: rgba(255,255,255,0.07); color: var(--muted); }
   .g-bad { background: rgba(239,68,68,0.14); color: var(--bad); }
+  .g-warn { background: rgba(245,158,11,0.14); color: var(--warn); }
   /* billing notices (SOLAR-212): pinned above the alerts, a button instead of a tap */
   .nl-pin:hover { background: none; }
+  .nl-pin .nl-title { font-weight: 600; }
   .nl-act { margin-top: 8px; }
   .nl-text { display: flex; flex-direction: column; min-width: 0; }
   .nl-title { font-size: 14.5px; font-weight: 500; line-height: 1.3; }
@@ -302,9 +304,27 @@
   .notice.stale { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.07); }
   .notice.offline { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.07); }
   .notice.gridoff { border-color: rgba(167,139,250,0.35); background: rgba(167,139,250,0.08); }
-  .notice-x { width: 32px; height: 32px; margin: -6px -8px -6px -6px; display: grid; place-items: center; background: none; border: none; color: var(--muted); border-radius: 8px; flex: none; }
-  .notice-x:hover { color: var(--text); }
-  .notice-x .ico { width: 16px; height: 16px; }
+  /* billing banners (SOLAR-212): a raised panel, the status in the glyph and a hairline of
+     its tone; the one action is a quiet button, so a fault never wears the solar green */
+  .bill-banners { display: grid; gap: 10px; margin-bottom: 18px; }
+  .bill-banner { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 14px; align-items: center;
+    padding: 12px 12px 12px 14px; border-radius: 14px; background: var(--panel-2); border: 1px solid; }
+  .bill-banner.bad { border-color: rgba(239,68,68,0.32); }
+  .bill-banner.warn { border-color: rgba(245,158,11,0.3); }
+  .bill-banner p { margin: 0; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .bill-banner p b { font-size: 14.5px; font-weight: 600; line-height: 1.3; }
+  .bill-banner p span { font-size: 13px; color: var(--muted); line-height: 1.45; }
+  .bill-banner-acts { display: flex; align-items: center; gap: 4px; }
+  .bill-banner .ghost-btn { color: var(--text); white-space: nowrap; }
+  .bill-banner.bad .ghost-btn { border-color: rgba(239,68,68,0.45); }
+  .bill-banner.warn .ghost-btn { border-color: rgba(245,158,11,0.4); }
+  .bill-banner-x { width: 32px; height: 32px; display: grid; place-items: center; background: none; border: none; color: var(--muted); border-radius: 8px; }
+  .bill-banner-x:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+  .bill-banner-x .ico { width: 16px; height: 16px; }
+  @media (max-width: 599px) {
+    .bill-banner { grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 10px 12px; }
+    .bill-banner-acts { grid-column: 2; justify-content: space-between; }
+  }
   .page { display: flex; flex-direction: column; }
   .page.old .mini-value, .page.old .stat-value, .page.old .flow-wrap,
   .page.old .chart-area, .page.old .wiw, .page.old .meter { opacity: 0.45; }
