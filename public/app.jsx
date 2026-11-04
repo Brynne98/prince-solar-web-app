@@ -1213,6 +1213,8 @@ function App({ links }) {
   useEffect(() => { energyRef.current = energy; }, [energy]);
 
   useEffect(() => { window.track('screen_viewed', { stage: 'dashboard', screen: tab }); }, [tab]);
+  // Back from Paystack's card page without paying, on a page outside Settings (which checks it itself).
+  useEffect(() => { if (!isSettings(tab)) window.billingReturn(); }, []);
 
   const loadNotifs = useCallback(() => { window.fetchNotifications().then(setNotifs).catch(() => {}); }, []);
   // ?day= and ?opened= (a pop-up's tap) are read once, then leave the address, as ?section= does.

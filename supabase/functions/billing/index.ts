@@ -91,11 +91,12 @@ const refundNow = (reference: string) => paystack("POST", "/refund", { transacti
   });
 
 /** Mark a charge failed (0116) and count it, by user id only (SOLAR-243). A charge
- *  already settled ("again") was counted the first time. A failed count never stops the report. */
-async function chargeFailed(reference: string, error: string, renewal: boolean) {
+ *  already settled ("again") was counted the first time; a card page left without trying a
+ *  card is not a decline (declined false, SOLAR-338). A failed count never stops the report. */
+async function chargeFailed(reference: string, error: string, renewal: boolean, declined = true) {
   const r = await rpc<{ status?: string; kind?: string; applied?: boolean; again?: boolean }>("billing_charge_failed",
     { p_reference: reference, p_error: error });
-  if (r?.status === "failed" && !r.again) {
+  if (declined && r?.status === "failed" && !r.again) {
     const user = await rpc<string | null>("billing_charge_user", { p_reference: reference }).catch(() => null);
     if (user) await track("payment_failed", user, reference, new Date().toISOString(), { renewal });
   }
@@ -146,7 +147,7 @@ async function settle(tx: Tx, out: { kind?: string } = {}, renewal = false): Pro
   // Reversed: refunded. A card change's R1 goes back on purpose, often before the
   // user's /verify (the webhook came first); 0120 answers that it was paid.
   if (["failed", "abandoned", "reversed", "reversal-pending"].includes(tx.status)) {
-    const r = await chargeFailed(tx.reference, tx.gateway_response || tx.status, renewal);
+    const r = await chargeFailed(tx.reference, tx.gateway_response || tx.status, renewal, tx.status === "failed");
     if (r?.status === "paid") { out.kind = r.kind; return r.applied === false ? "refund" : "paid"; }
     return "failed";
   }

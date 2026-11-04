@@ -162,6 +162,14 @@ const REFUND_NOTE = 'Your plan changed while you paid, so nothing changed. The p
 // paidEvent: { name, props } sent once the money is taken, here or back from the card page (SOLAR-268).
 let paying = false;
 const PAID_EVENT = 'ps.paidEvent';
+// The card-page payment last opened. Paystack sends the user back with ?reference= only
+// once paid; after a decline they close the page and come back without it, so
+// billingReturn checks this one instead (SOLAR-338).
+const OPEN_REF = 'ps.cardPage';
+const openCardPage = (r) => { try { sessionStorage.setItem(OPEN_REF, r.reference); } catch (e) {} location.assign(r.url); };
+// Back with the browser's back button the page is restored as it was, so nothing checks
+// the payment: load it again.
+window.addEventListener('pageshow', (e) => { try { if (e.persisted && sessionStorage.getItem(OPEN_REF)) location.reload(); } catch (x) {} });
 
 // A question over the page (SOLAR-286): the browser's own modal dialog dims the page, keeps
 // focus inside and closes on Escape. A click on the dimmed page outside it closes it too,
@@ -248,7 +256,7 @@ window.startUpgrade = async function startUpgrade(plan, period, newCard = false,
     if (r.url) {
       window.track('checkout_opened', { plan, period });
       try { paidEvent ? sessionStorage.setItem(PAID_EVENT, JSON.stringify(paidEvent)) : sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
-      location.assign(r.url);
+      openCardPage(r);
     } else if (r.status === 'paid') {
       if (paidEvent) window.track(paidEvent.name, paidEvent.props);
       billingPaid(plan, paidEvent?.name === 'yearly_switch_done');
@@ -269,7 +277,7 @@ window.settlePayment = async function settlePayment() {
   const stop = working('Opening the card page…');
   try {
     const r = await billingCall('pay', { settle: true });
-    location.assign(r.url);
+    openCardPage(r);
   } catch (e) {
     stop();
     payFailed(e, 'Couldn’t start the payment. Try again.');
@@ -282,7 +290,7 @@ window.changeCard = async function changeCard() {
   const stop = working('Opening the card page…');
   try {
     const r = await billingCall('pay', { card: true });
-    location.assign(r.url);
+    openCardPage(r);
   } catch (e) {
     stop();
     payFailed(e, 'Couldn’t open the card page. Try again.');
@@ -290,12 +298,17 @@ window.changeCard = async function changeCard() {
 };
 
 // Once, when Account opens: back from Paystack's card page (?reference=), after a
-// payment (?billing=paid), or from the "Pay with another card" email (?pay=1).
+// payment (?billing=paid), or from the "Pay with another card" email (?pay=1). Also once
+// on any other page, for a card page closed without paying (OPEN_REF).
 window.billingReturn = async function billingReturn(billingStatus) {
   const q = new URLSearchParams(location.search);
-  const ref = q.get('reference'), done = q.get('billing'), pay = q.get('pay');
+  const done = q.get('billing'), pay = q.get('pay');
+  let ref = q.get('reference'), open = null;
+  try { open = sessionStorage.getItem(OPEN_REF); sessionStorage.removeItem(OPEN_REF); } catch (e) {}
+  const fromUrl = !!(ref || done || pay);
+  ref = ref || (!done && !pay ? open : null);
   if (!ref && !done && !pay) return;
-  history.replaceState(null, '', planUrl());
+  if (fromUrl) history.replaceState(null, '', planUrl());
   if (pay) {
     if (billingStatus?.state === 'past_due') await window.settlePayment();
     return;
