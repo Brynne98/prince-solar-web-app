@@ -101,6 +101,8 @@ const rand = (n) => 'R' + Number(n).toLocaleString('en-US');
 // "30 Nov"; a date in another year carries it ("31 Oct 2027"), so a yearly date doesn't read as this year's.
 const billDay = (d) => window.dayText(d, { day: 'numeric', month: 'short', year: d.slice(0, 4) === String(new Date().getFullYear()) ? undefined : 'numeric' });
 const perUnit = (period) => (period === 'yearly' ? 'a year' : 'a month');
+// here, not in tabs.jsx, so the billing notices in the header can name a plan before tabs loads
+const PLAN_NAME = { free: 'Free', home: 'Home', family: 'Family' };
 // extras: the extra plants wanted on Family in all; null keeps those held (SOLAR-264).
 // A billing read or change that takes too long ends as an error, so no button or pop-up waits
 // forever (SOLAR-294). The caller says "try again"; a change may still land, so it re-reads.

@@ -2060,7 +2060,6 @@ function PlantLine({ name, off, children }) {
 // switch wait for the billing date; going up is an upgrade and charges now
 // (window.startUpgrade). A downgrade with more plants than the new plan covers first picks
 // the plants it keeps (SOLAR-295): the others collect until the billing date, then stop.
-const PLAN_NAME = { free: 'Free', home: 'Home', family: 'Family' };
 const PLAN_RANK = { free: 0, home: 1, family: 2 };
 const planRoom = (plan, extra) => (plan === 'family' ? 3 + (extra || 0) : 1);
 // The plants a downgrade picks from, under their logins as Billing lists them: collecting
