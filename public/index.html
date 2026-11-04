@@ -720,14 +720,15 @@
      middle and each part's kWh beside it. The card stretches to the row; the pie sits centred. */
   .solar-tab .wiw { display: flex; flex-direction: column; }
   .solar-tab .wiw .section-title { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 5px 12px; margin-bottom: 14px; }
-  .pie-wrap { flex: 1; display: flex; align-items: center; gap: 28px; }
+  /* the figures drop under the pie when the card is too narrow for both side by side */
+  .pie-wrap { flex: 1; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 28px; }
   .pie { width: 150px; height: 150px; flex: none; }
   .pie circle { fill: none; stroke-width: 18; }
   .pie-track { stroke: rgba(255,255,255,0.06); }
   .pie-num { text-anchor: middle; font: 700 24px var(--mono); fill: var(--text); }
   .pie-u { font-size: 12px; opacity: 0.85; }
   .pie-word { text-anchor: middle; font: 500 10px var(--display); letter-spacing: 0.12em; text-transform: uppercase; fill: var(--muted); }
-  .pie-figs { flex: 1; min-width: 0; display: grid; gap: 18px; }
+  .pie-figs { flex: 1 1 auto; min-width: 0; display: grid; gap: 18px; }
   .pie-figs > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
   .pie-figs span:not(.u) { font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
   .pie-figs b { font: 700 22px var(--mono); line-height: 1; white-space: nowrap; }
@@ -1292,7 +1293,8 @@
     .solar-stats { gap: 12px; }
     .solar-stats .stat-tile { padding: 18px; }
     .solar-tab .section-title { flex-direction: column; align-items: flex-start; gap: 5px; }
-    .solar-row { gap: 14px; }
+    /* one 12 px gap between every card on Solar, Home and Grid, as between the figure tiles */
+    .solar-tab.stack, .solar-row { gap: 12px; }
     .pie { width: 120px; height: 120px; }
     .pie-wrap { gap: 20px; }
     .pie-figs { gap: 14px; }
