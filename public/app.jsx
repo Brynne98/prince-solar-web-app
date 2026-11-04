@@ -375,12 +375,16 @@ function billNotice(n, act) {
         : `That was the last try. Your account moves to Free on ${billDay(n.freeOn)} unless it’s paid.`,
       button: 'Pay with another card', run: () => window.settlePayment() };
     case 'bill_removal_soon': {
-      const one = n.plants.length === 1;
+      // up to 3 names, then a count: the banner stays short on a phone
+      const p = n.plants, one = p.length === 1;
+      const list = p.length > 3 ? `${p.slice(0, 3).join(', ')} and ${p.length - 3} more`
+        : p.length > 1 ? `${p.slice(0, -1).join(', ')} and ${p[p.length - 1]}` : p[0] || 'A plant';
+      const why = `Your plan covers ${n.room} plant${n.room === 1 ? '' : 's'}. ${one ? 'Its' : 'Their'} history goes too.`;
       return { banner: true, tone: 'warn', icon: 'trash', closable: 'bill_removal_soon:' + n.on,
-        title: `${n.plants.length > 2 ? n.plants.length + ' plants' : n.plants.join(' and ')} ${one ? 'is' : 'are'} deleted on ${billDay(n.on)}`,
-        lead: `${one ? 'Its' : 'Their'} history goes too.`,
-        body: `${one ? 'Its' : 'Their'} history goes too. Linking a plant again later brings back only the last 60 days from SunSynk.`,
-        button: 'Choose the plant to keep', run: act.plan };
+        title: `${list} will be deleted on ${billDay(n.on)}`,
+        lead: why,
+        body: `${why} Linking a plant again later brings back only the last 60 days from SunSynk.`,
+        button: one ? `Keep ${p[0]}` : 'Keep them', run: act.plan };
     }
     case 'bill_free': {
       const stopped = n.stopped || [];

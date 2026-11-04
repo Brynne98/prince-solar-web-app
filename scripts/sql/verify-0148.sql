@@ -52,6 +52,7 @@ update private.billing set remove_on = (select d + 3 from t), next_billing_date 
  where user_id = '00000000-0000-0000-0000-00000000c001';
 select pg_temp.ok(pg_temp.kinds() = 'bill_removal_soon,bill_change', 'plants deleted soon shows 3 days before, first');
 select pg_temp.ok(pg_temp.pin('bill_removal_soon')->'plants' = '["Farm"]', 'deleted soon: the plant names');
+select pg_temp.ok((pg_temp.pin('bill_removal_soon')->>'room')::int = 1, 'deleted soon: a booked cancel leaves room for 1 plant');
 update private.billing set remove_on = (select d + 4 from t) where user_id = '00000000-0000-0000-0000-00000000c001';
 select pg_temp.ok(pg_temp.kinds() = 'bill_change', 'deleted soon not shown 4 days before');
 -- undone

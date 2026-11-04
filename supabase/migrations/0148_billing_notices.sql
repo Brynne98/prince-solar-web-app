@@ -7,7 +7,8 @@
 -- words (the emails' words, in app.jsx), from these facts:
 --
 --   bill_failed          past due: amount, nextTry (null after the last try), freeOn
---   bill_removal_soon    plants deleted within 3 days, as bill_removal_soon's email
+--   bill_removal_soon    plants deleted within 3 days, as bill_removal_soon's email,
+--                        and how many plants the plan covers
 --   bill_free            moved to Free by a failed payment, for 30 days after its
 --                        email: kept and stopped plants, deleteOn
 --   bill_change          a change booked for the billing date (cancel, downgrade,
@@ -43,7 +44,9 @@ begin
   end if;
 
   if b.remove_on > today and b.remove_on <= today + 3 and cardinality(b.plants_to_remove) > 0 then
+    -- room: the plants the plan covers from that date (a booked change, else today's plan)
     out := out || jsonb_build_object('kind', 'bill_removal_soon', 'on', b.remove_on,
+      'room', coalesce(private.billing_next_room(b), public.billing_room(b.plan, b.extra_plants)),
       'plants', coalesce((select jsonb_agg(coalesce(pu.plant_name, 'Plant ' || pu.plant_id) order by pu.linked_at)
                    from plant_users pu where pu.user_id = me and pu.plant_id = any (b.plants_to_remove)), '[]'));
   end if;
