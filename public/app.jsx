@@ -1158,7 +1158,11 @@ function FreeWeekOver({ onDone }) {
 // them to pick a plan adds section=plans (SOLAR-341): it opens once, when the app is up.
 let plansAsked = new URLSearchParams(location.search).get('section') === 'plans';
 function PlansSheet() {
-  const [open, setOpen] = useState(() => { const a = plansAsked; plansAsked = false; return a; });
+  const [open, setOpen] = useState(() => {
+    const a = plansAsked; plansAsked = false;
+    if (a) window.track('lock_tapped', { where: 'email' });
+    return a;
+  });
   useEffect(() => {
     const on = () => setOpen(true);
     window.addEventListener('ps-plans', on);
