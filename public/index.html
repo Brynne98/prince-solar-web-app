@@ -285,18 +285,27 @@
   .nl-foot { display: block; width: 100%; min-height: 44px; margin-top: 4px; padding: 12px 16px; background: none; border: none; border-top: 1px solid var(--line);
     color: var(--text); font: 500 13.5px var(--display); text-align: center; touch-action: manipulation; }
   .nl-foot:hover { background: rgba(255,255,255,0.04); }
-  /* the full page (SOLAR-327): the bell list's head and rows, with filters */
-  .alerts-page { max-width: 720px; padding-bottom: 24px; }
-  .alerts-head { padding: 0; }
-  .alerts-head h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
-  .alerts-head h1 + .nl-gear { margin-left: auto; }
-  .alerts-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 16px 0 6px; }
+  /* the full page (SOLAR-327): Settings' look, a card per day under its date */
+  .alerts-page { max-width: 920px; padding-bottom: 24px; }
+  .alerts-head { padding: 0; gap: 8px; }
+  .alerts-head .page-head h1 { margin: 0; }
+  .alerts-head .page-head + .nl-gear { margin-left: auto; }
+  .alerts-head .page-head + .nl-all { margin-left: auto; }
+  .alerts-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 18px 0 4px; }
   .alerts-row2 { display: flex; align-items: center; gap: 16px; }
   .alerts-kind { width: 170px; }
   .alerts-unread { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--muted); }
-  .alerts-list .nl-row { padding-left: 2px; padding-right: 4px; }
-  .alerts-list .nl-day { padding-left: 12px; }
-  .alerts-more { text-align: center; padding: 16px 0 8px; }
+  .alerts-list .nl-day { padding: 18px 2px 8px; font-size: 13px; color: var(--muted); }
+  .card.alerts-card { padding: 4px 8px; }
+  .alerts-card .nl-row { padding: 12px 12px 12px 6px; }
+  .alerts-card .nl-row + .nl-row { margin-top: 2px; }
+  /* wide: the time sits on the right, level with the title */
+  @media (min-width: 900px) {
+    .alerts-card .nl-text { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 32px; }
+    .alerts-card .nl-title, .alerts-card .nl-body { grid-column: 1; }
+    .alerts-card .nl-where { grid-column: 2; grid-row: 1 / span 2; align-self: center; margin-top: 0; text-align: right; }
+  }
+  .alerts-more { text-align: center; padding: 18px 0 8px; }
   .alerts-more .ghost-btn { min-height: 40px; padding: 8px 18px; }
   .nl-empty { padding: 40px 28px 28px; text-align: center; }
   .nl-empty .nl-glyph { margin: 0 auto 14px; width: 44px; height: 44px; border-radius: 12px; }
@@ -309,6 +318,7 @@
     .nl-head { padding-left: 8px; }
     .nl-back { display: grid; margin-right: 2px; }
     .alerts-head { margin-left: -8px; }
+    .card.alerts-card { padding: 2px 4px; border-radius: 14px; }
     .alerts-filters { flex-direction: column; align-items: stretch; }
     .alerts-range { display: flex; } .alerts-range .seg-btn { flex: 1; }
     .alerts-row2 { justify-content: space-between; }

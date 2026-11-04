@@ -508,11 +508,11 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
 }
 
 // Alert rows under day headings, as the bell list and the full page show them.
-// when(it): the time line after the plant's name.
-function NotifRows({ items, when }) {
+// when(it): the time line after the plant's name. heads={false}: no day headings.
+function NotifRows({ items, when, heads = true }) {
   let day = null;
   return items.map(it => {
-    const head = it.day !== day ? <div className="nl-day">{notifDay(it.day)}</div> : null;
+    const head = heads && it.day !== day ? <div className="nl-day">{notifDay(it.day)}</div> : null;
     day = it.day;
     return (
       <React.Fragment key={it.id}>
@@ -538,6 +538,9 @@ function alertSpan(it) {
   const end = it.endTime + (it.endDay !== it.day ? ' ' + window.dayText(it.endDay, { weekday: 'short' }) : '');
   return `${it.time} to ${end}, ${window.fmtDuration(Math.max(1, Math.round((it.endAt - it.at) / 60)))}`;
 }
+
+// [[day, items]] in the order given
+const alertDays = (items) => [...items.reduce((m, it) => m.set(it.day, [...(m.get(it.day) || []), it]), new Map())];
 
 const ALERT_RANGES = [['day', 'Day', 1], ['week', 'Week', 7], ['month', 'Month', 30], ['year', 'Year', 365], ['all', 'All', null]];
 const ALERT_KINDS = [{ value: 'all', label: 'All alerts' }, { value: 'grid', label: 'Grid' }, { value: 'battery', label: 'Battery' },
@@ -585,7 +588,7 @@ function AlertsPage({ onBack, onSettings, onShown, onReadAll }) {
     <div className="alerts-page">
       <div className="nl-head alerts-head">
         <button type="button" className="nl-back" aria-label="Back" onClick={onBack}><Icon id="back" /></button>
-        <h1>Notifications</h1>
+        <div className="page-head"><h1>Notifications</h1></div>
         {res?.unread > 0 && <button type="button" className="nl-all" onClick={readAll}>Mark all read</button>}
         <button type="button" className="nl-gear" aria-label="Notification settings" onClick={onSettings}><Icon id="settings" /></button>
       </div>
@@ -604,7 +607,7 @@ function AlertsPage({ onBack, onSettings, onShown, onReadAll }) {
           <button type="button" className="ghost-btn" onClick={load}>Try again</button>
         </div>
       )}
-      {!failed && !res && <div className="alerts-list">{[0, 1, 2, 3].map(i => <Skeleton key={i} h={62} r={10} style={{ marginTop: 8 }} />)}</div>}
+      {!failed && !res && <div className="alerts-list">{[0, 1, 2].map(i => <Skeleton key={i} h={150} r={16} style={{ marginTop: 40 }} />)}</div>}
       {res && !res.items.length && (
         <div className="nl-empty">
           <span className="nl-glyph g-readings"><Icon id="bell" /></span>
@@ -613,7 +616,13 @@ function AlertsPage({ onBack, onSettings, onShown, onReadAll }) {
           {(range !== 'all' || kind !== 'all' || unreadOnly) && <button type="button" className="ghost-btn" onClick={reset}>Show all alerts</button>}
         </div>
       )}
-      {res && res.items.length > 0 && <div className="alerts-list"><NotifRows items={res.items} when={alertSpan} /></div>}
+      {/* a card per day, under its date, as Settings puts each section's card under its title */}
+      {res && res.items.length > 0 && <div className="alerts-list">{alertDays(res.items).map(([day, rows]) => (
+        <section key={day} className="alerts-day" aria-label={notifDay(day)}>
+          <div className="nl-day">{notifDay(day)}</div>
+          <Card className="alerts-card"><NotifRows items={rows} when={alertSpan} heads={false} /></Card>
+        </section>
+      ))}</div>}
       {res?.more && <div className="alerts-more"><BusyButton className="ghost-btn" busy={more} busyText="Loading…" onClick={showMore}>Show more</BusyButton></div>}
     </div>
   );
