@@ -248,8 +248,10 @@
   .bell-btn .ico { width: 18px; height: 18px; }
   .bell-count { position: absolute; top: -6px; right: -6px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
     background: var(--bad); color: #fff; font-size: 10.5px; font-weight: 600; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--bg); }
-  .notif-panel { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; width: 400px; max-height: min(640px, calc(100vh - 90px)); overflow-y: auto;
-    border-radius: 14px; padding-bottom: 4px; }
+  .notif-panel { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; width: 400px; max-height: min(640px, calc(100vh - 90px));
+    display: flex; flex-direction: column; overflow: hidden; border-radius: 14px; }
+  .nl-head { flex: none; }
+  .nl-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 4px; }
   .nl-head { display: flex; align-items: center; gap: 6px; padding: 12px 10px 6px 16px; }
   .nl-head h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
   .nl-all { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 13px; font-weight: 500; padding: 8px 6px; }
@@ -259,9 +261,9 @@
   .nl-gear .ico, .nl-back .ico { width: 18px; height: 18px; }
   .nl-back { display: none; }
   .nl-day { padding: 12px 16px 4px; font-size: 12.5px; color: var(--dim); font-weight: 500; }
-  .nl-row { display: grid; grid-template-columns: 8px 32px minmax(0, 1fr) 14px; gap: 10px; align-items: start; width: 100%; padding: 9px 14px 9px 10px;
-    background: none; border: none; color: var(--text); text-align: left; }
-  .nl-row:hover, .nl-row:focus-visible { background: rgba(255,255,255,0.04); outline: none; }
+  /* a row is not a link (SOLAR-327) */
+  .nl-row { display: grid; grid-template-columns: 8px 32px minmax(0, 1fr); gap: 10px; align-items: start; width: 100%; padding: 9px 14px 9px 10px;
+    color: var(--text); }
   .nl-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 12px; }
   .nl-row.unread .nl-dot { background: var(--ok); }
   .nl-glyph { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; }
@@ -272,8 +274,7 @@
   .g-readings, .g-sunsynk { background: rgba(255,255,255,0.07); color: var(--muted); }
   .g-bad { background: rgba(239,68,68,0.14); color: var(--bad); }
   .g-warn { background: rgba(245,158,11,0.14); color: var(--warn); }
-  /* billing notices (SOLAR-212): pinned above the alerts, a button instead of a tap */
-  .nl-pin:hover { background: none; }
+  /* billing notices (SOLAR-212): pinned above the alerts, with a button */
   .nl-pin .nl-title { font-weight: 600; }
   .nl-act { margin-top: 8px; }
   .nl-text { display: flex; flex-direction: column; min-width: 0; }
@@ -281,8 +282,22 @@
   .nl-row.unread .nl-title { font-weight: 600; }
   .nl-body { font-size: 13px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
   .nl-where { font-size: 12px; color: var(--dim); margin-top: 3px; }
-  .nl-chev { color: #56606e; margin-top: 8px; } .nl-chev .ico { width: 14px; height: 14px; }
-  .nl-foot { padding: 12px 16px; font-size: 12.5px; color: var(--dim); text-align: center; }
+  .nl-foot { display: block; width: 100%; min-height: 44px; margin-top: 4px; padding: 12px 16px; background: none; border: none; border-top: 1px solid var(--line);
+    color: var(--text); font: 500 13.5px var(--display); text-align: center; touch-action: manipulation; }
+  .nl-foot:hover { background: rgba(255,255,255,0.04); }
+  /* the full page (SOLAR-327): the bell list's head and rows, with filters */
+  .alerts-page { max-width: 720px; padding-bottom: 24px; }
+  .alerts-head { padding: 0; }
+  .alerts-head h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .alerts-head h1 + .nl-gear { margin-left: auto; }
+  .alerts-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 16px 0 6px; }
+  .alerts-row2 { display: flex; align-items: center; gap: 16px; }
+  .alerts-kind { width: 170px; }
+  .alerts-unread { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--muted); }
+  .alerts-list .nl-row { padding-left: 2px; padding-right: 4px; }
+  .alerts-list .nl-day { padding-left: 12px; }
+  .alerts-more { text-align: center; padding: 16px 0 8px; }
+  .alerts-more .ghost-btn { min-height: 40px; padding: 8px 18px; }
   .nl-empty { padding: 40px 28px 28px; text-align: center; }
   .nl-empty .nl-glyph { margin: 0 auto 14px; width: 44px; height: 44px; border-radius: 12px; }
   .nl-empty b { display: block; font-size: 16px; font-weight: 600; margin-bottom: 6px; }
@@ -293,6 +308,11 @@
       background: var(--bg); padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); }
     .nl-head { padding-left: 8px; }
     .nl-back { display: grid; margin-right: 2px; }
+    .alerts-head { margin-left: -8px; }
+    .alerts-filters { flex-direction: column; align-items: stretch; }
+    .alerts-range { display: flex; } .alerts-range .seg-btn { flex: 1; }
+    .alerts-row2 { justify-content: space-between; }
+    .alerts-kind { width: auto; flex: 1; max-width: 200px; }
     /* the header is its own layer (sticky, z-index 5): lift it over the bar and the setup card while the list is open */
     .head:has(.notif-panel) { z-index: 30; }
   }
