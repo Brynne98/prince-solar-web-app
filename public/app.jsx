@@ -1154,15 +1154,9 @@ function FreeWeekOver({ onDone }) {
   );
 }
 
-// Every lock opens this (window.openPlans): the plans, yearly first. An email that asks
-// them to pick a plan adds section=plans (SOLAR-341): it opens once, when the app is up.
-let plansAsked = new URLSearchParams(location.search).get('section') === 'plans';
+// Every lock opens this (window.openPlans): the plans, yearly first.
 function PlansSheet() {
-  const [open, setOpen] = useState(() => {
-    const a = plansAsked; plansAsked = false;
-    if (a) window.track('lock_tapped', { where: 'email' });
-    return a;
-  });
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     const on = () => setOpen(true);
     window.addEventListener('ps-plans', on);
@@ -1307,9 +1301,8 @@ function App({ links }) {
       const url = new URL(location.href);
       const linked = Number(url.searchParams.get('plant'));
       // A report or alert footer adds section=notifications: open Account on the email switches.
-      // A payment email or Paystack's return adds section=plan: Billing. section=plans is
-      // Billing too, with the plans on top (PlansSheet).
-      const section = { logins: 'connection', notifications: 'notifications', plan: 'plan', plans: 'plan' }[url.searchParams.get('section')];
+      // A payment email or Paystack's return adds section=plan: Billing.
+      const section = { logins: 'connection', notifications: 'notifications', plan: 'plan' }[url.searchParams.get('section')];
       if (url.searchParams.has('section')) {
         url.searchParams.delete('section'); history.replaceState(history.state, '', url);
       }
@@ -1463,7 +1456,8 @@ function App({ links }) {
   // an open Billing page (ps-billing) to re-read the plan. Before tabs.js is here, Billing.
   const noticeAct = {
     plan: () => openSettings('plan'),
-    plans: () => window.openPlans('notice'),
+    // Adjust plan: Free, Home and Family side by side, as the emails open it (SOLAR-341)
+    plans: () => go('plans'),
     undo: (n) => (window.undoBooked ? window.undoBooked(n, loadNotifs).then(ok => {
       if (!ok) return;
       window.dispatchEvent(new Event('ps-billing'));

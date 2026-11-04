@@ -622,8 +622,9 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
 const PLAN = `${APP}/?tab=account&section=plan`;
 // "Pay with another card": the Plan section opens Paystack's card page for the failed payment.
 export const PAY_URL = `${PLAN}&pay=1`;
-// Buttons that ask them to pick a plan: Billing with the plans open (SOLAR-341).
-const PLANS = `${APP}/?tab=account&section=plans`;
+// Buttons that ask them to pick a plan open Adjust plan: Free, Home and Family side by
+// side (SOLAR-341).
+const PLANS = `${APP}/?tab=plans`;
 // What Free means after its first week, said the same way in every email.
 const FREE_RULE = "we keep only the last 24 hours of readings. Alerts stay on; reports stop.";
 // After a paid plan, readings stay 30 days first (SOLAR-329, 0146).
