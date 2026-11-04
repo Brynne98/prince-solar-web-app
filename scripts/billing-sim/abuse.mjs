@@ -32,7 +32,7 @@ const RUN = String(Date.now()).slice(-6);
 const argv = process.argv.slice(2);
 const si = argv.indexOf("--seed");
 const SEED = si < 0 ? 1 : Number(argv[si + 1]);
-const only = argv.filter((a, i) => a !== "--seed" && i !== si + 1);
+const only = argv.filter((a, i) => a !== "--seed" && (si < 0 || i !== si + 1));
 // seeded shuffle for the C attacks: each seed fires the same requests in another order
 let rs = (SEED * 2654435761) >>> 0;
 const rnd = () => { rs = (rs + 0x6D2B79F5) >>> 0; let t = Math.imul(rs ^ (rs >>> 15), 1 | rs); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -87,6 +87,9 @@ async function pay(u, body = {}) {
   }
   return o.data;
 }
+// A plan's price at the offer a charge was opened with (0145: the launch offer charges less).
+const priceAt = (ref, plan, period, extras = 0) => num(`select public.billing_amount('${plan}', '${period}', ${extras},
+  (select offer_id from private.billing_charges where reference = '${ref}'))`);
 const active = (u) => num(`select count(*) from public.plant_users where user_id='${u.id}' and not paused`);
 const planOf = (u) => sql(`select coalesce((select plan from private.billing where user_id='${u.id}'),'free')`);
 const family = async (label) => { const u = await user(label); const p = await pay(u, { plan: "family", period: "monthly" }); if (p.err) throw new Error(p.err); return u; };
@@ -142,12 +145,13 @@ await ensureMock();
 const ALLOW_AUTH = new Set(`_energy_row _erow _hm _plant_day_energy admin_overview api_account_delete api_balance api_billing_change
 api_billing_extras api_billing_keep api_billing_quote api_billing_status billing_room api_data_days api_db_stats api_energy api_export api_grid_off_recent api_health
 api_history api_history_earliest api_inverter_history api_link_disconnect api_link_remove api_link_status api_me api_notifications
-api_notifications_read api_overview api_plant_days api_plant_start api_plant_states api_plant_stop api_prefs_set api_push_sub
+api_notifications_read api_offer api_overview api_plant_days api_plant_start api_plant_states api_plant_stop api_prefs_set api_push_sub
 api_push_unsub api_string_health api_trends_by_hour api_trends_compare api_trends_daily calibration_plant cfg client_errors_cap
 day_start_epoch day_start_epoch_tz email_prefs_touch handle_new_user local_day local_day_tz local_hour local_hour_tz local_minute
 local_minute_tz local_ts local_ts_tz my_plant my_plant_ids panel_kwp plant_cfg plant_config_batt_sign_guard plant_config_features_guard
 plant_config_touch plant_tz profiles_guard q_by_hour q_day_agg q_day_gap_minutes q_grid_present q_recovered_minutes q_stats today_tz`.split(/\s+/));
-const ALLOW_ANON = new Set("api_health client_errors_cap email_prefs_touch handle_new_user local_day local_hour my_plant_ids panel_kwp plant_config_batt_sign_guard plant_config_features_guard plant_config_touch profiles_guard".split(" "));
+// api_offer: the website reads prices and the offer before sign-in (0145).
+const ALLOW_ANON = new Set("api_health api_offer client_errors_cap email_prefs_touch handle_new_user local_day local_hour my_plant_ids panel_kwp plant_config_batt_sign_guard plant_config_features_guard plant_config_touch profiles_guard".split(" "));
 const SERVICE_ONLY = ["billing_charge_open", "billing_charge_paid", "billing_charge_failed", "billing_charge_refunded", "billing_run", "billing_renew",
   "billing_set_comped", "billing_charge_disputed", "billing_refunds_due", "billing_charge_refund_event", "billing_book_change", "billing_book_removal", "billing_free_week_start", "billing_may_link", "billing_upgrade_quote",
   "billing_amount_due", "billing_settle_open", "billing_card_open", "plant_users_upsert", "account_upsert",
@@ -350,7 +354,7 @@ await attack("G4b", "crafted pay bodies: bad plan, period, extras (opened as /bi
     const o = await pay(a, body);
     const pl = planOf(a);
     if (!o.err && !(body.plan === "family" || body.plan === "home")) bad.push("accepted " + JSON.stringify(body));
-    if (!o.err && o.amount !== undefined && o.amount < (body.plan === "home" ? 99 : 179) && body.period !== "yearly") bad.push(`cheap ${JSON.stringify(body)} R${o.amount}`);
+    if (!o.err && o.amount !== undefined && o.amount < priceAt(o.reference, body.plan, "monthly") && body.period !== "yearly") bad.push(`cheap ${JSON.stringify(body)} R${o.amount}`);
     if (pl !== "free") { sql(`delete from private.billing where user_id='${a.id}'`); }
   }
   return { hit: bad.length > 0, note: bad.join("; ") };
@@ -399,10 +403,10 @@ await attack("G4f", "charge paid twice, and two start charges both paid", async 
   const a = await user("g4f"); const bad = [];
   const c1 = await svc("billing_charge_open", { p_user: a.id, p_plan: "home", p_period: "monthly" });
   const c2 = await svc("billing_charge_open", { p_user: a.id, p_plan: "family", p_period: "yearly" });
-  await svc("billing_charge_paid", { p_reference: c1.data.reference, p_cents: 9900 });
+  await svc("billing_charge_paid", { p_reference: c1.data.reference, p_cents: c1.data.amount * 100 });
   const d1 = sql(`select next_billing_date from private.billing where user_id='${a.id}'`);
-  await svc("billing_charge_paid", { p_reference: c1.data.reference, p_cents: 9900 });
-  await svc("billing_charge_paid", { p_reference: c2.data.reference, p_cents: 179900 });
+  await svc("billing_charge_paid", { p_reference: c1.data.reference, p_cents: c1.data.amount * 100 });
+  await svc("billing_charge_paid", { p_reference: c2.data.reference, p_cents: c2.data.amount * 100 });
   if (planOf(a) !== "home") bad.push("second start applied: " + planOf(a));
   if (sql(`select next_billing_date from private.billing where user_id='${a.id}'`) !== d1) bad.push("billing date moved");
   const wrong = await svc("billing_charge_paid", { p_reference: (await svc("billing_charge_open", { p_user: a.id, p_plan: "family", p_period: null })).data.reference, p_cents: 100 });
@@ -537,7 +541,9 @@ await attack("G7c", "stop an extra plant before renewal, start it again after: o
   sql(`update private.billing set next_billing_date = current_date where user_id='${a.id}'`);
   const r = await svc("billing_renew", { p_user: a.id });
   const s = await rpc(a, "api_plant_start", { p_plant: ex });
-  return { hit: good(s) && active(a) > 3 && r.data?.charge < 228, note: `renewal charge R${r.data?.charge}, restart ${s.status}` };
+  // Family and one extra plant, at the offer the account holds
+  const full = num(`select public.billing_amount('family', 'monthly', 1, private.billing_offer('${a.id}', private.billing_today()))`);
+  return { hit: good(s) && active(a) > 3 && r.data?.charge < full, note: `renewal charge R${r.data?.charge}, restart ${s.status}` };
 });
 await attack("G7d", "upgrade on the billing date costs nothing, then downgrade is booked", async () => {
   const h = await home("g7d");
@@ -608,13 +614,11 @@ await attack("G8d", "api_push_sub takes over another user's push endpoint", asyn
 const extrasPaid = (u) => Math.max(0, active(u) - 3 - num(`select coalesce((select extra_plants from private.billing where user_id='${u.id}'), 0)`));
 const ok = (u) => {
   const plan = planOf(u), comped = sql(`select coalesce((select comped from private.billing where user_id='${u.id}'), false)`) === "t";
-  const next = sql(`select coalesce((select next_plan from private.billing where user_id='${u.id}'), '')`);
-  const kept = num(`select count(*) from public.plant_users pu where user_id='${u.id}' and not paused
-                    and plant_id <> all (coalesce((select plants_to_remove from private.billing where user_id='${u.id}'), '{}'))`);
   if (comped) return null;
   if (plan !== "family" && active(u) > 1) return `${plan}: ${active(u)} collect`;
   if (plan === "family" && extrasPaid(u) > 0) return `family: ${extrasPaid(u)} plants collect past the room bought`;
-  if (next && next !== "family" && kept > 1) return `booked ${next}: ${kept} kept plants collect`;
+  // A booked downgrade lets every plant collect to the billing date, then stops those past
+  // the pick (0136, decided 2026-11-01); C2 checks the stop at renewal.
   return null;
 };
 await attack("C1", "a storm on each plan: links, stops, starts, pays, bookings all at once", async () => {
