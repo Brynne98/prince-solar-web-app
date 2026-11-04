@@ -503,7 +503,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         {(mode === 'signin' || mode === 'signup') && (<>
           {googleButton}
           {mode === 'signin' && <div className="login-fine">Continuing with Google creates an account and accepts
-            the <a href="terms.html" target="_blank" rel="noopener">Terms</a>, which limit what we owe you, and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>}
+            the <a href="terms.html" target="_blank" rel="noopener">Terms</a>, which limit what we owe you, and the <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>}
           <div className="login-or"><span>or with email</span></div>
         </>)}
 
