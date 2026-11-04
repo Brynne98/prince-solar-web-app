@@ -435,6 +435,22 @@ await attack("G5c", "billing function source: webhook signature, verify, run, or
   if (!/origin not allowed/.test(src)) bad.push("origin check");
   return { hit: bad.length > 0, note: bad.join(",") };
 });
+await attack("G5d", "verify: another user's payment reference is refused (SOLAR-208)", async () => {
+  const a = await user("g5d-a"); const b = await user("g5d-b"); const bad = [];
+  const o = await svc("billing_charge_open", { p_user: a.id, p_plan: "home", p_period: "monthly" });
+  if (!good(o)) throw new Error(`open charge: ${o.data?.message || o.status}`);
+  const ref = o.data.reference;
+  // the owner lookup is the server's alone
+  if (good(await rpc(b, "billing_charge_user", { p_reference: ref }))) bad.push("owner lookup open to users");
+  if (sql(`select public.billing_charge_user('${ref}') = '${a.id}'`) !== "t") bad.push("owner lookup wrong");
+  // Through the function: needs it served with a Paystack key (the mock); without one every route answers 503.
+  const verify = (u) => http("POST", `${FN}/billing/verify`, { jwt: u.jwt, body: { reference: ref } });
+  const rb = await verify(b);
+  if (rb.status === 503) return { hit: bad.length > 0, note: [...bad, "HTTP part skipped: billing served without a Paystack key"].join(",") };
+  if (rb.status !== 400 || rb.data?.error !== "unknown reference") bad.push(`other user got ${rb.status}`);
+  if ((await verify(a)).status === 400) bad.push("owner refused too");
+  return { hit: bad.length > 0, note: bad.join(",") };
+});
 
 // =================================================================== G6 link flow
 await attack("G6a", "Family: parallel links of five logins pass the 3-plant cover with no payment", async () => {
