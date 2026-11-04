@@ -2060,7 +2060,6 @@ function PlantLine({ name, off, children }) {
 // switch wait for the billing date; going up is an upgrade and charges now
 // (window.startUpgrade). A downgrade with more plants than the new plan covers first picks
 // the plants it keeps (SOLAR-295): the others collect until the billing date, then stop.
-const PLAN_NAME = { free: 'Free', home: 'Home', family: 'Family' };
 const PLAN_RANK = { free: 0, home: 1, family: 2 };
 const planRoom = (plan, extra) => (plan === 'family' ? 3 + (extra || 0) : 1);
 // The plants a downgrade picks from, under their logins as Billing lists them: collecting
@@ -3389,6 +3388,12 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
   const reloadPlan = () => Promise.all([reloadBilling(), links?.refresh?.()]).then(([b]) => b);
   // Back from a payment: billingReturn checks it (a paid one reloads the page).
   useEffect(() => { reloadBilling().then(b => window.billingReturn(b)).then(r => r === 'card' && reloadBilling()); }, []);
+  // a change undone from the Notifications list (SOLAR-212)
+  useEffect(() => {
+    const again = () => reloadBilling();
+    window.addEventListener('ps-billing', again);
+    return () => window.removeEventListener('ps-billing', again);
+  }, []);
   // Every plant on the logins once (a plant can be on two).
   const live = (links?.accounts || []).filter(a => a.status !== 'disabled');
   const plants = [...new Map(live.flatMap(a => a.plants || []).map(p => [p.plant_id, p])).values()];

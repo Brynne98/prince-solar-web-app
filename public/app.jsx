@@ -95,6 +95,10 @@ const NAV_ICONS = {
   power: '<path d="M12 2v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/>',
   bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   next: '<path d="m9 6 6 6-6 6"/>',
+  card: '<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19M6.5 15h4"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
 };
 // fixed strings from the table above, never data
 const Icon = ({ id, className }) => <svg className={'ico' + (className ? ' ' + className : '')} viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: NAV_ICONS[id] }} />;
@@ -357,11 +361,94 @@ function notifDay(day) {
   return window.dayText(day);
 }
 
+// Billing notices (SOLAR-212): the facts api_notifications pins (0148), in the emails'
+// words (_shared/email.ts). They stay at the top of the list until their state ends.
+// A failed payment and plants about to go are a banner on every page too; only the
+// second can be closed. act: { plan, plans, undo } from App.
+const FREE_PAID = 'we keep your readings for 30 days, then only the last 24 hours. Alerts stay on; reports stop.';
+function billNotice(n, act) {
+  const { rand, billDay } = window.billingFmt;
+  const plan = PLAN_NAME[n.plan];
+  switch (n.kind) {
+    case 'bill_failed': return { banner: true, tone: 'bad', icon: 'card', title: `Your payment of ${rand(n.amount)} didn’t go through`,
+      body: n.nextTry ? `We’ll try again on ${billDay(n.nextTry)}. If it’s still unpaid on ${billDay(n.freeOn)}, your account moves to Free.`
+        : `That was the last try. Your account moves to Free on ${billDay(n.freeOn)} unless it’s paid.`,
+      button: 'Pay with another card', run: () => window.settlePayment() };
+    case 'bill_removal_soon': {
+      // up to 3 names, then a count: the banner stays short on a phone
+      const p = n.plants, one = p.length === 1;
+      const list = p.length > 3 ? `${p.slice(0, 3).join(', ')} and ${p.length - 3} more`
+        : p.length > 1 ? `${p.slice(0, -1).join(', ')} and ${p[p.length - 1]}` : p[0] || 'A plant';
+      const why = `Your plan covers ${n.room} plant${n.room === 1 ? '' : 's'}. ${one ? 'Its' : 'Their'} history goes too.`;
+      return { banner: true, tone: 'warn', icon: 'trash', closable: 'bill_removal_soon:' + n.on,
+        title: `${list} will be deleted on ${billDay(n.on)}`,
+        lead: why,
+        body: `${why} Linking a plant again later brings back only the last 60 days from SunSynk.`,
+        button: one ? `Keep ${p[0]}` : 'Keep them', run: act.plan };
+    }
+    case 'bill_free': {
+      const stopped = n.stopped || [];
+      return { icon: 'card', title: 'Your account is now on Free',
+        body: `On Free, ${FREE_PAID}` + (stopped.length ? ` Still updating: ${(n.kept || []).join(', ')}. Stopped, deleted on ${billDay(n.deleteOn)}: ${stopped.join(', ')}.` : ''),
+        button: stopped.length ? 'Pay to keep these plants' : 'Pay now', run: act.plans };
+    }
+    case 'bill_change': {
+      const cancel = n.nextPlan === 'free', on = billDay(n.on);
+      return { icon: 'calendar', title: cancel ? `${plan} ends on ${on}` : n.nextPlan ? `You move to ${PLAN_NAME[n.nextPlan]} on ${on}`
+          : n.nextPeriod ? `You switch to ${n.nextPeriod} on ${on}` : `Extra plants drop to ${n.nextExtraPlants} on ${on}`,
+        body: 'Everything stays as it is until then.' + (cancel ? ` After that you’re on Free: ${FREE_PAID}` : ''),
+        // the same undo as Billing's Plan section (bookedChange)
+        button: n.nextPlan ? `Keep ${plan}` : n.nextPeriod ? `Stay ${n.period}` : `Keep ${n.extraPlants} extra plant${n.extraPlants === 1 ? '' : 's'}`,
+        run: () => act.undo(n) };
+    }
+    case 'bill_renewal_notice': return { icon: 'calendar', title: `Your yearly ${plan} plan renews on ${billDay(n.on)}`,
+      body: `Nothing changes: same plan, same price, ${rand(n.amount)}. To stop it, cancel before ${billDay(n.on)}.`,
+      button: 'See your plan', run: act.plan };
+    case 'free_week_soon': {
+      const day = new Date(n.endsAt).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Africa/Johannesburg' });
+      return { tone: 'warn', icon: 'clock', title: `On ${day}, ${n.days > 1 ? n.days + ' days of history' : 'the history'} for ${n.plant || 'your plant'} go${n.days > 1 ? '' : 'es'}`,
+        body: `Free keeps the last 24 hours. Keep your full history for R${n.perMonth} a month, billed yearly.`,
+        button: 'Keep my history', run: act.plans };
+    }
+    // FreeWeekOver's words
+    case 'free_week_ended': return { icon: 'clock', title: 'Your free week has ended', body: 'Free keeps the last 24 hours. Upgrade and your last 60 days come back.',
+      button: 'See plans', run: act.plans };
+    default: return null;
+  }
+}
+
+// The banner's close is kept on this device, for that one deletion date.
+const NOTICE_CLOSED = 'synsynk.noticeClosed';
+function BillBanners({ notices }) {
+  const [closed, setClosed] = useState(() => { try { return localStorage.getItem(NOTICE_CLOSED); } catch (e) { return null; } });
+  const close = (n) => {
+    window.track('notice_closed', { kind: n.kind });
+    try { localStorage.setItem(NOTICE_CLOSED, n.closable); } catch (e) { /* private mode: closed until reload */ }
+    setClosed(n.closable);
+  };
+  const shown = notices.filter(n => n.banner && (!n.closable || n.closable !== closed));
+  if (!shown.length) return null;
+  return (
+    <div className="bill-banners">
+      {shown.map(n => (
+        <div key={n.kind} className={'bill-banner ' + n.tone + (n.closable ? ' closable' : '')} role={n.closable ? 'status' : 'alert'}>
+          <span className={'nl-glyph g-' + n.tone}><Icon id={n.icon} /></span>
+          <p><b>{n.title}</b><span>{n.lead || n.body}</span></p>
+          <button type="button" className="ghost-btn" onClick={() => n.act('banner')}>{n.button}</button>
+          {/* top right at every width, out of the flow, so a wrap never moves it */}
+          {n.closable && <button type="button" className="bill-banner-x" aria-label="Close" onClick={() => close(n)}><Icon id="close" /></button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // disabled: the loading header holds its place, dimmed like Refresh (SOLAR-248)
-function NotifBell({ data, onOpen, onPick, onReadAll, onSettings, disabled }) {
+function NotifBell({ data, pinned = [], onOpen, onPick, onReadAll, onSettings, disabled }) {
   const [open, setOpen, ref] = usePopover();
   useEffect(() => { if (open) onOpen(); }, [open]);
-  const unread = data?.unread || 0;
+  // a billing notice counts until its state ends
+  const unread = (data?.unread || 0) + pinned.length;
   const close = () => setOpen(false);
   const items = data?.items;
   let day = null;
@@ -376,9 +463,21 @@ function NotifBell({ data, onOpen, onPick, onReadAll, onSettings, disabled }) {
           <div className="nl-head">
             <button type="button" className="nl-back" aria-label="Back" onClick={close}><Icon id="back" /></button>
             <h2>Notifications</h2>
-            {unread > 0 && <button type="button" className="nl-all" onClick={onReadAll}>Mark all read</button>}
+            {data?.unread > 0 && <button type="button" className="nl-all" onClick={onReadAll}>Mark all read</button>}
             <button type="button" className="nl-gear" aria-label="Notification settings" onClick={() => { close(); onSettings(); }}><Icon id="settings" /></button>
           </div>
+          {pinned.length > 0 && <div className="nl-day">Billing</div>}
+          {pinned.map(n => (
+            <div key={n.kind} className="nl-row nl-pin">
+              <span className="nl-dot" />
+              <span className={'nl-glyph g-' + (n.tone || 'readings')}><Icon id={n.icon} /></span>
+              <span className="nl-text">
+                <span className="nl-title">{n.title}</span>
+                <span className="nl-body">{n.body}</span>
+                <span><button type="button" className="ghost-btn nl-act" onClick={() => { close(); n.act('list'); }}>{n.button}</button></span>
+              </span>
+            </div>
+          ))}
           {items && !items.length && (
             <div className="nl-empty">
               <span className="nl-glyph g-readings"><Icon id="bell" /></span>
@@ -1351,7 +1450,22 @@ function App({ links }) {
     setNotifs(n => ({ ...n, unread: 0, items: n.items.map(x => ({ ...x, read: true })) }));
     window.readNotifications(null).catch(() => {});
   };
-  const bell = <NotifBell data={notifs} onOpen={loadNotifs} onPick={pickNotif} onReadAll={readAll} onSettings={() => openSettings('notifications')} />;
+  // Billing notices (SOLAR-212). An undo re-reads the list, so the notice goes, and tells
+  // an open Billing page (ps-billing) to re-read the plan. Before tabs.js is here, Billing.
+  const noticeAct = {
+    plan: () => openSettings('plan'),
+    plans: () => window.openPlans('notice'),
+    undo: (n) => (window.undoBooked ? window.undoBooked(n, loadNotifs).then(ok => {
+      if (!ok) return;
+      window.dispatchEvent(new Event('ps-billing'));
+      window.toast('The change you booked is undone.');
+    }) : openSettings('plan')),
+  };
+  const notices = (notifs?.pinned || []).map(n => {
+    const t = billNotice(n, noticeAct);
+    return t && { ...t, kind: n.kind, act: (where) => { window.track('notice_action_done', { kind: n.kind, where }); t.run(); } };
+  }).filter(Boolean);
+  const bell = <NotifBell data={notifs} pinned={notices} onOpen={loadNotifs} onPick={pickNotif} onReadAll={readAll} onSettings={() => openSettings('notifications')} />;
   const loginDead = links.accounts.some(a => a.status === 'needs_relink');
   // The free week (SOLAR-242): steps left mark the avatar; after it, history locks.
   const free = window.freeState(me);
@@ -1390,6 +1504,7 @@ function App({ links }) {
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
           <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} /><NotifBell disabled /></>}>
         {err && <div className="notice offline" role="alert"><p><b>Can't reach the server.</b> Retrying every minute.</p></div>}
+        <BillBanners notices={notices} />
         {null}
         {/* The Settings area never touches the snapshot: it draws for real. It sits in
             the same slot as in the loaded page below, so the first reading doesn't remount
@@ -1411,6 +1526,7 @@ function App({ links }) {
       {/* The raw error stays in the title; on screen it was a Postgres or JWT string a
           homeowner cannot act on. */}
       {err && <div className="notice stale" role="status" title={String(err)}>{/* reuse-check: allow */}<p><b>Couldn't refresh.</b> Showing the last good reading.</p></div>}
+      <BillBanners notices={notices} />
       {/* For the plant on screen. A plant still read through someone else's copy of the
           login stays quiet; a dead login still marks the avatar and Account with a dot. */}
       {dataPage && <PageNotice snap={snap} cutOff={plantCutOff} onReconnect={() => openSettings('connection')}
