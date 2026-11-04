@@ -5,7 +5,7 @@
 // when their cause happens (0102): poll steps each plant's state and queues grid,
 // battery, string and readings emails; triggers queue welcome, history, Reconnect
 // and account deleted. Each run here first calls email_sweep() for what only the
-// clock can tell (no readings for 15 min, SunSynk down/back, daily reminders,
+// clock can tell (no readings for 30 min, SunSynk down/back,
 // reports due today), then sends the queue: claim up to BATCH rows (skip locked,
 // so runs can overlap), build each email, send them in one Resend batch call,
 // and mark each row sent, skipped, failed, or queued again with a growing wait.
@@ -230,7 +230,10 @@ async function build(r: Row): Promise<Email | null> {
     case "batt_hot":
       // Counted only when the email goes: a 30-day scan, not one per minute while it stays hot.
       return ev({ kind: "batt_hot", at: hhmm(d.at, tz), tempC: d.tempC, hotDays: await rpc<number>("email_hot_days", { p_plant: p.id }) }, d.at);
+    case "batt_hot_back": return ev({ kind: "batt_hot_back", at: hhmm(d.at, tz), tempC: d.tempC, lasted: lasted(d.since, d.at) }, d.at);
     case "bank_drift": return ev({ kind: "bank_drift", banks: d.banks }, null);
+    case "bank_drift_back": return ev({ kind: "bank_drift_back", banks: d.banks, lasted: lasted(d.since, d.at) }, d.at);
+    case "string_back": return ev({ kind: "string_back", string: d.string, inverter: d.inverter, at: hhmm(d.at, tz), lasted: lasted(d.since, d.at) }, d.at);
     case "string_dead": return ev({ kind: "string_dead", string: d.string, inverter: d.inverter, since: hhmm(d.since, tz) }, d.since);
     case "logger_stale": return ev({ kind: "logger_stale", since: hhmm(d.since, tz), inverter: d.inverter ?? undefined }, d.since);
     case "logger_back": return ev({ kind: "logger_back", at: hhmm(d.at, tz), lasted: lasted(d.since, d.at), inverter: d.inverter ?? undefined }, d.at);
@@ -421,7 +424,7 @@ async function pushPass(deadline: number) {
 
 async function run(dry: boolean, withHtml: boolean, push: boolean) {
   const started = Date.now();
-  // What only the clock can tell: no readings, SunSynk, daily reminders, reports.
+  // What only the clock can tell: no readings, SunSynk, reports.
   const swept = dry ? null : await rpc<Record<string, unknown>>("email_sweep").catch((e) => ({ error: String(e?.message ?? e) }));
   const lines: Record<string, unknown>[] = [];
   const count = { sent: 0, queued: 0, failed: 0, skipped: 0 };
@@ -508,8 +511,11 @@ async function renderAll(plantId: number, today?: string) {
     ["grid-down", { kind: "grid_down", at: hhmm(now - 240, p.tz), chargePct: 62 }],
     ["grid-back", { kind: "grid_back", at: hhmm(now, p.tz), lasted: lasted(now - 5580, now) }],
     ["battery-hot", { kind: "batt_hot", at: hhmm(now, p.tz), tempC: 47, hotDays: 3 }],
+    ["battery-cooled", { kind: "batt_hot_back", at: hhmm(now, p.tz), tempC: 41, lasted: lasted(now - 3900, now) }],
     ["batteries-uneven", { kind: "bank_drift", banks: [{ name: "Inverter 1", chargePct: 72 }, { name: "Inverter 2", chargePct: 60 }] }],
     ["panels-stopped", { kind: "string_dead", string: "String 3", inverter: "Inverter 1", since: hhmm(now - 1200, p.tz) }],
+    ["batteries-even", { kind: "bank_drift_back", banks: [{ name: "Inverter 1", chargePct: 70 }, { name: "Inverter 2", chargePct: 66 }], lasted: lasted(now - 11400, now) }],
+    ["panels-back", { kind: "string_back", string: "String 3", inverter: "Inverter 1", at: hhmm(now, p.tz), lasted: lasted(now - 7800, now) }],
     ["no-readings", { kind: "logger_stale", since: hhmm(now - 1200, p.tz) }],
     ["readings-back", { kind: "logger_back", at: hhmm(now, p.tz), lasted: lasted(now - 6420, now) }],
     ["inverter-no-readings", { kind: "logger_stale", since: hhmm(now - 1200, p.tz), inverter: "Inverter 2" }],

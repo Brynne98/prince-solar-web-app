@@ -523,11 +523,13 @@ export function report(r: Report): Email {
 // Kinds follow the state changes in 0102 (email_plant_step, email_sweep):
 //  grid_down     3 known minutes in a row with no grid (>100 V); once per outage
 //  grid_back     2 known minutes with grid, after a grid_down went out
-//  batt_hot      hottest battery over 45 C for 3 minutes; again once a day until it is 43 C or below
-//  bank_drift    charge 10 points or more apart between inverters' own batteries for
-//                an hour; again once a day while it lasts
+//  batt_hot      hottest battery over 45 C for 3 minutes
+//  batt_hot_back 15 min at 43 C or below, after a batt_hot (0151)
+//  bank_drift    charge 10 points or more apart between inverters' own batteries for an hour
+//  bank_drift_back  under 8 points apart for 15 min, after a bank_drift (0151)
 //  string_dead   a string dead for 12 samples while another string on the same
-//                inverter makes over 200 W; again once a day until it has voltage
+//                inverter makes over 200 W
+//  string_back   voltage for 15 min with no dead sample, after a string_dead (0151)
 //  logger_stale  no new reading for the whole plant, or from one inverter while the others
 //                report (inverter set), for 30 min
 //  logger_back   readings fresh again, after a logger_stale went out
@@ -536,8 +538,11 @@ export type PlantEvent =
   | { kind: "grid_down"; at: string; chargePct?: number }
   | { kind: "grid_back"; at: string; lasted?: string }
   | { kind: "batt_hot"; at: string; tempC: number; hotDays?: number } // hotDays: days over 45 C in the last 30, today included; counted from readings at send time
+  | { kind: "batt_hot_back"; at: string; tempC: number; lasted: string }
   | { kind: "bank_drift"; banks: { name: string; chargePct: number }[] } // name: the inverter's name in SunSynk
+  | { kind: "bank_drift_back"; banks: { name: string; chargePct: number }[]; lasted: string }
   | { kind: "string_dead"; string: string; inverter: string; since: string }
+  | { kind: "string_back"; string: string; inverter: string; at: string; lasted: string }
   | { kind: "logger_stale"; since: string; inverter?: string }
   | { kind: "logger_back"; at: string; lasted: string; inverter?: string }
   | { kind: "needs_relink" };
@@ -552,7 +557,8 @@ type Card = Extract<Part, { stats: unknown }>["stats"][number];
 // "1 h 47 min" wraps in a card; "1h 47m" fits.
 const PAGE: Record<Exclude<PlantEvent["kind"], "needs_relink">, keyof typeof PAGES> = {
   grid_down: "grid", grid_back: "grid",
-  batt_hot: "inverters", bank_drift: "inverters", string_dead: "inverters",
+  batt_hot: "inverters", batt_hot_back: "inverters", bank_drift: "inverters", bank_drift_back: "inverters",
+  string_dead: "inverters", string_back: "inverters",
   logger_stale: "live", logger_back: "live",
 };
 const span = (d: string) => d.replace(/ h /, "h ").replace(/ min$/, "m");
@@ -577,6 +583,16 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
           { label: "Battery", value: `${e.tempC}\u00a0°C`, tone: "home", sub: `at ${at(e.at)}` },
         ], "Batteries wear faster when they run hot." + ((e.hotDays ?? 1) > 1
           ? ` Yours has gone above 45&nbsp;°C on ${e.hotDays} days in the last 30. If it keeps happening, have your battery checked.` : "")];
+      case "batt_hot_back":
+        return [`Battery cooled at ${plant}`, [
+          { label: "Battery", value: `${e.tempC}\u00a0°C`, tone: "solar", sub: `since ${at(e.at)}` },
+          { label: "Hot for", value: span(e.lasted) },
+        ]];
+      case "bank_drift_back":
+        return [`Batteries charging evenly at ${plant}`, [
+          ...e.banks.map((b) => ({ label: b.name, value: `${b.chargePct}%`, tone: "batt" as Tone, sub: "battery charge" })),
+          { label: "Apart for", value: span(e.lasted) },
+        ]];
       case "bank_drift": {
         const pcts = e.banks.map((b) => b.chargePct);
         return [`Batteries charging unevenly at ${plant}`, [
@@ -588,6 +604,11 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
           { label: `${e.string} · ${e.inverter.replace(/^Inverter /, "")}`, value: "No power", tone: "home", sub: `since ${at(e.since)}` },
           { label: "Other panels", value: "OK", tone: "solar", sub: "producing as normal" },
         ], `One group of panels on ${esc(e.inverter)} has stopped making power. The rest are still working.`];
+      case "string_back":
+        return [`Panels producing again at ${plant}`, [
+          { label: `${e.string} · ${e.inverter.replace(/^Inverter /, "")}`, value: "Producing", tone: "solar", sub: `since ${at(e.at)}` },
+          { label: "Stopped for", value: span(e.lasted) },
+        ]];
       case "logger_stale":
         return e.inverter
           ? [`No readings from ${e.inverter} at ${plant}`, [

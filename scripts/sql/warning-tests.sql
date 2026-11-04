@@ -84,7 +84,23 @@ do $$ begin
   end loop;
 end $$;
 select pg_temp.eq('grid: 3 off minutes around an unknown one send one Grid off', pg_temp.sent(9001, 'grid_down'), 1);
-select pg_temp.eq('grid: back for 2 minutes sends one Grid back', pg_temp.sent(9001, 'grid_back'), 1);
+select pg_temp.eq('grid: back for 5 minutes sends one Grid back', pg_temp.sent(9001, 'grid_back'), 1);
+-- SOLAR-320: grid flapping for 30 minutes, 3 off and 3 on, then on for good. One Grid off,
+-- and one Grid back after 5 minutes on: 3 minutes on is the same outage still.
+do $$ begin
+  for k in 20..54 loop
+    perform pg_temp.r(9001, k, 'M', case when k < 50 and (k - 20) / 3 % 2 = 0 then 0.0 else 239.3 end);
+    perform pg_temp.step(k);
+    if k = 49 then
+      perform pg_temp.eq('grid: 30 minutes flapping send one Grid off', pg_temp.sent(9001, 'grid_down'), 2);
+      perform pg_temp.eq('grid: 30 minutes flapping send no Grid back yet', pg_temp.sent(9001, 'grid_back'), 1);
+    end if;
+  end loop;
+end $$;
+select pg_temp.eq('grid: on for 5 minutes after flapping sends one Grid back', pg_temp.sent(9001, 'grid_back'), 2);
+select pg_temp.eq('grid: the Grid back covers the whole flapping outage',
+  (select (data->>'since')::bigint = pg_temp.t(20) and (data->>'at')::bigint = pg_temp.t(47) from public.email_queue
+    where plant_id = 9001 and kind = 'grid_back' order by id desc limit 1), true);
 
 -- Plant 9002: the 18 Sep lesson. The slave's logger froze at 240.1 V with an old
 -- device_time while the master, newest, read 0 V. Off for 4 minutes: Grid off.
@@ -106,6 +122,24 @@ do $$ begin
 end $$;
 select pg_temp.gap('grid: an inverter that cannot see mains does not decide Grid off', pg_temp.sent(9003, 'grid_down') = 0,
   'presence reads only the newest device_time, so a blind newer inverter outvotes one that sees 239 V');
+
+-- ---- Uneven charge (plant 9003, now with a battery on each inverter) -----------------------
+-- 12 points apart for an hour: one email. Then 30 minutes bouncing between 12 and 7
+-- points apart, then 3 apart: one Batteries charging evenly, 15 minutes after the bounce.
+update public.plant_config set battery_banks = 'per-inverter' where plant_id = 9003;
+do $$ begin
+  for k in 7..113 loop
+    perform pg_temp.r(9003, k, 'M', 239.0, 25, 80);
+    perform pg_temp.r(9003, k, 'S', 239.0, 25, case when k <= 67 then 68 when k >= 98 then 77 when (k - 68) / 3 % 2 = 0 then 68 else 73 end);
+    perform pg_temp.step(k);
+    if k = 66 then perform pg_temp.eq('uneven: 59 minutes apart send nothing', pg_temp.sent(9003, 'bank_drift'), 0); end if;
+    if k = 97 then
+      perform pg_temp.eq('uneven bounce: an hour apart, then 30 minutes round the limit, send one email', pg_temp.sent(9003, 'bank_drift'), 1);
+      perform pg_temp.eq('uneven bounce: 30 minutes round the limit send no back', pg_temp.sent(9003, 'bank_drift_back'), 0);
+    end if;
+  end loop;
+end $$;
+select pg_temp.eq('uneven bounce: 15 minutes 3 points apart send one Batteries charging evenly', pg_temp.sent(9003, 'bank_drift_back'), 1);
 
 -- ---- Battery hot (plant 9004: master reads the pack, slave -100) -----------------------
 do $$ begin
@@ -134,24 +168,50 @@ do $$ begin
   for k in 15..17 loop perform pg_temp.r(9004, k, 'M', 239, 46); perform pg_temp.r(9004, k, 'S', 239, -100); perform pg_temp.step(k); end loop;
 end $$;
 select pg_temp.eq('hot: back to 46 °C after 44 °C sends no second email', pg_temp.sent(9004, 'batt_hot'), 1);
+-- One minute at 43 °C is not the end of it (0151): back to 46 °C is the same spell.
 do $$ begin
   perform pg_temp.r(9004, 18, 'M', 239, 43); perform pg_temp.r(9004, 18, 'S', 239, -100); perform pg_temp.step(18);
   for k in 19..21 loop perform pg_temp.r(9004, k, 'M', 239, 46); perform pg_temp.r(9004, k, 'S', 239, -100); perform pg_temp.step(k); end loop;
 end $$;
-select pg_temp.eq('hot: after 43 °C, three more minutes at 46 °C send a second email', pg_temp.sent(9004, 'batt_hot'), 2);
+select pg_temp.eq('hot: one minute at 43 °C, then 46 °C again, sends no second email', pg_temp.sent(9004, 'batt_hot'), 1);
+select pg_temp.eq('hot: one minute at 43 °C sends no Battery cooled', pg_temp.sent(9004, 'batt_hot_back'), 0);
+-- 15 minutes at 30 °C: Battery cooled, with the time it went down and how long it ran hot.
+do $$ begin
+  for k in 22..37 loop perform pg_temp.r(9004, k, 'M', 239, 30); perform pg_temp.r(9004, k, 'S', 239, -100); perform pg_temp.step(k);
+    if k = 36 then perform pg_temp.eq('hot: 14 minutes cool send no Battery cooled', pg_temp.sent(9004, 'batt_hot_back'), 0); end if;
+  end loop;
+end $$;
+select pg_temp.eq('hot: 15 minutes at 30 °C send one Battery cooled', pg_temp.sent(9004, 'batt_hot_back'), 1);
+select pg_temp.eq('hot: Battery cooled says when it cooled, 30 °C, paired to its alert',
+  (select (data->>'at')::bigint = pg_temp.t(22) and (data->>'tempC')::int = 30 and (data->>'since')::bigint = pg_temp.t(11)
+          and pair_key = 'batt_hot:9004:' || pg_temp.t(11) || ':1'
+     from public.email_queue where plant_id = 9004 and kind = 'batt_hot_back'), true);
 -- 45.3 °C is hot in the app (over 45), so in the email too: not rounded down to 45.
 do $$ begin
-  perform pg_temp.r(9004, 22, 'M', 239, 30); perform pg_temp.r(9004, 22, 'S', 239, -100); perform pg_temp.step(22);
-  for k in 23..25 loop perform pg_temp.r(9004, k, 'M', 239, 45.3); perform pg_temp.r(9004, k, 'S', 239, -100); perform pg_temp.step(k); end loop;
+  for k in 38..40 loop perform pg_temp.r(9004, k, 'M', 239, 45.3); perform pg_temp.r(9004, k, 'S', 239, -100); perform pg_temp.step(k); end loop;
 end $$;
-select pg_temp.eq('hot: three minutes at 45.3 °C send a third email', pg_temp.sent(9004, 'batt_hot'), 3);
--- Two hot minutes, 5 minutes with no row, one hot minute: not three in a row.
+select pg_temp.eq('hot: three minutes at 45.3 °C send a second email', pg_temp.sent(9004, 'batt_hot'), 2);
+-- Cool 15 minutes, then two hot minutes, 5 minutes with no row, one hot minute: not three in a row.
 do $$ begin
-  perform pg_temp.r(9004, 26, 'M', 239, 30); perform pg_temp.r(9004, 26, 'S', 239, -100); perform pg_temp.step(26);
-  for k in 27..28 loop perform pg_temp.r(9004, k, 'M', 239, 47); perform pg_temp.r(9004, k, 'S', 239, -100); perform pg_temp.step(k); end loop;
-  perform pg_temp.r(9004, 34, 'M', 239, 47); perform pg_temp.r(9004, 34, 'S', 239, -100); perform pg_temp.step(34);
+  for k in 41..56 loop perform pg_temp.r(9004, k, 'M', 239, 30); perform pg_temp.r(9004, k, 'S', 239, -100); perform pg_temp.step(k); end loop;
+  for k in 57..58 loop perform pg_temp.r(9004, k, 'M', 239, 47); perform pg_temp.r(9004, k, 'S', 239, -100); perform pg_temp.step(k); end loop;
+  perform pg_temp.r(9004, 64, 'M', 239, 47); perform pg_temp.r(9004, 64, 'S', 239, -100); perform pg_temp.step(64);
 end $$;
-select pg_temp.eq('hot: two hot minutes, a 5-minute gap, one more: no email', pg_temp.sent(9004, 'batt_hot'), 3);
+select pg_temp.eq('hot: two hot minutes, a 5-minute gap, one more: no email', pg_temp.sent(9004, 'batt_hot'), 2);
+select pg_temp.eq('hot: the 45.3 °C spell cooled: a second Battery cooled', pg_temp.sent(9004, 'batt_hot_back'), 2);
+-- SOLAR-320 done-when: the temperature bounces round the limit for 30 minutes, 3 minutes
+-- at 47 °C and 3 at 42 °C, then stays at 40 °C. One Battery hot, one Battery cooled.
+do $$ begin
+  for k in 65..110 loop
+    perform pg_temp.r(9004, k, 'M', 239, case when k >= 95 then 40 when (k - 65) / 3 % 2 = 0 then 47 else 42 end);
+    perform pg_temp.r(9004, k, 'S', 239, -100); perform pg_temp.step(k);
+    if k = 94 then
+      perform pg_temp.eq('hot bounce: 30 minutes round 45 °C send one Battery hot', pg_temp.sent(9004, 'batt_hot'), 3);
+      perform pg_temp.eq('hot bounce: 30 minutes round 45 °C send no Battery cooled', pg_temp.sent(9004, 'batt_hot_back'), 2);
+    end if;
+  end loop;
+end $$;
+select pg_temp.eq('hot bounce: 15 minutes at 40 °C after it send one Battery cooled', pg_temp.sent(9004, 'batt_hot_back'), 3);
 
 -- ---- Strings (plant 9005: master M, inputs 1 and 2) -------------------------------------
 -- Input 1 as on 538820 since 25 Oct: about 1 V, 0 W, never made power. Input 2 makes power.
@@ -180,6 +240,25 @@ do $$ begin
   end loop;
 end $$;
 select pg_temp.eq('strings: an input that made power, dead 13 minutes, sends one email', pg_temp.sent(9005, 'string_dead'), 1);
+-- SOLAR-320: input 3 has voltage again for 7 minutes (56-59 and on), then bounces 4 minutes
+-- dead, 4 alive for 30 minutes, then has voltage for good. One email, one Panels back.
+do $$ begin
+  for k in 60..105 loop
+    perform pg_temp.r(9005, k, 'M', 239);
+    perform pg_temp.s(k, 'M', 2, 241.6, 1800);
+    perform pg_temp.s(k, 'M', 3, case when k < 90 and (k - 60) / 4 % 2 = 0 then 1.0 else 290 end,
+                                 case when k < 90 and (k - 60) / 4 % 2 = 0 then 0 else 2900 end);
+    perform pg_temp.step(k);
+    if k = 89 then
+      perform pg_temp.eq('strings bounce: 30 minutes on and off send no second email', pg_temp.sent(9005, 'string_dead'), 1);
+      perform pg_temp.eq('strings bounce: 30 minutes on and off send no Panels back', pg_temp.sent(9005, 'string_back'), 0);
+    end if;
+  end loop;
+end $$;
+select pg_temp.eq('strings bounce: 15 minutes with voltage send one Panels back', pg_temp.sent(9005, 'string_back'), 1);
+select pg_temp.eq('strings: Panels back says when the voltage came back',
+  (select (data->>'at')::bigint = pg_temp.t(88) and data->>'string' = 'String 3' from public.email_queue
+    where plant_id = 9005 and kind = 'string_back'), true);
 select pg_temp.gap('strings: an input broken before it ever made power is reported',
   exists (select 1 from public.email_queue where plant_id = 9005 and kind = 'string_dead' and key like 'string_dead:9005:9005M:1:%'),
   'by design since SOLAR-188: an input that never made 200 W is never checked');
@@ -196,33 +275,53 @@ create function pg_temp.r_at(p bigint, ts bigint, sn text, volt numeric, dev big
   insert into public.readings (ts, sn, plant_id, carried, device_time, grid_volt_v, batt_temp_c, batt_soc)
   values (ts, p || sn, p, false, pg_temp.dt(dev), volt, 25, 80)
 $$;
+-- Plant 9001: the slave's logger stops 61 minutes before now while the master keeps
+-- uploading. Plants 9006 and 9007: the whole logger stopped 29 and 31 minutes ago.
 do $$ declare ts bigint; begin
-  for back in reverse 20..1 loop
+  for back in reverse 60..13 loop
     ts := pg_temp.now_k(back);
     perform pg_temp.r_at(9001, ts, 'M', 239.3, ts - 30);
-    perform pg_temp.r_at(9001, ts, 'S', 238.7, pg_temp.now_k(21));
-    -- Plants 9006 and 9007: the whole logger stopped 14 and 16 minutes ago.
-    perform pg_temp.r_at(9006, ts, 'M', 239.3, least(ts - 30, pg_temp.now_k(14)));
-    perform pg_temp.r_at(9007, ts, 'M', 239.3, least(ts - 30, pg_temp.now_k(16)));
+    perform pg_temp.r_at(9001, ts, 'S', 238.7, pg_temp.now_k(61));
+    perform pg_temp.r_at(9006, ts, 'M', 239.3, least(ts - 30, pg_temp.now_k(29)));
+    perform pg_temp.r_at(9007, ts, 'M', 239.3, least(ts - 30, pg_temp.now_k(31)));
     perform pg_temp.step_at(ts);
   end loop;
 end $$;
 select pg_temp.logins('ok', now(), now());
 select public.email_sweep();
-select pg_temp.eq('no readings: an inverter quiet for 20 minutes beside a live one sends one email',
+select pg_temp.eq('no readings: an inverter quiet for 60 minutes beside a live one sends one email',
   (select count(*)::int from public.email_queue where plant_id = 9001 and kind = 'logger_stale' and data->>'inverter' = 'Inverter 9001S'), 1);
-select pg_temp.eq('no readings: a plant quiet 16 minutes sends no per-inverter email as well',
+select pg_temp.eq('no readings: a plant quiet 31 minutes sends no per-inverter email as well',
   (select count(*)::int from public.email_queue where plant_id = 9007 and kind = 'logger_stale' and data ? 'inverter'), 0);
--- The slave's logger comes back: Readings back for it.
-do $$ declare ts bigint := pg_temp.now_k(0); begin
-  perform pg_temp.r_at(9001, ts, 'M', 239.3, ts - 30);
-  perform pg_temp.r_at(9001, ts, 'S', 238.7, ts - 20);
-  perform pg_temp.step_at(ts);
+select pg_temp.eq('no readings: a plant quiet 29 minutes sends nothing', pg_temp.sent(9006, 'logger_stale'), 0);
+select pg_temp.eq('no readings: a plant quiet 31 minutes sends one email', pg_temp.sent(9007, 'logger_stale'), 1);
+-- 31 Oct on 495944: the slave sent one reading, went quiet 12 minutes, then came back.
+-- That lone reading sent Readings back, and a second No readings followed (SOLAR-320).
+-- Now Readings back waits for 15 minutes of readings with no gap over 10 minutes.
+do $$ declare ts bigint; begin
+  for back in reverse 12..-16 loop
+    ts := pg_temp.now_k(back);
+    perform pg_temp.r_at(9001, ts, 'M', 239.3, ts - 30);
+    perform pg_temp.r_at(9001, ts, 'S', 238.7, case when back > 0 then pg_temp.now_k(12) - 20 else ts - 20 end);
+    -- Plant 9007, quiet as a whole, comes back the same way.
+    perform pg_temp.r_at(9007, ts, 'M', 239.3, case when back > 0 then pg_temp.now_k(12) - 30 else ts - 30 end);
+    perform pg_temp.step_at(ts);
+    if back = 1 then perform pg_temp.eq('no readings: one lone reading sends no Readings back',
+      (select count(*)::int from public.email_queue where plant_id in (9001, 9007) and kind = 'logger_back'), 0); end if;
+    if back = -14 then perform pg_temp.eq('no readings: 14 minutes of readings send no Readings back',
+      (select count(*)::int from public.email_queue where plant_id in (9001, 9007) and kind = 'logger_back'), 0); end if;
+  end loop;
 end $$;
-select pg_temp.eq('no readings: the quiet inverter reporting again sends one Readings back',
+select public.email_sweep();
+select pg_temp.eq('no readings: 15 minutes of readings send one Readings back',
   (select count(*)::int from public.email_queue where plant_id = 9001 and kind = 'logger_back' and data->>'inverter' = 'Inverter 9001S'), 1);
-select pg_temp.eq('no readings: a plant quiet 14 minutes sends nothing', pg_temp.sent(9006, 'logger_stale'), 0);
-select pg_temp.eq('no readings: a plant quiet 16 minutes sends one email', pg_temp.sent(9007, 'logger_stale'), 1);
+select pg_temp.eq('no readings: the quiet spell sends one No readings in all',
+  (select count(*)::int from public.email_queue where plant_id = 9001 and kind = 'logger_stale'), 1);
+select pg_temp.eq('no readings: a whole plant back for 15 minutes sends one Readings back, after one No readings',
+  (select count(*) filter (where kind = 'logger_back' and not data ? 'inverter')::text || '/' || count(*) filter (where kind = 'logger_stale')
+     from public.email_queue where plant_id = 9007), '1/1');
+select pg_temp.eq('no readings: Readings back says when the readings came back',
+  (select (data->>'at')::bigint = pg_temp.now_k(0) - 20 from public.email_queue where plant_id = 9001 and kind = 'logger_back'), true);
 
 -- ---- SunSynk down -----------------------------------------------------------------------
 -- One login, failing for 20 minutes; the others not tried (as with two users, one down).
@@ -233,6 +332,13 @@ select pg_temp.eq('SunSynk down: the only login failing for 20 minutes is report
 -- Two logins tried, one failing: that login's trouble, not SunSynk's.
 select pg_temp.logins('ok', now(), now(), 'w9002');
 select public.email_sweep();
+select pg_temp.eq('SunSynk down: one of two logins failing is no back note before 15 minutes',
+  (select sunsynk_down and clear_since is not null from private.email_system_state), true);
+-- 15 minutes not down: back. (now() is fixed in a transaction, so the hold is back-dated.)
+update private.email_system_state set clear_since = now() - interval '15 minutes';
+select public.email_sweep();
 select pg_temp.eq('SunSynk down: one of two logins failing is not SunSynk down', (select sunsynk_down from private.email_system_state), false);
+select pg_temp.eq('SunSynk down: one SunSynk is back to the owner told it was down',
+  (select count(*)::int from public.email_queue where kind = 'sunsynk_back' and user_id = '00000000-0000-0000-0000-000000009001'), 1);
 
 rollback;
