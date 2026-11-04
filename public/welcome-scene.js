@@ -478,3 +478,239 @@ addEventListener('resize',()=>place());
 
 
 })();
+
+/* ---------- selling demos (SOLAR-334): each plays on its own while on screen; a click or drag hands it to the viewer ---------- */
+const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function autoplay(el, ms, step) {
+  let t = null, held = false;
+  new IntersectionObserver(es => es.forEach(e => {
+    if (e.isIntersecting && !t && !held && !calm) t = setInterval(step, ms);
+    if (!e.isIntersecting) { clearInterval(t); t = null; }
+  }), { threshold: .3 }).observe(el);
+  return () => { held = true; clearInterval(t); t = null; };
+}
+const hm = m => String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(Math.round(m % 60)).padStart(2, '0');
+const rand = n => 'R' + Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
+/* battery time left: a night on the example plant, the countdown redone every 5 minutes */
+(() => {
+const g = id => document.getElementById('bt-' + id), svg = g('svg');
+if (!svg) return;
+const CAP = 20, RES = 20, STEP = 5;
+// the home's use from each hour on, kW: the stove at 18:30, quiet from 23:00, the kettle at 06:00
+const USE = [[18, 2.6], [18.5, 4.2], [19, 2.1], [20, 1.5], [21, 1.2], [22, .7], [23, .45], [29, .6], [30, 1.3]];
+const use = h => USE.reduce((v, [a, k]) => h >= a ? k : v, USE[0][1]);
+const pts = [];
+for (let m = 18 * 60, soc = 90; m <= 31 * 60; m += STEP) { const k = use(m / 60); pts.push({ m, soc, k }); soc -= k * STEP / 60 / CAP * 100; }
+const X = m => 10 + (m - 18 * 60) / (13 * 60) * 500, Y = s => 12 + (100 - s) * 1.1;
+const dur = h => { const t = Math.round(h * 60); return Math.floor(t / 60) + ' h ' + t % 60 + ' m'; };
+const line = pts.map((p, i) => (i ? 'L' : 'M') + X(p.m).toFixed(1) + ' ' + Y(p.soc).toFixed(1)).join(' ');
+svg.innerHTML = `<defs><linearGradient id="bt-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa" stop-opacity=".35"/><stop offset="1" stop-color="#a78bfa" stop-opacity="0"/></linearGradient><clipPath id="bt-clip"><rect id="bt-cr" x="0" y="0" width="10" height="150"/></clipPath></defs>`
+  + `<line x1="10" x2="510" y1="${Y(RES)}" y2="${Y(RES)}" stroke="#a78bfa" stroke-opacity=".55" stroke-dasharray="4 4"/><text x="510" y="${Y(RES) - 6}" text-anchor="end" class="axis">reserve ${RES}%</text>`
+  + `<path d="${line}" fill="none" stroke="rgba(167,139,250,.35)" stroke-width="2" stroke-dasharray="3 5"/>`
+  + `<g clip-path="url(#bt-clip)"><path d="${line} L510 ${Y(0)} L10 ${Y(0)}Z" fill="url(#bt-g)"/><path d="${line}" fill="none" stroke="#a78bfa" stroke-width="2.5"/></g>`
+  + `<line id="bt-now" y1="4" y2="${Y(0)}" stroke="rgba(255,255,255,.3)"/><circle id="bt-dot" r="5.5" fill="#a78bfa" stroke="#0c1117" stroke-width="2.5"/>`
+  + [18, 22, 26, 30].map((h, i) => `<text x="${X(h * 60)}" y="144" text-anchor="${i ? 'middle' : 'start'}" class="axis">${hm(h * 60)}</text>`).join('');
+let i = 0, hold = 0;
+function show(n) {
+  i = n;
+  const p = pts[n], left = (p.soc - RES) / 100 * CAP / p.k, end = p.m + left * 60, x = X(p.m);
+  g('clock').textContent = hm(p.m);
+  g('left').innerHTML = dur(left).replace(/ ([hm])/g, '<small>$1</small>');
+  g('at').textContent = 'Reaches the ' + RES + '% reserve ' + (end >= 30 * 60 ? 'after sunrise' : 'at ' + hm(end));
+  g('soc').textContent = Math.round(p.soc) + '%';
+  g('load').textContent = p.k.toFixed(1) + ' kW';
+  g('load').classList.toggle('hi', p.k >= 3);
+  g('cr').setAttribute('width', x);
+  ['x1', 'x2'].forEach(a => g('now').setAttribute(a, x));
+  g('dot').setAttribute('cx', x); g('dot').setAttribute('cy', Y(p.soc));
+  g('range').value = n;
+  g('range').setAttribute('aria-valuetext', hm(p.m) + ', empty in ' + dur(left));
+}
+g('range').max = pts.length - 1;
+const stop = autoplay(svg.parentNode, 160, () => { if (i === pts.length - 1 && hold++ < 16) return; hold = 0; show((i + 1) % pts.length); });
+g('range').addEventListener('input', e => { stop(); show(+e.target.value); });
+show(calm ? 6 : 0);
+})();
+
+/* faults: the Equipment card, all working or with one problem, worded as the app words it (tabs.jsx) */
+(() => {
+const card = document.getElementById('fl-card'), picks = document.getElementById('fl-picks'), tiles = document.getElementById('fl-tiles');
+if (!card) return;
+const ok = ['ok', 'Working'], look = ['warn', 'Needs a look'], chg = ['ok', 'Charging'];
+const T = (pv, batt, inv) => [['Solar panels', 'var(--solar)', pv[0], 'kW', pv[1]], ['Battery', 'var(--batt)', batt[0], '%', batt[1]], ['Inverters', inv[1] === ok ? 'var(--solar)' : 'var(--warn)', inv[0], '', inv[1]]];
+const S = [
+  { k: 'All working', tiles: T(['4.82', ok], ['64', chg], ['All on', ok]) },
+  { k: 'Panels stopped', title: 'Some panels made nothing today', todo: 'Check the breaker or isolator for your panels.', since: 'Since 11:42', tiles: T(['3.06', look], ['58', chg], ['All on', ok]) },
+  { k: 'Panels weak', title: 'Some panels are making less than usual', todo: 'Check for shade, dirt or a tripped breaker.', since: 'Today', tiles: T(['3.91', look], ['61', chg], ['All on', ok]) },
+  { k: 'Battery hot', title: 'The battery is hot, 46 °C', todo: 'Make sure air can move around it.', since: 'Since 13:20', tiles: T(['4.82', ok], ['64', look], ['All on', ok]) },
+  { k: 'Uneven batteries', title: 'Batteries charging unevenly', todo: 'Pack 1 is at 72%, pack 2 at 60%. If the gap keeps growing, have them checked.', since: 'For over an hour', tiles: T(['4.82', ok], ['66', look], ['All on', ok]) },
+  { k: 'Inverter quiet', title: 'Inverter 2 isn’t reporting', todo: 'Check it is on and its Wi-Fi dongle shows a light.', since: 'Last reading 40 min ago', tiles: T(['2.47', ok], ['64', chg], ['1 of 2', look]) },
+];
+let cur = 0;
+function show(n) {
+  cur = n;
+  const s = S[n];
+  card.classList.toggle('warn', !!s.title);
+  document.getElementById('fl-head').textContent = s.title ? '1 thing needs a look' : 'Everything is working';
+  if (s.title) [['title', s.title], ['todo', s.todo], ['since', s.since]].forEach(([k, v]) => document.getElementById('fl-' + k).textContent = v);
+  tiles.innerHTML = s.tiles.map(([l, c, v, u, [tone, word]]) => `<div class="fl-tile ${tone}"><div class="v" style="color:${c}">${v}${u ? `<small>${u}</small>` : ''}</div><div class="l">${l}</div><div class="s"><i></i>${word}</div></div>`).join('');
+  [...picks.children].forEach((b, j) => b.setAttribute('aria-pressed', j === n));
+}
+S.forEach((s, n) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = s.k; b.addEventListener('click', () => { stop(); show(n); }); picks.appendChild(b); });
+const stop = autoplay(card, 3200, () => show((cur + 1) % S.length));
+show(0);
+})();
+
+/* savings: saved so far, against the time before; the line draws itself on each change */
+(() => {
+const svg = document.getElementById('sv-svg'), seg = document.getElementById('sv-seg');
+if (!svg) return;
+const g = id => document.getElementById('sv-' + id);
+const P = {
+  week: { saved: 312, prev: 294, ind: 84, indPrev: 81, n: 7, k1: '19-25 Oct', k2: '12-18 Oct', from: 'the week before', ax: ['Mon', 'Thu', 'Sun'] },
+  month: { saved: 1284, prev: 1146, ind: 81, indPrev: 78, n: 31, k1: 'October', k2: 'September', from: 'September', ax: ['1', '15', '31'] },
+  year: { saved: 14870, prev: 13640, ind: 79, indPrev: 77, n: 12, k1: '2025', k2: '2024', from: '2024', ax: ['Jan', 'Jun', 'Dec'] },
+};
+// each day's or month's share, uneven like real weather, summed so the line ends on the total
+const run = (n, total, seed) => { const v = Array.from({ length: n }, (_, i) => 1 + .32 * Math.sin(i * 1.9 + seed) + .18 * Math.sin(i * 4.3 + seed * 2)); const s = v.reduce((a, b) => a + b, 0); let c = 0; return v.map(x => c += x / s * total); };
+let shown = 0, raf = 0, on = 'month';
+function draw(k, anim) {
+  on = k;
+  const p = P[k], a = run(p.n, p.saved, 1), b = run(p.n, p.prev, 2.4), max = Math.max(p.saved, p.prev) * 1.12;
+  const X = i => 20 + i / (p.n - 1) * 470, Y = v => 186 - v / max * 170;
+  const path = arr => arr.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' ');
+  svg.innerHTML = `<defs><linearGradient id="sv-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa" stop-opacity=".3"/><stop offset="1" stop-color="#a78bfa" stop-opacity="0"/></linearGradient></defs>`
+    + `<line x1="20" x2="490" y1="186" y2="186" stroke="rgba(255,255,255,.1)"/>`
+    + `<path d="${path(b)}" fill="none" stroke="#7f8da0" stroke-width="2" stroke-dasharray="5 5"/>`
+    + `<path id="sv-area" d="${path(a)} L490 186 L20 186Z" fill="url(#sv-g)"/>`
+    + `<path id="sv-line" d="${path(a)}" fill="none" stroke="#a78bfa" stroke-width="2.8" stroke-linejoin="round"/>`
+    + `<text x="498" y="${Y(p.saved) + 4}" class="axis" style="fill:#a78bfa;font-weight:700">${rand(p.saved)}</text>`
+    + `<text x="498" y="${Y(p.prev) + (Y(p.prev) - Y(p.saved) < 14 ? 16 : 4)}" class="axis">${rand(p.prev)}</text>`
+    + p.ax.map((t, i) => `<text x="${20 + i * 235}" y="206" text-anchor="${['start', 'middle', 'end'][i]}" class="axis">${t}</text>`).join('');
+  const up = n => (n >= 0 ? '↑ ' : '↓ ') + Math.abs(n) + '%';
+  g('st').innerHTML = `<b>${up(Math.round((p.saved / p.prev - 1) * 100))}</b> on ${p.from}`;
+  g('it').innerHTML = `<b>${up(p.ind - p.indPrev)}</b> on ${p.from}`;
+  g('ind').textContent = p.ind + '%';
+  g('bar').style.transform = `scaleX(${p.ind / 100})`;
+  g('k1').textContent = p.k1; g('k2').textContent = p.k2;
+  seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x.dataset.k === k));
+  cancelAnimationFrame(raf);
+  if (!anim || calm) { shown = p.saved; g('saved').textContent = rand(p.saved); return; }
+  const line = document.getElementById('sv-line'), len = line.getTotalLength(), from = shown, t0 = performance.now();
+  line.style.strokeDasharray = len; line.style.strokeDashoffset = len;
+  document.getElementById('sv-area').style.opacity = 0;
+  const step = t => {
+    const f = Math.min(1, (t - t0) / 900), e = 1 - Math.pow(1 - f, 3);
+    line.style.strokeDashoffset = len * (1 - e);
+    document.getElementById('sv-area').style.opacity = e;
+    shown = from + (p.saved - from) * e;
+    g('saved').textContent = rand(shown);
+    if (f < 1) raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
+}
+seg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) draw(b.dataset.k, true); });
+draw('month');
+const io = new IntersectionObserver(es => { if (es[0].isIntersecting) { io.disconnect(); draw(on, true); } }, { threshold: .4 });
+io.observe(svg);
+})();
+
+/* wall view: the hero's power flow, copied onto a TV, moving through a day */
+(() => {
+const box = document.getElementById('w-in'), src = document.querySelector('#card .flow');
+if (!box || !src) return;
+const f = src.cloneNode(true);
+f.querySelectorAll('[id]').forEach(e => e.id = 'w-' + e.id);
+f.querySelectorAll('.on,.rev,.off,.cut').forEach(e => e.classList.remove('on', 'rev', 'off', 'cut'));
+box.appendChild(f);
+const w = id => document.getElementById('w-' + id);
+const screen = box.parentNode;
+const fit = () => box.style.transform = `scale(${screen.clientWidth / 800})`;
+fit();
+new ResizeObserver(fit).observe(screen);
+// solar, battery (+ out, - in), grid in, home: kW; soc %
+const S = [
+  { t: '12:40', narr: 'The sun runs the house and fills the battery.', solar: 6.42, batt: -4.91, grid: 0, home: 1.51, soc: 74 },
+  { t: '16:10', narr: 'The battery is full. The sun runs the house.', solar: 2.38, batt: 0, grid: 0, home: 2.38, soc: 100 },
+  { t: '18:05', narr: 'Grid off. The battery runs the house.', solar: 0, batt: 1.86, grid: 0, home: 1.86, soc: 92, off: 1 },
+  { t: '21:30', narr: 'The battery runs the house through the night.', solar: 0, batt: 0.72, grid: 0, home: 0.72, soc: 71 },
+];
+const kw = v => v < 1 ? [Math.round(v * 1000), 'W'] : [v.toFixed(2), 'kW'];
+const lane = (k, on, rev, v) => { w('l' + k + 'B').classList.toggle('on', on); const d = w('l' + k); d.classList.toggle('on', on); d.classList.toggle('rev', !!rev); d.style.setProperty('--d', (2.4 - Math.min(1.6, v * .25)).toFixed(2) + 's'); };
+const grow = (id, parts) => { const t = parts.reduce((a, b) => a + b, 0) || 1; [...w(id).children].forEach((e, i) => { e.style.flexGrow = parts[i] / t; e.style.flexBasis = 0; }); };
+let cur = 0;
+function show(n) {
+  cur = n;
+  const s = S[n], bIn = s.batt < 0 ? -s.batt : 0, bOut = s.batt > 0 ? s.batt : 0;
+  w('clock').textContent = s.t;
+  w('narr').textContent = s.narr;
+  [['Solar', s.solar], ['Grid', s.grid], ['BattW', Math.abs(s.batt)]].forEach(([k, v]) => { const [a, u] = v ? kw(v) : [0, 'W']; w('v' + k).textContent = a; w('u' + k).textContent = u; });
+  w('vHome').textContent = s.home.toFixed(2);
+  w('sSolar').textContent = s.solar ? 'Making power' : 'Waiting for sunrise';
+  w('sBatt').textContent = bIn ? 'Charging' : bOut ? 'Powering the house' : 'Full, resting';
+  w('sGrid').textContent = 'On, not in use';
+  w('pGrid').textContent = s.off ? 'Grid off' : 'Grid on';
+  w('sHome').textContent = s.solar >= s.home ? 'From solar' : 'From the battery';
+  w('vBatt').textContent = s.soc + '%';
+  w('bBatt').style.width = s.soc + '%';
+  w('tSolar').classList.toggle('on', s.solar > 0);
+  w('tBatt').classList.toggle('on', s.batt !== 0);
+  w('tHome').classList.add('on');
+  w('tGrid').classList.toggle('off', !!s.off);
+  w('lGridB').classList.toggle('cut', !!s.off);
+  lane('Solar', s.solar > 0, 0, s.solar);
+  lane('Batt', s.batt !== 0, bIn, Math.abs(s.batt));
+  lane('Grid', s.grid > 0, 0, s.grid);
+  lane('Home', true, 0, s.home);
+  grow('spSolar', [Math.min(s.solar, s.home), bIn]);
+  grow('spHome', [Math.min(s.solar, s.home), bOut, s.grid]);
+}
+show(0);
+autoplay(screen, 4200, () => show((cur + 1) % S.length));
+})();
+
+/* every plant in one place: the app's plant menu, switching between three example plants */
+(() => {
+const card = document.getElementById('pl-card');
+if (!card) return;
+const menu = document.getElementById('pl-menu'), pick = document.getElementById('pl-pick'), view = document.getElementById('pl-view');
+const PL = [
+  { name: 'Home', st: ['Live', '#3ddc84'], now: 4.82, batt: 64, made: 31.4, peak: 9.9 },
+  { name: 'Mum and Dad', st: ['Grid off', '#f87171'], now: 3.1, batt: 81, made: 22.7, peak: 6.4, note: 'Grid off since 12:10. The battery is running the house.' },
+  { name: 'Holiday house', st: ['Live', '#3ddc84'], now: 1.96, batt: 98, made: 12.3, peak: 3.1 },
+];
+menu.innerHTML = PL.map((p, i) => `<button type="button" role="option" data-i="${i}"><b>${p.name}</b><span><i style="background:${p.st[1]}"></i>${p.st[0]}</span><em>${p.now.toFixed(2)} kW</em></button>`).join('');
+const rows = [...menu.children];
+// solar so far today, 06:00 to now (13:05), against a whole day's width
+const curve = p => { const pts = []; for (let m = 360; m <= 785; m += 10) { const x = (m - 360) / 760, v = Math.max(0, Math.sin(Math.PI * x)) * p.peak * (.88 + .12 * Math.sin(m / 23)); pts.push([20 + x * 480, 92 - v / 10 * 80]); } return pts; };
+let cur = 0, timers = [];
+function render(n) {
+  cur = n;
+  const p = PL[n], c = curve(p), d = c.map(([x, y], i) => (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1)).join(' ');
+  document.getElementById('pl-name').textContent = p.name;
+  rows.forEach((r, i) => r.setAttribute('aria-selected', i === n));
+  view.innerHTML = `<div class="pl-stats"><div>Solar now<b style="color:var(--solar)">${p.now.toFixed(2)}<small>kW</small></b></div><div>Battery<b style="color:var(--batt)">${p.batt}<small>%</small></b></div><div>Made today<b>${p.made}<small>kWh</small></b></div></div>`
+    + `<p class="pl-note">${p.note || ''}</p>`
+    + `<div class="pl-ch"><span>Solar today</span><span class="num">06:00 to now</span></div>`
+    + `<svg class="pl-svg" viewBox="0 0 520 100" aria-hidden="true"><defs><linearGradient id="pl-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3ddc84" stop-opacity=".35"/><stop offset="1" stop-color="#3ddc84" stop-opacity="0"/></linearGradient></defs><line x1="20" x2="500" y1="92" y2="92" stroke="rgba(255,255,255,.1)"/><path d="${d} L${c[c.length - 1][0].toFixed(1)} 92 L20 92Z" fill="url(#pl-g)"/><path d="${d}" fill="none" stroke="#3ddc84" stroke-width="2.4"/></svg>`;
+}
+const open = on => { card.classList.toggle('open', on); pick.setAttribute('aria-expanded', on); if (!on) rows.forEach(r => r.classList.remove('hov')); };
+function choose(n) {
+  open(false);
+  if (n === cur) return;
+  view.classList.add('swap');
+  setTimeout(() => { render(n); view.classList.remove('swap'); }, calm ? 0 : 180);
+}
+const stopPlay = autoplay(card, 4000, () => {
+  const n = (cur + 1) % PL.length;
+  open(true);
+  timers = [setTimeout(() => rows[n].classList.add('hov'), 700), setTimeout(() => choose(n), 1400)];
+});
+const stop = () => { stopPlay(); timers.forEach(clearTimeout); };
+pick.addEventListener('click', () => { stop(); open(!card.classList.contains('open')); });
+rows.forEach((r, i) => r.addEventListener('click', () => { stop(); choose(i); }));
+document.addEventListener('click', e => { if (!card.contains(e.target)) open(false); });
+card.addEventListener('keydown', e => { if (e.key === 'Escape') { open(false); pick.focus(); } });
+render(0);
+})();
