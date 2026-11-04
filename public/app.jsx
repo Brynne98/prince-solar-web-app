@@ -1154,22 +1154,6 @@ function FreeWeekOver({ onDone }) {
   );
 }
 
-// Every lock opens this (window.openPlans): the plans, yearly first.
-function PlansSheet() {
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    const on = () => setOpen(true);
-    window.addEventListener('ps-plans', on);
-    return () => window.removeEventListener('ps-plans', on);
-  }, []);
-  if (!open) return null;
-  return (
-    <window.Dialog size="mid" label="Plans" onClose={() => setOpen(false)}>
-      <window.Paywall reason="history" onCancel={() => setOpen(false)} />
-    </window.Dialog>
-  );
-}
-
 function App({ links }) {
   // plan, preferences (the last plant viewed) and plants for the signed-in user (api_me)
   const [me, setMe] = useState(null);
@@ -1433,6 +1417,12 @@ function App({ links }) {
   const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(true); setRefreshKey(k => k + 1); };
 
   const go = (id) => { setTab(id); setOpenDay(null); toTop(); if (location.hash) history.replaceState(history.state, '', location.pathname + location.search); };
+  // Every lock (window.openPlans) opens Adjust plan: Free, Home and Family side by side.
+  useEffect(() => {
+    const on = () => go('plans');
+    window.addEventListener('ps-plans', on);
+    return () => window.removeEventListener('ps-plans', on);
+  }, []);
   // An alert tapped in the list: read, then its plant, page and day.
   const pickNotif = (it) => {
     window.track('notification_opened', { source: 'list', kind: it.kind });
@@ -1544,7 +1534,6 @@ function App({ links }) {
         {tab === 'grid' && <window.GridTab alertDay={openDay} snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'inverters' && <window.InvertersTab snap={snap} refreshKey={refreshKey} />}
       </div>
-      <PlansSheet />
     </Frame>
     </window.FreeCtx.Provider>
   );

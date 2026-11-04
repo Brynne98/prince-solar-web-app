@@ -364,14 +364,12 @@ window.sb.auth.onAuthStateChange((event, session) => {
  * Shown when the plan doesn't cover a plant.
  *   reason 'paused'     Upgrade on a login row with paused plants (`paused`: their names)
  *          'upgrade'    Upgrade in the Plan section, on Home: the price before the saved card is charged
- *          'history'    a lock on Free after its week (SOLAR-242): both plans, yearly first, priced a month
  * A paid user's period changes at renewal, so only Free gets the switch.
  */
 function Paywall({ reason, paused = [], plantIds = null, onCancel }) {
   const { useState, useEffect } = React;
-  const history = reason === 'history';
-  const offers = history ? ['home', 'family'] : ['family'];
-  const [period, setPeriod] = useState(history ? 'yearly' : 'monthly');
+  const offers = ['family'];
+  const [period, setPeriod] = useState('monthly');
   const [quotes, setQuotes] = useState(null);
   // Closed any way (Not now, the sheet's close, leaving the screen). Paying leaves the
   // page instead, so it never counts as closed.
@@ -388,15 +386,14 @@ function Paywall({ reason, paused = [], plantIds = null, onCancel }) {
   const per = paid ? first.period : period;
   return (
     <div className="paywall" role="dialog" aria-labelledby="pw-title">
-      <h2 id="pw-title" className="sset-title">{history ? 'See every day' : reason === 'upgrade' ? 'Upgrade to Family'
+      <h2 id="pw-title" className="sset-title">{reason === 'upgrade' ? 'Upgrade to Family'
         : reason === 'paused' ? `Collect data for ${paused.length === 1 ? paused[0] : paused.length + ' stopped plants'}`
         : 'Add another plant'}</h2>
-      <p className="sset-note">{history ? 'Free keeps the last 24 hours.' : first?.plan === 'family' ? 'Plants after your 3rd stay stopped until you add them to your plan.'
+      <p className="sset-note">{first?.plan === 'family' ? 'Plants after your 3rd stay stopped until you add them to your plan.'
         : (paid ? 'Home' : 'Free') + ' covers one plant.'}</p>
       {!paid && (
         <window.Segmented size="sm" className="pw-period" label="Billing" value={period} onChange={setPeriod}
-          options={(history ? ['yearly', 'monthly'] : ['monthly', 'yearly']).map(p => ({ value: p,
-            label: <>{p === 'monthly' ? 'Monthly' : 'Yearly'}{history && p === 'yearly' && <span className="pw-save">2 months free</span>}</> }))} />
+          options={['monthly', 'yearly'].map(p => ({ value: p, label: p === 'monthly' ? 'Monthly' : 'Yearly' }))} />
       )}
       {quotes?.error ? <p className="sset-note pw-error">Couldn’t load prices. Close this and try again.</p> : (
         <div className="pw-plans">
@@ -405,9 +402,7 @@ function Paywall({ reason, paused = [], plantIds = null, onCancel }) {
             return (
               <div key={p} className={'pw-plan' + (p === 'family' ? ' pw-main' : '')}>
                 <div className="pw-name">{p === 'family' ? 'Family' : 'Home'}</div>
-                {history && per === 'yearly'
-                  ? <div className="pw-price">{q && <Was list={Math.round(q.listCharge / 12)} price={Math.round(q.nextCharge / 12)} />}<b>{q ? rand(Math.round(q.nextCharge / 12)) : '…'}</b> a month{q && <span className="pw-billed">{rand(q.nextCharge)} billed yearly</span>}</div>
-                  : <div className="pw-price">{q && <Was list={q.listCharge} price={q.nextCharge} />}<b>{q ? rand(q.nextCharge) : '…'}</b> {perUnit(per)}</div>}
+                <div className="pw-price">{q && <Was list={q.listCharge} price={q.nextCharge} />}<b>{q ? rand(q.nextCharge) : '…'}</b> {perUnit(per)}</div>
                 {q?.offerTerms && q.listCharge > q.nextCharge && <div className="pw-offer">{offerLine(q.offerTerms, q.listCharge, per)}</div>}
                 <ul className="pw-gives">
                   <li>{p === 'family' ? 'Up to 3 plants' : '1 plant'}</li>
@@ -424,7 +419,7 @@ function Paywall({ reason, paused = [], plantIds = null, onCancel }) {
       {first && <p className="field-note"><Was list={first.listExtraPrice} price={first.extraPrice} />{rand(first.extraPrice)} {perUnit(per)} for each plant after your 3rd.{offerCap(first.offerTerms) && ' ' + offerCap(first.offerTerms)}</p>}
       <div className="conn-form-actions pw-foot">
         <span className="field-note">Cancel any time.</span>
-        <button type="button" className="ghost-btn" onClick={onCancel}>{history ? 'Stay on Free' : 'Not now'}</button>
+        <button type="button" className="ghost-btn" onClick={onCancel}>Not now</button>
       </div>
     </div>
   );
