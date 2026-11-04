@@ -90,10 +90,22 @@ const refundNow = (reference: string) => paystack("POST", "/refund", { transacti
     console.error(`billing refund ${reference}: ${e.message}`);
   });
 
+/** Mark a charge failed (0116) and count it, by user id only (SOLAR-243). A charge
+ *  already settled ("again") was counted the first time. A failed count never stops the report. */
+async function chargeFailed(reference: string, error: string, renewal: boolean) {
+  const r = await rpc<{ status?: string; kind?: string; applied?: boolean; again?: boolean }>("billing_charge_failed",
+    { p_reference: reference, p_error: error });
+  if (r?.status === "failed" && !r.again) {
+    const user = await rpc<string | null>("billing_charge_user", { p_reference: reference }).catch(() => null);
+    if (user) await track("payment_failed", user, reference, new Date().toISOString(), { renewal });
+  }
+  return r;
+}
+
 /** Report a Paystack transaction back to 0116. Paid, failed, still open (null), or "refund":
  *  paid after the account changed, so nothing applied and the money goes back (0127, 0128).
  *  `out.kind`: the paid charge's kind, for /verify. */
-async function settle(tx: Tx, out: { kind?: string } = {}): Promise<"paid" | "failed" | "refund" | null> {
+async function settle(tx: Tx, out: { kind?: string } = {}, renewal = false): Promise<"paid" | "failed" | "refund" | null> {
   if (tx.status === "success" && tx.currency !== "ZAR") {
     console.error(`billing ${tx.reference}: paid in ${tx.currency}, not ZAR: not applied, refunding`);
     await refundNow(tx.reference);
@@ -134,8 +146,7 @@ async function settle(tx: Tx, out: { kind?: string } = {}): Promise<"paid" | "fa
   // Reversed: refunded. A card change's R1 goes back on purpose, often before the
   // user's /verify (the webhook came first); 0120 answers that it was paid.
   if (["failed", "abandoned", "reversed", "reversal-pending"].includes(tx.status)) {
-    const r = await rpc<{ status?: string; kind?: string; applied?: boolean }>("billing_charge_failed",
-      { p_reference: tx.reference, p_error: tx.gateway_response || tx.status });
+    const r = await chargeFailed(tx.reference, tx.gateway_response || tx.status, renewal);
     if (r?.status === "paid") { out.kind = r.kind; return r.applied === false ? "refund" : "paid"; }
     return "failed";
   }
@@ -153,7 +164,7 @@ async function chargeCard(c: { reference: string; amount: number; card: string; 
     const tx = await paystack<Tx>("POST", "/transaction/charge_authorization", {
       authorization_code: c.card, email: c.email, amount: c.amount * 100, currency: "ZAR", reference: c.reference,
     });
-    return await settle(tx);
+    return await settle(tx, {}, run);
   } catch (e) {
     if (!(e instanceof PaystackError)) throw e;
     err = e;
@@ -174,8 +185,8 @@ async function chargeCard(c: { reference: string; amount: number; card: string; 
       return null;
     }
   }
-  if (tx) return await settle(tx); // null: still open, the webhook settles it
-  await rpc("billing_charge_failed", { p_reference: c.reference, p_error: err.message });
+  if (tx) return await settle(tx, {}, run); // null: still open, the webhook settles it
+  await chargeFailed(c.reference, err.message, run);
   return "failed" as const;
 }
 

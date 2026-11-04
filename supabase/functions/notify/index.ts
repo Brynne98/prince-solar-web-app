@@ -471,6 +471,12 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
       if (row?.kind === "winback" && row.user_id) {
         await track("winback_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), { plan: row.data.from });
       }
+      // SOLAR-243: a paid plan ended. Each email goes once per end: a cancel that ran
+      // out (winback, 0144) or a failed payment that moved it to Free (bill_free).
+      if ((row?.kind === "winback" || row?.kind === "bill_free") && row.user_id) {
+        await track("plan_cancelled", row.user_id, String(row.id), new Date().toISOString(),
+          { plan: row.data.from, reason: row.kind === "winback" ? "cancelled" : "unpaid" });
+      }
       // SOLAR-319
       if (row?.kind === "need_a_hand" && row.user_id) {
         await track("need_a_hand_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), {});

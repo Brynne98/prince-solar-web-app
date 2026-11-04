@@ -55,9 +55,16 @@ async function getJSON(url) {
   return must(window.sb.rpc(fn, { ...params, p_plant: window.CURRENT_PLANT }), {}, 'RPC ' + fn + ' failed');
 }
 // A Supabase call's data, or its error thrown. fallback stands in for no data.
+// The error also goes to PostHog, since many callers fall back to empty data without a
+// word (SOLAR-243). Not reported: no connection, and a change the database refused on
+// purpose (22023), which the caller explains.
 async function must(call, fallback, failed = 'failed') {
   const { data, error } = await call;
-  if (error) throw new Error(error.message || failed);
+  if (error) {
+    const e = new Error(error.message || failed);
+    if (error.code !== '22023' && !/fetch|network|load failed/i.test(e.message)) window.reportClientError?.(e);
+    throw e;
+  }
   return fallback !== undefined && !data ? fallback : data;
 }
 

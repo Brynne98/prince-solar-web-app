@@ -246,6 +246,7 @@ window.startUpgrade = async function startUpgrade(plan, period, newCard = false,
       }
     } finally { if (!r?.url && r?.status !== 'paid') stop(); }   // a new page is on its way: keep it up
     if (r.url) {
+      window.track('checkout_opened', { plan, period });
       try { paidEvent ? sessionStorage.setItem(PAID_EVENT, JSON.stringify(paidEvent)) : sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
       location.assign(r.url);
     } else if (r.status === 'paid') {
@@ -359,7 +360,9 @@ function Paywall({ reason, paused = [], plantIds = null, onCancel }) {
   const offers = history ? ['home', 'family'] : ['family'];
   const [period, setPeriod] = useState(history ? 'yearly' : 'monthly');
   const [quotes, setQuotes] = useState(null);
-  useEffect(() => { window.track('paywall_shown', { reason }); }, []);
+  // Closed any way (Not now, the sheet's close, leaving the screen). Paying leaves the
+  // page instead, so it never counts as closed.
+  useEffect(() => { window.track('paywall_shown', { reason }); return () => window.track('paywall_closed', { reason }); }, []);
   useEffect(() => {
     let alive = true;
     Promise.all(offers.map(p => quote(p, period)))
