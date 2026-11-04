@@ -533,7 +533,7 @@ function show(n, ms) {
   g('left').innerHTML = dur(left).replace(/ ([hm])/g, '<small>$1</small>');
   g('at').textContent = 'Reaches the ' + RES + '% reserve ' + (end >= 30 * 60 ? 'after sunrise' : 'at ' + hm(end));
   g('soc').textContent = Math.round(p.soc) + '%';
-  g('load').textContent = p.k.toFixed(1) + ' kW';
+  g('load').textContent = p.k < 1 ? Math.round(p.k * 1000) + ' W' : p.k.toFixed(1) + ' kW';
   g('load').classList.toggle('hi', p.k >= 3);
   glide(X(p.m), Y(p.soc), ms);
   g('range').value = n;
