@@ -1143,7 +1143,7 @@
   @media (prefers-reduced-motion: reduce) { .spin, [aria-busy="true"]::after { animation-duration: 2s; } }
   .pop-wait { display: flex; align-items: center; gap: 12px; font-size: 14.5px; }
   .pop-wait .spin { width: 16px; height: 16px; color: var(--pv); }
-  .pop-dlg:has(.pop-wait) { width: auto; min-width: 240px; }
+  .pop-dlg:has(.pop-wait) { width: fit-content; min-width: 240px; }   /* auto fills a modal dialog edge to edge (SOLAR-337) */
   .pop-dlg:focus { outline: none; }   /* a pop-up with nothing to press takes focus itself; no ring round it */
   .stepper[aria-busy="true"] .mono { opacity: .35; }
   .pop-dlg.pop-wide { width: min(940px, calc(100vw - 32px)); }
