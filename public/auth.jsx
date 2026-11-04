@@ -54,6 +54,9 @@ function fetchWithRefreshCutoff(url, opts) {
 const SITE_URL = location.origin + location.pathname.replace(/\/[^/]*$/, '/');
 // Reset links come back tagged, so an expired one can be told from a confirmation (SOLAR-198).
 const RESET_URL = SITE_URL + '?link=reset';
+// A failed emailed link comes back as #error_code=…. supabase-js reads it on start and
+// signs out, and the sign-out clears the hash, so keep it from before that (SOLAR-340).
+let linkHash = location.hash.slice(1);
 
 // "Reset password" in the password-changed email links to ?reset=1 (SOLAR-155). Signed in,
 // it opens Change password on Account; signed out, "Forgot password?". Read once and taken
@@ -393,7 +396,8 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   // A stale email link (confirm, reset) lands here signed out with the reason in the URL.
   // The back button restores the page from cache with `busy` still set, so clear it.
   React.useEffect(() => {
-    const params = new URLSearchParams(location.hash.slice(1) || location.search);
+    const params = new URLSearchParams(linkHash || location.search);
+    linkHash = '';
     if (params.get('error_description')) {
       // The link carries no email, so the expired card asks for it (SOLAR-196). An expired
       // reset link goes to Forgot password, which already asks for one (SOLAR-198).
