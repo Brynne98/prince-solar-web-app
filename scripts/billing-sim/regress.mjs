@@ -663,6 +663,26 @@ const CASES = [
     if (await K.active(u) !== 3) bad.push(`${await K.active(u)} collect on Family, want 3`);
     return bad;
   } },
+  { id: 'X15', title: 'priced per plant (SOLAR-249): Family with 5 plants and 7 inverters is R179 + 2 × R49 = R277', async run(K) {
+    const bad = [], u = await K.user('family');
+    const o = await K.open(u, 'family', null, 2); if (!o.ok) return ['refused: ' + o.err];
+    await K.paid(o.v.reference);
+    await K.link(u, [{ id: P(1), inv: 2 }, { id: P(2) }, { id: P(3), inv: 2 }, { id: P(4) }, { id: P(5) }]);
+    if (await K.active(u) !== 5) bad.push(`${await K.active(u)} of 5 collect`);
+    if (await K.due(u) !== 277) bad.push(`next bill R${await K.due(u)}, want R277`);
+    return bad;
+  } },
+  { id: 'X16', title: 'plan full, 2 plants stopped, the add paid for the newer one (SOLAR-253): only it starts', async run(K) {
+    const bad = [], u = await K.user('family');
+    await K.link(u, [1, 2, 3, 4, 5].map((i) => ({ id: P(i) })));                       // 4, 5 link stopped
+    const o = await K.open(u, 'family', null, 1, [P(5)]); if (!o.ok) return ['refused: ' + o.err];
+    const p = await K.paid(o.v.reference);
+    if (!p.ok || p.v.applied === false) bad.push('paid but not applied: ' + JSON.stringify(p.v ?? p.err));
+    if (await K.paused(u, P(5))) bad.push('the plant the add was paid for stays stopped');
+    if (!(await K.paused(u, P(4)))) bad.push('the older stopped plant started instead or as well');
+    if (await K.active(u) !== 4) bad.push(`${await K.active(u)} collect, want 4`);
+    return bad;
+  } },
   { id: 'T1', title: 'day 8 to Free after the login of the oldest plant was removed: Free keeps a plant not booked for deletion', async run(K) {
     // code review 2026-10-31: Free kept the booked plant, so on remove_on every plant went.
     const bad = [], u = await K.user('family');
