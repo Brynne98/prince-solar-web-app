@@ -36,7 +36,7 @@ export const senderFor = (kind: string) =>
   kind === "account_deleted" ? FROM_ACCOUNT
     : kind.startsWith("bill_") || kind === "free_week_soon" ? FROM_BILLING
     : kind.startsWith("report_") ? FROM_REPORTS
-    : kind === "welcome" || kind === "history" || kind === "free_week_setup" || kind === "winback" ? FROM_HELLO
+    : kind === "welcome" || kind === "history" || kind === "free_week_setup" || kind === "winback" || kind === "need_a_hand" ? FROM_HELLO
     : FROM_ALERTS;
 // Supabase's link lifetime (Auth -> mailer OTP expiry): 24 hours since SOLAR-196.
 const LINK_LIFE = "This link works once and expires in 24 hours.";
@@ -361,6 +361,24 @@ export const welcome = () =>
       { button: { label: "Add your plant", href: APP } },
     ],
     footer: [HELP],
+  });
+
+// 24 hours after sign-up, only if no SunSynk login was ever added (SOLAR-319). The
+// welcome email's steps again; from hello@, so a reply reaches us.
+export const needAHand = () =>
+  make("Need a hand adding your plant?", {
+    title: "Need a hand adding your plant?",
+    parts: [
+      { p: "Your account is ready, but no plant is linked yet. It takes two minutes." },
+      { steps: [
+        "Tap the button below and sign in.",
+        "Enter the email and password from your <b>SunSynk Connect</b> app.",
+        "Your readings start within a minute and update every minute. Your last 60 days follow, and we'll email you when they're in.",
+      ] },
+      { button: { label: "Add your plant", href: APP } },
+      { p: "Stuck? Reply to this email and we'll help." },
+    ],
+    footer: [],
   });
 
 

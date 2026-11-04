@@ -9,7 +9,7 @@
 // This is the only place a SunSynk password ever touches the backend. Keep it that
 // way: no console.log of the body, no error message that includes input.
 import { db, linkAccount } from "../_shared/sunsynk.ts";
-import { serve } from "../_shared/errors.ts";
+import { serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { mockClosed } from "../_shared/gate.ts";
 
@@ -56,6 +56,13 @@ serve("link-sunsynk", async (req) => {
     // A good link gives its try back, so only failed tries count (0135).
     const { error: refundErr } = await db.rpc("link_succeeded", { p_user: userId });
     if (refundErr) console.error(`link-sunsynk refund failed for user ${userId}: ${refundErr.message}`);
+    // SOLAR-319: a login added after the "need a hand" email went. Keyed on the email, so it counts once.
+    const { data: hand } = await db.from("email_queue").select("id, sent_at")
+      .eq("user_id", userId).eq("kind", "need_a_hand").eq("status", "sent").maybeSingle();
+    if (hand) {
+      await track("need_a_hand_login_linked_done", userId, String(hand.id), new Date().toISOString(),
+        { hours: Math.round((Date.now() - Date.parse(hand.sent_at)) / 3_600_000) });
+    }
     if (!plants.length) {
       // Linked, but SunSynk returned no plants: the login works but sees nothing —
       // typical when the installer owns the plant and hasn't shared it yet.

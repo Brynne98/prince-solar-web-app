@@ -29,7 +29,7 @@ import { reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, plantsRemovalSoon,
-  offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback,
+  offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, needAHand,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -292,6 +292,7 @@ async function build(r: Row): Promise<Email | null> {
     case "bill_offer_ends":
       return offerEnds({ plan: d.plan, period: d.period, was: d.was, amount: d.amount, on: day(d.on), card: d.card ?? undefined });
     case "winback": return winback({ from: d.from, keepUntil: day(d.keepUntil) });
+    case "need_a_hand": return needAHand();
   }
   throw new Error(`unknown kind ${r.kind}`);
 }
@@ -469,6 +470,10 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
       const row = x.status === "sent" ? rows.find((r) => r.id === x.id) : undefined;
       if (row?.kind === "winback" && row.user_id) {
         await track("winback_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), { plan: row.data.from });
+      }
+      // SOLAR-319
+      if (row?.kind === "need_a_hand" && row.user_id) {
+        await track("need_a_hand_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), {});
       }
     }
   }
