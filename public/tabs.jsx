@@ -276,13 +276,13 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   React.useEffect(() => {
     let armed = false;
     try { armed = localStorage.getItem('synsynk.flowFs') === '1'; } catch (e) {}
-    if (!armed) return;
+    if (!armed || over) return; // Free after its week: no wall view (SOLAR-333)
     const resume = () => { cleanup(); enterWall(); };
     const cleanup = () => { window.removeEventListener('pointerdown', resume); window.removeEventListener('keydown', resume); };
     window.addEventListener('pointerdown', resume, { once: true });
     window.addEventListener('keydown', resume, { once: true });
     return cleanup;
-  }, []);
+  }, [over]);
 
   // ---- period-over-period trend arrows on the Overview cards ----
   const cmp = useCompare(refreshKey, snap);
@@ -449,7 +449,8 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         {wall && strip}
         <Card className="flow-card">
           {!wall && <SectionTitle right={
-            <button className="flow-fs-btn" onClick={enterWall}>
+            over ? <button className="flow-fs-btn" onClick={() => window.openPlans('wall')}><window.LockIcon /><span>Fullscreen</span></button>
+            : <button className="flow-fs-btn" onClick={enterWall}>
               <FsEnterIcon /><span>Fullscreen</span>
             </button>
           }>POWER FLOW</SectionTitle>}
