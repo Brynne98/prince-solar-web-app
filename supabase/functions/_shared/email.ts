@@ -628,7 +628,7 @@ const FREE_RULE = "we keep only the last 24 hours of readings. Alerts stay on; r
 const PAID_FREE_RULE = "we keep your readings for 30 days, then only the last 24 hours. Alerts stay on; reports stop.";
 const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;
 // Who is selling, on every receipt and renewal notice.
-const SELLER = "Prince Solar Hub is run by Theron and Prince Solutions. No VAT is charged.";
+const SELLER = "Prince Solar Hub is run by Theron and Prince Solutions (Pty) Ltd, reg. no. 2026/182827/07, Kempton Park, Gauteng. No VAT is charged.";
 export type Plan = keyof typeof PLAN_NAME;
 export type BillPeriod = "monthly" | "yearly";
 // The plan as a receipt row: "Family plan", "Monthly · from 1 Dec", its price on the right.
