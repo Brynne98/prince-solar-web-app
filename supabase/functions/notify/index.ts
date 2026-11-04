@@ -285,7 +285,7 @@ async function build(r: Row): Promise<Email | null> {
     case "bill_mail_failed":
       return billMailFailed({ kind: String(d.kind), key: String(d.key), user: String(d.user ?? ""), error: String(d.error ?? "") });
     case "bill_free":
-      return movedToFree({ from: d.from, kept: d.kept, stopped: d.stopped, deleteOn: day(d.deleteOn), payUrl: PAY_URL });
+      return movedToFree({ from: d.from, kept: d.kept, stopped: d.stopped, deleteOn: day(d.deleteOn) });
     case "bill_removal_soon": return plantsRemovalSoon(d.plants, day(d.on));
     case "bill_renewal_notice":
       return renewalNotice({ plan: d.plan, amount: d.amount, on: day(d.on), change: d.changed ? "Your plan changes on that date, as you booked." : undefined });

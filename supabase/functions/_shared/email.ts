@@ -508,7 +508,7 @@ export function report(r: Report): Email {
   } else if (facts.length) parts.push({ facts: facts.map((f) => ({ label: f.label, value: `${f.sub ? esc(f.sub) + " · " : ""}${f.value}${f.unit ? " " + f.unit : ""}` })) });
   if (r.freeWeekEnds) {
     parts.push({ note: `Your free week ends today. From tomorrow ${FREE_RULE}` });
-    parts.push({ button: { label: "See plans", href: PLAN } });
+    parts.push({ button: { label: "See plans", href: PLANS } });
   } else parts.push({ button: openPage("live", r.plantId) });
   return make(`${EVERY[r.period]} solar report for ${r.plant}: ${r.label}`, {
     title: r.label,
@@ -622,6 +622,8 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
 const PLAN = `${APP}/?tab=account&section=plan`;
 // "Pay with another card": the Plan section opens Paystack's card page for the failed payment.
 export const PAY_URL = `${PLAN}&pay=1`;
+// Buttons that ask them to pick a plan: Billing with the plans open (SOLAR-341).
+const PLANS = `${APP}/?tab=account&section=plans`;
 // What Free means after its first week, said the same way in every email.
 const FREE_RULE = "we keep only the last 24 hours of readings. Alerts stay on; reports stop.";
 // After a paid plan, readings stay 30 days first (SOLAR-329, 0146).
@@ -851,7 +853,7 @@ export const billMailFailed = (m: { kind: string; key: string; user: string; err
 // Unpaid after the last try: the account is on Free. The first-linked plant stays
 // live; the others stop updating and are deleted after 30 days, unless paid for or
 // swapped for the one kept.
-export type MovedToFree = { from: Plan; kept: string; stopped: string[]; deleteOn: string; payUrl: string };
+export type MovedToFree = { from: Plan; kept: string; stopped: string[]; deleteOn: string };
 
 export const movedToFree = (m: MovedToFree) =>
   make("Your account is now on Free", {
@@ -861,7 +863,7 @@ export const movedToFree = (m: MovedToFree) =>
       { plants: { title: "Still updating", names: [m.kept], tone: "keep" } },
       ...(m.stopped.length ? [{ plants: { title: `Stopped, deleted on ${m.deleteOn}`, names: m.stopped, tone: "stop" as const } }] : []),
       ...(m.stopped.length ? [{ note: "Pay to keep every plant, or choose which plant Free keeps." }] : []),
-      { button: { label: m.stopped.length ? "Pay to keep these plants" : "Pay now", href: m.payUrl } },
+      { button: { label: m.stopped.length ? "Pay to keep these plants" : "Pay now", href: PLANS } },
     ],
     footer: [HELP],
   });
@@ -874,7 +876,7 @@ export const winback = (w: { from: Plan; keepUntil: string }) =>
     parts: [
       { p: `Your ${PLAN_NAME[w.from]} plan has ended. You're on Free now. We keep your readings until ${w.keepUntil} in case you change your mind. After that, Free keeps the last 24 hours.` },
       { p: "Come back any time." },
-      { button: { label: "Pick a plan", href: PLAN } },
+      { button: { label: "Pick a plan", href: PLANS } },
     ],
     footer: [HELP],
   });
@@ -901,7 +903,7 @@ export const freeWeekEndsSoon = (endsOn: string, plant: string, days: number, pe
     title,
     parts: [
       { p: `Free keeps the last 24 hours. Keep your full history for R${perMonth} a month, billed yearly.` },
-      { button: { label: "Keep my history", href: PLAN } },
+      { button: { label: "Keep my history", href: PLANS } },
     ],
     footer: [HELP],
   });

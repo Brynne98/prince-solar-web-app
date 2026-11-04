@@ -1154,9 +1154,11 @@ function FreeWeekOver({ onDone }) {
   );
 }
 
-// Every lock opens this (window.openPlans): the plans, yearly first.
+// Every lock opens this (window.openPlans): the plans, yearly first. An email that asks
+// them to pick a plan adds section=plans (SOLAR-341): it opens once, when the app is up.
+let plansAsked = new URLSearchParams(location.search).get('section') === 'plans';
 function PlansSheet() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => { const a = plansAsked; plansAsked = false; return a; });
   useEffect(() => {
     const on = () => setOpen(true);
     window.addEventListener('ps-plans', on);
@@ -1301,8 +1303,9 @@ function App({ links }) {
       const url = new URL(location.href);
       const linked = Number(url.searchParams.get('plant'));
       // A report or alert footer adds section=notifications: open Account on the email switches.
-      // A payment email or Paystack's return adds section=plan: Billing.
-      const section = { logins: 'connection', notifications: 'notifications', plan: 'plan' }[url.searchParams.get('section')];
+      // A payment email or Paystack's return adds section=plan: Billing. section=plans is
+      // Billing too, with the plans on top (PlansSheet).
+      const section = { logins: 'connection', notifications: 'notifications', plan: 'plan', plans: 'plan' }[url.searchParams.get('section')];
       if (url.searchParams.has('section')) {
         url.searchParams.delete('section'); history.replaceState(history.state, '', url);
       }

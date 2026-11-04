@@ -121,7 +121,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "billing-refund": [FROM_BILLING, paymentRefunded({ amount: 72, date: "3 Dec", reference: "psh_0123", why: "price" })],
   "billing-failed-disputed": [FROM_BILLING, paymentFailed({ plan: "home", period: "monthly", amount: 99, card: "Visa •••• 4081", nextTry: "4 Dec", freeOn: "11 Dec", payUrl: PAY_URL, disputed: "10 Nov" })],
   "billing-failed-last": [FROM_BILLING, paymentFailed({ plan: "family", period: "monthly", amount: 179, card: "Visa •••• 4081", freeOn: "8 Dec", payUrl: PAY_URL })],
-  "billing-moved-to-free": [FROM_BILLING, movedToFree({ from: "family", kept: "Home", stopped: ["Cabin", "Office"], deleteOn: "7 Jan", payUrl: PAY_URL })],
+  "billing-moved-to-free": [FROM_BILLING, movedToFree({ from: "family", kept: "Home", stopped: ["Cabin", "Office"], deleteOn: "7 Jan" })],
   "billing-removal-soon": [FROM_BILLING, plantsRemovalSoon(["Cabin", "Office"], "7 Jan")],
   "event-grid-down": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "grid_down", at: "14:32", chargePct: 62 })],
   "event-grid-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "grid_back", at: "16:05", lasted: "1 h 33 min" })],
