@@ -83,7 +83,7 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 .moment p{margin-top:22px;font-family:var(--body);font-size:20px;line-height:1.5;color:var(--ink-soft);max-width:30em;text-wrap:pretty}
 .moment .cta{display:flex;gap:14px;margin-top:32px}
 .cardcol{align-self:stretch;padding:max(84px,calc(50vh - 259px)) 0 0}
-.cardcol .card{position:sticky;top:max(84px,calc(50vh - 259px))}
+.cardcol .card{position:sticky;top:max(calc(84px + var(--bar,0px)),calc(50vh - 259px))}
 .sky{position:absolute;inset:0;background:linear-gradient(180deg,var(--s1) 0%,var(--s2) 55%,var(--s3) 100%)}
 #hillFar{fill:var(--l1)}#hillNear,#houseBody{fill:var(--l2)}#door{fill:var(--l1)}
 .stars{position:absolute;inset:0;opacity:var(--stars,1)}
@@ -361,8 +361,12 @@ section#features{padding-top:0;scroll-margin-top:112px}
 .period button span{margin-left:6px;color:var(--gold);font-weight:500}
 #pricing .plans{margin-top:24px}
 /* an offer (SOLAR-330): the list price struck out, its terms in a band under the switch */
+.extra s{color:var(--muted);text-decoration-thickness:1px}
 .price s{display:block;margin-bottom:6px;font-size:22px;letter-spacing:-.01em;color:var(--muted)}
-.offer-band{margin-top:18px;font-size:16px;color:var(--gold)}
+.offer-band{margin-top:18px;font-size:16px;color:var(--muted)}.offer-band b{color:var(--gold);font-weight:600}
+.offer-bar{display:block;text-decoration:none;padding:8px 16px;text-align:center;font:500 14px var(--sans);color:var(--gold);background:#1c160c;border-bottom:1px solid rgba(242,195,107,.25)}.offer-bar[hidden]{display:none}
+.offer-bar span{text-decoration:underline;text-underline-offset:3px}
+@media (max-width:600px){.offer-bar{padding:7px 12px;font-size:13px}.offer-bar span{display:none}}
 #pricing[data-period="m"] .y,#pricing[data-period="y"] .m{display:none}
 .extra{margin:0 0 26px;padding:16px 16px 14px;border-radius:14px;border:1px dashed rgba(242,195,107,.45);background:rgba(242,195,107,.05)}
 .extra div{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:2px 12px;font:600 16px var(--sans);white-space:nowrap}
@@ -412,7 +416,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   .brand{font-size:15px;gap:8px}.signin{font-size:15px}
   .scene{grid-template-columns:1fr;gap:0}
   .cardcol{position:absolute;top:0;bottom:0;left:16px;right:16px;padding:0;overflow:clip;pointer-events:none}
-  .cardcol .card{top:68px;transform:scale(var(--k,.64));transform-origin:top left;pointer-events:auto}
+  .cardcol .card{top:calc(68px + var(--bar,0px));transform:scale(var(--k,.64));transform-origin:top left;pointer-events:auto}
   /* the card is drawn small on a phone: the alert stays full size, narrower, right-aligned, just over the card's foot */
   .toast{left:auto;right:0;bottom:auto;top:calc(100% - 56px / var(--k,.64));width:calc(70% * var(--k,.64) / .8);scale:calc(.8 / var(--k,.64));transform-origin:top right}  /* the words sit just above low hills; later moments are shorter so the next words follow sooner */
   .moment{justify-content:flex-end;padding:0 0 116px;min-height:100svh}
@@ -459,6 +463,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 <body>
 
 <header class="top" id="top">
+  <a class="offer-bar" href="#pricing" hidden>Launch price. <span>See prices</span></a>
   <div class="wrap">
     <a class="brand" href="#"><span class="orb" aria-hidden="true"></span>Prince Solar Hub</a>
     <nav class="links" aria-label="Main"><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#questions">Questions</a></nav>
@@ -682,7 +687,8 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
         <ul>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Everything for your first 7 days</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Then only the last 24 hours</li>
-          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Every alert</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Live, every minute</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Alerts for power cuts, battery, panels and inverter</li>
         </ul>
         <a class="btn ghost" href="https://app.princesolarhub.co.za/?signup">Try it free</a>
       </div>
@@ -692,9 +698,11 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
         <div class="per" data-offer="home"><span class="m">About R3 a day</span><span class="y">About R83 a month</span></div>
         <ul>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>1 plant</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Live, every minute</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Your full history</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Weekly, monthly and yearly reports</li>
-          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Every alert</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Full-screen wall view</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Alerts for power cuts, battery, panels and inverter</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Cancel any time</li>
         </ul>
         <a class="btn ghost" data-plan="home" href="https://app.princesolarhub.co.za/?signup&amp;plan=home&amp;period=monthly">Get Home</a>
@@ -724,6 +732,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
       <details><summary>How often does it update?<i></i></summary><p>Every minute, the same as the SunSynk app.</p></details>
       <details><summary>How far back does my history go?<i></i></summary><p>When you connect, we bring in your last 60 days from SunSynk. From then on, Home and Family plans keep your full history.</p></details>
       <details><summary>What happens after the free week?<i></i></summary><p>You keep the last 24 hours and every alert. Move to a Home or Family plan to keep your full history.</p></details>
+      <details class="offer-q" hidden><summary>What is the launch price?<i></i></summary><p></p></details>
       <details><summary>Can I cancel any time?<i></i></summary><p>Yes. Your plan runs to your billing date, then moves to Free. Nothing more is charged.</p></details>
       <details><summary>Can I delete my account?<i></i></summary><p>Yes, any time, from Account. Your logins, settings and history go with it, and billing stops. It cannot be undone.</p></details>
       <details><summary>Do my numbers match the SunSynk app?<i></i></summary><p>Solar, home and battery match. With two or more inverters, our grid total can be higher: SunSynk counts the grid on one inverter, we count them all.</p></details>

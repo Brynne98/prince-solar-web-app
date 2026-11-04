@@ -359,17 +359,29 @@ addEventListener('DOMContentLoaded', async () => {
   for (const k of ['m', 'y']) {
     for (const p of ['home', 'family']) {
       pr.querySelector(`.price[data-offer="${p}"] .${k}`).innerHTML = `<s>${R(was[k][p])}</s>${R(at[k][p])}<small>${unit[k]}</small>`;
-      pr.querySelector(`.per[data-offer="${p}"] .${k}`).textContent = k === 'y' ? `About ${R(at.y[p] / 12)} a month`
-        : p === 'home' ? `About ${R(at.m.home / 30)} a day` : `About ${R(at.m.family / 3)} a plant`;
+      pr.querySelector(`.per[data-offer="${p}"] .${k}`).textContent = `Save ${R(was[k][p] - at[k][p])} ${unit[k]}`;
     }
-    pr.querySelector(`[data-offer="extra"] .${k}`).textContent = `+${R(at[k].extra)} a plant ${unit[k]}`;
+    pr.querySelector(`[data-offer="extra"] .${k}`).innerHTML = `<s>${R(was[k].extra)}</s> +${R(at[k].extra)} a plant ${unit[k]}`;
   }
   // Free keeps its price level with the struck-out prices beside it
   pr.querySelector('.price[data-offer="free"]').innerHTML = '<s aria-hidden="true" style="visibility:hidden">R0</s>R0';
-  const o = r.offer, band = pr.querySelector('.offer-band');
-  band.textContent = [o.id === 'launch' ? 'Launch price' : 'Offer price', o.cap ? ` for the first ${o.cap} members` : '', '. ',
-    o.months ? `For your first ${o.months} months, then the usual price.` : 'Join now and keep it while you stay.'].join('');
+  const o = r.offer, off = Math.round(100 * (1 - at.m.home / was.m.home));
+  const head = `${o.id === 'launch' ? 'Launch price' : 'Offer price'}: ${off >= 45 && off <= 55 ? 'half off' : `${off}% off`}${o.cap ? ` for the first ${o.cap} members` : ''}`;
+  const keep = o.months ? `For your first ${o.months} months, then the usual price.` : 'Keep it while your plan stays paid.';
+  const band = pr.querySelector('.offer-band');
+  band.innerHTML = `<b>${head}.</b> ${keep}`;
   band.hidden = false;
+  const bar = document.querySelector('.offer-bar');
+  bar.firstChild.textContent = head + '. ';
+  bar.hidden = false;
+  document.documentElement.style.setProperty('--bar', bar.offsetHeight + 'px');
+  const q = document.querySelector('.offer-q');
+  q.querySelector('summary').firstChild.textContent = `What is the ${o.id === 'launch' ? 'launch' : 'offer'} price?`;
+  q.querySelector('p').textContent = [o.cap ? `The first ${o.cap} members to pay` : 'Members who join now',
+    ` get Home for ${R(at.m.home)} and Family for ${R(at.m.family)} a month, instead of ${R(was.m.home)} and ${R(was.m.family)}. Extra plants are ${R(at.m.extra)}. `,
+    o.months ? `It lasts your first ${o.months} months, then the usual price applies.` : 'You keep it while your plan stays paid. Move to Free and it ends.',
+    o.cap ? ` Once ${o.cap} members have joined, it's gone.` : ''].join('');
+  q.hidden = false;
 });
 
 /* ---------- questions: one open at a time, eased ---------- */
