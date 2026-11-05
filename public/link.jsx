@@ -261,7 +261,7 @@ const reviewPay = async (plan, period, extras) => {
   const ok = await new Promise(resolve => {
     let close;
     const done = (yes) => { close(); resolve(yes); };
-    close = mountNode(<PayReview title={title} note={q.switch ? `Your year starts ${billDay(q.startsOn)}.` : null} due={q.dueNow} card={`${b.card.name} •••• ${b.card.last4}`}
+    close = mountNode(<PayReview title={title} note={q.switch ? `Your year starts ${billDay(q.startsOn)}.` : q.credit != null ? `Your year starts today, with ${rand(q.credit)} off for the rest of this month.` : null} due={q.dueNow} card={`${b.card.name} •••• ${b.card.last4}`}
       then={[`Then from ${billDay(q.nextDate)}`, `${rand(q.nextCharge)} ${perUnit(q.switch ? 'yearly' : q.period || period)}`]} onDone={done} />);
   });
   window.track('pay_review_done', { plan, choice: ok ? 'pay' : 'cancel' });

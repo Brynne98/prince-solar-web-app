@@ -2303,7 +2303,8 @@ function CancelSection({ billing: b, reload, logins = [] }) {
 
 // Adjust plan (SOLAR-250): a page of its own, back to Billing. Free, Home and Family side by
 // side with a monthly/yearly switch. A smaller plan in either period is booked for the
-// billing date (SOLAR-364); a bigger one is bought in the plan's own period. Family's Extra plants buys room for
+// billing date (SOLAR-364); a bigger one is paid today, in the plan's own period or, from
+// monthly, yearly. Family's Extra plants buys room for
 // plants past the 3rd, R49 a plant (SOLAR-264): more is paid today, fewer waits for the
 // billing date.
 const PLAN_TAG = { free: 'See your solar today', home: 'One house, every day kept', family: 'More than one house' };
@@ -2330,7 +2331,9 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   // for more extra plants on Family. A count that needs a quote shows only once its quote is
   // in, so the count, price, line and Pay change together; the next count up is fetched
   // ahead, so a tap is usually at once (SOLAR-281).
-  const period = paid ? b.period : view;
+  // Home monthly on the Yearly tab: Family yearly is paid now, from today (SOLAR-364)
+  const across = paid && b.plan === 'home' && b.period === 'monthly' && view === 'yearly';
+  const period = paid && !across ? b.period : view;
   const needs = (n) => paid && (b.plan === 'home' || n > held);
   const qKey = (n) => [b?.plan, b?.state, b?.nextDate, held, period, n].join(':');
   const [quotes, setQuotes] = useState({});
@@ -2403,8 +2406,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
     if (p === 'family' && famMine && more > held && quote?.refused) return quote.refused === 'past_due' ? 'Pay the failed payment first' : 'Keep your plan first';
     if (p === 'family' && famMine && more > held) return quote ? `${rand(quote.dueNow)} today, then from ${billDay(quote.nextDate)}` : ' ';
     if (p === b.plan && sameView) return p === 'family' ? famLine : ' '; // the renew date sits in the button's place
-    if (p === 'family' && paid && quote?.refused === 'past_due' && sameView) return 'Pay the failed payment first';
-    if (p === 'family' && paid && quote && quote.dueNow != null && sameView && quote.dueNow !== quote.nextCharge) return `${rand(quote.dueNow)} today, then from ${billDay(quote.nextDate)}`;
+    if (p === 'family' && paid && quote?.refused === 'past_due' && (sameView || across)) return 'Pay the failed payment first';
+    if (p === 'family' && paid && quote && quote.dueNow != null && (sameView || across) && quote.dueNow !== quote.nextCharge) return `${rand(quote.dueNow)} today, then from ${billDay(quote.nextDate)}`;
     if (p === 'family' && b.plan === 'home' && price('family') > price('home')) return `${rand(price('family') - price('home'))} more than Home`;
     return p === 'family' ? famLine : ' ';
   };
@@ -2433,7 +2436,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
       return <div className="plan-cur">{paid ? (booked ? 'Changes ' : 'Renews ') + billDay(b.nextDate) : 'No card needed'}</div>;
     }
     // a bigger plan is bought in the plan's own period
-    if (!sameView && PLAN_RANK[p] > PLAN_RANK[b.plan]) return <div className="plan-cur plan-wait">Upgrade on {b.period === 'yearly' ? 'Yearly' : 'Monthly'}</div>;
+    if (!sameView && !across && PLAN_RANK[p] > PLAN_RANK[b.plan]) return <div className="plan-cur plan-wait">Available {b.period}</div>;
     if (PLAN_RANK[p] > PLAN_RANK[b.plan]) {
       if (paid && p === 'family' && priceMissing) return priceMissing;
       return <button type="button" className="save-btn" disabled={paid && p === 'family' && quote?.dueNow == null}
