@@ -2699,10 +2699,11 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
       : n === 1 ? 'This plant and its history will be deleted straight away, unless another account shares it.'
       : 'These plants and their history will be deleted straight away, unless another account shares them.';
   };
+  // The plants that go, in the pay pop-up's darker box, a panel before each (SOLAR-368).
   const removeList = (acc) => !!acc.plants?.length && (
-    <div className="login-list keep-picks">
+    <div className="remove-plants">
       {acc.plants.map(p => (
-        <PlantLine key={p.plant_id} name={window.plantLabel(p)} />
+        <div key={p.plant_id} className="remove-plant"><Icon id="panel" />{window.plantLabel(p)}</div>
       ))}
     </div>
   );
