@@ -162,7 +162,8 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
     const d = new Date(snap.updated.getTime() + hrs * 3600000);
     return window.fmtPlantTime(d, tz) + ', ' + d.toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz || undefined });
   };
-  // A silent plant's last figures aren't now: no projection from them, and Today's tiles show a dash.
+  // A silent plant's last figures aren't now: no projection from them. Today's tiles keep
+  // the stored totals, as Solar's Today does; only live watts show a dash (SOLAR-348).
   const ps = window.plantStatus(snap, Date.now());
   const silent = ps.status === 'offline';
   let battEta = null, battInfo = null;
@@ -307,8 +308,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const rate = snap.config?.tariffImport ?? 0;
   const rateExp = snap.config?.tariffExport ?? 0;
   let pPv, pLoad, pImp, pExp;
-  if (period === 'today' && silent) { pPv = pLoad = pImp = pExp = null; }
-  else if (period === 'today') { pPv = a.pvToday; pLoad = a.loadToday; pImp = hasGrid ? a.gridFromToday : 0; pExp = hasGrid ? a.gridToToday : 0; }
+  if (period === 'today') { pPv = a.pvToday; pLoad = a.loadToday; pImp = hasGrid ? a.gridFromToday : 0; pExp = hasGrid ? a.gridToToday : 0; }
   else if (heavy) { pPv = heavy.pv; pLoad = heavy.load; pImp = hasGrid ? heavy.imp : 0; pExp = hasGrid ? heavy.exp : 0; }
   else { pPv = pLoad = pImp = pExp = null; } // aggregate period still loading
   // clamp to 0–100: import can exceed load when the grid charges the battery,
@@ -426,7 +426,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendFrom={cmpPhrase}
         // no rate yet: the line under the dash opens Settings on Tariff
         sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Add your rate to see this</button>
-          : over && period === 'month' ? <button type="button" className="lock-btn" onClick={() => window.openPlans('month_saved')}><window.LockIcon />See it</button> : undefined}
+          : over && period === 'month' ? <button type="button" className="lock-btn" onClick={() => window.openPlans('month_saved')}><window.LockIcon />On paid plans</button> : undefined}
         info={rateExp > 0 ? OV_INFO.saved.slice(0, -1) + ', plus what you exported at your feed-in rate.' : OV_INFO.saved} />
     </div>
   );
@@ -535,7 +535,10 @@ function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trend
     <Card className="mini-stat">
       {/* the trend arrow sits on the label's line, top right, so it fits at every width */}
       <div className="mini-label">
-        <span className="ml-text">{label}{info && <window.InfoDot text={arrow && trendNote ? <>{info}<span className="ib-note">{trendNote}</span></> : info} />}</span>
+        {/* the whole label opens the (?)'s bubble, so a phone, which has no room for the
+            dot, still opens it with a tap (SOLAR-348) */}
+        <window.Tip className="ml-text" text={info && (arrow && trendNote ? <>{info}<span className="ib-note">{trendNote}</span></> : info)}>
+          {label}{info && <window.InfoDot bare />}</window.Tip>
         {!loading && <TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} tip={trendNote} delta={trendDelta} deltaFmt={trendDeltaFmt} />}
       </div>
       {/* a shimmer beats an em-dash: switching to Week/Month refetches, and "—" reads as
@@ -3417,7 +3420,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
           ))}
         </nav>
         <div className="set-main">
-          <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><span aria-hidden="true">←</span> Settings</button>
+          <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><Icon id="back" />Settings</button>
           {shown === 'account' && <AccountPage user={user} billing={billing} plants={onPlants} plantId={plantId} ready={!!me} onBilling={() => onPage('billing')} />}
           {(page === 'billing' || page === 'plans') && <BillingPage billing={billing} reload={reloadBilling} reloadPlan={reloadPlan} links={links} onPage={onPage} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} onSaved={onPlantConfigSaved}
                                               onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}

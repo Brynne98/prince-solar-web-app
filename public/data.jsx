@@ -200,17 +200,20 @@ async function fetchSnapshot() {
   // read. Pass them straight through; null until the first snapshot lands.
   if (api.config && api.config.currency) window.PLANT_CURRENCY = api.config.currency;
   const cfg = api.config || {};
+  const agg = aggregate(inverters, api.totals || {});
   return {
     updated: new Date(api.generatedAt || Date.now()),
     lastReading: api.lastTs ? new Date(api.lastTs * 1000) : null,
     plant: api.plant || { id: null, name: 'My plant' },
-    aggregate: aggregate(inverters, api.totals || {}),
+    aggregate: agg,
     config: api.config || null,
     // Fresh-link sync (0048): pending flags, bookmarks, days of the last 60 with a chart.
     sync: api.sync || null,
     // What this plant has. null (not decided yet) shows everything; false hides it.
+    // A battery not decided yet shows only once a charge reads, as detection counts one
+    // (0088): a home with none read as a dead battery at 0 W (SOLAR-348).
     features: {
-      hasBattery: cfg.hasBattery !== false,
+      hasBattery: cfg.hasBattery === true || (cfg.hasBattery == null && agg.battSoc > 0),
       // Mains live right now beats the off-grid flag, which the poller only re-decides
       // every 10 min; until then a grid switched back on would still read Off-grid (SOLAR-7).
       hasGrid: cfg.hasGrid !== false || (api.totals || {}).gridPresent === true,

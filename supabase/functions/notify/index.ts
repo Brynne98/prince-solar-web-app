@@ -84,7 +84,8 @@ function dayOf(epoch: number, tz: string): string {
 }
 function lasted(fromEpoch: number, toEpoch: number): string {
   const m = Math.max(1, Math.round((toEpoch - fromEpoch) / 60));
-  return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+  // the app's format (fmtDuration) and the pop-ups' (0153): 45 min, 1h 33m, 2h
+  return m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`;
 }
 
 // ------------------------------------------------------------------- energy

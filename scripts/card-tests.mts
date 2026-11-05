@@ -11,8 +11,8 @@ const { plantEvent, report, sunsynkDown } = await import(copy);
 const bank = (names: string[]) => plantEvent("Home", 538820, { kind: "bank_drift", banks: names.map((name, i) => ({ name, chargePct: 70 - i * 12 })) });
 const cases: [name: string, html: string, wantStack: boolean, cards: number][] = [
   ["grid down, short labels", plantEvent("Home", 538820, { kind: "grid_down", at: "14:32", chargePct: 62 }).html, false, 2],
-  ["grid back, 8-char value (limit)", plantEvent("Home", 538820, { kind: "grid_back", at: "16:05", lasted: "123 h 45 min" }).html, false, 2],
-  ["grid back, 9-char value (over)", plantEvent("Home", 538820, { kind: "grid_back", at: "16:05", lasted: "1234 h 45 min" }).html, true, 2],
+  ["grid back, 8-char value (limit)", plantEvent("Home", 538820, { kind: "grid_back", at: "16:05", lasted: "123h 45m" }).html, false, 2],
+  ["grid back, 9-char value (over)", plantEvent("Home", 538820, { kind: "grid_back", at: "16:05", lasted: "1234h 45m" }).html, true, 2],
   ["banks, short names", bank(["Garage", "Kitchen"]).html, false, 2],
   ["banks, 13-char name (limit)", bank(["ABCDEFGHIJKLM", "Kitchen"]).html, false, 2],
   ["banks, 14-char name (over)", bank(["ABCDEFGHIJKLMN", "Kitchen"]).html, true, 2],

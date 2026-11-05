@@ -154,7 +154,7 @@ function StatTile({ label, value, unit, accent, sub, bar, loading, locked }) {
     <Card className="stat-tile">
       <div className="stat-label">{label}</div>
       <div className="stat-value"><HistoryLock tile /></div>
-      <div className="stat-sub"><button type="button" className="lock-btn" onClick={() => openPlans(locked)}><LockIcon />See every day</button></div>
+      <div className="stat-sub"><button type="button" className="lock-btn" onClick={() => openPlans(locked)}><LockIcon />On paid plans</button></div>
     </Card>);
   return (
     <Card className="stat-tile">
@@ -289,17 +289,21 @@ function Tip({ text, as: Tag = 'span', className = '', children, ...rest }) {
     </Tag>);
 
 }
-function InfoDot({ text }) {
+const INFO_GLYPH = (
+  <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
+    <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.3" />
+    <path d="M6.1 6.3a1.95 1.95 0 1 1 2.8 1.75c-.55.3-.9.65-.9 1.25v.35" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    <circle cx="8" cy="11.7" r="0.85" fill="currentColor" />
+  </svg>);
+// bare: the glyph alone, inside a Tip that holds the bubble (MiniStat's label)
+function InfoDot({ text, bare }) {
   // aria-describedby ties the bubble to the dot, so a screen reader on the dot hears the
   // explanation instead of an unnamed note.
   const id = React.useId();
+  if (bare) return <span className="info-dot" aria-hidden="true">{INFO_GLYPH}</span>;
   return (
     <span className="info-dot" tabIndex={0} aria-label="More about this" aria-describedby={id} onMouseEnter={placeBubble} onFocus={placeBubble}>
-      <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-        <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.3" />
-        <path d="M6.1 6.3a1.95 1.95 0 1 1 2.8 1.75c-.55.3-.9.65-.9 1.25v.35" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-        <circle cx="8" cy="11.7" r="0.85" fill="currentColor" />
-      </svg>
+      {INFO_GLYPH}
       <span id={id} className="info-bubble" role="tooltip">{text}</span>
     </span>);
 

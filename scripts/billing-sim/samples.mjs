@@ -12,7 +12,7 @@ const db = new Db();
 const OUT = new URL('./ui-samples.json', import.meta.url);
 const longDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 const billDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-const rand = (n) => 'R' + Number(n).toLocaleString('en-US');
+const rand = (n) => 'R' + Number(n).toLocaleString('en-US').replace(/,/g, '\u00a0'); // as link.jsx
 const perUnit = (p) => (p === 'yearly' ? 'a year' : 'a month');
 const NAME = { free: 'Free', home: 'Home', family: 'Family' };
 const uuid = (n) => `00000000-0000-4000-8000-0000000051${String(n).padStart(2, '0')}`;
