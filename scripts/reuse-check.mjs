@@ -18,6 +18,14 @@ const src = fs.readdirSync(PUB).filter(f => /\.(jsx|js|html)$/.test(f) && f !== 
 const jsx = src.filter(f => f.endsWith('.jsx'));
 const problems = [];
 
+// ---- 0. no inline scripts (SOLAR-352) ----
+// The site's CSP (_headers) has no 'unsafe-inline': a <script> with code in it is blocked live
+// but runs locally. JSON data blocks are not run, so they may stay.
+for (const f of src.filter(f => f.endsWith('.html'))) {
+  for (const m of read(f).matchAll(/<script(?![^>]*\bsrc=)(?![^>]*application\/json)[^>]*>([\s\S]*?)<\/script>/g))
+    if (m[1].trim()) problems.push(`${f}: inline <script> is blocked by the CSP: move it to a .js file`);
+}
+
 // ---- 1. dead CSS ----
 const html = read('index.html');
 const styleStart = html.indexOf('<style>'), styleEnd = html.indexOf('</style>');
