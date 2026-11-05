@@ -97,7 +97,8 @@ const LINK_ERRORS = {
 
 
 // ---- Paywall (SOLAR-208) ------------------------------------------------------
-const rand = (n) => 'R' + Number(n).toLocaleString('en-US');
+// "R1 799", the app's and emails' money format (SOLAR-348); no break inside a price
+const rand = (n) => 'R' + Number(n).toLocaleString('en-US').replace(/,/g, '\u00a0');
 // "30 Nov"; a date in another year carries it ("31 Oct 2027"), so a yearly date doesn't read as this year's.
 const billDay = (d) => window.dayText(d, { day: 'numeric', month: 'short', year: d.slice(0, 4) === String(new Date().getFullYear()) ? undefined : 'numeric' });
 const perUnit = (period) => (period === 'yearly' ? 'a year' : 'a month');

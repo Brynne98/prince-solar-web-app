@@ -395,7 +395,7 @@ addEventListener('DOMContentLoaded', async () => {
     r = res.ok ? await res.json() : null;
   } catch (e) { return; }
   if (!r?.offer) return;
-  const R = (n) => 'R' + Math.round(n).toLocaleString('en-US');
+  const R = (n) => 'R' + Math.round(n).toLocaleString('en-US').replace(/,/g, '\u00a0'); // "R1 799", as the app
   const at = { m: r.prices.monthly, y: r.prices.yearly }, was = { m: r.listPrices.monthly, y: r.listPrices.yearly };
   const unit = { m: 'a month', y: 'a year' };
   for (const k of ['m', 'y']) {
@@ -470,8 +470,8 @@ const MAIL=[
   bars:{title:'Solar each day',side:'Average 48.7 kWh a day',labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],vals:[46.2,51.3,38.4,49.8,48.1,55.6,51.6]},
   facts:[{l:'Best day',v:'55.6',u:'kWh',tone:'solar',sub:'Sat 24 Oct'},{l:'Busiest day',v:'58.9',u:'kWh',tone:'home',sub:'Sun 25 Oct'}],
   btn:'Open Live'},
- {k:'panels',dot:C.home,time:'20 Oct',at:'Tue 20 Oct, 11:55',subject:'Some panels stopped producing at Example plant',preview:'PV3 on Inverter 1: no power since 11:42',
-  title:'Some panels stopped producing at Example plant',stack:1,stats:[{l:'PV3 · 1',v:'No power',tone:'home',sub:'since 11:42 today'},{l:'Other panels',v:'OK',tone:'solar',sub:'producing as normal'}],
+ {k:'panels',dot:C.home,time:'20 Oct',at:'Tue 20 Oct, 11:55',subject:'Some panels stopped producing at Example plant',preview:'Inverter 1, string 3: no power since 11:42',
+  title:'Some panels stopped producing at Example plant',stack:1,stats:[{l:'Inverter 1, string 3',v:'No power',tone:'home',sub:'since 11:42 today'},{l:'Other panels',v:'OK',tone:'solar',sub:'producing as normal'}],
   note:'One group of panels on Inverter 1 has stopped making power. The rest are still working.',btn:'Open Equipment'},
  {k:'hot',dot:C.batt,time:'12 Oct',at:'Mon 12 Oct, 14:21',subject:'Battery hot at Example plant',preview:'Battery 41 °C at 14:20',
   title:'Battery hot at Example plant',stack:1,stats:[{l:'Battery',v:'41&nbsp;°C',tone:'home',sub:'at 14:20 today'}],

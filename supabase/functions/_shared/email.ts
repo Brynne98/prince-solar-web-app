@@ -447,7 +447,7 @@ export const sunsynkBack = (plant: string, plantId: number, at: string, lasted: 
   make("SunSynk is back", {
     title: "SunSynk is back",
     parts: [
-      { stack: true, stats: [{ label: "SunSynk", value: "Back", tone: "ok", sub: `since ${at} ${day}, after ${span(lasted)}` }] },
+      { stack: true, stats: [{ label: "SunSynk", value: "Back", tone: "ok", sub: `since ${at} ${day}, after ${lasted}` }] },
       { p: `Readings from ${esc(plant)} are arriving again.` },
       { button: openPage("live", plantId) },
     ],
@@ -561,14 +561,14 @@ export type PlantEvent =
 // green for what came back, amber for grid, purple for battery. A sentence stays only
 // where the cards can't explain it alone.
 type Card = Extract<Part, { stats: unknown }>["stats"][number];
-// "1 h 47 min" wraps in a card; "1h 47m" fits.
 const PAGE: Record<Exclude<PlantEvent["kind"], "needs_relink">, keyof typeof PAGES> = {
   grid_down: "grid", grid_back: "grid",
   batt_hot: "inverters", batt_hot_back: "inverters", bank_drift: "inverters", bank_drift_back: "inverters",
   string_dead: "inverters", string_back: "inverters",
   logger_stale: "live", logger_back: "live",
 };
-const span = (d: string) => d.replace(/ h /, "h ").replace(/ min$/, "m");
+// "Inverter 2508290475, string 2", as the app names it (SOLAR-348)
+const stringName = (e: { string: string; inverter: string }) => `${e.inverter}, ${e.string.toLowerCase()}`;
 const ALERT_FOOTER = (plant: string) => SETTINGS_FOOTER(`Alert for ${esc(plant)}. Don't want these? Turn them off in your notification settings.`);
 export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = "today"): Email {
   const P = esc(plant);
@@ -583,7 +583,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
       case "grid_back":
         return [`Grid back at ${plant}`, [
           { label: "Grid", value: "On", tone: "ok", sub: `since ${at(e.at)}` },
-          ...(e.lasted ? [{ label: "Outage", value: span(e.lasted), sub: "without grid" }] : []),
+          ...(e.lasted ? [{ label: "Outage", value: e.lasted, sub: "without grid" }] : []),
         ]];
       case "batt_hot":
         return [`Battery hot at ${plant}`, [
@@ -593,12 +593,12 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
       case "batt_hot_back":
         return [`Battery cooled at ${plant}`, [
           { label: "Battery", value: `${e.tempC}\u00a0°C`, tone: "ok", sub: `since ${at(e.at)}` },
-          { label: "Hot for", value: span(e.lasted) },
+          { label: "Hot for", value: e.lasted },
         ]];
       case "bank_drift_back":
         return [`Batteries charging evenly at ${plant}`, [
           ...e.banks.map((b) => ({ label: b.name, value: `${b.chargePct}%`, tone: "batt" as Tone, sub: "battery charge" })),
-          { label: "Apart for", value: span(e.lasted) },
+          { label: "Apart for", value: e.lasted },
         ]];
       case "bank_drift": {
         const pcts = e.banks.map((b) => b.chargePct);
@@ -608,13 +608,13 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
       }
       case "string_dead":
         return [`Some panels stopped producing at ${plant}`, [
-          { label: `${e.string} · ${e.inverter.replace(/^Inverter /, "")}`, value: "No power", tone: "bad", sub: `since ${at(e.since)}` },
+          { label: stringName(e), value: "No power", tone: "bad", sub: `since ${at(e.since)}` },
           { label: "Other panels", value: "OK", tone: "ok", sub: "producing as normal" },
         ], `One group of panels on ${esc(e.inverter)} has stopped making power. The rest are still working.`];
       case "string_back":
         return [`Panels producing again at ${plant}`, [
-          { label: `${e.string} · ${e.inverter.replace(/^Inverter /, "")}`, value: "Producing", tone: "ok", sub: `since ${at(e.at)}` },
-          { label: "Stopped for", value: span(e.lasted) },
+          { label: stringName(e), value: "Producing", tone: "ok", sub: `since ${at(e.at)}` },
+          { label: "Stopped for", value: e.lasted },
         ]];
       case "logger_stale":
         return e.inverter
@@ -626,7 +626,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
             ], "No new reading from your inverters for 30 minutes. We'll email you when readings are back."];
       case "logger_back":
         return [e.inverter ? `${e.inverter} back at ${plant}` : `Readings back at ${plant}`, [
-          { label: "Readings", value: "Back", tone: "ok", sub: `since ${at(e.at)}, after ${span(e.lasted)}` },
+          { label: "Readings", value: "Back", tone: "ok", sub: `since ${at(e.at)}, after ${e.lasted}` },
         ], e.inverter ? `${esc(e.inverter)} is sending readings again.` : "Your inverters are sending readings again."];
       case "needs_relink":
         return ["Reconnect your SunSynk login", { callout: "Prince Solar Hub is no longer connected to your SunSynk account, so new readings aren't arriving." },

@@ -50,7 +50,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
     })(),
   })],
   "event-sunsynk-down": [FROM_ALERTS, sunsynkDown(PLANT, PLANT_ID, "09:10")],
-  "event-sunsynk-back": [FROM_ALERTS, sunsynkBack(PLANT, PLANT_ID, "11:42", "2 h 32 min")],
+  "event-sunsynk-back": [FROM_ALERTS, sunsynkBack(PLANT, PLANT_ID, "11:42", "2h 32m")],
   "report-month": [FROM_REPORTS, report({
     ...base, period: "month", label: "October 2026", prevLabel: "September",
     change: { made: 12, home: -3, import: -21, independence: 6, saved: 9 },
@@ -124,13 +124,13 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "billing-moved-to-free": [FROM_BILLING, movedToFree({ from: "family", kept: "Home", stopped: ["Cabin", "Office"], deleteOn: "7 Jan" })],
   "billing-removal-soon": [FROM_BILLING, plantsRemovalSoon(["Cabin", "Office"], "7 Jan")],
   "event-grid-down": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "grid_down", at: "14:32", chargePct: 62 })],
-  "event-grid-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "grid_back", at: "16:05", lasted: "1 h 33 min" })],
+  "event-grid-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "grid_back", at: "16:05", lasted: "1h 33m" })],
   "event-battery-hot": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "batt_hot", at: "13:20", tempC: 47, hotDays: 3 })],
   "event-battery-hot-first": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "batt_hot", at: "13:20", tempC: 47, hotDays: 1 })],
-  "event-banks-drift": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "bank_drift", banks: [{ name: "Inverter 2508290475", chargePct: 72 }, { name: "Inverter 2512082438", chargePct: 60 }] })],
-  "event-string-dead": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "string_dead", string: "String 3", inverter: "Inverter 2512082438", since: "11:40" })],
+  "event-banks-drift": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "bank_drift", banks: [{ name: "Master", chargePct: 72 }, { name: "Slave", chargePct: 60 }] })],
+  "event-string-dead": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "string_dead", string: "String 3", inverter: "Slave", since: "11:40" })],
   "event-inverter-silent": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "logger_stale", since: "08:15" })],
-  "event-inverter-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "logger_back", at: "10:02", lasted: "1 h 47 min" })],
+  "event-inverter-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "logger_back", at: "10:02", lasted: "1h 47m" })],
   "event-relink": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "needs_relink" })],
 };
 
