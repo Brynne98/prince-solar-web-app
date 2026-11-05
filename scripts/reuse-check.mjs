@@ -113,6 +113,24 @@ for (const [k, v] of [['pv', 'solar'], ['load', 'home'], ['grid', 'grid'], ['soc
   if (!app || !em || app.toLowerCase() !== em.toLowerCase()) problems.push(`email.ts ${v} is ${em ?? 'missing'}, index.html --${k} is ${app ?? 'missing'}: keep them the same`);
 }
 
+// ---- 2e. one focus ring (SOLAR-343) ----
+// :root's `:focus-visible` draws the only ring: 2px in --focus. A focus rule may move it
+// (offset, radius) but not hide it or recolour it. Text fields mark focus with a --focus
+// border instead, so input/.input/.fs-in/.fs-cnt/.pop-dlg rules may drop the outline.
+for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+  const sel = m[1].trim();
+  if (!/:focus/.test(sel) || sel === ':focus:not(:focus-visible)') continue;
+  const at = lineOf(m.index + m[1].length);
+  const o = m[2].match(/(?<![\w-])outline\s*:([^;]*)/)?.[1].trim();
+  const field = /input|\.input|\.fs-in|\.fs-cnt|\.pop-dlg|textarea/.test(sel);
+  if (o && /^(none|0)$/.test(o) && !field) problems.push(`index.html:${at} outline: none on focus: keyboard users lose the ring`);
+  if (o && !/^(none|0)$/.test(o) && !/var\(--focus\)/.test(o)) problems.push(`index.html:${at} a focus ring not in var(--focus)`);
+  if (/outline-color\s*:(?![^;]*var\(--focus\))/.test(m[2])) problems.push(`index.html:${at} a focus ring not in var(--focus)`);
+}
+// An email's backup link says where it goes, not "Click here".
+for (const f of [path.join(PUB, '..', 'supabase', 'functions', '_shared', 'email.ts'), ...fs.readdirSync(path.join(PUB, '..', 'supabase', 'templates')).map(t => path.join(PUB, '..', 'supabase', 'templates', t))])
+  if (/>\s*click here\s*</i.test(fs.readFileSync(f, 'utf8'))) problems.push(`${path.basename(f)}: a link reads "Click here"; name where it goes`);
+
 // ---- 3. one global scope ----
 const seen = new Map();
 for (const f of jsx) {

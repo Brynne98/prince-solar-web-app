@@ -218,7 +218,7 @@ function html(subject: string, b: Body): string {
         `<td align="right" style="padding:6px 0;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2">${f.value}</td></tr>`).join("")}</table>`;
     if ("button" in x)
       return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 12px"><tr><td style="border-radius:8px;background:${ACCENT}"><a href="${x.button.href}" style="display:inline-block;padding:12px 22px;font:600 15px/1 ${SANS};color:#0a0d12;text-decoration:none;border-radius:8px">${esc(x.button.label)}</a></td></tr></table>
-<p class="d" style="margin:0 0 20px;font:400 12px/1.5 ${SANS};color:#7f8da0">Trouble with the button? <a href="${x.button.href}" style="color:inherit">Click here</a> instead.</p>`;
+<p class="d" style="margin:0 0 20px;font:400 12px/1.5 ${SANS};color:#7f8da0">Trouble with the button? Use this link: <a href="${x.button.href}" style="color:inherit">${esc(x.button.label)}</a></p>`;
     const cells = x.stats.map((s) => `<td class="tile" width="50%" style="padding:16px;background:#141a22;border-radius:8px;vertical-align:top">
 <div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(s.label)}</div>
 <div class="${s.tone ?? "t"}" style="margin-top:8px;font:700 24px/1.1 ${MONO};font-variant-numeric:tabular-nums;color:${s.tone ? C[s.tone] : "#e7ecf2"}">${esc(s.value)}${s.unit ? `<span style="font-size:14px;opacity:.85"> ${esc(s.unit)}</span>` : ""}</div>

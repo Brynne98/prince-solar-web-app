@@ -435,6 +435,15 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
     <>
     {over && hasGrid && <GridOffPrompt hasBatt={hasBatt} tz={tz} />}
     <div className="live-grid">
+      <div className="overview-section">
+        <div className="overview-head">
+          <SectionTitle>OVERVIEW</SectionTitle>
+          <Segmented size="sm"
+            options={PERIODS}
+            value={period} onChange={setPeriod} />
+        </div>
+        {over && period !== 'today' && period !== 'month' ? <window.HistoryLock where={'overview_' + period} /> : strip}
+      </div>
       <div className={'flow-fs-wrap' + (wall ? ' wall' : '') + (wall && idle ? ' idle' : '')} ref={flowRef}>
         {wall && (
           // Exit on the left, so the status sits flush right whether Exit shows or hides
@@ -462,15 +471,6 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         <window.HistoryView today={today} refreshKey={refreshKey} silent={silent} />
       </Card>
 
-      <div className="overview-section">
-        <div className="overview-head">
-          <SectionTitle>OVERVIEW</SectionTitle>
-          <Segmented size="sm"
-            options={PERIODS}
-            value={period} onChange={setPeriod} />
-        </div>
-        {over && period !== 'today' && period !== 'month' ? <window.HistoryLock where={'overview_' + period} /> : strip}
-      </div>
 
     </div>
     </>
@@ -1661,7 +1661,7 @@ function EqTile({ label, state, value, unit, sub, color, stale, word }) {
   return (
     <section className={'card eq-tile' + (stale ? ' stale' : '')} aria-label={label}>
       <div className="eq-tile-fig">
-        <div className={'eq-fig' + (word ? ' word' : ' mono')} style={{ color }}>{value}{unit && <span className="u">{unit}</span>}</div>
+        <div className={'eq-fig' + (word ? ' word' : ' mono')} style={stale ? undefined : { color }}>{value}{unit && <span className="u">{unit}</span>}</div>
         {sub && <div className="eq-fig-sub">{sub}</div>}
       </div>
       <div className="eq-tile-text">

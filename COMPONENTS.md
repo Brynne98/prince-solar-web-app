@@ -6,8 +6,8 @@ If something here is close, use it or give it a prop; don't make a second one.
 `node scripts/reuse-check.mjs` (part of `npm test`) catches the common repeats: native
 `<select>`, date inputs and checkboxes, `title=` tooltips, raw `.skel`, `confirm()` and
 `alert()`, hand-drawn copies of icons, hand-made tooltip rows, meters, sign-in cards,
-timeouts and saved-tab reads, CSS classes nothing uses, and two files declaring the same
-top-level name. A line can opt out with a `reuse-check: allow` comment; give the reason
+timeouts and saved-tab reads, CSS classes nothing uses, two files declaring the same
+top-level name, a hidden or recoloured focus ring, and a "Click here" email link. A line can opt out with a `reuse-check: allow` comment; give the reason
 next to it.
 
 How it is wired: every `public/*.jsx` shares one global scope. `auth`, `link`, `data`,

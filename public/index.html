@@ -73,6 +73,11 @@
     --r-xs: 2px; --r-sm: 4px; --r-md: 8px; --r-lg: 12px; --r-xl: 16px; --r-pill: 999px;
   }
   @media (max-width: 599px) { :root { --fs-sm: 14px; } }
+  /* One focus ring (SOLAR-343): every control, keyboard focus only, 2px in --focus. Text
+     fields mark focus with a --focus border instead. Never outline: none on :focus-visible;
+     a rule may only move the ring (offset, radius). npm test checks. */
+  :focus:not(:focus-visible) { outline: none; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   * { box-sizing: border-box; }
   /* the hidden attribute must beat any display: flex set by a class */
   [hidden] { display: none !important; }
@@ -192,7 +197,8 @@
   .fs-pop, .pop-dlg { box-shadow: var(--dlg-shadow); }
   .menu { position: absolute; z-index: 20; border-radius: var(--r-lg); padding: var(--sp-xs); }
   .menu button { display: flex; align-items: center; gap: var(--sp-sm); width: 100%; padding: var(--sp-sm) var(--sp-sm); border: none; background: none; border-radius: var(--r-md); color: var(--text); font-size: var(--fs-md); text-align: left; }
-  .menu button:hover, .menu button:focus-visible { background: rgba(255,255,255,0.06); outline: none; }
+  .menu button:hover, .menu button:focus-visible { background: rgba(255,255,255,0.06); }
+  .menu button:focus-visible { outline-offset: -2px; }
   .menu button .ico { width: 16px; height: 16px; color: var(--muted); }
   .menu hr { border: none; border-top: 1px solid var(--line); margin: var(--sp-2xs) 0; }
   /* the small status dots: one size, each its own colour */
@@ -344,6 +350,7 @@
       background: var(--bg); padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); }
     .nl-head { padding-left: var(--sp-sm); }
     .nl-back { display: grid; margin-right: var(--sp-3xs); }
+    .nl-gear, .nl-back { width: 44px; height: 44px; }
     .alerts-head { margin-left: calc(-1 * var(--sp-sm)); }
     .card.alerts-card { padding: var(--sp-3xs) var(--sp-2xs); border-radius: var(--r-xl); }
     .alerts-filters { flex-direction: column; align-items: stretch; }
@@ -403,8 +410,10 @@
     .bill-banner .ghost-btn, .nl-act { min-height: 44px; touch-action: manipulation; }
   }
   .page { display: flex; flex-direction: column; }
-  .page.old .mini-value, .page.old .stat-value, .page.old .flow-wrap,
-  .page.old .chart-area, .page.old .wiw, .page.old .meter { opacity: 0.45; }
+  /* Old readings: pictures fade, words and numbers go grey (SOLAR-343). Faded text fell
+     to 2.3:1; grey stays over 4.5:1. */
+  .page.old .chart-area, .page.old .meter, .page.old :is(.flow-wrap, .wiw) :is(svg, .meter) { opacity: 0.45; }
+  .page.old :is(.mini-value, .stat-value, .flow-wrap, .wiw), .page.old :is(.mini-value, .stat-value, .flow-wrap, .wiw) * { color: var(--muted) !important; }
 
   /* phone-only pieces, hidden wider */
   .phonebar, .sheet { display: none; }
@@ -521,7 +530,6 @@
   .today-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-lg); }
   @media (min-width: 981px) { .today-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
   @media (min-width: 1200px) { .today-strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); } }
-  .overview-section { order: -1; }
   .overview-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-lg); margin-bottom: var(--sp-lg); flex-wrap: wrap; }
   .overview-head .section-title { margin-bottom: 0; }
   .mini-stat { padding: var(--sp-xl) var(--sp-2xl); }
@@ -559,7 +567,7 @@
     35% { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(var(--accent-rgb),0.18); }
   }
   @media (prefers-reduced-motion: reduce) { .sset-flash, .sset-cards.sset-flash > .sset { animation: none; } }
-  .mini-link:focus-visible { outline: 2px solid var(--line-2); outline-offset: 2px; border-radius: var(--r-sm); }
+  .mini-link:focus-visible { border-radius: var(--r-sm); }
   /* grid presence chip on the Imported card — green when the mains is live, red when down */
   /* padding-left leaves room for the dot's 3px glow ring: .mini-sub clips overflow for
      its ellipsis, so a ring flush against x=0 loses its left edge. */
@@ -760,7 +768,7 @@
   .hv-today { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-md); color: var(--text);
     font-size: var(--fs-xs); padding: var(--sp-xs) var(--sp-md); cursor: pointer; transition: .15s; margin-left: auto; }
   .hv-today:hover { border-color: var(--line-2); }
-  .hv-today:disabled { color: var(--dim); border-color: var(--line); cursor: default; opacity: .45; }
+  .hv-today:disabled { color: var(--dim); border-color: var(--line); cursor: default; text-decoration: none; }
   .hv-lag { font-size: var(--fs-xs); color: var(--dim); }
   .chart-area { width: 100%; min-width: 0; overflow: hidden; }
   .chart-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: var(--fs-sm); text-align: center; padding: 0 var(--sp-lg); }
@@ -873,7 +881,7 @@
   .eq-fig.word { font-size: var(--fs-3xl); letter-spacing: -0.01em; }
   .eq-fig .u { font-size: var(--fs-xl); opacity: 0.85; }
   .eq-fig-sub { margin-top: var(--sp-sm); font-size: var(--fs-sm); color: var(--dim); }
-  .eq-tile.stale .eq-fig { opacity: 0.5; }
+  .eq-tile.stale .eq-fig { color: var(--muted); }   /* an old reading greys out; faded colour fell under 4.5:1 (SOLAR-343) */
   .eq-tile-text { display: flex; flex-direction: column; gap: var(--sp-sm); min-width: 0; }
   .eq-tile-label { font-size: var(--fs-lg); font-weight: 600; }
   .eq-tile-state { display: flex; align-items: center; gap: var(--sp-sm); font-size: var(--fs-md); color: var(--muted); }
@@ -901,7 +909,7 @@
   }
   .eq-big { font-size: var(--fs-4xl); font-weight: 700; line-height: 1; display: flex; align-items: baseline; gap: var(--sp-xs); }
   .eq-big .u { font-size: var(--fs-2xl); opacity: 0.85; }
-  .eq-big.stale { opacity: 0.5; }
+  .eq-big.stale { color: var(--muted); }
   .eq-big-sub { margin-top: var(--sp-sm); font-size: var(--fs-sm); color: var(--muted); }
   .eq-groups { margin-top: var(--sp-xl); display: flex; flex-direction: column; gap: var(--sp-lg); }
   .eq-group { display: flex; flex-direction: column; gap: var(--sp-md); }
@@ -1319,9 +1327,10 @@
   /* info tooltip */
   .info-dot { position: relative; display: inline-flex; align-items: center; vertical-align: middle;
     color: var(--dim); cursor: help; margin-left: var(--sp-2xs); }
-  .info-dot:hover, .info-dot:focus { color: var(--muted); outline: none; }
-  /* a 13px glyph is too small to tap; the invisible pad makes the hit area ~37px */
-  .info-dot::before { content: ''; position: absolute; inset: -12px; }
+  .info-dot:hover, .info-dot:focus { color: var(--muted); }
+  .info-dot:focus-visible { border-radius: 50%; }
+  /* a 13px glyph is too small to tap; the invisible pad makes the hit area 44px (SOLAR-343) */
+  .info-dot::before { content: ''; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
   .info-dot svg { display: block; }
   /* Closed, the bubble is display: none: a hidden one still widened the page and put a
      horizontal scrollbar under a dot near the right edge (SOLAR-26). Open, it is nudged by
@@ -1343,8 +1352,7 @@
   .info-dot.below .info-bubble::after { top: auto; bottom: calc(100% - 5px); border-width: 1px 0 0 1px; }
   /* Tip: the same bubble over a figure or a word, fixed to the window at --tx/--ty (placeTip) */
   .tip { cursor: help; }
-  .tip:focus { outline: none; }
-  .tip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-sm); }
+  .tip:focus-visible { border-radius: var(--r-sm); }
   .tip > .info-bubble { position: fixed; left: var(--tx, 50%); top: var(--ty, 0); bottom: auto; transform: translate(-50%, calc(-100% + 4px)); }
   .tip > .info-bubble::after { left: calc(50% + var(--arrow, 0px)); }
   .tip:hover > .info-bubble, .tip:focus > .info-bubble { display: block; opacity: 1; visibility: visible; transform: translate(-50%, -100%); }
@@ -1364,9 +1372,9 @@
 
   /* ---------- phones ---------- */
   @media (max-width: 600px) {
-    /* thumb-sized targets on phones (36px inside the segmented track), desktop unchanged */
-    .hv-datebar, .pick { --datebar-h: 40px; }
-    .hv-today { min-height: 40px; }
+    /* thumb-sized targets on phones: 44px (SOLAR-343), desktop unchanged */
+    .hv-datebar, .pick { --datebar-h: 44px; }
+    .hv-today { min-height: 44px; }
     /* SOLAR-27: arrows at the two ends, the date centred between them as "Fri 2 Oct" */
     .hv-datebox { display: flex; flex: 1 0 calc(100% - 2 * var(--datebar-h) - 16px); min-width: 0; justify-content: center; }
     /* notes ("Grid off 9h", "to 14:20") wrap under the bar, so the arrows never move */
@@ -1379,15 +1387,15 @@
     .hv-today-in { display: inline-flex; align-items: center; min-height: 0; margin-left: 0; background: none; border: 0; border-left: 1px solid var(--line-2);
       border-radius: 0; padding: var(--sp-3xs) 0 var(--sp-3xs) var(--sp-sm); color: var(--accent); font: 500 var(--fs-xs) var(--display);
       text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
-    .legend-chip { min-height: 40px; padding: var(--sp-2xs) var(--sp-sm); font-size: var(--fs-xs); }
+    .legend-chip { min-height: 44px; padding: var(--sp-2xs) var(--sp-sm); font-size: var(--fs-xs); }
     /* no (?) on a phone's Overview cards: the label and its arrow keep one line */
     .mini-stat .info-dot { display: none; }
     /* Live's chips in one row, name over value, so five never wrap 2-2-1 */
     .hv-root .legend-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--sp-xs); }
     .hv-root .legend-chip { flex-direction: column; justify-content: center; gap: var(--sp-2xs); padding: var(--sp-sm) var(--sp-3xs); font-size: var(--fs-2xs); min-width: 0; }
     .hv-root .legend-val { margin-left: 0; padding-left: 0; border-left: 0; font-size: var(--fs-2xs); white-space: nowrap; }
-    .seg-btn { min-height: 36px; padding: var(--sp-xs) var(--sp-sm); }
-    .ghost-btn, .danger-btn, .flow-fs-btn, .settings-page :is(.save-btn, .ghost-btn, .danger-btn), .fs-wrap :is(.save-btn, .ghost-btn) { min-height: 40px; }
+    .seg-btn { min-height: 44px; padding: var(--sp-xs) var(--sp-sm); }
+    .save-btn, .ghost-btn, .danger-btn, .flow-fs-btn, .settings-page :is(.save-btn, .ghost-btn, .danger-btn), .fs-wrap :is(.save-btn, .ghost-btn) { min-height: 44px; }
 
     .card { padding: var(--sp-lg) var(--sp-lg); border-radius: var(--r-xl); min-width: 0; }
     .chart-card, .flow-card { padding: var(--sp-lg); }
@@ -1634,7 +1642,7 @@
   .plan-cards .pw-price { margin-top: var(--sp-lg); font-size: var(--fs-md); color: var(--muted); }
   .plan-cards .pw-plan .pw-price b { font-size: var(--fs-4xl); letter-spacing: -0.03em; line-height: 1; }
   .plan-cards .plan-note { margin-top: var(--sp-2xs); }
-  .plan-cards .pw-plan > button, .plan-cards .plan-cur { width: 100%; min-height: 42px; margin: var(--sp-lg) 0 0; font-size: var(--fs-md); }
+  .plan-cards .pw-plan > button, .plan-cards .plan-cur { width: 100%; min-height: 44px; margin: var(--sp-lg) 0 0; font-size: var(--fs-md); }
   .plan-cards .plan-cur { color: var(--accent); background: rgba(var(--accent-rgb),0.06); }
   .plan-cards .plan-cur.plan-wait { color: var(--dim); background: none; border: 1px dashed var(--line-2); font-weight: 500; }
   /* the list keeps its own row, whatever is missing above it */
@@ -1747,7 +1755,7 @@
   /* the name only as wide as its text, so the line stops at the last letter; the arrow keeps right */
   .fs-item .fs-name { flex: 0 1 auto; } .fs-item > .ico { margin-left: auto; }
   .fs-item.cur > .ico { color: var(--accent); }
-  @media (max-width: 599px) { .fs-item { min-height: 40px; } .fs-fold { min-height: 40px; margin: calc(-1 * var(--sp-sm)) 0; } }
+  @media (max-width: 599px) { .fs-item { min-height: 44px; } .fs-fold { min-height: 44px; margin: calc(-1 * var(--sp-sm)) 0; } }
   .fs-mini { display: none; }
   .fs-pop { position: absolute; left: calc(100% + 24px); bottom: 0; z-index: 30; width: 320px; max-width: calc(100vw - var(--rail-w) - 24px);
     border-radius: var(--r-xl); padding: var(--sp-lg) var(--sp-xl) var(--sp-xl); }
@@ -1825,8 +1833,8 @@
     .fs-row.solo { grid-template-columns: 64px 12px minmax(0, 1fr); }
     .fs-rm { width: 44px; height: 44px; }
     /* finger-sized close and back */
-    .fs-x { width: 40px; height: 40px; margin: calc(-1 * var(--sp-sm)) calc(-1 * var(--sp-md)) calc(-1 * var(--sp-sm)) 0; }
-    .fs-back { height: 40px; margin: calc(-1 * var(--sp-md)) var(--sp-2xs) calc(-1 * var(--sp-md)) calc(-1 * var(--sp-sm)); }
+    .fs-x { width: 44px; height: 44px; margin: calc(-1 * var(--sp-sm)) calc(-1 * var(--sp-md)) calc(-1 * var(--sp-sm)) 0; }
+    .fs-back { height: 44px; margin: calc(-1 * var(--sp-md)) var(--sp-2xs) calc(-1 * var(--sp-md)) calc(-1 * var(--sp-sm)); }
   }
 
   /* ---- the free week (SOLAR-242) ---- */
@@ -1877,6 +1885,19 @@
     .hl-shape { height: 80px; gap: var(--sp-2xs); }
     .pay-review-acts { flex-direction: column-reverse; }
     .pay-review-acts button { padding: var(--sp-md) var(--sp-lg); font-size: var(--fs-md); }
+  }
+  /* Tap targets (SOLAR-343): on a phone every control is 44px or more to tap. Where the
+     drawn size stays small (header buttons, switches, badges, the Today link), an
+     invisible pad centred on it makes up the rest. */
+  @media (max-width: 600px) {
+    :is(.tip, .switch, .refresh, .bell-btn, .acct-btn, .plant-btn, .pop-x, .hv-today-in, .hv-datepick, .app-version a, .login-fine a) { position: relative; }
+    :is(.tip, .switch, .refresh, .bell-btn, .acct-btn, .plant-btn, .pop-x, .hv-today-in, .hv-datepick, .app-version a, .login-fine a)::before {
+      content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+    .back-link, .login-manage, .cal-day, .menu button { min-height: 44px; }
+    .cal-pop { width: min(344px, calc(100vw - 32px)); padding: var(--sp-sm); }   /* seven 44px days across */
+    .stepper button, .plan-plants .stepper button { width: 44px; height: 44px; }
+    .fs-in, .fs-cnt, .skel.fs-in { height: 46px !important; }   /* the box less its border: a 44px field */
+    .fs-in input { align-self: stretch; }
   }
 </style>
 </head>

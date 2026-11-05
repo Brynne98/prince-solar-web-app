@@ -211,7 +211,7 @@ function Toggle({ checked, onChange, label, hint, loading }) {
         <span className="toggle-label">{label}</span>
         {hint && <span className="toggle-hint">{hint}</span>}
       </span>
-      <Switch on={checked} onChange={onChange} loading={loading} />
+      <Switch on={checked} onChange={onChange} loading={loading} label={typeof label === 'string' ? label : undefined} />
     </Row>);
 
 }

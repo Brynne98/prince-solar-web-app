@@ -387,6 +387,19 @@ seconds idle the Exit button and cursor hide until a move, tap or key. Where the
 Fullscreen API (an iPad home-screen app) the same view covers the page, and the screen
 is kept awake while it shows.
 
+### Access (SOLAR-343)
+- **Tap size:** on a phone every control is 44px or more to tap. Where the drawn size
+  stays small (header buttons, switches, badges, the Today link, info dots), an invisible
+  pad centred on it makes up the rest (the last block in `public/index.html`).
+- **Focus:** one ring, `:focus-visible` on `:root` (see Buttons). `npm test` fails on a
+  focus rule that hides it or recolours it.
+- **Contrast:** every text 4.5:1 or more. Text never fades with opacity: old readings and
+  stale figures go grey (Muted), disabled Today is Dim without fading.
+- **Order:** the page source follows the screen, so Tab does too; no CSS `order` on
+  content.
+- **Emails:** the backup link under a button repeats the button's words, never
+  "Click here".
+
 ## Elevation & Depth
 
 Flat by default. Depth is tonal: Night Ground, then Panel, then Panel Raised for inset
@@ -453,8 +466,8 @@ No asymmetric border is left.
   1px border (strong hairline on ghost, Home Coral on danger, transparent on Save).
   Every form puts its buttons at the right, Cancel or Skip before the main button.
   Disabled Save is 40% opacity.
-- **Keyboard focus:** buttons and the password eye show a 2px Solar Green
-  inset outline; fields change border colour instead.
+- **Keyboard focus:** every control shows one ring: 2px Focus (Paper Text), 2px
+  out, keyboard only (SOLAR-343). Fields change border colour instead.
 - **Danger:** no fill, Home Coral border and text, 13px.
 - **Link:** bare green text at 13px 600, underlined on hover with 3px offset; a "quiet"
   variant in Muted Text.
@@ -518,7 +531,7 @@ No asymmetric border is left.
   amber. Offline: fault red. Idle: muted. Plant just switched: Charge Cyan.
 - **Plant switcher:** the plant name in 12.5px mono under the brand, with a 10px muted
   chevron. Transparent at rest so it reads as text; Panel with a strong hairline on
-  hover, a Solar Green border on focus.
+  hover, the focus ring on keyboard focus.
 
 ### First steps
 A card in the sidebar, above Settings, listing every setup step (SOLAR-252): 12px radius,
@@ -583,8 +596,8 @@ it stands in for. The sweep stops under reduced motion.
 - **Do** set every number in JetBrains Mono with tabular figures, and every word in
   Space Grotesk.
 - **Do** put colour on the value and its meter, and keep the card Panel with a hairline.
-- **Do** keep Solar Green as the single accent for focus, active and success, and Home
-  Coral for warning and danger.
+- **Do** keep Solar Green as the single accent for active and success, Focus for keyboard
+  focus, and Home Coral for warning and danger.
 - **Do** hold the layout with a skeleton of the same height while data loads.
 - **Do** mark estimates, gaps and stale data with an amber pill or word rather than
   hiding them.
