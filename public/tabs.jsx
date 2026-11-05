@@ -2112,12 +2112,15 @@ function bookedChange(b) {
   if (b.plan === 'free' || b.comped || !(b.nextPlan || b.nextPeriod || b.nextExtraPlants != null)) return null;
   // a paid switch to yearly (SOLAR-298): nothing to undo
   if (b.prepaidOn) return [`Switches to yearly on ${billDay(b.nextDate)}. Paid.`, null];
-  // the price from the billing date (nextAmount), as the booked change leaves it
-  const then = `, ${rand(b.nextAmount)} ${perUnit(b.nextPeriod || b.period)}.`;
-  return b.nextPlan === 'free' ? [`Ends on ${billDay(b.nextDate)}, then you’re on Free.`, `Keep ${PLAN_NAME[b.plan]}`]
-    : b.nextPlan ? [`Moves to ${PLAN_NAME[b.nextPlan]} on ${billDay(b.nextDate)}` + then, `Keep ${PLAN_NAME[b.plan]}`]
-    : b.nextPeriod ? [`Switches to ${b.nextPeriod} on ${billDay(b.nextDate)}` + then, `Stay ${b.period}`]
-    : [`Extra plants drop to ${b.nextExtraPlants} on ${billDay(b.nextDate)}` + then, `Keep ${b.extraPlants} extra plant${b.extraPlants === 1 ? '' : 's'}`];
+  // one sentence, as most billing pages put it: the plan, its plants and the price from the
+  // billing date (nextAmount), as the booked change leaves it (SOLAR-367)
+  const on = `On ${billDay(b.nextDate)} your plan changes to `;
+  const then = `${rand(b.nextAmount)} ${perUnit(b.nextPeriod || b.period)}.`;
+  const plants = (n) => (n === 1 ? '1 plant' : n + ' plants');
+  return b.nextPlan === 'free' ? [on + 'Free, 1 plant.', `Keep ${PLAN_NAME[b.plan]}`]
+    : b.nextPlan ? [on + `${PLAN_NAME[b.nextPlan]}, ${plants(planRoom(b.nextPlan, b.nextExtraPlants ?? b.extraPlants))}, ` + then, `Keep ${PLAN_NAME[b.plan]}`]
+    : b.nextPeriod ? [on + `${b.nextPeriod}, ` + then, `Stay ${b.period}`]
+    : [on + `${plants(planRoom(b.plan, b.nextExtraPlants))}, ` + then, `Keep ${plants(planRoom(b.plan, b.extraPlants))}`];
 }
 // Sets the extra plants from the billing date (SOLAR-264): fewer than held books a drop,
 // as many as held undoes one. More is a payment (window.startUpgrade). True once saved.
@@ -2225,24 +2228,21 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   // an ending plan says so in the notice under it (SOLAR-364)
   const word = b.state === 'past_due' ? 'Payment failed' : null;
   const line = b.comped ? 'Free of charge. Every plant, full history.'
-    : paid ? <><span className="mono">{rand(b.price)}</span> {perUnit(b.period)} for {b.plan === 'family' ? `up to ${planRoom('family', b.extraPlants)} plants` : '1 plant'}.</>
+    : paid ? <><span className="mono">{rand(b.price)}</span> {perUnit(b.period)}.</>
     : weekEnds ? `Free week until ${billDay(weekEnds)}.`
     : '1 plant and the last 24 hours. No card needed.';
-  // What the price is made of: Family's base plus R49 for each extra plant paid for.
-  const list = paid && b.plan === 'family' && b.prices?.[b.period];
-  const extra = list ? b.extraPlants || 0 : 0;
+  // Family's plants: those included and the extra ones paid for (SOLAR-367)
+  const extra = paid && b.plan === 'family' ? b.extraPlants || 0 : 0;
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
   return (
     <SettingsSection id="plan" title="Plan">
       {/* the plan top left, its buttons top right */}
       <div className="plan-head">
         <div className="plan-now">
-          <div className="plan-name">{PLAN_NAME[b.plan]}{word && <span className="conn-status warn">{word}</span>}</div>
+          <div className="plan-name">{PLAN_NAME[b.plan]}{paid && b.plan === 'family' && `, ${planRoom('family', b.extraPlants)} plants`}{word && <span className="conn-status warn">{word}</span>}</div>
           <div className="plan-line">{line}</div>
           {extra > 0 && (
-            <div className="conn-meta plan-break">
-              Family <span className="mono">{rand(list.family)}</span> + {extra === 1 ? '1 extra plant' : extra + ' extra plants'} <span className="mono">{rand(extra * list.extra)}</span>
-            </div>
+            <div className="conn-meta plan-break">{planRoom('family', 0)} included, {extra} extra.</div>
           )}
           {paid && b.offer?.held && <div className="conn-meta pw-offer">{window.billingFmt.offerLine(b.offer, listPrice(b, b.plan, b.period, b.extraPlants || 0), b.period)}</div>}
           {/* past due and ending say their date below */}
