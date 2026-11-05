@@ -1062,7 +1062,7 @@ const pageOk = (tabs, id) => isSettings(id) || tabs.some(t => t.id === id);
 // A section a link or a button opens, and the page that holds it. The plant's fields are
 // one section since SOLAR-250, so the old ids land on it.
 const SECTION_ALIAS = { tariff: 'system', battery: 'system', plant: 'system' };
-const SECTION_PAGE = { connection: 'billing', system: 'system', steps: 'system', download: 'account', notifications: 'account', plan: 'billing', payments: 'billing', plants: 'billing' };
+const SECTION_PAGE = { connection: 'billing', system: 'system', steps: 'system', download: 'account', notifications: 'account', plan: 'billing', payments: 'billing', plants: 'billing', cancel: 'billing' };
 // A saved or linked Battery page opens Equipment, where the packs now are; the plant's
 // settings were Settings' System page ('settings') until they moved to the list.
 const tabAlias = (id) => (id === 'battery' ? 'inverters' : id === 'settings' ? 'system' : id);
@@ -1116,12 +1116,22 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
 // that isn't one box's typing mistake is window.toast(text, { error: true, action:
 // { label, onClick } }): red, 6 s, at most one link. Frame mounts the host; the
 // signed-out screens mount their own (window.SaveToast).
+// A toast sent as its host goes (signing out swaps the frame for the sign-in screen in the
+// same render, as after Delete account, SOLAR-359) moves to the next host.
 let toastShow = null;
-window.toast = (text, opts = {}) => toastShow && toastShow({ text, ...opts, at: Date.now() });
+let toastLast = null;
+window.toast = (text, opts = {}) => {
+  toastLast = { text, ...opts, at: Date.now() };
+  if (toastShow) toastShow(toastLast);
+};
 function SaveToast() {
   const [t, setT] = useState(null);
   const host = useRef(null);
-  useEffect(() => { toastShow = setT; return () => { toastShow = null; }; }, []);
+  useEffect(() => {
+    toastShow = setT;
+    if (toastLast && Date.now() - toastLast.at < 1000) setT(toastLast);
+    return () => { toastShow = null; };
+  }, []);
   useEffect(() => {
     if (!t) return;
     // A pop-up's backdrop sits in the top layer over everything else; showing the host as a
@@ -1281,7 +1291,7 @@ function Setup({ links }) {
         {!connecting && (plantsOff
           ? <span className="setup-head-btns">{turnOnBtn('setup-head-btn')}{connectBtn('setup-head-btn', () => setAdding(true))}</span>
           : connectBtn('setup-head-btn'))}</>}>
-      {isSettings(tab) ? <window.SettingsArea page={tab} onPage={go} me={me} links={links} onPlantConfigSaved={linked}
+      {isSettings(tab) ? <window.SettingsArea page={tab} onPage={(p, section) => { if (section) setFlash(section); go(p); }} me={me} links={links} onPlantConfigSaved={linked}
                                               flash={flash} onFlashed={() => setFlash(null)} /> : stage}
       {adding && (
         <window.LinkDialog title="Add plant" onLinked={addedFromHead} onCancel={() => setAdding(false)} />
@@ -1443,7 +1453,7 @@ function App({ links }) {
       const linked = Number(url.searchParams.get('plant'));
       // A report or alert footer adds section=notifications: open Account on the email switches.
       // A payment email or Paystack's return adds section=plan: Billing.
-      const section = { logins: 'connection', notifications: 'notifications', plan: 'plan' }[url.searchParams.get('section')];
+      const section = { logins: 'connection', notifications: 'notifications', plan: 'plan', cancel: 'cancel', system: 'system' }[url.searchParams.get('section')];
       if (url.searchParams.has('section')) {
         url.searchParams.delete('section'); history.replaceState(history.state, '', url);
       }

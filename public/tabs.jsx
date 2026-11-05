@@ -3181,7 +3181,7 @@ function DownloadSection({ plants, plantId, ready }) {
 const DELETE_REFUSED = [
   [/owed/, 'Pay the failed payment on Billing first.'],
   [/payment is open/, 'A payment is still going through. Try again tomorrow.'],
-  [/cancel your plan/, 'Cancel your plan on Billing first.'],
+  [/cancel your plan/, 'Cancel your plan first.'],
 ];
 function DeleteAccountRow({ email, billing, onBilling }) {
   const { useState } = React;
@@ -3194,10 +3194,14 @@ function DeleteAccountRow({ email, billing, onBilling }) {
     setBusy(true);
     // The account is gone; signing out here is what moves the screen to sign-in, once.
     // No reload after it: that blanked the page and drew sign-in again (SOLAR-98).
-    try { await window.deleteAccount(); await window.signOutHere(); }
+    try { await window.deleteAccount(); await window.signOutHere(); window.toast('Account deleted.'); }
     catch (e) {
       const why = DELETE_REFUSED.find(([re]) => re.test(e?.message || ''));
-      window.toast(why ? why[1] : 'Couldn’t delete the account. Try again.', { error: true });
+      // Refused on billing: what we showed was stale, so reload it (Cancellation only draws
+      // for a paid plan), and link a running plan to where it is cancelled (SOLAR-361).
+      if (why) window.dispatchEvent(new Event('ps-billing'));
+      const toCancel = why && why[0].test('cancel your plan') && { label: 'Go to cancel plan', onClick: () => onBilling('cancel') };
+      window.toast(why ? why[1] : 'Couldn’t delete the account. Try again.', { error: true, ...(toCancel && { action: toCancel }) });
       setBusy(false);
     }
   };
@@ -3211,7 +3215,8 @@ function DeleteAccountRow({ email, billing, onBilling }) {
           title={owed ? 'Pay the failed payment first' : 'Cancel your plan first'}
           text={owed ? 'Pay it in Billing, then you can delete your account.'
             : <>Your <b>{PLAN_NAME[billing.plan]}</b> plan is still running. Cancel it in Billing, then you can delete your account.</>}
-          cancelLabel="Close" action="Go to Billing" onConfirm={onBilling} onCancel={() => setConfirming(false)} />
+          cancelLabel="Close" action={owed ? 'Go to Billing' : 'Go to cancel plan'}
+          onConfirm={() => onBilling(owed ? undefined : 'cancel')} onCancel={() => setConfirming(false)} />
       )}
       {!blocked && confirming && (
         <ConfirmCard modal title={<>Delete <b>{email || 'this account'}</b>?</>} text="Your plants’ history goes too, unless another account shares them. It cannot be undone."
@@ -3432,7 +3437,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
         </nav>
         <div className="set-main">
           <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><Icon id="back" />Settings</button>
-          {shown === 'account' && <AccountPage user={user} billing={billing} plants={onPlants} plantId={plantId} ready={!!me} onBilling={() => onPage('billing')} />}
+          {shown === 'account' && <AccountPage user={user} billing={billing} plants={onPlants} plantId={plantId} ready={!!me} onBilling={(section) => onPage('billing', section)} />}
           {(page === 'billing' || page === 'plans') && <BillingPage billing={billing} reload={reloadBilling} reloadPlan={reloadPlan} links={links} onPage={onPage} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} onSaved={onPlantConfigSaved}
                                               onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}
           {/* Adjust plan opens over Billing, not as a page of its own (SOLAR-292) */}
