@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Page not found · Prince Solar Hub</title>
+<!-- Cloudflare Pages serves this, with a 404, for any address that has no file (SOLAR-350).
+     It answers at every depth, so every link and file here is absolute. -->
+<meta name="robots" content="noindex" />
+<meta name="theme-color" content="#06080f" />
+<link rel="icon" type="image/svg+xml" href="/icon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&family=Geist:wght@400&family=Space+Grotesk:wght@600&display=swap">
+<style>
+/* the showcase's night (welcome.html): same colours, type, buttons and hills */
+:root{--night:#06080f;--paper:#f3eee4;--ink-soft:rgba(243,238,228,.78);--sun:#ffd56b;--sun-mid:#f4a93a;--sun-rim:#e07a1f;--gold:#f2c36b;
+  --sans:"Space Grotesk",system-ui,sans-serif;--display:"Bricolage Grotesque",system-ui,sans-serif;--body:"Geist",system-ui,sans-serif;color-scheme:dark}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--night)}
+body{min-height:100svh;display:flex;flex-direction:column;background:linear-gradient(180deg,#04060c 0%,#0b1020 55%,#171b33 100%);color:var(--paper);font:400 18px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:6px}
+header{max-width:1280px;width:100%;margin:0 auto;padding:0 56px;height:72px;display:flex;align-items:center}
+.brand{display:flex;align-items:center;gap:11px;font:600 18px var(--sans);text-decoration:none;letter-spacing:-.01em;min-height:44px}
+.orb{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 38% 34%,#fff6d6 0 12%,var(--sun) 30%,var(--sun-mid) 62%,var(--sun-rim) 100%);box-shadow:0 0 18px rgba(255,190,80,.55)}
+main{flex:1;max-width:1280px;width:100%;margin:0 auto;padding:12vh 56px 48px}
+h1{font:600 76px/1.04 var(--display);font-variation-settings:'opsz' 96;letter-spacing:-.035em;max-width:640px}
+h1 em{font-style:normal;color:#ffd27a}
+p{margin-top:22px;font:400 20px/1.5 var(--body);color:var(--ink-soft);max-width:30em}
+.cta{display:flex;flex-wrap:wrap;gap:14px;margin-top:32px}
+.btn{display:inline-flex;align-items:center;justify-content:center;height:46px;padding:0 22px;border-radius:12px;font:600 16px var(--sans);text-decoration:none;border:1px solid transparent}
+.btn.sun{background:linear-gradient(180deg,#ffd877,#f3a83c);color:#241500;box-shadow:0 6px 20px -6px rgba(243,168,60,.7),inset 0 1px 0 rgba(255,255,255,.5)}
+.btn.ghost{border-color:currentColor;opacity:.9}
+.btn.ghost:hover{opacity:1;background:rgba(127,127,127,.1)}
+/* the hills and the house sit under the words, never behind them */
+.land{position:relative;height:160px;flex:none}
+.land svg{position:absolute;inset:0;width:100%;height:100%}
+.land svg.house{inset:auto 12% 44px auto;width:150px;height:auto}
+@media (max-width:860px){
+  header,main{padding-left:16px;padding-right:16px}
+  h1{font-size:40px}p{font-size:17px;margin-top:12px}.cta{margin-top:18px}
+  .land{height:110px}.land svg.house{right:16px;bottom:30px;width:96px}
+}
+</style>
+</head>
+<body>
+<header><a class="brand" href="https://princesolarhub.co.za/"><span class="orb" aria-hidden="true"></span>Prince Solar Hub</a></header>
+<main>
+  <h1>Nothing <em>here.</em></h1>
+  <p>Check the address, or start again from the home page.</p>
+  <div class="cta"><a class="btn sun" href="https://princesolarhub.co.za/">Home page</a><a class="btn ghost" href="https://app.princesolarhub.co.za/">Sign in</a></div>
+</main>
+<div class="land" aria-hidden="true">
+  <svg viewBox="0 0 1440 160" preserveAspectRatio="none">
+    <path fill="#0b0e1a" d="M0 60 C180 20 330 50 480 36 C640 20 760 0 930 22 C1090 44 1230 14 1440 30 V160 H0Z"/>
+    <path fill="#06080e" d="M0 116 C220 84 420 108 640 94 C860 80 1040 102 1240 86 C1330 80 1390 84 1440 88 V160 H0Z"/>
+  </svg>
+  <svg class="house" viewBox="0 0 250 150">
+    <path fill="#06080e" d="M12 74 L118 14 L224 74 V150 H12Z"/><rect fill="#06080e" x="182" y="24" width="14" height="34"/>
+    <rect fill="#ffd27a" x="40" y="96" width="34" height="26" rx="2"/><rect fill="#ffd27a" x="98" y="96" width="34" height="26" rx="2"/><rect fill="#ffd27a" x="160" y="96" width="34" height="26" rx="2"/>
+    <rect fill="#0b0e1a" x="104" y="128" width="22" height="22"/>
+  </svg>
+</div>
+</body>
+</html>
