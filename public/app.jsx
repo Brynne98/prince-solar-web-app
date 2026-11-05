@@ -1453,7 +1453,7 @@ function App({ links }) {
       const linked = Number(url.searchParams.get('plant'));
       // A report or alert footer adds section=notifications: open Account on the email switches.
       // A payment email or Paystack's return adds section=plan: Billing.
-      const section = { logins: 'connection', notifications: 'notifications', plan: 'plan' }[url.searchParams.get('section')];
+      const section = { logins: 'connection', notifications: 'notifications', plan: 'plan', cancel: 'cancel', system: 'system' }[url.searchParams.get('section')];
       if (url.searchParams.has('section')) {
         url.searchParams.delete('section'); history.replaceState(history.state, '', url);
       }

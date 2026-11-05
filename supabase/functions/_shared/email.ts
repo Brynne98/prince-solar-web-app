@@ -199,7 +199,7 @@ function html(subject: string, b: Body): string {
       const more = names.length - shown.length;
       return `<div style="margin:0 0 6px;font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(title)}${names.length > 1 && count !== false ? ` · ${names.length} plants` : ""}</div>` +
         `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px">${shown.map((n) => itemRow({ icon: tone, name: esc(n) })).join("")}` +
-        (more ? `<tr><td></td><td style="padding:6px 0;font:400 14px/1.35 ${SANS};color:#9aa5b3">and ${more} more, listed in Account</td></tr>` : "") +
+        (more ? `<tr><td></td><td style="padding:6px 0;font:400 14px/1.35 ${SANS};color:#9aa5b3">and ${more} more, listed in Billing</td></tr>` : "") +
         `</table>`;
     }
     if ("items" in x) {
@@ -650,6 +650,10 @@ export const PAY_URL = `${PLAN}&pay=1`;
 // Buttons that ask them to pick a plan open Adjust plan: Free, Home and Family side by
 // side (SOLAR-341).
 const PLANS = `${APP}/?tab=plans`;
+// "To stop it, cancel before": Billing's Cancellation section (SOLAR-361).
+const CANCEL = `${APP}/?tab=account&section=cancel`;
+// Day-2 "Finish setup": Plant settings' Your system, where rate, battery and panels are set (SOLAR-361).
+const SYSTEM = `${APP}/?tab=account&section=system`;
 // What Free means after its first week, said the same way in every email.
 const FREE_RULE = "Free keeps only the last 24 hours of readings. Alerts stay on; reports stop.";
 // After a paid plan, readings stay 30 days first (SOLAR-329, 0146).
@@ -708,7 +712,7 @@ export const renewalNotice = (r: Renewal) =>
       ...(r.change ? [{ p: esc(r.change) }] : []),
       { items: { rows: [planItem(r.plan, "yearly", `renews ${r.on}`, rand(r.amount))] } },
       { p: `To stop it, cancel before ${r.on}.` },
-      { button: { label: "See your plan", href: PLAN } },
+      { button: { label: "Go to cancel plan", href: CANCEL } },
     ],
     footer: [SELLER, HELP],
   });
@@ -723,7 +727,7 @@ export const offerEnds = (o: OfferEnds) =>
       { p: `You pay ${rand(o.was)} ${o.period === "yearly" ? "a year" : "a month"} until then.${o.card ? ` We'll charge your ${esc(o.card)}.` : ""}` },
       { items: { rows: [planItem(o.plan, o.period, `from ${o.on}`, rand(o.amount))] } },
       { p: `To stop it, cancel before ${o.on}.` },
-      { button: { label: "See your plan", href: PLAN } },
+      { button: { label: "Go to cancel plan", href: CANCEL } },
     ],
     footer: [SELLER, HELP],
   });
@@ -948,7 +952,7 @@ export const freeWeekSetup = (steps: SetupStep[]) =>
     title: "Finish your setup",
     parts: [
       { steps: steps.filter((s) => s in SETUP_WHERE).map((s) => SETUP_WHERE[s]) },
-      { button: { label: "Finish setup", href: APP } },
+      { button: { label: "Finish setup", href: SYSTEM } },
     ],
     footer: [HELP],
   });
