@@ -511,12 +511,12 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
           {/* one list (SOLAR-353): billing notices lead Today, above its alerts */}
           {pinned.length > 0 && <div className="nl-day">Today</div>}
           <NoticeRows pinned={pinned} onAct={n => { close(); n.act('list'); }} />
-          {items && !items.length && (
+          {items && !items.length && !pinned.length && (
             <div className="nl-empty">
               <span className="nl-glyph g-readings"><Icon id="bell" /></span>
-              <b>{noAlerts('month')}</b>
+              <b>{noNotifs('month')}</b>
               <p>When the grid goes off, a battery runs hot, panels stop or readings stop, it shows here.</p>
-              <button type="button" className="ghost-btn" onClick={() => { close(); onSettings(); }}>Notification settings</button>
+              <button type="button" className="save-btn" onClick={() => { close(); onSettings(); }}>Notification settings</button>
             </div>
           )}
           {items && items.length > 0 && <NotifRows items={items} when={it => it.time} from={pinned.length ? window.localDateStr() : null} />}
@@ -539,7 +539,7 @@ function NoticeRows({ pinned, onAct }) {
       <span className="nl-text">
         <span className="nl-title">{n.title}</span>
         <span className="nl-body">{n.body}</span>
-        <span className="nl-act-wrap"><button type="button" className="ghost-btn nl-act" onClick={() => onAct(n)}>{n.button}</button></span>
+        <span className="nl-act-wrap"><button type="button" className="save-btn nl-act" onClick={() => onAct(n)}>{n.button}</button></span>
       </span>
     </div>
   ));
@@ -586,8 +586,9 @@ const ALERT_RANGES = [['day', 'Day', 1], ['week', 'Week', 7], ['month', 'Month',
 const ALERT_KINDS = [{ value: 'all', label: 'All' }, { value: 'billing', label: 'Billing' }, { value: 'grid', label: 'Grid' }, { value: 'battery', label: 'Battery' },
   { value: 'panels', label: 'Panels' }, { value: 'readings', label: 'Readings' }, { value: 'sunsynk', label: 'SunSynk' }];
 const ALERT_RANGE_WORDS = { day: 'in the last day', week: 'in the last week', month: 'in the last month', year: 'in the last year', all: 'yet' };
-// One empty line for the bell (its 30 days) and the page (its filters) (SOLAR-348)
-const noAlerts = (range, unread, kindWord = '') => 'No ' + (unread ? 'unread ' : '') + kindWord + 'alerts ' + ALERT_RANGE_WORDS[range];
+// One empty line for the bell (its 30 days) and the page (its filters) (SOLAR-348), shown
+// only when there are no notifications at all: notices and alerts are one kind (SOLAR-353)
+const noNotifs = (range, unread, kindWord = '') => 'No ' + (unread ? 'unread ' : '') + kindWord + 'notifications ' + ALERT_RANGE_WORDS[range];
 
 // The full page (SOLAR-327). onShown(ids): unread rows it showed, read once the page is left.
 // pinned: the billing notices the bell shows; they lead Today's card unless the kind filter
@@ -651,9 +652,9 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
       </div>
       {failed && (
         <div className="nl-empty">
-          <b>Couldn’t load your alerts</b>
+          <b>Couldn’t load your notifications</b>
           <p>Check your connection, then try again.</p>
-          <button type="button" className="ghost-btn" onClick={load}>Try again</button>
+          <button type="button" className="save-btn" onClick={load}>Try again</button>
         </div>
       )}
       {!failed && !res && <div className="alerts-list">{[0, 1, 2].map(i => <Skeleton key={i} h={150} r={16} style={{ marginTop: 40 }} />)}</div>}
@@ -667,12 +668,11 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
           </Card>
         </section>
       ))}</div>}
-      {res && !res.items.length && !(kind === 'billing' && notices.length) && (
+      {res && !days.length && (
         <div className="nl-empty">
-          {/* with notices above, no bell: only the alerts are missing */}
-          {!notices.length && <span className="nl-glyph g-readings"><Icon id="bell" /></span>}
-          <b>{kind === 'billing' ? 'No billing notifications' : noAlerts(range, unreadOnly, kindWord)}</b>
-          {(range !== 'all' || kind !== 'all' || unreadOnly) && <button type="button" className="ghost-btn" onClick={reset}>Show all</button>}
+          <span className="nl-glyph g-readings"><Icon id="bell" /></span>
+          <b>{noNotifs(range, unreadOnly, kindWord)}</b>
+          {(range !== 'all' || kind !== 'all' || unreadOnly) && <button type="button" className="save-btn" onClick={reset}>Show all</button>}
         </div>
       )}
       {res?.more && <div className="alerts-more"><BusyButton className="ghost-btn" busy={more} busyText="Loading…" onClick={showMore}>Show more</BusyButton></div>}
