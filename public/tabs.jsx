@@ -2447,7 +2447,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
     return <button type="button" className="ghost-btn" disabled={!!busy || cancelling} aria-busy={busy === 'down:' + p}
                    onClick={() => (p === 'free' ? setCancelling(true)
                      : plants.length > planRoom(p, b.nextExtraPlants ?? b.extraPlants) ? setPicking({ plan: p, period: view })
-                     : run(() => bookPlan(b, p, view, reload), 'down:' + p))}>Downgrade</button>;
+                     : run(() => bookPlan(b, p, view, reload), 'down:' + p))}>Switch to {PLAN_NAME[p]}</button>;
   };
   // Family's plants line: 3 included, the counter for extra ones beside it
   const plantsLine = (
@@ -2498,7 +2498,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
           onConfirm={(keep) => run(async () => { await bookPlan(b, 'free', null, reload, keep); setCancelling(false); })} />}
         {picking && (
           <KeepPicker b={b} room={planRoom(picking.plan, picking.extra ?? b.nextExtraPlants ?? b.extraPlants)} logins={logins} busy={!!busy}
-            action={picking.extra == null ? 'Downgrade' : held - picking.extra === 1 ? 'Remove plant' : 'Remove plants'}
+            action={picking.extra == null ? 'Switch to ' + PLAN_NAME[picking.plan] : held - picking.extra === 1 ? 'Remove plant' : 'Remove plants'}
             onPick={(keep) => run(async () => {
               const ok = picking.extra != null ? await bookExtras(b, picking.extra, reload, keep) : await bookPlan(b, picking.plan, picking.period, reload, keep);
               if (!ok && picking.extra != null) setMore(shown);
