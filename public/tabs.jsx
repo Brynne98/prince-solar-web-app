@@ -641,14 +641,17 @@ const WIW_INFO = {
 };
 // Where a day's energy went or came from (SOLAR-332): a hollow pie of its parts
 // ([name, kWh, colour]) with their sum in the middle, and each part's kWh beside it.
-function SharePie({ parts, word }) {
+// empty: the note for a day with nothing to share out; the ring stays, bare, so the card
+// keeps its shape beside the 30 days instead of leaving a blank box (SOLAR-345).
+function SharePie({ parts, word, empty }) {
+  if (empty) parts = [];
   const total = parts.reduce((t, d) => t + d[1], 0);
   const R = 61, C = 2 * Math.PI * R, gap = parts.length > 1 ? 3 : 0;
   const [n, u] = window.fmtEnergyParts(total);
   let at = 0;
   return (
-    <div className="pie-wrap">
-      <svg className="pie" viewBox="0 0 150 150" role="img" aria-label={word + ' ' + fmtKwh(total) + ': ' + parts.map(d => d[0] + ' ' + fmtKwh(d[1])).join(', ')}>
+    <div className={'pie-wrap' + (empty ? ' empty' : '')}>
+      <svg className="pie" viewBox="0 0 150 150" role="img" aria-hidden={empty ? 'true' : undefined} aria-label={word + ' ' + fmtKwh(total) + ': ' + parts.map(d => d[0] + ' ' + fmtKwh(d[1])).join(', ')}>
         <circle className="pie-track" cx="75" cy="75" r={R} />
         {parts.map(([l, v, c]) => {
           const len = v / total * C;
@@ -659,12 +662,12 @@ function SharePie({ parts, word }) {
         <text x="75" y="74" className="pie-num">{n}<tspan className="pie-u" dx="3">{u}</tspan></text>
         <text x="75" y="94" className="pie-word">{word}</text>
       </svg>
-      <div className="pie-figs" aria-hidden="true">
+      {empty ? <div className="solar-note">{empty}</div> : <div className="pie-figs" aria-hidden="true">
         {parts.map(([l, v, c]) => {
           const [a, b] = window.fmtEnergyParts(v);
           return <div key={l}><span>{l}</span><b style={{ color: c }}>{a}<span className="u">{b}</span></b></div>;
         })}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -1200,8 +1203,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         <Card className="wiw" {...dim}>
           <SectionTitle>{titled('WHERE IT WENT', dayWord)}<window.InfoDot text={WIW_INFO.solar} /></SectionTitle>
           {!day ? <WiwBodySkeleton />
-            : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')}</div>
-            : <SharePie parts={dests} word="Made" />}
+            : <SharePie parts={dests} word="Made" empty={(noReadings || splitTotal < 0.05) && (noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.'))} />}
         </Card>
         <Card>
           <SectionTitle right={best ? <>Best <b>{fmtKwh(best.pv)}</b> on {window.dayText(best.date)}</> : RIGHT_HOLD}>
@@ -1315,8 +1317,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
         <Card className="wiw" {...dim}>
           <SectionTitle>{titled('WHERE IT CAME FROM', dayWord)}<window.InfoDot text={WIW_INFO.home} /></SectionTitle>
           {!day ? <WiwBodySkeleton />
-            : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || 'No home readings for this day.'}</div>
-            : <SharePie parts={srcs} word="Used" />}
+            : <SharePie parts={srcs} word="Used" empty={(noReadings || splitTotal < 0.05) && (noReadings || 'No home readings for this day.')} />}
         </Card>
         <Card>
           <SectionTitle right={most && most.load > 0 ? <>Most <b>{fmtKwh(most.load)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
@@ -1475,8 +1476,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         <Card className="wiw" {...dim}>
           <SectionTitle>{titled('WHERE IT WENT', dayWord)}<window.InfoDot text={WIW_INFO.grid} /></SectionTitle>
           {!day ? <WiwBodySkeleton />
-            : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || (!points.some(p => p.grid != null) ? 'No grid readings for this day.' : view.isToday ? 'Nothing imported yet today.' : 'Nothing imported on this day.')}</div>
-            : <SharePie parts={dests} word="Imported" />}
+            : <SharePie parts={dests} word="Imported" empty={(noReadings || splitTotal < 0.05) && (noReadings || (!points.some(p => p.grid != null) ? 'No grid readings for this day.' : view.isToday ? 'Nothing imported yet today.' : 'Nothing imported on this day.'))} />}
         </Card>
         <Card>
           <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>

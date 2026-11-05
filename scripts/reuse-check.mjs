@@ -71,6 +71,18 @@ for (const m of css.matchAll(/font(?:-size)?:[^;{}]*?(?<![\w(-])(\d+(?:\.\d+)?)p
   problems.push(`index.html:${lineOf(m.index)} font size ${m[1]}px: use a --fs-* token`);
 }
 
+// ---- 2c. one spacing and corner scale (SOLAR-345) ----
+// Paddings, margins and gaps up to 40px are --sp-* tokens; corners are --r-* (or 50%).
+// 0 and 1px (hairline nudges) pass; bigger offsets match another element's size and stay px.
+for (const m of css.matchAll(/(?<![\w-])(padding|margin|gap|row-gap|column-gap|border(?:-[a-z]+)*-radius)(?:-[a-z]+)?\s*:([^;{}]*)/g)) {
+  const val = m[2].replace(/clamp\([^)]*\)/g, '');
+  for (const n of val.matchAll(/(\d+(?:\.\d+)?)px/g)) {
+    const v = Number(n[1]);
+    if (v <= 1 || (v > 40 && !/radius/.test(m[1]))) continue;
+    problems.push(`index.html:${lineOf(m.index)} ${m[1]} ${v}px: use a --${/radius/.test(m[1]) ? 'r' : 'sp'}-* token`);
+  }
+}
+
 // ---- 3. one global scope ----
 const seen = new Map();
 for (const f of jsx) {

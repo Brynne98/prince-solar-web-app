@@ -113,61 +113,59 @@ typography:
     lineHeight: 1.2
     letterSpacing: "0.2em"
 rounded:
-  hairline: "2px"
-  meter: "4px"
-  meter-thick: "5px"
-  xs: "7px"
-  sm: "9px"
-  md: "12px"
-  lg: "16px"
-  xl: "18px"
-  control: "10px"
-  login-input: "11px"
-  card-phone: "14px"
+  xs: "2px"
+  sm: "4px"
+  md: "8px"
+  lg: "12px"
+  xl: "16px"
   pill: "999px"
 spacing:
-  xs: "8px"
-  sm: "12px"
-  md: "16px"
-  lg: "20px"
-  xl: "26px"
-  card-x: "24px"
+  3xs: "2px"
+  2xs: "4px"
+  xs: "6px"
+  sm: "8px"
+  md: "12px"
+  lg: "16px"
+  xl: "20px"
+  2xl: "24px"
+  3xl: "32px"
+  4xl: "40px"
 components:
   button-primary:
     backgroundColor: "{colors.solar-green}"
     textColor: "#07130c"
-    rounded: "{rounded.sm}"
+    rounded: "{rounded.md}"
     padding: "0 16px"
     height: "34px"
   button-secondary:
     backgroundColor: "{colors.panel}"
     textColor: "{colors.paper-text}"
-    rounded: "{rounded.control}"
+    rounded: "{rounded.md}"
     padding: "10px 22px"
   button-ghost:
     backgroundColor: "transparent"
     textColor: "{colors.muted-text}"
-    rounded: "{rounded.sm}"
+    rounded: "{rounded.md}"
     padding: "0 16px"
     height: "34px"
   button-danger:
     backgroundColor: "transparent"
     textColor: "{colors.home-coral}"
-    rounded: "{rounded.sm}"
+    rounded: "{rounded.md}"
     padding: "0 16px"
     height: "34px"
   card:
     backgroundColor: "{colors.panel}"
-    rounded: "{rounded.lg}"
+    rounded: "{rounded.xl}"
     padding: "22px 24px"
   card-inset:
     backgroundColor: "{colors.panel-raised}"
-    rounded: "{rounded.md}"
+    rounded: "{rounded.lg}"
     padding: "16px 18px"
   input:
     backgroundColor: "{colors.panel-raised}"
     textColor: "{colors.paper-text}"
-    rounded: "{rounded.sm}"
+    rounded: "{rounded.md}"
     padding: "0 12px"
     height: "41px"
   chip:
@@ -333,6 +331,16 @@ face, sitting on the same baseline, slightly lighter.
 muted. It is found after the number, never before.
 
 ## Layout
+
+### Scale (SOLAR-345)
+Ten spacing steps and five corners, as tokens on `:root` in `public/index.html`
+(`npm test` fails on a px padding, margin, gap or corner): `--sp-3xs` 2, `--sp-2xs` 4,
+`--sp-xs` 6, `--sp-sm` 8, `--sp-md` 12, `--sp-lg` 16, `--sp-xl` 20, `--sp-2xl` 24,
+`--sp-3xl` 32, `--sp-4xl` 40; `--r-xs` 2, `--r-sm` 4, `--r-md` 8, `--r-lg` 12, `--r-xl` 16,
+`--r-pill`. Cards are xl, a box inside a card (power flow) lg, buttons and chips md; thin
+bars and switches are pills. Offsets over 40px that match another element (the phone tab
+bar, an icon column) stay px. The px values below predate the scale; each now rounds to
+its nearest step, a tie to the multiple of 8.
 
 One centred column, max 1320px, with 20px side gutters (8px on phones) and 30px top
 padding. The shell is a flex column so the version line sits at the true bottom of the
@@ -514,7 +522,8 @@ sidebar and folded on a phone. On a
 tablet the 84px sidebar shows a ring and the count instead. The step opens in
 a popup 24px right of the sidebar: 320px wide, Panel Raised, strong hairline, 16px
 radius, 18px 20px 20px padding, Popup shadow, an 18px title and a 13px muted note. On
-phones the card sits over the bottom bar and the step opens as a bottom sheet.
+phones the card sits at the top of the page, in the flow, so it never covers a chart
+(SOLAR-345); the step opens as a bottom sheet.
 
 ### Segmented control
 A Panel Raised track with hairline, 10px radius and 3px padding; 13px 500 buttons at 7px
