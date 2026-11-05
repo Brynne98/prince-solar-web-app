@@ -3211,7 +3211,8 @@ function DeleteAccountRow({ email, billing, onBilling }) {
           title={owed ? 'Pay the failed payment first' : 'Cancel your plan first'}
           text={owed ? 'Pay it in Billing, then you can delete your account.'
             : <>Your <b>{PLAN_NAME[billing.plan]}</b> plan is still running. Cancel it in Billing, then you can delete your account.</>}
-          cancelLabel="Close" action="Go to Billing" onConfirm={onBilling} onCancel={() => setConfirming(false)} />
+          cancelLabel="Close" action={owed ? 'Go to Billing' : 'Cancel plan'}
+          onConfirm={() => onBilling(owed ? undefined : 'cancel')} onCancel={() => setConfirming(false)} />
       )}
       {!blocked && confirming && (
         <ConfirmCard modal title={<>Delete <b>{email || 'this account'}</b>?</>} text="Your plants’ history goes too, unless another account shares them. It cannot be undone."
@@ -3432,7 +3433,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
         </nav>
         <div className="set-main">
           <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><Icon id="back" />Settings</button>
-          {shown === 'account' && <AccountPage user={user} billing={billing} plants={onPlants} plantId={plantId} ready={!!me} onBilling={() => onPage('billing')} />}
+          {shown === 'account' && <AccountPage user={user} billing={billing} plants={onPlants} plantId={plantId} ready={!!me} onBilling={(section) => onPage('billing', section)} />}
           {(page === 'billing' || page === 'plans') && <BillingPage billing={billing} reload={reloadBilling} reloadPlan={reloadPlan} links={links} onPage={onPage} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} onSaved={onPlantConfigSaved}
                                               onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}
           {/* Adjust plan opens over Billing, not as a page of its own (SOLAR-292) */}

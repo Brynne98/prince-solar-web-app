@@ -1062,7 +1062,7 @@ const pageOk = (tabs, id) => isSettings(id) || tabs.some(t => t.id === id);
 // A section a link or a button opens, and the page that holds it. The plant's fields are
 // one section since SOLAR-250, so the old ids land on it.
 const SECTION_ALIAS = { tariff: 'system', battery: 'system', plant: 'system' };
-const SECTION_PAGE = { connection: 'billing', system: 'system', steps: 'system', download: 'account', notifications: 'account', plan: 'billing', payments: 'billing', plants: 'billing' };
+const SECTION_PAGE = { connection: 'billing', system: 'system', steps: 'system', download: 'account', notifications: 'account', plan: 'billing', payments: 'billing', plants: 'billing', cancel: 'billing' };
 // A saved or linked Battery page opens Equipment, where the packs now are; the plant's
 // settings were Settings' System page ('settings') until they moved to the list.
 const tabAlias = (id) => (id === 'battery' ? 'inverters' : id === 'settings' ? 'system' : id);
@@ -1291,7 +1291,7 @@ function Setup({ links }) {
         {!connecting && (plantsOff
           ? <span className="setup-head-btns">{turnOnBtn('setup-head-btn')}{connectBtn('setup-head-btn', () => setAdding(true))}</span>
           : connectBtn('setup-head-btn'))}</>}>
-      {isSettings(tab) ? <window.SettingsArea page={tab} onPage={go} me={me} links={links} onPlantConfigSaved={linked}
+      {isSettings(tab) ? <window.SettingsArea page={tab} onPage={(p, section) => { if (section) setFlash(section); go(p); }} me={me} links={links} onPlantConfigSaved={linked}
                                               flash={flash} onFlashed={() => setFlash(null)} /> : stage}
       {adding && (
         <window.LinkDialog title="Add plant" onLinked={addedFromHead} onCancel={() => setAdding(false)} />
