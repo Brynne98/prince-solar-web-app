@@ -943,6 +943,17 @@ function DaysBarsChart({ rows, field, color, rgb, word, label, today, selected, 
   const h = hover != null ? rows[hover] : null;
   const dateLabel = (r, opts) => window.dayText(r.date, opts || { day: 'numeric', month: 'short' });
   const fill = (a) => 'rgba(' + rgb + ',' + a + ')';
+  // Axis labels: first day, the 1st of a month, last day. The 1st shows only when it has
+  // 12 px clear of both ends, measured in pixels (.ax is 11.5 px mono, ~7 px a character),
+  // so on a phone it never runs into "Today" (SOLAR-347).
+  const textW = (s) => s.length * 7;
+  const startX = m.l + slot / 2, endX = m.l + innerW - slot / 2;
+  const startText = dateLabel(rows[0]);
+  const endText = rows[rows.length - 1].date === today ? 'Today' : dateLabel(rows[rows.length - 1]);
+  const midX = m.l + slot * firstOfMonth + slot / 2, midText = firstOfMonth > 0 ? dateLabel(rows[firstOfMonth]) : '';
+  const showMid = firstOfMonth > 0
+    && midX - textW(midText) / 2 >= startX + textW(startText) + 12
+    && midX + textW(midText) / 2 <= endX - textW(endText) - 12;
   return (
     <div className="chart-area" ref={ref} style={{ position: 'relative', height }}>
       <svg width={width} height={height} className="chart-svg" role="img" aria-label={label}
@@ -969,9 +980,9 @@ function DaysBarsChart({ rows, field, color, rgb, word, label, today, selected, 
               style={{ transition: 'fill .12s' }} />
           );
         })}
-        <text x={m.l + slot / 2} y={height - 6} textAnchor="start" className="ax">{dateLabel(rows[0])}</text>
-        {firstOfMonth > 0 && firstOfMonth < rows.length - 4 && <text x={m.l + slot * firstOfMonth + slot / 2} y={height - 6} textAnchor="middle" className="ax">{dateLabel(rows[firstOfMonth])}</text>}
-        <text x={m.l + innerW - slot / 2} y={height - 6} textAnchor="end" className="ax">{rows[rows.length - 1].date === today ? 'Today' : dateLabel(rows[rows.length - 1])}</text>
+        <text x={startX} y={height - 6} textAnchor="start" className="ax">{startText}</text>
+        {showMid && <text x={midX} y={height - 6} textAnchor="middle" className="ax">{midText}</text>}
+        <text x={endX} y={height - 6} textAnchor="end" className="ax">{endText}</text>
       </svg>
       {h && (
         <div className="chart-tip" style={{ left: tipLeftFor(m.l + slot * hover + slot / 2, width, 168), top: 8 }}>
