@@ -1908,12 +1908,16 @@
   .grid-off-prompt .mini-link { color: var(--text); font-weight: 600; }
   .grid-off-prompt .fs-x { margin: calc(-1 * var(--sp-2xs)) calc(-1 * var(--sp-xs)) calc(-1 * var(--sp-2xs)) 0; }
   /* the review before a saved card is charged (SOLAR-276) */
-  .pay-review-t { margin: 0 0 var(--sp-md); font-size: var(--fs-lg); font-weight: 600; }
-  .pay-review-ln { display: flex; justify-content: space-between; gap: var(--sp-md); padding: var(--sp-sm) 0; border-top: 1px solid var(--line); font-size: var(--fs-md); color: var(--muted); }
+  /* No lines (SOLAR-368): today's amount leads, large; the bill and card sit in a darker box. */
+  .pay-review-t { margin: 0 0 var(--sp-lg); font-size: var(--fs-lg); font-weight: 600; }
+  .pay-review-due { margin: var(--sp-lg) 0 var(--sp-xl); font-size: var(--fs-sm); color: var(--muted); }
+  .pay-review-t + .pay-review-due { margin-top: 0; }
+  .pay-review-due b { display: block; margin-top: var(--sp-2xs); font: 600 var(--fs-3xl) var(--mono); letter-spacing: -0.01em; line-height: 1; color: var(--text); }
+  .pay-review-box { padding: var(--sp-md) var(--sp-lg); background: var(--panel); border-radius: var(--r-lg); }
+  .pay-review-ln { display: flex; justify-content: space-between; gap: var(--sp-md); padding: var(--sp-2xs) 0; font-size: var(--fs-md); color: var(--muted); }
   .pay-review-ln b { font-family: var(--mono); font-weight: 600; color: var(--text); text-align: right; }
-  .pay-review-ln.due { font-size: var(--fs-md); color: var(--text); }
-  .pay-review-ln.due b { font-size: var(--fs-lg); }
-  .pay-review-acts { display: flex; justify-content: flex-end; gap: var(--sp-sm); padding-top: var(--sp-lg); border-top: 1px solid var(--line); }
+  .pay-review-ln b.card { font-family: var(--display); font-weight: 500; }
+  .pay-review-acts { display: flex; justify-content: flex-end; gap: var(--sp-sm); padding-top: var(--sp-2xl); }
   .pw-billed { display: block; margin-top: var(--sp-3xs); font-size: var(--fs-sm); color: var(--muted); }
   /* SOLAR-330: an offer price, the list price struck out before it, its terms below */
   .pw-was { margin-right: var(--sp-xs); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: var(--fs-md); font-weight: 600; color: var(--dim); }

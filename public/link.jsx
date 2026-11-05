@@ -229,14 +229,17 @@ window.Dialog = Dialog;
 // card are shown first (SOLAR-276). Centred on a desktop, from the bottom on a phone.
 function PayReview({ title, note, due, then, card, onDone }) {
   const cancel = React.useRef(null);
-  React.useEffect(() => { cancel.current?.focus(); }, []);
+  // Opened by a tap or click after the price check, so no ring on Cancel; Tab still shows one (SOLAR-368).
+  React.useEffect(() => { cancel.current?.focus({ focusVisible: false }); }, []);
   return (
     <Dialog label={title} onClose={() => onDone(false)}>
       <h2 id="pay-review-t" className="pay-review-t">{title}</h2>
       {note && <p className="field-note">{note}</p>}
-      <div className="pay-review-ln due"><span>Due today</span><b>{rand(due)}</b></div>
-      <div className="pay-review-ln"><span>{then[0]}</span><b>{then[1]}</b></div>
-      <div className="pay-review-ln"><span>Card</span><b>{card}</b></div>
+      <div className="pay-review-due"><span>Due today</span><b>{rand(due)}</b></div>
+      <div className="pay-review-box">
+        <div className="pay-review-ln"><span>{then[0]}</span><b>{then[1]}</b></div>
+        <div className="pay-review-ln"><span>Card</span><b className="card">{card}</b></div>
+      </div>
       <div className="pay-review-acts">
         <button type="button" className="ghost-btn" ref={cancel} onClick={() => onDone(false)}>Cancel</button>
         <button type="button" className="save-btn" onClick={() => onDone(true)}>Pay</button>
@@ -262,7 +265,7 @@ const reviewPay = async (plan, period, extras) => {
     let close;
     const done = (yes) => { close(); resolve(yes); };
     close = mountNode(<PayReview title={title} note={q.switch ? `Your year starts ${billDay(q.startsOn)}.` : q.credit != null ? `Your year starts today, with ${rand(q.credit)} off for the rest of this month.` : null} due={q.dueNow} card={`${b.card.name} •••• ${b.card.last4}`}
-      then={[`Then from ${billDay(q.nextDate)}`, `${rand(q.nextCharge)} ${perUnit(q.switch ? 'yearly' : q.period || period)}`]} onDone={done} />);
+      then={[`Your bill from ${billDay(q.nextDate)}`, `${rand(q.nextCharge)} ${perUnit(q.switch ? 'yearly' : q.period || period)}`]} onDone={done} />);
   });
   window.track('pay_review_done', { plan, choice: ok ? 'pay' : 'cancel' });
   return ok;
