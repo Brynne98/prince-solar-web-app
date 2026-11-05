@@ -514,9 +514,7 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
           {items && !items.length && !pinned.length && (
             <div className="nl-empty">
               <span className="nl-glyph g-readings"><Icon id="bell" /></span>
-              <b>{noNotifs('month')}</b>
-              <p>When the grid goes off, a battery runs hot, panels stop or readings stop, it shows here.</p>
-              <button type="button" className="save-btn" onClick={() => { close(); onSettings(); }}>Notification settings</button>
+              <b>No notifications</b>
             </div>
           )}
           {items && items.length > 0 && <NotifRows items={items} when={it => it.time} from={pinned.length ? window.localDateStr() : null} />}
@@ -585,10 +583,6 @@ const ALERT_RANGES = [['day', 'Day', 1], ['week', 'Week', 7], ['month', 'Month',
 // Billing is a kind like the alert switches: one list, filtered by kind (SOLAR-353)
 const ALERT_KINDS = [{ value: 'all', label: 'All' }, { value: 'billing', label: 'Billing' }, { value: 'grid', label: 'Grid' }, { value: 'battery', label: 'Battery' },
   { value: 'panels', label: 'Panels' }, { value: 'readings', label: 'Readings' }, { value: 'sunsynk', label: 'SunSynk' }];
-const ALERT_RANGE_WORDS = { day: 'in the last day', week: 'in the last week', month: 'in the last month', year: 'in the last year', all: 'yet' };
-// One empty line for the bell (its 30 days) and the page (its filters) (SOLAR-348), shown
-// only when there are no notifications at all: notices and alerts are one kind (SOLAR-353)
-const noNotifs = (range, unread, kindWord = '') => 'No ' + (unread ? 'unread ' : '') + kindWord + 'notifications ' + ALERT_RANGE_WORDS[range];
 
 // The full page (SOLAR-327). onShown(ids): unread rows it showed, read once the page is left.
 // pinned: the billing notices the bell shows; they lead Today's card unless the kind filter
@@ -629,7 +623,6 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
     onReadAll();
   };
   const reset = () => { setRange('all'); setKind('all'); setUnreadOnly(false); };
-  const kindWord = kind === 'all' ? '' : ALERT_KINDS.find(k => k.value === kind).label.toLowerCase() + ' ';
   const notices = kind === 'all' || kind === 'billing' ? pinned : [];
   const today = window.localDateStr();
   const days = res ? alertDays(res.items) : [];
@@ -671,7 +664,7 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
       {res && !days.length && (
         <div className="nl-empty">
           <span className="nl-glyph g-readings"><Icon id="bell" /></span>
-          <b>{noNotifs(range, unreadOnly, kindWord)}</b>
+          <b>No notifications</b>
           {(range !== 'all' || kind !== 'all' || unreadOnly) && <button type="button" className="save-btn" onClick={reset}>Show all</button>}
         </div>
       )}
