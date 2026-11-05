@@ -252,7 +252,7 @@ async function build(r: Row): Promise<Email | null> {
     }
     case "free_week_soon":
       return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", timeZone: tz }), p.name, d.days ?? 0, d.perMonth ?? 83);
-    case "free_week_setup": return d.steps?.length ? freeWeekSetup(d.steps) : null;
+    case "free_week_setup": return d.steps?.length ? freeWeekSetup(d.steps, r.plant_id ?? undefined) : null;
     case "account_deleted": return accountDeleted(r.to_email);
     // Billing (0116): amounts in whole rand, dates as "2026-11-01".
     case "bill_paid":

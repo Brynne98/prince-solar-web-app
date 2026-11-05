@@ -425,7 +425,7 @@ function billNotice(n, act) {
     }
     case 'bill_renewal_notice': return { icon: 'calendar', title: `Your yearly ${plan} plan renews on ${billDay(n.on)}`,
       body: `${rand(n.amount)}. To stop it, cancel before ${billDay(n.on)}.`,
-      button: 'See your plan', run: act.plan };
+      button: 'Go to cancel plan', run: act.cancel };
     case 'free_week_soon': {
       const day = new Date(n.endsAt).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Africa/Johannesburg' });
       return { tone: 'warn', icon: 'clock', title: `${n.days > 1 ? n.days + ' days of history' : 'History'} for ${n.plant || 'your plant'} go${n.days > 1 ? '' : 'es'} on ${day}`,
@@ -1135,6 +1135,7 @@ function SaveToast() {
   }, []);
   useEffect(() => {
     if (!t) return;
+    if (t === toastLast) toastLast = null;   // drawn here: the next host must not show it again (SOLAR-365)
     // A pop-up's backdrop sits in the top layer over everything else; showing the host as a
     // popover again puts each new toast above whatever pop-up is open.
     const h = host.current;
@@ -1618,6 +1619,8 @@ function App({ links }) {
   // an open Billing page (ps-billing) to re-read the plan. Before tabs.js is here, Billing.
   const noticeAct = {
     plan: () => openSettings('plan'),
+    // "To stop it, cancel before": Billing's Cancellation, as the renewal email opens it (SOLAR-365)
+    cancel: () => openSettings('cancel'),
     // Adjust plan: Free, Home and Family side by side, as the emails open it (SOLAR-341)
     plans: () => go('plans'),
     undo: (n) => (window.undoBooked ? window.undoBooked(n, loadNotifs).then(ok => {
