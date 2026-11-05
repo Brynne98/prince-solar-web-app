@@ -200,6 +200,9 @@ function Dialog({ label, onClose, keep = false, busy = false, size = null, child
   React.useEffect(() => {
     const d = ref.current;
     d.showModal();
+    // Opened by mouse or touch: Chrome still rings the first button showModal focuses, so the
+    // pop-up holds focus itself; Tab goes to that button next. Keyboard users keep the ring (SOLAR-368).
+    if (!back.ring && document.activeElement?.matches(':focus-visible')) d.focus({ preventScroll: true });
     return () => { if (d.open) d.close(); if (back.el && back.el.isConnected) back.el.focus({ preventScroll: true, focusVisible: back.ring }); };
   }, []);
   // Closing (SOLAR-351): the dialog goes with whatever held it, so its content moves to a
@@ -216,7 +219,7 @@ function Dialog({ label, onClose, keep = false, busy = false, size = null, child
     setTimeout(() => g.remove(), ms);
   }, []);
   return (
-    <dialog ref={ref} className={'pop-dlg' + (size ? ' pop-' + size : '')} aria-label={label}
+    <dialog ref={ref} tabIndex={-1} className={'pop-dlg' + (size ? ' pop-' + size : '')} aria-label={label}
             onCancel={(e) => { e.preventDefault(); if (!busy && e.target === ref.current) onClose(); }}   // only its own Escape, not one from a pop-up opened over it
             onClick={(e) => { if (!keep && !busy && e.target === ref.current) onClose(); }}>
       <div className="pop-body">{children}</div>
@@ -228,9 +231,6 @@ window.Dialog = Dialog;
 // The saved card is charged without Paystack's page, so the amount, the next bill and the
 // card are shown first (SOLAR-276). Centred on a desktop, from the bottom on a phone.
 function PayReview({ title, note, due, then, card, onDone }) {
-  const cancel = React.useRef(null);
-  // Opened by a tap or click after the price check, so no ring on Cancel; Tab still shows one (SOLAR-368).
-  React.useEffect(() => { cancel.current?.focus({ focusVisible: false }); }, []);
   return (
     <Dialog label={title} onClose={() => onDone(false)}>
       <h2 id="pay-review-t" className="pay-review-t">{title}</h2>
@@ -238,10 +238,10 @@ function PayReview({ title, note, due, then, card, onDone }) {
       <div className="pay-review-due"><span>Due today</span><b>{rand(due)}</b></div>
       <div className="pay-review-box">
         <div className="pay-review-ln"><span>{then[0]}</span><b>{then[1]}</b></div>
-        <div className="pay-review-ln"><span>Card</span><b className="card">{card}</b></div>
+        <div className="pay-review-ln"><span>Card</span><b className="pay-review-card">{card}</b></div>
       </div>
       <div className="pay-review-acts">
-        <button type="button" className="ghost-btn" ref={cancel} onClick={() => onDone(false)}>Cancel</button>
+        <button type="button" className="ghost-btn" onClick={() => onDone(false)}>Cancel</button>
         <button type="button" className="save-btn" onClick={() => onDone(true)}>Pay</button>
       </div>
     </Dialog>
