@@ -2699,10 +2699,11 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
       : n === 1 ? 'This plant and its history will be deleted straight away, unless another account shares it.'
       : 'These plants and their history will be deleted straight away, unless another account shares them.';
   };
+  // The plants that go, in the pay pop-up's darker box, a panel before each (SOLAR-368).
   const removeList = (acc) => !!acc.plants?.length && (
-    <div className="login-list keep-picks">
+    <div className="remove-plants">
       {acc.plants.map(p => (
-        <PlantLine key={p.plant_id} name={window.plantLabel(p)} />
+        <div key={p.plant_id} className="remove-plant"><Icon id="panel" />{window.plantLabel(p)}</div>
       ))}
     </div>
   );
@@ -2810,7 +2811,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
       {!unread && mode === 'add' && (
         // A form over the page (SOLAR-286). Cancel re-reads too: a login with no plant yet is saved but not listed.
         <window.LinkDialog title="Add login" note={planFull && 'Your plan is full, so new plants are added stopped.'}
-          hasPlant={allPlants.some(p => !p.paused)} onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
+          onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
       )}
       {unread ? (
         <SettingRow className="sset" label="Couldn’t load your logins" note={NBSP}

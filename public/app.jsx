@@ -99,6 +99,7 @@ const NAV_ICONS = {
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  panel: '<path d="M5 4h14l2 11H3z"/><path d="M4 9.5h16M9.7 4l-.7 11M14.3 4l.7 11M12 15v5M8 20h8"/>',
 };
 // fixed strings from the table above, never data
 const Icon = ({ id, className }) => <svg className={'ico' + (className ? ' ' + className : '')} viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: NAV_ICONS[id] }} />;
@@ -1236,11 +1237,14 @@ function Setup({ links }) {
     <button type="button" className={(plantsOff ? 'ghost-btn' : 'save-btn') + ' setup-btn ' + cls} onClick={onClick} aria-label="Add plant"><Icon id="plug" /><span>Add plant</span></button>
   );
   // The header's Add plant with plants off: the form over the page, so Cancel leaves you where
-  // you were. A plant that comes on goes to Live; one added stopped (plan full) keeps the form
-  // open on its paywall.
+  // you were. A plant that comes on goes to Live; plants added stopped (plan full) close the
+  // form with a toast, and their switches offer the upgrade (SOLAR-368).
   const [adding, setAdding] = useState(false);
   const addedFromHead = (r) => {
-    if (comingOn(r).length) { setAdding(false); setTab('live'); }
+    const on = comingOn(r).length, n = (r?.plants || []).length;
+    if (on) setTab('live');
+    else if (n) window.toast(n === 1 ? `${window.plantLabel(r.plants[0])} added. It's off: your plan is full.` : `${n} plants added. They're off: your plan is full.`);
+    if (on || n) setAdding(false);
     return linked(r);
   };
   const turnOnBtn = (cls) => (
