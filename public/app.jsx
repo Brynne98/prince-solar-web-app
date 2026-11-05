@@ -508,17 +508,16 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
           </div>
           {/* only the list scrolls: the head stays, and so does the scroll bar's top */}
           <div className="nl-scroll">
-          {pinned.length > 0 && <div className="nl-day">Billing</div>}
+          {/* one list (SOLAR-353): billing notices lead Today, above its alerts */}
+          {pinned.length > 0 && <div className="nl-day">Today</div>}
           <NoticeRows pinned={pinned} onAct={n => { close(); n.act('list'); }} />
-          {items && !items.length && (
+          {items && !items.length && !pinned.length && (
             <div className="nl-empty">
               <span className="nl-glyph g-readings"><Icon id="bell" /></span>
-              <b>{noAlerts('month')}</b>
-              <p>When the grid goes off, a battery runs hot, panels stop or readings stop, it shows here.</p>
-              <button type="button" className="ghost-btn" onClick={() => { close(); onSettings(); }}>Notification settings</button>
+              <b>No notifications</b>
             </div>
           )}
-          {items && items.length > 0 && <NotifRows items={items} when={it => it.time} />}
+          {items && items.length > 0 && <NotifRows items={items} when={it => it.time} from={pinned.length ? window.localDateStr() : null} />}
           {/* older alerts can be there with none in the last 30 days */}
           {/* its unread rows go with it, read once the page is left, so the page still shows them */}
           {items && <button type="button" className="nl-foot" onClick={() => { const ids = shown.current || []; shown.current = null; close(); onSeeAll(ids); }}>See all</button>}
@@ -538,7 +537,7 @@ function NoticeRows({ pinned, onAct }) {
       <span className="nl-text">
         <span className="nl-title">{n.title}</span>
         <span className="nl-body">{n.body}</span>
-        <span className="nl-act-wrap"><button type="button" className="ghost-btn nl-act" onClick={() => onAct(n)}>{n.button}</button></span>
+        <span className="nl-act-wrap"><button type="button" className="nl-act" onClick={() => onAct(n)}>{n.button}</button></span>
       </span>
     </div>
   ));
@@ -546,8 +545,9 @@ function NoticeRows({ pinned, onAct }) {
 
 // Alert rows under day headings, as the bell list and the full page show them.
 // when(it): the time line after the plant's name. heads={false}: no day headings.
-function NotifRows({ items, when, heads = true }) {
-  let day = null;
+// from: the day whose heading is already above (the bell's Today over its notices).
+function NotifRows({ items, when, heads = true, from = null }) {
+  let day = from;
   return items.map(it => {
     const head = heads && it.day !== day ? <div className="nl-day">{notifDay(it.day)}</div> : null;
     day = it.day;
@@ -580,14 +580,13 @@ function alertSpan(it) {
 const alertDays = (items) => [...items.reduce((m, it) => m.set(it.day, [...(m.get(it.day) || []), it]), new Map())];
 
 const ALERT_RANGES = [['day', 'Day', 1], ['week', 'Week', 7], ['month', 'Month', 30], ['year', 'Year', 365], ['all', 'All', null]];
-const ALERT_KINDS = [{ value: 'all', label: 'All alerts' }, { value: 'grid', label: 'Grid' }, { value: 'battery', label: 'Battery' },
+// Billing is a kind like the alert switches: one list, filtered by kind (SOLAR-353)
+const ALERT_KINDS = [{ value: 'all', label: 'All' }, { value: 'billing', label: 'Billing' }, { value: 'grid', label: 'Grid' }, { value: 'battery', label: 'Battery' },
   { value: 'panels', label: 'Panels' }, { value: 'readings', label: 'Readings' }, { value: 'sunsynk', label: 'SunSynk' }];
-const ALERT_RANGE_WORDS = { day: 'in the last day', week: 'in the last week', month: 'in the last month', year: 'in the last year', all: 'yet' };
-// One empty line for the bell (its 30 days) and the page (its filters) (SOLAR-348)
-const noAlerts = (range, unread, kindWord = '') => 'No ' + (unread ? 'unread ' : '') + kindWord + 'alerts ' + ALERT_RANGE_WORDS[range];
 
 // The full page (SOLAR-327). onShown(ids): unread rows it showed, read once the page is left.
-// pinned: the billing notices the bell shows, on top here too, whatever the filters.
+// pinned: the billing notices the bell shows; they lead Today's card unless the kind filter
+// picks an alert switch.
 function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
   const [range, setRange] = useState('month');
   const [kind, setKind] = useState('all');
@@ -596,6 +595,7 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
   const [failed, setFailed] = useState(false);
   const [more, setMore] = useState(false);
   const ask = (before) => {
+    if (kind === 'billing') return Promise.resolve({ items: [], unread: 0, more: false });
     const days = ALERT_RANGES.find(r => r[0] === range)[2];
     return window.fetchAlerts({ from: days ? new Date(Date.now() - days * 86400000) : null, kind: kind === 'all' ? null : kind,
       unread: unreadOnly, before });
@@ -622,8 +622,10 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
     setRes(p => (unreadOnly ? { ...p, unread: 0, items: [], more: false } : { ...p, unread: 0, items: p.items.map(it => ({ ...it, read: true })) }));
     onReadAll();
   };
-  const reset = () => { setRange('all'); setKind('all'); setUnreadOnly(false); };
-  const kindWord = kind === 'all' ? '' : ALERT_KINDS.find(k => k.value === kind).label.toLowerCase() + ' ';
+  const notices = kind === 'all' || kind === 'billing' ? pinned : [];
+  const today = window.localDateStr();
+  const days = res ? alertDays(res.items) : [];
+  if (res && notices.length && days[0]?.[0] !== today) days.unshift([today, []]);
   return (
     <div className="alerts-page">
       <div className="nl-head alerts-head">
@@ -636,39 +638,34 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
         <Segmented label="Time" size="sm" className="alerts-range" value={range} onChange={v => filter('range', v, setRange)}
                    options={ALERT_RANGES.map(([value, label]) => ({ value, label }))} />
         <div className="alerts-row2">
-          <div className="alerts-kind"><PickMenu label="Kind of alert" value={kind} options={ALERT_KINDS} onPick={v => filter('kind', v, setKind)} /></div>
+          <div className="alerts-kind"><PickMenu label="Kind" value={kind} options={ALERT_KINDS} onPick={v => filter('kind', v, setKind)} /></div>
           <label className="alerts-unread">Unread only<Switch on={unreadOnly} label="Unread only" onChange={v => filter('unread', v, setUnreadOnly)} /></label>
         </div>
       </div>
       {failed && (
         <div className="nl-empty">
-          <b>Couldn’t load your alerts</b>
+          <b>Couldn’t load your notifications</b>
           <p>Check your connection, then try again.</p>
-          <button type="button" className="ghost-btn" onClick={load}>Try again</button>
+          <button type="button" className="save-btn" onClick={load}>Try again</button>
         </div>
       )}
       {!failed && !res && <div className="alerts-list">{[0, 1, 2].map(i => <Skeleton key={i} h={150} r={16} style={{ marginTop: 40 }} />)}</div>}
-      {pinned.length > 0 && (
-        <section className="alerts-day" aria-label="Billing">
-          <div className="nl-day">Billing</div>
-          <Card className="alerts-card alerts-notices"><NoticeRows pinned={pinned} onAct={n => n.act('page')} /></Card>
-        </section>
-      )}
-      {res && !res.items.length && (
-        <div className="nl-empty">
-          {/* with notices above, no bell: only the alerts are missing */}
-          {!pinned.length && <span className="nl-glyph g-readings"><Icon id="bell" /></span>}
-          <b>{noAlerts(range, unreadOnly, kindWord)}</b>
-          {(range !== 'all' || kind !== 'all' || unreadOnly) && <button type="button" className="ghost-btn" onClick={reset}>Show all alerts</button>}
-        </div>
-      )}
       {/* a card per day, under its date, as Settings puts each section's card under its title */}
-      {res && res.items.length > 0 && <div className="alerts-list">{alertDays(res.items).map(([day, rows]) => (
+      {days.length > 0 && <div className="alerts-list">{days.map(([day, rows]) => (
         <section key={day} className="alerts-day" aria-label={notifDay(day)}>
           <div className="nl-day">{notifDay(day)}</div>
-          <Card className="alerts-card"><NotifRows items={rows} when={alertSpan} heads={false} /></Card>
+          <Card className="alerts-card">
+            {day === today && <NoticeRows pinned={notices} onAct={n => n.act('page')} />}
+            <NotifRows items={rows} when={alertSpan} heads={false} />
+          </Card>
         </section>
       ))}</div>}
+      {res && !days.length && (
+        <div className="nl-empty">
+          <span className="nl-glyph g-readings"><Icon id="bell" /></span>
+          <b>No notifications</b>
+        </div>
+      )}
       {res?.more && <div className="alerts-more"><BusyButton className="ghost-btn" busy={more} busyText="Loading…" onClick={showMore}>Show more</BusyButton></div>}
     </div>
   );

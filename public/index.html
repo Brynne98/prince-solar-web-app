@@ -337,7 +337,11 @@
   .g-warn { background: rgba(var(--warn-rgb),0.14); color: var(--warn); }
   /* billing notices (SOLAR-212): pinned above the alerts, with a button */
   .nl-pin .nl-title { font-weight: 600; }
-  .nl-act { margin-top: var(--sp-sm); }
+  /* a notice's action: a green link under its text, at every width (SOLAR-353) */
+  .nl-act { margin-top: var(--sp-3xs); min-height: 36px; padding: 0; background: none; border: none; color: var(--accent);
+    font: 600 var(--fs-sm) var(--display); text-align: left; cursor: pointer; touch-action: manipulation; }
+  .nl-act::after { content: ' \203A'; }
+  .nl-act:hover { text-decoration: underline; }
   .nl-text { display: flex; flex-direction: column; min-width: 0; }
   .nl-title { font-size: var(--fs-md); font-weight: 500; line-height: 1.3; }
   .nl-row.unread .nl-title { font-weight: 600; }
@@ -346,6 +350,7 @@
   .nl-foot { display: block; width: 100%; min-height: 44px; margin-top: var(--sp-2xs); padding: var(--sp-md) var(--sp-lg); background: none; border: none; border-top: 1px solid var(--line);
     color: var(--text); font: 500 var(--fs-md) var(--display); text-align: center; touch-action: manipulation; }
   .nl-foot:hover { background: rgba(255,255,255,0.04); }
+  .nl-scroll > .nl-foot:last-child { margin-bottom: calc(-1 * var(--sp-2xs)); }   /* the hover reaches the panel's edge */
   /* the full page (SOLAR-327): Settings' look, a card per day under its date, full width like the data pages */
   .alerts-page { padding-bottom: var(--sp-2xl); }
   .alerts-head { padding: 0; gap: var(--sp-sm); }
@@ -366,8 +371,8 @@
   @media (min-width: 900px) {
     .alerts-card .nl-text { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--sp-3xl); }
     .alerts-card .nl-title, .alerts-card .nl-body { grid-column: 1; }
-    .alerts-card .nl-where, .alerts-card .nl-act-wrap { grid-column: 2; grid-row: 1 / span 2; align-self: center; margin-top: 0; text-align: right; }
-    .alerts-card .nl-act { margin-top: 0; }
+    .alerts-card .nl-where { grid-column: 2; grid-row: 1 / span 2; align-self: center; margin-top: 0; text-align: right; }
+    .alerts-card .nl-pin .nl-text { display: flex; }
   }
   .alerts-more { text-align: center; padding: var(--sp-lg) 0 var(--sp-sm); }
   .alerts-more .ghost-btn { min-height: 40px; padding: var(--sp-sm) var(--sp-lg); }
@@ -375,6 +380,8 @@
   .nl-empty .nl-glyph { margin: 0 auto var(--sp-lg); width: 44px; height: 44px; border-radius: var(--r-lg); }
   .nl-empty b { display: block; font-size: var(--fs-lg); font-weight: 600; margin-bottom: var(--sp-xs); }
   .nl-empty p { margin: 0 0 var(--sp-lg); font-size: var(--fs-md); color: var(--muted); line-height: 1.5; }
+  /* the page's one empty state, in the middle of the space under the filters */
+  .alerts-page > .nl-empty { min-height: 55vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding-top: 0; }
   @media (max-width: 599px) {
     .bell-btn { width: 36px; }
     .notif-panel { position: fixed; inset: 0; z-index: 40; width: auto; max-height: none; border: none; border-radius: 0; box-shadow: none;

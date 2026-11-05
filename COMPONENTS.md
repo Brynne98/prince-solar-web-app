@@ -105,7 +105,7 @@ a row of on/off settings (email and push preferences); `saveFlag` sends its own 
 | `stepNum`, `wholeNum`, `cfgFields`, `panelsPatch` | Reading, checking and saving system config (size, panels, reserve, rate). |
 | `savedTab`, `writeTab`, `TAB_KEY` | The last tab and plant, kept across visits. |
 | `window.toast(text)` | A short message at the bottom. Use instead of `alert()`. |
-| `NotifRows`, `alertSpan` | Alert rows under day headings (the bell list, the full Notifications page); "14:02 to 16:47, 2h 45m" (SOLAR-327). |
+| `NotifRows`, `alertSpan` | Alert rows under day headings (the bell list, the full Notifications page); "14:02 to 16:47, 2h 45m" (SOLAR-327). Billing notices (`NoticeRows`) lead the Today group in both, one list (SOLAR-353). |
 | `billNotice`, `BillBanners` | A billing notice from `api_notifications`' pinned facts, in the emails' words; the banners above every page (SOLAR-212). On a phone each banner is one line (`short`); a tap opens the bell (`ps-open-bell`) (SOLAR-345). |
 
 ## Charts (`chart.jsx`)
