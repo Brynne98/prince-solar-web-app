@@ -537,7 +537,7 @@ function NoticeRows({ pinned, onAct }) {
       <span className="nl-text">
         <span className="nl-title">{n.title}</span>
         <span className="nl-body">{n.body}</span>
-        <span className="nl-act-wrap"><button type="button" className="save-btn nl-act" onClick={() => onAct(n)}>{n.button}</button></span>
+        <span className="nl-act-wrap"><button type="button" className="nl-act" onClick={() => onAct(n)}>{n.button}</button></span>
       </span>
     </div>
   ));
@@ -622,7 +622,6 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
     setRes(p => (unreadOnly ? { ...p, unread: 0, items: [], more: false } : { ...p, unread: 0, items: p.items.map(it => ({ ...it, read: true })) }));
     onReadAll();
   };
-  const reset = () => { setRange('all'); setKind('all'); setUnreadOnly(false); };
   const notices = kind === 'all' || kind === 'billing' ? pinned : [];
   const today = window.localDateStr();
   const days = res ? alertDays(res.items) : [];
@@ -665,7 +664,6 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
         <div className="nl-empty">
           <span className="nl-glyph g-readings"><Icon id="bell" /></span>
           <b>No notifications</b>
-          {(range !== 'all' || kind !== 'all' || unreadOnly) && <button type="button" className="save-btn" onClick={reset}>Show all</button>}
         </div>
       )}
       {res?.more && <div className="alerts-more"><BusyButton className="ghost-btn" busy={more} busyText="Loading…" onClick={showMore}>Show more</BusyButton></div>}
