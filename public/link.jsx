@@ -148,7 +148,7 @@ const billingPaid = (plan, switched = false) => {
 };
 
 // A payment step that ran out of time may still have gone through, so it doesn't say "try again".
-const SLOW_NOTE = 'This is taking too long. Check Billing in a minute before you try again.';
+const SLOW_NOTE = 'Error. Check Billing before you pay again.';
 // The toast for a payment step that failed: paid plans not open yet, too slow, or fallback.
 const payFailed = (e, fallback) => (/open soon/.test(e.message) ? window.toast('Paid plans open soon. Nothing was charged.')
   : window.toast(e.message === 'timed out' ? SLOW_NOTE : fallback, { error: true }));
