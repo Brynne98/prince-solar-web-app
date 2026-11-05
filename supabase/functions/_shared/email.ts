@@ -49,13 +49,20 @@ const HELP = `Need help? Email <a href="mailto:hello@princesolarhub.co.za">hello
 
 export type Email = { subject: string; html: string; text: string };
 
+// Same roles as the app's :root (public/index.html, SOLAR-346). The five power colours
+// mean only solar, home, grid, charge and battery; status words take ok, warn or bad;
+// the main button takes accent. Money has no colour: it stays plain text.
 const C = {
   solar: "#3ddc84",
   home: "#f87171",
   grid: "#facc15",
   cyan: "#22d3ee",
   batt: "#a78bfa",
+  ok: "#60a5fa",
+  warn: "#f97316",
+  bad: "#f43f5e",
 } as const;
+const ACCENT = "#3ddc84";
 type Tone = keyof typeof C;
 
 const esc = (s: string) =>
@@ -101,9 +108,9 @@ const PLANT_ROWS = 10;
 type Item = { icon: "plan" | "plus" | "back" | "keep" | "stop"; name: string; sub?: string; value?: string };
 const tileIcon = (icon: Item["icon"]) =>
   icon === "plan" ? `<img src="${SITE}/icon-192.png" width="18" height="18" alt="" style="display:inline-block;vertical-align:middle;border:0;border-radius:4px">`
-    : icon === "plus" ? `<span style="font:700 17px/1 ${SANS};color:${C.solar}">+</span>`
+    : icon === "plus" ? `<span style="font:700 17px/1 ${SANS};color:${ACCENT}">+</span>`
     : icon === "back" ? `<span style="font:700 15px/1 ${SANS};color:#9aa5b3">&#8617;</span>`
-    : `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${icon === "keep" ? C.solar : C.home};vertical-align:middle"></span>`;
+    : `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${icon === "keep" ? C.ok : C.bad};vertical-align:middle"></span>`;
 const itemRow = (r: Item) => `<tr><td width="32" style="width:32px;padding:6px 12px 6px 0;vertical-align:middle">` +
   `<div style="width:32px;height:32px;border-radius:8px;background:#141a22;text-align:center;line-height:32px">${tileIcon(r.icon)}</div></td>` +
   `<td style="padding:6px 0;vertical-align:middle"><div style="font:700 14px/1.3 ${SANS};color:#e7ecf2">${r.name}</div>` +
@@ -152,7 +159,7 @@ function drawBars(b: Bars): string {
 
 const deltaHtml = (d: Delta) => {
   const r = Math.round(d.n);
-  const tone = d.tone === "good" ? C.solar : d.tone === "bad" ? C.home : "#9aa5b3";
+  const tone = d.tone === "good" ? C.ok : d.tone === "bad" ? C.bad : "#9aa5b3";
   return `<span style="color:${tone};font-weight:600">${r > 0 ? "↑" : r < 0 ? "↓" : "→"} ${Math.abs(r)}%</span> vs ${esc(d.prev)}`;
 };
 const deltaText = (d: Delta) => { const r = Math.round(d.n); return `${r > 0 ? "↑" : r < 0 ? "↓" : "→"} ${Math.abs(r)}% vs ${d.prev}`; };
@@ -203,14 +210,14 @@ function html(subject: string, b: Body): string {
         `</table>` + (meta ? `<p class="d" style="margin:0 0 16px;font:400 12px/1.6 ${SANS};color:#7f8da0">${meta.join("<br>")}</p>` : "");
     }
     if ("callout" in x)
-      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:14px 16px;background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.4);border-radius:8px;font:500 15px/1.45 ${SANS};color:#e7ecf2">` +
-        `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${C.home};margin-right:10px;vertical-align:1px"></span>${x.callout}</td></tr></table>`;
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:14px 16px;background:rgba(244,63,94,.07);border:1px solid rgba(244,63,94,.4);border-radius:8px;font:500 15px/1.45 ${SANS};color:#e7ecf2">` +
+        `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${C.bad};margin-right:10px;vertical-align:1px"></span>${x.callout}</td></tr></table>`;
     if ("facts" in x)
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px">${x.facts.map((f) =>
         `<tr><td style="padding:6px 0;font:400 14px/1.3 ${SANS};color:#9aa5b3">${esc(f.label)}</td>` +
         `<td align="right" style="padding:6px 0;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2">${f.value}</td></tr>`).join("")}</table>`;
     if ("button" in x)
-      return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 12px"><tr><td style="border-radius:8px;background:#3ddc84"><a href="${x.button.href}" style="display:inline-block;padding:12px 22px;font:600 15px/1 ${SANS};color:#0a0d12;text-decoration:none;border-radius:8px">${esc(x.button.label)}</a></td></tr></table>
+      return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 12px"><tr><td style="border-radius:8px;background:${ACCENT}"><a href="${x.button.href}" style="display:inline-block;padding:12px 22px;font:600 15px/1 ${SANS};color:#0a0d12;text-decoration:none;border-radius:8px">${esc(x.button.label)}</a></td></tr></table>
 <p class="d" style="margin:0 0 20px;font:400 12px/1.5 ${SANS};color:#7f8da0">Trouble with the button? <a href="${x.button.href}" style="color:inherit">Click here</a> instead.</p>`;
     const cells = x.stats.map((s) => `<td class="tile" width="50%" style="padding:16px;background:#141a22;border-radius:8px;vertical-align:top">
 <div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(s.label)}</div>
@@ -429,7 +436,7 @@ export const sunsynkDown = (plant: string, plantId: number, since: string, day =
   make("SunSynk is not answering", {
     title: "SunSynk is not answering",
     parts: [
-      { stack: true, stats: [{ label: "SunSynk", value: "Down", tone: "home", sub: `since ${since} ${day}` }] },
+      { stack: true, stats: [{ label: "SunSynk", value: "Down", tone: "bad", sub: `since ${since} ${day}` }] },
       { p: `SunSynk's service isn't answering, so no readings from ${esc(plant)} can reach us. We'll email you when it's back.` },
       { button: openPage("live", plantId) },
     ],
@@ -440,7 +447,7 @@ export const sunsynkBack = (plant: string, plantId: number, at: string, lasted: 
   make("SunSynk is back", {
     title: "SunSynk is back",
     parts: [
-      { stack: true, stats: [{ label: "SunSynk", value: "Back", tone: "solar", sub: `since ${at} ${day}, after ${span(lasted)}` }] },
+      { stack: true, stats: [{ label: "SunSynk", value: "Back", tone: "ok", sub: `since ${at} ${day}, after ${span(lasted)}` }] },
       { p: `Readings from ${esc(plant)} are arriving again.` },
       { button: openPage("live", plantId) },
     ],
@@ -491,7 +498,7 @@ export function report(r: Report): Email {
     ...(r.importKwh != null ? [{ label: "Imported", value: kwh(r.importKwh)[0], unit: kwh(r.importKwh)[1], tone: "grid" as Tone, ...trend(r.change.import, r.prevLabel, "down") }] : []),
     ...(r.exportKwh != null ? [{ label: "Exported", value: kwh(r.exportKwh)[0], unit: kwh(r.exportKwh)[1], tone: "grid" as Tone }] : []),
     { label: "Independence", value: `${Math.round(r.independencePct)}%`, tone: "cyan", ...trend(r.change.independence, r.prevLabel, "up") },
-    ...(r.savedRand != null ? [{ label: "Est. saved", value: rand(r.savedRand), tone: "batt" as Tone, ...trend(r.change.saved, r.prevLabel, "up") }] : []),
+    ...(r.savedRand != null ? [{ label: "Est. saved", value: rand(r.savedRand), ...trend(r.change.saved, r.prevLabel, "up") }] : []),
   ];
   const parts: Part[] = [];
   // A Free account's day-7 report is its last, so it promises no next one.
@@ -570,22 +577,22 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
     switch (e.kind) {
       case "grid_down":
         return [`Grid down at ${plant}`, [
-          { label: "Grid", value: "Off", tone: "home", sub: `since ${at(e.at)}` },
+          { label: "Grid", value: "Off", tone: "bad", sub: `since ${at(e.at)}` },
           ...(e.chargePct != null ? [{ label: "Battery", value: `${e.chargePct}%`, tone: "batt" as Tone, sub: "running the house" }] : []),
         ]];
       case "grid_back":
         return [`Grid back at ${plant}`, [
-          { label: "Grid", value: "On", tone: "grid", sub: `since ${at(e.at)}` },
+          { label: "Grid", value: "On", tone: "ok", sub: `since ${at(e.at)}` },
           ...(e.lasted ? [{ label: "Outage", value: span(e.lasted), sub: "without grid" }] : []),
         ]];
       case "batt_hot":
         return [`Battery hot at ${plant}`, [
-          { label: "Battery", value: `${e.tempC}\u00a0°C`, tone: "home", sub: `at ${at(e.at)}` },
+          { label: "Battery", value: `${e.tempC}\u00a0°C`, tone: "bad", sub: `at ${at(e.at)}` },
         ], "Batteries wear faster when they run hot." + ((e.hotDays ?? 1) > 1
           ? ` Yours has gone above 45&nbsp;°C on ${e.hotDays} days in the last 30. If it keeps happening, have your battery checked.` : "")];
       case "batt_hot_back":
         return [`Battery cooled at ${plant}`, [
-          { label: "Battery", value: `${e.tempC}\u00a0°C`, tone: "solar", sub: `since ${at(e.at)}` },
+          { label: "Battery", value: `${e.tempC}\u00a0°C`, tone: "ok", sub: `since ${at(e.at)}` },
           { label: "Hot for", value: span(e.lasted) },
         ]];
       case "bank_drift_back":
@@ -601,25 +608,25 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
       }
       case "string_dead":
         return [`Some panels stopped producing at ${plant}`, [
-          { label: `${e.string} · ${e.inverter.replace(/^Inverter /, "")}`, value: "No power", tone: "home", sub: `since ${at(e.since)}` },
-          { label: "Other panels", value: "OK", tone: "solar", sub: "producing as normal" },
+          { label: `${e.string} · ${e.inverter.replace(/^Inverter /, "")}`, value: "No power", tone: "bad", sub: `since ${at(e.since)}` },
+          { label: "Other panels", value: "OK", tone: "ok", sub: "producing as normal" },
         ], `One group of panels on ${esc(e.inverter)} has stopped making power. The rest are still working.`];
       case "string_back":
         return [`Panels producing again at ${plant}`, [
-          { label: `${e.string} · ${e.inverter.replace(/^Inverter /, "")}`, value: "Producing", tone: "solar", sub: `since ${at(e.at)}` },
+          { label: `${e.string} · ${e.inverter.replace(/^Inverter /, "")}`, value: "Producing", tone: "ok", sub: `since ${at(e.at)}` },
           { label: "Stopped for", value: span(e.lasted) },
         ]];
       case "logger_stale":
         return e.inverter
           ? [`No readings from ${e.inverter} at ${plant}`, [
-              { label: "Last reading", value: e.since, tone: "home", sub: esc(day) },
+              { label: "Last reading", value: e.since, tone: "warn", sub: esc(day) },
             ], `No new reading from ${esc(e.inverter)} for 30 minutes. Your other inverters are still reporting. We'll email you when it's back.`]
           : [`No readings from ${plant}`, [
-              { label: "Last reading", value: e.since, tone: "home", sub: esc(day) },
+              { label: "Last reading", value: e.since, tone: "warn", sub: esc(day) },
             ], "No new reading from your inverters for 30 minutes. We'll email you when readings are back."];
       case "logger_back":
         return [e.inverter ? `${e.inverter} back at ${plant}` : `Readings back at ${plant}`, [
-          { label: "Readings", value: "Back", tone: "solar", sub: `since ${at(e.at)}, after ${span(e.lasted)}` },
+          { label: "Readings", value: "Back", tone: "ok", sub: `since ${at(e.at)}, after ${span(e.lasted)}` },
         ], e.inverter ? `${esc(e.inverter)} is sending readings again.` : "Your inverters are sending readings again."];
       case "needs_relink":
         return ["Reconnect your SunSynk login", { callout: "Prince Solar Hub is no longer connected to your SunSynk account, so new readings aren't arriving." },

@@ -18,8 +18,11 @@ colors:
   sun-core: "#ffd56b"
   sun-mid: "#f4a93a"
   sun-rim: "#e07a1f"
-  warn-amber: "#f59e0b"
-  fault-red: "#ef4444"
+  ok-blue: "#60a5fa"
+  warn-orange: "#f97316"
+  bad-rose: "#f43f5e"
+  accent: "#3ddc84"
+  focus: "#e7ecf2"
   ambient-blue: "rgba(91,157,255,0.06)"
   ambient-green: "rgba(52,211,153,0.05)"
   ink-on-green: "#06210f"
@@ -132,7 +135,7 @@ spacing:
   4xl: "40px"
 components:
   button-primary:
-    backgroundColor: "{colors.solar-green}"
+    backgroundColor: "{colors.accent}"
     textColor: "#07130c"
     rounded: "{rounded.md}"
     padding: "0 16px"
@@ -150,7 +153,7 @@ components:
     height: "34px"
   button-danger:
     backgroundColor: "transparent"
-    textColor: "{colors.home-coral}"
+    textColor: "{colors.bad-rose}"
     rounded: "{rounded.md}"
     padding: "0 16px"
     height: "34px"
@@ -220,36 +223,41 @@ add a glowing ring, this system adds a hairline and a smaller grey label.
 A near-black ground, three grey text levels, and five saturated colours that are
 semantic, not decorative.
 
-### Primary
-- **Solar Green** (`solar-green`): solar production everywhere it appears, and by
-  extension "good": the live status dot, the active tab underline, the First steps
-  card and its progress bars, the primary Save and Sign-in buttons, the switch when on,
-  positive trend badges, and input focus on the login card. It is the product's one
-  accent as well as its first data colour.
+### Power (SOLAR-346: these five mean nothing else)
+- **Solar Green** (`solar-green`, CSS `--pv`): solar production.
+- **Battery Violet** (`battery-violet`, `--batt`): battery power and battery-side extras
+  in the flow diagram.
+- **Grid Amber** (`grid-amber`, `--grid`): grid import and export.
+- **Home Coral** (`home-coral`, `--load`): home load.
+- **Charge Cyan** (`charge-cyan`, `--soc`): the house running on its own: the
+  independence tile and meter, the runtime estimate, the charge line on charts, the
+  range slider thumb.
 
-### Secondary
-- **Battery Violet** (`battery-violet`): battery power and battery-side extras in the
-  flow diagram. Never used for status; success is always Solar Green.
-- **Grid Amber** (`grid-amber`): grid import and export, and the focus border on
-  every field in Settings, Account and First steps. Also the "connected but unverified" dot on a SunSynk account row.
-- **Home Coral** (`home-coral`): home load, and the warning tone: the danger button,
-  the inverter warning strip, negative trend badges, a grid-down chip, error text on
-  the login card.
-- **Charge Cyan** (`charge-cyan`): the house running on its own: the self-sufficiency
-  tile and its meter, the runtime estimate line, the range slider thumb, and the
-  plant-switched status dot. The Battery tab's charge line and totals are Battery Violet.
-
-### Tertiary
+### Roles
+- **Accent** (`accent`, `--accent`, on it `--on-accent`): what you press or pick. Main
+  buttons, text links, the switch when on, Finish setup, your current plan, today in the
+  calendar. Same green as solar by decision (the app stays green; the website button is
+  amber). Never on a reading.
+- **Ok Blue** (`ok-blue`, `--ok`): status that is fine. Live dot, grid on, connected,
+  unread dot, a rising trend that is good, the toast tick, "Back" and "OK" in alert emails.
+- **Warn Orange** (`warn-orange`, `--warn`): needs a look. Stale, Not updating, Payment
+  failed, Ending, a pack drifting, an unverified login, "Last reading" in alert emails.
+- **Bad Rose** (`bad-rose`, `--bad`): broken or destructive. Offline, grid off, errors,
+  invalid fields, the danger button, outage shading on charts, a falling trend that is bad,
+  "Off", "Down", "No power" and a hot battery in alert emails.
+- **Focus** (`focus`, `--focus`): the field being typed in, the open day picker or menu
+  button, the chosen day, keyboard focus rings.
+- **Money** (`--money`): plain Paper Text. "Saved", "Est. saved", prices and offers.
+- Loading and syncing ("Setting up", "Fetching history") are Muted Text, not a colour.
+- Status hues sit where no power colour is (blue, orange, rose) and show on words, dots
+  and edges, never on a big reading. Warning surfaces tint with their status at 6% to 9%
+  and edge it at 25% to 55%. Every role clears 4.5:1 on Panel Raised.
+- `--*-rgb` triplets on :root give the low-alpha tints: `rgba(var(--bad-rgb), .07)`.
+  `npm test` fails on a hex or rgb() of any of these outside :root, and on a power colour
+  used for focus or a pick.
 - **Sun** (`sun-core` → `sun-mid` → `sun-rim`): a radial gradient inside the brand orb
   and nowhere else. Its halo is the login page's ambient glow. It is a mark, not a
   palette entry for UI.
-- **Warn Amber** (`warn-amber`, CSS `--warn`) and **Fault Red** (`fault-red`, CSS
-  `--bad`): status only. The stale and offline states of the topbar pill, the
-  outage pill on the Grid and Inverters charts, a hot battery, a battery pack drifting
-  towards "watch". Kept distinct from Grid Amber so a status colour is never mistaken
-  for a data series. Warning surfaces (a drifting pack, an inverter warning strip, a
-  delete confirmation) tint with Home Coral at 6% to 9% and edge it at 25% to 55%; a
-  bad string card takes the coral edge at 35% and no tint.
 
 ### Neutral
 - **Night Ground** (`night-ground`): page background, the wall-display backdrop in
@@ -269,7 +277,8 @@ semantic, not decorative.
 ### Named Rules
 **The One Meaning Rule.** A series colour means one thing. Green is solar, violet is
 battery, amber is grid, coral is home, cyan is self-sufficiency. A new metric that is none of
-these gets grey, never a sixth hue.
+these gets grey, never a sixth hue. Status, focus and money take their role (above), never
+a series colour.
 
 **The Sun Stays In The Orb Rule.** The warm gradient and its glow belong to the brand
 mark and the login backdrop only. No other element is warm-lit.
@@ -485,8 +494,8 @@ No asymmetric border is left.
   14px regular mono, a 14px mono muted unit inside the box. Count boxes are the same
   well with centred text. An invalid box takes a Home Coral border.
 - **Phones:** every text and number box is 16px under 600px, so iOS does not zoom in.
-- **Focus:** border turns Grid Amber in Settings, Account and First steps; Solar Green with a 3px green ring at 14%
-  on the login card. No outline on fields.
+- **Focus:** border turns Focus (Paper Text) everywhere; the login card adds a 3px white ring at 12%.
+  No outline on fields.
 - **Autofill:** forced dark with an inset box-shadow so Chrome never paints a white well.
 - **Range:** 6px track at 10% white, 18px Charge Cyan thumb with a 3px ground-coloured
   border and a 1px cyan ring (16px and no ring in Firefox).
@@ -559,7 +568,7 @@ row, animated links down to an inverter node, and a home row.
 ### Tooltips
 Chart tooltips and info bubbles share one surface: 96% to 98% opaque near-black,
 strong hairline, 10px radius, 10px 12px padding, Floating shadow, 12px text with
-mono times. The info dot is a 13px outlined "i" in Dim Text that turns Grid Amber on
+mono times. The info dot is a 13px outlined "i" in Dim Text that turns Muted Text on
 hover or focus and reveals a 210px bubble with a 6px caret. `cursor: help` marks
 anything that carries an inference: battery-bank stats, the split bar, the approx and
 gap pills, the info dot.

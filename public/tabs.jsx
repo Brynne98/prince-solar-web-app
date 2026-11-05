@@ -421,7 +421,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
       {/* after Imported, the order Power flow uses */}
       {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergyParts(pExp)} color={CC.grid}
         info={OV_INFO.exp} />}
-      <MiniStat loading={pending} label="Saved" color={CC.batt}
+      <MiniStat loading={pending} label="Saved" color="var(--money)"
         value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
         trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendFrom={cmpPhrase}
         // no rate yet: the line under the dash opens Settings on Tariff
@@ -840,7 +840,7 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
         <defs><GapHatch /></defs>
         {gaps.map(([a, b]) => <rect key={'gap' + a} x={x(a)} y={m.t} width={x(b) - x(a)} height={innerH} fill="url(#gaphatch)" />)}
         {(outages || []).map(([a, b]) => (
-          <rect key={'o' + a} x={xt5(Math.max(t0, a * 5 - 2.5))} y={m.t} width={Math.max(2, xt5(Math.min(t1, b * 5 + 2.5)) - xt5(Math.max(t0, a * 5 - 2.5)))} height={innerH} fill={window.COLORS.load} fillOpacity="0.18" />
+          <rect key={'o' + a} x={xt5(Math.max(t0, a * 5 - 2.5))} y={m.t} width={Math.max(2, xt5(Math.min(t1, b * 5 + 2.5)) - xt5(Math.max(t0, a * 5 - 2.5)))} height={innerH} fill="var(--bad)" fillOpacity="0.18" />
         ))}
         {ticks.map((t, k) => (
           <g key={k}>
@@ -1406,7 +1406,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const [nowN, nowU] = fmtPowerParts(exporting || a.gridPower > 5 ? a.gridPower : 0);
   // Presence is mains voltage, not usage: nothing is bought on a sunny afternoon with the
   // grid live, and a blackout reads 0 W too.
-  const nowSub = a.gridPresent === false ? <span style={{ color: CC.load }}>The grid is off</span>
+  const nowSub = a.gridPresent === false ? <span style={{ color: 'var(--bad)' }}>The grid is off</span>
     : exporting ? 'Exporting'
     : a.gridPower > 5 ? 'Importing' : 'Not importing';
   const importPeak = (pts) => {
