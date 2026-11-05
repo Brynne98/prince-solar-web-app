@@ -385,14 +385,14 @@ function notifDay(day) {
 // words (_shared/email.ts). They stay at the top of the list until their state ends.
 // A failed payment and plants about to go are a banner on every page too; only the
 // second can be closed. act: { plan, plans, undo } from App.
-const FREE_PAID = 'we keep your readings for 30 days, then only the last 24 hours. Alerts stay on; reports stop.';
+const FREE_PAID = 'readings are kept for 30 days, then only the last 24 hours. Alerts stay on; reports stop.';
 function billNotice(n, act) {
   const { rand, billDay } = window.billingFmt;
   const plan = PLAN_NAME[n.plan];
   switch (n.kind) {
-    case 'bill_failed': return { banner: true, tone: 'bad', icon: 'card', title: `Your payment of ${rand(n.amount)} didn’t go through`, short: 'Payment didn’t go through',
-      body: n.nextTry ? `We’ll try again on ${billDay(n.nextTry)}. If it’s still unpaid on ${billDay(n.freeOn)}, your account moves to Free.`
-        : `That was the last try. Your account moves to Free on ${billDay(n.freeOn)} unless it’s paid.`,
+    case 'bill_failed': return { banner: true, tone: 'bad', icon: 'card', title: `Payment of ${rand(n.amount)} failed`, short: 'Payment failed',
+      body: n.nextTry ? `Next try ${billDay(n.nextTry)}. Moves to Free on ${billDay(n.freeOn)} if unpaid.`
+        : `Last try failed. Moves to Free on ${billDay(n.freeOn)} if unpaid.`,
       button: 'Pay with another card', run: () => window.settlePayment() };
     case 'bill_removal_soon': {
       // up to 3 names, then a count: the banner stays short on a phone
@@ -404,31 +404,31 @@ function billNotice(n, act) {
         title: `${list} will be deleted on ${billDay(n.on)}`,
         short: `Deleting ${one ? p[0] : p.length + ' plants'} on ${billDay(n.on)}`,
         lead: why,
-        body: `${why} Linking a plant again later brings back only the last 60 days from SunSynk.`,
+        body: why,
         button: one ? `Keep ${p[0]}` : 'Keep them', run: act.plan };
     }
     case 'bill_free': {
       const stopped = n.stopped || [];
       return { icon: 'card', title: 'Your account is now on Free',
-        body: `On Free, ${FREE_PAID}` + (stopped.length ? ` Still updating: ${(n.kept || []).join(', ')}. Stopped, deleted on ${billDay(n.deleteOn)}: ${stopped.join(', ')}.` : ''),
+        body: `On Free, ${FREE_PAID}` + (stopped.length ? ` Stopped, deleted on ${billDay(n.deleteOn)}: ${stopped.join(', ')}.` : ''),
         button: stopped.length ? 'Pay to keep these plants' : 'Pay now', run: act.plans };
     }
     case 'bill_change': {
       const cancel = n.nextPlan === 'free', on = billDay(n.on);
       return { icon: 'calendar', title: cancel ? `${plan} ends on ${on}` : n.nextPlan ? `You move to ${PLAN_NAME[n.nextPlan]} on ${on}`
           : n.nextPeriod ? `You switch to ${n.nextPeriod} on ${on}` : `Extra plants drop to ${n.nextExtraPlants} on ${on}`,
-        body: 'Everything stays as it is until then.' + (cancel ? ` After that you’re on Free: ${FREE_PAID}` : ''),
+        body: cancel ? `After that, on Free, ${FREE_PAID}` : '',
         // the same undo as Billing's Plan section (bookedChange)
         button: n.nextPlan ? `Keep ${plan}` : n.nextPeriod ? `Stay ${n.period}` : `Keep ${n.extraPlants} extra plant${n.extraPlants === 1 ? '' : 's'}`,
         run: () => act.undo(n) };
     }
     case 'bill_renewal_notice': return { icon: 'calendar', title: `Your yearly ${plan} plan renews on ${billDay(n.on)}`,
-      body: `Nothing changes: same plan, same price, ${rand(n.amount)}. To stop it, cancel before ${billDay(n.on)}.`,
+      body: `${rand(n.amount)}. To stop it, cancel before ${billDay(n.on)}.`,
       button: 'See your plan', run: act.plan };
     case 'free_week_soon': {
       const day = new Date(n.endsAt).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Africa/Johannesburg' });
-      return { tone: 'warn', icon: 'clock', title: `On ${day}, ${n.days > 1 ? n.days + ' days of history' : 'the history'} for ${n.plant || 'your plant'} go${n.days > 1 ? '' : 'es'}`,
-        body: `Free keeps the last 24 hours. Keep your full history for R${n.perMonth} a month, billed yearly.`,
+      return { tone: 'warn', icon: 'clock', title: `${n.days > 1 ? n.days + ' days of history' : 'History'} for ${n.plant || 'your plant'} go${n.days > 1 ? '' : 'es'} on ${day}`,
+        body: `Free keeps only the last 24 hours. Keep it all for R${n.perMonth} a month, billed yearly.`,
         button: 'Keep my history', run: act.plans };
     }
     // FreeWeekOver's words
@@ -536,7 +536,7 @@ function NoticeRows({ pinned, onAct }) {
       <span className={'nl-glyph g-' + (n.tone || 'readings')}><Icon id={n.icon} /></span>
       <span className="nl-text">
         <span className="nl-title">{n.title}</span>
-        <span className="nl-body">{n.body}</span>
+        {n.body && <span className="nl-body">{n.body}</span>}
         <span className="nl-act-wrap"><button type="button" className="nl-act" onClick={() => onAct(n)}>{n.button}</button></span>
       </span>
     </div>

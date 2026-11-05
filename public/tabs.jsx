@@ -433,7 +433,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
 
   return (
     <>
-    {over && hasGrid && <GridOffPrompt hasBatt={hasBatt} tz={tz} />}
+    {over && hasGrid && <GridOffPrompt tz={tz} />}
     <div className="live-grid">
       <div className="overview-section">
         <div className="overview-head">
@@ -479,7 +479,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
 
 // Free after its week, once the grid has come back (SOLAR-242): how long it was off and
 // what carried the house, then the plans. Once per outage on this device; × puts it away.
-function GridOffPrompt({ hasBatt, tz }) {
+function GridOffPrompt({ tz }) {
   const [span, setSpan] = React.useState(null);
   const [seen, setSeen] = React.useState(() => { try { return localStorage.getItem('ps.gridOffSeen'); } catch (e) { return null; } });
   React.useEffect(() => {
@@ -497,7 +497,7 @@ function GridOffPrompt({ hasBatt, tz }) {
   const close = () => { try { localStorage.setItem('ps.gridOffSeen', span.endedAt); } catch (e) {} setSeen(span.endedAt); };
   return (
     <div className="notice gridoff grid-off-prompt" role="status">
-      <p><b>Grid was off {dur} {when}.</b>{hasBatt && ' Your battery carried the house.'}</p>
+      <p><b>Grid was off {dur} {when}.</b></p>
       <button type="button" className="mini-link" onClick={() => { close(); window.openPlans('grid_off'); }}>See how it held up →</button>
       <button type="button" className="fs-x" aria-label="Close" onClick={close}><Icon id="close" /></button>
     </div>
@@ -1385,7 +1385,7 @@ function GridTab(props) {
         </div>
         <Card>
           <SectionTitle>OFF-GRID</SectionTitle>
-          <div className="field-note" style={{ marginTop: 0 }}>No grid for a day or more. Figures come back when the inverter sees the grid again.</div>
+          <div className="field-note" style={{ marginTop: 0 }}>No grid for over a day. Figures return when it’s back.</div>
         </Card>
       </div>
     );
@@ -2137,7 +2137,7 @@ const listPrice = (b, plan, period, extra = 0) => {
 };
 const cancelText = (b) => {
   const { billDay, rand, perUnit, offerName } = window.billingFmt;
-  const text = `It runs until ${billDay(b.nextDate)}. After that you’re on Free: we keep your readings for 30 days, then only the last 24 hours. Alerts stay on; reports stop.`;
+  const text = `It runs until ${billDay(b.nextDate)}. After that, on Free, readings are kept for 30 days, then only the last 24 hours. Alerts stay on; reports stop.`;
   // an offer goes with the plan: coming back costs the list price
   const list = b.offer?.held && listPrice(b, b.plan, b.period, b.extraPlants || 0);
   return list > b.price ? `${text} Your ${offerName(b.offer)} of ${rand(b.price)} ${perUnit(b.period)} goes too; ${PLAN_NAME[b.plan]} costs ${rand(list)} if you come back.` : text;
@@ -2255,7 +2255,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
       </div>
       {b.state === 'past_due' && (
         <div className="plan-booked plan-alert">
-          <span className="conn-status warn">Payment didn’t go through.{b.nextTry && <> We try your card again on {billDay(b.nextTry)}.</>} Pay by {billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.</span>
+          <span className="conn-status warn">Payment failed.{b.nextTry && <> Next try {billDay(b.nextTry)}.</>} Pay by {billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.</span>
           <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
         </div>
       )}
@@ -2770,7 +2770,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         {stopping === p.plant_id && (
           <ConfirmCard modal
             title={<>Stop collecting <b>{name}</b>?</>}
-            text="All its history is deleted, unless another account shares it. Turn it back on later and only the last 60 days come back from SunSynk."
+            text="Its history is deleted, unless another account shares it. Turn it on later and only the last 60 days come back."
             action="Stop and delete" onConfirm={() => stop(p)} onCancel={() => setStopping(null)} />
         )}
         {/* No room: the plans live on their own page, not in this list (SOLAR-264). On Family
@@ -3253,9 +3253,9 @@ const EMAIL_GROUPS = [
     ['yearly', 'Yearly', 'Last year, on 1 January.']] },
   { id: 'alerts', label: 'Alerts', when: 'Sent when it happens', rows: [
     ['grid', 'Grid', 'The grid goes off, and when it’s back.'],
-    ['battery', 'Battery', 'Over 40 °C, or charging unevenly. Once a day while it lasts.'],
-    ['panels', 'Panels', 'A string stops while the others make power. Once a day while it lasts.'],
-    ['readings', 'Readings', 'No readings for 15 min, and when they’re back.'],
+    ['battery', 'Battery', 'Over 45 °C, or charging unevenly, and when it’s fixed.'],
+    ['panels', 'Panels', 'A string stops while the others make power, and when it’s back.'],
+    ['readings', 'Readings', 'No readings for 30 min, and when they’re back.'],
     ['sunsynk', 'SunSynk', 'SunSynk stops answering, and when it’s back.']] },
 ];
 // "All 3 on", "Weekly and Monthly on", "4 of 5 on. Sent when it happens", "Off".
@@ -3362,10 +3362,10 @@ function NotificationsSection({ userId }) {
           <Toggle label="Pop-up alerts" hint="The same alerts, shown on this device even when the app is closed."
                   checked={push === 'on'} onChange={() => push !== 'asking' && push !== 'ios' && togglePush()} />
           {push === 'blocked' && (
-            <p className="notif-note warn">Your browser blocked pop-ups for this site. Allow notifications for {location.host} in the browser’s site settings, then turn this on again.</p>
+            <p className="notif-note warn">Pop-ups are blocked. Allow notifications for {location.host} in your browser’s site settings, then turn this on.</p>
           )}
           {push === 'ios' && (
-            <p className="notif-note">On iPhone, pop-ups work only from the Home Screen. In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>, and open the app from there. Needs iOS 16.4 or later.</p>
+            <p className="notif-note">On iPhone, pop-ups need the app on your Home Screen. In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>. iOS 16.4 or later.</p>
           )}
           {push === 'on' && group({ ...alerts, when: null }, pushPrefs, flipPush, 'push', loading)}
         </div>

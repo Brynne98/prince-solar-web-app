@@ -132,6 +132,10 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "event-inverter-silent": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "logger_stale", since: "08:15" })],
   "event-inverter-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "logger_back", at: "10:02", lasted: "1h 47m" })],
   "event-relink": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "needs_relink" })],
+  "event-battery-cooled": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "batt_hot_back", at: "15:10", tempC: 42, lasted: "1h 50m" })],
+  "event-banks-even": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "bank_drift_back", banks: [{ name: "Master", chargePct: 70 }, { name: "Slave", chargePct: 68 }], lasted: "2h 10m" })],
+  "event-string-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "string_back", string: "String 3", inverter: "Slave", at: "14:05", lasted: "2h 25m" })],
+  "event-one-inverter-silent": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "logger_stale", since: "08:15", inverter: "Slave" })],
 };
 
 const args = process.argv.slice(2);
