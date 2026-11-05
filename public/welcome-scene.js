@@ -670,7 +670,7 @@ if (!card) return;
 const menu = document.getElementById('pl-menu'), pick = document.getElementById('pl-pick'), view = document.getElementById('pl-view');
 const PL = [
   { name: 'Home', st: ['Live', '#3ddc84'], batt: 64, peak: 6.2 },
-  { name: 'Mum and Dad', st: ['Grid off', '#f87171'], batt: 81, peak: 4.4, note: 'Grid off since 12:10. The battery is running the house.' },
+  { name: 'Mum and Dad', st: ['Grid off', '#f87171'], batt: 81, peak: 4.4, note: 'Grid off since 12:10.' },
   { name: 'Holiday house', st: ['Live', '#3ddc84'], batt: 98, peak: 2.6 },
 ];
 // kW at minute m of the day: a sun arc 06:00 to 18:40 with passing cloud
