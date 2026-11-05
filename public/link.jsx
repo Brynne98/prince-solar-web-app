@@ -129,9 +129,9 @@ window.billingFmt = { rand, billDay, perUnit, offerName, offerLine, offerCap, Wa
 // Paystack (SOLAR-208, the billing function). A saved card is charged at once;
 // otherwise, or after the saved card is declined, Paystack's card page opens and
 // comes back to the Plan section with ?reference=, which billingReturn checks.
-const billingCall = async (route, body) => {
+const billingCall = async (route, body, ms = 30000) => {
   // a payment that hasn't started in 30 s says so (SOLAR-294)
-  const [res, out] = await edgePost('billing/' + route, body, AbortSignal.timeout(30000))
+  const [res, out] = await edgePost('billing/' + route, body, AbortSignal.timeout(ms))
     .catch(e => { throw new Error(/abort|timeout/i.test(e.name) ? 'timed out' : e.message); });
   if (!res.ok) throw new Error(out.error || 'payment failed');
   return out;
@@ -147,13 +147,27 @@ const billingPaid = (plan, switched = false) => {
   location.assign(planUrl('&billing=paid'));
 };
 
-// A payment step that ran out of time may still have gone through, so it doesn't say "try again".
-const SLOW_NOTE = 'Error. Check Billing before you pay again.';
-// The toast for a payment step that failed: paid plans not open yet, too slow, or fallback.
+// The toast for a payment step that failed: paid plans not open yet, or fallback. A card
+// page that didn't open in time charged nothing, so its fallback's "try again" holds.
 const payFailed = (e, fallback) => (/open soon/.test(e.message) ? window.toast('Paid plans open soon. Nothing was charged.')
-  : window.toast(e.message === 'timed out' ? SLOW_NOTE : fallback, { error: true }));
+  : window.toast(fallback, { error: true }));
+// A saved card's charge: the billing function gives Paystack 30 s to charge and 30 s more to
+// check, so the page waits past both (SOLAR-363).
+const PAY_WAIT = 70000;
+// Still no answer: the charge may land later, so read Billing every 5 s for a minute. A plan
+// that moved since the Pay tap is paid; otherwise it's still being checked.
+const billingSig = (b) => (b ? [b.plan, b.period, b.extraPlants, b.nextPlan, b.nextPeriod, b.prepaidOn].join('|') : null);
+const payLanded = async (beforeP) => {
+  const was = billingSig(await beforeP);
+  for (let i = 0; was && i < 12; i++) {
+    await new Promise(res => setTimeout(res, 5000));
+    const { data } = await billingRpc('api_billing_status').catch(() => ({}));
+    if (data && billingSig(data) !== was) return { status: 'paid' };
+  }
+  return { status: 'pending' };
+};
 // While a payment step runs, a small pop-up says so, so a slow one never looks frozen (SOLAR-294).
-// It has no close: every step ends, the slowest after 30 s. Returns the function that closes it.
+// It has no close: every step ends, the slowest after about 2 minutes. Returns the function that closes it.
 const working = (text) => mountNode(<Dialog busy label={text}><div className="pop-wait" role="status"><span className="spin" aria-hidden="true" />{text}</div></Dialog>);
 // Paid after the plan or extra plants changed: nothing applied, refunded by hand (0127).
 const REFUND_NOTE = 'Your plan changed while you paid. The payment will be refunded.';
@@ -260,8 +274,11 @@ window.startUpgrade = async function startUpgrade(plan, period, newCard = false,
     if (!newCard && !await reviewPay(plan, period, extras)) return;
     const stop = working(newCard ? 'Opening the card page…' : 'Taking payment…');
     let r;
+    // Billing as it was before Pay, for payLanded; read while the charge starts.
+    const before = billingRpc('api_billing_status').then(x => x.data).catch(() => null);
     try {
-      r = await billingCall('pay', { plan, period, newCard, extras, plants });
+      r = await billingCall('pay', { plan, period, newCard, extras, plants }, PAY_WAIT)
+        .catch(e => (e.message === 'timed out' ? payLanded(before) : Promise.reject(e)));
       if (r.status === 'failed') {
         window.toast('Your saved card was declined. Enter another card.', { error: true });
         r = await billingCall('pay', { plan, period, newCard: true, extras, plants });
