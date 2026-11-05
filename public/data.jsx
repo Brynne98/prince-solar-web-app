@@ -201,6 +201,11 @@ async function fetchSnapshot() {
   if (api.config && api.config.currency) window.PLANT_CURRENCY = api.config.currency;
   const cfg = api.config || {};
   const agg = aggregate(inverters, api.totals || {});
+  // Today's counters are the last reading's. A plant silent since before the plant's
+  // midnight has none for today, not yesterday's (SOLAR-348).
+  const day = (d) => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: cfg.timezone || undefined }).format(d); } catch (e) { return null; } };
+  if (api.lastTs && day(new Date(api.lastTs * 1000)) !== day(new Date()))
+    ['pvToday', 'loadToday', 'gridFromToday', 'gridToToday', 'battChgToday', 'battDischgToday'].forEach(k => { agg[k] = null; });
   return {
     updated: new Date(api.generatedAt || Date.now()),
     lastReading: api.lastTs ? new Date(api.lastTs * 1000) : null,
