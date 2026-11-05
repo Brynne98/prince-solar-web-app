@@ -88,14 +88,14 @@ function dayFace(s, todayStr) {
 
 // A drawn chevron, so it sits in the middle of its box; the ‹ › glyphs sat on the text baseline.
 const Chevron = ({ dir }) => (
-  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-    <path d={dir < 0 ? 'M8.5 3 4.5 7l4 4' : 'M5.5 3l4 4-4 4'} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+  <svg className="ico ico-sm" viewBox="0 0 14 14" aria-hidden="true">
+    <path d={dir < 0 ? 'M8.5 3 4.5 7l4 4' : 'M5.5 3l4 4-4 4'} />
   </svg>
 );
 const CalIcon = () => (
-  <svg className="hv-cal" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-    <rect x="1.75" y="2.75" width="12.5" height="11.5" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-    <path d="M1.75 6.5h12.5M5 1.5v2.5M11 1.5v2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  <svg className="hv-cal ico ico-sm" viewBox="0 0 16 16" aria-hidden="true">
+    <rect x="1.75" y="2.75" width="12.5" height="11.5" rx="2" />
+    <path d="M1.75 6.5h12.5M5 1.5v2.5M11 1.5v2.5" />
   </svg>
 );
 
@@ -241,7 +241,7 @@ function fitScale(lo, hi, unit) {
 //   kind="output" as "ac" but the inverter's own frequency, for an off-grid plant
 // A tab with a day picker of its own (Grid) passes it as `dayPick`; the chart then follows
 // that day and draws no date arrows of its own, only its lag and outage notes.
-const INV_COLORS = ['#fb923c', '#f472b6', '#60a5fa', '#fbbf24', '#34d399', '#c084fc'];
+const INV_COLORS = ['#fb923c', '#f472b6', '#60a5fa', '#fbbf24', '#34d399', '#c084fc']; // one line per inverter, on Inverters only; reuse-check: allow
 // Outage: runs of 5-minute buckets, [first, last], where any inverter's grid (or output) read
 // 0 Hz, or its terminal 0 V. The Grid tab's day chart shades the same runs (SOLAR-125).
 function outageRuns(invs, fKey, lastIdx) {
@@ -294,7 +294,7 @@ function ChartPlaceholder({ height, loading, text }) {
 }
 // The hover card's row for a bucket inside a run, in the band's red.
 function OutageTipRow({ span, what }) {
-  return span ? <window.TipRow sq color={window.COLORS.load} label={what + ' off'}>{span}</window.TipRow> : null;
+  return span ? <window.TipRow sq color="var(--bad)" label={what + ' off'}>{span}</window.TipRow> : null;
 }
 function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   const C = window.COLORS;
@@ -467,7 +467,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
             ))}
             {!isTemp && hasF && <text x={m.l + innerW + 10} y={m.t - 9} className="ax" fill={C.soc} fillOpacity="0.55">Hz</text>}
             {outages.map(([a, b], i) => (
-              <rect key={'o' + i} x={x(Math.max(0, a - 0.5))} y={m.t} width={Math.max(2, x(Math.min(lastIdx, b + 0.5)) - x(Math.max(0, a - 0.5)))} height={innerH} fill={C.load} fillOpacity="0.18" />
+              <rect key={'o' + i} x={x(Math.max(0, a - 0.5))} y={m.t} width={Math.max(2, x(Math.min(lastIdx, b + 0.5)) - x(Math.max(0, a - 0.5)))} height={innerH} fill="var(--bad)" fillOpacity="0.18" />
             ))}
             {shown.map((inv, k) => {
               const c = color(k);

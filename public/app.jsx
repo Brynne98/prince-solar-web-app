@@ -63,7 +63,7 @@ function WallStatus({ snap }) {
   const s = plantStatus(snap, useNow(15000));
   return (
     <window.Tip className={'wall-status below status-' + s.status} text={'Last reading ' + window.fmtTime(s.last)}>
-      <StatusBits word={s.word}><span className="status-detail mono">{s.detail}</span></StatusBits>
+      <StatusBits word={s.word}><span className="status-detail">{s.detail}</span></StatusBits>
     </window.Tip>
   );
 }
@@ -371,7 +371,7 @@ function billNotice(n, act) {
   const { rand, billDay } = window.billingFmt;
   const plan = PLAN_NAME[n.plan];
   switch (n.kind) {
-    case 'bill_failed': return { banner: true, tone: 'bad', icon: 'card', title: `Your payment of ${rand(n.amount)} didn’t go through`,
+    case 'bill_failed': return { banner: true, tone: 'bad', icon: 'card', title: `Your payment of ${rand(n.amount)} didn’t go through`, short: 'Payment didn’t go through',
       body: n.nextTry ? `We’ll try again on ${billDay(n.nextTry)}. If it’s still unpaid on ${billDay(n.freeOn)}, your account moves to Free.`
         : `That was the last try. Your account moves to Free on ${billDay(n.freeOn)} unless it’s paid.`,
       button: 'Pay with another card', run: () => window.settlePayment() };
@@ -383,6 +383,7 @@ function billNotice(n, act) {
       const why = `Your plan covers ${n.room} plant${n.room === 1 ? '' : 's'}. ${one ? 'Its' : 'Their'} history goes too.`;
       return { banner: true, tone: 'warn', icon: 'trash', closable: 'bill_removal_soon:' + n.on,
         title: `${list} will be deleted on ${billDay(n.on)}`,
+        short: `Deleting ${one ? p[0] : p.length + ' plants'} on ${billDay(n.on)}`,
         lead: why,
         body: `${why} Linking a plant again later brings back only the last 60 days from SunSynk.`,
         button: one ? `Keep ${p[0]}` : 'Keep them', run: act.plan };
@@ -434,8 +435,13 @@ function BillBanners({ notices }) {
       {shown.map(n => (
         <div key={n.kind} className={'bill-banner ' + n.tone + (n.closable ? ' closable' : '')} role={n.closable ? 'status' : 'alert'}>
           <span className={'nl-glyph g-' + n.tone}><Icon id={n.icon} /></span>
-          <p><b>{n.title}</b><span>{n.lead || n.body}</span></p>
+          <p><b>{n.title}</b><b className="bb-short">{n.short}</b><span>{n.lead || n.body}</span></p>
           <button type="button" className="ghost-btn" onClick={() => n.act('banner')}>{n.button}</button>
+          {/* phone: one line; the whole row opens the bell, where the details and button are (SOLAR-345) */}
+          <button type="button" className="bill-banner-more" aria-label={n.title + '. Details'}
+                  onClick={() => { window.track('notice_opened', { kind: n.kind }); window.dispatchEvent(new Event('ps-open-bell')); }}>
+            <Icon id="next" />
+          </button>
           {/* top right at every width, out of the flow, so a wrap never moves it */}
           {n.closable && <button type="button" className="bill-banner-x" aria-label="Close" onClick={() => close(n)}><Icon id="close" /></button>}
         </div>
@@ -449,6 +455,13 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
   const [open, setOpen, ref] = usePopover();
   const shown = useRef(null);
   useEffect(() => { if (open) onOpen(); }, [open]);
+  // a phone banner's tap opens the list (SOLAR-345)
+  useEffect(() => {
+    if (disabled) return;
+    const show = () => setOpen(true);
+    window.addEventListener('ps-open-bell', show);
+    return () => window.removeEventListener('ps-open-bell', show);
+  }, [disabled]);
   // what the open list showed unread; read once it closes, so the dots stay while it's open
   useEffect(() => { if (open) shown.current = (data?.items || []).filter(it => !it.read).map(it => it.id); }, [open, data]);
   useEffect(() => {
@@ -528,7 +541,7 @@ function NotifRows({ items, when, heads = true }) {
           <span className="nl-text">
             <span className="nl-title">{it.title}</span>
             <span className="nl-body">{it.body}</span>
-            <span className="nl-where mono">{it.plantName || 'Plant ' + it.plant} · {when(it)}</span>
+            <span className="nl-where">{it.plantName || 'Plant ' + it.plant} · {when(it)}</span>
           </span>
         </div>
       </React.Fragment>
@@ -1071,9 +1084,9 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
           {head}
           {account && <AccountMenu {...account} variant="head" />}
         </header>
-        <main className="content" aria-busy={busy || undefined}>{children}</main>
+        {/* phone: First steps sits at the top of the page, in the flow, so it never covers a chart (SOLAR-345) */}
+        <main className="content" aria-busy={busy || undefined}>{steps && !isSettings(tab) && tab !== 'system' && steps('phone')}{children}</main>
       </div>
-      {steps && !isSettings(tab) && tab !== 'system' && steps('phone')}
       <PhoneBar tabs={tabs} tab={tab} onTab={onTab} />
       <SaveToast />
     </div>

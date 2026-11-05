@@ -7,9 +7,9 @@
 const { Card, StatTile, Segmented, Toggle, SectionTitle,
   fmtPower, fmtPowerParts, battShown, fmtKwh, fmtRand, cleanTemp, COLORS: CC } = window;
 
-const FsEnterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" /></svg>;
-const TrashIcon = () => <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.6 9h6.8l.6-9M6.75 7v4M9.25 7v4" /></svg>;
-const FsExitIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" /></svg>;
+const FsEnterIcon = () => <svg className="ico ico-sm" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" /></svg>;
+const TrashIcon = () => <svg className="ico ico-sm" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.6 9h6.8l.6-9M6.75 7v4M9.25 7v4" /></svg>;
+const FsExitIcon = () => <svg className="ico ico-sm" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" /></svg>;
 
 // The Overview's periods, for its switch and its loading copy alike.
 const PERIODS = [{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }];
@@ -421,7 +421,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
       {/* after Imported, the order Power flow uses */}
       {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergyParts(pExp)} color={CC.grid}
         info={OV_INFO.exp} />}
-      <MiniStat loading={pending} label="Saved" color={CC.batt}
+      <MiniStat loading={pending} label="Saved" color="var(--money)"
         value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
         trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendFrom={cmpPhrase}
         // no rate yet: the line under the dash opens Settings on Tariff
@@ -435,6 +435,15 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
     <>
     {over && hasGrid && <GridOffPrompt hasBatt={hasBatt} tz={tz} />}
     <div className="live-grid">
+      <div className="overview-section">
+        <div className="overview-head">
+          <SectionTitle>OVERVIEW</SectionTitle>
+          <Segmented size="sm"
+            options={PERIODS}
+            value={period} onChange={setPeriod} />
+        </div>
+        {over && period !== 'today' && period !== 'month' ? <window.HistoryLock where={'overview_' + period} /> : strip}
+      </div>
       <div className={'flow-fs-wrap' + (wall ? ' wall' : '') + (wall && idle ? ' idle' : '')} ref={flowRef}>
         {wall && (
           // Exit on the left, so the status sits flush right whether Exit shows or hides
@@ -462,15 +471,6 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         <window.HistoryView today={today} refreshKey={refreshKey} silent={silent} />
       </Card>
 
-      <div className="overview-section">
-        <div className="overview-head">
-          <SectionTitle>OVERVIEW</SectionTitle>
-          <Segmented size="sm"
-            options={PERIODS}
-            value={period} onChange={setPeriod} />
-        </div>
-        {over && period !== 'today' && period !== 'month' ? <window.HistoryLock where={'overview_' + period} /> : strip}
-      </div>
 
     </div>
     </>
@@ -545,7 +545,7 @@ function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trend
         : <div className="mini-value mono" style={{ color }}><span className="mv-num">{unitSplit(value)}</span></div>}
       {bar != null && !loading && <window.Meter small pct={bar} color={color} />}
       {bar != null && loading && <window.Skeleton h={5} r={4} style={{ marginTop: 8 }} />}
-      {sub && <div className="mini-sub mono">{sub}</div>}
+      {sub && <div className="mini-sub">{sub}</div>}
     </Card>
   );
 }
@@ -641,14 +641,17 @@ const WIW_INFO = {
 };
 // Where a day's energy went or came from (SOLAR-332): a hollow pie of its parts
 // ([name, kWh, colour]) with their sum in the middle, and each part's kWh beside it.
-function SharePie({ parts, word }) {
+// empty: the note for a day with nothing to share out; the ring stays, bare, so the card
+// keeps its shape beside the 30 days instead of leaving a blank box (SOLAR-345).
+function SharePie({ parts, word, empty }) {
+  if (empty) parts = [];
   const total = parts.reduce((t, d) => t + d[1], 0);
   const R = 61, C = 2 * Math.PI * R, gap = parts.length > 1 ? 3 : 0;
   const [n, u] = window.fmtEnergyParts(total);
   let at = 0;
   return (
-    <div className="pie-wrap">
-      <svg className="pie" viewBox="0 0 150 150" role="img" aria-label={word + ' ' + fmtKwh(total) + ': ' + parts.map(d => d[0] + ' ' + fmtKwh(d[1])).join(', ')}>
+    <div className={'pie-wrap' + (empty ? ' empty' : '')}>
+      <svg className="pie" viewBox="0 0 150 150" role="img" aria-hidden={empty ? 'true' : undefined} aria-label={word + ' ' + fmtKwh(total) + ': ' + parts.map(d => d[0] + ' ' + fmtKwh(d[1])).join(', ')}>
         <circle className="pie-track" cx="75" cy="75" r={R} />
         {parts.map(([l, v, c]) => {
           const len = v / total * C;
@@ -659,12 +662,12 @@ function SharePie({ parts, word }) {
         <text x="75" y="74" className="pie-num">{n}<tspan className="pie-u" dx="3">{u}</tspan></text>
         <text x="75" y="94" className="pie-word">{word}</text>
       </svg>
-      <div className="pie-figs" aria-hidden="true">
+      {empty ? <div className="solar-note">{empty}</div> : <div className="pie-figs" aria-hidden="true">
         {parts.map(([l, v, c]) => {
           const [a, b] = window.fmtEnergyParts(v);
           return <div key={l}><span>{l}</span><b style={{ color: c }}>{a}<span className="u">{b}</span></b></div>;
         })}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -837,7 +840,7 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
         <defs><GapHatch /></defs>
         {gaps.map(([a, b]) => <rect key={'gap' + a} x={x(a)} y={m.t} width={x(b) - x(a)} height={innerH} fill="url(#gaphatch)" />)}
         {(outages || []).map(([a, b]) => (
-          <rect key={'o' + a} x={xt5(Math.max(t0, a * 5 - 2.5))} y={m.t} width={Math.max(2, xt5(Math.min(t1, b * 5 + 2.5)) - xt5(Math.max(t0, a * 5 - 2.5)))} height={innerH} fill={window.COLORS.load} fillOpacity="0.18" />
+          <rect key={'o' + a} x={xt5(Math.max(t0, a * 5 - 2.5))} y={m.t} width={Math.max(2, xt5(Math.min(t1, b * 5 + 2.5)) - xt5(Math.max(t0, a * 5 - 2.5)))} height={innerH} fill="var(--bad)" fillOpacity="0.18" />
         ))}
         {ticks.map((t, k) => (
           <g key={k}>
@@ -1200,8 +1203,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         <Card className="wiw" {...dim}>
           <SectionTitle>{titled('WHERE IT WENT', dayWord)}<window.InfoDot text={WIW_INFO.solar} /></SectionTitle>
           {!day ? <WiwBodySkeleton />
-            : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.')}</div>
-            : <SharePie parts={dests} word="Made" />}
+            : <SharePie parts={dests} word="Made" empty={(noReadings || splitTotal < 0.05) && (noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.'))} />}
         </Card>
         <Card>
           <SectionTitle right={best ? <>Best <b>{fmtKwh(best.pv)}</b> on {window.dayText(best.date)}</> : RIGHT_HOLD}>
@@ -1315,8 +1317,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
         <Card className="wiw" {...dim}>
           <SectionTitle>{titled('WHERE IT CAME FROM', dayWord)}<window.InfoDot text={WIW_INFO.home} /></SectionTitle>
           {!day ? <WiwBodySkeleton />
-            : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || 'No home readings for this day.'}</div>
-            : <SharePie parts={srcs} word="Used" />}
+            : <SharePie parts={srcs} word="Used" empty={(noReadings || splitTotal < 0.05) && (noReadings || 'No home readings for this day.')} />}
         </Card>
         <Card>
           <SectionTitle right={most && most.load > 0 ? <>Most <b>{fmtKwh(most.load)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
@@ -1405,7 +1406,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const [nowN, nowU] = fmtPowerParts(exporting || a.gridPower > 5 ? a.gridPower : 0);
   // Presence is mains voltage, not usage: nothing is bought on a sunny afternoon with the
   // grid live, and a blackout reads 0 W too.
-  const nowSub = a.gridPresent === false ? <span style={{ color: CC.load }}>The grid is off</span>
+  const nowSub = a.gridPresent === false ? <span style={{ color: 'var(--bad)' }}>The grid is off</span>
     : exporting ? 'Exporting'
     : a.gridPower > 5 ? 'Importing' : 'Not importing';
   const importPeak = (pts) => {
@@ -1475,8 +1476,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         <Card className="wiw" {...dim}>
           <SectionTitle>{titled('WHERE IT WENT', dayWord)}<window.InfoDot text={WIW_INFO.grid} /></SectionTitle>
           {!day ? <WiwBodySkeleton />
-            : noReadings || splitTotal < 0.05 ? <div className="solar-note">{noReadings || (!points.some(p => p.grid != null) ? 'No grid readings for this day.' : view.isToday ? 'Nothing imported yet today.' : 'Nothing imported on this day.')}</div>
-            : <SharePie parts={dests} word="Imported" />}
+            : <SharePie parts={dests} word="Imported" empty={(noReadings || splitTotal < 0.05) && (noReadings || (!points.some(p => p.grid != null) ? 'No grid readings for this day.' : view.isToday ? 'Nothing imported yet today.' : 'Nothing imported on this day.'))} />}
         </Card>
         <Card>
           <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
@@ -1661,7 +1661,7 @@ function EqTile({ label, state, value, unit, sub, color, stale, word }) {
   return (
     <section className={'card eq-tile' + (stale ? ' stale' : '')} aria-label={label}>
       <div className="eq-tile-fig">
-        <div className={'eq-fig' + (word ? ' word' : ' mono')} style={{ color }}>{value}{unit && <span className="u">{unit}</span>}</div>
+        <div className={'eq-fig' + (word ? ' word' : ' mono')} style={stale ? undefined : { color }}>{value}{unit && <span className="u">{unit}</span>}</div>
         {sub && <div className="eq-fig-sub">{sub}</div>}
       </div>
       <div className="eq-tile-text">
@@ -1746,7 +1746,7 @@ function EqPanelsCard({ st, snap, health, now }) {
                 {(groups.length > 1 || g.quiet) && (
                   <div className="eq-group-head">
                     <span>{invName(g.inv)}</span>
-                    <span className={'mono' + (g.quiet ? ' warn' : '')}>{g.quiet ? (g.inv.readAt ? 'Not reporting since ' + window.readAgo(g.inv.readAt, now) : 'Not reporting') : fmtKwh(g.kwh)}</span>
+                    <span className={g.quiet ? 'warn' : 'mono'}>{g.quiet ? (g.inv.readAt ? 'Not reporting since ' + window.readAgo(g.inv.readAt, now) : 'Not reporting') : fmtKwh(g.kwh)}</span>
                   </div>
                 )}
                 {(folded ? g.rows.slice(0, EQ_FOLD) : g.rows).map(r => (
@@ -2428,9 +2428,9 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
     <span className="plan-plants">
       <span><span className="mono">3</span> plants <span className="plan-plus">+ extra</span></span>
       <span className="stepper" aria-busy={waiting}>
-        <button type="button" aria-label="One plant fewer" disabled={more === 0} onClick={() => pick(more - 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
+        <button type="button" aria-label="One plant fewer" disabled={more === 0} onClick={() => pick(more - 1)}><svg className="ico ico-sm" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10" /></svg></button>
         <span className="mono" aria-live="polite">{more}</span>
-        <button type="button" aria-label="One plant more" onClick={() => pick(more + 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10M7 2v10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
+        <button type="button" aria-label="One plant more" onClick={() => pick(more + 1)}><svg className="ico ico-sm" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10M7 2v10" /></svg></button>
       </span>
     </span>
   );

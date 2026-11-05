@@ -211,7 +211,7 @@ function Toggle({ checked, onChange, label, hint, loading }) {
         <span className="toggle-label">{label}</span>
         {hint && <span className="toggle-hint">{hint}</span>}
       </span>
-      <Switch on={checked} onChange={onChange} loading={loading} />
+      <Switch on={checked} onChange={onChange} loading={loading} label={typeof label === 'string' ? label : undefined} />
     </Row>);
 
 }
@@ -295,10 +295,10 @@ function InfoDot({ text }) {
   const id = React.useId();
   return (
     <span className="info-dot" tabIndex={0} aria-label="More about this" aria-describedby={id} onMouseEnter={placeBubble} onFocus={placeBubble}>
-      <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-        <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.3" />
-        <path d="M6.1 6.3a1.95 1.95 0 1 1 2.8 1.75c-.55.3-.9.65-.9 1.25v.35" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-        <circle cx="8" cy="11.7" r="0.85" fill="currentColor" />
+      <svg className="ico ico-sm" viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="8" r="7" />
+        <path d="M6.1 6.3a1.95 1.95 0 1 1 2.8 1.75c-.55.3-.9.65-.9 1.25v.35" />
+        <circle cx="8" cy="11.7" r="0.85" fill="currentColor" stroke="none" />
       </svg>
       <span id={id} className="info-bubble" role="tooltip">{text}</span>
     </span>);
@@ -333,9 +333,9 @@ function openPlans(where) {
   window.dispatchEvent(new CustomEvent('ps-plans', { detail: where }));
 }
 const LockIcon = () => (
-  <svg className="lock-ico" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
-    <rect x="3" y="7" width="10" height="7.5" rx="1.6" fill="currentColor" />
-    <path d="M5.25 7V5.1a2.75 2.75 0 0 1 5.5 0V7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+  <svg className="lock-ico ico ico-sm" viewBox="0 0 16 16" aria-hidden="true">
+    <rect x="3" y="7" width="10" height="7.5" rx="1.6" fill="currentColor" stroke="none" />
+    <path d="M5.25 7V5.1a2.75 2.75 0 0 1 5.5 0V7" />
   </svg>
 );
 // The user's own figure, greyed (or blurred), and a lock with `label` that opens the plans.

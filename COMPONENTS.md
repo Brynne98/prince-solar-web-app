@@ -6,8 +6,8 @@ If something here is close, use it or give it a prop; don't make a second one.
 `node scripts/reuse-check.mjs` (part of `npm test`) catches the common repeats: native
 `<select>`, date inputs and checkboxes, `title=` tooltips, raw `.skel`, `confirm()` and
 `alert()`, hand-drawn copies of icons, hand-made tooltip rows, meters, sign-in cards,
-timeouts and saved-tab reads, CSS classes nothing uses, and two files declaring the same
-top-level name. A line can opt out with a `reuse-check: allow` comment; give the reason
+timeouts and saved-tab reads, CSS classes nothing uses, two files declaring the same
+top-level name, a hidden or recoloured focus ring, an icon off the icon line or sizes, and a "Click here" email link. A line can opt out with a `reuse-check: allow` comment; give the reason
 next to it.
 
 How it is wired: every `public/*.jsx` shares one global scope. `auth`, `link`, `data`,
@@ -91,7 +91,7 @@ a row of on/off settings (email and push preferences); `saveFlag` sends its own 
 
 | Name | Use it for |
 |---|---|
-| `Icon` | Any icon in `NAV_ICONS`: `<Icon id="next" />`. Add new icons to `NAV_ICONS`, not inline. |
+| `Icon` | Any icon in `NAV_ICONS`: `<Icon id="next" />`. Add new icons to `NAV_ICONS`, not inline. A drawn icon elsewhere is `<svg className="ico">` (`ico-sm` for 14 px) with no width, height or strokeWidth of its own. |
 | `useEscape(on, fn)` | Close something on Escape. |
 | `usePopover()` | A menu or popover's open state, outside-click and Escape. |
 | `MenuList`, `PickMenu` | A dropdown menu; `PickMenu` is the replacement for `<select>`. |
@@ -104,7 +104,7 @@ a row of on/off settings (email and push preferences); `saveFlag` sends its own 
 | `savedTab`, `writeTab`, `TAB_KEY` | The last tab and plant, kept across visits. |
 | `window.toast(text)` | A short message at the bottom. Use instead of `alert()`. |
 | `NotifRows`, `alertSpan` | Alert rows under day headings (the bell list, the full Notifications page); "14:02 to 16:47, 2h 45m" (SOLAR-327). |
-| `billNotice`, `BillBanners` | A billing notice from `api_notifications`' pinned facts, in the emails' words; the banners above every page (SOLAR-212). |
+| `billNotice`, `BillBanners` | A billing notice from `api_notifications`' pinned facts, in the emails' words; the banners above every page (SOLAR-212). On a phone each banner is one line (`short`); a tap opens the bell (`ps-open-bell`) (SOLAR-345). |
 
 ## Charts (`chart.jsx`)
 
@@ -122,7 +122,7 @@ a row of on/off settings (email and push preferences); `saveFlag` sends its own 
 | Name | Use it for |
 |---|---|
 | `MiniStat` | A small stat with trend, info and `loading`. |
-| `SharePie` | A hollow pie of a day's parts with their sum in the middle and each part's kWh beside it. `dayFlows` gives the parts. |
+| `SharePie` | A hollow pie of a day's parts with their sum in the middle and each part's kWh beside it. `dayFlows` gives the parts. `empty`: a note for a day with nothing to share; the bare ring keeps the card's shape (SOLAR-345). |
 | `DaysPanel` | The per-day bars with retry and the free-week lock. |
 | `TabSkeleton` | A whole tab while it loads. |
 | `ConfirmCard` | Any "are you sure". Inline or `modal`; `danger`, `busy`, `confirmDisabled`. Use instead of `confirm()`. |

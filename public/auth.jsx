@@ -122,13 +122,13 @@ window.useSession = function useSession() {
 
 // Eye / eye-with-a-line-through-it, for the reveal toggle.
 const EyeIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg className="ico" viewBox="0 0 20 20" aria-hidden="true">
     <path d="M1.5 10S4.5 4.5 10 4.5 18.5 10 18.5 10 15.5 15.5 10 15.5 1.5 10 1.5 10Z" />
     <circle cx="10" cy="10" r="2.5" />
   </svg>
 );
 const EyeOffIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg className="ico" viewBox="0 0 20 20" aria-hidden="true">
     <path d="M8.1 4.7A7.7 7.7 0 0 1 10 4.5c5.5 0 8.5 5.5 8.5 5.5a15 15 0 0 1-2.4 3.1M4.4 6A15 15 0 0 0 1.5 10S4.5 15.5 10 15.5c1.2 0 2.2-.2 3.2-.6" />
     <path d="M8.3 8.3a2.5 2.5 0 0 0 3.4 3.4" />
     <path d="M2.5 2.5l15 15" />
@@ -137,7 +137,7 @@ const EyeOffIcon = () => (
 
 /** Google's four-colour G, as drawn in their sign-in branding guide. */
 const GoogleMark = () => (
-  <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+  <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"> {/* reuse-check: allow: Google's own mark, filled */}
     <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.5 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.7 17.7 9.5 24 9.5z"/>
     <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 2.9-2.2 5.4-4.7 7.1l7.6 5.9c4.4-4.1 6.9-10.1 6.9-17z"/>
     <path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C1 16.5 0 20.1 0 24s1 7.5 2.6 10.8l7.9-6.1z"/>

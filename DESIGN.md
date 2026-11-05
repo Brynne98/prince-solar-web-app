@@ -18,8 +18,11 @@ colors:
   sun-core: "#ffd56b"
   sun-mid: "#f4a93a"
   sun-rim: "#e07a1f"
-  warn-amber: "#f59e0b"
-  fault-red: "#ef4444"
+  ok-blue: "#60a5fa"
+  warn-orange: "#f97316"
+  bad-rose: "#f43f5e"
+  accent: "#3ddc84"
+  focus: "#e7ecf2"
   ambient-blue: "rgba(91,157,255,0.06)"
   ambient-green: "rgba(52,211,153,0.05)"
   ink-on-green: "#06210f"
@@ -113,61 +116,59 @@ typography:
     lineHeight: 1.2
     letterSpacing: "0.2em"
 rounded:
-  hairline: "2px"
-  meter: "4px"
-  meter-thick: "5px"
-  xs: "7px"
-  sm: "9px"
-  md: "12px"
-  lg: "16px"
-  xl: "18px"
-  control: "10px"
-  login-input: "11px"
-  card-phone: "14px"
+  xs: "2px"
+  sm: "4px"
+  md: "8px"
+  lg: "12px"
+  xl: "16px"
   pill: "999px"
 spacing:
-  xs: "8px"
-  sm: "12px"
-  md: "16px"
-  lg: "20px"
-  xl: "26px"
-  card-x: "24px"
+  3xs: "2px"
+  2xs: "4px"
+  xs: "6px"
+  sm: "8px"
+  md: "12px"
+  lg: "16px"
+  xl: "20px"
+  2xl: "24px"
+  3xl: "32px"
+  4xl: "40px"
 components:
   button-primary:
-    backgroundColor: "{colors.solar-green}"
+    backgroundColor: "{colors.accent}"
     textColor: "#07130c"
-    rounded: "{rounded.sm}"
+    rounded: "{rounded.md}"
     padding: "0 16px"
     height: "34px"
   button-secondary:
     backgroundColor: "{colors.panel}"
     textColor: "{colors.paper-text}"
-    rounded: "{rounded.control}"
+    rounded: "{rounded.md}"
     padding: "10px 22px"
   button-ghost:
     backgroundColor: "transparent"
     textColor: "{colors.muted-text}"
-    rounded: "{rounded.sm}"
+    rounded: "{rounded.md}"
     padding: "0 16px"
     height: "34px"
   button-danger:
     backgroundColor: "transparent"
-    textColor: "{colors.home-coral}"
-    rounded: "{rounded.sm}"
+    textColor: "{colors.bad-rose}"
+    rounded: "{rounded.md}"
     padding: "0 16px"
     height: "34px"
   card:
     backgroundColor: "{colors.panel}"
-    rounded: "{rounded.lg}"
+    rounded: "{rounded.xl}"
     padding: "22px 24px"
   card-inset:
     backgroundColor: "{colors.panel-raised}"
-    rounded: "{rounded.md}"
+    rounded: "{rounded.lg}"
     padding: "16px 18px"
   input:
     backgroundColor: "{colors.panel-raised}"
     textColor: "{colors.paper-text}"
-    rounded: "{rounded.sm}"
+    rounded: "{rounded.md}"
     padding: "0 12px"
     height: "41px"
   chip:
@@ -222,36 +223,41 @@ add a glowing ring, this system adds a hairline and a smaller grey label.
 A near-black ground, three grey text levels, and five saturated colours that are
 semantic, not decorative.
 
-### Primary
-- **Solar Green** (`solar-green`): solar production everywhere it appears, and by
-  extension "good": the live status dot, the active tab underline, the First steps
-  card and its progress bars, the primary Save and Sign-in buttons, the switch when on,
-  positive trend badges, and input focus on the login card. It is the product's one
-  accent as well as its first data colour.
+### Power (SOLAR-346: these five mean nothing else)
+- **Solar Green** (`solar-green`, CSS `--pv`): solar production.
+- **Battery Violet** (`battery-violet`, `--batt`): battery power and battery-side extras
+  in the flow diagram.
+- **Grid Amber** (`grid-amber`, `--grid`): grid import and export.
+- **Home Coral** (`home-coral`, `--load`): home load.
+- **Charge Cyan** (`charge-cyan`, `--soc`): the house running on its own: the
+  independence tile and meter, the runtime estimate, the charge line on charts, the
+  range slider thumb.
 
-### Secondary
-- **Battery Violet** (`battery-violet`): battery power and battery-side extras in the
-  flow diagram. Never used for status; success is always Solar Green.
-- **Grid Amber** (`grid-amber`): grid import and export, and the focus border on
-  every field in Settings, Account and First steps. Also the "connected but unverified" dot on a SunSynk account row.
-- **Home Coral** (`home-coral`): home load, and the warning tone: the danger button,
-  the inverter warning strip, negative trend badges, a grid-down chip, error text on
-  the login card.
-- **Charge Cyan** (`charge-cyan`): the house running on its own: the self-sufficiency
-  tile and its meter, the runtime estimate line, the range slider thumb, and the
-  plant-switched status dot. The Battery tab's charge line and totals are Battery Violet.
-
-### Tertiary
+### Roles
+- **Accent** (`accent`, `--accent`, on it `--on-accent`): what you press or pick. Main
+  buttons, text links, the switch when on, Finish setup, your current plan, today in the
+  calendar. Same green as solar by decision (the app stays green; the website button is
+  amber). Never on a reading.
+- **Ok Blue** (`ok-blue`, `--ok`): status that is fine. Live dot, grid on, connected,
+  unread dot, a rising trend that is good, the toast tick, "Back" and "OK" in alert emails.
+- **Warn Orange** (`warn-orange`, `--warn`): needs a look. Stale, Not updating, Payment
+  failed, Ending, a pack drifting, an unverified login, "Last reading" in alert emails.
+- **Bad Rose** (`bad-rose`, `--bad`): broken or destructive. Offline, grid off, errors,
+  invalid fields, the danger button, outage shading on charts, a falling trend that is bad,
+  "Off", "Down", "No power" and a hot battery in alert emails.
+- **Focus** (`focus`, `--focus`): the field being typed in, the open day picker or menu
+  button, the chosen day, keyboard focus rings.
+- **Money** (`--money`): plain Paper Text. "Saved", "Est. saved", prices and offers.
+- Loading and syncing ("Setting up", "Fetching history") are Muted Text, not a colour.
+- Status hues sit where no power colour is (blue, orange, rose) and show on words, dots
+  and edges, never on a big reading. Warning surfaces tint with their status at 6% to 9%
+  and edge it at 25% to 55%. Every role clears 4.5:1 on Panel Raised.
+- `--*-rgb` triplets on :root give the low-alpha tints: `rgba(var(--bad-rgb), .07)`.
+  `npm test` fails on a hex or rgb() of any of these outside :root, and on a power colour
+  used for focus or a pick.
 - **Sun** (`sun-core` → `sun-mid` → `sun-rim`): a radial gradient inside the brand orb
   and nowhere else. Its halo is the login page's ambient glow. It is a mark, not a
   palette entry for UI.
-- **Warn Amber** (`warn-amber`, CSS `--warn`) and **Fault Red** (`fault-red`, CSS
-  `--bad`): status only. The stale and offline states of the topbar pill, the
-  outage pill on the Grid and Inverters charts, a hot battery, a battery pack drifting
-  towards "watch". Kept distinct from Grid Amber so a status colour is never mistaken
-  for a data series. Warning surfaces (a drifting pack, an inverter warning strip, a
-  delete confirmation) tint with Home Coral at 6% to 9% and edge it at 25% to 55%; a
-  bad string card takes the coral edge at 35% and no tint.
 
 ### Neutral
 - **Night Ground** (`night-ground`): page background, the wall-display backdrop in
@@ -271,7 +277,8 @@ semantic, not decorative.
 ### Named Rules
 **The One Meaning Rule.** A series colour means one thing. Green is solar, violet is
 battery, amber is grid, coral is home, cyan is self-sufficiency. A new metric that is none of
-these gets grey, never a sixth hue.
+these gets grey, never a sixth hue. Status, focus and money take their role (above), never
+a series colour.
 
 **The Sun Stays In The Orb Rule.** The warm gradient and its glow belong to the brand
 mark and the login backdrop only. No other element is warm-lit.
@@ -290,6 +297,15 @@ the card edge is the most colour a container gets.
 reads like a meter face: the mono gives numbers weight and alignment, the sans keeps
 labels and notes quiet. Neither face is antialiased artificially; on the dark ground the
 browser default renders crisper.
+
+### Scale (SOLAR-344)
+Nine sizes, as tokens on `:root` in `public/index.html`; nothing else is allowed
+(`npm test` fails on a px font size): `--fs-2xs` 11, `--fs-xs` 12, `--fs-sm` 13 (14 on
+phones), `--fs-md` 14, `--fs-lg` 16, `--fs-xl` 18, `--fs-2xl` 22, `--fs-3xl` 30,
+`--fs-4xl` 44. 2xs is for uppercase labels only; sentences are sm or larger, so phone
+sentences are 14px or more. Mono goes on figures only: sub-lines, setup prompts and
+text fields use Space Grotesk with tabular figures. The px values below predate the
+scale; each now rounds to its nearest step.
 
 ### Hierarchy
 - **Display** (700, 30px, line-height 1, tracking -0.01em): the brand name in the
@@ -324,6 +340,16 @@ face, sitting on the same baseline, slightly lighter.
 muted. It is found after the number, never before.
 
 ## Layout
+
+### Scale (SOLAR-345)
+Ten spacing steps and five corners, as tokens on `:root` in `public/index.html`
+(`npm test` fails on a px padding, margin, gap or corner): `--sp-3xs` 2, `--sp-2xs` 4,
+`--sp-xs` 6, `--sp-sm` 8, `--sp-md` 12, `--sp-lg` 16, `--sp-xl` 20, `--sp-2xl` 24,
+`--sp-3xl` 32, `--sp-4xl` 40; `--r-xs` 2, `--r-sm` 4, `--r-md` 8, `--r-lg` 12, `--r-xl` 16,
+`--r-pill`. Cards are xl, a box inside a card (power flow) lg, buttons and chips md; thin
+bars and switches are pills. Offsets over 40px that match another element (the phone tab
+bar, an icon column) stay px. The px values below predate the scale; each now rounds to
+its nearest step, a tie to the multiple of 8.
 
 One centred column, max 1320px, with 20px side gutters (8px on phones) and 30px top
 padding. The shell is a flex column so the version line sits at the true bottom of the
@@ -360,6 +386,19 @@ screen. On an upright tablet the stacked tiles are zoomed to fill the width. Aft
 seconds idle the Exit button and cursor hide until a move, tap or key. Where there is no
 Fullscreen API (an iPad home-screen app) the same view covers the page, and the screen
 is kept awake while it shows.
+
+### Access (SOLAR-343)
+- **Tap size:** on a phone every control is 44px or more to tap. Where the drawn size
+  stays small (header buttons, switches, badges, the Today link, info dots), an invisible
+  pad centred on it makes up the rest (the last block in `public/index.html`).
+- **Focus:** one ring, `:focus-visible` on `:root` (see Buttons). `npm test` fails on a
+  focus rule that hides it or recolours it.
+- **Contrast:** every text 4.5:1 or more. Text never fades with opacity: old readings and
+  stale figures go grey (Muted), disabled Today is Dim without fading.
+- **Order:** the page source follows the screen, so Tab does too; no CSS `order` on
+  content.
+- **Emails:** the backup link under a button repeats the button's words, never
+  "Click here".
 
 ## Elevation & Depth
 
@@ -405,6 +444,21 @@ a reference series.
 Cards carry no coloured edge: a tile's subject is carried by the colour of its number.
 No asymmetric border is left.
 
+## Icons (SOLAR-349)
+
+One line, three sizes, all on `:root`. Every icon is `svg.ico`; its line is
+`--icon-stroke` (1.5px) in screen pixels at any size (`.ico *` is non-scaling).
+
+| Token | Size | Use |
+|---|---|---|
+| `--icon-sm` | 14px | Beside small text: chevrons, info dots, the lock, calendar, row actions, ticks |
+| `--icon-md` | 18px | Page list, header, phone bar, menus, close, power-flow boxes, password eye |
+| `--icon-lg` | 28px | The empty-state card only |
+
+No bolder line for the current page; colour marks it. Charts, pies, the setup progress
+ring and the power-flow lines are drawings, not icons. An icon next to a two-line label
+sits level with the first line. `npm test` fails on any other icon size or line.
+
 ## Components
 
 ### Buttons
@@ -427,8 +481,8 @@ No asymmetric border is left.
   1px border (strong hairline on ghost, Home Coral on danger, transparent on Save).
   Every form puts its buttons at the right, Cancel or Skip before the main button.
   Disabled Save is 40% opacity.
-- **Keyboard focus:** buttons and the password eye show a 2px Solar Green
-  inset outline; fields change border colour instead.
+- **Keyboard focus:** every control shows one ring: 2px Focus (Paper Text), 2px
+  out, keyboard only (SOLAR-343). Fields change border colour instead.
 - **Danger:** no fill, Home Coral border and text, 13px.
 - **Link:** bare green text at 13px 600, underlined on hover with 3px offset; a "quiet"
   variant in Muted Text.
@@ -468,8 +522,8 @@ No asymmetric border is left.
   14px regular mono, a 14px mono muted unit inside the box. Count boxes are the same
   well with centred text. An invalid box takes a Home Coral border.
 - **Phones:** every text and number box is 16px under 600px, so iOS does not zoom in.
-- **Focus:** border turns Grid Amber in Settings, Account and First steps; Solar Green with a 3px green ring at 14%
-  on the login card. No outline on fields.
+- **Focus:** border turns Focus (Paper Text) everywhere; the login card adds a 3px white ring at 12%.
+  No outline on fields.
 - **Autofill:** forced dark with an inset box-shadow so Chrome never paints a white well.
 - **Range:** 6px track at 10% white, 18px Charge Cyan thumb with a 3px ground-coloured
   border and a 1px cyan ring (16px and no ring in Firefox).
@@ -492,7 +546,7 @@ No asymmetric border is left.
   amber. Offline: fault red. Idle: muted. Plant just switched: Charge Cyan.
 - **Plant switcher:** the plant name in 12.5px mono under the brand, with a 10px muted
   chevron. Transparent at rest so it reads as text; Panel with a strong hairline on
-  hover, a Solar Green border on focus.
+  hover, the focus ring on keyboard focus.
 
 ### First steps
 A card in the sidebar, above Settings, listing every setup step (SOLAR-252): 12px radius,
@@ -505,7 +559,8 @@ sidebar and folded on a phone. On a
 tablet the 84px sidebar shows a ring and the count instead. The step opens in
 a popup 24px right of the sidebar: 320px wide, Panel Raised, strong hairline, 16px
 radius, 18px 20px 20px padding, Popup shadow, an 18px title and a 13px muted note. On
-phones the card sits over the bottom bar and the step opens as a bottom sheet.
+phones the card sits at the top of the page, in the flow, so it never covers a chart
+(SOLAR-345); the step opens as a bottom sheet.
 
 ### Segmented control
 A Panel Raised track with hairline, 10px radius and 3px padding; 13px 500 buttons at 7px
@@ -541,7 +596,7 @@ row, animated links down to an inverter node, and a home row.
 ### Tooltips
 Chart tooltips and info bubbles share one surface: 96% to 98% opaque near-black,
 strong hairline, 10px radius, 10px 12px padding, Floating shadow, 12px text with
-mono times. The info dot is a 13px outlined "i" in Dim Text that turns Grid Amber on
+mono times. The info dot is a 13px outlined "i" in Dim Text that turns Muted Text on
 hover or focus and reveals a 210px bubble with a 6px caret. `cursor: help` marks
 anything that carries an inference: battery-bank stats, the split bar, the approx and
 gap pills, the info dot.
@@ -556,8 +611,8 @@ it stands in for. The sweep stops under reduced motion.
 - **Do** set every number in JetBrains Mono with tabular figures, and every word in
   Space Grotesk.
 - **Do** put colour on the value and its meter, and keep the card Panel with a hairline.
-- **Do** keep Solar Green as the single accent for focus, active and success, and Home
-  Coral for warning and danger.
+- **Do** keep Solar Green as the single accent for active and success, Focus for keyboard
+  focus, and Home Coral for warning and danger.
 - **Do** hold the layout with a skeleton of the same height while data loads.
 - **Do** mark estimates, gaps and stale data with an amber pill or word rather than
   hiding them.
