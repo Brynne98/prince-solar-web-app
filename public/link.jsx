@@ -156,7 +156,7 @@ const payFailed = (e, fallback) => (/open soon/.test(e.message) ? window.toast('
 // It has no close: every step ends, the slowest after 30 s. Returns the function that closes it.
 const working = (text) => mountNode(<Dialog busy label={text}><div className="pop-wait" role="status"><span className="spin" aria-hidden="true" />{text}</div></Dialog>);
 // Paid after the plan or extra plants changed: nothing applied, refunded by hand (0127).
-const REFUND_NOTE = 'Your plan changed while you paid, so nothing changed. The payment will be refunded.';
+const REFUND_NOTE = 'Your plan changed while you paid. The payment will be refunded.';
 // extras: the extra plants wanted on Family in all (SOLAR-264); left out, those held.
 // plants: the stopped plants the room is for; once paid they start first, else the oldest.
 // One payment at a time: a second click while one is open does nothing.
@@ -336,7 +336,7 @@ window.billingReturn = async function billingReturn(billingStatus) {
     // A card change changes no plan: the caller re-reads the card ('card').
     if (status === 'paid' && kind === 'card') {
       window.track('card_change_done');
-      window.toast('Card changed. The R1 we took to check it goes back to your card.');
+      window.toast('Card changed. The R1 check goes back to your card.');
       return 'card';
     }
     // A full reload: resumed plants join the plant list.
@@ -441,7 +441,7 @@ function Paywall({ reason, paused = [], plantIds = null, onCancel }) {
 window.Paywall = Paywall;
 
 // The same moment on the Connect screen and inside Settings; one wording for both.
-const NO_PLANT_TEXT = 'signed in, but no plant is shared with it yet. Your login is saved. Retry any time.';
+const NO_PLANT_TEXT = 'has no plant shared with it yet. Your login is saved.';
 
 // One form for a SunSynk login, built from the app's own Settings parts (SOLAR-96).
 // `compact`: inside Account's SunSynk logins section (Add login, Reconnect). Otherwise the
