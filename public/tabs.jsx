@@ -3194,7 +3194,7 @@ function DeleteAccountRow({ email, billing, onBilling }) {
     setBusy(true);
     // The account is gone; signing out here is what moves the screen to sign-in, once.
     // No reload after it: that blanked the page and drew sign-in again (SOLAR-98).
-    try { await window.deleteAccount(); await window.signOutHere(); }
+    try { await window.deleteAccount(); await window.signOutHere(); window.toast('Account deleted.'); }
     catch (e) {
       const why = DELETE_REFUSED.find(([re]) => re.test(e?.message || ''));
       window.toast(why ? why[1] : 'Couldn’t delete the account. Try again.', { error: true });

@@ -1116,12 +1116,22 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
 // that isn't one box's typing mistake is window.toast(text, { error: true, action:
 // { label, onClick } }): red, 6 s, at most one link. Frame mounts the host; the
 // signed-out screens mount their own (window.SaveToast).
+// A toast sent as its host goes (signing out swaps the frame for the sign-in screen in the
+// same render, as after Delete account, SOLAR-359) moves to the next host.
 let toastShow = null;
-window.toast = (text, opts = {}) => toastShow && toastShow({ text, ...opts, at: Date.now() });
+let toastLast = null;
+window.toast = (text, opts = {}) => {
+  toastLast = { text, ...opts, at: Date.now() };
+  if (toastShow) toastShow(toastLast);
+};
 function SaveToast() {
   const [t, setT] = useState(null);
   const host = useRef(null);
-  useEffect(() => { toastShow = setT; return () => { toastShow = null; }; }, []);
+  useEffect(() => {
+    toastShow = setT;
+    if (toastLast && Date.now() - toastLast.at < 1000) setT(toastLast);
+    return () => { toastShow = null; };
+  }, []);
   useEffect(() => {
     if (!t) return;
     // A pop-up's backdrop sits in the top layer over everything else; showing the host as a
