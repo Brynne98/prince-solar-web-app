@@ -352,7 +352,7 @@ const SETTINGS_FOOTER = (line: string) => [line.replace("notification settings",
 // Sent once the email is confirmed, before any plant is added. The Add plant
 // card opens on Live when a user has no plant, so the button goes straight there.
 // Wording matches link.jsx ("Add your plant", "Use the login from the
-// SunSynk Connect app", "We never keep your password").
+// SunSynk Connect app").
 export const welcome = () =>
   make("Welcome to Prince Solar Hub", {
     title: "Welcome to Prince Solar Hub",
