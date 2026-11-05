@@ -71,6 +71,9 @@
     --sp-3xs: 2px; --sp-2xs: 4px; --sp-xs: 6px; --sp-sm: 8px; --sp-md: 12px;
     --sp-lg: 16px; --sp-xl: 20px; --sp-2xl: 24px; --sp-3xl: 32px; --sp-4xl: 40px;
     --r-xs: 2px; --r-sm: 4px; --r-md: 8px; --r-lg: 12px; --r-xl: 16px; --r-pill: 999px;
+    /* icons (SOLAR-349): one line weight at every size, three sizes. The stroke is screen
+       pixels (.ico * is non-scaling), so a 14 and an 18 icon draw the same line. */
+    --icon-stroke: 1.5px; --icon-sm: 14px; --icon-md: 18px; --icon-lg: 28px;
   }
   @media (max-width: 599px) { :root { --fs-sm: 14px; } }
   /* One focus ring (SOLAR-343): every control, keyboard focus only, 2px in --focus. Text
@@ -156,7 +159,9 @@
   .content { flex: 1 0 auto; display: flex; flex-direction: column; width: 100%; max-width: 1360px; margin: 0 auto; padding: var(--sp-lg) var(--sp-2xl); }
   /* > * so a tab whose root is a grid/stack still behaves as it did before */
   .content > * { flex: none; }
-  .ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .ico { width: var(--icon-md); height: var(--icon-md); flex: none; fill: none; stroke: currentColor; stroke-width: var(--icon-stroke); stroke-linecap: round; stroke-linejoin: round; }
+  .ico * { vector-effect: non-scaling-stroke; }
+  .ico.ico-sm { width: var(--icon-sm); height: var(--icon-sm); }
   .sun {
     width: 24px; height: 24px; border-radius: 50%; flex: none;
     background: radial-gradient(circle at 38% 34%, #ffd56b, #f4a93a 58%, #e07a1f);
@@ -199,7 +204,7 @@
   .menu button { display: flex; align-items: center; gap: var(--sp-sm); width: 100%; padding: var(--sp-sm) var(--sp-sm); border: none; background: none; border-radius: var(--r-md); color: var(--text); font-size: var(--fs-md); text-align: left; }
   .menu button:hover, .menu button:focus-visible { background: rgba(255,255,255,0.06); }
   .menu button:focus-visible { outline-offset: -2px; }
-  .menu button .ico { width: 16px; height: 16px; color: var(--muted); }
+  .menu button .ico { width: var(--icon-md); height: var(--icon-md); color: var(--muted); }
   .menu hr { border: none; border-top: 1px solid var(--line); margin: var(--sp-2xs) 0; }
   /* the small status dots: one size, each its own colour */
   .menu .dot, .pm-dot, .gs-dot, .fbox-grid i, .set-nav .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
@@ -233,7 +238,7 @@
   .plant-btn { display: flex; align-items: center; gap: var(--sp-sm); max-width: 100%; padding: var(--sp-sm) var(--sp-sm); border: 1px solid transparent; border-radius: var(--r-md);
     background: none; color: var(--text); font-size: var(--fs-xl); font-weight: 600; }
   .plant-btn:not(.static):hover, .plant-btn[aria-expanded="true"] { background: var(--panel-2); border-color: var(--line-2); }
-  .plant-btn .ico { width: 16px; height: 16px; color: var(--muted); }
+  .plant-btn .ico { width: var(--icon-sm); height: var(--icon-sm); color: var(--muted); }
   .plant-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   /* the plant name gives way first; the status and its age never clip */
   .status { margin-left: auto; display: flex; align-items: center; gap: var(--sp-sm); white-space: nowrap; flex: none; }
@@ -275,7 +280,7 @@
      under it, a full page on a phone (below) */
   .bell { position: relative; flex: none; }
   .bell-btn { position: relative; display: grid; place-items: center; width: 38px; }
-  .bell-btn .ico { width: 18px; height: 18px; }
+  .bell-btn .ico { width: var(--icon-md); height: var(--icon-md); }
   .bell-count { position: absolute; top: -6px; right: -6px; min-width: 17px; height: 17px; padding: 0 var(--sp-2xs); border-radius: var(--r-md);
     background: var(--bad); color: #fff; font-size: var(--fs-2xs); font-weight: 600; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--bg); }
   .notif-panel { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; width: 400px; max-height: min(640px, calc(100vh - 90px));
@@ -288,7 +293,7 @@
   .nl-gear, .nl-back { width: 36px; height: 36px; display: grid; place-items: center; background: none; border: none; color: var(--muted); border-radius: var(--r-md); flex: none; }
   .nl-head h2 + .nl-gear { margin-left: auto; }
   .nl-all:hover, .nl-gear:hover, .nl-back:hover { color: var(--text); }
-  .nl-gear .ico, .nl-back .ico { width: 18px; height: 18px; }
+  .nl-gear .ico, .nl-back .ico { width: var(--icon-md); height: var(--icon-md); }
   .nl-back { display: none; }
   .nl-day { padding: var(--sp-md) var(--sp-lg) var(--sp-2xs); font-size: var(--fs-sm); color: var(--dim); font-weight: 500; }
   /* a row is not a link (SOLAR-327) */
@@ -297,7 +302,7 @@
   .nl-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: var(--sp-md); }
   .nl-row.unread .nl-dot { background: var(--ok); }
   .nl-glyph { width: 32px; height: 32px; border-radius: var(--r-md); display: grid; place-items: center; }
-  .nl-glyph .ico { width: 17px; height: 17px; }
+  .nl-glyph .ico { width: var(--icon-md); height: var(--icon-md); }
   .g-grid { background: rgba(var(--grid-rgb),0.12); color: var(--grid); }
   .g-battery { background: rgba(var(--batt-rgb),0.14); color: var(--batt); }
   .g-panels { background: rgba(var(--pv-rgb),0.12); color: var(--pv); }
@@ -387,7 +392,7 @@
   .bill-banner-x { position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; display: grid; place-items: center;
     background: none; border: none; color: var(--muted); border-radius: var(--r-md); touch-action: manipulation; }
   .bill-banner-x:hover { color: var(--text); background: rgba(255,255,255,0.05); }
-  .bill-banner-x .ico { width: 16px; height: 16px; }
+  .bill-banner-x .ico { width: var(--icon-md); height: var(--icon-md); }
   .bb-short, .bill-banner-more { display: none; }
   /* phone: each banner is one line (SOLAR-345); the row opens the bell, which holds the
      details and the button, so two banners never fill the top of the page */
@@ -396,13 +401,13 @@
     .bill-banner { grid-template-columns: 24px minmax(0, 1fr) 16px; gap: var(--sp-md); min-height: 48px; padding: var(--sp-sm) var(--sp-md); border-radius: var(--r-lg); }
     .bill-banner.closable { padding-right: 52px; }
     .bill-banner .nl-glyph { width: 24px; height: 24px; border-radius: var(--r-sm); }
-    .bill-banner .nl-glyph .ico { width: 14px; height: 14px; }
+    .bill-banner .nl-glyph .ico { width: var(--icon-sm); height: var(--icon-sm); }
     .bill-banner p b, .bill-banner p span, .bill-banner > .ghost-btn { display: none; }
     .bill-banner p .bb-short { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     /* the whole row is the tap; the X sits above it */
     .bill-banner-more { display: grid; place-items: center end; position: absolute; inset: 0; padding: 0 var(--sp-md); background: none; border: 0; border-radius: inherit; color: var(--muted); touch-action: manipulation; }
     .bill-banner.closable .bill-banner-more { right: 44px; padding-right: 0; }
-    .bill-banner-more .ico { width: 16px; height: 16px; }
+    .bill-banner-more .ico { width: var(--icon-sm); height: var(--icon-sm); }
     .bill-banner-x { top: 2px; right: 2px; z-index: 1; }
   }
   /* touch screens: the notice buttons take a full 44 px tap */
@@ -469,7 +474,6 @@
       border: none; background: none; color: var(--muted); font-size: var(--fs-xs); font-weight: 500; }
     .phonebar button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .phonebar button[aria-current="page"], .phonebar button.on { color: var(--text); font-weight: 600; }
-    .phonebar button[aria-current="page"] .ico, .phonebar button.on .ico { stroke-width: 2.2; }
 
     .sheet { display: block; position: fixed; inset: 0; z-index: 25; background: rgba(5,7,10,0.55); }
     .sheet-panel { position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel-2); border-top: 1px solid var(--line-2); border-radius: var(--r-xl) var(--r-xl) 0 0;
@@ -609,7 +613,7 @@
   .wall-status .status-detail { font-size: .9em; padding-left: .6em; }
   .wall .wall-exit { font-size: .85em; padding: .5em .9em; gap: .5em; border-radius: .7em; flex: none;
     transition: opacity .3s, visibility .3s, border-color .15s, color .15s; }
-  .wall .wall-exit svg { width: 1em; height: 1em; }
+  .wall .wall-exit .ico { width: 1em; height: 1em; } /* the wall scales in em */
   @media (pointer: coarse) { .wall .wall-exit { min-height: 44px; } }
   .wall.idle .wall-exit:not(:focus-visible) { opacity: 0; visibility: hidden; }
   .wall.idle, .wall.idle * { cursor: none !important; }
@@ -1013,8 +1017,9 @@
   .notif-group + .notif-group { border-top: 1px solid var(--line); }
   .notif-open { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: var(--sp-sm); padding: 0;
     background: none; border: none; color: inherit; text-align: left; }
-  .notif-open svg { flex: none; width: 16px; height: 16px; stroke-width: 2.4; color: var(--dim); transition: transform .18s; }
-  .notif-open[aria-expanded="true"] svg { transform: rotate(90deg); }
+  .notif-open .ico { width: var(--icon-sm); height: var(--icon-sm); color: var(--dim); transition: transform .18s;
+    font-size: var(--fs-lg); margin-block: calc((1lh - var(--icon-sm)) / 2); } /* level with the label's first line */
+  .notif-open[aria-expanded="true"] .ico { transform: rotate(90deg); }
   .notif-label { font-size: var(--fs-lg); font-weight: 500; }
   /* an email sits under its group, indented past the group's name; no rule between emails */
   .sset .notif-rows { margin: 0 0 var(--sp-lg) 42px; }
@@ -1068,7 +1073,7 @@
   .set-nav button:hover { color: var(--text); }
   .set-nav button[aria-current="page"] { background: var(--panel-2); border-color: var(--line-2); color: var(--text); }
   .set-nav .dot { background: var(--warn); }
-  .set-chev { display: none; flex: none; width: 16px; height: 16px; stroke-width: 2.4; color: var(--dim); }
+  .set-chev { display: none; flex: none; width: var(--icon-sm); height: var(--icon-sm); color: var(--dim); }
   .set-main { min-width: 0; }
   .set-main > .settings-page { padding-top: var(--sp-3xs); }
   .back-link { align-self: flex-start; display: inline-flex; align-items: center; gap: var(--sp-xs); margin: 0 0 var(--sp-md); padding: var(--sp-2xs) 0; background: none; border: none;
@@ -1104,7 +1109,7 @@
   .login-more { position: relative; flex: none; }
   /* Manage: grey text, no box, so the plants stay the loudest thing on the card (SOLAR-289) */
   .login-manage { display: inline-flex; align-items: center; gap: var(--sp-2xs); min-height: 32px; padding: var(--sp-2xs) var(--sp-xs); border: none; border-radius: var(--r-md); background: none; color: var(--dim); font-size: var(--fs-sm); }
-  .login-manage .ico { width: 12px; height: 12px; stroke-width: 3.2; }
+  .login-manage .ico { width: var(--icon-sm); height: var(--icon-sm); }
   .login-manage:hover, .login-manage[aria-expanded="true"] { background: var(--panel-2); color: var(--text); }
   .login-menu { right: 0; top: calc(100% + 4px); min-width: 180px; }
   .menu button.menu-danger { color: var(--bad); }
@@ -1236,7 +1241,7 @@
   .plan-pop .page-head { padding-right: var(--sp-4xl); }
   /* sticky, so it stays in view when the picker scrolls on a short screen */
   .pop-x { position: sticky; top: 0; z-index: 1; align-self: flex-end; margin: calc(-1 * var(--sp-sm)) calc(-1 * var(--sp-sm)) calc(-1 * var(--sp-2xl)) 0; width: 34px; height: 34px; display: grid; place-items: center; border: none; border-radius: var(--r-md); background: var(--panel-2); color: var(--dim); cursor: pointer; }
-  .pop-x .ico { width: 16px; height: 16px; stroke-width: 2.7; }
+  .pop-x .ico { width: var(--icon-md); height: var(--icon-md); }
   .pop-x:disabled { opacity: .4; cursor: default; }
   .pop-x:hover { background: var(--panel); color: var(--text); }
   /* A downgrade's pick of plants to keep (SOLAR-295): Billing's login groups and switches */
@@ -1266,7 +1271,7 @@
   .login-wrap .toast-host { bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
   .toast { display: flex; align-items: center; gap: var(--sp-sm); max-width: 560px; padding: var(--sp-sm) var(--sp-lg) var(--sp-sm) var(--sp-md); font-size: var(--fs-md); line-height: 1.35;
     border-radius: var(--r-lg); animation: toast-in .18s ease-out; }
-  .toast .ico { flex: none; width: 18px; height: 18px; stroke: var(--ok); stroke-width: 2.4; }
+  .toast .ico { stroke: var(--ok); }
   /* a failure, with at most one link */
   .toast.error { border-color: rgba(var(--bad-rgb),0.45); padding-left: var(--sp-lg); pointer-events: auto; }
   .toast-act { background: none; border: none; padding: 0; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; }
@@ -1584,7 +1589,7 @@
      the top and scrolls, rather than being cut off at both ends (SOLAR-118) */
   .setup-empty-box { width: min(380px, 100%); min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-sm); text-align: center;
     padding: var(--sp-2xl); border-radius: var(--r-xl); background: rgba(10,13,18,0.9); border: 1px solid var(--line-2); box-shadow: 0 20px 50px -24px rgba(0,0,0,0.9); }
-  .setup-empty-box > .ico { width: 28px; height: 28px; color: var(--accent); }
+  .setup-empty-box > .ico { width: var(--icon-lg); height: var(--icon-lg); color: var(--accent); }
   .setup-empty-box h2 { margin: var(--sp-2xs) 0 0; font-size: var(--fs-xl); text-wrap: balance; }
   .setup-empty-box p { margin: 0 0 var(--sp-xs); color: var(--muted); line-height: 1.45; font-size: var(--fs-md); }
   .setup-btn { display: inline-flex; align-items: center; gap: var(--sp-sm); font-size: var(--fs-md); padding: var(--sp-sm) var(--sp-lg); border-radius: var(--r-md); font-weight: 700; white-space: nowrap; }
@@ -1653,9 +1658,9 @@
   .plan-cards .plan-gives { padding-top: var(--sp-2xl); display: flex; flex-direction: column; gap: var(--sp-2xs); font-size: var(--fs-md); }
   .plan-cards .plan-gives li { display: flex; align-items: center; gap: var(--sp-md); min-height: 36px; }
   .plan-cards .plan-gives li::before { content: ''; flex: none; width: 20px; height: 20px; margin: 0; border-radius: 50%; vertical-align: 0;
-    background: rgba(var(--accent-rgb),0.13) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='%233ddc84' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 11px no-repeat; }
+    background: rgba(var(--accent-rgb),0.13) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='%233ddc84' stroke-width='1.5' vector-effect='non-scaling-stroke' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / var(--icon-sm) no-repeat; }
   .plan-cards .plan-gives li.plan-off { color: var(--dim); }
-  .plan-cards .plan-gives li.plan-off::before { background: rgba(255,255,255,0.04) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 3l6 6M9 3l-6 6' fill='none' stroke='%237f8da0' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center / 10px no-repeat; }
+  .plan-cards .plan-gives li.plan-off::before { background: rgba(255,255,255,0.04) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 3l6 6M9 3l-6 6' fill='none' stroke='%237f8da0' stroke-width='1.5' vector-effect='non-scaling-stroke' stroke-linecap='round'/%3E%3C/svg%3E") center / var(--icon-sm) no-repeat; }
   .plan-plants { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-sm); }
   .plan-plus { color: var(--muted); }
   .plan-plants > span:first-child { white-space: nowrap; }
@@ -1671,8 +1676,7 @@
   .stepper { display: inline-flex; align-items: center; border: 1px solid var(--line-2); border-radius: var(--r-md); overflow: hidden; }
   .stepper button { width: 36px; height: 34px; padding: 0; background: none; border: none; color: var(--text); display: grid; place-items: center;
     margin: 0; align-self: center; }   /* .pw-plan button gives every card button an 8px top margin */
-  .stepper svg { width: 14px; height: 14px; }
-  .stepper button:disabled { color: var(--dim); opacity: .5; cursor: default; }
+    .stepper button:disabled { color: var(--dim); opacity: .5; cursor: default; }
   .stepper .mono { min-width: 28px; text-align: center; font-size: var(--fs-md); font-weight: 600; }
   .plan-gives li::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: var(--r-xs); background: var(--accent); margin-right: var(--sp-sm); vertical-align: 2px; }
   .pay-logo { padding: 0; background: none; }
@@ -1729,7 +1733,7 @@
   .fs-n { margin-left: auto; font-size: var(--fs-xs); color: var(--muted); }
   .fs-x { width: 28px; height: 28px; margin: calc(-1 * var(--sp-2xs)) calc(-1 * var(--sp-xs)) calc(-1 * var(--sp-2xs)) 0; display: grid; place-items: center; padding: 0; border: none; background: none; border-radius: var(--r-md); color: var(--dim); cursor: pointer; }
   .fs-x:hover { color: var(--text); background: rgba(255,255,255,0.05); }
-  .fs-x .ico { width: 14px; height: 14px; stroke-width: 2.2; }
+  .fs-x .ico { width: var(--icon-sm); height: var(--icon-sm); }
   .fs-list { list-style: none; margin: 0 calc(-1 * var(--sp-xs)); padding: 0; display: grid; gap: var(--sp-3xs); }
   .fs-item { width: 100%; display: flex; align-items: center; gap: var(--sp-sm); min-height: 34px; padding: 0 var(--sp-xs) 0 var(--sp-sm); border: none; border-radius: var(--r-md);
     background: none; color: var(--text); font: inherit; font-size: var(--fs-md); font-weight: 500; text-align: left; cursor: pointer; }
@@ -1742,16 +1746,16 @@
   @media (prefers-reduced-motion: reduce) { .fs-name { transition: none; } }
   .fs-fold { flex: 1; display: flex; align-items: center; gap: var(--sp-sm); min-height: 32px; margin: calc(-1 * var(--sp-2xs)) 0; padding: 0; border: none; background: none; color: inherit; font: inherit; cursor: pointer; }
   .fs-fold .fs-n { margin-left: auto; }
-  .fs-fold .ico { width: 16px; height: 16px; color: var(--muted); transform: rotate(180deg); transition: transform .18s ease; }
+  .fs-fold .ico { width: var(--icon-sm); height: var(--icon-sm); color: var(--muted); transform: rotate(180deg); transition: transform .18s ease; }
   .fs-fold[aria-expanded="true"] .ico { transform: none; }
   @media (prefers-reduced-motion: reduce) { .fs-fold .ico { transition: none; } }
   div.fs-item { cursor: default; } div.fs-item:hover { background: none; }
   .fs-tick { width: 16px; height: 16px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--line-2); box-sizing: border-box; }
   .fs-item.cur .fs-tick { border-color: var(--accent); }
   .fs-item.done .fs-tick { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-  .fs-tick .ico { width: 11px; height: 11px; stroke-width: 3.2; }
+  .fs-tick .ico { width: var(--icon-sm); height: var(--icon-sm); }
   .fs-name { flex: 1; min-width: 0; }
-  .fs-item > .ico { width: 14px; height: 14px; color: var(--dim); }
+  .fs-item > .ico { width: var(--icon-sm); height: var(--icon-sm); color: var(--dim); }
   /* the name only as wide as its text, so the line stops at the last letter; the arrow keeps right */
   .fs-item .fs-name { flex: 0 1 auto; } .fs-item > .ico { margin-left: auto; }
   .fs-item.cur > .ico { color: var(--accent); }
@@ -1768,7 +1772,7 @@
   .fs-back { display: inline-flex; align-items: center; gap: var(--sp-2xs); height: 28px; margin: calc(-1 * var(--sp-xs)) var(--sp-2xs) calc(-1 * var(--sp-xs)) calc(-1 * var(--sp-sm)); padding: 0 var(--sp-sm); border: none; border-radius: var(--r-md);
     background: none; color: var(--muted); font-size: var(--fs-sm); cursor: pointer; }
   .fs-back:hover { color: var(--text); }
-  .fs-back .ico { width: 14px; height: 14px; }
+  .fs-back .ico { width: var(--icon-sm); height: var(--icon-sm); }
   /* the step bars in the panel move between steps */
   .fs-bars { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--sp-2xs); margin-top: calc(-1 * var(--sp-xs)); }
   .fs-bars button { height: 16px; padding: var(--sp-xs) 0; border: none; background: none; cursor: pointer; }
@@ -1788,7 +1792,7 @@
   .pick-btn { width: 100%; gap: var(--sp-sm); color: var(--text); font: 400 var(--fs-md) var(--display); text-align: left; cursor: pointer; }
   .pick-btn:hover, .pick-btn[aria-expanded="true"] { border-color: var(--focus); }
   .pick-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-  .pick-btn .ico { width: 16px; height: 16px; margin-left: auto; color: var(--muted); flex: none; }
+  .pick-btn .ico { width: var(--icon-sm); height: var(--icon-sm); margin-left: auto; color: var(--muted); flex: none; }
   .pick-val { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pick-menu { top: calc(100% + 6px); left: 0; right: 0; max-height: 300px; overflow-y: auto; }
   .pick-menu button { display: grid; grid-template-columns: 18px minmax(0, 1fr); white-space: nowrap; }

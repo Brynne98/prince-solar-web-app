@@ -444,6 +444,21 @@ a reference series.
 Cards carry no coloured edge: a tile's subject is carried by the colour of its number.
 No asymmetric border is left.
 
+## Icons (SOLAR-349)
+
+One line, three sizes, all on `:root`. Every icon is `svg.ico`; its line is
+`--icon-stroke` (1.5px) in screen pixels at any size (`.ico *` is non-scaling).
+
+| Token | Size | Use |
+|---|---|---|
+| `--icon-sm` | 14px | Beside small text: chevrons, info dots, the lock, calendar, row actions, ticks |
+| `--icon-md` | 18px | Page list, header, phone bar, menus, close, power-flow boxes, password eye |
+| `--icon-lg` | 28px | The empty-state card only |
+
+No bolder line for the current page; colour marks it. Charts, pies, the setup progress
+ring and the power-flow lines are drawings, not icons. An icon next to a two-line label
+sits level with the first line. `npm test` fails on any other icon size or line.
+
 ## Components
 
 ### Buttons

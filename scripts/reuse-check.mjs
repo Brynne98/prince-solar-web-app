@@ -131,6 +131,47 @@ for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
 for (const f of [path.join(PUB, '..', 'supabase', 'functions', '_shared', 'email.ts'), ...fs.readdirSync(path.join(PUB, '..', 'supabase', 'templates')).map(t => path.join(PUB, '..', 'supabase', 'templates', t))])
   if (/>\s*click here\s*</i.test(fs.readFileSync(f, 'utf8'))) problems.push(`${path.basename(f)}: a link reads "Click here"; name where it goes`);
 
+// ---- 2f. one icon line and three icon sizes (SOLAR-349) ----
+// Icons are svg.ico: line var(--icon-stroke) in screen px (.ico * is non-scaling), size
+// var(--icon-sm|md|lg). Charts, pies, the setup progress ring and the power-flow lines are
+// drawings, not icons, and keep their own lines.
+const NOT_ICON = /chart-svg|\.pie\b|fs-mini|pflow-lane|mflow-inv/;
+for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+  const sel = m[1].trim();
+  if (!/\.ico\b|(^|[\s>+~,(])svg\b/.test(sel) || NOT_ICON.test(sel)) continue;
+  for (const d of m[2].matchAll(/(?<![\w-])(width|height|stroke-width)\s*:([^;]*)/g)) {
+    const v = d[2].trim();
+    const ok = d[1] === 'stroke-width' ? v === 'var(--icon-stroke)' : /^var\(--icon-(sm|md|lg)\)$|^1em$/.test(v);
+    if (!ok) problems.push(`index.html:${lineOf(m.index + m[1].length + 1 + d.index)} icon ${d[1]} ${v}: use var(--icon-${d[1] === 'stroke-width' ? 'stroke' : 'sm|md|lg'})`);
+  }
+}
+// An icon drawn in a data: URI keeps the same 1.5 px line and a token size.
+for (const m of css.matchAll(/url\("data:image\/svg\+xml,([^"]*)"\)([^;]*)/g)) {
+  const at = lineOf(m.index);
+  for (const w of m[1].matchAll(/stroke-width='([^']*)'/g)) if (w[1] !== '1.5' || !/non-scaling-stroke/.test(m[1])) problems.push(`index.html:${at} icon in a data: URI: stroke-width='1.5' with vector-effect='non-scaling-stroke'`);
+  const size = m[2].match(/\/\s*([^\s;]+)/)?.[1];
+  if (size && !/^var\(--icon-(sm|md|lg)\)$/.test(size)) problems.push(`index.html:${at} icon in a data: URI sized ${size}: use var(--icon-sm|md|lg)`);
+}
+// In jsx a line icon is <svg className="ico …"> with no width, height or strokeWidth of its own.
+for (const f of jsx) {
+  let inIcon = false;
+  read(f).split('\n').forEach((line, i) => {
+    if (/reuse-check: allow/.test(line)) return;
+    const svg = line.match(/<svg\b[^>]*>/)?.[0];
+    if (svg && !/chart-svg|className="pie"|pay-logo/.test(svg)) {
+      const ico = /className="[^"]*\bico\b/.test(svg);
+      if (ico && /\b(width|height|strokeWidth)=/.test(svg)) problems.push(`${f}:${i + 1} an .ico svg sets its own size or line: drop width/height/strokeWidth`);
+      const w = +(svg.match(/\bwidth="(\d+)/)?.[1] || 0);
+      if (!ico && w <= 40 && /stroke|width="\d/.test(svg)) problems.push(`${f}:${i + 1} an inline icon without className="ico": use Icon or svg.ico`);
+      inIcon = ico;
+    }
+    // the power-flow box icons are drawn by flow.jsx's icon() into an svg.ico
+    if (f === 'flow.jsx' && /const icon = \(/.test(line)) inIcon = true;
+    if (inIcon && /strokeWidth=/.test(line)) problems.push(`${f}:${i + 1} strokeWidth inside an icon: the line is var(--icon-stroke)`);
+    if (inIcon && (/<\/svg>/.test(line) || f === 'flow.jsx' && /^  };/.test(line))) inIcon = false;
+  });
+}
+
 // ---- 3. one global scope ----
 const seen = new Map();
 for (const f of jsx) {

@@ -7,9 +7,9 @@
 const { Card, StatTile, Segmented, Toggle, SectionTitle,
   fmtPower, fmtPowerParts, battShown, fmtKwh, fmtRand, cleanTemp, COLORS: CC } = window;
 
-const FsEnterIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" /></svg>;
-const TrashIcon = () => <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.6 9h6.8l.6-9M6.75 7v4M9.25 7v4" /></svg>;
-const FsExitIcon = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" /></svg>;
+const FsEnterIcon = () => <svg className="ico ico-sm" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" /></svg>;
+const TrashIcon = () => <svg className="ico ico-sm" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.6 9h6.8l.6-9M6.75 7v4M9.25 7v4" /></svg>;
+const FsExitIcon = () => <svg className="ico ico-sm" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" /></svg>;
 
 // The Overview's periods, for its switch and its loading copy alike.
 const PERIODS = [{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'year', label: 'Year' }, { value: 'lifetime', label: 'Lifetime' }];
@@ -2428,9 +2428,9 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
     <span className="plan-plants">
       <span><span className="mono">3</span> plants <span className="plan-plus">+ extra</span></span>
       <span className="stepper" aria-busy={waiting}>
-        <button type="button" aria-label="One plant fewer" disabled={more === 0} onClick={() => pick(more - 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
+        <button type="button" aria-label="One plant fewer" disabled={more === 0} onClick={() => pick(more - 1)}><svg className="ico ico-sm" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10" /></svg></button>
         <span className="mono" aria-live="polite">{more}</span>
-        <button type="button" aria-label="One plant more" onClick={() => pick(more + 1)}><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10M7 2v10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg></button>
+        <button type="button" aria-label="One plant more" onClick={() => pick(more + 1)}><svg className="ico ico-sm" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10M7 2v10" /></svg></button>
       </span>
     </span>
   );

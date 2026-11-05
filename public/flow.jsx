@@ -143,31 +143,31 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
         const r = a * Math.PI / 180;
         rays.push(<line key={a} x1={Math.cos(r) * 6.5} y1={Math.sin(r) * 6.5} x2={Math.cos(r) * 9} y2={Math.sin(r) * 9} />);
       }
-      return <g stroke={color} strokeWidth="1.5" strokeLinecap="round" opacity={o}><circle r="4.2" fill={active ? color : 'none'} fillOpacity={active ? 0.45 : 0} />{rays}</g>;
+      return <g stroke={color} opacity={o}><circle r="4.2" fill={active ? color : 'none'} fillOpacity={active ? 0.45 : 0} />{rays}</g>;
     }
     if (type === 'battery') {
       const lvl = Math.max(0, Math.min(1, (soc || 0) / 100));
       return (
         <g opacity={o}>
-          <rect x={-9.5} y={-6.5} width="16" height="13" rx="3.2" fill="none" stroke={color} strokeWidth="1.6" />
-          <rect x={7} y={-3} width="3" height="6" rx="1.4" fill={color} />
-          <rect x={-7.3} y={-4.1} width={lvl * 12} height="8.2" rx="1.6" fill={color} />
+          <rect x={-9.5} y={-6.5} width="16" height="13" rx="3.2" stroke={color} />
+          <rect x={7} y={-3} width="3" height="6" rx="1.4" fill={color} stroke="none" />
+          <rect x={-7.3} y={-4.1} width={lvl * 12} height="8.2" rx="1.6" fill={color} stroke="none" />
         </g>
       );
     }
     if (type === 'bolt') {
       return (
         <g>
-          <path d="M 2 -8 L -5 1.5 L -0.5 1.5 L -1.5 8 L 5.5 -2 L 1 -2 Z" fill={color} fillOpacity={active ? 0.22 : 0} stroke={color} strokeWidth="1.5" strokeLinejoin="round" opacity={o} />
+          <path d="M 2 -8 L -5 1.5 L -0.5 1.5 L -1.5 8 L 5.5 -2 L 1 -2 Z" fill={color} fillOpacity={active ? 0.22 : 0} stroke={color} opacity={o} />
           {/* mains gone: a slash through the bolt */}
-          {off && <line x1={-8} y1={-8} x2={8} y2={8} stroke="var(--muted)" strokeWidth="1.6" strokeLinecap="round" />}
+          {off && <line x1={-8} y1={-8} x2={8} y2={8} stroke="var(--muted)" />}
         </g>
       );
     }
     return (
       <g opacity={o}>
-        <path d="M -8 8 L -8 -2 L 0 -10 L 8 -2 L 8 8 Z" fill={active ? color : 'none'} fillOpacity={active ? 0.18 : 0} stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
-        <rect x={-2.2} y={1} width="4.4" height="4.4" rx="0.6" fill="none" stroke={color} strokeWidth="1.2" />
+        <path d="M -8 8 L -8 -2 L 0 -10 L 8 -2 L 8 8 Z" fill={active ? color : 'none'} fillOpacity={active ? 0.18 : 0} stroke={color} />
+        <rect x={-2.2} y={1} width="4.4" height="4.4" rx="0.6" stroke={color} />
       </g>
     );
   };
@@ -207,7 +207,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
         style={{ borderColor: flowAlpha(n.color, active ? 0.6 : 0.22), background: active ? flowAlpha(n.color, 0.07) : undefined }}>
         <div className="fbox-now">
           <div className="fbox-head">
-            <svg width="18" height="18" viewBox="-11 -11 22 22">{icon(n.icon, n.color, active, n.soc, n.off)}</svg>
+            <svg className="ico" viewBox="-11 -11 22 22" aria-hidden="true">{icon(n.icon, n.color, active, n.soc, n.off)}</svg>
             <span className="fbox-label">{n.label}</span>
           </div>
           <div className="fbox-val" style={{ color: active ? n.color : 'var(--muted)' }}>{v}<span className="u">{u}</span></div>

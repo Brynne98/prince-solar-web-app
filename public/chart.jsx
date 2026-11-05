@@ -88,14 +88,14 @@ function dayFace(s, todayStr) {
 
 // A drawn chevron, so it sits in the middle of its box; the ‹ › glyphs sat on the text baseline.
 const Chevron = ({ dir }) => (
-  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-    <path d={dir < 0 ? 'M8.5 3 4.5 7l4 4' : 'M5.5 3l4 4-4 4'} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+  <svg className="ico ico-sm" viewBox="0 0 14 14" aria-hidden="true">
+    <path d={dir < 0 ? 'M8.5 3 4.5 7l4 4' : 'M5.5 3l4 4-4 4'} />
   </svg>
 );
 const CalIcon = () => (
-  <svg className="hv-cal" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-    <rect x="1.75" y="2.75" width="12.5" height="11.5" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-    <path d="M1.75 6.5h12.5M5 1.5v2.5M11 1.5v2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  <svg className="hv-cal ico ico-sm" viewBox="0 0 16 16" aria-hidden="true">
+    <rect x="1.75" y="2.75" width="12.5" height="11.5" rx="2" />
+    <path d="M1.75 6.5h12.5M5 1.5v2.5M11 1.5v2.5" />
   </svg>
 );
 
