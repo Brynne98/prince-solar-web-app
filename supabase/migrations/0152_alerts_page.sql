@@ -15,8 +15,10 @@
 --              starts after it, even if that row has gone since
 --   {items, more, unread}. Each item: the "down"'s words (alert_text), ts, and
 --     endAt/endDay/endTime: when it went back, null while it hasn't
---     open: it has a "back" kind, none came yet, and no later alert of its kind on
---           that plant ended it; the app says "not back yet"
+--     open: it has a "back" kind, none came yet, no later alert of its kind on that
+--           plant ended it, and it started after that "back" kind was first sent
+--           (battery, uneven charging and strings had none before 0151); the app
+--           says "not back yet"
 --     ids:  the "down" and "back" rows, for api_notifications_read
 --   unread: every unread alert row, all time (the page's Mark all read).
 -- ============================================================================
@@ -56,7 +58,10 @@ returns jsonb language sql stable security definer set search_path = '' as $$
        and (not p_unread or s.read_at is null or (b.id is not null and b.read_at is null))
      order by s.created_at desc, s.id desc
      limit greatest(1, least(p_limit, 200)) + 1),
-  shown as (select * from e order by created_at desc, id desc limit greatest(1, least(p_limit, 200)))
+  shown as (select * from e order by created_at desc, id desc limit greatest(1, least(p_limit, 200))),
+  -- when each "back" kind was first sent, by anyone
+  firsts as (select f.kind, min(f.created_at) at from public.email_queue f
+              where f.kind in (select private.alert_back_kind(k.kind) from shown k) group by f.kind)
   select jsonb_build_object(
     'more', (select count(*) from e) > greatest(1, least(p_limit, 200)),
     'unread', (select count(*) from a where read_at is null),
@@ -67,6 +72,7 @@ returns jsonb language sql stable security definer set search_path = '' as $$
         'endAt', (bt->>'at')::bigint,
         'endDay', bt->>'day', 'endTime', bt->>'time',
         'open', s.b_id is null and coalesce(private.is_alert(private.alert_back_kind(s.kind)), false)
+                and coalesce(s.created_at >= (select f.at from firsts f where f.kind = private.alert_back_kind(s.kind)), false)
                 and not exists (select 1 from public.email_queue l where l.user_id = auth.uid() and l.plant_id = s.plant_id
                                   and l.kind = s.kind and l.created_at > s.created_at))
         || t

@@ -80,6 +80,17 @@ select public.api_notifications_read(array(select (jsonb_array_elements(public.a
 select pg_temp.ok(jsonb_array_length(public.api_alerts(p_unread => true)->'items') = 4, 'both read: out of unread only');
 select pg_temp.ok((public.api_alerts()->'items'->1->>'read')::boolean, 'shown as read');
 
+-- a hot battery from before its "back" kind was ever sent: just its time, never "not back yet"
+select private.email_enqueue_plant(990201, 'batt_hot_back', 'bhb0', jsonb_build_object('at', extract(epoch from now() - interval '2 days')::bigint), 'nothing');
+select pg_temp.at('bhb0', '2 days');
+select pg_temp.ok(not (public.api_alerts(p_switch => 'battery')->'items'->0->>'open')::boolean, 'battery alert from before backs existed: not open');
+select private.email_enqueue_plant(990201, 'batt_hot', 'bh2', jsonb_build_object('at', extract(epoch from now() - interval '1 day')::bigint, 'tempC', 45));
+select pg_temp.at('bh2', '1 day');
+select pg_temp.ok((public.api_alerts(p_switch => 'battery')->'items'->0->>'open')::boolean, 'battery alert after backs began, none yet: not back yet');
+select private.email_enqueue_plant(990201, 'batt_hot_back', 'bhb2', jsonb_build_object('since', extract(epoch from now() - interval '1 day')::bigint,
+  'at', extract(epoch from now() - interval '1 day' + interval '20 minutes')::bigint), 'bh2');
+select pg_temp.ok((public.api_alerts(p_switch => 'battery')->'items'->0->>'endTime') is not null, 'battery back pairs with its alert (0151)');
+
 -- an earlier outage with no back, ended by a later one: not "not back yet"
 select private.email_enqueue_plant(990201, 'grid_down', 'gd0', jsonb_build_object('since', extract(epoch from now() - interval '100 days')::bigint));
 select pg_temp.at('gd0', '100 days');
@@ -87,7 +98,7 @@ select pg_temp.ok(not (public.api_alerts(p_switch => 'grid')->'items'->-1->>'ope
 
 -- user 2 sees their own copies, not user 1's read state; a removed plant leaves
 select pg_temp.as_user('00000000-0000-0000-0000-00000000c002');
-select pg_temp.ok((public.api_alerts()->>'unread')::int = 9 and public.api_alerts()->'items'->0->>'plantName' = 'Mom', 'user 2: own rows and names');
+select pg_temp.ok((public.api_alerts()->>'unread')::int = 12 and public.api_alerts()->'items'->0->>'plantName' = 'Mom', 'user 2: own rows and names');
 delete from public.plant_users where plant_id = 990201 and user_id = '00000000-0000-0000-0000-00000000c002';
 select pg_temp.ok(jsonb_array_length(public.api_alerts()->'items') = 0, 'removed plant: gone');
 select set_config('request.jwt.claims', '', true);
