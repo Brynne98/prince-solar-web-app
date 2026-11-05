@@ -142,17 +142,18 @@ const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
 const rgb = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 // hour, sky top, mid, bottom, far hill, near hill, ink (0 light, 1 dark), stars
+// the words turn dark as soon as the sky behind them is lighter than mid-tone, so they never fade into a bright sky
 const K = [
   [0, '#04060c', '#070b16', '#0e1424', '#090c16', '#05070c', 0, 1],
   [5.0, '#05070f', '#0b1020', '#171b33', '#0b0e1a', '#06080e', 0, 1],
   [5.9, '#0f1433', '#3b2f5e', '#c0656a', '#1a1626', '#0b0a12', 0, .55],
   [6.7, '#23305c', '#8a6282', '#f2a46f', '#3a2a2e', '#1a1418', 0, .05],
-  [8.0, '#6f6a8a', '#d9a27a', '#f6cf96', '#7a5a3e', '#3c2c20', 0, 0],
+  [8.0, '#6f6a8a', '#d9a27a', '#f6cf96', '#7a5a3e', '#3c2c20', 1, 0],
   [9.6, '#c08c4c', '#ebbd74', '#f9e0ad', '#a77d48', '#5e4428', 1, 0],
   [12.3, '#e3a744', '#f4cd7f', '#fdedc6', '#b98c4c', '#6e522e', 1, 0],
   [15.2, '#d68c38', '#efb462', '#f8d79e', '#a7743c', '#5c3f22', 1, 0],
   [16.6, '#b9672f', '#df9150', '#f1bd7c', '#874f2c', '#46291a', 1, 0],
-  [17.4, '#7e3f3c', '#c8664c', '#ee9d5e', '#5a2f2a', '#2c1816', 0, 0],
+  [17.4, '#7e3f3c', '#c8664c', '#ee9d5e', '#5a2f2a', '#2c1816', .7, 0],
   [18.4, '#3e2046', '#a1475c', '#ec8650', '#341c2a', '#1a0e16', 0, .1],
   [19.3, '#171633', '#3e2850', '#7a3f58', '#1a1424', '#0c0a12', 0, .5],
   [20.6, '#070a17', '#0d1124', '#181a33', '#0b0d18', '#06070d', 0, 1],
@@ -178,21 +179,53 @@ const moments = [...document.querySelectorAll('.moment')];
 // sizes and positions are read here, once and again when they change, never in a scroll frame:
 // a read after that frame's writes forced a fresh style and layout pass, ~30 ms a frame on a mid-range phone
 let L;
+// the words' own boxes, not their column: a short line or the buttons leave room beside them
+const inked = e => { const r = document.createRange(); r.selectNodeContents(e); return r.getBoundingClientRect(); };
+// the sun's disc and the moon, each with room to spare
+const SUN_R = 38, MOON_R = 44;
 function measure() {
-  const y = scrollY, r = cardEl.getBoundingClientRect();
-  L = { W: stage.clientWidth, H: stage.clientHeight, dayEnd: day.offsetTop + day.offsetHeight,
+  const y = scrollY, r = cardEl.getBoundingClientRect(), phone = innerWidth <= 860;
+  const land = document.querySelector('.land'), house = $('houseBody'), sTop = stage.getBoundingClientRect().top;
+  const landTop = land.offsetTop;
+  // where words may not go: on a phone the strip over the hills, where the sun and moon run; on a laptop the house
+  const hb = house.getBoundingClientRect(), keep = [];
+  if (phone) keep.push({ l: -1e5, r: 1e5, t: landTop - 46, b: 1e5 });
+  else if (hb.width) keep.push({ l: hb.left - 24, r: hb.right + 24, t: hb.top - sTop - 40, b: 1e5 });
+  L = { W: stage.clientWidth, H: stage.clientHeight, dayEnd: day.offsetTop + day.offsetHeight, landTop, keep,
+    navB: top.getBoundingClientRect().bottom + 8,
     // the card sticks at its sticky top until its column's foot pushes it up; drawn smaller than its box on a phone
     cardTop: parseFloat(getComputedStyle(cardEl).top), cardDrawn: r.height,
     cardLast: cardEl.parentElement.getBoundingClientRect().bottom + y - cardEl.offsetHeight,
-    mo: moments.map(e => ({ top: e.getBoundingClientRect().top + y, h: e.offsetHeight })) };
+    mo: moments.map(e => ({ top: e.getBoundingClientRect().top + y, h: e.offsetHeight, seen: -1e9,
+      words: [...e.children].filter(c => c.offsetHeight).map(c => { const b = inked(c); return { l: b.left, r: b.right, t: b.top + y, b: b.bottom + y }; }) })) };
 }
-function placeSun(h, y, vw) {
-  const sunEl = $('sun'), W = L.W, Hh = L.H;
-  // the arc's foot and crown; a phone keeps it in the open sky between the card's foot and the hills
-  const cardFoot = Math.min(L.cardTop, L.cardLast - y) + L.cardDrawn;
-  const phone = vw <= 860, foot = phone ? Hh - 40 : Hh - 110, crown = phone ? cardFoot + 56 : 110;
+/* the sun and moon never sit on words that show: one that would steps just above them, or below if the top bar is in the way */
+const lift = { sun: 0, moon: 0 };
+function dodge(x, v, r, y) {
+  for (const o of L.mo) {
+    if (!o.shown) continue;
+    const ws = o.words.filter(w => x + r > w.l && x - r < w.r);
+    if (!ws.length) continue;
+    const t = Math.min(...ws.map(w => w.t)) - y, b = Math.max(...ws.map(w => w.b)) - y;
+    if (v + r > t && v - r < b) v = t - 2 * r >= L.navB ? t - r : b + r;
+  }
+  return v;
+}
+function placeSun(h, y, vw, dt) {
+  const sunEl = $('sun'), W = L.W, Hh = L.H, phone = vw <= 860;
+  // the arc's foot and crown; a phone keeps it low, in the strip between the words and the hills
+  const foot = phone ? L.landTop + 24 : Hh - 110, crown = r => phone ? L.landTop - 52 + r + 6 : 110;
   const t = (h - 5.9) / (18.8 - 5.9), up = Math.min(1, Math.max(0, t));
-  const sx = W * (.06 + .88 * up), sy = foot - Math.pow(Math.sin(Math.PI * up), .55) * (foot - crown);
+  const arc = (k, r) => foot - Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, k))), .55) * (foot - crown(r));
+  const k = reduce ? 1 : 1 - Math.exp(-dt / 90);
+  let busy = false;
+  const ride = (n, x, v, r) => {
+    const want = dodge(x, v, r, y) - v;
+    lift[n] += (want - lift[n]) * k;
+    if (Math.abs(want - lift[n]) < .5) lift[n] = want; else busy = true;
+    return v + lift[n];
+  };
+  const sx = W * (.06 + .88 * up), sy = ride('sun', sx, arc(up, SUN_R - 12), SUN_R);
   sunEl.style.transform = `translate(${sx}px,${sy}px)`;
   sunEl.style.opacity = t > -.02 && t < 1.02 ? 1 : 0;
   const warm = Math.sin(Math.PI * up);
@@ -200,8 +233,9 @@ function placeSun(h, y, vw) {
   sunEl.style.setProperty('--glow', `rgba(255,${Math.round(150 + warm * 70)},${Math.round(70 + warm * 50)},${(.45 + warm * .2).toFixed(2)})`);
   // the moon crosses the night sky on the same arc
   const moon = $('moon'), mt = ((h < 12 ? h + 24 : h) - 13.3) / 32.7;
-  const mx = W * (.06 + .88 * mt), my = foot - Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, mt))), .55) * (foot - crown);
+  const mx = W * (.06 + .88 * mt), my = ride('moon', mx, arc(mt, MOON_R - 12), MOON_R);
   moon.style.transform = `translate(${mx}px,${my}px)`;
+  return busy;
 }
 let navInk, navWas;
 function inkNav(y, vh) {
@@ -292,9 +326,16 @@ function hourAtScroll(y, vh, vw) {
   const t = Math.min(1, Math.max(0, (c - a) / (b - a)));
   return MO[MO.length - 1][0] + (24 - MO[MO.length - 1][0]) * t;
 }
-/* each moment fades in while it holds the middle of the screen, and out as it leaves */
-const cardOut = (y, vh) => {
-  L.mo.forEach((o, i) => moments[i].classList.toggle('on', Math.abs(o.top - y + o.h / 2 - vh / 2) < vh * .3));
+/* each moment fades in while it holds the middle of the screen, and out as it leaves or reaches the hills' strip or the house */
+const clear = (o, y) => !o.words.some(w => L.keep.some(k => w.l < k.r && w.r > k.l && w.t - y < k.b && w.b - y > k.t));
+const cardOut = (y, vh, ts) => {
+  L.mo.forEach((o, i) => {
+    const on = Math.abs(o.top - y + o.h / 2 - vh / 2) < vh * .3 && clear(o, y);
+    if (on) o.seen = ts;
+    // words still fading out keep the sun and moon off them
+    o.shown = on || ts - o.seen < 700;
+    moments[i].classList.toggle('on', on);
+  });
   const lastM = L.mo[L.mo.length - 1];
   cardEl.classList.toggle('gone', lastM.top + lastM.h - y < vh * .4);
 };
@@ -306,12 +347,13 @@ function tick(ts) {
   hNow = reduce || hNow == null ? target : hNow + (target - hNow) * (1 - Math.exp(-dt / 220));
   if (Math.abs(target - hNow) < .002) hNow = target;
   if (hNow !== hDrawn) { hDrawn = hNow; skyTo(hNow); }
-  // every frame: on a phone the arc rides under the card, and the card scrolls away after the day
-  placeSun(hNow, y, vw);
+  const now = ts || performance.now();
+  inkNav(y, vh); cardOut(y, vh, now);
+  // every frame: the sun and moon step around the words that show, and the card scrolls away after the day
+  const busy = placeSun(hNow, y, vw, dt) || L.mo.some(o => o.shown && now - o.seen > 0);
   const m = Math.min(N - 1, Math.round(hNow * 60));
   if (m !== mDrawn) { mDrawn = m; cardAt(m, hNow); }
-  inkNav(y, vh); cardOut(y, vh);
-  raf = hNow === target ? 0 : requestAnimationFrame(tick);
+  raf = hNow === target && !busy ? 0 : requestAnimationFrame(tick);
   if (!raf) last = 0;
 }
 const kick = () => { if (!raf) raf = requestAnimationFrame(tick); };
