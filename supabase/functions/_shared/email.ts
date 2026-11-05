@@ -58,9 +58,9 @@ const C = {
   grid: "#facc15",
   cyan: "#22d3ee",
   batt: "#a78bfa",
-  ok: "#60a5fa",
-  warn: "#f97316",
-  bad: "#f43f5e",
+  ok: "#3ddc84",
+  warn: "#f59e0b",
+  bad: "#ef4444",
 } as const;
 const ACCENT = "#3ddc84";
 type Tone = keyof typeof C;
@@ -210,7 +210,7 @@ function html(subject: string, b: Body): string {
         `</table>` + (meta ? `<p class="d" style="margin:0 0 16px;font:400 12px/1.6 ${SANS};color:#7f8da0">${meta.join("<br>")}</p>` : "");
     }
     if ("callout" in x)
-      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:14px 16px;background:rgba(244,63,94,.07);border:1px solid rgba(244,63,94,.4);border-radius:8px;font:500 15px/1.45 ${SANS};color:#e7ecf2">` +
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:14px 16px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.4);border-radius:8px;font:500 15px/1.45 ${SANS};color:#e7ecf2">` +
         `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${C.bad};margin-right:10px;vertical-align:1px"></span>${x.callout}</td></tr></table>`;
     if ("facts" in x)
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px">${x.facts.map((f) =>

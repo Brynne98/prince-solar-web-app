@@ -44,19 +44,19 @@
     --dim: #7f8da0;
     --pv: #3ddc84; --batt: #a78bfa; --grid: #facc15; --load: #f87171; --soc: #22d3ee;
     /* Roles (SOLAR-346). The five above are power and mean nothing else. Status words,
-       dots and edges take --ok, --warn or --bad, each a hue none of the five uses: blue,
-       orange, rose. --accent is what you press or pick (buttons, links, switch, setup);
+       dots and edges take --ok, --warn or --bad: green, amber, red (blue, orange, rose
+       were tried in SOLAR-346 and reverted by decision in SOLAR-352). --accent is what you press or pick (buttons, links, switch, setup);
        it is solar's green by decision, never on a reading. --focus marks the field you
        type in, the open picker and the chosen day. --money is plain text. Use these, never
        a hex or rgb() of them, outside :root (npm test checks). All text-safe: 4.5:1 or
        more on --panel-2. */
-    --ok: #60a5fa; --warn: #f97316; --bad: #f43f5e;
+    --ok: #3ddc84; --warn: #f59e0b; --bad: #ef4444;
     --accent: #3ddc84; --on-accent: #07130c;
     --focus: #e7ecf2;
     --money: var(--text);
     /* the same at low alpha, for tints, edges and halos */
     --pv-rgb: 61,220,132; --batt-rgb: 167,139,250; --grid-rgb: 250,204,21; --load-rgb: 248,113,113; --soc-rgb: 34,211,238;
-    --ok-rgb: 96,165,250; --warn-rgb: 249,115,22; --bad-rgb: 244,63,94; --accent-rgb: 61,220,132;
+    --ok-rgb: 61,220,132; --warn-rgb: 245,158,11; --bad-rgb: 239,68,68; --accent-rgb: 61,220,132;
     --display: 'Space Grotesk', system-ui, sans-serif;
     --mono: 'JetBrains Mono', ui-monospace, monospace;
     /* The only font sizes in the app (SOLAR-344). 2xs is for uppercase labels and chart

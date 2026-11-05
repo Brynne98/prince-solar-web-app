@@ -18,9 +18,9 @@ colors:
   sun-core: "#ffd56b"
   sun-mid: "#f4a93a"
   sun-rim: "#e07a1f"
-  ok-blue: "#60a5fa"
-  warn-orange: "#f97316"
-  bad-rose: "#f43f5e"
+  ok-green: "#3ddc84"
+  warn-amber: "#f59e0b"
+  bad-red: "#ef4444"
   accent: "#3ddc84"
   focus: "#e7ecf2"
   ambient-blue: "rgba(91,157,255,0.06)"
@@ -153,7 +153,7 @@ components:
     height: "34px"
   button-danger:
     backgroundColor: "transparent"
-    textColor: "{colors.bad-rose}"
+    textColor: "{colors.bad-red}"
     rounded: "{rounded.md}"
     padding: "0 16px"
     height: "34px"
@@ -241,18 +241,18 @@ semantic, not decorative.
   buttons, text links, the switch when on, Finish setup, your current plan, today in the
   calendar. Same green as solar by decision (the app stays green; the website button is
   amber). Never on a reading.
-- **Ok Blue** (`ok-blue`, `--ok`): status that is fine. Live dot, grid on, connected,
+- **Ok Green** (`ok-green`, `--ok`): status that is fine. Live dot, grid on, connected,
   unread dot, a rising trend that is good, the toast tick, "Back" and "OK" in alert emails.
-- **Warn Orange** (`warn-orange`, `--warn`): needs a look. Stale, Not updating, Payment
+- **Warn Amber** (`warn-amber`, `--warn`): needs a look. Stale, Not updating, Payment
   failed, Ending, a pack drifting, an unverified login, "Last reading" in alert emails.
-- **Bad Rose** (`bad-rose`, `--bad`): broken or destructive. Offline, grid off, errors,
+- **Bad Red** (`bad-red`, `--bad`): broken or destructive. Offline, grid off, errors,
   invalid fields, the danger button, outage shading on charts, a falling trend that is bad,
   "Off", "Down", "No power" and a hot battery in alert emails.
 - **Focus** (`focus`, `--focus`): the field being typed in, the open day picker or menu
   button, the chosen day, keyboard focus rings.
 - **Money** (`--money`): plain Paper Text. "Saved", "Est. saved", prices and offers.
 - Loading and syncing ("Setting up", "Fetching history") are Muted Text, not a colour.
-- Status hues sit where no power colour is (blue, orange, rose) and show on words, dots
+- Status is green, amber and red by decision (SOLAR-352; blue, orange and rose were reverted) and shows on words, dots
   and edges, never on a big reading. Warning surfaces tint with their status at 6% to 9%
   and edge it at 25% to 55%. Every role clears 4.5:1 on Panel Raised.
 - `--*-rgb` triplets on :root give the low-alpha tints: `rgba(var(--bad-rgb), .07)`.

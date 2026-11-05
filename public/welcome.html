@@ -595,6 +595,8 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   .moment{justify-content:flex-end;padding:0 0 116px;min-height:100svh}
   /* a small house on the hill, bottom right, under the words */
   .house{display:block;left:auto;right:16px;bottom:calc(20px + 100lvh - 100svh);width:96px}
+  /* the moon's path runs behind the words here, so it stays dim */
+  .moonorb{filter:opacity(.4)}
   .moment+.moment{min-height:70svh}
   /* the stage is the full screen with the address bar hidden; while the bar shows it covers the stage's foot,
      so hills and house sit that much higher and the near hill's colour fills the strip under them */
@@ -1048,6 +1050,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 </main>
 
 
+<script src="sky.js"></script>
 <script src="welcome-scene.js"></script>
 <script src="config.js"></script>
 </body>
