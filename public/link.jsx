@@ -98,7 +98,8 @@ const LINK_ERRORS = {
 
 // ---- Paywall (SOLAR-208) ------------------------------------------------------
 // "R1 799", the app's and emails' money format (SOLAR-348); no break inside a price
-const rand = (n) => 'R' + Number(n).toLocaleString('en-US').replace(/,/g, '\u00a0');
+// narrow: a narrow no-break space, for the large prices, where a full one reads as a gap (SOLAR-364)
+const rand = (n, narrow) => 'R' + Number(n).toLocaleString('en-US').replace(/,/g, narrow ? '\u202f' : '\u00a0');
 // "30 Nov"; a date in another year carries it ("31 Oct 2027"), so a yearly date doesn't read as this year's.
 const billDay = (d) => window.dayText(d, { day: 'numeric', month: 'short', year: d.slice(0, 4) === String(new Date().getFullYear()) ? undefined : 'numeric' });
 const perUnit = (period) => (period === 'yearly' ? 'a year' : 'a month');
@@ -260,7 +261,7 @@ const reviewPay = async (plan, period, extras) => {
   const ok = await new Promise(resolve => {
     let close;
     const done = (yes) => { close(); resolve(yes); };
-    close = mountNode(<PayReview title={title} note={q.switch ? `Your year starts ${billDay(q.startsOn)}.` : null} due={q.dueNow} card={`${b.card.name} •••• ${b.card.last4}`}
+    close = mountNode(<PayReview title={title} note={q.switch ? `Your year starts ${billDay(q.startsOn)}.` : q.credit != null ? `Your year starts today, with ${rand(q.credit)} off for the rest of this month.` : null} due={q.dueNow} card={`${b.card.name} •••• ${b.card.last4}`}
       then={[`Then from ${billDay(q.nextDate)}`, `${rand(q.nextCharge)} ${perUnit(q.switch ? 'yearly' : q.period || period)}`]} onDone={done} />);
   });
   window.track('pay_review_done', { plan, choice: ok ? 'pay' : 'cancel' });
@@ -433,7 +434,7 @@ function Paywall({ reason, paused = [], plantIds = null, onCancel }) {
             return (
               <div key={p} className={'pw-plan' + (p === 'family' ? ' pw-main' : '')}>
                 <div className="pw-name">{p === 'family' ? 'Family' : 'Home'}</div>
-                <div className="pw-price">{q && <Was list={q.listCharge} price={q.nextCharge} />}<b>{q ? rand(q.nextCharge) : '…'}</b> {perUnit(per)}</div>
+                <div className="pw-price">{q && <Was list={q.listCharge} price={q.nextCharge} />}<b>{q ? rand(q.nextCharge, true) : '…'}</b> {perUnit(per)}</div>
                 {q?.offerTerms && q.listCharge > q.nextCharge && <div className="pw-offer">{offerLine(q.offerTerms, q.listCharge, per)}</div>}
                 <ul className="pw-gives">
                   <li>{p === 'family' ? 'Up to 3 plants' : '1 plant'}</li>

@@ -738,6 +738,8 @@ export type Upgrade = {
   from: Plan; to: Plan; period: BillPeriod;
   addedPlants?: number; // set when the change is extra plants on Family
   paidNow: number; daysLeft: number;
+  // Home monthly to Family yearly (SOLAR-364): the year starts today; what the rest of the month came to
+  credit?: number;
   next: { amount: number; date: string };
 };
 
@@ -750,7 +752,7 @@ export const planUpgraded = (u: Upgrade) => {
       { items: {
         rows: [u.addedPlants ? { icon: "plus" as const, name: plants, sub: `On your ${PLAN_NAME[u.to]} plan` } : planItem(u.to, u.period, "from today")],
         total: { label: "Paid today", value: rand(u.paidNow) },
-        meta: [`For the ${u.daysLeft === 1 ? "day" : u.daysLeft + " days"} left this period`, `Next payment ${rand(u.next.amount)} on ${u.next.date}`],
+        meta: [u.credit != null ? `${rand(u.credit)} off for the rest of your month` : `For the ${u.daysLeft === 1 ? "day" : u.daysLeft + " days"} left this period`, `Next payment ${rand(u.next.amount)} on ${u.next.date}`],
       } },
       { button: u.to === "family" && !u.addedPlants ? { label: "Add a plant", href: LOGINS } : { label: "See your plan", href: PLAN } },
     ],

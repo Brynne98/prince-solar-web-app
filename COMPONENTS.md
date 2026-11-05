@@ -74,6 +74,7 @@ Formatting and dates (also `components.jsx`):
 | `LinkDialog` | `LinkForm` in a `Dialog` with a `title` and `note`: add a plant, re-link, change login. |
 | `Paywall`, `PayReview` | Picking and paying for a plan. |
 | `PLAN_NAME` | A plan id as its name: "Home". |
+| `billingFmt.rand(n, narrow)` | A price in rand: "R1 799". `narrow` for the large prices on the plan cards, where a full space reads as a gap (SOLAR-364). |
 | `billingFmt.offerLine`, `offerCap`, `Was` | An offer price (SOLAR-330): its terms under the price, the members cap, the list price struck out. |
 | `withTimeout(call, ms)` | A Supabase call that must give up: after `ms` it resolves as `{ data: null, error: { message: 'timed out' } }`. |
 | `edgePost(path, body, signal)` | A POST to one of our edge functions as the signed-in user; returns `[response, json]`. |

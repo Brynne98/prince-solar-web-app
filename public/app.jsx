@@ -419,7 +419,7 @@ function billNotice(n, act) {
           : n.nextPeriod ? `You switch to ${n.nextPeriod} on ${on}` : `Extra plants drop to ${n.nextExtraPlants} on ${on}`,
         body: cancel ? `After that, on Free, ${FREE_PAID}` : '',
         // the same undo as Billing's Plan section (bookedChange)
-        button: n.nextPlan ? `Keep ${plan}` : n.nextPeriod ? `Stay ${n.period}` : `Keep ${n.extraPlants} extra plant${n.extraPlants === 1 ? '' : 's'}`,
+        button: n.nextPlan ? `Keep ${plan}` : n.nextPeriod ? `Stay ${n.period}` : `Keep ${3 + (n.extraPlants || 0)} plants`,   // Family's 3 included plus the extras (SOLAR-367)
         run: () => act.undo(n) };
     }
     case 'bill_renewal_notice': return { icon: 'calendar', title: `Your yearly ${plan} plan renews on ${billDay(n.on)}`,
