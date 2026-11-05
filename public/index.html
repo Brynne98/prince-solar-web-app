@@ -1645,20 +1645,13 @@
   .link-card { padding: var(--sp-xl) var(--sp-2xl) var(--sp-2xl); background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-xl); box-shadow: 0 20px 50px -24px rgba(0,0,0,0.9); }
   .link-form > .sset-note { margin-bottom: var(--sp-lg); }
   .link-form .sset-note b { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
-  /* Paywall and the extra-inverter cost card (link.jsx, SOLAR-208), in place of the form */
-  .paywall .pw-period { margin-top: var(--sp-lg); }
-  .pw-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--sp-md); margin-top: var(--sp-lg); }
+  /* The plan cards' base, for Pick your plan (SOLAR-208) */
   .pw-plan { display: flex; flex-direction: column; gap: var(--sp-xs); padding: var(--sp-lg); border: 1px solid var(--line-2); border-radius: var(--r-lg); background: var(--panel-2); }
-  .pw-plan.pw-main { border-color: rgba(var(--accent-rgb),0.45); }
   .pw-name { font-size: var(--fs-sm); font-weight: 600; color: var(--muted); }
   .pw-price { font-size: var(--fs-sm); color: var(--dim); }
   .pw-price b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: var(--fs-2xl); font-weight: 700; color: var(--text); }
   .pw-gives { margin: var(--sp-3xs) 0 0; padding: 0; list-style: none; font-size: var(--fs-sm); line-height: 1.6; color: var(--text); }
-  .pw-due { font-size: var(--fs-sm); color: var(--muted); }
   .pw-plan button { margin-top: var(--sp-sm); align-self: stretch; }
-  .pw-error { margin-top: var(--sp-lg); }
-  .pw-foot { justify-content: space-between; }
-  .pw-foot .field-note { margin-top: 0; }
   /* Plan section in Account (SOLAR-208) */
   .plan-name { font-size: var(--fs-lg); font-weight: 600; color: var(--text); }
   .plan-booked { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-md); flex-wrap: wrap; margin-top: var(--sp-sm); font-size: var(--fs-sm); }

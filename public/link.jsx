@@ -96,7 +96,7 @@ const LINK_ERRORS = {
 };
 
 
-// ---- Paywall (SOLAR-208) ------------------------------------------------------
+// ---- Billing (SOLAR-208) -------------------------------------------------------
 // "R1 799", the app's and emails' money format (SOLAR-348); no break inside a price
 // narrow: a narrow no-break space, for the large prices, where a full one reads as a gap (SOLAR-364)
 const rand = (n, narrow) => 'R' + Number(n).toLocaleString('en-US').replace(/,/g, narrow ? '\u202f' : '\u00a0');
@@ -399,72 +399,6 @@ window.sb.auth.onAuthStateChange((event, session) => {
   });
 });
 
-/**
- * Shown when the plan doesn't cover a plant.
- *   reason 'paused'     Upgrade on a login row with paused plants (`paused`: their names)
- *          'upgrade'    Upgrade in the Plan section, on Home: the price before the saved card is charged
- * A paid user's period changes at renewal, so only Free gets the switch.
- */
-function Paywall({ reason, paused = [], plantIds = null, onCancel }) {
-  const { useState, useEffect } = React;
-  const offers = ['family'];
-  const [period, setPeriod] = useState('monthly');
-  const [quotes, setQuotes] = useState(null);
-  // Closed any way (Not now, the sheet's close, leaving the screen). Paying leaves the
-  // page instead, so it never counts as closed.
-  useEffect(() => { window.track('paywall_shown', { reason }); return () => window.track('paywall_closed', { reason }); }, []);
-  useEffect(() => {
-    let alive = true;
-    Promise.all(offers.map(p => quote(p, period)))
-      .then(qs => alive && setQuotes(Object.fromEntries(qs.map((q, i) => [offers[i], q]))))
-      .catch(() => alive && setQuotes({ error: true }));
-    return () => { alive = false; };
-  }, [period]);
-  const first = quotes && !quotes.error ? quotes[offers[0]] : null;
-  const paid = first && first.plan !== 'free';
-  const per = paid ? first.period : period;
-  return (
-    <div className="paywall" role="dialog" aria-labelledby="pw-title">
-      <h2 id="pw-title" className="sset-title">{reason === 'upgrade' ? 'Upgrade to Family'
-        : reason === 'paused' ? `Collect data for ${paused.length === 1 ? paused[0] : paused.length + ' stopped plants'}`
-        : 'Add another plant'}</h2>
-      <p className="sset-note">{first?.plan === 'family' ? 'Plants after your 3rd stay stopped until you add them to your plan.'
-        : (paid ? 'Home' : 'Free') + ' covers one plant.'}</p>
-      {!paid && (
-        <window.Segmented size="sm" className="pw-period" label="Billing" value={period} onChange={setPeriod}
-          options={['monthly', 'yearly'].map(p => ({ value: p, label: p === 'monthly' ? 'Monthly' : 'Yearly' }))} />
-      )}
-      {quotes?.error ? <p className="sset-note pw-error">Couldn’t load prices. Close this and try again.</p> : (
-        <div className="pw-plans">
-          {offers.map(p => {
-            const q = quotes?.[p];
-            return (
-              <div key={p} className={'pw-plan' + (p === 'family' ? ' pw-main' : '')}>
-                <div className="pw-name">{p === 'family' ? 'Family' : 'Home'}</div>
-                <div className="pw-price">{q && <Was list={q.listCharge} price={q.nextCharge} />}<b>{q ? rand(q.nextCharge, true) : '…'}</b> {perUnit(per)}</div>
-                {q?.offerTerms && q.listCharge > q.nextCharge && <div className="pw-offer">{offerLine(q.offerTerms, q.listCharge, per)}</div>}
-                <ul className="pw-gives">
-                  <li>{p === 'family' ? 'Up to 3 plants' : '1 plant'}</li>
-                  <li>Your full history</li>
-                </ul>
-                {paid && q && q.dueNow != null && q.dueNow !== q.nextCharge && <div className="pw-due">{rand(q.dueNow)} today, then {rand(q.nextCharge)} {perUnit(per)} from {billDay(q.nextDate)}</div>}
-                <button type="button" className={p === 'family' ? 'save-btn' : 'ghost-btn'} disabled={!q || (paid && q.dueNow == null)}
-                        onClick={() => (q?.offer && window.track('offer_pick_done', { offer: q.offer, plan: p, period: per }), window.startUpgrade(p, per, false, q?.plan === 'family' ? (q.extraPlants || 0) + Math.max(paused.length, 1) : null, plantIds))}>{p === 'home' ? 'Choose Home' : q?.plan === 'family' ? 'Add to my plan' : 'Upgrade to Family'}</button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {first && <p className="field-note"><Was list={first.listExtraPrice} price={first.extraPrice} />{rand(first.extraPrice)} {perUnit(per)} for each plant after your 3rd.{offerCap(first.offerTerms) && ' ' + offerCap(first.offerTerms)}</p>}
-      <div className="conn-form-actions pw-foot">
-        <span className="field-note">Cancel any time.</span>
-        <button type="button" className="ghost-btn" onClick={onCancel}>Not now</button>
-      </div>
-    </div>
-  );
-}
-window.Paywall = Paywall;
-
 // The same moment on the Connect screen and inside Settings; one wording for both.
 const NO_PLANT_TEXT = 'has no plant shared with it yet. Your login is saved.';
 
@@ -473,10 +407,8 @@ const NO_PLANT_TEXT = 'has no plant shared with it yet. Your login is saved.';
 // Connect card that opens in place on a page with no inverter yet (Setup), with its title.
 // Either way: one line on which login, the two fields, a note, then Cancel and the green
 // button at the right.
-function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUsername, hasPlant }) {
+function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUsername }) {
   const { useState, useEffect, useRef } = React;
-  // The plan's answer: a paywall reason.
-  const [paywall, setPaywall] = useState(null);
   const [username, setUsername] = useState(initialUsername || '');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -519,15 +451,6 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
         setNoPlants(true);
         return;
       }
-      // Linked, but nothing to show: every plant is paused. The paywall says why, in
-      // place of the form.
-      const pausedAll = (r.paused || []).length > 0 && (r.paused || []).length === (r.plants || []).length && !hasPlant;
-      if (pausedAll) {
-        setPassword('');
-        setPaywall({ reason: 'paused', paused: r.plants.map(p => window.plantLabel(p)), ids: r.paused });
-        await onLinked(r);
-        return;
-      }
       // Busy until the caller has the new login list, or the screen sits idle before it changes.
       await onLinked(r);
       setPassword(''); setNoPlants(false);
@@ -543,11 +466,6 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
   const green = noPlants ? (busy ? 'Checking…' : 'Retry now')
     : busy ? (finding ? 'Finding your plant…' : 'Checking your login…')
     : relink ? (changing ? 'Save password' : 'Reconnect') : compact ? 'Add login' : 'Connect';
-
-  if (paywall) {
-    const close = () => { setPaywall(null); setPassword(''); onCancel && onCancel(); };
-    return <div className={compact ? 'conn-form' : 'link-card'}><Paywall reason={paywall.reason} paused={paywall.paused} plantIds={paywall.ids} onCancel={close} /></div>;
-  }
 
   return (
     <form className={compact ? 'conn-form link-form' : 'link-form link-card'} onSubmit={submit} noValidate aria-busy={busy}>

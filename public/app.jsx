@@ -1237,11 +1237,14 @@ function Setup({ links }) {
     <button type="button" className={(plantsOff ? 'ghost-btn' : 'save-btn') + ' setup-btn ' + cls} onClick={onClick} aria-label="Add plant"><Icon id="plug" /><span>Add plant</span></button>
   );
   // The header's Add plant with plants off: the form over the page, so Cancel leaves you where
-  // you were. A plant that comes on goes to Live; one added stopped (plan full) keeps the form
-  // open on its paywall.
+  // you were. A plant that comes on goes to Live; plants added stopped (plan full) close the
+  // form with a toast, and their switches offer the upgrade (SOLAR-368).
   const [adding, setAdding] = useState(false);
   const addedFromHead = (r) => {
-    if (comingOn(r).length) { setAdding(false); setTab('live'); }
+    const on = comingOn(r).length, n = (r?.plants || []).length;
+    if (on) setTab('live');
+    else if (n) window.toast(n === 1 ? `${window.plantLabel(r.plants[0])} added. It's off: your plan is full.` : `${n} plants added. They're off: your plan is full.`);
+    if (on || n) setAdding(false);
     return linked(r);
   };
   const turnOnBtn = (cls) => (

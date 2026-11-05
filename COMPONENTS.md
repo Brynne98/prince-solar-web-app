@@ -72,7 +72,7 @@ Formatting and dates (also `components.jsx`):
 | `Dialog` | Any modal. `label`, `onClose`, `keep` (no outside-click close), `busy` (dims, blocks closing), `size`. |
 | `LinkForm` | The SunSynk sign-in form, inline (`compact`) or as a card. |
 | `LinkDialog` | `LinkForm` in a `Dialog` with a `title` and `note`: add a plant, re-link, change login. |
-| `Paywall`, `PayReview` | Picking and paying for a plan. |
+| `PayReview` | The price, next bill and card before a saved card is charged. |
 | `PLAN_NAME` | A plan id as its name: "Home". |
 | `billingFmt.rand(n, narrow)` | A price in rand: "R1 799". `narrow` for the large prices on the plan cards, where a full space reads as a gap (SOLAR-364). |
 | `billingFmt.offerLine`, `offerCap`, `Was` | An offer price (SOLAR-330): its terms under the price, the members cap, the list price struck out. |

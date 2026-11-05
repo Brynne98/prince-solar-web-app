@@ -2811,7 +2811,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
       {!unread && mode === 'add' && (
         // A form over the page (SOLAR-286). Cancel re-reads too: a login with no plant yet is saved but not listed.
         <window.LinkDialog title="Add login" note={planFull && 'Your plan is full, so new plants are added stopped.'}
-          hasPlant={allPlants.some(p => !p.paused)} onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
+          onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
       )}
       {unread ? (
         <SettingRow className="sset" label="Couldn’t load your logins" note={NBSP}
