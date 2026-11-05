@@ -983,7 +983,7 @@ function DaysBarsChart({ rows, field, color, rgb, word, label, today, selected, 
               fill={r === best ? color : isToday ? fill(0.16) : hover === i ? fill(0.7) : fill(0.38)}
               stroke={r.date === selected ? 'var(--text)' : isToday ? color : 'none'} strokeWidth={r.date === selected ? 1.5 : 1}
               strokeDasharray={isToday && r.date !== selected ? '2 2' : undefined}
-              style={{ transition: 'fill .12s' }} />
+              style={{ transition: 'fill var(--dur-fast) var(--ease-out)' }} />
           );
         })}
         <text x={startX} y={height - 6} textAnchor="start" className="ax">{startText}</text>
@@ -1020,7 +1020,7 @@ function useShownDay(pick, today, refreshKey) {
     : loaded && loaded.date === pick.date ? { isToday: false, date: pick.date, data: loaded.data } : null;
   if (ready) shownRef.current = ready;
   const view = ready || shownRef.current || { isToday: pick.isToday, date: pick.date, data: null };
-  const dim = { 'aria-busy': !ready, style: { opacity: ready ? 1 : 0.45, transition: 'opacity .15s' } };
+  const dim = { 'aria-busy': !ready, style: { opacity: ready ? 1 : 0.45, transition: 'opacity var(--dur-fast) var(--ease-out)' } };
   const day = view.data;
   return { view, dim, day, points: (day && day.points) || [], dayWord: view.isToday ? 'today' : window.dayText(view.date) };
 }

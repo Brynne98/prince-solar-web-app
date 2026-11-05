@@ -217,6 +217,9 @@ add a glowing ring, this system adds a hairline and a smaller grey label.
 - Mono numerals with tabular figures; sans for everything that is a word
 - Uppercase, wide-tracked micro-labels over big values
 - Motion only for live data and status; skeletons hold the layout while data lands
+- Pop-ups (menus, sheet, dialogs, bubbles) arrive in 180 ms and leave in 120 ms; three
+  steps on `:root` (`--dur-fast` 120, `--dur-base` 180, `--dur-slow` 320 ms), arrivals
+  `--ease-out`, exits `--ease-in` (SOLAR-351)
 
 ## Colors
 

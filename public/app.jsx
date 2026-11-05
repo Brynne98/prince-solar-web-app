@@ -115,8 +115,24 @@ function useEscape(on, onEscape) {
   }, [on]);
 }
 
+// A motion step from :root in ms (SOLAR-351); 0 under reduced motion.
+const motionMs = (name) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+window.motionMs = motionMs;
+// [shown, leaving] for a pop-up that is `on`: once off it stays shown for --dur-fast with
+// leaving true, so its CSS can play it out (pop-out, sheet-out).
+function useExit(on) {
+  const [shown, setShown] = useState(on);
+  useEffect(() => {
+    if (on) { setShown(true); return; }
+    const t = setTimeout(() => setShown(false), motionMs('--dur-fast'));
+    return () => clearTimeout(t);
+  }, [on]);
+  return [on || shown, !on && shown];
+}
+
 // An open menu closes on a click elsewhere or Escape (focus goes back to its button), and
 // takes the arrow keys while focus is inside it. No keyboard shortcuts beyond that, by decision.
+// The open state it hands back stays true while the menu leaves; its box gets [data-leaving].
 function usePopover() {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -127,7 +143,9 @@ function usePopover() {
     return () => document.removeEventListener('pointerdown', away);
   }, [open]);
   useEscape(open, () => { setOpen(false); ref.current?.querySelector('button')?.focus(); });
-  return [open, setOpen, ref];
+  const [shown, leaving] = useExit(open);
+  React.useLayoutEffect(() => { ref.current?.toggleAttribute('data-leaving', leaving); }, [leaving]);
+  return [shown, setOpen, ref];
 }
 function MenuList({ className, label, children }) {
   const ref = useRef(null);
@@ -321,6 +339,7 @@ function Sheet({ label, onClose, opener, className = '', children }) {
 // sheet with the rest.
 function PhoneBar({ tabs, tab, onTab }) {
   const [more, setMore] = useState(false);
+  const [moreShown, moreLeaving] = useExit(more);
   const split = tabs.length > 5;
   const bar = split ? tabs.slice(0, 4) : tabs;
   const rest = split ? tabs.slice(4) : [];
@@ -341,7 +360,7 @@ function PhoneBar({ tabs, tab, onTab }) {
           </button>
         )}
       </nav>
-      {more && <Sheet label="More pages" onClose={() => setMore(false)} opener=".phonebar .bar-more">{rest.map(slot)}</Sheet>}
+      {moreShown && <Sheet label="More pages" className={moreLeaving ? 'leaving' : ''} onClose={() => setMore(false)} opener=".phonebar .bar-more">{rest.map(slot)}</Sheet>}
     </>
   );
 }
