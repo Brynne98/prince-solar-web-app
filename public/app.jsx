@@ -477,17 +477,7 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
           {/* only the list scrolls: the head stays, and so does the scroll bar's top */}
           <div className="nl-scroll">
           {pinned.length > 0 && <div className="nl-day">Billing</div>}
-          {pinned.map(n => (
-            <div key={n.kind} className="nl-row nl-pin">
-              <span className="nl-dot" />
-              <span className={'nl-glyph g-' + (n.tone || 'readings')}><Icon id={n.icon} /></span>
-              <span className="nl-text">
-                <span className="nl-title">{n.title}</span>
-                <span className="nl-body">{n.body}</span>
-                <span><button type="button" className="ghost-btn nl-act" onClick={() => { close(); n.act('list'); }}>{n.button}</button></span>
-              </span>
-            </div>
-          ))}
+          <NoticeRows pinned={pinned} onAct={n => { close(); n.act('list'); }} />
           {items && !items.length && (
             <div className="nl-empty">
               <span className="nl-glyph g-readings"><Icon id="bell" /></span>
@@ -505,6 +495,21 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
       )}
     </div>
   );
+}
+
+// Billing notices (SOLAR-212) with their buttons, as the bell list and the full page show them.
+function NoticeRows({ pinned, onAct }) {
+  return pinned.map(n => (
+    <div key={n.kind} className="nl-row nl-pin">
+      <span className="nl-dot" />
+      <span className={'nl-glyph g-' + (n.tone || 'readings')}><Icon id={n.icon} /></span>
+      <span className="nl-text">
+        <span className="nl-title">{n.title}</span>
+        <span className="nl-body">{n.body}</span>
+        <span className="nl-act-wrap"><button type="button" className="ghost-btn nl-act" onClick={() => onAct(n)}>{n.button}</button></span>
+      </span>
+    </div>
+  ));
 }
 
 // Alert rows under day headings, as the bell list and the full page show them.
@@ -548,7 +553,8 @@ const ALERT_KINDS = [{ value: 'all', label: 'All alerts' }, { value: 'grid', lab
 const ALERT_RANGE_WORDS = { day: 'in the last day', week: 'in the last week', month: 'in the last month', year: 'in the last year', all: 'yet' };
 
 // The full page (SOLAR-327). onShown(ids): unread rows it showed, read once the page is left.
-function AlertsPage({ onBack, onSettings, onShown, onReadAll }) {
+// pinned: the billing notices the bell shows, on top here too, whatever the filters.
+function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
   const [range, setRange] = useState('month');
   const [kind, setKind] = useState('all');
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -608,10 +614,16 @@ function AlertsPage({ onBack, onSettings, onShown, onReadAll }) {
         </div>
       )}
       {!failed && !res && <div className="alerts-list">{[0, 1, 2].map(i => <Skeleton key={i} h={150} r={16} style={{ marginTop: 40 }} />)}</div>}
+      {pinned.length > 0 && (
+        <section className="alerts-day" aria-label="Billing">
+          <div className="nl-day">Billing</div>
+          <Card className="alerts-card alerts-notices"><NoticeRows pinned={pinned} onAct={n => n.act('page')} /></Card>
+        </section>
+      )}
       {res && !res.items.length && (
         <div className="nl-empty">
-          <span className="nl-glyph g-readings"><Icon id="bell" /></span>
-          <b>Nothing here</b>
+          {/* with notices above, no "Nothing here": only the alerts are missing */}
+          {!pinned.length && <><span className="nl-glyph g-readings"><Icon id="bell" /></span><b>Nothing here</b></>}
           <p>No {unreadOnly ? 'unread ' : ''}{kindWord}alerts {ALERT_RANGE_WORDS[range]}.</p>
           {(range !== 'all' || kind !== 'all' || unreadOnly) && <button type="button" className="ghost-btn" onClick={reset}>Show all alerts</button>}
         </div>
@@ -1575,7 +1587,7 @@ function App({ links }) {
   }).filter(Boolean);
   const bell = <NotifBell data={notifs} pinned={notices} onOpen={loadNotifs} onSeen={readNotifs} onReadAll={() => readNotifs(null)}
                          onSeeAll={seeAll} onSettings={() => openSettings('notifications')} />;
-  const alertsPage = <AlertsPage key="alerts" onBack={() => go(alertsFrom.current)} onSettings={() => openSettings('notifications')}
+  const alertsPage = <AlertsPage key="alerts" pinned={notices} onBack={() => go(alertsFrom.current)} onSettings={() => openSettings('notifications')}
                                  onShown={ids => ids.forEach(id => alertsShown.current.add(id))}
                                  onReadAll={() => { alertsShown.current.clear(); readNotifs(null); }} />;
   const loginDead = links.accounts.some(a => a.status === 'needs_relink');
