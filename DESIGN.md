@@ -291,6 +291,15 @@ reads like a meter face: the mono gives numbers weight and alignment, the sans k
 labels and notes quiet. Neither face is antialiased artificially; on the dark ground the
 browser default renders crisper.
 
+### Scale (SOLAR-344)
+Nine sizes, as tokens on `:root` in `public/index.html`; nothing else is allowed
+(`npm test` fails on a px font size): `--fs-2xs` 11, `--fs-xs` 12, `--fs-sm` 13 (14 on
+phones), `--fs-md` 14, `--fs-lg` 16, `--fs-xl` 18, `--fs-2xl` 22, `--fs-3xl` 30,
+`--fs-4xl` 44. 2xs is for uppercase labels only; sentences are sm or larger, so phone
+sentences are 14px or more. Mono goes on figures only: sub-lines, setup prompts and
+text fields use Space Grotesk with tabular figures. The px values below predate the
+scale; each now rounds to its nearest step.
+
 ### Hierarchy
 - **Display** (700, 30px, line-height 1, tracking -0.01em): the brand name in the
   topbar only. 23px on phones.

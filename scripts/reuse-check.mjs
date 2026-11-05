@@ -64,6 +64,13 @@ for (const f of jsx) {
   });
 }
 
+// ---- 2b. one type scale (SOLAR-344) ----
+// Every font size in index.html is a --fs-* token. A px size outside :root, clamp() or calc() is a new step.
+for (const m of css.matchAll(/font(?:-size)?:[^;{}]*?(?<![\w(-])(\d+(?:\.\d+)?)px/g)) {
+  if (/clamp\(/.test(m[0])) continue;
+  problems.push(`index.html:${lineOf(m.index)} font size ${m[1]}px: use a --fs-* token`);
+}
+
 // ---- 3. one global scope ----
 const seen = new Map();
 for (const f of jsx) {

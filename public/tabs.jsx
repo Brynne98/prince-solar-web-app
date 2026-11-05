@@ -545,7 +545,7 @@ function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trend
         : <div className="mini-value mono" style={{ color }}><span className="mv-num">{unitSplit(value)}</span></div>}
       {bar != null && !loading && <window.Meter small pct={bar} color={color} />}
       {bar != null && loading && <window.Skeleton h={5} r={4} style={{ marginTop: 8 }} />}
-      {sub && <div className="mini-sub mono">{sub}</div>}
+      {sub && <div className="mini-sub">{sub}</div>}
     </Card>
   );
 }
@@ -1746,7 +1746,7 @@ function EqPanelsCard({ st, snap, health, now }) {
                 {(groups.length > 1 || g.quiet) && (
                   <div className="eq-group-head">
                     <span>{invName(g.inv)}</span>
-                    <span className={'mono' + (g.quiet ? ' warn' : '')}>{g.quiet ? (g.inv.readAt ? 'Not reporting since ' + window.readAgo(g.inv.readAt, now) : 'Not reporting') : fmtKwh(g.kwh)}</span>
+                    <span className={g.quiet ? 'warn' : 'mono'}>{g.quiet ? (g.inv.readAt ? 'Not reporting since ' + window.readAgo(g.inv.readAt, now) : 'Not reporting') : fmtKwh(g.kwh)}</span>
                   </div>
                 )}
                 {(folded ? g.rows.slice(0, EQ_FOLD) : g.rows).map(r => (

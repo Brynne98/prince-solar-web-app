@@ -63,7 +63,7 @@ function WallStatus({ snap }) {
   const s = plantStatus(snap, useNow(15000));
   return (
     <window.Tip className={'wall-status below status-' + s.status} text={'Last reading ' + window.fmtTime(s.last)}>
-      <StatusBits word={s.word}><span className="status-detail mono">{s.detail}</span></StatusBits>
+      <StatusBits word={s.word}><span className="status-detail">{s.detail}</span></StatusBits>
     </window.Tip>
   );
 }
@@ -528,7 +528,7 @@ function NotifRows({ items, when, heads = true }) {
           <span className="nl-text">
             <span className="nl-title">{it.title}</span>
             <span className="nl-body">{it.body}</span>
-            <span className="nl-where mono">{it.plantName || 'Plant ' + it.plant} · {when(it)}</span>
+            <span className="nl-where">{it.plantName || 'Plant ' + it.plant} · {when(it)}</span>
           </span>
         </div>
       </React.Fragment>
