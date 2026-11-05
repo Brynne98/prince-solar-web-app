@@ -947,12 +947,12 @@ const SETUP_WHERE: Record<SetupStep, string> = {
   reserve: "<b>Battery reserve</b>: as set on your inverter.",
   panels: "<b>Solar panels</b>: panel count times watts each, from your installer's invoice.",
 };
-export const freeWeekSetup = (steps: SetupStep[]) =>
+export const freeWeekSetup = (steps: SetupStep[], plantId?: number) =>
   make("Finish your setup", {
     title: "Finish your setup",
     parts: [
       { steps: steps.filter((s) => s in SETUP_WHERE).map((s) => SETUP_WHERE[s]) },
-      { button: { label: "Finish setup", href: SYSTEM } },
+      { button: { label: "Finish setup", href: plantId ? `${SYSTEM}&plant=${plantId}` : SYSTEM } },
     ],
     footer: [HELP],
   });

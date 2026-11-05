@@ -3181,7 +3181,7 @@ function DownloadSection({ plants, plantId, ready }) {
 const DELETE_REFUSED = [
   [/owed/, 'Pay the failed payment on Billing first.'],
   [/payment is open/, 'A payment is still going through. Try again tomorrow.'],
-  [/cancel your plan/, 'Cancel your plan first.'],
+  [/cancel your plan/, 'Cancel your plan first.', 'cancel'],
 ];
 function DeleteAccountRow({ email, billing, onBilling }) {
   const { useState } = React;
@@ -3200,7 +3200,7 @@ function DeleteAccountRow({ email, billing, onBilling }) {
       // Refused on billing: what we showed was stale, so reload it (Cancellation only draws
       // for a paid plan), and link a running plan to where it is cancelled (SOLAR-361).
       if (why) window.dispatchEvent(new Event('ps-billing'));
-      const toCancel = why && why[0].test('cancel your plan') && { label: 'Go to cancel plan', onClick: () => onBilling('cancel') };
+      const toCancel = why?.[2] === 'cancel' && { label: 'Go to cancel plan', onClick: () => onBilling('cancel') };
       window.toast(why ? why[1] : 'Couldn’t delete the account. Try again.', { error: true, ...(toCancel && { action: toCancel }) });
       setBusy(false);
     }
