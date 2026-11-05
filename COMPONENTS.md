@@ -7,7 +7,7 @@ If something here is close, use it or give it a prop; don't make a second one.
 `<select>`, date inputs and checkboxes, `title=` tooltips, raw `.skel`, `confirm()` and
 `alert()`, hand-drawn copies of icons, hand-made tooltip rows, meters, sign-in cards,
 timeouts and saved-tab reads, CSS classes nothing uses, two files declaring the same
-top-level name, a hidden or recoloured focus ring, an icon off the icon line or sizes, and a "Click here" email link. A line can opt out with a `reuse-check: allow` comment; give the reason
+top-level name, a hidden or recoloured focus ring, an icon off the icon line or sizes, a transition or animation not timed with `--dur-*` and `--ease-*`, and a "Click here" email link. A line can opt out with a `reuse-check: allow` comment; give the reason
 next to it.
 
 How it is wired: every `public/*.jsx` shares one global scope. `auth`, `link`, `data`,
@@ -93,7 +93,9 @@ a row of on/off settings (email and push preferences); `saveFlag` sends its own 
 |---|---|
 | `Icon` | Any icon in `NAV_ICONS`: `<Icon id="next" />`. Add new icons to `NAV_ICONS`, not inline. A drawn icon elsewhere is `<svg className="ico">` (`ico-sm` for 14 px) with no width, height or strokeWidth of its own. |
 | `useEscape(on, fn)` | Close something on Escape. |
-| `usePopover()` | A menu or popover's open state, outside-click and Escape. |
+| `usePopover()` | A menu or popover's open state, outside-click and Escape. Stays open while it leaves. |
+| `useExit(on)` | `[shown, leaving]`: keeps a closing pop-up on screen for `--dur-fast` so its CSS can play it out. |
+| `motionMs(name)` | A `--dur-*` step in ms; 0 under reduced motion. |
 | `MenuList`, `PickMenu` | A dropdown menu; `PickMenu` is the replacement for `<select>`. |
 | `Sheet` | A phone bottom sheet. |
 | `StatusBits` | The dot and word of a status pill. |

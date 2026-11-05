@@ -172,6 +172,28 @@ for (const f of jsx) {
   });
 }
 
+// ---- 2g. one motion scale (SOLAR-351) ----
+// Every transition and animation times itself with var(--dur-fast|base|slow) and eases with
+// var(--ease-out|in), so reduced motion (which zeroes the --dur-*) stops it too. Named
+// exceptions keep their own timing: the loops (skeleton sweep, status breath, spinners, the
+// power-flow dots), the one-off saved flash, and the autofill colour hold.
+const MOTION_OK = /skel-sweep|status-breathe|\bspin\b|\bflow\b|sset-flash|9999s/;
+const MOTION_RAW = /(?<![\w.-])\d*\.?\d+m?s\b|\b(ease|ease-in|ease-out|ease-in-out|linear)\b(?!-)|cubic-bezier|steps\(/;
+for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+  const spinner = /\.spin\b|aria-busy/.test(m[1]);
+  for (const d of m[2].matchAll(/(?<![\w-])((?:transition|animation)(?:-[a-z-]+)?)\s*:([^;]*)/g)) {
+    if (MOTION_OK.test(d[2]) || (spinner && d[1] === 'animation-duration') || !MOTION_RAW.test(d[2].replace(/var\([^)]*\)/g, ''))) continue;
+    problems.push(`index.html:${lineOf(m.index + m[1].length + 1 + d.index)} ${d[1]}: ${d[2].trim()}: time it with var(--dur-*) and var(--ease-*)`);
+  }
+}
+for (const f of jsx) {
+  read(f).split('\n').forEach((line, i) => {
+    if (/reuse-check: allow/.test(line)) return;
+    for (const d of line.matchAll(/\b(transition|animation)\s*:\s*(['"`])([^'"`]*)\2/g))
+      if (!MOTION_OK.test(d[3]) && MOTION_RAW.test(d[3].replace(/var\([^)]*\)/g, ''))) problems.push(`${f}:${i + 1} ${d[1]} '${d[3]}': time it with var(--dur-*) and var(--ease-*)`);
+  });
+}
+
 // ---- 3. one global scope ----
 const seen = new Map();
 for (const f of jsx) {

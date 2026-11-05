@@ -187,6 +187,19 @@ function Dialog({ label, onClose, keep = false, busy = false, size = null, child
     d.showModal();
     return () => { if (d.open) d.close(); if (back.el && back.el.isConnected) back.el.focus({ preventScroll: true, focusVisible: back.ring }); };
   }, []);
+  // Closing (SOLAR-351): the dialog goes with whatever held it, so its content moves to a
+  // copy that fades out on top for --dur-fast. Runs before React removes the dialog.
+  React.useLayoutEffect(() => () => {
+    const d = ref.current, ms = window.motionMs('--dur-fast');
+    if (!ms || !d?.open || !d.showPopover) return;
+    const g = document.createElement('div');
+    g.className = d.className + ' leaving';
+    g.popover = 'manual'; g.inert = true;
+    g.append(...d.childNodes);
+    document.body.append(g);
+    g.showPopover();
+    setTimeout(() => g.remove(), ms);
+  }, []);
   return (
     <dialog ref={ref} className={'pop-dlg' + (size ? ' pop-' + size : '')} aria-label={label}
             onCancel={(e) => { e.preventDefault(); if (!busy && e.target === ref.current) onClose(); }}   // only its own Escape, not one from a pop-up opened over it

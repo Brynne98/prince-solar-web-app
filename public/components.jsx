@@ -144,7 +144,7 @@ function Card({ children, className = '', style = {}, ...rest }) {
 
 // A bar filled to pct (0..100) in color. small: the mini tiles' thinner one.
 const Meter = ({ pct, color, small }) => (
-  <div className={'meter' + (small ? ' sm' : '')}><div className="meter-fill" style={{ width: Math.max(0, Math.min(100, pct)) + '%', background: color }} /></div>
+  <div className={'meter' + (small ? ' sm' : '')}><div className="meter-fill" style={{ translate: (Math.max(0, Math.min(100, pct)) - 100) + '%', background: color }} /></div>
 );
 
 // ---- Big number stat tile (the "4 tabs" the user liked) ---------------------
