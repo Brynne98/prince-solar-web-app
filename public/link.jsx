@@ -200,10 +200,14 @@ function Dialog({ label, onClose, keep = false, busy = false, size = null, child
   React.useEffect(() => {
     const d = ref.current;
     d.showModal();
-    // Opened by mouse or touch: Chrome still rings the first button showModal focuses, so the
-    // pop-up holds focus itself; Tab goes to that button next. Keyboard users keep the ring (SOLAR-368).
-    if (!back.ring && document.activeElement?.matches(':focus-visible')) d.focus({ preventScroll: true });
-    return () => { if (d.open) d.close(); if (back.el && back.el.isConnected) back.el.focus({ preventScroll: true, focusVisible: back.ring }); };
+    // Opened by mouse or touch: Chrome still rings the button showModal or the content focuses
+    // (ConfirmCard focuses Cancel), so the pop-up holds focus itself; Tab goes to that button
+    // next. Keyboard users keep the ring. After the content's own effects (SOLAR-368).
+    const t = setTimeout(() => {
+      const a = document.activeElement;
+      if (!back.ring && d.open && d.contains(a) && a !== d && a.matches(':focus-visible')) d.focus({ preventScroll: true });
+    });
+    return () => { clearTimeout(t); if (d.open) d.close(); if (back.el && back.el.isConnected) back.el.focus({ preventScroll: true, focusVisible: back.ring }); };
   }, []);
   // Closing (SOLAR-351): the dialog goes with whatever held it, so its content moves to a
   // copy that fades out on top for --dur-fast. Runs before React removes the dialog.
