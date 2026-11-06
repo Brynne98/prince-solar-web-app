@@ -10,8 +10,10 @@
 -- (api_billing_extras only books fewer).
 --
 -- Existing Family and Home yearly accounts pay the new price from their next charge.
--- The launch offer's prices (private.offers) are unchanged.
+-- The launch offer stays half off: Family R99 a month or R990 a year (was R89 / R890 for 3).
 -- ============================================================================
+
+update private.offers set family_monthly = 99, family_yearly = 990 where id = 'launch';
 
 -- 0145's prices, with Home yearly R990 and Family R199 / R1,990.
 create or replace function public.billing_amount(p_plan text, p_period text, p_extra int default 0, p_offer text default null)
