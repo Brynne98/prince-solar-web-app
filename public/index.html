@@ -1143,6 +1143,21 @@
   @media (min-width: 901px) { .login-plant, .login-plant .plant-nm { min-height: 36px; } }
   .login-plant.off .plant-nm { color: var(--dim); }
   .login-plant .plant-state { font-size: var(--fs-sm); white-space: nowrap; }
+  /* Settings' Plants (SOLAR-376): a card per login, the email its title, no line under it, plants indented */
+  .settings-page .sset-cards > .login-card + .login-card { margin-top: var(--sp-sm); }
+  /* email and its state top left, Reconnect then Manage top right; on a phone Reconnect drops under the email */
+  .login-card .login-line { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "who fix more"; border-bottom: none; }
+  .login-card .login-who { grid-area: who; min-width: 0; }
+  .login-card .login-fix { grid-area: fix; }
+  .login-card .login-more { grid-area: more; }
+  .login-card .login-email { display: block; font-size: var(--fs-lg); font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
+  .login-card .login-state { display: block; font-size: var(--fs-sm); }
+  .login-card .login-state.warn { color: var(--warn); } .login-card .login-state.bad { color: var(--bad); }
+  @media (max-width: 599px) {
+    .login-card .login-line { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "who more" "fix fix"; }
+    .login-card .login-fix { justify-self: start; margin-top: var(--sp-sm); }
+  }
+  .login-card .login-plant { padding-left: var(--sp-xl); }
   .switch:disabled { opacity: .5; }
   .login-more { position: relative; flex: none; }
   /* Manage: grey text, no box, so the plants stay the loudest thing on the card (SOLAR-289) */

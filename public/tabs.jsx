@@ -2746,9 +2746,9 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
       ) : !live.length ? (
         <div className="sset"><div className="field-note">No login connected.</div></div>
       ) : (
-        // One card. Each login is a grey caption over its plants, after YNAB and Copilot
-        // Money: its state shows only when it needs something, Remove waits in its menu.
-        <div className="sset login-list">
+        // A card per login (SOLAR-376): the email is its title, Reconnect and Manage top right,
+        // its plants indented under it, a switch each. Its state shows only when it needs something.
+        <>
           {live.map(acc => {
             const ok = acc.status === 'active';
             const plants = acc.plants || [];
@@ -2756,13 +2756,13 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
             // with no plant is never read, so its age means nothing (SOLAR-285).
             const stale = ok && plants.length > 0 && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
             return (
-              <div key={acc.account_id} className={'login-grp' + (leaving === acc.account_id ? ' leaving' : '')}>
+              <div key={acc.account_id} className={'sset login-grp login-card' + (leaving === acc.account_id ? ' leaving' : '')}>
                 <div className="login-line">
-                  <span className="login-email">
-                    {acc.sunsynk_username}
-                    {(!ok || stale) && <window.Tip className={ok ? 'warn' : 'bad'} text={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : null}> · {!ok ? 'Sign-in expired' : 'Not updating'}</window.Tip>}
-                  </span>
-                  {!ok && mode !== acc.account_id && <button type="button" className="ghost-btn" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
+                  <div className="login-who">
+                    <span className="login-email">{acc.sunsynk_username}</span>
+                    {(!ok || stale) && <window.Tip className={'login-state ' + (ok ? 'warn' : 'bad')} text={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : null}>{!ok ? 'Sign-in expired' : 'Not updating'}</window.Tip>}
+                  </div>
+                  {!ok && mode !== acc.account_id && <button type="button" className="ghost-btn login-fix" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
                   <LoginMenu email={acc.sunsynk_username} busy={busy === acc.account_id}
                     onPassword={ok ? () => setMode(acc.account_id) : null}
                     onRemove={() => setConfirming(acc.account_id)} />
@@ -2782,7 +2782,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
               </div>
             );
           })}
-        </div>
+        </>
       )}
     </SettingsSection>
   );
