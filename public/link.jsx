@@ -263,25 +263,21 @@ const reviewPay = async (plan, period, extras) => {
   if (error) throw new Error('price check');
   if (!b?.card || !q?.dueNow) return true;
   const name = plan === 'family' ? 'Family' : 'Home';
-  // Family's extra plants on the new bill, and those added now
-  const extra = plan === 'family' ? extras ?? q.extraPlants : 0;
-  const more = extra - q.extraPlants;
+  // Extra plants are no longer sold (SOLAR-371); those already held stay on the bill.
+  const extra = plan === 'family' ? q.extraPlants || 0 : 0;
   // A switch to yearly (SOLAR-298) is paid now and starts on the billing date.
-  const title = q.switch ? 'Switch to yearly'
-    : q.plan === plan && more > 0 ? `Add ${more} extra ${more === 1 ? 'plant' : 'plants'}` : `Upgrade to ${name}`;
-  // The bill's parts (SOLAR-369): Family alone, then its extra plants. Not on a switch, whose
-  // bill is yearly while extraPrice is the plan's monthly one.
+  const title = q.switch ? 'Switch to yearly' : `Upgrade to ${name}`;
+  // The bill's parts (SOLAR-369): Family alone, then the extra plants held. Not on a switch,
+  // whose bill is yearly while extraPrice is the plan's monthly one.
   // extraPrice is today's offer; a next bill at list prices (the offer over by then) takes the list one.
   const each = q.listCharge != null && q.nextCharge === q.listCharge ? q.listExtraPrice ?? q.extraPrice : q.extraPrice;
   const parts = extra > 0 && !q.switch && each != null
-    ? [['Family, 3 plants', rand(q.nextCharge - extra * each)], [`Extra plants, ${extra} × ${rand(each)}`, rand(extra * each)]] : [];
-  // An upgrade to Family that brings extra plants says why (SOLAR-369)
-  const stay = q.plan !== 'family' && extra > 0 ? `Your ${3 + extra} plants stay on: 3 with Family, ${extra} extra.` : null;
+    ? [['Family, 5 plants', rand(q.nextCharge - extra * each)], [`Extra plants, ${extra} × ${rand(each)}`, rand(extra * each)]] : [];
   const when = q.switch ? `Your year starts ${billDay(q.startsOn)}.` : q.credit != null ? `Your year starts today, with ${rand(q.credit)} off for the rest of this month.` : null;
   const ok = await new Promise(resolve => {
     let close;
     const done = (yes) => { close(); resolve(yes); };
-    close = mountNode(<PayReview title={title} note={[stay, when].filter(Boolean).join(' ') || null} due={q.dueNow} parts={parts} card={`${b.card.name} •••• ${b.card.last4}`}
+    close = mountNode(<PayReview title={title} note={when} due={q.dueNow} parts={parts} card={`${b.card.name} •••• ${b.card.last4}`}
       then={[`Your bill from ${billDay(q.nextDate)}`, `${rand(q.nextCharge)} ${perUnit(q.switch ? 'yearly' : q.period || period)}`]} onDone={done} />);
   });
   window.track('pay_review_done', { plan, choice: ok ? 'pay' : 'cancel' });

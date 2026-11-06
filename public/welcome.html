@@ -502,17 +502,14 @@ section#features{padding-top:0;scroll-margin-top:112px}
 .period button span{margin-left:6px;color:var(--gold);font-weight:500}
 #pricing .plans{margin-top:24px}
 /* an offer (SOLAR-330): the list price struck out, its terms in a band under the switch */
-.extra s{color:var(--muted);text-decoration-thickness:1px}
 .price s{display:block;margin-bottom:6px;font-size:22px;letter-spacing:-.01em;color:var(--muted)}
 .offer-band{margin-top:18px;font-size:16px;color:var(--muted)}.offer-band b{color:var(--gold);font-weight:600}
 .offer-bar{display:block;text-decoration:none;padding:8px 16px;text-align:center;font:500 14px var(--sans);color:var(--gold);background:#1c160c;border-bottom:1px solid rgba(242,195,107,.25)}.offer-bar[hidden]{display:none}
 .offer-bar span{text-decoration:underline;text-underline-offset:3px}
 @media (max-width:600px){.offer-bar{padding:7px 12px;font-size:13px}.offer-bar span{display:none}}
 #pricing[data-period="m"] .y,#pricing[data-period="y"] .m{display:none}
-.extra{margin:0 0 26px;padding:16px 16px 14px;border-radius:14px;border:1px dashed rgba(242,195,107,.45);background:rgba(242,195,107,.05)}
-.extra div{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:2px 12px;font:600 16px var(--sans);white-space:nowrap}
-.extra em{font-style:normal;color:var(--gold)}
-.extra p{margin-top:4px;font-size:14.5px;color:var(--muted)}
+.extra{margin:0 0 26px;font-size:14.5px;color:var(--muted)}
+.extra a{color:var(--gold)}
 .tag{position:absolute;top:30px;right:28px;padding:5px 11px;border-radius:999px;background:rgba(242,195,107,.16);color:var(--gold);font-size:13px;font-weight:600}
 
 /* questions */
@@ -965,10 +962,10 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
       </div>
       <div class="plan rv d1">
         <h3>Home</h3>
-        <div class="price" data-offer="home"><span class="m">R99<small>a month</small></span><span class="y">R999<small>a year</small></span></div>
+        <div class="price" data-offer="home"><span class="m">R99<small>a month</small></span><span class="y">R990<small>a year</small></span></div>
         <div class="per" data-offer="home"><span class="m">About R3 a day</span><span class="y">About R83 a month</span></div>
         <ul>
-          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>1 plant</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>2 plants</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Your full history, any day</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Battery time left</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Weekly, monthly and yearly reports</li>
@@ -981,14 +978,14 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
       </div>
       <div class="plan year rv d2">
         <h3>Family</h3>
-        <div class="price" data-offer="family"><span class="m">R179<small>a month</small></span><span class="y">R1&nbsp;799<small>a year</small></span></div>
-        <div class="per" data-offer="family"><span class="m">About R60 a plant</span><span class="y">About R150 a month</span></div>
+        <div class="price" data-offer="family"><span class="m">R199<small>a month</small></span><span class="y">R1&nbsp;990<small>a year</small></span></div>
+        <div class="per" data-offer="family"><span class="m">About R40 a plant</span><span class="y">About R166 a month</span></div>
         <ul>
-          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f2c36b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Up to 3 plants</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f2c36b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Up to 5 plants</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f2c36b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Your home and the ones you look after</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f2c36b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Everything in Home</li>
         </ul>
-        <div class="extra"><div><span>Extra plants</span><em data-offer="extra"><span class="m">+R49 a plant a month</span><span class="y">+R588 a plant a year</span></em></div><p>Past 3 plants? Add more in the app.</p></div>
+        <p class="extra">More than 5 plants? <a href="mailto:hello@princesolarhub.co.za">Email us</a>.</p>
         <a class="btn sun" data-plan="family" href="https://app.princesolarhub.co.za/?signup&amp;plan=family&amp;period=monthly">Get Family</a>
       </div>
     </div>

@@ -41,7 +41,7 @@ begin
   perform pg_temp.eq('u3 renews at R99', public.billing_amount_due(u3), 99);
   -- upgrade at the offer: Family R89 from the next date
   perform pg_temp.eq('u1 upgrade next at offer', (public.billing_upgrade_quote(u1, 'family', 0)->>'nextCharge')::int, 89);
-  perform pg_temp.eq('u1 upgrade list shown', (public.billing_upgrade_quote(u1, 'family', 0)->>'listCharge')::int, 179);
+  perform pg_temp.eq('u1 upgrade list shown', (public.billing_upgrade_quote(u1, 'family', 0)->>'listCharge')::int, 199);
   -- an extra plant past the 3rd: R29
   perform pg_temp.eq('u2 extra plant yearly', public.billing_amount('family', 'yearly', 1, 't_launch'), 890 + 290);
 

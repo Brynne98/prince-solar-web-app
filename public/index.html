@@ -1271,7 +1271,6 @@
   .pop-wait .spin { width: 16px; height: 16px; color: var(--accent); }
   .pop-dlg:has(.pop-wait) { width: fit-content; min-width: 240px; }   /* auto fills a modal dialog edge to edge (SOLAR-337) */
   .pop-dlg:focus { outline: none; }   /* a pop-up with nothing to press takes focus itself; no ring round it */
-  .stepper[aria-busy="true"] .mono { opacity: .35; }
   .pop-dlg.pop-wide { width: min(940px, calc(100vw - 32px)); }
   .pop-wide .pop-body { padding: var(--sp-2xl) var(--sp-2xl) var(--sp-2xl); }
   /* the plan picker inside its pop-up (SOLAR-292): no page padding, a close button top right */
@@ -1700,11 +1699,6 @@
     .plan-cards .plan-gives { padding-top: var(--sp-lg); gap: var(--sp-3xs); }
     .plan-cards .plan-gives li { min-height: 32px; }
   }
-  .stepper { display: inline-flex; align-items: center; border: 1px solid var(--line-2); border-radius: var(--r-md); overflow: hidden; }
-  .stepper button { width: 36px; height: 34px; padding: 0; background: none; border: none; color: var(--text); display: grid; place-items: center;
-    margin: 0; align-self: center; }   /* .pw-plan button gives every card button an 8px top margin */
-    .stepper button:disabled { color: var(--dim); opacity: .5; cursor: default; }
-  .stepper .mono { min-width: 28px; text-align: center; font-size: var(--fs-md); font-weight: 600; }
   .plan-gives li::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: var(--r-xs); background: var(--accent); margin-right: var(--sp-sm); vertical-align: 2px; }
   .pay-logo { padding: 0; background: none; }
   .plan-cards + .confirm-card { margin-top: var(--sp-lg); }
@@ -1936,7 +1930,6 @@
       content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
     .back-link, .login-manage, .cal-day, .menu button { min-height: 44px; }
     .cal-pop { width: min(344px, calc(100vw - 32px)); padding: var(--sp-sm); }   /* seven 44px days across */
-    .stepper button { width: 44px; height: 44px; }
     .fs-in, .fs-cnt, .skel.fs-in { height: 46px !important; }   /* the box less its border: a 44px field */
     .fs-in input { align-self: stretch; }
   }

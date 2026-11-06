@@ -748,7 +748,7 @@ export const planUpgraded = (u: Upgrade) => {
   return make(u.addedPlants ? `${plants} added to your plan` : `You're on ${PLAN_NAME[u.to]}`, {
     title: u.addedPlants ? `${plants} added` : `You're on ${PLAN_NAME[u.to]}`,
     parts: [
-      { p: u.addedPlants ? "They're billed with your Family plan from today." : u.to === "family" ? "You can add up to 3 plants now." : "Your history is kept from now on." },
+      { p: u.addedPlants ? "They're billed with your Family plan from today." : u.to === "family" ? "You can add up to 5 plants now." : "Your history is kept from now on." },
       { items: {
         rows: [u.addedPlants ? { icon: "plus" as const, name: plants, sub: `On your ${PLAN_NAME[u.to]} plan` } : planItem(u.to, u.period, "from today")],
         total: { label: "Paid today", value: rand(u.paidNow) },
