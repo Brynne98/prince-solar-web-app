@@ -18,7 +18,7 @@ colors:
   sun-core: "#ffd56b"
   sun-mid: "#f4a93a"
   sun-rim: "#e07a1f"
-  ok-green: "#3ddc84"
+  ok-green: "#84cc16"
   warn-amber: "#f59e0b"
   bad-red: "#ef4444"
   accent: "#3ddc84"
@@ -241,7 +241,8 @@ semantic, not decorative.
   buttons, text links, the switch when on, Finish setup, your current plan, today in the
   calendar. Same green as solar by decision (the app stays green; the website button is
   amber). Never on a reading.
-- **Ok Green** (`ok-green`, `--ok`): status that is fine. Live dot, grid on, connected,
+- **Ok Green** (`ok-green`, `--ok`): a deep lime, never solar's green, so a status mark
+  never reads as solar (SOLAR-379). Status that is fine. Live dot, grid on, connected,
   unread dot, a rising trend that is good, the toast tick, "Back" and "OK" in alert emails.
 - **Warn Amber** (`warn-amber`, `--warn`): needs a look. Stale, Not updating, Payment
   failed, Ending, a pack drifting, an unverified login, "Last reading" in alert emails.

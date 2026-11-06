@@ -58,7 +58,7 @@ const C = {
   grid: "#facc15",
   cyan: "#22d3ee",
   batt: "#a78bfa",
-  ok: "#3ddc84",
+  ok: "#84cc16",
   warn: "#f59e0b",
   bad: "#ef4444",
 } as const;
