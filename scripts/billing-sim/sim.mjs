@@ -273,8 +273,9 @@ async function check(H, U, what, pre) {
   eq('screen: extraPlants', g.extraPlants, st.extraPlants); eq('screen: nextExtraPlants', g.nextExtraPlants, st.nextExtraPlants); eq('billing_amount_due', s.due, st.nextAmount);
   // independent of the oracle: no plant collects beyond what the plan covers
   const act = s.plants.filter((p) => !p.paused).length;
-  if (!(b && b.comped) && (b ? b.plan : 'free') !== 'family' && act > 1) bad.push(['plant collects free: Free/Home with >1 active plant', act, 1]);
-  if (b && !b.comped && b.plan === 'family' && act > 3 + b.extra_plants) bad.push(['plant collects free: Family past its room', act, 3 + b.extra_plants]);
+  // rooms from the oracle (0156: Free 1, Home 2, Family 5 + extras held)
+  const room = cover(b ? b.plan : 'free', b ? b.extra_plants : 0);
+  if (!(b && b.comped) && act > room) bad.push([`plant collects free: ${b ? b.plan : 'free'} past its room`, act, room]);
   if (s.due < 0 || (g.price !== null && g.price < 0)) bad.push(['negative figure', s.due, '>=0']);
   if (b && b.plan !== 'free' && !b.comped) {
     // next date never moves except by the clamp rule: it is the billing day clamped into its month
