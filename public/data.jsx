@@ -465,6 +465,14 @@ async function deleteAccount() {
 // Minute days and temperature days of the last 60 count together, since the 60-days
 // email waits for both. Temperatures count only while more than a day behind: every
 // plant falls one day behind at midnight (as first-load-continue, 0093).
+// Temperatures behind are a first load only for a plant linked in the last day. On an
+// older plant they are the walk catching up after a dead login, not a plant setting up
+// (SOLAR-373). A restarted plant (0125) still loads its minutes as a first load.
+function firstLoadSync(sync, linkedAt) {
+  if (!sync || !sync.invPending || sync.spinePending) return sync;
+  if (!linkedAt || Date.now() - Date.parse(linkedAt) < 86400000) return sync;
+  return { ...sync, pending: false, invPending: false };
+}
 function syncProgress(sync) {
   if (!sync || !sync.pending) return null;
   const win = sync.window || 60;
@@ -494,5 +502,5 @@ function emptyText(days, fallback) {
 Object.assign(window, {
   fetchSnapshot, fetchDay, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth,
   fetchMe, savePrefs, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount,
-  fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, pushSupport, pushState, pushTurnOn, pushTurnOff, pushResync, emptyText, syncProgress, BATT_MAX_KW, TYPICAL_DAYS,
+  fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, pushSupport, pushState, pushTurnOn, pushTurnOff, pushResync, emptyText, syncProgress, firstLoadSync, BATT_MAX_KW, TYPICAL_DAYS,
 });

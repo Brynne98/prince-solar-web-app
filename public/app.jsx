@@ -252,7 +252,7 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
                   );
                 }
                 // the plant on screen takes the header's progress, so the two % always match
-                const st = p.id === plantId && states[p.id] && currentSync ? { ...states[p.id], sync: currentSync } : states[p.id];
+                const st = states[p.id] && { ...states[p.id], sync: p.id === plantId && currentSync ? currentSync : window.firstLoadSync(states[p.id].sync, p.linkedAt) };
                 return (
                   <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
                           onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
@@ -1347,7 +1347,9 @@ function App({ links }) {
     return ls.length > 0 && !ls.some(a => a.status === 'active');
   };
   const loginCut = !!rawSnap && plantStatus(rawSnap, Date.now()).status !== 'live' && loginsCut(plantId);
-  const snap = React.useMemo(() => (loginCut ? { ...rawSnap, sync: null, loginCut: true } : rawSnap), [rawSnap, loginCut]);
+  const linkedAt = (me?.plants || []).find(p => p.id === plantId)?.linkedAt;
+  const snap = React.useMemo(() => (!rawSnap ? rawSnap : loginCut ? { ...rawSnap, sync: null, loginCut: true }
+    : { ...rawSnap, sync: window.firstLoadSync(rawSnap.sync, linkedAt) }), [rawSnap, loginCut, linkedAt]);
   const [today, setToday] = useState(null);
   const [energy, setEnergy] = useState({});
   // > 0 while a snapshot fetch is in flight; the Refresh icon spins on it. Held to a
