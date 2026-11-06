@@ -702,10 +702,10 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
           </span>
         )}
       </window.Tip>
-      {/* takes the status colour once something is wrong, and reads Retry when nothing reports */}
+      {/* takes the status colour once something is wrong; the icon alone at every width (SOLAR-375) */}
       <button type="button" className={'refresh refresh-' + s.status + (busy ? ' busy' : '') + (sync != null ? ' fetching' : '')} aria-busy={busy} onClick={onRefresh}
               aria-label={s.status === 'offline' ? 'Retry' : 'Refresh'}>
-        <Icon id="refresh" />{s.status === 'offline' && <span className="lbl">Retry</span>}
+        <Icon id="refresh" />
       </button>
     </>
   );
