@@ -4,9 +4,11 @@
 // Dates are 'YYYY-MM-DD' strings. Money is whole rand.
 
 export const PLAN_RANK = { free: 0, home: 1, family: 2 };
-const BASE = { home: { monthly: 99, yearly: 999 }, family: { monthly: 179, yearly: 1799 } };
-const EXTRA = { monthly: 49, yearly: 588 }; // per extra plant, per period
-export const cover = (plan, extra = 0) => (plan === 'family' ? 3 + extra : 1); // plants a plan collects
+// 0156 (SOLAR-371): Home 2 plants, Family 5, a year is 10 months; extra plants no longer sold,
+// those already held keep their price.
+const BASE = { home: { monthly: 99, yearly: 990 }, family: { monthly: 199, yearly: 1990 } };
+const EXTRA = { monthly: 49, yearly: 588 }; // per extra plant held, per period
+export const cover = (plan, extra = 0) => (plan === 'family' ? 5 + extra : plan === 'home' ? 2 : 1); // plants a plan collects
 
 export function price(plan, period, extra = 0) {
   if (plan === 'free') return 0;
@@ -179,7 +181,7 @@ export class Oracle {
     if (extras !== null && extras < 0) return { err: 'unknown plan or period' };
     const kind = this.plan === 'free' ? 'start' : 'upgrade';
     const per = kind === 'start' ? period ?? 'monthly' : this.period;
-    const added = plan === 'family' ? Math.max((extras ?? this.extra) - this.held(), 0) : 0;
+    const added = 0; // extra plants are no longer sold (0156)
     if (kind === 'upgrade' && plan === this.plan) {
       if (added === 0) return { err: 'nothing to buy' };
       if (this.nextPlan !== null) return { err: 'plan change' };

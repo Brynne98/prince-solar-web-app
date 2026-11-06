@@ -34,7 +34,8 @@ insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000000c1', 'o@t.test'), ('00000000-0000-0000-0000-0000000000d1', 'j@t.test'),
   ('00000000-0000-0000-0000-0000000000e1', 'h@t.test'), ('00000000-0000-0000-0000-0000000000f1', 'z@t.test');
 
--- y holds 1 extra plant (0129): room for its 4.
+-- Rooms since 0156: Home 2, Family 5. a fills Home, f fills Family; y holds 1 extra plant
+-- (0129, no longer sold): room for its 6.
 insert into private.billing (user_id, plan, period, billing_day, next_billing_date, extra_plants) values
   ('00000000-0000-0000-0000-00000000000a', 'home',   'monthly', 1,  '2026-12-01', 0),
   ('00000000-0000-0000-0000-00000000000f', 'family', 'monthly', 1,  '2026-12-01', 0),
@@ -44,13 +45,18 @@ insert into private.billing (user_id, plan, period, billing_day, next_billing_da
 
 insert into public.plant_users (plant_id, user_id, linked_at) values
   (9000001, '00000000-0000-0000-0000-00000000000a', '2026-01-01'),
+  (9000002, '00000000-0000-0000-0000-00000000000a', '2026-01-02'),
   (9000011, '00000000-0000-0000-0000-00000000000f', '2026-01-01'),
   (9000012, '00000000-0000-0000-0000-00000000000f', '2026-01-02'),
   (9000013, '00000000-0000-0000-0000-00000000000f', '2026-01-03'),
+  (9000014, '00000000-0000-0000-0000-00000000000f', '2026-01-04'),
+  (9000015, '00000000-0000-0000-0000-00000000000f', '2026-01-05'),
   (9000021, '00000000-0000-0000-0000-0000000000a1', '2026-01-01'),
   (9000022, '00000000-0000-0000-0000-0000000000a1', '2026-01-02'),
   (9000023, '00000000-0000-0000-0000-0000000000a1', '2026-01-03'),
   (9000024, '00000000-0000-0000-0000-0000000000a1', '2026-01-04'),
+  (9000026, '00000000-0000-0000-0000-0000000000a1', '2026-01-05'),
+  (9000027, '00000000-0000-0000-0000-0000000000a1', '2026-01-06'),
   (9000031, '00000000-0000-0000-0000-0000000000b1', '2026-01-01');
 insert into private.inverters (sn, plant_id) values
   ('T-11', 9000011), ('T-12a', 9000012), ('T-12b', 9000012), ('T-13', 9000013),
@@ -74,11 +80,11 @@ begin
   -- Prices
   perform pg_temp.eq('free',              public.billing_amount('free', null), 0);
   perform pg_temp.eq('home monthly',      public.billing_amount('home', 'monthly'), 99);
-  perform pg_temp.eq('home yearly',       public.billing_amount('home', 'yearly'), 999);
-  perform pg_temp.eq('family monthly',    public.billing_amount('family', 'monthly'), 179);
-  perform pg_temp.eq('family yearly',     public.billing_amount('family', 'yearly'), 1799);
-  perform pg_temp.eq('family + 2 extra',  public.billing_amount('family', 'monthly', 2), 277);
-  perform pg_temp.eq('family yr + 1',     public.billing_amount('family', 'yearly', 1), 2387);
+  perform pg_temp.eq('home yearly',       public.billing_amount('home', 'yearly'), 990);
+  perform pg_temp.eq('family monthly',    public.billing_amount('family', 'monthly'), 199);
+  perform pg_temp.eq('family yearly',     public.billing_amount('family', 'yearly'), 1990);
+  perform pg_temp.eq('family + 2 extra',  public.billing_amount('family', 'monthly', 2), 297);
+  perform pg_temp.eq('family yr + 1',     public.billing_amount('family', 'yearly', 1), 2578);
 
   -- Billing dates: same day each period, last day in a shorter month, then back
   perform pg_temp.eq('31 Jan -> Feb',     public.billing_step('2027-01-31', 'monthly', 31, 1), date '2027-02-28');
@@ -108,15 +114,15 @@ begin
 
   -- Upgrade quotes from the user's own row: billing date stays, next charge is full
   q := public.billing_upgrade_quote(ua, 'family', 0, null, '2026-11-15');
-  perform pg_temp.eq('quote home m due',  (q->>'dueNow')::int, 43);
-  perform pg_temp.eq('quote home m next', (q->>'nextCharge')::int, 179);
+  perform pg_temp.eq('quote home m due',  (q->>'dueNow')::int, 53);
+  perform pg_temp.eq('quote home m next', (q->>'nextCharge')::int, 199);
   perform pg_temp.eq('quote home m date', (q->>'nextDate')::date, date '2026-12-01');
   q := public.billing_upgrade_quote(uh, 'family', 0, null, '2027-05-02');
-  perform pg_temp.eq('quote home y due',  (q->>'dueNow')::int, 401);
-  perform pg_temp.eq('quote home y next', (q->>'nextCharge')::int, 1799);
+  perform pg_temp.eq('quote home y due',  (q->>'dueNow')::int, 501);
+  perform pg_temp.eq('quote home y next', (q->>'nextCharge')::int, 1990);
   -- billing day 31, next 31 Mar: the period started 28 Feb (31 days); 15 Mar = 16 left
   q := public.billing_upgrade_quote(uj, 'family', 0, null, '2027-03-15');
-  perform pg_temp.eq('quote day-31 due',  (q->>'dueNow')::int, 41);
+  perform pg_temp.eq('quote day-31 due',  (q->>'dueNow')::int, 52);
   -- Free -> paid: full price now, period starts today
   q := public.billing_upgrade_quote(ur, 'home', 0, 'monthly', '2026-11-15');
   perform pg_temp.eq('free -> home due',  (q->>'dueNow')::int, 99);
@@ -124,29 +130,29 @@ begin
   perform pg_temp.raises('family -> home is no upgrade',
     format('select public.billing_upgrade_quote(%L, %L)', uf, 'home'), 'not an upgrade');
 
-  -- Room (0129): Free and Home 1, Family 3 + the extra plants bought, R49 a plant
+  -- Room (0156): Free 1, Home 2, Family 5 + any extra plants held (0129, no longer sold)
   perform pg_temp.eq('room free',           public.billing_room('free'), 1);
-  perform pg_temp.eq('room home',           public.billing_room('home'), 1);
-  perform pg_temp.eq('room family + 2',     public.billing_room('family', 2), 5);
+  perform pg_temp.eq('room home',           public.billing_room('home'), 2);
+  perform pg_temp.eq('room family + 2',     public.billing_room('family', 2), 7);
   -- 1 extra plant mid-period on Family: R49, 16 of 30 days left
-  perform pg_temp.eq('4th plant ok',        (public.billing_may_link(uf, 'new@login.test', array[2])->>'ok')::boolean, false);
+  perform pg_temp.eq('6th plant ok',        (public.billing_may_link(uf, 'new@login.test', array[2])->>'ok')::boolean, false);
   q := public.billing_upgrade_quote(uf, 'family', 1, null, '2026-11-15');
-  perform pg_temp.eq('4th plant due now',   (q->>'dueNow')::int, public.billing_prorate(49, '2026-11-15', '2026-11-01', '2026-12-01'));
-  perform pg_temp.eq('4th plant next',      (q->>'nextCharge')::int, 228);
+  perform pg_temp.eq('6th plant due now',   (q->>'dueNow')::int, public.billing_prorate(49, '2026-11-15', '2026-11-01', '2026-12-01'));
+  perform pg_temp.eq('6th plant next',      (q->>'nextCharge')::int, 248);
   -- Yearly Family with 1 extra plant: R588 a year
-  perform pg_temp.eq('yearly 4 plants due', public.billing_amount_due(uy), 2387);
+  perform pg_temp.eq('yearly 6 plants due', public.billing_amount_due(uy), 2578);
   insert into public.plant_users (plant_id, user_id, linked_at) values (9000041, uo, '2026-01-01');
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
     values (uo, 'family', 'monthly', 1, '2026-12-01');
 
   -- Guard a: every plant a login brings counts
-  -- Past the plan's one plant, a new plant links paused (0110 trigger)
+  -- Past the plan's room, a new plant links paused (0110 trigger)
   insert into public.plant_users (plant_id, user_id) values (9000099, ua);
-  perform pg_temp.eq('home 2nd plant links paused', (select paused from public.plant_users where plant_id = 9000099 and user_id = ua), true);
+  perform pg_temp.eq('home 3rd plant links paused', (select paused from public.plant_users where plant_id = 9000099 and user_id = ua), true);
   perform pg_temp.eq('paused plant not counted', (public.billing_may_link(ua, 'a@login.test', array[1])->>'reason'), 'upgrade_needed');
   delete from public.plant_users where plant_id = 9000099;
   perform pg_temp.eq('free 2nd plant',    public.billing_may_link(ur, 'r@login.test', array[1])->>'reason', 'upgrade_needed');
-  perform pg_temp.eq('home 2nd plant',    public.billing_may_link(ua, 'a@login.test', array[1])->>'reason', 'upgrade_needed');
+  perform pg_temp.eq('home 3rd plant',    public.billing_may_link(ua, 'a@login.test', array[1])->>'reason', 'upgrade_needed');
   delete from public.plant_users where user_id = ur;
   perform pg_temp.eq('installer on free', public.billing_may_link(ur, 'i@login.test', array[1, 1, 1])->>'reason', 'upgrade_needed');
   perform pg_temp.eq('free 1st plant',    (public.billing_may_link(ur, 'r@login.test', array[1])->>'ok')::boolean, true);
@@ -156,17 +162,18 @@ begin
   perform pg_temp.eq('free link records the login', (select user_id from private.free_week_logins where sunsynk_username = 'fresh@login.test'), ur);
   perform pg_temp.eq('paid link records it too', (select count(*)::int from private.free_week_logins where sunsynk_username = 'paid@login.test'), 1);
 
-  -- Downgrade at period end. With 3 plants it books; the 2 not picked stop on the date (0136).
+  -- Downgrade at period end. With 5 plants it books; the 3 not picked stop on the date (0136).
   perform public.billing_book_change(uf, 'home');
-  perform pg_temp.eq('family -> home with 3 plants books', (select cardinality(private.billing_drops(b)) from private.billing b where user_id = uf), 2);
+  perform pg_temp.eq('family -> home with 5 plants books', (select cardinality(private.billing_drops(b)) from private.billing b where user_id = uf), 3);
   perform public.billing_book_removal(uf, 9000012);
   perform public.billing_book_removal(uf, 9000013);
+  perform public.billing_book_removal(uf, 9000014);
   perform public.billing_book_change(uf, 'home');
   perform pg_temp.eq('plan kept to period end', (select plan from private.billing where user_id = uf), 'family');
   perform pg_temp.eq('downgrade due',           public.billing_amount_due(uf), 99);
   q := public.billing_renew(uf);
   perform pg_temp.eq('renew charge',  (q->>'charge')::int, 99);
-  perform pg_temp.eq('renew removes', q->'removePlants', '[9000012, 9000013]'::jsonb);
+  perform pg_temp.eq('renew removes', q->'removePlants', '[9000012, 9000013, 9000014]'::jsonb);
   perform pg_temp.eq('now home',      (select plan from private.billing where user_id = uf), 'home');
   perform pg_temp.eq('date kept',     (select next_billing_date from private.billing where user_id = uf), date '2027-01-01');
   perform pg_temp.raises('upgrade not booked',
@@ -179,7 +186,7 @@ begin
 
   -- Removing a plant on Family: the room bought stays billed until it is lowered (0129)
   perform public.billing_book_removal(uy, 9000024);
-  perform pg_temp.eq('room still billed', public.billing_amount_due(uy), 2387);
+  perform pg_temp.eq('room still billed', public.billing_amount_due(uy), 2578);
   perform public.billing_book_removal(uy, 9000023);
 
   -- Cancel = downgrade to Free at period end
@@ -196,10 +203,10 @@ begin
   -- date stays, then a year on with no second charge
   perform pg_temp.raises('switch not booked', format('select public.billing_book_change(%L, ''home'', ''yearly'')', uj), 'paid now');
   q := public.billing_upgrade_quote(uj, 'home', 0, 'yearly');
-  perform pg_temp.eq('switch quote', q->>'dueNow' || ' ' || (q->>'startsOn') || ' ' || (q->>'nextDate'), '999 2027-03-31 2028-03-31');
+  perform pg_temp.eq('switch quote', q->>'dueNow' || ' ' || (q->>'startsOn') || ' ' || (q->>'nextDate'), '990 2027-03-31 2028-03-31');
   q := public.billing_charge_open(uj, 'home', 'yearly');
   perform pg_temp.eq('switch charge', (select kind || ' ' || period || ' ' || amount || ' ' || billing_date
-                                         from private.billing_charges where reference = q->>'reference'), 'switch yearly 999 2027-03-31');
+                                         from private.billing_charges where reference = q->>'reference'), 'switch yearly 990 2027-03-31');
   -- a double tap opens two; the second paid goes back
   perform set_config('t.switch2', public.billing_charge_open(uj, 'home', 'yearly')->>'reference', true);
   perform public.billing_charge_paid(q->>'reference');
@@ -207,7 +214,7 @@ begin
   perform pg_temp.eq('switch kept to period end', (select period || ' ' || next_period || ' ' || prepaid_on
                                                      from private.billing where user_id = uj), 'monthly yearly 2027-03-31');
   perform pg_temp.eq('switch receipt', (select data->>'amount' || ' ' || (data->>'startsOn') || ' ' || (data->>'nextDate')
-                                          from public.email_queue where user_id = uj and kind = 'bill_switched'), '999 2027-03-31 2028-03-31');
+                                          from public.email_queue where user_id = uj and kind = 'bill_switched'), '990 2027-03-31 2028-03-31');
   -- no undo, no other change, no second switch until the year starts
   perform pg_temp.raises('switch no undo', format('select public.billing_book_change(%L, ''home'', ''monthly'')', uj), 'year is paid');
   perform pg_temp.raises('switch no cancel', format('select public.billing_book_change(%L, ''free'')', uj), 'year is paid');
@@ -224,7 +231,7 @@ begin
   perform pg_temp.eq('switch renewal free', (q->>'charge')::int, 0);
   perform pg_temp.eq('switch y date', (select period || ' ' || next_billing_date || ' ' || coalesce(prepaid_on::text, '-')
                                          from private.billing where user_id = uj), 'yearly 2028-03-31 -');
-  perform pg_temp.eq('switch y due', public.billing_amount_due(uj), 999);
+  perform pg_temp.eq('switch y due', public.billing_amount_due(uj), 990);
   -- Yearly -> monthly
   perform public.billing_book_change(uh, 'home', 'monthly');
   perform pg_temp.eq('switch m due', public.billing_amount_due(uh), 99);
@@ -252,12 +259,13 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', ur, 'role', 'authenticated')::text, true);
   q := public.api_billing_quote('family', 'yearly');
   perform pg_temp.eq('quote free plan',   q->>'plan', 'free');
-  perform pg_temp.eq('quote free yearly', (q->>'dueNow')::int, 1799);
+  perform pg_temp.eq('quote free yearly', (q->>'dueNow')::int, 1990);
   perform pg_temp.eq('quote free home',   (public.api_billing_quote('home', 'monthly')->>'dueNow')::int, 99);
   perform set_config('request.jwt.claims', json_build_object('sub', uy, 'role', 'authenticated')::text, true);
   q := public.api_billing_quote('family', 'monthly', 3);
   perform pg_temp.eq('quote keeps own period', q->>'period', 'yearly');
-  perform pg_temp.eq('quote yearly extras (1 now + 2 new)', (q->>'nextCharge')::int, 1799 + 3 * 588);
+  -- extra plants are no longer sold (0156): asking for 3 keeps the 1 held
+  perform pg_temp.eq('quote yearly extras: none sold', (q->>'nextCharge')::int, 1990 + 1 * 588);
   perform set_config('request.jwt.claims', '', true);
   perform pg_temp.raises('quote signed out', 'select public.api_billing_quote(''family'')', 'sign in first');
 
@@ -363,7 +371,7 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', uh, 'role', 'authenticated')::text, true);
   perform pg_temp.eq('home monthly now', public.api_billing_status()->>'period', 'monthly');
   perform pg_temp.raises('switch not booked by the app', 'select public.api_billing_change(''home'', ''yearly'')', 'paid now');
-  perform pg_temp.eq('switch quote for the app', (select q->>'dueNow' || ' ' || (q->>'switch') from public.api_billing_quote('home', 'yearly') q), '999 true');
+  perform pg_temp.eq('switch quote for the app', (select q->>'dueNow' || ' ' || (q->>'switch') from public.api_billing_quote('home', 'yearly') q), '990 true');
   perform pg_temp.eq('cancel booked', public.api_billing_change('free')->>'nextPlan', 'free');
   perform pg_temp.eq('undo cancel', public.api_billing_change('home', 'monthly')->>'nextPlan', null);
   -- Each undo of a booked change is emailed; an undo with nothing booked is not (0134).
@@ -473,8 +481,9 @@ insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values
 insert into public.plant_users (plant_id, user_id, account_id, plant_name, linked_at) values
   (9000091, '00000000-0000-0000-0000-000000000091', '00000000-0000-0000-0000-000000000094', 'Home one', '2026-01-01'),
   (9000092, '00000000-0000-0000-0000-000000000091', '00000000-0000-0000-0000-000000000094', 'Home two', '2026-01-02'),
+  (9000094, '00000000-0000-0000-0000-000000000091', '00000000-0000-0000-0000-000000000094', 'Home three', '2026-01-03'),
   (9000093, '00000000-0000-0000-0000-000000000092', null, 'N', '2026-01-01');
-insert into private.inverters (sn, plant_id) values ('T-91', 9000091), ('T-92', 9000092);
+insert into private.inverters (sn, plant_id) values ('T-91', 9000091), ('T-92', 9000092), ('T-94', 9000094);
 do $$
 declare
   s constant uuid := '00000000-0000-0000-0000-000000000091';
@@ -484,7 +493,7 @@ declare
   t date := private.billing_today();
   o jsonb; ref text; runs jsonb;
 begin
-  perform pg_temp.eq('s starts with one plant paused', (select count(*)::int from public.plant_users where user_id = s and paused), 1);
+  perform pg_temp.eq('s starts with two plants paused', (select count(*)::int from public.plant_users where user_id = s and paused), 2);
   -- start: Free to Home, full price, period from today
   o := public.billing_charge_open(s, 'home', 'monthly');
   perform pg_temp.eq('start costs the full price', (o->>'amount')::int, 99);
@@ -499,12 +508,12 @@ begin
   perform pg_temp.eq('card saved', (select card->>'authorization_code' from private.billing where user_id = s), 'AUTH_t1');
   perform pg_temp.eq('one upgrade email', (select count(*)::int from public.email_queue where user_id = s and kind = 'bill_upgraded'), 1);
   perform pg_temp.eq('card label', (select data->>'card' from public.email_queue where user_id = s and kind = 'bill_upgraded'), 'Visa •••• 4081');
-  perform pg_temp.eq('Home still covers one plant', (select count(*)::int from public.plant_users where user_id = s and paused), 1);
+  perform pg_temp.eq('Home covers two of three plants', (select count(*)::int from public.plant_users where user_id = s and paused), 1);
 
   -- upgrade: Home to Family resumes the paused plant, charges the saved card
   o := public.billing_charge_open(s, 'family');
   perform pg_temp.eq('upgrade uses the saved card', o->>'card', 'AUTH_t1');
-  perform pg_temp.eq('upgrade on day 1 is the whole difference', (o->>'amount')::int, 80);
+  perform pg_temp.eq('upgrade on day 1 is the whole difference', (o->>'amount')::int, 100);
   perform public.billing_charge_paid(o->>'reference', v_card);
   perform pg_temp.eq('on Family', (select plan from private.billing where user_id = s), 'family');
   perform pg_temp.eq('paused plant resumed', (select count(*)::int from public.plant_users where user_id = s and paused), 0);
@@ -522,7 +531,7 @@ begin
   update private.billing set next_billing_date = t where user_id = s;
   runs := public.billing_run(t);
   perform pg_temp.eq('renewal charged', (select count(*)::int from jsonb_array_elements(runs) x
-    where x->>'card' = 'AUTH_t1' and (x->>'amount')::int = 179), 1);
+    where x->>'card' = 'AUTH_t1' and (x->>'amount')::int = 199), 1);
   perform pg_temp.eq('date moved on', (select next_billing_date from private.billing where user_id = s), public.billing_step(t, 'monthly', extract(day from t)::int, 1));
   ref := (select x->>'reference' from jsonb_array_elements(runs) x where x->>'card' = 'AUTH_t1');
   perform pg_temp.eq('failure: next try day 1', public.billing_charge_failed(ref, 'declined')->>'nextTry', (t + 1)::text);
@@ -530,7 +539,7 @@ begin
   runs := public.billing_run(t + 1);
   perform pg_temp.eq('retry once a day', (select count(*)::int from jsonb_array_elements(public.billing_run(t + 1)) x where x->>'card' = 'AUTH_t1'), 0);
   ref := (select x->>'reference' from jsonb_array_elements(runs) x where x->>'card' = 'AUTH_t1');
-  perform pg_temp.eq('retry same amount', (select amount from private.billing_charges where reference = ref), 179);
+  perform pg_temp.eq('retry same amount', (select amount from private.billing_charges where reference = ref), 199);
   update private.billing_charges set created_on = t + 1 where reference = ref;
   perform pg_temp.eq('day 1 fails: next day 3', public.billing_charge_failed(ref, 'declined')->>'nextTry', (t + 3)::text);
   perform pg_temp.eq('nothing on day 2', (select count(*)::int from jsonb_array_elements(public.billing_run(t + 2)) x where x->>'card' = 'AUTH_t1'), 0);
@@ -542,7 +551,7 @@ begin
   perform public.billing_run(t + 8);
   perform pg_temp.eq('day 8: Free', (select plan || state from private.billing where user_id = s), 'freeactive');
   perform pg_temp.eq('first plant kept', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = s),
-    '9000091:false,9000092:true');
+    '9000091:false,9000092:true,9000094:true');
   perform pg_temp.eq('second booked for day 38', (select remove_on from private.billing where user_id = s), t + 38);
   perform pg_temp.eq('moved-to-Free email', (select data->>'kept' || '/' || (data->'stopped'->>0) from public.email_queue where user_id = s and kind = 'bill_free'), 'Home one/Home two');
   perform public.billing_run(t + 35);
@@ -610,7 +619,7 @@ begin
   -- yearly renewal notice 60 days before
   update private.billing set next_billing_date = t + 60 where user_id = k;
   perform public.billing_run(t);
-  perform pg_temp.eq('renewal notice', (select (data->>'amount')::int from public.email_queue where user_id = k and kind = 'bill_renewal_notice'), 999);
+  perform pg_temp.eq('renewal notice', (select (data->>'amount')::int from public.email_queue where user_id = k and kind = 'bill_renewal_notice'), 990);
 end $$;
 select pg_temp.eq('authenticated cannot mark paid', has_function_privilege('authenticated', 'public.billing_charge_paid(text, jsonb, boolean, bigint, text, timestamptz)', 'execute'), false);
 select pg_temp.eq('charges closed', has_table_privilege('authenticated', 'private.billing_charges', 'select'), false);

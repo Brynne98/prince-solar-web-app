@@ -3,7 +3,9 @@
 // rolled back. A case returns the problems it saw; none = fixed. The ids are the SOLAR-264 findings
 // (F1-F10 from the first run, P1-P5 from the Paystack test-mode run).
 // Charges are opened with named arguments, so the cases also run against the code before 0127.
-// Since 0129 Family buys extra plants (room), R49 a plant: the X cases; per-inverter cases went.
+// Since 0129 Family bought extra plants (room), R49 a plant: the X cases; per-inverter cases went.
+// Since 0156 (SOLAR-371) Home is 2 plants, Family 5, and extra plants are no longer sold: those held
+// are set with SQL (held), and cases that only bought extras went (X3, X5-X8, X12, X15, X16).
 // A case marked net: true ("safety net" in the log) sets state with SQL that no app path, Paystack event
 // or daily run makes (a card email, a delete list set by hand); it guards the database alone.
 
@@ -67,6 +69,8 @@ function kit(db) {
     // plants: the stopped plants the room is bought for (the app sends them, 0130)
     open: (uid, plan, period = null, extras = null, plants = null) => db.t(`select public.billing_charge_open(p_user => '${uid}', p_plan => '${plan}', p_period => ${period ? `'${period}'` : 'null'}${extras != null ? `, p_extra => ${extras}` : ''}${plants ? `, p_plants => array[${plants.join(',')}]::bigint[]` : ''})`),
     extras: (uid, n) => db.u(uid, `select public.api_billing_extras(${n})`),
+    // extra plants held from before 0156, when they were sold
+    held: (uid, n) => db.exec(`update private.billing set extra_plants = ${n} where user_id = '${uid}';`),
     due: async (uid) => Number((await db.exec(`select public.billing_amount_due('${uid}')`))[0]),
     paid: (ref, cents = null) => db.t(`select public.billing_charge_paid('${ref}', null, true, ${cents ?? 'null'})`),
     failed: (ref) => db.t(`select public.billing_charge_failed('${ref}', 'declined')`),
@@ -83,14 +87,14 @@ function kit(db) {
 
 const P = PLANT;
 const CASES = [
-  { id: 'F1a', title: 'Family books Home, then links 3 more: they link stopped, and 1 collects after the renewal', async run(K) {
+  { id: 'F1a', title: 'Family books Home, then links 3 more: they link stopped, and 2 collect after the renewal', async run(K) {
     const bad = [], u = await K.user('family');
     await K.link(u, [{ id: P(1) }]);
     const b = await K.as(u, `select public.api_billing_change('home', null)`); if (!b.ok) return ['booking refused: ' + b.err];
     await K.link(u, [{ id: P(2) }, { id: P(3) }, { id: P(4) }]);
-    if (await K.active(u) !== 1) bad.push(`after the link: ${await K.active(u)} collect, booked Home takes 1`);
+    if (await K.active(u) !== 2) bad.push(`after the link: ${await K.active(u)} collect, booked Home takes 2`);
     const r = await K.row(u); await K.today(r.next_billing_date); await K.run(r.next_billing_date);
-    if (await K.active(u) !== 1) bad.push(`after the renewal: ${await K.active(u)} collect on Home`);
+    if (await K.active(u) !== 2) bad.push(`after the renewal: ${await K.active(u)} collect on Home`);
     return bad;
   } },
   { id: 'F1b', title: 'Home cancels, then plants collect anyway: the renewal leaves 1, not the one booked for deletion', async run(K) {
@@ -112,20 +116,20 @@ const CASES = [
     for (const p of [1, 2, 3]) await K.as(u, `select public.api_plant_start(${P(p)})`);
     return (await K.active(u)) === 1 ? [] : [`${await K.active(u)} collect on Free`];
   } },
-  { id: 'F3', title: 'Family: a 4th plant inserted as a link inserts it (no app pause) links stopped', async run(K) {
+  { id: 'F3', title: 'Family: a 6th plant inserted as a link inserts it (no app pause) links stopped', async run(K) {
     const u = await K.user('family');
-    await K.link(u, [{ id: P(1) }, { id: P(2) }, { id: P(3) }]);
-    await K.link(u, [{ id: P(4), inv: 2 }]);
-    return (await K.paused(u, P(4))) ? [] : ['4th plant collects unpaid'];
+    await K.link(u, [1, 2, 3, 4, 5].map((i) => ({ id: P(i) })));
+    await K.link(u, [{ id: P(6), inv: 2 }]);
+    return (await K.paused(u, P(6))) ? [] : ['6th plant collects unpaid'];
   } },
   { id: 'F4', title: 'Family: a plant booked for removal still counts; a new plant past it links stopped', async run(K) {
     const bad = [], u = await K.user('family');
-    await K.link(u, [{ id: P(1) }, { id: P(2) }, { id: P(3) }]);
+    await K.link(u, [1, 2, 3, 4, 5].map((i) => ({ id: P(i) })));
     await K.db.t(`select to_jsonb(1) from (select public.billing_book_removal('${u}', ${P(1)})) x`);
     const m = await K.db.t(`select public.billing_may_link('${u}', 'x', array[2])`);
     if (!m.ok || m.v.ok !== false) bad.push(`link check says room: ${JSON.stringify(m.v ?? m.err)}`);
-    await K.link(u, [{ id: P(4), inv: 2 }]);
-    if (!(await K.paused(u, P(4)))) bad.push('new plant collects unpaid');
+    await K.link(u, [{ id: P(6), inv: 2 }]);
+    if (!(await K.paused(u, P(6)))) bad.push('new plant collects unpaid');
     return bad;
   } },
   { id: 'F11', title: 'booked Home, stopped plants booked for deletion: starting all of them keeps 1 past the date', async run(K) {
@@ -220,88 +224,42 @@ const CASES = [
     return w.ok && w.v === u ? [] : ['no owner check: ' + (w.err || w.v)];
   } },
   // ---- 0129: Family buys extra plants, R49 a plant (decided 2026-10-31) ----
-  { id: 'X1', title: 'Family with no extras: a login with 5 plants fills 3, links 2 stopped, bill stays R179', async run(K) {
+  { id: 'X1', title: 'Family: a login with 7 plants fills 5, links 2 stopped, bill stays R199', async run(K) {
     const bad = [], u = await K.user('family');
-    await K.link(u, [1, 2, 3, 4, 5].map((i) => ({ id: P(i), inv: 2 })));
-    if (await K.active(u) !== 3) bad.push(`${await K.active(u)} collect, room is 3`);
-    if (await K.due(u) !== 179) bad.push(`next bill R${await K.due(u)}`);
+    await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i), inv: 2 })));
+    if (await K.active(u) !== 5) bad.push(`${await K.active(u)} collect, room is 5`);
+    if (await K.due(u) !== 199) bad.push(`next bill R${await K.due(u)}`);
     return bad;
   } },
-  { id: 'X2', title: 'buy 2 extra plants on the first day: R98, stopped plants start, bill R277, a 6th links stopped', async run(K) {
-    const bad = [], u = await K.user('family');
-    await K.link(u, [1, 2, 3, 4, 5].map((i) => ({ id: P(i) })));
-    const o = await K.open(u, 'family', null, 2); if (!o.ok) return ['refused: ' + o.err];
-    if (o.v.amount !== 98) bad.push(`charged R${o.v.amount}, 2 plants for the full period cost R98`);
-    const p = await K.paid(o.v.reference, o.v.amount * 100);
-    if (!p.ok || p.v.applied === false) bad.push('paid but not applied: ' + JSON.stringify(p.v ?? p.err));
-    if (await K.active(u) !== 5) bad.push(`${await K.active(u)} collect after buying room for 5`);
-    if (await K.due(u) !== 277) bad.push(`next bill R${await K.due(u)}, want R277`);
-    await K.link(u, [{ id: P(6) }]);
-    if (!(await K.paused(u, P(6)))) bad.push('6th plant collects past the room');
+  { id: 'X2', title: 'extra plants are no longer sold (0156): more on Family is refused, an upgrade buys none', async run(K) {
+    const bad = [], f = await K.user('family'), h = await K.user('home');
+    const more = await K.open(f, 'family', null, 2);
+    if (more.ok) bad.push('extras opened on Family: ' + JSON.stringify(more.v));
+    else if (!/nothing to buy/.test(more.err)) bad.push('refused for another reason: ' + more.err);
+    const up = await K.open(h, 'family', null, 2); if (!up.ok) return [...bad, 'upgrade refused: ' + up.err];
+    if (up.v.amount !== 100) bad.push(`upgrade on day 1 charged R${up.v.amount}, R199 less R99 is R100`);
+    await K.paid(up.v.reference);
+    if ((await K.row(h)).extra_plants !== 0) bad.push(`upgrade bought ${(await K.row(h)).extra_plants} extras`);
+    if (await K.due(h) !== 199) bad.push(`next bill R${await K.due(h)}, want R199`);
     return bad;
   } },
-  { id: 'X3', title: 'priced per plant: a 4th plant with 3 inverters needs 1 extra, R49', async run(K) {
+  { id: 'X4', title: 'extras held: lowering waits for the billing date; with 7 collecting it books and the last linked stops on the date (0136)', async run(K) {
     const bad = [], u = await K.user('family');
-    const o = await K.open(u, 'family', null, 1); if (!o.ok) return ['refused: ' + o.err];
-    if (o.v.amount !== 49) bad.push(`charged R${o.v.amount}`);
-    await K.paid(o.v.reference);
-    await K.link(u, [{ id: P(1) }, { id: P(2) }, { id: P(3) }, { id: P(4), inv: 3 }]);
-    if (await K.active(u) !== 4) bad.push(`${await K.active(u)} of 4 collect`);
-    if (await K.due(u) !== 228) bad.push(`next bill R${await K.due(u)}, want R228`);
-    return bad;
-  } },
-  { id: 'X4', title: 'lowering waits for the billing date; with 5 collecting it books and the last linked stops on the date (0136)', async run(K) {
-    const bad = [], u = await K.user('family');
-    const o = await K.open(u, 'family', null, 2); await K.paid(o.v.reference);
-    await K.link(u, [1, 2, 3, 4, 5].map((i) => ({ id: P(i) })));
-    const l = await K.extras(u, 1); if (!l.ok) return ['lowering with 5 collecting refused: ' + l.err];
+    await K.held(u, 2);
+    await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i) })));
+    const l = await K.extras(u, 1); if (!l.ok) return ['lowering with 7 collecting refused: ' + l.err];
     if ((await K.row(u)).extra_plants !== 2) bad.push('lowered at once');
-    if (await K.due(u) !== 228) bad.push(`next bill R${await K.due(u)}, want R228`);
-    if (await K.active(u) !== 5) bad.push(`${await K.active(u)} collect before the date, want 5`);
+    if (await K.due(u) !== 248) bad.push(`next bill R${await K.due(u)}, want R248`);
+    if (await K.active(u) !== 7) bad.push(`${await K.active(u)} collect before the date, want 7`);
     const r = await K.row(u); await K.today(r.next_billing_date); await K.run(r.next_billing_date);
     const after = await K.row(u);
     if (after.extra_plants !== 1 || after.next_extra_plants !== null) bad.push(`after the date: ${after.extra_plants} extras, ${after.next_extra_plants} booked`);
-    if (await K.active(u) !== 4) bad.push(`${await K.active(u)} collect after the date`);
+    if (await K.active(u) !== 6) bad.push(`${await K.active(u)} collect after the date`);
     return bad;
   } },
-  { id: 'X5', title: 'raising with a drop booked: charged from the extras held, the booking goes', async run(K) {
+  { id: 'X9', title: 'extras held, Home booked: buying more is refused; the renewal to Home drops them', async run(K) {
     const bad = [], u = await K.user('family');
-    const o = await K.open(u, 'family', null, 2); await K.paid(o.v.reference);
-    await K.extras(u, 0);
-    const up = await K.open(u, 'family', null, 3); if (!up.ok) return ['refused: ' + up.err];
-    if (up.v.amount !== 49) bad.push(`charged R${up.v.amount} for 1 more`);
-    await K.paid(up.v.reference);
-    const r = await K.row(u);
-    if (r.extra_plants !== 3 || r.next_extra_plants !== null) bad.push(`${r.extra_plants} extras, ${r.next_extra_plants} booked`);
-    const undo = await K.extras(u, 3);
-    if (!undo.ok) bad.push('undo with nothing booked refused: ' + undo.err);
-    return bad;
-  } },
-  { id: 'X6', title: 'Free to Family with 2 extras: R277 today, extras held', async run(K) {
-    const bad = [], u = await K.user('free');
-    const o = await K.open(u, 'family', 'monthly', 2); if (!o.ok) return ['refused: ' + o.err];
-    if (o.v.amount !== 277) bad.push(`charged R${o.v.amount}`);
-    await K.paid(o.v.reference);
-    if ((await K.row(u)).extra_plants !== 2) bad.push('extras not held');
-    return bad;
-  } },
-  { id: 'X7', title: 'Home to Family with 1 extra on the first day: R129 (R228 less R99)', async run(K) {
-    const u = await K.user('home');
-    const o = await K.open(u, 'family', null, 1);
-    return o.ok && o.v.amount === 129 ? [] : [`charge: ${JSON.stringify(o.v ?? o.err)}`];
-  } },
-  { id: 'X8', title: 'a charge for extras paid after another changed them: marked for refund', async run(K) {
-    const bad = [], u = await K.user('family');
-    const a = await K.open(u, 'family', null, 1), b = await K.open(u, 'family', null, 2);
-    await K.paid(b.v.reference);
-    const late = await K.paid(a.v.reference);
-    if (!late.ok || late.v.applied !== false) bad.push('stale charge applied: ' + JSON.stringify(late.v ?? late.err));
-    if ((await K.row(u)).extra_plants !== 2) bad.push(`${(await K.row(u)).extra_plants} extras`);
-    return bad;
-  } },
-  { id: 'X9', title: 'with Home booked, buying extras is refused; the renewal to Home drops them', async run(K) {
-    const bad = [], u = await K.user('family');
-    const o = await K.open(u, 'family', null, 1); await K.paid(o.v.reference);
+    await K.held(u, 1);
     await K.as(u, `select public.api_billing_change('home', null)`);
     if ((await K.open(u, 'family', null, 2)).ok) bad.push('extras bought with Home booked');
     if (await K.due(u) !== 99) bad.push(`next bill R${await K.due(u)}, Home is R99`);
@@ -317,15 +275,15 @@ const CASES = [
     if ((await K.row(f)).extra_plants !== 0) bad.push('extras changed');
     return bad;
   } },
-  { id: 'G7c', title: 'room bought stays: stop the 4th, renew (still billed), start it again without paying', async run(K) {
+  { id: 'G7c', title: 'room held stays: stop the 6th, renew (still billed), start it again without paying', async run(K) {
     const bad = [], u = await K.user('family');
-    const o = await K.open(u, 'family', null, 1); await K.paid(o.v.reference);
-    await K.link(u, [{ id: P(1) }, { id: P(2) }, { id: P(3) }, { id: P(4) }]);
-    await K.as(u, `select public.api_plant_stop(${P(4)})`);
+    await K.held(u, 1);
+    await K.link(u, [1, 2, 3, 4, 5, 6].map((i) => ({ id: P(i) })));
+    await K.as(u, `select public.api_plant_stop(${P(6)})`);
     const r = await K.row(u); await K.today(r.next_billing_date); await K.run(r.next_billing_date);
     const ren = await K.db.json(`select to_jsonb(amount) from private.billing_charges where user_id = '${u}' and kind = 'renewal'`);
-    if (ren !== 228) bad.push(`renewal R${ren}, want R228`);
-    const s = await K.as(u, `select public.api_plant_start(${P(4)})`);
+    if (ren !== 248) bad.push(`renewal R${ren}, want R248`);
+    const s = await K.as(u, `select public.api_plant_start(${P(6)})`);
     if (!s.ok) bad.push('start refused: ' + s.err);
     return bad;
   } },
@@ -402,20 +360,20 @@ const CASES = [
     return bad;
   } },
   { id: 'F12', title: 'paid room, a stopped plant that fits it refuses to start: charge marked for refund, nothing applied', async run(K) {
-    const bad = [], u = await K.user('family');
-    await K.link(u, [{ id: P(1) }, { id: P(2) }, { id: P(3) }, { id: P(4) }]);   // P4 links stopped: no room
-    const o = await K.open(u, 'family', null, 1); if (!o.ok) return ['refused: ' + o.err];
+    const bad = [], u = await K.user('home');
+    await K.link(u, [{ id: P(1) }, { id: P(2) }, { id: P(3) }]);   // P3 links stopped: no room on Home
+    const o = await K.open(u, 'family', null, null, [P(3)]); if (!o.ok) return ['refused: ' + o.err];
     // a refusal the paid re-check did not foresee
-    await K.sql(`create function public.sim_refuse_p4() returns trigger language plpgsql as $f$ begin
-        if new.plant_id = ${P(4)} and not new.paused then raise exception 'no room' using errcode = '22023'; end if; return new; end $f$;
-      create trigger sim_refuse_p4 before update of paused on public.plant_users for each row execute function public.sim_refuse_p4();`);
+    await K.sql(`create function public.sim_refuse_p3() returns trigger language plpgsql as $f$ begin
+        if new.plant_id = ${P(3)} and not new.paused then raise exception 'no room' using errcode = '22023'; end if; return new; end $f$;
+      create trigger sim_refuse_p3 before update of paused on public.plant_users for each row execute function public.sim_refuse_p3();`);
     const p = await K.paid(o.v.reference, o.v.amount * 100);
     if (!p.ok) return ['paid raised: ' + p.err];
     if (p.v.applied !== false) bad.push('reported applied, plant stopped');
     const c = await K.charge(o.v.reference);
     if (!/^refund/.test(c.error || '')) bad.push('not marked for refund');
-    if ((await K.row(u)).extra_plants !== 0) bad.push(`extra plants became ${(await K.row(u)).extra_plants}`);
-    if (!(await K.paused(u, P(4)))) bad.push('plant started');
+    if ((await K.row(u)).plan !== 'home') bad.push(`plan became ${(await K.row(u)).plan}`);
+    if (!(await K.paused(u, P(3)))) bad.push('plant started');
     return bad;
   } },
   { id: 'A4', title: 'a retry left open, then the user settles with another card: the run does not charge it again', async run(K) {
@@ -628,59 +586,25 @@ const CASES = [
     const after = (await K.row(u)).card_email;
     return after === before ? [] : [`card_email became ${after} after a paid renewal: the next renewal is refused by Paystack`];
   } },
-  { id: 'X11', title: 'room bought while a plant stopped on purpose is older: the plant bought for starts, not the older one', async run(K) {
-    const u = await K.user('family');
-    await K.link(u, [{ id: P(1) }, { id: P(2) }, { id: P(3) }, { id: P(4) }, { id: P(5) }]);  // 4, 5 link stopped
-    await K.as(u, `select public.api_plant_stop(${P(3)})`);                                 // 3 stopped on purpose
-    await K.as(u, `select public.api_plant_start(${P(4)})`);                                // 4 fills the room
-    const o = await K.open(u, 'family', null, 1, [P(5)]); if (!o.ok) return ['open refused: ' + o.err];
-    await K.paid(o.v.reference);                                                            // bought for P5
-    return (await K.paused(u, P(5))) ? ['paid for P5, but P3 (stopped on purpose) started and P5 stays stopped'] : [];
+  { id: 'X11', title: 'room bought while a plant stopped on purpose is older: the plant bought for starts', async run(K) {
+    const u = await K.user('home');
+    await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i) })));                   // 3-7 link stopped
+    await K.as(u, `select public.api_plant_stop(${P(1)})`);                                 // 1 stopped on purpose
+    await K.as(u, `select public.api_plant_start(${P(3)})`);                                // 3 fills the room
+    const o = await K.open(u, 'family', null, null, [P(7)]); if (!o.ok) return ['open refused: ' + o.err];
+    await K.paid(o.v.reference);                                                            // bought for P7
+    return (await K.paused(u, P(7))) ? ['paid for P7, but it stays stopped'] : [];
   } },
   // ---- round 3 fixes (0130): delete, disputes, refunds ----
-  { id: 'X12', title: 'one more extra plant with plants stopped on purpose and none named: one starts, the newest, not all', async run(K) {
-    // UI walk 2026-10-31: Family with 5 room, 3 plants stopped on purpose, +1 extra on the plans page started all 3.
-    const bad = [], u = await K.user('family');
-    await K.link(u, [1, 2, 3, 4, 5].map((i) => ({ id: P(i) })));
-    const o = await K.open(u, 'family', null, 2); if (!o.ok) return ['refused: ' + o.err];
-    await K.paid(o.v.reference);
-    for (const i of [2, 3, 4]) await K.as(u, `select public.api_plant_stop(${P(i)})`);   // stopped on purpose
-    const o2 = await K.open(u, 'family', null, 3); if (!o2.ok) return ['raise refused: ' + o2.err];
-    const p = await K.paid(o2.v.reference);
-    if (!p.ok || p.v.applied === false) bad.push('paid but not applied: ' + JSON.stringify(p.v ?? p.err));
-    if (await K.active(u) !== 3) bad.push(`${await K.active(u)} collect after buying 1 more with 2 collecting, want 3`);
-    if (await K.paused(u, P(4))) bad.push('the newest stopped plant stays stopped');
-    return bad;
-  } },
   { id: 'X13', title: 'Free to Family bought for one stopped plant: that plant starts, and the rest of the room fills too', async run(K) {
-    // UI walk 2026-10-31: "plan is full" → Upgrade → Family named plant 2; only it started, the 3rd slot stayed empty.
+    // UI walk 2026-10-31: "plan is full" → Upgrade → Family named plant 2; only it started, the rest of the room stayed empty.
     const bad = [], u = await K.user('free');
-    await K.link(u, [1, 2, 3, 4, 5].map((i) => ({ id: P(i) })));                        // 1 collects on Free
-    const o = await K.open(u, 'family', 'monthly', null, [P(4)]); if (!o.ok) return ['refused: ' + o.err];
+    await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i) })));                  // 1 collects on Free
+    const o = await K.open(u, 'family', 'monthly', null, [P(6)]); if (!o.ok) return ['refused: ' + o.err];
     const p = await K.paid(o.v.reference);
     if (!p.ok || p.v.applied === false) bad.push('paid but not applied: ' + JSON.stringify(p.v ?? p.err));
-    if (await K.paused(u, P(4))) bad.push('the plant it was bought for stays stopped');
-    if (await K.active(u) !== 3) bad.push(`${await K.active(u)} collect on Family, want 3`);
-    return bad;
-  } },
-  { id: 'X15', title: 'priced per plant (SOLAR-249): Family with 5 plants and 7 inverters is R179 + 2 × R49 = R277', async run(K) {
-    const bad = [], u = await K.user('family');
-    const o = await K.open(u, 'family', null, 2); if (!o.ok) return ['refused: ' + o.err];
-    await K.paid(o.v.reference);
-    await K.link(u, [{ id: P(1), inv: 2 }, { id: P(2) }, { id: P(3), inv: 2 }, { id: P(4) }, { id: P(5) }]);
-    if (await K.active(u) !== 5) bad.push(`${await K.active(u)} of 5 collect`);
-    if (await K.due(u) !== 277) bad.push(`next bill R${await K.due(u)}, want R277`);
-    return bad;
-  } },
-  { id: 'X16', title: 'plan full, 2 plants stopped, the add paid for the newer one (SOLAR-253): only it starts', async run(K) {
-    const bad = [], u = await K.user('family');
-    await K.link(u, [1, 2, 3, 4, 5].map((i) => ({ id: P(i) })));                       // 4, 5 link stopped
-    const o = await K.open(u, 'family', null, 1, [P(5)]); if (!o.ok) return ['refused: ' + o.err];
-    const p = await K.paid(o.v.reference);
-    if (!p.ok || p.v.applied === false) bad.push('paid but not applied: ' + JSON.stringify(p.v ?? p.err));
-    if (await K.paused(u, P(5))) bad.push('the plant the add was paid for stays stopped');
-    if (!(await K.paused(u, P(4)))) bad.push('the older stopped plant started instead or as well');
-    if (await K.active(u) !== 4) bad.push(`${await K.active(u)} collect, want 4`);
+    if (await K.paused(u, P(6))) bad.push('the plant it was bought for stays stopped');
+    if (await K.active(u) !== 5) bad.push(`${await K.active(u)} collect on Family, want 5`);
     return bad;
   } },
   { id: 'T1', title: 'day 8 to Free after the login of the oldest plant was removed: Free keeps a plant not booked for deletion', async run(K) {
@@ -701,15 +625,15 @@ const CASES = [
     if (kept.some((id) => row.plants_to_remove.includes(id))) bad.push(`Free keeps ${kept}, booked for deletion with the rest: ${row.plants_to_remove}`);
     return bad;
   } },
-  { id: 'X14', title: 'one more extra plant, the newest stopped plant is booked for removal: it stays stopped and booked', async run(K) {
-    const bad = [], u = await K.user('family');
-    await K.link(u, [1, 2, 3, 4, 5].map((i) => ({ id: P(i) })));                       // 4, 5 link stopped
-    await K.db.t(`select to_jsonb(1) from (select public.billing_book_removal('${u}', ${P(5)})) x`);  // Remove login of P5
-    const o = await K.open(u, 'family', null, 1); if (!o.ok) return ['refused: ' + o.err];
+  { id: 'X14', title: 'Home to Family, the newest stopped plant is booked for removal: it stays stopped and booked', async run(K) {
+    const bad = [], u = await K.user('home');
+    await K.link(u, [1, 2, 3, 4, 5, 6, 7, 8].map((i) => ({ id: P(i) })));              // 3-8 link stopped
+    await K.db.t(`select to_jsonb(1) from (select public.billing_book_removal('${u}', ${P(8)})) x`);  // Remove login of P8
+    const o = await K.open(u, 'family'); if (!o.ok) return ['refused: ' + o.err];
     await K.paid(o.v.reference);
-    if (!(await K.paused(u, P(5)))) bad.push('the plant booked for removal started');
-    if (!(await K.row(u)).plants_to_remove.includes(P(5))) bad.push('the removal booking went');
-    if (await K.paused(u, P(4))) bad.push('the plant bought for (P4) stays stopped');
+    if (!(await K.paused(u, P(8)))) bad.push('the plant booked for removal started');
+    if (!(await K.row(u)).plants_to_remove.includes(P(8))) bad.push('the removal booking went');
+    if (await K.active(u) !== 5) bad.push(`${await K.active(u)} collect on Family, want 5`);
     return bad;
   } },
   { id: 'RF5', title: 'a refund Paystack accepts and then fails 7 times: hello@ is told', async run(K) {
@@ -873,16 +797,16 @@ const CASES = [
   { id: 'T2', title: 'Free after day 8, then a paid start: plants the new plan starts are kept, the rest are still deleted on their date', async run(K) {
     // Rule (Brynne, 2026-11-01): paying again does not cancel the 30-day deletion of plants past the new plan's room.
     const bad = [], u = await K.user('family');
-    await K.link(u, [1, 2, 3, 4].map((i) => ({ id: P(i) })));
-    await K.sql(`select private.billing_to_free('${u}', '2027-03-10')`);                   // P2-P4 booked for 2027-04-09
+    await K.link(u, [1, 2, 3, 4, 5, 6].map((i) => ({ id: P(i) })));
+    await K.sql(`select private.billing_to_free('${u}', '2027-03-10')`);                   // P2-P6 booked for 2027-04-09
     const o = await K.open(u, 'family', 'monthly'); if (!o.ok) return ['start refused: ' + o.err];
-    await K.paid(o.v.reference);                                                          // Family: P1-P3 collect
+    await K.paid(o.v.reference);                                                          // Family: P1-P5 collect
     const r = await K.row(u);
-    if (!r.plants_to_remove.includes(P(4))) bad.push('the plant past the room is no longer booked for deletion');
-    if (r.plants_to_remove.includes(P(2)) || r.plants_to_remove.includes(P(3))) bad.push('a plant the plan started is still booked');
+    if (!r.plants_to_remove.includes(P(6))) bad.push('the plant past the room is no longer booked for deletion');
+    if ([2, 3, 4, 5].some((i) => r.plants_to_remove.includes(P(i)))) bad.push('a plant the plan started is still booked');
     await K.today('2027-04-09'); await K.run('2027-04-09');
     const left = await K.db.json(`select to_jsonb(coalesce(array_agg(plant_id order by plant_id), '{}')) from public.plant_users where user_id = '${u}'`);
-    if (JSON.stringify(left) !== JSON.stringify([P(1), P(2), P(3)])) bad.push(`left after the date: ${left}, want P1-P3`);
+    if (JSON.stringify(left) !== JSON.stringify([1, 2, 3, 4, 5].map(P))) bad.push(`left after the date: ${left}, want P1-P5`);
     return bad;
   } },
   { id: 'T3', title: 'after the paid start, a booked plant swapped in on the paid plan is kept; the one swapped out stays', async run(K) {
@@ -901,12 +825,12 @@ const CASES = [
   } },
   { id: 'K3', title: 'on the paid plan after the start, Keep on a stopped plant Free booked is refused (only a swap keeps it)', async run(K) {
     const u = await K.user('family');
-    await K.link(u, [1, 2, 3, 4].map((i) => ({ id: P(i) })));
+    await K.link(u, [1, 2, 3, 4, 5, 6].map((i) => ({ id: P(i) })));
     await K.sql(`select private.billing_to_free('${u}', '2027-03-10')`);
     const o = await K.open(u, 'family', 'monthly'); if (!o.ok) return ['start refused: ' + o.err];
     await K.paid(o.v.reference);
-    await K.as(u, `select public.api_billing_keep(${P(4)})`);
-    return (await K.row(u)).plants_to_remove.includes(P(4)) ? [] : ['Keep took a plant the plan does not run off the delete list'];
+    await K.as(u, `select public.api_billing_keep(${P(6)})`);
+    return (await K.row(u)).plants_to_remove.includes(P(6)) ? [] : ['Keep took a plant the plan does not run off the delete list'];
   } },
   { id: 'C1', title: 'a card page left unpaid for 2 days is closed, not left open for ever', async run(K) {
     const u = await K.user('home');

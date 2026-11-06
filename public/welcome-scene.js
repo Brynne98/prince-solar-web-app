@@ -336,7 +336,6 @@ addEventListener('DOMContentLoaded', async () => {
       pr.querySelector(`.price[data-offer="${p}"] .${k}`).innerHTML = `<s>${R(was[k][p])}</s>${R(at[k][p])}<small>${unit[k]}</small>`;
       pr.querySelector(`.per[data-offer="${p}"] .${k}`).textContent = `Save ${R(was[k][p] - at[k][p])} ${unit[k]}`;
     }
-    pr.querySelector(`[data-offer="extra"] .${k}`).innerHTML = `<s>${R(was[k].extra)}</s> +${R(at[k].extra)} a plant ${unit[k]}`;
   }
   // Free keeps its price level with the struck-out prices beside it
   pr.querySelector('.price[data-offer="free"]').innerHTML = '<s aria-hidden="true" style="visibility:hidden">R0</s>R0';

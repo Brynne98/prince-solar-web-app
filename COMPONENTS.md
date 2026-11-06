@@ -72,7 +72,7 @@ Formatting and dates (also `components.jsx`):
 | `Dialog` | Any modal. `label`, `onClose`, `keep` (no outside-click close), `busy` (dims, blocks closing), `size`. |
 | `LinkForm` | The SunSynk sign-in form, inline (`compact`) or as a card. |
 | `LinkDialog` | `LinkForm` in a `Dialog` with a `title` and `note`: add a plant, re-link, change login. |
-| `PayReview` | The price, next bill and card before a saved card is charged. |
+| `PayReview` | The price, next bill and card before a saved card is charged. `parts`: the lines the bill is made of. Its `.pay-review-box` is also Billing's darker box. |
 | `PLAN_NAME` | A plan id as its name: "Home". |
 | `billingFmt.rand(n, narrow)` | A price in rand: "R1 799". `narrow` for the large prices on the plan cards, where a full space reads as a gap (SOLAR-364). |
 | `billingFmt.offerLine`, `offerCap`, `Was` | An offer price (SOLAR-330): its terms under the price, the members cap, the list price struck out. |
@@ -130,6 +130,7 @@ a row of on/off settings (email and push preferences); `saveFlag` sends its own 
 | `TabSkeleton` | A whole tab while it loads. |
 | `ConfirmCard` | Any "are you sure". Inline or `modal`; `danger`, `busy`, `confirmDisabled`. Use instead of `confirm()`. |
 | `KeepPicker` | Choosing which plants to keep when a plan gets smaller. |
+| `PlanCard`, `BookedNotice` | A card in Billing's Plan section (title top left, control top right); a change booked for the billing date with its undo. |
 | `SettingsSection` | A Settings card with title, note and an `action`. |
 | `SettingRow` | One row in a Settings card: `label`, `note`, `action`, `lead`. |
 | `PlantLine` | A plant's name with an "off" marker, in Settings lists. |

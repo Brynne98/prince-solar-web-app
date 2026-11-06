@@ -2075,7 +2075,8 @@ function PlantLine({ name, off, children }) {
 // (window.startUpgrade). A downgrade with more plants than the new plan covers first picks
 // the plants it keeps (SOLAR-295): the others collect until the billing date, then stop.
 const PLAN_RANK = { free: 0, home: 1, family: 2 };
-const planRoom = (plan, extra) => (plan === 'family' ? 3 + (extra || 0) : 1);
+// Since SOLAR-371: Home 2, Family 5. Extra plants are no longer sold; those already held still count.
+const planRoom = (plan, extra) => (plan === 'family' ? 5 + (extra || 0) : plan === 'home' ? 2 : 1);
 // The plants a downgrade picks from, under their logins as Billing lists them: collecting
 // and not up for deletion, except those that stop on the billing date (drop), which can
 // still be picked. A plant two logins share shows under the first.
@@ -2205,18 +2206,15 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   if (!billing || (kind === 'free' && freeWeekEndsAt === undefined)) {
     const last = (() => { try { return localStorage.getItem('synsynk.planKind'); } catch (e) { return null; } })() || 'free';
     return (
-      <SettingsSection id="plan" title="Plan">
-        <div className="plan-head">
-          <div className="plan-now" aria-hidden="true">
-            <window.Skeleton w={130} h={20} r={6} />
-            <window.Skeleton w={280} h={12} r={5} style={{ marginTop: 9, maxWidth: '100%' }} />
-          </div>
-          {last !== 'comped' && <div className="plan-acts" aria-hidden="true"><window.Skeleton w={112} h={34} r={9} /></div>}
-        </div>
+      <SettingsSection id="plan" title="Plan" bare>
+        <PlanCard title={<window.Skeleton w={130} h={20} r={6} />} hidden
+          action={last !== 'comped' && <window.Skeleton w={112} h={34} r={9} />}>
+          <window.Skeleton w={280} h={12} r={5} style={{ marginTop: 9, maxWidth: '100%' }} />
+        </PlanCard>
       </SettingsSection>
     );
   }
-  const { rand, billDay, perUnit } = window.billingFmt;
+  const { rand, perUnit } = window.billingFmt;
   const b = billing;
   const paid = b.plan !== 'free' && !b.comped;
   const booked = bookedChange(b);
@@ -2228,47 +2226,63 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   // an ending plan says so in the notice under it (SOLAR-364)
   const word = b.state === 'past_due' ? 'Payment failed' : null;
   const line = b.comped ? 'Free of charge. Every plant, full history.'
-    : paid ? <><span className="mono">{rand(b.price)}</span> {perUnit(b.period)}.</>
-    : weekEnds ? `Free week until ${billDay(weekEnds)}.`
-    : '1 plant and the last 24 hours. No card needed.';
-  // Family's plants: those included and the extra ones paid for (SOLAR-367)
-  const extra = paid && b.plan === 'family' ? b.extraPlants || 0 : 0;
+    : weekEnds ? `Free week until ${window.billingFmt.billDay(weekEnds)}.`
+    : !paid ? '1 plant and the last 24 hours. No card needed.' : null;
+  // the plants it collects, with any extra plants still held (SOLAR-371)
+  const room = planRoom(b.plan, b.extraPlants);
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
   return (
-    <SettingsSection id="plan" title="Plan">
-      {/* the plan top left, its buttons top right */}
-      <div className="plan-head">
-        <div className="plan-now">
-          <div className="plan-name">{PLAN_NAME[b.plan]}{paid && b.plan === 'family' && `, ${planRoom('family', b.extraPlants)} plants`}{word && <span className="conn-status warn">{word}</span>}</div>
-          <div className="plan-line">{line}</div>
-          {extra > 0 && (
-            <div className="conn-meta plan-break">{planRoom('family', 0)} included, {extra} extra.</div>
-          )}
-          {paid && b.offer?.held && <div className="conn-meta pw-offer">{window.billingFmt.offerLine(b.offer, listPrice(b, b.plan, b.period, b.extraPlants || 0), b.period)}</div>}
-          {/* past due and ending say their date below */}
-          {paid && b.state !== 'past_due' && !ending && <div className="conn-meta">Renews on {window.dayText(b.nextDate, { day: 'numeric', month: 'long', year: 'numeric' })}.</div>}
-        </div>
-        {!b.comped && (
-          <div className="plan-acts">
-            <button type="button" className={paid ? 'ghost-btn' : 'save-btn'} onClick={onAdjust}>Adjust plan</button>
+    <SettingsSection id="plan" title="Plan" bare>
+      {/* the plan top left, its button top right; its price and renewal in the darker box under them */}
+      <PlanCard title={<>{PLAN_NAME[b.plan]}{word && <span className="conn-status warn">{word}</span>}</>}
+        action={!b.comped && <button type="button" className={paid ? 'ghost-btn' : 'save-btn'} onClick={onAdjust}>Adjust plan</button>}>
+        {line && <div className="plan-line">{line}</div>}
+        {paid && (
+          <div className="pay-review-box">
+            <div className="pay-review-ln"><span>{room === 1 ? '1 plant' : room + ' plants'}</span><b>{rand(b.price)} {perUnit(b.period)}</b></div>
+            {/* past due and ending say their date below */}
+            {b.state !== 'past_due' && !ending && <div className="pay-review-ln"><span>Renews</span><b>{window.dayText(b.nextDate, { day: 'numeric', month: 'short', year: 'numeric' })}</b></div>}
           </div>
         )}
-      </div>
-      {b.state === 'past_due' && (
-        <div className="plan-booked plan-alert">
-          <span className="conn-status warn">Payment failed.{b.nextTry && <> Next try {billDay(b.nextTry)}.</>} Pay by {billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.</span>
-          <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
-        </div>
-      )}
-      {booked && (
-        <div className="plan-booked plan-alert">
-          {/* the undo is a link in the notice, so Adjust plan stays the card's one button (SOLAR-283) */}
-          <span className="conn-status warn">{booked[0]} {booked[1] && <button type="button" className="plan-undo" disabled={busy} aria-busy={busy} onClick={() => run(() => undoBooked(b, reload))}>{booked[1]}</button>}</span>
-        </div>
-      )}
+        {paid && b.offer?.held && <div className="conn-meta pw-offer">{window.billingFmt.offerLine(b.offer, listPrice(b, b.plan, b.period, b.extraPlants || 0), b.period)}</div>}
+        {b.state === 'past_due' && (
+          <div className="plan-booked plan-alert">
+            <span className="conn-status warn">Payment failed.{b.nextTry && <> Next try {window.billingFmt.billDay(b.nextTry)}.</>} Pay by {window.billingFmt.billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.</span>
+            <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
+          </div>
+        )}
+        {booked && <BookedNotice booked={booked} busy={busy} onUndo={() => run(() => undoBooked(b, reload))} />}
+      </PlanCard>
     </SettingsSection>
   );
 }
+
+// One card of Billing's Plan section: its title top left, its control top right, the rest under them.
+// hidden: a loading outline.
+function PlanCard({ title, action, hidden, children }) {
+  return (
+    <div className="sset" aria-hidden={hidden || undefined}>
+      <div className="sset-body">
+        <div className="plan-head">
+          <div className="plan-name">{title}</div>
+          {action && <div className="plan-acts">{action}</div>}
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// A change booked for the billing date, the undo a link in the notice, so the card keeps one
+// button (SOLAR-283).
+function BookedNotice({ booked, busy, onUndo }) {
+  return (
+    <div className="plan-booked plan-alert">
+      <span className="conn-status warn">{booked[0]} {booked[1] && <button type="button" className="plan-undo" disabled={busy} aria-busy={busy} onClick={onUndo}>{booked[1]}</button>}</span>
+    </div>
+  );
+}
+
 // Which of Billing's lower sections showed last on this device, as Plan keeps its kind: while
 // the plan loads they draw as outlines in their places rather than popping in under it.
 const BILL_SHAPE = 'synsynk.billShape';
@@ -2304,9 +2318,7 @@ function CancelSection({ billing: b, reload, logins = [] }) {
 // Adjust plan (SOLAR-250): a page of its own, back to Billing. Free, Home and Family side by
 // side with a monthly/yearly switch. A smaller plan in either period is booked for the
 // billing date (SOLAR-364); a bigger one is paid today, in the plan's own period or, from
-// monthly, yearly. Family's Extra plants buys room for
-// plants past the 3rd, R49 a plant (SOLAR-264): more is paid today, fewer waits for the
-// billing date.
+// monthly, yearly. No extra plants (SOLAR-371): more than Family's 5 is by email.
 const PLAN_TAG = { free: 'See your solar today', home: 'One house, every day kept', family: 'More than one house' };
 function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null }) {
   const plants = logins.flatMap(a => a.plants);
@@ -2318,58 +2330,12 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   useEffect(() => { if (paid) setView(b.period); }, [paid, b?.period]);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  // A downgrade that needs a pick first (SOLAR-295): { plan, extra }
+  // A downgrade that needs a pick first (SOLAR-295): { plan, period }
   const [picking, setPicking] = useState(null);
-  // Extra plants on Family, from the number paid for, or a drop booked (SOLAR-264). A plan
-  // change booked replaces a drop, and the server refuses extras either way (SOLAR-364).
-  const held = b?.plan === 'family' ? b.extraPlants || 0 : 0;
-  const locked = b?.plan === 'family' && !!b.nextPlan;
-  const shown = b?.plan === 'family' ? (locked ? held : b.nextExtraPlants ?? held) : 0;
-  const [more, setMore] = useState(shown);
-  useEffect(() => { setMore(shown); }, [shown]);
-  // Family's real charge today (the saved card pays it at once): on an upgrade from Home, or
-  // for more extra plants on Family. A count that needs a quote shows only once its quote is
-  // in, so the count, price, line and Pay change together; the next count up is fetched
-  // ahead, so a tap is usually at once (SOLAR-281).
   // Home monthly on the Yearly tab: Family yearly is paid now, from today (SOLAR-364)
   const across = paid && b.plan === 'home' && b.period === 'monthly' && view === 'yearly';
   const period = paid && !across ? b.period : view;
-  const needs = (n) => paid && (b.plan === 'home' || n > held);
-  const qKey = (n) => [b?.plan, b?.state, b?.nextDate, held, period, n].join(':');
-  const [quotes, setQuotes] = useState({});
-  const [failed, setFailed] = useState({}); // qKey → true when its price couldn't be read (SOLAR-294)
-  const [waiting, setWaiting] = useState(false); // a tapped count still waiting for its price
-  const asked = React.useRef({});   // qKey → its request, once per key
-  const wanted = React.useRef(null); // the count last tapped
-  const ask = (n) => {
-    const k = qKey(n);
-    if (!asked.current[k]) asked.current[k] = window.billingRpc('api_billing_quote', { p_plan: 'family', p_period: period, p_extra: n })
-      .then(({ data, error }) => {
-        if (error) { delete asked.current[k]; setFailed(f => ({ ...f, [k]: true })); return null; }
-        setFailed(f => ({ ...f, [k]: false }));
-        setQuotes(q => ({ ...q, [k]: data }));
-        return data;
-      });
-    return asked.current[k];
-  };
-  const quote = quotes[qKey(more)] || null;
-  const pick = (n) => {
-    wanted.current = n;
-    const show = () => { setMore(n); window.track('plan_extra_count_done', { count: n }); };
-    if (!needs(n) || quotes[qKey(n)]) return show();
-    setWaiting(true);
-    ask(n).then(q => {
-      if (wanted.current !== n) return;
-      setWaiting(false);
-      if (q) show(); else window.toast('Couldn’t get the price. Try again.', { error: true });
-    });
-  };
   useEffect(() => { window.track('plan_page_shown', { plan: b?.plan }); }, []);
-  useEffect(() => {
-    if (!b) return;
-    if (needs(more)) ask(more);
-    if (needs(more + 1)) ask(more + 1);
-  }, [b, period, more]);
   // It can't close while a change is saving, so the result is never lost from view.
   const close = () => { if (!busy) onBack(); };
   const pop = (body) => <window.Dialog size="wide" label="Pick your plan" onClose={close}>{body}</window.Dialog>;
@@ -2389,32 +2355,17 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   const unit = perUnit(view);
   const prices = b.prices?.[view] || {};
   const sameView = !paid || view === b.period;
-  const price = (p) => p === 'free' ? 0 : p === 'family' ? (prices.family ?? 0) + more * (prices.extra ?? 0)
-    : p === b.plan && sameView ? b.price : prices[p];
-  const famMine = b.plan === 'family' && sameView;
+  const price = (p) => p === 'free' ? 0 : p === b.plan && sameView ? b.price : prices[p];
+  // its list price, with the extra plants still held on your own Family card
+  const list = (p) => listPrice(b, p, view, p === b.plan && sameView ? b.extraPlants || 0 : 0);
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
   const booked = bookedChange(b);
   // the plan's own card while a change is booked: when it ends or changes, in either period
   const ownDate = <div className="plan-cur">{b.nextPlan === 'free' ? 'Ends ' : 'Changes '}{billDay(b.nextDate)}</div>;
   // a smaller plan booked for the billing date in this period; Free has none
   const bookedHere = (p) => b.nextPlan === p && (p === 'free' || (b.nextPeriod || b.period) === view);
-  // What Family's price is made of, when nothing more pressing goes under it (SOLAR-303)
-  const famLine = more ? `3 plants, plus ${more} extra at ${rand(prices.extra ?? 0)}` : `Extra plants ${rand(prices.extra ?? 0)} ${unit} each`;
-  // The line under a price
-  const note = (p) => {
-    if (p === 'family' && famMine && more < held) return b.nextExtraPlants === more ? famLine : `From ${billDay(b.nextDate)}`;
-    if (p === 'family' && famMine && more > held && quote?.refused) return quote.refused === 'past_due' ? 'Pay the failed payment first' : 'Keep your plan first';
-    if (p === 'family' && famMine && more > held) return quote ? `${rand(quote.dueNow)} today, then from ${billDay(quote.nextDate)}` : ' ';
-    if (p === b.plan && sameView) return p === 'family' ? famLine : ' '; // the renew date sits in the button's place
-    if (p === 'family' && paid && quote?.refused === 'past_due' && (sameView || across)) return 'Pay the failed payment first';
-    if (p === 'family' && paid && quote && quote.dueNow != null && (sameView || across) && quote.dueNow !== quote.nextCharge) return `${rand(quote.dueNow)} today, then from ${billDay(quote.nextDate)}`;
-    if (p === 'family' && b.plan === 'home' && price('family') > price('home')) return `${rand(price('family') - price('home'))} more than Home`;
-    return p === 'family' ? famLine : ' ';
-  };
-  // Family's price still loading: a busy button; it couldn't be read: a button to ask again.
-  const priceMissing = !quote && (failed[qKey(more)]
-    ? <button type="button" className="ghost-btn" onClick={() => { setFailed(f => ({ ...f, [qKey(more)]: false })); ask(more); }}>Get the price again</button>
-    : needs(more) && <button type="button" className="save-btn" disabled aria-busy="true">Getting the price</button>);
+  // The line under a price: Family's says where more plants go
+  const note = (p) => (p === 'family' ? <>More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: b.plan, from: 'plans' })}>Email us</a>.</> : ' ');
   const action = (p) => {
     // a paid year changes nothing until it starts (SOLAR-298); a quiet line holds the button's row
     if (b.prepaidOn && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
@@ -2425,23 +2376,13 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
         : view === 'yearly' ? <button type="button" className="ghost-btn" onClick={() => window.startUpgrade(b.plan, 'yearly', false, null, null,
             { name: 'yearly_switch_done', props: { plan: b.plan } })}>Switch</button>
         : <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'switch'} onClick={() => run(() => bookPlan(b, b.plan, view, reload), 'switch')}>Switch</button>;
-      if (p === 'family' && more > held) return priceMissing || <button type="button" className="save-btn" disabled={quote?.dueNow == null}
-        onClick={() => window.startUpgrade('family', period, false, more, forPlant ? [forPlant] : null,
-          { name: 'extra_plants_done', props: { count: more, change: 'up' } })}>Pay</button>;
-      if (p === 'family' && more < held && b.nextExtraPlants === more) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
-      if (p === 'family' && more < held) return <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'lower'}
-        onClick={() => (plants.length > planRoom('family', more) ? setPicking({ plan: 'family', extra: more })
-          : run(async () => { if (!await bookExtras(b, more, reload)) setMore(shown); }, 'lower'))}>{held - more === 1 ? 'Remove plant' : 'Remove plants'}</button>;
       // in the button's place, so the card for your plan has no empty row (SOLAR-303)
       return <div className="plan-cur">{paid ? (booked ? 'Changes ' : 'Renews ') + billDay(b.nextDate) : 'No card needed'}</div>;
     }
     // a bigger plan is bought in the plan's own period
     if (!sameView && !across && PLAN_RANK[p] > PLAN_RANK[b.plan]) return <div className="plan-cur plan-wait">Available {b.period}</div>;
-    if (PLAN_RANK[p] > PLAN_RANK[b.plan]) {
-      if (paid && p === 'family' && priceMissing) return priceMissing;
-      return <button type="button" className="save-btn" disabled={paid && p === 'family' && quote?.dueNow == null}
-                     onClick={() => (b.offer && window.track('offer_pick_done', { offer: b.offer.id, plan: p, period }), window.startUpgrade(p, period, !paid, p === 'family' ? more : null, forPlant ? [forPlant] : null))}>Upgrade</button>;
-    }
+    if (PLAN_RANK[p] > PLAN_RANK[b.plan]) return <button type="button" className="save-btn"
+      onClick={() => (b.offer && window.track('offer_pick_done', { offer: b.offer.id, plan: p, period }), window.startUpgrade(p, period, !paid, null, forPlant ? [forPlant] : null))}>Upgrade</button>;
     if (bookedHere(p)) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
     // a smaller plan in either period, from the billing date (SOLAR-364)
     return <button type="button" className="ghost-btn" disabled={!!busy || cancelling} aria-busy={busy === 'down:' + p}
@@ -2449,22 +2390,11 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
                      : plants.length > planRoom(p, b.nextExtraPlants ?? b.extraPlants) ? setPicking({ plan: p, period: view })
                      : run(() => bookPlan(b, p, view, reload), 'down:' + p))}>Downgrade</button>;
   };
-  // Family's plants line: 3 included, the counter for extra ones beside it
-  const plantsLine = (
-    <span className="plan-plants">
-      <span><span className="mono">3</span> plants <span className="plan-plus">+ extra</span></span>
-      <span className="stepper" aria-busy={waiting}>
-        <button type="button" aria-label="One plant fewer" disabled={locked || more === 0} onClick={() => pick(more - 1)}><svg className="ico ico-sm" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10" /></svg></button>
-        <span className="mono" aria-live="polite">{more}</span>
-        <button type="button" aria-label="One plant more" disabled={locked} onClick={() => pick(more + 1)}><svg className="ico ico-sm" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10M7 2v10" /></svg></button>
-      </span>
-    </span>
-  );
   // The same four lines on every card, so the cards end level; false is a line the plan lacks
   const gives = {
     free: [['1 plant', true], ['The last 24 hours', true], ['Alerts', true], ['Reports by email', false]],
-    home: [['1 plant', true], ['Full history', true], ['Alerts', true], ['Reports by email', true]],
-    family: [[plantsLine, true], ['Full history', true], ['Alerts', true], ['Reports by email', true]],
+    home: [['2 plants', true], ['Full history', true], ['Alerts', true], ['Reports by email', true]],
+    family: [['5 plants', true], ['Full history', true], ['Alerts', true], ['Reports by email', true]],
   };
   return pop(
     <div className="settings-page plan-pop">
@@ -2475,7 +2405,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
       </div>
       {b.comped ? <p className="field-note">Your plan is free of charge: every plant, full history.</p> : <>
         <Segmented size="sm" className="plan-period" label="Billing" value={view} onChange={setView}
-                   options={[{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly, save 16%' }]} />
+                   options={[{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly, 2 months free' }]} />
         {/* One paywall on every screen: three cards side by side, stacked on phones (SOLAR-303, SOLAR-304) */}
         <div className="plan-grid plan-cards">
           {['free', 'home', 'family'].map(p => (
@@ -2483,8 +2413,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
               {p === b.plan && <div className="plan-band">Your plan</div>}
               <div className="pw-name">{PLAN_NAME[p]}</div>
               <div className="plan-tagline">{PLAN_TAG[p]}</div>
-              <div className="pw-price"><Was list={listPrice(b, p, view, p === 'family' ? more : 0)} price={price(p) ?? 0} /><b>{rand(price(p) ?? 0, true)}</b>{p !== 'free' && ' ' + unit}
-                {b.offer && listPrice(b, p, view, p === 'family' ? more : 0) > (price(p) ?? 0) && <span className="pw-billed pw-offer">{offerLine(b.offer, listPrice(b, p, view, p === 'family' ? more : 0), view)}</span>}</div>
+              <div className="pw-price"><Was list={list(p)} price={price(p) ?? 0} /><b>{rand(price(p) ?? 0, true)}</b>{p !== 'free' && ' ' + unit}
+                {b.offer && list(p) > (price(p) ?? 0) && <span className="pw-billed pw-offer">{offerLine(b.offer, list(p), view)}</span>}</div>
               <div className="plan-note">{note(p)}</div>
               {action(p)}
               <ul className="pw-gives plan-gives">
@@ -2497,13 +2427,9 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
         {cancelling && <CancelPlanDialog b={b} logins={logins} busy={!!busy} onCancel={() => setCancelling(false)}
           onConfirm={(keep) => run(async () => { await bookPlan(b, 'free', null, reload, keep); setCancelling(false); })} />}
         {picking && (
-          <KeepPicker b={b} room={planRoom(picking.plan, picking.extra ?? b.nextExtraPlants ?? b.extraPlants)} logins={logins} busy={!!busy}
-            action={picking.extra == null ? 'Downgrade' : held - picking.extra === 1 ? 'Remove plant' : 'Remove plants'}
-            onPick={(keep) => run(async () => {
-              const ok = picking.extra != null ? await bookExtras(b, picking.extra, reload, keep) : await bookPlan(b, picking.plan, picking.period, reload, keep);
-              if (!ok && picking.extra != null) setMore(shown);
-              setPicking(null);
-            })} onCancel={() => setPicking(null)} />
+          <KeepPicker b={b} room={planRoom(picking.plan)} logins={logins} busy={!!busy} action="Downgrade"
+            onPick={(keep) => run(async () => { await bookPlan(b, picking.plan, picking.period, reload, keep); setPicking(null); })}
+            onCancel={() => setPicking(null)} />
         )}
       </>}
     </div>
@@ -2786,17 +2712,18 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
             text="Its history is deleted, unless another account shares it. Turn it on later and only the last 60 days come back."
             action="Stop and delete" onConfirm={() => stop(p)} onCancel={() => setStopping(null)} />
         )}
-        {/* No room: the plans live on their own page, not in this list (SOLAR-264). On Family
-            the plans page buys extra plants, R49 a plant; Free and Home upgrade there. */}
+        {/* No room: the plans live on their own page, not in this list (SOLAR-264). Family is the
+            biggest plan; more than its 5 plants is by email (SOLAR-371). */}
         {full === p.plant_id && (
           <ConfirmCard modal danger={false} label="Your plan is full" title="Your plan is full"
-            text={billing?.plan === 'family' ? 'Turn another plant off first, or add this one to your plan.' : 'Turn another plant off first, or upgrade.'}
-            action={onCollect && 'Upgrade'} onConfirm={() => { setFull(null); onCollect(p.plant_id); }} onCancel={() => setFull(null)} />
+            text={billing?.plan === 'family' ? <>Turn another plant off first. More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: 'family', from: 'plan_full' })}>Email us</a>.</> : 'Turn another plant off first, or upgrade.'}
+            action={billing?.plan !== 'family' && onCollect && 'Upgrade'} onCancel={() => setFull(null)}
+            onConfirm={() => { setFull(null); onCollect(p.plant_id); }} />
         )}
       </PlantLine>
     );
   };
-  // Free and Home collect one plant, Family 3 plus the extra bought. With that taken, Add login
+  // Free collects one plant, Home 2, Family 5 plus any extras still held. With that taken, Add login
   // still opens the form: the server links the new plants stopped, and each one's switch offers
   // the upgrade (SOLAR-272). A stopped plant leaves room, as on the server (SOLAR-259).
   const collecting = allPlants.filter(p => !p.paused).length;

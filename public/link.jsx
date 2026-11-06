@@ -234,14 +234,16 @@ window.Dialog = Dialog;
 
 // The saved card is charged without Paystack's page, so the amount, the next bill and the
 // card are shown first (SOLAR-276). Centred on a desktop, from the bottom on a phone.
-function PayReview({ title, note, due, then, card, onDone }) {
+// parts: the lines the bill is made of, before it, as [label, amount] (SOLAR-369).
+function PayReview({ title, note, due, parts = [], then, card, onDone }) {
   return (
     <Dialog label={title} onClose={() => onDone(false)}>
       <h2 id="pay-review-t" className="pay-review-t">{title}</h2>
       {note && <p className="field-note">{note}</p>}
       <div className="pay-review-due"><span>Due today</span><b>{rand(due)}</b></div>
       <div className="pay-review-box">
-        <div className="pay-review-ln"><span>{then[0]}</span><b>{then[1]}</b></div>
+        {parts.map(([k, v]) => <div key={k} className="pay-review-ln"><span>{k}</span><b>{v}</b></div>)}
+        <div className={'pay-review-ln' + (parts.length ? ' pay-review-sum' : '')}><span>{then[0]}</span><b>{then[1]}</b></div>
         <div className="pay-review-ln"><span>Card</span><b className="pay-review-card">{card}</b></div>
       </div>
       <div className="pay-review-acts">
@@ -261,14 +263,21 @@ const reviewPay = async (plan, period, extras) => {
   if (error) throw new Error('price check');
   if (!b?.card || !q?.dueNow) return true;
   const name = plan === 'family' ? 'Family' : 'Home';
-  const more = (extras ?? q.extraPlants) - q.extraPlants;
+  // Extra plants are no longer sold (SOLAR-371); those already held stay on the bill.
+  const extra = plan === 'family' ? q.extraPlants || 0 : 0;
   // A switch to yearly (SOLAR-298) is paid now and starts on the billing date.
-  const title = q.switch ? 'Switch to yearly'
-    : q.plan === plan && more > 0 ? `Add ${more} ${more === 1 ? 'plant' : 'plants'} to ${name}` : `Upgrade to ${name}`;
+  const title = q.switch ? 'Switch to yearly' : `Upgrade to ${name}`;
+  // The bill's parts (SOLAR-369): Family alone, then the extra plants held. Not on a switch,
+  // whose bill is yearly while extraPrice is the plan's monthly one.
+  // extraPrice is today's offer; a next bill at list prices (the offer over by then) takes the list one.
+  const each = q.listCharge != null && q.nextCharge === q.listCharge ? q.listExtraPrice ?? q.extraPrice : q.extraPrice;
+  const parts = extra > 0 && !q.switch && each != null
+    ? [['Family, 5 plants', rand(q.nextCharge - extra * each)], [`Extra plants, ${extra} × ${rand(each)}`, rand(extra * each)]] : [];
+  const when = q.switch ? `Your year starts ${billDay(q.startsOn)}.` : q.credit != null ? `Your year starts today, with ${rand(q.credit)} off for the rest of this month.` : null;
   const ok = await new Promise(resolve => {
     let close;
     const done = (yes) => { close(); resolve(yes); };
-    close = mountNode(<PayReview title={title} note={q.switch ? `Your year starts ${billDay(q.startsOn)}.` : q.credit != null ? `Your year starts today, with ${rand(q.credit)} off for the rest of this month.` : null} due={q.dueNow} card={`${b.card.name} •••• ${b.card.last4}`}
+    close = mountNode(<PayReview title={title} note={when} due={q.dueNow} parts={parts} card={`${b.card.name} •••• ${b.card.last4}`}
       then={[`Your bill from ${billDay(q.nextDate)}`, `${rand(q.nextCharge)} ${perUnit(q.switch ? 'yearly' : q.period || period)}`]} onDone={done} />);
   });
   window.track('pay_review_done', { plan, choice: ok ? 'pay' : 'cancel' });
