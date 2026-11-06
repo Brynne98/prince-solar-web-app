@@ -2356,6 +2356,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   const prices = b.prices?.[view] || {};
   const sameView = !paid || view === b.period;
   const price = (p) => p === 'free' ? 0 : p === b.plan && sameView ? b.price : prices[p];
+  // its list price, with the extra plants still held on your own Family card
+  const list = (p) => listPrice(b, p, view, p === b.plan && sameView ? b.extraPlants || 0 : 0);
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
   const booked = bookedChange(b);
   // the plan's own card while a change is booked: when it ends or changes, in either period
@@ -2363,7 +2365,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   // a smaller plan booked for the billing date in this period; Free has none
   const bookedHere = (p) => b.nextPlan === p && (p === 'free' || (b.nextPeriod || b.period) === view);
   // The line under a price: Family's says where more plants go
-  const note = (p) => (p === 'family' ? <>More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za">Email us</a>.</> : ' ');
+  const note = (p) => (p === 'family' ? <>More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: b.plan, from: 'plans' })}>Email us</a>.</> : ' ');
   const action = (p) => {
     // a paid year changes nothing until it starts (SOLAR-298); a quiet line holds the button's row
     if (b.prepaidOn && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
@@ -2411,8 +2413,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
               {p === b.plan && <div className="plan-band">Your plan</div>}
               <div className="pw-name">{PLAN_NAME[p]}</div>
               <div className="plan-tagline">{PLAN_TAG[p]}</div>
-              <div className="pw-price"><Was list={listPrice(b, p, view)} price={price(p) ?? 0} /><b>{rand(price(p) ?? 0, true)}</b>{p !== 'free' && ' ' + unit}
-                {b.offer && listPrice(b, p, view) > (price(p) ?? 0) && <span className="pw-billed pw-offer">{offerLine(b.offer, listPrice(b, p, view), view)}</span>}</div>
+              <div className="pw-price"><Was list={list(p)} price={price(p) ?? 0} /><b>{rand(price(p) ?? 0, true)}</b>{p !== 'free' && ' ' + unit}
+                {b.offer && list(p) > (price(p) ?? 0) && <span className="pw-billed pw-offer">{offerLine(b.offer, list(p), view)}</span>}</div>
               <div className="plan-note">{note(p)}</div>
               {action(p)}
               <ul className="pw-gives plan-gives">
@@ -2714,7 +2716,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
             biggest plan; more than its 5 plants is by email (SOLAR-371). */}
         {full === p.plant_id && (
           <ConfirmCard modal danger={false} label="Your plan is full" title="Your plan is full"
-            text={billing?.plan === 'family' ? <>Turn another plant off first. More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za">Email us</a>.</> : 'Turn another plant off first, or upgrade.'}
+            text={billing?.plan === 'family' ? <>Turn another plant off first. More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: 'family', from: 'plan_full' })}>Email us</a>.</> : 'Turn another plant off first, or upgrade.'}
             action={billing?.plan !== 'family' && onCollect && 'Upgrade'} onCancel={() => setFull(null)}
             onConfirm={() => { setFull(null); onCollect(p.plant_id); }} />
         )}
