@@ -2247,7 +2247,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
         {paid && b.offer?.held && <div className="conn-meta pw-offer">{window.billingFmt.offerLine(b.offer, listPrice(b, b.plan, b.period, b.extraPlants || 0), b.period)}</div>}
         {b.state === 'past_due' && (
           <div className="plan-booked plan-alert">
-            <span className="conn-status warn">Payment failed.{b.nextTry && <> Next try {window.billingFmt.billDay(b.nextTry)}.</>} Pay by {window.billingFmt.billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.</span>
+            <span className="conn-status bad">Payment failed.{b.nextTry && <> Next try {window.billingFmt.billDay(b.nextTry)}.</>} Pay by {window.billingFmt.billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.</span>
             <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
           </div>
         )}
