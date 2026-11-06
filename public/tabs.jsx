@@ -2752,6 +2752,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
           {live.map(acc => {
             const ok = acc.status === 'active';
             const plants = acc.plants || [];
+            const at = acc.sunsynk_username.indexOf('@') + 1; // 0 when there is no @
             // Amber at the age the header pill calls offline (15 minutes without a reading). A login
             // with no plant is never read, so its age means nothing (SOLAR-285).
             const stale = ok && plants.length > 0 && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
@@ -2759,7 +2760,8 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
               <div key={acc.account_id} className={'sset login-grp login-card' + (leaving === acc.account_id ? ' leaving' : '')}>
                 <div className="login-line">
                   <div className="login-who">
-                    <span className="login-email">{acc.sunsynk_username}</span>
+                    {/* a narrow card breaks a long email after the @, not mid-word */}
+                    <span className="login-email">{at ? <>{acc.sunsynk_username.slice(0, at)}<wbr />{acc.sunsynk_username.slice(at)}</> : acc.sunsynk_username}</span>
                     {(!ok || stale) && <window.Tip className={'login-state ' + (ok ? 'warn' : 'bad')} text={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : null}>{!ok ? 'Sign-in expired' : 'Not updating'}</window.Tip>}
                   </div>
                   {!ok && mode !== acc.account_id && <button type="button" className="ghost-btn login-fix" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
