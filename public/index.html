@@ -406,7 +406,7 @@
   .notice p b { font-weight: 600; }
   .notice.stale { border-color: rgba(var(--warn-rgb),0.35); background: rgba(var(--warn-rgb),0.07); }
   .notice.offline { border-color: rgba(var(--bad-rgb),0.4); background: rgba(var(--bad-rgb),0.07); }
-  .notice.gridoff { border-color: rgba(var(--batt-rgb),0.35); background: rgba(var(--batt-rgb),0.08); }
+  .notice.gridoff { border-color: rgba(var(--bad-rgb),0.4); background: rgba(var(--bad-rgb),0.07); }
   /* billing banners (SOLAR-212): a raised panel, the status in the glyph and a hairline of
      its tone; the one action is a quiet button, so a fault never wears the solar green */
   .bill-banners { display: grid; gap: var(--sp-sm); margin-bottom: var(--sp-lg); }
@@ -1110,7 +1110,7 @@
   .set-nav button > span:first-child { flex: 1; }
   .set-nav button:hover { color: var(--text); }
   .set-nav button[aria-current="page"] { background: var(--panel-2); border-color: var(--line-2); color: var(--text); }
-  .set-nav .dot { background: var(--warn); }
+  .set-nav .dot { background: var(--bad); }
   .set-chev { display: none; flex: none; width: var(--icon-sm); height: var(--icon-sm); color: var(--dim); }
   .set-main { min-width: 0; }
   .set-main > .settings-page { padding-top: var(--sp-3xs); }
