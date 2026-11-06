@@ -49,7 +49,8 @@ function plantStatus(snap, now) {
   const status = loading && bad !== 'live' ? 'loading' : bad;
   return {
     status, last, old: status !== 'loading' && ageS > 180,
-    word: { live: 'Live', stale: 'Stale', offline: 'Offline', loading: 'Setting up' }[status],
+    // every login dead (snap.loginCut, set by App): the menu's word, Reconnect (SOLAR-373)
+    word: status === 'offline' && snap.loginCut ? 'Reconnect' : { live: 'Live', stale: 'Stale', offline: 'Offline', loading: 'Setting up' }[status],
     detail: offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now),
   };
 }
@@ -251,7 +252,7 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
                   );
                 }
                 // the plant on screen takes the header's progress, so the two % always match
-                const st = p.id === plantId && states[p.id] && currentSync ? { ...states[p.id], sync: currentSync } : states[p.id];
+                const st = states[p.id] && { ...states[p.id], sync: p.id === plantId && currentSync ? currentSync : window.firstLoadSync(states[p.id].sync, p.linkedAt) };
                 return (
                   <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
                           onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
@@ -281,7 +282,7 @@ function AccountMenu({ user, plantCount, alert, stepsLeft, onSettings, active, v
               aria-current={active ? 'page' : undefined} onClick={() => setOpen(o => !o)}
               aria-label={'Account menu' + (alert ? '. A SunSynk login needs reconnecting' : stepsLeft ? '. Setup steps left' : '')}>
         <span className="avatar" aria-hidden="true">{user.initials}</span>
-        {variant === 'rail' && <span className="who" aria-hidden="true"><b>{user.name}</b><span className={alert ? 'warn' : ''} style={sub ? undefined : { position: 'relative' }}>{sub || <>{'\u00a0'}<window.Skeleton as="span" w={52} h={11} r={6} style={{ position: 'absolute', left: 0, top: 2 }} /></>}</span></span>}
+        {variant === 'rail' && <span className="who" aria-hidden="true"><b>{user.name}</b><span className={alert ? 'bad' : ''} style={sub ? undefined : { position: 'relative' }}>{sub || <>{'\u00a0'}<window.Skeleton as="span" w={52} h={11} r={6} style={{ position: 'absolute', left: 0, top: 2 }} /></>}</span></span>}
       </button>
       {open && (
         <MenuList className="acct-menu" label="Account">
@@ -1334,7 +1335,21 @@ function App({ links }) {
   shownPlant.current = plantId;
   const [tab, setTab] = useState(() => savedTab() || 'live');
   const auto = true; // refresh runs on its own; the header button forces one now
-  const [snap, setSnap] = useState(null);
+  const [rawSnap, setSnap] = useState(null);
+  // Every login of the plant needs a reconnect and no reading lands (SOLAR-373): nothing is
+  // fetched, so its history load is not "in progress". Without this the stalled temperature
+  // fetch read "Setting up 99%", which hid Offline, the banner and the silent pages.
+  // the working logins a plant is read through
+  const loginsFor = (id) => links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(id)));
+  // a plant whose every login stopped working reads Reconnect in the menu
+  const loginsCut = (id) => {
+    const ls = loginsFor(id);
+    return ls.length > 0 && !ls.some(a => a.status === 'active');
+  };
+  const loginCut = !!rawSnap && plantStatus(rawSnap, Date.now()).status !== 'live' && loginsCut(plantId);
+  const linkedAt = (me?.plants || []).find(p => p.id === plantId)?.linkedAt;
+  const snap = React.useMemo(() => (!rawSnap ? rawSnap : loginCut ? { ...rawSnap, sync: null, loginCut: true }
+    : { ...rawSnap, sync: window.firstLoadSync(rawSnap.sync, linkedAt) }), [rawSnap, loginCut, linkedAt]);
   const [today, setToday] = useState(null);
   const [energy, setEnergy] = useState({});
   // > 0 while a snapshot fetch is in flight; the Refresh icon spins on it. Held to a
@@ -1569,8 +1584,6 @@ function App({ links }) {
     };
   }, [auto, plantId]);
 
-  // the working logins a plant is read through
-  const loginsFor = (id) => links.accounts.filter(a => a.status !== 'disabled' && (a.plants || []).some(p => String(p.plant_id) === String(id)));
   const plantLogins = loginsFor(plantId);
   // useLinkStatus reads the logins again each minute (SOLAR-153), so one that dies later
   // shows as cut off and Reconnect reads as a reconnect.
@@ -1645,11 +1658,6 @@ function App({ links }) {
   const [overSeen, setOverSeen] = useState(false);
   const overCard = free?.over && !overSeen && !me?.prefs?.freeWeekOverSeen;
   const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, stepsLeft, onSettings: () => go('prefs'), active: isSettings(tab) };
-  // a plant whose every login stopped working reads Reconnect in the menu
-  const loginsCut = (id) => {
-    const ls = loginsFor(id);
-    return ls.length > 0 && !ls.some(a => a.status === 'active');
-  };
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync}
                                accounts={links.accounts} onStopped={() => openSettings('connection')} />;
   // A page's section, from Billing's Reconnect: openSettings; otherwise the page itself
