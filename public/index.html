@@ -297,7 +297,7 @@
   .refresh { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-sm); font-size: var(--fs-md); font-weight: 500; }
   .refresh:disabled { cursor: progress; }
   .refresh-stale { color: var(--warn); border-color: rgba(var(--warn-rgb),0.45); }
-  .refresh-offline { color: var(--bad); border-color: rgba(var(--bad-rgb),0.5); padding: 0 var(--sp-lg); }
+  .refresh-offline { color: var(--bad); border-color: rgba(var(--bad-rgb),0.5); }
   /* spins for as long as a snapshot fetch is in flight (app.jsx holds it ≥ 800 ms) */
   .refresh.busy .ico { animation: spin .8s linear infinite; }
   @media (prefers-reduced-motion: reduce) { .refresh.busy .ico { animation: none; opacity: .5; } }
@@ -487,7 +487,6 @@
     /* first load: only "Fetching history" and its %, no status word or refresh (SOLAR-182) */
     .status.fetching .status-dot, .status.fetching .status-word, .status.fetching .status-age, .refresh.fetching { display: none; }
     .status.fetching .status-sync { display: inline-flex; padding-left: 0; border-left: none; }
-    @media (max-width: 399px) { .refresh-offline { padding: 0 var(--sp-sm); } .refresh .lbl { display: none; } }
     /* the plant name needs the room more; the page's banner already says how old the reading is */
     @media (max-width: 359px) { .status-age { display: none; } }
     .status-age .age-date { display: none; }
