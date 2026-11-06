@@ -95,8 +95,8 @@ for (const m of css.matchAll(/(?<![\w-])(padding|margin|gap|row-gap|column-gap|b
 // The five power colours and the role colours (ok, warn, bad, accent) live on :root only.
 // Elsewhere a hex or rgb() of one is a second copy that drifts: use var(--x) or
 // rgba(var(--x-rgb), a). A focus, open or picked state takes --focus, never a power colour.
-const ROLE_HEX = /#(3ddc84|a78bfa|facc15|f87171|22d3ee|60a5fa|f97316|f43f5e|f59e0b|ef4444)\b/i;
-const ROLE_RGB = /rgba?\(\s*(61,\s*220,\s*132|167,\s*139,\s*250|250,\s*204,\s*21|248,\s*113,\s*113|34,\s*211,\s*238|96,\s*165,\s*250|249,\s*115,\s*22|244,\s*63,\s*94|245,\s*158,\s*11|239,\s*68,\s*68)\b/;
+const ROLE_HEX = /#(3ddc84|84cc16|a78bfa|facc15|f87171|22d3ee|60a5fa|f97316|f43f5e|f59e0b|ef4444)\b/i;
+const ROLE_RGB = /rgba?\(\s*(61,\s*220,\s*132|132,\s*204,\s*22|167,\s*139,\s*250|250,\s*204,\s*21|248,\s*113,\s*113|34,\s*211,\s*238|96,\s*165,\s*250|249,\s*115,\s*22|244,\s*63,\s*94|245,\s*158,\s*11|239,\s*68,\s*68)\b/;
 for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
   for (const d of m[2].matchAll(/([\w-]+)\s*:([^;]*)/g)) {
     if (d[1].startsWith('--') || /url\(/.test(d[2])) continue;
