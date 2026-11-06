@@ -2363,7 +2363,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   // a smaller plan booked for the billing date in this period; Free has none
   const bookedHere = (p) => b.nextPlan === p && (p === 'free' || (b.nextPeriod || b.period) === view);
   // The line under a price: Family's says where more plants go
-  const note = (p) => (p === 'family' ? <>More than 5 plants? <a href="mailto:hello@princesolarhub.co.za">Email us</a>.</> : ' ');
+  const note = (p) => (p === 'family' ? <>More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za">Email us</a>.</> : ' ');
   const action = (p) => {
     // a paid year changes nothing until it starts (SOLAR-298); a quiet line holds the button's row
     if (b.prepaidOn && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
@@ -2714,7 +2714,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
             biggest plan; more than its 5 plants is by email (SOLAR-371). */}
         {full === p.plant_id && (
           <ConfirmCard modal danger={false} label="Your plan is full" title="Your plan is full"
-            text={billing?.plan === 'family' ? <>Turn another plant off first. More than 5 plants? <a href="mailto:hello@princesolarhub.co.za">Email us</a>.</> : 'Turn another plant off first, or upgrade.'}
+            text={billing?.plan === 'family' ? <>Turn another plant off first. More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za">Email us</a>.</> : 'Turn another plant off first, or upgrade.'}
             action={billing?.plan !== 'family' && onCollect && 'Upgrade'} onCancel={() => setFull(null)}
             onConfirm={() => { setFull(null); onCollect(p.plant_id); }} />
         )}
