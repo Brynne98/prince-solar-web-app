@@ -2760,7 +2760,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                 <div className="login-line">
                   <span className="login-email">
                     {acc.sunsynk_username}
-                    {(!ok || stale) && <window.Tip className="warn" text={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : null}> · {!ok ? 'Sign-in expired' : 'Not updating'}</window.Tip>}
+                    {(!ok || stale) && <window.Tip className={ok ? 'warn' : 'bad'} text={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : null}> · {!ok ? 'Sign-in expired' : 'Not updating'}</window.Tip>}
                   </span>
                   {!ok && mode !== acc.account_id && <button type="button" className="ghost-btn" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
                   <LoginMenu email={acc.sunsynk_username} busy={busy === acc.account_id}

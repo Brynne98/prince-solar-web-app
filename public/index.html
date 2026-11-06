@@ -197,7 +197,7 @@
   .who { display: grid; min-width: 0; line-height: 1.25; }
   .who b { font-weight: 600; font-size: var(--fs-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .who span { font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .who span.warn { color: var(--warn); }
+  .who span.bad { color: var(--bad); }
   /* a SunSynk login needs reconnecting */
   .acct-btn.needs::after { content: ''; position: absolute; left: 32px; top: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px #0d1117; }
   .acct-head { display: none; }
@@ -1136,6 +1136,7 @@
   .login-line { display: flex; align-items: center; gap: var(--sp-sm); min-height: 36px; border-bottom: 1px solid var(--line); margin-bottom: var(--sp-3xs); }
   .login-email { flex: 1; min-width: 0; font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
   .login-email .warn { color: var(--warn); white-space: nowrap; }
+  .login-email .bad { color: var(--bad); white-space: nowrap; }
   .login-plant { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-md); min-height: 44px; }
   /* the name holds the row's 44px, so the row doesn't shrink up when a question opens under it */
   .login-plant .plant-nm { flex: 1; min-width: 0; font-size: var(--fs-md); min-height: 44px; display: flex; align-items: center; }
