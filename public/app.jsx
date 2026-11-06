@@ -711,7 +711,7 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
   );
 }
 
-// Says on the page when its numbers are old, and why. Grid off is news, not a fault: calm purple.
+// Says on the page when its numbers are old, and why. Grid off is red, as on the Grid card (SOLAR-374).
 function PageNotice({ snap, cutOff, onReconnect, relinkedAt }) {
   const now = useNow(15000);
   const s = plantStatus(snap, now);

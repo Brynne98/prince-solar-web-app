@@ -2234,7 +2234,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   return (
     <SettingsSection id="plan" title="Plan" bare>
       {/* the plan top left, its button top right; its price and renewal in the darker box under them */}
-      <PlanCard title={<>{PLAN_NAME[b.plan]}{word && <span className="conn-status warn">{word}</span>}</>}
+      <PlanCard title={<>{PLAN_NAME[b.plan]}{word && <span className="conn-status bad">{word}</span>}</>}
         action={!b.comped && <button type="button" className={paid ? 'ghost-btn' : 'save-btn'} onClick={onAdjust}>Adjust plan</button>}>
         {line && <div className="plan-line">{line}</div>}
         {paid && (
