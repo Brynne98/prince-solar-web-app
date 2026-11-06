@@ -2733,7 +2733,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   // free of charge. A plant up for deletion still collects until its date.
   const title = <>Plants{limit != null && allPlants.length > 0 && <span className="sset-count">{allPlants.filter(p => !p.paused && ['on', 'going'].includes(state(p))).length} of {limit} on your plan</span>}</>;
   return (
-    <SettingsSection id="connection" title={title} bare
+    <SettingsSection id="connection" title={title}
       action={!unread && <button type="button" className="save-btn" onClick={() => { if (planFull) window.track('add_login_full_done', { plan: billing.plan }); setMode('add'); }}>Add login</button>}>
       {!unread && mode === 'add' && (
         // A form over the page (SOLAR-286). Cancel re-reads too: a login with no plant yet is saved but not listed.
@@ -2741,13 +2741,14 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
           onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
       )}
       {unread ? (
-        <SettingRow className="sset" label="Couldn’t load your logins" note={NBSP}
+        <SettingRow label="Couldn’t load your logins" note={NBSP}
           action={<window.BusyButton className="ghost-btn" onClick={retry} busy={checking} busyText="Checking…">Try again</window.BusyButton>} />
       ) : !live.length ? (
-        <div className="sset"><div className="field-note">No login connected.</div></div>
+        <div className="field-note">No login connected.</div>
       ) : (
-        // A card per login (SOLAR-376): the email is its title, Reconnect and Manage top right,
-        // its plants indented under it, a switch each. Its state shows only when it needs something.
+        // One full-width card, laid out as Notifications (SOLAR-377): each login a small grey
+        // heading with Reconnect and Manage at its right, its plants under it, a switch each.
+        // Its state shows only when it needs something.
         <>
           {live.map(acc => {
             const ok = acc.status === 'active';
@@ -2757,7 +2758,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
             // with no plant is never read, so its age means nothing (SOLAR-285).
             const stale = ok && plants.length > 0 && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
             return (
-              <div key={acc.account_id} className={'sset login-grp login-card' + (leaving === acc.account_id ? ' leaving' : '')}>
+              <div key={acc.account_id} className={'login-grp plant-logins' +(leaving === acc.account_id ? ' leaving' : '')}>
                 <div className="login-line">
                   <div className="login-who">
                     {/* a narrow card breaks a long email after the @, not mid-word */}

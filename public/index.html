@@ -1143,17 +1143,19 @@
   @media (min-width: 901px) { .login-plant, .login-plant .plant-nm { min-height: 36px; } }
   .login-plant.off .plant-nm { color: var(--dim); }
   .login-plant .plant-state { font-size: var(--fs-sm); white-space: nowrap; }
-  /* Settings' Plants (SOLAR-376): a card per login, the email its title, no line under it, plants indented */
-  .settings-page .sset-cards > .login-card + .login-card { margin-top: var(--sp-sm); }
-  /* email and its state top left, Reconnect then Manage top right at every width */
-  .login-card .login-line { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "who fix more"; border-bottom: none; }
-  .login-card .login-who { grid-area: who; min-width: 0; }
-  .login-card .login-fix { grid-area: fix; }
-  .login-card .login-more { grid-area: more; }
-  .login-card .login-email { display: block; font-size: var(--fs-lg); font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
-  .login-card .login-state { display: block; font-size: var(--fs-sm); }
-  @media (max-width: 599px) { .login-card .login-line { gap: var(--sp-xs); } .settings-page .login-card .login-fix { padding: 0 var(--sp-md); } }
-  .login-card .login-state.warn { color: var(--warn); } .login-card .login-state.bad { color: var(--bad); }  .login-card .login-plant { padding-left: var(--sp-xl); }
+  /* Billing's Plants (SOLAR-377): one full-width card laid out as Notifications. Each login a small
+     grey heading, Reconnect then Manage at its right; its plants under it as rows, a switch each. */
+  .plant-logins + .plant-logins { margin-top: var(--sp-2xl); }
+  .plant-logins .login-line { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "who fix more"; border-bottom: none; margin-bottom: var(--sp-2xs); }
+  .plant-logins .login-who { grid-area: who; min-width: 0; }
+  .plant-logins .login-fix { grid-area: fix; }
+  .plant-logins .login-more { grid-area: more; }
+  .plant-logins .login-email { display: block; font-size: var(--fs-sm); font-weight: 500; color: var(--dim); overflow-wrap: anywhere; }
+  .plant-logins .login-state { display: block; font-size: var(--fs-sm); }
+  .plant-logins .login-state.warn { color: var(--warn); } .plant-logins .login-state.bad { color: var(--bad); }
+  .plant-logins .login-plant .plant-nm { font-size: var(--fs-lg); font-weight: 500; }
+  .plant-logins .login-plant.off .plant-nm { font-weight: 400; }
+  @media (max-width: 599px) { .plant-logins .login-line { gap: var(--sp-xs); } .settings-page .plant-logins .login-fix { padding: 0 var(--sp-md); } }
   .switch:disabled { opacity: .5; }
   .login-more { position: relative; flex: none; }
   /* Manage: grey text, no box, so the plants stay the loudest thing on the card (SOLAR-289) */
