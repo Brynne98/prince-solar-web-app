@@ -772,7 +772,7 @@ const STEPS = {
   rate: { title: 'Electricity rate', how: 'The price per unit on your bill, with VAT. Shows what solar saved you.', ph: '0.00' },
   size: { title: 'Battery size', how: 'All your batteries together. Shows how long the battery will last.' },
   reserve: { title: 'Battery reserve', how: 'The battery stops powering your home at this charge. Match the number set on your inverter.', ph: '0' },
-  panels: { title: 'Solar panels', how: 'All your panels together, in full sun. Shows how well they’re doing.' },
+  panels: { title: 'Solar panels', how: 'All your panels’ watts added up. Shows how much of that the sun gets out of them.' },
 };
 // Settings shows the same titles and lines; empty boxes show the number's shape, not a sample (SOLAR-400)
 window.STEPS = STEPS;
