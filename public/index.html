@@ -1033,26 +1033,17 @@
   .sset .field label.toggle-row { display: flex; margin-bottom: 0; letter-spacing: 0; color: var(--text); }
   .sset .field label.toggle-row .toggle-label { font-size: var(--fs-md); }
   .sset .sset-body > .field + .field { margin-top: var(--sp-xl); }
-  /* Notifications: two groups that open to a switch per email (SOLAR-164). */
-  .notif-head { display: flex; align-items: center; gap: var(--sp-md); padding: var(--sp-lg) 0; }
-  .notif-group:first-child .notif-head { padding-top: 0; }
-  .notif-group:last-child .notif-head:has(+ [hidden]) { padding-bottom: 0; }
-  .notif-group + .notif-group { border-top: 1px solid var(--line); }
-  .notif-open { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: var(--sp-sm); padding: 0;
-    background: none; border: none; color: inherit; text-align: left; }
-  .notif-open .ico { width: var(--icon-sm); height: var(--icon-sm); color: var(--dim); transition: transform var(--dur-base) var(--ease-out);
-    font-size: var(--fs-lg); margin-block: calc((1lh - var(--icon-sm)) / 2); } /* level with the label's first line */
-  .notif-open[aria-expanded="true"] .ico { transform: rotate(90deg); }
-  .notif-label { font-size: var(--fs-lg); font-weight: 500; }
-  /* an email sits under its group, indented past the group's name; no rule between emails */
-  .sset .notif-rows { margin: 0 0 var(--sp-lg) 42px; }
-  .sset .notif-rows .toggle-row { padding: var(--sp-sm) 0; border-top: none; }
+  /* Notifications: one row per alert or report, one switch column per channel (SOLAR-402) */
+  .notif-row { display: grid; grid-template-columns: minmax(0, 1fr) repeat(var(--notif-cols), 56px); align-items: start;
+    column-gap: var(--sp-xs); padding: var(--sp-sm) 0; }
+  .notif-row > .switch, .notif-row > .skel { justify-self: center; }
+  .notif-cols { padding: 0; font-size: var(--fs-sm); color: var(--dim); font-weight: 500; text-align: center; }
+  .notif-row .toggle-label { font-size: var(--fs-md); }
   .sset .toggle-hint { font-size: var(--fs-sm); }   /* hints are 13px or more (SOLAR-14) */
-  /* Email, then On this browser: pop-ups with the same five alert switches (SOLAR-244) */
-  .notif-sub { font-size: var(--fs-sm); color: var(--dim); font-weight: 500; margin: 0 0 var(--sp-2xs); }
-  .notif-sub + .notif-group .notif-head { padding-top: var(--sp-sm); }
+  /* On this browser: pop-ups on or off here (SOLAR-244) */
+  .notif-sub { font-size: var(--fs-sm); color: var(--dim); font-weight: 500; margin: var(--sp-lg) 0 0; }
   .notif-push { border-top: 1px solid var(--line); margin-top: var(--sp-lg); padding-top: var(--sp-lg); }
-  .notif-push .notif-group { border-top: 1px solid var(--line); }
+  .notif-push .notif-sub { margin-top: 0; }
   .notif-push.ios .switch, .notif-push.asking .switch { opacity: .35; }
   .notif-note { margin: var(--sp-2xs) 0 var(--sp-xs); padding: var(--sp-sm) var(--sp-md); border-radius: var(--r-md); font-size: var(--fs-sm); line-height: 1.5;
     border: 1px solid var(--line-2); background: var(--panel-2); color: #b4bdc8; }
@@ -1171,10 +1162,6 @@
   .dl-row > button { flex: none; min-height: 41px; }
   .dl-row + .sset-err { margin-top: var(--sp-sm); }
   /* Account: Delete is off while a paid plan runs, with this note under it */
-  /* All emails: one switch over both groups, ruled off from them */
-  .notif-all { min-height: 44px; border-bottom: 1px solid var(--line-2); }
-  .notif-all .toggle-text { flex: 1; min-width: 0; }
-  .notif-all + .notif-group .notif-head { padding-top: var(--sp-lg); }
   /* Billing */
   .plan-head .plan-name { font-size: var(--fs-xl); }
   .plan-line { font-size: var(--fs-md); color: var(--text); margin-top: var(--sp-2xs); }
@@ -1197,8 +1184,7 @@
   .settings-page > .save-bar { order: 1; }
 
   /* No rules inside Settings cards: space alone sets rows apart (SOLAR-250) */
-  .settings-page :is(.conn-row, .notif-group + .notif-group, .notif-push, .notif-push .notif-group, .plan-alert) { border-top: none; }
-  .settings-page .notif-all { border-bottom: none; }
+  .settings-page :is(.conn-row, .notif-push, .plan-alert) { border-top: none; }
   .settings-page #settings-system .conn-row.sset-row { border-top: none; padding: 0; }
   .settings-page #settings-system .conn-row.sset-row + .conn-row.sset-row { margin-top: var(--sp-4xl); }
   .settings-page #settings-system .conn-row.sset-row:first-child { padding-top: 0; }
@@ -1215,7 +1201,7 @@
   /* Every Settings row: a switch or button lines up with the top of its name (SOLAR-250) */
   .settings-page .conn-actions, .settings-page .conn-row > .plant-state { align-self: flex-start; }
   .settings-page #settings-actions .conn-row:not(:has(form)) { align-items: flex-start; }
-  .settings-page :is(.notif-head, .notif-open, .toggle-row) { align-items: flex-start; }
+  .settings-page :is(.toggle-row) { align-items: flex-start; }
   /* just the number, centred under the last section */
   .app-version { padding-top: var(--sp-lg); text-align: center; font-size: var(--fs-xs); color: var(--dim); }
   .app-version a { color: inherit; }
