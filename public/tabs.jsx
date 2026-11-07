@@ -2797,7 +2797,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
 // One form, three sections, one floating save bar. The fields are First steps' own
 // (StepField, SumBox in app.jsx, SOLAR-170), so a value is entered the same way in both.
 const SYSTEM_NOTE = 'Sizes the charts and the battery’s time left.';
-function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
+function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked, battSays }) {
   const { useState, useEffect } = React;
   const plant = (me?.plants || []).find(p => p.id === plantId) || (me?.plants || [])[0];
   const cfg = plant?.config || {};
@@ -2820,9 +2820,9 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   const n = window.stepNum;
   const batt = window.sumOf('size', f.bMode, f.bTot, f.bRows);
   const pan = window.sumOf('panels', f.pMode, f.pTot, f.pRows);
-  // An empty rate is 0 (savings show as zero). A stored reserve outside 5..50, left alone, is kept.
+  // An empty rate is 0 (savings show as zero). A stored reserve outside 0..50, left alone, is kept.
   const rateOk = f.rate === '' || n(f.rate) >= 0;
-  const resOk = window.wholeNum(f.res, 5, 50) || n(f.res) === (cfg.battery_reserve_pct ?? 20);
+  const resOk = window.wholeNum(f.res, 0, 50) || n(f.res) === (cfg.battery_reserve_pct ?? 20);
   // What Save sends: the way on screen for battery and panels, empty meaning none
   const patch = {
     tariff_import: f.rate === '' ? 0 : n(f.rate),
@@ -2918,11 +2918,12 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
           action={<>
             <window.SumBox kind="size" mode={f.bMode} onMode={set('bMode')} tot={f.bTot} onTot={set('bTot')} rows={f.bRows} onRows={set('bRows')} label="Battery size" />
             {err(bad.batt, f.bMode === 'total' ? 'Enter more than 0 kWh.' : 'Enter whole batteries and the kWh of one.')}
+            {battSays && <p className="field-note">SunSynk says about {battSays} kWh.</p>}
           </>} />
         <SettingRow className="sset-row" label="Battery reserve" note="The battery stops powering your home at this charge." actionClass="conn-actions sset-one"
           action={<>
             <window.StepField value={f.res} onChange={set('res')} label="Reserve" unit="%" inputMode="numeric" ph="20" invalid={tried && bad.res} />
-            {err(bad.res, 'Enter 5 to 50.')}
+            {err(bad.res, 'Enter 0 to 50.')}
           </>} />
         <SettingRow className="sset-row" label="Solar panels" note="What they make in full sun." actionClass="sset-sum"
           action={<>
@@ -3442,13 +3443,13 @@ function BillingPage({ billing, reload, reloadPlan, links, onPage, freeWeekEndsA
 
 // Plant settings: the plant on screen (picked in the header), a page in the list beside
 // Equipment rather than in the account's Settings. Titled with the plant's name.
-function PlantSettings({ me, plantId, onSaved, onDirty, switchBlocked, flash, onFlashed }) {
+function PlantSettings({ me, plantId, onSaved, onDirty, switchBlocked, flash, onFlashed, battSays }) {
   const plant = (me?.plants || []).find(p => p.id === plantId);
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
       <div className="settings-page">
         <div className="page-head"><h1>{!me ? <window.SkelLine w={180} h={22} /> : plant?.name || 'Plant settings'}</h1><p>Changes apply to everyone on this plant.</p></div>
-        <PlantSections me={me} plantId={plantId} onSaved={onSaved} onDirty={onDirty} switchBlocked={switchBlocked} />
+        <PlantSections me={me} plantId={plantId} onSaved={onSaved} onDirty={onDirty} switchBlocked={switchBlocked} battSays={battSays} />
         <FirstStepsSection me={me} plantId={plantId} onSaved={onSaved} />
       </div>
     </SettingsFlash.Provider>
