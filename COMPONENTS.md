@@ -103,7 +103,7 @@ a row of on/off settings (email and push preferences); `saveFlag` sends its own 
 | `fmtAgo`, `readAgo`, `useNow` | "5 min ago", "Read 2 h ago", a ticking clock. |
 | `plantStatus` | A plant's status word and tone from its last reading. |
 | `StepField` | A number box with a unit, as in First steps. |
-| `stepNum`, `wholeNum`, `cfgFields`, `panelsPatch` | Reading, checking and saving system config (size, panels, reserve, rate). |
+| `stepNum`, `wholeNum`, `cfgFields`, `sumPatch` | Reading, checking and saving system config (size, panels, reserve, rate). |
 | `savedTab`, `writeTab`, `TAB_KEY` | The last tab and plant, kept across visits. |
 | `window.toast(text)` | A short message at the bottom. Use instead of `alert()`. One sent just before sign-out shows on the sign-in screen. |
 | `NotifRows`, `alertSpan` | Alert rows under day headings (the bell list, the full Notifications page); "14:02 to 16:47, 2h 45m" (SOLAR-327). Billing notices (`NoticeRows`) lead the Today group in both, one list (SOLAR-353). |

@@ -810,25 +810,33 @@ window.saveFirstSteps = saveFirstSteps;
 
 // Battery size and panels share one box (SumBox): a total, or count × size rows that add up.
 const STEP_SUMS = {
-  size: { unit: 'kWh', each: 'kWh', per: 1, ph: '0.00', totPh: '0.0', add: 'Add battery size', sizeLabel: 'kWh each', ok: (e) => e > 0 },
-  panels: { unit: 'kW', each: 'W', per: 1000, ph: '0', totPh: '0.0', add: 'Add panel size', sizeLabel: 'Watts each', ok: (e) => Number.isInteger(e) && e >= 50 && e <= 1000 },
+  size: { total: 'battery_kwh', list: 'battery_groups', key: 'kwh', unit: 'kWh', each: 'kWh', per: 1, ph: '0.00', totPh: '0.0', add: 'Add battery size', sizeLabel: 'kWh each', ok: (e) => e > 0 && e <= 1000 && +e.toFixed(2) === e },
+  panels: { total: 'system_kwp', list: 'panel_groups', key: 'watts', unit: 'kW', each: 'W', per: 1000, ph: '0', totPh: '0.0', add: 'Add panel size', sizeLabel: 'Watts each', ok: (e) => Number.isInteger(e) && e >= 50 && e <= 1000 },
 };
 // typed as text, so a comma keyboard's 5,12 reads as 5.12
 const stepNum = (v) => (v ?? '') === '' ? NaN : Number(String(v).replace(',', '.'));
 const stepFix = (x) => String(+x.toFixed(2));
 const wholeNum = (x, lo, hi) => Number.isInteger(stepNum(x)) && stepNum(x) >= lo && stepNum(x) <= hi;
-// A plant's saved settings as the boxes show them, by step id; groups: its panel rows, if saved.
+// A plant's saved settings as the boxes show them, by step id; groups / bGroups: its panel
+// and battery rows, if saved. The total box keeps the figure either way, so a switch to
+// Total at the same figure needs no retyping.
+const listOf = (g) => Array.isArray(g) && g.length ? g : null;
 const cfgFields = (c) => {
-  const groups = Array.isArray(c?.panel_groups) && c.panel_groups.length ? c.panel_groups : null;
+  const groups = listOf(c?.panel_groups), bGroups = listOf(c?.battery_groups);
   // the reserve's stored 20 is only a stand-in until the owner says, so it opens empty
   const standIn = !c?.battery_reserve_confirmed && (c?.battery_reserve_pct ?? 20) === 20;
-  return { groups, rate: c?.tariff_import > 0 ? String(c.tariff_import) : '', reserve: standIn ? '' : String(c.battery_reserve_pct),
-    size: c?.battery_kwh > 0 ? String(c.battery_kwh) : '', panels: !groups && c?.system_kwp > 0 ? String(c.system_kwp) : '' };
+  return { groups, bGroups, rate: c?.tariff_import > 0 ? String(c.tariff_import) : '', reserve: standIn ? '' : String(c.battery_reserve_pct),
+    size: c?.battery_kwh > 0 ? String(c.battery_kwh) : '', panels: c?.system_kwp > 0 ? String(c.system_kwp) : '' };
 };
-// What saving the panels sends: the way on screen (sumOf's answer), empty meaning none.
-const panelsPatch = (now, mode) => (now.empty ? { system_kwp: null, panel_groups: null }
-  : { system_kwp: now.value, panel_groups: mode === 'total' ? null : now.filled.map(r => ({ count: stepNum(r.c), watts: stepNum(r.e) })) });
-Object.assign(window, { stepNum, wholeNum, cfgFields, panelsPatch });
+// What saving the battery or panels sends: the way on screen (sumOf's answer), empty meaning
+// none. Total clears the rows, so a switch at the same figure is still a change (SOLAR-401).
+const sumPatch = (kind, now, mode) => {
+  const s = STEP_SUMS[kind];
+  if (now.empty) return { [s.total]: null, [s.list]: null };
+  return { [s.total]: kind === 'size' ? +now.value.toFixed(3) : now.value,
+    [s.list]: mode === 'total' ? null : now.filled.map(r => ({ count: stepNum(r.c), [s.key]: stepNum(r.e) })) };
+};
+Object.assign(window, { stepNum, wholeNum, cfgFields, sumPatch });
 
 // What a sum box holds now: its value, whether it can be saved, and (By size) the rows
 // typed. A row counts once its size is typed; a fresh "1 ×" row on its own changes nothing.
@@ -894,18 +902,19 @@ function SumBox({ kind, mode, onMode, tot, onTot, rows, onRows, label }) {
 }
 window.SumBox = SumBox;
 // the rows a saved plant opens on: its panel groups, or one empty row
-const rowsFrom = (groups) => Array.isArray(groups) && groups.length ? groups.map(g => ({ c: String(g.count), e: String(g.watts) })) : [{ c: '1', e: '' }];
+const rowsFrom = (groups, key = 'watts') => Array.isArray(groups) && groups.length ? groups.map(g => ({ c: String(g.count), e: String(g[key]) })) : [{ c: '1', e: '' }];
 window.rowsFrom = rowsFrom;
 
 // One step's boxes. Save stays off until the value is one the database takes. A step opened
 // again (Back, or a step bar) starts from what is saved.
-// Panels' rows are saved as panel_groups, as Settings saves them; the battery keeps only kWh.
+// Battery and panel rows are saved (battery_groups, panel_groups), as Settings saves them.
 function StepForm({ id, cfg, busy, onSave, onSkip }) {
   const sum = STEP_SUMS[id];
   const [saved] = useState(() => cfgFields(cfg));
   const [v, setV] = useState(saved[id]);
-  const [mode, setMode] = useState(id === 'panels' && saved.groups ? 'rows' : 'total');
-  const [rows, setRows] = useState(() => rowsFrom(saved.groups));
+  const list = id === 'size' ? saved.bGroups : id === 'panels' ? saved.groups : null;
+  const [mode, setMode] = useState(list ? 'rows' : 'total');
+  const [rows, setRows] = useState(() => rowsFrom(list, sum?.key));
   const box = useRef(null);
   useEffect(() => { box.current?.querySelector('input')?.focus(); }, [mode]);
   const now = sum ? sumOf(id, mode, v, rows) : null;
@@ -915,7 +924,7 @@ function StepForm({ id, cfg, busy, onSave, onSkip }) {
     if (!ok) return;
     // the way on screen is the one saved; the other is only kept to switch back to
     onSave(id === 'rate' ? { tariff_import: stepNum(v) } : id === 'reserve' ? { battery_reserve_pct: stepNum(v) }
-      : id === 'size' ? { battery_kwh: +now.value.toFixed(3) } : panelsPatch(now, mode));
+      : sumPatch(id, now, mode));
   };
   const sym = window.moneySymbol ? window.moneySymbol() : 'R';
   return (

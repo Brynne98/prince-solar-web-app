@@ -2929,11 +2929,11 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   const { useState, useEffect } = React;
   const plant = (me?.plants || []).find(p => p.id === plantId) || (me?.plants || [])[0];
   const cfg = plant?.config || {};
-  // The battery keeps only its kWh, so it opens on Total; panels open on By size when rows
-  // are saved (panel_groups), else on Total.
+  // Battery and panels open on By size when rows are saved (battery_groups, panel_groups),
+  // else on Total.
   const fromCfg = (c) => {
     const t = window.cfgFields(c);
-    return { rate: t.rate, res: t.reserve, bMode: 'total', bTot: t.size, bRows: window.rowsFrom(null),
+    return { rate: t.rate, res: t.reserve, bMode: t.bGroups ? 'rows' : 'total', bTot: t.size, bRows: window.rowsFrom(t.bGroups, 'kwh'),
       pMode: t.groups ? 'rows' : 'total', pTot: t.panels, pRows: window.rowsFrom(t.groups) };
   };
   const [f, setF] = useState(() => fromCfg(cfg));
@@ -2955,16 +2955,17 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   // What Save sends: the way on screen for battery and panels, empty meaning none
   const patch = {
     tariff_import: f.rate === '' ? 0 : n(f.rate),
-    battery_kwh: batt.empty ? null : +batt.value.toFixed(3),
     battery_reserve_pct: f.res === '' ? (cfg.battery_reserve_pct ?? 20) : n(f.res),
-    ...window.panelsPatch(pan, f.pMode),
+    ...window.sumPatch('size', batt, f.bMode),
+    ...window.sumPatch('panels', pan, f.pMode),
   };
   const bad = { rate: !rateOk, res: !resOk, batt: !batt.ok, pan: !pan.ok };
   // Numbers are compared as numbers, not as typed: 12.60 over a stored 12.6 is not a change.
   // Switching Total and By size alone is not a change unless what would be saved differs.
-  const groupsOf = (g) => JSON.stringify(Array.isArray(g) && g.length ? g.map(x => ({ count: Number(x.count), watts: Number(x.watts) })) : null);
+  const groupsOf = (g) => JSON.stringify(Array.isArray(g) && g.length ? g.map(x => ({ count: Number(x.count), each: Number(x.watts ?? x.kwh) })) : null);
+  const battMoved = patch.battery_kwh !== (cfg.battery_kwh ?? null) || groupsOf(patch.battery_groups) !== groupsOf(cfg.battery_groups);
   const dirty = Object.values(bad).some(Boolean)
-    || patch.tariff_import !== (cfg.tariff_import ?? 0) || patch.battery_kwh !== (cfg.battery_kwh ?? null)
+    || patch.tariff_import !== (cfg.tariff_import ?? 0) || battMoved
     || patch.battery_reserve_pct !== (cfg.battery_reserve_pct ?? 20) || patch.system_kwp !== (cfg.system_kwp ?? null)
     || groupsOf(patch.panel_groups) !== groupsOf(cfg.panel_groups);
   // App holds the plant still while there are unsaved changes; a switch asked for meanwhile
@@ -2991,7 +2992,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
     const said = [];
     if (patch.tariff_import !== (cfg.tariff_import ?? 0)) said.push('rate R' + patch.tariff_import.toFixed(2) + ' a unit');
     if (patch.battery_reserve_pct !== (cfg.battery_reserve_pct ?? 20)) said.push('reserve ' + patch.battery_reserve_pct + '%');
-    if (patch.battery_kwh !== (cfg.battery_kwh ?? null)) said.push(patch.battery_kwh == null ? 'no battery size' : 'battery ' + num(patch.battery_kwh) + ' kWh');
+    if (battMoved) said.push(patch.battery_kwh == null ? 'no battery size' : 'battery ' + num(patch.battery_kwh) + ' kWh');
     if (patch.system_kwp !== (cfg.system_kwp ?? null) || groupsOf(patch.panel_groups) !== groupsOf(cfg.panel_groups))
       said.push(patch.system_kwp == null ? 'no panel size' : 'panels ' + num(patch.system_kwp) + ' kW');
     setBusy(true);
