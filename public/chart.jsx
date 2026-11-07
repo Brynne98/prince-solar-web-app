@@ -532,6 +532,8 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
   const C = window.COLORS;
   const [vis, setVis] = React.useState({ pv: true, batt: hasBatt, load: true, grid: hasGrid, soc: hasBatt });
   const has = k => (k === 'batt' || k === 'soc' ? hasBatt : k === 'grid' ? hasGrid : true);
+  // another plant may have what this one lacks: its series come back on with it
+  React.useEffect(() => setVis(v => ({ ...v, batt: hasBatt, soc: hasBatt, grid: hasGrid })), [hasBatt, hasGrid]);
   const [hover, setHover] = React.useState(null);
   const [sel, setSel] = React.useState(null);    // [i0,i1] selected range (totals readout)
   const [drag, setDrag] = React.useState(null);  // { i0, i1 } in-progress drag (drives the band visual)
@@ -781,9 +783,9 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
         <div className="cr-head"><span className="tip-time">{HM(t0)} – {HM(t1)} · {dur}</span><button className="cr-x" onClick={() => setSel(null)} aria-label="Clear">×</button></div>
         <window.TipRow color={C.pv} label="Generated">{f(gen)} kWh</window.TipRow>
         <window.TipRow color={C.load} label="Home">{f(cons)} kWh</window.TipRow>
-        <window.TipRow color={C.grid} label="Grid in / out">{f(gImp)} / {f(gExp)} kWh</window.TipRow>
-        <window.TipRow color={C.batt} label="Batt chg / dis">{f(bChg)} / {f(bDis)} kWh</window.TipRow>
-        {dSoc != null && <window.TipRow color={C.soc} label="Charge">{soc0}% → {soc1}% ({dSoc >= 0 ? '+' : ''}{dSoc}%)</window.TipRow>}
+        {hasGrid && <window.TipRow color={C.grid} label="Grid in / out">{f(gImp)} / {f(gExp)} kWh</window.TipRow>}
+        {hasBatt && <window.TipRow color={C.batt} label="Batt chg / dis">{f(bChg)} / {f(bDis)} kWh</window.TipRow>}
+        {hasBatt && dSoc != null && <window.TipRow color={C.soc} label="Charge">{soc0}% → {soc1}% ({dSoc >= 0 ? '+' : ''}{dSoc}%)</window.TipRow>}
       </div>
     );
   }
