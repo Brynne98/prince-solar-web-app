@@ -1604,7 +1604,6 @@ function InvertersSkeleton() {
 // An inverter's last temperature today, from SunSynk's day history (SOLAR-393): no live
 // reading reaches our key, and recover fetches the history every six hours, so each comes
 // with its time. A DC sensor that never moves is absent (the parents' read 25 °C flat).
-const EQ_HOT_AC = 60, EQ_HOT_DC = 75; // °C, the limits pvbiz alerts on
 function invTemps(rows) {
   const out = {};
   (rows || []).forEach(r => {
