@@ -25,7 +25,7 @@ function flowAlpha(hex, a) {
   return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`;
 }
 
-function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince }) {
+function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince, pausedSince }) {
   const C = window.COLORS;
   const mobile = useFlowMobile();
   // The boxes stretch with the card (SOLAR-39); its width only decides the lane's.
@@ -49,7 +49,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
 
   // battInfo arrives as "3h 40m to empty" / "1h 55m to full" / "Set pack size"; no time while idle
   const battRow = (() => {
-    if (silentSince) return { k: '', v: '' }; // a silent plant's battery is doing nothing we know of
+    if (silentSince || pausedSince) return { k: '', v: '' }; // a silent plant's battery is doing nothing we know of
     const m = battInfo && /^(.*) to (empty|full)$/.exec(battInfo);
     if (m) return { k: m[2] === 'empty' ? 'Empty in' : 'Full in', v: m[1] };
     // "Set pack size" stands alone, a link to Settings (SOLAR-23)
@@ -334,6 +334,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   // A silent plant's last figures aren't happening now. The page banner says since when;
   // fullscreen covers the banner, so only there does the card say it.
   if (silentSince) narrative = wall ? <>No readings since {silentSince}.</> : null;
+  // A dead login (SOLAR-385): the last figures stay, greyed; the page banner says it.
+  else if (pausedSince) narrative = wall ? <>Readings paused at {pausedSince}.</> : null;
   else if (gridOff) {
     const timeLeft = battRow.k === 'Empty in' ? battRow.v : null;
     // The page's Grid off banner says it; fullscreen covers the banner (SOLAR-91).
@@ -367,7 +369,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   else narrative = <>Solar, battery and grid are <b>all powering the home</b>.</>;
 
   return (
-    <div className="flow-wrap" ref={wrapRef}>
+    <div className={'flow-wrap' + (pausedSince ? ' paused' : '')} ref={wrapRef}>
       {narrative && <div className="flow-narrative">{narrative}</div>}
       {mobile ? renderMobile() : renderDesktop()}
     </div>

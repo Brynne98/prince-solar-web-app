@@ -165,9 +165,12 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   // A silent plant's last figures aren't now: no projection from them. Today's tiles keep
   // the stored totals, as Solar's Today does; only live watts show a dash (SOLAR-348).
   const ps = window.plantStatus(snap, Date.now());
-  const silent = ps.status === 'offline';
+  // Every login dead (SOLAR-385): Today and the power flow keep their last figures,
+  // greyed out; the rest of the page reads as usual. Otherwise silent: dashes.
+  const cut = !!snap.loginCut;
+  const silent = ps.status === 'offline' && !cut;
   let battEta = null, battInfo = null;
-  if (!hasBatt || silent) { /* nothing to estimate */ }
+  if (!hasBatt || silent || cut) { /* nothing to estimate */ }
   else if (!cap) { battInfo = 'Add battery size to see this'; } // a link on the flow's battery node
   // Under 200 W the battery is only trickling and a time would read in days, so it gives none.
   else if (a.battState === 'discharging' && a.battPower >= 200) {
@@ -393,7 +396,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
 
   // Overview's cards, drawn under the chart and, in fullscreen, above the flow (SOLAR-309)
   const strip = (
-    <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '')}>
+    <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '') + (cut && period === 'today' ? ' paused' : '')}>
       <MiniStat loading={pending} label="Made" value={window.fmtEnergyParts(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendFrom={cmpPhrase}
         info={OV_INFO.made} />
       <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendFrom={cmpPhrase}
@@ -463,7 +466,8 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
               <FsEnterIcon /><span>Fullscreen</span>
             </button>
           }>POWER FLOW</SectionTitle>}
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} silentSince={silent ? window.readAgo(ps.last.getTime(), Date.now()) : null} />
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} silentSince={silent ? window.readAgo(ps.last.getTime(), Date.now()) : null}
+            pausedSince={cut ? window.readAgo(ps.last.getTime(), Date.now()) : null} />
         </Card>
       </div>
 

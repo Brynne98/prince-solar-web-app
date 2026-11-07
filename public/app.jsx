@@ -49,8 +49,10 @@ function plantStatus(snap, now) {
   const status = loading && bad !== 'live' ? 'loading' : bad;
   return {
     status, last, old: status !== 'loading' && ageS > 180,
-    // every login dead (snap.loginCut, set by App): the menu's word, Reconnect (SOLAR-373)
-    word: status === 'offline' && snap.loginCut ? 'Reconnect' : { live: 'Live', stale: 'Stale', offline: 'Offline', loading: 'Setting up' }[status],
+    // every login dead (snap.loginCut, set by App): Reconnect in red as soon as the poller
+    // marks it, not after 15 min silent (SOLAR-385). tone is the colour; status stays the age.
+    tone: snap.loginCut ? 'offline' : status,
+    word: snap.loginCut ? 'Reconnect' : { live: 'Live', stale: 'Stale', offline: 'Offline', loading: 'Setting up' }[status],
     detail: offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now),
   };
 }
@@ -63,7 +65,7 @@ const StatusBits = ({ word, children }) => <><span className="status-dot" /><spa
 function WallStatus({ snap }) {
   const s = plantStatus(snap, useNow(15000));
   return (
-    <window.Tip className={'wall-status below status-' + s.status} text={'Last reading ' + window.fmtTime(s.last)}>
+    <window.Tip className={'wall-status below status-' + s.tone} text={'Last reading ' + window.fmtTime(s.last)}>
       <StatusBits word={s.word}><span className="status-detail">{s.detail}</span></StatusBits>
     </window.Tip>
   );
@@ -691,7 +693,7 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
   const sync = window.syncProgress(snap.sync), pct = sync == null ? null : Math.round(100 * sync);
   return (
     <>
-      <window.Tip as="div" className={'status below status-' + s.status + (sync != null ? ' fetching' : '')} text={'Last reading ' + window.fmtTime(s.last)} role="status">
+      <window.Tip as="div" className={'status below status-' + s.tone + (sync != null ? ' fetching' : '')} text={'Last reading ' + window.fmtTime(s.last)} role="status">
         <StatusBits word={s.word} />
         {/* an old reading's date shows from tablet width up; a phone keeps the room for the plant name */}
         {s.old && (() => { const p = fmtAgo(s.last, now).replace(' ago', '').split(', ');
@@ -706,7 +708,7 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
         )}
       </window.Tip>
       {/* takes the status colour once something is wrong; the icon alone at every width (SOLAR-375) */}
-      <button type="button" className={'refresh refresh-' + s.status + (busy ? ' busy' : '') + (sync != null ? ' fetching' : '')} aria-busy={busy} onClick={onRefresh}
+      <button type="button" className={'refresh refresh-' + s.tone + (busy ? ' busy' : '') + (sync != null ? ' fetching' : '')} aria-busy={busy} onClick={onRefresh}
               aria-label={s.status === 'offline' ? 'Retry' : 'Refresh'}>
         <Icon id="refresh" />
       </button>
@@ -726,15 +728,16 @@ function PageNotice({ snap, cutOff, onReconnect, relinkedAt }) {
       <p><b>Reconnected.</b> Waiting for the first reading.</p>
     </div>
   );
-  // First load (SOLAR-167): no Offline or Stale banner while the 60 days come in;
-  // the header's "Setting up" and "Fetching history" say it (SOLAR-169)
-  if (s.status === 'loading') return null;
-  if (s.status === 'offline' && cutOff) return (
+  // a dead login says so at once, whatever the reading's age (SOLAR-385)
+  if (cutOff) return (
     <div className="notice offline" role="alert">
       <p><b>SunSynk login stopped working.</b> Readings paused at {at}.</p>
       <button type="button" className="save-btn" onClick={onReconnect}>Reconnect</button>
     </div>
   );
+  // First load (SOLAR-167): no Offline or Stale banner while the 60 days come in;
+  // the header's "Setting up" and "Fetching history" say it (SOLAR-169)
+  if (s.status === 'loading') return null;
   if (s.status === 'offline') return (
     <div className="notice offline" role="alert">
       <p><b>{s.old ? 'No readings since ' + at + '.' : 'No inverter is reporting.'}</b></p>
@@ -1601,8 +1604,8 @@ function App({ links }) {
   const plantLogins = loginsFor(plantId);
   // useLinkStatus reads the logins again each minute (SOLAR-153), so one that dies later
   // shows as cut off and Reconnect reads as a reconnect.
-  const silent = !!snap && plantStatus(snap, Date.now()).status === 'offline';
-  const plantCutOff = plantLogins.length > 0 && !plantLogins.some(a => a.status === 'active') && silent;
+  // every login dead and no reading since (snap.loginCut): cut off at once, not after 15 min (SOLAR-385)
+  const plantCutOff = !!snap?.loginCut;
   // The login came back but no new reading has landed yet: until one does, the banner says
   // so instead of "No readings since …", which read as a failed reconnect (SOLAR-147).
   const [relinked, setRelinked] = useState(null);
