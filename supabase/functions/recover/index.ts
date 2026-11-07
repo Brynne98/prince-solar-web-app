@@ -56,7 +56,7 @@ import {
   type FeedScale,
   plantFeedForDay,
 } from "../_shared/plantfeed.ts";
-import { dayStartEpoch, fetchInverterDay, fetchInverterExtras, historyRows, plantSpine, type SpineRow } from "../_shared/invhistory.ts";
+import { dayStartEpoch, fetchInverterDay, fetchInverterExtras, historyRows, localDate, plantSpine, type SpineRow } from "../_shared/invhistory.ts";
 
 const DEFAULT_WINDOW_DAYS = 14;
 // Leave headroom under the 150 s free-tier wall clock; a partial sweep is fine
@@ -66,12 +66,6 @@ const TIME_BUDGET_MS = 110_000;
 const json = (b: unknown, status = 200) =>
   new Response(JSON.stringify(b), { status, headers: { "Content-Type": "application/json" } });
 
-/** YYYY-MM-DD in the plant's zone. */
-function localDate(tz: string, d = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(d);
-}
 // Calendar arithmetic needs no zone: formatting a UTC-noon instant in a UTC+12
 // or later zone used to land on the NEXT day, skipping every other day.
 const addDays = (_tz: string, day: string, n: number) => {

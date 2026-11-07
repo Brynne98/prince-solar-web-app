@@ -1548,13 +1548,13 @@ function InvertersSkeleton() {
   // a line of text whose words haven't come: a shimmer, and the line's own height held by a space
   const line = (w, h = 10) => <><window.SkelLine w={w} h={h} max="70%" />{NBSP}</>;
   const fig = <window.Skeleton w={80} h="1em" r={6} />;
-  const tile = (label, word) => (
+  const tile = (label) => (
     <section className="card eq-tile" aria-label={label}>
-      <div className="eq-tile-fig"><div className={'eq-fig' + (word ? ' word' : ' mono')}>{fig}</div><div className="eq-fig-sub">{line(60)}</div></div>
-      <div className="eq-tile-text">
-        <span className="eq-tile-label">{label}</span>
-        <span className="eq-tile-state"><i className="eq-dot sm" />{line(90)}</span>
-      </div>
+      <span className="eq-tile-label">{label}</span>
+      <span className="eq-tile-state"><i className="eq-dot sm" />{line(70)}</span>
+      <div className="eq-fig mono">{fig}</div>
+      <div className="eq-fig-sub">{line(120)}</div>
+      <div className="eq-spark" />
     </section>
   );
   const rows = (n) => <dl className="eq-rows">{Array.from({ length: n }, (_, i) => <div key={i}><dt>{line(60)}</dt><dd>{line(110)}</dd></div>)}</dl>;
@@ -1569,7 +1569,7 @@ function InvertersSkeleton() {
         <div className="eq-head-sub">{line(150)}</div>
       </section>
       {!detailed ? (
-        <div className="eq-tiles">{tile('Solar panels')}{tile('Battery')}{tile('Inverter', true)}</div>
+        <div className="eq-tiles">{tile('Solar panels')}{tile('Battery')}{tile('Inverter')}{tile('Grid')}</div>
       ) : (
         <>
           <div className="eq-cards">
@@ -1694,45 +1694,103 @@ function simpleIssues(issues) {
   return issues.flatMap(x => !x.string ? [x] : placed ? [] : (placed = true, [one]));
 }
 
-function EqTile({ label, state, value, unit, sub, color, stale, word }) {
+// Simple (SOLAR-397): a tile per part, its figure, one line of what it is doing, and a small
+// chart of today under it. Panels, battery and grid from our own minute readings; inverter
+// heat from SunSynk's inverter history, which the poller fetches every ten minutes (SOLAR-398).
+
+// A day sparkline: `vals` are [minute, value | null] pairs across 0 to 1440, drawn into a box
+// that stretches with the tile. `stroke` is a colour or a heat gradient (`heat`).
+function EqSpark({ vals, lo, hi, stroke, fill, heat, outages }) {
+  const gid = React.useId().replace(/:/g, '');
+  const W = 1440, H = 100;
+  const ys = v => H - 4 - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo) * (H - 8);
+  const d = seriesPath(0, vals.length - 1, i => vals[i][0], i => vals[i][1] == null ? null : ys(vals[i][1]));
+  const area = fill ? seriesArea(0, vals.length - 1, i => vals[i][0], i => vals[i][1] == null ? null : ys(vals[i][1]), H) : null;
   return (
-    <section className={'card eq-tile' + (stale ? ' stale' : '')} aria-label={label}>
-      <div className="eq-tile-fig">
-        <div className={'eq-fig' + (word ? ' word' : ' mono')} style={stale ? undefined : { color }}>{value}{unit && <span className="u">{unit}</span>}</div>
-        {sub && <div className="eq-fig-sub">{sub}</div>}
-      </div>
-      <div className="eq-tile-text">
-        <span className="eq-tile-label">{label}</span>
-        <span className={'eq-tile-state ' + state[0]}><i className={'eq-dot sm ' + state[0]} />{state[1]}</span>
-      </div>
+    <div className="chart-area eq-spark" aria-hidden="true">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" preserveAspectRatio="none" style={{ display: 'block' }}>
+        {heat && (
+          <defs><linearGradient id={gid} gradientUnits="userSpaceOnUse" x1={0} x2={0} y1={ys(heat)} y2={ys(heat - 20)}>
+            <stop offset="0" style={{ stopColor: 'var(--bad)' }} /><stop offset="0.5" style={{ stopColor: HEAT_WARM }} /><stop offset="1" style={{ stopColor: 'var(--muted)' }} />
+          </linearGradient></defs>
+        )}
+        {(outages || []).map(([a, b], i) => <rect key={i} x={a * 5} y={0} width={Math.max(5, (b - a + 1) * 5)} height={H} fill="var(--bad)" fillOpacity="0.18" />)}
+        {area && <path d={area} fill={fill} fillOpacity="0.15" stroke="none" />}
+        <path d={d} fill="none" stroke={heat ? `url(#${gid})` : stroke} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+      </svg>
+    </div>
+  );
+}
+
+function EqTile({ label, state, value, unit, sub, color, stale, spark }) {
+  return (
+    <section className={'card eq-tile' + (stale ? ' stale' : '')} aria-label={label} data-today>
+      <span className="eq-tile-label">{label}</span>
+      <span className={'eq-tile-state ' + state[0]}><i className={'eq-dot sm ' + state[0]} />{state[1]}</span>
+      <div className="eq-fig mono" style={stale || !color ? undefined : { color }}>{value}{unit && <span className="u">{unit}</span>}</div>
+      <div className="eq-fig-sub">{sub || NBSP}</div>
+      {spark || <div className="eq-spark" />}
     </section>
   );
 }
 
-function EquipmentSimple({ st, now }) {
+function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const { a, verdict } = st;
   const last = t => t ? 'Last reading ' + window.readAgo(t, now) : 'Not reporting';
   const alerts = verdict && verdict.state === 'alert' ? verdict.alerts : [];
+  const pts = (today && today.points) || [];
+  const rows = (hist || []).filter(r => r.points && r.points.length);
+  // ---- solar panels ----
   const pvState = st.allQuiet ? ['stale', last(st.lastAt)]
     : st.quiet.length ? ['stale', 'Not all reporting']
     : alerts.length ? ['warn', 'Needs a look']
     : st.night ? ['ok', 'Resting for the night']
     : ['ok', 'Working'];
+  const pvVals = pts.map(p => [p.t, p.pv == null ? null : Math.max(0, p.pv)]);
+  const pvMax = Math.max(500, ...pvVals.map(v => v[1] || 0));
+  // ---- battery ----
   const battState = st.battStale ? ['stale', last(st.battAt)]
     : st.hot || st.badSensor ? ['warn', 'Needs a look']
     : ['ok', a.battOut > 5 ? 'Powering the house' : a.battOut < -5 ? 'Charging' : 'Resting'];
+  const battSub = st.battStale ? null : [a.battOut > 5 ? fmtPower(a.battOut) + ' out' : a.battOut < -5 ? fmtPower(-a.battOut) + ' in' : null,
+    st.battTemp != null ? Math.round(st.battTemp) + ' °C' : null].filter(Boolean).join(' · ');
+  // ---- inverters: the warmest one now, and the warmest of them through the day ----
   const n = st.invs.length, live = n - st.quiet.length;
-  const invState = !st.quiet.length ? ['ok', 'Working']
+  const invState = !st.quiet.length ? ['ok', n === 1 ? 'On' : n === 2 ? 'Both on' : 'All on']
     : st.allQuiet ? ['stale', last(st.lastAt)]
-    : ['warn', 'Needs a look'];
-  const invValue = !st.quiet.length ? (n === 1 ? 'On' : 'All on') : n === 1 ? '—' : live + ' of ' + n;
-  const invSub = st.quiet.length ? (n === 1 ? 'not reporting' : 'reporting') : n === 2 ? st.invs.map(invName).join(' and ') : n > 2 ? n + ' inverters' : '';
+    : ['warn', live + ' of ' + n + ' reporting'];
+  const temps = Object.values(st.invT);
+  const warm = temps.length ? temps.reduce((x, y) => (y.ac > x.ac ? y : x)) : null;
+  const hot = temps.some(t => t.ac > EQ_HOT_AC || (t.dc != null && t.dc > EQ_HOT_DC));
+  const out = st.invs.filter(i => !st.quiet.includes(i)).reduce((s, i) => s + (i.output || 0), 0);
+  const heatVals = Array.from({ length: DAY_LAST + 1 }, (_, i) => {
+    const vs = rows.map(r => r.points[i] && r.points[i].ac).filter(v => v != null);
+    return [i * 5, vs.length ? Math.max(...vs) : null];
+  });
+  // ---- grid: voltage now, and any time off today, from our own minute readings (SOLAR-398) ----
+  const liveInv = st.invs.filter(i => !st.quiet.includes(i));
+  const volt = liveInv.map(i => i.gridVolt).find(v => v > 50) || null;
+  const gb = (gridDay && gridDay.buckets) || [];
+  const outages = [];
+  gb.forEach(b => { const r = outages[outages.length - 1]; if (!b.off) return; if (r && r[1] === b.i - 1) r[1] = b.i; else outages.push([b.i, b.i]); });
+  const offMin = gridDay ? Number(gridDay.offMinutes) || 0 : 0;
+  const gridState = st.allQuiet || a.gridPresent == null ? ['stale', st.allQuiet ? last(st.lastAt) : 'Not known']
+    : a.gridPresent ? ['ok', 'On'] : ['warn', 'Off'];
+  const vVals = gb.map(b => [b.i * 5, b.v]);
   return (
     <div className="eq-tiles">
-      <EqTile label="Solar panels" state={pvState} value={st.pvParts[0]} unit={st.pvParts[1]} sub={st.pvSub} color={CC.pv} stale={st.allQuiet} />
-      {st.hasBatt && <EqTile label="Battery" state={battState} value={a.battSoc ?? '—'} unit={a.battSoc != null ? '%' : null} sub="charged" color={CC.batt} stale={st.battStale} />}
-      <EqTile label={n === 1 ? 'Inverter' : 'Inverters'} state={invState} value={invValue} sub={invSub} word
-        color={!st.quiet.length ? CC.pv : st.allQuiet ? 'var(--dim)' : 'var(--warn)'} />
+      <EqTile label="Solar panels" state={pvState} value={st.pvParts[0]} unit={st.pvParts[1]} color={CC.pv} stale={st.allQuiet}
+        sub={st.allQuiet ? st.pvSub : st.pvSub + (a.pvNow > 0 ? ' · now ' + fmtPower(a.pvNow) : '')}
+        spark={pvVals.length > 1 && <EqSpark vals={pvVals} lo={0} hi={pvMax} stroke={CC.pv} fill={CC.pv} />} />
+      {st.hasBatt && <EqTile label="Battery" state={battState} value={a.battSoc ?? '—'} unit={a.battSoc != null ? '%' : null} color={CC.batt} stale={st.battStale}
+        sub={battSub} spark={pts.some(p => p.soc != null) && <EqSpark vals={pts.map(p => [p.t, p.soc])} lo={0} hi={100} stroke={CC.batt} />} />}
+      <EqTile label={n === 1 ? 'Inverter' : 'Inverters'} state={hot && !st.allQuiet ? ['warn', 'Running hot'] : invState}
+        value={warm ? Math.round(warm.ac) : '—'} unit={warm ? ' °C' : null} stale={st.allQuiet}
+        sub={[warm && (n > 1 ? 'warmest at ' : 'at ') + HM(warm.at), !st.allQuiet && fmtPower(out) + ' to the house'].filter(Boolean).join(' · ')}
+        spark={heatVals.some(v => v[1] != null) && <EqSpark vals={heatVals} lo={30} hi={70} heat={EQ_HOT_AC} />} />
+      {st.hasGrid && <EqTile label="Grid" state={gridState} value={volt ? Math.round(volt) : '—'} unit={volt ? ' V' : null} color={CC.grid} stale={st.allQuiet || !volt}
+        sub={gb.length ? (offMin ? 'Off ' + window.fmtDuration(offMin) + ' today' : 'No outage today') : null}
+        spark={vVals.some(v => v[1] != null) && <EqSpark vals={vVals} lo={215} hi={255} stroke={CC.grid} outages={outages} />} />}
     </div>
   );
 }
@@ -1970,7 +2028,7 @@ function EquipmentDetailed({ st, snap, health, now, refreshKey }) {
   );
 }
 
-function InvertersTab({ snap, refreshKey }) {
+function InvertersTab({ snap, today, refreshKey }) {
   const now = window.useNow(15000);
   // Panels: today's share of each string against its usual share by this time (0076). Asked on
   // open, on refresh and every 10 minutes; the shares move slowly.
@@ -1986,9 +2044,11 @@ function InvertersTab({ snap, refreshKey }) {
   }, [refreshKey]);
   // Today's temperatures: the same answer the Temperature chart asks for, shared, so no extra call
   const [hist, setHist] = React.useState(null);
+  const [gridDay, setGridDay] = React.useState(null); // today's grid from our own readings (SOLAR-398)
   React.useEffect(() => {
     let alive = true;
     window.fetchInverterHistory(window.localDateStr(), refreshKey).then(r => { if (alive) setHist(r); }).catch(() => {});
+    window.fetchGridToday().then(r => { if (alive) setGridDay(r); }).catch(() => {});
     return () => { alive = false; };
   }, [refreshKey]);
   // Simple or Detailed is this viewer's own choice, kept across visits
@@ -2025,7 +2085,7 @@ function InvertersTab({ snap, refreshKey }) {
         </div>
       )}
 
-      {simple ? <EquipmentSimple st={st} now={now} />
+      {simple ? <EquipmentSimple st={st} now={now} today={today} hist={hist} gridDay={gridDay} />
         : <EquipmentDetailed st={st} snap={snap} health={health} now={now} refreshKey={refreshKey} />}
     </div>
   );

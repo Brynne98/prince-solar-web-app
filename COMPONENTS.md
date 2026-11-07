@@ -137,6 +137,7 @@ a row of on/off settings (email and push preferences); `saveFlag` sends its own 
 | `PlantLine` | A plant's name with an "off" marker, in Settings lists. |
 | `DayField` | A date box that opens `CalendarPop`. |
 | `EqTable` | A table with a column per inverter: row label, then one cell each (`v`, `sub`, `cls`). Equipment's cards (SOLAR-392). |
+| `EqSpark` | A small day chart in a tile: `vals` as `[minute, value]`, `lo`/`hi`, a `stroke` (with `fill` for an area) or `heat` for the temperature shading, `outages` shaded red (SOLAR-397). |
 | `EqMore` | Rows folded under "More detail" (a native `details`); rows with no value are left out. |
 | `scaleParts`, `totalTile`, `changePct`, `PERIODS` | Shared maths and pieces behind the Solar, Home and Grid tabs. |
 
