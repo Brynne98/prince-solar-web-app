@@ -1045,6 +1045,22 @@ function dayProblem(view, day, points, silent) {
 function withLiveToday(daily, today, field, live) {
   return (daily || []).filter(r => r.date).map(r => (r.date === today && live != null ? { ...r, [field]: live } : r));
 }
+// The shown day's total as the 30-day bar has it: the inverter's own counter, or the
+// live figure today. Undefined for a day outside the 30.
+const dayTotal = (daily, today, date, field, live) => (withLiveToday(daily, today, field, live).find(r => r.date === date) || {})[field];
+// Where it went sums 5-minute readings, and short bursts slip between them: 14 Oct read
+// 0.05 kWh imported against the counter's 0.2 (SOLAR-387). Its parts ([name, kWh, colour,
+// shown]) are scaled to the day total, so the round chart and the bar agree; with no split
+// at all, the total goes to the first part. Rounded to 0.1, the rest to the largest part.
+function toDayTotal(parts, total) {
+  if (!(total > 0)) return parts;
+  const on = parts.filter(d => d[3]);
+  const sum = on.reduce((t, d) => t + d[1], 0);
+  const out = parts.map(d => !d[3] ? d : [d[0], sum > 0 ? Math.round(d[1] * total / sum * 10) / 10 : d === on[0] ? total : 0, d[2], d[3]]);
+  const big = out.filter(d => d[3]).reduce((m, d) => (!m || d[1] > m[1] ? d : m), null);
+  if (big) big[1] = Math.round((big[1] + total - out.filter(d => d[3]).reduce((t, d) => t + d[1], 0)) * 10) / 10;
+  return out;
+}
 
 // Period-over-period totals for the trend arrows. "Yesterday up to now" moves with the
 // clock, so it is asked again with each new snapshot, not only on refreshKey; the shared
@@ -1176,7 +1192,8 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // A destination is shown only once it holds something: a 0.0 kWh column would be a
   // zero-width segment under a full-width label, and "the battery got none of it" is said
   // better by its absence than by a zero.
-  const dests = [['Home', flows.pvHome, CC.load, true], ['Battery', flows.pvBatt, CC.batt, hasBatt], ['Grid', flows.pvGrid, CC.grid, hasGrid]]
+  const dests = toDayTotal([['Home', flows.pvHome, CC.load, true], ['Battery', flows.pvBatt, CC.batt, hasBatt], ['Grid', flows.pvGrid, CC.grid, hasGrid]],
+      dayTotal(daily, plantToday, pick.date, 'pv', a.pvToday))
     .filter(d => d[3] && d[1] >= 0.05);
   const splitTotal = dests.reduce((t, d) => t + d[1], 0);
   // The percentages were a permanent column until 2026-09-19; the bar says the same thing,
@@ -1302,7 +1319,8 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
 
   // ---- where it came from: the same flows Solar and Grid show (SOLAR-332) ----
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
-  const srcs = [['Solar', flows.pvHome, CC.pv, true], ['Battery', flows.battHome, CC.batt, hasBatt], ['Grid', flows.gridHome, CC.grid, hasGrid]]
+  const srcs = toDayTotal([['Solar', flows.pvHome, CC.pv, true], ['Battery', flows.battHome, CC.batt, hasBatt], ['Grid', flows.gridHome, CC.grid, hasGrid]],
+      dayTotal(daily, plantToday, pick.date, 'load', a.loadToday))
     .filter(d => d[3] && d[1] >= 0.05);
   const splitTotal = srcs.reduce((t, d) => t + d[1], 0);
 
@@ -1456,12 +1474,13 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const outageMin = outageMinutes(outages);
   // where the day's imports went: the same flows Solar and Home show (SOLAR-332)
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
-  const dests = [['Home', flows.gridHome, CC.load, true], ['Battery', flows.gridBatt, CC.batt, hasBatt]]
+  const [daily, loadDaily] = useDaily(refreshKey);
+  const dests = toDayTotal([['Home', flows.gridHome, CC.load, true], ['Battery', flows.gridBatt, CC.batt, hasBatt]],
+      dayTotal(daily, plantToday, pick.date, 'imp', a.gridFromToday))
     .filter(d => d[3] && d[1] >= 0.05);
   const splitTotal = dests.reduce((t, d) => t + d[1], 0);
 
   // ---- last 30 days ----
-  const [daily, loadDaily] = useDaily(refreshKey);
   const bars = withLiveToday(daily, plantToday, 'imp', a.gridFromToday);
   const most = over ? null : bestDay(bars, 'imp', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('grid-day'); };
