@@ -1464,6 +1464,9 @@
     .solar-stats .stat-tile { padding: var(--sp-lg); }
     .solar-tab .section-title { flex-direction: column; align-items: flex-start; gap: var(--sp-2xs); }
     /* one 12 px gap between every card on Solar, Home and Grid, as between the figure tiles */
+    /* Grid's day title keeps its peak on the title's own row, so its held blank line adds no
+       height and the date bar sits as close as on Solar and Home (SOLAR-408) */
+    .solar-tab #grid-day > .section-title { flex-direction: row; align-items: center; flex-wrap: wrap; }
     .solar-tab.stack, .solar-row { gap: var(--sp-md); }
     .pie { width: 120px; height: 120px; }
     .pie-wrap { gap: var(--sp-xl); }
