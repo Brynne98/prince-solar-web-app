@@ -241,6 +241,9 @@ function fitScale(lo, hi, unit) {
 //   kind="output" as "ac" but the inverter's own frequency, for an off-grid plant
 // A tab with a day picker of its own (Grid) passes it as `dayPick`; the chart then follows
 // that day and draws no date arrows of its own, only its lag and outage notes.
+// An inverter is hot above these (°C, the limits pvbiz alerts on). The Temperature chart
+// draws a line red above its limit; Equipment's Inverters card and problem cards use them too.
+const EQ_HOT_AC = 60, EQ_HOT_DC = 75;
 // One grey per inverter: a reading that is no power series takes grey, never a sixth hue (SOLAR-392).
 const INV_COLORS = ['#e7ecf2', '#9aa5b3', '#6b7a8d', '#c4ccd6', '#556170', '#aeb8c4']; // on Equipment only; reuse-check: allow
 // Outage: runs of 5-minute buckets, [first, last], where any inverter's grid (or output) read
@@ -306,6 +309,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   const [invs, setInvs] = React.useState(null); // null = loading
   const [hover, setHover] = React.useState(null);
   const [ref, width, height] = useChartSize([220, 300]);
+  const clipId = React.useId().replace(/:/g, ''); // the hot bands' clip paths, unique per chart (SOLAR-395)
   const mobile = width < 560;
 
   React.useEffect(() => {
@@ -458,6 +462,12 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
             onMouseMove={onMove} onMouseLeave={() => setHover(null)}
             onTouchStart={e => e.touches[0] && setHover(idxFromPointer(e.touches[0].clientX, e.currentTarget, m, innerW, lastIdx))}
             onTouchMove={e => e.touches[0] && setHover(idxFromPointer(e.touches[0].clientX, e.currentTarget, m, innerW, lastIdx))}>
+            {isTemp && hasV && (
+              <defs>
+                <clipPath id={clipId + 'ac'}><rect x={0} y={0} width={width} height={Math.max(0, y(EQ_HOT_AC))} /></clipPath>
+                <clipPath id={clipId + 'dc'}><rect x={0} y={0} width={width} height={Math.max(0, y(EQ_HOT_DC))} /></clipPath>
+              </defs>
+            )}
             {hasV && ys.ticks.map(v => (
               <g key={'y' + v}>
                 <line x1={m.l} x2={m.l + innerW} y1={y(v)} y2={y(v)} stroke="rgba(255,255,255,0.05)" />
@@ -478,6 +488,9 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
                 <g key={inv.sn}>
                   {!inv.dcFlat && <path d={line(inv.points, 'dc', y)} fill="none" stroke={c} strokeWidth="1" strokeOpacity="0.5" strokeDasharray="3 3" />}
                   <path d={line(inv.points, 'ac', y)} fill="none" stroke={c} strokeWidth="1.4" strokeLinejoin="round" />
+                  {/* the same lines again in red, shown only above the hot limit (SOLAR-395) */}
+                  {!inv.dcFlat && hi > EQ_HOT_DC && <path d={line(inv.points, 'dc', y)} fill="none" stroke="var(--bad)" strokeWidth="1" strokeDasharray="3 3" clipPath={`url(#${clipId}dc)`} />}
+                  {hi > EQ_HOT_AC && <path d={line(inv.points, 'ac', y)} fill="none" stroke="var(--bad)" strokeWidth="1.4" strokeLinejoin="round" clipPath={`url(#${clipId}ac)`} />}
                 </g>
               ) : (
                 <g key={inv.sn}>
