@@ -904,7 +904,7 @@ export const cardChanged = (c: CardChange) =>
     parts: [
       { panel: [`Payments now go on <b>${esc(c.card)}</b>.`, ...(c.was ? [`It replaces <b>${esc(c.was)}</b>.`] : []),
         ...(c.next ? [`Your next payment of <b>${rand(c.next.amount)}</b> is on <b>${c.next.date}</b>.`] : [])] },
-      { note: "The R1 charged to check the card is refunded." },
+      { note: "The R1 charged to check the card goes back to it." },
       ...notYou,
     ],
     footer: [HELP],
