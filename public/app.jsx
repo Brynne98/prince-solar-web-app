@@ -582,7 +582,9 @@ function alertSpan(it) {
   if (it.open) return it.time + ', not back yet';
   if (it.endAt == null) return it.time;
   const end = it.endTime + (it.endDay !== it.day ? ' ' + window.dayText(it.endDay, { weekday: 'short' }) : '');
-  return `${it.time} to ${end}, ${window.fmtDuration(Math.max(1, Math.round((it.endAt - it.at) / 60)))}`;
+  const dur = window.fmtDuration(Math.max(1, Math.round((it.endAt - it.at) / 60)));
+  // over within the minute: "14:40, 1 min", not "14:40 to 14:40" (SOLAR-409)
+  return end === it.time ? `${it.time}, ${dur}` : `${it.time} to ${end}, ${dur}`;
 }
 
 // [[day, items]] in the order given
