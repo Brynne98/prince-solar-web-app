@@ -2925,7 +2925,6 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
 // for: the planned best-day line (BEST_DAY_CURVE.md) would learn from the plant's readings.
 // One form, three sections, one floating save bar. The fields are First steps' own
 // (StepField, SumBox in app.jsx, SOLAR-170), so a value is entered the same way in both.
-const SYSTEM_NOTE = 'Sizes the charts and the battery’s time left.';
 function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   const { useState, useEffect } = React;
   const plant = (me?.plants || []).find(p => p.id === plantId) || (me?.plants || [])[0];
@@ -3022,11 +3021,8 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
           : <window.Skeleton className="fs-in" w="" h={41} r={9} />} />
     );
     return (
-      <SettingsSection id="system" title="Your system" note={SYSTEM_NOTE}>
-        {row('Electricity rate', 'Savings show as zero until this is set.')}
-        {row('Battery capacity', 'All batteries together.', true)}
-        {row('Battery reserve', 'The battery stops powering your home at this charge.')}
-        {row('Solar panels', 'What they make in full sun.', true)}
+      <SettingsSection id="system" title="Your system">
+        {['rate', 'size', 'reserve', 'panels'].map(k => <React.Fragment key={k}>{row(window.STEPS[k].title, window.STEPS[k].how, k === 'size' || k === 'panels')}</React.Fragment>)}
       </SettingsSection>
     );
   }
@@ -3036,25 +3032,24 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked }) {
   return (
     <>
       {/* One section since SOLAR-250, in First steps' order: rate, battery, reserve, panels */}
-      <SettingsSection id="system" title="Your system" note={SYSTEM_NOTE}>
+      <SettingsSection id="system" title="Your system">
         {/* A unit is a kWh: it is what a South African bill calls one, so the rate is per unit */}
-        <SettingRow className="sset-row" label="Electricity rate" actionClass="conn-actions sset-one"
-          note={n(f.rate) > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}
+        <SettingRow className="sset-row" label={window.STEPS.rate.title} note={window.STEPS.rate.how} actionClass="conn-actions sset-one"
           action={<>
             <window.StepField value={f.rate} onChange={set('rate')} label="Electricity rate" pre={sym} unit="/unit" inputMode="decimal" ph={window.STEPS.rate.ph} invalid={tried && bad.rate} />
             {err(bad.rate, 'Enter a price, like 3.40.')}
           </>} />
-        <SettingRow className="sset-row" label="Battery capacity" note="All batteries together." actionClass="sset-sum"
+        <SettingRow className="sset-row" label={window.STEPS.size.title} note={window.STEPS.size.how} actionClass="sset-sum"
           action={<>
             <window.SumBox kind="size" mode={f.bMode} onMode={set('bMode')} tot={f.bTot} onTot={set('bTot')} rows={f.bRows} onRows={set('bRows')} label="Battery size" />
             {err(bad.batt, f.bMode === 'total' ? 'Enter more than 0 kWh.' : 'Enter whole batteries and the kWh of one.')}
           </>} />
-        <SettingRow className="sset-row" label="Battery reserve" note="The battery stops powering your home at this charge." actionClass="conn-actions sset-one"
+        <SettingRow className="sset-row" label={window.STEPS.reserve.title} note={window.STEPS.reserve.how} actionClass="conn-actions sset-one"
           action={<>
             <window.StepField value={f.res} onChange={set('res')} label="Reserve" unit="%" inputMode="numeric" ph={window.STEPS.reserve.ph} invalid={tried && bad.res} />
             {err(bad.res, 'Enter 0 to 50.')}
           </>} />
-        <SettingRow className="sset-row" label="Solar panels" note="What they make in full sun." actionClass="sset-sum"
+        <SettingRow className="sset-row" label={window.STEPS.panels.title} note={window.STEPS.panels.how} actionClass="sset-sum"
           action={<>
             <window.SumBox kind="panels" mode={f.pMode} onMode={set('pMode')} tot={f.pTot} onTot={set('pTot')} rows={f.pRows} onRows={set('pRows')} label="Solar panels" />
             {err(bad.pan, f.pMode === 'total' ? 'Enter more than 0 kW.' : 'Enter whole panels and 50 to 1000 W each.')}

@@ -769,12 +769,12 @@ function PageNotice({ snap, cutOff, onReconnect, relinkedAt }) {
 // (battery_reserve_confirmed, SOLAR-247). Hidden is the user's, kept in prefs per plant,
 // so it follows the user to every device; no step means no card.
 const STEPS = {
-  rate: { title: 'Electricity rate', how: 'The price per unit on your bill, with VAT.', ph: 'On your bill' },
-  size: { title: 'Battery size', how: 'All batteries together.' },
-  reserve: { title: 'Battery reserve', how: 'Match the number set on your inverter.', ph: 'On your inverter' },
-  panels: { title: 'Solar panels', how: 'All panels together.' },
+  rate: { title: 'Electricity rate', how: 'The price per unit on your bill, with VAT. Shows what solar saved you.', ph: '0.00' },
+  size: { title: 'Battery size', how: 'All your batteries together. Shows how long the battery will last.' },
+  reserve: { title: 'Battery reserve', how: 'The battery stops powering your home at this charge. Match the number set on your inverter.', ph: '0' },
+  panels: { title: 'Solar panels', how: 'All your panels together, in full sun. Shows how well they’re doing.' },
 };
-// Empty boxes say where to find the number, not a sample one (SOLAR-400)
+// Settings shows the same titles and lines; empty boxes show the number's shape, not a sample (SOLAR-400)
 window.STEPS = STEPS;
 // The marks hold the plant's linkedAt (0097): a plant removed and added again keeps its id
 // but gets a new link, so marks from before the re-add are dropped and it starts fresh.
@@ -810,8 +810,8 @@ window.saveFirstSteps = saveFirstSteps;
 
 // Battery size and panels share one box (SumBox): a total, or count × size rows that add up.
 const STEP_SUMS = {
-  size: { unit: 'kWh', each: 'kWh', per: 1, ph: 'On the battery', totPh: 'On the battery', add: 'Add battery size', sizeLabel: 'kWh each', ok: (e) => e > 0 },
-  panels: { unit: 'kW', each: 'W', per: 1000, ph: 'On the panel', totPh: 'All panels', add: 'Add panel size', sizeLabel: 'Watts each', ok: (e) => Number.isInteger(e) && e >= 50 && e <= 1000 },
+  size: { unit: 'kWh', each: 'kWh', per: 1, ph: '0.00', totPh: '0.0', add: 'Add battery size', sizeLabel: 'kWh each', ok: (e) => e > 0 },
+  panels: { unit: 'kW', each: 'W', per: 1000, ph: '0', totPh: '0.0', add: 'Add panel size', sizeLabel: 'Watts each', ok: (e) => Number.isInteger(e) && e >= 50 && e <= 1000 },
 };
 // typed as text, so a comma keyboard's 5,12 reads as 5.12
 const stepNum = (v) => (v ?? '') === '' ? NaN : Number(String(v).replace(',', '.'));
