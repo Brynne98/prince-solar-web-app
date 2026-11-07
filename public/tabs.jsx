@@ -396,7 +396,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
 
   // Overview's cards, drawn under the chart and, in fullscreen, above the flow (SOLAR-309)
   const strip = (
-    <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '')}>
+    <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '')} data-today={period === 'today' || undefined}>
       <MiniStat loading={pending} label="Made" value={window.fmtEnergyParts(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendFrom={cmpPhrase}
         info={OV_INFO.made} />
       <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendFrom={cmpPhrase}
@@ -1024,7 +1024,8 @@ function useShownDay(pick, today, refreshKey) {
     : loaded && loaded.date === pick.date ? { isToday: false, date: pick.date, data: loaded.data } : null;
   if (ready) shownRef.current = ready;
   const view = ready || shownRef.current || { isToday: pick.isToday, date: pick.date, data: null };
-  const dim = { 'aria-busy': !ready, style: { opacity: ready ? 1 : 0.45, transition: 'opacity var(--dur-fast) var(--ease-out)' } };
+  // data-today: old readings grey today's day and leave history in colour (SOLAR-386)
+  const dim = { 'aria-busy': !ready, 'data-today': view.isToday || undefined, style: { opacity: ready ? 1 : 0.45, transition: 'opacity var(--dur-fast) var(--ease-out)' } };
   const day = view.data;
   return { view, dim, day, points: (day && day.points) || [], dayWord: view.isToday ? 'today' : window.dayText(view.date) };
 }
