@@ -462,8 +462,9 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
         ))}
         {!isTemp && fInv && <window.LegendChip color={fColor} label={freqLabel} value={fmtHz(fVal)} active />}
       </div>
-      <div className="chart-area" ref={ref} style={{ position: 'relative', height }}>
-        {nInv === 0 ? <ChartPlaceholder height={height} loading={invs == null} text={emptyMsg} /> : (
+      {/* today before the first six-hourly fetch: a short note, not a chart-high empty box (SOLAR-411) */}
+      <div className="chart-area" ref={ref} style={{ position: 'relative', height: nInv === 0 && invs != null && isToday ? 120 : height }}>
+        {nInv === 0 ? <ChartPlaceholder height={invs != null && isToday ? 120 : height} loading={invs == null} text={emptyMsg} /> : (
           <svg width={width} height={height} className="chart-svg" style={{ cursor: 'crosshair' }}
             onMouseMove={onMove} onMouseLeave={() => setHover(null)}
             onTouchStart={e => e.touches[0] && setHover(idxFromPointer(e.touches[0].clientX, e.currentTarget, m, innerW, lastIdx))}

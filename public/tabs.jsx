@@ -1551,7 +1551,7 @@ function InvertersSkeleton() {
   const tile = (label) => (
     <section className="card eq-tile" aria-label={label}>
       <span className="eq-tile-label">{label}</span>
-      <span className="eq-tile-state"><i className="eq-dot sm" />{line(70)}</span>
+      <span className="eq-tile-state">{line(70)}</span>
       <div className="eq-fig mono">{fig}</div>
       <div className="eq-fig-sub">{line(120)}</div>
       <div className="eq-spark" />
@@ -1726,7 +1726,8 @@ function EqTile({ label, state, value, unit, sub, color, stale, spark }) {
   return (
     <section className={'card eq-tile' + (stale ? ' stale' : '')} aria-label={label} data-today>
       <span className="eq-tile-label">{label}</span>
-      <span className={'eq-tile-state ' + state[0]}><i className={'eq-dot sm ' + state[0]} />{state[1]}</span>
+      {/* the state as a word; the headline above keeps the page's one dot (SOLAR-411) */}
+      <span className={'eq-tile-state ' + state[0]}>{state[1]}</span>
       <div className="eq-fig mono" style={stale || !color ? undefined : { color }}>{value}{unit && <span className="u">{unit}</span>}</div>
       <div className="eq-fig-sub">{sub || NBSP}</div>
       {spark || <div className="eq-spark" />}
@@ -1917,7 +1918,9 @@ function EqBatteryCard({ st, snap, now }) {
     else if (st.battTemp != null) rows.push(['Temperature', Math.round(st.battTemp) + ' °C' + (st.battTemp > 45 ? ', hot' : st.battTemp < 5 ? ', cold' : ''), st.battTemp > 45]);
   }
   if (!st.battStale) rows.push(['In · out today', window.fmtEnergyParts(a.battChgToday)[0] + ' · ' + fmtKwh(a.battDischgToday)]);
-  if (a.battChgTotal > 0) rows.push(['In · out since installed', window.fmtEnergySmart(a.battChgTotal) + ' · ' + window.fmtEnergySmart(a.battDischgTotal)]);
+  // each figure keeps its unit on its line when the row wraps (SOLAR-411)
+  const nb = s => String(s).replace(/ /g, NBSP);
+  if (a.battChgTotal > 0) rows.push(['In · out since installed', nb(window.fmtEnergySmart(a.battChgTotal)) + ' · ' + nb(window.fmtEnergySmart(a.battDischgTotal))]);
   const packs = st.shared ? Math.min(1, st.withBatt.length) : st.withBatt.length;
   const modules = st.shared ? Math.max(0, ...st.withBatt.map(i => i.numberOfBatteries || 0)) : st.withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
   // each pack under the inverter that reads its sensor: the slaves on a shared pack read -100.
@@ -1953,7 +1956,7 @@ function EqInvertersCard({ st, now }) {
   const down = inv => st.quiet.includes(inv);
   const rows = [
     ['State', invs.map(inv => down(inv) ? { v: 'Not reporting', cls: 'warn', sub: inv.readAt ? 'Since ' + window.readAgo(inv.readAt, now) : null }
-      : { v: <><i className="eq-dot sm ok" />On</>, sub: 'Read ' + eqReadAt(inv, now) })],
+      : { v: 'On', sub: 'Read ' + eqReadAt(inv, now) })],
     ['To the house now', invs.map(inv => ({ v: down(inv) ? '—' : fmtPower(inv.output) }))],
     ['Temperature', invs.map(inv => {
       const t = st.invT[inv.sn];
