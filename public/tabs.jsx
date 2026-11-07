@@ -3328,15 +3328,15 @@ const NOTIF_CHANNELS = [
 ];
 const NOTIF_GROUPS = [
   { label: 'Alerts', rows: [
-    ['grid', 'Grid', 'The grid goes off, and when it’s back.'],
-    ['battery', 'Battery', 'Over 45 °C, or charging unevenly, and when it’s fixed.'],
-    ['panels', 'Panels', 'A string stops while the others make power, and when it’s back.'],
-    ['readings', 'Readings', 'No readings for 30 min, and when they’re back.'],
-    ['sunsynk', 'SunSynk', 'SunSynk stops answering, and when it’s back.']] },
+    ['grid', 'Grid'],
+    ['battery', 'Battery', 'Hot or uneven'],
+    ['panels', 'Panels', 'A string stops'],
+    ['readings', 'Readings', 'No data for 30 min'],
+    ['sunsynk', 'SunSynk', 'SunSynk is down']] },
   { label: 'Reports', rows: [
-    ['weekly', 'Weekly', 'Last week, on Mondays.'],
-    ['monthly', 'Monthly', 'Last month, on the 1st.'],
-    ['yearly', 'Yearly', 'Last year, on 1 January.']] },
+    ['weekly', 'Weekly'],
+    ['monthly', 'Monthly'],
+    ['yearly', 'Yearly']] },
 ];
 function NotificationsSection({ userId }) {
   const { useState, useEffect } = React;
@@ -3385,14 +3385,13 @@ function NotificationsSection({ userId }) {
     <div className="notif-row">
       <span className="toggle-text">
         <span className="toggle-label">Pop-ups</span>
-        <span className="toggle-hint">Shows the pop-up alerts here, even when the app is closed.</span>
       </span>
       {NOTIF_CHANNELS.map(ch => ch.id === 'push' ? <React.Fragment key={ch.id}>{sw}</React.Fragment> : <span key={ch.id} />)}
     </div>
   );
   return (
     <SettingsSection id="notifications" title="Notifications"
-                     note="Every alert shows in the Notifications list. Reconnect needed and billing emails always go out.">
+                     note="Every alert stays in your Notifications list.">
       {failed ? (
         <SettingRow label="Couldn’t load your notification settings" action={<button type="button" className="ghost-btn" onClick={load}>Try again</button>} />
       ) : (
@@ -3412,7 +3411,7 @@ function NotificationsSection({ userId }) {
                 <div key={kind} className="notif-row">
                   <span className="toggle-text">
                     <span className="toggle-label">{label}</span>
-                    <span className="toggle-hint">{hint}</span>
+                    {hint && <span className="toggle-hint">{hint}</span>}
                   </span>
                   {NOTIF_CHANNELS.map(ch => cell(ch, kind, label))}
                 </div>
