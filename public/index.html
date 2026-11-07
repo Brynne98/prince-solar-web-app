@@ -1165,12 +1165,16 @@
   /* on Total the box is the value; the sum over it only reads on By size */
   #settings-system .fs-sumhead:has(.seg-btn:first-child.active) .fs-val { display: none; }
   @media (max-width: 599px) { #settings-system .conn-row.sset-row { grid-template-columns: minmax(0, 1fr); gap: var(--sp-sm); } }
-  /* Your data: fields of one width in columns, Download in the next cell; one column on a phone */
-  .dl-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); align-items: end; gap: var(--sp-lg); }
+  /* Your data: Plant on its own row, From and To side by side under it, Download bottom right;
+     one column on a phone */
+  .dl-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-lg); }
+  .dl-plant { grid-column: 1 / -1; }
   .dl-field { display: flex; flex-direction: column; gap: var(--sp-xs); min-width: 0; }
-  .dl-row > button { justify-self: start; min-height: 41px; }
   .dl-field .cal-pop { max-width: calc(100vw - 32px); }
-  @media (max-width: 600px) { .dl-field .cal-pop { width: 100%; } }   /* the field's width: inside the card */
+  @media (max-width: 600px) {
+    .dl-row { grid-template-columns: minmax(0, 1fr); }
+    .dl-field .cal-pop { width: 100%; }   /* the field's width: inside the card */
+  }
   .dl-row + .sset-err { margin-top: var(--sp-sm); }
   /* Account: Delete is off while a paid plan runs, with this note under it */
   /* Billing */

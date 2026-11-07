@@ -3211,7 +3211,7 @@ function DownloadSection({ plants, plantId, ready }) {
     }
   };
 
-  // From, To and Download on one line; on a phone they stack. The two calendars keep the
+  // Plant on its own row, From and To under it, Download bottom right; on a phone they stack. The two calendars keep the
   // range in order and a year at most; a day with no readings is still a fine end.
   const field = (id, text, value, set, earliest, latest) => (
     <div className="dl-field">
@@ -3225,7 +3225,7 @@ function DownloadSection({ plants, plantId, ready }) {
     <SettingsSection id="download" title="Your data" note="A CSV file. Every minute for the last 31 days, every 5 minutes before that.">
       <div className="dl-row">
         {plants.length > 1 && (
-          <div className="dl-field">
+          <div className="dl-field dl-plant">
             <label htmlFor="dl-plant" className="conn-meta">Plant</label>
             {/* which plant is on screen comes with api_me: until then the picker shimmers */}
             {!ready ? <window.Skeleton className="fs-in" w="" h={41} r={9} />
@@ -3235,12 +3235,14 @@ function DownloadSection({ plants, plantId, ready }) {
         )}
         {field('dl-from', 'From', from, setFrom, window.shiftDate(to, -365), to)}
         {field('dl-to', 'To', to, setTo, from, yearTo < today ? yearTo : today)}
+      </div>
+      {bad && <p className="sset-err" id="dl-err" role="alert">{bad}</p>}
+      <div className="conn-form-actions">
         {/* the plan isn't known yet, so neither is the lock: the button's place shimmers */}
         {!ready ? <window.Skeleton w={104} h={41} r={9} style={{ flex: 'none' }} />
           : over ? <button type="button" className="ghost-btn lock-cta" onClick={() => window.openPlans('csv')}><window.LockIcon />Download</button>
           : <window.BusyButton className="save-btn" onClick={submit} busy={busy} busyText="Preparing…">Download</window.BusyButton>}
       </div>
-      {bad && <p className="sset-err" id="dl-err" role="alert">{bad}</p>}
     </SettingsSection>
   );
 }
