@@ -1383,7 +1383,7 @@ function GridSkeleton() {
       <div className="solar-stats">
         {['GRID NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'].map(l => <StatTile key={l} label={l} loading sub={NBSP} />)}
       </div>
-      <Card>
+      <Card className="grid-day">
         <SectionTitle right={NBSP}>{titled('GRID', 'today')}<window.InfoDot text={'Above the line is power imported from the grid; below it is power exported.'} /></SectionTitle>
         <DayChartSkeleton />
       </Card>
@@ -1499,7 +1499,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         {tile('LIFETIME', tot.lifetime, lifetimeSince(energy.lifetime, earliest, plantToday))}
       </div>
 
-      <Card id="grid-day">
+      <Card id="grid-day" className="grid-day">
         {/* the right line is always there (blank today) so the date bar under it never shifts on a phone */}
         <SectionTitle right={day && !noReadings && !view.isToday && peak ? <>Peak <b>{fmtPower(peak.grid)}</b> at <b>{HM(peak.t)}</b></> : NBSP}>
           {titled('GRID', dayWord)}
@@ -1786,7 +1786,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
       <EqTile label="Solar panels" state={pvState} value={st.pvParts[0]} unit={st.pvParts[1]} color={CC.pv} stale={st.allQuiet}
         sub={st.allQuiet ? st.pvSub : st.pvSub + (a.pvNow > 0 ? ' · now ' + fmtPower(a.pvNow) : '')}
         spark={pvVals.length > 1 && <EqSpark vals={pvVals} lo={0} hi={pvMax} stroke={CC.pv} fill={CC.pv} />} />
-      {st.hasBatt && <EqTile label="Battery" state={battState} value={a.battSoc ?? '—'} unit={a.battSoc != null ? '%' : null} color={CC.batt} stale={st.battStale}
+      {st.hasBatt && <EqTile label="Battery" state={battState} value={a.battSoc ?? '—'} unit={a.battSoc != null ? '%' : null} color={CC.batt} stale={st.battStale || st.allQuiet}
         sub={battSub} spark={pts.some(p => p.soc != null) && <EqSpark vals={pts.map(p => [p.t, p.soc])} lo={0} hi={100} stroke={CC.batt} />} />}
       <EqTile label={n === 1 ? 'Inverter' : 'Inverters'} state={hot && !st.allQuiet ? ['warn', 'Running hot'] : invState}
         value={warm ? Math.round(warm.ac) : outParts ? outParts[0] : '—'} unit={warm ? ' °C' : outParts ? outParts[1] : null} stale={st.allQuiet}
