@@ -2901,6 +2901,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked, battSays 
     );
   }
   if (!plant) return <SettingsSection id="system" title="Your system"><div className="field-note">No plant connected yet.</div></SettingsSection>;
+  const sym = window.moneySymbol ? window.moneySymbol() : (cfg.currency || '');
   const err = (on, text) => on && tried ? <p className="sset-err" role="alert">{text}</p> : null;
   return (
     <>
@@ -2910,7 +2911,7 @@ function PlantSections({ me, plantId, onSaved, onDirty, switchBlocked, battSays 
         <SettingRow className="sset-row" label="Electricity rate" actionClass="conn-actions sset-one"
           note={n(f.rate) > 0 ? 'Used to work out what solar saved.' : 'Savings show as zero until this is set.'}
           action={<>
-            <window.RateField value={f.rate} onChange={set('rate')} label="Electricity rate" invalid={tried && bad.rate} />
+            <window.StepField value={f.rate} onChange={set('rate')} label="Electricity rate" pre={sym} unit="/unit" inputMode="decimal" ph="3.40" invalid={tried && bad.rate} />
             {err(bad.rate, 'Enter a price, like 3.40.')}
           </>} />
         <SettingRow className="sset-row" label="Battery capacity" note="All batteries together." actionClass="sset-sum"

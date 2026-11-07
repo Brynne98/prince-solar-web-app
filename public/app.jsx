@@ -846,29 +846,6 @@ function StepField({ id, value, onChange, label, pre, unit, inputMode, ph, inval
   );
 }
 window.StepField = StepField;
-// The rate by area (SOLAR-382): picking one fills the box, typing your own reads as Custom.
-// 2026/27, with VAT, the middle block of a typical home; checked 2026-11-07, the bill wins.
-// Each rate differs, so the area is read back from the number and never stored.
-const RATE_AREAS = [
-  { value: 'eskom', label: 'Eskom Homepower', rate: 3.56 },
-  { value: 'joburg', label: 'Johannesburg (City Power)', rate: 3.83 },
-  { value: 'capetown', label: 'Cape Town', rate: 4.14 },
-  { value: 'durban', label: 'Durban (eThekwini)', rate: 4.17 },
-  { value: 'tshwane', label: 'Pretoria (Tshwane)', rate: 4.36 },
-  { value: 'custom', label: 'Your own rate' },
-];
-function RateField({ value, onChange, label, invalid }) {
-  const area = RATE_AREAS.find(a => a.rate != null && stepNum(value) === a.rate)?.value || 'custom';
-  const sym = window.moneySymbol ? window.moneySymbol() : 'R';
-  return (
-    <div className="rate-field">
-      <PickMenu label="Area" value={area} options={RATE_AREAS}
-                onPick={v => { const a = RATE_AREAS.find(x => x.value === v); window.track?.('rate_area_done', { area: v }); onChange(a.rate != null ? String(a.rate) : ''); }} />
-      <StepField value={value} onChange={onChange} label={label} pre={sym} unit="/unit" inputMode="decimal" ph="3.40" invalid={invalid} />
-    </div>
-  );
-}
-window.RateField = RateField;
 // What SunSynk says the battery holds, as a hint only (SOLAR-382): its Ah is often the
 // inverter's default, so it never drives an estimate. Parallel inverters share one bank,
 // so the largest, not the sum; 51.2 V is a lithium pack's nominal voltage.
@@ -923,10 +900,8 @@ window.rowsFrom = rowsFrom;
 function StepForm({ id, cfg, busy, onSave, onSkip, battSays }) {
   const sum = STEP_SUMS[id];
   const [saved] = useState(() => cfgFields(cfg));
-  // no rate yet: the step opens on a typical one for Save to confirm (SOLAR-382)
   // the reserve's stored 20 is only a stand-in until the owner says, so it opens empty
-  const [v, setV] = useState(id === 'rate' && saved.rate === '' ? '3.40'
-    : id === 'reserve' && !cfg?.battery_reserve_confirmed && (cfg?.battery_reserve_pct ?? 20) === 20 ? '' : saved[id]);
+  const [v, setV] = useState(id === 'reserve' && !cfg?.battery_reserve_confirmed && (cfg?.battery_reserve_pct ?? 20) === 20 ? '' : saved[id]);
   const [mode, setMode] = useState(id === 'panels' && saved.groups ? 'rows' : 'total');
   const [rows, setRows] = useState(() => rowsFrom(saved.groups));
   const box = useRef(null);
@@ -940,9 +915,10 @@ function StepForm({ id, cfg, busy, onSave, onSkip, battSays }) {
     onSave(id === 'rate' ? { tariff_import: stepNum(v) } : id === 'reserve' ? { battery_reserve_pct: stepNum(v) }
       : id === 'size' ? { battery_kwh: +now.value.toFixed(3) } : panelsPatch(now, mode));
   };
+  const sym = window.moneySymbol ? window.moneySymbol() : 'R';
   return (
     <form className="fs-form" onSubmit={save} ref={box}>
-      {id === 'rate' && <RateField value={v} onChange={setV} label={STEPS.rate.title} />}
+      {id === 'rate' && <StepField value={v} onChange={setV} label={STEPS.rate.title} pre={sym} unit="/unit" inputMode="decimal" />}
       {id === 'reserve' && <StepField value={v} onChange={setV} label={STEPS.reserve.title} unit="%" inputMode="numeric" />}
       {sum && <SumBox kind={id} mode={mode} onMode={setMode} tot={v} onTot={setV} rows={rows} onRows={setRows} label={STEPS[id].title} />}
       {id === 'size' && battSays && <p className="field-note">SunSynk says about {battSays} kWh.</p>}
@@ -1699,13 +1675,13 @@ function App({ links }) {
   // key: the loading and loaded pages put it at different child positions; without it the
   // first reading remounted it and Billing's Plan drew its outline twice (SOLAR-281).
   // Plant settings draws from api_me, not the snapshot, so it shares the slot with Settings.
+  const battSays = sunsynkBattKwh(snap, plantId);
   const settingsPage = tab === 'system'
-    ? <window.PlantSettings key="system" me={me} plantId={plantId} onSaved={reloadPlantConfig} battSays={sunsynkBattKwh(snap, plantId)}
+    ? <window.PlantSettings key="system" me={me} plantId={plantId} onSaved={reloadPlantConfig} battSays={battSays}
         flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />
     : <window.SettingsArea key="settings" page={tab} onPage={(p, section) => (section ? openSettings(section) : go(p))}
         me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} links={links}
         flash={flashSection} onFlashed={() => setFlashSection(null)} />;
-  const battSays = sunsynkBattKwh(snap, plantId);
   const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} battSays={battSays} />);
 
   // ---- not-yet-loaded gate ----
