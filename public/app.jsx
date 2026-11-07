@@ -924,7 +924,9 @@ function StepForm({ id, cfg, busy, onSave, onSkip, battSays }) {
   const sum = STEP_SUMS[id];
   const [saved] = useState(() => cfgFields(cfg));
   // no rate yet: the step opens on a typical one for Save to confirm (SOLAR-382)
-  const [v, setV] = useState(id === 'rate' && saved.rate === '' ? '3.40' : saved[id]);
+  // the reserve's stored 20 is only a stand-in until the owner says, so it opens empty
+  const [v, setV] = useState(id === 'rate' && saved.rate === '' ? '3.40'
+    : id === 'reserve' && !cfg?.battery_reserve_confirmed && (cfg?.battery_reserve_pct ?? 20) === 20 ? '' : saved[id]);
   const [mode, setMode] = useState(id === 'panels' && saved.groups ? 'rows' : 'total');
   const [rows, setRows] = useState(() => rowsFrom(saved.groups));
   const box = useRef(null);
@@ -941,7 +943,7 @@ function StepForm({ id, cfg, busy, onSave, onSkip, battSays }) {
   return (
     <form className="fs-form" onSubmit={save} ref={box}>
       {id === 'rate' && <RateField value={v} onChange={setV} label={STEPS.rate.title} />}
-      {id === 'reserve' && <StepField value={v} onChange={setV} label={STEPS.reserve.title} unit="%" inputMode="numeric" ph="20" />}
+      {id === 'reserve' && <StepField value={v} onChange={setV} label={STEPS.reserve.title} unit="%" inputMode="numeric" />}
       {sum && <SumBox kind={id} mode={mode} onMode={setMode} tot={v} onTot={setV} rows={rows} onRows={setRows} label={STEPS[id].title} />}
       {id === 'size' && battSays && <p className="field-note">SunSynk says about {battSays} kWh.</p>}
       <div className="fs-actions">
