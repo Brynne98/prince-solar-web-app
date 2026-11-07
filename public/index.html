@@ -319,6 +319,8 @@
   .notif-panel { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; width: 400px; max-height: min(640px, calc(100vh - 90px));
     display: flex; flex-direction: column; overflow: hidden; border-radius: var(--r-xl); }
   .nl-head { flex: none; }
+  /* the popup's head gets the same rule as See all (SOLAR-391); the full page's head doesn't */
+  .notif-panel .nl-head { padding-bottom: var(--sp-md); border-bottom: 1px solid var(--line); }
   .nl-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: var(--sp-2xs); }
   .nl-head { display: flex; align-items: center; gap: var(--sp-xs); padding: var(--sp-md) var(--sp-sm) var(--sp-xs) var(--sp-lg); }
   .nl-head h2 { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.01em; }
