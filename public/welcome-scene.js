@@ -52,7 +52,7 @@ const clipR = el('rect', { x: 0, y: -10, width: 0, height: TH + 20 }, clip);
 for (let i = 0; i <= 4; i++) el('line', { x1: i * TW / 4, x2: i * TW / 4, y1: 0, y2: TH, stroke: 'rgba(255,255,255,.05)' }, T);
 const gTc = el('g', { 'clip-path': 'url(#tc)' }, T);
 // grid off, shaded like the app's Grid chart: red at 18% (tabs.jsx DayLineChart outages)
-el('rect', { x: CUT0 / N * TW, y: 0, width: (CUT1 - CUT0) / N * TW, height: TH, fill: '#f87171', 'fill-opacity': .18 }, gTc);
+el('rect', { x: CUT0 / N * TW, y: 0, width: (CUT1 - CUT0) / N * TW, height: TH, fill: '#ef4444', 'fill-opacity': .18 }, gTc);
 el('path', { d: path(D.pv, TW, TH, 10.5), fill: 'url(#gS)' }, gTc);
 el('path', { d: path(D.pv, TW, TH, 10.5, 5, false), fill: 'none', stroke: '#3ddc84', 'stroke-width': 1.8, 'vector-effect': 'non-scaling-stroke' }, gTc);
 el('path', { d: path(D.home, TW, TH, 10.5, 5, false), fill: 'none', stroke: '#f87171', 'stroke-width': 1.3, 'stroke-opacity': .8, 'vector-effect': 'non-scaling-stroke' }, gTc);
@@ -390,9 +390,9 @@ qs.forEach(d => d.addEventListener('toggle', () => {
 
 /* ---------- inbox: open any of the example emails ---------- */
 (() => {
-const C={solar:'#3ddc84',home:'#f87171',grid:'#facc15',cyan:'#22d3ee',batt:'#a78bfa',plain:'#e7ecf2'};
+const C={solar:'#3ddc84',home:'#f87171',grid:'#facc15',cyan:'#22d3ee',batt:'#a78bfa',plain:'#e7ecf2',ok:'#84cc16',bad:'#ef4444'};
 const d=(n,prev,good)=>({n,prev,good});
-const delta=x=>!x?'':`<div class="ib-d"><b style="color:${x.good===undefined?'#9aa5b3':x.good?C.solar:C.home}">${x.n>0?'↑':'↓'} ${Math.abs(x.n)}%</b> vs ${x.prev}</div>`;
+const delta=x=>!x?'':`<div class="ib-d"><b style="color:${x.good===undefined?'#9aa5b3':x.good?C.ok:C.bad}">${x.n>0?'↑':'↓'} ${Math.abs(x.n)}%</b> vs ${x.prev}</div>`;
 const card=c=>`<div class="ib-card"><div class="ib-l">${c.l}</div><div class="ib-v" style="color:${C[c.tone||'plain']}">${c.v}${c.u?`<small>${c.u}</small>`:''}</div>${c.sub?`<div class="ib-d">${c.sub}</div>`:''}${delta(c.delta)}</div>`;
 // The example plant's mail, worded and laid out as the app's own emails (supabase/functions/_shared/email.ts)
 const MAIL=[
@@ -402,14 +402,14 @@ const MAIL=[
   bars:{title:'Solar each day',side:'Average 48.7 kWh a day',labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],vals:[46.2,51.3,38.4,49.8,48.1,55.6,51.6]},
   facts:[{l:'Best day',v:'55.6',u:'kWh',tone:'solar',sub:'Sat 24 Oct'},{l:'Busiest day',v:'58.9',u:'kWh',tone:'home',sub:'Sun 25 Oct'}],
   btn:'Open Live'},
- {k:'panels',dot:C.home,time:'20 Oct',at:'Tue 20 Oct, 11:55',subject:'Panels stopped producing at Example plant',preview:'Inverter 1, string 3: no power since 11:42',
-  title:'Panels stopped producing at Example plant',stack:1,stats:[{l:'Inverter 1, string 3',v:'No power',tone:'home',sub:'since 11:42 today'},{l:'Other panels',v:'OK',tone:'solar'}],btn:'Open Equipment'},
- {k:'hot',dot:C.batt,time:'12 Oct',at:'Mon 12 Oct, 14:21',subject:'Battery hot at Example plant',preview:'Battery 41 °C at 14:20',
-  title:'Battery hot at Example plant',stack:1,stats:[{l:'Battery',v:'41&nbsp;°C',tone:'home',sub:'at 14:20 today'}],btn:'Open Equipment'},
+ {k:'panels',dot:C.bad,time:'20 Oct',at:'Tue 20 Oct, 11:55',subject:'Panels stopped producing at Example plant',preview:'Inverter 1, string 3: no power since 11:42',
+  title:'Panels stopped producing at Example plant',stack:1,stats:[{l:'Inverter 1, string 3',v:'No power',tone:'bad',sub:'since 11:42 today'},{l:'Other panels',v:'OK',tone:'ok'}],btn:'Open Equipment'},
+ {k:'hot',dot:C.bad,time:'12 Oct',at:'Mon 12 Oct, 14:21',subject:'Battery hot at Example plant',preview:'Battery 41 °C at 14:20',
+  title:'Battery hot at Example plant',stack:1,stats:[{l:'Battery',v:'41&nbsp;°C',tone:'bad',sub:'at 14:20 today'}],btn:'Open Equipment'},
  {k:'back',dot:C.grid,time:'3 Oct',at:'Sat 3 Oct, 18:45',subject:'Grid back at Example plant',preview:'Grid on since 18:45 today, outage 45m',
-  title:'Grid back at Example plant',stack:1,stats:[{l:'Grid',v:'On',tone:'grid',sub:'since 18:45 today'},{l:'Outage',v:'45m'}],btn:'Open Grid'},
- {k:'down',dot:C.home,time:'3 Oct',at:'Sat 3 Oct, 18:00',subject:'Grid down at Example plant',preview:'Grid off since 18:00 today, battery 86%',
-  title:'Grid down at Example plant',stack:1,stats:[{l:'Grid',v:'Off',tone:'home',sub:'since 18:00 today'},{l:'Battery',v:'86%',tone:'batt'}],btn:'Open Grid'}
+  title:'Grid back at Example plant',stack:1,stats:[{l:'Grid',v:'On',tone:'ok',sub:'since 18:45 today'},{l:'Outage',v:'45m'}],btn:'Open Grid'},
+ {k:'down',dot:C.bad,time:'3 Oct',at:'Sat 3 Oct, 18:00',subject:'Grid down at Example plant',preview:'Grid off since 18:00 today, battery 86%',
+  title:'Grid down at Example plant',stack:1,stats:[{l:'Grid',v:'Off',tone:'bad',sub:'since 18:00 today'},{l:'Battery',v:'86%',tone:'batt'}],btn:'Open Grid'}
 ];
 const rows=document.getElementById('ib-rows'),view=document.getElementById('ib-view'),box=view.parentNode,rowEls=[];
 let cur=0;
@@ -522,7 +522,7 @@ show(calm ? 6 : 0);
 const card = document.getElementById('fl-card'), picks = document.getElementById('fl-picks'), tiles = document.getElementById('fl-tiles');
 if (!card) return;
 const ok = ['ok', 'Working'], look = ['warn', 'Needs a look'], chg = ['ok', 'Charging'];
-const T = (pv, batt, inv) => [['Solar panels', 'var(--solar)', pv[0], 'kW', pv[1]], ['Battery', 'var(--batt)', batt[0], '%', batt[1]], ['Inverters', inv[1] === ok ? 'var(--solar)' : 'var(--warn)', inv[0], '', inv[1]]];
+const T = (pv, batt, inv) => [['Solar panels', 'var(--solar)', pv[0], 'kW', pv[1]], ['Battery', 'var(--batt)', batt[0], '%', batt[1]], ['Inverters', inv[1] === ok ? 'var(--ok)' : 'var(--warn)', inv[0], '', inv[1]]];
 const S = [
   { k: 'All working', tiles: T(['4.82', ok], ['64', chg], ['All on', ok]) },
   { k: 'Panels stopped', title: 'Some panels made nothing today', todo: 'Check the breaker or isolator for your panels.', since: 'Since 11:42', tiles: T(['3.06', look], ['58', chg], ['All on', ok]) },
@@ -668,15 +668,16 @@ const card = document.getElementById('pl-card');
 if (!card) return;
 const menu = document.getElementById('pl-menu'), pick = document.getElementById('pl-pick'), view = document.getElementById('pl-view');
 const PL = [
-  { name: 'Home', st: ['Live', '#84cc16'], batt: 64, peak: 6.2 },
-  { name: 'Mum and Dad', st: ['Grid off', '#f87171'], batt: 81, peak: 4.4, note: 'Grid off since 12:10.' },
-  { name: 'Holiday house', st: ['Live', '#84cc16'], batt: 98, peak: 2.6 },
+  { name: 'Home', login: 'you@example.com', batt: 64, peak: 6.2 },
+  { name: 'Holiday house', login: 'you@example.com', batt: 98, peak: 2.6 },
+  { name: 'Mum and Dad', login: 'mum@example.com', batt: 81, peak: 4.4, note: 'Grid off since 12:10.' },
 ];
 // kW at minute m of the day: a sun arc 06:00 to 18:40 with passing cloud
 const kwAt = (p, m) => Math.max(0, Math.sin(Math.PI * (m - 360) / 760)) * p.peak * (.88 + .12 * Math.sin(m / 23));
 PL.forEach(p => { p.now = kwAt(p, 785); let e = 0; for (let m = 360; m < 785; m += 5) e += (kwAt(p, m) + kwAt(p, m + 5)) / 2 * 5 / 60; p.made = e; });
-menu.innerHTML = PL.map((p, i) => `<button type="button" role="option" data-i="${i}"><b>${p.name}</b><span><i style="background:${p.st[1]}"></i>${p.st[0]}</span><em>${p.now.toFixed(2)} kW</em></button>`).join('');
-const rows = [...menu.children];
+menu.innerHTML = [...new Set(PL.map(p => p.login))].map(l => `<div role="group" aria-label="${l}"><div class="pl-login" aria-hidden="true">${l}</div>`
+  + PL.map((p, i) => p.login !== l ? '' : `<button type="button" role="option"><span class="tick" aria-hidden="true"></span><b>${p.name}</b><span class="st"><i></i>Live</span></button>`).join('') + '</div>').join('');
+const rows = [...menu.querySelectorAll('button')];
 // solar so far today, 06:00 to now (13:05), against a whole day's width
 const curve = p => { const pts = []; for (let m = 360; m <= 785; m += 5) pts.push([20 + (m - 360) / 760 * 480, 92 - kwAt(p, m) / 7 * 80]); return pts; };
 let cur = 0, timers = [];
@@ -684,7 +685,7 @@ function render(n) {
   cur = n;
   const p = PL[n], c = curve(p), d = c.map(([x, y], i) => (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1)).join(' ');
   document.getElementById('pl-name').textContent = p.name;
-  rows.forEach((r, i) => r.setAttribute('aria-selected', i === n));
+  rows.forEach((r, i) => { r.setAttribute('aria-selected', i === n); r.firstChild.textContent = i === n ? '✓' : ''; });
   view.innerHTML = `<div class="pl-stats"><div>Solar now<b style="color:var(--solar)">${p.now.toFixed(2)}<small>kW</small></b></div><div>Battery<b style="color:var(--batt)">${p.batt}<small>%</small></b></div><div>Made today<b>${p.made.toFixed(1)}<small>kWh</small></b></div></div>`
     + `<p class="pl-note">${p.note || ''}</p>`
     + `<div class="pl-ch"><span>Solar today</span><span class="num">06:00 to now</span></div>`

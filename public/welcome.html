@@ -27,7 +27,7 @@
 :root{
   --night:#06080f;--night-2:#0b0f1a;--panel:#11161d;--panel-2:#161c25;--hair:rgba(255,255,255,.08);--hair-2:rgba(255,255,255,.14);
   --paper:#f3eee4;--muted:#b4ad9f;--dim:#8d8676;
-  --solar:#3ddc84;--ok:#84cc16;--batt:#a78bfa;--grid:#facc15;--home:#f87171;--sun:#ffd56b;--sun-mid:#f4a93a;--sun-rim:#e07a1f;--warn:#f59e0b;
+  --solar:#3ddc84;--ok:#84cc16;--batt:#a78bfa;--grid:#facc15;--home:#f87171;--sun:#ffd56b;--sun-mid:#f4a93a;--sun-rim:#e07a1f;--warn:#f59e0b;--bad:#ef4444;
   --gold:#f2c36b;--gold-deep:#d9932f;
   --ink:#f3eee4;--ink-soft:rgba(243,238,228,.78);
   --serif:"Instrument Serif",Georgia,serif;--sans:"Space Grotesk",system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,monospace;--display:"Bricolage Grotesque",system-ui,sans-serif;--body:"Geist",system-ui,sans-serif;
@@ -124,7 +124,7 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(132,204,22,.5)}70%{box-shadow:0 0 0 8px rgba(132,204,22,0)}100%{box-shadow:0 0 0 0 rgba(132,204,22,0)}}
 .banner{height:0;overflow:hidden;transition:height .35s cubic-bezier(.2,.8,.2,1),margin .35s;margin-top:0}
 .banner.on{height:38px;margin-top:12px}
-.banner div{display:flex;align-items:center;gap:10px;height:38px;padding:0 14px;border-radius:10px;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.35);color:#fecaca;font-size:14px}
+.banner div{display:flex;align-items:center;gap:10px;height:38px;padding:0 14px;border-radius:10px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);color:#fecaca;font-size:14px}
 .banner b{color:#fff}
 .card.stepped .flow,.card.stepped .narr,.card.stepped .today,.card.stepped .stats{animation:stepfade .6s ease-out}
 @keyframes stepfade{from{opacity:.3}to{opacity:1}}
@@ -149,9 +149,9 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 .fb-bar i{display:block;height:100%;border-radius:4px;transition:flex-grow .4s,width .4s}
 .gpill{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border-radius:999px;font:600 11px var(--sans);color:#c8d0da;background:rgba(255,255,255,.05);border:1px solid var(--hair)}
 .gpill i{width:7px;height:7px;border-radius:50%;background:var(--grid)}
-.fb-grid.off{border-style:dashed;border-color:rgba(248,113,113,.4);background:rgba(248,113,113,.05)}
-.fb-grid.off .gpill{color:#fecaca;border-color:rgba(248,113,113,.35);background:rgba(248,113,113,.1)}
-.fb-grid.off .gpill i{background:var(--home)}
+.fb-grid.off{border-style:dashed;border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.05)}
+.fb-grid.off .gpill{color:#fecaca;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.fb-grid.off .gpill i{background:var(--bad)}
 .fb-grid .fb-foot{display:none}.fb-grid.off .fb-foot{display:flex}.fb-grid.off .s{display:none}
 .fb-grid .slash{opacity:0}.fb-grid.off .slash{opacity:1}
 .lane{grid-column:2;grid-row:1 / span 2;position:relative}
@@ -335,12 +335,12 @@ section#features{padding-top:0;scroll-margin-top:112px}
 /* faults: the Equipment card */
 #faults{align-items:start}#faults>div:first-child{padding-top:24px}
 #faults .fl-head{display:flex;align-items:center;gap:10px;margin-top:16px;font:600 22px var(--sans);letter-spacing:-.01em}
-#faults .fl-dot,#faults .fl-tile i{flex:none;width:9px;height:9px;border-radius:50%;background:var(--solar);transition:background .3s}
+#faults .fl-dot,#faults .fl-tile i{flex:none;width:9px;height:9px;border-radius:50%;background:var(--ok);transition:background .3s}
 #faults .warn .fl-dot,#faults .fl-tile.warn i{background:var(--warn)}
 #faults .fl-issue{display:grid;grid-template-rows:0fr;transition:grid-template-rows .35s cubic-bezier(.2,.8,.2,1)}
 #faults .fl-issue>div{overflow:hidden}
 #faults .warn .fl-issue{grid-template-rows:1fr}
-#faults .fl-issue section{margin-top:14px;padding:14px 16px;border-radius:14px;border:1px solid rgba(248,113,113,.42);background:rgba(248,113,113,.06)}
+#faults .fl-issue section{margin-top:14px;padding:14px 16px;border-radius:14px;border:1px solid rgba(239,68,68,.42);background:rgba(239,68,68,.06)}
 #faults .fl-issue header{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
 #faults .fl-issue b{display:block;font:600 16px var(--sans)}
 #faults .fl-issue p{margin-top:4px;font-size:14.5px;color:#c8d0da}
@@ -397,13 +397,16 @@ section#features{padding-top:0;scroll-margin-top:112px}
 #plants .open .pl-pick svg{transform:rotate(180deg)}
 #plants .pl-menu{position:absolute;left:26px;top:76px;z-index:4;width:min(340px,calc(100% - 52px));padding:6px;border-radius:14px;background:#0f151d;border:1px solid rgba(255,255,255,.16);box-shadow:0 24px 50px rgba(0,0,0,.6);opacity:0;transform:translateY(-6px) scale(.98);transform-origin:top left;pointer-events:none;transition:opacity .2s,transform .25s cubic-bezier(.2,.8,.2,1)}
 #plants .open .pl-menu{opacity:1;transform:none;pointer-events:auto}
-#plants .pl-menu button{display:grid;grid-template-columns:1fr auto;gap:2px 12px;width:100%;padding:10px 12px;border:0;border-radius:9px;background:transparent;color:#e7ecf2;font:inherit;text-align:left;cursor:pointer}
+#plants .pl-login{padding:8px 12px 4px;font-size:12px;color:#9aa5b3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#plants .pl-menu [role="group"]+[role="group"]{border-top:1px solid var(--hair);margin-top:4px;padding-top:4px}
+#plants .pl-menu button{display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:8px;width:100%;padding:9px 12px;border:0;border-radius:9px;background:transparent;color:#e7ecf2;font:inherit;text-align:left;cursor:pointer}
 #plants .pl-menu button:hover,#plants .pl-menu button.hov{background:rgba(255,255,255,.06)}
-#plants .pl-menu button[aria-selected="true"]{background:rgba(242,195,107,.1)}
-#plants .pl-menu b{font:600 15px var(--sans)}
-#plants .pl-menu span{grid-row:2;display:flex;align-items:center;gap:6px;font-size:12.5px;color:#9aa5b3}
-#plants .pl-menu span i{width:7px;height:7px;border-radius:50%}
-#plants .pl-menu em{grid-row:1/3;align-self:center;font:600 14px var(--mono);font-style:normal;color:var(--solar)}
+#plants .pl-menu button[aria-selected="true"]{background:rgba(255,255,255,.075)}
+#plants .pl-menu .tick{font-size:13px;color:#e7ecf2}
+#plants .pl-menu b{font:500 15px var(--sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#plants .pl-menu [aria-selected="true"] b{font-weight:600}
+#plants .pl-menu .st{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--ok)}
+#plants .pl-menu .st i{width:7px;height:7px;border-radius:50%;background:currentColor}
 #plants .pl-view{margin-top:18px;transition:opacity .25s}
 #plants .pl-view.swap{opacity:.25}
 #plants .pl-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
@@ -465,20 +468,21 @@ section#features{padding-top:0;scroll-margin-top:112px}
 #start .st-f:focus{border-color:rgba(242,195,107,.7)}
 #start .st-ct{font:600 16px var(--sans)}#start .st-cs{font-size:12.5px;color:#9aa5b3;margin-top:-4px}
 #start .st-go{display:flex;align-items:center;justify-content:center;height:40px;border-radius:10px;background:var(--solar);color:#07130c;font:600 14px var(--sans)}
-#start .st-arc{width:11px;height:11px;border-radius:50%;border:2px solid rgba(34,211,238,.25);border-top-color:#22d3ee;animation:stspin .9s linear infinite}
-@keyframes stspin{to{transform:rotate(360deg)}}
-#start .st-imp{display:flex;align-items:center;justify-content:center;gap:12px;font-size:20px;color:#22d3ee}
-#start .st-imp .st-arc{width:20px;height:20px;border-width:3px}
-#start .st-imp b{font:600 20px var(--mono)}
-#start .st-imp-bar{height:6px;margin:6px 8px 0;border-radius:4px;background:rgba(34,211,238,.14);overflow:hidden}
-#start .st-imp-bar i{display:block;width:64%;height:100%;border-radius:4px;background:#22d3ee}
-#start .st-imp-note{text-align:center;font-size:13px;color:#9aa5b3;margin-top:4px}
+#start .st-fs{justify-content:flex-start;gap:8px;background:radial-gradient(120% 70% at 20% 0,rgba(61,220,132,.06),transparent 60%),linear-gradient(180deg,#121b19,#0c1117);border-color:rgba(61,220,132,.22)}
+#start .st-fs-top{display:flex;justify-content:space-between;font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:#9aa5b3}
+#start .st-fs-top .num{letter-spacing:0;font-size:12px}
+#start .st-fs ul{list-style:none;display:grid;gap:2px}
+#start .st-fs li{display:flex;align-items:center;gap:10px;min-height:27px;padding:0 8px;border-radius:8px;font-size:14px;font-weight:500}
+#start .st-fs li i{flex:none;width:15px;height:15px;border-radius:50%;border:1.5px solid rgba(255,255,255,.3)}
+#start .st-fs li.done{color:#8d99a8}
+#start .st-fs li.done span{text-decoration:line-through}
+#start .st-fs li.done i{border:0;background:var(--solar) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4.5 8.2 2.3 2.3 4.7-4.9' fill='none' stroke='%2307130c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/100% no-repeat}
+#start .st-fs li.cur{background:rgba(61,220,132,.1)}
 #start .st-cta{display:flex;justify-content:center;margin-top:48px}
 @media(max-width:860px){
   #start .st-row{grid-template-columns:1fr;gap:44px}#start .st-row::before{display:none}
   #start .st-shot{height:auto;min-height:210px}
 }
-@media(prefers-reduced-motion:reduce){#start .st-arc{animation:none;border-top-color:rgba(34,211,238,.6)}}
 
 /* pricing */
 .plans{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:56px;align-items:stretch}
@@ -738,12 +742,12 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
         <div class="toast" id="toastDown" role="status">
           <div class="from"><span class="orb"></span><span>Prince Solar Hub</span><span class="num">18:00</span></div>
           <p class="tt">Grid down at Example plant</p>
-          <div class="cards"><div>Grid<b style="color:var(--home)">Off</b>since 18:00 today</div><div>Battery<b style="color:var(--batt)" id="toastPct">88%</b></div></div>
+          <div class="cards"><div>Grid<b style="color:var(--bad)">Off</b>since 18:00 today</div><div>Battery<b style="color:var(--batt)" id="toastPct">88%</b></div></div>
         </div>
         <div class="toast" id="toastBack" role="status">
           <div class="from"><span class="orb"></span><span>Prince Solar Hub</span><span class="num">18:45</span></div>
           <p class="tt">Grid back at Example plant</p>
-          <div class="cards"><div>Grid<b style="color:var(--grid)">On</b>since 18:45 today</div><div>Outage<b>45m</b></div></div>
+          <div class="cards"><div>Grid<b style="color:var(--ok)">On</b>since 18:45 today</div><div>Outage<b>45m</b></div></div>
         </div>
       </div>
       </div>
@@ -925,13 +929,19 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
     </div>
     <div>
       <span class="st-n">3</span>
-      <div class="st-shot">
-        <div class="st-imp"><span class="st-arc"></span>Fetching history <b>64%</b></div>
-        <div class="st-imp-bar"><i></i></div>
-        <p class="st-imp-note">Bringing in your past days from SunSynk.</p>
+      <div class="st-shot st-fs">
+        <div class="st-fs-top"><span>Finish setup</span><span class="num">2/6</span></div>
+        <ul>
+          <li class="done"><i></i><span>Sign up</span></li>
+          <li class="done"><i></i><span>Add plant</span></li>
+          <li class="cur"><i></i><span>Electricity rate</span></li>
+          <li><i></i><span>Battery size</span></li>
+          <li><i></i><span>Battery reserve</span></li>
+          <li><i></i><span>Solar panels</span></li>
+        </ul>
       </div>
-      <h3 class="st-h">Your history fills in</h3>
-      <p class="st-p">Live in a minute. Past days follow on their own.</p>
+      <h3 class="st-h">Finish setup</h3>
+      <p class="st-p">Add your rate, battery and panels. Past days fill in on their own.</p>
     </div>
   </div>
   <div class="st-cta"><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a></div>
