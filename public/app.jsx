@@ -1371,6 +1371,11 @@ function App({ links }) {
   const linkedAt = (me?.plants || []).find(p => p.id === plantId)?.linkedAt;
   const snap = React.useMemo(() => (!rawSnap ? rawSnap : loginCut ? { ...rawSnap, sync: null, loginCut: true }
     : { ...rawSnap, sync: window.firstLoadSync(rawSnap.sync, linkedAt) }), [rawSnap, loginCut, linkedAt]);
+  // Readings starting or stopping can mean a login came back or died: read the logins
+  // again at once, so the sidebar's "Reconnect a login" turns with the header instead of
+  // on the next minute's read (SOLAR-389).
+  const readingLive = !!rawSnap && plantStatus(rawSnap, Date.now()).status === 'live';
+  useEffect(() => { if (rawSnap) links.refresh(); }, [readingLive]); // eslint-disable-line react-hooks/exhaustive-deps
   const [today, setToday] = useState(null);
   const [energy, setEnergy] = useState({});
   // > 0 while a snapshot fetch is in flight; the Refresh icon spins on it. Held to a
