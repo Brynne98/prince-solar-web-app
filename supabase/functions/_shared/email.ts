@@ -649,7 +649,7 @@ export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email
   // A short calm note, no red (SOLAR-383): the missed readings come back after a reconnect.
   const parts: Part[] = dead
     ? [{ p: `Readings for ${P} paused${e.at ? ` at ${e.at} ${day}` : ""}. SunSynk asked for your login again.` },
-       { p: "Reconnect and we fetch the readings you missed." },
+       { p: "Reconnect and we'll get what we can of the readings you missed." },
        { button: { label: "Reconnect", href: LOGINS } }]
     : [{ p: `Readings for ${P} are back since ${e.at} ${day}, after ${e.lasted}.` },
        { p: "We'll get what we can of the readings you missed." },
