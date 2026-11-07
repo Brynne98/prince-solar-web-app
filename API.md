@@ -261,6 +261,17 @@ So the flow shortcut is web-host only and off the table. Everything the product
 stores comes from the five realtime endpoints, and the per-inverter history is the
 one unused capability worth building on (backfill + a real freshness signal).
 
+### 🔎 Inverter settings probe — 7 Nov 2026 (openapi.sunsynk.net, the production key)
+
+Asked for the battery reserve (Low SOC / Shutdown SOC), which pvbiz shows on its read-only
+Inverter settings page. Master 2508290475, via the temporary `recover ?dry=1&probe=` path.
+Every path answered `HTTP 404 API not found` from the gateway: `/common/setting/{sn}/read`
+(with and without `?lan=en`), `/inverter/{sn}/setting`, `/inverter/{sn}/settings`,
+`/inverter/setting/{sn}`, `/inverter/{sn}/read`, `/setting/{sn}/read`,
+`/inverter/{sn}/setting/read`, `/inverter/battery/{sn}/setting`. The official host has no
+settings read; pvbiz most likely uses the web host with a stored login, which we don't keep.
+So the reserve stays the owner's to set (SOLAR-382).
+
 ### 🔎 Endpoint survey — 13 Sep 2026 (openapi.sunsynk.net, the production key)
 
 A systematic `column=` sweep of the five per-inverter `…/day` endpoints, run
