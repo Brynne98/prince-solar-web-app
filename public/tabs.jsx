@@ -650,15 +650,18 @@ const WIW_INFO = {
 // ([name, kWh, colour]) with their sum in the middle, and each part's kWh beside it.
 // empty: the note for a day with nothing to share out; the ring stays, bare, so the card
 // keeps its shape beside the 30 days instead of leaving a blank box (SOLAR-345).
-function SharePie({ parts, word, empty }) {
-  if (empty) parts = [];
+function SharePie({ parts, word, empty, whole }) {
+  // whole: [the day total the bar shows, the page's colour]. A day with that total but no
+  // readings to split it still shows the total, as one ring with no parts beside it (SOLAR-387).
+  const only = empty && whole && whole[0] >= 0.05 ? whole : null;
+  if (empty) parts = only ? [['', only[0], only[1]]] : [];
   const total = parts.reduce((t, d) => t + d[1], 0);
   const R = 61, C = 2 * Math.PI * R, gap = parts.length > 1 ? 3 : 0;
   const [n, u] = window.fmtEnergyParts(total);
   let at = 0;
   return (
-    <div className={'pie-wrap' + (empty ? ' empty' : '')}>
-      <svg className="pie" viewBox="0 0 150 150" role="img" aria-hidden={empty ? 'true' : undefined} aria-label={word + ' ' + fmtKwh(total) + ': ' + parts.map(d => d[0] + ' ' + fmtKwh(d[1])).join(', ')}>
+    <div className={'pie-wrap' + (only ? ' whole' : empty ? ' empty' : '')}>
+      <svg className="pie" viewBox="0 0 150 150" role="img" aria-hidden={empty && !only ? 'true' : undefined} aria-label={word + ' ' + fmtKwh(total) + (only ? '' : ': ' + parts.map(d => d[0] + ' ' + fmtKwh(d[1])).join(', '))}>
         <circle className="pie-track" cx="75" cy="75" r={R} />
         {parts.map(([l, v, c]) => {
           const len = v / total * C;
@@ -1192,8 +1195,8 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // A destination is shown only once it holds something: a 0.0 kWh column would be a
   // zero-width segment under a full-width label, and "the battery got none of it" is said
   // better by its absence than by a zero.
-  const dests = toDayTotal([['Home', flows.pvHome, CC.load, true], ['Battery', flows.pvBatt, CC.batt, hasBatt], ['Grid', flows.pvGrid, CC.grid, hasGrid]],
-      dayTotal(daily, plantToday, pick.date, 'pv', a.pvToday))
+  const shownTotal = dayTotal(daily, plantToday, pick.date, 'pv', a.pvToday);
+  const dests = toDayTotal([['Home', flows.pvHome, CC.load, true], ['Battery', flows.pvBatt, CC.batt, hasBatt], ['Grid', flows.pvGrid, CC.grid, hasGrid]], shownTotal)
     .filter(d => d[3] && d[1] >= 0.05);
   const splitTotal = dests.reduce((t, d) => t + d[1], 0);
   // The percentages were a permanent column until 2026-09-19; the bar says the same thing,
@@ -1239,7 +1242,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         <Card className="wiw" {...dim}>
           <SectionTitle>{titled('WHERE IT WENT', dayWord)}<window.InfoDot text={WIW_INFO.solar} /></SectionTitle>
           {!day ? <WiwBodySkeleton />
-            : <SharePie parts={dests} word="Made" empty={(noReadings || splitTotal < 0.05) && (noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.'))} />}
+            : <SharePie parts={dests} word="Made" whole={[shownTotal, CC.pv]} empty={(noReadings || splitTotal < 0.05) && (noReadings || (view.isToday ? 'No solar yet today.' : 'No solar on this day.'))} />}
         </Card>
         <Card>
           <SectionTitle right={best ? <>Best <b>{fmtKwh(best.pv)}</b> on {window.dayText(best.date)}</> : RIGHT_HOLD}>
@@ -1319,8 +1322,8 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
 
   // ---- where it came from: the same flows Solar and Grid show (SOLAR-332) ----
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
-  const srcs = toDayTotal([['Solar', flows.pvHome, CC.pv, true], ['Battery', flows.battHome, CC.batt, hasBatt], ['Grid', flows.gridHome, CC.grid, hasGrid]],
-      dayTotal(daily, plantToday, pick.date, 'load', a.loadToday))
+  const shownTotal = dayTotal(daily, plantToday, pick.date, 'load', a.loadToday);
+  const srcs = toDayTotal([['Solar', flows.pvHome, CC.pv, true], ['Battery', flows.battHome, CC.batt, hasBatt], ['Grid', flows.gridHome, CC.grid, hasGrid]], shownTotal)
     .filter(d => d[3] && d[1] >= 0.05);
   const splitTotal = srcs.reduce((t, d) => t + d[1], 0);
 
@@ -1354,7 +1357,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
         <Card className="wiw" {...dim}>
           <SectionTitle>{titled('WHERE IT CAME FROM', dayWord)}<window.InfoDot text={WIW_INFO.home} /></SectionTitle>
           {!day ? <WiwBodySkeleton />
-            : <SharePie parts={srcs} word="Used" empty={(noReadings || splitTotal < 0.05) && (noReadings || 'No home readings for this day.')} />}
+            : <SharePie parts={srcs} word="Used" whole={[shownTotal, CC.load]} empty={(noReadings || splitTotal < 0.05) && (noReadings || 'No home readings for this day.')} />}
         </Card>
         <Card>
           <SectionTitle right={most && most.load > 0 ? <>Most <b>{fmtKwh(most.load)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
@@ -1475,8 +1478,8 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // where the day's imports went: the same flows Solar and Home show (SOLAR-332)
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
   const [daily, loadDaily] = useDaily(refreshKey);
-  const dests = toDayTotal([['Home', flows.gridHome, CC.load, true], ['Battery', flows.gridBatt, CC.batt, hasBatt]],
-      dayTotal(daily, plantToday, pick.date, 'imp', a.gridFromToday))
+  const shownTotal = dayTotal(daily, plantToday, pick.date, 'imp', a.gridFromToday);
+  const dests = toDayTotal([['Home', flows.gridHome, CC.load, true], ['Battery', flows.gridBatt, CC.batt, hasBatt]], shownTotal)
     .filter(d => d[3] && d[1] >= 0.05);
   const splitTotal = dests.reduce((t, d) => t + d[1], 0);
 
@@ -1514,7 +1517,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         <Card className="wiw" {...dim}>
           <SectionTitle>{titled('WHERE IT WENT', dayWord)}<window.InfoDot text={WIW_INFO.grid} /></SectionTitle>
           {!day ? <WiwBodySkeleton />
-            : <SharePie parts={dests} word="Imported" empty={(noReadings || splitTotal < 0.05) && (noReadings || (!points.some(p => p.grid != null) ? 'No grid readings for this day.' : view.isToday ? 'Nothing imported yet today.' : 'Nothing imported on this day.'))} />}
+            : <SharePie parts={dests} word="Imported" whole={[shownTotal, CC.grid]} empty={(noReadings || splitTotal < 0.05) && (noReadings || (!points.some(p => p.grid != null) ? 'No grid readings for this day.' : view.isToday ? 'Nothing imported yet today.' : 'Nothing imported on this day.'))} />}
         </Card>
         <Card>
           <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>

@@ -887,7 +887,7 @@
   .pie-track { stroke: rgba(255,255,255,0.06); }
   /* a day with nothing to share: the bare ring and the note, so the card is not a blank box (SOLAR-345) */
   .pie-wrap.empty .pie-num { fill: var(--dim); }
-  .pie-wrap.empty .solar-note { flex: 1 1 160px; margin: 0; }
+  .pie-wrap:is(.empty, .whole) .solar-note { flex: 1 1 160px; margin: 0; }
   .pie-num { text-anchor: middle; font: 700 var(--fs-2xl) var(--mono); fill: var(--text); }
   .pie-u { font-size: var(--fs-xs); opacity: 0.85; }
   .pie-word { text-anchor: middle; font: 500 var(--fs-2xs) var(--display); letter-spacing: 0.12em; text-transform: uppercase; fill: var(--muted); }
