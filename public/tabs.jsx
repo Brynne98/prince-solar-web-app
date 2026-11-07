@@ -1601,7 +1601,23 @@ function InvertersSkeleton() {
 
 // Everything both views read: who is quiet, the problems, the battery's checks and today's
 // solar as it may be shown. Pure, so every state can be checked without a screen.
-function equipmentState(snap, health, now) {
+// An inverter's last temperature today, from SunSynk's day history (SOLAR-393): no live
+// reading reaches our key, and recover fetches the history every six hours, so each comes
+// with its time. A DC sensor that never moves is absent (the parents' read 25 °C flat).
+const EQ_HOT_AC = 60, EQ_HOT_DC = 75; // °C, the limits pvbiz alerts on
+function invTemps(rows) {
+  const out = {};
+  (rows || []).forEach(r => {
+    const pts = r.points || [];
+    for (let i = pts.length - 1; i >= 0; i--) {
+      const p = pts[i];
+      if (p && p.ac != null) { out[r.sn] = { ac: p.ac, dc: r.dcFlat ? null : p.dc, at: i * 5 }; break; }
+    }
+  });
+  return out;
+}
+
+function equipmentState(snap, health, now, invT = {}) {
   const feat = snap.features || {};
   const a = snap.aggregate;
   const tz = (snap.config || {}).timezone;
@@ -1649,6 +1665,13 @@ function equipmentState(snap, health, now) {
     ? readBatt.length === liveBatt.length && battTemp == null
     : readBatt.some(i => cleanTemp(i.battTemp) == null));
   const hot = hasBatt && battTemp != null && battTemp > 45;
+  invs.forEach(inv => {
+    const t = invT[inv.sn];
+    if (!t) return;
+    const hot = t.ac > EQ_HOT_AC ? t.ac : t.dc != null && t.dc > EQ_HOT_DC ? t.dc : null;
+    if (hot != null) issues.push({ title: invName(inv) + ' is hot, ' + Math.round(hot) + ' °C', since: 'At ' + HM(t.at),
+      todo: 'Make sure air can move around it and it is out of direct sun.' });
+  });
   if (badSensor) issues.push({ title: 'A battery temperature sensor isn’t reading', todo: 'Mention it at the battery’s next service.' });
   if (hot) issues.push({ title: 'The battery is hot, ' + Math.round(battTemp) + ' °C', todo: 'Make sure air can move around it.' });
 
@@ -1657,7 +1680,7 @@ function equipmentState(snap, health, now) {
   const pvParts = oldDay ? ['—', ''] : window.fmtEnergyParts(a.pvToday);
   const pvSub = oldDay ? 'No readings today' : allQuiet ? 'today, by ' + window.fmtTime(new Date(lastAt)) : night ? 'made today' : 'so far today';
 
-  return { a, tz, hasBatt, hasGrid, invs, quiet, allQuiet, lastAt, verdict, night, issues,
+  return { a, tz, hasBatt, hasGrid, invs, quiet, allQuiet, lastAt, verdict, night, issues, invT,
     withBatt, battStale, battAt, battTemp, badSensor, hot, shared: feat.banks === 'shared', pvParts, pvSub };
 }
 
@@ -1871,6 +1894,13 @@ function EqInvertersCard({ st, now }) {
     ['State', invs.map(inv => down(inv) ? { v: 'Not reporting', cls: 'warn', sub: inv.readAt ? 'Since ' + window.readAgo(inv.readAt, now) : null }
       : { v: <><i className="eq-dot sm ok" />On</>, sub: 'Read ' + eqReadAt(inv, now) })],
     ['To the house now', invs.map(inv => ({ v: down(inv) ? '—' : fmtPower(inv.output) }))],
+    ['Temperature', invs.map(inv => {
+      const t = st.invT[inv.sn];
+      if (!t) return { v: '—' };
+      const hot = t.ac > EQ_HOT_AC || (t.dc != null && t.dc > EQ_HOT_DC);
+      return { v: Math.round(t.ac) + ' °C', cls: hot ? 'bad' : undefined,
+        sub: (t.dc != null ? 'DC side ' + Math.round(t.dc) + ' °C, ' : '') + 'at ' + HM(t.at) };
+    })],
     ['Home use today', invs.map(inv => ({ v: down(inv) && st.pvParts[0] === '—' ? '—' : fmtKwh(inv.loadToday) }))],
     ['Model', invs.map(inv => ({ v: inv.model, cls: 'wrap' }))],
     ['Firmware', invs.map(inv => ({ v: inv.soft }))],
@@ -1955,11 +1985,19 @@ function InvertersTab({ snap, refreshKey }) {
     document.addEventListener('visibilitychange', back);
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', back); };
   }, [refreshKey]);
+  // Today's temperatures: the same answer the Temperature chart asks for, shared, so no extra call
+  const [hist, setHist] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    window.fetchInverterHistory(window.localDateStr(), refreshKey).then(r => { if (alive) setHist(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, [refreshKey]);
   // Simple or Detailed is this viewer's own choice, kept across visits
   const [view, setView] = React.useState(() => { try { return localStorage.getItem('synsynk.eqView') === 'detailed' ? 'detailed' : 'simple'; } catch (e) { return 'simple'; } });
   const pickView = (v) => { setView(v); try { localStorage.setItem('synsynk.eqView', v); } catch (e) {} };
 
-  const st = equipmentState(snap, health, now);
+  const temps = React.useMemo(() => invTemps(hist), [hist]);
+  const st = equipmentState(snap, health, now, temps);
   const simple = view === 'simple';
   const issues = simple ? simpleIssues(st.issues) : st.issues;
   const n = issues.length;
