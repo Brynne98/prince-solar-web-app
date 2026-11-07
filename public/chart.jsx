@@ -241,7 +241,8 @@ function fitScale(lo, hi, unit) {
 //   kind="output" as "ac" but the inverter's own frequency, for an off-grid plant
 // A tab with a day picker of its own (Grid) passes it as `dayPick`; the chart then follows
 // that day and draws no date arrows of its own, only its lag and outage notes.
-const INV_COLORS = ['#fb923c', '#f472b6', '#60a5fa', '#fbbf24', '#34d399', '#c084fc']; // one line per inverter, on Inverters only; reuse-check: allow
+// One grey per inverter: a reading that is no power series takes grey, never a sixth hue (SOLAR-392).
+const INV_COLORS = ['#e7ecf2', '#9aa5b3', '#6b7a8d', '#c4ccd6', '#556170', '#aeb8c4']; // on Equipment only; reuse-check: allow
 // Outage: runs of 5-minute buckets, [first, last], where any inverter's grid (or output) read
 // 0 Hz, or its terminal 0 V. The Grid tab's day chart shades the same runs (SOLAR-125).
 function outageRuns(invs, fKey, lastIdx) {
@@ -380,11 +381,13 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   const fmtHz = v => (v == null ? null : v.toFixed(2) + ' Hz');
   const lagNote = lastData >= 0 && (isToday || lastData < 287) ? `to ${HM(lastData * 5)}` : null;
   const color = k => INV_COLORS[k % INV_COLORS.length];
+  const name = inv => invName({ sn: inv.sn, alias: inv.alias }); // as the cards above call it
   const freqLabel = kind === 'output' ? 'Frequency' : 'Grid frequency';
   // frequency chip and line: one series across inverters (grid) or per inverter (output);
   // drawn from the first inverter that actually carries it
   const fInv = shown.find(i => i.points.some(p => p[fKey[0]] != null)) || null;
   const fVal = fInv ? valAt(fInv, fKey[1]) : null;
+  const fColor = kind === 'output' ? 'var(--muted)' : C.grid;
 
   const onMove = e => setHover(idxFromPointer(e.clientX, e.currentTarget, m, innerW, lastIdx));
   const hp = hover != null && nInv ? hover : null;
@@ -397,13 +400,13 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
     shown.forEach((inv, k) => {
       const p = inv.points[hp] || {};
       if (isTemp) {
-        rows.push([nInv > 1 ? inv.alias : 'AC side', fmtC(p.ac), color(k)]);
-        if (!inv.dcFlat) rows.push([(nInv > 1 ? inv.alias + ' ' : '') + 'DC side', fmtC(p.dc), color(k)]);
+        rows.push([nInv > 1 ? name(inv) : 'AC side', fmtC(p.ac), color(k)]);
+        if (!inv.dcFlat) rows.push([(nInv > 1 ? name(inv) + ', ' : '') + 'DC side', fmtC(p.dc), color(k)]);
       } else {
-        rows.push([nInv > 1 ? inv.alias : 'Voltage', p.vmin != null ? `${Math.round(p.vmin)}–${Math.round(p.vmax)} V` : null, color(k)]);
+        rows.push([nInv > 1 ? name(inv) : 'Voltage', p.vmin != null ? `${Math.round(p.vmin)}–${Math.round(p.vmax)} V` : null, color(k)]);
       }
     });
-    if (!isTemp && fInv) { const p = fInv.points[hp] || {}; rows.push([freqLabel, p[fKey[0]] != null ? `${p[fKey[0]].toFixed(2)}–${p[fKey[1]].toFixed(2)} Hz` : null, C.soc]); }
+    if (!isTemp && fInv) { const p = fInv.points[hp] || {}; rows.push([freqLabel, p[fKey[0]] != null ? `${p[fKey[0]].toFixed(2)}–${p[fKey[1]].toFixed(2)} Hz` : null, fColor]); }
     return (
       <div className="chart-tip" style={{ left: tipLeftFor(px, width), top: 24 }}>
         <div className="tip-time">{HM(hp * 5)}</div>
@@ -441,13 +444,13 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
         {/* an unseen chip holds the row's height until the inverters land (SOLAR-221) */}
         {invs == null && <span className="legend-chip" style={{ visibility: 'hidden' }} aria-hidden="true">{' '}</span>}
         {shown.map((inv, k) => (
-          <window.LegendChip key={inv.sn} color={color(k)} label={nInv > 1 ? inv.alias : (isTemp ? 'AC side' : 'Voltage')}
+          <window.LegendChip key={inv.sn} color={color(k)} label={nInv > 1 ? name(inv) : (isTemp ? 'AC side' : 'Voltage')}
             value={isTemp ? fmtC(valAt(inv, 'ac')) : fmtV(valAt(inv, 'v'))} active />
         ))}
         {isTemp && shown.filter(i => !i.dcFlat).map((inv, k) => (
-          <window.LegendChip key={inv.sn + 'dc'} color={color(shown.indexOf(inv))} label={(nInv > 1 ? inv.alias + ' ' : '') + 'DC side'} value={fmtC(valAt(inv, 'dc'))} active />
+          <window.LegendChip key={inv.sn + 'dc'} color={color(shown.indexOf(inv))} label={(nInv > 1 ? name(inv) + ', ' : '') + 'DC side'} value={fmtC(valAt(inv, 'dc'))} active />
         ))}
-        {!isTemp && fInv && <window.LegendChip color={C.soc} label={freqLabel} value={fmtHz(fVal)} active />}
+        {!isTemp && fInv && <window.LegendChip color={fColor} label={freqLabel} value={fmtHz(fVal)} active />}
       </div>
       <div className="chart-area" ref={ref} style={{ position: 'relative', height }}>
         {nInv === 0 ? <ChartPlaceholder height={height} loading={invs == null} text={emptyMsg} /> : (
@@ -463,9 +466,9 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
             ))}
             {hasV && <text x={m.l - 10} y={m.t - 9} textAnchor="end" className="ax" fillOpacity="0.55">{isTemp ? '°C' : 'V'}</text>}
             {!isTemp && hasF && fs.ticks.map(v => (
-              <text key={'f' + v} x={m.l + innerW + 10} y={yf(v) + 3} className="ax" fill={C.soc} fillOpacity="0.75">{v.toFixed(1)}</text>
+              <text key={'f' + v} x={m.l + innerW + 10} y={yf(v) + 3} className="ax" fill={fColor} fillOpacity="0.75">{v.toFixed(1)}</text>
             ))}
-            {!isTemp && hasF && <text x={m.l + innerW + 10} y={m.t - 9} className="ax" fill={C.soc} fillOpacity="0.55">Hz</text>}
+            {!isTemp && hasF && <text x={m.l + innerW + 10} y={m.t - 9} className="ax" fill={fColor} fillOpacity="0.55">Hz</text>}
             {outages.map(([a, b], i) => (
               <rect key={'o' + i} x={x(Math.max(0, a - 0.5))} y={m.t} width={Math.max(2, x(Math.min(lastIdx, b + 0.5)) - x(Math.max(0, a - 0.5)))} height={innerH} fill="var(--bad)" fillOpacity="0.18" />
             ))}
@@ -485,8 +488,8 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
             })}
             {!isTemp && fInv && (
               <g>
-                <path d={band(fInv.points, fKey[0], fKey[1], yf, v => v > 10)} fill={C.soc} fillOpacity="0.18" />
-                <path d={line(fInv.points, fKey[1], yf, v => v > 10)} fill="none" stroke={C.soc} strokeWidth="1" strokeOpacity="0.9" />
+                <path d={band(fInv.points, fKey[0], fKey[1], yf, v => v > 10)} fill={fColor} fillOpacity="0.18" />
+                <path d={line(fInv.points, fKey[1], yf, v => v > 10)} fill="none" stroke={fColor} strokeWidth="1" strokeOpacity="0.9" />
               </g>
             )}
             {xticks.map(t => (

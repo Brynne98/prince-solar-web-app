@@ -1536,8 +1536,8 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 // "Equipment" (SOLAR-52). Built for a home user (SOLAR-73, SOLAR-75): one headline says
 // whether anything needs a look and a coral-edged card per problem says what to do. Under
 // it, Simple (a tile each for panels, battery and inverters: one figure, one word) or
-// Detailed (each panel string against its usual, the battery against its reserve, a tile
-// per inverter, spec sheets and the two day charts). The choice is the viewer's, kept.
+// Detailed (SOLAR-392: panels, battery, inverters and grid as cards with the inverters in
+// columns, then the two day charts full width). The choice is the viewer's, kept.
 
 // The page as InvertersTab draws it with nothing wrong, in the view this viewer last chose,
 // built from the same classes so each piece lands at the real one's height (SOLAR-221).
@@ -1574,46 +1574,22 @@ function InvertersSkeleton() {
         <>
           <div className="eq-cards">
             <Card className="eq-card">
-              <SectionTitle>SOLAR PANELS</SectionTitle>
+              <SectionTitle right={NBSP}>SOLAR PANELS</SectionTitle>
               <div className="eq-big mono">{fig}</div>
               <div className="eq-big-sub">{line(140)}</div>
-              <div className="eq-groups"><div className="eq-group">
-                {[1, 2].map(no => <div className="eq-string" key={no}><span className="eq-string-name">String {no}</span><span className="eq-bar" /><span className="eq-string-kwh mono">{NBSP}</span></div>)}
-              </div></div>
+              {rows(4)}
             </Card>
             <Card className="eq-card">
-              <SectionTitle>BATTERY</SectionTitle>
+              <SectionTitle right={NBSP}>BATTERY</SectionTitle>
               <div className="eq-big mono">{fig}</div>
               <div className="eq-meter" />
               <div className="eq-meter-scale"><span>{NBSP}</span></div>
-              {rows(2)}
-              <div className="eq-foot">{line(120)}</div>
-            </Card>
-            <Card className="eq-card">
-              <SectionTitle>INVERTER</SectionTitle>
-              <div className="eq-inv-tiles one"><div className="eq-inv">
-                <div className="eq-inv-name">{line(90)}</div>
-                <div className="eq-inv-state"><i className="eq-dot sm" />{line(30)}</div>
-                <div className="eq-inv-now mono">{fig}</div>
-                <div className="eq-inv-cap">solar now</div>
-                <div className="eq-inv-today"><span>Today</span><span className="mono">{line(50)}</span></div>
-                <div className="eq-inv-foot">{line(110)}</div>
-              </div></div>
+              {rows(4)}
             </Card>
           </div>
-          <div className="eq-specs">
-            <Card className="eq-spec">
-              <div className="eq-spec-head"><span>{line(90)}</span></div>
-              <dl className="eq-spec-rows">
-                {['Model', 'Serial number', 'Firmware', 'Last reading'].map(l => <div key={l}><dt>{l}</dt><dd className="mono">{line(100)}</dd></div>)}
-              </dl>
-              <div>
-                <div className="eq-label eq-pack-label">Battery pack</div>
-                <div className="eq-pack">
-                  {['Charge', 'Voltage', 'Temperature', 'Batteries'].map(l => <div key={l}><b className="mono">{line(40, 14)}</b><span>{l}</span></div>)}
-                </div>
-              </div>
-            </Card>
+          <div className="eq-cards">
+            <Card className="eq-card"><SectionTitle>INVERTER</SectionTitle>{rows(5)}</Card>
+            <Card className="eq-card"><SectionTitle>GRID SUPPLY</SectionTitle>{rows(3)}</Card>
           </div>
           <Card className="chart-card"><SectionTitle>TEMPERATURE</SectionTitle><DayChartSkeleton legend /></Card>
           <Card className="chart-card"><SectionTitle>GRID SUPPLY</SectionTitle><DayChartSkeleton legend /></Card>
@@ -1622,8 +1598,6 @@ function InvertersSkeleton() {
     </div>
   );
 }
-
-const EQ_FOLD = 6; // strings shown per inverter before "Show all"
 
 // Everything both views read: who is quiet, the problems, the battery's checks and today's
 // solar as it may be shown. Pure, so every state can be checked without a screen.
@@ -1741,77 +1715,109 @@ function EquipmentSimple({ st, now }) {
   );
 }
 
-// Panels in detail: one bar per string, grouped under its inverter, with a mark where it
-// usually is by this time. The mark shows only where panelsVerdict really compared.
+// Detailed (SOLAR-392): a card per part, the inverters side by side in columns so they
+// read across; what only an installer would want sits under "More detail". The two day
+// charts run full width below.
+
+// A table with a column per inverter. `rows`: [label, cells], one cell per inverter, each
+// { v, sub, cls } or null for nothing there (an inverter without that string).
+function EqTable({ invs, st, now, rows }) {
+  const many = invs.length > 1;
+  return (
+    <div className="eq-table">
+      <table>
+        {many && (
+          <thead><tr><th />{invs.map(inv => {
+            const down = st.quiet.includes(inv); // its column reads dashes; the Inverters card says why
+            return <th key={inv.sn} scope="col" className={down ? 'down' : undefined}>{invName(inv)}</th>;
+          })}</tr></thead>
+        )}
+        <tbody>
+          {rows.map(([label, cells]) => (
+            <tr key={label}>
+              <th scope="row">{label}</th>
+              {cells.map((c, k) => (
+                <td key={invs[k].sn} className={c && c.cls}>
+                  {c ? <span className="mono">{c.v}</span> : null}
+                  {c && c.sub && <span className="eq-sub">{c.sub}</span>}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Rows an everyday look doesn't need, folded shut.
+function EqMore({ rows }) {
+  const shown = rows.filter(r => r[1] != null);
+  if (!shown.length) return null;
+  return (
+    <details className="eq-more">
+      <summary>More detail<Icon id="chevron" /></summary>
+      <dl className="eq-rows">{shown.map(([l, val]) => <div key={l}><dt>{l}</dt><dd className="mono">{val}</dd></div>)}</dl>
+    </details>
+  );
+}
+
+const eqVolts = v => v != null && v > 0 ? Math.round(v) + ' V' : null;
+const eqReadAt = (inv, now) => inv.readAt ? window.readAgo(inv.readAt, now) : '—';
+
+// Solar panels: today's total, then each inverter's solar now, each string's yield with its
+// live volts and amps, today and since installed. A string well below its usual share is red.
 function EqPanelsCard({ st, snap, health, now }) {
-  const [open, setOpen] = React.useState({}); // inverters whose long string list is unfolded
   const v = st.verdict;
-  const hi = v && health ? health.inverters || [] : [];
+  const hi = (health && health.inverters) || [];
+  const invs = snap.inverters;
+  const down = inv => st.quiet.includes(inv);
+  const nos = [...new Set(invs.flatMap(inv => {
+    const h = hi.find(x => x.sn === inv.sn);
+    return (h ? h.strings.map(s => s.no) : []).concat((inv.strings || []).map(s => s.no));
+  }))].sort((x, y) => x - y);
   const compared = v && (v.state === 'normal' || v.state === 'alert' || v.state === 'resting');
-  const groups = st.allQuiet || (v && (v.state === 'single' || v.state === 'none')) ? []
-    : snap.inverters.filter(inv => st.quiet.includes(inv) || hi.some(h => h.sn === inv.sn)).map(inv => {
-      if (st.quiet.includes(inv)) return { inv, quiet: true, rows: [] };
-      const h = hi.find(x => x.sn === inv.sn);
-      const multi = h.strings.length >= 2;
-      const invKwh = h.strings.reduce((n, s) => n + (s.todayKwh || 0), 0);
-      const rows = h.strings.map(s => {
-        const share = multi ? s.usualInvShare : s.usualPlantShare;
-        const usual = compared && share != null && share >= 0.02 && (multi || !h.battFull) ? share * (multi ? invKwh : health.todayKwh) : null;
-        return { no: s.no, kwh: s.todayKwh || 0, usual, alert: v.alerts.find(x => x.inv.sn === inv.sn && x.no === s.no) };
-      });
-      return { inv, rows, kwh: invKwh };
-    });
-  let max = 0;
-  groups.forEach(g => g.rows.forEach(r => { max = Math.max(max, r.kwh, r.usual || 0); }));
-  const pct = x => (max > 0 ? Math.min(100, x / max * 100) : 0) + '%';
-  const anyMark = groups.some(g => g.rows.some(r => r.usual != null));
+  const stringCell = (inv, no) => {
+    const h = hi.find(x => x.sn === inv.sn);
+    const hs = h && h.strings.find(s => s.no === no);
+    const live = (inv.strings || []).find(s => s.no === no);
+    if (!hs && !live) return null;
+    if (down(inv)) return { v: '—' };
+    const kwh = hs ? hs.todayKwh || 0 : live.today;
+    const sub = live && live.v > 0 ? Math.round(live.v) + ' V · ' + (live.i || 0).toFixed(1) + ' A' : null;
+    const alert = v && v.state === 'alert' && v.alerts.find(x => x.inv.sn === inv.sn && x.no === no);
+    if (!alert) return { v: fmtKwh(kwh), sub };
+    const multi = h.strings.length >= 2;
+    const share = multi ? hs.usualInvShare : hs.usualPlantShare;
+    const usual = compared && share != null ? share * (multi ? h.strings.reduce((n, s) => n + (s.todayKwh || 0), 0) : health.todayKwh) : null;
+    return { v: fmtKwh(kwh), cls: 'bad', sub: alert.kind === 'nothing' ? 'Made nothing today' : usual != null ? 'Usually ' + fmtKwh(usual) + ' by now' : 'Less than usual' };
+  };
   const toGo = PANELS_MIN_DAYS - ((health && health.historyDays) || 0);
   const note = v && {
-    single: 'One string, nothing to compare it with.',
-    learning: 'Checks start in ' + toGo + (toGo === 1 ? ' day.' : ' days.'),
-    early: 'Checked once the panels have made ' + PANELS_MIN_KWH + ' kWh today.',
-    dull: 'Not enough sun today to check.',
-    unchecked: 'Battery full, panels turned down. Not checked today.',
+    learning: 'String checks start in ' + toGo + (toGo === 1 ? ' day.' : ' days.'),
+    early: 'Strings are checked once the panels have made ' + PANELS_MIN_KWH + ' kWh today.',
+    dull: 'Not enough sun today to check the strings.',
+    unchecked: 'Battery full, panels turned down. Strings not checked today.',
   }[v.state];
+  const rows = [
+    ['Solar now', invs.map(inv => ({ v: down(inv) ? '—' : fmtPower(inv.pvNow) }))],
+    ...nos.map(no => ['String ' + no, invs.map(inv => stringCell(inv, no))]),
+    ['Today', invs.map(inv => down(inv) && st.pvParts[0] === '—' ? { v: '—' } : { v: fmtKwh(inv.pvToday), cls: 'pv' })],
+    ['Since installed', invs.map(inv => ({ v: window.fmtEnergySmart(inv.pvTotal) }))],
+  ];
   return (
     <Card className="eq-card">
-      <SectionTitle>SOLAR PANELS</SectionTitle>
-      <div className={'eq-big mono' + (st.allQuiet ? ' stale' : '')} style={{ color: CC.pv }}>{st.pvParts[0]}{st.pvParts[1] && <span className="u">{st.pvParts[1]}</span>}</div>
+      <SectionTitle right={st.allQuiet ? NBSP : <>Now <b>{fmtPower(st.a.pvNow)}</b></>}>SOLAR PANELS</SectionTitle>
+      <div className={'eq-big mono' + (st.allQuiet ? ' stale' : '')} style={st.allQuiet ? undefined : { color: CC.pv }}>{st.pvParts[0]}{st.pvParts[1] && <span className="u">{st.pvParts[1]}</span>}</div>
       <div className="eq-big-sub">{st.pvSub}</div>
-      {groups.length > 0 && (
-        <div className="eq-groups">
-          {groups.map(g => {
-            const folded = g.rows.length > EQ_FOLD && !open[g.inv.sn];
-            return (
-              <div className="eq-group" key={g.inv.sn}>
-                {(groups.length > 1 || g.quiet) && (
-                  <div className="eq-group-head">
-                    <span>{invName(g.inv)}</span>
-                    <span className={g.quiet ? 'warn' : 'mono'}>{g.quiet ? (g.inv.readAt ? 'Not reporting since ' + window.readAgo(g.inv.readAt, now) : 'Not reporting') : fmtKwh(g.kwh)}</span>
-                  </div>
-                )}
-                {(folded ? g.rows.slice(0, EQ_FOLD) : g.rows).map(r => (
-                  <div className={'eq-string' + (r.alert ? ' weak' : '')} key={r.no}>
-                    <span className="eq-string-name">String {r.no}</span>
-                    <span className="eq-bar"><i style={{ width: pct(r.kwh) }} />{r.usual != null && <b style={{ left: pct(r.usual) }} />}</span>
-                    <span className="eq-string-kwh mono">{window.fmtEnergyParts(r.kwh)[0]}</span>
-                    {r.alert && <span className="eq-string-why">{r.alert.kind === 'nothing' ? 'Made nothing today' : 'Usually ' + window.fmtKwh(r.usual) + ' by now'}</span>}
-                  </div>
-                ))}
-                {folded && <button type="button" className="mini-link eq-fold" onClick={() => setOpen(o => Object.assign({}, o, { [g.inv.sn]: true }))}>Show all {g.rows.length} strings</button>}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {anyMark && <div className="eq-legend"><b />usual by now</div>}
+      <EqTable invs={invs} st={st} now={now} rows={rows} />
       {note && <div className="eq-note">{note}</div>}
     </Card>
   );
 }
 
-// The battery against its reserve, then what it is doing and what it holds. Temperature
-// shows only when it is worth a look.
+// The battery: charge against the reserve, then what it is doing, its voltage, current and
+// temperature, and what went in and out. Each pack as the inverters read it is folded away.
 function EqBatteryCard({ st, snap, now }) {
   const { a } = st;
   const cfg = snap.config || {};
@@ -1822,88 +1828,87 @@ function EqBatteryCard({ st, snap, now }) {
   else {
     rows.push(['Now', a.battOut > 5 ? 'Powering the house at ' + fmtPower(a.battOut) : a.battOut < -5 ? 'Charging at ' + fmtPower(-a.battOut) : 'Resting']);
     if (cap > 0 && a.battSoc != null) rows.push(['Stored', window.fmtEnergyParts(a.battSoc * cap / 100)[0] + ' of ' + fmtKwh(cap)]);
+    if (a.battVoltage > 0) rows.push(['Voltage · current', a.battVoltage.toFixed(1) + ' V · ' + Math.abs(a.battCurrent || 0).toFixed(1) + ' A']);
     if (st.badSensor) rows.push(['Temperature', 'Sensor not reading', true]);
-    else if (st.battTemp != null && (st.battTemp > 45 || st.battTemp < 5)) rows.push(['Temperature', Math.round(st.battTemp) + ' °C, ' + (st.battTemp > 45 ? 'hot' : 'cold'), st.battTemp > 45]);
+    else if (st.battTemp != null) rows.push(['Temperature', Math.round(st.battTemp) + ' °C' + (st.battTemp > 45 ? ', hot' : st.battTemp < 5 ? ', cold' : ''), st.battTemp > 45]);
   }
+  if (!st.battStale) rows.push(['In · out today', window.fmtEnergyParts(a.battChgToday)[0] + ' · ' + fmtKwh(a.battDischgToday)]);
+  if (a.battChgTotal > 0) rows.push(['In · out since installed', window.fmtEnergySmart(a.battChgTotal) + ' · ' + window.fmtEnergySmart(a.battDischgTotal)]);
   const packs = st.shared ? Math.min(1, st.withBatt.length) : st.withBatt.length;
   const modules = st.shared ? Math.max(0, ...st.withBatt.map(i => i.numberOfBatteries || 0)) : st.withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
+  // each pack under the inverter that reads its sensor: the slaves on a shared pack read -100.
+  // One whose answer came back empty this minute is likely it, so it keeps the pack.
+  const packInv = st.withBatt.find(i => cleanTemp(i.battTemp) != null) || st.withBatt.find(i => i.battSoc == null) || st.withBatt[0];
+  const packLine = (soc, volt, t) => [soc != null ? soc + '%' : '—', volt != null ? volt.toFixed(1) + ' V' : '—', t != null ? Math.round(t) + ' °C' : '—'].join(' · ');
+  const more = [];
+  (st.shared ? [packInv].filter(Boolean) : st.withBatt).forEach((inv, k, all) => {
+    const name = all.length > 1 ? invName(inv) + ', pack' : 'Pack';
+    more.push([inv.bank2 ? name + ' 1' : name, packLine(inv.battSoc, inv.battVolt, cleanTemp(inv.battTemp))]);
+    if (inv.bank2) more.push([name + ' 2', packLine(inv.bank2.soc, inv.bank2.voltage, cleanTemp(inv.bank2.temperature))]);
+  });
+  const ah = st.shared ? Math.max(0, ...st.withBatt.map(i => i.battCap || 0)) : st.withBatt.reduce((n, i) => n + (i.battCap || 0), 0);
+  if (ah > 0) more.push(['Capacity', Math.round(ah) + ' Ah']);
   const soc = Math.max(0, Math.min(100, a.battSoc || 0));
   return (
     <Card className="eq-card">
-      <SectionTitle>BATTERY</SectionTitle>
-      <div className={'eq-big mono' + (st.battStale ? ' stale' : '')} style={{ color: CC.batt }}>{a.battSoc ?? '—'}{a.battSoc != null && <span className="u">%</span>}</div>
+      <SectionTitle right={<>{packs} {packs === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'}</>}>BATTERY</SectionTitle>
+      <div className={'eq-big mono' + (st.battStale ? ' stale' : '')} style={st.battStale ? undefined : { color: CC.batt }}>{a.battSoc ?? '—'}{a.battSoc != null && <span className="u">%</span>}</div>
       <div className={'eq-meter' + (st.battStale ? ' stale' : '')}><i style={{ width: soc + '%', background: CC.batt }} /><b style={{ left: reserve + '%' }} /></div>
       <div className="eq-meter-scale"><span style={reserve > 60 ? { right: (100 - reserve) + '%' } : { left: reserve + '%' }}>{reserve}% reserve</span></div>
       <dl className="eq-rows">
-        {rows.map(([l, val, warn]) => <div key={l}><dt>{l}</dt><dd className={warn ? 'warn' : ''}>{val}</dd></div>)}
+        {rows.map(([l, val, warn]) => <div key={l}><dt>{l}</dt><dd className={'mono' + (warn ? ' warn' : '')}>{val}</dd></div>)}
       </dl>
-      <div className="eq-foot">{packs} {packs === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'}</div>
+      <EqMore rows={more} />
     </Card>
   );
 }
 
+// The inverters side by side: on or not, what each sends to the house, model and firmware.
 function EqInvertersCard({ st, now }) {
+  const invs = st.invs;
+  const down = inv => st.quiet.includes(inv);
+  const rows = [
+    ['State', invs.map(inv => down(inv) ? { v: 'Not reporting', cls: 'warn', sub: inv.readAt ? 'Since ' + window.readAgo(inv.readAt, now) : null }
+      : { v: <><i className="eq-dot sm ok" />On</>, sub: 'Read ' + eqReadAt(inv, now) })],
+    ['To the house now', invs.map(inv => ({ v: down(inv) ? '—' : fmtPower(inv.output) }))],
+    ['Home use today', invs.map(inv => ({ v: down(inv) && st.pvParts[0] === '—' ? '—' : fmtKwh(inv.loadToday) }))],
+    ['Model', invs.map(inv => ({ v: inv.model, cls: 'wrap' }))],
+    ['Firmware', invs.map(inv => ({ v: inv.soft }))],
+  ];
+  // per inverter when there are several, so each row says whose it is
+  const each = (label, f) => invs.map(inv => [invs.length > 1 ? invName(inv) + ', ' + label.toLowerCase() : label, f(inv)]);
+  const more = [
+    ...each('Serial number', inv => inv.sn),
+    ...each('Wi-Fi dongle', inv => inv.gsn !== '—' ? inv.gsn : null),
+    ...each('Screen firmware', inv => inv.hmi !== '—' ? inv.hmi : null),
+    ...each('Output voltage', inv => down(inv) ? null : inv.phases.map(p => eqVolts(p.volt)).filter(Boolean).join(' · ') || null),
+    ...each('Unused panel inputs', inv => inv.unusedInputs > 0 ? String(inv.unusedInputs) : null),
+  ];
   return (
     <Card className="eq-card">
-      <SectionTitle>{st.invs.length === 1 ? 'INVERTER' : 'INVERTERS'}</SectionTitle>
-      <div className={'eq-inv-tiles' + (st.invs.length === 1 ? ' one' : '')}>
-        {st.invs.map(inv => {
-          const down = st.quiet.includes(inv);
-          const [n, u] = down ? ['—', ''] : fmtPowerParts(inv.pvNow);
-          return (
-            <div className={'eq-inv' + (down ? ' down' : '')} key={inv.sn}>
-              <div className="eq-inv-name">{invName(inv)}</div>
-              <div className={'eq-inv-state' + (down ? ' warn' : '')}><i className={'eq-dot sm ' + (down ? 'warn' : 'ok')} />{down ? 'Not reporting' : 'On'}</div>
-              <div className="eq-inv-now mono" style={{ color: down ? 'var(--dim)' : CC.pv }}>{n}{u && <span className="u">{u}</span>}</div>
-              <div className="eq-inv-cap">solar now</div>
-              <div className="eq-inv-today"><span>Today</span><span className="mono">{fmtKwh(inv.pvToday)}</span></div>
-              <div className="eq-inv-foot">{down ? (inv.readAt ? 'Since ' + window.readAgo(inv.readAt, now) : NBSP) : inv.readAt ? 'Last reading ' + window.fmtAgo(new Date(inv.readAt), now) : NBSP}</div>
-            </div>
-          );
-        })}
-      </div>
+      <SectionTitle>{invs.length === 1 ? 'INVERTER' : 'INVERTERS'}</SectionTitle>
+      <EqTable invs={invs} st={st} now={now} rows={rows} />
+      <EqMore rows={more} />
     </Card>
   );
 }
 
-// One plain sheet per inverter: what it is, and its battery pack as the inverter reads it.
-// A shared pack shows once, under the first inverter that reads it.
-function EqSpecCard({ inv, st, now }) {
-  const down = st.quiet.includes(inv);
-  const rows = [
-    ['Model', inv.model], ['Serial number', inv.sn], ['Firmware', inv.soft],
-    ['Last reading', inv.readAt ? window.readAgo(inv.readAt, now) : '—'],
-  ];
-  const packs = [];
-  const reads = inv.numberOfBatteries > 0 || inv.battSoc > 0;
-  // under the inverter that reads its sensor: the slaves on a shared pack read -100.
-  // One whose answer came back empty this minute is likely it, so it keeps the pack.
-  const packInv = st.withBatt.find(i => cleanTemp(i.battTemp) != null) || st.withBatt.find(i => i.battSoc == null) || st.withBatt[0];
-  if (st.hasBatt && reads && (!st.shared || inv === packInv)) {
-    const label = st.shared ? 'Battery pack, shared' : inv.bank2 ? 'Battery pack 1' : 'Battery pack';
-    packs.push({ label, soc: inv.battSoc, v: inv.battVolt, t: cleanTemp(inv.battTemp), n: inv.numberOfBatteries });
-    if (inv.bank2) packs.push({ label: 'Battery pack 2', soc: inv.bank2.soc, v: inv.bank2.voltage, t: cleanTemp(inv.bank2.temperature), n: null });
-  }
+// The grid as each inverter sees it now; the day's story is the chart below.
+function EqGridCard({ st }) {
+  const { a } = st;
+  const live = st.invs.filter(inv => !st.quiet.includes(inv));
+  const volts = inv => inv.gridVolts.map(eqVolts).filter(Boolean).join(' · ') || eqVolts(inv.gridVolt) || '—';
+  const rows = [['Grid', st.allQuiet || a.gridPresent == null ? '—' : a.gridPresent ? 'On' : 'Off', a.gridPresent === false]];
+  if (live.length === 1) rows.push(['Voltage', volts(live[0])]);
+  else live.forEach(inv => rows.push([invName(inv) + ', voltage', volts(inv)]));
+  rows.push(['Frequency', !st.allQuiet && a.gridFreq > 0 ? a.gridFreq.toFixed(2) + ' Hz' : '—']);
+  if (!st.allQuiet && a.gridPf > 0) rows.push(['Power factor', a.gridPf.toFixed(2)]);
   return (
-    <Card className="eq-spec">
-      <div className="eq-spec-head">
-        <span>{invName(inv)}</span>
-        <span className={'eq-inv-state' + (down ? ' warn' : '')}><i className={'eq-dot sm ' + (down ? 'warn' : 'ok')} />{down ? 'Not reporting' : 'On'}</span>
-      </div>
-      <dl className="eq-spec-rows">
-        {rows.map(([l, val]) => <div key={l}><dt>{l}</dt><dd className="mono">{val}</dd></div>)}
+    <Card className="eq-card">
+      <SectionTitle>GRID SUPPLY</SectionTitle>
+      <dl className="eq-rows">
+        {rows.map(([l, val, bad]) => <div key={l}><dt>{l}</dt><dd className={'mono' + (bad ? ' bad' : '')}>{val}</dd></div>)}
       </dl>
-      {packs.map(p => (
-        <div key={p.label}>
-          <div className="eq-label eq-pack-label">{p.label}</div>
-          <div className="eq-pack">
-            <div><b className="mono">{p.soc != null ? p.soc + '%' : '—'}</b><span>Charge</span></div>
-            <div><b className="mono">{p.v != null ? p.v.toFixed(1) + ' V' : '—'}</b><span>Voltage</span></div>
-            <div><b className="mono">{p.t != null ? Math.round(p.t) + ' °C' : '—'}</b><span>{p.t != null || p.soc == null ? 'Temperature' : 'Sensor not reading'}</span></div>
-            {p.n != null && <div><b className="mono">{p.n}</b><span>{p.n === 1 ? 'Battery' : 'Batteries'}</span></div>}
-          </div>
-        </div>
-      ))}
     </Card>
   );
 }
@@ -1911,13 +1916,13 @@ function EqSpecCard({ inv, st, now }) {
 function EquipmentDetailed({ st, snap, health, now, refreshKey }) {
   return (
     <>
-      <div className={'eq-cards' + (st.hasBatt ? '' : ' two')}>
+      <div className="eq-cards">
         <EqPanelsCard st={st} snap={snap} health={health} now={now} />
         {st.hasBatt && <EqBatteryCard st={st} snap={snap} now={now} />}
-        <EqInvertersCard st={st} now={now} />
       </div>
-      <div className="eq-specs">
-        {snap.inverters.map(inv => <EqSpecCard key={inv.sn} inv={inv} st={st} now={now} />)}
+      <div className="eq-cards">
+        <EqInvertersCard st={st} now={now} />
+        {st.hasGrid && <EqGridCard st={st} />}
       </div>
       {/* inverter temperatures over a day (SunSynk history; nothing live reports them) */}
       <Card className="chart-card">
