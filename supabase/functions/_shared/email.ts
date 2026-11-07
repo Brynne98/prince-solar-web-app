@@ -89,7 +89,7 @@ type Part =
   | { callout: string } // a plain-language status line in a coral-edged panel
   | { note: string }
   | { steps: string[] } // numbered how-to; may hold <b> set by us
-  | { plants: { title: string; names: string[]; tone: "keep" | "stop"; count?: false } } // one row per plant, any number; count: false when the title already counts
+  | { plants: { title: string; names: string[]; tone: "keep" | "stop"; count?: false; rest?: string } } // one row per plant, any number; count: false when the title already counts; rest: after "and N more" (default: listed in Billing)
   | { items: { rows: Item[]; total?: { label: string; value: string }; meta?: string[] } } // billing: what is paid for, as receipt rows
   | { bars: Bars }; // daily solar kWh; null = no data
 
@@ -194,12 +194,12 @@ function html(subject: string, b: Body): string {
       // One row per plant, so a long name wraps in its own row and many plants stay a
       // list. Past PLANT_ROWS the rest are counted, not listed: an installer login can
       // bring dozens.
-      const { title, names, tone, count } = x.plants;
+      const { title, names, tone, count, rest = ", listed in Billing" } = x.plants;
       const shown = names.length > PLANT_ROWS ? names.slice(0, PLANT_ROWS - 1) : names;
       const more = names.length - shown.length;
       return `<div style="margin:0 0 6px;font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(title)}${names.length > 1 && count !== false ? ` · ${names.length} plants` : ""}</div>` +
         `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px">${shown.map((n) => itemRow({ icon: tone, name: esc(n) })).join("")}` +
-        (more ? `<tr><td></td><td style="padding:6px 0;font:400 14px/1.35 ${SANS};color:#9aa5b3">and ${more} more, listed in Billing</td></tr>` : "") +
+        (more ? `<tr><td></td><td style="padding:6px 0;font:400 14px/1.35 ${SANS};color:#9aa5b3">and ${more} more${esc(rest)}</td></tr>` : "") +
         `</table>`;
     }
     if ("items" in x) {
@@ -536,7 +536,6 @@ export function report(r: Report): Email {
 //  logger_stale  no new reading for the whole plant, or from one inverter while the others
 //                report (inverter set), for 30 min
 //  logger_back   readings fresh again, after a logger_stale went out
-//  needs_relink  the login turned needs_relink in poll
 export type PlantEvent =
   | { kind: "grid_down"; at: string; chargePct?: number }
   | { kind: "grid_back"; at: string; lasted?: string }
@@ -547,8 +546,7 @@ export type PlantEvent =
   | { kind: "string_dead"; string: string; inverter: string; since: string }
   | { kind: "string_back"; string: string; inverter: string; at: string; lasted: string }
   | { kind: "logger_stale"; since: string; inverter?: string }
-  | { kind: "logger_back"; at: string; lasted: string; inverter?: string }
-  | { kind: "needs_relink" };
+  | { kind: "logger_back"; at: string; lasted: string; inverter?: string };
 
 // day: "today", or the date when the alert reaches the owner on a later day
 // ("Tue 21 Oct"), so a time is never read against the wrong day.
@@ -557,7 +555,7 @@ export type PlantEvent =
 // green for what came back, amber for grid, purple for battery. A sentence stays only
 // where the cards can't explain it alone.
 type Card = Extract<Part, { stats: unknown }>["stats"][number];
-const PAGE: Record<Exclude<PlantEvent["kind"], "needs_relink">, keyof typeof PAGES> = {
+const PAGE: Record<PlantEvent["kind"], keyof typeof PAGES> = {
   grid_down: "grid", grid_back: "grid",
   batt_hot: "inverters", batt_hot_back: "inverters", bank_drift: "inverters", bank_drift_back: "inverters",
   string_dead: "inverters", string_back: "inverters",
@@ -626,17 +624,38 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
         return [e.inverter ? `${e.inverter} back at ${plant}` : `Readings back at ${plant}`, [
           { label: "Readings", value: "Back", tone: "ok", sub: `since ${at(e.at)}, after ${e.lasted}` },
         ]];
-      case "needs_relink":
-        return ["Reconnect your SunSynk login", { callout: "SunSynk stopped accepting your login. New readings have stopped." }];
     }
   })();
-  const relink = e.kind === "needs_relink";
   return make(title, {
     title,
-    parts: [Array.isArray(cards) ? { stats: cards, stack: true } : cards, ...(note ? [{ p: note }] : []), { button: relink ? { label: "Reconnect", href: LOGINS } : openPage(PAGE[e.kind as Exclude<PlantEvent["kind"], "needs_relink">], plantId) }],
-    // Reconnect has no switch, so no "turn them off" line.
-    footer: relink ? [HELP] : ALERT_FOOTER(plant),
+    parts: [Array.isArray(cards) ? { stats: cards, stack: true } : cards, ...(note ? [{ p: note }] : []), { button: openPage(PAGE[e.kind], plantId) }],
+    footer: ALERT_FOOTER(plant),
   });
+}
+
+// A SunSynk login stopped working (needs_relink) or works again (relinked), SOLAR-380.
+// One email per login: it names the login and every plant on it (0158).
+//  login   the SunSynk username; missing on rows queued before 0158
+//  at      when it stopped / came back, HH:MM
+export type LoginEvent =
+  | { kind: "needs_relink"; login?: string; plants: string[]; at?: string }
+  | { kind: "relinked"; login?: string; plants: string[]; at: string; lasted: string };
+// up to 3 names, then a count, as the app's billing banner
+const andList = (a: string[]) => names(a.length > 3 ? [...a.slice(0, 3), `${a.length - 3} more`] : a);
+export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email {
+  const list = e.plants.length ? e.plants : ["your plant"];
+  const login = e.login ? `the login <b>${esc(e.login)}</b>` : "your login";
+  const dead = e.kind === "needs_relink";
+  const title = dead ? `Reconnect SunSynk for ${andList(list)}` : `SunSynk reconnected for ${andList(list)}`;
+  const parts: Part[] = dead
+    ? [{ callout: `SunSynk stopped accepting ${login}${e.at ? ` at ${e.at} ${day}` : ""}.` },
+       { plants: { title: "No new readings", names: list, tone: "stop", rest: "" } },
+       { button: { label: "Reconnect", href: LOGINS } }]
+    : [{ p: `${e.login ? `<b>${esc(e.login)}</b>` : "Your login"} works again since ${e.at} ${day}. Stopped for ${e.lasted}.` },
+       { plants: { title: "Readings back", names: list, tone: "keep", rest: "" } },
+       { button: openPage("live", plantId) }];
+  // No switch for these, so no "turn them off" line.
+  return make(title, { title, parts, footer: [HELP] });
 }
 
 // --------------------------------------------------------------------- billing

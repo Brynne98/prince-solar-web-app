@@ -12,7 +12,7 @@
 // It keeps going until the queue is empty or BUDGET_MS is spent.
 //
 // email_claim skips rows whose switch is off (email_wanted, 0091), whose plant the
-// user no longer has, and "back" emails whose "down" never went. needs_relink,
+// user no longer has, and "back" emails whose "down" never went. needs_relink, relinked,
 // welcome, history and account deleted have no switch.
 //
 // After the emails, the pop-ups (SOLAR-244, 0124): push_claim hands over the alerts
@@ -28,7 +28,7 @@ import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
-  PAY_URL, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, plantsRemovalSoon,
+  PAY_URL, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
   offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, needAHand,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
@@ -238,7 +238,11 @@ async function build(r: Row): Promise<Email | null> {
     case "string_dead": return ev({ kind: "string_dead", string: d.string, inverter: d.inverter, since: hhmm(d.since, tz) }, d.since);
     case "logger_stale": return ev({ kind: "logger_stale", since: hhmm(d.since, tz), inverter: d.inverter ?? undefined }, d.since);
     case "logger_back": return ev({ kind: "logger_back", at: hhmm(d.at, tz), lasted: lasted(d.since, d.at), inverter: d.inverter ?? undefined }, d.at);
-    case "needs_relink": return plantEvent(p.name, p.id, { kind: "needs_relink" }, "");
+    // one email per login, naming it and every plant on it (0158); old rows have neither
+    case "needs_relink": return loginEvent({ kind: "needs_relink", login: d.login, plants: d.plants ?? (r.plant_name ? [r.plant_name] : []),
+      at: d.since == null ? undefined : hhmm(d.since, tz) }, p.id, d.since == null ? "today" : dayOf(d.since, tz));
+    case "relinked": return loginEvent({ kind: "relinked", login: d.login, plants: d.plants ?? [], at: hhmm(d.at, tz),
+      lasted: lasted(d.since, d.at) }, p.id, dayOf(d.at, tz));
     case "sunsynk_down": return sunsynkDown(p.name, p.id, hhmm(d.since, tz), dayOf(d.since, tz));
     case "sunsynk_back": return sunsynkBack(p.name, p.id, hhmm(d.at, tz), lasted(d.since, d.at), dayOf(d.at, tz));
     case "welcome": return welcome();
@@ -386,8 +390,9 @@ async function pushOne(r: PushRow, s: PushRow["subs"][number]): Promise<"ok" | "
   // data is fields, not a link, so the phone apps can map them to their own screens.
   // tag: a Grid back replaces its Grid down on screen, per plant.
   const msg = JSON.stringify({
-    title: r.title, body: r.body, tag: `${r.plant_id}:${r.kind.split("_")[0]}`,
-    data: { id: r.id, tab: r.tab, plant: r.plant_id, day: r.day },
+    title: r.title, body: r.body, tag: `${r.plant_id}:${r.kind === "relinked" ? "needs" : r.kind.split("_")[0]}`,
+    // a login's pop-up opens Account on the logins, where Reconnect is (SOLAR-380)
+    data: { id: r.id, tab: r.tab, plant: r.plant_id, day: r.day, section: r.tab === "account" ? "logins" : undefined },
   });
   try {
     // An alert an hour late is no longer news: the push service drops it after that.
@@ -521,9 +526,10 @@ async function renderAll(plantId: number, today?: string) {
     ["readings-back", { kind: "logger_back", at: hhmm(now, p.tz), lasted: lasted(now - 6420, now) }],
     ["inverter-no-readings", { kind: "logger_stale", since: hhmm(now - 1200, p.tz), inverter: "Inverter 2" }],
     ["inverter-readings-back", { kind: "logger_back", at: hhmm(now, p.tz), lasted: lasted(now - 6420, now), inverter: "Inverter 2" }],
-    ["reconnect", { kind: "needs_relink" }],
   ];
   for (const [name, e] of ev) out[name] = plantEvent(p.name, p.id, e);
+  out["reconnect"] = loginEvent({ kind: "needs_relink", login: "owner@example.com", plants: [p.name, "Second plant"], at: hhmm(now - 1500, p.tz) }, p.id);
+  out["reconnected"] = loginEvent({ kind: "relinked", login: "owner@example.com", plants: [p.name, "Second plant"], at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
   // The free week's two emails (0122), from this plant's own day count; steps are a sample.
   const { count: days } = await db.from("plant_energy").select("period", { count: "exact", head: true })
     .eq("plant_id", plantId).eq("bucket", "day").lt("period", today);
