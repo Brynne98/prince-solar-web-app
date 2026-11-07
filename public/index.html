@@ -1039,6 +1039,14 @@
   .notif-row > .switch, .notif-row > .skel { justify-self: center; }
   .notif-cols { padding: 0; font-size: var(--fs-sm); color: var(--dim); font-weight: 500; text-align: center; }
   .notif-row .toggle-label { font-size: var(--fs-md); }
+  /* Alerts and Reports: a row that folds open; its rows sit indented past the arrow */
+  .notif-group { margin-top: var(--sp-sm); }
+  .notif-open { min-width: 0; min-height: 32px; display: flex; align-items: center; gap: var(--sp-sm); padding: 0;
+    background: none; border: none; color: inherit; text-align: left; }
+  .notif-open .ico { width: var(--icon-sm); height: var(--icon-sm); color: var(--dim); transition: transform var(--dur-base) var(--ease-out); }
+  .notif-open[aria-expanded="true"] .ico { transform: rotate(90deg); }
+  .notif-open .toggle-label { font-size: var(--fs-lg); font-weight: 500; }
+  .notif-rows .notif-row > .toggle-text { padding-left: 42px; }
   .sset .toggle-hint { font-size: var(--fs-sm); }   /* hints are 13px or more (SOLAR-14) */
   /* On this browser: pop-ups on or off here (SOLAR-244) */
   .notif-sub { font-size: var(--fs-sm); color: var(--dim); font-weight: 500; margin: var(--sp-lg) 0 0; }

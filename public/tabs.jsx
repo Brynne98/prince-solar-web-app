@@ -3366,20 +3366,29 @@ function NotificationsSection({ userId }) {
     try { setPush(await (was === 'on' ? window.pushTurnOff() : window.pushTurnOn())); }
     catch { setPush(was); window.toast('Couldn’t turn pop-ups ' + (was === 'on' ? 'off' : 'on') + '. Try again.', { error: true }); }
   };
+  // While this browser's pop-ups aren't on, the Pop-up column reads off and can't be changed.
+  const idle = (ch) => ch.id === 'push' && push !== 'on';
   // One switch per channel; an empty cell where the channel doesn't carry this kind.
   const cell = (ch, kind, label) => {
     if (!ch.kinds.includes(kind)) return <span key={ch.id} />;
     const p = prefs[ch.id];
-    return <window.Switch key={ch.id} loading={!p} on={!p || p[kind]} label={label + ' ' + ch.noun}
+    return <window.Switch key={ch.id} loading={!p || (ch.id === 'push' && push === null)} on={!idle(ch) && (!p || p[kind])}
+                          disabled={idle(ch)} label={label + ' ' + ch.noun}
                           onChange={(on) => p && flip(ch, kind, on, label + ' ' + ch.noun)} />;
   };
-  // All: on while any of the channel's switches is on, and sets them all
-  const allCell = (ch) => {
+  // A switch over several kinds (All, a group): on while any is on, and sets them all.
+  const setCell = (ch, kinds, label) => {
+    kinds = kinds.filter(k => ch.kinds.includes(k));
+    if (!kinds.length) return <span key={ch.id} />;
     const p = prefs[ch.id];
-    const anyOn = !p || ch.kinds.some(k => p[k]);
-    return <window.Switch key={ch.id} loading={!p} on={anyOn} label={'All ' + ch.noun + 's'}
-                          onChange={() => p && ch.kinds.forEach(k => { if (p[k] === anyOn) flip(ch, k, !anyOn, 'all ' + ch.noun + 's'); })} />;
+    const anyOn = !p || kinds.some(k => p[k]);
+    const name = label + ' ' + ch.noun + 's';
+    return <window.Switch key={ch.id} loading={!p || (ch.id === 'push' && push === null)} on={!idle(ch) && anyOn}
+                          disabled={idle(ch)} label={name}
+                          onChange={() => p && kinds.forEach(k => { if (p[k] === anyOn) flip(ch, k, !anyOn, name.toLowerCase()); })} />;
   };
+  // Alerts and Reports fold open to their rows, as before SOLAR-402
+  const [open, setOpen] = useState({});
   const cols = { '--notif-cols': NOTIF_CHANNELS.length };
   // This browser's switch, in the Pop-up column
   const pushRow = (sw) => (
@@ -3403,20 +3412,29 @@ function NotificationsSection({ userId }) {
           </div>
           <div className="notif-row">
             <span className="toggle-text"><span className="toggle-label">All</span></span>
-            {NOTIF_CHANNELS.map(allCell)}
+            {NOTIF_CHANNELS.map(ch => setCell(ch, ch.kinds, 'All'))}
           </div>
           {NOTIF_GROUPS.map(g => (
-            <div key={g.label} role="group" aria-label={g.label}>
-              <div className="notif-sub">{g.label}</div>
-              {g.rows.map(([kind, label, hint]) => (
-                <div key={kind} className="notif-row">
-                  <span className="toggle-text">
-                    <span className="toggle-label">{label}</span>
-                    {hint && <span className="toggle-hint">{hint}</span>}
-                  </span>
-                  {NOTIF_CHANNELS.map(ch => cell(ch, kind, label))}
-                </div>
-              ))}
+            <div key={g.label} className="notif-group">
+              <div className="notif-row">
+                <button type="button" className="notif-open" aria-expanded={!!open[g.label]} aria-controls={'notif-' + g.label}
+                        onClick={() => setOpen(o => ({ ...o, [g.label]: !o[g.label] }))}>
+                  <Icon id="next" />
+                  <span className="toggle-label">{g.label}</span>
+                </button>
+                {NOTIF_CHANNELS.map(ch => setCell(ch, g.rows.map(([k]) => k), g.label))}
+              </div>
+              <div id={'notif-' + g.label} className="notif-rows" role="group" aria-label={g.label} hidden={!open[g.label]}>
+                {g.rows.map(([kind, label, hint]) => (
+                  <div key={kind} className="notif-row">
+                    <span className="toggle-text">
+                      <span className="toggle-label">{label}</span>
+                      {hint && <span className="toggle-hint">{hint}</span>}
+                    </span>
+                    {NOTIF_CHANNELS.map(ch => cell(ch, kind, label))}
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>
