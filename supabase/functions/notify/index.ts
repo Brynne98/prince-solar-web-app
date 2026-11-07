@@ -239,9 +239,9 @@ async function build(r: Row): Promise<Email | null> {
     case "logger_stale": return ev({ kind: "logger_stale", since: hhmm(d.since, tz), inverter: d.inverter ?? undefined }, d.since);
     case "logger_back": return ev({ kind: "logger_back", at: hhmm(d.at, tz), lasted: lasted(d.since, d.at), inverter: d.inverter ?? undefined }, d.at);
     // one email per login, naming it and every plant on it (0158); old rows have neither
-    case "needs_relink": return loginEvent({ kind: "needs_relink", login: d.login, plants: d.plants ?? (r.plant_name ? [r.plant_name] : []),
+    case "needs_relink": return loginEvent({ kind: "needs_relink", plants: d.plants ?? (r.plant_name ? [r.plant_name] : []),
       at: d.since == null ? undefined : hhmm(d.since, tz) }, p.id, d.since == null ? "today" : dayOf(d.since, tz));
-    case "relinked": return loginEvent({ kind: "relinked", login: d.login, plants: d.plants ?? [], at: hhmm(d.at, tz),
+    case "relinked": return loginEvent({ kind: "relinked", plants: d.plants ?? [], at: hhmm(d.at, tz),
       lasted: lasted(d.since, d.at) }, p.id, dayOf(d.at, tz));
     case "sunsynk_down": return sunsynkDown(p.name, p.id, hhmm(d.since, tz), dayOf(d.since, tz));
     case "sunsynk_back": return sunsynkBack(p.name, p.id, hhmm(d.at, tz), lasted(d.since, d.at), dayOf(d.at, tz));
@@ -528,8 +528,8 @@ async function renderAll(plantId: number, today?: string) {
     ["inverter-readings-back", { kind: "logger_back", at: hhmm(now, p.tz), lasted: lasted(now - 6420, now), inverter: "Inverter 2" }],
   ];
   for (const [name, e] of ev) out[name] = plantEvent(p.name, p.id, e);
-  out["reconnect"] = loginEvent({ kind: "needs_relink", login: "owner@example.com", plants: [p.name, "Second plant"], at: hhmm(now - 1500, p.tz) }, p.id);
-  out["reconnected"] = loginEvent({ kind: "relinked", login: "owner@example.com", plants: [p.name, "Second plant"], at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
+  out["reconnect"] = loginEvent({ kind: "needs_relink", plants: [p.name, "Second plant"], at: hhmm(now - 1500, p.tz) }, p.id);
+  out["reconnected"] = loginEvent({ kind: "relinked", plants: [p.name, "Second plant"], at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
   // The free week's two emails (0122), from this plant's own day count; steps are a sample.
   const { count: days } = await db.from("plant_energy").select("period", { count: "exact", head: true })
     .eq("plant_id", plantId).eq("bucket", "day").lt("period", today);

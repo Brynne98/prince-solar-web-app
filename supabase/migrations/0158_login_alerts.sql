@@ -6,7 +6,7 @@
 -- nothing. The email named no plant either. Now:
 --
 --   needs_relink   one row per user per plant on the login, when it dies. Each names its
---                  plant (the row's plant) and the login (data.login). Only the first
+--                  plant (the row's plant). Only the first
 --                  plant's row emails; it lists every plant on the login (data.plants).
 --                  The others go in as skipped, so one login is one email.
 --   relinked       new: the login works again (status needs_relink -> active, account_upsert
@@ -19,7 +19,7 @@
 --
 -- Bodies: alert_text is 0154's, api_alerts 0152's, email_on_relink 0102's, with only the
 -- parts above changed. Old needs_relink rows (data {account} only) read with their
--- created_at as the time and no login name.
+-- created_at as the time.
 -- ============================================================================
 
 create or replace function private.is_alert(p_kind text)
@@ -72,7 +72,7 @@ begin
       n := n + 1;
       insert into public.email_queue (user_id, plant_id, kind, key, data, priority, status, last_error)
       values (new.user_id, r.plant_id, 'needs_relink', 'needs_relink:' || new.id || ':' || r.plant_id || ':' || now_s,
-              jsonb_build_object('account', new.id, 'login', new.sunsynk_username, 'since', now_s, 'plants', names), 0,
+              jsonb_build_object('account', new.id, 'since', now_s, 'plants', names), 0,
               case when n = 1 then 'queued' else 'skipped' end, case when n > 1 then 'one email per login' end)
       on conflict do nothing;
     end loop;
@@ -80,7 +80,7 @@ begin
     if n = 0 then
       insert into public.email_queue (user_id, kind, key, data, priority)
       values (new.user_id, 'needs_relink', 'needs_relink:' || new.id || ':' || now_s,
-              jsonb_build_object('account', new.id, 'login', new.sunsynk_username, 'since', now_s, 'plants', names), 0)
+              jsonb_build_object('account', new.id, 'since', now_s, 'plants', names), 0)
       on conflict do nothing;
     end if;
 
@@ -100,7 +100,7 @@ begin
       -- the email goes on the plant whose "down" emailed, so email_claim pairs them
       insert into public.email_queue (user_id, plant_id, kind, key, pair_key, data, priority, status, last_error)
       values (new.user_id, r.plant_id, 'relinked', 'relinked:' || new.id || ':' || r.plant_id || ':' || now_s, r.key,
-              jsonb_build_object('account', new.id, 'login', new.sunsynk_username, 'since', r.since, 'at', now_s, 'plants', names), 0,
+              jsonb_build_object('account', new.id, 'since', r.since, 'at', now_s, 'plants', names), 0,
               case when r.status <> 'skipped' then 'queued' else 'skipped' end,
               case when r.status = 'skipped' then 'one email per login' end)
       on conflict do nothing;
@@ -120,7 +120,6 @@ declare
   lasted text;
   m int;
   inv text := nullif(d->>'inverter', '');
-  login text := coalesce('Login ' || nullif(d->>'login', ''), 'Login');
   title text; body text; tab text;
 begin
   if ev < extract(epoch from p_created) - 43200 then ev := extract(epoch from p_created)::bigint; end if;
@@ -166,9 +165,9 @@ begin
     when 'sunsynk_back' then
       title := 'SunSynk is back'; body := 'Back after ' || lasted || '.';
     when 'needs_relink' then
-      title := 'Reconnect needed'; body := login || ' stopped at ' || hm || '.';
+      title := 'Reconnect needed'; body := 'SunSynk login stopped at ' || hm || '.';
     when 'relinked' then
-      title := 'Reconnected'; body := login || ' back after ' || lasted || '.';
+      title := 'Reconnected'; body := 'Back after ' || lasted || '.';
     else return null;
   end case;
   tab := case when p_kind in ('grid_down', 'grid_back') then 'grid'
@@ -213,7 +212,7 @@ returns jsonb language sql stable security definer set search_path = '' as $$
   firsts as (select f.kind, min(f.at) at from (
                select q.kind, q.created_at at from public.email_queue q
                 where q.kind in (select private.alert_back_kind(k.kind) from shown k)
-               union all select 'relinked', timestamptz '2026-11-07 12:00+02') f
+               union all select 'relinked', timestamptz '2026-11-07 00:00+02') f
               group by f.kind)
   select jsonb_build_object(
     'more', (select count(*) from e) > greatest(1, least(p_limit, 200)),

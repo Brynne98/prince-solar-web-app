@@ -634,24 +634,23 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
 }
 
 // A SunSynk login stopped working (needs_relink) or works again (relinked), SOLAR-380.
-// One email per login: it names the login and every plant on it (0158).
-//  login   the SunSynk username; missing on rows queued before 0158
+// One email per login: it names every plant on it (0158).
 //  at      when it stopped / came back, HH:MM
 export type LoginEvent =
-  | { kind: "needs_relink"; login?: string; plants: string[]; at?: string }
-  | { kind: "relinked"; login?: string; plants: string[]; at: string; lasted: string };
+  | { kind: "needs_relink"; plants: string[]; at?: string }
+  | { kind: "relinked"; plants: string[]; at: string; lasted: string };
 // up to 3 names, then a count, as the app's billing banner
 const andList = (a: string[]) => names(a.length > 3 ? [...a.slice(0, 3), `${a.length - 3} more`] : a);
 export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email {
   const list = e.plants.length ? e.plants : ["your plant"];
-  const login = e.login ? `the login <b>${esc(e.login)}</b>` : "your login";
+  const plants = andList(list), P = `<b>${esc(plants)}</b>`;
   const dead = e.kind === "needs_relink";
-  const title = dead ? `Reconnect SunSynk for ${andList(list)}` : `SunSynk reconnected for ${andList(list)}`;
+  const title = dead ? `Reconnect SunSynk for ${plants}` : `SunSynk reconnected for ${plants}`;
   const parts: Part[] = dead
-    ? [{ callout: `SunSynk stopped accepting ${login}${e.at ? ` at ${e.at} ${day}` : ""}.` },
+    ? [{ callout: `SunSynk stopped accepting the login for ${P}${e.at ? ` at ${e.at} ${day}` : ""}.` },
        { plants: { title: "No new readings", names: list, tone: "stop", rest: "" } },
        { button: { label: "Reconnect", href: LOGINS } }]
-    : [{ p: `${e.login ? `<b>${esc(e.login)}</b>` : "Your login"} works again since ${e.at} ${day}. Stopped for ${e.lasted}.` },
+    : [{ p: `${P} reconnected at ${e.at} ${day}. Stopped for ${e.lasted}.` },
        { plants: { title: "Readings back", names: list, tone: "keep", rest: "" } },
        { button: openPage("live", plantId) }];
   // No switch for these, so no "turn them off" line.
