@@ -3481,7 +3481,8 @@ function NotificationsSection({ userId }) {
 // tap into, and each page has a back link to it; on a desktop 'prefs' shows Account. Adjust
 // plan ('plans') is a page under Billing. The plan is read once here: Billing shows it,
 // Account's Delete needs it.
-const SETTINGS_NAV = [['account', 'Account'], ['billing', 'Billing']];
+// the note shows on the phone's list only, so two rows read as what each holds (SOLAR-411)
+const SETTINGS_NAV = [['account', 'Account', 'Notifications, your data, password'], ['billing', 'Billing', 'Plan, plants, card']];
 // Setup and App each draw their own SettingsArea, so the first plant switched on or the last
 // one off mounts a new one; it starts from the plan last read, not the Plan outline. The
 // free week's end too, so Plan's line doesn't drop it until the new screen reads api_me.
@@ -3522,13 +3523,13 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
       <div className={'set-area' + (page === 'prefs' ? ' set-list' : '')}>
         <nav className="set-nav" aria-label="Settings">
           <h1 className="set-nav-title">Settings</h1>
-          {SETTINGS_NAV.map(([id, label]) => (
+          <div className="set-nav-list">{SETTINGS_NAV.map(([id, label, note]) => (
             <button key={id} type="button" aria-current={shown === id ? 'page' : undefined} onClick={() => onPage(id)}>
-              <span>{label}</span>
+              <span className="set-nav-text"><span>{label}</span><small className="set-nav-note">{note}</small></span>
               {dot[id] && <span className="dot" aria-label={billing?.state === 'past_due' ? 'Needs you' : 'A login needs reconnecting'} />}
               <Icon id="next" className="set-chev" />
             </button>
-          ))}
+          ))}</div>
         </nav>
         <div className="set-main">
           <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><Icon id="back" />Settings</button>
