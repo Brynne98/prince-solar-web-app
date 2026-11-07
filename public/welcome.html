@@ -193,6 +193,7 @@ section#features{padding-top:0;scroll-margin-top:112px}
 .h2{font:600 60px/1.04 var(--display);font-variation-settings:'opsz' 96;letter-spacing:-.035em;text-wrap:balance}
 .h2 em{font-style:normal;color:var(--gold)}
 .lede{margin-top:20px;font-size:20px;line-height:1.5;color:var(--muted);max-width:36em;text-wrap:pretty}
+.need{margin-top:12px;font-size:15px;line-height:1.5;color:var(--dim)}
 .rv{opacity:0;transition:opacity .5s ease-out}
 .rv.in{opacity:1}
 .rv.d1{transition-delay:.08s}.rv.d2{transition-delay:.16s}
@@ -792,6 +793,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   <div>
     <h2 class="h2 rv">Know how long <em>the battery lasts.</em></h2>
     <p class="lede rv d1">Down to your reserve, every minute. Cook supper and watch it drop.</p>
+    <p class="need rv d1">Needs your battery size and reserve, set once.</p>
   </div>
   <div class="app demo rv d2">
     <div class="demo-top"><span class="plant">Example plant</span><span class="mut num" id="bt-clock">18:00</span></div>
@@ -812,6 +814,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   <div>
     <h2 class="h2 rv">Catch faults <em>early.</em></h2>
     <p class="lede rv d1">Panels stop or the battery runs hot? See it that day, with what to check.</p>
+    <p class="need rv d1">Weak panels show after your first week.</p>
     <div class="chips rv d2" id="fl-picks" role="group" aria-label="Show an example"></div>
   </div>
   <div class="app demo rv d2" id="fl-card" aria-live="polite">
@@ -843,6 +846,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   <div class="wrap" id="save">
   <h2 class="h2 rv">See what <em>it saves you.</em></h2>
   <p class="lede rv d1">Rand saved, and how much of the house ran on your own power.</p>
+  <p class="need rv d1">Needs your electricity rate, from your bill.</p>
   <div class="app demo sv-card rv d2">
     <div class="demo-top"><span class="plant">Example plant</span><div class="seg" id="sv-seg" role="group" aria-label="Period"><button type="button" data-k="week" aria-pressed="false">Week</button><button type="button" data-k="month" aria-pressed="true">Month</button><button type="button" data-k="year" aria-pressed="false">Year</button></div></div>
     <div class="sv-body">
@@ -967,6 +971,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Then only the last 24 hours</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Live, every minute</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Alerts for power cuts, battery, panels and inverter</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>A report after your first week</li>
         </ul>
         <a class="btn ghost" href="https://app.princesolarhub.co.za/?signup">Try it free</a>
       </div>
@@ -976,13 +981,12 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
         <div class="per" data-offer="home"><span class="m">About R3 a day</span><span class="y">About R83 a month</span></div>
         <ul>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>2 plants</li>
-          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Your full history, any day</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Every day since you joined, plus 60 before</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Battery time left</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Weekly, monthly and yearly reports</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Fault checks</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Full-screen wall view</li>
-          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Download to Excel</li>
-          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Cancel any time</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Download your readings</li>
         </ul>
         <a class="btn ghost" data-plan="home" href="https://app.princesolarhub.co.za/?signup&amp;plan=home&amp;period=monthly">Get Home</a>
       </div>
