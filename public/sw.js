@@ -19,7 +19,8 @@ self.addEventListener('push', (e) => {
   }));
 });
 
-// data is {id, tab, plant, day}: the page, plant and day to open, and the alert to mark read.
+// data is {id, tab, plant, day, section}: the page, plant, day and Settings section to open,
+// and the alert to mark read.
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const d = e.notification.data || {};
@@ -27,6 +28,7 @@ self.addEventListener('notificationclick', (e) => {
   if (d.tab) url.searchParams.set('tab', d.tab);
   if (d.plant) url.searchParams.set('plant', d.plant);
   if (d.day) url.searchParams.set('day', d.day);
+  if (d.section) url.searchParams.set('section', d.section);
   if (d.id) url.searchParams.set('opened', d.id);
   e.waitUntil((async () => {
     const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });

@@ -558,7 +558,10 @@ function NotifRows({ items, when, heads = true, from = null }) {
         {head}
         <div className={'nl-row' + (it.read ? '' : ' unread')}>
           <span className="nl-dot" aria-label={it.read ? undefined : 'Unread'} />
-          <span className={'nl-glyph g-' + it.switch}><Icon id={NOTIF_GLYPH[it.switch] || 'live'} /></span>
+          {/* a dead login is red, a plug; its Reconnected keeps SunSynk's grey (SOLAR-380) */}
+          <span className={'nl-glyph g-' + (it.kind === 'needs_relink' ? 'bad' : it.switch)}>
+            <Icon id={it.kind === 'needs_relink' || it.kind === 'relinked' ? 'plug' : NOTIF_GLYPH[it.switch] || 'live'} />
+          </span>
           <span className="nl-text">
             <span className="nl-title">{it.title}</span>
             <span className="nl-body">{it.body}</span>

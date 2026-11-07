@@ -19,7 +19,7 @@ const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
   accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, offerEnds, renewalNotice, winback, needAHand,
-  passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, planKept, plantEvent, plantsRemovalSoon, planSwitched, planUpgraded,
+  passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, planKept, plantEvent, loginEvent, plantsRemovalSoon, planSwitched, planUpgraded,
   renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
 
@@ -131,7 +131,8 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "event-string-dead": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "string_dead", string: "String 3", inverter: "Slave", since: "11:40" })],
   "event-inverter-silent": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "logger_stale", since: "08:15" })],
   "event-inverter-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "logger_back", at: "10:02", lasted: "1h 47m" })],
-  "event-relink": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "needs_relink" })],
+  "event-relink": [FROM_ALERTS, loginEvent({ kind: "needs_relink", plants: [PLANT, "Cabin"], at: "17:40" }, PLANT_ID)],
+  "event-relinked": [FROM_ALERTS, loginEvent({ kind: "relinked", plants: [PLANT, "Cabin"], at: "19:45", lasted: "2h 5m" }, PLANT_ID)],
   "event-battery-cooled": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "batt_hot_back", at: "15:10", tempC: 42, lasted: "1h 50m" })],
   "event-banks-even": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "bank_drift_back", banks: [{ name: "Master", chargePct: 70 }, { name: "Slave", chargePct: 68 }], lasted: "2h 10m" })],
   "event-string-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "string_back", string: "String 3", inverter: "Slave", at: "14:05", lasted: "2h 25m" })],
