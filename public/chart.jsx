@@ -427,7 +427,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
       : 'No readings for this day.';
 
   return (
-    <div className="hv-root">
+    <div className="hv-root" data-today={isToday || undefined}>
       {(() => {
         const notes = <>
           {lagNote && <window.Tip className="hv-lag mono" text="From SunSynk's history, fetched every six hours; the live numbers above run ahead of it">{lagNote}</window.Tip>}
