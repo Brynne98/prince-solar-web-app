@@ -778,7 +778,7 @@ function HistoryView({ today, refreshKey, locked, silent }) {
     : isToday ? window.emptyText(window.PLANT_DAYS, 'Loading today’s data…') : pastMsg;
 
   return (
-    <div className="hv-root">
+    <div className="hv-root" data-today={isToday || undefined}>
       <DateBar pick={pick} earliest={earliest} locked={locked} />
       {/* No count of missing minutes: most are single minutes inside a five-minute bucket
           the graph cannot show, and a hole long enough to matter already breaks the lines. */}

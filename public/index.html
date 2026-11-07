@@ -448,10 +448,13 @@
     .bill-banner .ghost-btn, .nl-act { min-height: 44px; touch-action: manipulation; }
   }
   .page { display: flex; flex-direction: column; }
-  /* Old readings: pictures fade, words and numbers go grey (SOLAR-343). Faded text fell
-     to 2.3:1; grey stays over 4.5:1. */
-  .page.old .chart-area, .page.old .meter, .page.old :is(.flow-wrap, .wiw) :is(svg, .meter) { opacity: 0.45; }
-  .page.old :is(.mini-value, .stat-value, .flow-wrap, .wiw, .legend-val), .page.old :is(.mini-value, .stat-value, .flow-wrap, .wiw) * { color: var(--muted) !important; }
+  /* Old readings: today's pictures fade, today's words and numbers go grey (SOLAR-343).
+     Faded text fell to 2.3:1; grey stays over 4.5:1. History keeps its colour: [data-today]
+     marks what shows today, and the first two tiles on Solar, Home and Grid are NOW and
+     TODAY (SOLAR-386). */
+  .page.old [data-today] :is(.chart-area, .meter), .page.old :is(.flow-wrap, .wiw[data-today]) :is(svg, .meter) { opacity: 0.45; }
+  .page.old :is([data-today] .mini-value, .solar-stats > :nth-child(-n+2) .stat-value, .trio .stat-value, .flow-wrap, .wiw[data-today], [data-today] .legend-val),
+  .page.old :is([data-today] .mini-value, .solar-stats > :nth-child(-n+2) .stat-value, .trio .stat-value, .flow-wrap, .wiw[data-today]) * { color: var(--muted) !important; }
 
   /* phone-only pieces, hidden wider */
   .phonebar, .sheet { display: none; }
