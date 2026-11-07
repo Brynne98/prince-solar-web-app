@@ -1695,8 +1695,8 @@ function simpleIssues(issues) {
 }
 
 // Simple (SOLAR-397): a tile per part, its figure, one line of what it is doing, and a small
-// chart of today under it. Panels and battery from the day's minute log; inverter heat and
-// grid voltage from SunSynk's inverter history, which lags by up to six hours.
+// chart of today under it. Panels, battery and grid from our own minute readings; inverter
+// heat from SunSynk's inverter history, which the poller fetches every ten minutes (SOLAR-398).
 
 // A day sparkline: `vals` are [minute, value | null] pairs across 0 to 1440, drawn into a box
 // that stretches with the tile. `stroke` is a colour or a heat gradient (`heat`).
@@ -1734,7 +1734,7 @@ function EqTile({ label, state, value, unit, sub, color, stale, spark }) {
   );
 }
 
-function EquipmentSimple({ st, now, today, hist }) {
+function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const { a, verdict } = st;
   const last = t => t ? 'Last reading ' + window.readAgo(t, now) : 'Not reporting';
   const alerts = verdict && verdict.state === 'alert' ? verdict.alerts : [];
@@ -1767,15 +1767,16 @@ function EquipmentSimple({ st, now, today, hist }) {
     const vs = rows.map(r => r.points[i] && r.points[i].ac).filter(v => v != null);
     return [i * 5, vs.length ? Math.max(...vs) : null];
   });
-  // ---- grid: voltage now, and any time off today ----
+  // ---- grid: voltage now, and any time off today, from our own minute readings (SOLAR-398) ----
   const liveInv = st.invs.filter(i => !st.quiet.includes(i));
   const volt = liveInv.map(i => i.gridVolt).find(v => v > 50) || null;
-  const outages = outageRuns(rows, ['gmin', 'gmax'], DAY_LAST);
-  const offMin = outageMinutes(outages);
+  const gb = (gridDay && gridDay.buckets) || [];
+  const outages = [];
+  gb.forEach(b => { const r = outages[outages.length - 1]; if (!b.off) return; if (r && r[1] === b.i - 1) r[1] = b.i; else outages.push([b.i, b.i]); });
+  const offMin = gridDay ? Number(gridDay.offMinutes) || 0 : 0;
   const gridState = st.allQuiet || a.gridPresent == null ? ['stale', st.allQuiet ? last(st.lastAt) : 'Not known']
     : a.gridPresent ? ['ok', 'On'] : ['warn', 'Off'];
-  const vRow = rows.find(r => r.points.some(p => p.v != null));
-  const vVals = vRow ? vRow.points.map((p, i) => [i * 5, p.v != null && p.v > 50 ? p.v : null]) : [];
+  const vVals = gb.map(b => [b.i * 5, b.v]);
   return (
     <div className="eq-tiles">
       <EqTile label="Solar panels" state={pvState} value={st.pvParts[0]} unit={st.pvParts[1]} color={CC.pv} stale={st.allQuiet}
@@ -1788,7 +1789,7 @@ function EquipmentSimple({ st, now, today, hist }) {
         sub={[warm && (n > 1 ? 'warmest at ' : 'at ') + HM(warm.at), !st.allQuiet && fmtPower(out) + ' to the house'].filter(Boolean).join(' · ')}
         spark={heatVals.some(v => v[1] != null) && <EqSpark vals={heatVals} lo={30} hi={70} heat={EQ_HOT_AC} />} />
       {st.hasGrid && <EqTile label="Grid" state={gridState} value={volt ? Math.round(volt) : '—'} unit={volt ? ' V' : null} color={CC.grid} stale={st.allQuiet || !volt}
-        sub={rows.length ? (offMin ? 'Off ' + window.fmtDuration(offMin) + ' today' : 'No outage today') : null}
+        sub={gb.length ? (offMin ? 'Off ' + window.fmtDuration(offMin) + ' today' : 'No outage today') : null}
         spark={vVals.some(v => v[1] != null) && <EqSpark vals={vVals} lo={215} hi={255} stroke={CC.grid} outages={outages} />} />}
     </div>
   );
@@ -2043,9 +2044,11 @@ function InvertersTab({ snap, today, refreshKey }) {
   }, [refreshKey]);
   // Today's temperatures: the same answer the Temperature chart asks for, shared, so no extra call
   const [hist, setHist] = React.useState(null);
+  const [gridDay, setGridDay] = React.useState(null); // today's grid from our own readings (SOLAR-398)
   React.useEffect(() => {
     let alive = true;
     window.fetchInverterHistory(window.localDateStr(), refreshKey).then(r => { if (alive) setHist(r); }).catch(() => {});
+    window.fetchGridToday().then(r => { if (alive) setGridDay(r); }).catch(() => {});
     return () => { alive = false; };
   }, [refreshKey]);
   // Simple or Detailed is this viewer's own choice, kept across visits
@@ -2082,7 +2085,7 @@ function InvertersTab({ snap, today, refreshKey }) {
         </div>
       )}
 
-      {simple ? <EquipmentSimple st={st} now={now} today={today} hist={hist} />
+      {simple ? <EquipmentSimple st={st} now={now} today={today} hist={hist} gridDay={gridDay} />
         : <EquipmentDetailed st={st} snap={snap} health={health} now={now} refreshKey={refreshKey} />}
     </div>
   );

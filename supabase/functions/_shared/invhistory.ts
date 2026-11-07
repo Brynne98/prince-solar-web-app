@@ -275,6 +275,13 @@ export function plantSpine(days: InverterDay[], dayStart: number): Map<number, S
   return rows;
 }
 
+/** YYYY-MM-DD in the plant's zone (moved here from recover). */
+export function localDate(tz: string, d = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(d);
+}
+
 /** Epoch of local midnight for a YYYY-MM-DD in `tz` (moved here from recover). */
 export function dayStartEpoch(tz: string, day: string): number {
   // Find the UTC instant whose wall-clock in `tz` is 00:00 on `day`: start from

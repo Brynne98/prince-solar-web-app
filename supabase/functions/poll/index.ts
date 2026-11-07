@@ -27,6 +27,7 @@
 // Deliberately NOT ported: the gzipped `raw` payload table. It was 46 MB of the
 // 96 MB SQLite file, has no dashboard consumer, and may embed account identifiers.
 import { reportError, serve } from "../_shared/errors.ts";
+import { dayStartEpoch, extrasOf, extrasPaths, historyRows, localDate, parseSeries } from "../_shared/invhistory.ts";
 import {
   aggregate,
   DEFAULT_BATT_POSITIVE_MEANS,
@@ -88,6 +89,8 @@ type AccountResult = {
   tiered?: Record<string, string[]>;
   /** inverters that answered with nothing at all this minute; no row stored */
   noData?: string[];
+  /** inverters whose today's temperatures were fetched this minute: rows banked, or the error (SOLAR-398) */
+  temps?: Record<string, number | string>;
   /** inverter list re-read from SunSynk this minute (else served from cache) */
   listRefreshed: boolean;
   /** SunSynk requests spent on the inverter / plant lists this minute (0, 1 or 2+) */
@@ -159,6 +162,25 @@ function outageSignal(r: Record<string, unknown>): "relay_open" | "low_volt" | n
 // ---------------------------------------------------------------------------
 const MAX_CARRIED_RUN = 5;
 const OUTPUT_EVERY_S = 600;
+
+// ---------------------------------------------------------------------------
+// Today's inverter temperatures (SOLAR-398). SunSynk sends no live temperature on
+// our key, only its day history (output/day). Recover fetches that every six hours;
+// here each inverter fetches today's once in ten minutes, on its own minute (spread
+// by serial), so Equipment's temperature is ten minutes old at most plus the
+// logger's upload (master ~67 s, slave 5 min). One call: AC/DC temperature, AC
+// terminal volts and output Hz. The insert keeps what a row already holds (0046).
+// ---------------------------------------------------------------------------
+const TEMP_EVERY_MIN = 10;
+const tempMinute = (sn: string) => [...sn].reduce((h, c) => h + c.charCodeAt(0), 0) % TEMP_EVERY_MIN;
+
+async function bankTodayTemps(inv: InverterInfo, acc: Account, tz: string): Promise<number> {
+  const day = localDate(tz);
+  const out = await apiGet(extrasPaths(inv.sn, day).output, acc);
+  const rows = historyRows(extrasOf(parseSeries(out), undefined), dayStartEpoch(tz, day));
+  if (!rows.length) return 0;
+  return Number(await rpc("q_insert_inverter_history", { p_plant: inv.plantId, p_sn: inv.sn, p_rows: rows }) ?? 0);
+}
 
 type Endpoint = "battery" | "grid" | "load" | "output";
 const ALL_ENDPOINTS: Endpoint[] = ["battery", "grid", "load", "output"];
@@ -357,6 +379,13 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   const offGrid = new Set(jobs.filter((j) => j.hasGrid !== true).map((j) => j.plantId));
   const perInv = await Promise.all(inverters.map((inv) =>
     fetchInverter(inv, acc, ts, signOf.get(Number(inv.plantId)) ?? null, offGrid.has(Number(inv.plantId)))));
+  // Today's temperatures for the inverters whose minute this is and whose logger has sent
+  // something new: started now, awaited at the end so the readings commit first. A
+  // failure costs only this round.
+  const tzOf = new Map(jobs.map((j) => [j.plantId, j.timezone]));
+  const due = perInv.filter((f) => !f.carried && inputTimeOf(f.raw.input) != null
+    && Math.floor(ts / 60) % TEMP_EVERY_MIN === tempMinute(f.inv.sn)).map((f) => f.inv);
+  const tempsDone = Promise.allSettled(due.map((inv) => bankTodayTemps(inv, acc, tzOf.get(Number(inv.plantId)) ?? "Africa/Johannesburg")));
   const carried = perInv.filter((f) => f.carried).map((f) => f.inv.sn);
   if (carried.length) result.carried = carried;
   // Endpoints whose value on this row came from the previous one — whether they were
@@ -459,6 +488,11 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
     }
   }
 
+  if (due.length) {
+    const got = await tempsDone;
+    result.temps = Object.fromEntries(due.map((inv, i) => [inv.sn, got[i].status === "fulfilled"
+      ? (got[i] as PromiseFulfilledResult<number>).value : String((got[i] as PromiseRejectedResult).reason)]));
+  }
   result.apiCalls = callsSince(acc, callsAtStart);
   return result;
 }

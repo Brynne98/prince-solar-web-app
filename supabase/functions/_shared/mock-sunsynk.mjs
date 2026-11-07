@@ -358,6 +358,17 @@ function inverterDay(plantId, inv, day, column) {
   const rec = (k) => feedRecords(plant, day, k, step, "full");
   if (column === "soc") return { infos: [{ label: "SOC", unit: "%", records: plant.battKwh > 0 ? rec("soc") : [] }] };
   if (column === "ppv") return { infos: [{ label: "P-pv", unit: "W", records: scale("pv")(rec("pv")) }] };
+  // the extras (recover's walk and the poller's 10-minute call, SOLAR-398): temperatures follow the sun
+  if (/igbt_temp/.test(column || "")) {
+    const pv = rec("pv");
+    const warm = (base, k) => pv.map((r) => ({ time: r.time, value: String(r1(base + k * Number(r.value) / Math.max(1, plant.kwp * 1000))) }));
+    return { infos: [
+      { label: "AC TEMP", unit: "℃", records: warm(44, 10) },
+      { label: "DC TEMP", unit: "℃", records: warm(55, 12) },
+      { label: "V-ac-1", unit: "V", records: pv.map((r) => ({ time: r.time, value: "238.5" })) },
+      { label: "F-ac", unit: "Hz", records: pv.map((r) => ({ time: r.time, value: "50.01" })) },
+    ] };
+  }
   if (column === "pac" ) return { infos: [{ label: "P-Grid", unit: "W", records: scale("grid")(rec("grid")) }] };
   if (column === "pac-load") return { infos: [{ label: "P-Load", unit: "W", records: scale("load")(rec("load")) }] };
   if (column === "vpv" || column === "ipv") {
