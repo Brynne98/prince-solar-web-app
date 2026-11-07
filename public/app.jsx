@@ -1746,7 +1746,7 @@ function App({ links }) {
         {tab === 'solar' && <window.SolarTab alertDay={openDay} snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
         {tab === 'home' && <window.HomeTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} />}
         {tab === 'grid' && <window.GridTab alertDay={openDay} snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
-        {tab === 'inverters' && <window.InvertersTab snap={snap} refreshKey={refreshKey} />}
+        {tab === 'inverters' && <window.InvertersTab snap={snap} today={today} refreshKey={refreshKey} />}
       </div>
     </Frame>
     </window.FreeCtx.Provider>

@@ -927,25 +927,25 @@
   .eq-problem-head span { flex: none; font-size: var(--fs-xs); color: var(--dim); }
   .eq-problem p { margin: var(--sp-xs) 0 0; font-size: var(--fs-md); color: var(--muted); line-height: 1.5; }
 
-  /* Simple: a row of tiles, figure on top; below 900px a list, words left and figure right */
-  .eq-tiles { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-md); }
-  .eq-tile { display: flex; flex-direction: column; gap: var(--sp-lg); min-width: 0; }
-  .eq-fig { font-weight: 700; font-size: var(--fs-4xl); line-height: 1; display: flex; align-items: baseline; gap: var(--sp-2xs); }
-  .eq-fig.word { font-size: var(--fs-3xl); letter-spacing: -0.01em; }
-  .eq-fig .u { font-size: var(--fs-xl); opacity: 0.85; }
-  .eq-fig-sub { margin-top: var(--sp-sm); font-size: var(--fs-sm); color: var(--dim); }
-  .eq-tile.stale .eq-fig { color: var(--muted); }   /* an old reading greys out; faded colour fell under 4.5:1 (SOLAR-343) */
-  .eq-tile-text { display: flex; flex-direction: column; gap: var(--sp-sm); min-width: 0; }
+  /* Simple (SOLAR-397): a tile per part, figure, one line, and a small chart of today; four
+     across when wide, two by two on a phone */
+  .eq-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-md); }
+  @media (min-width: 1100px) { .eq-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-xl); } }
+  .eq-tiles > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+  @media (min-width: 1100px) { .eq-tiles > :last-child:nth-child(odd) { grid-column: auto; } }
+  .eq-tile { display: flex; flex-direction: column; min-width: 0; }
   .eq-tile-label { font-size: var(--fs-lg); font-weight: 600; }
-  .eq-tile-state { display: flex; align-items: center; gap: var(--sp-sm); font-size: var(--fs-md); color: var(--muted); }
+  .eq-tile-state { display: flex; align-items: center; gap: var(--sp-sm); margin-top: var(--sp-2xs); font-size: var(--fs-sm); color: var(--muted); }
   .eq-tile-state.warn { color: var(--warn); }
-  @media (min-width: 900px) { .eq-tiles { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--sp-xl); } }
-  @media (max-width: 899px) {
-    .eq-tile { flex-direction: row-reverse; justify-content: space-between; align-items: center; gap: var(--sp-lg); }
-    .eq-tile-fig { text-align: right; flex: none; }
-    .eq-fig { font-size: var(--fs-3xl); justify-content: flex-end; }
-    .eq-fig.word { font-size: var(--fs-2xl); }
+  .eq-fig { margin-top: var(--sp-lg); font-weight: 700; font-size: var(--fs-4xl); line-height: 1; display: flex; align-items: baseline; gap: var(--sp-2xs); }
+  .eq-fig .u { font-size: var(--fs-xl); opacity: 0.85; }
+  .eq-fig-sub { margin-top: var(--sp-sm); font-size: var(--fs-sm); color: var(--muted); }
+  .eq-tile.stale .eq-fig { color: var(--muted); }   /* an old reading greys out; faded colour fell under 4.5:1 (SOLAR-343) */
+  .eq-spark { margin-top: auto; padding-top: var(--sp-lg); height: 72px; }
+  @media (max-width: 599px) {
+    .eq-fig { margin-top: var(--sp-md); font-size: var(--fs-3xl); }
     .eq-fig .u { font-size: var(--fs-lg); }
+    .eq-spark { height: 52px; padding-top: var(--sp-md); }
   }
 
   /* Detailed (SOLAR-392): cards in pairs when wide, one on a phone; the inverters read across */
