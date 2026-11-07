@@ -645,13 +645,14 @@ export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email
   const list = e.plants.length ? e.plants : ["your plant"];
   const plants = andList(list), P = `<b>${esc(plants)}</b>`;
   const dead = e.kind === "needs_relink";
-  const title = dead ? `Reconnect SunSynk for ${plants}` : `SunSynk reconnected for ${plants}`;
+  const title = dead ? `Sign in to SunSynk again for ${plants}` : `SunSynk reconnected for ${plants}`;
+  // A short calm note, no red (SOLAR-383): the missed readings come back after a reconnect.
   const parts: Part[] = dead
-    ? [{ callout: `SunSynk stopped accepting the login for ${P}${e.at ? ` at ${e.at} ${day}` : ""}.` },
-       { plants: { title: "No new readings", names: list, tone: "stop", rest: "" } },
+    ? [{ p: `Readings for ${P} paused${e.at ? ` at ${e.at} ${day}` : ""}. SunSynk asked for your login again.` },
+       { p: "Reconnect and we fetch the readings you missed." },
        { button: { label: "Reconnect", href: LOGINS } }]
-    : [{ p: `${P} reconnected at ${e.at} ${day}. Stopped for ${e.lasted}.` },
-       { plants: { title: "Readings back", names: list, tone: "keep", rest: "" } },
+    : [{ p: `Readings for ${P} are back since ${e.at} ${day}, after ${e.lasted}.` },
+       { p: "We're fetching the readings you missed." },
        { button: openPage("live", plantId) }];
   // No switch for these, so no "turn them off" line.
   return make(title, { title, parts, footer: [HELP] });
