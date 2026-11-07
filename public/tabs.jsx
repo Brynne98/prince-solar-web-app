@@ -3314,133 +3314,131 @@ function FirstStepsSection({ me, plantId, onSaved }) {
   );
 }
 
-// Report and alert emails (SOLAR-158), in two groups that open to one switch per email
-// (SOLAR-164). A group's switch is on while any email in it is on, and sets them all.
-// A tap saves at once and flips back if the save fails. "SunSynk disconnected" and
-// account emails have no switch. The footer of every report and alert email opens this
+// Notifications (SOLAR-402): one row per alert or report, one switch per way it can reach
+// the user. A new way (a phone app, WhatsApp) is one more entry in NOTIF_CHANNELS: its
+// switches table, the kinds it carries, and its fetch and save. The switches only stop
+// that channel: every alert stays in the Notifications list (api_alerts). A tap saves at
+// once and flips back if the save fails. "Reconnect needed" and account and billing
+// emails have no switch. The footer of every report and alert email opens this
 // (section=notifications).
-const EMAIL_GROUPS = [
-  { id: 'reports', label: 'Reports', rows: [
-    ['weekly', 'Weekly', 'Last week, on Mondays.'],
-    ['monthly', 'Monthly', 'Last month, on the 1st.'],
-    ['yearly', 'Yearly', 'Last year, on 1 January.']] },
-  { id: 'alerts', label: 'Alerts', when: 'Sent when it happens', rows: [
+const NOTIF_CHANNELS = [
+  { id: 'email', label: 'Email', noun: 'email', kinds: window.EMAIL_KINDS, fetch: window.fetchEmailPrefs, save: window.saveEmailPref },
+  // push_prefs are the account's: they apply on every device with pop-ups on
+  { id: 'push', label: 'Pop-up', noun: 'pop-up', kinds: window.PUSH_KINDS, fetch: window.fetchPushPrefs, save: window.savePushPref },
+];
+const NOTIF_GROUPS = [
+  { label: 'Alerts', rows: [
     ['grid', 'Grid', 'The grid goes off, and when it’s back.'],
     ['battery', 'Battery', 'Over 45 °C, or charging unevenly, and when it’s fixed.'],
     ['panels', 'Panels', 'A string stops while the others make power, and when it’s back.'],
     ['readings', 'Readings', 'No readings for 30 min, and when they’re back.'],
     ['sunsynk', 'SunSynk', 'SunSynk stops answering, and when it’s back.']] },
+  { label: 'Reports', rows: [
+    ['weekly', 'Weekly', 'Last week, on Mondays.'],
+    ['monthly', 'Monthly', 'Last month, on the 1st.'],
+    ['yearly', 'Yearly', 'Last year, on 1 January.']] },
 ];
-// "All 3 on", "Weekly and Monthly on", "4 of 5 on. Sent when it happens", "Off".
-function emailGroupSummary(g, prefs) {
-  const on = g.rows.filter(([k]) => !prefs || prefs[k]).map(([, label]) => label);
-  if (!on.length) return 'Off';
-  const names = on.length === g.rows.length ? 'All ' + on.length
-    : on.length > 2 ? on.length + ' of ' + g.rows.length : on.join(' and ');
-  return names + ' on' + (g.when ? '. ' + g.when : '');
-}
 function NotificationsSection({ userId }) {
   const { useState, useEffect } = React;
-  const [prefs, setPrefs] = useState(null);
+  // each channel's switches, by channel id; null while on its way
+  const [prefs, setPrefs] = useState({});
   const [failed, setFailed] = useState(false);
-  const [open, setOpen] = useState({});
-  // Pop-ups on this browser (SOLAR-244): its state, then the five alert switches once on.
+  // Pop-ups on this browser (SOLAR-244)
   const [push, setPush] = useState(null); // on | off | blocked | ios | none | asking
-  const [pushPrefs, setPushPrefs] = useState(null);
   const load = () => {
     setFailed(false);
-    window.fetchEmailPrefs(userId).then(setPrefs).catch(() => setFailed(true));
-    window.fetchPushPrefs(userId).then(setPushPrefs).catch(() => {});
+    NOTIF_CHANNELS.forEach(ch => ch.fetch(userId).then(p => setPrefs(s => ({ ...s, [ch.id]: p }))).catch(() => setFailed(true)));
   };
   useEffect(() => { if (userId) load(); }, [userId]);
   useEffect(() => { window.pushState().then(setPush).catch(() => setPush('off')); }, []);
-  // A save that works shows nothing more than the switch; one that fails names what it was
-  // (the email, or the group a group switch set) in the red toast (SOLAR-166).
-  const saver = (set, save) => async (kind, on, name) => {
-    set(p => ({ ...p, [kind]: on }));
-    try { await save(userId, kind, on); }
-    catch {
-      set(p => ({ ...p, [kind]: !on }));
-      window.toast('Couldn’t save ' + (name || EMAIL_GROUPS.flatMap(g => g.rows).find(([k]) => k === kind)[1]) + '. Try again.', { error: true });
-    }
+  // A save that works shows nothing more than the switch; one that fails names it in the
+  // red toast (SOLAR-166).
+  const flip = async (ch, kind, on, name) => {
+    const set = (v) => setPrefs(s => ({ ...s, [ch.id]: { ...s[ch.id], [kind]: v } }));
+    set(on);
+    try { await ch.save(userId, kind, on); }
+    catch { set(!on); window.toast('Couldn’t save ' + name + '. Try again.', { error: true }); }
   };
-  const flip = saver(setPrefs, window.saveEmailPref);
-  const flipPush = saver(setPushPrefs, window.savePushPref);
   const togglePush = async () => {
     const was = push;
     setPush('asking');
     try { setPush(await (was === 'on' ? window.pushTurnOff() : window.pushTurnOn())); }
     catch { setPush(was); window.toast('Couldn’t turn pop-ups ' + (was === 'on' ? 'off' : 'on') + '. Try again.', { error: true }); }
   };
-  // The email choices still on their way: each switch and its summary shimmer in place.
-  const loading = !prefs && !failed;
-  // One group: a row that opens its switches, and a switch for all of them. Each switch
-  // saves through its own flip, so a group is its switches' saves, one per kind.
-  const group = (g, p, flipOne, key, wait) => {
-    const anyOn = !p || g.rows.some(([kind]) => p[kind]);
-    return (
-      <div className="notif-group" key={key}>
-        <div className="notif-head">
-          <button type="button" className="notif-open" aria-expanded={!!open[key]} aria-controls={'notif-' + key}
-                  onClick={() => setOpen(o => ({ ...o, [key]: !o[key] }))}>
-            <Icon id="next" />
-            <span className="toggle-text">
-              <span className="notif-label">{g.label}</span>
-              <span className="toggle-hint">{wait ? <window.SkelLine w={g.when ? 190 : 70} h={11} /> : emailGroupSummary(g, p)}</span>
-            </span>
-          </button>
-          <window.Switch loading={wait} on={anyOn} label={g.label}
-                  onChange={() => p && g.rows.forEach(([kind]) => { if (p[kind] === anyOn) flipOne(kind, !anyOn, g.label); })} />
-        </div>
-        <div id={'notif-' + key} className="field notif-rows" role="group" aria-label={g.label} hidden={!open[key]}>
-          {g.rows.map(([kind, label, hint]) => (
-            <Toggle key={kind} label={label} hint={hint} checked={!p || p[kind]} loading={wait}
-                    onChange={(on) => p && flipOne(kind, on)} />
+  // One switch per channel; an empty cell where the channel doesn't carry this kind.
+  const cell = (ch, kind, label) => {
+    if (!ch.kinds.includes(kind)) return <span key={ch.id} />;
+    const p = prefs[ch.id];
+    return <window.Switch key={ch.id} loading={!p} on={!p || p[kind]} label={label + ' ' + ch.noun}
+                          onChange={(on) => p && flip(ch, kind, on, label + ' ' + ch.noun)} />;
+  };
+  // All: on while any of the channel's switches is on, and sets them all
+  const allCell = (ch) => {
+    const p = prefs[ch.id];
+    const anyOn = !p || ch.kinds.some(k => p[k]);
+    return <window.Switch key={ch.id} loading={!p} on={anyOn} label={'All ' + ch.noun + 's'}
+                          onChange={() => p && ch.kinds.forEach(k => { if (p[k] === anyOn) flip(ch, k, !anyOn, 'all ' + ch.noun + 's'); })} />;
+  };
+  const cols = { '--notif-cols': NOTIF_CHANNELS.length };
+  // This browser's switch, in the Pop-up column
+  const pushRow = (sw) => (
+    <div className="notif-row">
+      <span className="toggle-text">
+        <span className="toggle-label">Pop-ups</span>
+        <span className="toggle-hint">Shows the pop-up alerts here, even when the app is closed.</span>
+      </span>
+      {NOTIF_CHANNELS.map(ch => ch.id === 'push' ? <React.Fragment key={ch.id}>{sw}</React.Fragment> : <span key={ch.id} />)}
+    </div>
+  );
+  return (
+    <SettingsSection id="notifications" title="Notifications"
+                     note="Every alert shows in the Notifications list. Reconnect needed and billing emails always go out.">
+      {failed ? (
+        <SettingRow label="Couldn’t load your notification settings" action={<button type="button" className="ghost-btn" onClick={load}>Try again</button>} />
+      ) : (
+        <div className="notif-table" style={cols}>
+          <div className="notif-row notif-cols" aria-hidden="true">
+            <span />
+            {NOTIF_CHANNELS.map(ch => <span key={ch.id} className="notif-col">{ch.label}</span>)}
+          </div>
+          <div className="notif-row">
+            <span className="toggle-text"><span className="toggle-label">All</span></span>
+            {NOTIF_CHANNELS.map(allCell)}
+          </div>
+          {NOTIF_GROUPS.map(g => (
+            <div key={g.label} role="group" aria-label={g.label}>
+              <div className="notif-sub">{g.label}</div>
+              {g.rows.map(([kind, label, hint]) => (
+                <div key={kind} className="notif-row">
+                  <span className="toggle-text">
+                    <span className="toggle-label">{label}</span>
+                    <span className="toggle-hint">{hint}</span>
+                  </span>
+                  {NOTIF_CHANNELS.map(ch => cell(ch, kind, label))}
+                </div>
+              ))}
+            </div>
           ))}
         </div>
-      </div>
-    );
-  };
-  const alerts = EMAIL_GROUPS.find(g => g.id === 'alerts');
-  // All emails (SOLAR-250): one switch over both groups, on while any email is on
-  const every = EMAIL_GROUPS.flatMap(g => g.rows);
-  const onCount = prefs ? every.filter(([k]) => prefs[k]).length : every.length;
-  const allOn = onCount > 0;
-  return (
-    <SettingsSection id="notifications" title="Notifications" note="Account emails always go out.">
-      {failed ? (
-        <SettingRow label="Couldn’t load your email settings" action={<button type="button" className="ghost-btn" onClick={load}>Try again</button>} />
-      ) : <>
-        <div className="notif-sub">Email</div>
-        <div className="notif-head notif-all">
-          <span className="toggle-text">
-            <span className="notif-label">All emails</span>
-            <span className="toggle-hint">{loading ? <window.SkelLine w={60} h={11} /> : onCount === every.length ? 'All ' + onCount + ' on' : onCount ? onCount + ' of ' + every.length + ' on' : 'Off'}</span>
-          </span>
-          <window.Switch loading={loading} on={allOn} label="All emails"
-                  onChange={() => prefs && every.forEach(([kind]) => { if (prefs[kind] === allOn) flip(kind, !allOn, 'All emails'); })} />
-        </div>
-        {EMAIL_GROUPS.map(g => group(g, prefs, flip, g.id, loading))}
-      </>}
+      )}
       {/* This browser's pop-up state is still being read: its row, with the switch shimmering */}
       {push === null && (
-        <div className="notif-push" aria-hidden="true">
+        <div className="notif-push" style={cols} aria-hidden="true">
           <div className="notif-sub">On this browser</div>
-          <Toggle loading label="Pop-up alerts" hint="The same alerts, shown on this device even when the app is closed." />
+          {pushRow(<window.Switch loading />)}
         </div>
       )}
       {push && push !== 'none' && (
-        <div className={'notif-push ' + push}>
+        <div className={'notif-push ' + push} style={cols}>
           <div className="notif-sub">On this browser</div>
-          <Toggle label="Pop-up alerts" hint="The same alerts, shown on this device even when the app is closed."
-                  checked={push === 'on'} onChange={() => push !== 'asking' && push !== 'ios' && togglePush()} />
+          {pushRow(<window.Switch on={push === 'on'} label="Pop-ups on this browser"
+                                  onChange={() => push !== 'asking' && push !== 'ios' && togglePush()} />)}
           {push === 'blocked' && (
             <p className="notif-note warn">Pop-ups are blocked. Allow notifications for {location.host} in your browser’s site settings, then turn this on.</p>
           )}
           {push === 'ios' && (
             <p className="notif-note">On iPhone, pop-ups need the app on your Home Screen. In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>. iOS 16.4 or later.</p>
           )}
-          {push === 'on' && group({ ...alerts, when: null }, pushPrefs, flipPush, 'push', loading)}
         </div>
       )}
     </SettingsSection>
