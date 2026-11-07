@@ -1592,7 +1592,7 @@ function InvertersSkeleton() {
             <Card className="eq-card"><SectionTitle>GRID SUPPLY</SectionTitle>{rows(3)}</Card>
           </div>
           <Card className="chart-card"><SectionTitle>TEMPERATURE</SectionTitle><DayChartSkeleton legend /></Card>
-          <Card className="chart-card"><SectionTitle>GRID SUPPLY</SectionTitle><DayChartSkeleton legend /></Card>
+          <Card className="chart-card"><SectionTitle>VOLTAGE</SectionTitle><DayChartSkeleton legend /></Card>
         </>
       )}
     </div>
@@ -1737,11 +1737,13 @@ function EqTile({ label, state, value, unit, sub, color, stale, spark }) {
 function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const { a, verdict } = st;
   const last = t => t ? 'Last reading ' + window.readAgo(t, now) : 'Not reporting';
+  // the whole plant quiet: the problem card above says since when, so each tile says it once, plainly (SOLAR-407)
+  const QUIET = ['stale', 'Not reporting'];
   const alerts = verdict && verdict.state === 'alert' ? verdict.alerts : [];
   const pts = (today && today.points) || [];
   const rows = (hist || []).filter(r => r.points && r.points.length);
   // ---- solar panels ----
-  const pvState = st.allQuiet ? ['stale', last(st.lastAt)]
+  const pvState = st.allQuiet ? QUIET
     : st.quiet.length ? ['stale', 'Not all reporting']
     : alerts.length ? ['warn', 'Needs a look']
     : st.night ? ['ok', 'Resting for the night']
@@ -1749,7 +1751,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const pvVals = pts.map(p => [p.t, p.pv == null ? null : Math.max(0, p.pv)]);
   const pvMax = Math.max(500, ...pvVals.map(v => v[1] || 0));
   // ---- battery ----
-  const battState = st.battStale ? ['stale', last(st.battAt)]
+  const battState = st.allQuiet ? QUIET : st.battStale ? ['stale', last(st.battAt)]
     : st.hot || st.badSensor ? ['warn', 'Needs a look']
     : ['ok', a.battOut > 5 ? 'Powering the house' : a.battOut < -5 ? 'Charging' : 'Resting'];
   const battSub = st.battStale ? null : [a.battOut > 5 ? fmtPower(a.battOut) + ' out' : a.battOut < -5 ? fmtPower(-a.battOut) + ' in' : null,
@@ -1757,12 +1759,14 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   // ---- inverters: the warmest one now, and the warmest of them through the day ----
   const n = st.invs.length, live = n - st.quiet.length;
   const invState = !st.quiet.length ? ['ok', n === 1 ? 'On' : n === 2 ? 'Both on' : 'All on']
-    : st.allQuiet ? ['stale', last(st.lastAt)]
+    : st.allQuiet ? QUIET
     : ['warn', live + ' of ' + n + ' reporting'];
   const temps = Object.values(st.invT);
   const warm = temps.length ? temps.reduce((x, y) => (y.ac > x.ac ? y : x)) : null;
   const hot = temps.some(t => t.ac > EQ_HOT_AC || (t.dc != null && t.dc > EQ_HOT_DC));
   const out = st.invs.filter(i => !st.quiet.includes(i)).reduce((s, i) => s + (i.output || 0), 0);
+  // no temperature yet today (it comes every six hours): the power to the house is the figure, not a dash (SOLAR-407)
+  const outParts = !warm && !st.allQuiet ? fmtPowerParts(out) : null;
   const heatVals = Array.from({ length: DAY_LAST + 1 }, (_, i) => {
     const vs = rows.map(r => r.points[i] && r.points[i].ac).filter(v => v != null);
     return [i * 5, vs.length ? Math.max(...vs) : null];
@@ -1774,7 +1778,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const outages = [];
   gb.forEach(b => { const r = outages[outages.length - 1]; if (!b.off) return; if (r && r[1] === b.i - 1) r[1] = b.i; else outages.push([b.i, b.i]); });
   const offMin = gridDay ? Number(gridDay.offMinutes) || 0 : 0;
-  const gridState = st.allQuiet || a.gridPresent == null ? ['stale', st.allQuiet ? last(st.lastAt) : 'Not known']
+  const gridState = st.allQuiet ? QUIET : a.gridPresent == null ? ['stale', 'Not known']
     : a.gridPresent ? ['ok', 'On'] : ['warn', 'Off'];
   const vVals = gb.map(b => [b.i * 5, b.v]);
   return (
@@ -1785,8 +1789,8 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
       {st.hasBatt && <EqTile label="Battery" state={battState} value={a.battSoc ?? '—'} unit={a.battSoc != null ? '%' : null} color={CC.batt} stale={st.battStale}
         sub={battSub} spark={pts.some(p => p.soc != null) && <EqSpark vals={pts.map(p => [p.t, p.soc])} lo={0} hi={100} stroke={CC.batt} />} />}
       <EqTile label={n === 1 ? 'Inverter' : 'Inverters'} state={hot && !st.allQuiet ? ['warn', 'Running hot'] : invState}
-        value={warm ? Math.round(warm.ac) : '—'} unit={warm ? ' °C' : null} stale={st.allQuiet}
-        sub={[warm && (n > 1 ? 'warmest at ' : 'at ') + HM(warm.at), !st.allQuiet && fmtPower(out) + ' to the house'].filter(Boolean).join(' · ')}
+        value={warm ? Math.round(warm.ac) : outParts ? outParts[0] : '—'} unit={warm ? ' °C' : outParts ? outParts[1] : null} stale={st.allQuiet}
+        sub={outParts ? 'to the house now' : [warm && (n > 1 ? 'warmest at ' : 'at ') + HM(warm.at), !st.allQuiet && fmtPower(out) + ' to the house'].filter(Boolean).join(' · ')}
         spark={heatVals.some(v => v[1] != null) && <EqSpark vals={heatVals} lo={30} hi={70} heat={EQ_HOT_AC} />} />
       {st.hasGrid && <EqTile label="Grid" state={gridState} value={volt ? Math.round(volt) : '—'} unit={volt ? ' V' : null} color={CC.grid} stale={st.allQuiet || !volt}
         sub={gb.length ? (offMin ? 'Off ' + window.fmtDuration(offMin) + ' today' : 'No outage today') : null}
@@ -2021,7 +2025,8 @@ function EquipmentDetailed({ st, snap, health, now, refreshKey }) {
           terminal keeps reading the inverter's own 230 V then, so only the 0 Hz gives it away.
           Off-grid, the inverter's own output takes its place. */}
       <Card className="chart-card">
-        <SectionTitle>{st.hasGrid ? 'GRID SUPPLY' : 'OUTPUT'}</SectionTitle>
+        {/* not "Grid supply" again: the card above has that name (SOLAR-407) */}
+        <SectionTitle>{st.hasGrid ? 'VOLTAGE' : 'OUTPUT'}</SectionTitle>
         <window.InverterHistoryChart kind={st.hasGrid ? 'ac' : 'output'} refreshKey={refreshKey} />
       </Card>
     </>
@@ -2071,7 +2076,8 @@ function InvertersTab({ snap, today, refreshKey }) {
 
       {/* the one place that says whether things are OK */}
       <section className="eq-status" aria-label="Status">
-        <div className="eq-head"><i className={'eq-dot ' + (n ? 'warn' : 'ok')} />{head}</div>
+        {/* red, as the problem cards under it are (SOLAR-407) */}
+        <div className="eq-head"><i className={'eq-dot ' + (n ? 'bad' : 'ok')} />{head}</div>
         {n === 0 && st.lastAt && <div className="eq-head-sub">Last reading {window.fmtAgo(new Date(st.lastAt), now)}</div>}
       </section>
       {n > 0 && (

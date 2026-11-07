@@ -916,6 +916,7 @@
   .eq-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--dim); }
   .eq-dot.ok { background: var(--ok); box-shadow: 0 0 0 4px rgba(var(--ok-rgb),0.15); }
   .eq-dot.warn { background: var(--warn); box-shadow: 0 0 0 4px rgba(var(--warn-rgb),0.15); }
+  .eq-dot.bad { background: var(--bad); box-shadow: 0 0 0 4px rgba(var(--bad-rgb),0.15); }
   .eq-dot.sm { width: 7px; height: 7px; }
   .eq-dot.sm.ok { box-shadow: 0 0 0 3px rgba(var(--ok-rgb),0.16); }
   .eq-dot.sm.warn { box-shadow: 0 0 0 3px rgba(var(--warn-rgb),0.16); }
@@ -986,7 +987,8 @@
   .eq-table td.pv .mono { color: var(--pv); }
   .eq-table td.bad, .eq-table td.bad .eq-sub { color: var(--bad); }
   .eq-table td.warn { color: var(--warn); }
-  .eq-table td.wrap { white-space: normal; overflow-wrap: anywhere; }
+  /* a model name breaks at its hyphens, not between letters (SOLAR-407) */
+  .eq-table td.wrap { white-space: normal; overflow-wrap: break-word; }
   .eq-sub { display: block; margin-top: var(--sp-3xs); font-size: var(--fs-sm); color: var(--dim); }
   .eq-more { margin-top: var(--sp-lg); }
   .eq-more summary { cursor: pointer; list-style: none; font-size: var(--fs-sm); color: var(--muted); min-height: 32px; display: flex; align-items: center; gap: var(--sp-xs); }
@@ -999,6 +1001,10 @@
     .eq-problem { border-radius: var(--r-xl); }
     .eq-big { font-size: var(--fs-3xl); }
     .eq-big .u { font-size: var(--fs-xl); }
+    /* two inverter columns fit at 375 px: row labels wrap, cells sit closer (SOLAR-407) */
+    .eq-table thead th { min-width: 0; padding-left: var(--sp-md); }
+    .eq-table tbody th { white-space: normal; }
+    .eq-table td { padding-left: var(--sp-md); }
   }
   @media (min-width: 900px) { .eq-problems { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .eq-problems > :only-child { grid-column: 1 / -1; }
