@@ -452,8 +452,8 @@
      Faded text fell to 2.3:1; grey stays over 4.5:1. History keeps its colour: [data-today]
      marks what shows today, and the first two tiles on Solar, Home and Grid are NOW and
      TODAY (SOLAR-386). */
-  .page.old [data-today] :is(.chart-area, .meter), .page.old :is(.flow-wrap, .wiw[data-today]) :is(svg, .meter) { opacity: 0.45; }
-  .page.old :is([data-today] .mini-value, .solar-stats > :nth-child(-n+2) .stat-value, .trio .stat-value, .flow-wrap, .wiw[data-today], [data-today] .legend-val),
+  .page.old [data-today] :is(.chart-area, .meter, .legend-val), .page.old :is(.flow-wrap, .wiw[data-today]) :is(svg, .meter) { opacity: 0.45; }
+  .page.old :is([data-today] .mini-value, .solar-stats > :nth-child(-n+2) .stat-value, .trio .stat-value, .flow-wrap, .wiw[data-today]),
   .page.old :is([data-today] .mini-value, .solar-stats > :nth-child(-n+2) .stat-value, .trio .stat-value, .flow-wrap, .wiw[data-today]) * { color: var(--muted) !important; }
 
   /* phone-only pieces, hidden wider */
