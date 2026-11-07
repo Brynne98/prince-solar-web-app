@@ -512,7 +512,7 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
             {data?.unread > 0 && <button type="button" className="nl-all" onClick={onReadAll}>Mark all read</button>}
             <button type="button" className="nl-gear" aria-label="Notification settings" onClick={() => { close(); onSettings(); }}><Icon id="settings" /></button>
           </div>
-          {/* only the list scrolls: the head stays, and so does the scroll bar's top */}
+          {/* only the list scrolls: the head and See all stay, so the scroll bar runs between them (SOLAR-390) */}
           <div className="nl-scroll">
           {/* one list (SOLAR-353): billing notices lead Today, above its alerts */}
           {pinned.length > 0 && <div className="nl-day">Today</div>}
@@ -524,10 +524,10 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
             </div>
           )}
           {items && items.length > 0 && <NotifRows items={items} when={it => it.time} from={pinned.length ? window.localDateStr() : null} />}
+          </div>
           {/* older alerts can be there with none in the last 30 days */}
           {/* its unread rows go with it, read once the page is left, so the page still shows them */}
           {items && <button type="button" className="nl-foot" onClick={() => { const ids = shown.current || []; shown.current = null; close(); onSeeAll(ids); }}>See all</button>}
-          </div>
         </div>
       )}
     </div>
