@@ -488,7 +488,7 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
     return () => window.removeEventListener('ps-open-bell', show);
   }, [disabled]);
   // what the open list showed unread; read once it closes, so the dots stay while it's open
-  useEffect(() => { if (open) shown.current = (data?.items || []).filter(it => !it.read).map(it => it.id); }, [open, data]);
+  useEffect(() => { if (open) shown.current = (data?.items || []).filter(it => !it.read).flatMap(it => it.ids || [it.id]); }, [open, data]);
   useEffect(() => {
     if (open || !shown.current) return;
     if (shown.current.length) onSeen(shown.current);
@@ -523,7 +523,7 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
               <b>No notifications</b>
             </div>
           )}
-          {items && items.length > 0 && <NotifRows items={items} when={it => it.time} from={pinned.length ? window.localDateStr() : null} />}
+          {items && items.length > 0 && <NotifRows items={items} when={alertSpan} from={pinned.length ? window.localDateStr() : null} />}
           </div>
           {/* older alerts can be there with none in the last 30 days */}
           {/* its unread rows go with it, read once the page is left, so the page still shows them */}

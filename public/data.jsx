@@ -388,8 +388,12 @@ const EMAIL_KINDS = ['weekly', 'monthly', 'yearly', 'grid', 'battery', 'panels',
 const fetchEmailPrefs = (userId) => fetchFlags('email_prefs', EMAIL_KINDS, userId);
 const saveEmailPref = (userId, kind, on) => saveFlag('email_prefs', 'email_pref_change_done', userId, kind, on);
 // The alerts of the last 30 days, {pinned, items, unread} (0124, SOLAR-244).
+// The bell: the billing notices, and the last 30 days of alerts one row each, a start and
+// its "back" together, as the full page lists them (SOLAR-411). unread counts those rows.
 async function fetchNotifications() {
-  return must(window.sb.rpc('api_notifications'));
+  const [n, a] = await Promise.all([must(window.sb.rpc('api_notifications')),
+    fetchAlerts({ from: new Date(Date.now() - 30 * 86400000) })]);
+  return { pinned: n.pinned, items: a.items, unread: a.items.filter(it => !it.read).length };
 }
 // Every alert, one row per alert with when it went back (0152, SOLAR-327): {items, more,
 // unread}. from: a Date or null; kind: an alert switch or null; before: the last item shown.
