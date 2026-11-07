@@ -25,7 +25,7 @@ function flowAlpha(hex, a) {
   return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`;
 }
 
-function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince, pausedSince }) {
+function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince, pausedSince, keepToday }) {
   const C = window.COLORS;
   const mobile = useFlowMobile();
   // The boxes stretch with the card (SOLAR-39); its width only decides the lane's.
@@ -105,8 +105,9 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   };
   // A silent plant: each box keeps its name and shows a dash, with no state, share, charge,
   // grid chip or Today figures, and no line runs. The sentence above says since when.
+  // A dead login keeps today's figures: they are today's, only the live watts are not now (SOLAR-386).
   if (silentSince) Object.values(nodes).forEach(n => n && Object.assign(n, {
-    w: 0, dash: true, state: null, split: null, charge: null, known: false, off: false, reverse: false, today: [] }));
+    w: 0, dash: true, state: null, split: null, charge: null, known: false, off: false, reverse: false, today: keepToday ? n.today : [] }));
 
   const CEIL = 8000;
   const pw = w => window.fmtPowerParts(w);
@@ -334,7 +335,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   // A silent plant's last figures aren't happening now. The page banner says since when;
   // fullscreen covers the banner, so only there does the card say it.
   if (silentSince) narrative = wall ? <>No readings since {silentSince}.</> : null;
-  // Stale (SOLAR-386): the last figures stay, greyed; the page banner says since when.
+  // Stale (SOLAR-386): the last figures stay (the page greys them); the banner says since when.
   else if (pausedSince) narrative = wall ? <>Last reading at {pausedSince}.</> : null;
   else if (gridOff) {
     const timeLeft = battRow.k === 'Empty in' ? battRow.v : null;
@@ -369,7 +370,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   else narrative = <>Solar, battery and grid are <b>all powering the home</b>.</>;
 
   return (
-    <div className={'flow-wrap' + (pausedSince || silentSince ? ' paused' : '')} ref={wrapRef}>
+    <div className="flow-wrap" ref={wrapRef}>
       {narrative && <div className="flow-narrative">{narrative}</div>}
       {mobile ? renderMobile() : renderDesktop()}
     </div>

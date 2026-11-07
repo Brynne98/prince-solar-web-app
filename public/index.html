@@ -451,7 +451,7 @@
   /* Old readings: pictures fade, words and numbers go grey (SOLAR-343). Faded text fell
      to 2.3:1; grey stays over 4.5:1. */
   .page.old .chart-area, .page.old .meter, .page.old :is(.flow-wrap, .wiw) :is(svg, .meter) { opacity: 0.45; }
-  .page.old :is(.mini-value, .stat-value, .flow-wrap, .wiw), .page.old :is(.mini-value, .stat-value, .flow-wrap, .wiw) * { color: var(--muted) !important; }
+  .page.old :is(.mini-value, .stat-value, .flow-wrap, .wiw, .legend-val), .page.old :is(.mini-value, .stat-value, .flow-wrap, .wiw) * { color: var(--muted) !important; }
 
   /* phone-only pieces, hidden wider */
   .phonebar, .sheet { display: none; }
@@ -569,9 +569,6 @@
   .hv-root { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
   /* five in a row from 1200 px (six for an exporting plant), four from 980 px, three below that, two per row on a phone */
   .today-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-lg); }
-  /* today's figures while they are not now: stale or a dead login (SOLAR-385, SOLAR-386) */
-  .paused, .solar-stats.paused-today > :nth-child(-n+2) { opacity: .45; filter: grayscale(1); }
-  .paused * { animation-play-state: paused !important; }
   @media (min-width: 981px) { .today-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
   @media (min-width: 1200px) { .today-strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); } }
   .overview-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-lg); margin-bottom: var(--sp-lg); flex-wrap: wrap; }
