@@ -526,9 +526,11 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
 }
 window.InverterHistoryChart = InverterHistoryChart;
 
-function HistoryView({ today, refreshKey, locked, silent }) {
+// hasBatt / hasGrid: a plant without one has no chip, line or tooltip row for it (SOLAR-411)
+function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGrid = true }) {
   const C = window.COLORS;
-  const [vis, setVis] = React.useState({ pv: true, batt: true, load: true, grid: true, soc: true });
+  const [vis, setVis] = React.useState({ pv: true, batt: hasBatt, load: true, grid: hasGrid, soc: hasBatt });
+  const has = k => (k === 'batt' || k === 'soc' ? hasBatt : k === 'grid' ? hasGrid : true);
   const [hover, setHover] = React.useState(null);
   const [sel, setSel] = React.useState(null);    // [i0,i1] selected range (totals readout)
   const [drag, setDrag] = React.useState(null);  // { i0, i1 } in-progress drag (drives the band visual)
@@ -741,7 +743,7 @@ function HistoryView({ today, refreshKey, locked, silent }) {
       ['Grid', p.grid, C.grid, 'W'], // signed: − = exporting
       ['Home', p.load, C.load, 'W'],
       ['Charge', p.soc, C.soc, '%'],
-    ];
+    ].filter((r, i) => has(['pv', 'batt', 'grid', 'load', 'soc'][i]));
     return (
       <div className="chart-tip" style={{ left, top: 24 }}>
         {/* cloud-recovered points no longer announce themselves here; `p.est` still
@@ -785,7 +787,7 @@ function HistoryView({ today, refreshKey, locked, silent }) {
     );
   }
 
-  const legend = [['pv', 'Solar', C.pv], ['batt', 'Battery', C.batt], ['grid', 'Grid', C.grid], ['load', 'Home', C.load], ['soc', 'Charge', C.soc]];
+  const legend = [['pv', 'Solar', C.pv], ['batt', 'Battery', C.batt], ['grid', 'Grid', C.grid], ['load', 'Home', C.load], ['soc', 'Charge', C.soc]].filter(([k]) => has(k));
 
   // The server sends no series until today has its first reading (`approx`, 0099).
   // A past day with nothing: still being fetched (fresh link, 0048), before the

@@ -472,7 +472,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
       </div>
 
       <Card className="chart-card">
-        <window.HistoryView today={today} refreshKey={refreshKey} silent={silent} />
+        <window.HistoryView today={today} refreshKey={refreshKey} silent={silent} hasBatt={hasBatt} hasGrid={hasGrid} />
       </Card>
 
 

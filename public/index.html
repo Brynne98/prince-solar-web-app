@@ -582,8 +582,8 @@
   .hv-root { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
   /* five in a row from 1200 px (six for an exporting plant), four from 980 px, three below that, two per row on a phone */
   .today-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-lg); }
-  @media (min-width: 981px) { .today-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-  @media (min-width: 1200px) { .today-strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); } }
+  /* one row from tablet width up: four columns left Saved alone on a second row (SOLAR-411) */
+  @media (min-width: 981px) { .today-strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); } }
   .overview-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-lg); margin-bottom: var(--sp-lg); flex-wrap: wrap; }
   .overview-head .section-title { margin-bottom: 0; }
   .mini-stat { padding: var(--sp-xl) var(--sp-2xl); }
