@@ -165,12 +165,12 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   // A silent plant's last figures aren't now: no projection from them. Today's tiles keep
   // the stored totals, as Solar's Today does; only live watts show a dash (SOLAR-348).
   const ps = window.plantStatus(snap, Date.now());
-  // Every login dead (SOLAR-385): Today and the power flow keep their last figures,
-  // greyed out; the rest of the page reads as usual. Otherwise silent: dashes.
+  // Stale: today's figures keep their values, greyed. Every login dead: dashes there and no
+  // trends; Week to Lifetime keep colour (SOLAR-386).
   const cut = !!snap.loginCut;
-  const silent = ps.status === 'offline' && !cut;
+  const silent = ps.status === 'offline' || cut;
   let battEta = null, battInfo = null;
-  if (!hasBatt || silent || cut) { /* nothing to estimate */ }
+  if (!hasBatt || silent || ps.faded) { /* nothing to estimate */ }
   else if (!cap) { battInfo = 'Add battery size to see this'; } // a link on the flow's battery node
   // Under 200 W the battery is only trickling and a time would read in days, so it gives none.
   else if (a.battState === 'discharging' && a.battPower >= 200) {
@@ -395,15 +395,16 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const dSaved = (moneyTrend && prev && cSaved != null) ? cSaved - prevSaved : null;
 
   // Overview's cards, drawn under the chart and, in fullscreen, above the flow (SOLAR-309)
+  const dashToday = cut && period === 'today'; // a dead login: Today's figures are dashes
   const strip = (
-    <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '') + (cut && period === 'today' ? ' paused' : '')}>
-      <MiniStat loading={pending} label="Made" value={window.fmtEnergyParts(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendFrom={cmpPhrase}
+    <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '') + (ps.faded && period === 'today' ? ' paused' : '')}>
+      <MiniStat loading={pending} label="Made" value={dashToday ? '—' : window.fmtEnergyParts(pPv)} color={CC.pv} trend={dashToday ? undefined : tGen} trendDelta={dGen} trendFrom={cmpPhrase}
         info={OV_INFO.made} />
-      <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendFrom={cmpPhrase}
+      <MiniStat loading={pending} label="Home" value={dashToday ? '—' : window.fmtEnergyParts(pLoad)} color={CC.load} trend={dashToday ? undefined : tCon} trendDelta={dCon} trendInvert trendFrom={cmpPhrase}
         info={OV_INFO.home} />
-      <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff ?? undefined} trend={tSuff} trendFrom={cmpPhrase}
+      <MiniStat loading={pending} label="Independence" value={dashToday ? '—' : pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={dashToday ? undefined : pSuff ?? undefined} trend={dashToday ? undefined : tSuff} trendFrom={cmpPhrase}
         info={OV_INFO.suff} />
-      {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendFrom={cmpPhrase}
+      {hasGrid && <MiniStat loading={pending} label="Imported" value={dashToday ? '—' : window.fmtEnergyParts(pImp)} color={CC.grid} trend={dashToday ? undefined : tImp} trendDelta={dImp} trendInvert trendFrom={cmpPhrase}
         info={OV_INFO.imp}
         sub={silent ? undefined : a.gridPresent == null ? (
           // No inverter has reported mains voltage yet; a blank here read as a
@@ -422,11 +423,11 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
       {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off" color={CC.grid}
         info={OV_INFO.grid} />}
       {/* after Imported, the order Power flow uses */}
-      {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergyParts(pExp)} color={CC.grid}
+      {showExport && <MiniStat loading={pending} label="Exported" value={dashToday ? '—' : window.fmtEnergyParts(pExp)} color={CC.grid}
         info={OV_INFO.exp} />}
       <MiniStat loading={pending} label="Saved" color="var(--money)"
-        value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
-        trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendFrom={cmpPhrase}
+        value={dashToday ? '—' : (rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
+        trend={dashToday ? undefined : tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendFrom={cmpPhrase}
         // no rate yet: the line under the dash opens Settings on Tariff
         sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Add your rate to see this</button>
           : over && period === 'month' ? <button type="button" className="lock-btn" onClick={() => window.openPlans('month_saved')}><window.LockIcon />On paid plans</button> : undefined}
@@ -467,12 +468,12 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             </button>
           }>POWER FLOW</SectionTitle>}
           <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} silentSince={silent ? window.readAgo(ps.last.getTime(), Date.now()) : null}
-            pausedSince={cut ? window.readAgo(ps.last.getTime(), Date.now()) : null} />
+            pausedSince={!silent && ps.faded ? window.readAgo(ps.last.getTime(), Date.now()) : null} />
         </Card>
       </div>
 
       <Card className="chart-card">
-        <window.HistoryView today={today} refreshKey={refreshKey} silent={silent} />
+        <window.HistoryView today={today} refreshKey={refreshKey} silent={silent} faded={ps.faded} />
       </Card>
 
 
@@ -1160,7 +1161,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
     && daytime.filter(p => p.pv == null).length > daytime.length / 2;
   // A silent plant's last figures aren't now: a dash and when they were read.
   const ps = window.plantStatus(snap, Date.now());
-  const silent = ps.status === 'offline';
+  const silent = ps.status === 'offline' || !!snap.loginCut; // a dead login: dashes now (SOLAR-386)
   const noReadings = dayProblem(view, day, points, silent) || (day && gapDay ? 'Readings are missing for most of this day.' : null);
   const peakOf = (pts) => {
     let pk = null;
@@ -1194,7 +1195,8 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 
   return (
     <div className="stack solar-tab">
-      <div className="solar-stats">
+      {/* NOW and TODAY grey while today's figures are not now (SOLAR-386) */}
+      <div className={'solar-stats' + (ps.faded ? ' paused-today' : '')}>
         <StatTile label="SOLAR NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.pv}
           sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? (over ? <window.Locked where="panel_pct" label="Keep your insights"><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW</window.Locked>
               : <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>)
@@ -1283,7 +1285,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
   const trend = (k, min, word) => periodTrend(cmp, k, 'load', min, word, true);
   const [nowN, nowU] = fmtPowerParts(a.loadNow);
   const ps = window.plantStatus(snap, Date.now());
-  const silent = ps.status === 'offline';
+  const silent = ps.status === 'offline' || !!snap.loginCut; // a dead login: dashes now (SOLAR-386)
   const solarNow = a.loadNow > 50 ? Math.round(Math.min(a.loadNow, Math.max(0, a.pvNow || 0)) / a.loadNow * 100) : null;
   const peakOf = (pts) => {
     let pk = null;
@@ -1312,7 +1314,8 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
 
   return (
     <div className="stack solar-tab">
-      <div className="solar-stats">
+      {/* NOW and TODAY grey while today's figures are not now (SOLAR-386) */}
+      <div className={'solar-stats' + (ps.faded ? ' paused-today' : '')}>
         <StatTile label="HOME NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.load}
           sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : solarNow != null ? <><b>{solarNow}%</b> from solar right now</> : NBSP} />
         {tile('TODAY', a.loadToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.load)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
@@ -1435,7 +1438,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const todayPeak = importPeak(today && !today.approx ? today.points : null);
   // A silent plant's last figures aren't now: a dash and when they were read.
   const ps = window.plantStatus(snap, Date.now());
-  const silent = ps.status === 'offline';
+  const silent = ps.status === 'offline' || !!snap.loginCut; // a dead login: dashes now (SOLAR-386)
 
   // ---- the day on the chart: grid power signed, + bought and − exported ----
   const pick = useDayPicker(earliest, plantToday, alertDay);
@@ -1467,7 +1470,8 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 
   return (
     <div className="stack solar-tab">
-      <div className="solar-stats">
+      {/* NOW and TODAY grey while today's figures are not now (SOLAR-386) */}
+      <div className={'solar-stats' + (ps.faded ? ' paused-today' : '')}>
         <StatTile label="GRID NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.grid} sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : nowSub} />
         {tile('TODAY', a.gridFromToday, sells ? <>Exported <b>{fmtKwh(a.gridToToday)}</b></> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}

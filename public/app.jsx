@@ -52,6 +52,8 @@ function plantStatus(snap, now) {
     // every login dead (snap.loginCut, set by App): Reconnect in red as soon as the poller
     // marks it, not after 15 min silent (SOLAR-385). tone is the colour; status stays the age.
     tone: snap.loginCut ? 'offline' : status,
+    // today's figures are not now: greyed (an old reading or a dead login), SOLAR-386
+    faded: !!snap.loginCut || (status !== 'loading' && ageS > 180),
     word: snap.loginCut ? 'Reconnect' : { live: 'Live', stale: 'Stale', offline: 'Offline', loading: 'Setting up' }[status],
     detail: offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now),
   };
