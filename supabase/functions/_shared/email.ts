@@ -88,6 +88,7 @@ type Part =
   | { facts: { label: string; value: string }[] } // label left, value right
   | { callout: string } // a plain-language status line in a coral-edged panel
   | { note: string }
+  | { panel: string[] } // paragraphs in a darker box with no border, set apart from the rest; may hold <b> set by us
   | { steps: string[] } // numbered how-to; may hold <b> set by us
   | { plants: { title: string; names: string[]; tone: "keep" | "stop"; count?: false; rest?: string } } // one row per plant, any number; count: false when the title already counts; rest: after "and N more" (default: listed in Billing)
   | { items: { rows: Item[]; total?: { label: string; value: string }; meta?: string[] } } // billing: what is paid for, as receipt rows
@@ -168,6 +169,8 @@ function html(subject: string, b: Body): string {
   const rows = b.parts.map((x) => {
     if ("p" in x) return `<p class="t" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#e7ecf2">${x.p}</p>`;
     if ("note" in x) return `<p class="m" style="margin:0 0 16px;font:400 13px/1.5 ${SANS};color:#9aa5b3">${x.note}</p>`;
+    if ("panel" in x) return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:16px;background:#141a22;border-radius:8px">` +
+      x.panel.map((l, i) => `<p class="t" style="margin:${i ? "8px" : "0"} 0 0;font:400 15px/1.55 ${SANS};color:#e7ecf2">${l}</p>`).join("") + `</td></tr></table>`;
     if ("steps" in x)
       return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px">${x.steps.map((s, i) =>
         `<tr><td style="vertical-align:top;padding:0 12px 12px 0"><div style="width:24px;height:24px;border-radius:12px;background:#141a22;border:1px solid rgba(255,255,255,.12);font:700 12px/24px ${MONO};color:#3ddc84;text-align:center">${i + 1}</div></td>` +
@@ -262,6 +265,7 @@ function text(b: Body): string {
   for (const x of b.parts) {
     if ("p" in x) out.push(strip(x.p), "");
     else if ("note" in x) out.push(strip(x.note), "");
+    else if ("panel" in x) out.push(...x.panel.map(strip), "");
     else if ("steps" in x) out.push(...x.steps.map((s, i) => `${i + 1}. ${strip(s)}`), "");
     else if ("button" in x) out.push(`${x.button.label}: ${x.button.href}`, "");
     else if ("bars" in x && x.bars.labels) out.push(x.bars.labels.map((l, i) => `${l} ${x.bars.values[i] == null ? "–" : x.bars.values[i]!.toFixed(0)}`).join(", ") + " kWh", "");
@@ -884,6 +888,37 @@ export const paymentRefunded = (r: Refund) =>
         : "Your plan changed while you paid." },
       { items: { rows: [{ icon: "back", name: "Refund", sub: `Paid ${r.date} · Reference ${esc(r.reference)}`, value: rand(r.amount) }] } },
       { button: { label: "See your plan", href: PLAN } },
+    ],
+    footer: [HELP],
+  });
+
+// After a card change (the R1 card check, SOLAR-406). The card, the one it replaced and
+// the next payment, each on its own line; then the security lines from Your password was
+// changed, so a change they didn't make shows up. Every card, amount and date in the box is
+// bold, the rest plain. Cards read "Visa •••• 4081"
+// (billing_card_label, SOLAR-300).
+export type CardChange = { card: string; was?: string; next?: { amount: number; date: string } }; // no next once a cancel is booked
+export const cardChanged = (c: CardChange) =>
+  make("Your card was changed", {
+    title: "Your card was changed",
+    parts: [
+      { panel: [`Payments now go on <b>${esc(c.card)}</b>.`, ...(c.was ? [`It replaces <b>${esc(c.was)}</b>.`] : []),
+        ...(c.next ? [`Your next payment of <b>${rand(c.next.amount)}</b> is on <b>${c.next.date}</b>.`] : [])] },
+      { note: "The R1 charged to check the card goes back to it." },
+      ...notYou,
+    ],
+    footer: [HELP],
+  });
+
+// The saved card expires before the next payment (SOLAR-406): 30 days before, then a last
+// reminder 7 days before. `on`: the card's last day ("30 Nov").
+export type CardExpiry = { card: string; on: string; final?: boolean; next: { amount: number; date: string } };
+export const cardExpiring = (c: CardExpiry) =>
+  make(c.final ? `Last reminder: your card expires on ${c.on}` : `Your ${c.card} expires on ${c.on}`, {
+    title: `Your card expires on ${c.on}`,
+    parts: [
+      { panel: [`Your next payment of <b>${rand(c.next.amount)}</b> is on <b>${c.next.date}</b>.`, `Update <b>${esc(c.card)}</b> so it goes through.`] },
+      { button: { label: "Update card", href: PLAN } },
     ],
     footer: [HELP],
   });

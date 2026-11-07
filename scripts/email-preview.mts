@@ -18,7 +18,7 @@ import type { Email } from "../supabase/functions/_shared/email.ts";
 const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
-  accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, offerEnds, renewalNotice, winback, needAHand,
+  accountDeleted, cardChanged, cardExpiring, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, offerEnds, renewalNotice, winback, needAHand,
   passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, planKept, plantEvent, loginEvent, plantsRemovalSoon, planSwitched, planUpgraded,
   renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
@@ -118,6 +118,9 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "billing-change-kept": [FROM_BILLING, planKept({ plan: "home", period: "monthly", next: { amount: 99, date: "1 Dec" } })],
   "billing-switch-booked": [FROM_BILLING, planChangeBooked({ from: "home", to: "home", fromPeriod: "monthly", toPeriod: "yearly", on: "1 Dec", removePlants: [], next: { amount: 990 } })],
   "billing-failed-1": [FROM_BILLING, paymentFailed({ plan: "family", period: "monthly", amount: 199, card: "Visa •••• 4081", nextTry: "3 Dec", freeOn: "8 Dec", payUrl: PAY_URL })],
+  "billing-card-changed": [FROM_BILLING, cardChanged({ card: "Visa •••• 4081", was: "Mastercard •••• 5520", next: { amount: 199, date: "1 Dec" } })],
+  "billing-card-expiring": [FROM_BILLING, cardExpiring({ card: "Visa •••• 4081", on: "30 Nov", next: { amount: 199, date: "1 Dec" } })],
+  "billing-card-expiring-last": [FROM_BILLING, cardExpiring({ card: "Visa •••• 4081", on: "30 Nov", final: true, next: { amount: 199, date: "1 Dec" } })],
   "billing-refund": [FROM_BILLING, paymentRefunded({ amount: 72, date: "3 Dec", reference: "psh_0123", why: "price" })],
   "billing-failed-disputed": [FROM_BILLING, paymentFailed({ plan: "home", period: "monthly", amount: 99, card: "Visa •••• 4081", nextTry: "4 Dec", freeOn: "11 Dec", payUrl: PAY_URL, disputed: "10 Nov" })],
   "billing-failed-last": [FROM_BILLING, paymentFailed({ plan: "family", period: "monthly", amount: 199, card: "Visa •••• 4081", freeOn: "8 Dec", payUrl: PAY_URL })],
