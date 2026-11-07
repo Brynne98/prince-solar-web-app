@@ -1943,7 +1943,8 @@ function EqBatteryCard({ st, snap, now }) {
       <div className={'eq-meter' + (st.battStale ? ' stale' : '')}><i style={{ width: soc + '%', background: CC.batt }} /><b style={{ left: reserve + '%' }} /></div>
       <div className="eq-meter-scale"><span style={reserve > 60 ? { right: (100 - reserve) + '%' } : { left: reserve + '%' }}>{reserve}% reserve</span></div>
       <dl className="eq-rows">
-        {rows.map(([l, val, warn]) => <div key={l}><dt>{l}</dt><dd className={'mono' + (warn ? ' warn' : '')}>{val}</dd></div>)}
+        {/* a problem reads red, as its card at the top of the page does (SOLAR-411) */}
+        {rows.map(([l, val, bad]) => <div key={l}><dt>{l}</dt><dd className={'mono' + (bad ? ' bad' : '')}>{val}</dd></div>)}
       </dl>
       <EqMore rows={more} />
     </Card>

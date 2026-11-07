@@ -970,7 +970,6 @@
   .eq-rows > div { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-md); padding: var(--sp-sm) 0; border-top: 1px solid var(--line); font-size: var(--fs-md); }
   .eq-rows dt { color: var(--muted); }
   .eq-rows dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
-  .eq-rows dd.warn { color: var(--warn); }
   .eq-rows dd.bad { color: var(--bad); }
   /* a column per inverter; more than fit scroll sideways inside the card */
   .eq-table { margin-top: var(--sp-lg); overflow-x: auto; }
@@ -1002,6 +1001,8 @@
     .eq-table thead th { min-width: 0; padding-left: var(--sp-md); }
     .eq-table tbody th { white-space: normal; }
     .eq-table td { padding-left: var(--sp-md); }
+    /* a sub line such as "DC side 59 °C, at 20:00" wraps in its column, not past the card (SOLAR-411) */
+    .eq-table td .eq-sub { white-space: normal; }
   }
   @media (min-width: 900px) { .eq-problems { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .eq-problems > :only-child { grid-column: 1 / -1; }
