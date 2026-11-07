@@ -652,7 +652,7 @@ export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email
        { p: "Reconnect and we fetch the readings you missed." },
        { button: { label: "Reconnect", href: LOGINS } }]
     : [{ p: `Readings for ${P} are back since ${e.at} ${day}, after ${e.lasted}.` },
-       { p: "We're fetching the readings you missed." },
+       { p: "We'll get what we can of the readings you missed." },
        { button: openPage("live", plantId) }];
   // No switch for these, so no "turn them off" line.
   return make(title, { title, parts, footer: [HELP] });
