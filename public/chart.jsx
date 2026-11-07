@@ -502,7 +502,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
 }
 window.InverterHistoryChart = InverterHistoryChart;
 
-function HistoryView({ today, refreshKey, locked, silent }) {
+function HistoryView({ today, refreshKey, locked, silent, faded }) {
   const C = window.COLORS;
   const [vis, setVis] = React.useState({ pv: true, batt: true, load: true, grid: true, soc: true });
   const [hover, setHover] = React.useState(null);
@@ -783,7 +783,8 @@ function HistoryView({ today, refreshKey, locked, silent }) {
       {/* No count of missing minutes: most are single minutes inside a five-minute bucket
           the graph cannot show, and a hole long enough to matter already breaks the lines. */}
 
-      <div className="legend-row">
+      {/* today's legend greys with the rest of today's figures (SOLAR-386) */}
+      <div className={'legend-row' + (isToday && faded ? ' paused' : '')}>
         {legend.map(([k, l, c]) => <window.LegendChip key={k} color={c} label={l} value={chipVal(k)} active={vis[k]} onClick={() => toggle(k)} />)}
       </div>
 

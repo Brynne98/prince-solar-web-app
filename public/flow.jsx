@@ -334,8 +334,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   // A silent plant's last figures aren't happening now. The page banner says since when;
   // fullscreen covers the banner, so only there does the card say it.
   if (silentSince) narrative = wall ? <>No readings since {silentSince}.</> : null;
-  // A dead login (SOLAR-385): the last figures stay, greyed; the page banner says it.
-  else if (pausedSince) narrative = wall ? <>Readings paused at {pausedSince}.</> : null;
+  // Stale (SOLAR-386): the last figures stay, greyed; the page banner says since when.
+  else if (pausedSince) narrative = wall ? <>Last reading at {pausedSince}.</> : null;
   else if (gridOff) {
     const timeLeft = battRow.k === 'Empty in' ? battRow.v : null;
     // The page's Grid off banner says it; fullscreen covers the banner (SOLAR-91).
@@ -369,7 +369,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   else narrative = <>Solar, battery and grid are <b>all powering the home</b>.</>;
 
   return (
-    <div className={'flow-wrap' + (pausedSince ? ' paused' : '')} ref={wrapRef}>
+    <div className={'flow-wrap' + (pausedSince || silentSince ? ' paused' : '')} ref={wrapRef}>
       {narrative && <div className="flow-narrative">{narrative}</div>}
       {mobile ? renderMobile() : renderDesktop()}
     </div>

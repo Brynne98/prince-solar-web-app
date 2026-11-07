@@ -569,8 +569,8 @@
   .hv-root { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
   /* five in a row from 1200 px (six for an exporting plant), four from 980 px, three below that, two per row on a phone */
   .today-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-lg); }
-  /* every SunSynk login dead (SOLAR-385): Today and the power flow keep their last figures, greyed and still */
-  .paused { opacity: .45; filter: grayscale(1); }
+  /* today's figures while they are not now: stale or a dead login (SOLAR-385, SOLAR-386) */
+  .paused, .solar-stats.paused-today > :nth-child(-n+2) { opacity: .45; filter: grayscale(1); }
   .paused * { animation-play-state: paused !important; }
   @media (min-width: 981px) { .today-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
   @media (min-width: 1200px) { .today-strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); } }
