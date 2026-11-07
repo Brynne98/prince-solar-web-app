@@ -818,7 +818,9 @@ const wholeNum = (x, lo, hi) => Number.isInteger(stepNum(x)) && stepNum(x) >= lo
 // A plant's saved settings as the boxes show them, by step id; groups: its panel rows, if saved.
 const cfgFields = (c) => {
   const groups = Array.isArray(c?.panel_groups) && c.panel_groups.length ? c.panel_groups : null;
-  return { groups, rate: c?.tariff_import > 0 ? String(c.tariff_import) : '', reserve: String(c?.battery_reserve_pct ?? 20),
+  // the reserve's stored 20 is only a stand-in until the owner says, so it opens empty
+  const standIn = !c?.battery_reserve_confirmed && (c?.battery_reserve_pct ?? 20) === 20;
+  return { groups, rate: c?.tariff_import > 0 ? String(c.tariff_import) : '', reserve: standIn ? '' : String(c.battery_reserve_pct),
     size: c?.battery_kwh > 0 ? String(c.battery_kwh) : '', panels: !groups && c?.system_kwp > 0 ? String(c.system_kwp) : '' };
 };
 // What saving the panels sends: the way on screen (sumOf's answer), empty meaning none.
@@ -854,15 +856,6 @@ function StepField({ id, value, onChange, label, pre, unit, inputMode, ph, inval
   );
 }
 window.StepField = StepField;
-// What SunSynk says the battery holds, as a hint only (SOLAR-382): its Ah is often the
-// inverter's default, so it never drives an estimate. Parallel inverters share one bank,
-// so the largest, not the sum; 51.2 V is a lithium pack's nominal voltage.
-const sunsynkBattKwh = (snap, plantId) => {
-  if (!snap || snap.plant?.id !== plantId) return null;
-  const ah = Math.max(0, ...(snap.inverters || []).map(i => Number(i.battCap) || 0));
-  return ah > 0 ? Math.round(ah * 51.2 / 1000) : null;
-};
-window.sunsynkBattKwh = sunsynkBattKwh;
 // Battery size and panels: Total or By size, the value on the switch's line in its own place,
 // so nothing moves as it changes. Controlled: the caller holds mode, total and rows.
 const SUM_MODES = [{ value: 'total', label: 'Total' }, { value: 'rows', label: 'By size' }];
@@ -905,11 +898,10 @@ window.rowsFrom = rowsFrom;
 // One step's boxes. Save stays off until the value is one the database takes. A step opened
 // again (Back, or a step bar) starts from what is saved.
 // Panels' rows are saved as panel_groups, as Settings saves them; the battery keeps only kWh.
-function StepForm({ id, cfg, busy, onSave, onSkip, battSays }) {
+function StepForm({ id, cfg, busy, onSave, onSkip }) {
   const sum = STEP_SUMS[id];
   const [saved] = useState(() => cfgFields(cfg));
-  // the reserve's stored 20 is only a stand-in until the owner says, so it opens empty
-  const [v, setV] = useState(id === 'reserve' && !cfg?.battery_reserve_confirmed && (cfg?.battery_reserve_pct ?? 20) === 20 ? '' : saved[id]);
+  const [v, setV] = useState(saved[id]);
   const [mode, setMode] = useState(id === 'panels' && saved.groups ? 'rows' : 'total');
   const [rows, setRows] = useState(() => rowsFrom(saved.groups));
   const box = useRef(null);
@@ -929,7 +921,6 @@ function StepForm({ id, cfg, busy, onSave, onSkip, battSays }) {
       {id === 'rate' && <StepField value={v} onChange={setV} label={STEPS.rate.title} pre={sym} unit="/unit" inputMode="decimal" />}
       {id === 'reserve' && <StepField value={v} onChange={setV} label={STEPS.reserve.title} unit="%" inputMode="numeric" />}
       {sum && <SumBox kind={id} mode={mode} onMode={setMode} tot={v} onTot={setV} rows={rows} onRows={setRows} label={STEPS[id].title} />}
-      {id === 'size' && battSays && <p className="field-note">SunSynk says about {battSays} kWh.</p>}
       <div className="fs-actions">
         <button type="button" className="ghost-btn" onClick={onSkip} disabled={busy}>Skip</button>
         <window.BusyButton type="submit" className="save-btn" busy={busy} busyText="Saving…" disabled={!ok}>Save</window.BusyButton>
@@ -945,7 +936,7 @@ function StepForm({ id, cfg, busy, onSave, onSkip, battSays }) {
 // row opens its step, done ones too. A tap on the header folds it to the next step; a
 // phone starts folded.
 const STEPS_DONE = ['Sign up', 'Add plant'];
-function FirstSteps({ me, plantId, onSaved, variant, battSays }) {
+function FirstSteps({ me, plantId, onSaved, variant }) {
   const [open, setOpen, ref] = usePopover();
   const [skipped, setSkipped] = useState([]);
   const [cur, setCur] = useState(null);      // the step open; null = the next one waiting
@@ -1022,7 +1013,7 @@ function FirstSteps({ me, plantId, onSaved, variant, battSays }) {
       </div>
       <h2 className="fs-title">{S.title}</h2>
       <p className="fs-how">{S.how}</p>
-      <StepForm key={stepId} id={stepId} cfg={fs.cfg} busy={busy} onSave={save} onSkip={skip} battSays={battSays} />
+      <StepForm key={stepId} id={stepId} cfg={fs.cfg} busy={busy} onSave={save} onSkip={skip} />
     </div>
   );
   return (
@@ -1690,14 +1681,13 @@ function App({ links }) {
   // key: the loading and loaded pages put it at different child positions; without it the
   // first reading remounted it and Billing's Plan drew its outline twice (SOLAR-281).
   // Plant settings draws from api_me, not the snapshot, so it shares the slot with Settings.
-  const battSays = sunsynkBattKwh(snap, plantId);
   const settingsPage = tab === 'system'
-    ? <window.PlantSettings key="system" me={me} plantId={plantId} onSaved={reloadPlantConfig} battSays={battSays}
+    ? <window.PlantSettings key="system" me={me} plantId={plantId} onSaved={reloadPlantConfig}
         flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />
     : <window.SettingsArea key="settings" page={tab} onPage={(p, section) => (section ? openSettings(section) : go(p))}
         me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} links={links}
         flash={flashSection} onFlashed={() => setFlashSection(null)} />;
-  const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} battSays={battSays} />);
+  const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);
 
   // ---- not-yet-loaded gate ----
   //
