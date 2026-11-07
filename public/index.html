@@ -1783,6 +1783,9 @@
   .fs-fold .fs-n { margin-left: auto; }
   .fs-fold .ico { width: var(--icon-sm); height: var(--icon-sm); color: var(--muted); transform: rotate(180deg); transition: transform var(--dur-base) var(--ease-out); }
   .fs-fold[aria-expanded="true"] .ico { transform: none; }
+  /* sidebar: pinned to the nav's foot, it grows up, so folded points up. Phone: top of the page, it grows down */
+  .fs-phone .fs-fold .ico { transform: none; }
+  .fs-phone .fs-fold[aria-expanded="true"] .ico { transform: rotate(180deg); }
   @media (prefers-reduced-motion: reduce) { .fs-fold .ico { transition: none; } }
   div.fs-item { cursor: default; } div.fs-item:hover { background: none; }
   .fs-tick { width: 16px; height: 16px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--line-2); box-sizing: border-box; }
