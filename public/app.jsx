@@ -1108,8 +1108,8 @@ const comingOn = (r) => {
   return (r?.plants || []).map(p => Number(p.id)).filter(id => !paused.has(id));
 };
 
-// Back to the top of the page: the frame's body scrolls beside a sidebar, the document on a phone.
-const toTop = () => { document.querySelector('.frame-body')?.scrollTo({ top: 0 }); window.scrollTo({ top: 0 }); };
+// Back to the top of the page: the box under the header scrolls beside a sidebar, the document on a phone.
+const toTop = () => { document.querySelector('.frame-scroll')?.scrollTo({ top: 0 }); window.scrollTo({ top: 0 }); };
 
 // The frame around every page: sidebar, header, content, phone bar.
 // `steps` draws First steps for 'rail' or 'phone'; a phone leaves it off Settings and
@@ -1124,7 +1124,9 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
           {account && <AccountMenu {...account} variant="head" />}
         </header>
         {/* phone: First steps sits at the top of the page, in the flow, so it never covers a chart (SOLAR-345) */}
-        <main className="content" aria-busy={busy || undefined}>{steps && !isSettings(tab) && tab !== 'system' && steps('phone')}{children}</main>
+        <div className="frame-scroll">
+          <main className="content" aria-busy={busy || undefined}>{steps && !isSettings(tab) && tab !== 'system' && steps('phone')}{children}</main>
+        </div>
       </div>
       <PhoneBar tabs={tabs} tab={tab} onTab={onTab} />
       <SaveToast />

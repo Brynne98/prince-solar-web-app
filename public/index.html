@@ -149,18 +149,23 @@
      (600–1023), and on a phone a header with the avatar plus a bottom bar. The page
      scrolls as a document; the sidebar and header stay put. The selected page is a
      raised neutral surface: green is kept for the data. */
-  .frame { --rail-w: 232px; --head-h: 60px; display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100dvh; }
+  /* --stick: how far below the scroll box's top the header ends, for sticky tops and
+     scroll margins. --sb: the scrollbar's width, when the page under the header has one */
+  .frame { --rail-w: 232px; --head-h: 60px; --stick: var(--head-h); display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100dvh; }
   .frame-body { display: flex; flex-direction: column; min-width: 0; }
+  .frame-scroll { flex: 1 0 auto; display: flex; flex-direction: column; }
   /* with a sidebar and a mouse or trackpad, only the page beside it scrolls, so a wheel
      over the sidebar moves nothing, and nothing bounces (SOLAR-22). A touch screen keeps
      scrolling the document, so it keeps the bounce and the browser's pull-down to
      reload (SOLAR-108) */
   @media (min-width: 600px) and (hover: hover) and (pointer: fine) {
     html, body { overscroll-behavior: none; }
-    .frame { height: 100dvh; }
+    .frame { height: 100dvh; --stick: 0px; --sb: 11px; }
+    /* the header stays out of the scroll box, so the scrollbar starts under it (SOLAR-388) */
+    .frame-body { overflow: hidden; }
     /* stable: a short page keeps the scrollbar's room, so moving between pages never
        shifts the content sideways (SOLAR-95) */
-    .frame-body { overflow-y: auto; overscroll-behavior: none; scrollbar-gutter: stable; }
+    .frame-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: none; scrollbar-gutter: stable; }
   }
   /* flex: 1 0 auto: shrinking to the scroll box would push the bottom padding under the last card (SOLAR-25) */
   /* the gap under the last card matches the one above the first (SOLAR-25) */
@@ -258,7 +263,9 @@
   /* flex: none: the page under it no longer shrinks, so a shrinkable header was squashed to 39px (SOLAR-25) */
   /* past 1360 px .content centres, so the padding grows on both sides to keep the plant
      and refresh over the cards' edges */
-  .head { flex: none; position: sticky; top: 0; z-index: 5; height: var(--head-h); display: flex; align-items: center; gap: var(--sp-lg); padding: 0 max(var(--sp-2xl), calc((100% - 1360px) / 2 + var(--sp-2xl)));
+  /* the header spans the scrollbar too, so its right edge adds --sb to stay over the cards' edge */
+  .head { --pad: max(var(--sp-2xl), calc((100% - var(--sb, 0px) - 1360px) / 2 + var(--sp-2xl)));
+    flex: none; position: sticky; top: 0; z-index: 5; height: var(--head-h); display: flex; align-items: center; gap: var(--sp-lg); padding: 0 calc(var(--pad) + var(--sb, 0px)) 0 var(--pad);
     background: var(--bg); border-bottom: 1px solid var(--line); }
   .plant { position: relative; min-width: 0; margin-left: calc(-1 * var(--sp-sm)); }
   .plant-btn { display: flex; align-items: center; gap: var(--sp-sm); max-width: 100%; padding: var(--sp-sm) var(--sp-sm); border: 1px solid transparent; border-radius: var(--r-md);
@@ -471,7 +478,8 @@
     .acct-rail .who { display: none; }
     .acct-btn.needs::after { left: calc(50% + 8px); }
     .acct-menu { right: auto; width: 250px; }
-    .head, .content { padding-left: var(--sp-2xl); padding-right: var(--sp-2xl); }
+    .head { --pad: var(--sp-2xl); }
+    .content { padding-left: var(--sp-2xl); padding-right: var(--sp-2xl); }
   }
 
   /* phone: the header plus a five-slot bottom bar; the account moves to the header */
@@ -874,7 +882,7 @@
   .solar-row > * { min-width: 0; }
   .solar-row > :only-child { grid-column: 1 / -1; }
   /* below the sticky header, not under it (SOLAR-275) */
-  #solar-day, #battery-day, #grid-day, #home-day { scroll-margin-top: calc(var(--head-h, 60px) + var(--sp-lg)); }
+  #solar-day, #battery-day, #grid-day, #home-day { scroll-margin-top: calc(var(--stick, 60px) + var(--sp-lg)); }
   .tip-hint { font-size: var(--fs-sm); color: var(--dim); margin-top: var(--sp-xs); }
   /* Where it went, beside the 30 days (SOLAR-332): a hollow pie with the day's sum in its
      middle and each part's kWh beside it. The card stretches to the row; the pie sits centred. */
@@ -1026,7 +1034,7 @@
   .page-head h1 { font-size: var(--fs-2xl); margin: 0 0 var(--sp-2xs); letter-spacing: -0.01em; }
   .page-head p { margin: 0 0 var(--sp-xs); color: var(--muted); font-size: var(--fs-md); overflow-wrap: anywhere; }
   .sec { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-sm); padding: var(--sp-lg) 0; margin-top: var(--sp-sm);
-    scroll-margin-top: calc(var(--head-h, 60px) + var(--sp-md)); }
+    scroll-margin-top: calc(var(--stick, 60px) + var(--sp-md)); }
   .page-head + .sec { margin-top: var(--sp-lg); }
   .sec + .sec { margin-top: 0; }
   .sec-intro { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-md); }   /* title top left, a button top right */
@@ -1105,7 +1113,7 @@
   /* the area: its menu beside the page; on a phone the menu is a list you tap into, and each
      page has a back link to it (SOLAR-250) */
   .set-area { display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: var(--sp-3xl); align-items: start; }
-  .set-nav { position: sticky; top: calc(var(--head-h, 60px) + 16px); display: flex; flex-direction: column; gap: var(--sp-3xs); }
+  .set-nav { position: sticky; top: calc(var(--stick, 60px) + 16px); display: flex; flex-direction: column; gap: var(--sp-3xs); }
   .set-nav-title { font-size: var(--fs-xl); font-weight: 600; margin: var(--sp-3xs) var(--sp-sm) var(--sp-md); letter-spacing: -0.01em; }
   .set-nav button { display: flex; align-items: center; gap: var(--sp-sm); min-height: 38px; padding: 0 var(--sp-sm); border-radius: var(--r-md); background: none;
     border: 1px solid transparent; color: var(--muted); font: inherit; font-size: var(--fs-md); text-align: left; cursor: pointer; }
@@ -1638,7 +1646,7 @@
   .setup-stage > * { grid-area: 1 / 1; min-width: 0; }
   .setup-outline { opacity: .35; pointer-events: none; user-select: none; contain: size; overflow: hidden; }
   .setup-outline .skel::after { display: none; }
-  .setup-empty { position: sticky; top: calc(var(--head-h) + 14px); align-self: start; z-index: 1; height: calc(100dvh - var(--head-h) - 28px);
+  .setup-empty { position: sticky; top: calc(var(--stick) + 14px); align-self: start; z-index: 1; height: calc(100dvh - var(--head-h) - 28px);
     display: grid; place-items: safe center; padding: 0 var(--sp-2xs); overflow-y: auto; }
   /* safe + auto: on a short or sideways screen the card is taller than its layer; it starts at
      the top and scrolls, rather than being cut off at both ends (SOLAR-118) */
