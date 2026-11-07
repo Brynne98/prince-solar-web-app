@@ -651,8 +651,8 @@ export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email
     ? [{ p: `Readings for ${P} paused${e.at ? ` at ${e.at} ${day}` : ""}. SunSynk asked for your login again.` },
        { p: "Reconnect and we fetch the readings you missed." },
        { button: { label: "Reconnect", href: LOGINS } }]
-    : [{ p: `${P} reconnected at ${e.at} ${day}. Stopped for ${e.lasted}.` },
-       { plants: { title: "Readings back", names: list, tone: "keep", rest: "" } },
+    : [{ p: `Readings for ${P} are back since ${e.at} ${day}, after ${e.lasted}.` },
+       { p: "We're fetching the readings you missed." },
        { button: openPage("live", plantId) }];
   // No switch for these, so no "turn them off" line.
   return make(title, { title, parts, footer: [HELP] });
