@@ -559,9 +559,10 @@ function HistoryView({ today, refreshKey, locked, silent }) {
   const real = pts.filter(p => p.pv != null); // anything with data (est = cloud-sourced, drawn dotted)
   const hasData = real.length > 1;
 
-  // value shown inside each legend pill: the hovered point, else the latest reading.
-  // A silent plant's latest reading isn't now, so today's pills show none (SOLAR-348).
-  const cur = (hover != null && pts[hover] && pts[hover].pv != null) ? pts[hover] : (real.length && !(isToday && silent) ? real[real.length - 1] : null);
+  // value shown inside each legend pill: the hovered point, else the latest reading. A
+  // silent plant's today shows its last reading too, greyed by the page, as a past day
+  // does (SOLAR-386; SOLAR-348 had none).
+  const cur = (hover != null && pts[hover] && pts[hover].pv != null) ? pts[hover] : (real.length ? real[real.length - 1] : null);
   const chipVal = (k) => {
     // still fetching: keep the value slot so the chips (and the row wrap) hold their size
     // at a typical reading's width, unseen: on a phone the chips wrap by their width (SOLAR-221)
