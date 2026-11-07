@@ -462,8 +462,9 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
         ))}
         {!isTemp && fInv && <window.LegendChip color={fColor} label={freqLabel} value={fmtHz(fVal)} active />}
       </div>
-      <div className="chart-area" ref={ref} style={{ position: 'relative', height }}>
-        {nInv === 0 ? <ChartPlaceholder height={height} loading={invs == null} text={emptyMsg} /> : (
+      {/* today before the first six-hourly fetch: a short note, not a chart-high empty box (SOLAR-411) */}
+      <div className="chart-area" ref={ref} style={{ position: 'relative', height: nInv === 0 && invs != null && isToday ? 120 : height }}>
+        {nInv === 0 ? <ChartPlaceholder height={invs != null && isToday ? 120 : height} loading={invs == null} text={emptyMsg} /> : (
           <svg width={width} height={height} className="chart-svg" style={{ cursor: 'crosshair' }}
             onMouseMove={onMove} onMouseLeave={() => setHover(null)}
             onTouchStart={e => e.touches[0] && setHover(idxFromPointer(e.touches[0].clientX, e.currentTarget, m, innerW, lastIdx))}
@@ -526,9 +527,13 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
 }
 window.InverterHistoryChart = InverterHistoryChart;
 
-function HistoryView({ today, refreshKey, locked, silent }) {
+// hasBatt / hasGrid: a plant without one has no chip, line or tooltip row for it (SOLAR-411)
+function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGrid = true }) {
   const C = window.COLORS;
-  const [vis, setVis] = React.useState({ pv: true, batt: true, load: true, grid: true, soc: true });
+  const [vis, setVis] = React.useState({ pv: true, batt: hasBatt, load: true, grid: hasGrid, soc: hasBatt });
+  const has = k => (k === 'batt' || k === 'soc' ? hasBatt : k === 'grid' ? hasGrid : true);
+  // another plant may have what this one lacks: its series come back on with it
+  React.useEffect(() => setVis(v => ({ ...v, batt: hasBatt, soc: hasBatt, grid: hasGrid })), [hasBatt, hasGrid]);
   const [hover, setHover] = React.useState(null);
   const [sel, setSel] = React.useState(null);    // [i0,i1] selected range (totals readout)
   const [drag, setDrag] = React.useState(null);  // { i0, i1 } in-progress drag (drives the band visual)
@@ -741,7 +746,7 @@ function HistoryView({ today, refreshKey, locked, silent }) {
       ['Grid', p.grid, C.grid, 'W'], // signed: − = exporting
       ['Home', p.load, C.load, 'W'],
       ['Charge', p.soc, C.soc, '%'],
-    ];
+    ].filter((r, i) => has(['pv', 'batt', 'grid', 'load', 'soc'][i]));
     return (
       <div className="chart-tip" style={{ left, top: 24 }}>
         {/* cloud-recovered points no longer announce themselves here; `p.est` still
@@ -778,14 +783,14 @@ function HistoryView({ today, refreshKey, locked, silent }) {
         <div className="cr-head"><span className="tip-time">{HM(t0)} – {HM(t1)} · {dur}</span><button className="cr-x" onClick={() => setSel(null)} aria-label="Clear">×</button></div>
         <window.TipRow color={C.pv} label="Generated">{f(gen)} kWh</window.TipRow>
         <window.TipRow color={C.load} label="Home">{f(cons)} kWh</window.TipRow>
-        <window.TipRow color={C.grid} label="Grid in / out">{f(gImp)} / {f(gExp)} kWh</window.TipRow>
-        <window.TipRow color={C.batt} label="Batt chg / dis">{f(bChg)} / {f(bDis)} kWh</window.TipRow>
-        {dSoc != null && <window.TipRow color={C.soc} label="Charge">{soc0}% → {soc1}% ({dSoc >= 0 ? '+' : ''}{dSoc}%)</window.TipRow>}
+        {hasGrid && <window.TipRow color={C.grid} label="Grid in / out">{f(gImp)} / {f(gExp)} kWh</window.TipRow>}
+        {hasBatt && <window.TipRow color={C.batt} label="Batt chg / dis">{f(bChg)} / {f(bDis)} kWh</window.TipRow>}
+        {hasBatt && dSoc != null && <window.TipRow color={C.soc} label="Charge">{soc0}% → {soc1}% ({dSoc >= 0 ? '+' : ''}{dSoc}%)</window.TipRow>}
       </div>
     );
   }
 
-  const legend = [['pv', 'Solar', C.pv], ['batt', 'Battery', C.batt], ['grid', 'Grid', C.grid], ['load', 'Home', C.load], ['soc', 'Charge', C.soc]];
+  const legend = [['pv', 'Solar', C.pv], ['batt', 'Battery', C.batt], ['grid', 'Grid', C.grid], ['load', 'Home', C.load], ['soc', 'Charge', C.soc]].filter(([k]) => has(k));
 
   // The server sends no series until today has its first reading (`approx`, 0099).
   // A past day with nothing: still being fetched (fresh link, 0048), before the

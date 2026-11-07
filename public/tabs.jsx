@@ -472,7 +472,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
       </div>
 
       <Card className="chart-card">
-        <window.HistoryView today={today} refreshKey={refreshKey} silent={silent} />
+        <window.HistoryView today={today} refreshKey={refreshKey} silent={silent} hasBatt={hasBatt} hasGrid={hasGrid} />
       </Card>
 
 
@@ -1383,7 +1383,7 @@ function GridSkeleton() {
       <div className="solar-stats">
         {['GRID NOW', 'TODAY', 'THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'].map(l => <StatTile key={l} label={l} loading sub={NBSP} />)}
       </div>
-      <Card>
+      <Card className="grid-day">
         <SectionTitle right={NBSP}>{titled('GRID', 'today')}<window.InfoDot text={'Above the line is power imported from the grid; below it is power exported.'} /></SectionTitle>
         <DayChartSkeleton />
       </Card>
@@ -1499,7 +1499,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         {tile('LIFETIME', tot.lifetime, lifetimeSince(energy.lifetime, earliest, plantToday))}
       </div>
 
-      <Card id="grid-day">
+      <Card id="grid-day" className="grid-day">
         {/* the right line is always there (blank today) so the date bar under it never shifts on a phone */}
         <SectionTitle right={day && !noReadings && !view.isToday && peak ? <>Peak <b>{fmtPower(peak.grid)}</b> at <b>{HM(peak.t)}</b></> : NBSP}>
           {titled('GRID', dayWord)}
@@ -1551,7 +1551,7 @@ function InvertersSkeleton() {
   const tile = (label) => (
     <section className="card eq-tile" aria-label={label}>
       <span className="eq-tile-label">{label}</span>
-      <span className="eq-tile-state"><i className="eq-dot sm" />{line(70)}</span>
+      <span className="eq-tile-state">{line(70)}</span>
       <div className="eq-fig mono">{fig}</div>
       <div className="eq-fig-sub">{line(120)}</div>
       <div className="eq-spark" />
@@ -1592,7 +1592,7 @@ function InvertersSkeleton() {
             <Card className="eq-card"><SectionTitle>GRID SUPPLY</SectionTitle>{rows(3)}</Card>
           </div>
           <Card className="chart-card"><SectionTitle>TEMPERATURE</SectionTitle><DayChartSkeleton legend /></Card>
-          <Card className="chart-card"><SectionTitle>GRID SUPPLY</SectionTitle><DayChartSkeleton legend /></Card>
+          <Card className="chart-card"><SectionTitle>VOLTAGE</SectionTitle><DayChartSkeleton legend /></Card>
         </>
       )}
     </div>
@@ -1726,7 +1726,8 @@ function EqTile({ label, state, value, unit, sub, color, stale, spark }) {
   return (
     <section className={'card eq-tile' + (stale ? ' stale' : '')} aria-label={label} data-today>
       <span className="eq-tile-label">{label}</span>
-      <span className={'eq-tile-state ' + state[0]}><i className={'eq-dot sm ' + state[0]} />{state[1]}</span>
+      {/* the state as a word; the headline above keeps the page's one dot (SOLAR-411) */}
+      <span className={'eq-tile-state ' + state[0]}>{state[1]}</span>
       <div className="eq-fig mono" style={stale || !color ? undefined : { color }}>{value}{unit && <span className="u">{unit}</span>}</div>
       <div className="eq-fig-sub">{sub || NBSP}</div>
       {spark || <div className="eq-spark" />}
@@ -1737,11 +1738,13 @@ function EqTile({ label, state, value, unit, sub, color, stale, spark }) {
 function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const { a, verdict } = st;
   const last = t => t ? 'Last reading ' + window.readAgo(t, now) : 'Not reporting';
+  // the whole plant quiet: the problem card above says since when, so each tile says it once, plainly (SOLAR-407)
+  const QUIET = ['stale', 'Not reporting'];
   const alerts = verdict && verdict.state === 'alert' ? verdict.alerts : [];
   const pts = (today && today.points) || [];
   const rows = (hist || []).filter(r => r.points && r.points.length);
   // ---- solar panels ----
-  const pvState = st.allQuiet ? ['stale', last(st.lastAt)]
+  const pvState = st.allQuiet ? QUIET
     : st.quiet.length ? ['stale', 'Not all reporting']
     : alerts.length ? ['warn', 'Needs a look']
     : st.night ? ['ok', 'Resting for the night']
@@ -1749,7 +1752,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const pvVals = pts.map(p => [p.t, p.pv == null ? null : Math.max(0, p.pv)]);
   const pvMax = Math.max(500, ...pvVals.map(v => v[1] || 0));
   // ---- battery ----
-  const battState = st.battStale ? ['stale', last(st.battAt)]
+  const battState = st.allQuiet ? QUIET : st.battStale ? ['stale', last(st.battAt)]
     : st.hot || st.badSensor ? ['warn', 'Needs a look']
     : ['ok', a.battOut > 5 ? 'Powering the house' : a.battOut < -5 ? 'Charging' : 'Resting'];
   const battSub = st.battStale ? null : [a.battOut > 5 ? fmtPower(a.battOut) + ' out' : a.battOut < -5 ? fmtPower(-a.battOut) + ' in' : null,
@@ -1757,12 +1760,14 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   // ---- inverters: the warmest one now, and the warmest of them through the day ----
   const n = st.invs.length, live = n - st.quiet.length;
   const invState = !st.quiet.length ? ['ok', n === 1 ? 'On' : n === 2 ? 'Both on' : 'All on']
-    : st.allQuiet ? ['stale', last(st.lastAt)]
+    : st.allQuiet ? QUIET
     : ['warn', live + ' of ' + n + ' reporting'];
   const temps = Object.values(st.invT);
   const warm = temps.length ? temps.reduce((x, y) => (y.ac > x.ac ? y : x)) : null;
   const hot = temps.some(t => t.ac > EQ_HOT_AC || (t.dc != null && t.dc > EQ_HOT_DC));
   const out = st.invs.filter(i => !st.quiet.includes(i)).reduce((s, i) => s + (i.output || 0), 0);
+  // no temperature yet today (it comes every six hours): the power to the house is the figure, not a dash (SOLAR-407)
+  const outParts = !warm && !st.allQuiet ? fmtPowerParts(out) : null;
   const heatVals = Array.from({ length: DAY_LAST + 1 }, (_, i) => {
     const vs = rows.map(r => r.points[i] && r.points[i].ac).filter(v => v != null);
     return [i * 5, vs.length ? Math.max(...vs) : null];
@@ -1774,7 +1779,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const outages = [];
   gb.forEach(b => { const r = outages[outages.length - 1]; if (!b.off) return; if (r && r[1] === b.i - 1) r[1] = b.i; else outages.push([b.i, b.i]); });
   const offMin = gridDay ? Number(gridDay.offMinutes) || 0 : 0;
-  const gridState = st.allQuiet || a.gridPresent == null ? ['stale', st.allQuiet ? last(st.lastAt) : 'Not known']
+  const gridState = st.allQuiet ? QUIET : a.gridPresent == null ? ['stale', 'Not known']
     : a.gridPresent ? ['ok', 'On'] : ['warn', 'Off'];
   const vVals = gb.map(b => [b.i * 5, b.v]);
   return (
@@ -1782,11 +1787,11 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
       <EqTile label="Solar panels" state={pvState} value={st.pvParts[0]} unit={st.pvParts[1]} color={CC.pv} stale={st.allQuiet}
         sub={st.allQuiet ? st.pvSub : st.pvSub + (a.pvNow > 0 ? ' · now ' + fmtPower(a.pvNow) : '')}
         spark={pvVals.length > 1 && <EqSpark vals={pvVals} lo={0} hi={pvMax} stroke={CC.pv} fill={CC.pv} />} />
-      {st.hasBatt && <EqTile label="Battery" state={battState} value={a.battSoc ?? '—'} unit={a.battSoc != null ? '%' : null} color={CC.batt} stale={st.battStale}
+      {st.hasBatt && <EqTile label="Battery" state={battState} value={a.battSoc ?? '—'} unit={a.battSoc != null ? '%' : null} color={CC.batt} stale={st.battStale || st.allQuiet}
         sub={battSub} spark={pts.some(p => p.soc != null) && <EqSpark vals={pts.map(p => [p.t, p.soc])} lo={0} hi={100} stroke={CC.batt} />} />}
       <EqTile label={n === 1 ? 'Inverter' : 'Inverters'} state={hot && !st.allQuiet ? ['warn', 'Running hot'] : invState}
-        value={warm ? Math.round(warm.ac) : '—'} unit={warm ? ' °C' : null} stale={st.allQuiet}
-        sub={[warm && (n > 1 ? 'warmest at ' : 'at ') + HM(warm.at), !st.allQuiet && fmtPower(out) + ' to the house'].filter(Boolean).join(' · ')}
+        value={warm ? Math.round(warm.ac) : outParts ? outParts[0] : '—'} unit={warm ? ' °C' : outParts ? outParts[1] : null} stale={st.allQuiet}
+        sub={outParts ? 'to the house now' : [warm && (n > 1 ? 'warmest at ' : 'at ') + HM(warm.at), !st.allQuiet && fmtPower(out) + ' to the house'].filter(Boolean).join(' · ')}
         spark={heatVals.some(v => v[1] != null) && <EqSpark vals={heatVals} lo={30} hi={70} heat={EQ_HOT_AC} />} />
       {st.hasGrid && <EqTile label="Grid" state={gridState} value={volt ? Math.round(volt) : '—'} unit={volt ? ' V' : null} color={CC.grid} stale={st.allQuiet || !volt}
         sub={gb.length ? (offMin ? 'Off ' + window.fmtDuration(offMin) + ' today' : 'No outage today') : null}
@@ -1913,7 +1918,9 @@ function EqBatteryCard({ st, snap, now }) {
     else if (st.battTemp != null) rows.push(['Temperature', Math.round(st.battTemp) + ' °C' + (st.battTemp > 45 ? ', hot' : st.battTemp < 5 ? ', cold' : ''), st.battTemp > 45]);
   }
   if (!st.battStale) rows.push(['In · out today', window.fmtEnergyParts(a.battChgToday)[0] + ' · ' + fmtKwh(a.battDischgToday)]);
-  if (a.battChgTotal > 0) rows.push(['In · out since installed', window.fmtEnergySmart(a.battChgTotal) + ' · ' + window.fmtEnergySmart(a.battDischgTotal)]);
+  // each figure keeps its unit on its line when the row wraps (SOLAR-411)
+  const nb = s => String(s).replace(/ /g, NBSP);
+  if (a.battChgTotal > 0) rows.push(['In · out since installed', nb(window.fmtEnergySmart(a.battChgTotal)) + ' · ' + nb(window.fmtEnergySmart(a.battDischgTotal))]);
   const packs = st.shared ? Math.min(1, st.withBatt.length) : st.withBatt.length;
   const modules = st.shared ? Math.max(0, ...st.withBatt.map(i => i.numberOfBatteries || 0)) : st.withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
   // each pack under the inverter that reads its sensor: the slaves on a shared pack read -100.
@@ -1936,7 +1943,8 @@ function EqBatteryCard({ st, snap, now }) {
       <div className={'eq-meter' + (st.battStale ? ' stale' : '')}><i style={{ width: soc + '%', background: CC.batt }} /><b style={{ left: reserve + '%' }} /></div>
       <div className="eq-meter-scale"><span style={reserve > 60 ? { right: (100 - reserve) + '%' } : { left: reserve + '%' }}>{reserve}% reserve</span></div>
       <dl className="eq-rows">
-        {rows.map(([l, val, warn]) => <div key={l}><dt>{l}</dt><dd className={'mono' + (warn ? ' warn' : '')}>{val}</dd></div>)}
+        {/* a problem reads red, as its card at the top of the page does (SOLAR-411) */}
+        {rows.map(([l, val, bad]) => <div key={l}><dt>{l}</dt><dd className={'mono' + (bad ? ' bad' : '')}>{val}</dd></div>)}
       </dl>
       <EqMore rows={more} />
     </Card>
@@ -1949,7 +1957,7 @@ function EqInvertersCard({ st, now }) {
   const down = inv => st.quiet.includes(inv);
   const rows = [
     ['State', invs.map(inv => down(inv) ? { v: 'Not reporting', cls: 'warn', sub: inv.readAt ? 'Since ' + window.readAgo(inv.readAt, now) : null }
-      : { v: <><i className="eq-dot sm ok" />On</>, sub: 'Read ' + eqReadAt(inv, now) })],
+      : { v: 'On', sub: 'Read ' + eqReadAt(inv, now) })],
     ['To the house now', invs.map(inv => ({ v: down(inv) ? '—' : fmtPower(inv.output) }))],
     ['Temperature', invs.map(inv => {
       const t = st.invT[inv.sn];
@@ -2021,7 +2029,8 @@ function EquipmentDetailed({ st, snap, health, now, refreshKey }) {
           terminal keeps reading the inverter's own 230 V then, so only the 0 Hz gives it away.
           Off-grid, the inverter's own output takes its place. */}
       <Card className="chart-card">
-        <SectionTitle>{st.hasGrid ? 'GRID SUPPLY' : 'OUTPUT'}</SectionTitle>
+        {/* not "Grid supply" again: the card above has that name (SOLAR-407) */}
+        <SectionTitle>{st.hasGrid ? 'VOLTAGE' : 'OUTPUT'}</SectionTitle>
         <window.InverterHistoryChart kind={st.hasGrid ? 'ac' : 'output'} refreshKey={refreshKey} />
       </Card>
     </>
@@ -2071,7 +2080,8 @@ function InvertersTab({ snap, today, refreshKey }) {
 
       {/* the one place that says whether things are OK */}
       <section className="eq-status" aria-label="Status">
-        <div className="eq-head"><i className={'eq-dot ' + (n ? 'warn' : 'ok')} />{head}</div>
+        {/* red, as the problem cards under it are (SOLAR-407) */}
+        <div className="eq-head"><i className={'eq-dot ' + (n ? 'bad' : 'ok')} />{head}</div>
         {n === 0 && st.lastAt && <div className="eq-head-sub">Last reading {window.fmtAgo(new Date(st.lastAt), now)}</div>}
       </section>
       {n > 0 && (
@@ -3472,7 +3482,8 @@ function NotificationsSection({ userId }) {
 // tap into, and each page has a back link to it; on a desktop 'prefs' shows Account. Adjust
 // plan ('plans') is a page under Billing. The plan is read once here: Billing shows it,
 // Account's Delete needs it.
-const SETTINGS_NAV = [['account', 'Account'], ['billing', 'Billing']];
+// the note shows on the phone's list only, so two rows read as what each holds (SOLAR-411)
+const SETTINGS_NAV = [['account', 'Account', 'Notifications, your data, password'], ['billing', 'Billing', 'Plan, plants, card']];
 // Setup and App each draw their own SettingsArea, so the first plant switched on or the last
 // one off mounts a new one; it starts from the plan last read, not the Plan outline. The
 // free week's end too, so Plan's line doesn't drop it until the new screen reads api_me.
@@ -3513,13 +3524,13 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
       <div className={'set-area' + (page === 'prefs' ? ' set-list' : '')}>
         <nav className="set-nav" aria-label="Settings">
           <h1 className="set-nav-title">Settings</h1>
-          {SETTINGS_NAV.map(([id, label]) => (
+          <div className="set-nav-list">{SETTINGS_NAV.map(([id, label, note]) => (
             <button key={id} type="button" aria-current={shown === id ? 'page' : undefined} onClick={() => onPage(id)}>
-              <span>{label}</span>
+              <span className="set-nav-text"><span>{label}</span><small className="set-nav-note">{note}</small></span>
               {dot[id] && <span className="dot" aria-label={billing?.state === 'past_due' ? 'Needs you' : 'A login needs reconnecting'} />}
               <Icon id="next" className="set-chev" />
             </button>
-          ))}
+          ))}</div>
         </nav>
         <div className="set-main">
           <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><Icon id="back" />Settings</button>

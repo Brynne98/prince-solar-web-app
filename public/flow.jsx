@@ -250,7 +250,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   // lines are drawn one unit per pixel. Under 1000 wide the lane and the inverter shrink.
   function renderDesktop() {
     const narrow = !wall && wrapW < 1000;
-    const LW = narrow ? 200 : 240, R = narrow ? 40 : 47, BH = 176, GAP = 22, H = 2 * BH + GAP;
+    // A silent plant's boxes hold a name and a dash only, so they sit low rather than as tall empty boxes (SOLAR-411)
+    const LW = narrow ? 200 : 240, R = narrow ? 40 : 47, BH = silentSince && !keepToday ? 104 : 176, GAP = 22, H = 2 * BH + GAP;
     const cx = LW / 2, cy = H / 2, row1 = BH / 2, row2 = BH + GAP + BH / 2;
     // a plant without a battery or grid centres the one box left on that side
     const solarY = nodes.bat ? row1 : cy, homeY = nodes.grid ? row2 : cy;
