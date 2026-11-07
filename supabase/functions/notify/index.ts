@@ -28,7 +28,7 @@ import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
-  PAY_URL, cardChanged, cardExpiring, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
+  PAY_URL, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
   offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, needAHand,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
@@ -290,11 +290,6 @@ async function build(r: Row): Promise<Email | null> {
       });
     case "bill_refund":
       return paymentRefunded({ amount: d.amount, date: day(d.date), reference: d.reference, why: d.why === "price" ? "price" : "changed" });
-    // SOLAR-406 (0161)
-    case "bill_card_changed":
-      return cardChanged({ card: d.card, was: d.was ?? undefined, next: d.nextDate ? { amount: d.nextAmount, date: day(d.nextDate) } : undefined });
-    case "bill_card_expiring":
-      return cardExpiring({ card: d.card, on: day(d.on), final: d.final === true, next: { amount: d.nextAmount, date: day(d.nextDate) } });
     case "bill_mail_failed":
       return billMailFailed({ kind: String(d.kind), key: String(d.key), user: String(d.user ?? ""), error: String(d.error ?? "") });
     case "bill_free":
