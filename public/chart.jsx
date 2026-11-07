@@ -246,6 +246,9 @@ function fitScale(lo, hi, unit) {
 const EQ_HOT_AC = 60, EQ_HOT_DC = 75;
 // One grey per inverter: a reading that is no power series takes grey, never a sixth hue (SOLAR-392).
 const INV_COLORS = ['#e7ecf2', '#9aa5b3', '#6b7a8d', '#c4ccd6', '#556170', '#aeb8c4']; // on Equipment only; reuse-check: allow
+// A temperature line shades with heat (SOLAR-396): its inverter's grey until 20 °C under the
+// hot limit, this warm orange halfway, the warning red at the limit and above.
+const HEAT_WARM = '#f0884a'; // temperature only; reuse-check: allow
 // Outage: runs of 5-minute buckets, [first, last], where any inverter's grid (or output) read
 // 0 Hz, or its terminal 0 V. The Grid tab's day chart shades the same runs (SOLAR-125).
 function outageRuns(invs, fKey, lastIdx) {
@@ -309,7 +312,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   const [invs, setInvs] = React.useState(null); // null = loading
   const [hover, setHover] = React.useState(null);
   const [ref, width, height] = useChartSize([220, 300]);
-  const clipId = React.useId().replace(/:/g, ''); // the hot bands' clip paths, unique per chart (SOLAR-395)
+  const gradId = React.useId().replace(/:/g, ''); // the heat gradients' ids, unique per chart (SOLAR-396)
   const mobile = width < 560;
 
   React.useEffect(() => {
@@ -464,8 +467,13 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
             onTouchMove={e => e.touches[0] && setHover(idxFromPointer(e.touches[0].clientX, e.currentTarget, m, innerW, lastIdx))}>
             {isTemp && hasV && (
               <defs>
-                <clipPath id={clipId + 'ac'}><rect x={0} y={0} width={width} height={Math.max(0, y(EQ_HOT_AC))} /></clipPath>
-                <clipPath id={clipId + 'dc'}><rect x={0} y={0} width={width} height={Math.max(0, y(EQ_HOT_DC))} /></clipPath>
+                {shown.flatMap((inv, k) => [['ac', EQ_HOT_AC], ['dc', EQ_HOT_DC]].map(([kind, lim]) => (
+                  <linearGradient key={kind + k} id={gradId + kind + k} gradientUnits="userSpaceOnUse" x1={0} x2={0} y1={y(lim)} y2={y(lim - 20)}>
+                    <stop offset="0" style={{ stopColor: 'var(--bad)' }} />
+                    <stop offset="0.5" style={{ stopColor: HEAT_WARM }} />
+                    <stop offset="1" style={{ stopColor: color(k) }} />
+                  </linearGradient>
+                )))}
               </defs>
             )}
             {hasV && ys.ticks.map(v => (
@@ -486,11 +494,8 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
               const c = color(k);
               return isTemp ? (
                 <g key={inv.sn}>
-                  {!inv.dcFlat && <path d={line(inv.points, 'dc', y)} fill="none" stroke={c} strokeWidth="1" strokeOpacity="0.5" strokeDasharray="3 3" />}
-                  <path d={line(inv.points, 'ac', y)} fill="none" stroke={c} strokeWidth="1.4" strokeLinejoin="round" />
-                  {/* the same lines again in red, shown only above the hot limit (SOLAR-395) */}
-                  {!inv.dcFlat && hi > EQ_HOT_DC && <path d={line(inv.points, 'dc', y)} fill="none" stroke="var(--bad)" strokeWidth="1" strokeDasharray="3 3" clipPath={`url(#${clipId}dc)`} />}
-                  {hi > EQ_HOT_AC && <path d={line(inv.points, 'ac', y)} fill="none" stroke="var(--bad)" strokeWidth="1.4" strokeLinejoin="round" clipPath={`url(#${clipId}ac)`} />}
+                  {!inv.dcFlat && <path d={line(inv.points, 'dc', y)} fill="none" stroke={`url(#${gradId}dc${k})`} strokeWidth="1" strokeOpacity="0.8" strokeDasharray="3 3" />}
+                  <path d={line(inv.points, 'ac', y)} fill="none" stroke={`url(#${gradId}ac${k})`} strokeWidth="1.4" strokeLinejoin="round" />
                 </g>
               ) : (
                 <g key={inv.sn}>
