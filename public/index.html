@@ -511,6 +511,7 @@
     .acct-head .acct-menu { left: auto; right: 0; bottom: auto; top: calc(100% + 6px); width: 260px; max-width: calc(100vw - 20px); }
     /* bottom: the 56px bar plus the same 10px gap as at the top (SOLAR-25) */
     .content { padding: var(--sp-sm) var(--sp-md) calc(66px + env(safe-area-inset-bottom, 0px)); }
+    .cal-pop { scroll-margin-bottom: calc(66px + env(safe-area-inset-bottom, 0px)); }   /* scrolled clear of the bar when it opens */
 
     .phonebar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: #0d1117; border-top: 1px solid var(--line);
       padding: 0 var(--sp-xs) env(safe-area-inset-bottom, 0px); }
@@ -1164,10 +1165,12 @@
   /* on Total the box is the value; the sum over it only reads on By size */
   #settings-system .fs-sumhead:has(.seg-btn:first-child.active) .fs-val { display: none; }
   @media (max-width: 599px) { #settings-system .conn-row.sset-row { grid-template-columns: minmax(0, 1fr); gap: var(--sp-sm); } }
-  /* Your data: From, To and Download on one line */
-  .dl-row { display: flex; align-items: flex-end; gap: var(--sp-lg); flex-wrap: wrap; }
-  .dl-field { flex: 1 1 180px; display: flex; flex-direction: column; gap: var(--sp-xs); }
-  .dl-row > button { flex: none; min-height: 41px; }
+  /* Your data: fields of one width in columns, Download in the next cell; one column on a phone */
+  .dl-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); align-items: end; gap: var(--sp-lg); }
+  .dl-field { display: flex; flex-direction: column; gap: var(--sp-xs); min-width: 0; }
+  .dl-row > button { justify-self: start; min-height: 41px; }
+  .dl-field .cal-pop { max-width: calc(100vw - 32px); }
+  @media (max-width: 600px) { .dl-field .cal-pop { width: 100%; } }   /* the field's width: inside the card */
   .dl-row + .sset-err { margin-top: var(--sp-sm); }
   /* Account: Delete is off while a paid plan runs, with this note under it */
   /* Billing */

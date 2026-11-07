@@ -117,8 +117,11 @@ function CalendarPop({ date, todayStr, earliest, latest = todayStr, days, allDay
   const shut = k => !!floor && k < floor;
   // Free can look back two months: what comes back on a paid plan
   const back = floor ? monthsBack(floor, month) >= 2 : !!earliest && month <= earliest.slice(0, 7);
+  // Opened low on the page, it scrolls up into view instead of hiding under the screen's edge.
+  const ref = React.useRef(null);
+  React.useEffect(() => { ref.current?.scrollIntoView({ block: 'nearest' }); }, []);
   return (
-    <div className="cal-pop" role="dialog" aria-label="Pick a day">
+    <div className="cal-pop" role="dialog" aria-label="Pick a day" ref={ref}>
       <div className="cal-head">
         <button type="button" className="hv-daynav" aria-label="Previous month" disabled={back} onClick={() => shift(-1)}><Chevron dir={-1} /></button>
         <span className="cal-title">{MONTHS[m - 1]} {y}</span>

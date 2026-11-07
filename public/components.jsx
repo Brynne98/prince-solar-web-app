@@ -56,7 +56,8 @@ function shiftDate(s, days) {
 // Read as UTC so the day never shifts with the device's zone.
 function dayText(s, opts = { weekday: 'short', day: 'numeric', month: 'short' }) {
   const [y, m, d] = s.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-GB', { ...opts, timeZone: 'UTC' }).replace(',', '');
+  // en-GB says "Sept"; every other short month has three letters
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-GB', { ...opts, timeZone: 'UTC' }).replace(',', '').replace(/\bSept\b/, 'Sep');
 }
 /** Whole minutes as "12 min" / "2h 33m": spoken, not decimal hours, like everything else here. */
 function fmtDuration(mins) {
