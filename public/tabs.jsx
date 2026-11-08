@@ -2503,7 +2503,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
   const booked = bookedChange(b);
   // the plan's own card while a change is booked: when it ends or changes, in either period
-  const ownDate = <div className="plan-cur">{b.nextPlan === 'free' ? 'Ends ' : 'Changes '}{billDay(b.nextDate)}</div>;
+  // built only when shown: a comped plan has no date (SOLAR-433)
+  const ownDate = () => <div className="plan-cur">{b.nextPlan === 'free' ? 'Ends ' : 'Changes '}{billDay(b.nextDate)}</div>;
   // a smaller plan booked for the billing date in this period; Free has none
   const bookedHere = (p) => b.nextPlan === p && (p === 'free' || (b.nextPeriod || b.period) === view);
   // The line under a price: Family's says where more plants go
@@ -2511,7 +2512,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   const action = (p) => {
     // a paid year changes nothing until it starts (SOLAR-298); a quiet line holds the button's row
     if (b.prepaidOn && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
-    if (p === b.plan && paid && b.nextPlan) return ownDate;
+    if (p === b.plan && paid && b.nextPlan) return ownDate();
     if (p === b.plan) {
       if (!sameView) return b.nextPeriod === view ? <div className="plan-cur">From {billDay(b.nextDate)}</div>
         // monthly to yearly is paid now (SOLAR-298); yearly to monthly is booked

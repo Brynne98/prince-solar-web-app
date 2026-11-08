@@ -101,7 +101,8 @@ const LINK_ERRORS = {
 // narrow: a narrow no-break space, for the large prices, where a full one reads as a gap (SOLAR-364)
 const rand = (n, narrow) => 'R' + Number(n).toLocaleString('en-US').replace(/,/g, narrow ? '\u202f' : '\u00a0');
 // "30 Nov"; a date in another year carries it ("31 Oct 2027"), so a yearly date doesn't read as this year's.
-const billDay = (d) => window.dayText(d, { day: 'numeric', month: 'short', year: d.slice(0, 4) === String(new Date().getFullYear()) ? undefined : 'numeric' });
+// No date (a comped plan has none) gives '' (SOLAR-433).
+const billDay = (d) => !d ? '' : window.dayText(d, { day: 'numeric', month: 'short', year: d.slice(0, 4) === String(new Date().getFullYear()) ? undefined : 'numeric' });
 const perUnit = (period) => (period === 'yearly' ? 'a year' : 'a month');
 // here, not in tabs.jsx, so the billing notices in the header can name a plan before tabs loads
 const PLAN_NAME = { free: 'Free', home: 'Home', family: 'Family' };
