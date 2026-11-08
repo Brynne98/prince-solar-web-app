@@ -291,7 +291,6 @@ function useLiveOffFrom(offNow, buckets, nowIdx) {
 }
 // The last 5-minute slot of `points` with a value in `field`: where today's line ends.
 const lastSlot = (points, field) => { for (let i = points.length - 1; i >= 0; i--) if (points[i][field] != null) return Math.round(points[i].t / 5); return null; };
-const OUTAGE_TITLE = 'Five-minute buckets with at least one reading under 50 V or 10 Hz — a blackout, to the nearest bucket';
 // The run holding bucket i as "10:25–19:30", for the hover card; null outside every run.
 function outageAt(runs, i) {
   const r = runs.find(([a, b]) => i >= a && i <= b);
@@ -299,7 +298,7 @@ function outageAt(runs, i) {
 }
 // "Grid off 9h" by the date; its square is the band's red, so it names the shading.
 function OutagePill({ mins, what }) {
-  return mins > 0 ? <window.Tip className="hv-gap" text={OUTAGE_TITLE}><i className="hv-gap-sq" />{what} off {window.fmtDuration(mins)}</window.Tip> : null;
+  return mins > 0 ? <window.Tip className="hv-gap" text={'When the ' + what.toLowerCase() + ' was off, to the nearest 5 minutes.'}><i className="hv-gap-sq" />{what} off {window.fmtDuration(mins)}</window.Tip> : null;
 }
 // A series from index `from` to `to` as an SVG path: x(i) across, yAt(i) down, which is null
 // where there is no reading, so the line breaks there rather than bridging the gap.

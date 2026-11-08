@@ -1472,7 +1472,8 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const gb = gridDay && gridDay.buckets;
   const liveFrom = useLiveOffFrom(pick.isToday && a.gridPresent === false, gb, nowIdx);
   // drawn once both answers are in, so a reload never shows part of the band first
-  const outages = !histRuns ? [] : !pick.isToday ? histRuns : gb ? gridOffRuns(histRuns, gb, liveFrom, nowIdx) : [];
+  const offPending = !histRuns || (pick.isToday && !gb);
+  const outages = offPending ? [] : !pick.isToday ? histRuns : gridOffRuns(histRuns, gb, liveFrom, nowIdx);
   const outageMin = outageMinutes(outages);
   // where the day's imports went: the same flows Solar and Home show (SOLAR-332)
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1507,7 +1508,8 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         <DateBar pick={pick} earliest={earliest}>
           <OutagePill mins={outageMin} what="Grid" />
         </DateBar>
-        {!day ? <PlotSkeleton heights={[220, 300]} />
+        {/* waits for the grid-off answers too, so no 0 W line shows where the band will be */}
+        {!day || offPending ? <PlotSkeleton heights={[220, 300]} />
           : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="grid" color={CC.grid} label="Grid"
               sums={['Imported', 'Exported']} importScale outages={outages} empty={noReadings || 'No grid readings for this day.'} /></div>}
       </Card>
