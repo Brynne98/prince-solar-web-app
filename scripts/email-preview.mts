@@ -130,6 +130,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "billing-moved-to-free-one-plant": [FROM_BILLING, movedToFree({ from: "home", kept: "Home", stopped: [], deleteOn: "7 Jan", amount: 99, days: 58 })],
   "billing-removal-soon": [FROM_BILLING, plantsRemovalSoon(["Cabin", "Office"], "7 Jan", "free", { plan: "family", now: 99, list: 199 }, 154)],
   "event-grid-down": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "grid_down", at: "14:32", chargePct: 62 })],
+  "event-grid-down-in-gap": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "grid_down", from: "13:53", at: "14:55", chargePct: 95 })],
   "event-grid-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "grid_back", since: "14:32", at: "16:05", lasted: "1h 33m", chargePct: 41 })],
   "event-battery-hot": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "batt_hot", at: "13:20", tempC: 47, hotDays: 3 })],
   "event-battery-hot-first": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "batt_hot", at: "13:20", tempC: 47, hotDays: 1 })],
