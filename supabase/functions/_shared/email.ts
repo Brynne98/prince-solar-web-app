@@ -924,12 +924,13 @@ export const freeWeekEndsSoon = (endsOn: string, plant: string, days: number, _p
 // Day 2 of the free week, once, only while setup steps are left (0122): each one left,
 // and where its number is found.
 export type SetupStep = "rate" | "size" | "reserve" | "panels";
-// Same names as the app's setup card (app.jsx STEPS), with where to find each number.
+// Same names as the app's setup card (app.jsx STEPS): what each number shows in the app,
+// then where to find it.
 const SETUP_WHERE: Record<SetupStep, [string, string]> = {
-  rate: ["Electricity rate", "The price per unit on your bill, with VAT. Shows what solar saved you."],
-  size: ["Battery size", "All your batteries together, from their labels. Shows how long the battery will last."],
-  reserve: ["Battery reserve", "The charge where the battery stops powering your home, as set on your inverter."],
-  panels: ["Solar panels", "All your panels' watts added up, from your installer's invoice."],
+  rate: ["Electricity rate", "Shows what solar saved you, in rand. Use the price per unit on your bill, with VAT."],
+  size: ["Battery size", "Shows how long your battery will last. Add up all your batteries, from their labels."],
+  reserve: ["Battery reserve", "Shows how long until the battery stops powering your home. Use the number set on your inverter."],
+  panels: ["Solar panels", "Shows how much your panels make against what they can. Add up their watts, from your installer's invoice."],
 };
 const COUNT = ["", "One number is", "Two numbers are", "Three numbers are", "Four numbers are"];
 export const freeWeekSetup = (steps: SetupStep[], plantId?: number) => {
@@ -937,7 +938,7 @@ export const freeWeekSetup = (steps: SetupStep[], plantId?: number) => {
   return make("Finish your setup", {
     title: "Finish your setup",
     parts: [
-      { lead: `${COUNT[left.length] ?? `${left.length} numbers are`} still empty:` },
+      { lead: `${COUNT[left.length] ?? `${left.length} numbers are`} still empty. Each one turns on part of the app.` },
       { box: { items: left.map((s) => SETUP_WHERE[s]) } },
       { button: { label: "Finish setup", href: plantId ? `${SYSTEM}&plant=${plantId}` : SYSTEM } },
     ],
