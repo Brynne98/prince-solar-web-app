@@ -312,7 +312,9 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const rateExp = snap.config?.tariffExport ?? 0;
   let pPv, pLoad, pImp, pExp;
   if (period === 'today') { pPv = a.pvToday; pLoad = a.loadToday; pImp = hasGrid ? a.gridFromToday : 0; pExp = hasGrid ? a.gridToToday : 0; }
-  else if (heavy) { pPv = heavy.pv; pLoad = heavy.load; pImp = hasGrid ? heavy.imp : 0; pExp = hasGrid ? heavy.exp : 0; }
+  // stored import even when the grid is off now: a year or lifetime still holds the
+  // months it was on (SOLAR-418)
+  else if (heavy) { pPv = heavy.pv; pLoad = heavy.load; pImp = heavy.imp; pExp = hasGrid ? heavy.exp : 0; }
   else { pPv = pLoad = pImp = pExp = null; } // aggregate period still loading
   // clamp to 0–100: import can exceed load when the grid charges the battery,
   // which would otherwise drive this negative (and break the bar).
