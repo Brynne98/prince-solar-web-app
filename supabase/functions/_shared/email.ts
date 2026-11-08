@@ -770,7 +770,6 @@ export const planChangeBooked = (c: Change) => {
   const cancel = c.to === "free";
   const switchOnly = c.from === c.to;
   const title = cancel ? `${PLAN_NAME[c.from]} ends on ${c.on}` : switchOnly ? `${PLAN_NAME[c.from]} goes ${c.toPeriod} on ${c.on}` : `You move to ${PLAN_NAME[c.to]} on ${c.on}`;
-  const per = (c.toPeriod ?? c.fromPeriod) === "yearly" ? "a year" : "a month";
   // Plants to delete lead, in amber, as in the later "deleted on" email (SOLAR-415).
   const hero = c.removePlants.length
     ? lost(`Deleted on ${c.deleteOn ?? c.on}`, plantCount(c.removePlants.length), withDays(names(c.removePlants), c.days)) : undefined;
@@ -785,7 +784,11 @@ export const planChangeBooked = (c: Change) => {
             { box: { hero: lost(`Deleted on ${c.history.on}`, dayCount(c.history.days), `of history at ${c.history.plant}`),
               rows: [[`After ${c.on}`, "Last 24 hours"], ["Reports", "Stop"]] } }, keep]
         : [{ lead: `Nothing more is charged. ${PAID_FREE}` }, keep]
-      : [{ box: { hero, rows: [[switchOnly ? `${c.on} payment` : `From ${c.on}`, `${c.next ? rand(c.next.amount) : "R0"}${switchOnly ? "" : ` ${per}`}`], ...kept] } },
+      // A monthly/yearly switch reads like the plan-kept email: what carries on, then the price.
+      : switchOnly ? [{ lead: "Your plants, history and reports carry on as before." },
+          { box: { rows: [["Next payment", `${c.next ? rand(c.next.amount) : "R0"} on ${c.on}`]] } },
+          { button: { label: `Keep ${c.fromPeriod}`, href: PLAN } }]
+      : [{ box: { hero, rows: [["Next payment", `${c.next ? rand(c.next.amount) : "R0"} on ${c.on}`], ...kept] } },
          hero ? keep : SEE_PLAN],
     footer: BILL_FOOTER,
   });
