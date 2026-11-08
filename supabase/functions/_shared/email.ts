@@ -80,18 +80,22 @@ a{color:inherit}
 @media (max-width:340px){.card{width:auto!important;display:block!important;margin-right:0!important}}
 `;
 
+// The one box every email shows its facts in (SOLAR-415): an optional big number, then
+// label-value rows split by space, no lines. Values may hold markup set by us (a coloured
+// battery %), never user text unescaped. tone colours the big number only.
+type Hero = { label: string; value: string; tone?: Tone; sub?: string };
+type Box = { hero?: Hero; rows?: [label: string, value: string][] };
+
 type Part =
-  | { p: string } // a paragraph; may hold <b> set by us, never user text unescaped
+  | { lead: string } // grey sentence under the title: what happened, only when the box can't say it
+  | { box: Box }
+  | { small: string } // small print under the button ("The link works once, for 24 hours.")
   | { button: { label: string; href: string } }
   | { stats: { label: string; value: string; unit?: string; tone?: Tone; sub?: string; delta?: Delta }[]; stack?: boolean } // stack: may go full width on a phone (alerts); see below
   | { chart: { title: string; side?: string; bars: Bars; facts: { label: string; value: string; unit?: string; tone?: Tone; sub?: string }[] } }
   | { facts: { label: string; value: string }[] } // label left, value right
-  | { callout: string } // a plain-language status line in a coral-edged panel
   | { note: string }
-  | { steps: string[] } // numbered how-to; may hold <b> set by us
-  | { plants: { title: string; names: string[]; tone: "keep" | "stop"; count?: false; rest?: string } } // one row per plant, any number; count: false when the title already counts; rest: after "and N more" (default: listed in Billing)
-  | { items: { rows: Item[]; total?: { label: string; value: string }; meta?: string[] } } // billing: what is paid for, as receipt rows
-  | { bars: Bars }; // daily solar kWh; null = no data
+  | { steps: string[] }; // numbered how-to; may hold <b> set by us
 
 // labels: one under each bar (a week); titles: the hover text per bar, where the mail app
 // shows it (desktop only). The highest bar is drawn full green, the rest dimmer.
@@ -100,24 +104,6 @@ type Delta = { n: number; prev: string; tone?: "good" | "bad" };
 type Bars = { values: (number | null)[]; from: string; to: string; labels?: string[]; titles?: string[] };
 
 type Body = { title: string; sub?: string; parts: Part[]; footer: string[] };
-const PLANT_ROWS = 10;
-
-// Billing rows (SOLAR-297), like a store receipt: an icon tile, the name, a grey detail
-// under it, the price on the right. Space separates the rows, no lines. Plant lists use
-// the same row with a coloured dot.
-type Item = { icon: "plan" | "plus" | "back" | "keep" | "stop"; name: string; sub?: string; value?: string };
-const tileIcon = (icon: Item["icon"]) =>
-  icon === "plan" ? `<img src="${SITE}/icon-192.png" width="18" height="18" alt="" style="display:inline-block;vertical-align:middle;border:0;border-radius:4px">`
-    : icon === "plus" ? `<span style="font:700 17px/1 ${SANS};color:${ACCENT}">+</span>`
-    : icon === "back" ? `<span style="font:700 15px/1 ${SANS};color:#9aa5b3">&#8617;</span>`
-    : `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${icon === "keep" ? C.ok : C.bad};vertical-align:middle"></span>`;
-const itemRow = (r: Item) => `<tr><td width="32" style="width:32px;padding:6px 12px 6px 0;vertical-align:middle">` +
-  `<div style="width:32px;height:32px;border-radius:8px;background:#141a22;text-align:center;line-height:32px">${tileIcon(r.icon)}</div></td>` +
-  `<td style="padding:6px 0;vertical-align:middle"><div style="font:700 14px/1.3 ${SANS};color:#e7ecf2">${r.name}</div>` +
-  (r.sub ? `<div style="margin-top:2px;font:400 12px/1.4 ${SANS};color:#7f8da0">${r.sub}</div>` : "") + `</td>` +
-  (r.value != null ? `<td align="right" style="padding:6px 0 6px 12px;vertical-align:middle;white-space:nowrap;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2">${r.value}</td>` : "") +
-  `</tr>`;
-
 function drawBars(b: Bars): string {
   // A bar per day, drawn with table cells so it survives email clients that drop SVG
   // and images. A day with no data is a faint stub, never a zero bar. Only the best
@@ -166,13 +152,24 @@ const deltaText = (d: Delta) => { const r = Math.round(d.n); return `${r > 0 ? "
 
 function html(subject: string, b: Body): string {
   const rows = b.parts.map((x) => {
-    if ("p" in x) return `<p class="t" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#e7ecf2">${x.p}</p>`;
-    if ("note" in x) return `<p class="m" style="margin:0 0 16px;font:400 13px/1.5 ${SANS};color:#9aa5b3">${x.note}</p>`;
+    if ("lead" in x) return `<p class="m" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#9aa5b3">${x.lead}</p>`;
+    if ("small" in x) return `<p class="d" style="margin:0;font:400 13px/1.5 ${SANS};color:#7f8da0">${x.small}</p>`;
+    if ("box" in x) {
+      const { hero, rows: r = [] } = x.box;
+      const big = hero ? `<tr><td colspan="2" style="padding:0 0 ${r.length ? 12 : 0}px">` +
+        `<div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(hero.label)}</div>` +
+        `<div class="${hero.tone ?? "t"}" style="margin-top:8px;font:700 40px/1 ${MONO};font-variant-numeric:tabular-nums;color:${hero.tone ? C[hero.tone] : "#e7ecf2"}">${esc(hero.value)}</div>` +
+        (hero.sub ? `<div class="d" style="margin-top:6px;font:400 13px/1.4 ${SANS};color:#7f8da0">${esc(hero.sub)}</div>` : "") + `</td></tr>` : "";
+      const lines = r.map(([l, v]) => `<tr><td class="m" style="padding:6px 12px 6px 0;font:400 14px/1.3 ${SANS};color:#9aa5b3;vertical-align:top">${esc(l)}</td>` +
+        `<td class="t" align="right" style="padding:6px 0;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2;vertical-align:top">${v}</td></tr>`).join("");
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px"><tr><td style="padding:18px 18px ${r.length ? 12 : 18}px;background:#141a22;border-radius:10px">` +
+        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${big}${lines}</table></td></tr></table>`;
+    }
+    if ("note" in x) return `<p class="m" style="margin:0 0 16px;font:400 14px/1.55 ${SANS};color:#9aa5b3">${x.note}</p>`;
     if ("steps" in x)
       return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px">${x.steps.map((s, i) =>
-        `<tr><td style="vertical-align:top;padding:0 12px 12px 0"><div style="width:24px;height:24px;border-radius:12px;background:#141a22;border:1px solid rgba(255,255,255,.12);font:700 12px/24px ${MONO};color:#3ddc84;text-align:center">${i + 1}</div></td>` +
-        `<td style="vertical-align:top;padding:2px 0 12px;font:400 15px/1.5 ${SANS};color:#e7ecf2">${s}</td></tr>`).join("")}</table>`;
-    if ("bars" in x) return drawBars(x.bars);
+        `<tr><td style="vertical-align:top;padding:0 8px 6px 0;font:700 14px/1.55 ${SANS};color:#e7ecf2">${i + 1}.</td>` +
+        `<td style="vertical-align:top;padding:0 0 6px;font:400 14px/1.55 ${SANS};color:#9aa5b3">${s}</td></tr>`).join("")}</table>`;
     if ("chart" in x) {
       const c = x.chart;
       // The average sits under the title, not beside it, so the two never crowd on a phone.
@@ -190,34 +187,12 @@ function html(subject: string, b: Body): string {
       const facts = c.facts.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="table-layout:fixed;border-top:1px solid rgba(255,255,255,.07)">${rowsOf2.join("")}</table>` : "";
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:16px;background:#141a22;border-radius:8px">${head}${drawBars(c.bars)}${facts}</td></tr></table>`;
     }
-    if ("plants" in x) {
-      // One row per plant, so a long name wraps in its own row and many plants stay a
-      // list. Past PLANT_ROWS the rest are counted, not listed: an installer login can
-      // bring dozens.
-      const { title, names, tone, count, rest = ", listed in Billing" } = x.plants;
-      const shown = names.length > PLANT_ROWS ? names.slice(0, PLANT_ROWS - 1) : names;
-      const more = names.length - shown.length;
-      return `<div style="margin:0 0 6px;font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(title)}${names.length > 1 && count !== false ? ` · ${names.length} plants` : ""}</div>` +
-        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px">${shown.map((n) => itemRow({ icon: tone, name: esc(n) })).join("")}` +
-        (more ? `<tr><td></td><td style="padding:6px 0;font:400 14px/1.35 ${SANS};color:#9aa5b3">and ${more} more${esc(rest)}</td></tr>` : "") +
-        `</table>`;
-    }
-    if ("items" in x) {
-      const { rows, total, meta } = x.items;
-      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 ${meta ? 10 : 16}px">${rows.map(itemRow).join("")}` +
-        (total ? `<tr><td colspan="2" style="padding:12px 0 0;font:700 14px/1.3 ${SANS};color:#e7ecf2">${esc(total.label)}</td>` +
-          `<td align="right" style="padding:12px 0 0;white-space:nowrap;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2">${total.value}</td></tr>` : "") +
-        `</table>` + (meta ? `<p class="d" style="margin:0 0 16px;font:400 12px/1.6 ${SANS};color:#7f8da0">${meta.join("<br>")}</p>` : "");
-    }
-    if ("callout" in x)
-      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr><td style="padding:14px 16px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.4);border-radius:8px;font:500 15px/1.45 ${SANS};color:#e7ecf2">` +
-        `<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${C.bad};margin-right:10px;vertical-align:1px"></span>${x.callout}</td></tr></table>`;
     if ("facts" in x)
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px">${x.facts.map((f) =>
         `<tr><td style="padding:6px 0;font:400 14px/1.3 ${SANS};color:#9aa5b3">${esc(f.label)}</td>` +
         `<td align="right" style="padding:6px 0;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2">${f.value}</td></tr>`).join("")}</table>`;
     if ("button" in x)
-      return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 12px"><tr><td style="border-radius:8px;background:${ACCENT}"><a href="${x.button.href}" style="display:inline-block;padding:12px 22px;font:600 15px/1 ${SANS};color:#0a0d12;text-decoration:none;border-radius:8px">${esc(x.button.label)}</a></td></tr></table>`;
+      return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 12px"><tr><td style="border-radius:8px;background:${ACCENT}"><a href="${x.button.href}" style="display:inline-block;padding:13px 24px;font:600 15px/1 ${SANS};color:#0a0d12;text-decoration:none;border-radius:8px">${esc(x.button.label)}</a></td></tr></table>`;
     const cells = x.stats.map((s) => `<td class="tile" width="50%" style="padding:16px;background:#141a22;border-radius:8px;vertical-align:top">
 <div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(s.label)}</div>
 <div class="${s.tone ?? "t"}" style="margin-top:8px;font:700 24px/1.1 ${MONO};font-variant-numeric:tabular-nums;color:${s.tone ? C[s.tone] : "#e7ecf2"}">${esc(s.value)}${s.unit ? `<span style="font-size:14px;opacity:.85"> ${esc(s.unit)}</span>` : ""}</div>
@@ -236,7 +211,7 @@ ${s.delta ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};colo
   // Every part ends in its own bottom margin; take it off the card's bottom padding so
   // the space under the last part matches the sides.
   const last = b.parts[b.parts.length - 1];
-  const tail = !last ? 0 : "button" in last ? 20 : "stats" in last ? 12 : "steps" in last ? 28 : 16;
+  const tail = !last ? 0 : "button" in last ? 20 : "stats" in last ? 12 : "steps" in last ? 28 : "small" in last ? 8 : "box" in last ? 20 : 16;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><title>${esc(subject)}</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
@@ -247,7 +222,7 @@ ${s.delta ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};colo
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
 <tr><td style="padding:24px 16px 16px 20px"><a href="${APP}" style="text-decoration:none"><img src="${SITE}/icon-192.png" width="28" height="28" alt="" style="vertical-align:middle;border:0;border-radius:6px"> <span class="t" style="vertical-align:middle;font:700 17px/1 ${SANS};color:#e7ecf2">Prince Solar Hub</span></a></td></tr>
 <tr><td style="padding:0 12px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td class="card pad" style="background:#11161d;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:32px 32px ${Math.max(0, 32 - tail)}px">
-<h1 class="t" style="margin:0 0 ${b.sub ? 4 : 16}px;font:700 22px/1.25 ${SANS};letter-spacing:-.02em;color:#e7ecf2">${esc(b.title)}</h1>
+<h1 class="t" style="margin:0 0 ${b.sub ? 4 : 16}px;font:700 20px/1.3 ${SANS};letter-spacing:-.02em;color:#e7ecf2">${esc(b.title)}</h1>
 ${b.sub ? `<p class="m" style="margin:0 0 20px;font:400 14px/1.4 ${SANS};color:#9aa5b3">${esc(b.sub)}</p>` : ""}
 ${rows.join("\n")}
 </td></tr></table></td></tr>
@@ -260,17 +235,15 @@ const strip = (s: string) => s.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").re
 function text(b: Body): string {
   const out = [b.title, b.sub ?? "", ""];
   for (const x of b.parts) {
-    if ("p" in x) out.push(strip(x.p), "");
+    if ("lead" in x) out.push(strip(x.lead), "");
+    else if ("small" in x) out.push(strip(x.small), "");
+    else if ("box" in x) out.push(...(x.box.hero ? [`${x.box.hero.label}: ${x.box.hero.value}${x.box.hero.sub ? ` (${x.box.hero.sub})` : ""}`] : []),
+      ...(x.box.rows ?? []).map(([l, v]) => `${l}: ${strip(v)}`), "");
     else if ("note" in x) out.push(strip(x.note), "");
     else if ("steps" in x) out.push(...x.steps.map((s, i) => `${i + 1}. ${strip(s)}`), "");
     else if ("button" in x) out.push(`${x.button.label}: ${x.button.href}`, "");
-    else if ("bars" in x && x.bars.labels) out.push(x.bars.labels.map((l, i) => `${l} ${x.bars.values[i] == null ? "–" : x.bars.values[i]!.toFixed(0)}`).join(", ") + " kWh", "");
     else if ("chart" in x) out.push(x.chart.title, ...(x.chart.bars.labels ? [x.chart.bars.labels.map((l, i) => `${l} ${x.chart.bars.values[i] == null ? "–" : x.chart.bars.values[i]!.toFixed(0)}`).join(", ") + " kWh"] : []),
       ...x.chart.facts.map((f) => `${f.label}: ${strip(f.value)}${f.unit ? " " + f.unit : ""}${f.sub ? `, ${f.sub}` : ""}`), "");
-    else if ("plants" in x) out.push(`${x.plants.title}${x.plants.names.length > 1 && x.plants.count !== false ? ` (${x.plants.names.length} plants)` : ""}:`, ...x.plants.names.map((n) => `- ${n}`), "");
-    else if ("callout" in x) out.push(strip(x.callout), "");
-    else if ("items" in x) out.push(...x.items.rows.map((r) => `${strip(r.name)}${r.sub ? ` (${strip(r.sub)})` : ""}${r.value ? `: ${strip(r.value)}` : ""}`),
-      ...(x.items.total ? [`${x.items.total.label}: ${strip(x.items.total.value)}`] : []), ...(x.items.meta ?? []).map(strip), "");
     else if ("facts" in x) out.push(...x.facts.map((f) => `${f.label}: ${strip(f.value)}`), "");
     else if ("stats" in x) out.push(...x.stats.map((s) => `${s.label}: ${s.value}${s.unit ? " " + s.unit : ""}${s.delta ? ` (${deltaText(s.delta)})` : s.sub ? ` (${s.sub})` : ""}`), "");
   }
@@ -283,30 +256,27 @@ const make = (subject: string, b: Body): Email => ({ subject, html: html(subject
 
 // ---------------------------------------------------------------- account mail
 
-function account(subject: string, title: string, label: string, url: string, ignore: string): Email {
-  return make(subject, {
+function account(title: string, lead: string, label: string, url: string, ignore: string): Email {
+  return make(title, {
     title,
-    parts: [{ note: LINK_LIFE }, { button: { label, href: url } }],
+    parts: [{ lead }, { button: { label, href: url } }, { small: LINK_LIFE }],
     footer: [ignore, HELP],
   });
 }
 
-export const confirmSignup = (url: string) =>
-  account("Confirm your email", "Confirm your email",
+export const confirmSignup = (url: string, email: string) =>
+  account("Confirm your email", `Tap the button to finish signing up as ${addr(esc(email))}.`,
     "Confirm email", url, "Didn't sign up? Ignore this email.");
 
-export const resetPassword = (url: string) =>
-  account("Reset your password", "Reset your password",
+export const resetPassword = (url: string, email: string) =>
+  account("Reset your password", `Tap the button to choose a new password for ${addr(esc(email))}.`,
     "Reset password", url, "Didn't ask for this? Ignore this email. Your password stays the same.");
 
 // Security notices: sent at once, after the change, so there is nothing to confirm.
 // Common practice: say what changed, when and from what device, then one action named
 // for what it does. Reset password needs the app to open its reset screen from a link
 // (?reset=1, not built yet); these are noreply@, so help goes to hello@ by address.
-const notYou = [
-  { p: "If this wasn't you, reset your password now." },
-  { button: { label: "Reset password", href: `${APP}/?reset=1` } },
-];
+const RESET = { button: { label: "Reset password", href: `${APP}/?reset=1` } };
 
 // Supabase sends this one too: its "Password changed" security notice
 // (auth.email.notification.password_changed). The template only knows {{ .Email }},
@@ -314,15 +284,15 @@ const notYou = [
 export const passwordChanged = (email: string) =>
   make("Your password was changed", {
     title: "Your password was changed",
-    parts: [{ p: `The password for ${addr(esc(email))} was just changed.` }, ...notYou],
+    parts: [{ box: { rows: [["Account", esc(email)]] } }, { note: "Wasn't you? Reset your password." }, RESET],
     footer: [HELP],
   });
 
 export const accountDeleted = (email: string) =>
   make("Your account is deleted", {
     title: "Your account is deleted",
-    parts: [{ p: `The account for ${addr(esc(email))} is deleted, with its settings and readings. Your SunSynk account and inverter are not affected.` },
-      { note: "Sign up again any time. The last 60 days come back from SunSynk." }],
+    parts: [{ lead: `The settings and readings for ${addr(esc(email))} are gone. Your SunSynk account and inverter aren't affected.` },
+      { note: "Sign up again any time. Your last 60 days come back from SunSynk." }],
     footer: [HELP],
   });
 
@@ -332,8 +302,8 @@ export function renderAuthTemplates(): Record<string, Email> {
   // the email address can't be changed yet.
   const URL = "{{ .ConfirmationURL }}";
   return {
-    confirmation: confirmSignup(URL),
-    recovery: resetPassword(URL),
+    confirmation: confirmSignup(URL, "{{ .Email }}"),
+    recovery: resetPassword(URL, "{{ .Email }}"),
     password_changed_notification: passwordChanged("{{ .Email }}"),
   };
 }
@@ -353,18 +323,17 @@ const SETTINGS_FOOTER = (line: string) => [line.replace("notification settings",
 // card opens on Live when a user has no plant, so the button goes straight there.
 // Wording matches link.jsx ("Add your plant", "Use the login from the
 // SunSynk Connect app").
+const ADD_STEPS = {
+  steps: [
+    `Tap <b style="color:#e7ecf2">Add your plant</b> and sign in.`,
+    "Enter the email and password from your SunSynk Connect app.",
+    "Readings start within a minute. Your last 60 days follow.",
+  ],
+};
 export const welcome = () =>
   make("Welcome to Prince Solar Hub", {
     title: "Welcome to Prince Solar Hub",
-    parts: [
-      { p: "One step left: add your plant." },
-      { steps: [
-        "Tap the button below and sign in.",
-        "Enter the email and password from your <b>SunSynk Connect</b> app.",
-        "Readings start within a minute. Your last 60 days follow.",
-      ] },
-      { button: { label: "Add your plant", href: APP } },
-    ],
+    parts: [{ lead: "Add your plant to start." }, ADD_STEPS, { button: { label: "Add your plant", href: APP } }],
     footer: [HELP],
   });
 
@@ -373,16 +342,8 @@ export const welcome = () =>
 export const needAHand = () =>
   make("Need a hand adding your plant?", {
     title: "Need a hand adding your plant?",
-    parts: [
-      { p: "No plant is linked yet. It takes two minutes." },
-      { steps: [
-        "Tap the button below and sign in.",
-        "Enter the email and password from your <b>SunSynk Connect</b> app.",
-        "Readings start within a minute. Your last 60 days follow.",
-      ] },
-      { button: { label: "Add your plant", href: APP } },
-      { p: "Stuck? Reply and we'll help." },
-    ],
+    parts: [{ lead: "Your plant isn't added yet. It takes two minutes." }, ADD_STEPS,
+      { button: { label: "Add your plant", href: APP } }, { small: "Stuck? Reply to this email and we'll help." }],
     footer: [],
   });
 
@@ -406,8 +367,8 @@ export const historySynced = (h: History) => {
   const [mv, mu] = kwh(h.madeKwh);
   const days = h.days === 1 ? "day" : `${h.days} days`;
   return make(`Your last ${days} at ${h.plant} are in`, {
-    title: `Your last ${days} are in`,
-    sub: `${h.plant} · ${h.from} to ${h.to}`,
+    title: `Your last ${days} at ${h.plant} are in`,
+    sub: `${h.from} to ${h.to}`,
     parts: [
       { stats: [
         { label: "Made", value: mv, unit: mu, tone: "solar" },
@@ -433,21 +394,21 @@ export const sunsynkDown = (plant: string, plantId: number, since: string, day =
   make("SunSynk is down", {
     title: "SunSynk is down",
     parts: [
-      { stack: true, stats: [{ label: "SunSynk", value: "Down", tone: "bad", sub: `since ${since} ${day}` }] },
-      { p: "Every SunSynk plant is affected, not only yours." },
+      { lead: "SunSynk isn't answering for anyone, so no readings come in." },
+      { box: { hero: { label: "Down since", value: since, tone: "bad", sub: day } } },
       { button: openPage("live", plantId) },
     ],
-    footer: ALERT_FOOTER(plant),
+    footer: ALERT_FOOTER("SunSynk", plant),
   });
 
-export const sunsynkBack = (plant: string, plantId: number, at: string, lasted: string, day = "today") =>
+export const sunsynkBack = (plant: string, plantId: number, since: string, at: string, lasted: string, day = "today") =>
   make("SunSynk is back", {
     title: "SunSynk is back",
     parts: [
-      { stack: true, stats: [{ label: "SunSynk", value: "Back", tone: "ok", sub: `since ${at} ${day}, after ${lasted}` }] },
+      { box: { hero: { label: "SunSynk was down for", value: lasted, sub: `${since} to ${at} ${day}` } } },
       { button: openPage("live", plantId) },
     ],
-    footer: ALERT_FOOTER(plant),
+    footer: ALERT_FOOTER("SunSynk", plant),
   });
 
 // --------------------------------------------------------------------- reports
@@ -538,124 +499,112 @@ export function report(r: Report): Email {
 //  logger_back   readings fresh again, after a logger_stale went out
 export type PlantEvent =
   | { kind: "grid_down"; at: string; chargePct?: number }
-  | { kind: "grid_back"; at: string; lasted?: string }
+  | { kind: "grid_back"; since: string; at: string; lasted?: string; chargePct?: number }
   | { kind: "batt_hot"; at: string; tempC: number; hotDays?: number } // hotDays: days over 45 C in the last 30, today included; counted from readings at send time
-  | { kind: "batt_hot_back"; at: string; tempC: number; lasted: string }
   | { kind: "bank_drift"; banks: { name: string; chargePct: number }[] } // name: the inverter's name in SunSynk
-  | { kind: "bank_drift_back"; banks: { name: string; chargePct: number }[]; lasted: string }
   | { kind: "string_dead"; string: string; inverter: string; since: string }
-  | { kind: "string_back"; string: string; inverter: string; at: string; lasted: string }
-  | { kind: "logger_stale"; since: string; inverter?: string }
-  | { kind: "logger_back"; at: string; lasted: string; inverter?: string };
+  | { kind: "string_back"; string: string; inverter: string; since: string; at: string; lasted: string }
+  // inverters: every inverter on the plant with its last reading time ("08:15"), or null
+  // while it still sends; listed so the owner sees which one stopped (SOLAR-415)
+  | { kind: "logger_stale"; since: string; inverter?: string; inverters?: { name: string; last: string | null }[] }
+  | { kind: "logger_back"; since: string; at: string; lasted: string; inverter?: string };
+// batt_hot_back and bank_drift_back stay in the app's bell but send no email (SOLAR-415).
 
 // day: "today", or the date when the alert reaches the owner on a later day
 // ("Tue 21 Oct"), so a time is never read against the wrong day.
 //
-// Each alert shows its facts as cards, like the reports: coral for what went wrong,
-// green for what came back, amber for grid, purple for battery. A sentence stays only
-// where the cards can't explain it alone.
-type Card = Extract<Part, { stats: unknown }>["stats"][number];
+// Each alert shows its facts in the one box (SOLAR-415): the big number is what's wrong
+// now (red or amber), or how long it lasted (white) once it's back. Rows only for other
+// numbers. A sentence only where the box can't say it. Never a guessed cause, and never a
+// promise to fill missed readings: we get what we can.
 const PAGE: Record<PlantEvent["kind"], keyof typeof PAGES> = {
-  grid_down: "grid", grid_back: "grid",
-  batt_hot: "inverters", batt_hot_back: "inverters", bank_drift: "inverters", bank_drift_back: "inverters",
-  string_dead: "inverters", string_back: "inverters",
-  logger_stale: "live", logger_back: "live",
+  grid_down: "grid", grid_back: "grid", batt_hot: "inverters", bank_drift: "inverters",
+  string_dead: "inverters", string_back: "inverters", logger_stale: "live", logger_back: "live",
+};
+const WHAT: Record<PlantEvent["kind"], string> = {
+  grid_down: "grid", grid_back: "grid", batt_hot: "battery", bank_drift: "battery",
+  string_dead: "panel", string_back: "panel", logger_stale: "reading", logger_back: "reading",
 };
 // "Inverter 2508290475, string 2", as the app names it (SOLAR-348)
 const stringName = (e: { string: string; inverter: string }) => `${e.inverter}, ${e.string.toLowerCase()}`;
-const ALERT_FOOTER = (plant: string) => SETTINGS_FOOTER(`Alert for ${esc(plant)}. Turn these off in notification settings.`);
+const ALERT_FOOTER = (what: string, plant: string) => SETTINGS_FOOTER(`You get ${what} alerts for ${esc(plant)}. Turn them off in notification settings.`);
+const batt = (pct: number) => `<span style="color:${C.batt}">${pct}%</span>`;
+const GAP = "We're getting what we can of the missed readings.";
 export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = "today"): Email {
-  const P = esc(plant);
-  const at = (time: string) => `${time} ${day}`;
-  const [title, cards, note]: [string, Part | Card[], string?] = (() => {
+  const span = (from: string, to: string) => `${from} to ${to} ${day}`;
+  const [title, parts]: [string, Part[]] = (() => {
     switch (e.kind) {
       case "grid_down":
-        return [`Grid down at ${plant}`, [
-          { label: "Grid", value: "Off", tone: "bad", sub: `since ${at(e.at)}` },
-          ...(e.chargePct != null ? [{ label: "Battery", value: `${e.chargePct}%`, tone: "batt" as Tone }] : []),
-        ]];
+        return [`Grid down at ${plant}`, [{ box: { hero: { label: "Grid", value: "Off", tone: "bad", sub: `since ${e.at} ${day}` },
+          rows: e.chargePct != null ? [["Battery", batt(e.chargePct)]] : [] } }]];
       case "grid_back":
-        return [`Grid back at ${plant}`, [
-          { label: "Grid", value: "On", tone: "ok", sub: `since ${at(e.at)}` },
-          ...(e.lasted ? [{ label: "Outage", value: e.lasted }] : []),
-        ]];
+        return [`Grid back at ${plant}`, [{ box: { hero: { label: "Grid was off for", value: e.lasted ?? "a while", sub: span(e.since, e.at) },
+          rows: e.chargePct != null ? [["Battery", batt(e.chargePct)]] : [] } }]];
       case "batt_hot":
-        return [`Battery hot at ${plant}`, [
-          { label: "Battery", value: `${e.tempC}\u00a0°C`, tone: "bad", sub: `at ${at(e.at)}` },
-          ...((e.hotDays ?? 1) > 1 ? [{ label: "Above 45\u00a0°C", value: `${e.hotDays} days`, sub: "in the last 30" }] : []),
-        ]];
-      case "batt_hot_back":
-        return [`Battery cooled at ${plant}`, [
-          { label: "Battery", value: `${e.tempC}\u00a0°C`, tone: "ok", sub: `since ${at(e.at)}` },
-          { label: "Hot for", value: e.lasted },
-        ]];
-      case "bank_drift_back":
-        return [`Batteries charging evenly at ${plant}`, [
-          ...e.banks.map((b) => ({ label: b.name, value: `${b.chargePct}%`, tone: "batt" as Tone })),
-          { label: "Apart for", value: e.lasted },
-        ]];
+        return [`Battery hot at ${plant}`, [{ box: { hero: { label: "Battery", value: `${e.tempC} °C`, tone: "bad", sub: `at ${e.at} ${day}` },
+          rows: (e.hotDays ?? 1) > 1 ? [["Over 45 °C", `${e.hotDays} of the last 30 days`]] : [] } }]];
       case "bank_drift": {
         const pcts = e.banks.map((b) => b.chargePct);
-        return [`Batteries charging unevenly at ${plant}`, [
-          ...e.banks.map((b) => ({ label: b.name, value: `${b.chargePct}%`, tone: "batt" as Tone })),
-          { label: "Gap", value: `${Math.max(...pcts) - Math.min(...pcts)}%`, sub: "for over an hour" },
-        ]];
+        return [`Batteries charging unevenly at ${plant}`, [{ box: {
+          hero: { label: "Gap", value: `${Math.max(...pcts) - Math.min(...pcts)}%`, tone: "warn", sub: "for over an hour" },
+          rows: e.banks.map((b) => [b.name, batt(b.chargePct)] as [string, string]) } }]];
       }
       case "string_dead":
-        return [`Panels stopped producing at ${plant}`, [
-          { label: stringName(e), value: "No power", tone: "bad", sub: `since ${at(e.since)}` },
-          { label: "Other panels", value: "OK", tone: "ok" },
-        ]];
+        return [`Panels stopped producing at ${plant}`, [{ box: { hero: { label: stringName(e), value: "No power", tone: "bad", sub: `since ${e.since} ${day}` },
+          rows: [["Other strings", "Producing"]] } }]];
       case "string_back":
-        return [`Panels producing again at ${plant}`, [
-          { label: stringName(e), value: "Producing", tone: "ok", sub: `since ${at(e.at)}` },
-          { label: "Stopped for", value: e.lasted },
+        return [`Panels producing again at ${plant}`, [{ box: { hero: { label: `${stringName(e)} was off for`, value: e.lasted, sub: span(e.since, e.at) } } }]];
+      case "logger_stale": {
+        const one = !!e.inverter;
+        const list = e.inverters?.length ? e.inverters : [{ name: e.inverter ?? "Inverter", last: e.since }];
+        return [`No readings from ${plant}`, [
+          { lead: one
+            ? "SunSynk is working, but one inverter stopped sending it readings. Your power isn't affected. Only the app shows part of your plant."
+            : "SunSynk is working, but your inverter stopped sending it readings. Your power isn't affected. Only the app stops updating." },
+          { box: { hero: { label: "Last reading", value: e.since, tone: "warn", sub: day },
+            rows: list.map((i) => [esc(i.name), i.last ? `Last reading ${esc(i.last)}` : "Sending readings"] as [string, string]) } },
+          { note: "We'll email you when readings come back, and get what we can of the gap." },
         ]];
-      case "logger_stale":
-        return e.inverter
-          ? [`No readings from ${e.inverter} at ${plant}`, [
-              { label: "Last reading", value: e.since, tone: "warn", sub: esc(day) },
-              { label: "Other inverters", value: "OK", tone: "ok" },
-            ]]
-          : [`No readings from ${plant}`, [
-              { label: "Last reading", value: e.since, tone: "warn", sub: esc(day) },
-            ]];
+      }
       case "logger_back":
-        return [e.inverter ? `${e.inverter} back at ${plant}` : `Readings back at ${plant}`, [
-          { label: "Readings", value: "Back", tone: "ok", sub: `since ${at(e.at)}, after ${e.lasted}` },
-        ]];
+        return [e.inverter ? `${e.inverter} back at ${plant}` : `Readings back at ${plant}`,
+          [{ box: { hero: { label: "No readings for", value: e.lasted, sub: span(e.since, e.at) } } }, { note: GAP }]];
     }
   })();
-  return make(title, {
-    title,
-    parts: [Array.isArray(cards) ? { stats: cards, stack: true } : cards, ...(note ? [{ p: note }] : []), { button: openPage(PAGE[e.kind], plantId) }],
-    footer: ALERT_FOOTER(plant),
-  });
+  return make(title, { title, parts: [...parts, { button: openPage(PAGE[e.kind], plantId) }], footer: ALERT_FOOTER(WHAT[e.kind], plant) });
 }
 
 // A SunSynk login stopped working (needs_relink) or works again (relinked), SOLAR-380.
 // One email per login: it names every plant on it (0158).
-//  at      when it stopped / came back, HH:MM
+//  at      when it stopped / came back, HH:MM; since: when it stopped (relinked)
 export type LoginEvent =
   | { kind: "needs_relink"; plants: string[]; at?: string }
-  | { kind: "relinked"; plants: string[]; at: string; lasted: string };
+  | { kind: "relinked"; plants: string[]; since?: string; at: string; lasted: string };
 // up to 3 names, then a count, as the app's billing banner
 const andList = (a: string[]) => names(a.length > 3 ? [...a.slice(0, 3), `${a.length - 3} more`] : a);
 export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email {
-  const list = e.plants.length ? e.plants : ["your plant"];
-  const plants = andList(list), P = `<b>${esc(plants)}</b>`;
-  const dead = e.kind === "needs_relink";
-  const title = dead ? `Sign in to SunSynk again for ${plants}` : `SunSynk reconnected for ${plants}`;
-  // A short calm note, no red (SOLAR-383): the missed readings come back after a reconnect.
-  const parts: Part[] = dead
-    ? [{ p: `Readings for ${P} paused${e.at ? ` at ${e.at} ${day}` : ""}. SunSynk asked for your login again.` },
-       { p: "Reconnect and we'll get what we can of the readings you missed." },
-       { button: { label: "Reconnect", href: LOGINS } }]
-    : [{ p: `Readings for ${P} are back since ${e.at} ${day}, after ${e.lasted}.` },
-       { p: "We'll get what we can of the readings you missed." },
-       { button: openPage("live", plantId) }];
-  // No switch for these, so no "turn them off" line.
-  return make(title, { title, parts, footer: [HELP] });
+  const plants = andList(e.plants.length ? e.plants : ["your plant"]);
+  // A calm note, no red (SOLAR-383). No switch for these, so no "turn them off" line.
+  if (e.kind === "needs_relink")
+    return make(`Sign in to SunSynk again for ${plants}`, {
+      title: "Sign in to SunSynk again",
+      parts: [
+        { lead: `SunSynk asked for your login again. Readings for ${esc(plants)} stopped${e.at ? ` at ${e.at} ${day}` : ""}.` },
+        { note: "After you sign in, we get what we can of the missed readings." },
+        { button: { label: "Sign in to SunSynk", href: LOGINS } },
+      ],
+      footer: [HELP],
+    });
+  return make(`SunSynk reconnected for ${plants}`, {
+    title: "SunSynk reconnected",
+    parts: [
+      { box: { hero: { label: "No readings for", value: e.lasted, sub: e.since ? `${e.since} to ${e.at} ${day}` : `until ${e.at} ${day}` },
+        rows: [["Plants", esc(plants)]] } },
+      { note: GAP },
+      { button: openPage("live", plantId) },
+    ],
+    footer: [HELP],
+  });
 }
 
 // --------------------------------------------------------------------- billing
@@ -675,140 +624,125 @@ const CANCEL = `${APP}/?tab=account&section=cancel`;
 const SYSTEM = `${APP}/?tab=account&section=system`;
 // What Free means after its first week, said the same way in every email.
 const FREE_RULE = "Free keeps only the last 24 hours of readings. Alerts stay on; reports stop.";
-// After a paid plan, readings stay 30 days first (SOLAR-329, 0146).
-const PAID_FREE_RULE = "readings are kept for 30 days, then only the last 24 hours. Alerts stay on; reports stop.";
+// After a paid plan ends, said the same way in every email (SOLAR-329, 0146; SOLAR-415).
+const PAID_FREE = "On Free, one plant updates and you see only the last 24 hours. We keep your history for 30 days in case you come back. Reports stop.";
 const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;
-// Who is selling, on every receipt and renewal notice.
+// How many plants each plan keeps (SOLAR-371): said when plants are deleted.
+const PLAN_PLANTS = { free: "one plant", home: "2 plants", family: "5 plants" } as const;
+// Who is selling: on every billing email (SOLAR-415).
 const SELLER = "Prince Solar Hub is run by Theron and Prince Solutions (Pty) Ltd, reg. no. 2026/182827/07, Kempton Park, Gauteng. No VAT is charged.";
+const BILL_FOOTER = [HELP, SELLER];
 export type Plan = keyof typeof PLAN_NAME;
 export type BillPeriod = "monthly" | "yearly";
-// The plan as a receipt row: "Family plan", "Monthly · from 1 Dec", its price on the right.
-const PERIOD = { monthly: "Monthly", yearly: "Yearly" } as const;
-const planItem = (plan: Plan, period?: BillPeriod, when?: string, value?: string): Item => {
-  const sub = [plan === "free" ? "" : period ? PERIOD[period] : "", when ?? ""].filter(Boolean).join(" · ");
-  return { icon: "plan", name: `${PLAN_NAME[plan]} plan`, sub: sub ? sub[0].toUpperCase() + sub.slice(1) : undefined, value };
-};
-const extraN = (n: number) => `${n} extra ${n === 1 ? "plant" : "plants"}`;
 const names = (list: string[]) => list.length < 2 ? list.join("") : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+const list = (a: string[]) => esc(a.join(", "));
+const SEE_PLAN = { button: { label: "See your plan", href: PLAN } };
+const CANCEL_BUTTON = { button: { label: "Cancel plan", href: CANCEL } };
+const PAY_BUTTON = (url: string) => ({ button: { label: "Pay with another card", href: url } });
 
+// Billing wording (SOLAR-415): short, names the plan, date and amount, and never explains
+// what the owner just did themselves. Amounts sit in the box, not in the title, except
+// in a subject, where the inbox shows them.
 export type Receipt = {
   plan: Plan; period: BillPeriod; amount: number; date: string; // "1 Nov 2026"
   card: string; // "Visa •••• 4081"
   reference: string; // Paystack reference
-  extraPlants?: { n: number; each: number }; // plants after the 3rd paid for, and the price of one
+  covers?: string; // the days this payment pays for: "1 to 30 Nov"
+  extraPlants?: { n: number; each: number }; // old plans only; extra plants left pricing (SOLAR-371)
   next: { amount: number; date: string };
 };
 
-export const paymentReceived = (r: Receipt) => {
-  const extra = r.extraPlants ? r.extraPlants.n * r.extraPlants.each : 0;
-  return make(`Payment received: ${rand(r.amount)}`, {
+export const paymentReceived = (r: Receipt) =>
+  make(`Payment received: ${rand(r.amount)}`, {
     title: "Payment received",
     parts: [
-      { items: {
-        rows: [
-          // The plan's own price is what is left after the extra plants.
-          planItem(r.plan, r.period, undefined, extra > 0 && extra < r.amount ? rand(r.amount - extra) : r.extraPlants ? undefined : rand(r.amount)),
-          ...(r.extraPlants ? [{ icon: "plus" as const, name: extraN(r.extraPlants.n), sub: `${rand(r.extraPlants.each)} each`, value: rand(extra) }] : []),
-        ],
-        total: { label: "Paid", value: rand(r.amount) },
-        meta: [`${r.date} · ${esc(r.card)}`, `Reference ${esc(r.reference)}`, `Next payment ${rand(r.next.amount)} on ${r.next.date}`],
-      } },
-      { button: { label: "See your plan", href: PLAN } },
+      { box: { hero: { label: "Paid", value: rand(r.amount), sub: r.date },
+        rows: [["For", esc(`${PLAN_NAME[r.plan]}${r.covers ? `, ${r.covers}` : `, ${r.period}`}`)], ["Card", esc(r.card)],
+          ["Reference", esc(r.reference)], ["Next payment", `${rand(r.next.amount)} on ${r.next.date}`]] } },
+      SEE_PLAN,
     ],
-    footer: [SELLER, HELP],
+    footer: BILL_FOOTER,
   });
-};
 
 // Yearly plans: notice 40 to 80 business days before the renewal (Consumer Protection
-// Act s14, if a yearly plan counts as fixed-term; to confirm on SOLAR-104). It names any
-// change and says the plan can be stopped before the date.
-export type Renewal = { plan: Plan; amount: number; on: string; change?: string };
+// Act s14, if a yearly plan counts as fixed-term; to confirm on SOLAR-104).
+export type Renewal = { plan: Plan; amount: number; on: string; card?: string; change?: string };
 
 export const renewalNotice = (r: Renewal) =>
   make(`Your yearly ${PLAN_NAME[r.plan]} plan renews on ${r.on}`, {
-    title: `Your yearly plan renews on ${r.on}`,
+    title: `Your ${PLAN_NAME[r.plan]} plan renews on ${r.on}`,
     parts: [
-      ...(r.change ? [{ p: esc(r.change) }] : []),
-      { items: { rows: [planItem(r.plan, "yearly", `renews ${r.on}`, rand(r.amount))] } },
-      { p: `To stop it, cancel before ${r.on}.` },
-      { button: { label: "Go to cancel plan", href: CANCEL } },
+      ...(r.change ? [{ lead: esc(r.change) }] : []),
+      { box: { hero: { label: "We charge", value: rand(r.amount), sub: `on ${r.on}` }, rows: r.card ? [["Card", esc(r.card)]] : [] } },
+      { note: `To stop it, cancel before ${r.on}.` },
+      CANCEL_BUTTON,
     ],
-    footer: [SELLER, HELP],
+    footer: BILL_FOOTER,
   });
 
 // An offer price that lasts some months ends: sent up to 30 days before the first charge
 // at the usual price (SOLAR-330).
 export type OfferEnds = { plan: Plan; period: BillPeriod; was: number; amount: number; on: string; card?: string };
-export const offerEnds = (o: OfferEnds) =>
-  make(`${PLAN_NAME[o.plan]} goes to ${rand(o.amount)} ${o.period === "yearly" ? "a year" : "a month"} on ${o.on}`, {
+export const offerEnds = (o: OfferEnds) => {
+  const per = o.period === "yearly" ? "a year" : "a month";
+  return make(`${PLAN_NAME[o.plan]} goes to ${rand(o.amount)} ${per} on ${o.on}`, {
     title: `Your offer price ends on ${o.on}`,
     parts: [
-      { p: `You pay ${rand(o.was)} ${o.period === "yearly" ? "a year" : "a month"} until then.${o.card ? ` We'll charge your ${esc(o.card)}.` : ""}` },
-      { items: { rows: [planItem(o.plan, o.period, `from ${o.on}`, rand(o.amount))] } },
-      { p: `To stop it, cancel before ${o.on}.` },
-      { button: { label: "Go to cancel plan", href: CANCEL } },
+      { box: { hero: { label: `From ${o.on}`, value: rand(o.amount), sub: `${per}, was ${rand(o.was)}` }, rows: o.card ? [["Card", esc(o.card)]] : [] } },
+      { note: `To stop it, cancel before ${o.on}.` },
+      CANCEL_BUTTON,
     ],
-    footer: [SELLER, HELP],
+    footer: BILL_FOOTER,
   });
+};
 
 // An upgrade starts at once: the difference for the days left is charged now, the
-// billing date stays (SOLAR-208). Adding extra plants past the 3rd is the same.
+// billing date stays (SOLAR-208).
 export type Upgrade = {
   from: Plan; to: Plan; period: BillPeriod;
-  addedPlants?: number; // set when the change is extra plants on Family
+  addedPlants?: number; // extra plants on Family: no email since SOLAR-371 (notify skips it)
   paidNow: number; daysLeft: number;
-  // Home monthly to Family yearly (SOLAR-364): the year starts today; what the rest of the month came to
-  credit?: number;
+  covers?: string; // "15 to 30 Nov"
+  card?: string;
+  credit?: number; // Home monthly to Family yearly (SOLAR-364): what the rest of the month came to
   next: { amount: number; date: string };
 };
 
-export const planUpgraded = (u: Upgrade) => {
-  const plants = u.addedPlants ? `${u.addedPlants} extra ${u.addedPlants === 1 ? "plant" : "plants"}` : "";
-  return make(u.addedPlants ? `${plants} added to your plan` : `You're on ${PLAN_NAME[u.to]}`, {
-    title: u.addedPlants ? `${plants} added` : `You're on ${PLAN_NAME[u.to]}`,
+export const planUpgraded = (u: Upgrade) =>
+  make(`You're on ${PLAN_NAME[u.to]}`, {
+    title: `You're on ${PLAN_NAME[u.to]}`,
     parts: [
-      { p: u.addedPlants ? "They're billed with your Family plan from today." : u.to === "family" ? "You can add up to 5 plants now." : "Your history is kept from now on." },
-      { items: {
-        rows: [u.addedPlants ? { icon: "plus" as const, name: plants, sub: `On your ${PLAN_NAME[u.to]} plan` } : planItem(u.to, u.period, "from today")],
-        total: { label: "Paid today", value: rand(u.paidNow) },
-        meta: [u.credit != null ? `${rand(u.credit)} off for the rest of your month` : `For the ${u.daysLeft === 1 ? "day" : u.daysLeft + " days"} left this period`, `Next payment ${rand(u.next.amount)} on ${u.next.date}`],
-      } },
-      { button: u.to === "family" && !u.addedPlants ? { label: "Add a plant", href: LOGINS } : { label: "See your plan", href: PLAN } },
+      { box: { hero: { label: "Paid today", value: rand(u.paidNow),
+          sub: u.credit != null ? `${rand(u.credit)} off for the rest of your month` : u.covers ? `for ${u.covers}` : `for the ${u.daysLeft === 1 ? "day" : u.daysLeft + " days"} left this month` },
+        rows: [...(u.card ? [["Card", esc(u.card)] as [string, string]] : []), ["Next payment", `${rand(u.next.amount)} on ${u.next.date}`]] } },
+      u.to === "family" ? { button: { label: "Add a plant", href: LOGINS } } : SEE_PLAN,
     ],
-    footer: [HELP],
+    footer: BILL_FOOTER,
   });
-};
 
 // Monthly to yearly on the same plan is paid now (SOLAR-298). The month paid runs out;
 // the year starts on the billing date, so the next payment is a year after it.
 export type Switched = Receipt & { startsOn: string };
 
-export const planSwitched = (s: Switched) => {
-  const extra = s.extraPlants ? s.extraPlants.n * s.extraPlants.each : 0;
-  return make(`Your yearly plan starts on ${s.startsOn}`, {
-    title: `Your yearly plan starts on ${s.startsOn}`,
+export const planSwitched = (s: Switched) =>
+  make(`Your yearly plan starts on ${s.startsOn}`, {
+    title: "You're on yearly",
     parts: [
-      { items: {
-        rows: [
-          planItem(s.plan, "yearly", `from ${s.startsOn}`, rand(s.amount - extra)),
-          ...(s.extraPlants ? [{ icon: "plus" as const, name: extraN(s.extraPlants.n), sub: `${rand(s.extraPlants.each)} each`, value: rand(extra) }] : []),
-        ],
-        total: { label: "Paid today", value: rand(s.amount) },
-        meta: [`${s.date} · ${esc(s.card)}`, `Reference ${esc(s.reference)}`, `Next payment ${rand(s.next.amount)} on ${s.next.date}`],
-      } },
-      { button: { label: "See your plan", href: PLAN } },
+      { box: { hero: { label: "Paid today", value: rand(s.amount), sub: s.date },
+        rows: [["For", esc(`${PLAN_NAME[s.plan]}, ${s.covers ?? `from ${s.startsOn}`}`)], ["Card", esc(s.card)], ["Reference", esc(s.reference)]] } },
+      SEE_PLAN,
     ],
-    footer: [SELLER, HELP],
+    footer: BILL_FOOTER,
   });
-};
 
 // Downgrade, cancel (to Free) and a monthly/yearly switch all wait for the billing
-// date. Sent when booked; the plants named collect until that date and are deleted on
-// deleteOn (SOLAR-295), or on that date when no deleteOn is given.
+// date. Sent when booked; the plants named are deleted on deleteOn (SOLAR-295), or on
+// that date when no deleteOn is given.
 export type Change = {
   from: Plan; to: Plan; fromPeriod: BillPeriod; toPeriod?: BillPeriod;
   on: string; // the billing date
   removePlants: string[];
+  keepPlants?: string[];
   deleteOn?: string;
   next?: { amount: number }; // absent on Free
 };
@@ -816,40 +750,40 @@ export type Change = {
 export const planChangeBooked = (c: Change) => {
   const cancel = c.to === "free";
   const switchOnly = c.from === c.to;
-  const title = cancel ? `${PLAN_NAME[c.from]} ends on ${c.on}` : switchOnly ? `You switch to ${c.toPeriod} on ${c.on}` : `You move to ${PLAN_NAME[c.to]} on ${c.on}`;
+  const title = cancel ? `${PLAN_NAME[c.from]} ends on ${c.on}` : switchOnly ? `${PLAN_NAME[c.from]} goes ${c.toPeriod} on ${c.on}` : `You move to ${PLAN_NAME[c.to]} on ${c.on}`;
+  const per = (c.toPeriod ?? c.fromPeriod) === "yearly" ? "a year" : "a month";
+  const plants: [string, string][] = c.removePlants.length
+    ? [...(c.keepPlants?.length ? [["Plants kept", list(c.keepPlants)] as [string, string]] : []), [`Deleted on ${c.deleteOn ?? c.on}`, list(c.removePlants)]]
+    : [];
   return make(title, {
     title,
-    parts: [
-      ...(cancel ? [{ p: `After that, on Free, ${PAID_FREE_RULE}` }] : []),
-      { items: {
-        rows: [planItem(c.from, c.fromPeriod, `until ${c.on}`), planItem(c.to, c.toPeriod ?? c.fromPeriod, `from ${c.on}`, c.next ? rand(c.next.amount) : "R0")],
-        meta: [c.next ? `Next payment ${rand(c.next.amount)} on ${c.on}` : "Nothing more is charged."],
-      } },
-      ...(c.removePlants.length ? [{ plants: { title: `Deleted on ${c.deleteOn ?? c.on}`, names: c.removePlants, tone: "stop" as const } },
-        { note: c.removePlants.length === 1 ? "Its history is deleted too." : "Their history is deleted too." }] : []),
-      { button: { label: cancel ? `Keep ${PLAN_NAME[c.from]}` : "See your plan", href: PLAN } },
-    ],
-    footer: [HELP],
+    parts: cancel
+      ? [{ lead: `Nothing more is charged. ${PAID_FREE}` }, ...(plants.length ? [{ box: { rows: plants } }] : []),
+         { button: { label: `Keep ${PLAN_NAME[c.from]}`, href: PLAN } }]
+      : [{ box: { rows: [[switchOnly ? `${c.on} payment` : `From ${c.on}`, `${c.next ? rand(c.next.amount) : "R0"}${switchOnly ? "" : ` ${per}`}`], ...plants] } }, SEE_PLAN],
+    footer: BILL_FOOTER,
   });
 };
 
-// Keep: a booked change undone, so the plan carries on as it is (SOLAR-271).
-export type Kept = { plan: Plan; period: BillPeriod; next: { amount: number; date: string } };
+// Keep: a booked change undone, so the plan carries on as it is (SOLAR-271). undone: the
+// change that was booked, read from its bill_change email; the title names it.
+export type Kept = { plan: Plan; period: BillPeriod; next: { amount: number; date: string }; undone?: { to: Plan; toPeriod?: BillPeriod } };
 
-export const planKept = (k: Kept) =>
-  make(`You're staying on ${PLAN_NAME[k.plan]}`, {
-    title: `You're staying on ${PLAN_NAME[k.plan]}`,
-    parts: [
-      { p: "The change you booked is undone." },
-      { items: { rows: [planItem(k.plan, k.period, undefined, rand(k.next.amount))], meta: [`Next payment ${rand(k.next.amount)} on ${k.next.date}`] } },
-      { button: { label: "See your plan", href: PLAN } },
-    ],
-    footer: [HELP],
+export const planKept = (k: Kept) => {
+  const u = k.undone;
+  const title = !u ? `You're staying on ${PLAN_NAME[k.plan]}`
+    : u.to === "free" ? `${PLAN_NAME[k.plan]} won't end on ${k.next.date}`
+    : u.to !== k.plan ? `You won't move to ${PLAN_NAME[u.to]} on ${k.next.date}`
+    : `${PLAN_NAME[k.plan]} stays ${k.period}`;
+  return make(title, {
+    title,
+    parts: [{ box: { rows: [["Next payment", `${rand(k.next.amount)} on ${k.next.date}`]] } }, SEE_PLAN],
+    footer: BILL_FOOTER,
   });
+};
 
 // A failed charge is retried on day 1, 3 and 7 after the billing date. The first email
-// goes as soon as the billing-day charge fails, not at the day-1 retry; each retry that
-// fails sends another, with a link to pay with another card.
+// goes as soon as the billing-day charge fails; each retry that fails sends another.
 export type Failed = {
   plan: Plan; period: BillPeriod; amount: number; card: string;
   nextTry?: string; // absent after the last try
@@ -858,19 +792,20 @@ export type Failed = {
   disputed?: string; // the bank took a payment back (a lost dispute, 0130): the day it was paid
 };
 
-export const paymentFailed = (f: Failed) =>
-  make(`Your payment of ${rand(f.amount)} didn't go through`, {
-    title: "Your payment didn't go through",
+export const paymentFailed = (f: Failed) => {
+  const then = `If it's unpaid on ${f.freeOn}, you move to Free. ${PAID_FREE}`;
+  return make(f.disputed ? "Your bank reversed a payment" : `Your payment of ${rand(f.amount)} didn't go through`, {
+    title: f.disputed ? "Your bank reversed a payment" : "Your payment didn't go through",
     parts: [
-      { callout: f.disputed ? `Your bank took back the ${rand(f.amount)} paid on ${f.disputed}.` : `${esc(f.card)} was declined for ${rand(f.amount)}.` },
-      { p: f.nextTry
-        ? `We'll try again on ${f.nextTry}. If it's still unpaid on ${f.freeOn}, your account moves to Free.`
-        : `That was the last try. Your account moves to Free on ${f.freeOn} unless it's paid.` },
-      { items: { rows: [planItem(f.plan, f.period, "unpaid", rand(f.amount))] } },
-      { button: { label: "Pay with another card", href: f.payUrl } },
+      { box: { hero: f.disputed
+        ? { label: "Reversed", value: rand(f.amount), tone: "bad", sub: `paid on ${f.disputed}` }
+        : { label: "Declined", value: rand(f.amount), tone: "bad", sub: f.card } } },
+      { note: f.nextTry ? `We try again on ${f.nextTry}. ${then}` : `That was the last try. ${then}` },
+      PAY_BUTTON(f.payUrl),
     ],
-    footer: [HELP],
+    footer: BILL_FOOTER,
   });
+};
 
 // A payment we refund (0130): it applied nothing, because the plan or the price changed
 // while the user paid. Not sent for the R1 card check.
@@ -878,102 +813,132 @@ export type Refund = { amount: number; date: string; reference: string; why: "pr
 
 export const paymentRefunded = (r: Refund) =>
   make(`${rand(r.amount)} is on its way back to your card`, {
-    title: `${rand(r.amount)} is on its way back to your card`,
+    title: "Your refund is on its way",
     parts: [
-      { p: r.why === "price" ? "The price changed while you paid. Pay the new price on your plan."
-        : "Your plan changed while you paid." },
-      { items: { rows: [{ icon: "back", name: "Refund", sub: `Paid ${r.date} · Reference ${esc(r.reference)}`, value: rand(r.amount) }] } },
-      { button: { label: "See your plan", href: PLAN } },
+      { lead: r.why === "price" ? "The price changed while you paid, so we sent it back." : "Your plan changed while you paid, so we sent it back." },
+      { box: { hero: { label: "Refund", value: rand(r.amount), sub: `paid on ${r.date}` }, rows: [["Reference", esc(r.reference)]] } },
+      SEE_PLAN,
     ],
-    footer: [HELP],
+    footer: BILL_FOOTER,
   });
+
+// After a card change (the R1 card check, SOLAR-406, 0161): the new card, the one it
+// replaced (left out when the same card is saved again), when, and the next payment (left
+// out once a cancel is booked); then the password-reset line, so a change they didn't
+// make shows up. No switch turns it off.
+export type CardChange = { card: string; was?: string; at?: string; next?: { amount: number; date: string } };
+export const cardChanged = (c: CardChange) =>
+  make("Your card was changed", {
+    title: "Your card was changed",
+    parts: [
+      { box: { rows: [["New card", esc(c.card)], ...(c.was ? [["Replaces", esc(c.was)] as [string, string]] : []),
+        ...(c.at ? [["Changed", esc(c.at)] as [string, string]] : []),
+        ...(c.next ? [["Next payment", `${rand(c.next.amount)} on ${c.next.date}`] as [string, string]] : [])] } },
+      { note: "The R1 card check is paid back.<br>Wasn't you? Reset your password." },
+      RESET,
+    ],
+    footer: BILL_FOOTER,
+  });
+
+// The saved card's last day (end of its expiry month) falls before the next payment
+// (SOLAR-406, 0161): 30 days before, then a last reminder 7 days before. A card first
+// seen 7 days or less before gets one email, not called a last reminder.
+export type CardExpiry = { card: string; on: string; final?: boolean; next: { amount: number; date: string } };
+export const cardExpiring = (c: CardExpiry) => {
+  const title = `${c.final ? "Last reminder: your" : "Your"} card expires on ${c.on}`;
+  return make(c.final ? title : `Your ${c.card} expires on ${c.on}`, {
+    title: c.final ? title : `Your card expires on ${c.on}`,
+    parts: [
+      { lead: `Update it before your next payment of ${rand(c.next.amount)} on ${c.next.date}.` },
+      { box: { rows: [["Card", esc(c.card)]] } },
+      { button: { label: "Update card", href: PLAN } },
+    ],
+    footer: BILL_FOOTER,
+  });
+};
 
 // To hello@ (Brynne): a bill email failed after its last try, so the user never heard.
 export const billMailFailed = (m: { kind: string; key: string; user: string; error: string }) =>
   make(`Bill email not sent: ${m.kind}`, {
     title: "A bill email was not sent",
-    parts: [{ facts: [
-      { label: "Email", value: esc(m.kind) },
-      { label: "Key", value: esc(m.key) },
-      { label: "User", value: esc(m.user) },
-      { label: "Error", value: esc(m.error) },
-    ] }],
+    parts: [{ box: { rows: [["Email", esc(m.kind)], ["Key", esc(m.key)], ["User", esc(m.user)], ["Error", esc(m.error)]] } }],
     footer: [],
   });
 
 // Unpaid after the last try: the account is on Free. The first-linked plant stays
 // live; the others stop updating and are deleted after 30 days, unless paid for or
 // swapped for the one kept.
-export type MovedToFree = { from: Plan; kept: string; stopped: string[]; deleteOn: string };
+export type MovedToFree = { from: Plan; kept: string; stopped: string[]; deleteOn: string; amount?: number };
 
 export const movedToFree = (m: MovedToFree) =>
-  make("Your account is now on Free", {
-    title: "Your account is now on Free",
+  make("You're now on Free", {
+    title: "You're now on Free",
     parts: [
-      { p: `Payment for ${PLAN_NAME[m.from]} didn't go through. On Free, ${PAID_FREE_RULE}` },
-      { plants: { title: "Still updating", names: [m.kept], tone: "keep" } },
-      ...(m.stopped.length ? [{ plants: { title: `Stopped, deleted on ${m.deleteOn}`, names: m.stopped, tone: "stop" as const } }] : []),
-      ...(m.stopped.length ? [{ note: "Or choose which plant Free keeps." }] : []),
-      { button: { label: m.stopped.length ? "Pay to keep these plants" : "Pay now", href: PLANS } },
+      { lead: `We couldn't charge ${m.amount != null ? `${rand(m.amount)} ` : "your card "}for ${PLAN_NAME[m.from]}. ${PAID_FREE}` },
+      { box: { rows: [["Still updating", esc(m.kept)], ...(m.stopped.length ? [[`Deleted on ${m.deleteOn}`, list(m.stopped)] as [string, string]] : [])] } },
+      { button: { label: `Pay for ${PLAN_NAME[m.from]}`, href: PLANS } },
     ],
-    footer: [HELP],
+    footer: BILL_FOOTER,
   });
 
-// Once, when a cancelled plan ends on its date (SOLAR-328, 0144). Readings are kept 30
-// days after (SOLAR-329). No switch to turn it off: it goes once per plan that ends.
+// Once, when a cancelled plan ends on its date (SOLAR-328, 0144). History is kept 30
+// days after (SOLAR-329).
 export const winback = (w: { from: Plan; keepUntil: string }) =>
   make(`Your ${PLAN_NAME[w.from]} plan has ended`, {
     title: `Your ${PLAN_NAME[w.from]} plan has ended`,
     parts: [
-      { p: `You're on Free now. Your readings are kept until ${w.keepUntil}, then only the last 24 hours.` },
-      { button: { label: "Pick a plan", href: PLANS } },
+      { lead: `You're on Free now, so you see only the last 24 hours. We keep your history until ${w.keepUntil} in case you come back.` },
+      { button: { label: "See plans", href: PLANS } },
     ],
     footer: [HELP],
   });
 
-// 3 days before plants are deleted (after a downgrade, cancel or failed payment).
-export const plantsRemovalSoon = (plants: string[], on: string) =>
-  // The subject names one or two plants; past that it counts them, so it stays short.
-  make(`${plants.length > 2 ? `${plants.length} plants` : names(plants)} ${plants.length === 1 ? "is" : "are"} deleted on ${on}`, {
-    title: `${plants.length === 1 ? "A plant is" : "Plants are"} deleted on ${on}`,
-    parts: [
-      // The heading already gives the date, so the list only counts.
-      { plants: { title: plants.length === 1 ? "1 plant" : `${plants.length} plants`, names: plants, tone: "stop", count: false } },
-      { p: `${plants.length === 1 ? "Its" : "Their"} history goes too.` },
-      { button: { label: "Choose the plant to keep", href: PLAN } },
-    ],
-    footer: [HELP],
-  });
-
-// Two days before a Free account's first week ends (SOLAR-242): what goes, in days. The
-// day-7 report says it again. `days` = day totals the plant holds; 0 when unknown.
-export const freeWeekEndsSoon = (endsOn: string, plant: string, days: number, perMonth: number) => {
-  const title = `${days > 1 ? `${days} days of history` : "History"} for ${plant} go${days > 1 ? "" : "es"} on ${endsOn}`;
+// 3 days before plants are deleted (after a downgrade, cancel or failed payment). plan:
+// the plan the account is on now, to say how many plants it keeps.
+export const plantsRemovalSoon = (plants: string[], on: string, plan?: Plan) => {
+  const title = `${plants.length > 2 ? `${plants.length} plants` : names(plants)} ${plants.length === 1 ? "is" : "are"} deleted on ${on}`;
   return make(title, {
     title,
     parts: [
-      { p: `Free keeps only the last 24 hours. Keep it all for R${perMonth} a month, billed yearly.` },
-      { button: { label: "Keep my history", href: PLANS } },
+      { lead: `${plan ? `${PLAN_NAME[plan]} keeps ${PLAN_PLANTS[plan]}. ` : ""}Choose a plan to keep ${plants.length === 1 ? "it" : "them"}.` },
+      ...(plants.length > 2 ? [{ box: { rows: [["Plants", list(plants)]] as [string, string][] } }] : []),
+      { button: { label: "See plans", href: PLANS } },
     ],
-    footer: [HELP],
+    footer: BILL_FOOTER,
   });
 };
 
-// Day 2 of the free week, only while setup steps are left (0122): each one left, and
-// where its number is found.
+// Two days before a Free account's first week ends (SOLAR-242): what goes. The day-7
+// report says it again. `days` = day totals the plant holds; 0 when unknown.
+export const freeWeekEndsSoon = (endsOn: string, plant: string, days: number, _perMonth?: number) =>
+  make(`Your free week ends on ${endsOn}`, {
+    title: `Your free week ends on ${endsOn}`,
+    parts: [
+      { lead: `Free keeps only the last 24 hours. ${days > 1 ? `${esc(plant)}'s ${days} days of history are` : `The history for ${esc(plant)} is`} deleted.` },
+      { button: { label: "See plans", href: PLANS } },
+    ],
+    footer: BILL_FOOTER,
+  });
+
+// Day 2 of the free week, once, only while setup steps are left (0122): each one left,
+// and where its number is found.
 export type SetupStep = "rate" | "size" | "reserve" | "panels";
-const SETUP_WHERE: Record<SetupStep, string> = {
-  rate: "<b>Electricity rate</b>: price per unit on your bill, with VAT.",
-  size: "<b>Battery size</b>: on the battery's label, or under Equipment in the SunSynk app.",
-  reserve: "<b>Battery reserve</b>: as set on your inverter.",
-  panels: "<b>Solar panels</b>: panel count times watts each, from your installer's invoice.",
+const SETUP_WHERE: Record<SetupStep, [string, string]> = {
+  rate: ["Electricity rate", "Price per unit on your bill, with VAT."],
+  size: ["Battery size", "On the battery's label, or in the SunSynk app under Equipment."],
+  reserve: ["Battery reserve", "As set on your inverter."],
+  panels: ["Solar panels", "Panel count times watts each, from your installer's invoice."],
 };
-export const freeWeekSetup = (steps: SetupStep[], plantId?: number) =>
-  make("Finish your setup", {
+const COUNT = ["", "One number is", "Two numbers are", "Three numbers are", "Four numbers are"];
+export const freeWeekSetup = (steps: SetupStep[], plantId?: number) => {
+  const left = steps.filter((s) => s in SETUP_WHERE);
+  return make("Finish your setup", {
     title: "Finish your setup",
     parts: [
-      { steps: steps.filter((s) => s in SETUP_WHERE).map((s) => SETUP_WHERE[s]) },
+      { lead: `${COUNT[left.length] ?? `${left.length} numbers are`} still empty:` },
+      { note: left.map((s) => `<b style="color:#e7ecf2">${SETUP_WHERE[s][0]}</b><br>${SETUP_WHERE[s][1]}`).join("<br><br>") },
       { button: { label: "Finish setup", href: plantId ? `${SYSTEM}&plant=${plantId}` : SYSTEM } },
     ],
     footer: [HELP],
   });
+};

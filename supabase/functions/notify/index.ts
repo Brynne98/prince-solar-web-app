@@ -28,7 +28,7 @@ import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
-  PAY_URL, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
+  PAY_URL, cardChanged, cardExpiring, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
   offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, needAHand,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
@@ -82,6 +82,30 @@ function dayOf(epoch: number, tz: string): string {
   const d = local(tz, new Date(epoch * 1000)).date;
   return d === local(tz).date ? "today" : fmtDay(d, { weekday: "short", day: "numeric", month: "short" });
 }
+/** The days a payment covers, "2026-11-01".."2026-11-30" as "1 to 30 Nov" (SOLAR-415). */
+function covers(from: string, to: string): string {
+  const [fy, fm] = [from.slice(0, 4), from.slice(5, 7)], [ty, tm] = [to.slice(0, 4), to.slice(5, 7)];
+  if (fy === ty && fm === tm) return `${Number(from.slice(8))} to ${fmtDay(to, { day: "numeric", month: "short" })}`;
+  return fy === ty ? `${fmtDay(from, { day: "numeric", month: "short" })} to ${fmtDay(to, { day: "numeric", month: "short" })}` : `${day(from)} to ${day(to)}`;
+}
+/** Battery % at an instant: the newest reading in the 10 minutes before it, as grid_down's
+ *  chargePct (0151). Null when none. */
+async function socAt(plant: number, at: number): Promise<number | null> {
+  const { data } = await db.from("agg_minute").select("soc").eq("plant_id", plant).gte("ts", at - 600).lte("ts", at)
+    .not("soc", "is", null).order("ts", { ascending: false }).limit(1).maybeSingle();
+  return data?.soc == null ? null : Math.round(data.soc);
+}
+/** The saved card and the plan, for billing emails that name them (0162). */
+const billFacts = (user: string | null) =>
+  user ? rpc<{ card: string | null; plan: "free" | "home" | "family" } | null>("email_billing_facts", { p_user: user }) : Promise.resolve(null);
+/** The newest earlier email of a kind for this user, to read what it said. */
+async function lastMail(user: string | null, kind: string, before: number): Promise<Record<string, any> | null> {
+  if (!user) return null;
+  const { data } = await db.from("email_queue").select("data").eq("user_id", user).eq("kind", kind).lt("id", before)
+    .order("id", { ascending: false }).limit(1).maybeSingle();
+  return data?.data ?? null;
+}
+
 function lasted(fromEpoch: number, toEpoch: number): string {
   const m = Math.max(1, Math.round((toEpoch - fromEpoch) / 60));
   // the app's format (fmtDuration) and the pop-ups' (0153): 45 min, 1h 33m, 2h
@@ -227,24 +251,33 @@ async function build(r: Row): Promise<Email | null> {
   const ev = (e: PlantEvent, at: number | null) => plantEvent(p.name, p.id, e, at == null ? "today" : dayOf(at, tz));
   switch (r.kind) {
     case "grid_down": return ev({ kind: "grid_down", at: hhmm(d.since, tz), chargePct: d.chargePct ?? undefined }, d.since);
-    case "grid_back": return ev({ kind: "grid_back", at: hhmm(d.at, tz), lasted: lasted(d.since, d.at) }, d.at);
+    case "grid_back": return ev({ kind: "grid_back", since: hhmm(d.since, tz), at: hhmm(d.at, tz), lasted: lasted(d.since, d.at),
+      chargePct: (await socAt(p.id, d.at)) ?? undefined }, d.at);
     case "batt_hot":
       // Counted only when the email goes: a 30-day scan, not one per minute while it stays hot.
       return ev({ kind: "batt_hot", at: hhmm(d.at, tz), tempC: d.tempC, hotDays: await rpc<number>("email_hot_days", { p_plant: p.id }) }, d.at);
-    case "batt_hot_back": return ev({ kind: "batt_hot_back", at: hhmm(d.at, tz), tempC: d.tempC, lasted: lasted(d.since, d.at) }, d.at);
+    // Kept in the app's bell, no email (SOLAR-415).
+    case "batt_hot_back": case "bank_drift_back": return null;
     case "bank_drift": return ev({ kind: "bank_drift", banks: d.banks }, null);
-    case "bank_drift_back": return ev({ kind: "bank_drift_back", banks: d.banks, lasted: lasted(d.since, d.at) }, d.at);
-    case "string_back": return ev({ kind: "string_back", string: d.string, inverter: d.inverter, at: hhmm(d.at, tz), lasted: lasted(d.since, d.at) }, d.at);
+    case "string_back": return ev({ kind: "string_back", string: d.string, inverter: d.inverter, since: hhmm(d.since, tz), at: hhmm(d.at, tz), lasted: lasted(d.since, d.at) }, d.at);
     case "string_dead": return ev({ kind: "string_dead", string: d.string, inverter: d.inverter, since: hhmm(d.since, tz) }, d.since);
-    case "logger_stale": return ev({ kind: "logger_stale", since: hhmm(d.since, tz), inverter: d.inverter ?? undefined }, d.since);
-    case "logger_back": return ev({ kind: "logger_back", at: hhmm(d.at, tz), lasted: lasted(d.since, d.at), inverter: d.inverter ?? undefined }, d.at);
+    case "logger_stale": {
+      // Every inverter by serial with its last reading, so the owner sees which one stopped
+      // (SOLAR-415, 0162). The whole plant's alert shows each one's own last time.
+      const invs = await rpc<{ sn: string; last_dev: number | null }[]>("email_plant_inverters", { p_plant: p.id });
+      const stale = d.inverter ? String(r.key).split(":")[2] : null; // logger_stale:<plant>:<sn>:<last_dev>
+      return ev({ kind: "logger_stale", since: hhmm(d.since, tz), inverter: d.inverter ?? undefined,
+        inverters: invs.length < 2 && !stale ? undefined : invs.map((i) => ({ name: `Inverter ${i.sn}`,
+          last: stale && i.sn !== stale ? null : i.last_dev ? hhmm(i.last_dev, tz) : null })) }, d.since);
+    }
+    case "logger_back": return ev({ kind: "logger_back", since: hhmm(d.since, tz), at: hhmm(d.at, tz), lasted: lasted(d.since, d.at) }, d.at);
     // one email per login, naming it and every plant on it (0158); old rows have neither
     case "needs_relink": return loginEvent({ kind: "needs_relink", plants: d.plants ?? (r.plant_name ? [r.plant_name] : []),
       at: d.since == null ? undefined : hhmm(d.since, tz) }, p.id, d.since == null ? "today" : dayOf(d.since, tz));
-    case "relinked": return loginEvent({ kind: "relinked", plants: d.plants ?? [], at: hhmm(d.at, tz),
+    case "relinked": return loginEvent({ kind: "relinked", plants: d.plants ?? [], since: d.since == null ? undefined : hhmm(d.since, tz), at: hhmm(d.at, tz),
       lasted: lasted(d.since, d.at) }, p.id, dayOf(d.at, tz));
     case "sunsynk_down": return sunsynkDown(p.name, p.id, hhmm(d.since, tz), dayOf(d.since, tz));
-    case "sunsynk_back": return sunsynkBack(p.name, p.id, hhmm(d.at, tz), lasted(d.since, d.at), dayOf(d.at, tz));
+    case "sunsynk_back": return sunsynkBack(p.name, p.id, hhmm(d.since, tz), hhmm(d.at, tz), lasted(d.since, d.at), dayOf(d.at, tz));
     case "welcome": return welcome();
     case "history": { const h = await buildHistory(p); return h && historySynced(h); }
     case "report_week": case "report_month": case "report_year": {
@@ -262,26 +295,40 @@ async function build(r: Row): Promise<Email | null> {
     case "bill_paid":
       return paymentReceived({
         plan: d.plan, period: d.period, amount: d.amount, date: day(d.date), card: d.card, reference: d.reference,
+        covers: covers(d.date, addDays(d.nextDate, -1)),
         extraPlants: d.extra > 0 ? { n: d.extra, each: d.extraEach } : undefined,
         next: { amount: d.nextAmount, date: day(d.nextDate) },
       });
     case "bill_upgraded":
+      // Extra plants left pricing (SOLAR-371): an old extra-plants row sends nothing.
+      if (d.from === d.to) return null;
       return planUpgraded({
         from: d.from, to: d.to, period: d.period, addedPlants: d.from === d.to ? d.added : undefined,
         paidNow: d.amount, daysLeft: d.daysLeft, credit: d.credit ?? undefined, next: { amount: d.nextAmount, date: day(d.nextDate) },
+        covers: covers(addDays(d.nextDate, -d.daysLeft), addDays(d.nextDate, -1)), card: (await billFacts(r.user_id))?.card ?? undefined,
       });
     case "bill_switched":
       return planSwitched({
         plan: d.plan, period: "yearly", amount: d.amount, date: day(d.date), card: d.card, reference: d.reference,
         extraPlants: d.extra > 0 ? { n: d.extra, each: d.extraEach } : undefined,
         startsOn: day(d.startsOn), next: { amount: d.nextAmount, date: day(d.nextDate) },
+        covers: covers(d.startsOn, addDays(d.nextDate, -1)),
       });
-    case "bill_change":
-      return planChangeBooked({
+    case "bill_change": {
+      // The plants that stay: the user's others (SOLAR-415).
+      const { data: pus } = await db.from("plant_users").select("plant_name").eq("user_id", r.user_id).order("linked_at");
+      const keep = (pus ?? []).map((x) => x.plant_name ?? "").filter((n) => n && !(d.removePlants ?? []).includes(n));
+      return planChangeBooked({ keepPlants: keep,
         from: d.from, to: d.to, fromPeriod: d.fromPeriod, toPeriod: d.toPeriod, on: day(d.on),
         removePlants: d.removePlants, deleteOn: d.deleteOn ? day(d.deleteOn) : undefined, next: d.to === "free" ? undefined : { amount: d.nextAmount },
       });
-    case "bill_kept": return planKept({ plan: d.plan, period: d.period, next: { amount: d.nextAmount, date: day(d.on) } });
+    }
+    case "bill_kept": {
+      // What was undone: the change booked last, from its own email (SOLAR-415).
+      const booked = await lastMail(r.user_id, "bill_change", r.id);
+      return planKept({ plan: d.plan, period: d.period, next: { amount: d.nextAmount, date: day(d.on) },
+        undone: booked ? { to: booked.to, toPeriod: booked.toPeriod } : undefined });
+    }
     case "bill_failed":
       return paymentFailed({
         plan: d.plan, period: d.period, amount: d.amount, card: d.card,
@@ -293,12 +340,20 @@ async function build(r: Row): Promise<Email | null> {
     case "bill_mail_failed":
       return billMailFailed({ kind: String(d.kind), key: String(d.key), user: String(d.user ?? ""), error: String(d.error ?? "") });
     case "bill_free":
-      return movedToFree({ from: d.from, kept: d.kept, stopped: d.stopped, deleteOn: day(d.deleteOn) });
-    case "bill_removal_soon": return plantsRemovalSoon(d.plants, day(d.on));
+      return movedToFree({ from: d.from, kept: d.kept, stopped: d.stopped, deleteOn: day(d.deleteOn),
+        amount: (await lastMail(r.user_id, "bill_failed", r.id))?.amount ?? undefined });
+    case "bill_removal_soon": return plantsRemovalSoon(d.plants, day(d.on), (await billFacts(r.user_id))?.plan);
     case "bill_renewal_notice":
-      return renewalNotice({ plan: d.plan, amount: d.amount, on: day(d.on), change: d.changed ? "Your plan changes on that date, as you booked." : undefined });
+      return renewalNotice({ plan: d.plan, amount: d.amount, on: day(d.on), card: (await billFacts(r.user_id))?.card ?? undefined,
+        change: d.changed ? "Your plan changes on that date, as you booked." : undefined });
     case "bill_offer_ends":
       return offerEnds({ plan: d.plan, period: d.period, was: d.was, amount: d.amount, on: day(d.on), card: d.card ?? undefined });
+    // SOLAR-406 (0161)
+    case "bill_card_changed":
+      return cardChanged({ card: d.card, was: d.was ?? undefined, at: d.at ? `${dayOf(d.at, tz) === "today" ? "Today" : dayOf(d.at, tz)} at ${hhmm(d.at, tz)}` : undefined,
+        next: d.nextDate ? { amount: d.nextAmount, date: day(d.nextDate) } : undefined });
+    case "bill_card_expiring":
+      return cardExpiring({ card: d.card, on: day(d.on), final: d.final === true, next: { amount: d.nextAmount, date: day(d.nextDate) } });
     case "winback": return winback({ from: d.from, keepUntil: day(d.keepUntil) });
     case "need_a_hand": return needAHand();
   }
@@ -512,24 +567,22 @@ async function renderAll(plantId: number, today?: string) {
     if (r) out[`report-${period}`] = report(r);
   }
   out["sunsynk-down"] = sunsynkDown(p.name, p.id, hhmm(now - 1500, p.tz));
-  out["sunsynk-back"] = sunsynkBack(p.name, p.id, hhmm(now, p.tz), lasted(now - 1500, now));
+  out["sunsynk-back"] = sunsynkBack(p.name, p.id, hhmm(now - 1500, p.tz), hhmm(now, p.tz), lasted(now - 1500, now));
   const ev: [string, PlantEvent][] = [
     ["grid-down", { kind: "grid_down", at: hhmm(now - 240, p.tz), chargePct: 62 }],
-    ["grid-back", { kind: "grid_back", at: hhmm(now, p.tz), lasted: lasted(now - 5580, now) }],
+    ["grid-back", { kind: "grid_back", since: hhmm(now - 5580, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 5580, now), chargePct: 41 }],
     ["battery-hot", { kind: "batt_hot", at: hhmm(now, p.tz), tempC: 47, hotDays: 3 }],
-    ["battery-cooled", { kind: "batt_hot_back", at: hhmm(now, p.tz), tempC: 41, lasted: lasted(now - 3900, now) }],
     ["batteries-uneven", { kind: "bank_drift", banks: [{ name: "Inverter 1", chargePct: 72 }, { name: "Inverter 2", chargePct: 60 }] }],
     ["panels-stopped", { kind: "string_dead", string: "String 3", inverter: "Inverter 1", since: hhmm(now - 1200, p.tz) }],
-    ["batteries-even", { kind: "bank_drift_back", banks: [{ name: "Inverter 1", chargePct: 70 }, { name: "Inverter 2", chargePct: 66 }], lasted: lasted(now - 11400, now) }],
-    ["panels-back", { kind: "string_back", string: "String 3", inverter: "Inverter 1", at: hhmm(now, p.tz), lasted: lasted(now - 7800, now) }],
+    ["panels-back", { kind: "string_back", string: "String 3", inverter: "Inverter 1", since: hhmm(now - 7800, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 7800, now) }],
     ["no-readings", { kind: "logger_stale", since: hhmm(now - 1200, p.tz) }],
-    ["readings-back", { kind: "logger_back", at: hhmm(now, p.tz), lasted: lasted(now - 6420, now) }],
-    ["inverter-no-readings", { kind: "logger_stale", since: hhmm(now - 1200, p.tz), inverter: "Inverter 2" }],
-    ["inverter-readings-back", { kind: "logger_back", at: hhmm(now, p.tz), lasted: lasted(now - 6420, now), inverter: "Inverter 2" }],
+    ["readings-back", { kind: "logger_back", since: hhmm(now - 6420, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 6420, now) }],
+    ["inverter-no-readings", { kind: "logger_stale", since: hhmm(now - 1200, p.tz), inverter: "Inverter 2",
+      inverters: [{ name: "Inverter 1", last: null }, { name: "Inverter 2", last: hhmm(now - 1200, p.tz) }] }],
   ];
   for (const [name, e] of ev) out[name] = plantEvent(p.name, p.id, e);
   out["reconnect"] = loginEvent({ kind: "needs_relink", plants: [p.name, "Second plant"], at: hhmm(now - 1500, p.tz) }, p.id);
-  out["reconnected"] = loginEvent({ kind: "relinked", plants: [p.name, "Second plant"], at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
+  out["reconnected"] = loginEvent({ kind: "relinked", plants: [p.name, "Second plant"], since: hhmm(now - 7500, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
   // The free week's two emails (0122), from this plant's own day count; steps are a sample.
   const { count: days } = await db.from("plant_energy").select("period", { count: "exact", head: true })
     .eq("plant_id", plantId).eq("bucket", "day").lt("period", today);
