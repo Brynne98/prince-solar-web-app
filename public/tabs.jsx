@@ -800,9 +800,10 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
     const t0 = 0, t1 = 1440;
     const x = i => m.l + ((points[i].t - t0) / Math.max(5, t1 - t0)) * innerW;
     const y = val => m.t + innerH - ((val - lo) / (hi - lo)) * innerH;
-    // a missing bucket breaks the line
-    const gaps = gapRuns(i0, i1, i => v(i) == null);
-    const yAt = i => v(i) == null ? null : y(v(i));
+    // a missing bucket breaks the line; so does a grid-off one: the red band says it, not a 0 W line (SOLAR-421)
+    const off = i => (outages || []).some(([a, b]) => { const s = Math.round(points[i].t / 5); return s >= a && s <= b; });
+    const gaps = gapRuns(i0, i1, i => v(i) == null && !off(i));
+    const yAt = i => v(i) == null || off(i) ? null : y(v(i));
     const line = window.seriesPath(i0, i1, x, yAt);
     const area = window.seriesArea(i0, i1, x, yAt, y(0));
     const step = mobile ? 360 : 180;
