@@ -165,8 +165,8 @@ function html(subject: string, b: Body): string {
       const lines = r.map(([l, v]) => `<tr><td class="m" style="padding:6px 12px 6px 0;font:400 14px/1.3 ${SANS};color:#9aa5b3;vertical-align:top">${esc(l)}</td>` +
         `<td class="t" align="right" style="padding:6px 0;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2;vertical-align:top">${v}</td></tr>`).join("");
       const tick = (done?: boolean) => done
-        ? `<div style="width:20px;height:20px;border-radius:5px;background:#3ddc84;color:#0b0f14;font:700 14px/20px ${SANS};text-align:center">&#10003;</div>`
-        : `<div style="width:16px;height:16px;border-radius:5px;border:2px solid #4a5666"></div>`;
+        ? `<div style="width:20px;height:20px;border-radius:50%;background:#3ddc84;color:#0b0f14;font:700 14px/20px ${SANS};text-align:center">&#10003;</div>`
+        : `<div style="width:16px;height:16px;border-radius:50%;border:2px solid #4a5666"></div>`;
       const list = checks.map((c) => {
         const pad = c.done ? 10 : 16;
         return `<tr><td style="vertical-align:top;width:34px;padding:${pad}px 0"><div style="margin-top:1px">${tick(c.done)}</div></td><td style="vertical-align:top;padding:${pad}px 0">` +
