@@ -1482,6 +1482,13 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const offPending = !histRuns || (pick.isToday && !gb);
   const outages = offPending ? [] : !pick.isToday ? histRuns : gridOffRuns(histRuns, gb, liveFrom, nowIdx);
   const outageMin = outageMinutes(outages);
+  // The chart on screen with its own band. While a newly picked day and its grid-off answers
+  // load, the last whole day stays, faded as Solar's does, so no 0 W line shows where its
+  // band was (SOLAR-432). A refresh of the same day doesn't fade.
+  const shownChart = React.useRef(null);
+  if (day && !dim['aria-busy'] && !offPending) shownChart.current = { date: pick.date, word: dayWord, points: noReadings ? [] : points, outages, noReadings };
+  const chart = shownChart.current;
+  const chartFaded = chart && chart.date !== pick.date;
   // where the day's imports went: the same flows Solar and Home show (SOLAR-332)
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
   const [daily, loadDaily] = useDaily(refreshKey);
@@ -1509,16 +1516,17 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
       <Card id="grid-day" className="grid-day">
         {/* the right line is always there (blank today) so the date bar under it never shifts on a phone */}
         <SectionTitle right={day && !noReadings && !view.isToday && peak ? <>Peak <b>{fmtPower(peak.grid)}</b> at <b>{HM(peak.t)}</b></> : NBSP}>
-          {titled('GRID', dayWord)}
+          {titled('GRID', chart ? chart.word : dayWord)}
           <window.InfoDot text={'Above the line is power imported from the grid; below it is power exported.'} />
         </SectionTitle>
         <DateBar pick={pick} earliest={earliest}>
           <OutagePill mins={outageMin} what="Grid" />
         </DateBar>
         {/* waits for the grid-off answers too, so no 0 W line shows where the band will be */}
-        {!day || offPending ? <PlotSkeleton heights={[220, 300]} />
-          : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="grid" color={CC.grid} label="Grid"
-              sums={['Imported', 'Exported']} importScale outages={outages} empty={noReadings || 'No grid readings for this day.'} /></div>}
+        {!chart ? <PlotSkeleton heights={[220, 300]} />
+          : <div aria-busy={chartFaded || undefined} data-today={dim['data-today']} style={{ ...dim.style, opacity: chartFaded ? 0.45 : 1 }}>
+              <DayLineChart key={chart.date} points={chart.points} field="grid" color={CC.grid} label="Grid"
+                sums={['Imported', 'Exported']} importScale outages={chart.outages} empty={chart.noReadings || 'No grid readings for this day.'} /></div>}
       </Card>
 
       <div className="solar-row">
