@@ -1456,22 +1456,23 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const noReadings = dayProblem(view, day, points, silent);
   const peak = importPeak(points);
   // grid-down runs for the day, from the same history Equipment's supply chart shades
-  const [histRuns, setHistRuns] = React.useState([]);
+  const [histRuns, setHistRuns] = React.useState(null); // null until the history answers
   const [gridDay, setGridDay] = React.useState(null); // today: our own minute readings, as Equipment's Grid tile
   React.useEffect(() => {
     let alive = true;
-    setHistRuns([]); setGridDay(null);
+    setHistRuns(null); setGridDay(null);
     window.fetchInverterHistory(pick.date, refreshKey)
       .then(r => { if (alive) setHistRuns(outageRuns(r || [], ['gmin', 'gmax'], DAY_LAST)); })
-      .catch(() => {});
-    if (pick.isToday) window.fetchGridToday(refreshKey).then(r => { if (alive) setGridDay(r); }).catch(() => {});
+      .catch(() => { if (alive) setHistRuns([]); });
+    if (pick.isToday) window.fetchGridToday(refreshKey).then(r => { if (alive) setGridDay(r); }).catch(() => { if (alive) setGridDay({ buckets: [] }); });
     return () => { alive = false; };
   }, [pick.date, pick.isToday, refreshKey]);
   // today the history lags up to 6 h: our readings fill it in, and the band grows while the grid is off (SOLAR-421)
   const nowIdx = pick.isToday ? lastSlot(points, 'grid') : null;
   const gb = gridDay && gridDay.buckets;
   const liveFrom = useLiveOffFrom(pick.isToday && a.gridPresent === false, gb, nowIdx);
-  const outages = pick.isToday ? gridOffRuns(histRuns, gb, liveFrom, nowIdx) : histRuns;
+  // drawn once both answers are in, so a reload never shows part of the band first
+  const outages = !histRuns ? [] : !pick.isToday ? histRuns : gb ? gridOffRuns(histRuns, gb, liveFrom, nowIdx) : [];
   const outageMin = outageMinutes(outages);
   // where the day's imports went: the same flows Solar and Home show (SOLAR-332)
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1776,7 +1777,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const gb = (gridDay && gridDay.buckets) || [];
   // the band grows while the grid is off, as on the Grid tab (SOLAR-421)
   const nowIdx = lastSlot(pts, 'grid');
-  const liveFrom = useLiveOffFrom(a.gridPresent === false, gb, nowIdx);
+  const liveFrom = useLiveOffFrom(a.gridPresent === false, gridDay && gridDay.buckets, nowIdx);
   const outages = gridOffRuns(null, gb, liveFrom, nowIdx);
   const offMin = gridDay ? Number(gridDay.offMinutes) || 0 : 0;
   const gridState = st.allQuiet ? QUIET : a.gridPresent == null ? ['stale', 'Not known']

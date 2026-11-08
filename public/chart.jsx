@@ -282,6 +282,7 @@ function useLiveOffFrom(offNow, buckets, nowIdx) {
   const ref = React.useRef(null);
   const plant = window.CURRENT_PLANT;
   if (!offNow || nowIdx == null) { ref.current = null; return null; }
+  if (!buckets) return null; // our readings not in yet: no sliver drawn ahead of the band
   if (!ref.current || ref.current.plant !== plant) {
     const last = buckets && buckets[buckets.length - 1];
     ref.current = { plant, from: last && last.off ? Math.min(last.i, nowIdx) : nowIdx };
