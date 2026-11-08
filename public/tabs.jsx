@@ -800,9 +800,10 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
     const t0 = 0, t1 = 1440;
     const x = i => m.l + ((points[i].t - t0) / Math.max(5, t1 - t0)) * innerW;
     const y = val => m.t + innerH - ((val - lo) / (hi - lo)) * innerH;
-    // a missing bucket breaks the line
-    const gaps = gapRuns(i0, i1, i => v(i) == null);
-    const yAt = i => v(i) == null ? null : y(v(i));
+    // a missing bucket breaks the line; so does a grid-off one: the red band says it, not a 0 W line (SOLAR-421)
+    const off = i => (outages || []).some(([a, b]) => { const s = Math.round(points[i].t / 5); return s >= a && s <= b; });
+    const gaps = gapRuns(i0, i1, i => v(i) == null && !off(i));
+    const yAt = i => v(i) == null || off(i) ? null : y(v(i));
     const line = window.seriesPath(i0, i1, x, yAt);
     const area = window.seriesArea(i0, i1, x, yAt, y(0));
     const step = mobile ? 360 : 180;
@@ -1455,15 +1456,22 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const noReadings = dayProblem(view, day, points, silent);
   const peak = importPeak(points);
   // grid-down runs for the day, from the same history Equipment's supply chart shades
-  const [outages, setOutages] = React.useState([]);
+  const [histRuns, setHistRuns] = React.useState([]);
+  const [gridDay, setGridDay] = React.useState(null); // today: our own minute readings, as Equipment's Grid tile
   React.useEffect(() => {
     let alive = true;
-    setOutages([]);
+    setHistRuns([]); setGridDay(null);
     window.fetchInverterHistory(pick.date, refreshKey)
-      .then(r => { if (alive) setOutages(outageRuns(r || [], ['gmin', 'gmax'], DAY_LAST)); })
+      .then(r => { if (alive) setHistRuns(outageRuns(r || [], ['gmin', 'gmax'], DAY_LAST)); })
       .catch(() => {});
+    if (pick.isToday) window.fetchGridToday(refreshKey).then(r => { if (alive) setGridDay(r); }).catch(() => {});
     return () => { alive = false; };
-  }, [pick.date, refreshKey]);
+  }, [pick.date, pick.isToday, refreshKey]);
+  // today the history lags up to 6 h: our readings fill it in, and the band grows while the grid is off (SOLAR-421)
+  const nowIdx = pick.isToday ? lastSlot(points, 'grid') : null;
+  const gb = gridDay && gridDay.buckets;
+  const liveFrom = useLiveOffFrom(pick.isToday && a.gridPresent === false, gb, nowIdx);
+  const outages = pick.isToday ? gridOffRuns(histRuns, gb, liveFrom, nowIdx) : histRuns;
   const outageMin = outageMinutes(outages);
   // where the day's imports went: the same flows Solar and Home show (SOLAR-332)
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1766,8 +1774,10 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const liveInv = st.invs.filter(i => !st.quiet.includes(i));
   const volt = liveInv.map(i => i.gridVolt).find(v => v > 50) || null;
   const gb = (gridDay && gridDay.buckets) || [];
-  const outages = [];
-  gb.forEach(b => { const r = outages[outages.length - 1]; if (!b.off) return; if (r && r[1] === b.i - 1) r[1] = b.i; else outages.push([b.i, b.i]); });
+  // the band grows while the grid is off, as on the Grid tab (SOLAR-421)
+  const nowIdx = lastSlot(pts, 'grid');
+  const liveFrom = useLiveOffFrom(a.gridPresent === false, gb, nowIdx);
+  const outages = gridOffRuns(null, gb, liveFrom, nowIdx);
   const offMin = gridDay ? Number(gridDay.offMinutes) || 0 : 0;
   const gridState = st.allQuiet ? QUIET : a.gridPresent == null ? ['stale', 'Not known']
     : a.gridPresent ? ['ok', 'On'] : ['warn', 'Off'];
@@ -2047,7 +2057,7 @@ function InvertersTab({ snap, today, refreshKey }) {
   React.useEffect(() => {
     let alive = true;
     window.fetchInverterHistory(window.localDateStr(), refreshKey).then(r => { if (alive) setHist(r); }).catch(() => {});
-    window.fetchGridToday().then(r => { if (alive) setGridDay(r); }).catch(() => {});
+    window.fetchGridToday(refreshKey).then(r => { if (alive) setGridDay(r); }).catch(() => {});
     return () => { alive = false; };
   }, [refreshKey]);
   // Simple or Detailed is this viewer's own choice, kept across visits

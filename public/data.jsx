@@ -356,8 +356,9 @@ async function fetchStringHealth() {
   return getJSON('/api/strings/health');
 }
 // today's grid from our own minute readings: volts and off per 5-minute step, off minutes (0159, SOLAR-398)
-async function fetchGridToday() {
-  return getJSON('/api/grid/today');
+// Shared: Equipment's Grid tile and the Grid tab's day chart ask for the same answer (SOLAR-421).
+async function fetchGridToday(rk) {
+  return sharedAsk('gridtoday', MIN5, rk, () => getJSON('/api/grid/today'));
 }
 
 // ---- me: plan, preferences, plants -----------------------------------------

@@ -119,6 +119,7 @@ a row of on/off settings (email and push preferences); `saveFlag` sends its own 
 | `dayFace(s)` | "Today", "Yesterday" or the date. |
 | `seriesPath`, `seriesArea` | An SVG line or filled area from a series. |
 | `ChartPlaceholder` | A chart-sized box while loading or with nothing to show. |
+| `gridOffRuns`, `useLiveOffFrom`, `lastSlot` | Today's grid-off band: SunSynk history runs joined with our readings' off buckets, grown to now while the grid is off (SOLAR-421). |
 
 ## Tabs and Settings (`tabs.jsx`)
 
