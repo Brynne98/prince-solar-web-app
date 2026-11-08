@@ -100,12 +100,12 @@ function LiveSkeleton({ cfg }) {
           <window.Segmented size="sm" value="today" onChange={() => {}}
             options={PERIODS} />
         </div>
-        {/* The real tiles in loading mode, with the same meter and second line the live
+        {/* The real tiles in loading mode, with the same second line the live
             ones carry, so the row lands at the same height. */}
         <div className="today-strip">
           <MiniStat loading label="Made" info={OV_INFO.made} />
           <MiniStat loading label="Home" info={OV_INFO.home} />
-          <MiniStat loading label="Independence" info={OV_INFO.suff} bar={0} />
+          <MiniStat loading label="Independence" info={OV_INFO.suff} />
           {/* the grid chip's box sets its line 0.5px taller than plain text */}
           {grid ? <MiniStat loading label="Imported" info={OV_INFO.imp} sub={<span className="grid-state" style={{ visibility: 'hidden' }}><span className="gs-dot" />{NBSP}</span>} /> : <MiniStat loading label="Grid" info={OV_INFO.grid} />}
           {exp && <MiniStat loading label="Exported" info={OV_INFO.exp} />}
@@ -401,7 +401,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         info={OV_INFO.made} />
       <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendFrom={cmpPhrase}
         info={OV_INFO.home} />
-      <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff ?? undefined} trend={tSuff} trendFrom={cmpPhrase}
+      <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} trend={tSuff} trendFrom={cmpPhrase}
         info={OV_INFO.suff} />
       {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendFrom={cmpPhrase}
         info={OV_INFO.imp}
@@ -530,7 +530,7 @@ function TrendBadge({ pct, unit = '%', invert, title, tip, delta, deltaFmt }) {
 }
 // value: text, or [number, unit] (fmtEnergyParts) for the number, then a smaller unit, so the figure reads first
 const unitSplit = (v) => (Array.isArray(v) && v[1] ? <>{v[0]}<span className={'mv-unit' + (v[1] === '%' ? ' pct' : '')}>{v[1]}</span></> : Array.isArray(v) ? v[0] : v);
-function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trendInvert, trendFrom, trendDelta, trendDeltaFmt, loading }) {
+function MiniStat({ label, value, color, sub, info, trend, trendUnit, trendInvert, trendFrom, trendDelta, trendDeltaFmt, loading }) {
   // the note joins the (?) only while TrendBadge draws a badge, and is its hover text too
   const arrow = !loading && trend != null && (Number.isFinite(trend) || Number.isFinite(trendDelta));
   const flat = Number.isFinite(trend) && Math.abs(trend) < 0.05;   // TrendBadge's "0%"
@@ -550,8 +550,6 @@ function MiniStat({ label, value, color, sub, bar, info, trend, trendUnit, trend
       {loading
         ? <div className="mini-value mono" style={{ position: 'relative' }}>{NBSP}<window.Skeleton w="70%" h="auto" style={{ position: 'absolute', top: 0, bottom: 0, left: 0 }} /></div>
         : <div className="mini-value mono" style={{ color }}><span className="mv-num">{unitSplit(value)}</span></div>}
-      {bar != null && !loading && <window.Meter small pct={bar} color={color} />}
-      {bar != null && loading && <window.Skeleton h={5} r={4} style={{ marginTop: 8 }} />}
       {sub && <div className="mini-sub">{sub}</div>}
     </Card>
   );
@@ -1406,7 +1404,7 @@ function GridTab(props) {
       <div className="stack">
         <div className="trio">
           <StatTile label="GRID" value="Off" unit="" accent={CC.grid} sub="Not connected" />
-          <StatTile label="INDEPENDENCE" value={selfSuff} unit="%" accent={CC.soc} bar={selfSuff} sub={NBSP} />
+          <StatTile label="INDEPENDENCE" value={selfSuff} unit="%" accent={CC.soc} sub={NBSP} />
           <StatTile label="USED TODAY" value={window.fmtEnergyParts(a.loadToday)[0]} unit={' ' + window.fmtEnergyParts(a.loadToday)[1]} accent={CC.load} sub={NBSP} />
         </div>
         <Card>

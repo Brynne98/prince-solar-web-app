@@ -570,7 +570,6 @@
   .batt-eta .bel { display: block; }
   .batt-eta .bel.sub { color: var(--muted); margin-top: 1px; }
   .meter { height: 7px; border-radius: var(--r-pill); background: rgba(255,255,255,0.07); overflow: hidden; margin-top: var(--sp-lg); position: relative; }
-  .meter.sm { height: 5px; margin-top: var(--sp-sm); }
   /* the fill is full width and slides in from the left (SOLAR-351): a transform, so no relayout,
      and its rounded end keeps its shape at any value, which scaleX would squash */
   .meter-fill { height: 100%; border-radius: var(--r-pill); transition: translate var(--dur-slow) var(--ease-out); }
@@ -1898,7 +1897,7 @@
   .hl-line:hover b { text-decoration: underline; }
   .overview-section .hist-lock { padding: var(--sp-lg) var(--sp-xl); border: 1px solid var(--line); border-radius: var(--r-xl); background: var(--panel); }
   .today-strip.blurred .mini-value { filter: blur(7px); }
-  .today-strip.blurred .trend-badge, .today-strip.blurred .meter { visibility: hidden; }
+  .today-strip.blurred .trend-badge { visibility: hidden; }
   .lock-cta { display: inline-flex; align-items: center; gap: var(--sp-xs); }
   .free-over { margin-bottom: var(--sp-lg); border-color: rgba(var(--accent-rgb),0.35); display: grid; gap: var(--sp-sm); }
   .free-over h2 { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.01em; }

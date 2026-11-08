@@ -32,7 +32,7 @@ Look and feel (sizes, colours, radii) is in `DESIGN.md`. This file is about code
 | `Tip` | Hover or tap help on any element. Use instead of `title=`. |
 | `InfoDot` | The small (i) with a `Tip`. |
 | `TipRow` | One line in a chart tooltip: `color`, `label`, value as children; `sq` for a square key. |
-| `Meter` | A thin progress bar: `pct`, `color`, `small`. |
+| `Meter` | A thin progress bar: `pct`, `color`. |
 | `Skeleton` | A loading shape: `w`, `h`, `r`, `as`. |
 | `SkelLine` | A one-line text skeleton: `w`, `h`, `max`. |
 | `Locked`, `HistoryLock`, `LockIcon` | Paid-only content behind the free-week lock. |
