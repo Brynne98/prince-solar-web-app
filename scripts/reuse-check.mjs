@@ -97,11 +97,14 @@ for (const m of css.matchAll(/(?<![\w-])(padding|margin|gap|row-gap|column-gap|b
 // rgba(var(--x-rgb), a). A focus, open or picked state takes --focus, never a power colour.
 const ROLE_HEX = /#(3ddc84|84cc16|a78bfa|facc15|f87171|22d3ee|60a5fa|f97316|f43f5e|f59e0b|ef4444)\b/i;
 const ROLE_RGB = /rgba?\(\s*(61,\s*220,\s*132|132,\s*204,\s*22|167,\s*139,\s*250|250,\s*204,\s*21|248,\s*113,\s*113|34,\s*211,\s*238|96,\s*165,\s*250|249,\s*115,\s*22|244,\s*63,\s*94|245,\s*158,\s*11|239,\s*68,\s*68)\b/;
+// Light mode (SOLAR-318): a white or black wash written raw stays dark-only.
+const RAW_TINT = /rgba?\(\s*(255,\s*255,\s*255|0,\s*0,\s*0)\b/;
 for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
   for (const d of m[2].matchAll(/([\w-]+)\s*:([^;]*)/g)) {
     if (d[1].startsWith('--') || /url\(/.test(d[2])) continue;
     const at = lineOf(m.index + m[1].length + 1 + d.index);
     if (ROLE_HEX.test(d[2]) || ROLE_RGB.test(d[2])) problems.push(`index.html:${at} a raw power or status colour: use var(--…) from :root`);
+    if (RAW_TINT.test(d[2])) problems.push(`index.html:${at} a raw white or black tint: use rgba(var(--ink-rgb), a) or rgba(var(--shade-rgb), a) so it flips with the theme`);
     if (/:focus|\.open\b|\[aria-expanded|\.on\b/.test(m[1]) && /(border|outline)/.test(d[1]) && /var\(--(pv|batt|grid|load|soc)\)/.test(d[2]))
       problems.push(`index.html:${at} a power colour marks focus or a pick: use var(--focus)`);
   }
@@ -110,6 +113,7 @@ for (const f of jsx) {
   read(f).split('\n').forEach((line, i) => {
     if (/reuse-check: allow/.test(line) || /^\s*(\/\/|\*|\/\*)/.test(line) || f === 'components.jsx' && /^\s+(pv|batt|grid|load|soc):/.test(line)) return;
     if (ROLE_HEX.test(line) || ROLE_RGB.test(line)) problems.push(`${f}:${i + 1} a raw power or status colour: use window.COLORS or var(--…)`);
+    if (RAW_TINT.test(line)) problems.push(`${f}:${i + 1} a raw white or black tint: use rgba(var(--ink-rgb), a)`);
   });
 }
 

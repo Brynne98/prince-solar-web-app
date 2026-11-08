@@ -216,7 +216,7 @@ function gapRuns(from, to, missing) {
 /** The stripes for a gap band; goes in the chart's <defs>, filled as url(#gaphatch). */
 const GapHatch = () => (
   <pattern id="gaphatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-    <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(255,255,255,0.07)" strokeWidth="3" />
+    <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(var(--ink-rgb),0.07)" strokeWidth="3" />
   </pattern>
 );
 /** Tooltip left edge: beside the crosshair, flipped near the right edge, never off either end. */
@@ -248,7 +248,7 @@ function fitScale(lo, hi, unit) {
 // draws a line red above its limit; Equipment's Inverters card and problem cards use them too.
 const EQ_HOT_AC = 60, EQ_HOT_DC = 75;
 // One grey per inverter: a reading that is no power series takes grey, never a sixth hue (SOLAR-392).
-const INV_COLORS = ['#e7ecf2', '#9aa5b3', '#6b7a8d', '#c4ccd6', '#556170', '#aeb8c4']; // on Equipment only; reuse-check: allow
+const INV_COLORS = ['var(--text)', 'var(--muted)', 'rgba(var(--ink-rgb),0.42)', 'rgba(var(--ink-rgb),0.78)', 'rgba(var(--ink-rgb),0.3)', 'rgba(var(--ink-rgb),0.66)']; // greys, on Equipment only
 // A temperature line shades with heat (SOLAR-396): its inverter's grey until 20 °C under the
 // hot limit, this warm orange halfway, the warning red at the limit and above.
 const HEAT_WARM = '#f0884a'; // temperature only; reuse-check: allow
@@ -508,7 +508,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
             )}
             {hasV && ys.ticks.map(v => (
               <g key={'y' + v}>
-                <line x1={m.l} x2={m.l + innerW} y1={y(v)} y2={y(v)} stroke="rgba(255,255,255,0.05)" />
+                <line x1={m.l} x2={m.l + innerW} y1={y(v)} y2={y(v)} stroke="rgba(var(--ink-rgb),0.05)" />
                 <text x={m.l - 10} y={y(v) + 3} textAnchor="end" className="ax">{v}</text>
               </g>
             ))}
@@ -543,7 +543,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
             {xticks.map(t => (
               <text key={'gx' + t} x={x(t / 5)} y={m.t + innerH + 22} textAnchor="middle" className="ax">{HM(t)}</text>
             ))}
-            {hp != null && <line x1={x(hp)} x2={x(hp)} y1={m.t - 8} y2={m.t + innerH} stroke="rgba(255,255,255,0.25)" />}
+            {hp != null && <line x1={x(hp)} x2={x(hp)} y1={m.t - 8} y2={m.t + innerH} stroke="rgba(var(--ink-rgb),0.25)" />}
           </svg>
         )}
         {tooltip()}
@@ -689,7 +689,7 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
         {/* left axis: power (kW) */}
         {yticks.map((v, i) => (
           <g key={'gy' + i}>
-            <line x1={m.l} x2={m.l + innerW} y1={y(v)} y2={y(v)} stroke={v === 0 ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'} />
+            <line x1={m.l} x2={m.l + innerW} y1={y(v)} y2={y(v)} stroke={v === 0 ? 'rgba(var(--ink-rgb),0.14)' : 'rgba(var(--ink-rgb),0.05)'} />
             <text x={m.l - 10} y={y(v) + 3} textAnchor="end" className={'ax' + (v === 0 ? ' ax-hi' : '')}>{+(v / 1000).toFixed(1)}</text>
           </g>
         ))}
@@ -701,11 +701,11 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
         {xticks.map(t => (
           <text key={'gx' + t} x={x(t / 5)} y={m.t + innerH + 22} textAnchor="middle" className="ax">{HM(t)}</text>
         ))}
-        <line x1={m.l} x2={m.l + innerW} y1={y(0)} y2={y(0)} stroke="rgba(255,255,255,0.16)" />
+        <line x1={m.l} x2={m.l + innerW} y1={y(0)} y2={y(0)} stroke="rgba(var(--ink-rgb),0.16)" />
 
         {band && (
           <g>
-            <rect x={x(band[0])} y={m.t} width={Math.max(1, x(band[1]) - x(band[0]))} height={innerH} fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.4)" strokeDasharray="3 3" />
+            <rect x={x(band[0])} y={m.t} width={Math.max(1, x(band[1]) - x(band[0]))} height={innerH} fill="rgba(var(--ink-rgb),0.07)" stroke="rgba(var(--ink-rgb),0.4)" strokeDasharray="3 3" />
             {(() => {
               const a = pts[band[0]], bEnd = pts[band[1]];
               if (!a) return null;
@@ -746,11 +746,11 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
 
         {hp && (
           <g>
-            <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + innerH} stroke="rgba(255,255,255,0.25)" />
+            <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + innerH} stroke="rgba(var(--ink-rgb),0.25)" />
             {['pv', 'load', 'batt', 'grid'].filter(k => vis[k] && hp[k] != null).map(k => (
-              <circle key={k} cx={x(hover)} cy={y(hp[k])} r="3" fill={C[k]} stroke="#0b0e12" strokeWidth="1.5" />
+              <circle key={k} cx={x(hover)} cy={y(hp[k])} r="3" fill={C[k]} stroke="var(--panel)" strokeWidth="1.5" />
             ))}
-            {vis.soc && hp.soc != null && <circle cx={x(hover)} cy={ysoc(hp.soc)} r="3" fill={C.soc} stroke="#0b0e12" strokeWidth="1.5" />}
+            {vis.soc && hp.soc != null && <circle cx={x(hover)} cy={ysoc(hp.soc)} r="3" fill={C.soc} stroke="var(--panel)" strokeWidth="1.5" />}
           </g>
         )}
       </svg>

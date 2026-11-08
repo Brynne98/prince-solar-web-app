@@ -845,7 +845,7 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
         ))}
         {ticks.map((t, k) => (
           <g key={k}>
-            <line x1={m.l} x2={m.l + innerW} y1={y(t)} y2={y(t)} stroke={t === 0 ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'} />
+            <line x1={m.l} x2={m.l + innerW} y1={y(t)} y2={y(t)} stroke={t === 0 ? 'rgba(var(--ink-rgb),0.14)' : 'rgba(var(--ink-rgb),0.05)'} />
             <text x={m.l - 8} y={y(t) + 3} textAnchor="end" className="ax">{pct ? t : +(t / 1000).toFixed(1)}</text>
           </g>
         ))}
@@ -859,7 +859,7 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
         )}
         {band && (
           <g>
-            <rect x={x(band[0])} y={m.t} width={Math.max(1, x(band[1]) - x(band[0]))} height={innerH} fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.4)" strokeDasharray="3 3" />
+            <rect x={x(band[0])} y={m.t} width={Math.max(1, x(band[1]) - x(band[0]))} height={innerH} fill="rgba(var(--ink-rgb),0.07)" stroke="rgba(var(--ink-rgb),0.4)" strokeDasharray="3 3" />
             <text x={Math.max(m.l + 16, x(band[0]))} y={m.t - 6} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(points[band[0]].t)}</text>
             {band[1] > band[0] && x(band[1]) - x(band[0]) >= 78 && <text x={Math.min(m.l + innerW - 16, x(band[1]))} y={m.t - 6} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(points[band[1]].t)}</text>}
           </g>
@@ -871,8 +871,8 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
         </g>
         {hp != null && !band && (
           <g>
-            <line x1={x(hp)} x2={x(hp)} y1={m.t} y2={m.t + innerH} stroke="rgba(255,255,255,0.25)" />
-            <circle cx={x(hp)} cy={Math.max(m.t, Math.min(m.t + innerH, y(v(hp))))} r="3" fill={color} stroke="#0b0e12" strokeWidth="1.5" />
+            <line x1={x(hp)} x2={x(hp)} y1={m.t} y2={m.t + innerH} stroke="rgba(var(--ink-rgb),0.25)" />
+            <circle cx={x(hp)} cy={Math.max(m.t, Math.min(m.t + innerH, y(v(hp))))} r="3" fill={color} stroke="var(--panel)" strokeWidth="1.5" />
           </g>
         )}
       </svg>
@@ -968,17 +968,17 @@ function DaysBarsChart({ rows, field, color, rgb, word, label, today, selected, 
         onClick={e => { const r = rows[idxAt(e.clientX, e.currentTarget)]; if (can(r)) onPick(r.date); }}>
         {ticks.map((v, k) => (
           <g key={k}>
-            <line x1={m.l} x2={m.l + innerW} y1={y(v)} y2={y(v)} stroke={v === 0 ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'} />
+            <line x1={m.l} x2={m.l + innerW} y1={y(v)} y2={y(v)} stroke={v === 0 ? 'rgba(var(--ink-rgb),0.14)' : 'rgba(var(--ink-rgb),0.05)'} />
             <text x={m.l - 7} y={y(v) + 3} textAnchor="end" className="ax">{v}</text>
           </g>
         ))}
         <text x={m.l - 7} y={m.t - 10} textAnchor="end" className="ax" fillOpacity="0.55">kWh</text>
-        {h && <rect x={m.l + slot * hover} y={m.t} width={slot} height={innerH} fill="rgba(255,255,255,0.04)" />}
+        {h && <rect x={m.l + slot * hover} y={m.t} width={slot} height={innerH} fill="rgba(var(--ink-rgb),0.04)" />}
         {rows.map((r, i) => {
           const cx = m.l + slot * i + slot / 2, top = y(r[field] || 0), isToday = r.date === today;
           return (
             <rect key={r.date} x={cx - bw / 2} y={top} width={bw} height={Math.max(0, y(0) - top)} rx={Math.min(2, bw / 2)}
-              fill={r === best ? color : isToday ? fill(0.16) : hover === i ? fill(0.7) : fill(0.38)}
+              fill={r === best ? color : isToday ? fill(0.16) : hover === i ? fill('var(--bar-hover-a)') : fill('var(--bar-a)')}
               stroke={r.date === selected ? 'var(--text)' : isToday ? color : 'none'} strokeWidth={r.date === selected ? 1.5 : 1}
               strokeDasharray={isToday && r.date !== selected ? '2 2' : undefined}
               style={{ transition: 'fill var(--dur-fast) var(--ease-out)' }} />
@@ -3553,6 +3553,25 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
 // then the account's actions. ready: api_me has answered, so Your data knows if it's locked.
 const HAD_PASSWORD = 'synsynk.hasPassword';
 const hadPassword = () => { try { return localStorage.getItem(HAD_PASSWORD) !== '0'; } catch (e) { return true; } };
+// Dark, Light or the device's (SOLAR-318). Kept on this device by theme.js, not the account.
+function AppearanceSection() {
+  const [theme, setTheme] = React.useState(window.getTheme());
+  // another tab on this device changed it (theme.js fires ps-theme)
+  React.useEffect(() => {
+    const sync = () => setTheme(window.getTheme());
+    window.addEventListener('ps-theme', sync);
+    return () => window.removeEventListener('ps-theme', sync);
+  }, []);
+  const pick = (v) => { setTheme(v); window.setTheme(v); window.track('theme_changed', { theme: v }); };
+  return (
+    <SettingsSection id="appearance" title="Appearance">
+      <SettingRow label="Theme" note="On this device."
+        action={<Segmented size="sm" label="Theme" value={theme} onChange={pick}
+          options={[{ value: 'device', label: 'Device' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />} />
+    </SettingsSection>
+  );
+}
+
 function AccountPage({ user, billing, plants, plantId, ready, onBilling }) {
   const email = user?.email || null;
   const providers = user?.app_metadata?.providers || [];
@@ -3565,6 +3584,7 @@ function AccountPage({ user, billing, plants, plantId, ready, onBilling }) {
         <p>{email ? <>{email}<span className="set-method"> · Signs in with {method}</span></> : <window.SkelLine w={260} />}</p>
       </div>
       <NotificationsSection userId={user?.id} />
+      <AppearanceSection />
       {plants.length > 0 && <DownloadSection plants={plants} plantId={plantId} ready={ready} />}
       <SettingsSection id="actions" title="Account actions">
         {email && providers.includes('email') && <PasswordRow email={email} />}

@@ -2,12 +2,13 @@
 // components.jsx — shared atoms + formatting helpers + the energy palette
 // ============================================================================
 
+// CSS variables, so charts and the flow follow Dark or Light (SOLAR-318). Values live on :root.
 const COLORS = {
-  pv: '#3ddc84', // solar green
-  batt: '#a78bfa', // battery purple
-  grid: '#facc15', // grid yellow
-  load: '#f87171', // load red
-  soc: '#22d3ee' // SOC (state of charge) cyan
+  pv: 'var(--pv)', // solar green
+  batt: 'var(--batt)', // battery purple
+  grid: 'var(--grid)', // grid yellow
+  load: 'var(--load)', // load red
+  soc: 'var(--soc)' // SOC (state of charge) cyan
 };
 
 // ---- formatting -------------------------------------------------------------
