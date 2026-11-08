@@ -1,5 +1,6 @@
 // Lock-order race (SOLAR-264 round 3): a card payment applying (billing_charge_paid -> billing_resume) while the
-// user starts a stopped plant (api_plant_start), each in its own session, many times. Exit 0 = no deadlock, 1 = deadlock.
+// user starts a stopped plant (api_plant_start), each in its own session, many times. Since 0156 no extra plants
+// are sold, so the payment is a Home (2 plants) to Family (5) upgrade that starts the stopped ones. Exit 0 = no deadlock, 1 = deadlock.
 // A deadlock makes billing_charge_paid fail and a paid charge can stay pending, unapplied (since 0130 the
 // webhook answers 500 then, so Paystack sends the event again). Commits rows for users race-N@s264.test and deletes them at the end.
 // --removal (0132): the daily run deleting a Free account's booked plants while the user pays a start that
@@ -66,10 +67,10 @@ try {
     q(`insert into auth.users (id, email, aud, role, confirmation_token, recovery_token, email_change_token_new, email_change)
          values ('${u}', 'race-${i}@s264.test', 'authenticated', 'authenticated', '', '', '', '');
        insert into private.billing (user_id, plan, period, billing_day, next_billing_date, card)
-         values ('${u}', 'family', 'monthly', 10, private.billing_today() + 10, '{"authorization_code":"R","reusable":true}');
+         values ('${u}', 'home', 'monthly', 10, private.billing_today() + 10, '{"authorization_code":"R","reusable":true}');
        insert into public.plant_users (plant_id, user_id, plant_name, linked_at, paused)
-         select 95000000 + ${i} * 10 + k, '${u}', 'r' || k, now() + k * interval '1 s', k > 3 from generate_series(1, 5) k;`);
-    const ref = q(`select public.billing_charge_open('${u}', 'family', null, 1)->>'reference'`);
+         select 95000000 + ${i} * 10 + k, '${u}', 'r' || k, now() + k * interval '1 s', k > 2 from generate_series(1, 5) k;`);
+    const ref = q(`select public.billing_charge_open('${u}', 'family')->>'reference'`);
     const plant = 95000000 + i * 10 + 4;
     // A comped helper collects the same plants, so no start fills them (plant_start_fill posts to the hosted functions).
     q(`insert into public.plant_users (plant_id, user_id, plant_name) select 95000000 + ${i} * 10 + k, '${HELPER}', 'h' from generate_series(1, 5) k`);
@@ -81,10 +82,12 @@ try {
     if (q(`select status from private.billing_charges where reference = '${ref}'`) === 'pending') unapplied++;
   }
 } finally {
-  q(`delete from private.billing_charges where user_id in (select id from auth.users where email like 'race-%@s264.test');
+  // The local DB is shared: another session's billing_run can deadlock this delete. Try again.
+  for (let t = 1; ; t++) try { q(`delete from private.billing_charges where user_id in (select id from auth.users where email like 'race-%@s264.test');
      delete from public.plant_users where user_id in (select id from auth.users where email like 'race-%@s264.test');
      delete from private.sunsynk_accounts where user_id in (select id from auth.users where email like 'race-%@s264.test');
-     delete from auth.users where email like 'race-%@s264.test';`);
+     delete from auth.users where email like 'race-%@s264.test';`); break; }
+  catch (e) { if (t >= 5 || !/deadlock detected/.test(String(e.stderr))) throw e; }
 }
 console.log(`${ROUNDS} rounds${REMOVAL ? ' (removal)' : SHARED ? ' (shared)' : ''}: ${deadlocks} deadlocks, ${unapplied} paid charges left pending (unapplied)` +
   (REMOVAL ? `, ${deleted} accounts lost plants they paid to keep` : ''));
