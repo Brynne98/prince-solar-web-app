@@ -114,6 +114,15 @@ async function historyAt(user: string | null, plantId?: number | null): Promise<
   const { count } = await db.from("plant_energy").select("period", { count: "exact", head: true }).eq("plant_id", pu.plant_id).eq("bucket", "day");
   return { plant: pu.plant_name || "your plant", days: count ?? 0 };
 }
+/** Day totals held by the account's plants with these names, added up: the history a removal deletes. */
+async function historyOf(user: string | null, names: string[]): Promise<number> {
+  if (!user || !names.length) return 0;
+  const { data: pu } = await db.from("plant_users").select("plant_id").eq("user_id", user).in("plant_name", names);
+  const ids = (pu ?? []).map((x) => x.plant_id);
+  if (!ids.length) return 0;
+  const { count } = await db.from("plant_energy").select("period", { count: "exact", head: true }).in("plant_id", ids).eq("bucket", "day");
+  return count ?? 0;
+}
 /** The newest earlier email of a kind for this user, to read what it said. */
 async function lastMail(user: string | null, kind: string, before: number): Promise<Record<string, any> | null> {
   if (!user) return null;
@@ -364,12 +373,12 @@ async function build(r: Row): Promise<Email | null> {
     case "bill_free":
       return movedToFree({ from: d.from, kept: d.kept, stopped: d.stopped, deleteOn: day(d.deleteOn),
         amount: (await lastMail(r.user_id, "bill_failed", r.id))?.amount ?? undefined,
-        days: (await historyAt(r.user_id, r.plant_id))?.days });
+        days: (await historyAt(r.user_id, r.plant_id))?.days, stoppedDays: await historyOf(r.user_id, d.stopped) });
     case "bill_removal_soon": {
       // The next plan up keeps them: Free to Home if 2 plants fit, else Family.
       const plan = (await billFacts(r.user_id))?.plan;
       const up = plan === "free" ? (d.plants.length + 1 <= 2 ? "home" : "family") : plan === "home" ? "family" : null;
-      return plantsRemovalSoon(d.plants, day(d.on), plan, up ? await priceOf(up) : undefined);
+      return plantsRemovalSoon(d.plants, day(d.on), plan, up ? await priceOf(up) : undefined, await historyOf(r.user_id, d.plants));
     }
     case "bill_renewal_notice":
       return renewalNotice({ plan: d.plan, amount: d.amount, on: day(d.on), card: (await billFacts(r.user_id))?.card ?? undefined,

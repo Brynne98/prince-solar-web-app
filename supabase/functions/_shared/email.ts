@@ -893,12 +893,14 @@ const keepSmall = (p: Price) => `${p.now < p.list ? `${PLAN_NAME[p.plan]} is nor
 const dayCount = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
 const plantCount = (n: number) => `${n} plant${n === 1 ? "" : "s"}`;
 const lost = (label: string, value: string, sub: string): Hero => ({ label, value, tone: "warn", sub });
+const withDays = (who: string, days?: number) => days ? `${who}, with ${dayCount(days)} of history` : who;
 
 // Unpaid after the last try: the account is on Free. The first-linked plant stays
 // live; the others stop updating and are deleted after 30 days, unless paid for or
 // swapped for the one kept. days: history the kept plant holds.
 // No offer price here: the line above names what they were paying.
-export type MovedToFree = { from: Plan; kept: string; stopped: string[]; deleteOn: string; amount?: number; days?: number };
+// stoppedDays: day totals the stopped plants hold between them.
+export type MovedToFree = { from: Plan; kept: string; stopped: string[]; deleteOn: string; amount?: number; days?: number; stoppedDays?: number };
 
 export const movedToFree = (m: MovedToFree) =>
   make("You're now on Free", {
@@ -906,7 +908,7 @@ export const movedToFree = (m: MovedToFree) =>
     parts: [
       { lead: `We couldn't charge ${m.amount != null ? rand(m.amount) : "your card"} for ${PLAN_NAME[m.from]}.` },
       { box: {
-        hero: m.stopped.length ? lost(`Deleted on ${m.deleteOn}`, plantCount(m.stopped.length), names(m.stopped))
+        hero: m.stopped.length ? lost(`Deleted on ${m.deleteOn}`, plantCount(m.stopped.length), withDays(names(m.stopped), m.stoppedDays))
           : m.days ? lost(`Deleted on ${m.deleteOn}`, dayCount(m.days), `of history at ${m.kept}`) : undefined,
         rows: [...(m.stopped.length ? [["Still updating", esc(m.kept)] as [string, string]] : []),
           ["You see", "Last 24 hours"], ["Reports", "Stop"]],
@@ -936,14 +938,14 @@ export const winback = (w: { from: Plan; keepUntil: string; plant?: string; days
 
 // 3 days before plants are deleted (after a downgrade, cancel or failed payment). plan:
 // the plan the account is on now, to say how many plants it keeps. price: the next plan
-// up, which keeps them.
-export const plantsRemovalSoon = (plants: string[], on: string, plan?: Plan, price?: Price) => {
+// up, which keeps them. days: day totals the plants hold between them.
+export const plantsRemovalSoon = (plants: string[], on: string, plan?: Plan, price?: Price, days?: number) => {
   const title = `${plants.length > 2 ? `${plants.length} plants` : names(plants)} ${plants.length === 1 ? "is" : "are"} deleted on ${on}`;
   const them = plants.length === 1 ? "it" : "them";
   return make(title, {
     title,
     parts: [
-      { box: { hero: lost(`Deleted on ${on}`, plantCount(plants.length), names(plants)) } },
+      { box: { hero: lost(`Deleted on ${on}`, plantCount(plants.length), withDays(names(plants), days)) } },
       { lead: `${plan ? `${PLAN_NAME[plan]} keeps ${PLAN_PLANTS[plan]}. ` : ""}${price ? keepOn(price, them) : `Choose a plan to keep ${them}.`}` },
       { button: { label: plants.length === 1 ? "Keep my plant" : "Keep my plants", href: PLANS } },
       ...(price ? [{ small: keepSmall(price) }] : []),
