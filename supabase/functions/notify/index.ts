@@ -591,7 +591,7 @@ async function renderAll(plantId: number, today?: string) {
   // The free week's two emails (0122), from this plant's own day count; steps are a sample.
   const { count: days } = await db.from("plant_energy").select("period", { count: "exact", head: true })
     .eq("plant_id", plantId).eq("bucket", "day").lt("period", today);
-  out["free-week-setup"] = freeWeekSetup(["rate", "size", "panels"]);
+  out["free-week-setup"] = freeWeekSetup(["rate", "size", "reserve", "panels"]);
   out["free-week-ends-soon"] = freeWeekEndsSoon("Monday", p.name, days ?? 0, 83);
   return out;
 }

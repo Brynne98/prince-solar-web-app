@@ -83,7 +83,9 @@ a{color:inherit}
 // label-value rows split by space, no lines. Values may hold markup set by us (a coloured
 // battery %), never user text unescaped. tone colours the big number only.
 type Hero = { label: string; value: string; tone?: Tone; sub?: string };
-type Box = { hero?: Hero; rows?: [label: string, value: string][] };
+// items: a short list where each line needs a sentence (setup steps): the name, then
+// the sentence under it, left-aligned.
+type Box = { hero?: Hero; rows?: [label: string, value: string][]; items?: [name: string, text: string][] };
 
 type Part =
   | { lead: string } // grey sentence under the title: what happened, only when the box can't say it
@@ -154,15 +156,18 @@ function html(subject: string, b: Body): string {
     if ("lead" in x) return `<p class="m" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#9aa5b3">${x.lead}</p>`;
     if ("small" in x) return `<p class="d" style="margin:0;font:400 13px/1.5 ${SANS};color:#7f8da0">${x.small}</p>`;
     if ("box" in x) {
-      const { hero, rows: r = [] } = x.box;
+      const { hero, rows: r = [], items = [] } = x.box;
       const big = hero ? `<tr><td colspan="2" style="padding:0 0 ${r.length ? 12 : 0}px">` +
         `<div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(hero.label)}</div>` +
         `<div class="${hero.tone ?? "t"}" style="margin-top:8px;font:700 40px/1 ${MONO};font-variant-numeric:tabular-nums;color:${hero.tone ? C[hero.tone] : "#e7ecf2"}">${esc(hero.value)}</div>` +
         (hero.sub ? `<div class="d" style="margin-top:6px;font:400 13px/1.4 ${SANS};color:#7f8da0">${esc(hero.sub)}</div>` : "") + `</td></tr>` : "";
       const lines = r.map(([l, v]) => `<tr><td class="m" style="padding:6px 12px 6px 0;font:400 14px/1.3 ${SANS};color:#9aa5b3;vertical-align:top">${esc(l)}</td>` +
         `<td class="t" align="right" style="padding:6px 0;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2;vertical-align:top">${v}</td></tr>`).join("");
+      const list = items.map(([n, t], i) => `<tr><td colspan="2" style="padding:${i ? 14 : 0}px 0 0">` +
+        `<div class="t" style="font:700 15px/1.4 ${SANS};color:#e7ecf2">${esc(n)}</div>` +
+        `<div class="m" style="margin-top:2px;font:400 14px/1.5 ${SANS};color:#9aa5b3">${esc(t)}</div></td></tr>`).join("");
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px"><tr><td style="padding:18px 18px ${r.length ? 12 : 18}px;background:#141a22;border-radius:10px">` +
-        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${big}${lines}</table></td></tr></table>`;
+        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${big}${lines}${list}</table></td></tr></table>`;
     }
     if ("note" in x) return `<p class="m" style="margin:0 0 16px;font:400 14px/1.55 ${SANS};color:#9aa5b3">${x.note}</p>`;
     if ("steps" in x)
@@ -233,7 +238,7 @@ function text(b: Body): string {
     if ("lead" in x) out.push(strip(x.lead), "");
     else if ("small" in x) out.push(strip(x.small), "");
     else if ("box" in x) out.push(...(x.box.hero ? [`${x.box.hero.label}: ${x.box.hero.value}${x.box.hero.sub ? ` (${x.box.hero.sub})` : ""}`] : []),
-      ...(x.box.rows ?? []).map(([l, v]) => `${l}: ${strip(v)}`), "");
+      ...(x.box.rows ?? []).map(([l, v]) => `${l}: ${strip(v)}`), ...(x.box.items ?? []).map(([n, t]) => `${n}: ${t}`), "");
     else if ("note" in x) out.push(strip(x.note), "");
     else if ("steps" in x) out.push(...x.steps.map((s, i) => `${i + 1}. ${strip(s)}`), "");
     else if ("button" in x) out.push(`${x.button.label}: ${x.button.href}`, "");
@@ -919,11 +924,12 @@ export const freeWeekEndsSoon = (endsOn: string, plant: string, days: number, _p
 // Day 2 of the free week, once, only while setup steps are left (0122): each one left,
 // and where its number is found.
 export type SetupStep = "rate" | "size" | "reserve" | "panels";
+// Same names as the app's setup card (app.jsx STEPS), with where to find each number.
 const SETUP_WHERE: Record<SetupStep, [string, string]> = {
-  rate: ["Electricity rate", "Price per unit on your bill, with VAT."],
-  size: ["Battery size", "On the battery's label, or in the SunSynk app under Equipment."],
-  reserve: ["Battery reserve", "As set on your inverter."],
-  panels: ["Solar panels", "Panel count times watts each, from your installer's invoice."],
+  rate: ["Electricity rate", "The price per unit on your bill, with VAT. Shows what solar saved you."],
+  size: ["Battery size", "All your batteries together, from their labels. Shows how long the battery will last."],
+  reserve: ["Battery reserve", "The charge where the battery stops powering your home, as set on your inverter."],
+  panels: ["Solar panels", "All your panels' watts added up, from your installer's invoice."],
 };
 const COUNT = ["", "One number is", "Two numbers are", "Three numbers are", "Four numbers are"];
 export const freeWeekSetup = (steps: SetupStep[], plantId?: number) => {
@@ -932,7 +938,7 @@ export const freeWeekSetup = (steps: SetupStep[], plantId?: number) => {
     title: "Finish your setup",
     parts: [
       { lead: `${COUNT[left.length] ?? `${left.length} numbers are`} still empty:` },
-      { note: left.map((s) => `<b style="color:#e7ecf2">${SETUP_WHERE[s][0]}</b><br>${SETUP_WHERE[s][1]}`).join("<br><br>") },
+      { box: { items: left.map((s) => SETUP_WHERE[s]) } },
       { button: { label: "Finish setup", href: plantId ? `${SYSTEM}&plant=${plantId}` : SYSTEM } },
     ],
     footer: [HELP],

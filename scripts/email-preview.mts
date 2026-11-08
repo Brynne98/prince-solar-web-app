@@ -106,7 +106,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "billing-renewal-notice": [FROM_BILLING, renewalNotice({ plan: "family", amount: 1990, on: "1 Feb 2027", card: "Visa •••• 4081" })],
   "billing-offer-ends": [FROM_BILLING, offerEnds({ plan: "home", period: "monthly", was: 49, amount: 99, on: "3 Mar", card: "Visa •••• 4242" })],
   "billing-free-week-ends-soon": [FROM_BILLING, freeWeekEndsSoon("Monday", "Home", 58, 83)],
-  "free-week-setup": [FROM_HELLO, freeWeekSetup(["rate", "size", "panels"])],
+  "free-week-setup": [FROM_HELLO, freeWeekSetup(["rate", "size", "reserve", "panels"])],
   "winback": [FROM_HELLO, winback({ from: "home", keepUntil: "3 Jan 2027" })],
   "need-a-hand": [FROM_HELLO, needAHand()],
   "billing-switched": [FROM_BILLING, planSwitched({ plan: "home", period: "yearly", amount: 990, date: "1 Nov 2026", card: "Visa •••• 4081",
