@@ -52,6 +52,7 @@ Formatting and dates (also `components.jsx`):
 | `plantLabel(p)` | A plant's name, or "Plant 123". |
 | `battShown`, `cleanTemp` | Battery power and temperatures with sensor junk removed. |
 | `COLORS` | The series colours as `var(--…)`, so charts follow the theme: solar, home, grid, battery, charge. |
+| `COLORS_TEXT` | The same colours for small text (a darker shade in light, SOLAR-427). |
 
 ## Forms and sign-in (`auth.jsx`)
 
