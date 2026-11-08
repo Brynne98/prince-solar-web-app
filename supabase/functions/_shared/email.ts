@@ -822,16 +822,21 @@ export type Failed = {
   disputed?: string; // the bank took a payment back (a lost dispute, 0130): the day it was paid
 };
 
+// The shared layout (SOLAR-415): the amount big with what it was for, facts as rows
+// (card, next try, the day Free starts), one line on what to do, the button, then what
+// Free means in small print.
 export const paymentFailed = (f: Failed) => {
-  const then = `If it's unpaid on ${f.freeOn}, you move to Free. ${PAID_FREE}`;
+  const plan = PLAN_NAME[f.plan];
   return make(f.disputed ? "Your bank reversed a payment" : `Your payment of ${rand(f.amount)} didn't go through`, {
     title: f.disputed ? "Your bank reversed a payment" : "Your payment didn't go through",
     parts: [
       { box: { hero: f.disputed
-        ? { label: "Reversed", value: rand(f.amount), tone: "bad", sub: `paid on ${f.disputed}` }
-        : { label: "Declined", value: rand(f.amount), tone: "bad", sub: f.card } } },
-      { note: f.nextTry ? `We try again on ${f.nextTry}. ${then}` : `That was the last try. ${then}` },
+          ? { label: "Reversed", value: rand(f.amount), tone: "bad", sub: `for ${plan}, paid on ${f.disputed}` }
+          : { label: "Declined", value: rand(f.amount), tone: "bad", sub: `for ${plan}` },
+        rows: [["Card", esc(f.card)], ...(f.nextTry ? [["Next try", f.nextTry] as [string, string]] : []), ["Free from", f.freeOn]] } },
+      { lead: `${f.nextTry ? "" : "That was the last try. "}Pay before ${f.freeOn} to keep ${plan}.` },
       PAY_BUTTON(f.payUrl),
+      { small: PAID_FREE },
     ],
     footer: BILL_FOOTER,
   });
@@ -868,7 +873,7 @@ export const cardChanged = (c: CardChange) =>
       { box: { rows: [["New card", esc(c.card)], ...(c.was ? [["Replaces", esc(c.was)] as [string, string]] : []),
         ...(c.at ? [["Changed", esc(c.at)] as [string, string]] : []),
         ...(c.next ? [["Next payment", `${rand(c.next.amount)} on ${c.next.date}`] as [string, string]] : [])] } },
-      { note: "The R1 card check is paid back.<br>Wasn't you? Reset your password." },
+      { lead: "The R1 card check is paid back. Wasn't you? Reset your password." },
       RESET,
     ],
     footer: BILL_FOOTER,
@@ -883,8 +888,8 @@ export const cardExpiring = (c: CardExpiry) => {
   return make(c.final ? title : `Your ${c.card} expires on ${c.on}`, {
     title: c.final ? title : `Your card expires on ${c.on}`,
     parts: [
-      { lead: `Update it before your next payment of ${rand(c.next.amount)} on ${c.next.date}.` },
-      { box: { rows: [["Card", esc(c.card)]] } },
+      { box: { rows: [["Card", esc(c.card)], ["Next payment", `${rand(c.next.amount)} on ${c.next.date}`]] } },
+      { lead: "Update it before your next payment." },
       { button: { label: "Update card", href: PLAN } },
     ],
     footer: BILL_FOOTER,
