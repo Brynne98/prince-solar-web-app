@@ -36,7 +36,7 @@ const ROUTES = {
   '/api/data/days':        () => ['api_data_days', {}],
   '/api/history/inverters': (q) => ['api_inverter_history', { p_date: q.date || null }],
   '/api/strings/health':    () => ['api_string_health', {}],
-  '/api/grid/today':        () => ['api_grid_today', {}],
+  '/api/grid/today':        (q) => ['api_grid_today', { p_date: q.date || null }],
   '/api/energy':           (q) => ['api_energy', { p_period: q.period || 'week' }],
   '/api/plant/days':       () => ['api_plant_days', {}],
   '/api/trends/by-hour':   (q) => ['api_trends_by_hour', { p_days: Number(q.days) || 14 }],
@@ -355,10 +355,11 @@ async function fetchCompare(rk) {
 async function fetchStringHealth() {
   return getJSON('/api/strings/health');
 }
-// today's grid from our own minute readings: volts and off per 5-minute step, off minutes (0159, SOLAR-398)
+// a day's grid from our own minute readings, SunSynk's history filling their gaps: volts and off
+// per 5-minute step, off minutes (0159, SOLAR-398, 0166). date: a past day; none is today.
 // Shared: Equipment's Grid tile and the Grid tab's day chart ask for the same answer (SOLAR-421).
-async function fetchGridToday(rk) {
-  return sharedAsk('gridtoday', MIN5, rk, () => getJSON('/api/grid/today'));
+async function fetchGridToday(rk, date) {
+  return sharedAsk('gridtoday:' + (date || ''), MIN5, rk, () => getJSON('/api/grid/today' + (date ? '?date=' + date : '')));
 }
 
 // ---- me: plan, preferences, plants -----------------------------------------
