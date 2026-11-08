@@ -76,7 +76,6 @@ const STYLE = `
 body{margin:0;padding:0}
 a{color:inherit}
 @media (max-width:520px){.pad{padding:20px 20px var(--pb-m,8px)!important}}
-@media (max-width:440px){.flow{width:auto!important;display:block!important;margin-right:0!important}}
 @media (max-width:340px){.card{width:auto!important;display:block!important;margin-right:0!important}}
 `;
 
@@ -91,7 +90,7 @@ type Part =
   | { box: Box }
   | { small: string } // small print under the button ("The link works once, for 24 hours.")
   | { button: { label: string; href: string } }
-  | { stats: { label: string; value: string; unit?: string; tone?: Tone; sub?: string; delta?: Delta }[]; stack?: boolean } // stack: may go full width on a phone (alerts); see below
+  | { stats: { label: string; value: string; unit?: string; tone?: Tone; sub?: string; delta?: Delta }[] } // report tiles, two to a row
   | { chart: { title: string; side?: string; bars: Bars; facts: { label: string; value: string; unit?: string; tone?: Tone; sub?: string }[] } }
   | { facts: { label: string; value: string }[] } // label left, value right
   | { note: string }
@@ -197,14 +196,10 @@ function html(subject: string, b: Body): string {
 <div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(s.label)}</div>
 <div class="${s.tone ?? "t"}" style="margin-top:8px;font:700 24px/1.1 ${MONO};font-variant-numeric:tabular-nums;color:${s.tone ? C[s.tone] : "#e7ecf2"}">${esc(s.value)}${s.unit ? `<span style="font-size:14px;opacity:.85"> ${esc(s.unit)}</span>` : ""}</div>
 ${s.delta ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};color:#7f8da0">${deltaHtml(s.delta)}</div>` : s.sub ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};color:#7f8da0">${esc(s.sub)}</div>` : ""}</td>`);
-    // Every card takes half the width, a lone one included, so cards look the same in
-    // every email. Two short cards fit side by side even on a phone (about 13 label and
-    // 8 value characters per card at 375 px). Alert cards that are longer than that, or
-    // alone, go full width on a phone, where the mail app honours the media query.
-    // Below 340 px (the smallest phones) every card goes full width.
-    const stack = x.stack && (x.stats.length === 1 || x.stats.some((s) => s.label.length > 13 || s.value.length > 8));
+    // Every card takes half the width, a lone one included. Below 340 px (the smallest
+    // phones) every card goes full width.
     const boxes = cells.map((c, i) => c.replace(/^<td class="tile" width="50%" style="/,
-      `<div class="card${stack ? " flow" : ""}" style="display:inline-block;width:49%;box-sizing:border-box;margin:0 ${i % 2 ? 0 : "2%"} 8px 0;font-size:14px;`).replace(/<\/td>$/, "</div>"));
+      `<div class="card" style="display:inline-block;width:49%;box-sizing:border-box;margin:0 ${i % 2 ? 0 : "2%"} 8px 0;font-size:14px;`).replace(/<\/td>$/, "</div>"));
     return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 4px"><tr><td style="font-size:0;line-height:0">${boxes.join("")}</td></tr></table>`;
   });
 
@@ -567,8 +562,9 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
         ]];
       }
       case "logger_back":
-        return [e.inverter ? `${e.inverter} back at ${plant}` : `Readings back at ${plant}`,
-          [{ box: { hero: { label: "No readings for", value: e.lasted, sub: span(e.since, e.at) } } }, { note: GAP }]];
+        return [`Readings back at ${plant}`,
+          [{ box: { hero: { label: "No readings for", value: e.lasted, sub: span(e.since, e.at) },
+            rows: e.inverter ? [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))]] : [] } }, { note: GAP }]];
     }
   })();
   return make(title, { title, parts: [...parts, { button: openPage(PAGE[e.kind], plantId) }], footer: ALERT_FOOTER(WHAT[e.kind], plant) });

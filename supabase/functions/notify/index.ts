@@ -266,11 +266,16 @@ async function build(r: Row): Promise<Email | null> {
       // (SOLAR-415, 0162). The whole plant's alert shows each one's own last time.
       const invs = await rpc<{ sn: string; last_dev: number | null }[]>("email_plant_inverters", { p_plant: p.id });
       const stale = d.inverter ? String(r.key).split(":")[2] : null; // logger_stale:<plant>:<sn>:<last_dev>
+      // One stopped: the others send ("null"). The whole plant stopped: each its own last time.
       return ev({ kind: "logger_stale", since: hhmm(d.since, tz), inverter: d.inverter ?? undefined,
-        inverters: invs.length < 2 && !stale ? undefined : invs.map((i) => ({ name: `Inverter ${i.sn}`,
-          last: stale && i.sn !== stale ? null : i.last_dev ? hhmm(i.last_dev, tz) : null })) }, d.since);
+        inverters: invs.map((i) => ({ name: `Inverter ${i.sn}`,
+          last: stale && i.sn !== stale ? null : hhmm(i.last_dev ?? d.since, tz) })) }, d.since);
     }
-    case "logger_back": return ev({ kind: "logger_back", since: hhmm(d.since, tz), at: hhmm(d.at, tz), lasted: lasted(d.since, d.at) }, d.at);
+    case "logger_back": {
+      const sn = d.inverter ? String(r.key).split(":")[2] : null; // logger_back:<plant>:<sn>:<last_dev>
+      return ev({ kind: "logger_back", since: hhmm(d.since, tz), at: hhmm(d.at, tz), lasted: lasted(d.since, d.at),
+        inverter: sn ? `Inverter ${sn}` : undefined }, d.at);
+    }
     // one email per login, naming it and every plant on it (0158); old rows have neither
     case "needs_relink": return loginEvent({ kind: "needs_relink", plants: d.plants ?? (r.plant_name ? [r.plant_name] : []),
       at: d.since == null ? undefined : hhmm(d.since, tz) }, p.id, d.since == null ? "today" : dayOf(d.since, tz));
