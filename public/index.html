@@ -41,6 +41,7 @@
     --ink-rgb: 255,255,255; --shade-rgb: 0,0,0; --bg-rgb: 10,13,18;
     --bar: #0d1117; --avatar: #26303d; --scrim: rgba(4,6,9,0.6);
     --note-text: #b4bdc8; --warn-text: #fed7aa;
+    --switch-off: rgba(255,255,255,0.1);
     color-scheme: dark;
     --line: rgba(var(--ink-rgb),0.07);
     --line-2: rgba(var(--ink-rgb),0.12);
@@ -104,6 +105,7 @@
     --text: #111827; --muted: #4b5563; --dim: #5a6676;
     --avatar: #e3e8ef; --scrim: rgba(15,23,42,0.35);
     --note-text: #4b5563; --warn-text: #92400e;
+    --switch-off: rgba(15,23,42,0.22);
     --pv: #137a3a; --batt: #7c3aed; --grid: #856500; --load: #c23b3b; --soc: #0e7490;
     --ok: #477310; --warn: #a84d08; --bad: #b91c1c;
     --accent: #137a3a; --on-accent: #ffffff;
@@ -1393,9 +1395,9 @@
   .toggle-row:first-of-type { border-top: none; }
   .toggle-text { display: flex; flex-direction: column; gap: var(--sp-2xs); }
   .toggle-label { font-size: var(--fs-md); } .toggle-hint { font-size: var(--fs-sm); color: var(--dim); }
-  .switch { width: 42px; height: 24px; border-radius: var(--r-pill); background: rgba(var(--ink-rgb),0.1); border: none; position: relative; transition: var(--dur-base) var(--ease-out); flex: none; }
+  .switch { width: 42px; height: 24px; border-radius: var(--r-pill); background: var(--switch-off); border: none; position: relative; transition: var(--dur-base) var(--ease-out); flex: none; }
   .switch.on { background: var(--accent); }
-  .knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: var(--dur-base) var(--ease-out); }
+  .knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(var(--shade-rgb),0.2); transition: var(--dur-base) var(--ease-out); }
   .switch.on .knob { left: 21px; }
 
 

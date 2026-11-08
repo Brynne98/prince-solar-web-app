@@ -1,6 +1,6 @@
 ---
 name: Prince Solar
-description: A household's solar ledger, read in the dark. Calm, precise, honest.
+description: A household's solar ledger, dark by default, light in daylight. Calm, precise, honest.
 colors:
   night-ground: "#0a0d12"
   panel: "#11161d"
@@ -193,7 +193,7 @@ components:
 
 **Creative North Star: "The Home Ledger"**
 
-Prince Solar is a household's energy diary, kept in the dark. The page is a near-black
+Prince Solar is a household's energy diary, dark by default. The page is a near-black
 ground with two faint tints of blue and green breathing at its corners, and on it sit
 flat panels edged in hairlines. Numbers are the content: big, monospaced, tabular, each
 tinted by the one thing it measures. Everything else, labels, notes, chrome, steps back
@@ -212,7 +212,8 @@ gradients laid over data, no skeuomorphic gauges, no glass. Where a competitor w
 add a glowing ring, this system adds a hairline and a smaller grey label.
 
 **Key Characteristics:**
-- Dark-only, tonal layering, hairline edges, no shadows at rest
+- Dark by default, with a light scheme for daylight (SOLAR-318); tonal layering, hairline
+  edges, no shadows at rest
 - Five semantic energy colours, each meaning exactly one thing everywhere
 - Mono numerals with tabular figures; sans for everything that is a word
 - Uppercase, wide-tracked micro-labels over big values
@@ -277,6 +278,34 @@ semantic, not decorative.
   legends, chart axes, notes, inactive tabs. **Dim Text** (`dim-text`): sub-notes,
   meter scales, version numbers. Muted clears 7:1 and Dim 5.2:1 on all three surfaces
   (raised for readability, SOLAR-14).
+
+### Light (SOLAR-318)
+Chosen per device in Account → Appearance: Device (follows the phone or computer), Light or
+Dark. Saved in localStorage (`ps-theme`); `public/theme.js` runs in `<head>` and sets
+`data-theme` on `<html>` before the first paint, so a reload never flashes the other scheme.
+`:root[data-theme="light"]` in `public/index.html` redefines the tokens; nothing else
+changes. Cool grey, not warm paper (picked 2026-11-08).
+
+| Token | Dark | Light |
+|---|---|---|
+| `--bg` Night Ground | #0a0d12 | #f3f5f8 |
+| `--panel` | #11161d | #ffffff |
+| `--panel-2` Panel Raised | #141a22 | #f1f4f8 |
+| `--bar` sidebar, phone bar | #0d1117 | #ffffff |
+| `--text` / `--muted` / `--dim` | #e7ecf2 / #9aa5b3 / #7f8da0 | #111827 / #4b5563 / #5a6676 |
+| `--ink-rgb` washes, rules | 255,255,255 | 15,23,42 |
+| `--line` / `--line-2` | 7% / 12% white | 9% / 16% ink |
+| `--pv` Solar Green, `--accent` | #3ddc84 | #137a3a |
+| `--batt` Battery Violet | #a78bfa | #7c3aed |
+| `--grid` Grid Amber | #facc15 | #856500 |
+| `--load` Home Coral | #f87171 | #c23b3b |
+| `--soc` Charge Cyan | #22d3ee | #0e7490 |
+| `--ok` / `--warn` / `--bad` | #84cc16 / #f59e0b / #ef4444 | #477310 / #a84d08 / #b91c1c |
+| `--on-accent` | #07130c | #ffffff |
+
+Light keeps every meaning and hue of dark, one step darker so each power and role colour
+clears 4.5:1 on Panel Raised; Muted clears 6.8:1 and Dim 5.2:1 on all three surfaces.
+The sun orb keeps its gradient in both. Emails stay dark-palette (`email.ts`).
 
 ### Named Rules
 **The One Meaning Rule.** A series colour means one thing. Green is solar, violet is
@@ -519,7 +548,7 @@ sits level with the first line. `npm test` fails on any other icon size or line.
 ### Inputs / Fields
 - **Style:** Panel Raised well, strong hairline, 9px radius, 10px 12px padding, 14px.
   Text inputs are mono; selects are sans with a custom 12px chevron inset 14px from the
-  right and `color-scheme: dark` for a dark native menu. Login inputs sit on Night
+  right; `color-scheme` on :root gives native menus the current scheme. Login inputs sit on Night
   Ground at 11px radius with 12px 14px padding, in Space Grotesk at 14.5px.
 - **Number boxes** (First steps, Settings, Account): built to match the password
   boxes. 41px tall, Panel Raised well, strong hairline, 9px radius, 0 12px padding,
@@ -528,10 +557,11 @@ sits level with the first line. `npm test` fails on any other icon size or line.
 - **Phones:** every text and number box is 16px under 600px, so iOS does not zoom in.
 - **Focus:** border turns Focus (Paper Text) everywhere; the login card adds a 3px white ring at 12%.
   No outline on fields.
-- **Autofill:** forced dark with an inset box-shadow so Chrome never paints a white well.
+- **Autofill:** forced to Panel Raised with an inset box-shadow so Chrome never paints its own well.
 - **Range:** 6px track at 10% white, 18px Charge Cyan thumb with a 3px ground-coloured
   border and a 1px cyan ring (16px and no ring in Firefox).
-- **Switch:** 42×24 pill, 10% white off, Solar Green on, white 18px knob sliding 18px.
+- **Switch:** 42×24 pill, `--switch-off` off (10% white; 22% ink in light), Accent on, white
+  18px knob with a 1px soft shadow, sliding 18px.
 - **Field label:** 12px muted with 0.04em tracking, 7px above; login labels are 11px
   uppercase 600 at 0.12em in Dim Text. Notes below are 12px Dim Text at 1.55 line-height.
 
@@ -632,5 +662,6 @@ it stands in for. The sweep stops under reduced motion.
 - **Don't** lay a gradient over data, draw a skeuomorphic gauge, or add glass or neon.
 - **Don't** apply `-webkit-font-smoothing: antialiased`; it thins light text on the dark
   ground.
-- **Don't** ship a light scheme by accident: the app is dark-only today, and `color-scheme:
-  dark` on native controls is part of that.
+- **Don't** write a raw white or black tint. Washes, rules and tracks are
+  `rgba(var(--ink-rgb), a)` and shadows `rgba(var(--shade-rgb), a)`, so they flip with the
+  scheme. A colour that only works on dark is a light-mode bug.

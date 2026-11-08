@@ -51,7 +51,7 @@ Formatting and dates (also `components.jsx`):
 | `dayText(s, opts)` | A `YYYY-MM-DD` as "Mon 3 Nov", or with your own `Intl` options. |
 | `plantLabel(p)` | A plant's name, or "Plant 123". |
 | `battShown`, `cleanTemp` | Battery power and temperatures with sensor junk removed. |
-| `COLORS` | The series colours: solar, home, grid, battery. |
+| `COLORS` | The series colours as `var(--…)`, so charts follow the theme: solar, home, grid, battery, charge. |
 
 ## Forms and sign-in (`auth.jsx`)
 
@@ -134,6 +134,7 @@ a row of on/off settings (email and push preferences); `saveFlag` sends its own 
 | `PlanCard`, `BookedNotice` | A card in Billing's Plan section (title top left, control top right); a change booked for the billing date with its undo. |
 | `SettingsSection` | A Settings card with title, note and an `action`. |
 | `SettingRow` | One row in a Settings card: `label`, `note`, `action`, `lead`. |
+| `AppearanceSection` | Account's Theme switch: Device, Light, Dark. Calls `window.setTheme` from `theme.js` (SOLAR-318). |
 | `PlantLine` | A plant's name with an "off" marker, in Settings lists. |
 | `DayField` | A date box that opens `CalendarPop`. |
 | `EqTable` | A table with a column per inverter: row label, then one cell each (`v`, `sub`, `cls`). Equipment's cards (SOLAR-392). |
@@ -146,4 +147,5 @@ a row of on/off settings (email and push preferences); `saveFlag` sends its own 
 The floating surfaces (menus, the notifications panel, calendar, popovers, the save bar,
 toasts, chart tooltips, info bubbles) share one rule and the `--pop-shadow`,
 `--dlg-shadow` and `--tip-bg` variables; a new floating thing joins that rule. Spinners
-use `@keyframes spin`. Don't add a class that nothing uses: the check fails on it.
+use `@keyframes spin`. A white or black tint is `rgba(var(--ink-rgb), a)` or
+`rgba(var(--shade-rgb), a)`, never a raw rgba, so it works in light and dark (SOLAR-318). Don't add a class that nothing uses: the check fails on it.

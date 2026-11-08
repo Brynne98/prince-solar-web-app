@@ -3553,6 +3553,19 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
 // then the account's actions. ready: api_me has answered, so Your data knows if it's locked.
 const HAD_PASSWORD = 'synsynk.hasPassword';
 const hadPassword = () => { try { return localStorage.getItem(HAD_PASSWORD) !== '0'; } catch (e) { return true; } };
+// Dark, Light or the device's (SOLAR-318). Kept on this device by theme.js, not the account.
+function AppearanceSection() {
+  const [theme, setTheme] = React.useState(window.getTheme());
+  const pick = (v) => { setTheme(v); window.setTheme(v); window.track('theme_changed', { theme: v }); };
+  return (
+    <SettingsSection id="appearance" title="Appearance">
+      <SettingRow label="Theme" note="On this device."
+        action={<Segmented size="sm" label="Theme" value={theme} onChange={pick}
+          options={[{ value: 'device', label: 'Device' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />} />
+    </SettingsSection>
+  );
+}
+
 function AccountPage({ user, billing, plants, plantId, ready, onBilling }) {
   const email = user?.email || null;
   const providers = user?.app_metadata?.providers || [];
@@ -3565,6 +3578,7 @@ function AccountPage({ user, billing, plants, plantId, ready, onBilling }) {
         <p>{email ? <>{email}<span className="set-method"> · Signs in with {method}</span></> : <window.SkelLine w={260} />}</p>
       </div>
       <NotificationsSection userId={user?.id} />
+      <AppearanceSection />
       {plants.length > 0 && <DownloadSection plants={plants} plantId={plantId} ready={ready} />}
       <SettingsSection id="actions" title="Account actions">
         {email && providers.includes('email') && <PasswordRow email={email} />}
