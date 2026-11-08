@@ -275,7 +275,7 @@ async function build(r: Row): Promise<Email | null> {
   const p: Plant = { id: r.plant_id ?? 0, name: r.plant_name || "your plant", tz };
   const ev = (e: PlantEvent, at: number | null) => plantEvent(p.name, p.id, e, at == null ? "today" : dayOf(at, tz));
   switch (r.kind) {
-    case "grid_down": return ev({ kind: "grid_down", at: hhmm(d.since, tz), chargePct: d.chargePct ?? undefined }, d.since);
+    case "grid_down": return ev({ kind: "grid_down", at: hhmm(d.since, tz), from: d.from == null ? undefined : hhmm(d.from, tz), chargePct: d.chargePct ?? undefined }, d.since);
     case "grid_back": return ev({ kind: "grid_back", since: hhmm(d.since, tz), at: hhmm(d.at, tz), lasted: lasted(d.since, d.at),
       chargePct: (await socAt(p.id, d.at)) ?? undefined }, d.at);
     case "batt_hot":
@@ -614,6 +614,7 @@ async function renderAll(plantId: number, today?: string) {
   out["sunsynk-back"] = sunsynkBack(p.name, p.id, hhmm(now - 1500, p.tz), hhmm(now, p.tz), lasted(now - 1500, now));
   const ev: [string, PlantEvent][] = [
     ["grid-down", { kind: "grid_down", at: hhmm(now - 240, p.tz), chargePct: 62 }],
+    ["grid-down-in-gap", { kind: "grid_down", from: hhmm(now - 3720, p.tz), at: hhmm(now - 240, p.tz), chargePct: 62 }],
     ["grid-back", { kind: "grid_back", since: hhmm(now - 5580, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 5580, now), chargePct: 41 }],
     ["battery-hot", { kind: "batt_hot", at: hhmm(now, p.tz), tempC: 47, hotDays: 3 }],
     ["batteries-uneven", { kind: "bank_drift", banks: [{ name: "Inverter 1", chargePct: 72 }, { name: "Inverter 2", chargePct: 60 }] }],

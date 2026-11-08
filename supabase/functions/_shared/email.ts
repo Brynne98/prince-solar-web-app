@@ -518,7 +518,9 @@ export function report(r: Report): Email {
 //                report (inverter set), for 30 min
 //  logger_back   readings fresh again, after a logger_stale went out
 export type PlantEvent =
-  | { kind: "grid_down"; at: string; chargePct?: number }
+  // from: set when the grid went off inside a gap in readings and the refill can't say
+  // when (SOLAR-416): it went off between from and at
+  | { kind: "grid_down"; at: string; from?: string; chargePct?: number }
   | { kind: "grid_back"; since: string; at: string; lasted?: string; chargePct?: number }
   | { kind: "batt_hot"; at: string; tempC: number; hotDays?: number } // hotDays: days over 45 C in the last 30, today included; counted from readings at send time
   | { kind: "bank_drift"; banks: { name: string; chargePct: number }[] } // name: the inverter's name in SunSynk
@@ -554,7 +556,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
   const [title, parts]: [string, Part[]] = (() => {
     switch (e.kind) {
       case "grid_down":
-        return [`Grid down at ${plant}`, [{ box: { hero: { label: "Grid", value: "Off", tone: "bad", sub: `since ${e.at} ${day}` },
+        return [`Grid down at ${plant}`, [{ box: { hero: { label: "Grid", value: "Off", tone: "bad", sub: e.from ? `went off between ${e.from} and ${e.at} ${day}` : `since ${e.at} ${day}` },
           rows: e.chargePct != null ? [["Battery", batt(e.chargePct)]] : [] } }]];
       case "grid_back":
         return [`Grid back at ${plant}`, [{ box: { hero: { label: "Grid was off for", value: e.lasted ?? "a while", sub: span(e.since, e.at) },
