@@ -95,8 +95,10 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
     grid: hasGrid && { key: 'grid', label: 'Grid', color: C.grid, w: gridExport > 0 ? gridExport : gridImport,
       val: gridExport > 0 ? -gridExport : gridImport, icon: 'bolt',
       reverse: gridExport > 0, off: gridOff, known: gridKnown,
-      // on and idle is one line, so the Grid on foot below goes (SOLAR-91)
-      state: gridOff ? 'Off' : gridExport > 0 ? 'Exporting' : gridImport > 0 ? 'Importing' : gridKnown ? 'On, not in use' : 'Not in use',
+      // on and idle is one line, so the Grid on foot below goes (SOLAR-91); off is the red
+      // Grid off foot alone, so it is not said twice; no voltage read yet is Not known yet,
+      // since the grid may be off (SOLAR-417)
+      state: gridOff ? null : gridExport > 0 ? 'Exporting' : gridImport > 0 ? 'Importing' : gridKnown ? 'On, not in use' : 'Not known yet',
       idle: gridKnown && !gridOff && !gridExport && !gridImport,
       today: today(['Imported', agg.gridFromToday ?? 0], ['Exported', agg.gridToToday ?? 0]) },
     home: { key: 'home', label: 'Home', color: C.load, w: agg.loadNow, icon: 'home',

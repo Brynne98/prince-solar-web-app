@@ -238,7 +238,7 @@
   .menu button .ico { width: var(--icon-md); height: var(--icon-md); color: var(--muted); }
   .menu hr { border: none; border-top: 1px solid var(--line); margin: var(--sp-2xs) 0; }
   /* the small status dots: one size, each its own colour */
-  .menu .dot, .pm-dot, .gs-dot, .fbox-grid i, .set-nav .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .menu .dot, .pm-dot, .fbox-grid i, .set-nav .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
   .menu .dot { background: var(--bad); margin-left: auto; }
   .acct-menu { left: 0; right: 0; bottom: calc(100% + 6px); }
   /* who is signed in, above Account and Sign out (back in SOLAR-97) */
@@ -625,13 +625,6 @@
   /* grid presence chip on the Imported card — green when the mains is live, red when down */
   /* padding-left leaves room for the dot's 3px glow ring: .mini-sub clips overflow for
      its ellipsis, so a ring flush against x=0 loses its left edge. */
-  .grid-state { display: inline-flex; align-items: center; gap: var(--sp-xs); cursor: help; padding-left: var(--sp-2xs); }
-  .grid-state.on  { color: var(--muted); }
-  .grid-state.on  .gs-dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(var(--ok-rgb),0.14); }
-  .grid-state.off { color: var(--bad); font-weight: 600; }
-  .grid-state.unknown { color: var(--dim); cursor: default; }
-  .grid-state.unknown .gs-dot { background: var(--dim); opacity: .5; }
-  .grid-state.off .gs-dot { background: var(--bad); box-shadow: 0 0 0 3px rgba(var(--bad-rgb),0.16); }
   /* Two lines, then clip. The old single-line ellipsis cut "Set your rate in Settings"
      to "Set your rate in Se…" on every width; a second line costs 15px and keeps
      the sentence. Grid rows stretch, so a two-line tile does not misalign its row. */
@@ -717,7 +710,9 @@
   /* mains there or gone: a green dot, or a hollow grey one */
   .fbox-grid { display: flex; align-items: center; gap: var(--sp-sm); font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
   .fbox-grid i { background: var(--ok); }
-  .fbox-grid.off i { box-sizing: border-box; background: none; border: 1.5px solid var(--dim); }
+  /* grid off is red, the app's colour for a problem (SOLAR-417) */
+  .fbox-grid.off { color: var(--bad); font-weight: 600; }
+  .fbox-grid.off i { background: var(--bad); box-shadow: 0 0 0 3px rgba(var(--bad-rgb),0.16); }
   .fbox-today { display: flex; flex-direction: column; gap: var(--sp-md); }
   .fbox-today > div:not(.fbox-today-h) { display: flex; flex-direction: column; gap: var(--sp-2xs); }
   .fbox-today b { font: 600 var(--fs-xl) var(--mono); color: var(--text); white-space: nowrap; }
