@@ -845,7 +845,7 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
         ))}
         {ticks.map((t, k) => (
           <g key={k}>
-            <line x1={m.l} x2={m.l + innerW} y1={y(t)} y2={y(t)} stroke={t === 0 ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'} />
+            <line x1={m.l} x2={m.l + innerW} y1={y(t)} y2={y(t)} stroke={t === 0 ? 'rgba(var(--ink-rgb),0.14)' : 'rgba(var(--ink-rgb),0.05)'} />
             <text x={m.l - 8} y={y(t) + 3} textAnchor="end" className="ax">{pct ? t : +(t / 1000).toFixed(1)}</text>
           </g>
         ))}
@@ -859,7 +859,7 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
         )}
         {band && (
           <g>
-            <rect x={x(band[0])} y={m.t} width={Math.max(1, x(band[1]) - x(band[0]))} height={innerH} fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.4)" strokeDasharray="3 3" />
+            <rect x={x(band[0])} y={m.t} width={Math.max(1, x(band[1]) - x(band[0]))} height={innerH} fill="rgba(var(--ink-rgb),0.07)" stroke="rgba(var(--ink-rgb),0.4)" strokeDasharray="3 3" />
             <text x={Math.max(m.l + 16, x(band[0]))} y={m.t - 6} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(points[band[0]].t)}</text>
             {band[1] > band[0] && x(band[1]) - x(band[0]) >= 78 && <text x={Math.min(m.l + innerW - 16, x(band[1]))} y={m.t - 6} textAnchor="middle" className="ax" fillOpacity="0.9">{HM(points[band[1]].t)}</text>}
           </g>
@@ -871,8 +871,8 @@ function DayLineChart({ points, field, color, label, pct, reserve, empty, sums, 
         </g>
         {hp != null && !band && (
           <g>
-            <line x1={x(hp)} x2={x(hp)} y1={m.t} y2={m.t + innerH} stroke="rgba(255,255,255,0.25)" />
-            <circle cx={x(hp)} cy={Math.max(m.t, Math.min(m.t + innerH, y(v(hp))))} r="3" fill={color} stroke="#0b0e12" strokeWidth="1.5" />
+            <line x1={x(hp)} x2={x(hp)} y1={m.t} y2={m.t + innerH} stroke="rgba(var(--ink-rgb),0.25)" />
+            <circle cx={x(hp)} cy={Math.max(m.t, Math.min(m.t + innerH, y(v(hp))))} r="3" fill={color} stroke="var(--panel)" strokeWidth="1.5" />
           </g>
         )}
       </svg>
@@ -968,12 +968,12 @@ function DaysBarsChart({ rows, field, color, rgb, word, label, today, selected, 
         onClick={e => { const r = rows[idxAt(e.clientX, e.currentTarget)]; if (can(r)) onPick(r.date); }}>
         {ticks.map((v, k) => (
           <g key={k}>
-            <line x1={m.l} x2={m.l + innerW} y1={y(v)} y2={y(v)} stroke={v === 0 ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)'} />
+            <line x1={m.l} x2={m.l + innerW} y1={y(v)} y2={y(v)} stroke={v === 0 ? 'rgba(var(--ink-rgb),0.14)' : 'rgba(var(--ink-rgb),0.05)'} />
             <text x={m.l - 7} y={y(v) + 3} textAnchor="end" className="ax">{v}</text>
           </g>
         ))}
         <text x={m.l - 7} y={m.t - 10} textAnchor="end" className="ax" fillOpacity="0.55">kWh</text>
-        {h && <rect x={m.l + slot * hover} y={m.t} width={slot} height={innerH} fill="rgba(255,255,255,0.04)" />}
+        {h && <rect x={m.l + slot * hover} y={m.t} width={slot} height={innerH} fill="rgba(var(--ink-rgb),0.04)" />}
         {rows.map((r, i) => {
           const cx = m.l + slot * i + slot / 2, top = y(r[field] || 0), isToday = r.date === today;
           return (

@@ -125,7 +125,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
     const ve = fixed ? 'non-scaling-stroke' : undefined;
     return (
       <g key={key}>
-        <path d={d} fill="none" stroke={active ? color : `rgba(255,255,255,${broken ? 0.22 : 0.08})`}
+        <path d={d} fill="none" stroke={active ? color : `rgba(var(--ink-rgb),${broken ? 0.22 : 0.08})`}
           strokeOpacity={active ? 0.16 : 1} strokeWidth={active ? (fixed ? 6 : 11) : (broken ? 2 : fixed ? 2 : 2.5)}
           strokeDasharray={broken ? '3 7' : undefined} strokeLinecap="round" vectorEffect={ve} />
         {active && (
@@ -275,8 +275,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
             {nodes.bat && flowLine(curve(10, row2, inL, b), C.batt, flows.bat, 'lbat', nodes.bat.reverse)}
             {nodes.grid && flowLine(curve(LW - 10, row1, inR, a), C.grid, nodes.grid.w, 'lgrid', nodes.grid.reverse, false, nodes.grid.off)}
             {flowLine(curve(inR, nodes.grid ? b : cy, LW - 10, homeY), C.load, flows.home, 'lhome', false)}
-            <circle cx={cx} cy={cy} r={R} fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.24)" strokeWidth="1.3" />
-            <circle cx={cx} cy={cy} r={R} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="8" />
+            <circle cx={cx} cy={cy} r={R} fill="rgba(var(--ink-rgb),0.05)" stroke="rgba(var(--ink-rgb),0.24)" strokeWidth="1.3" />
+            <circle cx={cx} cy={cy} r={R} fill="none" stroke="rgba(var(--ink-rgb),0.05)" strokeWidth="8" />
             <g transform={`translate(${cx}, ${cy})${narrow ? ' scale(0.85)' : ''}`}>{inverterMark}</g>
           </svg>
           <div className="pflow-inv-label" style={{ top: cy - R - 26 }}>{invLabel}</div>
@@ -321,7 +321,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
 
         <div className="mflow-inv">
           <svg width="84" height="84" viewBox="-42 -42 84 84">
-            <circle r="40" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.16)" strokeWidth="1.3" />
+            <circle r="40" fill="rgba(var(--ink-rgb),0.04)" stroke="rgba(var(--ink-rgb),0.16)" strokeWidth="1.3" />
             {inverterMark}
           </svg>
           <div className="mflow-inv-label">{invLabel}</div>

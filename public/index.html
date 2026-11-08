@@ -12,6 +12,8 @@
 <meta name="apple-mobile-web-app-title" content="Prince Solar Hub" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="theme-color" content="#0a0d12" />
+<!-- Dark, Light or the device's, before first paint (SOLAR-318) -->
+<script src="theme.js"></script>
 <!-- Safari/iOS turns email addresses in text into blue mailto links; keep them plain -->
 <meta name="format-detection" content="email=no" />
 <!-- Tab icon: the dashboard's own sun (see .sun below). SVG first for crispness at
@@ -31,11 +33,17 @@
     --panel: #11161d;
     --panel-2: #141a22;
     /* what floats over the page: menus and pop-ups, then the larger dialogs, then hover cards */
-    --pop-shadow: 0 12px 32px rgba(0,0,0,0.45);
-    --dlg-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    --pop-shadow: 0 12px 32px rgba(var(--shade-rgb),0.45);
+    --dlg-shadow: 0 20px 50px rgba(var(--shade-rgb),0.5);
     --tip-bg: rgba(13,17,23,0.97);
-    --line: rgba(255,255,255,0.07);
-    --line-2: rgba(255,255,255,0.12);
+    /* SOLAR-318: white on dark, dark ink on light. Every wash, rule and track is
+       rgba(var(--ink-rgb), a); every shadow rgba(var(--shade-rgb), a). */
+    --ink-rgb: 255,255,255; --shade-rgb: 0,0,0; --bg-rgb: 10,13,18;
+    --bar: #0d1117; --avatar: #26303d; --scrim: rgba(4,6,9,0.6);
+    --note-text: #b4bdc8; --warn-text: #fed7aa;
+    color-scheme: dark;
+    --line: rgba(var(--ink-rgb),0.07);
+    --line-2: rgba(var(--ink-rgb),0.12);
     --text: #e7ecf2;
     /* Raised a step for readability (SOLAR-14): --muted is 7.0:1 and --dim 5.2:1 at worst,
        on --panel-2. Before that they were 5.8:1 and 4.5:1, and small grey labels still
@@ -82,6 +90,27 @@
     --dur-fast: 120ms; --dur-base: 180ms; --dur-slow: 320ms;
     --ease-out: cubic-bezier(.16, 1, .3, 1); --ease-in: cubic-bezier(.4, 0, 1, 1);
   }
+  /* Light (SOLAR-318). theme.js sets data-theme on <html> before paint: the saved choice,
+     or the device's when the choice is Device. Same roles and meanings as dark; every
+     power and role colour is a darker shade that clears 4.5:1 on --panel-2. */
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f3f5f8; --panel: #ffffff; --panel-2: #f1f4f8; --bar: #ffffff; --bg-rgb: 243,245,248;
+    --ink-rgb: 15,23,42; --shade-rgb: 15,23,42;
+    --pop-shadow: 0 12px 32px rgba(15,23,42,0.12);
+    --dlg-shadow: 0 20px 50px rgba(15,23,42,0.18);
+    --tip-bg: rgba(255,255,255,0.98);
+    --line: rgba(15,23,42,0.09); --line-2: rgba(15,23,42,0.16);
+    --text: #111827; --muted: #4b5563; --dim: #5a6676;
+    --avatar: #e3e8ef; --scrim: rgba(15,23,42,0.35);
+    --note-text: #4b5563; --warn-text: #92400e;
+    --pv: #137a3a; --batt: #7c3aed; --grid: #955a05; --load: #c23b3b; --soc: #0e7490;
+    --ok: #477310; --warn: #a84d08; --bad: #b91c1c;
+    --accent: #137a3a; --on-accent: #ffffff;
+    --focus: #111827;
+    --pv-rgb: 19,122,58; --batt-rgb: 124,58,237; --grid-rgb: 149,90,5; --load-rgb: 194,59,59; --soc-rgb: 14,116,144;
+    --ok-rgb: 71,115,16; --warn-rgb: 168,77,8; --bad-rgb: 185,28,28; --accent-rgb: 19,122,58;
+  }
   @media (prefers-reduced-motion: reduce) { :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; } }
   @media (max-width: 599px) { :root { --fs-sm: 14px; } }
   /* One focus ring (SOLAR-343): every control, keyboard focus only, 2px in --focus. Text
@@ -117,16 +146,16 @@
      browsers that have no -webkit scrollbar support (Firefox), and Chrome/Safari get
      the pseudo-elements. */
   @supports not selector(::-webkit-scrollbar) {
-    * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.22) transparent; }
+    * { scrollbar-width: thin; scrollbar-color: rgba(var(--ink-rgb),0.22) transparent; }
   }
   ::-webkit-scrollbar { width: 11px; height: 11px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.14); border-radius: var(--r-md);
+    background: rgba(var(--ink-rgb),0.14); border-radius: var(--r-md);
     border: 3px solid transparent; background-clip: content-box;
   }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.26); background-clip: content-box; }
-  ::-webkit-scrollbar-thumb:active { background: rgba(255,255,255,0.34); background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(var(--ink-rgb),0.26); background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:active { background: rgba(var(--ink-rgb),0.34); background-clip: content-box; }
   ::-webkit-scrollbar-corner { background: transparent; }
 
   .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
@@ -134,10 +163,10 @@
   button { font-family: inherit; cursor: pointer; }
 
   /* ---------- skeletons ---------- */
-  .skel { position: relative; overflow: hidden; background: rgba(255,255,255,0.055); }
+  .skel { position: relative; overflow: hidden; background: rgba(var(--ink-rgb),0.055); }
   .skel::after {
     content: ''; position: absolute; inset: 0; transform: translateX(-100%);
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), transparent);
+    background: linear-gradient(90deg, transparent, rgba(var(--ink-rgb),0.07), transparent);
     animation: skel-sweep 1.5s ease-in-out infinite;
   }
   @keyframes skel-sweep { 100% { transform: translateX(100%); } }
@@ -182,29 +211,29 @@
   }
 
   .rail { position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column; gap: var(--sp-2xs); padding: var(--sp-lg) var(--sp-md);
-    background: #0d1117; border-right: 1px solid var(--line); z-index: 6; }
+    background: var(--bar); border-right: 1px solid var(--line); z-index: 6; }
   .rail-logo { height: calc(var(--head-h) - 14px); display: flex; align-items: center; gap: var(--sp-md); padding-left: var(--sp-sm); margin-bottom: var(--sp-sm);
     font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
   .nav { display: flex; flex-direction: column; gap: var(--sp-3xs); flex: 1; min-height: 0; }
   .nav > button { display: flex; align-items: center; gap: var(--sp-md); width: 100%; padding: var(--sp-sm) var(--sp-md); border: none; background: none; color: var(--muted);
     border-radius: var(--r-md); font-size: var(--fs-md); font-weight: 500; text-align: left; }
-  .nav > button:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,0.04); }
-  .nav > button[aria-current="page"] { color: var(--text); background: rgba(255,255,255,0.075); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); font-weight: 600; }
+  .nav > button:hover:not(:disabled) { color: var(--text); background: rgba(var(--ink-rgb),0.04); }
+  .nav > button[aria-current="page"] { color: var(--text); background: rgba(var(--ink-rgb),0.075); box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb),0.06); font-weight: 600; }
   .nav > button:disabled { cursor: progress; }
 
   /* the account: a row at the foot of the sidebar, an avatar in a phone's header */
   .acct { position: relative; }
   .acct-rail { border-top: 1px solid var(--line); margin-top: var(--sp-sm); padding-top: var(--sp-sm); }
   .acct-btn { position: relative; display: flex; align-items: center; gap: var(--sp-sm); width: 100%; padding: var(--sp-sm); border: none; background: none; border-radius: var(--r-md); text-align: left; color: var(--text); }
-  .acct-btn:hover, .acct-btn[aria-expanded="true"], .acct-btn[aria-current="page"] { background: rgba(255,255,255,0.05); }
-  .avatar { width: 30px; height: 30px; border-radius: 50%; flex: none; display: grid; place-items: center; background: #26303d; color: var(--text);
+  .acct-btn:hover, .acct-btn[aria-expanded="true"], .acct-btn[aria-current="page"] { background: rgba(var(--ink-rgb),0.05); }
+  .avatar { width: 30px; height: 30px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--avatar); color: var(--text);
     font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.02em; }
   .who { display: grid; min-width: 0; line-height: 1.25; }
   .who b { font-weight: 600; font-size: var(--fs-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .who span { font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .who span.bad { color: var(--bad); }
   /* a SunSynk login needs reconnecting */
-  .acct-btn.needs::after { content: ''; position: absolute; left: 32px; top: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px #0d1117; }
+  .acct-btn.needs::after { content: ''; position: absolute; left: 32px; top: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px var(--bar); }
   .acct-head { display: none; }
 
   /* menus: the plant list and the account */
@@ -231,9 +260,9 @@
   .pop-dlg[open]::backdrop { animation: fade-in var(--dur-base) var(--ease-out); }
   /* a closed dialog's copy, fading out over the page (Dialog, link.jsx) */
   .pop-dlg.leaving { inset: 0; margin: auto; height: fit-content; animation: dlg-out var(--dur-fast) var(--ease-in) forwards; pointer-events: none; }
-  .pop-dlg.leaving::backdrop { background: rgba(4,6,9,0.62); animation: fade-out var(--dur-fast) var(--ease-in) forwards; }
+  .pop-dlg.leaving::backdrop { background: var(--scrim); animation: fade-out var(--dur-fast) var(--ease-in) forwards; }
   .menu button { display: flex; align-items: center; gap: var(--sp-sm); width: 100%; padding: var(--sp-sm) var(--sp-sm); border: none; background: none; border-radius: var(--r-md); color: var(--text); font-size: var(--fs-md); text-align: left; }
-  .menu button:hover, .menu button:focus-visible { background: rgba(255,255,255,0.06); }
+  .menu button:hover, .menu button:focus-visible { background: rgba(var(--ink-rgb),0.06); }
   .menu button:focus-visible { outline-offset: -2px; }
   .menu button .ico { width: var(--icon-md); height: var(--icon-md); color: var(--muted); }
   .menu hr { border: none; border-top: 1px solid var(--line); margin: var(--sp-2xs) 0; }
@@ -252,7 +281,7 @@
   .pm-state.status-live { color: var(--ok); } .pm-state.status-stale { color: var(--warn); }
   .pm-state.status-offline { color: var(--bad); } .pm-state.status-loading { color: var(--muted); }
   /* the picked row and a long name, in every menu that picks one (plants, Your data's plant) */
-  .menu button[aria-checked="true"] { background: rgba(255,255,255,0.075); font-weight: 600; }
+  .menu button[aria-checked="true"] { background: rgba(var(--ink-rgb),0.075); font-weight: 600; }
   .menu .nm { overflow: hidden; text-overflow: ellipsis; }
   /* each SunSynk login's email above its plants (SOLAR-251) */
   .plant-menu .pm-login { padding: var(--sp-sm) var(--sp-md) var(--sp-2xs); font-size: var(--fs-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -279,7 +308,7 @@
   .status-word { font-size: var(--fs-md); font-weight: 600; }
   /* every state breathes, in its own colour; --ring is the halo */
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none;
-    --ring: rgba(255,255,255,0.14); box-shadow: 0 0 0 3px var(--ring); animation: status-breathe 2.4s ease-in-out infinite; }
+    --ring: rgba(var(--ink-rgb),0.14); box-shadow: 0 0 0 3px var(--ring); animation: status-breathe 2.4s ease-in-out infinite; }
   .status-live .status-dot { background: var(--ok); --ring: rgba(var(--ok-rgb),0.18); }
   .status-live .status-word { color: var(--ok); }
   .status-stale .status-dot { background: var(--warn); --ring: rgba(var(--warn-rgb),0.18); }
@@ -287,13 +316,13 @@
   .status-offline .status-dot { background: var(--bad); --ring: rgba(var(--bad-rgb),0.18); }
   .status-offline .status-word, .status-offline .status-age { color: var(--bad); }
   .status-idle .status-word { color: var(--muted); }
-  .status-loading .status-dot { background: var(--muted); --ring: rgba(255,255,255,0.12); }
+  .status-loading .status-dot { background: var(--muted); --ring: rgba(var(--ink-rgb),0.12); }
   .status-loading .status-word { color: var(--muted); }
   @keyframes status-breathe { 0%, 100% { box-shadow: 0 0 0 3px var(--ring); } 50% { box-shadow: 0 0 0 5px transparent; } }
   @media (prefers-reduced-motion: reduce) { .status-dot { animation: none; } }
   /* "Fetching history" beside the status while a fresh plant's 60 days arrive (0048) */
   .status-sync { display: inline-flex; align-items: center; gap: var(--sp-sm); font-size: var(--fs-sm); color: var(--muted); padding-left: var(--sp-sm); border-left: 1px solid var(--line-2); }
-  .sync-arc { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.14); border-top-color: var(--muted); animation: spin 0.9s linear infinite; flex: none; }
+  .sync-arc { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(var(--ink-rgb),0.14); border-top-color: var(--muted); animation: spin 0.9s linear infinite; flex: none; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .sync-arc { animation: none; border-top-color: var(--muted); } }
   /* the header's square buttons: Refresh and the bell share one box (SOLAR-248) */
@@ -341,7 +370,7 @@
   .g-grid { background: rgba(var(--grid-rgb),0.12); color: var(--grid); }
   .g-battery { background: rgba(var(--batt-rgb),0.14); color: var(--batt); }
   .g-panels { background: rgba(var(--pv-rgb),0.12); color: var(--pv); }
-  .g-readings, .g-sunsynk { background: rgba(255,255,255,0.07); color: var(--muted); }
+  .g-readings, .g-sunsynk { background: rgba(var(--ink-rgb),0.07); color: var(--muted); }
   .g-bad { background: rgba(var(--bad-rgb),0.14); color: var(--bad); }
   .g-warn { background: rgba(var(--warn-rgb),0.14); color: var(--warn); }
   /* billing notices (SOLAR-212): pinned above the alerts, with a button */
@@ -358,7 +387,7 @@
   .nl-where { font-size: var(--fs-xs); color: var(--dim); margin-top: var(--sp-2xs); }
   .nl-foot { flex: none; display: block; width: 100%; min-height: 44px; padding: var(--sp-md) var(--sp-lg); background: none; border: none; border-top: 1px solid var(--line);
     color: var(--text); font: 500 var(--fs-md) var(--display); text-align: center; touch-action: manipulation; }
-  .nl-foot:hover { background: rgba(255,255,255,0.04); }
+  .nl-foot:hover { background: rgba(var(--ink-rgb),0.04); }
   /* the full page (SOLAR-327): Settings' look, a card per day under its date, full width like the data pages */
   .alerts-page { padding-bottom: var(--sp-2xl); }
   .alerts-head { padding: 0; gap: var(--sp-sm); }
@@ -432,7 +461,7 @@
   /* a 44 px tap area round a 16 px icon, pinned to the corner */
   .bill-banner-x { position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; display: grid; place-items: center;
     background: none; border: none; color: var(--muted); border-radius: var(--r-md); touch-action: manipulation; }
-  .bill-banner-x:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+  .bill-banner-x:hover { color: var(--text); background: rgba(var(--ink-rgb),0.05); }
   .bill-banner-x .ico { width: var(--icon-md); height: var(--icon-md); }
   .bb-short, .bill-banner-more { display: none; }
   /* phone: each banner is one line (SOLAR-345); the row opens the bell, which holds the
@@ -513,14 +542,14 @@
     .content { padding: var(--sp-sm) var(--sp-md) calc(66px + env(safe-area-inset-bottom, 0px)); }
     .cal-pop { scroll-margin-bottom: calc(66px + env(safe-area-inset-bottom, 0px)); }   /* scrolled clear of the bar when it opens */
 
-    .phonebar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: #0d1117; border-top: 1px solid var(--line);
+    .phonebar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; background: var(--bar); border-top: 1px solid var(--line);
       padding: 0 var(--sp-xs) env(safe-area-inset-bottom, 0px); }
     .phonebar button { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2xs); padding: var(--sp-sm) 0 var(--sp-sm);
       border: none; background: none; color: var(--muted); font-size: var(--fs-xs); font-weight: 500; }
     .phonebar button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .phonebar button[aria-current="page"], .phonebar button.on { color: var(--text); font-weight: 600; }
 
-    .sheet { display: block; position: fixed; inset: 0; z-index: 25; background: rgba(5,7,10,0.55); animation: fade-in var(--dur-base) var(--ease-out); }
+    .sheet { display: block; position: fixed; inset: 0; z-index: 25; background: var(--scrim); animation: fade-in var(--dur-base) var(--ease-out); }
     .sheet-panel { animation: sheet-in var(--dur-base) var(--ease-out); }
     .sheet.leaving, [data-leaving] .sheet { animation: fade-out var(--dur-fast) var(--ease-in) forwards; pointer-events: none; }
     .sheet.leaving .sheet-panel, [data-leaving] .sheet-panel { animation: sheet-out var(--dur-fast) var(--ease-in) forwards; }
@@ -529,7 +558,7 @@
     .sheet-grip { width: 36px; height: 4px; border-radius: var(--r-pill); background: var(--line-2); margin: var(--sp-2xs) auto var(--sp-sm); }
     .sheet-panel > button { display: flex; align-items: center; gap: var(--sp-lg); width: 100%; padding: var(--sp-md) var(--sp-md); border: none; background: none; border-radius: var(--r-md);
       font-size: var(--fs-lg); text-align: left; color: var(--text); }
-    .sheet-panel > button[aria-current="page"] { background: rgba(255,255,255,0.075); font-weight: 600; }
+    .sheet-panel > button[aria-current="page"] { background: rgba(var(--ink-rgb),0.075); font-weight: 600; }
   }
 
   /* ---------- cards ---------- */
@@ -569,7 +598,7 @@
   .batt-eta b { color: var(--soc); font-weight: 700; }
   .batt-eta .bel { display: block; }
   .batt-eta .bel.sub { color: var(--muted); margin-top: 1px; }
-  .meter { height: 7px; border-radius: var(--r-pill); background: rgba(255,255,255,0.07); overflow: hidden; margin-top: var(--sp-lg); position: relative; }
+  .meter { height: 7px; border-radius: var(--r-pill); background: rgba(var(--ink-rgb),0.07); overflow: hidden; margin-top: var(--sp-lg); position: relative; }
   /* the fill is full width and slides in from the left (SOLAR-351): a transform, so no relayout,
      and its rounded end keeps its shape at any value, which scaleX would squash */
   .meter-fill { height: 100%; border-radius: var(--r-pill); transition: translate var(--dur-slow) var(--ease-out); }
@@ -696,7 +725,7 @@
   .fbox-state b { font: 600 var(--fs-sm) var(--mono); color: var(--text); margin-left: var(--sp-2xs); }
   /* the foot sits on the box's bottom edge whatever is above it */
   .fbox-foot { margin-top: auto; padding-top: var(--sp-sm); }
-  .fbox-bar { display: flex; gap: var(--sp-3xs); height: 5px; border-radius: var(--r-pill); overflow: hidden; background: rgba(255,255,255,0.08); }
+  .fbox-bar { display: flex; gap: var(--sp-3xs); height: 5px; border-radius: var(--r-pill); overflow: hidden; background: rgba(var(--ink-rgb),0.08); }
   .fbox-bar i { display: block; height: 100%; border-radius: var(--r-pill); min-width: 6px; }   /* a 1% share still reads as a segment */
   .fbox-split { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3xs) var(--sp-sm); margin-bottom: var(--sp-sm); }
   .fbox-split span { display: flex; flex-direction: column; gap: var(--sp-3xs); }
@@ -721,7 +750,7 @@
   .pflow-cell { display: grid; min-width: 0; }
   .pflow .fbox { display: grid; grid-template-columns: minmax(0, 1fr) 148px; }
   .pflow .fbox-now { padding: var(--sp-lg) var(--sp-xl) var(--sp-lg); }
-  .pflow .fbox-today { border-left: 1px solid var(--line); background: rgba(255,255,255,0.015); padding: var(--sp-lg) var(--sp-lg) var(--sp-lg); }
+  .pflow .fbox-today { border-left: 1px solid var(--line); background: rgba(var(--ink-rgb),0.015); padding: var(--sp-lg) var(--sp-lg) var(--sp-lg); }
   .pflow.narrow .fbox { grid-template-columns: minmax(0, 1fr) 116px; }
   .pflow.narrow .fbox-now { padding: var(--sp-lg) var(--sp-lg) var(--sp-lg); }
   .pflow.narrow .fbox-today { padding: var(--sp-lg) var(--sp-lg) var(--sp-lg); }
@@ -789,7 +818,7 @@
   /* the date box: "Tue 6 Oct", opening our calendar (SOLAR-72); Today sits inside it only on a phone */
   .hv-datebox { position: relative; box-sizing: border-box; height: var(--datebar-h); display: inline-flex; align-items: center; gap: var(--sp-sm);
     background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-md); }
-  .hv-datebox:hover { border-color: rgba(255,255,255,0.3); } .hv-datebox.open { border-color: var(--focus); }   /* as Your data's From and To */
+  .hv-datebox:hover { border-color: rgba(var(--ink-rgb),0.3); } .hv-datebox.open { border-color: var(--focus); }   /* as Your data's From and To */
   .hv-datepick { display: inline-flex; align-items: center; gap: var(--sp-sm); height: 100%; padding: 0 var(--sp-md); background: none; border: 0; color: var(--text); cursor: pointer; }
   .hv-datepick:disabled { cursor: default; }
   .hv-cal { display: block; flex: none; color: var(--muted); }
@@ -807,7 +836,7 @@
   .cal-day:hover:not(:disabled) { background: var(--panel-2); border-color: var(--line-2); }
   .cal-day:disabled { color: var(--dim); opacity: 0.35; cursor: default; }
   .cal-day.today { color: var(--accent); }
-  .cal-day.on { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.4); color: var(--text); font-weight: 700; }
+  .cal-day.on { background: rgba(var(--ink-rgb),0.12); border-color: rgba(var(--ink-rgb),0.4); color: var(--text); font-weight: 700; }
   .cal-day:focus-visible, .hv-datepick:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
   .hv-gap { display: inline-flex; align-items: center; gap: var(--sp-xs); font-size: var(--fs-xs); color: var(--text);
     border: 1px solid var(--line); border-radius: var(--r-pill); padding: var(--sp-2xs) var(--sp-sm); margin-left: var(--sp-3xs); cursor: help; white-space: nowrap; }
@@ -857,7 +886,7 @@
   .segmented { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--sp-2xs); gap: var(--sp-3xs); }
   .seg-btn { background: none; border: none; color: var(--muted); padding: var(--sp-sm) var(--sp-lg); border-radius: var(--r-md); font-size: var(--fs-sm); font-weight: 500; transition: var(--dur-fast) var(--ease-out); }
   .seg-sm .seg-btn { padding: var(--sp-2xs) var(--sp-md); font-size: var(--fs-sm); }
-  .seg-btn:hover:not(:disabled) { color: var(--text); } .seg-btn:disabled { cursor: default; } .seg-btn.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+  .seg-btn:hover:not(:disabled) { color: var(--text); } .seg-btn:disabled { cursor: default; } .seg-btn.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(var(--shade-rgb),0.3); }
   .ghost-btn { background: none; border: 1px solid var(--line-2); color: var(--muted); padding: var(--sp-sm) var(--sp-lg); border-radius: var(--r-md); font-size: var(--fs-sm); transition: var(--dur-fast) var(--ease-out); }
   .ghost-btn:hover { color: var(--text); } .ghost-btn.active { border-color: var(--focus); color: var(--text); }
 
@@ -887,7 +916,7 @@
   .pie-wrap { flex: 1; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: var(--sp-2xl); }
   .pie { width: 150px; height: 150px; flex: none; }
   .pie circle { fill: none; stroke-width: 18; }
-  .pie-track { stroke: rgba(255,255,255,0.06); }
+  .pie-track { stroke: rgba(var(--ink-rgb),0.06); }
   /* a day with nothing to share: the bare ring and the note, so the card is not a blank box (SOLAR-345) */
   .pie-wrap.empty .pie-num { fill: var(--dim); }
   .pie-wrap:is(.empty, .whole) .solar-note { flex: 1 1 160px; margin: 0; }
@@ -951,7 +980,7 @@
   .eq-big .u { font-size: var(--fs-2xl); opacity: 0.85; }
   .eq-big.stale { color: var(--muted); }
   .eq-big-sub { margin-top: var(--sp-sm); font-size: var(--fs-sm); color: var(--muted); }
-  .eq-meter { position: relative; height: 7px; border-radius: var(--r-pill); background: rgba(255,255,255,0.07); }
+  .eq-meter { position: relative; height: 7px; border-radius: var(--r-pill); background: rgba(var(--ink-rgb),0.07); }
   .eq-meter i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: var(--r-pill); }
   .eq-meter b { position: absolute; top: -4px; width: 2px; height: 15px; margin-left: -1px; border-radius: 1px; background: rgba(231,236,242,0.7); }
   .eq-note { margin-top: var(--sp-lg); font-size: var(--fs-sm); color: var(--dim); }
@@ -1052,8 +1081,8 @@
   .notif-push .notif-sub { margin-top: 0; }
   .notif-push.ios .switch, .notif-push.asking .switch { opacity: .35; }
   .notif-note { margin: var(--sp-2xs) 0 var(--sp-xs); padding: var(--sp-sm) var(--sp-md); border-radius: var(--r-md); font-size: var(--fs-sm); line-height: 1.5;
-    border: 1px solid var(--line-2); background: var(--panel-2); color: #b4bdc8; }
-  .notif-note.warn { border-color: rgba(var(--warn-rgb),0.35); background: rgba(var(--warn-rgb),0.07); color: #fed7aa; }
+    border: 1px solid var(--line-2); background: var(--panel-2); color: var(--note-text); }
+  .notif-note.warn { border-color: rgba(var(--warn-rgb),0.35); background: rgba(var(--warn-rgb),0.07); color: var(--warn-text); }
   .notif-note b { color: var(--text); font-weight: 600; }
   /* Tariff, Plant and Battery: the login rows' layout (name and hint left, control right).
      The name is a <label> or a <div> of spans, so stack the spans like the login rows' divs. */
@@ -1246,7 +1275,7 @@
   .conn-row.leaving, .login-grp.leaving { overflow: hidden; animation: conn-out var(--dur-base) var(--ease-in) forwards; }
   @media (prefers-reduced-motion: reduce) { .conn-row > .conn-text, .conn-row > .conn-actions, .conn-form, .conn-row.leaving { animation: none; } }
   .conn-row > .conn-form { flex-basis: 100%; }
-  .conn-form { margin-top: var(--sp-lg); padding: var(--sp-lg); border: 1px solid var(--line); border-radius: var(--r-lg); background: rgba(255,255,255,0.015); }
+  .conn-form { margin-top: var(--sp-lg); padding: var(--sp-lg); border: 1px solid var(--line); border-radius: var(--r-lg); background: rgba(var(--ink-rgb),0.015); }
   .conn-form .field-row { grid-template-columns: 1fr 1fr; gap: var(--sp-lg) var(--sp-xl); }
   .conn-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-sm); margin-top: var(--sp-lg); flex-wrap: wrap; }
   /* inline confirmation for a destructive row: same inset box, coral edge and tint */
@@ -1256,7 +1285,7 @@
   .confirm-text { margin-top: var(--sp-2xs); font-size: var(--fs-md); line-height: 1.5; color: var(--text); }
   /* a question over the page (Dialog, SOLAR-286), centred on every screen (SOLAR-291) */
   .pop-dlg { padding: 0; width: min(420px, calc(100vw - 32px)); border-radius: var(--r-xl); color: var(--text); }
-  .pop-dlg::backdrop { background: rgba(4,6,9,0.62); }
+  .pop-dlg::backdrop { background: var(--scrim); }
   .pop-body { padding: var(--sp-xl); }
   .pop-body .confirm-title { font-size: var(--fs-lg); font-weight: 600; }
   .pop-body .confirm-text { margin-top: var(--sp-sm); font-size: var(--fs-md); color: var(--muted); }
@@ -1364,7 +1393,7 @@
   .toggle-row:first-of-type { border-top: none; }
   .toggle-text { display: flex; flex-direction: column; gap: var(--sp-2xs); }
   .toggle-label { font-size: var(--fs-md); } .toggle-hint { font-size: var(--fs-sm); color: var(--dim); }
-  .switch { width: 42px; height: 24px; border-radius: var(--r-pill); background: rgba(255,255,255,0.1); border: none; position: relative; transition: var(--dur-base) var(--ease-out); flex: none; }
+  .switch { width: 42px; height: 24px; border-radius: var(--r-pill); background: rgba(var(--ink-rgb),0.1); border: none; position: relative; transition: var(--dur-base) var(--ease-out); flex: none; }
   .switch.on { background: var(--accent); }
   .knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: var(--dur-base) var(--ease-out); }
   .switch.on .knob { left: 21px; }
@@ -1522,7 +1551,7 @@
     background: linear-gradient(180deg, var(--panel-2), var(--panel));
     border: 1px solid var(--line-2); border-radius: var(--r-xl); padding: var(--sp-3xl);
     color: var(--text); text-align: left;
-    box-shadow: 0 24px 60px -30px rgba(0,0,0,0.9), 0 0 0 1px rgba(0,0,0,0.25) inset;
+    box-shadow: 0 24px 60px -30px rgba(var(--shade-rgb),0.9), 0 0 0 1px rgba(var(--shade-rgb),0.25) inset;
   }
   .auth-brand { display: flex; align-items: center; gap: var(--sp-lg); }
   .auth-brand .sun { width: 40px; height: 40px; box-shadow: 0 0 0 5px rgba(244,169,58,0.10), 0 0 28px rgba(244,169,58,0.40); }
@@ -1539,7 +1568,7 @@
     transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
   }
   .login-card input::placeholder { color: var(--dim); }
-  .login-card input:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px rgba(255,255,255,0.12); }
+  .login-card input:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px rgba(var(--ink-rgb),0.12); }
   /* invalid: red border; invalid and focused: red border plus the ring, so focus stays visible */
   .login-card input:not([type="checkbox"])[aria-invalid="true"] { border-color: var(--bad); box-shadow: none; }
   .login-card input:not([type="checkbox"])[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px rgba(var(--bad-rgb),0.28); }
@@ -1633,7 +1662,7 @@
   /* safe + auto: on a short or sideways screen the card is taller than its layer; it starts at
      the top and scrolls, rather than being cut off at both ends (SOLAR-118) */
   .setup-empty-box { width: min(380px, 100%); min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-sm); text-align: center;
-    padding: var(--sp-2xl); border-radius: var(--r-xl); background: rgba(10,13,18,0.9); border: 1px solid var(--line-2); box-shadow: 0 20px 50px -24px rgba(0,0,0,0.9); }
+    padding: var(--sp-2xl); border-radius: var(--r-xl); background: rgba(var(--bg-rgb),0.9); border: 1px solid var(--line-2); box-shadow: 0 20px 50px -24px rgba(var(--shade-rgb),0.9); }
   .setup-empty-box > .ico { width: var(--icon-lg); height: var(--icon-lg); color: var(--accent); }
   .setup-empty-box h2 { margin: var(--sp-2xs) 0 0; font-size: var(--fs-xl); text-wrap: balance; }
   .setup-empty-box p { margin: 0 0 var(--sp-xs); color: var(--muted); line-height: 1.45; font-size: var(--fs-md); }
@@ -1648,7 +1677,7 @@
   @keyframes setup-open { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { .setup-form { animation: none; } }
   /* The SunSynk login form (link.jsx), on that card and in Account, from the Settings parts */
-  .link-card { padding: var(--sp-xl) var(--sp-2xl) var(--sp-2xl); background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-xl); box-shadow: 0 20px 50px -24px rgba(0,0,0,0.9); }
+  .link-card { padding: var(--sp-xl) var(--sp-2xl) var(--sp-2xl); background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-xl); box-shadow: 0 20px 50px -24px rgba(var(--shade-rgb),0.9); }
   .link-form > .sset-note { margin-bottom: var(--sp-lg); }
   .link-form .sset-note b { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
   /* The plan cards' base, for Pick your plan (SOLAR-208) */
@@ -1696,7 +1725,7 @@
   .plan-cards .plan-gives li::before { content: ''; flex: none; width: 20px; height: 20px; margin: 0; border-radius: 50%; vertical-align: 0;
     background: rgba(var(--accent-rgb),0.13) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2l2.3 2.3 4.7-5' fill='none' stroke='%233ddc84' stroke-width='1.5' vector-effect='non-scaling-stroke' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / var(--icon-sm) no-repeat; }
   .plan-cards .plan-gives li.plan-off { color: var(--dim); }
-  .plan-cards .plan-gives li.plan-off::before { background: rgba(255,255,255,0.04) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 3l6 6M9 3l-6 6' fill='none' stroke='%237f8da0' stroke-width='1.5' vector-effect='non-scaling-stroke' stroke-linecap='round'/%3E%3C/svg%3E") center / var(--icon-sm) no-repeat; }
+  .plan-cards .plan-gives li.plan-off::before { background: rgba(var(--ink-rgb),0.04) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 3l6 6M9 3l-6 6' fill='none' stroke='%237f8da0' stroke-width='1.5' vector-effect='non-scaling-stroke' stroke-linecap='round'/%3E%3C/svg%3E") center / var(--icon-sm) no-repeat; }
   .plan-foot { margin: var(--sp-2xl) 0 0; text-align: center; font-size: var(--fs-sm); color: var(--dim); }
   @media (max-width: 760px) {
     .plan-grid.plan-cards { gap: var(--sp-lg); margin-top: var(--sp-xl); }
@@ -1759,12 +1788,12 @@
   .fs-lbl { font-size: var(--fs-2xs); font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
   .fs-n { margin-left: auto; font-size: var(--fs-xs); color: var(--muted); }
   .fs-x { width: 28px; height: 28px; margin: calc(-1 * var(--sp-2xs)) calc(-1 * var(--sp-xs)) calc(-1 * var(--sp-2xs)) 0; display: grid; place-items: center; padding: 0; border: none; background: none; border-radius: var(--r-md); color: var(--dim); cursor: pointer; }
-  .fs-x:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+  .fs-x:hover { color: var(--text); background: rgba(var(--ink-rgb),0.05); }
   .fs-x .ico { width: var(--icon-sm); height: var(--icon-sm); }
   .fs-list { list-style: none; margin: 0 calc(-1 * var(--sp-xs)); padding: 0; display: grid; gap: var(--sp-3xs); }
   .fs-item { width: 100%; display: flex; align-items: center; gap: var(--sp-sm); min-height: 34px; padding: 0 var(--sp-xs) 0 var(--sp-sm); border: none; border-radius: var(--r-md);
     background: none; color: var(--text); font: inherit; font-size: var(--fs-md); font-weight: 500; text-align: left; cursor: pointer; }
-  .fs-item:hover { background: rgba(255,255,255,0.05); }
+  .fs-item:hover { background: rgba(var(--ink-rgb),0.05); }
   .fs-item.cur { background: rgba(var(--accent-rgb),0.1); }
   .fs-item.done { color: var(--dim); }
   /* a done step's line draws across when it is ticked; rows already done load with it drawn (SOLAR-260) */
@@ -1806,8 +1835,8 @@
   /* the step bars in the panel move between steps */
   .fs-bars { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--sp-2xs); margin-top: calc(-1 * var(--sp-xs)); }
   .fs-bars button { height: 16px; padding: var(--sp-xs) 0; border: none; background: none; cursor: pointer; }
-  .fs-bars i { display: block; height: 4px; border-radius: var(--r-pill); background: rgba(255,255,255,0.08); }
-  .fs-bars .cur i { background: rgba(255,255,255,0.35); }
+  .fs-bars i { display: block; height: 4px; border-radius: var(--r-pill); background: rgba(var(--ink-rgb),0.08); }
+  .fs-bars .cur i { background: rgba(var(--ink-rgb),0.35); }
   .fs-bars .on i { background: var(--accent); }
   .fs-bars .on.cur i { box-shadow: 0 0 0 2px rgba(var(--accent-rgb),0.3); }
   /* every number box (First steps, Settings, Account) looks like the password boxes (SOLAR-200) */
@@ -1855,7 +1884,7 @@
       background: rgba(var(--accent-rgb),0.08); color: var(--text); font-size: var(--fs-xs); cursor: pointer; }
     .fs-mini[aria-expanded="true"] { background: rgba(var(--accent-rgb),0.16); }
     .fs-mini svg { width: 20px; height: 20px; }
-    .fs-mini .track { fill: none; stroke: rgba(255,255,255,0.14); stroke-width: 2.2; }
+    .fs-mini .track { fill: none; stroke: rgba(var(--ink-rgb),0.14); stroke-width: 2.2; }
     .fs-mini .fill { fill: none; stroke: var(--accent); stroke-width: 2.2; stroke-linecap: round; }
     .fs-pop { left: calc(100% + 20px); }
   }
@@ -1880,10 +1909,10 @@
   .locked-v { color: var(--dim); opacity: .55; }
   .locked-v b { color: inherit; }
   .locked.blur .locked-v { filter: blur(5px); }
-  .faint-num { display: block; width: 62%; height: 0.8em; margin: 0.1em 0; border-radius: var(--r-md); background: rgba(255,255,255,0.06); }
+  .faint-num { display: block; width: 62%; height: 0.8em; margin: 0.1em 0; border-radius: var(--r-md); background: rgba(var(--ink-rgb),0.06); }
   .hist-lock { position: relative; display: grid; gap: var(--sp-md); }
   .hl-shape { display: flex; align-items: flex-end; gap: var(--sp-xs); height: 110px; }
-  .hl-shape i { flex: 1; border-radius: var(--r-sm) var(--r-sm) var(--r-xs) var(--r-xs); background: rgba(255,255,255,0.05); }
+  .hl-shape i { flex: 1; border-radius: var(--r-sm) var(--r-sm) var(--r-xs) var(--r-xs); background: rgba(var(--ink-rgb),0.05); }
   .hl-line { display: inline-flex; align-items: center; gap: var(--sp-sm); align-self: start; justify-self: start; padding: 0; border: 0; background: none;
     font: inherit; font-size: var(--fs-md); color: var(--muted); text-align: left; cursor: pointer; }
   .hl-line b { color: var(--accent); font-weight: 600; white-space: nowrap; }
@@ -1923,7 +1952,7 @@
   .pw-offer { font-size: var(--fs-sm); line-height: 1.45; color: var(--money); }
   .cal-day.shut, .hv-daynav.shut { color: var(--dim); opacity: 0.45; }
   .cal-day.shut:hover, .hv-daynav.shut:hover { opacity: 0.8; }
-  .acct-btn.steps::after { content: ''; position: absolute; left: 32px; top: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px #0d1117; }
+  .acct-btn.steps::after { content: ''; position: absolute; left: 32px; top: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bar); }
   .acct-head .acct-btn.steps::after { left: auto; right: 1px; top: 1px; box-shadow: 0 0 0 2px var(--bg); }
   .menu-left { margin-left: auto; padding-left: var(--sp-md); white-space: nowrap; font-size: var(--fs-xs); color: var(--accent); }
   @media (min-width: 600px) and (max-width: 1023px) { .acct-btn.steps::after { left: calc(50% + 8px); } }
