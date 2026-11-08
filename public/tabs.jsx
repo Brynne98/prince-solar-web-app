@@ -1475,7 +1475,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const offPending = !histRuns || !gb;
   const outages = offPending ? [] : !pick.isToday ? histRuns : gridOffRuns(histRuns, gb, liveFrom, nowIdx);
   // the label counts minutes, as the notices do; the band keeps 5-minute steps (SOLAR-430)
-  const outageMin = offPending ? 0 : gridDay.offMinutes != null ? Number(gridDay.offMinutes) : outageMinutes(outages);
+  const outageMin = offPending ? 0 : gridOffMinutes(gridDay, pick.isToday && a.gridPresent === false) ?? outageMinutes(outages);
   // where the day's imports went: the same flows Solar and Home show (SOLAR-332)
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
   const [daily, loadDaily] = useDaily(refreshKey);
@@ -1782,7 +1782,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const nowIdx = lastSlot(pts, 'grid');
   const liveFrom = useLiveOffFrom(a.gridPresent === false, gridDay && gridDay.buckets, nowIdx);
   const outages = gridOffRuns(null, gb, liveFrom, nowIdx);
-  const offMin = gridDay ? Number(gridDay.offMinutes) || 0 : 0;
+  const offMin = gridOffMinutes(gridDay, a.gridPresent === false) || 0;
   const gridState = st.allQuiet ? QUIET : a.gridPresent == null ? ['stale', 'Not known']
     : a.gridPresent ? ['ok', 'On'] : ['warn', 'Off'];
   const vVals = gb.map(b => [b.i * 5, b.v]);

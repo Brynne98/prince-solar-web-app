@@ -264,6 +264,9 @@ function outageRuns(invs, fKey, lastIdx) {
   return runs;
 }
 const outageMinutes = runs => runs.reduce((n, r) => n + (r[1] - r[0] + 1) * 5, 0);
+// A day's off minutes from api_grid_today, still counting while the grid is off now (SOLAR-430).
+const gridOffMinutes = (gd, offNow) => gd && gd.offMinutes != null
+  ? Number(gd.offMinutes) + (offNow && gd.asOf ? Math.max(0, Math.floor((Date.now() / 1000 - gd.asOf) / 60)) : 0) : null;
 // Today's grid-off runs (SOLAR-421). SunSynk's history (`runs`) lands every 6 hours, so it is
 // joined with our own minute readings (`buckets` from api_grid_today, {i, off}) and, while
 // the grid is off now, every slot from `liveFrom` to `nowIdx`: the band grows until it is back.

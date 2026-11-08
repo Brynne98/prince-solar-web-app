@@ -21,7 +21,8 @@
 --   api_alerts          0166's body; reads the row data through grid_notice_data.
 --   api_grid_off_recent 0122's body; startedAt through grid_off_began.
 --   api_grid_today      0159's body plus p_date (a past day), so the Grid tab's and
---                       Equipment's "Grid off" counts minutes, not 5-minute blocks.
+--                       Equipment's "Grid off" counts minutes, not 5-minute blocks; asOf
+--                       lets a page keep counting while the grid stays off.
 -- No table changes.
 -- ============================================================================
 
@@ -201,7 +202,8 @@ as $$
                'off', coalesce(o.off, false))
              order by coalesce(v.b, o.b))
         from v full join o on o.b = v.b), '[]'::jsonb),
-    'offMinutes', (select count(*) from m where not m.present)
+    'offMinutes', (select count(*) from m where not m.present),
+    'asOf', extract(epoch from now())::bigint                                    -- 0167
   )
 $$;
 revoke all on function public.api_grid_today(bigint, date) from public, anon;
