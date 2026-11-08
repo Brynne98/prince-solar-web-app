@@ -177,7 +177,7 @@ function html(subject: string, b: Body): string {
               (c.sub ? `<div class="d" style="margin-top:6px;font:400 13px/1.5 ${SANS};color:#7f8da0">${esc(c.sub)}</div>` : "")) +
           `</td></tr>`;
       }).join("");
-      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px"><tr><td style="padding:${checks.length ? "4px 18px" : `18px 18px ${r.length ? 12 : 18}px`};background:#141a22;border-radius:10px">` +
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px"><tr><td style="padding:${checks.length ? "4px 18px" : `${hero ? 18 : 12}px 18px ${r.length ? 12 : 18}px`};background:#141a22;border-radius:10px">` +
         `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${big}${lines}${list}</table></td></tr></table>`;
     }
     if ("note" in x) return `<p class="m" style="margin:0 0 16px;font:400 14px/1.55 ${SANS};color:#9aa5b3">${x.note}</p>`;
