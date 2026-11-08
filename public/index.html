@@ -44,6 +44,8 @@
     --switch-off: rgba(255,255,255,0.1);
     /* day bars: the rest of the days, and the one under the pointer */
     --bar-a: 0.38; --bar-hover-a: 0.7;
+    /* cards on the page: dark lifts them by tone and a hairline; light by a faint shadow (SOLAR-426) */
+    --card-edge: var(--line); --card-shadow: none;
     --lift: 0 24px 60px -30px rgba(0,0,0,0.9), 0 0 0 1px rgba(0,0,0,0.25) inset;
     color-scheme: dark;
     --line: rgba(var(--ink-rgb),0.07);
@@ -99,7 +101,7 @@
      power and role colour is a darker shade that clears 4.5:1 on --panel-2. */
   :root[data-theme="light"] {
     color-scheme: light;
-    --bg: #f3f5f8; --panel: #ffffff; --panel-2: #f1f4f8; --bar: #ffffff; --bg-rgb: 243,245,248;
+    --bg: #eaedf2; --panel: #ffffff; --panel-2: #f1f4f8; --bar: #ffffff; --bg-rgb: 234,237,242;
     --ink-rgb: 15,23,42; --shade-rgb: 15,23,42;
     --pop-shadow: 0 12px 32px rgba(15,23,42,0.12);
     --dlg-shadow: 0 20px 50px rgba(15,23,42,0.18);
@@ -110,6 +112,7 @@
     --note-text: #4b5563; --warn-text: #92400e;
     --switch-off: rgba(15,23,42,0.22);
     --bar-a: 0.6; --bar-hover-a: 0.85;
+    --card-edge: transparent; --card-shadow: 0 1px 2px rgba(15,23,42,0.05), 0 3px 10px rgba(15,23,42,0.05);
     --lift: 0 20px 44px -28px rgba(15,23,42,0.28);
     --pv: #137a3a; --batt: #7c3aed; --grid: #9a6404; --load: #b94a3c; --soc: #0e7490;
     --ok: #477310; --warn: #b4470e; --bad: #b91c1c;
@@ -569,7 +572,7 @@
   }
 
   /* ---------- cards ---------- */
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-xl); padding: var(--sp-2xl) var(--sp-2xl); }
+  .card { background: var(--panel); border: 1px solid var(--card-edge); box-shadow: var(--card-shadow); border-radius: var(--r-xl); padding: var(--sp-2xl) var(--sp-2xl); }
   /* charts want the width more than they want the gutter */
   /* the day chart and power flow keep one gutter on all four sides */
   .chart-card, .flow-card { padding: var(--sp-md); }
@@ -1049,7 +1052,7 @@
   .sec-intro { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-md); }   /* title top left, a button top right */
   .sec-intro > div { min-width: 0; }
   .sec-intro > button { flex: none; white-space: nowrap; }
-  .sset { padding: var(--sp-xl) var(--sp-2xl); background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-xl); min-width: 0; }
+  .sset { padding: var(--sp-xl) var(--sp-2xl); background: var(--panel); border: 1px solid var(--card-edge); box-shadow: var(--card-shadow); border-radius: var(--r-xl); min-width: 0; }
   .sset-title { margin: 0 0 var(--sp-2xs); font-size: var(--fs-lg); font-weight: 600; }
   .sset-note { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--muted); }
   .sset-count { margin-left: var(--sp-sm); font-variant-numeric: tabular-nums; font-size: var(--fs-sm); font-weight: 500; color: var(--dim); }
@@ -1146,7 +1149,7 @@
     .set-list .set-nav { display: flex; gap: 0; }
     .set-list .set-nav-title { font-size: var(--fs-2xl); margin: 0 0 var(--sp-md); }
     /* the two pages in one card, as Settings' sections are: space between rows, no lines (SOLAR-250, SOLAR-411) */
-    .set-list .set-nav-list { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-xl); padding: var(--sp-sm) var(--sp-lg); gap: 0; }
+    .set-list .set-nav-list { background: var(--panel); border: 1px solid var(--card-edge); box-shadow: var(--card-shadow); border-radius: var(--r-xl); padding: var(--sp-sm) var(--sp-lg); gap: 0; }
     .set-list .set-nav button, .set-list .set-nav button[aria-current="page"] { min-height: 64px; padding: 0; border: none;
       border-radius: 0; background: none; color: var(--text); font-size: var(--fs-lg); }
     .set-list .set-nav-note { display: block; font-size: var(--fs-sm); color: var(--muted); }
@@ -1924,7 +1927,7 @@
     font: inherit; font-size: var(--fs-md); color: var(--muted); text-align: left; cursor: pointer; }
   .hl-line b { color: var(--accent); font-weight: 600; white-space: nowrap; }
   .hl-line:hover b { text-decoration: underline; }
-  .overview-section .hist-lock { padding: var(--sp-lg) var(--sp-xl); border: 1px solid var(--line); border-radius: var(--r-xl); background: var(--panel); }
+  .overview-section .hist-lock { padding: var(--sp-lg) var(--sp-xl); border: 1px solid var(--card-edge); box-shadow: var(--card-shadow); border-radius: var(--r-xl); background: var(--panel); }
   .today-strip.blurred .mini-value { filter: blur(7px); }
   .today-strip.blurred .mini-trend { visibility: hidden; }
   .lock-cta { display: inline-flex; align-items: center; gap: var(--sp-xs); }

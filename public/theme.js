@@ -14,7 +14,7 @@
     var mode = choice === 'device' ? (media && media.matches ? 'light' : 'dark') : choice;
     document.documentElement.setAttribute('data-theme', mode);
     var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', mode === 'light' ? '#f3f5f8' : '#0a0d12'); // --bg of each
+    if (meta) meta.setAttribute('content', mode === 'light' ? '#eaedf2' : '#0a0d12'); // --bg of each
     window.dispatchEvent(new Event('ps-theme'));
   }
   window.getTheme = saved;
