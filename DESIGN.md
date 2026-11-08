@@ -297,14 +297,17 @@ changes. Cool grey, not warm paper (picked 2026-11-08).
 | `--line` / `--line-2` | 7% / 12% white | 9% / 16% ink |
 | `--pv` Solar Green, `--accent` | #3ddc84 | #137a3a |
 | `--batt` Battery Violet | #a78bfa | #7c3aed |
-| `--grid` Grid Amber | #facc15 | #856500 |
-| `--load` Home Coral | #f87171 | #c23b3b |
+| `--grid` Grid Amber | #facc15 | #9a6404 |
+| `--load` Home Coral | #f87171 | #b94a3c |
 | `--soc` Charge Cyan | #22d3ee | #0e7490 |
-| `--ok` / `--warn` / `--bad` | #84cc16 / #f59e0b / #ef4444 | #477310 / #a84d08 / #b91c1c |
+| `--ok` / `--warn` / `--bad` | #84cc16 / #f59e0b / #ef4444 | #477310 / #b4470e / #b91c1c |
+| `--bar-a` / `--bar-hover-a` day bars | 0.38 / 0.7 | 0.6 / 0.85 |
+| `--lift` sign-in card shadow | deep black | soft ink |
 | `--on-accent` | #07130c | #ffffff |
 
 Light keeps every meaning and hue of dark, one step darker so each power and role colour
-clears 4.5:1 on Panel Raised; Muted clears 6.8:1 and Dim 5.2:1 on all three surfaces.
+clears 4.5:1 on Panel Raised. Home Coral is a warm coral, not Bad Red, so a home reading
+never looks like an error; Muted clears 6.8:1 and Dim 5.2:1 on all three surfaces.
 The sun orb keeps its gradient in both. Emails stay dark-palette (`email.ts`).
 
 ### Named Rules

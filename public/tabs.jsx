@@ -978,7 +978,7 @@ function DaysBarsChart({ rows, field, color, rgb, word, label, today, selected, 
           const cx = m.l + slot * i + slot / 2, top = y(r[field] || 0), isToday = r.date === today;
           return (
             <rect key={r.date} x={cx - bw / 2} y={top} width={bw} height={Math.max(0, y(0) - top)} rx={Math.min(2, bw / 2)}
-              fill={r === best ? color : isToday ? fill(0.16) : hover === i ? fill(0.7) : fill(0.38)}
+              fill={r === best ? color : isToday ? fill(0.16) : hover === i ? fill('var(--bar-hover-a)') : fill('var(--bar-a)')}
               stroke={r.date === selected ? 'var(--text)' : isToday ? color : 'none'} strokeWidth={r.date === selected ? 1.5 : 1}
               strokeDasharray={isToday && r.date !== selected ? '2 2' : undefined}
               style={{ transition: 'fill var(--dur-fast) var(--ease-out)' }} />

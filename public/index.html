@@ -42,6 +42,9 @@
     --bar: #0d1117; --avatar: #26303d; --scrim: rgba(4,6,9,0.6);
     --note-text: #b4bdc8; --warn-text: #fed7aa;
     --switch-off: rgba(255,255,255,0.1);
+    /* day bars: the rest of the days, and the one under the pointer */
+    --bar-a: 0.38; --bar-hover-a: 0.7;
+    --lift: 0 24px 60px -30px rgba(0,0,0,0.9), 0 0 0 1px rgba(0,0,0,0.25) inset;
     color-scheme: dark;
     --line: rgba(var(--ink-rgb),0.07);
     --line-2: rgba(var(--ink-rgb),0.12);
@@ -106,12 +109,14 @@
     --avatar: #e3e8ef; --scrim: rgba(15,23,42,0.35);
     --note-text: #4b5563; --warn-text: #92400e;
     --switch-off: rgba(15,23,42,0.22);
-    --pv: #137a3a; --batt: #7c3aed; --grid: #856500; --load: #c23b3b; --soc: #0e7490;
-    --ok: #477310; --warn: #a84d08; --bad: #b91c1c;
+    --bar-a: 0.6; --bar-hover-a: 0.85;
+    --lift: 0 20px 44px -28px rgba(15,23,42,0.28);
+    --pv: #137a3a; --batt: #7c3aed; --grid: #9a6404; --load: #b94a3c; --soc: #0e7490;
+    --ok: #477310; --warn: #b4470e; --bad: #b91c1c;
     --accent: #137a3a; --on-accent: #ffffff;
     --focus: #111827;
-    --pv-rgb: 19,122,58; --batt-rgb: 124,58,237; --grid-rgb: 133,101,0; --load-rgb: 194,59,59; --soc-rgb: 14,116,144;
-    --ok-rgb: 71,115,16; --warn-rgb: 168,77,8; --bad-rgb: 185,28,28; --accent-rgb: 19,122,58;
+    --pv-rgb: 19,122,58; --batt-rgb: 124,58,237; --grid-rgb: 154,100,4; --load-rgb: 185,74,60; --soc-rgb: 14,116,144;
+    --ok-rgb: 71,115,16; --warn-rgb: 180,71,14; --bad-rgb: 185,28,28; --accent-rgb: 19,122,58;
   }
   @media (prefers-reduced-motion: reduce) { :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; } }
   @media (max-width: 599px) { :root { --fs-sm: 14px; } }
@@ -1553,7 +1558,7 @@
     background: linear-gradient(180deg, var(--panel-2), var(--panel));
     border: 1px solid var(--line-2); border-radius: var(--r-xl); padding: var(--sp-3xl);
     color: var(--text); text-align: left;
-    box-shadow: 0 24px 60px -30px rgba(var(--shade-rgb),0.9), 0 0 0 1px rgba(var(--shade-rgb),0.25) inset;
+    box-shadow: var(--lift);
   }
   .auth-brand { display: flex; align-items: center; gap: var(--sp-lg); }
   .auth-brand .sun { width: 40px; height: 40px; box-shadow: 0 0 0 5px rgba(244,169,58,0.10), 0 0 28px rgba(244,169,58,0.40); }
