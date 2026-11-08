@@ -106,8 +106,7 @@ function LiveSkeleton({ cfg }) {
           <MiniStat loading label="Made" info={OV_INFO.made} />
           <MiniStat loading label="Home" info={OV_INFO.home} />
           <MiniStat loading label="Independence" info={OV_INFO.suff} bar={0} />
-          {/* the grid chip's box sets its line 0.5px taller than plain text */}
-          {grid ? <MiniStat loading label="Imported" info={OV_INFO.imp} sub={<span className="grid-state" style={{ visibility: 'hidden' }}><span className="gs-dot" />{NBSP}</span>} /> : <MiniStat loading label="Grid" info={OV_INFO.grid} />}
+          {grid ? <MiniStat loading label="Imported" info={OV_INFO.imp} /> : <MiniStat loading label="Grid" info={OV_INFO.grid} />}
           {exp && <MiniStat loading label="Exported" info={OV_INFO.exp} />}
           <MiniStat loading label="Saved" info={OV_INFO.saved} sub={NBSP} />
         </div>
@@ -404,21 +403,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
       <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff ?? undefined} trend={tSuff} trendFrom={cmpPhrase}
         info={OV_INFO.suff} />
       {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendFrom={cmpPhrase}
-        info={OV_INFO.imp}
-        sub={silent ? undefined : a.gridPresent == null ? (
-          // No inverter has reported mains voltage yet; a blank here read as a
-          // chip that failed to load.
-          <span className="grid-state unknown"><span className="gs-dot" />Grid unknown</span>
-        ) : (
-          // Presence, not usage: mains voltage is there even when you draw nothing
-          // from it, so this stays ON through a sunny self-powered afternoon.
-          <window.Tip className={'grid-state ' + (a.gridPresent ? 'on' : 'off')}
-                text={a.gridPresent
-                  ? 'The grid is live, even when you’re not using it.'
-                  : 'No power from the grid.'}>
-            <span className="gs-dot" />{a.gridPresent ? (a.phaseDown ? 'Phase down' : 'Grid on') : 'Grid off'}
-          </window.Tip>
-        )} />}
+        info={OV_INFO.imp} />}
       {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off" color={CC.grid}
         info={OV_INFO.grid} />}
       {/* after Imported, the order Power flow uses */}
