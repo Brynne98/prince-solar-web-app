@@ -698,7 +698,7 @@
   .wall.idle .wall-exit:not(:focus-visible) { opacity: 0; visibility: hidden; }
   .wall.idle, .wall.idle * { cursor: none !important; }
   @media (prefers-reduced-motion: reduce) { .wall .wall-exit { transition: none; } }
-  .wall .flow-card { background: none; border: 0; border-radius: 0; padding: 0; min-height: 0; grid-row: -2; }
+  .wall .flow-card { background: none; border: 0; box-shadow: none; border-radius: 0; padding: 0; min-height: 0; grid-row: -2; }
   /* Today's cards between the bar and the flow, one row (SOLAR-309); none on a phone */
   .wall .today-strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
   /* drawn like the flow's boxes and at their zoom: clear, with the card's own plain border */
