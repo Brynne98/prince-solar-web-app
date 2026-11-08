@@ -1,5 +1,5 @@
 -- verify-0152: the full Notifications page reader (SOLAR-327). Local stack only;
--- one transaction, rolled back.
+-- one transaction, rolled back. Superseded by verify-0166 (0166 splits the folded rows).
 -- psql "$LOCAL_DB_URL" -X -q -f scripts/sql/verify-0152.sql   (exit code decides)
 \set ON_ERROR_STOP 1
 begin;
