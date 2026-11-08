@@ -839,15 +839,19 @@ export const paymentFailed = (f: Failed) => {
 
 // A payment we refund (0130): it applied nothing, because the plan or the price changed
 // while the user paid. Not sent for the R1 card check.
-export type Refund = { amount: number; date: string; reference: string; why: "price" | "changed" };
+// card: the card on file, which the refund goes back to. 3 to 10 working days is
+// Paystack's own figure for card refunds in South Africa; Paystack emails them too.
+export type Refund = { amount: number; date: string; reference: string; why: "price" | "changed"; card?: string };
 
 export const paymentRefunded = (r: Refund) =>
   make(`${rand(r.amount)} is on its way back to your card`, {
     title: "Your refund is on its way",
     parts: [
       { lead: r.why === "price" ? "The price changed while you paid, so we sent it back." : "Your plan changed while you paid, so we sent it back." },
-      { box: { hero: { label: "Refund", value: rand(r.amount), sub: `paid on ${r.date}` }, rows: [["Reference", esc(r.reference)]] } },
+      { box: { hero: { label: "Refund", value: rand(r.amount), sub: r.card ? `back to ${r.card}` : "back to your card" },
+        rows: [["Paid on", r.date], ["Arrives in", "3 to 10 working days"], ["Reference", esc(r.reference)]] } },
       SEE_PLAN,
+      { small: "Paystack, who handles our payments, emails you about it too." },
     ],
     footer: BILL_FOOTER,
   });

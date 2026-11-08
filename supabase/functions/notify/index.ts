@@ -370,7 +370,8 @@ async function build(r: Row): Promise<Email | null> {
         disputed: d.disputed ? day(d.disputed) : undefined,
       });
     case "bill_refund":
-      return paymentRefunded({ amount: d.amount, date: day(d.date), reference: d.reference, why: d.why === "price" ? "price" : "changed" });
+      return paymentRefunded({ amount: d.amount, date: day(d.date), reference: d.reference, why: d.why === "price" ? "price" : "changed",
+        card: (await billFacts(r.user_id))?.card ?? undefined });
     case "bill_mail_failed":
       return billMailFailed({ kind: String(d.kind), key: String(d.key), user: String(d.user ?? ""), error: String(d.error ?? "") });
     case "bill_free":
