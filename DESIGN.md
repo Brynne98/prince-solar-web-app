@@ -295,19 +295,22 @@ changes. Cool grey, not warm paper (picked 2026-11-08).
 | `--text` / `--muted` / `--dim` | #e7ecf2 / #9aa5b3 / #7f8da0 | #111827 / #4b5563 / #5a6676 |
 | `--ink-rgb` washes, rules | 255,255,255 | 15,23,42 |
 | `--line` / `--line-2` | 7% / 12% white | 9% / 16% ink |
-| `--pv` Solar Green, `--accent` | #3ddc84 | #137a3a |
-| `--batt` Battery Violet | #a78bfa | #7c3aed |
-| `--grid` Grid Amber | #facc15 | #9a6404 |
-| `--load` Home Coral | #f87171 | #b94a3c |
-| `--soc` Charge Cyan | #22d3ee | #0e7490 |
+| `--pv` Solar Green | #3ddc84 | #158f42 (text #137a3a) |
+| `--accent` | #3ddc84 | #137a3a |
+| `--batt` Battery Violet | #a78bfa | #8247ef (text #7c3aed) |
+| `--grid` Grid Amber | #facc15 | #ad7204 (text #9a6404) |
+| `--load` Home Coral | #f87171 | #c94a3c (text #b94a3c) |
+| `--soc` Charge Cyan | #22d3ee | #0b84a2 (text #0e7490) |
 | `--ok` / `--warn` / `--bad` | #84cc16 / #f59e0b / #ef4444 | #477310 / #b4470e / #b91c1c |
 | `--bar-a` / `--bar-hover-a` day bars | 0.38 / 0.7 | 0.6 / 0.85 |
 | `--lift` sign-in card shadow | deep black | soft ink |
 | `--card-edge` / `--card-shadow` page cards | hairline / none | none / 1–3 px soft ink shadow |
 | `--on-accent` | #07130c | #ffffff |
 
-Light keeps every meaning and hue of dark, one step darker so each power and role colour
-clears 4.5:1 on Panel Raised. Home Coral is a warm coral, not Bad Red, so a home reading
+Light keeps every meaning and hue of dark. Each power colour has two shades in light
+(SOLAR-427): `--pv` etc. for big numbers, bars, charts and flow trails, a middle step that
+clears 3.5:1 on every surface; `--pv-text` etc. (`COLORS_TEXT` in JS) for small text,
+which clears 4.5:1 on Panel Raised. In dark the two are the same. Role colours clear 4.5:1. Home Coral is a warm coral, not Bad Red, so a home reading
 never looks like an error; Muted clears 6.8:1 and Dim 5.2:1 on all three surfaces.
 The sun orb keeps its gradient in both. Emails stay dark-palette (`email.ts`).
 

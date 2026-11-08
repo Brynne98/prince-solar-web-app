@@ -46,6 +46,8 @@
     --bar-a: 0.38; --bar-hover-a: 0.7;
     /* cards on the page: dark lifts them by tone and a hairline; light by a faint shadow (SOLAR-426) */
     --card-edge: var(--line); --card-shadow: none;
+    /* small text in a power colour: the same as the colour in dark, a darker shade in light (SOLAR-427) */
+    --pv-text: var(--pv); --batt-text: var(--batt); --grid-text: var(--grid); --load-text: var(--load); --soc-text: var(--soc);
     --lift: 0 24px 60px -30px rgba(0,0,0,0.9), 0 0 0 1px rgba(0,0,0,0.25) inset;
     color-scheme: dark;
     --line: rgba(var(--ink-rgb),0.07);
@@ -114,11 +116,13 @@
     --bar-a: 0.6; --bar-hover-a: 0.85;
     --card-edge: transparent; --card-shadow: 0 1px 2px rgba(15,23,42,0.05), 0 3px 10px rgba(15,23,42,0.05);
     --lift: 0 20px 44px -28px rgba(15,23,42,0.28);
-    --pv: #137a3a; --batt: #7c3aed; --grid: #9a6404; --load: #b94a3c; --soc: #0e7490;
+    /* big numbers, bars and charts: a middle step, 3.5:1 or more on every surface (SOLAR-427) */
+    --pv: #158f42; --batt: #8247ef; --grid: #ad7204; --load: #c94a3c; --soc: #0b84a2;
+    --pv-text: #137a3a; --batt-text: #7c3aed; --grid-text: #9a6404; --load-text: #b94a3c; --soc-text: #0e7490;
     --ok: #477310; --warn: #b4470e; --bad: #b91c1c;
     --accent: #137a3a; --on-accent: #ffffff;
     --focus: #111827;
-    --pv-rgb: 19,122,58; --batt-rgb: 124,58,237; --grid-rgb: 154,100,4; --load-rgb: 185,74,60; --soc-rgb: 14,116,144;
+    --pv-rgb: 21,143,66; --batt-rgb: 130,71,239; --grid-rgb: 173,114,4; --load-rgb: 201,74,60; --soc-rgb: 11,132,162;
     --ok-rgb: 71,115,16; --warn-rgb: 180,71,14; --bad-rgb: 185,28,28; --accent-rgb: 19,122,58;
   }
   @media (prefers-reduced-motion: reduce) { :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; } }
@@ -377,9 +381,9 @@
   .nl-row.unread .nl-dot { background: var(--ok); }
   .nl-glyph { width: 32px; height: 32px; border-radius: var(--r-md); display: grid; place-items: center; }
   .nl-glyph .ico { width: var(--icon-md); height: var(--icon-md); }
-  .g-grid { background: rgba(var(--grid-rgb),0.12); color: var(--grid); }
-  .g-battery { background: rgba(var(--batt-rgb),0.14); color: var(--batt); }
-  .g-panels { background: rgba(var(--pv-rgb),0.12); color: var(--pv); }
+  .g-grid { background: rgba(var(--grid-rgb),0.12); color: var(--grid-text); }
+  .g-battery { background: rgba(var(--batt-rgb),0.14); color: var(--batt-text); }
+  .g-panels { background: rgba(var(--pv-rgb),0.12); color: var(--pv-text); }
   .g-readings, .g-sunsynk { background: rgba(var(--ink-rgb),0.07); color: var(--muted); }
   .g-bad { background: rgba(var(--bad-rgb),0.14); color: var(--bad); }
   .g-warn { background: rgba(var(--warn-rgb),0.14); color: var(--warn); }
@@ -604,8 +608,8 @@
   .stat-value .unit { font-size: var(--fs-2xl); margin-left: var(--sp-2xs); opacity: 0.85; }
   .stat-sub { font-size: var(--fs-sm); color: var(--muted); margin-top: var(--sp-md); }
   .stat-sub b { color: var(--text); font-weight: 600; }
-  .batt-eta { display: block; margin-top: var(--sp-sm); font-size: var(--fs-xs); color: var(--soc); font-family: var(--mono); letter-spacing: -0.01em; }
-  .batt-eta b { color: var(--soc); font-weight: 700; }
+  .batt-eta { display: block; margin-top: var(--sp-sm); font-size: var(--fs-xs); color: var(--soc-text); font-family: var(--mono); letter-spacing: -0.01em; }
+  .batt-eta b { color: var(--soc-text); font-weight: 700; }
   .batt-eta .bel { display: block; }
   .batt-eta .bel.sub { color: var(--muted); margin-top: 1px; }
   .meter { height: 7px; border-radius: var(--r-pill); background: rgba(var(--ink-rgb),0.07); overflow: hidden; margin-top: var(--sp-lg); position: relative; }
@@ -1012,7 +1016,7 @@
   .eq-table tbody th { padding: var(--sp-sm) var(--sp-md) var(--sp-sm) 0; text-align: left; font-weight: 400; color: var(--muted); white-space: nowrap; border-top: 1px solid var(--line); }
   .eq-table td { padding: var(--sp-sm) 0 var(--sp-sm) var(--sp-lg); text-align: right; vertical-align: top; border-top: 1px solid var(--line); white-space: nowrap; }
   .eq-table td .mono { display: inline-flex; align-items: center; gap: var(--sp-sm); }
-  .eq-table td.pv .mono { color: var(--pv); }
+  .eq-table td.pv .mono { color: var(--pv-text); }
   .eq-table td.bad, .eq-table td.bad .eq-sub { color: var(--bad); }
   .eq-table td.warn { color: var(--warn); }
   /* a model name breaks at its hyphens, not between letters (SOLAR-407) */
@@ -1870,8 +1874,8 @@
   /* battery size and panels: Total or By size, the value on the same line */
   .fs-sumhead { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-md); }
   .fs-val { font-size: var(--fs-2xl); font-weight: 700; line-height: 1; color: var(--dim); white-space: nowrap; }
-  .fs-val.size { color: var(--batt); }
-  .fs-val.panels { color: var(--pv); }
+  .fs-val.size { color: var(--batt-text); }
+  .fs-val.panels { color: var(--pv-text); }
   .fs-val small { font-size: var(--fs-md); font-weight: 500; color: var(--muted); margin-left: var(--sp-2xs); }
   .fs-rows { display: flex; flex-direction: column; gap: var(--sp-sm); }
   .fs-row { display: grid; grid-template-columns: 72px 14px minmax(0, 1fr) 28px; align-items: center; gap: var(--sp-sm); animation: fs-rowin var(--dur-base) var(--ease-out); }

@@ -10,6 +10,11 @@ const COLORS = {
   load: 'var(--load)', // load red
   soc: 'var(--soc)' // SOC (state of charge) cyan
 };
+// The same colours for small text: in light they are a darker shade that reads at 13 px
+// (SOLAR-427); in dark they are the same as COLORS. Big numbers, bars and charts use COLORS.
+const COLORS_TEXT = {
+  pv: 'var(--pv-text)', batt: 'var(--batt-text)', grid: 'var(--grid-text)', load: 'var(--load-text)', soc: 'var(--soc-text)'
+};
 
 // ---- formatting -------------------------------------------------------------
 // Live power: whole watts under 1 kW ("450 W"), kilowatts from there ("1.25 kW") (SOLAR-24).
@@ -369,7 +374,7 @@ function HistoryLock({ where, tile }) {
 
 Object.assign(window, {
   freeState, FreeCtx, useFreeOver, openPlans, LockIcon, Locked, HistoryLock,
-  COLORS, fmtPower, fmtPowerParts, battShown, localDateStr, shiftDate, dayText, fmtDuration, plantLabel, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
+  COLORS, COLORS_TEXT, fmtPower, fmtPowerParts, battShown, localDateStr, shiftDate, dayText, fmtDuration, plantLabel, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
   Card, StatTile, Segmented, Switch, Toggle, LegendChip, SectionTitle, InfoDot, Tip,
   Skeleton, SkelLine, BusyButton, TipRow, Meter,
   fmtEnergySmart, fmtRandSmart, fmtEnergyParts, fmtMoney, fmtMoneySmart, moneySymbol
