@@ -543,7 +543,6 @@ const WHAT: Record<PlantEvent["kind"], string> = {
   string_dead: "panel", string_back: "panel", logger_stale: "reading", logger_back: "reading",
 };
 // "Inverter 2508290475, string 2", as the app names it (SOLAR-348)
-const stringName = (e: { string: string; inverter: string }) => `${e.inverter}, ${e.string.toLowerCase()}`;
 const ALERT_FOOTER = (what: string, plant: string) => SETTINGS_FOOTER(`You get ${what} alerts for ${esc(plant)}. Turn them off in notification settings.`);
 const batt = (pct: number) => `<span style="color:${C.batt}">${pct}%</span>`;
 const GAP = "We're getting what we can of the missed readings.";
@@ -567,10 +566,11 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
           rows: e.banks.map((b) => [b.name, batt(b.chargePct)] as [string, string]) } }]];
       }
       case "string_dead":
-        return [`Panels stopped producing at ${plant}`, [{ box: { hero: { label: stringName(e), value: "No power", tone: "bad", sub: `since ${e.since} ${day}` },
-          rows: [["Other strings", "Producing"]] } }]];
+        return [`Panels stopped producing at ${plant}`, [{ box: { hero: { label: e.string, value: "No power", tone: "bad", sub: `since ${e.since} ${day}` },
+          rows: [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))], ["Other strings", "Producing"]] } }]];
       case "string_back":
-        return [`Panels producing again at ${plant}`, [{ box: { hero: { label: `${stringName(e)} was off for`, value: e.lasted, sub: span(e.since, e.at) } } }]];
+        return [`Panels producing again at ${plant}`, [{ box: { hero: { label: `${e.string} was off for`, value: e.lasted, sub: span(e.since, e.at) },
+          rows: [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))]] } }]];
       case "logger_stale": {
         const one = !!e.inverter;
         const list = e.inverters?.length ? e.inverters : [{ name: e.inverter ?? "Inverter", last: e.since }];
@@ -579,7 +579,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
             ? "SunSynk is working, but one inverter stopped sending it readings. Your power isn't affected. Only the app shows part of your plant."
             : "SunSynk is working, but your inverter stopped sending it readings. Your power isn't affected. Only the app stops updating." },
           { box: { hero: { label: "Last reading", value: e.since, tone: "warn", sub: day },
-            rows: list.map((i) => [esc(i.name), i.last ? `Last reading ${esc(i.last)}` : "Sending readings"] as [string, string]) } },
+            rows: list.map((i) => [esc(i.name), i.last ? esc(i.last) : "Sending"] as [string, string]) } },
           { note: "We'll email you when readings come back, and get what we can of the gap." },
         ]];
       }
@@ -607,8 +607,9 @@ export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email
     return make(`Sign in to SunSynk again for ${plants}`, {
       title: "Sign in to SunSynk again",
       parts: [
-        { lead: `SunSynk asked for your login again. Readings for ${esc(plants)} stopped${e.at ? ` at ${e.at} ${day}` : ""}.` },
-        { note: "After you sign in, we get what we can of the missed readings." },
+        { lead: "SunSynk asked for your login again." },
+        { box: { hero: e.at ? { label: "No readings since", value: e.at, sub: day } : undefined, rows: [["Plants", esc(plants)]] } },
+        { lead: "After you sign in, we get what we can of the missed readings." },
         { button: { label: "Sign in to SunSynk", href: LOGINS } },
       ],
       footer: [HELP],
