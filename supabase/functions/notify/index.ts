@@ -27,7 +27,7 @@
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { reportError, serve, track } from "../_shared/errors.ts";
 import {
-  accountDeleted, type Email, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
+  accountDeleted, type Email, type Price, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, cardChanged, cardExpiring, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
   offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, needAHand,
 } from "../_shared/email.ts";
@@ -98,6 +98,22 @@ async function socAt(plant: number, at: number): Promise<number | null> {
 /** The saved card and the plan, for billing emails that name them (0162). */
 const billFacts = (user: string | null) =>
   user ? rpc<{ card: string | null; plan: "free" | "home" | "family" } | null>("email_billing_facts", { p_user: user }) : Promise.resolve(null);
+/** A plan's monthly price from the live offer, and its usual price (SOLAR-415). */
+let offerNow: { prices: { monthly: Record<string, number> }; listPrices: { monthly: Record<string, number> } } | null = null;
+async function priceOf(plan: "home" | "family"): Promise<Price> {
+  offerNow ??= await rpc("api_offer");
+  return { plan, now: offerNow!.prices.monthly[plan], list: offerNow!.listPrices.monthly[plan] };
+}
+/** The account's first plant (or the one given), its name and how many day totals it holds. */
+async function historyAt(user: string | null, plantId?: number | null): Promise<{ plant: string; days: number } | null> {
+  if (!user) return null;
+  let q = db.from("plant_users").select("plant_id, plant_name").eq("user_id", user);
+  if (plantId) q = q.eq("plant_id", plantId);
+  const { data: pu } = await q.order("linked_at").limit(1).maybeSingle();
+  if (!pu) return null;
+  const { count } = await db.from("plant_energy").select("period", { count: "exact", head: true }).eq("plant_id", pu.plant_id).eq("bucket", "day");
+  return { plant: pu.plant_name || "your plant", days: count ?? 0 };
+}
 /** The newest earlier email of a kind for this user, to read what it said. */
 async function lastMail(user: string | null, kind: string, before: number): Promise<Record<string, any> | null> {
   if (!user) return null;
@@ -293,7 +309,8 @@ async function build(r: Row): Promise<Email | null> {
       return rep && report({ ...rep, freeWeekEnds: d.freeWeekEnds === true });
     }
     case "free_week_soon":
-      return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", timeZone: tz }), p.name, d.days ?? 0, d.perMonth ?? 83);
+      return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: tz }).replace(/\bSept\b/, "Sep"),
+        p.name, d.days ?? 0, await priceOf("home"));
     case "free_week_setup": return d.steps?.length ? freeWeekSetup(d.steps, r.plant_id ?? undefined, d.battery !== false) : null;
     case "account_deleted": return accountDeleted(r.to_email);
     // Billing (0116): amounts in whole rand, dates as "2026-11-01".
@@ -346,8 +363,14 @@ async function build(r: Row): Promise<Email | null> {
       return billMailFailed({ kind: String(d.kind), key: String(d.key), user: String(d.user ?? ""), error: String(d.error ?? "") });
     case "bill_free":
       return movedToFree({ from: d.from, kept: d.kept, stopped: d.stopped, deleteOn: day(d.deleteOn),
-        amount: (await lastMail(r.user_id, "bill_failed", r.id))?.amount ?? undefined });
-    case "bill_removal_soon": return plantsRemovalSoon(d.plants, day(d.on), (await billFacts(r.user_id))?.plan);
+        amount: (await lastMail(r.user_id, "bill_failed", r.id))?.amount ?? undefined,
+        days: (await historyAt(r.user_id, r.plant_id))?.days });
+    case "bill_removal_soon": {
+      // The next plan up keeps them: Free to Home if 2 plants fit, else Family.
+      const plan = (await billFacts(r.user_id))?.plan;
+      const up = plan === "free" ? (d.plants.length + 1 <= 2 ? "home" : "family") : plan === "home" ? "family" : null;
+      return plantsRemovalSoon(d.plants, day(d.on), plan, up ? await priceOf(up) : undefined);
+    }
     case "bill_renewal_notice":
       return renewalNotice({ plan: d.plan, amount: d.amount, on: day(d.on), card: (await billFacts(r.user_id))?.card ?? undefined,
         change: d.changed ? "Your plan changes on that date, as you booked." : undefined });
@@ -359,7 +382,10 @@ async function build(r: Row): Promise<Email | null> {
         next: d.nextDate ? { amount: d.nextAmount, date: day(d.nextDate) } : undefined });
     case "bill_card_expiring":
       return cardExpiring({ card: d.card, on: day(d.on), final: d.final === true, next: { amount: d.nextAmount, date: day(d.nextDate) } });
-    case "winback": return winback({ from: d.from, keepUntil: day(d.keepUntil) });
+    case "winback": {
+      const h = await historyAt(r.user_id, r.plant_id);
+      return winback({ from: d.from, keepUntil: day(d.keepUntil), plant: h?.plant, days: h?.days, price: await priceOf(d.from) });
+    }
     case "need_a_hand": return needAHand();
   }
   throw new Error(`unknown kind ${r.kind}`);
@@ -592,7 +618,7 @@ async function renderAll(plantId: number, today?: string) {
   const { count: days } = await db.from("plant_energy").select("period", { count: "exact", head: true })
     .eq("plant_id", plantId).eq("bucket", "day").lt("period", today);
   out["free-week-setup"] = freeWeekSetup(["size", "reserve", "panels"]);
-  out["free-week-ends-soon"] = freeWeekEndsSoon("Monday", p.name, days ?? 0, 83);
+  out["free-week-ends-soon"] = freeWeekEndsSoon("Monday 10 Nov", p.name, days ?? 0, await priceOf("home"));
   return out;
 }
 
