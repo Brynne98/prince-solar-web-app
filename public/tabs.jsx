@@ -3556,6 +3556,12 @@ const hadPassword = () => { try { return localStorage.getItem(HAD_PASSWORD) !== 
 // Dark, Light or the device's (SOLAR-318). Kept on this device by theme.js, not the account.
 function AppearanceSection() {
   const [theme, setTheme] = React.useState(window.getTheme());
+  // another tab on this device changed it (theme.js fires ps-theme)
+  React.useEffect(() => {
+    const sync = () => setTheme(window.getTheme());
+    window.addEventListener('ps-theme', sync);
+    return () => window.removeEventListener('ps-theme', sync);
+  }, []);
   const pick = (v) => { setTheme(v); window.setTheme(v); window.track('theme_changed', { theme: v }); };
   return (
     <SettingsSection id="appearance" title="Appearance">
