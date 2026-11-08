@@ -1457,14 +1457,14 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const peak = importPeak(points);
   // grid-down runs for the day, from the same history Equipment's supply chart shades
   const [histRuns, setHistRuns] = React.useState(null); // null until the history answers
-  const [gridDay, setGridDay] = React.useState(null); // today: our own minute readings, as Equipment's Grid tile
+  const [gridDay, setGridDay] = React.useState(null); // the day's minute readings, as Equipment's Grid tile
   React.useEffect(() => {
     let alive = true;
     setHistRuns(null); setGridDay(null);
     window.fetchInverterHistory(pick.date, refreshKey)
       .then(r => { if (alive) setHistRuns(outageRuns(r || [], ['gmin', 'gmax'], DAY_LAST)); })
       .catch(() => { if (alive) setHistRuns([]); });
-    if (pick.isToday) window.fetchGridToday(refreshKey).then(r => { if (alive) setGridDay(r); }).catch(() => { if (alive) setGridDay({ buckets: [] }); });
+    window.fetchGridToday(refreshKey, pick.isToday ? null : pick.date).then(r => { if (alive) setGridDay(r); }).catch(() => { if (alive) setGridDay({ buckets: [] }); });
     return () => { alive = false; };
   }, [pick.date, pick.isToday, refreshKey]);
   // today the history lags up to 6 h: our readings fill it in, and the band grows while the grid is off (SOLAR-421)
@@ -1472,9 +1472,10 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const gb = gridDay && gridDay.buckets;
   const liveFrom = useLiveOffFrom(pick.isToday && a.gridPresent === false, gb, nowIdx);
   // drawn once both answers are in, so a reload never shows part of the band first
-  const offPending = !histRuns || (pick.isToday && !gb);
+  const offPending = !histRuns || !gb;
   const outages = offPending ? [] : !pick.isToday ? histRuns : gridOffRuns(histRuns, gb, liveFrom, nowIdx);
-  const outageMin = outageMinutes(outages);
+  // the label counts minutes, as the notices do; the band keeps 5-minute steps (SOLAR-430)
+  const outageMin = offPending ? 0 : gridDay.offMinutes != null ? Number(gridDay.offMinutes) : outageMinutes(outages);
   // where the day's imports went: the same flows Solar and Home show (SOLAR-332)
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
   const [daily, loadDaily] = useDaily(refreshKey);

@@ -298,7 +298,7 @@ function outageAt(runs, i) {
 }
 // "Grid off 9h" by the date; its square is the band's red, so it names the shading.
 function OutagePill({ mins, what }) {
-  return mins > 0 ? <window.Tip className="hv-gap" text={'When the ' + what.toLowerCase() + ' was off, to the nearest 5 minutes.'}><i className="hv-gap-sq" />{what} off {window.fmtDuration(mins)}</window.Tip> : null;
+  return mins > 0 ? <window.Tip className="hv-gap" text={what === 'Grid' ? 'How long the grid was off.' : 'When the ' + what.toLowerCase() + ' was off, to the nearest 5 minutes.'}><i className="hv-gap-sq" />{what} off {window.fmtDuration(mins)}</window.Tip> : null;
 }
 // A series from index `from` to `to` as an SVG path: x(i) across, yAt(i) down, which is null
 // where there is no reading, so the line breaks there rather than bridging the gap.
@@ -352,6 +352,15 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
       .catch(() => { if (alive) setInvs([]); });
     return () => { alive = false; };
   }, [date, refreshKey]);
+  // the Grid off label in minutes, as the Grid tab and the notices count it (SOLAR-430)
+  const [gridMin, setGridMin] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    setGridMin(null);
+    if (kind === 'ac') window.fetchGridToday(refreshKey, isToday ? null : date)
+      .then(r => { if (alive && r && r.offMinutes != null) setGridMin(Number(r.offMinutes)); }).catch(() => {});
+    return () => { alive = false; };
+  }, [kind, date, isToday, refreshKey]);
 
   const isTemp = kind === 'temp';
   const fKey = kind === 'output' ? ['fmin', 'fmax'] : ['gmin', 'gmax'];
@@ -403,7 +412,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
     return segs.map(sg => 'M' + sg.map(q => q[0].toFixed(1) + ' ' + q[2].toFixed(1)).join(' L') + ' L' + [...sg].reverse().map(q => q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' L') + ' Z').join(' ');
   };
   const outages = isTemp ? [] : outageRuns(shown, fKey, lastIdx);
-  const outageMin = outageMinutes(outages);
+  const outageMin = gridMin != null ? gridMin : outageMinutes(outages);
   const offWord = kind === 'output' ? 'Output' : 'Grid';
 
   // legend value: hovered bucket, else the latest reading; never a reading from another time
