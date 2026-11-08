@@ -762,6 +762,7 @@ export type Change = {
   keepPlants?: string[];
   deleteOn?: string;
   next?: { amount: number }; // absent on Free
+  days?: number; // day totals the plants to delete hold between them
 };
 
 export const planChangeBooked = (c: Change) => {
@@ -769,15 +770,17 @@ export const planChangeBooked = (c: Change) => {
   const switchOnly = c.from === c.to;
   const title = cancel ? `${PLAN_NAME[c.from]} ends on ${c.on}` : switchOnly ? `${PLAN_NAME[c.from]} goes ${c.toPeriod} on ${c.on}` : `You move to ${PLAN_NAME[c.to]} on ${c.on}`;
   const per = (c.toPeriod ?? c.fromPeriod) === "yearly" ? "a year" : "a month";
-  const plants: [string, string][] = c.removePlants.length
-    ? [...(c.keepPlants?.length ? [["Plants kept", list(c.keepPlants)] as [string, string]] : []), [`Deleted on ${c.deleteOn ?? c.on}`, list(c.removePlants)]]
-    : [];
+  // Plants to delete lead, in amber, as in the later "deleted on" email (SOLAR-415).
+  const hero = c.removePlants.length
+    ? lost(`Deleted on ${c.deleteOn ?? c.on}`, plantCount(c.removePlants.length), withDays(names(c.removePlants), c.days)) : undefined;
+  const kept: [string, string][] = hero && c.keepPlants?.length ? [["Plants kept", list(c.keepPlants)]] : [];
+  const keep = { button: { label: `Keep ${PLAN_NAME[c.from]}`, href: PLAN } };
   return make(title, {
     title,
     parts: cancel
-      ? [{ lead: `Nothing more is charged. ${PAID_FREE}` }, ...(plants.length ? [{ box: { rows: plants } }] : []),
-         { button: { label: `Keep ${PLAN_NAME[c.from]}`, href: PLAN } }]
-      : [{ box: { rows: [[switchOnly ? `${c.on} payment` : `From ${c.on}`, `${c.next ? rand(c.next.amount) : "R0"}${switchOnly ? "" : ` ${per}`}`], ...plants] } }, SEE_PLAN],
+      ? [{ lead: `Nothing more is charged. ${PAID_FREE}` }, ...(hero ? [{ box: { hero, rows: kept } }] : []), keep]
+      : [{ box: { hero, rows: [[switchOnly ? `${c.on} payment` : `From ${c.on}`, `${c.next ? rand(c.next.amount) : "R0"}${switchOnly ? "" : ` ${per}`}`], ...kept] } },
+         hero ? keep : SEE_PLAN],
     footer: BILL_FOOTER,
   });
 };

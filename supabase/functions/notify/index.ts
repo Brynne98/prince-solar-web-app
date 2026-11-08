@@ -352,6 +352,7 @@ async function build(r: Row): Promise<Email | null> {
       return planChangeBooked({ keepPlants: keep,
         from: d.from, to: d.to, fromPeriod: d.fromPeriod, toPeriod: d.toPeriod, on: day(d.on),
         removePlants: d.removePlants, deleteOn: d.deleteOn ? day(d.deleteOn) : undefined, next: d.to === "free" ? undefined : { amount: d.nextAmount },
+        days: await historyOf(r.user_id, d.removePlants ?? []),
       });
     }
     case "bill_kept": {
