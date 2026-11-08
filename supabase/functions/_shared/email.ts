@@ -162,7 +162,7 @@ function html(subject: string, b: Body): string {
         `<div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(hero.label)}</div>` +
         `<div class="${hero.tone ?? "t"}" style="margin-top:8px;font:700 40px/1 ${MONO};font-variant-numeric:tabular-nums;color:${hero.tone ? C[hero.tone] : "#e7ecf2"}">${esc(hero.value)}</div>` +
         (hero.sub ? `<div class="d" style="margin-top:6px;font:400 13px/1.4 ${SANS};color:#7f8da0">${esc(hero.sub)}</div>` : "") + `</td></tr>` : "";
-      const lines = r.map(([l, v]) => `<tr><td class="m" style="padding:6px 12px 6px 0;font:400 14px/1.3 ${SANS};color:#9aa5b3;vertical-align:top">${esc(l)}</td>` +
+      const lines = r.map(([l, v]) => `<tr><td class="m" style="padding:6px 12px 6px 0;font:400 14px/1.3 ${SANS};color:#9aa5b3;vertical-align:top;white-space:nowrap">${esc(l)}</td>` +
         `<td class="t" align="right" style="padding:6px 0;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2;vertical-align:top">${v}</td></tr>`).join("");
       const tick = (done?: boolean) => done
         ? `<div style="width:20px;height:20px;border-radius:50%;background:#3ddc84;font-size:0;line-height:0"><img src="${SITE}/email/tick.png" width="20" height="20" alt="" style="display:block;border:0"></div>`
@@ -233,7 +233,7 @@ ${s.delta ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};colo
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
 <tr><td style="padding:24px 16px 16px 20px"><a href="${APP}" style="text-decoration:none"><img src="${SITE}/icon-192.png" width="28" height="28" alt="" style="vertical-align:middle;border:0;border-radius:6px"> <span class="t" style="vertical-align:middle;font:700 17px/1 ${SANS};color:#e7ecf2">Prince Solar Hub</span></a></td></tr>
 <tr><td style="padding:0 12px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td class="card pad" style="background:#11161d;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:32px 32px ${Math.max(0, 32 - tail)}px">
-<h1 class="t" style="margin:0 0 ${b.sub ? 4 : 16}px;font:700 20px/1.3 ${SANS};letter-spacing:-.02em;color:#e7ecf2">${esc(b.title)}</h1>
+<h1 class="t" style="margin:0 0 ${b.sub ? 4 : 16}px;font:700 20px/1.3 ${SANS};letter-spacing:-.02em;color:#e7ecf2">${esc(b.title).replace(/ (\S+)$/, "&nbsp;$1")}</h1>
 ${b.sub ? `<p class="m" style="margin:0 0 20px;font:400 14px/1.4 ${SANS};color:#9aa5b3">${esc(b.sub)}</p>` : ""}
 ${rows.join("\n")}
 </td></tr></table></td></tr>
@@ -262,7 +262,13 @@ function text(b: Body): string {
   return out.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
 }
 
-const make = (subject: string, b: Body): Email => ({ subject, html: html(subject, b), text: text(b) });
+// A phone line never splits a date ("7 Jan", "Jan 2027") or a card ("•••• 4081").
+const MON = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec";
+const keep = (h: string) => h
+  .replace(new RegExp(`(\\d{1,2}) (${MON})\\b`, "g"), "$1&nbsp;$2")
+  .replace(new RegExp(`\\b(${MON}) (\\d{4})`, "g"), "$1&nbsp;$2")
+  .replace(/•••• (\d{4})/g, "••••&nbsp;$1");
+const make = (subject: string, b: Body): Email => ({ subject, html: keep(html(subject, b)), text: text(b) });
 
 
 // ---------------------------------------------------------------- account mail
@@ -455,7 +461,7 @@ const trend = (n: number | undefined, prev: string, better: "up" | "down"): { de
   if (Math.round(n) === 0) return { delta: { n, prev } };
   return { delta: { n, prev, tone: (n > 0) === (better === "up") ? "good" : "bad" } };
 };
-const rand = (n: number) => "R" + Math.round(n).toLocaleString("en-ZA").replace(/,/g, " ");
+const rand = (n: number) => "R" + Math.round(n).toLocaleString("en-US");
 const EVERY: Record<Period, string> = { week: "Weekly", month: "Monthly", year: "Yearly" };
 
 export function report(r: Report): Email {
@@ -552,8 +558,8 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
         return [`Grid back at ${plant}`, [{ box: { hero: { label: "Grid was off for", value: e.lasted ?? "a while", sub: span(e.since, e.at) },
           rows: e.chargePct != null ? [["Battery", batt(e.chargePct)]] : [] } }]];
       case "batt_hot":
-        return [`Battery hot at ${plant}`, [{ box: { hero: { label: "Battery", value: `${e.tempC} °C`, tone: "bad", sub: `at ${e.at} ${day}` },
-          rows: (e.hotDays ?? 1) > 1 ? [["Over 45 °C", `${e.hotDays} of the last 30 days`]] : [] } }]];
+        return [`Battery hot at ${plant}`, [{ box: { hero: { label: "Battery", value: `${e.tempC}°C`, tone: "bad", sub: `at ${e.at} ${day}` },
+          rows: (e.hotDays ?? 1) > 1 ? [["Over 45°C", `${e.hotDays} of the last 30 days`]] : [] } }]];
       case "bank_drift": {
         const pcts = e.banks.map((b) => b.chargePct);
         return [`Batteries charging unevenly at ${plant}`, [{ box: {
