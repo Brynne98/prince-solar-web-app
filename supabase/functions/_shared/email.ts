@@ -796,14 +796,15 @@ export const planChangeBooked = (c: Change) => {
 export type Kept = { plan: Plan; period: BillPeriod; next: { amount: number; date: string }; undone?: { to: Plan; toPeriod?: BillPeriod } };
 
 export const planKept = (k: Kept) => {
+  // Warm, not loud (SOLAR-415): a cancel or downgrade undone says what carries on. Undoing
+  // a monthly/yearly switch changes nothing they'd notice, so it just says so.
   const u = k.undone;
-  const title = !u ? `You're staying on ${PLAN_NAME[k.plan]}`
-    : u.to === "free" ? `${PLAN_NAME[k.plan]} won't end on ${k.next.date}`
-    : u.to !== k.plan ? `You won't move to ${PLAN_NAME[u.to]} on ${k.next.date}`
-    : `${PLAN_NAME[k.plan]} stays ${k.period}`;
+  const periodOnly = !!u && u.to === k.plan;
+  const title = periodOnly ? `${PLAN_NAME[k.plan]} stays ${k.period}` : `Good to have you on ${PLAN_NAME[k.plan]}`;
+  const lead = periodOnly ? null : u && u.to !== "free" ? "Your plants, history and reports carry on as before." : "Your history and reports carry on as before.";
   return make(title, {
     title,
-    parts: [{ box: { rows: [["Next payment", `${rand(k.next.amount)} on ${k.next.date}`]] } }, SEE_PLAN],
+    parts: [...(lead ? [{ lead }] : []), { box: { rows: [["Next payment", `${rand(k.next.amount)} on ${k.next.date}`]] } }, SEE_PLAN],
     footer: BILL_FOOTER,
   });
 };
