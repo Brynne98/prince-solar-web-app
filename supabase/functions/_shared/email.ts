@@ -125,10 +125,13 @@ function drawBars(b: Bars): string {
   // The best value, with its unit, is wider than a bar, so its cell spans R bars on each
   // side and centres over its own bar. R is enough bars to hold the ~70px label on a
   // ~290px phone chart. Near either end there aren't R bars to that side, so the label
-  // lines up with the first or last bar instead: it never runs past either end.
-  const R = Math.max(1, Math.ceil((Math.ceil((70 * v.length) / 290) - 1) / 2));
-  const lo = Math.max(0, best - R), hi = Math.min(v.length - 1, best + R);
-  const [a0, a1, align] = best - lo === hi - best ? [lo, hi, "center"] : best - lo < hi - best ? [lo, hi, "left"] : [lo, hi, "right"];
+  // lines up with the first or last bar instead: it never runs past either end. That
+  // cell still spans 2R+1 bars, since text too wide for its cell spills right even when
+  // set to the right.
+  const n = v.length, R = Math.max(1, Math.ceil((Math.ceil((70 * n) / 290) - 1) / 2));
+  const [a0, a1, align] = best < R ? [0, Math.min(n - 1, 2 * R), "left"]
+    : best > n - 1 - R ? [Math.max(0, n - 1 - 2 * R), n - 1, "right"]
+    : [best - R, best + R, "center"];
   const empty = (i: number) => td("", i, "height:11px");
   // A fixed-layout table takes its column widths from the first row, so an empty row of
   // equal cells comes first; otherwise the spanning label cell squeezes its bars.
