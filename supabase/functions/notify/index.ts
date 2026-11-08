@@ -269,7 +269,7 @@ async function build(r: Row): Promise<Email | null> {
       // One stopped: the others send ("null"). The whole plant stopped: each its own last time.
       return ev({ kind: "logger_stale", since: hhmm(d.since, tz), inverter: d.inverter ?? undefined,
         inverters: invs.map((i) => ({ name: `Inverter ${i.sn}`,
-          last: stale && i.sn !== stale ? null : hhmm(i.last_dev ?? d.since, tz) })) }, d.since);
+          last: stale ? (i.sn === stale ? hhmm(d.since, tz) : null) : hhmm(i.last_dev ?? d.since, tz) })) }, d.since);
     }
     case "logger_back": {
       const sn = d.inverter ? String(r.key).split(":")[2] : null; // logger_back:<plant>:<sn>:<last_dev>
