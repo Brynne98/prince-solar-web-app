@@ -325,6 +325,8 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   // Only plants paid for export get an Exported tile. Every grid-tied inverter leaks a
   // few Wh of backflow, so a non-zero counter alone is not a sign the site sells.
   const showExport = hasGrid && rateExp > 0;
+  // grid off now, but a period that imported still shows how much (SOLAR-420)
+  const showImp = hasGrid || pImp > 0;
   // trend vs the same elapsed slice of the previous period. Today's is yesterday up to
   // the same time (0077), so it is fair from the first minute and shows all day.
   // "current" = the live value shown in the tile (pPv/pLoad/…) so the arrow stays
@@ -405,7 +407,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         info={OV_INFO.home} />
       <MiniStat loading={pending} label="Independence" value={pSuff != null ? [pSuff, '%'] : '—'} color={CC.soc} bar={pSuff ?? undefined} trend={tSuff} trendFrom={cmpPhrase}
         info={OV_INFO.suff} />
-      {hasGrid && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendFrom={cmpPhrase}
+      {showImp && <MiniStat loading={pending} label="Imported" value={window.fmtEnergyParts(pImp)} color={CC.grid} trend={tImp} trendDelta={dImp} trendInvert trendFrom={cmpPhrase}
         info={OV_INFO.imp}
         sub={silent ? undefined : a.gridPresent == null ? (
           // No inverter has reported mains voltage yet; a blank here read as a
@@ -421,7 +423,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             <span className="gs-dot" />{a.gridPresent ? (a.phaseDown ? 'Phase down' : 'Grid on') : 'Grid off'}
           </window.Tip>
         )} />}
-      {!hasGrid && <MiniStat loading={pending} label="Grid" value="Off" color={CC.grid}
+      {!showImp && <MiniStat loading={pending} label="Grid" value="Off" color={CC.grid}
         info={OV_INFO.grid} />}
       {/* after Imported, the order Power flow uses */}
       {showExport && <MiniStat loading={pending} label="Exported" value={window.fmtEnergyParts(pExp)} color={CC.grid}
