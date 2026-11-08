@@ -264,6 +264,32 @@ function outageRuns(invs, fKey, lastIdx) {
   return runs;
 }
 const outageMinutes = runs => runs.reduce((n, r) => n + (r[1] - r[0] + 1) * 5, 0);
+// Today's grid-off runs (SOLAR-421). SunSynk's history (`runs`) lands every 6 hours, so it is
+// joined with our own minute readings (`buckets` from api_grid_today, {i, off}) and, while
+// the grid is off now, every slot from `liveFrom` to `nowIdx`: the band grows until it is back.
+function gridOffRuns(runs, buckets, liveFrom, nowIdx) {
+  const off = new Set();
+  (runs || []).forEach(([a, b]) => { for (let i = a; i <= b; i++) off.add(i); });
+  (buckets || []).forEach(b => { if (b.off) off.add(b.i); });
+  if (liveFrom != null && nowIdx != null) for (let i = liveFrom; i <= nowIdx; i++) off.add(i);
+  const out = [];
+  [...off].sort((x, y) => x - y).forEach(i => { const r = out[out.length - 1]; if (r && r[1] === i - 1) r[1] = i; else out.push([i, i]); });
+  return out;
+}
+// The slot the grid has been off since, as this page knows it: the last of our readings'
+// buckets when they already end off, else the first slot the live check said off. null while on.
+function useLiveOffFrom(offNow, buckets, nowIdx) {
+  const ref = React.useRef(null);
+  const plant = window.CURRENT_PLANT;
+  if (!offNow || nowIdx == null) { ref.current = null; return null; }
+  if (!ref.current || ref.current.plant !== plant) {
+    const last = buckets && buckets[buckets.length - 1];
+    ref.current = { plant, from: last && last.off ? Math.min(last.i, nowIdx) : nowIdx };
+  }
+  return ref.current.from;
+}
+// The last 5-minute slot of `points` with a value in `field`: where today's line ends.
+const lastSlot = (points, field) => { for (let i = points.length - 1; i >= 0; i--) if (points[i][field] != null) return Math.round(points[i].t / 5); return null; };
 const OUTAGE_TITLE = 'Five-minute buckets with at least one reading under 50 V or 10 Hz — a blackout, to the nearest bucket';
 // The run holding bucket i as "10:25–19:30", for the hover card; null outside every run.
 function outageAt(runs, i) {
