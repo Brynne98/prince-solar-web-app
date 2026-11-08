@@ -1464,14 +1464,14 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const peak = importPeak(points);
   // grid-down runs for the day, from the same history Equipment's supply chart shades
   const [histRuns, setHistRuns] = React.useState(null); // null until the history answers
-  const [gridDay, setGridDay] = React.useState(null); // today: our own minute readings, as Equipment's Grid tile
+  const [gridDay, setGridDay] = React.useState(null); // the day's minute readings, as Equipment's Grid tile
   React.useEffect(() => {
     let alive = true;
     setHistRuns(null); setGridDay(null);
     window.fetchInverterHistory(pick.date, refreshKey)
       .then(r => { if (alive) setHistRuns(outageRuns(r || [], ['gmin', 'gmax'], DAY_LAST)); })
       .catch(() => { if (alive) setHistRuns([]); });
-    if (pick.isToday) window.fetchGridToday(refreshKey).then(r => { if (alive) setGridDay(r); }).catch(() => { if (alive) setGridDay({ buckets: [] }); });
+    window.fetchGridToday(refreshKey, pick.isToday ? null : pick.date).then(r => { if (alive) setGridDay(r); }).catch(() => { if (alive) setGridDay({ buckets: [] }); });
     return () => { alive = false; };
   }, [pick.date, pick.isToday, refreshKey]);
   // today the history lags up to 6 h: our readings fill it in, and the band grows while the grid is off (SOLAR-421)
@@ -1479,9 +1479,10 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const gb = gridDay && gridDay.buckets;
   const liveFrom = useLiveOffFrom(pick.isToday && a.gridPresent === false, gb, nowIdx);
   // drawn once both answers are in, so a reload never shows part of the band first
-  const offPending = !histRuns || (pick.isToday && !gb);
+  const offPending = !histRuns || !gb;
   const outages = offPending ? [] : !pick.isToday ? histRuns : gridOffRuns(histRuns, gb, liveFrom, nowIdx);
-  const outageMin = outageMinutes(outages);
+  // the label counts minutes, as the notices do; the band keeps 5-minute steps (SOLAR-430)
+  const outageMin = offPending ? 0 : gridOffMinutes(gridDay, pick.isToday && a.gridPresent === false) ?? outageMinutes(outages);
   // The chart on screen with its own band. While a newly picked day and its grid-off answers
   // load, the last whole day stays, faded as Solar's does, so no 0 W line shows where its
   // band was (SOLAR-432). A refresh of the same day doesn't fade.
@@ -1796,7 +1797,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const nowIdx = lastSlot(pts, 'grid');
   const liveFrom = useLiveOffFrom(a.gridPresent === false, gridDay && gridDay.buckets, nowIdx);
   const outages = gridOffRuns(null, gb, liveFrom, nowIdx);
-  const offMin = gridDay ? Number(gridDay.offMinutes) || 0 : 0;
+  const offMin = gridOffMinutes(gridDay, a.gridPresent === false) || 0;
   const gridState = st.allQuiet ? QUIET : a.gridPresent == null ? ['stale', 'Not known']
     : a.gridPresent ? ['ok', 'On'] : ['warn', 'Off'];
   const vVals = gb.map(b => [b.i * 5, b.v]);
@@ -2518,7 +2519,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
   const booked = bookedChange(b);
   // the plan's own card while a change is booked: when it ends or changes, in either period
-  const ownDate = <div className="plan-cur">{b.nextPlan === 'free' ? 'Ends ' : 'Changes '}{billDay(b.nextDate)}</div>;
+  // built only when shown: a comped plan has no date (SOLAR-433)
+  const ownDate = () => <div className="plan-cur">{b.nextPlan === 'free' ? 'Ends ' : 'Changes '}{billDay(b.nextDate)}</div>;
   // a smaller plan booked for the billing date in this period; Free has none
   const bookedHere = (p) => b.nextPlan === p && (p === 'free' || (b.nextPeriod || b.period) === view);
   // The line under a price: Family's says where more plants go
@@ -2526,7 +2528,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   const action = (p) => {
     // a paid year changes nothing until it starts (SOLAR-298); a quiet line holds the button's row
     if (b.prepaidOn && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
-    if (p === b.plan && paid && b.nextPlan) return ownDate;
+    if (p === b.plan && paid && b.nextPlan) return ownDate();
     if (p === b.plan) {
       if (!sameView) return b.nextPeriod === view ? <div className="plan-cur">From {billDay(b.nextDate)}</div>
         // monthly to yearly is paid now (SOLAR-298); yearly to monthly is booked

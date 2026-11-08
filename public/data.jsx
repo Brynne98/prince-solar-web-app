@@ -36,7 +36,7 @@ const ROUTES = {
   '/api/data/days':        () => ['api_data_days', {}],
   '/api/history/inverters': (q) => ['api_inverter_history', { p_date: q.date || null }],
   '/api/strings/health':    () => ['api_string_health', {}],
-  '/api/grid/today':        () => ['api_grid_today', {}],
+  '/api/grid/today':        (q) => ['api_grid_today', { p_date: q.date || null }],
   '/api/energy':           (q) => ['api_energy', { p_period: q.period || 'week' }],
   '/api/plant/days':       () => ['api_plant_days', {}],
   '/api/trends/by-hour':   (q) => ['api_trends_by_hour', { p_days: Number(q.days) || 14 }],
@@ -355,10 +355,11 @@ async function fetchCompare(rk) {
 async function fetchStringHealth() {
   return getJSON('/api/strings/health');
 }
-// today's grid from our own minute readings: volts and off per 5-minute step, off minutes (0159, SOLAR-398)
+// a day's grid from our own minute readings, SunSynk's history filling their gaps: volts and off
+// per 5-minute step, off minutes (0159, SOLAR-398, 0166). date: a past day; none is today.
 // Shared: Equipment's Grid tile and the Grid tab's day chart ask for the same answer (SOLAR-421).
-async function fetchGridToday(rk) {
-  return sharedAsk('gridtoday', MIN5, rk, () => getJSON('/api/grid/today'));
+async function fetchGridToday(rk, date) {
+  return sharedAsk('gridtoday:' + (date || ''), MIN5, rk, () => getJSON('/api/grid/today' + (date ? '?date=' + date : '')));
 }
 
 // ---- me: plan, preferences, plants -----------------------------------------
@@ -389,14 +390,14 @@ const EMAIL_KINDS = ['weekly', 'monthly', 'yearly', 'grid', 'battery', 'panels',
 const fetchEmailPrefs = (userId) => fetchFlags('email_prefs', EMAIL_KINDS, userId);
 const saveEmailPref = (userId, kind, on) => saveFlag('email_prefs', 'email_pref_change_done', userId, kind, on);
 // The alerts of the last 30 days, {pinned, items, unread} (0124, SOLAR-244).
-// The bell: the billing notices, and the last 30 days of alerts one row each, a start and
-// its "back" together, as the full page lists them (SOLAR-411). unread counts those rows.
+// The bell: the billing notices, and the last 30 days of alerts as the full page lists them
+// (SOLAR-411): a start and its "back" are two rows (0166, SOLAR-431). unread counts rows.
 async function fetchNotifications() {
   const [n, a] = await Promise.all([must(window.sb.rpc('api_notifications')),
     fetchAlerts({ from: new Date(Date.now() - 30 * 86400000) })]);
   return { pinned: n.pinned, items: a.items, unread: a.items.filter(it => !it.read).length };
 }
-// Every alert, one row per alert with when it went back (0152, SOLAR-327): {items, more,
+// Every alert, one row each, a "back" too (0166, SOLAR-431): {items, more,
 // unread}. from: a Date or null; kind: an alert switch or null; before: the last item shown.
 async function fetchAlerts({ from, kind, unread, before }) {
   return must(window.sb.rpc('api_alerts', { p_from: from ? from.toISOString() : null, p_switch: kind || null,
