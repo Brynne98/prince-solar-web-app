@@ -720,7 +720,6 @@ export type Upgrade = {
   from: Plan; to: Plan; period: BillPeriod;
   addedPlants?: number; // extra plants on Family: no email since SOLAR-371 (notify skips it)
   paidNow: number; daysLeft: number;
-  covers?: string; // "15 to 30 Nov"
   card?: string;
   credit?: number; // Home monthly to Family yearly (SOLAR-364): what the rest of the month came to
   next: { amount: number; date: string };
@@ -731,7 +730,7 @@ export const planUpgraded = (u: Upgrade) =>
     title: `You're on ${PLAN_NAME[u.to]}`,
     parts: [
       { box: { hero: { label: "Paid today", value: rand(u.paidNow),
-          sub: u.credit != null ? `${rand(u.credit)} off for the rest of your month` : u.covers ? `for ${u.covers}` : `for the ${u.daysLeft === 1 ? "day" : u.daysLeft + " days"} left this month` },
+          sub: u.credit != null ? `${rand(u.credit)} off for the rest of your month` : `for the rest of this ${u.period === "yearly" ? "year" : "month"}` },
         rows: [...(u.card ? [["Card", esc(u.card)] as [string, string]] : []), ["Next payment", `${rand(u.next.amount)} on ${u.next.date}`]] } },
       u.to === "family" ? { button: { label: "Add a plant", href: LOGINS } } : SEE_PLAN,
     ],

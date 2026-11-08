@@ -336,7 +336,7 @@ async function build(r: Row): Promise<Email | null> {
       return planUpgraded({
         from: d.from, to: d.to, period: d.period, addedPlants: d.from === d.to ? d.added : undefined,
         paidNow: d.amount, daysLeft: d.daysLeft, credit: d.credit ?? undefined, next: { amount: d.nextAmount, date: day(d.nextDate) },
-        covers: covers(addDays(d.nextDate, -d.daysLeft), addDays(d.nextDate, -1)), card: (await billFacts(r.user_id))?.card ?? undefined,
+        card: (await billFacts(r.user_id))?.card ?? undefined,
       });
     case "bill_switched":
       return planSwitched({
