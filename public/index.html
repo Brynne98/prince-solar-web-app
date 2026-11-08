@@ -586,12 +586,11 @@
   .overview-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-lg); margin-bottom: var(--sp-lg); flex-wrap: wrap; }
   .overview-head .section-title { margin-bottom: 0; }
   .mini-stat { padding: var(--sp-xl) var(--sp-lg); }
-  /* label left, trend arrow right on the same line; a long label wraps, the arrow keeps its corner */
-  /* tracking and gap kept tight so "Independence (?) ▼ 10%" fits one line in a ~200 px card */
-  .mini-label { font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
-    display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--sp-3xs) var(--sp-xs); }
+  .mini-label { font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); display: flex; }
   .ml-text { display: flex; align-items: center; min-width: 0; line-height: 1.35; }
-  .mini-label .trend-badge { margin-left: 0; top: 0; line-height: 1.35; text-transform: none; }
+  /* the trend in words under the number: "▲ 8% vs yesterday" (SOLAR-419) */
+  .mini-trend { font-size: var(--fs-sm); color: var(--dim); margin-top: var(--sp-2xs); line-height: 1.35; }
+  .mini-trend .trend-badge { margin: 0 var(--sp-2xs) 0 0; top: 0; font-size: inherit; }
   .mv-unit { font-size: var(--fs-md); font-weight: 500; margin-left: var(--sp-2xs); opacity: 0.85; }
   .mv-unit.pct { margin-left: 1px; }
   .mini-stat { transition: border-color var(--dur-fast) var(--ease-out); }
@@ -599,7 +598,7 @@
   /* baseline, not flex-end. Aligning the boxes lines up the two fonts' DESCENDER
      space, and the mono face reserves more of it — so its glyphs ride higher and the
      badge reads as sitting low. Baselines are where the glyphs actually rest. */
-  .mini-value { font-size: var(--fs-2xl); font-weight: 600; margin-top: var(--sp-sm); letter-spacing: -0.01em;
+  .mini-value { font-size: var(--fs-3xl); font-weight: 600; margin-top: var(--sp-sm); letter-spacing: -0.01em;
     display: flex; align-items: baseline; flex-wrap: wrap; row-gap: var(--sp-3xs); }
   /* Baseline alone sits the badge a touch high, box-bottom a touch low. 1px down off
      the baseline is the middle, and it is a nudge rather than a different rule. */
@@ -673,9 +672,9 @@
   /* drawn like the flow's boxes and at their zoom: clear, with the card's own plain border */
   .wall .mini-stat { --z: var(--wall-zoom, 1); background: transparent;
     padding: calc(var(--sp-lg) * var(--z)) calc(var(--sp-xl) * var(--z)) calc(var(--sp-lg) * var(--z)); border-radius: calc(var(--r-xl) * var(--z)); }
-  .wall .mini-label, .wall .mini-label .trend-badge { font-size: calc(var(--fs-xs) * var(--z)); }
+  .wall .mini-label { font-size: calc(var(--fs-xs) * var(--z)); }
   .wall .mini-value { font-size: calc(var(--fs-3xl) * var(--z)); margin-top: calc(var(--sp-sm) * var(--z)); }
-  .wall .mini-sub { font-size: calc(var(--fs-sm) * var(--z)); }
+  .wall :is(.mini-sub, .mini-trend) { font-size: calc(var(--fs-sm) * var(--z)); }
   @media (max-width: 600px) { .wall .today-strip { display: none; } }
   .wall .flow-wrap { height: 100%; display: flex; flex-direction: column; justify-content: center; }
   /* left, on the diagram's own left edge: as wide as the zoomed layout, centred like it */
@@ -1463,7 +1462,6 @@
     .today-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-sm); }
     .today-strip > :last-child:nth-child(odd) { grid-column: 1 / -1; }
     .mini-stat { padding: var(--sp-lg); }
-    .mini-value { font-size: var(--fs-2xl); }
     .solar-stats { gap: var(--sp-md); }
     .solar-stats .stat-tile { padding: var(--sp-lg); }
     .solar-tab .section-title { flex-direction: column; align-items: flex-start; gap: var(--sp-2xs); }
@@ -1897,7 +1895,7 @@
   .hl-line:hover b { text-decoration: underline; }
   .overview-section .hist-lock { padding: var(--sp-lg) var(--sp-xl); border: 1px solid var(--line); border-radius: var(--r-xl); background: var(--panel); }
   .today-strip.blurred .mini-value { filter: blur(7px); }
-  .today-strip.blurred .trend-badge { visibility: hidden; }
+  .today-strip.blurred .mini-trend { visibility: hidden; }
   .lock-cta { display: inline-flex; align-items: center; gap: var(--sp-xs); }
   .free-over { margin-bottom: var(--sp-lg); border-color: rgba(var(--accent-rgb),0.35); display: grid; gap: var(--sp-sm); }
   .free-over h2 { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.01em; }
