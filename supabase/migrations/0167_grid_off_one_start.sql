@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0166 — One start time for a grid outage, everywhere (SOLAR-430).
+-- 0167 — One start time for a grid outage, everywhere (SOLAR-430).
 --
 -- 8 Nov, plant 538820: the grid was off 14:51 to 19:24 (SunSynk history 0 Hz from
 -- 14:51:51, our readings back on at 19:24). Our readings had a hole 13:53-14:55 (dead
@@ -18,7 +18,7 @@
 --                       from the data, so notices already sent show the start too
 --                       (Brynne, 8 Nov: recompute old notices). Emails and pop-ups that
 --                       went out keep what they said.
---   api_alerts          0158's body; reads the row data through grid_notice_data.
+--   api_alerts          0166's body; reads the row data through grid_notice_data.
 --   api_grid_off_recent 0122's body; startedAt through grid_off_began.
 --   api_grid_today      0159's body plus p_date (a past day), so the Grid tab's and
 --                       Equipment's "Grid off" counts minutes, not 5-minute blocks.
@@ -48,7 +48,7 @@ as $$
      where v.device_time is not distinct from n.dt
      group by v.ts
   ),
-  -- 0166: SunSynk's history for the minutes we have no reading for
+  -- 0167: SunSynk's history for the minutes we have no reading for
   hist as (
     select (h.ts / 60) * 60 as ts, bool_or(h.grid_fac_hz >= 40) as present
       from public.inverter_history h
@@ -105,21 +105,16 @@ create or replace function public.api_alerts(p_from timestamptz default null, p_
 returns jsonb language sql stable security definer set search_path = '' as $$
   with a as (
     -- every alert the user can still see: plants still linked
-    select q.id, q.kind, q.key, q.pair_key, q.plant_id, pu.plant_name, q.read_at, q.created_at, q.data
+    select q.id, q.kind, q.key, q.plant_id, pu.plant_name, q.read_at, q.created_at, q.data
       from public.email_queue q
       join public.plant_users pu on pu.user_id = q.user_id and pu.plant_id = q.plant_id
      where q.user_id = auth.uid() and private.is_alert(q.kind)),
   e as (
-    -- one row per alert: each start, and a "back" whose start is gone
-    select s.*, b.id b_id, b.read_at b_read, b.created_at b_created, b.data b_data, b.kind b_kind
-      from a s
-      left join lateral (select x.* from public.email_queue x where x.user_id = auth.uid() and x.pair_key = s.key
-                          order by x.id limit 1) b on true
-     where (s.pair_key is null or not exists (select 1 from public.email_queue d where d.user_id = auth.uid() and d.key = s.pair_key))
-       and (p_from is null or s.created_at >= p_from)
+    select s.* from a s
+     where (p_from is null or s.created_at >= p_from)
        and (p_switch is null or private.alert_group(s.kind) = p_switch)
        and (p_before is null or (s.created_at, s.id) < (p_before_ts, p_before))
-       and (not p_unread or s.read_at is null or (b.id is not null and b.read_at is null))
+       and (not p_unread or s.read_at is null)
      order by s.created_at desc, s.id desc
      limit greatest(1, least(p_limit, 200)) + 1),
   shown as (select * from e order by created_at desc, id desc limit greatest(1, least(p_limit, 200))),
@@ -134,20 +129,17 @@ returns jsonb language sql stable security definer set search_path = '' as $$
     'unread', (select count(*) from a where read_at is null),
     'items', coalesce((select jsonb_agg(jsonb_build_object(
         'id', s.id, 'ts', s.created_at, 'kind', s.kind, 'plant', s.plant_id, 'plantName', s.plant_name,
-        'read', s.read_at is not null and (s.b_id is null or s.b_read is not null),
-        'ids', to_jsonb(array_remove(array[s.id, s.b_id], null)),
-        'endAt', (bt->>'at')::bigint,
-        'endDay', bt->>'day', 'endTime', bt->>'time',
-        'open', s.b_id is null and coalesce(private.is_alert(private.alert_back_kind(s.kind)), false)
+        'read', s.read_at is not null,
+        'ids', jsonb_build_array(s.id),
+        'open', coalesce(private.is_alert(private.alert_back_kind(s.kind)), false)
+                and not exists (select 1 from public.email_queue b where b.user_id = auth.uid() and b.pair_key = s.key)
                 and coalesce(s.created_at >= (select f.at from firsts f where f.kind = private.alert_back_kind(s.kind)), false)
                 and not exists (select 1 from public.email_queue l where l.user_id = auth.uid() and l.plant_id = s.plant_id
                                   and l.kind = s.kind and l.created_at > s.created_at))
         || t
         order by s.created_at desc, s.id desc) from shown s
-        cross join lateral (select private.alert_text(s.kind, private.grid_notice_data(s.plant_id, s.kind, s.data),   -- 0166
-                                                      s.created_at, public.plant_tz(s.plant_id)) t) x
-        left join lateral (select private.alert_text(s.b_kind, private.grid_notice_data(s.plant_id, s.b_kind, s.b_data), -- 0166
-                                                     s.b_created, public.plant_tz(s.plant_id)) bt) y on true),
+        cross join lateral (select private.alert_text(s.kind, private.grid_notice_data(s.plant_id, s.kind, s.data),   -- 0167
+                                                      s.created_at, public.plant_tz(s.plant_id)) t) x),
       '[]'::jsonb));
 $$;
 
@@ -155,7 +147,7 @@ create or replace function public.api_grid_off_recent(p_plant bigint default nul
 returns jsonb
 language sql stable security definer set search_path = public, pg_temp
 as $$
-  select jsonb_build_object('startedAt', coalesce(to_timestamp(private.grid_off_began(g.plant_id,       -- 0166
+  select jsonb_build_object('startedAt', coalesce(to_timestamp(private.grid_off_began(g.plant_id,       -- 0167
                                            extract(epoch from g.started_at)::bigint)), g.started_at),
                             'endedAt', g.ended_at)
     from public.grid_off g
@@ -166,7 +158,7 @@ $$;
 
 -- p_date: a past day in the plant's time zone; null is today, up to now.
 drop function if exists public.api_grid_today(bigint);
-create function public.api_grid_today(p_plant bigint default null, p_date date default null)
+create or replace function public.api_grid_today(p_plant bigint default null, p_date date default null)
 returns jsonb
 language sql
 stable
