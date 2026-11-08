@@ -9,7 +9,7 @@
 --   needs_relink   since = the login's last good poll (last_ok_at; account_mark leaves it
 --                  alone). No last_ok_at: the time we noticed, as before.
 --   grid_down      when the off run starts at the first reading after a gap (private.gaps,
---                  to_ts = run start), the start comes from the refilled per-inverter grid
+--                  ended up to 5 min before the run start, as when the first minute back has no voltage), the start comes from the refilled per-inverter grid
 --                  frequency: the first sample under 40 Hz after the last one at 40 Hz or
 --                  over. If the refill has not landed yet, or shows no off sample, the
 --                  row carries 'from' (the last on sample, else the gap's start) and the
@@ -24,7 +24,9 @@
 create or replace function private.grid_off_start(p_plant bigint, p_seen bigint)
 returns jsonb language sql stable security definer set search_path = '' as $$
   with g as (
-    select max(x.from_ts) from_ts from private.gaps x where x.plant_id = p_plant and x.to_ts = p_seen),
+    -- a gap that ended up to 5 min before: the first minutes after it may have had no voltage
+    select max(x.from_ts) from_ts from private.gaps x
+     where x.plant_id = p_plant and x.to_ts <= p_seen and x.to_ts > p_seen - 300),
   h as (
     select i.ts, i.grid_fac_hz from public.inverter_history i, g
      where i.plant_id = p_plant and i.ts > g.from_ts and i.ts <= p_seen and i.grid_fac_hz is not null),

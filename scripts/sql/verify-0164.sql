@@ -22,19 +22,19 @@ create function pg_temp.on_(p bigint, k int) returns void language sql as
   $$ select private.email_plant_apply(p, pg_temp.t(3720 + k * 60), '{"present": true, "has_batt": false}') $$;
 
 insert into auth.users (id, email)
-  select ('00000000-0000-0000-0000-00000000' || p)::uuid, p || '@t.test' from unnest(array[9101, 9102, 9103]) p;
+  select ('00000000-0000-0000-0000-00000000' || p)::uuid, p || '@t.test' from unnest(array[9101, 9102, 9103, 9104]) p;
 insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, last_ok_at)
   select ('00000000-0000-0000-0000-0000000a' || p)::uuid, ('00000000-0000-0000-0000-00000000' || p)::uuid, 'w' || p, 'active',
          to_timestamp(pg_temp.t(0))
-    from unnest(array[9101, 9102, 9103]) p;
+    from unnest(array[9101, 9102, 9103, 9104]) p;
 insert into public.plant_users (plant_id, user_id, account_id)
   select p, ('00000000-0000-0000-0000-00000000' || p)::uuid, ('00000000-0000-0000-0000-0000000a' || p)::uuid
-    from unnest(array[9101, 9102, 9103]) p;
-insert into public.plant_config (plant_id, has_battery) select p, false from unnest(array[9101, 9102, 9103]) p;
+    from unnest(array[9101, 9102, 9103, 9104]) p;
+insert into public.plant_config (plant_id, has_battery) select p, false from unnest(array[9101, 9102, 9103, 9104]) p;
 -- every plant: grid on before the gap, then a 62-minute gap
 insert into private.plant_alert_state (plant_id, grid_on, grid_since, grid_run_on, grid_run_n, grid_run_start, stepped_ts)
-  select p, true, pg_temp.t(-3600), true, 60, pg_temp.t(-3600), pg_temp.t(0) from unnest(array[9101, 9102, 9103]) p;
-insert into private.gaps (plant_id, from_ts, to_ts) select p, pg_temp.t(0) + p - 9100, pg_temp.t(3720) from unnest(array[9101, 9102, 9103]) p;
+  select p, true, pg_temp.t(-3600), true, 60, pg_temp.t(-3600), pg_temp.t(0) from unnest(array[9101, 9102, 9103, 9104]) p;
+insert into private.gaps (plant_id, from_ts, to_ts) select p, pg_temp.t(0) + p - 9100, pg_temp.t(3720) from unnest(array[9101, 9102, 9103, 9104]) p;
 
 -- ---- Login --------------------------------------------------------------------------------
 update private.sunsynk_accounts set status = 'needs_relink' where sunsynk_username = 'w9101';
@@ -80,6 +80,14 @@ select pg_temp.hist(9103, 'M', s, 50.0) from generate_series(60, 1800, 60) s;
 select pg_temp.off(9103, k) from generate_series(0, 2) k;
 select pg_temp.eq('grid: history that stops while on gives a range from the last on sample',
   (select data->>'from' from public.email_queue where plant_id = 9103 and kind = 'grid_down'), pg_temp.t(1800)::text);
+
+-- ---- Grid, first minute after the gap had no voltage (9104): run starts a minute later -------
+update private.gaps set to_ts = pg_temp.t(3660) where plant_id = 9104;
+select pg_temp.hist(9104, 'M', s, 49.9) from generate_series(60, 3047, 60) s;
+select pg_temp.hist(9104, 'M', s, 0) from generate_series(3111, 3711, 60) s;
+select pg_temp.off(9104, k) from generate_series(0, 2) k;
+select pg_temp.eq('grid: a gap that ended a minute before the off run still refines the start',
+  (select (data->>'since')::bigint from public.email_queue where plant_id = 9104 and kind = 'grid_down'), pg_temp.t(3111));
 
 -- ---- Grid, no gap: unchanged ----------------------------------------------------------------
 delete from private.gaps where plant_id = 9103;
