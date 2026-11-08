@@ -89,9 +89,12 @@ function skelVal(w) {
 }
 
 // cfg: the plant's saved settings from api_me, so the row holds the cards LiveTab will draw
+const RATE_ASK = 'Add your rate to see this'; // Saved's line with no rate set, also in its skeleton
 function LiveSkeleton({ cfg }) {
   const grid = cfg?.has_grid !== false;
   const exp = grid && cfg?.tariff_export > 0;
+  const rateSet = cfg ? cfg.tariff_import > 0 || cfg.tariff_export > 0
+    : (() => { try { return localStorage.getItem('synsynk.rateSet') !== '0'; } catch (e) { return true; } })();
   return (
     <div className="live-grid">
       <div className="overview-section">
@@ -108,7 +111,9 @@ function LiveSkeleton({ cfg }) {
           <MiniStat loading label="Independence" info={OV_INFO.suff} />
           {grid ? <MiniStat loading label="Imported" info={OV_INFO.imp} /> : <MiniStat loading label="Grid" info={OV_INFO.grid} />}
           {exp && <MiniStat loading label="Exported" info={OV_INFO.exp} />}
-          <MiniStat loading label="Saved" info={OV_INFO.saved} sub={NBSP} />
+          {/* no rate: the live card's "Add your rate" line, so the row lands at its height (SOLAR-429) */}
+          <MiniStat loading label="Saved" info={OV_INFO.saved}
+            sub={rateSet ? undefined : <button type="button" className="mini-link" disabled>{RATE_ASK}</button>} />
         </div>
       </div>
       <div className="card flow-card">
@@ -309,6 +314,8 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   }, [period, energy, pending, tz, a.pvToday, a.loadToday, a.gridFromToday, a.gridToToday]);
   const rate = snap.config?.tariffImport ?? 0;
   const rateExp = snap.config?.tariffExport ?? 0;
+  // remembered for the skeleton, which draws before the plant's settings arrive
+  React.useEffect(() => { try { localStorage.setItem('synsynk.rateSet', rate > 0 || rateExp > 0 ? '1' : '0'); } catch (e) {} }, [rate, rateExp]);
   let pPv, pLoad, pImp, pExp;
   if (period === 'today') { pPv = a.pvToday; pLoad = a.loadToday; pImp = hasGrid ? a.gridFromToday : 0; pExp = hasGrid ? a.gridToToday : 0; }
   // stored import even when the grid is off now: a year or lifetime still holds the
@@ -418,7 +425,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
         trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendFrom={cmpPhrase} trendVs={cmpVs}
         // no rate yet: the line under the dash opens Settings on Tariff
-        sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Add your rate to see this</button>
+        sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>{RATE_ASK}</button>
           : over && period === 'month' ? <button type="button" className="lock-btn" onClick={() => window.openPlans('month_saved')}><window.LockIcon />On paid plans</button> : undefined}
         info={rateExp > 0 ? OV_INFO.saved.slice(0, -1) + ', plus what you exported at your feed-in rate.' : OV_INFO.saved} />
     </div>
@@ -539,9 +546,9 @@ function MiniStat({ label, value, color, sub, info, trend, trendUnit, trendInver
       {loading
         ? <div className="mini-value mono" style={{ position: 'relative' }}>{NBSP}<window.Skeleton w="70%" h="auto" style={{ position: 'absolute', top: 0, bottom: 0, left: 0 }} /></div>
         : <div className="mini-value mono" style={{ color }}><span className="mv-num">{unitSplit(value)}</span></div>}
-      {/* loading keeps the line's height, so the row doesn't grow when the trend lands */}
-      {loading ? <div className="mini-trend">{NBSP}</div>
-        : arrow && <div className="mini-trend"><TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} tip={trendNote} delta={trendDelta} deltaFmt={trendDeltaFmt} />{trendVs}</div>}
+      {/* the trend line always keeps its height, empty while loading or with nothing to
+          compare (Year, Lifetime), so switching period doesn't make the row jump (SOLAR-429) */}
+      <div className="mini-trend">{arrow ? <><TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} tip={trendNote} delta={trendDelta} deltaFmt={trendDeltaFmt} />{trendVs}</> : NBSP}</div>
       {sub && <div className="mini-sub">{sub}</div>}
     </Card>
   );
