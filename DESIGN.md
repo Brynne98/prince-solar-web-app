@@ -288,7 +288,7 @@ changes. Cool grey, not warm paper (picked 2026-11-08).
 
 | Token | Dark | Light |
 |---|---|---|
-| `--bg` Night Ground | #0a0d12 | #f3f5f8 |
+| `--bg` Night Ground | #0a0d12 | #eaedf2 |
 | `--panel` | #11161d | #ffffff |
 | `--panel-2` Panel Raised | #141a22 | #f1f4f8 |
 | `--bar` sidebar, phone bar | #0d1117 | #ffffff |
@@ -303,6 +303,7 @@ changes. Cool grey, not warm paper (picked 2026-11-08).
 | `--ok` / `--warn` / `--bad` | #84cc16 / #f59e0b / #ef4444 | #477310 / #b4470e / #b91c1c |
 | `--bar-a` / `--bar-hover-a` day bars | 0.38 / 0.7 | 0.6 / 0.85 |
 | `--lift` sign-in card shadow | deep black | soft ink |
+| `--card-edge` / `--card-shadow` page cards | hairline / none | none / 1–3 px soft ink shadow |
 | `--on-accent` | #07130c | #ffffff |
 
 Light keeps every meaning and hue of dark, one step darker so each power and role colour
@@ -658,7 +659,10 @@ it stands in for. The sweep stops under reduced motion.
 - **Do** keep Muted text at or above 7:1 and Dim at or above 5:1 on Panel Raised.
 
 ### Don't:
-- **Don't** put a shadow on a card that sits in the page flow.
+- **Don't** put a shadow on a card that sits in the page flow, except light mode's
+  `--card-shadow` (SOLAR-426): on white-on-grey a tone step alone reads flat, so web light
+  cards lift with a faint shadow and no hairline. Dark keeps tone and hairline. The phone
+  app will use the phone norm: grey page, white cards, no shadow.
 - **Don't** add a sixth series colour or reuse one of the five for a different meaning.
 - **Don't** use the sun gradient or its glow anywhere but the brand orb and the login
   backdrop.
