@@ -83,9 +83,10 @@ a{color:inherit}
 // label-value rows split by space, no lines. Values may hold markup set by us (a coloured
 // battery %), never user text unescaped. tone colours the big number only.
 type Hero = { label: string; value: string; tone?: Tone; sub?: string };
-// checks: a checklist (setup). A done line is ticked and struck through, name only; an
-// open line has an empty box, the name, what it does, and where to find it, dimmer.
-type Check = { name: string; done?: boolean; text?: string; sub?: string };
+// checks: a checklist (setup) or numbered steps (adding a plant). A done line is ticked
+// and struck through, name only; an open line has an empty circle, or its step number n,
+// then the name, a line under it, and a dimmer line under that.
+type Check = { name: string; done?: boolean; n?: number; text?: string; sub?: string };
 type Box = { hero?: Hero; rows?: [label: string, value: string][]; checks?: Check[] };
 
 type Part =
@@ -96,8 +97,7 @@ type Part =
   | { stats: { label: string; value: string; unit?: string; tone?: Tone; sub?: string; delta?: Delta }[] } // report tiles, two to a row
   | { chart: { title: string; side?: string; bars: Bars; facts: { label: string; value: string; unit?: string; tone?: Tone; sub?: string }[] } }
   | { facts: { label: string; value: string }[] } // label left, value right
-  | { note: string }
-  | { steps: string[] }; // numbered how-to; may hold <b> set by us
+  | { note: string };
 
 // labels: one under each bar (a week); titles: the hover text per bar, where the mail app
 // shows it (desktop only). The highest bar is drawn full green, the rest dimmer.
@@ -164,12 +164,14 @@ function html(subject: string, b: Body): string {
         (hero.sub ? `<div class="d" style="margin-top:6px;font:400 13px/1.4 ${SANS};color:#7f8da0">${esc(hero.sub)}</div>` : "") + `</td></tr>` : "";
       const lines = r.map(([l, v]) => `<tr><td class="m" style="padding:6px 12px 6px 0;font:400 14px/1.3 ${SANS};color:#9aa5b3;vertical-align:top;white-space:nowrap">${esc(l)}</td>` +
         `<td class="t" align="right" style="padding:6px 0;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2;vertical-align:top">${v}</td></tr>`).join("");
-      const tick = (done?: boolean) => done
+      const tick = (c: Check) => c.n
+        ? `<div style="width:22px;height:22px;border-radius:50%;background:#1f3a2b;color:#3ddc84;font:700 12px/22px ${SANS};text-align:center">${c.n}</div>`
+        : c.done
         ? `<div style="width:20px;height:20px;border-radius:50%;background:#3ddc84;font-size:0;line-height:0"><img src="${SITE}/email/tick.png" width="20" height="20" alt="" style="display:block;border:0"></div>`
         : `<div style="width:16px;height:16px;border-radius:50%;border:2px solid #4a5666"></div>`;
       const list = checks.map((c) => {
         const pad = c.done ? 10 : 16;
-        return `<tr><td style="vertical-align:top;width:34px;padding:${pad}px 0"><div style="margin-top:1px">${tick(c.done)}</div></td><td style="vertical-align:top;padding:${pad}px 0">` +
+        return `<tr><td style="vertical-align:top;width:34px;padding:${pad}px 0"><div style="margin-top:1px">${tick(c)}</div></td><td style="vertical-align:top;padding:${pad}px 0">` +
           (c.done
             ? `<div class="d" style="font:700 16px/1.3 ${SANS};color:#7f8da0;text-decoration:line-through">${esc(c.name)}</div>`
             : `<div class="t" style="font:700 16px/1.3 ${SANS};color:#e7ecf2">${esc(c.name)}</div>` +
@@ -181,10 +183,6 @@ function html(subject: string, b: Body): string {
         `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${big}${lines}${list}</table></td></tr></table>`;
     }
     if ("note" in x) return `<p class="m" style="margin:0 0 16px;font:400 14px/1.55 ${SANS};color:#9aa5b3">${x.note}</p>`;
-    if ("steps" in x)
-      return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px">${x.steps.map((s, i) =>
-        `<tr><td style="vertical-align:top;padding:0 8px 6px 0;font:700 14px/1.55 ${SANS};color:#e7ecf2">${i + 1}.</td>` +
-        `<td style="vertical-align:top;padding:0 0 6px;font:400 14px/1.55 ${SANS};color:#9aa5b3">${s}</td></tr>`).join("")}</table>`;
     if ("chart" in x) {
       const c = x.chart;
       // The average sits under the title, not beside it, so the two never crowd on a phone.
@@ -222,7 +220,7 @@ ${s.delta ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};colo
   // Every part ends in its own bottom margin; take it off the card's bottom padding so
   // the space under the last part matches the sides.
   const last = b.parts[b.parts.length - 1];
-  const tail = !last ? 0 : "button" in last ? 20 : "stats" in last ? 12 : "steps" in last ? 28 : "small" in last ? 8 : "box" in last ? 20 : 16;
+  const tail = !last ? 0 : "button" in last ? 20 : "stats" in last ? 12 : "small" in last ? 8 : "box" in last ? 20 : 16;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><title>${esc(subject)}</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet">
@@ -249,9 +247,8 @@ function text(b: Body): string {
     if ("lead" in x) out.push(strip(x.lead), "");
     else if ("small" in x) out.push(strip(x.small), "");
     else if ("box" in x) out.push(...(x.box.hero ? [`${x.box.hero.label}: ${x.box.hero.value}${x.box.hero.sub ? ` (${x.box.hero.sub})` : ""}`] : []),
-      ...(x.box.rows ?? []).map(([l, v]) => `${l}: ${strip(v)}`), ...(x.box.checks ?? []).map((c) => c.done ? `[x] ${c.name}` : `[ ] ${c.name}: ${[c.text, c.sub].filter(Boolean).join(" ")}`), "");
+      ...(x.box.rows ?? []).map(([l, v]) => `${l}: ${strip(v)}`), ...(x.box.checks ?? []).map((c) => c.done ? `[x] ${c.name}` : `${c.n ? `${c.n}.` : "[ ]"} ${[c.name, [c.text, c.sub].filter(Boolean).join(" ")].filter(Boolean).join(": ")}`), "");
     else if ("note" in x) out.push(strip(x.note), "");
-    else if ("steps" in x) out.push(...x.steps.map((s, i) => `${i + 1}. ${strip(s)}`), "");
     else if ("button" in x) out.push(`${x.button.label}: ${x.button.href}`, "");
     else if ("chart" in x) out.push(x.chart.title, ...(x.chart.bars.labels ? [x.chart.bars.labels.map((l, i) => `${l} ${x.chart.bars.values[i] == null ? "–" : x.chart.bars.values[i]!.toFixed(0)}`).join(", ") + " kWh"] : []),
       ...x.chart.facts.map((f) => `${f.label}: ${strip(f.value)}${f.unit ? " " + f.unit : ""}${f.sub ? `, ${f.sub}` : ""}`), "");
@@ -341,16 +338,16 @@ const SETTINGS_FOOTER = (line: string) => [line.replace("notification settings",
 // Wording matches link.jsx ("Add your plant", "Use the login from the
 // SunSynk Connect app").
 const ADD_STEPS = {
-  steps: [
-    `Tap <b style="color:#e7ecf2">Add your plant</b> and sign in.`,
-    "Enter the email and password from your SunSynk Connect app.",
-    "Readings start within a minute. Your last 60 days follow.",
-  ],
+  box: { checks: [
+    { n: 1, name: "Tap Add your plant" },
+    { n: 2, name: "Sign in with SunSynk", text: "Use the email and password from your SunSynk Connect app." },
+    { n: 3, name: "Watch it fill in", text: "Readings start within a minute. Your last 60 days follow." },
+  ] },
 };
 export const welcome = () =>
   make("Welcome to Prince Solar Hub", {
     title: "Welcome to Prince Solar Hub",
-    parts: [{ lead: "Add your plant to start." }, ADD_STEPS, { button: { label: "Add your plant", href: APP } }],
+    parts: [{ lead: "Three steps, about a minute." }, ADD_STEPS, { button: { label: "Add your plant", href: APP } }],
     footer: [HELP],
   });
 
@@ -359,7 +356,7 @@ export const welcome = () =>
 export const needAHand = () =>
   make("Need a hand adding your plant?", {
     title: "Need a hand adding your plant?",
-    parts: [{ lead: "Your plant isn't added yet. It takes two minutes." }, ADD_STEPS,
+    parts: [{ lead: "Your plant isn't added yet. It takes about a minute." }, ADD_STEPS,
       { button: { label: "Add your plant", href: APP } }, { small: "Stuck? Reply to this email and we'll help." }],
     footer: [],
   });
