@@ -353,6 +353,8 @@ async function build(r: Row): Promise<Email | null> {
         from: d.from, to: d.to, fromPeriod: d.fromPeriod, toPeriod: d.toPeriod, on: day(d.on),
         removePlants: d.removePlants, deleteOn: d.deleteOn ? day(d.deleteOn) : undefined, next: d.to === "free" ? undefined : { amount: d.nextAmount },
         days: await historyOf(r.user_id, d.removePlants ?? []),
+        // Cancel to Free: history is kept 30 days after the plan ends (SOLAR-329).
+        history: d.to === "free" ? await historyAt(r.user_id).then((h) => h && { ...h, on: day(addDays(d.on, 30)) }) : undefined,
       });
     }
     case "bill_kept": {

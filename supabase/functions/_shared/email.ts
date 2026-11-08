@@ -763,6 +763,7 @@ export type Change = {
   deleteOn?: string;
   next?: { amount: number }; // absent on Free
   days?: number; // day totals the plants to delete hold between them
+  history?: { plant: string; days: number; on: string }; // cancel: the first plant's history, deleted 30 days after
 };
 
 export const planChangeBooked = (c: Change) => {
@@ -778,7 +779,12 @@ export const planChangeBooked = (c: Change) => {
   return make(title, {
     title,
     parts: cancel
-      ? [{ lead: `Nothing more is charged. ${PAID_FREE}` }, ...(hero ? [{ box: { hero, rows: kept } }] : []), keep]
+      ? hero ? [{ lead: `Nothing more is charged. ${PAID_FREE}` }, { box: { hero, rows: kept } }, keep]
+        // No plant deleted: the history that goes leads instead, as in the plan-ended email.
+        : c.history?.days ? [{ lead: "Nothing more is charged." },
+            { box: { hero: lost(`Deleted on ${c.history.on}`, dayCount(c.history.days), `of history at ${c.history.plant}`),
+              rows: [[`After ${c.on}`, "Last 24 hours"], ["Reports", "Stop"]] } }, keep]
+        : [{ lead: `Nothing more is charged. ${PAID_FREE}` }, keep]
       : [{ box: { hero, rows: [[switchOnly ? `${c.on} payment` : `From ${c.on}`, `${c.next ? rand(c.next.amount) : "R0"}${switchOnly ? "" : ` ${per}`}`], ...kept] } },
          hero ? keep : SEE_PLAN],
     footer: BILL_FOOTER,

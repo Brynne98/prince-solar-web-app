@@ -115,7 +115,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
     reference: "psh_3f9a2c71", startsOn: "1 Dec 2026", covers: "1 Dec 2026 to 30 Nov 2027", next: { amount: 990, date: "1 Dec 2027" } })],
   "billing-upgraded": [FROM_BILLING, planUpgraded({ from: "home", to: "family", period: "monthly", paidNow: 53, daysLeft: 16, card: "Visa •••• 4081", next: { amount: 199, date: "1 Dec" } })],
   "billing-downgrade-booked": [FROM_BILLING, planChangeBooked({ from: "family", to: "home", fromPeriod: "monthly", on: "1 Dec", removePlants: ["Cabin", "Office"], keepPlants: ["Home", "Plot"], next: { amount: 99 }, days: 154 })],
-  "billing-cancel-booked": [FROM_BILLING, planChangeBooked({ from: "home", to: "free", fromPeriod: "monthly", on: "1 Dec", removePlants: [] })],
+  "billing-cancel-booked": [FROM_BILLING, planChangeBooked({ from: "home", to: "free", fromPeriod: "monthly", on: "1 Dec", removePlants: [], history: { plant: "Home", days: 58, on: "31 Dec" } })],
   "billing-change-kept": [FROM_BILLING, planKept({ plan: "home", period: "monthly", next: { amount: 99, date: "1 Dec" }, undone: { to: "free" } })],
   "billing-switch-booked": [FROM_BILLING, planChangeBooked({ from: "home", to: "home", fromPeriod: "monthly", toPeriod: "yearly", on: "1 Dec", removePlants: [], next: { amount: 990 } })],
   "billing-failed-1": [FROM_BILLING, paymentFailed({ plan: "family", period: "monthly", amount: 199, card: "Visa •••• 4081", nextTry: "3 Dec", freeOn: "8 Dec", payUrl: PAY_URL })],
