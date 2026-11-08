@@ -430,14 +430,25 @@ end $$;
 
 -- Free week in the app and the day-2 email (0122)
 insert into auth.users (id, email) values
-  ('00000000-0000-0000-0000-000000000073', 'd2@t.test'), ('00000000-0000-0000-0000-000000000074', 'd2done@t.test');
+  ('00000000-0000-0000-0000-000000000073', 'd2@t.test'), ('00000000-0000-0000-0000-000000000074', 'd2done@t.test'),
+  ('00000000-0000-0000-0000-000000000075', 'd2paid@t.test'), ('00000000-0000-0000-0000-000000000076', 'd2hid@t.test');
 insert into private.free_week_logins (sunsynk_username, user_id, started_at) values
   ('d2@login.test', '00000000-0000-0000-0000-000000000073', now() - interval '2 days 2 hours'),
   ('d2done@login.test', '00000000-0000-0000-0000-000000000074', now() - interval '2 days 2 hours');
-insert into public.plant_users (plant_id, user_id) values
-  (9000073, '00000000-0000-0000-0000-000000000073'), (9000074, '00000000-0000-0000-0000-000000000074');
+-- the setup email counts from the first plant's link (0163), on any plan, Hide or not
+insert into public.plant_users (plant_id, user_id, linked_at) values
+  (9000073, '00000000-0000-0000-0000-000000000073', now() - interval '2 days 2 hours'),
+  (9000074, '00000000-0000-0000-0000-000000000074', now() - interval '2 days 2 hours'),
+  (9000075, '00000000-0000-0000-0000-000000000075', now() - interval '2 days 2 hours'),
+  (9000076, '00000000-0000-0000-0000-000000000076', now() - interval '2 days 2 hours');
+insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
+  values ('00000000-0000-0000-0000-000000000075', 'home', 'monthly', 1, '2026-12-01');
+insert into public.profiles (user_id, prefs) values
+  ('00000000-0000-0000-0000-000000000076', '{"firstSteps": {"9000076": {"done": true}}}')
+  on conflict (user_id) do update set prefs = excluded.prefs;
 insert into public.plant_config (plant_id, tariff_import, has_battery, battery_kwh, battery_reserve_pct, system_kwp) values
-  (9000073, 3.1, true, null, 20, null), (9000074, 3.1, false, null, 20, 8);
+  (9000073, 3.1, true, null, 20, null), (9000074, 3.1, false, null, 20, 8),
+  (9000075, 0, false, null, 20, 8), (9000076, 0, true, 10, 30, 8);
 do $$
 begin
   perform pg_temp.eq('steps left: size, reserve, panels', private.setup_steps_left('00000000-0000-0000-0000-000000000073', 9000073),
@@ -453,6 +464,13 @@ begin
     where user_id = '00000000-0000-0000-0000-000000000073' and kind = 'free_week_setup'), '["size", "reserve", "panels"]'::jsonb);
   perform pg_temp.eq('day 2: nothing left, no email', (select count(*)::int from public.email_queue
     where user_id = '00000000-0000-0000-0000-000000000074' and kind = 'free_week_setup'), 0);
+  perform pg_temp.eq('day 2 says the plant has a battery', (select data->'battery' from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000073' and kind = 'free_week_setup'), 'true'::jsonb);
+  perform pg_temp.eq('day 2 on a paid plan, no battery', (select data from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000075' and kind = 'free_week_setup'), '{"steps": ["rate"], "battery": false}'::jsonb);
+  perform pg_temp.eq('day 2 with the setup card hidden', (select data->'steps' from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000076' and kind = 'free_week_setup'), '["rate"]'::jsonb);
+  perform pg_temp.eq('hidden card: app shows no steps', private.setup_steps_left('00000000-0000-0000-0000-000000000076', 9000076), '{}'::text[]);
   perform pg_temp.eq('day 5 says Home per month', (select (data->>'perMonth')::int from public.email_queue
     where user_id = '00000000-0000-0000-0000-000000000071' and kind = 'free_week_soon'), 83);
   perform set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000073","role":"authenticated"}', true);

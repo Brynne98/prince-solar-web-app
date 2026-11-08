@@ -83,9 +83,10 @@ a{color:inherit}
 // label-value rows split by space, no lines. Values may hold markup set by us (a coloured
 // battery %), never user text unescaped. tone colours the big number only.
 type Hero = { label: string; value: string; tone?: Tone; sub?: string };
-// items: a short list where each line needs a sentence (setup steps): the name, then
-// the sentence under it, left-aligned.
-type Box = { hero?: Hero; rows?: [label: string, value: string][]; items?: [name: string, text: string][] };
+// checks: a checklist (setup). A done line is ticked and struck through, name only; an
+// open line has an empty box, the name, what it does, and where to find it, dimmer.
+type Check = { name: string; done?: boolean; text?: string; sub?: string };
+type Box = { hero?: Hero; rows?: [label: string, value: string][]; checks?: Check[] };
 
 type Part =
   | { lead: string } // grey sentence under the title: what happened, only when the box can't say it
@@ -156,17 +157,27 @@ function html(subject: string, b: Body): string {
     if ("lead" in x) return `<p class="m" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#9aa5b3">${x.lead}</p>`;
     if ("small" in x) return `<p class="d" style="margin:0;font:400 13px/1.5 ${SANS};color:#7f8da0">${x.small}</p>`;
     if ("box" in x) {
-      const { hero, rows: r = [], items = [] } = x.box;
+      const { hero, rows: r = [], checks = [] } = x.box;
       const big = hero ? `<tr><td colspan="2" style="padding:0 0 ${r.length ? 12 : 0}px">` +
         `<div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(hero.label)}</div>` +
         `<div class="${hero.tone ?? "t"}" style="margin-top:8px;font:700 40px/1 ${MONO};font-variant-numeric:tabular-nums;color:${hero.tone ? C[hero.tone] : "#e7ecf2"}">${esc(hero.value)}</div>` +
         (hero.sub ? `<div class="d" style="margin-top:6px;font:400 13px/1.4 ${SANS};color:#7f8da0">${esc(hero.sub)}</div>` : "") + `</td></tr>` : "";
       const lines = r.map(([l, v]) => `<tr><td class="m" style="padding:6px 12px 6px 0;font:400 14px/1.3 ${SANS};color:#9aa5b3;vertical-align:top">${esc(l)}</td>` +
         `<td class="t" align="right" style="padding:6px 0;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2;vertical-align:top">${v}</td></tr>`).join("");
-      const list = items.map(([n, t], i) => `<tr><td colspan="2" style="padding:${i ? 14 : 0}px 0 0">` +
-        `<div class="t" style="font:700 15px/1.4 ${SANS};color:#e7ecf2">${esc(n)}</div>` +
-        `<div class="m" style="margin-top:2px;font:400 14px/1.5 ${SANS};color:#9aa5b3">${esc(t)}</div></td></tr>`).join("");
-      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px"><tr><td style="padding:18px 18px ${r.length ? 12 : 18}px;background:#141a22;border-radius:10px">` +
+      const tick = (done?: boolean) => done
+        ? `<div style="width:20px;height:20px;border-radius:5px;background:#3ddc84;color:#0b0f14;font:700 14px/20px ${SANS};text-align:center">&#10003;</div>`
+        : `<div style="width:16px;height:16px;border-radius:5px;border:2px solid #4a5666"></div>`;
+      const list = checks.map((c) => {
+        const pad = c.done ? 10 : 16;
+        return `<tr><td style="vertical-align:top;width:34px;padding:${pad}px 0"><div style="margin-top:1px">${tick(c.done)}</div></td><td style="vertical-align:top;padding:${pad}px 0">` +
+          (c.done
+            ? `<div class="d" style="font:700 16px/1.3 ${SANS};color:#7f8da0;text-decoration:line-through">${esc(c.name)}</div>`
+            : `<div class="t" style="font:700 16px/1.3 ${SANS};color:#e7ecf2">${esc(c.name)}</div>` +
+              (c.text ? `<div class="m" style="margin-top:4px;font:400 14px/1.5 ${SANS};color:#c3ccd6">${esc(c.text)}</div>` : "") +
+              (c.sub ? `<div class="d" style="margin-top:6px;font:400 13px/1.5 ${SANS};color:#7f8da0">${esc(c.sub)}</div>` : "")) +
+          `</td></tr>`;
+      }).join("");
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px"><tr><td style="padding:${checks.length ? "4px 18px" : `18px 18px ${r.length ? 12 : 18}px`};background:#141a22;border-radius:10px">` +
         `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${big}${lines}${list}</table></td></tr></table>`;
     }
     if ("note" in x) return `<p class="m" style="margin:0 0 16px;font:400 14px/1.55 ${SANS};color:#9aa5b3">${x.note}</p>`;
@@ -238,7 +249,7 @@ function text(b: Body): string {
     if ("lead" in x) out.push(strip(x.lead), "");
     else if ("small" in x) out.push(strip(x.small), "");
     else if ("box" in x) out.push(...(x.box.hero ? [`${x.box.hero.label}: ${x.box.hero.value}${x.box.hero.sub ? ` (${x.box.hero.sub})` : ""}`] : []),
-      ...(x.box.rows ?? []).map(([l, v]) => `${l}: ${strip(v)}`), ...(x.box.items ?? []).map(([n, t]) => `${n}: ${t}`), "");
+      ...(x.box.rows ?? []).map(([l, v]) => `${l}: ${strip(v)}`), ...(x.box.checks ?? []).map((c) => c.done ? `[x] ${c.name}` : `[ ] ${c.name}: ${[c.text, c.sub].filter(Boolean).join(" ")}`), "");
     else if ("note" in x) out.push(strip(x.note), "");
     else if ("steps" in x) out.push(...x.steps.map((s, i) => `${i + 1}. ${strip(s)}`), "");
     else if ("button" in x) out.push(`${x.button.label}: ${x.button.href}`, "");
@@ -921,25 +932,34 @@ export const freeWeekEndsSoon = (endsOn: string, plant: string, days: number, _p
     footer: BILL_FOOTER,
   });
 
-// Day 2 of the free week, once, only while setup steps are left (0122): each one left,
-// and where its number is found.
+// Two days after the account's first plant, once, while a number is still empty (0163):
+// a checklist. Sign up and Add plant are done by then; each number is ticked when set.
+// A plant without a battery isn't asked for battery size or reserve, so those go.
 export type SetupStep = "rate" | "size" | "reserve" | "panels";
-// Same names as the app's setup card (app.jsx STEPS): what each number shows in the app,
-// then where to find it.
-const SETUP_WHERE: Record<SetupStep, [string, string]> = {
-  rate: ["Electricity rate", "Shows what solar saved you, in rand. Use the price per unit on your bill, with VAT."],
-  size: ["Battery size", "Shows how long your battery will last. Add up all your batteries, from their labels."],
-  reserve: ["Battery reserve", "Shows how long until the battery stops powering your home. Use the number set on your inverter."],
-  panels: ["Solar panels", "Shows how much your panels make against what they can. Add up their watts, from your installer's invoice."],
+// Same names as the app's setup card (app.jsx STEPS, STEPS_DONE): what each number shows
+// in the app, then where to find it.
+const SETUP_WHERE: Record<SetupStep, [string, string, string]> = {
+  rate: ["Electricity rate", "Shows what solar saved you, in rand.", "Use the price per unit on your bill, with VAT."],
+  size: ["Battery size", "Shows how long your battery will last.", "Add up all your batteries, from their labels."],
+  reserve: ["Battery reserve", "Shows how long until the battery stops powering your home.", "Use the number set on your inverter."],
+  panels: ["Solar panels", "Shows how much your panels make against what they can.", "Add up their watts, from your installer's invoice."],
 };
+const BATTERY_STEPS: SetupStep[] = ["size", "reserve"];
 const COUNT = ["", "One number is", "Two numbers are", "Three numbers are", "Four numbers are"];
-export const freeWeekSetup = (steps: SetupStep[], plantId?: number) => {
-  const left = steps.filter((s) => s in SETUP_WHERE);
+export const freeWeekSetup = (steps: SetupStep[], plantId?: number, battery = true) => {
+  const all = (Object.keys(SETUP_WHERE) as SetupStep[]).filter((s) => battery || !BATTERY_STEPS.includes(s));
+  const left = steps.filter((s) => all.includes(s));
+  const checks = [
+    { name: "Sign up", done: true }, { name: "Add plant", done: true },
+    ...all.map((s) => left.includes(s)
+      ? { name: SETUP_WHERE[s][0], text: SETUP_WHERE[s][1], sub: SETUP_WHERE[s][2] }
+      : { name: SETUP_WHERE[s][0], done: true }),
+  ];
   return make("Finish your setup", {
     title: "Finish your setup",
     parts: [
       { lead: `${COUNT[left.length] ?? `${left.length} numbers are`} still empty. Each one turns on part of the app.` },
-      { box: { items: left.map((s) => SETUP_WHERE[s]) } },
+      { box: { checks } },
       { button: { label: "Finish setup", href: plantId ? `${SYSTEM}&plant=${plantId}` : SYSTEM } },
     ],
     footer: [HELP],

@@ -294,7 +294,7 @@ async function build(r: Row): Promise<Email | null> {
     }
     case "free_week_soon":
       return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", timeZone: tz }), p.name, d.days ?? 0, d.perMonth ?? 83);
-    case "free_week_setup": return d.steps?.length ? freeWeekSetup(d.steps, r.plant_id ?? undefined) : null;
+    case "free_week_setup": return d.steps?.length ? freeWeekSetup(d.steps, r.plant_id ?? undefined, d.battery !== false) : null;
     case "account_deleted": return accountDeleted(r.to_email);
     // Billing (0116): amounts in whole rand, dates as "2026-11-01".
     case "bill_paid":
@@ -591,7 +591,7 @@ async function renderAll(plantId: number, today?: string) {
   // The free week's two emails (0122), from this plant's own day count; steps are a sample.
   const { count: days } = await db.from("plant_energy").select("period", { count: "exact", head: true })
     .eq("plant_id", plantId).eq("bucket", "day").lt("period", today);
-  out["free-week-setup"] = freeWeekSetup(["rate", "size", "reserve", "panels"]);
+  out["free-week-setup"] = freeWeekSetup(["size", "reserve", "panels"]);
   out["free-week-ends-soon"] = freeWeekEndsSoon("Monday", p.name, days ?? 0, 83);
   return out;
 }
