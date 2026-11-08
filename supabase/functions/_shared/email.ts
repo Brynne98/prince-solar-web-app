@@ -267,7 +267,10 @@ const MON = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec";
 const keep = (h: string) => h
   .replace(new RegExp(`(\\d{1,2}) (${MON})\\b`, "g"), "$1&nbsp;$2")
   .replace(new RegExp(`\\b(${MON}) (\\d{4})`, "g"), "$1&nbsp;$2")
-  .replace(/•••• (\d{4})/g, "••••&nbsp;$1");
+  .replace(/•••• (\d{4})/g, "••••&nbsp;$1")
+  // Mail apps turn a long number (an inverter serial) into a blue phone link; a
+  // zero-width space inside it stops that and shows nothing.
+  .replace(/>([^<]*)</g, (_m, t: string) => `>${t.replace(/\b(\d{4})(\d{5,})\b/g, "$1&#8203;$2")}<`);
 const make = (subject: string, b: Body): Email => ({ subject, html: keep(html(subject, b)), text: text(b) });
 
 
