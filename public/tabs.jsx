@@ -89,9 +89,12 @@ function skelVal(w) {
 }
 
 // cfg: the plant's saved settings from api_me, so the row holds the cards LiveTab will draw
+const RATE_ASK = 'Add your rate to see this'; // Saved's line with no rate set, also in its skeleton
 function LiveSkeleton({ cfg }) {
   const grid = cfg?.has_grid !== false;
   const exp = grid && cfg?.tariff_export > 0;
+  const rateSet = cfg ? cfg.tariff_import > 0 || cfg.tariff_export > 0
+    : (() => { try { return localStorage.getItem('synsynk.rateSet') !== '0'; } catch (e) { return true; } })();
   return (
     <div className="live-grid">
       <div className="overview-section">
@@ -108,7 +111,9 @@ function LiveSkeleton({ cfg }) {
           <MiniStat loading label="Independence" info={OV_INFO.suff} />
           {grid ? <MiniStat loading label="Imported" info={OV_INFO.imp} /> : <MiniStat loading label="Grid" info={OV_INFO.grid} />}
           {exp && <MiniStat loading label="Exported" info={OV_INFO.exp} />}
-          <MiniStat loading label="Saved" info={OV_INFO.saved} sub={NBSP} />
+          {/* no rate: the live card's "Add your rate" line, so the row lands at its height (SOLAR-429) */}
+          <MiniStat loading label="Saved" info={OV_INFO.saved}
+            sub={rateSet ? undefined : <button type="button" className="mini-link" disabled>{RATE_ASK}</button>} />
         </div>
       </div>
       <div className="card flow-card">
@@ -309,6 +314,8 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   }, [period, energy, pending, tz, a.pvToday, a.loadToday, a.gridFromToday, a.gridToToday]);
   const rate = snap.config?.tariffImport ?? 0;
   const rateExp = snap.config?.tariffExport ?? 0;
+  // remembered for the skeleton, which draws before the plant's settings arrive
+  React.useEffect(() => { try { localStorage.setItem('synsynk.rateSet', rate > 0 || rateExp > 0 ? '1' : '0'); } catch (e) {} }, [rate, rateExp]);
   let pPv, pLoad, pImp, pExp;
   if (period === 'today') { pPv = a.pvToday; pLoad = a.loadToday; pImp = hasGrid ? a.gridFromToday : 0; pExp = hasGrid ? a.gridToToday : 0; }
   // stored import even when the grid is off now: a year or lifetime still holds the
@@ -418,7 +425,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
         trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendFrom={cmpPhrase} trendVs={cmpVs}
         // no rate yet: the line under the dash opens Settings on Tariff
-        sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>Add your rate to see this</button>
+        sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>{RATE_ASK}</button>
           : over && period === 'month' ? <button type="button" className="lock-btn" onClick={() => window.openPlans('month_saved')}><window.LockIcon />On paid plans</button> : undefined}
         info={rateExp > 0 ? OV_INFO.saved.slice(0, -1) + ', plus what you exported at your feed-in rate.' : OV_INFO.saved} />
     </div>
@@ -539,9 +546,9 @@ function MiniStat({ label, value, color, sub, info, trend, trendUnit, trendInver
       {loading
         ? <div className="mini-value mono" style={{ position: 'relative' }}>{NBSP}<window.Skeleton w="70%" h="auto" style={{ position: 'absolute', top: 0, bottom: 0, left: 0 }} /></div>
         : <div className="mini-value mono" style={{ color }}><span className="mv-num">{unitSplit(value)}</span></div>}
-      {/* loading keeps the line's height, so the row doesn't grow when the trend lands */}
-      {loading ? <div className="mini-trend">{NBSP}</div>
-        : arrow && <div className="mini-trend"><TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} tip={trendNote} delta={trendDelta} deltaFmt={trendDeltaFmt} />{trendVs}</div>}
+      {/* the trend line always keeps its height, empty while loading or with nothing to
+          compare (Year, Lifetime), so switching period doesn't make the row jump (SOLAR-429) */}
+      <div className="mini-trend">{arrow ? <><TrendBadge pct={trend} unit={trendUnit} invert={trendInvert} tip={trendNote} delta={trendDelta} deltaFmt={trendDeltaFmt} />{trendVs}</> : NBSP}</div>
       {sub && <div className="mini-sub">{sub}</div>}
     </Card>
   );
@@ -1476,6 +1483,13 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const outages = offPending ? [] : !pick.isToday ? histRuns : gridOffRuns(histRuns, gb, liveFrom, nowIdx);
   // the label counts minutes, as the notices do; the band keeps 5-minute steps (SOLAR-430)
   const outageMin = offPending ? 0 : gridOffMinutes(gridDay, pick.isToday && a.gridPresent === false) ?? outageMinutes(outages);
+  // The chart on screen with its own band. While a newly picked day and its grid-off answers
+  // load, the last whole day stays, faded as Solar's does, so no 0 W line shows where its
+  // band was (SOLAR-432). A refresh of the same day doesn't fade.
+  const shownChart = React.useRef(null);
+  if (day && !dim['aria-busy'] && !offPending) shownChart.current = { date: pick.date, word: dayWord, points: noReadings ? [] : points, outages, noReadings };
+  const chart = shownChart.current;
+  const chartFaded = chart && chart.date !== pick.date;
   // where the day's imports went: the same flows Solar and Home show (SOLAR-332)
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
   const [daily, loadDaily] = useDaily(refreshKey);
@@ -1503,16 +1517,17 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
       <Card id="grid-day" className="grid-day">
         {/* the right line is always there (blank today) so the date bar under it never shifts on a phone */}
         <SectionTitle right={day && !noReadings && !view.isToday && peak ? <>Peak <b>{fmtPower(peak.grid)}</b> at <b>{HM(peak.t)}</b></> : NBSP}>
-          {titled('GRID', dayWord)}
+          {titled('GRID', chart ? chart.word : dayWord)}
           <window.InfoDot text={'Above the line is power imported from the grid; below it is power exported.'} />
         </SectionTitle>
         <DateBar pick={pick} earliest={earliest}>
           <OutagePill mins={outageMin} what="Grid" />
         </DateBar>
         {/* waits for the grid-off answers too, so no 0 W line shows where the band will be */}
-        {!day || offPending ? <PlotSkeleton heights={[220, 300]} />
-          : <div {...dim}><DayLineChart key={pick.date} points={noReadings ? [] : points} field="grid" color={CC.grid} label="Grid"
-              sums={['Imported', 'Exported']} importScale outages={outages} empty={noReadings || 'No grid readings for this day.'} /></div>}
+        {!chart ? <PlotSkeleton heights={[220, 300]} />
+          : <div aria-busy={chartFaded || undefined} data-today={dim['data-today']} style={{ ...dim.style, opacity: chartFaded ? 0.45 : 1 }}>
+              <DayLineChart key={chart.date} points={chart.points} field="grid" color={CC.grid} label="Grid"
+                sums={['Imported', 'Exported']} importScale outages={chart.outages} empty={chart.noReadings || 'No grid readings for this day.'} /></div>}
       </Card>
 
       <div className="solar-row">
