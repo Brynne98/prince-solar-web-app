@@ -77,6 +77,14 @@ export type Account = {
 
 export type TokenSet = { access_token: string; refresh_token: string; expires_in: number };
 
+/**
+ * The company login owners share their plant to, as Visitor (SOLAR-310). One stored login
+ * reads every shared plant; a plant is polled only once an owner has claimed it.
+ */
+export const SHARE_USERNAME = (Deno.env.get("SUNSYNK_SHARE_USERNAME") ?? "").trim();
+export const isShareAccount = (acc: Pick<Account, "sunsynk_username">) =>
+  !!SHARE_USERNAME && acc.sunsynk_username.toLowerCase() === SHARE_USERNAME.toLowerCase();
+
 /** Thrown when an account's refresh token is dead; the poller marks it needs_relink. */
 export class RelinkNeeded extends Error {
   constructor(public accountId: string, reason: string) {
@@ -192,7 +200,10 @@ async function accessTokenFor(acc: Account, force = false): Promise<string> {
   const refresh = await rpc<string | null>("account_refresh_get", { p_account: acc.id });
   if (!refresh) throw new RelinkNeeded(acc.id, "no refresh token stored");
 
-  const t = await tokenRefresh(refresh);
+  let t = await tokenRefresh(refresh);
+  // The share login (SOLAR-310) has its password in a secret: sign in again rather than wait for a person.
+  const sharePw = isShareAccount(acc) ? Deno.env.get("SUNSYNK_SHARE_PASSWORD") : undefined;
+  if (!t && sharePw) t = await tokenLogin(SHARE_USERNAME, sharePw).catch(() => null);
   if (!t) throw new RelinkNeeded(acc.id, "refresh token rejected (password changed or revoked)");
 
   const exp = expiresAt(t.expires_in);
@@ -407,6 +418,15 @@ export async function syncPlants(acc: Account, linked?: { plants: PlantInfo[]; i
     .eq("user_id", acc.user_id).eq("paused", true).in("plant_id", all.map((p) => p.id));
   if (pausedErr) throw new Error(`plant_users: ${pausedErr.message}`);
   const paused = new Set((pausedRows ?? []).map((r: any) => Number(r.plant_id)));
+  return await seedPlants(acc, all, paused, invs);
+}
+
+/**
+ * The part of syncPlants after plant_users: store a paused plant's serials, and seed,
+ * import and kick the active plants that have no plant_config row yet. A claimed shared
+ * plant (SOLAR-310) comes through here too. Returns the active plants.
+ */
+export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<number>, invs?: InverterInfo[]): Promise<PlantInfo[]> {
   const plants = all.filter((p) => !paused.has(p.id));
   // A paused plant's inverter serials are stored too, so the paywall can price it.
   // Nothing polls them: plantsToPoll leaves paused plants out.
@@ -519,7 +539,7 @@ export async function plantsToPoll(): Promise<PlantJob[]> {
   const byId = new Map(accounts.map((a) => [a.id, a]));
   const { data, error } = await db
     .from("plant_users").select("plant_id, plant_name, account_id")
-    .in("account_id", [...byId.keys()]).eq("paused", false);
+    .in("account_id", [...byId.keys()]).eq("paused", false).is("share_gone_at", null);
   if (error) throw new Error(`plant_users: ${error.message}`);
   const { data: cfgRows } = await db.from("plant_config").select("plant_id, timezone, batt_positive_means, backfill_next, backfill_until, backfill_tries, has_grid, temp_next, temp_tries");
   const cfg = new Map((cfgRows ?? []).map((c: any) => [Number(c.plant_id), c]));
@@ -620,6 +640,83 @@ export async function markCursor(key: string, plantId: number): Promise<void> {
 export async function bootstrapPlantId(): Promise<number | null> {
   const v = await rpc<number | null>("calibration_plant", {});
   return v == null ? null : Number(v);
+}
+
+// ---------------------------------------------------------------------------
+// Shared plants (SOLAR-310, 0172)
+// ---------------------------------------------------------------------------
+
+/** The auth user that owns the share login row: one for the share address, made once. */
+async function shareUserId(): Promise<string> {
+  // Not confirmed: nobody signs in as it, and the welcome and no-plant emails never start.
+  const made = await db.auth.admin.createUser({ email: SHARE_USERNAME, email_confirm: false });
+  if (made.data?.user) return made.data.user.id;
+  for (let page = 1; page <= 50; page++) {
+    const { data, error } = await db.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error(`listUsers: ${error.message}`);
+    const u = data.users.find((x) => x.email?.toLowerCase() === SHARE_USERNAME.toLowerCase());
+    if (u) return u.id;
+    if (data.users.length < 1000) break;
+  }
+  throw new Error(`share login: no auth user for the share address (${made.error?.message ?? "create failed"})`);
+}
+
+/**
+ * The share login, signed in. Signs in with the secret when there is no row yet or the
+ * stored one died. Null when the secrets are not set.
+ */
+export async function shareAccount(): Promise<Account | null> {
+  const password = Deno.env.get("SUNSYNK_SHARE_PASSWORD");
+  if (!SHARE_USERNAME || !password) return null;
+  const row = (await rpc<any[]>("share_account_get", {}))?.[0];
+  if (row?.status === "active") return row as Account;
+  const t = await tokenLogin(SHARE_USERNAME, password);
+  const exp = expiresAt(t.expires_in);
+  const userId: string = row?.user_id ?? await shareUserId();
+  const id = await rpc<string>("share_account_set", {
+    p_user: userId, p_username: SHARE_USERNAME, p_access: t.access_token, p_expires: exp,
+  });
+  await rpc("account_refresh_set", { p_account: id, p_refresh: t.refresh_token });
+  return { id, user_id: userId, sunsynk_username: SHARE_USERNAME, access_token: t.access_token, access_expires_at: exp };
+}
+
+/** Hourly in poll: claimed plants that left the share list stop, and come back when shared again. */
+export async function shareSync(acc: Account): Promise<unknown> {
+  const plants = await getPlants(acc);
+  // apiGetAll stops at MAX_PAGES: a full list may be cut short, and the cut plants would read as unshared.
+  if (plants.length >= MAX_PAGES * PAGE_LIMIT) throw new Error(`share list at the ${plants.length} plant cap; raise MAX_PAGES`);
+  return await rpc("share_sync", { p_account: acc.id, p_plants: plants.map((p) => p.id) });
+}
+
+export type ClaimResult =
+  | { result: "not_shared" }
+  | { result: "taken" | "yours" | "claimed" | "claimed_paused"; plantId: number; plantName: string };
+
+/**
+ * Claim a plant shared to the share login: `ref` is its plant id or one of its inverter
+ * serials. Checked live against what SunSynk shows the share login.
+ */
+export async function claimShared(userId: string, ref: string): Promise<ClaimResult> {
+  const acc = await shareAccount();
+  if (!acc) throw new Error("share login not set up");
+  const plants = await getPlants(acc);
+  let invs: InverterInfo[] | undefined;
+  let plant = /^\d+$/.test(ref) ? plants.find((p) => p.id === Number(ref)) : undefined;
+  if (!plant) {
+    invs = await getInverters(acc);
+    const inv = invs.find((i) => i.sn.toLowerCase() === ref.toLowerCase());
+    plant = inv?.plantId != null ? plants.find((p) => p.id === Number(inv.plantId)) : undefined;
+  }
+  if (!plant) return { result: "not_shared" };
+  const result = await rpc<"taken" | "yours" | "claimed" | "claimed_paused">("share_claim", {
+    p_user: userId, p_account: acc.id, p_plant: plant.id, p_plant_name: plant.name,
+  });
+  if (result === "claimed" || result === "claimed_paused") {
+    invs ??= await getInverters(acc);
+    const mineOnly = invs.filter((i) => Number(i.plantId) === plant.id);
+    await seedPlants(acc, [plant], new Set(result === "claimed_paused" ? [plant.id] : []), mineOnly);
+  }
+  return { result, plantId: plant.id, plantName: plant.name };
 }
 
 export { num, pick };

@@ -23,7 +23,7 @@ Look and feel (sizes, colours, radii) is in `DESIGN.md`. This file is about code
 |---|---|
 | `Card` | Any panel. Passes `className`, `style` and the rest through. |
 | `StatTile` | A big number with label, unit, sub-line, optional `bar` and `loading`, `locked`. |
-| `Segmented` | A row of 2 to 5 options, one selected. |
+| `Segmented` | A row of 2 to 5 options, one selected. `block` fills the row. |
 | `Switch` | An on/off control in a row. `busy`, `loading` (shows a skeleton). |
 | `Toggle` | A labelled checkbox-style choice with a `hint`. `loading`. |
 | `BusyButton` | A button whose text swaps while it works: `busy`, `busyText`. |

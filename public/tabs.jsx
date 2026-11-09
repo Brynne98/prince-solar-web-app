@@ -2713,7 +2713,7 @@ function InvoicesSection({ billing: b }) {
 // Plant states (stopped, deleted) and their buttons are on Billing since SOLAR-250.
 // A login's quiet actions: change its password, remove it (SOLAR-251). The header's menus
 // (usePopover, MenuList in app.jsx) do the opening, closing and arrow keys.
-function LoginMenu({ email, busy, onPassword, onRemove }) {
+function LoginMenu({ email, busy, onPassword, onRemove, removeLabel = 'Remove login' }) {
   const [open, setOpen, ref] = usePopover();
   const pick = (fn) => () => { setOpen(false); fn(); };
   return (
@@ -2727,7 +2727,7 @@ function LoginMenu({ email, busy, onPassword, onRemove }) {
       {open && (
         <MenuList className="login-menu" label={email}>
           {onPassword && <button type="button" role="menuitem" onClick={pick(onPassword)}>Change password</button>}
-          <button type="button" role="menuitem" className="menu-danger" onClick={pick(onRemove)}>Remove login</button>
+          <button type="button" role="menuitem" className="menu-danger" onClick={pick(onRemove)}>{removeLabel}</button>
         </MenuList>
       )}
     </div>
@@ -2856,6 +2856,8 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     const sw = <window.Switch on={on} label={'Collect ' + name} disabled={b} busy={b} onChange={() => on ? setStopping(p.plant_id) : start(p)} />;
     return (
       <PlantLine key={p.plant_id} name={name} off={!on}>
+        {/* the owner removed the share in SunSynk (SOLAR-310): nothing is read until it's back */}
+        {p.share_gone && <span className="conn-status plant-state bad">Share removed</span>}
         {s === 'going' ? <>
           <span className="conn-status plant-state bad">Deleted {billDay(p.remove_on)}</span>
           {swap ? sw : <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
@@ -2908,7 +2910,10 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
           {live.map(acc => {
             const ok = acc.status === 'active';
             const plants = acc.plants || [];
-            const at = acc.sunsynk_username.indexOf('@') + 1; // 0 when there is no @
+            // Plants shared to our login (SOLAR-310): the login is ours, so no password to change.
+            const shared = acc.kind === 'share';
+            const who = shared ? 'Shared plants' : acc.sunsynk_username;
+            const at = shared ? 0 : who.indexOf('@') + 1; // 0 when there is no @
             // Amber at the age the header pill calls offline (15 minutes without a reading). A login
             // with no plant is never read, so its age means nothing (SOLAR-285).
             const stale = ok && plants.length > 0 && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
@@ -2917,12 +2922,12 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                 <div className="login-line">
                   <div className="login-who">
                     {/* a narrow card breaks a long email after the @, not mid-word */}
-                    <span className="login-email">{at ? <>{acc.sunsynk_username.slice(0, at)}<wbr />{acc.sunsynk_username.slice(at)}</> : acc.sunsynk_username}</span>
-                    {(!ok || stale) && <window.Tip className={'login-state ' + (ok ? 'warn' : 'bad')} text={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : null}>{!ok ? 'Sign-in expired' : 'Not updating'}</window.Tip>}
+                    <span className="login-email">{at ? <>{who.slice(0, at)}<wbr />{who.slice(at)}</> : who}</span>
+                    {(!ok || stale) && <window.Tip className={'login-state ' + (ok && !shared ? 'warn' : 'bad')} text={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : null}>{!ok && !shared ? 'Sign-in expired' : 'Not updating'}</window.Tip>}
                   </div>
-                  {!ok && mode !== acc.account_id && <button type="button" className="ghost-btn login-fix" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
-                  <LoginMenu email={acc.sunsynk_username} busy={busy === acc.account_id}
-                    onPassword={ok ? () => setMode(acc.account_id) : null}
+                  {!ok && !shared && mode !== acc.account_id && <button type="button" className="ghost-btn login-fix" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
+                  <LoginMenu email={who} busy={busy === acc.account_id} removeLabel={shared ? 'Remove plants' : undefined}
+                    onPassword={ok && !shared ? () => setMode(acc.account_id) : null}
                     onRemove={() => setConfirming(acc.account_id)} />
                 </div>
                 {mode === acc.account_id && (
@@ -2931,9 +2936,9 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                 )}
                 {confirming === acc.account_id && (
                   <ConfirmCard modal
-                    title={<>Remove <b>{acc.sunsynk_username}</b>?</>}
+                    title={<>Remove <b>{who}</b>?</>}
                     text={removeText(acc)}
-                    action="Remove login" onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)}>
+                    action={shared ? 'Remove plants' : 'Remove login'} onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)}>
                     {removeList(acc)}                  </ConfirmCard>
                 )}
                 {plants.length ? plants.map(plantRow) : <div className="conn-meta">No plant shared with this login.</div>}
@@ -3532,7 +3537,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
   // Account's Your data: the plants on, from the logins, which are here before api_me answers.
   const onPlants = plants.filter(p => !p.paused).map(p => ({ id: Number(p.plant_id), name: p.plant_name }));
   // Billing holds the logins too, so a dead one marks it as a failed payment does.
-  const relink = live.some(a => a.status === 'needs_relink');
+  const relink = live.some(a => a.status === 'needs_relink' && a.kind !== 'share');
   const dot = { billing: billing?.state === 'past_due' || relink };
   const shown = page === 'prefs' ? 'account' : page === 'plans' ? 'billing' : page;
   return (

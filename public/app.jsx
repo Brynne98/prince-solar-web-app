@@ -1253,7 +1253,7 @@ function Setup({ links }) {
   const connect = () => { if (isSettings(tab)) setTab('live'); setConnecting(true); };
   useEscape(connecting, () => setConnecting(false));
   useEffect(() => { window.track('screen_viewed', { stage: 'setup', screen: connecting ? 'connect' : tab }); }, [tab, connecting]);
-  const dead = links.accounts.filter(a => a.status === 'needs_relink');
+  const dead = links.accounts.filter(a => a.status === 'needs_relink' && a.kind !== 'share');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
   const account = { user, plantCount: 0, alert: dead.length > 0, onSettings: () => go('prefs'), active: isSettings(tab) };
   // Every plant on a working login switched off: turning one on comes first, adding one second.
@@ -1681,7 +1681,7 @@ function App({ links }) {
   const alertsPage = <AlertsPage key="alerts" pinned={notices} onBack={() => go(alertsFrom.current)} onSettings={() => openSettings('notifications')}
                                  onShown={ids => ids.forEach(id => alertsShown.current.add(id))}
                                  onReadAll={() => { alertsShown.current.clear(); readNotifs(null); }} />;
-  const loginDead = links.accounts.some(a => a.status === 'needs_relink');
+  const loginDead = links.accounts.some(a => a.status === 'needs_relink' && a.kind !== 'share');
   // The free week (SOLAR-242): steps left mark the avatar; after it, history locks.
   const free = window.freeState(me);
   const stepsLeft = free?.week ? (firstSteps(me, plantId)?.left || []).length : 0;

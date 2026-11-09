@@ -308,6 +308,7 @@ async function build(r: Row): Promise<Email | null> {
       at: d.since == null ? undefined : hhmm(d.since, tz) }, p.id, d.since == null ? "today" : dayOf(d.since, tz));
     case "relinked": return loginEvent({ kind: "relinked", plants: d.plants ?? [], since: d.since == null ? undefined : hhmm(d.since, tz), at: hhmm(d.at, tz),
       lasted: lasted(d.since, d.at) }, p.id, dayOf(d.at, tz));
+    case "share_removed": return loginEvent({ kind: "share_removed", plants: d.plants ?? [] }, p.id);
     case "sunsynk_down": return sunsynkDown(p.name, p.id, hhmm(d.since, tz), dayOf(d.since, tz));
     case "sunsynk_back": return sunsynkBack(p.name, p.id, hhmm(d.since, tz), hhmm(d.at, tz), lasted(d.since, d.at), dayOf(d.at, tz));
     case "welcome": return welcome();
@@ -631,6 +632,7 @@ async function renderAll(plantId: number, today?: string) {
   for (const [name, e] of ev) out[name] = plantEvent(p.name, p.id, e);
   out["reconnect"] = loginEvent({ kind: "needs_relink", plants: [p.name, "Second plant"], at: hhmm(now - 1500, p.tz) }, p.id);
   out["reconnected"] = loginEvent({ kind: "relinked", plants: [p.name, "Second plant"], since: hhmm(now - 7500, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
+  out["sharing-stopped"] = loginEvent({ kind: "share_removed", plants: [p.name] }, p.id);
   // The free week's two emails (0122), from this plant's own day count; steps are a sample.
   const { count: days } = await db.from("plant_energy").select("period", { count: "exact", head: true })
     .eq("plant_id", plantId).eq("bucket", "day").lt("period", today);

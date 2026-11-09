@@ -86,6 +86,20 @@ window.linkSunsynk = async function linkSunsynk(username, password) {
   return body;
 };
 
+// The SunSynk login owners share their plant to, as Visitor (SOLAR-310).
+const SHARE_TO = 'admin@princesolarhub.co.za';
+// A plant shared to us: plantId or an inverter serial. Resolves like linkSunsynk, so the
+// screens that take a login take this too; a claimed plant throws with .taken = what was typed.
+window.claimShare = async function claimShare(ref) {
+  const [res, body] = await edgePost('claim-share', { ref });
+  window.track('share_check_done', { result: body.result || body.error || String(res.status) });
+  if (body.error === 'taken') throw Object.assign(new Error('taken'), { taken: ref });
+  if (body.error === 'not_shared') throw Object.assign(new Error('Not shared with us yet'), { field: true });
+  if (!res.ok) throw new Error(LINK_ERRORS[body.error] || 'Couldn’t check SunSynk. Try again.');
+  window.track('plant_linked', { via: 'share' });
+  return { plants: [{ id: body.plantId, name: body.plantName }], paused: body.result === 'claimed_paused' ? [body.plantId] : [] };
+};
+
 // link-sunsynk answers in developer shorthand; these are the household's words for it.
 const LINK_ERRORS = {
   'SunSynk rejected those credentials': 'SunSynk didn’t accept that email and password.',
@@ -443,9 +457,30 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
   const [noPlants, setNoPlants] = useState(false);
   // Field id → message, shown on the label line.
   const { bad, setBad, flag, edited } = window.useFieldErrors();
+  // 'share': no password, the owner shares the plant to us in SunSynk (SOLAR-310).
+  const [mode, setMode] = useState('login');
+  const [ref, setRef] = useState('');
+  // A plant someone else has: its id, for the line on how to get it back.
+  const [taken, setTaken] = useState(null);
+  const share = mode === 'share' && !relink;
+
+  const check = async () => {
+    if (!ref.trim()) return flag({ 'ss-ref': 'Enter a plant ID or serial' });
+    setBusy(true); setBad({}); setTaken(null);
+    try {
+      await onLinked(await window.claimShare(ref.trim()));
+    } catch (ex) {
+      if (ex.taken) setTaken(ex.taken);
+      else if (ex.field) flag({ 'ss-ref': ex.message });
+      else fail(ex instanceof TypeError ? 'Can’t reach Prince Solar Hub. Check your connection and try again.' : ex.message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async (e) => {
     e?.preventDefault();
+    if (share) return check();
     const problems = {};
     if (!username.trim()) problems['ss-user'] = 'Enter your email';
     if (!password) problems['ss-pass'] = 'Enter your password';
@@ -473,14 +508,35 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
   };
 
   const invalid = (id) => window.invalidProps(id, bad[id]);
-  const green = noPlants ? (busy ? 'Checking…' : 'Retry now')
+  const green = share ? (busy ? 'Checking…' : 'Check') : noPlants ? (busy ? 'Checking…' : 'Retry now')
     : busy ? (finding ? 'Finding your plant…' : 'Checking your login…')
     : relink ? (changing ? 'Save password' : 'Reconnect') : compact ? 'Add login' : 'Connect';
 
   return (
     <form className={compact ? 'conn-form link-form' : 'link-form link-card'} onSubmit={submit} noValidate aria-busy={busy}>
       {!compact && <h2 className="sset-title">{noPlants ? 'Connected, but no plant yet' : relink ? 'Reconnect SunSynk' : 'Add your plant'}</h2>}
-      {noPlants ? (
+      {!relink && !noPlants && (
+        <window.Segmented block label="How to add it" className="link-mode" value={mode}
+          onChange={(m) => { setMode(m); setBad({}); setTaken(null); window.track('link_mode_picked', { mode: m }); }}
+          options={[{ value: 'login', label: 'SunSynk login' }, { value: 'share', label: 'Share plant' }]} />
+      )}
+      {share ? (<>
+        <p className="sset-note">No password needed. In the SunSynk Connect app, share your plant with <b>{SHARE_TO}</b> as Visitor.</p>
+        <div className="field link-last">
+          <window.FieldLabel id="ss-ref" label="Plant ID or inverter serial" error={bad['ss-ref']} />
+          <input id="ss-ref" className="input" type="text" inputMode="text" autoComplete="off" value={ref}
+                 onChange={(e) => { setRef(e.target.value); edited('ss-ref'); setTaken(null); }} {...invalid('ss-ref')} />
+        </div>
+        {taken ? (
+          <div className="field-note link-note" role="alert">
+            {taken} is linked to another account. If it’s yours, remove the share in SunSynk, wait 2 hours, share it again and press Check.
+            {' '}Or <a className="mini-link" href={`mailto:hello@princesolarhub.co.za?subject=${encodeURIComponent(`${taken} is linked to another account`)}`}
+                     onClick={() => window.track('share_taken_email_done')}>email us</a>.
+          </div>
+        ) : (
+          <div className="field-note link-note">Only the person who created the plant in SunSynk can share it. Installer set it up? Ask them or SunSynk support to share it.</div>
+        )}
+      </>) : noPlants ? (
         // The login worked but SunSynk lists no plant for it. Say so and offer Retry; never
         // send the owner to an installer or SunSynk.
         <p className="sset-note"><b>{username.trim()}</b> {NO_PLANT_TEXT}</p>
