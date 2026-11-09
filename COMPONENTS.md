@@ -47,6 +47,7 @@ Formatting and dates (also `components.jsx`):
 | `fmtTime`, `fmtPlantTime`, `plantHour` | Times, in the plant's time zone where it matters. |
 | `fmtDuration(mins)` | "2h 5m", "12 min". |
 | `localDateStr(d)` | Today, or `d`, as `YYYY-MM-DD` in local time. |
+| `plantDateStr(tz, d)` | Today, or `d`, as `YYYY-MM-DD` at the plant (`tz`, e.g. `window.PLANT_TZ`); local time when `tz` is unknown. Every day picker opens on it. |
 | `shiftDate(s, days)` | A `YYYY-MM-DD` moved by whole days. |
 | `dayText(s, opts)` | A `YYYY-MM-DD` as "Mon 3 Nov", or with your own `Intl` options. |
 | `plantLabel(p)` | A plant's name, or "Plant 123". |

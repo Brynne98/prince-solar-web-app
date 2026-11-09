@@ -58,7 +58,7 @@ function niceScale(min, max, targetTicks) {
 const DAY_FLOOR_DAYS = 60; // what SunSynk's per-inverter history keeps
 
 /** Selected day + the arrows' bounds. `earliest` may be null (no lower bound). `today` is the
- *  plant's own date when the caller knows it; otherwise the device's. `want` ({date}) moves
+ *  plant's own date; left out, it is read from the current plant's zone (SOLAR-446). `want` ({date}) moves
  *  it to a day from outside: an alert opened from Notifications (SOLAR-244). */
 function useDayPicker(earliest, today, want) {
   // back on screen, look at the clock again: the day may have turned while it was away
@@ -68,7 +68,7 @@ function useDayPicker(earliest, today, want) {
     document.addEventListener('visibilitychange', back);
     return () => document.removeEventListener('visibilitychange', back);
   }, []);
-  const todayStr = today || localDateStr();
+  const todayStr = today || plantDateStr(window.PLANT_TZ);
   const [date, setDate] = React.useState(want?.date && want.date <= todayStr ? want.date : todayStr);
   React.useEffect(() => { if (want?.date && want.date <= todayStr) setDate(want.date); }, [want]);
   // The day turned while today was on screen: follow it to the new today. A day picked by
@@ -337,7 +337,7 @@ function OutageTipRow({ span, what }) {
 }
 function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   const C = window.COLORS;
-  const earliest = shiftDate(localDateStr(), -DAY_FLOOR_DAYS);
+  const earliest = shiftDate(plantDateStr(window.PLANT_TZ), -DAY_FLOOR_DAYS);
   const ownPick = useDayPicker(earliest);
   const pick = dayPick || ownPick;
   const { date, isToday } = pick;
