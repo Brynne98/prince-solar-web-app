@@ -71,12 +71,15 @@ const esc = (s: string) =>
 const SANS = "'Space Grotesk',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 const MONO = "'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace";
 
+// .chg: a report card's change line wraps to two lines between 341 and 420 px; every card
+// keeps two there, so a row stays even (SOLAR-452)
 const STYLE = `
 :root{color-scheme:dark;supported-color-schemes:dark}
 body{margin:0;padding:0}
 a{color:inherit}
 @media (max-width:520px){.pad{padding:20px 20px var(--pb-m,8px)!important}}
 @media (max-width:340px){.card{width:auto!important;display:block!important;margin-right:0!important}}
+@media (min-width:341px) and (max-width:420px){.chg{min-height:34px}}
 `;
 
 // The one box every email shows its facts in (SOLAR-415): an optional big number, then
@@ -209,10 +212,12 @@ function html(subject: string, b: Body): string {
         `<td align="right" style="padding:6px 0;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2">${f.value}</td></tr>`).join("")}</table>`;
     if ("button" in x)
       return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 12px"><tr><td style="border-radius:8px;background:${ACCENT}"><a href="${x.button.href}" style="display:inline-block;padding:13px 24px;font:600 15px/1 ${SANS};color:#0a0d12;text-decoration:none;border-radius:8px">${esc(x.button.label)}</a></td></tr></table>`;
+    // The change line always takes its space, so a card with nothing to compare (Imported
+    // with the grid off) stays as tall as the card beside it (SOLAR-452).
     const cells = x.stats.map((s) => `<td class="tile" width="50%" style="padding:16px;background:#141a22;border-radius:8px;vertical-align:top">
 <div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(s.label)}</div>
 <div class="${s.tone ?? "t"}" style="margin-top:8px;font:700 24px/1.1 ${MONO};font-variant-numeric:tabular-nums;color:${s.tone ? C[s.tone] : "#e7ecf2"}">${esc(s.value)}${s.unit ? `<span style="font-size:14px;opacity:.85"> ${esc(s.unit)}</span>` : ""}</div>
-${s.delta ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};color:#7f8da0">${deltaHtml(s.delta)}</div>` : s.sub ? `<div class="d" style="margin-top:6px;font:400 12px/1.4 ${SANS};color:#7f8da0">${esc(s.sub)}</div>` : ""}</td>`);
+<div class="d chg" style="margin-top:6px;font:400 12px/1.4 ${SANS};color:#7f8da0">${s.delta ? deltaHtml(s.delta) : s.sub ? esc(s.sub) : "&nbsp;"}</div></td>`);
     // Every card takes half the width, a lone one included. Below 340 px (the smallest
     // phones) every card goes full width.
     const boxes = cells.map((c, i) => c.replace(/^<td class="tile" width="50%" style="/,
