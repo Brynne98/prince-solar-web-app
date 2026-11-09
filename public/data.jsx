@@ -81,6 +81,13 @@ function sharedAsk(name, ms, rk, ask) {
   shared[k] = { at: Date.now(), rk: rk || 0, p };
   return p;
 }
+// The plant and the shared answers belong to who was signed in. Without a reload the next
+// user's first loads asked for the last user's plant and got 403s (SOLAR-442).
+window.sb.auth.onAuthStateChange((event) => {
+  if (event !== 'SIGNED_OUT') return;
+  window.CURRENT_PLANT = null; window.PLANT_CURRENCY = 'ZAR';
+  for (const k in shared) delete shared[k];
+});
 const MIN5 = 5 * 60000;
 
 const isOnline = (s) => s === 1 || s === '1' || s === 'online' || s === true;
