@@ -524,7 +524,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
         <p className="sset-note">No password needed. In the SunSynk Connect app, share your plant with <b>{SHARE_TO}</b> as Visitor.</p>
         <div className="field link-last">
           <window.FieldLabel id="ss-ref" label="Plant ID or inverter serial" error={bad['ss-ref']} />
-          <input id="ss-ref" className="input" type="text" inputMode="text" autoComplete="off" value={ref}
+          <input id="ss-ref" className="input" type="text" inputMode="text" autoComplete="off" placeholder="123456" value={ref}
                  onChange={(e) => { setRef(e.target.value); edited('ss-ref'); setTaken(null); }} {...invalid('ss-ref')} />
         </div>
         {taken ? (
