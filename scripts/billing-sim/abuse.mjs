@@ -93,6 +93,8 @@ const priceAt = (ref, plan, period, extras = 0) => num(`select public.billing_am
 const active = (u) => num(`select count(*) from public.plant_users where user_id='${u.id}' and not paused`);
 const planOf = (u) => sql(`select coalesce((select plan from private.billing where user_id='${u.id}'),'free')`);
 const family = async (label) => { const u = await user(label); const p = await pay(u, { plan: "family", period: "monthly" }); if (p.err) throw new Error(p.err); return u; };
+// 0156: extras are no longer sold; an account that still holds some gets them set here, as regress.mjs does.
+const holdExtras = (u, n) => sql(`update private.billing set extra_plants = ${n} where user_id='${u.id}'`);
 const home = async (label) => { const u = await user(label); const p = await pay(u, { plan: "home", period: "monthly" }); if (p.err) throw new Error(p.err); return u; };
 
 // ---------------------------------------------------------------- runner
@@ -142,12 +144,12 @@ async function cleanup() {
 try {
 await ensureMock();
 // =================================================================== G1 inventory
-const ALLOW_AUTH = new Set(`_energy_row _erow _hm _plant_day_energy admin_overview api_account_delete api_balance api_billing_change
-api_billing_extras api_billing_keep api_billing_quote api_billing_status billing_room api_data_days api_db_stats api_energy api_export api_grid_off_recent api_health
+const ALLOW_AUTH = new Set(`_energy_row _erow _hm _plant_day_energy admin_overview api_account_delete api_alerts api_balance api_billing_change
+api_billing_extras api_billing_keep api_billing_quote api_billing_status billing_room api_data_days api_db_stats api_energy api_export api_grid_off_recent api_grid_today api_health
 api_history api_history_earliest api_inverter_history api_link_disconnect api_link_remove api_link_status api_me api_notifications
 api_notifications_read api_offer api_overview api_plant_days api_plant_start api_plant_states api_plant_stop api_prefs_set api_push_sub
 api_push_unsub api_string_health api_trends_by_hour api_trends_compare api_trends_daily calibration_plant cfg client_errors_cap
-day_start_epoch day_start_epoch_tz email_prefs_touch handle_new_user local_day local_day_tz local_hour local_hour_tz local_minute
+battery_groups_kwh day_start_epoch day_start_epoch_tz email_prefs_touch handle_new_user local_day local_day_tz local_hour local_hour_tz local_minute
 local_minute_tz local_ts local_ts_tz my_plant my_plant_ids panel_kwp plant_cfg plant_config_batt_sign_guard plant_config_features_guard
 plant_config_touch plant_tz profiles_guard q_by_hour q_day_agg q_day_gap_minutes q_grid_present q_recovered_minutes q_stats today_tz`.split(/\s+/));
 // api_offer: the website reads prices and the offer before sign-in (0145).
@@ -259,16 +261,16 @@ await attack("G3b", "start a plant past the plan with no payment (Free, Home, Fa
   const h = await home("g3h"); await link(h, "installer@mock");
   const hp = sql(`select plant_id from public.plant_users where user_id='${h.id}' and paused order by plant_id limit 1`);
   if (good(await rpc(h, "api_plant_start", { p_plant: Number(hp) }))) bad.push("home");
-  const fa = await family("g3fam"); await link(fa, "installer@mock", { confirmCost: "paused" });
+  const fa = await family("g3fam"); await link(fa, "installer@mock", { confirmCost: "paused" }); await link(fa, "farm@mock", { confirmCost: "paused" });
   const fp = sql(`select plant_id from public.plant_users where user_id='${fa.id}' and paused order by plant_id limit 1`);
-  if (active(fa) !== 3 || !fp) bad.push("family link did not leave 2 stopped: " + active(fa));
-  else if (good(await rpc(fa, "api_plant_start", { p_plant: Number(fp) }))) bad.push("family 4th");
+  if (active(fa) !== 5 || !fp) bad.push("family link did not leave 2 stopped: " + active(fa));
+  else if (good(await rpc(fa, "api_plant_start", { p_plant: Number(fp) }))) bad.push("family 6th");
   return { hit: bad.length > 0, note: bad.join(",") };
 });
 await attack("G3c", "parallel api_plant_start goes past the plan's plant limit (Free has no billing row)", async () => {
   const bad = [];
-  for (const [kind, mk, lim] of [["free", () => user("g3c-free"), 1], ["home", () => home("g3c-home"), 1], ["family", () => family("g3c-fam"), 3]]) {
-    const a = await mk(); await link(a, "installer@mock", { confirmCost: "paused" });
+  for (const [kind, mk, lim] of [["free", () => user("g3c-free"), 1], ["home", () => home("g3c-home"), 2], ["family", () => family("g3c-fam"), 5]]) {
+    const a = await mk(); await link(a, "installer@mock", { confirmCost: "paused" }); await link(a, "farm@mock", { confirmCost: "paused" });
     for (const p of sql(`select plant_id from public.plant_users where user_id='${a.id}' and not paused`).split("\n").filter(Boolean)) await rpc(a, "api_plant_stop", { p_plant: Number(p) });
     const ids = sql(`select plant_id from public.plant_users where user_id='${a.id}' order by plant_id`).split("\n").map(Number);
     const hasRow = num(`select count(*) from private.billing where user_id='${a.id}'`);
@@ -359,11 +361,10 @@ await attack("G4b", "crafted pay bodies: bad plan, period, extras (opened as /bi
   }
   return { hit: bad.length > 0, note: bad.join("; ") };
 });
-await attack("G4c", "Family pays extras at or below those held, or negative: nothing charged, nothing lowered", async () => {
+await attack("G4c", "Family pays extras (more, the same, fewer, negative): nothing charged, nothing changed (0156: none sold)", async () => {
   const bad = [];
-  const a = await family("g4c"); const p = await pay(a, { plan: "family", extras: 2 });
-  if (p.err) bad.push("could not buy 2: " + p.err);
-  for (const n of [2, 1, 0, -1]) {
+  const a = await family("g4c"); holdExtras(a, 2);
+  for (const n of [3, 2, 1, 0, -1]) {
     const o = await pay(a, { plan: "family", extras: n });
     if (!o.err) bad.push(`extras ${n} opened R${o.amount}`);
   }
@@ -376,13 +377,13 @@ await attack("G4d", "a plant with no inverter rows still needs room bought", asy
   const acc = await link(a, "solo@mock");                            // gives a real account id
   const accId = acc.data?.accountId;
   const ghost = 9264000 + Number(RUN) % 1000;
-  sql(`insert into public.plant_users (plant_id,user_id,account_id,plant_name) select p,'${a.id}','${accId}','f'||p from unnest(array[${ghost + 1},${ghost + 2}]) p`);
-  sql(`select public.plant_users_upsert('${a.id}','${accId}','[{"plant_id":${ghost},"plant_name":"ghost"}]'::jsonb)`);   // the 4th: links stopped
+  sql(`insert into public.plant_users (plant_id,user_id,account_id,plant_name) select p,'${a.id}','${accId}','f'||p from unnest(array[${ghost + 1},${ghost + 2},${ghost + 3},${ghost + 4}]) p`);
+  sql(`select public.plant_users_upsert('${a.id}','${accId}','[{"plant_id":${ghost},"plant_name":"ghost"}]'::jsonb)`);   // the 6th: links stopped
   const o = await pay(a, { plan: "family" });                                                                          // nothing bought
   const s1 = await rpc(a, "api_plant_start", { p_plant: ghost });
   const started = num(`select count(*) from public.plant_users where user_id='${a.id}' and plant_id=${ghost} and not paused`);
-  sql(`delete from public.plant_users where user_id='${a.id}' and plant_id in (${ghost},${ghost + 1},${ghost + 2})`);
-  sql(`delete from public.plant_config where plant_id in (${ghost},${ghost + 1},${ghost + 2})`);
+  sql(`delete from public.plant_users where user_id='${a.id}' and plant_id between ${ghost} and ${ghost + 4}`);
+  sql(`delete from public.plant_config where plant_id between ${ghost} and ${ghost + 4}`);
   return { hit: started === 1, note: `started=${started}, pay: ${o.err ?? "R" + o.amount}, start ${s1.status}` };
 });
 await attack("G4e", "stale cheap upgrade charge paid after the next renewal", async () => {
@@ -457,28 +458,29 @@ await attack("G5d", "verify: another user's payment reference is refused (SOLAR-
 });
 
 // =================================================================== G6 link flow
-await attack("G6a", "Family: parallel links of five logins pass the 3-plant cover with no payment", async () => {
+await attack("G6a", "Family: parallel links of six logins (8 plants) pass the 5-plant cover with no payment", async () => {
   const a = await family("g6a");
-  const rs = await Promise.all(["nobatt@mock", "shared@mock", "export@mock", "brynne@mock", "solo@mock"].map((l) => link(a, l, { confirmCost: true })));
+  const rs = await Promise.all(["nobatt@mock", "shared@mock", "export@mock", "brynne@mock", "farm@mock", "flat@mock"].map((l) => link(a, l, { confirmCost: true })));
   const n = active(a);
-  return { hit: n > 3, note: `${n} plants collecting on Family (3 covered), statuses ${rs.map((r) => r.status).join(",")}` };
+  return { hit: n > 5, note: `${n} plants collecting on Family (5 covered), statuses ${rs.map((r) => r.status).join(",")}` };
 });
-await attack("G6b", "Home and Free: parallel links stay at 1 plant", async () => {
+await attack("G6b", "Free and Home: parallel links stay at 1 and 2 plants", async () => {
   const bad = [];
-  for (const mk of [() => user("g6b-free"), () => home("g6b-home")]) {
+  for (const [mk, lim] of [[() => user("g6b-free"), 1], [() => home("g6b-home"), 2]]) {
     const a = await mk();
     await Promise.all(["nobatt@mock", "shared@mock", "export@mock", "brynne@mock", "installer@mock"].map((l) => link(a, l, { confirmCost: true })));
-    if (active(a) > 1) bad.push(`${planOf(a)} active=${active(a)}`);
+    if (active(a) > lim) bad.push(`${planOf(a)} active=${active(a)}`);
   }
   return { hit: bad.length > 0, note: bad.join(",") };
 });
-await attack("G6c", "old confirmCost values on a Family 4th+5th plant: no cost question, never past the room", async () => {
+await attack("G6c", "old confirmCost values on a Family 6th+7th plant: no cost question, never past the room", async () => {
   const bad = [];
   for (const cc of [undefined, false, 1, "yes", true, "paused"]) {
     const a = await family("g6c");
-    const r = await link(a, "installer@mock", cc === undefined ? {} : { confirmCost: cc });
+    await link(a, "installer@mock");
+    const r = await link(a, "farm@mock", cc === undefined ? {} : { confirmCost: cc });
     if (r.status !== 200) bad.push(`${JSON.stringify(cc)} -> ${r.status}`);
-    if (active(a) > 3) bad.push(`${JSON.stringify(cc)} active=${active(a)}`);
+    if (active(a) > 5) bad.push(`${JSON.stringify(cc)} active=${active(a)}`);
   }
   return { hit: bad.length > 0, note: bad.join("; ") };
 });
@@ -519,23 +521,24 @@ await attack("G7a", "book Home (or Free) then link new plants: they stay active 
     await link(a, "installer@mock", { confirmCost: true });                // more plants while still Family
     sql(`update private.billing set next_billing_date = current_date where user_id='${a.id}'`);
     await svc("billing_renew", { p_user: a.id });
-    const lim = target === "home" ? 1 : 1;
+    const lim = target === "home" ? 2 : 1;
     if (active(a) > lim) bad.push(`${target}: ${active(a)} plants active on ${planOf(a)} (limit ${lim})`);
   }
   return { hit: bad.length > 0, note: bad.join("; ") };
 });
-await attack("G7b", "Family: book removal of a login, link others: more than 3 collect until the date", async () => {
+await attack("G7b", "Family: book removal of a login, link others: more than 5 collect until the date", async () => {
   const a = await family("g7b");
   const r = await link(a, "solo@mock");                                    // 6003
   const rm = await rpc(a, "api_link_remove", { p_account: r.data.accountId });     // removed now (0139)
   await link(a, "shared@mock", { confirmCost: true });                     // 6004
   await link(a, "export@mock", { confirmCost: true });                     // 3001, 6002
   await link(a, "brynne@mock", { confirmCost: true });                     // 5001
+  await link(a, "farm@mock", { confirmCost: true });                       // 6008, 6009
   const n = active(a);
-  return { hit: n > 3, note: `${n} collecting, 3 paid; removal ${rm.data?.result}` };
+  return { hit: n > 5, note: `${n} collecting, 5 paid; removal ${rm.data?.result}` };
 });
 await attack("G7c", "stop an extra plant before renewal, start it again after: only while its room is still billed", async () => {
-  const a = await family("g7c"); await pay(a, { plan: "family", extras: 1 }); await link(a, "installer@mock");
+  const a = await family("g7c"); holdExtras(a, 1); await link(a, "installer@mock"); await link(a, "farm@mock");
   const ex = num(`select plant_id from public.plant_users where user_id='${a.id}' and not paused order by linked_at desc, plant_id desc limit 1`);
   await rpc(a, "api_plant_stop", { p_plant: ex });
   sql(`update private.billing set next_billing_date = current_date where user_id='${a.id}'`);
@@ -543,7 +546,7 @@ await attack("G7c", "stop an extra plant before renewal, start it again after: o
   const s = await rpc(a, "api_plant_start", { p_plant: ex });
   // Family and one extra plant, at the offer the account holds
   const full = num(`select public.billing_amount('family', 'monthly', 1, private.billing_offer('${a.id}', private.billing_today()))`);
-  return { hit: good(s) && active(a) > 3 && r.data?.charge < full, note: `renewal charge R${r.data?.charge}, restart ${s.status}` };
+  return { hit: good(s) && active(a) > 5 && r.data?.charge < full, note: `renewal charge R${r.data?.charge}, restart ${s.status}` };
 });
 await attack("G7d", "upgrade on the billing date costs nothing, then downgrade is booked", async () => {
   const h = await home("g7d");
@@ -610,12 +613,12 @@ await attack("G8d", "api_push_sub takes over another user's push endpoint", asyn
 }, { design: true });
 
 // =================================================================== C many requests at once (--seed sets the order)
-// Family plants collecting past the room bought (0129)
-const extrasPaid = (u) => Math.max(0, active(u) - 3 - num(`select coalesce((select extra_plants from private.billing where user_id='${u.id}'), 0)`));
+// Family plants collecting past the room: 5 plus extras still held (0156)
+const extrasPaid = (u) => Math.max(0, active(u) - 5 - num(`select coalesce((select extra_plants from private.billing where user_id='${u.id}'), 0)`));
 const ok = (u) => {
   const plan = planOf(u), comped = sql(`select coalesce((select comped from private.billing where user_id='${u.id}'), false)`) === "t";
   if (comped) return null;
-  if (plan !== "family" && active(u) > 1) return `${plan}: ${active(u)} collect`;
+  if (plan !== "family" && active(u) > (plan === "home" ? 2 : 1)) return `${plan}: ${active(u)} collect`;
   if (plan === "family" && extrasPaid(u) > 0) return `family: ${extrasPaid(u)} plants collect past the room bought`;
   // A booked downgrade lets every plant collect to the billing date, then stops those past
   // the pick (0136, decided 2026-11-01); C2 checks the stop at renewal.
@@ -626,7 +629,7 @@ await attack("C1", "a storm on each plan: links, stops, starts, pays, bookings a
   for (const mk of [() => user("c1-free"), () => home("c1-home"), () => family("c1-fam")]) {
     const a = await mk();
     await link(a, "solo@mock");
-    const logins = shuffle(["installer@mock", "export@mock", "shared@mock", "brynne@mock", "nobatt@mock"]);
+    const logins = shuffle(["installer@mock", "export@mock", "shared@mock", "farm@mock", "business@mock"]);
     const ids = () => sql(`select string_agg(plant_id::text, ',') from public.plant_users where user_id='${a.id}'`).split(",").filter(Boolean).map(Number);
     for (let round = 0; round < 3; round++) {
       const reqs = [
@@ -659,7 +662,7 @@ await attack("C2", "renewal of a booked downgrade while links and starts run", a
     ]).map((f) => f().catch((e) => e)));
     const late = sql(`select string_agg(plant_id::text, ',') from public.plant_users where user_id='${a.id}' and paused`).split(",").filter(Boolean).map(Number);
     await Promise.all(late.map((p) => rpc(a, "api_plant_start", { p_plant: p })));
-    if (active(a) > 1) bad.push(`${target}: ${active(a)} collect on ${planOf(a)}`);
+    if (active(a) > (target === "home" ? 2 : 1)) bad.push(`${target}: ${active(a)} collect on ${planOf(a)}`);
   }
   return { hit: bad.length > 0, note: bad.join("; ") };
 });

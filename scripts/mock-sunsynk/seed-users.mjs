@@ -5,7 +5,8 @@
 //   eval "$(supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY|ANON_KEY)=')"
 //   node scripts/mock-sunsynk/seed-users.mjs
 //
-// Idempotent: existing users are reused, existing links are refreshed.
+// Idempotent: existing users are reused, existing links are refreshed, and plants a
+// check run left stopped are started again.
 const API = (process.env.API_URL || "http://127.0.0.1:55321").replace(/"/g, "");
 const SERVICE = (process.env.SERVICE_ROLE_KEY || "").replace(/"/g, "");
 const ANON = (process.env.ANON_KEY || "").replace(/"/g, "");
@@ -25,7 +26,7 @@ const USERS = {
 import { execFileSync } from "node:child_process";
 
 // Every seed user is on Family (SOLAR-208), so the plan check lets dev link all its
-// logins and the shared ones link twice. Their plants past the 3rd are confirmed.
+// logins and the shared ones link twice. Family covers 5 plants (0156): dev's 5 all collect.
 function family(id) {
   execFileSync("supabase", ["db", "query", "--local", `insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
     values ('${id}', 'family', 'monthly', 1, date_trunc('month', current_date + interval '1 month')::date)
@@ -64,6 +65,13 @@ for (const [email, logins] of Object.entries(USERS)) {
   for (const u of logins) {
     const r = await link(jwt, u);
     console.log(email, "->", u, r.ok ? `ok plants=${(r.plants || []).map((p) => p.id).join(",")}${r.warning ? " (" + r.warning + ")" : ""}` : `FAIL ${JSON.stringify(r)}`);
+  }
+  // A relink keeps a stopped plant stopped; start them, the way the Plants page does.
+  const stopped = execFileSync("supabase", ["db", "query", "--local", "-o", "csv",
+    `select plant_id from public.plant_users where user_id = '${id}' and paused`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split("\n").slice(1).filter((l) => /^\d+$/.test(l.trim()));
+  for (const p of stopped) {
+    const r = await fetch(`${API}/rest/v1/rpc/api_plant_start`, { method: "POST", headers: { apikey: ANON, Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }, body: JSON.stringify({ p_plant: Number(p) }) });
+    console.log(email, "start", p.trim(), r.ok ? "ok" : `FAIL ${r.status} ${await r.text()}`);
   }
   console.log("user", email, id);
 }

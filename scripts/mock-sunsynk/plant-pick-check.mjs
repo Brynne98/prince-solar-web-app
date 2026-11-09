@@ -12,7 +12,9 @@ const API = (process.env.API_URL || "http://127.0.0.1:55321").replace(/"/g, "");
 const FN = process.env.LINK_URL || `${API}/functions/v1/link-sunsynk`;
 const SERVICE = (process.env.SERVICE_ROLE_KEY || "").replace(/"/g, ""), ANON = (process.env.ANON_KEY || "").replace(/"/g, "");
 const DB = process.env.DB_URL?.replace(/"/g, "") || "postgresql://postgres:postgres@127.0.0.1:55322/postgres";
-const sql = (q) => execFileSync(process.env.PSQL || "psql", [DB, "-XAtc", q]).toString().trim();
+// The local DB is shared: another session's billing run can deadlock a write here. Try again.
+const sql = (q) => { for (let t = 1; ; t++) try { return execFileSync(process.env.PSQL || "psql", [DB, "-XAtc", q], { stdio: ["ignore", "pipe", "pipe"] }).toString().trim(); }
+  catch (e) { if (t >= 5 || !/deadlock detected/.test(String(e.stderr))) throw e; } };
 let fail = 0;
 const check = (ok, what) => { console.log((ok ? "  ok   " : "  FAIL ") + what); if (!ok) fail++; };
 const tag = Date.now();
@@ -48,8 +50,9 @@ const [a] = on.map(Number), [b] = off.map(Number);
 const others = sql(`select coalesce(string_agg(user_id || ':' || plant_id, ','), '') from public.plant_users
                      where plant_id in (${a}, ${b}) and user_id <> '${u.id}' and not paused`).split(",").filter(Boolean);
 sql(`update public.plant_users set paused = true where plant_id in (${a}, ${b}) and user_id <> '${u.id}'`);
-const restore = () => others.forEach(x => { const [uid, pid] = x.split(":"); sql(`update public.plant_users set paused = false where user_id = '${uid}' and plant_id = ${pid}`); });
+const restore = () => others.splice(0).forEach(x => { const [uid, pid] = x.split(":"); sql(`update public.plant_users set paused = false where user_id = '${uid}' and plant_id = ${pid}`); });
 
+try {
 r = await rpc(u, "api_plant_start", { p_plant: b });
 check(!r.ok && /no room/.test(r.error), `start on a full plan is refused: ${r.error}`);
 
@@ -74,15 +77,16 @@ const nd = sql(`select (current_date + 15)::date`);
 sql(`insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values ('${u.id}', 'family', 'monthly', extract(day from current_date + 15)::int, '${nd}')`);
 r = await rpc(u, "api_plant_start", { p_plant: a });
 check(r.ok && active(u).split(",").length === 2, `Family has room for a 2nd: ${r.error || "ok"}`);
+// 0136: a cancel books with the plants Free keeps; the rest collect to the billing date.
+const drops = () => sql(`select coalesce(array_length(private.billing_drops(b), 1), 0) from private.billing b where user_id = '${u.id}'`);
 r = await rpc(u, "api_billing_change", { p_plan: "free", p_period: null });
-check(!r.ok && /remove plants first/.test(r.error), `cancel with 2 collecting is refused: ${r.error}`);
+check(r.ok && active(u).split(",").length === 2 && drops() === "1", `cancel with 2 collecting books, 1 stops on the date: ${r.error || "ok"} drops=${drops()}`);
 r = await rpc(u, "api_plant_stop", { p_plant: a });
-r = await rpc(u, "api_billing_change", { p_plan: "free", p_period: null });
-check(r.ok, `after a stop the cancel goes through: ${r.error || "ok"}`);
+check(r.ok && drops() === "0", `after a stop nothing drops: ${r.error || "ok"} drops=${drops()}`);
 r = await rpc(u, "api_plant_start", { p_plant: a });
-check(!r.ok && /plan change/.test(r.error), `a start that breaks the booked cancel is refused: ${r.error}`);
+check(r.ok && drops() === "1", `a start with room now collects to the date, then stops: ${r.error || "ok"} drops=${drops()}`);
 
-restore();
+} finally { restore(); } // seed users' plants collect again even when a step throws
 await fetch(`${API}/auth/v1/admin/users/${u.id}`, { method: "DELETE", headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } });
 sql(`delete from private.free_week_logins where sunsynk_username = 'installer@mock'`);
 console.log(fail ? `${fail} FAILED` : "PASS");
