@@ -899,6 +899,7 @@
   /* ---------- segmented / buttons ---------- */
   .segmented { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--sp-2xs); gap: var(--sp-3xs); }
   .seg-btn { background: none; border: none; color: var(--muted); padding: var(--sp-sm) var(--sp-lg); border-radius: var(--r-md); font-size: var(--fs-sm); font-weight: 500; transition: var(--dur-fast) var(--ease-out); }
+  .seg-block { display: flex; } .seg-block .seg-btn { flex: 1; }
   .seg-sm .seg-btn { padding: var(--sp-2xs) var(--sp-md); font-size: var(--fs-sm); }
   .seg-btn:hover:not(:disabled) { color: var(--text); } .seg-btn:disabled { cursor: default; } .seg-btn.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(var(--shade-rgb),0.3); }
   .ghost-btn { background: none; border: 1px solid var(--line-2); color: var(--muted); padding: var(--sp-sm) var(--sp-lg); border-radius: var(--r-md); font-size: var(--fs-sm); transition: var(--dur-fast) var(--ease-out); }
@@ -1693,8 +1694,7 @@
   /* The SunSynk login form (link.jsx), on that card and in Account, from the Settings parts */
   .link-card { padding: var(--sp-xl) var(--sp-2xl) var(--sp-2xl); background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-xl); box-shadow: 0 20px 50px -24px rgba(var(--shade-rgb),0.9); }
   .link-form > .sset-note { margin-bottom: var(--sp-lg); }
-  .link-form .link-mode { display: flex; margin-bottom: var(--sp-lg); }
-  .link-form .link-mode .seg-btn { flex: 1; }
+  .link-form .link-mode { margin-bottom: var(--sp-lg); }
   .link-form .sset-note b { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
   /* The plan cards' base, for Pick your plan (SOLAR-208) */
   .pw-plan { display: flex; flex-direction: column; gap: var(--sp-xs); padding: var(--sp-lg); border: 1px solid var(--line-2); border-radius: var(--r-lg); background: var(--panel-2); }

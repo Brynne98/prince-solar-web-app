@@ -183,9 +183,10 @@ function StatTile({ label, value, unit, accent, sub, bar, loading, locked }) {
 
 // ---- Segmented control ------------------------------------------------------
 // Every pick-one-of-a-few in the app is this one. disabled: drawn for real while its page loads.
-function Segmented({ options, value, onChange, size = 'md', label, className = '', disabled }) {
+// block: fills its row, the options sharing the width.
+function Segmented({ options, value, onChange, size = 'md', label, className = '', disabled, block }) {
   return (
-    <div className={'segmented seg-' + size + (className ? ' ' + className : '')} role="group" aria-label={label}>
+    <div className={'segmented seg-' + size + (block ? ' seg-block' : '') + (className ? ' ' + className : '')} role="group" aria-label={label}>
       {options.map((o) => {
         const val = typeof o === 'string' ? o : o.value;
         const lab = typeof o === 'string' ? o : o.label;

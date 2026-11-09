@@ -516,7 +516,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
     <form className={compact ? 'conn-form link-form' : 'link-form link-card'} onSubmit={submit} noValidate aria-busy={busy}>
       {!compact && <h2 className="sset-title">{noPlants ? 'Connected, but no plant yet' : relink ? 'Reconnect SunSynk' : 'Add your plant'}</h2>}
       {!relink && !noPlants && (
-        <window.Segmented label="How to add it" className="link-mode" value={mode}
+        <window.Segmented block label="How to add it" className="link-mode" value={mode}
           onChange={(m) => { setMode(m); setBad({}); setTaken(null); window.track('link_mode_picked', { mode: m }); }}
           options={[{ value: 'login', label: 'SunSynk login' }, { value: 'share', label: 'Share plant' }]} />
       )}
