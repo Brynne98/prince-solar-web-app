@@ -275,16 +275,15 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
 
 // The person: avatar, name and plant count in the sidebar; the avatar alone in a phone's
 // header. A dead SunSynk login puts a red dot on the avatar and on Account.
-// stepsLeft (the free week, SOLAR-242): a dot on the avatar and the count on Settings
-function AccountMenu({ user, plantCount, alert, stepsLeft, onSettings, active, variant }) {
+function AccountMenu({ user, plantCount, alert, onSettings, active, variant }) {
   const [open, setOpen, ref] = usePopover();
   // plantCount is null while the plants load: the row shows, its count shimmers
   const sub = alert ? 'Reconnect a login' : plantCount == null ? '' : plantCount + (plantCount === 1 ? ' plant' : ' plants');
   return (
     <div className={'acct acct-' + variant} ref={ref}>
-      <button type="button" className={'acct-btn' + (alert ? ' needs' : stepsLeft ? ' steps' : '')} aria-haspopup="menu" aria-expanded={open}
+      <button type="button" className={'acct-btn' + (alert ? ' needs' : '')} aria-haspopup="menu" aria-expanded={open}
               aria-current={active ? 'page' : undefined} onClick={() => setOpen(o => !o)}
-              aria-label={'Account menu' + (alert ? '. A SunSynk login needs reconnecting' : stepsLeft ? '. Setup steps left' : '')}>
+              aria-label={'Account menu' + (alert ? '. A SunSynk login needs reconnecting' : '')}>
         <span className="avatar" aria-hidden="true">{user.initials}</span>
         {variant === 'rail' && <span className="who" aria-hidden="true"><b>{user.name}</b><span className={alert ? 'bad' : ''} style={sub ? undefined : { position: 'relative' }}>{sub || <>{'\u00a0'}<window.Skeleton as="span" w={52} h={11} r={6} style={{ position: 'absolute', left: 0, top: 2 }} /></>}</span></span>}
       </button>
@@ -294,7 +293,7 @@ function AccountMenu({ user, plantCount, alert, stepsLeft, onSettings, active, v
           {/* Settings left the page list for here (SOLAR-224); Account, Billing and Plant are
               one Settings area since SOLAR-250 */}
           <button type="button" onClick={() => { setOpen(false); onSettings(); }}>
-            <Icon id="settings" />Settings{stepsLeft > 0 && <span className="menu-left">{stepsLeft} left</span>}
+            <Icon id="settings" />Settings
             {alert && <span className="dot" aria-label="A login needs reconnecting" />}
           </button>
           <hr />
@@ -1684,12 +1683,11 @@ function App({ links }) {
                                  onShown={ids => ids.forEach(id => alertsShown.current.add(id))}
                                  onReadAll={() => { alertsShown.current.clear(); readNotifs(null); }} />;
   const loginDead = links.accounts.some(a => a.status === 'needs_relink' && a.kind !== 'share');
-  // The free week (SOLAR-242): steps left mark the avatar; after it, history locks.
+  // The free week (SOLAR-242): after it, history locks.
   const free = window.freeState(me);
-  const stepsLeft = free?.week ? (firstSteps(me, plantId)?.left || []).length : 0;
   const [overSeen, setOverSeen] = useState(false);
   const overCard = free?.over && !overSeen && !me?.prefs?.freeWeekOverSeen;
-  const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, stepsLeft, onSettings: () => go('prefs'), active: isSettings(tab) };
+  const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, onSettings: () => go('prefs'), active: isSettings(tab) };
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync}
                                accounts={links.accounts} onStopped={() => openSettings('connection')} />;
   // A page's section, from Billing's Reconnect: openSettings; otherwise the page itself
