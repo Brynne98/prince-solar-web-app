@@ -2394,7 +2394,13 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
           <div className="pay-review-box">
             <div className="pay-review-ln"><span>{room === 1 ? '1 plant' : room + ' plants'}</span><b>{rand(b.price)} {perUnit(b.period)}</b></div>
             {/* past due and ending say their date below */}
-            {b.state !== 'past_due' && !ending && <div className="pay-review-ln"><span>Renews</span><b>{window.dayText(b.nextDate, { day: 'numeric', month: 'short', year: 'numeric' })}</b></div>}
+            {b.state !== 'past_due' && !ending && !b.prepaidOn && <div className="pay-review-ln"><span>Renews</span><b>{longDay(b.nextDate)}</b></div>}
+            {/* a paid switch to yearly (SOLAR-298): when the year starts, what it cost, the payment after it */}
+            {b.prepaidOn && <>
+              <div className="pay-review-ln"><span>Yearly from</span><b>{longDay(b.nextDate)}</b></div>
+              <div className="pay-review-ln"><span>Year paid</span><b className="paid">{rand(b.nextAmount)}</b></div>
+              <div className="pay-review-ln"><span>Next payment</span><b>{longDay(yearOn(b.nextDate))}</b></div>
+            </>}
           </div>
         )}
         {paid && b.offer?.held && <div className="conn-meta pw-offer">{window.billingFmt.offerLine(b.offer, listPrice(b, b.plan, b.period, b.extraPlants || 0), b.period)}</div>}
@@ -2404,11 +2410,15 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
             <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
           </div>
         )}
-        {booked && <BookedNotice booked={booked} busy={busy} onUndo={() => run(() => undoBooked(b, reload))} />}
+        {booked && !b.prepaidOn && <BookedNotice booked={booked} busy={busy} onUndo={() => run(() => undoBooked(b, reload))} />}
       </PlanCard>
     </SettingsSection>
   );
 }
+
+const longDay = (d) => window.dayText(d, { day: 'numeric', month: 'short', year: 'numeric' });
+// The same day a year on: a yearly plan's next payment.
+const yearOn = (d) => (+d.slice(0, 4) + 1) + d.slice(4);
 
 // One card of Billing's Plan section: its title top left, its control top right, the rest under them.
 // hidden: a loading outline.
