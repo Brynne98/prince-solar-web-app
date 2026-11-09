@@ -88,6 +88,13 @@ const mails: Record<string, [from: string, mail: Email]> = {
       labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
       titles: ["Mon 6 Oct: 27.4 kWh", "Tue 7 Oct: 29.8 kWh", "Wed 8 Oct: 18.2 kWh", "Thu 9 Oct: 33.1 kWh", "Fri 10 Oct: 30.6 kWh", "Sat 11 Oct: 24.9 kWh", "Sun 12 Oct: 27.3 kWh"] },
   })],
+  // Grid switched off both weeks: nothing bought before, so Imported has no change line (SOLAR-452).
+  "report-week-grid-off": [FROM_REPORTS, report({
+    ...base, period: "week", label: "2 – 8 Nov 2026", prevLabel: "last week",
+    madeKwh: 191.3, homeKwh: 168.9, importKwh: 0, independencePct: 100, savedRand: 495,
+    change: { made: 4, home: 1, independence: 0, saved: 1 },
+    bestDay: { label: "Thu 5 Nov", kwh: 33.1 }, highestUse: { label: "Sat 7 Nov", kwh: 30.4 },
+  })],
   "report-year": [FROM_REPORTS, report({
     ...base, period: "year", label: "2026", prevLabel: "2025",
     madeKwh: 9420, homeKwh: 10870, importKwh: 2710, exportKwh: null, independencePct: 75, savedRand: 25300,
