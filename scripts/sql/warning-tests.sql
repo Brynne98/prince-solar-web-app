@@ -9,9 +9,11 @@
 begin;
 
 -- Never on a live database: email_sweep locks and steps every plant. A login that polled
--- in the last hour means a poller is running here.
+-- in the last hour means a poller is running here. A local poller only reads the mock
+-- (name@mock) and our share login, so those don't count.
 do $$ begin
-  if exists (select 1 from private.sunsynk_accounts where last_ok_at > now() - interval '1 hour')
+  if exists (select 1 from private.sunsynk_accounts where last_ok_at > now() - interval '1 hour'
+               and sunsynk_username not like '%@mock' and sunsynk_username not like '%@princesolarhub.co.za')
      or exists (select 1 from public.plant_config where plant_id between 9001 and 9007) then
     raise exception 'refused: this looks like a live database';
   end if;
