@@ -560,11 +560,6 @@ function MiniStat({ label, value, color, sub, info, trend, trendUnit, trendInver
 // with its peak, where that solar went, when the battery fills, the strings as they
 // read now, and the last 30 days.
 
-// YYYY-MM-DD at the plant, not on the viewer's device
-function plantDateStr(tz, d = new Date()) {
-  try { if (tz) return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); } catch (e) {}
-  return window.localDateStr(d);
-}
 
 // Every total is the days before today plus today's live figure, and the current month is
 // rebuilt from its days: the nightly sync (02:15 UTC) writes today's cached row, and the

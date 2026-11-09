@@ -54,6 +54,11 @@ function localDateStr(d = new Date()) {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+// YYYY-MM-DD at the plant, not on the viewer's device; the device's when no zone is known
+function plantDateStr(tz, d = new Date()) {
+  try { if (tz) return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d); } catch (e) {}
+  return localDateStr(d);
+}
 function shiftDate(s, days) {
   const [y, m, d] = s.split('-').map(Number);
   return localDateStr(new Date(y, m - 1, d + days));
@@ -375,7 +380,7 @@ function HistoryLock({ where, tile }) {
 
 Object.assign(window, {
   freeState, FreeCtx, useFreeOver, openPlans, LockIcon, Locked, HistoryLock,
-  COLORS, COLORS_TEXT, fmtPower, fmtPowerParts, battShown, localDateStr, shiftDate, dayText, fmtDuration, plantLabel, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
+  COLORS, COLORS_TEXT, fmtPower, fmtPowerParts, battShown, localDateStr, plantDateStr, shiftDate, dayText, fmtDuration, plantLabel, fmtKwh, fmtRand, fmtTime, cleanTemp, plantHour, fmtPlantTime,
   Card, StatTile, Segmented, Switch, Toggle, LegendChip, SectionTitle, InfoDot, Tip,
   Skeleton, SkelLine, BusyButton, TipRow, Meter,
   fmtEnergySmart, fmtRandSmart, fmtEnergyParts, fmtMoney, fmtMoneySmart, moneySymbol
