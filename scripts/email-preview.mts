@@ -120,6 +120,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "billing-switch-booked": [FROM_BILLING, planChangeBooked({ from: "home", to: "home", fromPeriod: "yearly", toPeriod: "monthly", on: "1 Dec", removePlants: [], next: { amount: 99 } })],
   "billing-failed-1": [FROM_BILLING, paymentFailed({ plan: "family", period: "monthly", amount: 199, card: "Visa •••• 4081", nextTry: "3 Dec", freeOn: "8 Dec", payUrl: PAY_URL })],
   "billing-refund": [FROM_BILLING, paymentRefunded({ amount: 72, date: "3 Dec", reference: "psh_0123", why: "price", card: "Visa •••• 4081" })],
+  "billing-refund-hand-part": [FROM_BILLING, paymentRefunded({ amount: 40.5, paid: 990, date: "3 Dec", reference: "psh_0123", why: "hand", card: "Visa •••• 4081" })],
   "billing-failed-disputed": [FROM_BILLING, paymentFailed({ plan: "home", period: "monthly", amount: 99, card: "Visa •••• 4081", nextTry: "4 Dec", freeOn: "11 Dec", payUrl: PAY_URL, disputed: "10 Nov" })],
   "billing-failed-last": [FROM_BILLING, paymentFailed({ plan: "family", period: "monthly", amount: 199, card: "Visa •••• 4081", freeOn: "8 Dec", payUrl: PAY_URL })],
   "billing-moved-to-free": [FROM_BILLING, movedToFree({ from: "family", kept: "Home", stopped: ["Cabin", "Office"], deleteOn: "7 Jan", amount: 199, days: 120, stoppedDays: 154 })],

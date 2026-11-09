@@ -849,23 +849,32 @@ export const paymentFailed = (f: Failed) => {
 };
 
 // A payment we refund (0130): it applied nothing, because the plan or the price changed
-// while the user paid. Not sent for the R1 card check.
+// while the user paid. Or one refunded by hand in Paystack (why "hand", SOLAR-444, 0171),
+// all or part of it: the plan stays. Not sent for the R1 card check.
 // card: the card on file, which the refund goes back to. 3 to 10 working days is
 // Paystack's own figure for card refunds in South Africa; Paystack emails them too.
-export type Refund = { amount: number; date: string; reference: string; why: "price" | "changed"; card?: string };
+// paid: what the payment was, for a hand refund; a part refund shows it.
+export type Refund = { amount: number; date: string; reference: string; why: "price" | "changed" | "hand"; paid?: number; card?: string };
 
-export const paymentRefunded = (r: Refund) =>
-  make(`${rand(r.amount)} is on its way back to your card`, {
+// A hand refund can be part of a rand: R40.50 stays R40.50.
+const refundRand = (n: number) => Number.isInteger(n) ? rand(n) : "R" + n.toFixed(2);
+export const paymentRefunded = (r: Refund) => {
+  const part = r.why === "hand" && r.paid != null && r.amount < r.paid;
+  return make(`${refundRand(r.amount)} is on its way back to your card`, {
     title: "Your refund is on its way",
     parts: [
-      { lead: r.why === "price" ? "The price changed while you paid, so we sent it back." : "Your plan changed while you paid, so we sent it back." },
-      { box: { hero: { label: "Refund", value: rand(r.amount), sub: r.card ? `back to ${r.card}` : "back to your card" },
-        rows: [["Paid on", r.date], ["Arrives in", "3 to 10 working days"], ["Reference", esc(r.reference)]] } },
+      { lead: r.why === "price" ? "The price changed while you paid, so we sent it back."
+        : r.why === "hand" ? `We refunded ${part ? "part of " : ""}your payment. Your plan stays as it is.`
+        : "Your plan changed while you paid, so we sent it back." },
+      { box: { hero: { label: "Refund", value: refundRand(r.amount), sub: r.card ? `back to ${r.card}` : "back to your card" },
+        rows: [...(part ? [["Payment", rand(r.paid!)] as [string, string]] : []),
+          ["Paid on", r.date], ["Arrives in", "3 to 10 working days"], ["Reference", esc(r.reference)]] } },
       SEE_PLAN,
       { small: "Paystack, who handles our payments, emails you about it too." },
     ],
     footer: BILL_FOOTER,
   });
+};
 
 // After a card change (the R1 card check, SOLAR-406, 0161): the new card, the one it
 // replaced (left out when the same card is saved again), when, and the next payment (left

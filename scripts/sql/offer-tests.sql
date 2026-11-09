@@ -133,6 +133,24 @@ begin
   perform set_config('request.jwt.claims', '', true);
 end $$;
 
+-- Emails quote the price this user pays (SOLAR-443): an offer left is not quoted again.
+do $$
+declare u uuid := pg_temp.uid(9011);
+begin
+  perform pg_temp.eq('new account email R49', (public.email_prices(pg_temp.uid(9012))->'prices'->'monthly'->>'home')::int, 49);
+  perform pg_temp.eq('holder email R49', (public.email_prices(pg_temp.uid(9008))->'prices'->'monthly'->>'family')::int, 89);
+  perform pg_temp.eq('leaver start R49', pg_temp.start(u, 'home', 'monthly'), 49);
+  perform public.billing_book_change(u, 'free', null, null);
+  perform set_config('t.today', '2027-01-01', true);
+  perform public.billing_run('2027-01-01');
+  perform pg_temp.eq('leaver on Free', (select plan from private.billing where user_id = u), 'free');
+  perform pg_temp.eq('website still R49', (public.api_offer()->'prices'->'monthly'->>'home')::int, 49);
+  perform pg_temp.eq('leaver email home R99', (public.email_prices(u)->'prices'->'monthly'->>'home')::int, 99);
+  perform pg_temp.eq('leaver email family R199', (public.email_prices(u)->'prices'->'monthly'->>'family')::int, 199);
+  perform pg_temp.eq('leaver email list', (public.email_prices(u)->'listPrices'->'monthly'->>'home')::int, 99);
+  perform pg_temp.eq('leaver pays what email says', pg_temp.start(u, 'home', 'monthly'), 99);
+end $$;
+
 \set QUIET off
 do $$ begin
   if exists (select 1 from pg_temp.fails) then
