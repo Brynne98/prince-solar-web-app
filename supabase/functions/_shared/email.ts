@@ -627,7 +627,7 @@ export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email
       parts: [
         { lead: "Your plant is no longer shared with admin@princesolarhub.co.za in SunSynk, so we stopped reading it. Your history is safe." },
         { box: { rows: [["Plants", esc(plants)]] } },
-        { lead: "Share it again as Visitor and readings start again within 2 hours." },
+        { lead: "To start again, share it as Visitor, then add it in the app with Share plant." },
         { button: { label: "Open Prince Solar Hub", href: LOGINS } },
       ],
       footer: [HELP],

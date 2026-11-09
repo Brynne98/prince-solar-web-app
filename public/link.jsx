@@ -89,11 +89,11 @@ window.linkSunsynk = async function linkSunsynk(username, password) {
 // The SunSynk login owners share their plant to, as Visitor (SOLAR-310).
 const SHARE_TO = 'admin@princesolarhub.co.za';
 // A plant shared to us: plantId or an inverter serial. Resolves like linkSunsynk, so the
-// screens that take a login take this too; a claimed plant throws with .taken = its id.
+// screens that take a login take this too; a claimed plant throws with .taken = what was typed.
 window.claimShare = async function claimShare(ref) {
   const [res, body] = await edgePost('claim-share', { ref });
   window.track('share_check_done', { result: body.result || body.error || String(res.status) });
-  if (body.error === 'taken') throw Object.assign(new Error('taken'), { taken: body.plantId });
+  if (body.error === 'taken') throw Object.assign(new Error('taken'), { taken: ref });
   if (body.error === 'not_shared') throw Object.assign(new Error('Not shared with us yet'), { field: true });
   if (!res.ok) throw new Error(LINK_ERRORS[body.error] || 'Couldn’t check SunSynk. Try again.');
   window.track('plant_linked', { via: 'share' });
@@ -529,8 +529,8 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
         </div>
         {taken ? (
           <div className="field-note link-note" role="alert">
-            Plant {taken} is linked to another account. If it’s yours, remove the share in SunSynk, wait 2 hours, share it again and press Check.
-            {' '}Or <a className="mini-link" href={`mailto:hello@princesolarhub.co.za?subject=${encodeURIComponent(`Plant ${taken} is linked to another account`)}`}
+            {taken} is linked to another account. If it’s yours, remove the share in SunSynk, wait 2 hours, share it again and press Check.
+            {' '}Or <a className="mini-link" href={`mailto:hello@princesolarhub.co.za?subject=${encodeURIComponent(`${taken} is linked to another account`)}`}
                      onClick={() => window.track('share_taken_email_done')}>email us</a>.
           </div>
         ) : (

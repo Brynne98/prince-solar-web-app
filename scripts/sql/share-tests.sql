@@ -30,7 +30,9 @@ begin
   insert into t values ('email queued', (select count(*)::text from public.email_queue where kind = 'share_removed' and plant_id = x and user_id = a), '1');
   insert into t values ('not polled', (select count(*)::text from public.poll_jobs(0, 1) where plant_id = x), '0');
   j := public.share_sync(acc, array[x]);
-  insert into t values ('re-shared resumes A', (select (share_gone_at is null)::text from public.plant_users where plant_id = x and user_id = a), 'true');
+  insert into t values ('re-shared waits for Check', (select (share_gone_at is null)::text from public.plant_users where plant_id = x and user_id = a), 'false');
+  insert into t values ('A Check restarts it', public.share_claim(a, acc, x, 'Shared One'), 'claimed');
+  insert into t values ('A live again', (select (share_gone_at is null)::text from public.plant_users where plant_id = x and user_id = a), 'true');
   -- lapse again, then B takes it over
   update public.plant_users set share_gone_at = now() where plant_id = x and user_id = a;
   insert into t values ('B claims lapsed', public.share_claim(b, acc, x, 'Shared One'), 'claimed');

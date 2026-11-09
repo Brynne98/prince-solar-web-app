@@ -648,7 +648,8 @@ export async function bootstrapPlantId(): Promise<number | null> {
 
 /** The auth user that owns the share login row: one for the share address, made once. */
 async function shareUserId(): Promise<string> {
-  const made = await db.auth.admin.createUser({ email: SHARE_USERNAME, email_confirm: true });
+  // Not confirmed: nobody signs in as it, and the welcome and no-plant emails never start.
+  const made = await db.auth.admin.createUser({ email: SHARE_USERNAME, email_confirm: false });
   if (made.data?.user) return made.data.user.id;
   for (let page = 1; page <= 50; page++) {
     const { data, error } = await db.auth.admin.listUsers({ page, perPage: 1000 });
@@ -682,6 +683,8 @@ export async function shareAccount(): Promise<Account | null> {
 /** Hourly in poll: claimed plants that left the share list stop, and come back when shared again. */
 export async function shareSync(acc: Account): Promise<unknown> {
   const plants = await getPlants(acc);
+  // apiGetAll stops at MAX_PAGES: a full list may be cut short, and the cut plants would read as unshared.
+  if (plants.length >= MAX_PAGES * PAGE_LIMIT) throw new Error(`share list at the ${plants.length} plant cap; raise MAX_PAGES`);
   return await rpc("share_sync", { p_account: acc.id, p_plants: plants.map((p) => p.id) });
 }
 

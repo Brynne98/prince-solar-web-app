@@ -13,8 +13,11 @@
 --     can't be claimed. The owner is told and can remove the share in SunSynk,
 --     which lapses the claim, then share again and claim it.
 --   * share_sync (poll, hourly): a claimed plant missing from the list twice an hour
---     apart stops (share_gone_at) and its owner gets one share_removed email. Back
---     in the list, it starts again, unless someone else claimed it meanwhile.
+--     apart stops (share_gone_at) and its owner gets one share_removed email. Shared
+--     again, it starts when its owner presses Check, not on its own: else a squatter's
+--     stopped claim would come back before the owner could take the plant.
+--   * poll_jobs leaves out stopped shared plants, and paused plants (0110's rule,
+--     which plantsToPoll kept and poll_jobs missed).
 -- ============================================================================
 
 alter table private.sunsynk_accounts
@@ -106,13 +109,10 @@ begin
   perform pg_advisory_xact_lock_shared(3, 0);  -- waits for a billing run, before any other lock (SOLAR-438)
   perform pg_advisory_xact_lock(1, hashtext(p_account::text));
 
-  -- in the list: a miss is forgotten, a stopped claim starts again if nobody else holds the plant
-  update public.plant_users pu set share_missing_at = null, share_gone_at = null
+  -- in the list: a miss is forgotten (a stopped claim waits for its owner's Check)
+  update public.plant_users pu set share_missing_at = null
    where pu.account_id = p_account and pu.via_share and pu.plant_id = any (p_plants)
-     and (pu.share_missing_at is not null or pu.share_gone_at is not null)
-     and (pu.share_gone_at is null or not exists (
-           select 1 from public.plant_users o
-            where o.plant_id = pu.plant_id and o.user_id <> pu.user_id and (not o.via_share or o.share_gone_at is null)));
+     and pu.share_missing_at is not null and pu.share_gone_at is null;
   get diagnostics back = row_count;
 
   -- not in the list: first miss noted, so one bad list can't stop a plant
@@ -138,7 +138,7 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 0100's poll_jobs, leaving out stopped shared plants
+-- 0100's poll_jobs, leaving out stopped shared plants and paused plants
 -- ---------------------------------------------------------------------------
 create or replace function public.poll_jobs(p_shard int, p_shards int, p_account uuid default null)
 returns table (
@@ -163,7 +163,7 @@ as $$
     select distinct on (pu.plant_id) pu.plant_id, pu.plant_name, acc.*
       from public.plant_users pu
       join acc on acc.id = pu.account_id
-     where pu.share_gone_at is null
+     where pu.share_gone_at is null and not pu.paused
      order by pu.plant_id, acc.rank
   )
   select p.plant_id, p.plant_name,

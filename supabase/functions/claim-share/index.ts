@@ -5,7 +5,8 @@
 // it to the user (0172 share_claim). No SunSynk password from the user, ever.
 //
 // Answers: 200 {result: "claimed" | "claimed_paused" | "yours", plantId, plantName},
-// 404 {error: "not_shared"}, 409 {error: "taken", plantId}, 429 too many tries.
+// 404 {error: "not_shared"}, 409 {error: "taken"}, 429 too many tries. A taken plant's id
+// is not sent back: a serial typed from someone else's inverter would reveal it.
 import { claimShared, db } from "../_shared/sunsynk.ts";
 import { serve } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
@@ -42,7 +43,7 @@ serve("claim-share", async (req) => {
   try {
     const r = await claimShared(userId, ref);
     if (r.result === "not_shared") return json({ error: "not_shared" }, 404, cors);
-    if (r.result === "taken") return json({ error: "taken", plantId: r.plantId }, 409, cors);
+    if (r.result === "taken") return json({ error: "taken" }, 409, cors);
     const { error: refundErr } = await db.rpc("link_succeeded", { p_user: userId });
     if (refundErr) console.error(`claim-share refund failed for user ${userId}: ${refundErr.message}`);
     return json({ ok: true, ...r }, 200, cors);
