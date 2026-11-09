@@ -1,6 +1,8 @@
 // Independent oracle of the Prince Solar price rules (SOLAR-264).
 // Written from the rules text in supabase/migrations/0110_billing.sql's header and the plan approved
 // on SOLAR-264 (0127's header, 0129's: Family buys extra plants, R49 a plant), not from the SQL.
+// Since SOLAR-437 also from the headers of 0136 (a downgrade picks the plants it keeps), 0138 (monthly
+// to yearly on the same plan is paid now), 0155 (Home monthly to Family yearly from today) and 0156.
 // Dates are 'YYYY-MM-DD' strings. Money is whole rand.
 
 export const PLAN_RANK = { free: 0, home: 1, family: 2 };
@@ -47,8 +49,10 @@ export class Oracle {
     this.extra = 0; this.nextExtra = null; // extra plants paid for on Family; a drop booked for the billing date
     this.rm = new Set(); this.rmOn = null; this.comped = false;
     this.freeRm = new Set();  // plants the move to Free booked (0133): kept only by a start
-    this.plants = []; // {id, inv, seq, paused}
+    this.plants = []; // {id, inv, seq, paused, acc}
     this.hasCard = false;
+    this.nextKeep = [];   // the plants a booked downgrade keeps, picked first (0136)
+    this.prepaid = null;  // the billing date a paid switch to yearly covers (0138)
     this.charges = []; // expected charges {ref, kind, amount, plan, period, dueOn, createdOn, status, named, added}
     this.paidTotal = 0;
     this.stat = { toFree: 0, retries: 0, renewals: 0, removals: 0 };
@@ -63,21 +67,27 @@ export class Oracle {
     const plan = this.nextPlan ?? this.plan;
     return cover(plan, plan === 'family' ? this.nextExtra ?? this.extra : 0);
   }
-  // The room, one rule for links and starts: why a plant may not start, or null.
-  // Booked-for-removal plants count (they collect until their date), except against a booked change.
-  blocked() {
+  // The room: why a plant may not start, or null. Booked-for-removal plants count (they collect until
+  // their date). A new link also links stopped once the booked plan is full; a start under a booked
+  // downgrade is allowed while the plan has room now: it collects to the billing date (0136).
+  blocked(link = false) {
     if (this.comped) return null;
     if (this.active().length >= cover(this.plan, this.held())) return 'no room';
     const br = this.bookedRoom();
-    if (br !== null && this.kept() >= br) return 'plan change';
+    if (link && br !== null && this.kept() >= br) return 'plan change';
     return null;
   }
-  // On the billing date the plants fit the room: the first linked that are not about to be deleted stay.
-  fit(going) {
-    if (this.comped) return;
-    const keep = this.active().sort((a, b) => (going.has(a.id) - going.has(b.id)) || a.seq - b.seq || a.id - b.id).slice(0, cover(this.plan, this.held()));
-    for (const p of this.active()) if (!keep.includes(p)) p.paused = true;
+  pickIdx(id) { const i = this.nextKeep.indexOf(id); return i < 0 ? Infinity : i; }
+  byPick(a, b) { return this.pickIdx(a.id) - this.pickIdx(b.id) || a.seq - b.seq || a.id - b.id; }
+  // The plants that stop on the billing date: collecting, not booked for deletion, past the booked
+  // room, the pick first (0136). Empty when nothing is booked.
+  drops() {
+    const br = this.bookedRoom();
+    if (br === null || this.comped) return [];
+    return this.active().filter((p) => !this.rm.has(p.id)).sort((a, b) => this.byPick(a, b)).slice(br).map((p) => p.id);
   }
+  // the collecting plants the booked plan keeps, in pick order
+  picks() { const d = this.drops(); return this.active().filter((p) => !this.rm.has(p.id) && !d.includes(p.id)).sort((a, b) => this.byPick(a, b)).map((p) => p.id); }
   has(id) { return this.plants.some((p) => p.id === id); }
   get(id) { return this.plants.find((p) => p.id === id); }
 
@@ -104,7 +114,7 @@ export class Oracle {
   // Mutates nothing; returns [{id, paused}].
   planLink(freshIds) {
     const c = this.clone();
-    return freshIds.map((id) => { const paused = c.blocked() !== null; c.plants.push({ id, inv: 1, seq: Infinity, paused }); return { id, paused }; });
+    return freshIds.map((id) => { const paused = c.blocked(true) !== null; c.plants.push({ id, inv: 1, seq: Infinity, paused }); return { id, paused }; });
   }
   // Start stopped plants after a paid start or upgrade: the oldest stopped, while there is room.
   // More room on the same plan (0131): at most `max`, the newest linked first.
@@ -113,24 +123,37 @@ export class Oracle {
     const stopped = this.ordered().filter((x) => x.paused && !(newest && this.rm.has(x.id)));
     if (newest) stopped.reverse();
     for (const p of stopped.slice(0, max)) {
-      if (this.blocked() !== null) break;
+      if (this.blocked() !== null) break;  // only the room now stops it (0136)
       p.paused = false;
       // a plant that is collecting again is no longer up for deletion (0116: plants stopped by a move to Free come back)
       this.freeRm.delete(p.id);
       if (this.rm.delete(p.id)) { this.unbooked = (this.unbooked || 0) + 1; if (this.rm.size === 0) this.rmOn = null; }
     }
   }
-  clone() { const c = Object.assign(new Oracle(), this); c.plants = this.plants.map((p) => ({ ...p })); c.rm = new Set(this.rm); c.freeRm = new Set(this.freeRm); return c; }
+  clone() { const c = Object.assign(new Oracle(), this); c.plants = this.plants.map((p) => ({ ...p })); c.rm = new Set(this.rm); c.freeRm = new Set(this.freeRm); c.nextKeep = this.nextKeep.slice(); return c; }
+  // A paid year holds plan, period, extras and anything booked as they are until it starts (0138).
+  yearPaid(next) {
+    if (this.prepaid === null) return false;
+    return next.nextPlan !== this.nextPlan || next.nextPeriod !== this.nextPeriod || next.nextExtra !== this.nextExtra;
+  }
 
   // ---- actions: each returns {err} for a refusal, else {} and applies the change ----
+  // A downgrade books with the plants it keeps (0136): no "remove plants first". The same plan monthly
+  // to yearly is paid now (0138). A plan change, or an undo, takes a booked extras drop with it (0155).
   bookChange(plan, period) {
     if (this.plan === 'free') return { err: 'nothing to change on Free' };
     if (this.comped) return { err: 'free of charge' };
     if (PLAN_RANK[plan] > PLAN_RANK[this.plan]) return { err: 'upgrade starts at once' };
-    const keep = this.plants.filter((p) => !p.paused && !this.rm.has(p.id)).length;
-    if (keep > cover(plan, plan === 'family' ? this.nextExtra ?? this.extra : 0)) return { err: 'remove plants first' };
-    this.nextPlan = plan === this.plan ? null : plan;
-    this.nextPeriod = plan === 'free' || (period ?? this.period) === this.period ? null : period;
+    if (plan === this.plan && this.period === 'monthly' && period === 'yearly') return { err: 'switch to yearly is paid now' };
+    const samePer = (period ?? this.period) === this.period;
+    const n = {
+      nextPlan: plan === this.plan ? null : plan,
+      nextPeriod: plan === 'free' || samePer ? null : period,
+      nextExtra: plan !== this.plan || samePer ? null : this.nextExtra,
+    };
+    if (this.yearPaid(n)) return { err: 'your year is paid' };
+    this.nextKeep = plan === this.plan && !samePer && this.nextExtra !== null ? this.nextKeep : [];
+    Object.assign(this, n);
     return {};
   }
   bookRemoval(id) {
@@ -139,14 +162,15 @@ export class Oracle {
     this.rm.add(id); this.rmOn = this.next; return {};
   }
   keep(id) {
+    // a plant a booked downgrade stops: first in the pick, the last pick drops out (0136)
+    if (this.drops().includes(id)) { this.nextKeep = [id, ...this.picks()].slice(0, this.bookedRoom()); return {}; }
     // Free, or a plant the move to Free booked: it comes back only by a swap (start), never by Keep (0131, 0133)
     if (this.plan === 'free' || (this.rm.has(id) && this.freeRm.has(id))) return { err: 'start it instead' };
-    const br = this.bookedRoom();
-    if (br !== null) {
-      const n = this.plants.filter((p) => !p.paused && (p.id === id || !this.rm.has(p.id))).length;
-      if (n > br) return { err: 'needed for your plan change' };
-    }
-    this.rm.delete(id); if (this.rm.size === 0) this.rmOn = null; return {};
+    // a removal booked before 0139 comes back whole: every plant of its login (no room check since 0139)
+    const acc = this.get(id)?.acc ?? null;
+    for (const x of [...this.rm]) if (!this.freeRm.has(x) && (x === id || (acc !== null && this.get(x)?.acc === acc))) this.rm.delete(x);
+    if (this.rm.size === 0) this.rmOn = null;
+    return {};
   }
   stop(id) {
     const p = this.get(id); if (!p) return { err: 'not linked' };
@@ -157,8 +181,10 @@ export class Oracle {
     if (this.plan !== 'family' || this.comped) return { err: 'extra plants are on Family only' };
     if (n < 0 || n > this.extra) return { err: 'pay to add extra plants' };
     if (this.nextPlan !== null && n !== this.extra) return { err: 'plan change' };
-    if (this.kept() > cover('family', n)) return { err: 'remove plants first' };
-    this.nextExtra = n === this.extra ? null : n;
+    const nextExtra = n === this.extra ? null : n;
+    if (this.yearPaid({ nextPlan: this.nextPlan, nextPeriod: this.nextPeriod, nextExtra })) return { err: 'your year is paid' };
+    this.nextKeep = n === this.extra && this.nextPlan !== null ? this.nextKeep : [];
+    this.nextExtra = nextExtra;
     return {};
   }
   start(id) {
@@ -172,28 +198,52 @@ export class Oracle {
     return {};
   }
 
-  // What the user pays now to start `plan` (Free) or upgrade (Home -> Family, or more extra plants on Family).
-  // `extras`: the extra plants wanted on Family in all; null keeps those held.
+  // What the user pays now (0138, 0155, 0156):
+  //   start:  from Free, the plan and period asked (monthly when none).
+  //   switch: the same plan, monthly to yearly: a year of what is held from the billing date, paid now.
+  //   upgrade: a bigger plan in the period held, the difference for the days left; Home monthly to
+  //            Family yearly instead starts a year today at its full price, less the unused days of the month.
+  // `extras`: the extra plants asked for; none are sold (0156), only a negative count is refused.
   // Returns {kind, amount, period, added, extraTotal} or {err}.
   quote(plan, period, extras, today) {
     if (this.comped) return { err: 'this plan is free of charge' };
     if (this.state === 'past_due') return { err: 'settle the failed payment first' };
+    if (this.prepaid !== null) return { err: 'your year is paid' };
+    const kind = this.plan === 'free' ? 'start' : plan === this.plan && this.period === 'monthly' && period === 'yearly' ? 'switch' : 'upgrade';
+    const across = kind === 'upgrade' && this.period === 'monthly' && period === 'yearly' && plan !== this.plan;
+    const per = across ? 'yearly' : kind === 'upgrade' ? this.period : period ?? 'monthly';
     if (extras !== null && extras < 0) return { err: 'unknown plan or period' };
-    const kind = this.plan === 'free' ? 'start' : 'upgrade';
-    const per = kind === 'start' ? period ?? 'monthly' : this.period;
     const added = 0; // extra plants are no longer sold (0156)
-    if (kind === 'upgrade' && plan === this.plan) {
-      if (added === 0) return { err: 'nothing to buy' };
-      if (this.nextPlan !== null) return { err: 'plan change' };
-    }
+    if (kind === 'switch' && this.nextPlan !== null) return { err: 'plan change' };
+    if (kind === 'upgrade' && plan === this.plan) return { err: 'nothing to buy' };
     if (kind === 'upgrade' && this.plan === 'family' && plan === 'home') return { err: 'not an upgrade' };
-    const amount = this.priceNow2(kind, plan, per, added, today);
-    return { kind, amount, period: per, added, extraTotal: plan === 'family' ? this.held() + added : 0 };
+    const amount = this.amountFor(kind, plan, per, today);
+    const extraTotal = plan !== 'family' ? 0 : kind === 'switch' ? this.nextExtra ?? this.extra : kind === 'start' ? added : this.held() + added;
+    return { kind, amount, period: per, added, extraTotal, across };
   }
-  priceNow2(kind, plan, per, added, today) {
-    const newAmt = price(plan, per, (plan === 'family' ? this.held() : 0) + added);
-    if (kind === 'start') return newAmt;
-    return prorate(newAmt - price(this.plan, this.period, this.held()), today, this.next, this.period, this.day);
+  amountFor(kind, plan, per, today) {
+    if (kind === 'start') return price(plan, per, 0);
+    if (kind === 'switch') return price(plan, 'yearly', plan === 'family' ? this.nextExtra ?? this.extra : 0);
+    if (per !== this.period) return price(plan, per, 0) - prorate(price(this.plan, this.period, 0), today, this.next, this.period, this.day);
+    return prorate(price(plan, per, plan === 'family' ? this.held() : 0) - price(this.plan, this.period, this.held()), today, this.next, this.period, this.day);
+  }
+  // Why a payment no longer applies (refunded), or null: the account moved on since the charge opened.
+  stale(c, today) {
+    if (this.prepaid !== null) return 'year paid';
+    if (c.kind === 'switch') {
+      if (this.plan !== c.plan || this.period !== 'monthly' || this.state === 'past_due' || this.comped) return 'plan changed';
+      if (this.nextPlan !== null) return 'plan change booked';
+      if ((c.billingDate ?? null) !== this.next) return 'billing date passed';
+      return this.amountFor('switch', c.plan, 'yearly', today) !== c.amount ? 'price changed' : null;
+    }
+    if (c.kind === 'start' && this.plan !== 'free') return 'not on Free';
+    if (c.kind === 'upgrade' && (this.plan === 'free' || this.state === 'past_due'
+        || (this.period !== c.period && !(this.period === 'monthly' && c.period === 'yearly' && this.plan !== c.plan)))) return 'plan changed';
+    if ((c.billingDate ?? null) !== this.next) return 'billing date passed';
+    if (c.extraTotal !== (c.plan === 'family' ? this.held() + c.added : 0)) return 'extra plants changed';
+    if (c.kind === 'upgrade' && this.plan === 'family' && c.plan === 'home') return 'not an upgrade';
+    // priced again on the day it is paid (decided 2026-10-31, 0130): another price is refunded
+    return Math.max(0, this.amountFor(c.kind, c.plan, c.period, today)) !== c.amount ? 'price changed' : null;
   }
   // The payment came in. `c` = {kind, plan, period, added, extraTotal, amount, createdOn, billingDate, dueOn}.
   // Returns false when the account moved on since the charge was opened (nothing applied: refund).
@@ -204,23 +254,18 @@ export class Oracle {
       if (reusable) this.hasCard = true;
       return true;
     }
-    if (c.kind === 'start' && this.plan !== 'free') return false;
-    if (c.kind === 'upgrade' && (this.plan === 'free' || this.state === 'past_due' || this.period !== c.period)) return false;
-    if ((c.billingDate ?? null) !== this.next) return false;
-    if (c.added > 0 && this.nextPlan !== null && c.plan === this.plan) return false;
-    if (c.extraTotal !== (c.plan === 'family' ? this.held() + c.added : 0)) return false;
-    if (c.kind === 'upgrade' && this.plan === 'family' && c.plan === 'home') return false;
-    // priced again on the day it is paid (decided 2026-10-31, 0130): another price is refunded
-    if (Math.max(0, this.priceNow2(c.kind, c.plan, c.period, c.added, today)) !== c.amount) return false;
-    if (c.kind === 'start') {
+    if (this.stale(c, today) !== null) return false;
+    if (reusable) this.hasCard = true;
+    if (c.kind === 'switch') { this.nextPeriod = 'yearly'; this.prepaid = c.billingDate; return true; }
+    if (c.kind === 'start' || this.period !== c.period) {
+      // a start, or a bigger plan in a new period: a new billing date from today, nothing booked carries over
       this.plan = c.plan; this.period = c.period; this.day = dom(today); this.next = step(today, c.period, this.day, 1);
       this.nextPlan = null; this.nextPeriod = null; this.state = 'active'; this.pds = null;
-    }
-    const room = c.kind === 'upgrade' && this.plan === c.plan;
-    if (c.kind !== 'start') { if (this.plan !== c.plan) this.nextPlan = null; this.plan = c.plan; }
+      if (c.kind !== 'start') this.nextKeep = [];
+    } else { if (this.plan !== c.plan) this.nextPlan = null; this.plan = c.plan; }
+    const room = c.kind === 'upgrade' && this.plan === c.plan && c.added > 0;
     this.extra = c.extraTotal; this.nextExtra = null;
     if (room) this.resume(c.added, true); else this.resume();
-    if (reusable) this.hasCard = true;
     return true;
   }
   // A pending renewal is still owed: the past-due date it is for, or the billing date just passed
@@ -251,15 +296,15 @@ export class Oracle {
     }
     // unpaid after the last retry (day 7): Free, not while a try is open; the first-linked plant stays, the rest stop and go in 30 days
     if (this.state === 'past_due' && dayNo(d) - dayNo(this.pds) >= 8 && !this.charges.some((c) => c.kind === 'renewal' && c.status === 'pending')) {
-      // the first linked that is not booked for deletion; all booked: the first linked (0131)
-      const keep = this.ordered().find((p) => !this.rm.has(p.id)) ?? this.ordered()[0];
+      // not booked for deletion first, then collecting, then the pick, then the first linked (0131, 0136)
+      const keep = this.plants.slice().sort((a, b) => this.rm.has(a.id) - this.rm.has(b.id) || a.paused - b.paused || this.byPick(a, b))[0];
       const stop = this.plants.filter((p) => p !== keep).map((p) => p.id);
       for (const p of this.plants) p.paused = p !== keep;
       stop.forEach((id) => { this.rm.add(id); this.freeRm.add(id); });
       if (stop.length) this.rmOn = addDays(d, 30);
       this.plan = 'free'; this.period = null; this.day = null; this.next = null;
       this.nextPlan = null; this.nextPeriod = null; this.state = 'active'; this.pds = null;
-      this.extra = 0; this.nextExtra = null;
+      this.extra = 0; this.nextExtra = null; this.nextKeep = []; this.prepaid = null;
       this.stat.toFree++;
     }
     // retries on day 1, 3, 7 after the billing date, once a day
@@ -269,18 +314,34 @@ export class Oracle {
       out.push({ kind: 'renewal', amount: first.amount, dueOn: first.dueOn, plan: first.plan, period: first.period });
       this.stat.retries++;
     }
-    // the billing date: booked changes apply, the new amount is charged
+    // the billing date: booked changes apply, the new amount is charged (none for a year a switch paid, 0138)
     if (this.plan !== 'free' && !this.comped && this.state === 'active' && this.next <= d) {
       const plan = this.nextPlan ?? this.plan, per = this.nextPeriod ?? this.period;
       const extra = plan === 'family' ? this.nextExtra ?? this.extra : 0;
-      const amount = plan === 'free' ? 0 : price(plan, per, extra);
       const dueOn = this.next;
+      const amount = plan === 'free' || this.prepaid === dueOn ? 0 : price(plan, per, extra);
+      const keep = this.picks(), before = new Set(this.active().map((p) => p.id));
       this.plan = plan; this.extra = extra; this.nextExtra = null;
       if (plan === 'free') { this.period = null; this.day = null; this.next = null; }
       else { this.period = per; this.next = step(dueOn, per, this.day, 1); }
-      this.nextPlan = null; this.nextPeriod = null;
-      this.fit(this.rmOn !== null && this.rmOn <= dueOn ? this.rm : new Set());
-      if (plan !== 'free') { out.push({ kind: 'renewal', amount, dueOn, plan, period: per }); this.stat.renewals++; }
+      this.nextPlan = null; this.nextPeriod = null; this.nextKeep = []; this.prepaid = null;
+      // the plants fit the new room: booked for deletion last, then the pick, then link order (0136)
+      const ki = (id) => { const i = keep.indexOf(id); return i < 0 ? Infinity : i; };
+      const fitted = this.active().sort((a, b) => this.rm.has(a.id) - this.rm.has(b.id) || ki(a.id) - ki(b.id) || a.seq - b.seq || a.id - b.id);
+      fitted.slice(cover(this.plan, this.held())).forEach((p) => { p.paused = true; });
+      // stopped by the change: deleted 30 days on, only a start keeps one; removals due today go now
+      const stopped = this.plants.filter((p) => p.paused && before.has(p.id) && !this.rm.has(p.id)).map((p) => p.id);
+      if (stopped.length) {
+        if (this.rmOn !== null && this.rmOn <= dueOn) {
+          this.plants = this.plants.filter((p) => !this.rm.has(p.id));
+          this.stat.removals += this.rm.size;
+          this.freeRm = new Set([...this.freeRm].filter((id) => !this.rm.has(id)));
+          this.rm = new Set();
+        }
+        stopped.forEach((id) => { this.rm.add(id); this.freeRm.add(id); });
+        this.rmOn = addDays(dueOn, 30);
+      }
+      if (plan !== 'free' && amount > 0) { out.push({ kind: 'renewal', amount, dueOn, plan, period: per }); this.stat.renewals++; }
     }
     for (const o of out) {
       o.card = this.hasCard; o.createdOn = d; o.status = this.hasCard ? 'pending' : 'failed'; o.triedOn = d;

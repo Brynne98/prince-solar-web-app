@@ -3,11 +3,13 @@ Local database only (`SIM_DB_URL` to change; default is the local Supabase on 55
 - `node scripts/billing-sim/sim.mjs [--seed N]` runs the fixed cases (`regress.mjs`), then ~1,450 households (~2,000 users)
   over 3 years each (`--households N`, `--years N`). 15% of users switch plants or plans every day or two for weeks.
   Every household is one transaction that is rolled back. Exit 0 = all invariants held, 1 = findings, 2 = simulator error.
-  One seed takes about 70 minutes; seeds use their own ids, so 5 can run at once.
+  One seed takes about 21 minutes; seeds use their own ids, so 5 can run at once. Do not run `abuse.mjs`, `webhook.mjs`
+  or anything else that commits billing rows at the same time: `billing_run` reads every account, so their rows land in
+  the sim's runs (SOLAR-437: findings that no `--only` replay shows).
 - `--regress` runs only the fixed cases: every bug found so far (F1–F11, P1, P3, G-cases). They open charges with named
   arguments, so they also run against older code, where they fail.
 - `--only H --trace` replays one household with every step printed.
-- `oracle.mjs` is the price oracle, written from the rules text (0110 header, 0127 header), not from the SQL.
+- `oracle.mjs` is the price oracle, written from the rules text (headers of 0110, 0127, 0136, 0138, 0139, 0155, 0156), not from the SQL.
 - `abuse.mjs [--seed N] [ids]` attacks as signed-in users through the REST API and link-sunsynk, with the mock SunSynk server.
   The C attacks fire many requests at once, in an order set by the seed.
 - `node scripts/billing-sim/samples.mjs` builds 13 committed `ui-sample-N@sim.test` users at real today and writes

@@ -950,6 +950,28 @@ const CASES = [
     const d = await K.as(u, `select public.api_account_delete()`);
     return d.ok ? ['deleted with a refund still owed: the charge row the refund needs is gone'] : [];
   } },
+  { id: 'N1', net: true, title: 'an account set past due by hand, with no failed renewal: the daily run still runs for everyone, no retry, Free on day 8 (SOLAR-437)', async run(K) {
+    // Found by sim.mjs --seed 372 while abuse.mjs (G5a, G7e) had such an account committed: the retry
+    // read the failed renewal, found none, and inserted a charge with no plan. The whole run raised.
+    const bad = [], h = await K.user('home'), u = await K.user('home');
+    const d = (await K.row(u)).next_billing_date;
+    await K.sql(`update private.billing set state = 'past_due', past_due_since = '${d}' where user_id = '${h}'`);
+    await K.sql(`update private.billing set next_billing_date = '${d}', billing_day = ${+d.slice(8, 10)} where user_id = '${u}'`);
+    await K.today(d);
+    const r = await K.run(d);
+    if (!r.ok) return [`billing_run raised: ${r.err}`];
+    const mine = [];
+    for (const t of r.v || []) mine.push((await K.charge(t.reference)).user_id);
+    if (!mine.includes(u)) bad.push('the other account\'s renewal was not handed out');
+    for (const k of [1, 3, 7]) {
+      await K.today(addD(d, k)); const x = await K.run(addD(d, k));
+      if (!x.ok) { bad.push(`day ${k}: billing_run raised: ${x.err}`); break; }
+      for (const t of x.v || []) if ((await K.charge(t.reference)).user_id === h) bad.push(`day ${k}: a retry with nothing to retry`);
+    }
+    await K.today(addD(d, 8)); await K.run(addD(d, 8));
+    if ((await K.row(h)).plan !== 'free') bad.push('still on Home after day 8');
+    return bad;
+  } },
   { id: 'A6', title: 'a renewal Paystack keeps open 3 days, then failed: a real try on day 3 (no card was charged that day), day 7, Free on day 8', async run(K) {
     // changed by 0132 (Brynne, 2026-10-31): the expiry day no longer counts as the day-3 try.
     const bad = [], u = await K.user('home');

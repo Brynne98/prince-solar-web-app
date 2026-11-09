@@ -258,6 +258,7 @@ async function check(H, U, what, pre) {
     eq('plants_to_remove', [...b.plants_to_remove].sort((x, y) => x - y), [...o.rm].sort((x, y) => x - y));
     eq('remove_on', b.remove_on, o.rmOn); eq('comped', b.comped, o.comped);
     eq('extra_plants', b.extra_plants, o.extra); eq('next_extra_plants', b.next_extra_plants, o.nextExtra);
+    eq('prepaid_on', b.prepaid_on, o.prepaid);
   }
   const dbPaused = new Map(s.plants.map((p) => [p.id, p.paused]));
   eq('plants linked', [...dbPaused.keys()].sort((x, y) => x - y), o.plants.map((p) => p.id).sort((x, y) => x - y));
@@ -289,8 +290,8 @@ async function check(H, U, what, pre) {
 
 async function resyncUser(U, s) {
   const o = U.o, b = s.b;
-  if (b) { o.plan = b.plan; o.period = b.period; o.day = b.billing_day; o.next = b.next_billing_date; o.state = b.state; o.pds = b.past_due_since; o.nextPlan = b.next_plan; o.nextPeriod = b.next_period; o.rm = new Set(b.plants_to_remove); o.rmOn = b.remove_on; o.extra = b.extra_plants; o.nextExtra = b.next_extra_plants; }
-  else { o.plan = 'free'; o.period = o.day = o.next = o.pds = o.nextPlan = o.nextPeriod = o.rmOn = o.nextExtra = null; o.extra = 0; o.rm = new Set(); }
+  if (b) { o.plan = b.plan; o.period = b.period; o.day = b.billing_day; o.next = b.next_billing_date; o.state = b.state; o.pds = b.past_due_since; o.nextPlan = b.next_plan; o.nextPeriod = b.next_period; o.rm = new Set(b.plants_to_remove); o.rmOn = b.remove_on; o.extra = b.extra_plants; o.nextExtra = b.next_extra_plants; o.prepaid = b.prepaid_on; o.nextKeep = b.next_keep; }
+  else { o.plan = 'free'; o.period = o.day = o.next = o.pds = o.nextPlan = o.nextPeriod = o.rmOn = o.nextExtra = o.prepaid = null; o.extra = 0; o.rm = new Set(); o.nextKeep = []; }
   const paused = new Map(s.plants.map((p) => [p.id, p.paused]));
   o.plants = o.plants.filter((p) => paused.has(p.id));
   for (const p of o.plants) p.paused = paused.get(p.id);
@@ -308,7 +309,7 @@ async function runEvent(H, U, ev) {
   H.step++;
   const o = U.o, rng = H.rng;
   inc(cov.events, ev.type);
-  if (TRACE) console.log(`[h${H.h} ${U.name}] ${ev.date} ${ev.type} plan=${o.plan}/${o.period} plants=${o.plants.map((p) => (p.paused ? '-' : '+') + p.inv).join('')}`);
+  if (TRACE) console.log(`[h${H.h} ${U.name}] ${ev.date} ${ev.type} plan=${o.plan}/${o.period} plants=${o.plants.map((p) => (p.paused ? '-' : '+') + p.inv).join('')}${o.nextPlan || o.nextPeriod || o.nextExtra !== null ? ` booked=${o.nextPlan}/${o.nextPeriod}/${o.nextExtra} keep=[${o.nextKeep}]` : ''}${o.rm.size ? ` rm=[${[...o.rm]}] on ${o.rmOn}` : ''}`);
   switch (ev.type) {
     case 'link': return doLink(H, U, ev.p.login);
     case 'linkmore': {
@@ -359,7 +360,7 @@ async function doLink(H, U, login) {
     const invRows = fresh.flatMap((id) => Array.from({ length: H.inv.get(id) }, (_, k) => `('SIM-${id}-${k}', ${id}, '${accId}')`));
     if (invRows.length) await db.exec(`insert into private.inverters (sn, plant_id, account_id) values ${invRows.join(',')} on conflict (sn) do update set account_id = excluded.account_id;`);
     await db.exec(`select public.billing_free_week_start('${U.id}', '${uname}');`);
-    for (const pl of plan) o.plants.push({ id: pl.id, inv: H.inv.get(pl.id), seq: H.seq, paused: pl.paused });
+    for (const pl of plan) o.plants.push({ id: pl.id, inv: H.inv.get(pl.id), seq: H.seq, paused: pl.paused, acc: accId });
     // the rest of the login's plants are on it too (already linked via another login): nothing to do
   }
   U.accts.set(uname, accId);
@@ -454,7 +455,13 @@ async function doUpgrade(H, U, { first, extras }) {
   if (o.plan === 'free') {
     plan = rng.chance(0.55) ? 'family' : 'home';
     period = rng.chance(0.5) ? 'monthly' : 'yearly';
-  } else plan = 'family';
+  } else {
+    // any plan in either period (0155): Family in the period held, Family yearly, or the plan held
+    // yearly (a switch, 0138)
+    const k = rng.weighted({ held: 5, yearly: 3, switch: 2 });
+    plan = k === 'switch' ? o.plan : 'family';
+    period = k === 'held' ? null : 'yearly';
+  }
   if (extras && o.plan !== 'family') return doProbe(H, U);
   if (extras && rng.chance(0.35)) return doLower(H, U);
   // the plans page sends the extra plants wanted in all (0129); now and then none, the same, or junk
@@ -541,14 +548,15 @@ async function doRemove(H, U) {
 
 async function doKeep(H, U) {
   const o = U.o;
-  const ids = [...o.rm]; if (!ids.length) return doStopStart(H, U, 'stop');
+  // booked for deletion, or stopped by a booked downgrade (0136)
+  const ids = [...new Set([...o.rm, ...o.drops()])]; if (!ids.length) return doStopStart(H, U, 'stop');
   const id = H.rng.pick(ids);
   const before = await snap(U);
   const exp = o.clone().keep(id);
   const r = await db.u(U.id, `select public.api_billing_keep(${id})`);
   const ctx = ctxOf(H, U, 'keep plant');
   if (exp.err) {
-    if (r.ok) { fail(ctx, `keep: allowed but the rules refuse (${exp.err})`, {}); await resyncUser(U, await snap(U)); return; }
+    if (r.ok) { fail(ctx, `keep: allowed but the rules refuse (${exp.err})`, { id }); await resyncUser(U, await snap(U)); return; }
     inc(cov.refused, 'keep'); await sameState(H, U, 'keep', before); return;
   }
   if (!r.ok) { fail(ctx, 'keep: refused', r.err); return; }
