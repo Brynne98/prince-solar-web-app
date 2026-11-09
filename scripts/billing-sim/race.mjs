@@ -7,14 +7,16 @@
 // keeps them. Before 0132 the run took the plant lock, then the billing row; the payment the other way round.
 // --shared (0132): a payment starting a user's stopped plants while another user's sync of the same plants runs.
 // billing_resume took plant locks in link order, plant_users_upsert in plant id order.
-//   node scripts/billing-sim/race.mjs [--rounds 20] [--removal | --shared]
+// --run (0170): the daily run deleting two accounts' booked plants (higher plant id first) while another user's sync
+// links both plants. The run held one plant and waited for the other; the link the other way round (SOLAR-438).
+//   node scripts/billing-sim/race.mjs [--rounds 20] [--removal | --shared | --run]
 import { spawn, execFileSync } from 'node:child_process';
 import { PSQL, DB_URL } from './db.mjs';
 const ROUNDS = Number(process.argv[process.argv.indexOf('--rounds') + 1] || 20) || 20;
 const q = (sql) => execFileSync(PSQL, ['-X', '-At', '-v', 'ON_ERROR_STOP=1', DB_URL, '-c', sql], { encoding: 'utf8' }).trim();
 const bg = (sql) => new Promise((res) => { const p = spawn(PSQL, ['-X', '-At', DB_URL, '-c', sql]); let o = ''; p.stdout.on('data', (d) => o += d); p.stderr.on('data', (d) => o += d); p.on('exit', () => res(o)); });
-const REMOVAL = process.argv.includes('--removal'), SHARED = process.argv.includes('--shared');
-if (REMOVAL && SHARED) { console.error('one of --removal and --shared'); process.exit(2); }
+const REMOVAL = process.argv.includes('--removal'), SHARED = process.argv.includes('--shared'), RUN = process.argv.includes('--run');
+if (REMOVAL + SHARED + RUN > 1) { console.error('one of --removal, --shared and --run'); process.exit(2); }
 // It commits rows and calls billing_run for the whole database: local only.
 if (!/@(127\.0\.0\.1|localhost):/.test(DB_URL)) { console.error(`not a local database: ${DB_URL}`); process.exit(2); }
 let deadlocks = 0, unapplied = 0, deleted = 0;
@@ -42,7 +44,7 @@ try {
     if (q(`select status from private.billing_charges where reference = '${ref}'`) === 'pending') unapplied++;
     if (Number(q(`select count(*) from public.plant_users where user_id = '${u}'`)) < 3) deleted++;
   }
-  const acc = SHARED ? q(`insert into private.sunsynk_accounts (user_id, sunsynk_username) values ('${HELPER}', 'race-helper@login.test') returning id`).split('\n')[0] : null;
+  const acc = SHARED || RUN ? q(`insert into private.sunsynk_accounts (user_id, sunsynk_username) values ('${HELPER}', 'race-helper@login.test') returning id`).split('\n')[0] : null;
   for (let i = 0; SHARED && i < ROUNDS; i++) {
     const u = `00000000-0000-4000-9500-${String(i).padStart(12, '0')}`;
     const hi = 95000000 + i * 10 + 8, lo = 95000000 + i * 10 + 2, one = 95000000 + i * 10 + 1;
@@ -62,7 +64,28 @@ try {
     if (/deadlock detected/.test(a + b)) deadlocks++;
     if (q(`select status from private.billing_charges where reference = '${ref}'`) === 'pending') unapplied++;
   }
-  for (let i = 0; !REMOVAL && !SHARED && i < ROUNDS; i++) {
+  for (let i = 0; RUN && i < ROUNDS; i++) {
+    // a and b are Free with one plant each booked for deletion today; the run takes a first (hi), then b (lo).
+    const a = `00000000-0000-4000-9500-${String(i).padStart(12, '0')}`, b = `00000000-0000-4000-9501-${String(i).padStart(12, '0')}`;
+    const hi = 95000000 + i * 10 + 8, lo = 95000000 + i * 10 + 2;
+    q(`insert into auth.users (id, email, aud, role, confirmation_token, recovery_token, email_change_token_new, email_change)
+         values ('${a}', 'race-${i}@s264.test', 'authenticated', 'authenticated', '', '', '', ''),
+                ('${b}', 'race-b${i}@s264.test', 'authenticated', 'authenticated', '', '', '', '');
+       insert into private.billing (user_id, plan, plants_to_remove, remove_on) values ('${a}', 'free', '{${hi}}', private.billing_today());
+       insert into private.billing (user_id, plan, plants_to_remove, remove_on) values ('${b}', 'free', '{${lo}}', private.billing_today());
+       insert into public.plant_users (plant_id, user_id, plant_name, paused) values (${hi}, '${a}', 'a', true), (${lo}, '${b}', 'b', true);
+       insert into public.plant_users (plant_id, user_id, account_id, plant_name) values (${hi}, '${HELPER}', '${acc}', 'h'), (${lo}, '${HELPER}', '${acc}', 'h');`);
+    const rows = JSON.stringify([{ plant_id: lo, plant_name: 'h' }, { plant_id: hi, plant_name: 'h' }]);
+    // b's payment holds b's lock, so the run holds hi while it waits for b; the link starts in that gap.
+    const [x, y, z] = await Promise.all([
+      bg(`begin; select private.billing_lock('${b}'); select pg_sleep(0.6); commit;`),
+      new Promise((r) => setTimeout(r, 100)).then(() => bg(`begin; select public.billing_run(private.billing_today()); commit;`)),
+      new Promise((r) => setTimeout(r, 300)).then(() => bg(`begin; select public.plant_users_upsert('${HELPER}', '${acc}', '${rows}'::jsonb); commit;`)),
+    ]);
+    if (/deadlock detected/.test(x + y + z)) deadlocks++;
+    if (Number(q(`select count(*) from public.plant_users where user_id in ('${a}', '${b}')`)) > 0) deleted++;
+  }
+  for (let i = 0; !REMOVAL && !SHARED && !RUN && i < ROUNDS; i++) {
     const u = `00000000-0000-4000-9500-${String(i).padStart(12, '0')}`;
     q(`insert into auth.users (id, email, aud, role, confirmation_token, recovery_token, email_change_token_new, email_change)
          values ('${u}', 'race-${i}@s264.test', 'authenticated', 'authenticated', '', '', '', '');
@@ -89,6 +112,6 @@ try {
      delete from auth.users where email like 'race-%@s264.test';`); break; }
   catch (e) { if (t >= 5 || !/deadlock detected/.test(String(e.stderr))) throw e; }
 }
-console.log(`${ROUNDS} rounds${REMOVAL ? ' (removal)' : SHARED ? ' (shared)' : ''}: ${deadlocks} deadlocks, ${unapplied} paid charges left pending (unapplied)` +
-  (REMOVAL ? `, ${deleted} accounts lost plants they paid to keep` : ''));
+console.log(`${ROUNDS} rounds${REMOVAL ? ' (removal)' : SHARED ? ' (shared)' : RUN ? ' (run)' : ''}: ${deadlocks} deadlocks, ${unapplied} paid charges left pending (unapplied)` +
+  (REMOVAL ? `, ${deleted} accounts lost plants they paid to keep` : RUN ? `, ${deleted} runs left booked plants` : ''));
 process.exit(deadlocks || deleted || unapplied ? 1 : 0);
