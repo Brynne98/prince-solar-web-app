@@ -28,20 +28,22 @@ delete from auth.users where email like 'ui-sample-%@sim.test';`);
 }
 
 // each plant: [inverters, state] state 'on' | 'off' (stopped)
+// heldExtras: extra plants bought before 0156 (none are sold now; an account that has them keeps them), set by SQL.
+// switchPaid: a monthly-to-yearly switch, paid now and held to its date (0138).
 const SAMPLES = [
   { n: 1, kind: 'Free', plan: 'free', plants: [[1, 'on']] },
   { n: 2, kind: 'Home monthly', plan: 'home', period: 'monthly', plants: [[1, 'on']] },
   { n: 3, kind: 'Home yearly', plan: 'home', period: 'yearly', plants: [[2, 'on']] },
   { n: 4, kind: 'Family monthly, 3 plants', plan: 'family', period: 'monthly', plants: [[1, 'on'], [1, 'on'], [2, 'on']] },
-  { n: 5, kind: 'Family monthly, 2 extra plants (1 and 2 inverters)', plan: 'family', period: 'monthly', plants: [[1, 'on'], [1, 'on'], [2, 'on'], [1, 'on'], [2, 'on']], extras: 2 },
+  { n: 5, kind: 'Family monthly, 5 plants (full)', plan: 'family', period: 'monthly', plants: [[1, 'on'], [1, 'on'], [2, 'on'], [1, 'on'], [2, 'on']] },
   { n: 6, kind: 'Family monthly, downgrade to Home booked', plan: 'family', period: 'monthly', plants: [[1, 'on'], [1, 'off']], book: ['home', null] },
   { n: 7, kind: 'Home monthly, cancel booked', plan: 'home', period: 'monthly', plants: [[1, 'on']], book: ['free', null] },
   { n: 8, kind: 'Family monthly, payment failed', plan: 'family', period: 'monthly', plants: [[1, 'on'], [2, 'on']], pastDue: true },
   { n: 9, kind: 'Family monthly, one plant booked for removal', plan: 'family', period: 'monthly', plants: [[1, 'on'], [1, 'on'], [2, 'on']], remove: 2 },
   { n: 10, kind: 'Family monthly, one plant stopped', plan: 'family', period: 'monthly', plants: [[1, 'on'], [1, 'on'], [2, 'off']] },
-  { n: 11, kind: 'Family yearly, 1 extra plant of 2 inverters', plan: 'family', period: 'yearly', plants: [[1, 'on'], [1, 'on'], [1, 'on'], [2, 'on']], extras: 1 },
+  { n: 11, kind: 'Family yearly, 1 extra plant held from before 0156', plan: 'family', period: 'yearly', plants: [[1, 'on'], [1, 'on'], [1, 'on'], [2, 'on'], [1, 'on'], [2, 'on']], heldExtras: 1 },
   { n: 12, kind: 'Comped Family', plan: 'family', comped: true, plants: [[1, 'on'], [2, 'on'], [1, 'on'], [3, 'on']] },
-  { n: 13, kind: 'Home monthly, switch to yearly booked', plan: 'home', period: 'monthly', plants: [[1, 'on']], book: ['home', 'yearly'] },
+  { n: 13, kind: 'Home monthly, switch to yearly paid, starts on its date', plan: 'home', period: 'monthly', plants: [[1, 'on']], switchPaid: true },
 ];
 
 async function must(sql) { const r = await db.t(sql); if (!r.ok) throw new Error(`${r.err}\n--- ${sql}`); return r.v; }
@@ -78,9 +80,16 @@ async function build() {
       } else {
         // pay first, with no plants linked yet: the payment then has nothing to resume (a resume would call
         // plant_bootstrap_kick, which posts to the hosted functions). The plants appear afterwards.
-        const q = await must(`select public.billing_charge_open('${id}', '${S.plan}', '${S.period}', ${S.extras ?? 'null'})`);
-        await must(`select public.billing_charge_paid('${q.reference}', '{"authorization_code":"AUTH_UI${S.n}","reusable":true,"last4":"${4000 + S.n}","card_type":"visa ","exp_month":"12","exp_year":"2031"}'::jsonb, true, null)`);
+        const card = `'{"authorization_code":"AUTH_UI${S.n}","reusable":true,"last4":"${4000 + S.n}","card_type":"visa ","exp_month":"12","exp_year":"2031"}'::jsonb`;
+        const q = await must(`select public.billing_charge_open('${id}', '${S.plan}', '${S.period}')`);
+        await must(`select public.billing_charge_paid('${q.reference}', ${card}, true, null)`);
+        // before the plants: room counts the extras
+        if (S.heldExtras) await db.exec(`update private.billing set extra_plants = ${S.heldExtras} where user_id = '${id}';`);
         await addPlants(0, S.plants.length);
+        if (S.switchPaid) {
+          const sw = await must(`select public.billing_charge_open('${id}', '${S.plan}', 'yearly')`);
+          await must(`select public.billing_charge_paid('${sw.reference}', ${card}, true, null)`);
+        }
         if (S.book) await must(`select to_jsonb(1) from (select public.billing_book_change('${id}', '${S.book[0]}', ${S.book[1] ? `'${S.book[1]}'` : 'null'})) x`);
         if (S.remove !== undefined) await must(`select to_jsonb(1) from (select public.billing_book_removal('${id}', ${8100000 + S.n * 10 + S.remove})) x`);
         if (S.pastDue) {
@@ -115,16 +124,17 @@ async function build() {
     const prices = g.prices;
     const breakdown = paid && g.plan === 'family' && extraInv > 0
       ? `Family ${rand(prices[g.period].family)} + ${extraInv === 1 ? '1 extra plant' : extraInv + ' extra plants'} ${rand(extraInv * prices[g.period].extra)}` : null;
-    const booked = !paid ? null : g.nextPlan === 'free' ? `Ends on ${billDay(g.nextDate)}, then you’re on Free.`
+    const booked = !paid ? null : g.prepaidOn ? `Switches to yearly on ${billDay(g.nextDate)}. Paid.` : g.nextPlan === 'free' ? `Ends on ${billDay(g.nextDate)}, then you’re on Free.`
       : g.nextPlan ? `Moves to ${NAME[g.nextPlan]} on ${billDay(g.nextDate)}.` : g.nextPeriod ? `Switches to ${g.nextPeriod} on ${billDay(g.nextDate)}.` : null;
     const removal = g.removePlants.map((p) => p.name);
     // what each sample must show, written by hand from the kind
-    const want = { plan: S.plan, period: S.period ?? null, collecting: S.plants.filter((p) => p[1] === 'on').length - (S.remove !== undefined ? 0 : 0), extraInv: S.extras ?? 0 };
+    const want = { plan: S.plan, period: S.period ?? null, collecting: S.plants.filter((p) => p[1] === 'on').length - (S.remove !== undefined ? 0 : 0), extraInv: S.heldExtras ?? 0 };
     const bad = [];
     if (g.plan !== want.plan) bad.push('plan');
     if (act !== want.collecting) bad.push(`collecting ${act} != ${want.collecting}`);
     if (extraInv !== want.extraInv) bad.push(`extra ${extraInv} != ${want.extraInv}`);
     if (S.pastDue && g.state !== 'past_due') bad.push('state');
+    if (!!S.switchPaid !== !!g.prepaidOn) bad.push(`prepaidOn ${g.prepaidOn}`);
     if (bad.length) throw new Error(`sample ${S.n} wrong: ${bad.join(', ')} ${JSON.stringify(g)}`);
     manifest.push({
       email: email(S.n), kind: S.kind,
