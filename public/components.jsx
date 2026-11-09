@@ -132,8 +132,9 @@ function moneySymbol() {
   catch (e) { return window.PLANT_CURRENCY || ''; }
 }
 const fmtRand = fmtMoney, fmtRandSmart = fmtMoneySmart;
-function fmtTime(d) {
-  return d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false });
+// A clock time at the plant shown (SOLAR-445), not on the viewer's device.
+function fmtTime(d, tz = window.PLANT_TZ) {
+  return fmtPlantTime(d, tz);
 }
 // bad-sensor guard (e.g. battery temp -100°C per API caveat)
 function cleanTemp(t) {return t == null || t <= -50 || t > 120 ? null : t;}
