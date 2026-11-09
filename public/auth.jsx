@@ -475,7 +475,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
 
   const copy = {
     signin:   { h: 'Sign in',               p: null,                                                   cta: 'Sign in',         busy: 'Signing in…' },
-    signup:   { h: 'Create your account',   p: 'Next, you’ll connect SunSynk.',                        cta: 'Create account',  busy: 'Creating account…' },
+    signup:   { h: 'Create your account',   p: null,                                                   cta: 'Create account',  busy: 'Creating account…' },
     forgot:   { h: 'Reset your password',   p: 'We’ll email you a link to choose a new one.',          cta: 'Send reset link', busy: 'Sending…' },
     recovery: { h: 'Choose a new password', p: 'Set a new password to continue.',                      cta: 'Save password',   busy: 'Saving…' },
     expired:  { h: 'That link has expired', p: 'Links last 24 hours. Enter your email and we’ll send a new one.', cta: 'Send a new link', busy: 'Sending…' },
