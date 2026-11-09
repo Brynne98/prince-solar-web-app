@@ -13,7 +13,9 @@ declare
   co uuid := 'bc4ef05b-7dec-48f9-9606-1dc6067b2876'; -- stands in for the company user
   acc uuid; r text; x bigint := 990001; j jsonb; n int;
 begin
-  acc := public.share_account_set(co, 'share@local.test', 'tok', 9999999999999);
+  -- the share login already linked here, if any (only one may exist), else a stand-in
+  acc := coalesce((select id from private.sunsynk_accounts where kind = 'share'),
+                  public.share_account_set(co, 'share@local.test', 'tok', 9999999999999));
   insert into t values ('kind', (select kind from private.sunsynk_accounts where id = acc), 'share');
   insert into t values ('A claims', public.share_claim(a, acc, x, 'Shared One'), 'claimed');
   insert into t values ('B claims same', public.share_claim(b, acc, x, 'Shared One'), 'taken');
@@ -22,11 +24,11 @@ begin
     case when exists (select 1 from public.plant_users where plant_id = 5001 and user_id <> b) then 'taken' else 'claimed' end);
   insert into t values ('poll_jobs has x', (select count(*)::text from public.poll_jobs(0, 1) where plant_id = x), '1');
   j := public.share_sync(acc, array[]::bigint[]);
-  insert into t values ('first miss', j->>'missing', '1');
+  insert into t values ('first miss', (select (share_missing_at is not null)::text from public.plant_users where plant_id = x and user_id = a), 'true');
   insert into t values ('still polled after one miss', (select count(*)::text from public.poll_jobs(0, 1) where plant_id = x), '1');
   update public.plant_users set share_missing_at = now() - interval '1 hour' where plant_id = x;
   j := public.share_sync(acc, array[]::bigint[]);
-  insert into t values ('second miss stops', j->>'gone', '1');
+  insert into t values ('second miss stops', (select (share_gone_at is not null)::text from public.plant_users where plant_id = x and user_id = a), 'true');
   insert into t values ('email queued', (select count(*)::text from public.email_queue where kind = 'share_removed' and plant_id = x and user_id = a), '1');
   insert into t values ('not polled', (select count(*)::text from public.poll_jobs(0, 1) where plant_id = x), '0');
   j := public.share_sync(acc, array[x]);
