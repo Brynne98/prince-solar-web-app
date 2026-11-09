@@ -48,10 +48,12 @@ import {
   ensureBootstrapAccount,
   getInverters,
   getInvertersCached,
+  isShareAccount,
   type PlantJob,
   plantsToPoll,
   pollJobs,
   RelinkNeeded,
+  shareSync,
   syncPlants,
 } from "../_shared/sunsynk.ts";
 
@@ -354,7 +356,14 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
       return c ? { ...inv, lastReading: c.lastReading, carriedRun: c.carriedRun } : inv;
     });
   }
-  if (plantsMinute || !cached.length) {
+  if (isShareAccount(acc)) {
+    // The share login sees every shared plant, claimed or not: only claimed ones poll,
+    // and nothing is linked to the login's own user (SOLAR-310).
+    if (plantsMinute) {
+      try { console.log(`share sync:`, JSON.stringify(await shareSync(acc))); }
+      catch (e) { console.warn(`share sync failed:`, e instanceof Error ? e.message : e); }
+    }
+  } else if (plantsMinute || !cached.length) {
     try {
       const plants = await syncPlants(acc);
       for (const p of plants) wanted.add(p.id);

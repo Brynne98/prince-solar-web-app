@@ -602,7 +602,9 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
 //  at      when it stopped / came back, HH:MM; since: when it stopped (relinked)
 export type LoginEvent =
   | { kind: "needs_relink"; plants: string[]; at?: string }
-  | { kind: "relinked"; plants: string[]; since?: string; at: string; lasted: string };
+  | { kind: "relinked"; plants: string[]; since?: string; at: string; lasted: string }
+  // the owner removed the plant's share to our login (SOLAR-310, 0172)
+  | { kind: "share_removed"; plants: string[] };
 // up to 3 names, then a count, as the app's billing banner
 const andList = (a: string[]) => names(a.length > 3 ? [...a.slice(0, 3), `${a.length - 3} more`] : a);
 export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email {
@@ -616,6 +618,17 @@ export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email
         { box: { hero: e.at ? { label: "No readings since", value: e.at, sub: day } : undefined, rows: [["Plants", esc(plants)]] } },
         { lead: "After you sign in, we get what we can of the missed readings." },
         { button: { label: "Sign in to SunSynk", href: LOGINS } },
+      ],
+      footer: [HELP],
+    });
+  if (e.kind === "share_removed")
+    return make(`Sharing stopped for ${plants}`, {
+      title: "Sharing stopped",
+      parts: [
+        { lead: "Your plant is no longer shared with admin@princesolarhub.co.za in SunSynk, so we stopped reading it. Your history is safe." },
+        { box: { rows: [["Plants", esc(plants)]] } },
+        { lead: "Share it again as Visitor and readings start again within 2 hours." },
+        { button: { label: "Open Prince Solar Hub", href: LOGINS } },
       ],
       footer: [HELP],
     });
