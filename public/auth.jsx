@@ -240,7 +240,8 @@ function AuthCard({ title, sub, onSubmit, busy, noValidate, children }) {
     </form>
   );
 }
-function PasswordInput({ id, value, onChange, placeholder, autoComplete = 'off', className, aria }) {
+// Every password field shows the same dots until something is typed (SOLAR-449).
+function PasswordInput({ id, value, onChange, placeholder = '••••••••', autoComplete = 'off', className, aria }) {
   const [show, setShow] = React.useState(false);
   return (
     <div className="pw-box">
@@ -522,14 +523,13 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
                          value={password} error={bad['auth-password']}
                          onChange={(v) => { setPassword(v); edited('auth-password', 'auth-password2'); }}
                          hint={mode === 'signin' ? null : '8+ characters'}
-                         placeholder={mode === 'signin' ? 'Your password' : 'Choose a password'}
                          autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} />
         )}
         {mode === 'recovery' && (
           <PasswordField id="auth-password2" label="Confirm password" value={password2}
                          error={bad['auth-password2']}
                          onChange={(v) => { setPassword2(v); edited('auth-password2'); }}
-                         placeholder="Type it again" autoComplete="new-password" />
+                         autoComplete="new-password" />
         )}
 
         <button type="submit" disabled={!!busy} aria-busy={busy === 'form'}>{busy === 'form' ? copy.busy : copy.cta}</button>

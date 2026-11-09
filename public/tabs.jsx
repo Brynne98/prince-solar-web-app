@@ -2752,7 +2752,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const changed = async (linked) => {
     const wasAdding = mode === 'add';
     const readError = await refresh();
-    setMode(null); onChanged && onChanged(linked);
+    setMode(null); onChanged && onChanged(linked, wasAdding);
     if (readError) { fail('Connected. Reload the page to see it here.'); return; }
     const paused = new Set((linked?.paused || []).map(Number));
     const on = (linked?.plants || []).filter(p => !paused.has(Number(p.id)));
@@ -2839,7 +2839,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     const { error } = await window.sb.rpc('api_plant_start', { p_plant: p.plant_id });
     if (error && /no room/.test(error.message)) setFull(p.plant_id);
     else if (error) fail(/plan change/.test(error.message) ? `Your booked change has no room for it. Tap ${(billing && bookedChange(billing)?.[1]) || 'Keep'} in Plan first.` : 'Couldn’t start it. Try again.');
-    else { window.track('plant_start_done'); onChanged && onChanged(); }
+    else { window.track('plant_start_done'); onChanged && onChanged({ plants: [{ id: p.plant_id }] }, true); }
     await refresh();
     setBusy(null);
   };
