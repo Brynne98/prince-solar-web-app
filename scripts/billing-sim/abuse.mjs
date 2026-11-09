@@ -297,11 +297,12 @@ await attack("G3f", "another user's login, account id or plant in link/billing c
   if (junk.status === 200) bad.push("link with junk jwt");
   return { hit: bad.length > 0, note: bad.join(",") };
 });
-await attack("G6g", "ten links at once get past the 5-an-hour cap", async () => {
+// A wrong login: a link that works gives its try back (0135), so the cap is for guessing.
+await attack("G6g", "ten wrong logins at once get past the 5-an-hour cap", async () => {
   const a = await user("g6g"); sql(`delete from private.link_attempts where user_id='${a.id}'`);
-  const rs = await Promise.all(Array.from({ length: 10 }, () => http("POST", `${FN}/link-sunsynk`, { jwt: a.jwt, headers: { Origin: ORIGIN }, body: { username: "solo@mock", password: "x" } })));
-  const ok = rs.filter((r) => r.status === 200).length;
-  return { hit: ok > 5, note: `${ok} went through` };
+  const rs = await Promise.all(Array.from({ length: 10 }, () => http("POST", `${FN}/link-sunsynk`, { jwt: a.jwt, headers: { Origin: ORIGIN }, body: { username: "nobody@mock", password: "x" } })));
+  const tried = rs.filter((r) => r.status !== 429).length;
+  return { hit: tried > 5, note: `${tried} reached SunSynk` };
 });
 await attack("G3d", "crafted api_billing_change / quote / keep arguments", async () => {
   const bad = []; const f = await user("g3f2"); const h = await home("g3h2");
