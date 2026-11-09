@@ -21,7 +21,7 @@ function fmtAgo(d, now) {
 }
 // How long ago a reading was, the way the cards say it: the time, and the date once it is over a day and a half old.
 const readAgo = (t, now) => now - t > 36 * 3600e3
-  ? new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ', ' + window.fmtTime(new Date(t))
+  ? new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: window.PLANT_TZ || undefined }) + ', ' + window.fmtTime(new Date(t))
   : window.fmtTime(new Date(t));
 function useNow(ms) {
   const [now, setNow] = useState(Date.now());
@@ -1514,7 +1514,7 @@ function App({ links }) {
       const cfg = (m.plants || []).find(p => p.id === wanted)?.config;
       // The plant on screen stopped (SOLAR-251): clear its readings, as a switch does.
       if (shownPlant.current != null && wanted !== shownPlant.current) clearPlant();
-      window.setCurrentPlant(wanted, cfg?.currency);
+      window.setCurrentPlant(wanted, cfg?.currency, cfg?.timezone);
       setPlantId(wanted);
       // how much history this plant has — drives the "collecting your first day" copy
       window.fetchPlantDays().then(d => { window.PLANT_DAYS = d; }).catch(() => {});
@@ -1540,7 +1540,7 @@ function App({ links }) {
     if (tab === 'system' && settingsDirty.current) { setSwitchBlocked(n => n + 1); return; }
     const plant = (me?.plants || []).find(p => p.id === Number(id));
     const cfg = plant?.config;
-    window.setCurrentPlant(id, cfg?.currency);
+    window.setCurrentPlant(id, cfg?.currency, cfg?.timezone);
     setPlantId(Number(id));
     setNotice(window.plantLabel(plant || { id }));
     window.savePrefs({ lastPlant: Number(id) }).catch(() => {});

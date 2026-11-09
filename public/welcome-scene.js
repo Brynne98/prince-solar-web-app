@@ -352,7 +352,7 @@ addEventListener('DOMContentLoaded', async () => {
   const q = document.querySelector('.offer-q');
   q.querySelector('summary').firstChild.textContent = `What is the ${o.id === 'launch' ? 'launch' : 'offer'} price?`;
   q.querySelector('p').textContent = [o.cap ? `The first ${o.cap} members to pay` : 'Members who join now',
-    ` get Home for ${R(at.m.home)} and Family for ${R(at.m.family)} a month, instead of ${R(was.m.home)} and ${R(was.m.family)}. Extra plants are ${R(at.m.extra)}. `,
+    ` get Home for ${R(at.m.home)} and Family for ${R(at.m.family)} a month, instead of ${R(was.m.home)} and ${R(was.m.family)}. `,
     o.months ? `It lasts your first ${o.months} months, then the usual price applies.` : 'You keep it while your plan stays paid. Move to Free and it ends.',
     o.cap ? ` Once ${o.cap} members have joined, it's gone.` : ''].join('');
   q.hidden = false;

@@ -24,9 +24,12 @@ const BATT_MAX_KW = 5.0; // charge/discharge ceiling per inverter (display only)
 // the header's plant selector sets window.CURRENT_PLANT and everything follows.
 window.CURRENT_PLANT = window.CURRENT_PLANT ?? null;
 window.PLANT_CURRENCY = window.PLANT_CURRENCY || 'ZAR';
-window.setCurrentPlant = (id, currency) => {
+// The plant's timezone: every clock time on screen is the plant's, as alerts and emails are (SOLAR-445).
+window.PLANT_TZ = window.PLANT_TZ || null;
+window.setCurrentPlant = (id, currency, tz) => {
   window.CURRENT_PLANT = id == null ? null : Number(id);
   if (currency) window.PLANT_CURRENCY = currency;
+  window.PLANT_TZ = tz || null;
 };
 
 const ROUTES = {
@@ -81,6 +84,13 @@ function sharedAsk(name, ms, rk, ask) {
   shared[k] = { at: Date.now(), rk: rk || 0, p };
   return p;
 }
+// The plant and the shared answers belong to who was signed in. Without a reload the next
+// user's first loads asked for the last user's plant and got 403s (SOLAR-442).
+window.sb.auth.onAuthStateChange((event) => {
+  if (event !== 'SIGNED_OUT') return;
+  window.CURRENT_PLANT = null; window.PLANT_CURRENCY = 'ZAR'; window.PLANT_TZ = null;
+  for (const k in shared) delete shared[k];
+});
 const MIN5 = 5 * 60000;
 
 const isOnline = (s) => s === 1 || s === '1' || s === 'online' || s === true;
