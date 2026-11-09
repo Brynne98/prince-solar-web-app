@@ -1568,10 +1568,12 @@ function App({ links }) {
   // A reconnected login also clears the banner, so the gate's list is read again.
   // linked: link-sunsynk's answer when a login was just added. A plant it brings that the
   // account didn't have yet is opened on Live, where Setting up and First steps are (SOLAR-174).
-  const reloadPlantConfig = (linked) => {
+  // open: the user just added or switched on these plants, so show the first even if the
+  // plant list here still has it from before (SOLAR-450).
+  const reloadPlantConfig = (linked, open) => {
     links.refresh();
     const had = new Set((me?.plants || []).map(p => p.id));
-    const added = comingOn(linked).find(id => !had.has(id));
+    const added = open ? comingOn(linked)[0] : comingOn(linked).find(id => !had.has(id));
     return loadMe().then(() => {
       if (added) { switchPlant(added); go('live'); return; }
       // a saved setting can change the shared trend and 30-day answers too, so they are asked again
