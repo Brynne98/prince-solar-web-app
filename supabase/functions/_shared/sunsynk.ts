@@ -700,6 +700,9 @@ export async function claimShared(userId: string, ref: string): Promise<ClaimRes
   const acc = await shareAccount();
   if (!acc) throw new Error("share login not set up");
   const plants = await getPlants(acc);
+  // The login just answered: say so, or a plant claimed between polls shows "Not updating"
+  // for its first minutes, timed from the share login's last poll (SOLAR-448).
+  await rpc("account_access_set", { p_account: acc.id, p_access: acc.access_token, p_expires: acc.access_expires_at });
   let invs: InverterInfo[] | undefined;
   let plant = /^\d+$/.test(ref) ? plants.find((p) => p.id === Number(ref)) : undefined;
   if (!plant) {
