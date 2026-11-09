@@ -1,7 +1,8 @@
 // Signed Paystack events against the local billing webhook (SOLAR-264 round 3). Users wh-N@s264.test, deleted at the end.
 // Needs the edge runtime served with PAYSTACK_SECRET_KEY=s264-local-dummy-key and PAYSTACK_URL at mock-paystack.mjs
 // (port 4500). Exit 0 = every check held, 1 = findings. Checks: W1 a lost dispute is recorded and the account is past due;
-// W2 a full hand refund leaves the payment list, the plan stays; W3 a partial hand refund keeps its amount; W4 a refund
+// W2 a full hand refund leaves the payment list, the plan stays, one refund email; W3 a partial hand refund keeps its
+// amount, one refund email for the part, none more on a replay (SOLAR-444); W4 a refund
 // before charge.success does not leave the plan applied; W5 delete is refused with a paid plan, and a payment for an
 // account deleted anyway (an old card page) is refunded; W6 a wrong-amount payment resent is refunded once and
 // answered 200 each time.
@@ -30,9 +31,12 @@ try {
   out.push(['W2 refund.processed full', await send({ event: 'refund.processed', data: { status: 'processed', amount: 9900, currency: 'ZAR', transaction_reference: 'psh_wh2ren' } })]);
   out.push(['W2 after', q(`select b.plan||' '||b.state||' refunded_at set='||(c.refunded_at is not null)||' error='||coalesce(c.error,'null') from private.billing b join private.billing_charges c on c.user_id=b.user_id where c.reference='psh_wh2ren'`)]);
   out.push(['W2 status payments', q(`select set_config('request.jwt.claims', json_build_object('sub','${U(2)}','role','authenticated')::text, false); select public.api_billing_status()->'payments'`).split('\n').pop()]);
+  out.push(['W2 mail', q(`select coalesce(string_agg((data->>'why')||' '||(data->>'amount')||' of '||coalesce(data->>'paid','?'), ', '), 'none') from public.email_queue where kind = 'bill_refund' and key like 'bill_refund:psh_wh2ren%'`)]);
   // W3 partial hand refund R40 of R99
   out.push(['W3 refund.processed partial', await send({ event: 'refund.processed', data: { status: 'processed', amount: '4000', currency: 'ZAR', transaction_reference: 'psh_wh3ren', refund_reference: 'rf_wh3' } })]);
   out.push(['W3 after', q(`select 'refunded_cents='||coalesce(refunded_cents::text,'null')||' amount kept='||amount||' error='||coalesce(error,'null') from private.billing_charges where reference='psh_wh3ren'`)]);
+  out.push(['W3 replay', await send({ event: 'refund.processed', data: { status: 'processed', amount: '4000', currency: 'ZAR', transaction_reference: 'psh_wh3ren', refund_reference: 'rf_wh3' } })]);
+  out.push(['W3 mail', q(`select coalesce(string_agg((data->>'why')||' '||(data->>'amount')||' of '||coalesce(data->>'paid','?'), ', '), 'none') from public.email_queue where kind = 'bill_refund' and key like 'bill_refund:psh_wh3ren%'`)]);
   // W4 refund event before charge.success (an upgrade Home->Family, card page)
   const ref4 = JSON.parse(q(`select public.billing_charge_open('${U(4)}','family',null,null)`)).reference;
   const amt4 = q(`select amount from private.billing_charges where reference='${ref4}'`);
@@ -67,11 +71,13 @@ try {
 for (const o of out) console.log(o.join(' | '));
 const get = (k) => out.find((o) => o[0] === k) || [];
 const bad = [];
-const status = out.filter((o) => / status$|first$|again$|after$|after delete$|full$|partial$/.test(o[0]) && typeof o[1] === 'number');
+const status = out.filter((o) => / status$|first$|again$|after$|after delete$|full$|partial$|replay$/.test(o[0]) && typeof o[1] === 'number');
 for (const o of status) if (o[1] !== 200) bad.push(`${o[0]}: webhook answered ${o[1]}`);
 if (!/past_due/.test(get('W1 after dispute lost')[1] || '')) bad.push('W1 dispute lost: account not past due');
 if (!/home active/.test(get('W2 after')[1] || '') || get('W2 status payments')[1] !== '[]') bad.push(`W2 full hand refund: ${get('W2 after')[1]}, payments ${get('W2 status payments')[1]}`);
 if (!/refunded_cents=4000/.test(get('W3 after')[1] || '')) bad.push(`W3 partial hand refund: ${get('W3 after')[1]}`);
+if (get('W2 mail')[1] !== 'hand 99.00 of 99') bad.push(`W2 refund email: ${get('W2 mail')[1]}, want one: hand 99.00 of 99`);
+if (get('W3 mail')[1] !== 'hand 40.00 of 99') bad.push(`W3 refund email: ${get('W3 mail')[1]}, want one: hand 40.00 of 99`);
 if (get('W5 delete refused')[1] !== 'yes') bad.push(`W5 delete of an active Home account: ${get('W5 delete refused')[1]}`);
 if (/charge=paid refunded_at=null error=null/.test(get('W1 after dispute lost')[1])) bad.push('W1 dispute lost: plan, plants and charge unchanged, nothing recorded');
 if (/charge=paid refunded_at set=false error=null/.test(get('W4 after')[1])) bad.push('W4 refund before success: upgrade applied, refund lost');
