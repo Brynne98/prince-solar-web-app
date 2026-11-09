@@ -2889,8 +2889,9 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const limit = billing && !billing.comped ? planRoom(billing.plan, billing.extraPlants) : null;
   const planFull = limit != null && collecting >= limit;
   // Plants on out of what the plan allows, so it shows the room left (SOLAR-285); none when
-  // free of charge. A plant up for deletion still collects until its date.
-  const title = <>Plants{limit != null && allPlants.length > 0 && <span className="sset-count">{allPlants.filter(p => !p.paused && ['on', 'going'].includes(state(p))).length} of {limit} on your plan</span>}</>;
+  // free of charge. A plant up for deletion still collects until its date. Counts what takes
+  // plan room, as the server does: a plant whose login expired still takes it (SOLAR-440).
+  const title = <>Plants{limit != null && allPlants.length > 0 && <span className="sset-count">{collecting} of {limit} on your plan</span>}</>;
   return (
     <SettingsSection id="connection" title={title}
       action={!unread && <button type="button" className="save-btn" onClick={() => { if (planFull) window.track('add_login_full_done', { plan: billing.plan }); setMode('add'); }}>Add login</button>}>
