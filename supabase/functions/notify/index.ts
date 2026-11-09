@@ -98,11 +98,13 @@ async function socAt(plant: number, at: number): Promise<number | null> {
 /** The saved card and the plan, for billing emails that name them (0162). */
 const billFacts = (user: string | null) =>
   user ? rpc<{ card: string | null; plan: "free" | "home" | "family" } | null>("email_billing_facts", { p_user: user }) : Promise.resolve(null);
-/** A plan's monthly price from the live offer, and its usual price (SOLAR-415). */
-let offerNow: { prices: { monthly: Record<string, number> }; listPrices: { monthly: Record<string, number> } } | null = null;
-async function priceOf(plan: "home" | "family"): Promise<Price> {
-  offerNow ??= await rpc("api_offer");
-  return { plan, now: offerNow!.prices.monthly[plan], list: offerNow!.listPrices.monthly[plan] };
+/** A plan's monthly price and its usual price (SOLAR-415). With a user, the price that user
+ *  pays today: an offer they already left is not quoted again (SOLAR-443, 0169). */
+type Prices = { prices: { monthly: Record<string, number> }; listPrices: { monthly: Record<string, number> } };
+let offerNow: Prices | null = null;
+async function priceOf(plan: "home" | "family", user: string | null): Promise<Price> {
+  const o = user ? await rpc<Prices>("email_prices", { p_user: user }) : (offerNow ??= await rpc<Prices>("api_offer"));
+  return { plan, now: o.prices.monthly[plan], list: o.listPrices.monthly[plan] };
 }
 /** The account's first plant (or the one given), its name and how many day totals it holds. */
 async function historyAt(user: string | null, plantId?: number | null): Promise<{ plant: string; days: number } | null> {
@@ -319,7 +321,7 @@ async function build(r: Row): Promise<Email | null> {
     }
     case "free_week_soon":
       return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: tz }).replace(/\bSept\b/, "Sep"),
-        p.name, d.days ?? 0, await priceOf("home"));
+        p.name, d.days ?? 0, await priceOf("home", r.user_id));
     case "free_week_setup": return d.steps?.length ? freeWeekSetup(d.steps, r.plant_id ?? undefined, d.battery !== false) : null;
     case "account_deleted": return accountDeleted(r.to_email);
     // Billing (0116): amounts in whole rand, dates as "2026-11-01".
@@ -382,7 +384,7 @@ async function build(r: Row): Promise<Email | null> {
       // The next plan up keeps them: Free to Home if 2 plants fit, else Family.
       const plan = (await billFacts(r.user_id))?.plan;
       const up = plan === "free" ? (d.plants.length + 1 <= 2 ? "home" : "family") : plan === "home" ? "family" : null;
-      return plantsRemovalSoon(d.plants, day(d.on), plan, up ? await priceOf(up) : undefined, await historyOf(r.user_id, d.plants));
+      return plantsRemovalSoon(d.plants, day(d.on), plan, up ? await priceOf(up, r.user_id) : undefined, await historyOf(r.user_id, d.plants));
     }
     case "bill_renewal_notice":
       return renewalNotice({ plan: d.plan, amount: d.amount, on: day(d.on), card: (await billFacts(r.user_id))?.card ?? undefined,
@@ -397,7 +399,7 @@ async function build(r: Row): Promise<Email | null> {
       return cardExpiring({ card: d.card, on: day(d.on), final: d.final === true, next: { amount: d.nextAmount, date: day(d.nextDate) } });
     case "winback": {
       const h = await historyAt(r.user_id, r.plant_id);
-      return winback({ from: d.from, keepUntil: day(d.keepUntil), plant: h?.plant, days: h?.days, price: await priceOf(d.from) });
+      return winback({ from: d.from, keepUntil: day(d.keepUntil), plant: h?.plant, days: h?.days, price: await priceOf(d.from, r.user_id) });
     }
     case "need_a_hand": return needAHand();
   }
@@ -632,7 +634,7 @@ async function renderAll(plantId: number, today?: string) {
   const { count: days } = await db.from("plant_energy").select("period", { count: "exact", head: true })
     .eq("plant_id", plantId).eq("bucket", "day").lt("period", today);
   out["free-week-setup"] = freeWeekSetup(["size", "reserve", "panels"]);
-  out["free-week-ends-soon"] = freeWeekEndsSoon("Monday 10 Nov", p.name, days ?? 0, await priceOf("home"));
+  out["free-week-ends-soon"] = freeWeekEndsSoon("Monday 10 Nov", p.name, days ?? 0, await priceOf("home", null));
   return out;
 }
 
