@@ -26,13 +26,17 @@ function frames(stack: string) {
   }).filter(Boolean).reverse();
 }
 
-// The user id (`sub`) in a request's sign-in token. Not checked here: it only labels the
-// report. The service and publishable keys carry no `sub`, so a cron run has no user.
-export function userOf(req: Request): string | null {
+// The signed-in user behind a request, asked of Supabase Auth so a made-up token can't
+// file an error under someone else. Some functions skip the gateway's sign-in check
+// (config.toml verify_jwt = false). Only runs on an error. A cron run, the service key or
+// a bad token gives null.
+export async function userOf(req: Request): Promise<string | null> {
+  const auth = req.headers.get("Authorization");
+  const url = Deno.env.get("SUPABASE_URL"), key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!auth?.startsWith("Bearer ") || !url || !key) return null;
   try {
-    const jwt = req.headers.get("Authorization")?.replace(/^Bearer /, "").split(".")[1];
-    const sub = jwt && JSON.parse(atob(jwt.replace(/-/g, "+").replace(/_/g, "/"))).sub;
-    return typeof sub === "string" ? sub : null;
+    const r = await fetch(`${url}/auth/v1/user`, { headers: { apikey: key, Authorization: auth }, signal: AbortSignal.timeout(3000) });
+    return r.ok ? ((await r.json()).id ?? null) : null;
   } catch { return null; }
 }
 
@@ -89,7 +93,7 @@ export function serve(fn: string, handler: (req: Request) => Response | Promise<
     try {
       return await handler(req);
     } catch (e) {
-      await reportError(fn, e, userOf(req));
+      await reportError(fn, e, await userOf(req));
       throw e;
     }
   });

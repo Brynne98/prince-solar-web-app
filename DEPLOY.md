@@ -27,12 +27,14 @@ supabase migration list             # Local and Remote columns must match
 grep -rn "TEMPORARY\|console.log\|debugger" public/ supabase/functions/
 ```
 
-Then build. `npm run build` compiles `public/*.jsx` into `public/build/*.js` with the same
-Babel settings the browser used to apply (SOLAR-131). It exits 1 on a syntax error; Cloudflare
-runs the same build and keeps the last good deploy live if it fails:
+Then build and test. `npm test` runs `npm run build`, which compiles `public/*.jsx` into
+`public/build/*.js` with the same Babel settings the browser used to apply (SOLAR-131), then
+the warning tests and the reuse check. The reuse check fails when the functions' `APP_VERSION`
+differs from `config.js`. Any failure exits 1; Cloudflare runs only the build and keeps the
+last good deploy live if it fails:
 
 ```bash
-npm run build
+npm test
 ```
 
 A missing function or bad reference will NOT be caught by that — it is a syntax check,
