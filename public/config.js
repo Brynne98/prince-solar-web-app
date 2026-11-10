@@ -84,7 +84,11 @@ window.POSTHOG_KEY = 'phc_ABkqiYsajciVYVKYX4GZMApcDP7QfD7CKQtgE7XPgjxN';
     try {
       var key = String((err && err.message) || err).slice(0, 200);
       if (!on) return null;
-      if (seen[key] || count >= 20) return typeof seen[key] === 'string' ? seen[key] : null;
+      if (seen[key] || count >= 20) {
+        var old = typeof seen[key] === 'string' ? seen[key] : null;
+        if (old) window.lastErrorId = { id: old, at: Date.now() };
+        return old;
+      }
       count++;
       var r = ph.captureException(err instanceof Error ? err : new Error(key), Object.assign({ page: location.pathname + location.search }, props));
       seen[key] = (r && r.uuid) || true;

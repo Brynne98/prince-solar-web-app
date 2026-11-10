@@ -369,7 +369,7 @@ function FeedbackDialog({ onClose, report }) {
       <form className="conn-form link-form" onSubmit={submit} noValidate aria-busy={busy}>
         <div className="field">
           <window.FieldLabel id="fb-msg" label={report ? 'What were you doing? (optional)' : 'Message'} error={bad['fb-msg']} />
-          <textarea id="fb-msg" className="input fb-msg" rows={5} maxLength={4000} autoFocus value={msg}
+          <textarea id="fb-msg" className="input fb-msg" rows={5} maxLength={report ? 3500 : 4000} autoFocus value={msg}
                     onChange={(e) => { setMsg(e.target.value); edited('fb-msg'); }} {...window.invalidProps('fb-msg', bad['fb-msg'])} />
         </div>
         <div className="field fb-shot">

@@ -80,6 +80,12 @@ export function judge(i: Inputs): Verdict[] {
              detail: { calls, failed, failed_share: Math.round(share * 1000) / 1000, since: i.sunsynk.since } });
   out.push({ name: "email-queue", job: "notify", failing: i.email.waiting > 0,
              detail: { waiting: i.email.waiting, oldest_due: i.email.oldest_due } });
+  // A failing check whose shard or job is gone (fewer shards, job unscheduled) clears.
+  for (const [name, c] of Object.entries(i.checks)) {
+    if (c.failing && !out.some((v) => v.name === name)) {
+      out.push({ name, job: name.startsWith("poll:") ? "poll" : name.replace(/^cron:/, ""), failing: false, detail: { gone: true } });
+    }
+  }
   return out;
 }
 
