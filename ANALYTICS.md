@@ -46,6 +46,7 @@ Web (`public/*.jsx`):
 | `password_reset_sent_done` | Asked for a reset link |
 | `password_reset_done` | New password set from the link |
 | `password_change_done` | Password changed in Settings |
+| `feedback_sent_done` | Feedback sent from the account menu (`page`, `image`: true or false). Never the message |
 | `plant_linked` | SunSynk login linked, or a shared plant taken |
 | `share_check_done`, `link_mode_picked`, `share_taken_email_done` | Linking steps |
 | `plant_switched` | Another plant picked |

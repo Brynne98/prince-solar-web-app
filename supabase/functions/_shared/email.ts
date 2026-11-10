@@ -954,6 +954,19 @@ export const billMailFailed = (m: { kind: string; key: string; user: string; err
     footer: [],
   });
 
+// To hello@: a user's "Send feedback" (SOLAR-428). Reply-to is the sender (notify sets it),
+// so Reply answers them. The screenshot, if any, comes as an attachment.
+export const feedback = (f: { email: string; message: string; page: string; version: string; user: string; image: boolean }) =>
+  make(`Feedback: ${f.message.replace(/\s+/g, " ").slice(0, 60)}`, {
+    title: "New feedback",
+    parts: [
+      { lead: esc(f.message).replace(/\n/g, "<br>\n") },
+      { box: { rows: [["From", esc(f.email)], ["Page", esc(f.page || "unknown")], ["Version", esc(f.version || "unknown")],
+        ["Screenshot", f.image ? "attached" : "none"], ["User", esc(f.user)]] } },
+    ],
+    footer: [],
+  });
+
 // Emails where the owner loses something: a big amber number for what goes and when,
 // then the plan that keeps it at today's price (SOLAR-415).
 // Price: the live offer's monthly price, and the usual price when the offer is lower.

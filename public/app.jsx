@@ -91,6 +91,7 @@ const NAV_ICONS = {
   system: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
   more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   account: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  feedback: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   signout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
@@ -296,11 +297,86 @@ function AccountMenu({ user, plantCount, alert, onSettings, active, variant }) {
             <Icon id="settings" />Settings
             {alert && <span className="dot" aria-label="A login needs reconnecting" />}
           </button>
+          <button type="button" onClick={() => { setOpen(false); openFeedback(); }}>
+            <Icon id="feedback" />Send feedback
+          </button>
           <hr />
           <window.SignOutButton className="menu-signout"><Icon id="signout" />Sign out</window.SignOutButton>
         </MenuList>
       )}
     </div>
+  );
+}
+
+// "Send feedback" (SOLAR-428): a message and an optional screenshot, emailed to hello@ with
+// reply-to the user (0179). The screenshot is shrunk here to a JPEG under 1 MB, so a phone's
+// full-size photo still goes; it travels only in the email, never stored.
+const openFeedback = () => { const close = mountNode(<FeedbackDialog onClose={() => close()} />); };
+async function shrinkShot(file) {
+  const img = await createImageBitmap(file);
+  const s = Math.min(1, 1600 / Math.max(img.width, img.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  for (const q of [0.85, 0.7, 0.5]) {
+    const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', q));
+    if (blob && blob.size < 1e6) return await new Promise((ok, no) => {
+      const fr = new FileReader();
+      fr.onload = () => ok(String(fr.result).split(',')[1]); fr.onerror = no; fr.readAsDataURL(blob);
+    });
+  }
+  throw new Error('too big');
+}
+function FeedbackDialog({ onClose }) {
+  const { useState } = React;
+  const [msg, setMsg] = useState('');
+  const [shot, setShot] = useState(null); // { name, data }
+  const [busy, setBusy] = useState(false);
+  const { bad, flag, edited } = window.useFieldErrors();
+  const pick = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try { setShot({ name: f.name, data: await shrinkShot(f) }); edited('fb-shot'); }
+    catch { flag({ 'fb-shot': 'Couldn’t read that image' }); }
+  };
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!msg.trim()) return flag({ 'fb-msg': 'Write a message' });
+    setBusy(true);
+    try {
+      const page = new URLSearchParams(location.search).get('tab') || 'home';
+      await window.sendFeedback(msg, page, shot?.data ?? null);
+      window.track('feedback_sent_done', { page, image: !!shot });
+      onClose();
+      window.toast('Feedback sent');
+    } catch (ex) {
+      window.toast(/feedback limit/.test(ex.message) ? 'You’ve sent 10 today. Try again tomorrow.' : 'Not sent. Try again.', { error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <window.Dialog keep busy={busy} label="Send feedback" onClose={onClose}>
+      <div className="confirm-title">Send feedback</div>
+      <form className="conn-form link-form" onSubmit={submit} noValidate aria-busy={busy}>
+        <div className="field">
+          <window.FieldLabel id="fb-msg" label="Message" error={bad['fb-msg']} />
+          <textarea id="fb-msg" className="input fb-msg" rows={5} maxLength={4000} autoFocus value={msg}
+                    onChange={(e) => { setMsg(e.target.value); edited('fb-msg'); }} {...window.invalidProps('fb-msg', bad['fb-msg'])} />
+        </div>
+        <div className="field fb-shot">
+          {shot
+            ? <><span className="fb-shot-name">{shot.name}</span><button type="button" className="ghost-btn" onClick={() => setShot(null)} disabled={busy}>Remove</button></>
+            : <label className="ghost-btn">Add screenshot<input type="file" accept="image/*" hidden onChange={pick} /></label>}
+          {bad['fb-shot'] && <span className="field-err" role="alert">{bad['fb-shot']}</span>}
+        </div>
+        <div className="conn-form-actions">
+          <button type="button" className="ghost-btn" onClick={onClose} disabled={busy}>Cancel</button>
+          <window.BusyButton type="submit" className="save-btn" busy={busy} busyText="Sending…">Send</window.BusyButton>
+        </div>
+      </form>
+    </window.Dialog>
   );
 }
 

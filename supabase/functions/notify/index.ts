@@ -29,7 +29,7 @@ import { reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type Price, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, cardChanged, cardExpiring, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
-  offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, needAHand,
+  offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, needAHand, feedback,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -408,6 +408,9 @@ async function build(r: Row): Promise<Email | null> {
       return winback({ from: d.from, keepUntil: day(d.keepUntil), plant: h?.plant, days: h?.days, price: await priceOf(d.from, r.user_id) });
     }
     case "need_a_hand": return needAHand();
+    case "feedback":
+      return feedback({ email: String(d.email ?? ""), message: String(d.message ?? ""), page: String(d.page ?? ""),
+        version: String(d.version ?? ""), user: String(d.user ?? ""), image: !!d.image });
   }
   throw new Error(`unknown kind ${r.kind}`);
 }
@@ -432,9 +435,12 @@ const later = (row: Row): Done => ({ id: row.id, status: "queued", error: "run o
 // from a bad key or address) is retried, and fails only after MAX_TRIES.
 const refused = (status: number) => status === 400 || status === 422;
 
+// Feedback (SOLAR-428): a reply goes to the user who sent it, with their screenshot attached.
+const fb = (o: Out) => o.row.kind === "feedback";
 const payload = (o: Out) => {
-  return { from: senderFor(o.row.kind), reply_to: REPLY_TO, to: [o.row.to_email],
-           subject: o.mail.subject, html: o.mail.html, text: o.mail.text };
+  return { from: senderFor(o.row.kind), reply_to: fb(o) && o.row.data.email ? o.row.data.email : REPLY_TO, to: [o.row.to_email],
+           subject: o.mail.subject, html: o.mail.html, text: o.mail.text,
+           ...(fb(o) && o.row.data.image ? { attachments: [{ filename: "screenshot.jpg", content: o.row.data.image }] } : {}) };
 };
 
 async function post(url: string, body: unknown, key: string): Promise<{ status: number; error?: string }> {
@@ -469,7 +475,9 @@ async function sendBatch(outs: Out[], deadline: number, reuse?: string): Promise
   // answer was lost, it answers from that and sends nothing twice.
   const ids = new TextEncoder().encode(outs.map((o) => o.row.id).join("."));
   const key = reuse ?? "q-" + [...new Uint8Array(await crypto.subtle.digest("SHA-256", ids))].map((b) => b.toString(16).padStart(2, "0")).join("");
-  const res = await paced(() => post(`${RESEND_URL}/batch`, outs.map(payload), key));
+  // Resend's batch call takes no attachments, so feedback goes on its own (one per group, see run).
+  const one = outs.length === 1 && fb(outs[0]);
+  const res = await paced(() => one ? post(RESEND_URL, payload(outs[0]), key) : post(`${RESEND_URL}/batch`, outs.map(payload), key));
   if (!res.error) return outs.map((o) => ({ id: o.row.id, status: "sent" }));
   // 409: the old key was used with a different body (the batch changed since); a fresh one.
   if (res.status === 409 && reuse) return await sendBatch(outs, deadline);
@@ -575,7 +583,7 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
     // Retries go in the batch they went in before, under its key; new rows in fresh batches.
     const groups = new Map<string, Out[]>();
     for (const o of outs) {
-      const g = o.row.batch_key ?? "";
+      const g = o.row.batch_key ?? (fb(o) ? `fb-${o.row.id}` : "");
       groups.set(g, [...(groups.get(g) ?? []), o]);
     }
     for (const [key, group] of groups) done.push(...await sendBatch(group, deadline, key || undefined));
