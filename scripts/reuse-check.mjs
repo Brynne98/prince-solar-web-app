@@ -22,8 +22,26 @@ const problems = [];
 // The site's CSP (_headers) has no 'unsafe-inline': a <script> with code in it is blocked live
 // but runs locally. JSON data blocks are not run, so they may stay.
 for (const f of src.filter(f => f.endsWith('.html'))) {
-  for (const m of read(f).matchAll(/<script(?![^>]*\bsrc=)(?![^>]*application\/json)[^>]*>([\s\S]*?)<\/script>/g))
+  for (const m of read(f).matchAll(/<script(?![^>]*\bsrc=)(?![^>]*application\/(?:ld\+)?json)[^>]*>([\s\S]*?)<\/script>/g))
     if (m[1].trim()) problems.push(`${f}: inline <script> is blocked by the CSP: move it to a .js file`);
+}
+
+// ---- 0a. search answers match the page (SOLAR-216) ----
+// A FAQPage block (ld+json) repeats the page's <details> questions for Google and AI answers.
+// Each question and answer must read the same as on screen, so an edit to one is made to both.
+for (const f of src.filter(f => f.endsWith('.html'))) {
+  const page = read(f);
+  const text = (h) => h.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  const shown = new Map([...page.matchAll(/<details[^>]*><summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/g)].map(m => [text(m[1]), text(m[2])]));
+  for (const m of page.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) {
+    let data;
+    try { data = JSON.parse(m[1]); } catch (e) { problems.push(`${f}: ld+json does not parse: ${e.message}`); continue; }
+    const faq = (data['@graph'] || [data]).find(x => x['@type'] === 'FAQPage');
+    for (const q of faq?.mainEntity || []) {
+      if (!shown.has(q.name)) problems.push(`${f}: FAQ data asks "${q.name}" but no <details> on the page does`);
+      else if (shown.get(q.name) !== q.acceptedAnswer.text) problems.push(`${f}: FAQ data answer for "${q.name}" differs from the page`);
+    }
+  }
 }
 
 // ---- 0b. one release (SOLAR-423) ----
