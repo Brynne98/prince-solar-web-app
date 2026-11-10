@@ -481,8 +481,11 @@ async function sendBatch(outs: Out[], deadline: number, reuse?: string): Promise
   if (!res.error) return outs.map((o) => ({ id: o.row.id, status: "sent" }));
   // 409: the old key was used with a different body (the batch changed since); a fresh one.
   if (res.status === 409 && reuse) return await sendBatch(outs, deadline);
-  noteError(`resend_${res.status || "network"}`, new Error(res.error), { hourly: true });
-  if (!refused(res.status)) return outs.map((o) => retry(o.row, res.error!, key));
+  // A refusal ends as a failed row, which run() reports as email_failed: one report, not two (SOLAR-471).
+  if (!refused(res.status)) {
+    noteError(`resend_${res.status || "network"}`, new Error(res.error), { hourly: true });
+    return outs.map((o) => retry(o.row, res.error!, key));
+  }
   if (outs.length === 1) return [{ id: outs[0].row.id, status: "failed", error: res.error }];
   const half = Math.ceil(outs.length / 2);
   return [...await sendBatch(outs.slice(0, half), deadline), ...await sendBatch(outs.slice(half), deadline)];
