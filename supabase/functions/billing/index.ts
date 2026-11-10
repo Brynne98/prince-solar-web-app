@@ -20,7 +20,7 @@
 // verify_jwt is off: Paystack has no Supabase session. Each route checks its caller.
 // Secret: PAYSTACK_SECRET_KEY (test key until the company account is live).
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
-import { serve, track } from "../_shared/errors.ts";
+import { noteError, serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
@@ -76,7 +76,10 @@ async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
  *  A refused refund is logged on the charge; the daily run asks again (0130). */
 async function refund(reference: string) {
   const err = await paystack("POST", "/refund", { transaction: reference }).then(() => null, (e) => e.message as string);
-  if (err) console.error(`billing refund ${reference}: ${err}`);
+  if (err) {
+    console.error(`billing refund ${reference}: ${err}`);
+    noteError("refund_refused", new Error(`refund ${reference}: ${err}`), { ref: reference });
+  }
   await rpc("billing_charge_refunded", { p_reference: reference, p_error: err });
 }
 
@@ -88,6 +91,7 @@ const refundNow = (reference: string) => paystack("POST", "/refund", { transacti
   .then(() => {}, (e) => {
     if (!(e instanceof PaystackError) || e.status !== 400) throw e;
     console.error(`billing refund ${reference}: ${e.message}`);
+    noteError("refund_refused", e, { ref: reference });
   });
 
 /** Mark a charge failed (0116) and count it, by user id only (SOLAR-243). A charge
@@ -109,6 +113,7 @@ async function chargeFailed(reference: string, error: string, renewal: boolean, 
 async function settle(tx: Tx, out: { kind?: string } = {}, renewal = false): Promise<"paid" | "failed" | "refund" | null> {
   if (tx.status === "success" && tx.currency !== "ZAR") {
     console.error(`billing ${tx.reference}: paid in ${tx.currency}, not ZAR: not applied, refunding`);
+    noteError("payment_not_zar", new Error(`${tx.reference}: paid in ${tx.currency}, not ZAR: refunding`), { ref: tx.reference });
     await refundNow(tx.reference);
     return "refund";
   }
@@ -122,6 +127,7 @@ async function settle(tx: Tx, out: { kind?: string } = {}, renewal = false): Pro
     if (error && /^paid \d+ cents, charge is/.test(error.message)) {
       // Another amount than the charge: never ours to keep, so it goes back.
       console.error(`billing ${tx.reference}: ${error.message}: refunding`);
+      noteError("payment_wrong_amount", new Error(`${tx.reference}: ${error.message}: refunding`), { ref: tx.reference });
       await refundNow(tx.reference);
       return "refund";
     }
@@ -131,6 +137,7 @@ async function settle(tx: Tx, out: { kind?: string } = {}, renewal = false): Pro
       // refund false: Paystack has the refund already (a replay, or refunded before it was reported).
       if (r.refund !== false) {
         console.error(`billing ${tx.reference}: paid after the account changed, not applied: refunding`);
+        noteError("payment_not_applied", new Error(`${tx.reference}: paid after the account changed: refunding`), { ref: tx.reference });
         await refund(tx.reference);
       }
       return "refund";
@@ -183,6 +190,7 @@ async function chargeCard(c: { reference: string; amount: number; card: string; 
     const none = e instanceof PaystackError && e.status === 400;
     if (run && (!none || err.status !== 400)) {
       console.error(`billing charge ${c.reference}: ${err.message}; left open`);
+      noteError("charge_left_open", err, { ref: c.reference });
       return null;
     }
   }
@@ -225,6 +233,7 @@ serve("billing", async (req) => {
           if (!/unknown reference/.test(e instanceof Error ? e.message : String(e))) throw e;
           // Our reference with no charge row: the account was deleted. Not ours to keep.
           console.error(`billing webhook ${paid}: paid for no charge we hold: refunding`);
+          noteError("payment_no_charge", new Error(`${paid}: paid for no charge we hold: refunding`), { ref: paid });
           await refundNow(paid);
         }
       }
@@ -234,7 +243,10 @@ serve("billing", async (req) => {
       const refunded = String(ev.data?.transaction_reference ?? "");
       if (event.startsWith("refund.") && refunded.startsWith("psh_")) {
         const status = event.slice("refund.".length);
-        if (status === "failed") console.error(`billing refund ${refunded} failed: ${ev.data?.reason ?? ""}`);
+        if (status === "failed") {
+          console.error(`billing refund ${refunded} failed: ${ev.data?.reason ?? ""}`);
+          noteError("refund_failed", new Error(`refund ${refunded} failed: ${ev.data?.reason ?? ""}`), { ref: refunded });
+        }
         // Paystack sends amount as a string ("10000", in cents) in its samples.
         const cents = Number(ev.data?.amount);
         const id = ev.data?.id ?? ev.data?.refund_reference;
@@ -253,6 +265,7 @@ serve("billing", async (req) => {
         const lost = event === "charge.dispute.resolve"
           && (status === "lost" || ev.data?.resolution === "merchant-accepted" || (Number.isFinite(back) && back > 0));
         console.error(`billing dispute ${disputed}: ${event} ${status} ${ev.data?.resolution ?? ""}${lost ? " (lost)" : ""}`);
+        noteError("dispute", new Error(`dispute ${disputed}: ${event} ${status}${lost ? " (lost)" : ""}`), { ref: disputed });
         await rpc("billing_charge_disputed", {
           p_reference: disputed, p_status: status || event.slice("charge.dispute.".length), p_lost: lost,
           p_cents: Number.isSafeInteger(back) && back > 0 ? back : null,
@@ -260,6 +273,7 @@ serve("billing", async (req) => {
       }
     } catch (e) {
       console.error(`billing webhook ${event}: ${e instanceof Error ? e.message : e}`);
+      noteError("webhook_failed", e);
       return json({ error: "not recorded" }, 500);
     }
     return json({ ok: true }, 200);
@@ -289,6 +303,7 @@ serve("billing", async (req) => {
         out.charged++;
         const r = await chargeCard(c, true).catch((e) => {
           console.error(`billing run ${c.reference}: ${e instanceof Error ? e.message : e}`);
+          noteError("run_charge_failed", e, { ref: c.reference });
           return null;
         });
         out[r ?? "open"]++;
@@ -358,6 +373,7 @@ serve("billing", async (req) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`billing pay ${o.reference}: ${msg}`);
+    noteError("pay_failed", e, { user: user.id, ref: o.reference });
     await rpc("billing_charge_failed", { p_reference: o.reference, p_error: msg });
     return json({ error: "could not reach Paystack" }, 502, cors);
   }

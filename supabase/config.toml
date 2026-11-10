@@ -408,6 +408,10 @@ verify_jwt = false
 # Paystack's webhook has no Supabase session; each route checks its caller.
 verify_jwt = false
 
+[functions.error-alert]
+# PostHog's alert webhook (SOLAR-336): no Supabase session; checks a shared key header.
+verify_jwt = false
+
 [functions.mock-sunsynk]
 # Fake SunSynk (SOLAR-270): called by our own functions with a fake SunSynk token, not a JWT.
 verify_jwt = false

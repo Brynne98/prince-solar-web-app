@@ -8,7 +8,7 @@
 // 404 {error: "not_shared"}, 409 {error: "taken"}, 429 too many tries. A taken plant's id
 // is not sent back: a serial typed from someone else's inverter would reveal it.
 import { claimShared, db, saveCallTally } from "../_shared/sunsynk.ts";
-import { serve } from "../_shared/errors.ts";
+import { noteError, serve } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 
 serve("claim-share", async (req) => {
@@ -36,6 +36,7 @@ serve("claim-share", async (req) => {
   const { data: allowed, error: limitErr } = await db.rpc("link_attempt", { p_user: userId });
   if (limitErr) {
     console.error(`claim-share limit check failed for user ${userId}: ${limitErr.message}`);
+    noteError("limit_check_failed", new Error(`link_attempt: ${limitErr.message}`), { user: userId });
     return json({ error: "could not reach SunSynk" }, 502, cors);
   }
   if (!allowed) return json({ error: "too many attempts" }, 429, { ...cors, "Retry-After": "3600" });
@@ -45,10 +46,14 @@ serve("claim-share", async (req) => {
     if (r.result === "not_shared") return json({ error: "not_shared" }, 404, cors);
     if (r.result === "taken") return json({ error: "taken" }, 409, cors);
     const { error: refundErr } = await db.rpc("link_succeeded", { p_user: userId });
-    if (refundErr) console.error(`claim-share refund failed for user ${userId}: ${refundErr.message}`);
+    if (refundErr) {
+      console.error(`claim-share refund failed for user ${userId}: ${refundErr.message}`);
+      noteError("try_refund_failed", new Error(`link_succeeded: ${refundErr.message}`), { user: userId });
+    }
     return json({ ok: true, ...r }, 200, cors);
   } catch (e) {
     console.error(`claim-share failed for user ${userId}: ${e instanceof Error ? e.message : e}`);
+    noteError("claim_failed", e, { user: userId });
     return json({ error: "could not reach SunSynk" }, 502, cors);
   } finally {
     await saveCallTally();

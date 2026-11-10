@@ -26,7 +26,7 @@
 //
 // Deliberately NOT ported: the gzipped `raw` payload table. It was 46 MB of the
 // 96 MB SQLite file, has no dashboard consumer, and may embed account identifiers.
-import { reportError, serve, track } from "../_shared/errors.ts";
+import { flushErrors, noteError, reportError, serve, track } from "../_shared/errors.ts";
 import { dayStartEpoch, extrasOf, extrasPaths, historyRows, localDate, parseSeries } from "../_shared/invhistory.ts";
 import {
   aggregate,
@@ -365,7 +365,10 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
     // and nothing is linked to the login's own user (SOLAR-310).
     if (plantsMinute) {
       try { console.log(`share sync:`, JSON.stringify(await shareSync(acc))); }
-      catch (e) { console.warn(`share sync failed:`, e instanceof Error ? e.message : e); }
+      catch (e) {
+        console.warn(`share sync failed:`, e instanceof Error ? e.message : e);
+        noteError("share_sync_failed", e, { hourly: true });
+      }
     }
   } else if (plantsMinute || !cached.length) {
     try {
@@ -373,6 +376,7 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
       for (const p of plants) wanted.add(p.id);
     } catch (e) {
       console.warn(`plant refresh failed for ${acc.id}:`, e instanceof Error ? e.message : e);
+      noteError("plant_refresh_failed", e, { user: acc.user_id, hourly: true });
     }
   }
   result.listCalls = callsSince(acc, callsAtStart);
@@ -546,6 +550,7 @@ async function tallyCalls(spec: ShardSpec, runMs: number, plants: number, ts: nu
     if (day) await track("sunsynk_calls_counted", "edge:poll", String(day.day), `${day.day}T23:59:00+02:00`, { ...day, $process_person_profile: false });
   } catch (e) {
     console.warn("sunsynk_calls_report:", e instanceof Error ? e.message : e);
+    noteError("calls_report_failed", e, { hourly: true });
   }
 }
 
@@ -564,11 +569,15 @@ async function retryShareLogin() {
       const msg = e instanceof Error ? e.message : String(e);
       await db.rpc("account_mark", { p_account: id, p_status: "needs_relink", p_error: msg });
       console.warn("share login retry failed:", msg);
+      noteError("share_login_retry_failed", e, { hourly: true });
     }
   } catch (e) {
     console.warn("share login retry skipped:", e instanceof Error ? e.message : e);
+    noteError("share_login_retry_skipped", e, { hourly: true });
   } finally {
     await saveCallTally();
+    // Runs past the response, so serve() may have sent its notes already.
+    await flushErrors();
   }
 }
 
@@ -630,6 +639,11 @@ serve("poll", async (req) => {
           p_account: acc.id, p_status: needsRelink ? "needs_relink" : "active", p_error: msg,
         }).catch(() => {});
         console.error(`poll: account ${acc.id} failed:`, msg);
+        // A dead login is the owner's to fix and is mailed to them; the rest are ours or SunSynk's.
+        if (!needsRelink) {
+          const kind = e instanceof SignInFailed ? "sign_in" : /^[a-z_]+: /.test(msg) ? "ours" : "sunsynk";
+          for (const j of jobs) noteError(`account_failed_${kind}`, e, { user: acc.user_id, plant: j.plantId, hourly: true });
+        }
         return { ...emptyResult(acc), error: msg, ...(needsRelink ? { needsRelink } : {}),
           ...(e instanceof SignInFailed ? { signInFailed: true } : {}) };
       }
@@ -651,7 +665,10 @@ serve("poll", async (req) => {
       }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),
       tallyCalls(spec, Date.now() - runStart, jobs.length, ts),
     ]);
-    if ((stepped as any)?.error || (stepped as any)?.failed?.length) console.warn("email_poll_step:", JSON.stringify(stepped));
+    if ((stepped as any)?.error || (stepped as any)?.failed?.length) {
+      console.warn("email_poll_step:", JSON.stringify(stepped));
+      noteError("email_step_failed", new Error(`email_poll_step: ${(stepped as any).error ?? `${(stepped as any).failed.length} failed`}`), { hourly: true });
+    }
 
     const ok = results.filter((r) => !r.error);
     return json({

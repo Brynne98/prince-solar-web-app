@@ -954,6 +954,18 @@ export const billMailFailed = (m: { kind: string; key: string; user: string; err
     footer: [],
   });
 
+// To admin@: a PostHog error tracking alert (SOLAR-336). PostHog calls error-alert with
+// the issue; this says what happened and links to it.
+export const errorAlert = (a: { trigger: "created" | "reopened"; name: string; description: string; fn: string; url: string }) =>
+  make(`${a.trigger === "created" ? "New server error" : "Server error back"}: ${a.name.slice(0, 80)}`, {
+    title: a.trigger === "created" ? "A new error" : "A fixed error came back",
+    parts: [
+      { lead: esc(a.description || a.name).replace(/\n/g, "<br>\n") },
+      { box: { rows: [["Error", esc(a.name)], ["Function", esc(a.fn || "web app")], ["Issue", `<a href="${esc(a.url)}">${esc(a.url)}</a>`]] } },
+    ],
+    footer: [],
+  });
+
 // To hello@: a user's "Send feedback" (SOLAR-428). Reply-to is the sender (notify sets it),
 // so Reply answers them. The screenshot, if any, comes as an attachment.
 export const feedback = (f: { email: string; message: string; page: string; version: string; user: string; image: boolean }) =>

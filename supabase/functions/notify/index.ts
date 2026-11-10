@@ -25,7 +25,7 @@
 // send. ?render=all&plant=<id> returns every template built from that plant's data,
 // for checking by eye.
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
-import { reportError, serve, track } from "../_shared/errors.ts";
+import { noteError, reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type Price, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, cardChanged, cardExpiring, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
@@ -481,6 +481,7 @@ async function sendBatch(outs: Out[], deadline: number, reuse?: string): Promise
   if (!res.error) return outs.map((o) => ({ id: o.row.id, status: "sent" }));
   // 409: the old key was used with a different body (the batch changed since); a fresh one.
   if (res.status === 409 && reuse) return await sendBatch(outs, deadline);
+  noteError(`resend_${res.status || "network"}`, new Error(res.error), { hourly: true });
   if (!refused(res.status)) return outs.map((o) => retry(o.row, res.error!, key));
   if (outs.length === 1) return [{ id: outs[0].row.id, status: "failed", error: res.error }];
   const half = Math.ceil(outs.length / 2);
@@ -517,6 +518,9 @@ async function pushOne(r: PushRow, s: PushRow["subs"][number]): Promise<"ok" | "
   } catch (e) {
     if (e instanceof webpush.PushMessageError && [404, 410].includes(e.response.status)) return "gone";
     console.error("push failed:", e instanceof webpush.PushMessageError ? e.toString() : e);
+    // Status only: the push service's answer names the browser's endpoint.
+    noteError("push_failed", e instanceof webpush.PushMessageError ? new Error(`push service ${e.response.status}`) : e,
+      { plant: r.plant_id, hourly: true });
     return "failed";
   }
 }
@@ -546,7 +550,10 @@ async function pushPass(deadline: number) {
 async function run(dry: boolean, withHtml: boolean, push: boolean) {
   const started = Date.now();
   // What only the clock can tell: no readings, SunSynk, reports.
-  const swept = dry ? null : await rpc<Record<string, unknown>>("email_sweep").catch((e) => ({ error: String(e?.message ?? e) }));
+  const swept = dry ? null : await rpc<Record<string, unknown>>("email_sweep").catch((e) => {
+    noteError("email_sweep_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  });
   const lines: Record<string, unknown>[] = [];
   const count = { sent: 0, queued: 0, failed: 0, skipped: 0 };
 
@@ -577,6 +584,7 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
       } catch (e) {
         // One email that can't be built stops nothing else.
         done.push(retry(row, `build: ${e instanceof Error ? e.message : e}`));
+        noteError("email_build_failed", e, { user: row.user_id, hourly: true });
       }
     }
     if (dry) break;  // a peek claims nothing, so the next read would be the same rows
@@ -588,6 +596,11 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
     }
     for (const [key, group] of groups) done.push(...await sendBatch(group, deadline, key || undefined));
     for (const x of done) count[x.status]++;
+    // Given up for good: Resend refused it, or it failed MAX_TRIES times.
+    for (const x of done.filter((d) => d.status === "failed")) {
+      const row = rows.find((r) => r.id === x.id);
+      noteError("email_failed", new Error(`${row?.kind ?? "email"} ${x.id}: ${x.error ?? ""}`), { user: row?.user_id ?? null, hourly: true });
+    }
     await rpc("email_done", { p_results: done });
     // SOLAR-328: counted once it has gone, by user id only.
     for (const x of done) {
@@ -608,7 +621,10 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
     }
   }
   // The cron call times out at 55 s.
-  const pushed = push ? await pushPass(started + 50_000).catch((e) => ({ error: String(e?.message ?? e) })) : null;
+  const pushed = push ? await pushPass(started + 50_000).catch((e) => {
+    noteError("push_pass_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  }) : null;
   return { live: !dry, swept, ...count, pushed, due: lines };
 }
 

@@ -23,6 +23,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { createHash, createHmac } from "node:crypto";
 import { type InverterInfo, num, pick } from "./extract.ts";
+import { noteError } from "./errors.ts";
 
 const API_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? "https://openapi.sunsynk.net";
 // Fake logins (name@mock, SOLAR-270) go to the mock: locally the mock server is API_BASE
@@ -159,12 +160,17 @@ async function postToken(payload: Record<string, string>): Promise<any> {
     });
   } catch (e) {
     tallyCall("/oauth/token", failResult(e), Date.now() - t0);
+    sunsynkFailed("/oauth/token", failResult(e), e);
     throw e;
   }
   tallyCall("/oauth/token", resultOf(res), Date.now() - t0);
   const gatewayErr = res.headers.get("x-ca-error-message");
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`token endpoint HTTP ${res.status}: ${gatewayErr ?? json?.msg ?? ""}`);
+  if (!res.ok) {
+    const e = new Error(`token endpoint HTTP ${res.status}: ${gatewayErr ?? json?.msg ?? ""}`);
+    sunsynkFailed("/oauth/token", resultOf(res), e);
+    throw e;
+  }
   return json;
 }
 
@@ -283,6 +289,10 @@ function addTally(n: CallTally) {
 const failResult = (e: unknown) => (e instanceof DOMException && e.name === "TimeoutError" ? "timeout" : "network");
 const tallyCall = (pathname: string, result: string, ms: number) =>
   addTally({ kind: kindOf(pathname), result, calls: 1, ms, ms_max: ms });
+// A SunSynk call that failed for good (after the retries), as one PostHog issue per data
+// type and result, sent at most once an hour (SOLAR-336). The full counts are in the tally.
+const sunsynkFailed = (pathname: string, result: string, e: unknown) =>
+  noteError(`sunsynk_${result}:${kindOf(pathname)}`, e, { hourly: true });
 
 /**
  * Adds the counts since the last save to private.sunsynk_calls in one write (0178). A poll
@@ -313,6 +323,7 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
       return res;
     } catch (e) {
       tallyCall(pathname, failResult(e), Date.now() - t0);
+      sunsynkFailed(pathname, failResult(e), e);
       throw e;
     }
   };
@@ -326,11 +337,17 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
     res = await doFetch(await accessTokenFor(acc));
   }
   if (throttled(res)) {
-    throw new Error(`API ${pathname} -> HTTP ${res.status} (rate-limited after ${RATE_LIMIT_RETRIES} retries)`);
+    const e = new Error(`API ${pathname} -> HTTP ${res.status} (rate-limited after ${RATE_LIMIT_RETRIES} retries)`);
+    sunsynkFailed(pathname, resultOf(res), e);
+    throw e;
   }
   const gatewayErr = res.headers.get("x-ca-error-message");
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`API ${pathname} -> HTTP ${res.status} ${gatewayErr ?? body?.msg ?? ""}`);
+  if (!res.ok) {
+    const e = new Error(`API ${pathname} -> HTTP ${res.status} ${gatewayErr ?? body?.msg ?? ""}`);
+    sunsynkFailed(pathname, resultOf(res), e);
+    throw e;
+  }
   return body?.data;
 }
 
@@ -506,7 +523,10 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
     const seed = invs.filter((i) => i.plantId != null && paused.has(Number(i.plantId)));
     if (seed.length) {
       try { await rpc("inverters_seed", { p_rows: seed.map((i) => ({ sn: i.sn, plant_id: i.plantId, account_id: acc.id })) }); }
-      catch (e) { console.warn(`inverter seed for paused ${[...paused].join(",")}:`, e instanceof Error ? e.message : e); }
+      catch (e) {
+        console.warn(`inverter seed for paused ${[...paused].join(",")}:`, e instanceof Error ? e.message : e);
+        noteError("inverter_seed_failed", e, { user: acc.user_id, hourly: true });
+      }
     }
   }
   const { data: seeded, error } = await db.from("plant_config").select("plant_id")
@@ -529,7 +549,10 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
     const cut = rows.map((r) => r.plant_id).filter((id) => trimmed.has(id));
     if (cut.length) {
       const { error } = await db.from("plant_config").update({ backfill_next: null, backfill_until: null, temp_next: null }).in("plant_id", cut);
-      if (error) console.warn(`free bookmarks ${cut.join(",")}: ${error.message}`);
+      if (error) {
+        console.warn(`free bookmarks ${cut.join(",")}: ${error.message}`);
+        noteError("free_bookmarks_failed", new Error(`free bookmarks ${cut.join(",")}: ${error.message}`), { hourly: true });
+      }
     }
   }
   // Plants seeded just now (0044): store their inverter serials so `recover` can
@@ -547,13 +570,17 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
     } catch (e) {
       // recover refuses to walk a plant with no serials, and the first poll stores them.
       console.warn(`inverter seed for ${seededIds.join(",")}:`, e instanceof Error ? e.message : e);
+      noteError("inverter_seed_failed", e, { user: acc.user_id, hourly: true });
     }
     // Two edge invocations per plant. An installer login can see hundreds of
     // plants at once; those go to the nightly schedule instead of a burst.
     if (seededIds.length <= MAX_BOOTSTRAP_KICKS) {
       for (const pid of seededIds) {
         try { await rpc("plant_bootstrap_kick", { p_plant: pid }); }
-        catch (e) { console.warn(`bootstrap kick ${pid}:`, e instanceof Error ? e.message : e); }
+        catch (e) {
+          console.warn(`bootstrap kick ${pid}:`, e instanceof Error ? e.message : e);
+          noteError("bootstrap_kick_failed", e, { plant: pid, hourly: true });
+        }
       }
     } else {
       console.log(`${seededIds.length} plants seeded at once; leaving them to the schedule`);
@@ -701,7 +728,10 @@ export async function rotateJobs<T extends { plantId: number }>(jobs: T[], key: 
 export async function markCursor(key: string, plantId: number): Promise<void> {
   const { error } = await db.from("app_config")
     .upsert({ key, value: plantId, note: "last plant finished by this batch function; the next run starts after it" }, { onConflict: "key" });
-  if (error) console.warn(`cursor ${key}:`, error.message);
+  if (error) {
+    console.warn(`cursor ${key}:`, error.message);
+    noteError("cursor_failed", new Error(`cursor ${key}: ${error.message}`), { hourly: true });
+  }
 }
 
 /**
