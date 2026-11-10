@@ -49,7 +49,7 @@
 //
 // ?plant=ID restricts a run to one plant and leaves the round-robin cursor alone.
 import { type Account, db, denyUnlessServer, freeTrimmedPlants, markCursor, type PlantJob, plantsToPoll, rotateJobs, saveCallTally } from "../_shared/sunsynk.ts";
-import { reportError, serve } from "../_shared/errors.ts";
+import { noteError, reportError, serve } from "../_shared/errors.ts";
 import {
   bucketizeAgg,
   calibrateFeedScale,
@@ -110,7 +110,10 @@ async function historySpine(acc: Account, plantId: number, tz: string, day: stri
   for (const sn of sns) {
     const d = await fetchInverterDay(acc, sn, day);
     days.push(d);
-    if (bank) await bankHistory(plantId, sn, historyRows(d, lo)).catch((e) => console.error(`inverter_history ${sn}:`, e));
+    if (bank) await bankHistory(plantId, sn, historyRows(d, lo)).catch((e) => {
+      console.error(`inverter_history ${sn}:`, e);
+      noteError("inverter_history_failed", e, { plant: plantId, hourly: true });
+    });
   }
   const spine = plantSpine(days, lo);
   return spine.size ? { spine, days } : null;
@@ -200,12 +203,18 @@ async function temperatureWalk(job: PlantJob, started: number) {
     if (error) throw new Error(`temp watermark ${plantId}: ${error.message}`);
     if (!moved?.length) { stoppedEarly = `another run moved the temperature watermark at ${day}`; break; }
     if (retry) { stoppedEarly = `${day} failed (try ${tries + 1}): ${failed}; next run retries it`; break; }
-    if (failed) console.error(`temps ${plantId} ${day} given up after ${TEMP_MAX_TRIES} tries: ${failed}`);
+    if (failed) {
+      console.error(`temps ${plantId} ${day} given up after ${TEMP_MAX_TRIES} tries: ${failed}`);
+      noteError("temps_given_up", new Error(`temps ${plantId} ${day} given up after ${TEMP_MAX_TRIES} tries: ${failed}`), { plant: plantId, hourly: true });
+    }
     walked++; tries = 0;
   }
   let pruned = 0;
   try { pruned = Number(await rpc("q_prune_inverter_history", { p_plant: plantId }) ?? 0); }
-  catch (e) { console.error(`prune inverter_history ${plantId}:`, e); }
+  catch (e) {
+    console.error(`prune inverter_history ${plantId}:`, e);
+    noteError("prune_failed", e, { plant: plantId, hourly: true });
+  }
   return { banked, walked, walkedTo: day, stoppedEarly, pruned };
 }
 
@@ -243,6 +252,7 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
     }
   } catch (e) {
     console.warn(`invhistory ${plantId} ${day}:`, e instanceof Error ? e.message : e);
+    noteError("invhistory_failed", e, { plant: plantId, hourly: true });
   }
   if (!gaps.length) return { day, banked: bankedHistory, bankedHistory, missing: wanted };
   if (historyOnly) return { day, banked: bankedHistory, bankedHistory, missing: wanted, reason: "plant feed skipped (day older than the feed keeps)" };

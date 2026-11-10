@@ -9,7 +9,7 @@
 // This is the only place a SunSynk password ever touches the backend. Keep it that
 // way: no console.log of the body, no error message that includes input.
 import { db, linkAccount, LoginRejected, saveCallTally } from "../_shared/sunsynk.ts";
-import { serve, track } from "../_shared/errors.ts";
+import { noteError, serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { mockClosed } from "../_shared/gate.ts";
 
@@ -46,6 +46,7 @@ serve("link-sunsynk", async (req) => {
   const { data: allowed, error: limitErr } = await db.rpc("link_attempt", { p_user: userId });
   if (limitErr) {
     console.error(`link-sunsynk limit check failed for user ${userId}: ${limitErr.message}`);
+    noteError("limit_check_failed", new Error(`link_attempt: ${limitErr.message}`), { user: userId });
     return json({ error: "could not reach SunSynk" }, 502, cors);
   }
   if (!allowed) return json({ error: "too many attempts" }, 429, { ...cors, "Retry-After": "3600" });
@@ -55,7 +56,10 @@ serve("link-sunsynk", async (req) => {
     password = ""; // done with it
     // A good link gives its try back, so only failed tries count (0135).
     const { error: refundErr } = await db.rpc("link_succeeded", { p_user: userId });
-    if (refundErr) console.error(`link-sunsynk refund failed for user ${userId}: ${refundErr.message}`);
+    if (refundErr) {
+      console.error(`link-sunsynk refund failed for user ${userId}: ${refundErr.message}`);
+      noteError("try_refund_failed", new Error(`link_succeeded: ${refundErr.message}`), { user: userId });
+    }
     // SOLAR-319: a login added after the "need a hand" email went. Keyed on the email, so it counts once.
     const { data: hand } = await db.from("email_queue").select("id, sent_at")
       .eq("user_id", userId).eq("kind", "need_a_hand").eq("status", "sent").maybeSingle();
@@ -76,6 +80,8 @@ serve("link-sunsynk", async (req) => {
     // LoginRejected comes from tokenLogin and contains only SunSynk's msg.
     const status = e instanceof LoginRejected ? 401 : 502;
     console.error(`link-sunsynk failed for user ${userId}: ${msg}`);
+    // A wrong password is the user's own, not a fault.
+    if (status === 502) noteError("link_failed", e, { user: userId });
     return json({ error: status === 401 ? "SunSynk rejected those credentials" : "could not reach SunSynk" }, status, cors);
   } finally {
     await saveCallTally();

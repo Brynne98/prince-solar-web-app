@@ -40,33 +40,98 @@ export async function userOf(req: Request): Promise<string | null> {
   } catch { return null; }
 }
 
-export async function reportError(fn: string, e: unknown, userId: string | null = null): Promise<void> {
+function send(fn: string, e: unknown, userId: string | null, handled: boolean, props: Record<string, unknown> = {}, type?: string) {
   const err = e instanceof Error ? e : new Error(String(e));
+  return fetch(POSTHOG_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(3000),
+    body: JSON.stringify({
+      api_key: POSTHOG_KEY,
+      event: "$exception",
+      distinct_id: userId ?? `edge:${fn}`,
+      properties: {
+        app: "prince-solar-hub",
+        platform: "edge",
+        app_version: APP_VERSION,
+        function: fn,
+        $process_person_profile: false,
+        ...props,
+        $exception_list: [{
+          type: type ?? err.name,
+          value: scrub(err.message),
+          mechanism: { handled, synthetic: !(e instanceof Error) },
+          stacktrace: { type: "raw", frames: frames(scrub(err.stack ?? "")) },
+        }],
+      },
+    }),
+  }).then(() => {}, () => { /* PostHog down: the Supabase log still has it */ });
+}
+
+export async function reportError(fn: string, e: unknown, userId: string | null = null): Promise<void> {
+  await send(fn, e, userId, false);
+}
+
+// Caught failures (SOLAR-336): a refund Paystack refused, a SunSynk 502, a Resend
+// refusal. Noted as they happen, sent when the request ends (serve), one report per kind
+// with a count, so a run where 40 plants hit the same SunSynk 504 is one report. Each
+// kind is its own PostHog issue (the fingerprint), named by the kind, whatever ids its
+// message holds.
+// hourly: a kind that can repeat every minute (SunSynk, Resend) sends at most once an
+// hour; the gap is kept in app_config, so it holds across runs. Only ids go with it:
+// the user's Supabase id, plant ids, a payment reference.
+type Note = { e: unknown; count: number; user: string | null; plants: Set<number>; ref?: string; hourly: boolean };
+const notes = new Map<string, Note>();
+let served = "edge";
+
+export function noteError(kind: string, e: unknown,
+  at: { user?: string | null; plant?: number | string | null; ref?: string; hourly?: boolean } = {}) {
+  const n = notes.get(kind) ?? { e, count: 0, user: at.user ?? null, plants: new Set<number>(), ref: at.ref, hourly: !!at.hourly };
+  n.count++;
+  if (at.plant != null && Number.isSafeInteger(Number(at.plant))) n.plants.add(Number(at.plant));
+  notes.set(kind, n);
+}
+
+const HOUR_S = 3600;
+async function sentWithinHour(keys: string[]): Promise<{ recent: Set<string>; mark: (ks: string[]) => Promise<void> }> {
+  const url = Deno.env.get("SUPABASE_URL"), key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const none = { recent: new Set<string>(), mark: async () => {} };
+  if (!url || !key || !keys.length) return none;
+  const headers = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
+  const now = Date.now() / 1000;
   try {
-    await fetch(POSTHOG_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(3000),
-      body: JSON.stringify({
-        api_key: POSTHOG_KEY,
-        event: "$exception",
-        distinct_id: userId ?? `edge:${fn}`,
-        properties: {
-          app: "prince-solar-hub",
-          platform: "edge",
-          app_version: APP_VERSION,
-          function: fn,
-          $process_person_profile: false,
-          $exception_list: [{
-            type: err.name,
-            value: scrub(err.message),
-            mechanism: { handled: false, synthetic: !(e instanceof Error) },
-            stacktrace: { type: "raw", frames: frames(scrub(err.stack ?? "")) },
-          }],
-        },
-      }),
-    });
-  } catch { /* PostHog down: the Supabase log still has it */ }
+    const r = await fetch(`${url}/rest/v1/app_config?select=key,value&key=in.(${keys.map((k) => `"${k}"`).join(",")})`,
+      { headers, signal: AbortSignal.timeout(3000) });
+    const rows: { key: string; value: number }[] = r.ok ? await r.json() : [];
+    return {
+      recent: new Set(rows.filter((x) => now - x.value < HOUR_S).map((x) => x.key)),
+      mark: async (ks) => {
+        if (!ks.length) return;
+        await fetch(`${url}/rest/v1/app_config?on_conflict=key`, {
+          method: "POST", headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" },
+          signal: AbortSignal.timeout(3000),
+          body: JSON.stringify(ks.map((k) => ({ key: k, value: now, note: "last error report of this kind (SOLAR-336)" }))),
+        }).catch(() => {});
+      },
+    };
+  } catch { return none; }
+}
+
+/** Sends what noteError gathered. serve() calls it when a request ends; work left
+ *  running after the response calls it itself. */
+export async function flushErrors(fn = served): Promise<void> {
+  if (!notes.size) return;
+  const batch = [...notes.entries()];
+  notes.clear();
+  const keyOf = (kind: string) => `error_sent:${fn}:${kind}`;
+  const gate = await sentWithinHour(batch.filter(([, n]) => n.hourly).map(([k]) => keyOf(k)));
+  const due = batch.filter(([k, n]) => !n.hourly || !gate.recent.has(keyOf(k)));
+  await Promise.all(due.map(([kind, n]) => send(fn, n.e, n.user, true, {
+    kind, count: n.count, $exception_fingerprint: `${fn}:${kind}`,
+    ...(n.plants.size ? { plant_ids: [...n.plants].slice(0, 50) } : {}),
+    ...(n.ref ? { reference: n.ref } : {}),
+  }, kind)));
+  await gate.mark(due.filter(([, n]) => n.hourly).map(([k]) => keyOf(k)));
 }
 
 // A product event for one user, by Supabase user id only (CLAUDE.md, Analytics). The
@@ -87,14 +152,17 @@ export async function track(event: string, userId: string, once: string, at: str
 }
 
 // Deno.serve for a function: anything the handler throws is reported, then rethrown,
-// so the response is the same 500 as before.
+// so the response is the same 500 as before. Failures noted on the way are sent last.
 export function serve(fn: string, handler: (req: Request) => Response | Promise<Response>) {
+  served = fn;
   return Deno.serve(async (req) => {
     try {
       return await handler(req);
     } catch (e) {
       await reportError(fn, e, await userOf(req));
       throw e;
+    } finally {
+      await flushErrors(fn);
     }
   });
 }
