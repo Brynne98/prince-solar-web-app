@@ -3,17 +3,21 @@
 // job_check_failed / job_check_recovered for them, distinct id edge:<job>. Each run also
 // sends job_check_ran, so a PostHog alert hears when the check itself stops.
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
-import { serve, track } from "../_shared/errors.ts";
+import { noteError, serve, track } from "../_shared/errors.ts";
 
 type Job = { job: string; schedule: string; active: boolean; last_start: string | null; last_status: string | null; last_end: string | null; message: string };
 type Inputs = {
   now: string;
   shards: { shard: number; last_at: string | null }[];
   jobs: Job[];
+  calls?: Call[];
   sunsynk: { calls: number; failed: number; since: string | null };
   email: { waiting: number; oldest_due: string | null };
   checks: Record<string, { failing: boolean; since: string }>;
+  signin?: Record<string, number> | null;
 };
+// A function pg_cron calls through private.call_fn (0181): its last answered call per shard.
+type Call = { fn: string; failing: boolean | null; result: string | null; error: string | null; last_call: string | null; failed_1h: number };
 type Verdict = { name: string; job: string; failing: boolean | null; detail: Record<string, unknown> };
 
 const SHARD_SILENT_MS = 5 * 60_000;
@@ -53,6 +57,30 @@ export function lastFire(schedule: string, t: number): number | null {
   return null;
 }
 
+// Sign-in mail (SOLAR-469): Supabase Auth sends it through Infobip SMTP, so a bounce or a
+// refusal shows only in Infobip's email logs. Statuses of sends in the last hour, as
+// { DELIVERED: 3, UNDELIVERABLE: 1 }, or null when the key isn't set or Infobip didn't answer.
+const SIGNIN_BAD = ["UNDELIVERABLE", "REJECTED", "EXPIRED"];
+export async function signinMail(now: number): Promise<Record<string, number> | null> {
+  const key = Deno.env.get("INFOBIP_API_KEY"), base = Deno.env.get("INFOBIP_BASE_URL");
+  if (!key || !base) return null;
+  try {
+    const since = new Date(now - 3_600_000).toISOString();
+    const r = await fetch(`https://${base.replace(/^https?:\/\//, "")}/email/1/logs?sentSince=${encodeURIComponent(since)}&limit=1000`,
+      { headers: { Authorization: `App ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error(`Infobip email logs ${r.status}`);
+    const out: Record<string, number> = {};
+    for (const x of (await r.json()).results ?? []) {
+      const g = String(x?.status?.groupName ?? "UNKNOWN");
+      out[g] = (out[g] ?? 0) + 1;
+    }
+    return out;
+  } catch (e) {
+    noteError("infobip_logs", e, { hourly: true });
+    return null;
+  }
+}
+
 export function judge(i: Inputs): Verdict[] {
   const now = Date.parse(i.now);
   const out: Verdict[] = [];
@@ -73,17 +101,31 @@ export function judge(i: Inputs): Verdict[] {
                          last_start: j.last_start, ...(failed ? { message: j.message } : {}),
                          ...(missed ? { due: new Date(due!).toISOString() } : {}) } });
   }
+  // A timed call that failed or timed out (SOLAR-472). null: no answered call yet, keep the state.
+  for (const c of i.calls ?? []) {
+    out.push({ name: `call:${c.fn}`, job: c.fn, failing: c.failing,
+               detail: { result: c.result, last_call: c.last_call, failed_last_hour: c.failed_1h,
+                         ...(c.failing && c.error ? { error: c.error } : {}) } });
+  }
   const { calls, failed } = i.sunsynk;
   const share = calls > 0 ? failed / calls : 0;
   // Under 20 calls the share says little: the state stays as it was.
   out.push({ name: "sunsynk", job: "sunsynk", failing: calls < 20 ? null : share >= 0.2 ? true : share < 0.1 ? false : null,
              detail: { calls, failed, failed_share: Math.round(share * 1000) / 1000, since: i.sunsynk.since } });
+  // Failing while a sign-in email sent in the last hour bounced or was refused. Infobip not
+  // answering (i.signin null) keeps the state.
+  if (i.signin) {
+    const failed = SIGNIN_BAD.reduce((n, g) => n + (i.signin![g] ?? 0), 0);
+    const sent = Object.values(i.signin).reduce((a, b) => a + b, 0);
+    out.push({ name: "signin-email", job: "signin-email", failing: failed > 0,
+               detail: { failed_last_hour: failed, sent_last_hour: sent, statuses: i.signin } });
+  }
   out.push({ name: "email-queue", job: "notify", failing: i.email.waiting > 0,
              detail: { waiting: i.email.waiting, oldest_due: i.email.oldest_due } });
   // A failing check whose shard or job is gone (fewer shards, job unscheduled) clears.
   for (const [name, c] of Object.entries(i.checks)) {
-    if (c.failing && !out.some((v) => v.name === name)) {
-      out.push({ name, job: name.startsWith("poll:") ? "poll" : name.replace(/^cron:/, ""), failing: false, detail: { gone: true } });
+    if (c.failing && name !== "signin-email" && !out.some((v) => v.name === name)) {
+      out.push({ name, job: name.startsWith("poll:") ? "poll" : name.replace(/^(cron|call):/, ""), failing: false, detail: { gone: true } });
     }
   }
   return out;
@@ -99,6 +141,7 @@ if (import.meta.main) serve("job-check", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
   const i = await rpc("job_check_inputs") as Inputs;
+  i.signin = await signinMail(Date.parse(i.now));
   const verdicts = judge(i);
   const changes = verdicts.filter((v) => v.failing != null && v.failing !== (i.checks[v.name]?.failing ?? false));
   if (changes.length) await rpc("job_check_save", { p_changes: changes.map(({ name, failing, detail }) => ({ name, failing, detail })) });

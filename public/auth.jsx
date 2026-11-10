@@ -326,6 +326,8 @@ function explain(ex) {
   if (code === 'over_email_send_rate_limit') return { text: 'Too many emails sent. Try again in a few minutes.' };
   if (code === 'over_request_rate_limit' || ex?.status === 429) return { text: 'Too many tries. Try again in a minute.' };
   if (ex?.name === 'AuthRetryableFetchError' || ex instanceof TypeError) return { text: 'Can’t reach Prince Solar Hub. Check your connection.' };
+  // A 5xx here is often a sign-in email that failed to send (Infobip, SOLAR-469).
+  window.reportServerError?.('auth', ex, ex?.status);
   // Never the server's own words (SOLAR-163).
   return { text: 'Something went wrong. Try again.' };
 }

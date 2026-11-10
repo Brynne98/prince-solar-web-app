@@ -9,7 +9,7 @@
 // Shown in Settings -> About. Bumped on every deploy; semver, so patch for fixes,
 // minor for features, major for a rewrite. Lives here rather than in the JSX so it sits
 // with the other deploy-time config and loads before anything renders.
-window.APP_VERSION = 'v0.52.1';
+window.APP_VERSION = 'v0.53.0';
 // Shown in Settings → About and on error screens.
 window.SUPPORT_EMAIL = 'hello@princesolarhub.co.za';
 // Google sign-in client (Google Cloud project prince-solar, "Supabase web"). Public by design.
@@ -90,7 +90,12 @@ window.POSTHOG_KEY = 'phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v';
         return old;
       }
       count++;
-      var r = ph.captureException(err instanceof Error ? err : new Error(key), Object.assign({ page: location.pathname + location.search }, props));
+      // No code location (a thrown string, "Script error." from another site's script, an
+      // Error with no stack): PostHog would group them all under one old issue, so a new one
+      // sends no "new error" email. Group these by their message instead (SOLAR-472).
+      var stackless = !(err instanceof Error) || !/:\d+:\d+/.test(err.stack || '');
+      var r = ph.captureException(err instanceof Error ? err : new Error(key), Object.assign({ page: location.pathname + location.search },
+        stackless ? { $exception_fingerprint: 'message:' + scrub(key).slice(0, 120) } : {}, props));
       seen[key] = (r && r.uuid) || true;
       if (r && r.uuid) window.lastErrorId = { id: r.uuid, at: Date.now() };
       return (r && r.uuid) || null;
@@ -99,4 +104,18 @@ window.POSTHOG_KEY = 'phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v';
   window.addEventListener('error', function (e) { report(e.error || e.message); });
   window.addEventListener('unhandledrejection', function (e) { report(e.reason); });
   window.reportClientError = report;
+  // A Supabase call the server or database failed (SOLAR-472): a 5xx, or a Postgres error
+  // that isn't a deliberate refusal (22: bad value such as 22023, 23: constraint, 28 and
+  // 42501: not allowed, P0: raised by our own code). Not sent: offline (status 0) and other
+  // 4xx. Each RPC and code is its own issue; at most 5 per page load.
+  var serverErrors = 0;
+  window.reportServerError = function (name, error, status) {
+    var code = String((error && error.code) || '');
+    var dbFault = /^[0-9A-Z]{5}$/.test(code) && !/^(22|23|28|P0)|^42501$/.test(code);
+    if (!(status >= 500 || dbFault || code === 'PGRST202') || serverErrors >= 5) return null;
+    serverErrors++;
+    return report(new Error(name + ': ' + (code || status) + ' ' + ((error && error.message) || '')), {
+      $exception_fingerprint: 'rpc:' + name + ':' + (code || status), rpc: name, code: code || null, status: status || null,
+    });
+  };
 })();

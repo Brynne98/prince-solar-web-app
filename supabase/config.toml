@@ -412,6 +412,10 @@ verify_jwt = false
 # PostHog's alert webhook (SOLAR-336): no Supabase session; checks a shared key header.
 verify_jwt = false
 
+[functions.health]
+# Outside uptime check (SOLAR-469): no session; answers only ok and minutes.
+verify_jwt = false
+
 [functions.mock-sunsynk]
 # Fake SunSynk (SOLAR-270): called by our own functions with a fake SunSynk token, not a JWT.
 verify_jwt = false

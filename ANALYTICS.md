@@ -69,6 +69,14 @@ Web (`public/*.jsx`):
 | `email_pref_change_done`, `push_pref_change_done`, `push_enabled_done`, `push_disabled_done` | Notification settings |
 | `account_delete_done` | Account deleted |
 
+Showcase (`public/welcome-track.js`, princesolarhub.co.za, SOLAR-472), no person:
+
+| Event | Sent when |
+|---|---|
+| `screen_viewed` | The page opens (`stage`: `website`, `screen`: `welcome`) |
+| `website_section_viewed` | A section is 30% on screen, once per visit (`section`: its id, e.g. `day`, `pricing`, `questions`) |
+| `website_button_tapped` | `button`: `try_free`, `sign_in`, `see_pricing`, `get_home`, `get_family`; `section` it sits in, or `header` |
+
 Functions (`track()` in `_shared/errors.ts`): `payment_failed`, `plan_cancelled`,
 `winback_resubscribed_done`, `winback_email_sent_done`, `need_a_hand_login_linked_done`,
 `need_a_hand_email_sent_done`. `sunsynk_calls_counted` (SOLAR-468): once a day from `poll` as
@@ -80,6 +88,12 @@ Job checks (SOLAR-428, `job-check`, every 5 min from pg_cron, 0180), no person:
 `edge:<job>` (`edge:poll`, `edge:notify`, `edge:sunsynk`, `edge:<cron job name>`), with
 `check` (`poll:s<n>`, `cron:<job>`, `sunsynk`, `email-queue`) and its numbers; a cron
 failure carries the first 200 characters of pg_cron's message, emails masked.
+`call:<fn>` (SOLAR-472): the last answered timed call to poll, notify, billing, recover,
+sync-plant-energy or job-check was not 2xx, timed out, or had no answer 2 min past its
+timeout. The cron jobs call through `private.call_fn` (0181), which keeps each pg_net
+request id in `private.fn_calls`, joined to `net._http_response`. `signin-email`
+(SOLAR-469): a sign-in email sent in the last hour was UNDELIVERABLE, REJECTED or EXPIRED
+in Infobip's email logs (`INFOBIP_API_KEY`, `INFOBIP_BASE_URL`); recovers after a clean hour.
 `job_check_ran` once a run as `edge:job-check`, with the checks still failing. PostHog
 alerts: "Timed job failed or recovered" (hourly) and "Job check stopped running" (no run
 in 15 min).
@@ -91,12 +105,35 @@ Not sent on purpose: menu opens, hovers, day arrows after the first, chart serie
 - Web: uncaught errors and failed promises go to PostHog error tracking (`$exception`),
   each message once per page load, at most 20 (`public/config.js`). PostHog reads the
   public `build/*.js.map` files to show the source lines.
+- Web: an error with no code location (a thrown string, "Script error.") is grouped by its
+  message (`$exception_fingerprint` `message:<text>`), so a new one opens a new issue (SOLAR-472).
+- Web: a Supabase call that fails on the server (5xx, or a Postgres error other than a
+  deliberate refusal: classes 22, 23, 28, P0 and 42501) is reported by `must()` in `data.jsx`
+  through `reportServerError` in `config.js`, with `rpc` (RPC or table), `code` and `status`,
+  one issue per RPC and code (`rpc:<name>:<code>`), at most 5 per page load. A 5xx from
+  sign-in, sign-up or a reset request is reported as `rpc: auth` (often a failed sign-in
+  email). 4xx refusals and no connection are not sent.
+- Outside: an uptime service calls `/functions/v1/health` every 5 min and emails admin@ on a
+  503 (database down, or job-check silent over 15 min) (SOLAR-469). It sees no user data.
 - Web: a page that throws while drawing shows "This page stopped working" with Reload and
   Report this (`PageBoundary`, `app.jsx`); the crash is reported with its component stack.
   Red toasts offer "Report this" too. Both open the feedback box with the error and its
   PostHog id.
 - Functions: anything a handler throws (`serve()` in `_shared/errors.ts`), with the
   signed-in user's id when the request has one.
+- Functions, caught failures (SOLAR-336): a failure the code handles and carries on from
+  calls `noteError(kind, error, {user, plant, ref, hourly})`. `serve()` sends them when the
+  request ends, one `$exception` per kind with `kind`, `count`, `plant_ids` (up to 50) and
+  `reference` (a payment reference), fingerprinted `<function>:<kind>` so each kind is its
+  own issue. `hourly: true` kinds (SunSynk calls, Resend, email sweeps) go at most once an
+  hour, kept in `app_config`; billing kinds go every time. Covered: billing (refunds,
+  wrong currency or amount, payment not applied, disputes, webhook, daily run, pay),
+  claim-share and link-sunsynk 502s (not a wrong password), poll, notify (retryable Resend
+  errors as `resend_<status>`, emails given up as `email_failed`, push), recover, SunSynk
+  calls.
+- Alerts: a new or reopened issue calls `error-alert` (PostHog webhook with the
+  `x-alert-key` secret header, `ERROR_ALERT_KEY`), which emails admin@theronprince.co.za.
+  The insight alerts above and "Web app errors jumped" email admin@ from PostHog.
 - `app_version` is the release. The functions' copy in `_shared/errors.ts` must match
   `public/config.js`; `npm test` fails when it doesn't.
 
