@@ -423,8 +423,8 @@ function billNotice(n, act) {
       return { icon: 'calendar', title: cancel ? `${plan} ends on ${on}` : n.nextPlan ? `You move to ${PLAN_NAME[n.nextPlan]} on ${on}`
           : n.nextPeriod ? `You switch to ${n.nextPeriod} on ${on}` : `Extra plants drop to ${n.nextExtraPlants} on ${on}`,
         body: cancel ? `After that, on Free, ${FREE_PAID}` : '',
-        // the same undo as Billing's Plan section (bookedChange); a cancel has none (SOLAR-457)
-        button: cancel ? null : n.nextPlan ? `Keep ${plan}` : n.nextPeriod ? `Stay ${n.period}` : `Keep ${5 + (n.extraPlants || 0)} plants`,   // Family's 5 plus the extras held (SOLAR-367, SOLAR-371)
+        // the same undo as Billing's Plan section (bookedChange)
+        button: n.nextPlan ? `Keep ${plan}` : n.nextPeriod ? `Stay ${n.period}` : `Keep ${5 + (n.extraPlants || 0)} plants`,   // Family's 5 plus the extras held (SOLAR-367, SOLAR-371)
         run: () => act.undo(n) };
     }
     case 'bill_renewal_notice': return { icon: 'calendar', title: `Your yearly ${plan} plan renews on ${billDay(n.on)}`,
@@ -544,7 +544,7 @@ function NoticeRows({ pinned, onAct }) {
       <span className="nl-text">
         <span className="nl-title">{n.title}</span>
         {n.body && <span className="nl-body">{n.body}</span>}
-        {n.button && <span className="nl-act-wrap"><button type="button" className="nl-act" onClick={() => onAct(n)}>{n.button}</button></span>}
+        <span className="nl-act-wrap"><button type="button" className="nl-act" onClick={() => onAct(n)}>{n.button}</button></span>
       </span>
     </div>
   ));

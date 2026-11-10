@@ -145,14 +145,18 @@ export class Oracle {
   bookChange(plan, period) {
     if (this.plan === 'free') return { err: 'nothing to change on Free' };
     if (this.comped) return { err: 'free of charge' };
-    // a booked cancel is final (0175)
-    if (this.nextPlan === 'free') return { err: 'your plan is cancelled' };
-    // a paid year: only a cancel, which keeps the switch and ends the plan a year later (0175)
+    // a cancel already booked: a second one changes nothing (0176)
+    if (this.nextPlan === 'free' && plan === 'free') return {};
+    // a paid year: only a cancel, which keeps the switch and ends the plan a year later (0175),
+    // or its undo back to the switch (0176)
     if (this.prepaid !== null) {
+      if (plan === this.plan) { if (this.nextPlan === 'free') { this.nextPlan = null; this.nextKeep = []; } return {}; }
       if (plan !== 'free') return { err: 'your year is paid' };
       this.nextPlan = 'free'; this.nextKeep = [];
       return {};
     }
+    // a booked cancel: only its undo, the plan as it is (0176)
+    if (this.nextPlan === 'free' && !(plan === this.plan && (period ?? this.period) === this.period)) return { err: 'your plan is cancelled' };
     if (PLAN_RANK[plan] > PLAN_RANK[this.plan]) return { err: 'upgrade starts at once' };
     if (plan === this.plan && this.period === 'monthly' && period === 'yearly') return { err: 'switch to yearly is paid now' };
     const samePer = (period ?? this.period) === this.period;
