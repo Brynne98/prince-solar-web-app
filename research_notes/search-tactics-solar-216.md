@@ -3,6 +3,8 @@
 Research date: 2026-11-11.
 State: home, privacy, terms indexed. 1 click, 14 impressions, avg position 4 (28 days). Not on page 1 for "SunSynk monitoring".
 
+Built on the SOLAR-216 branch: Organization markup, footer and FAQ links to every new page, sitemap, `lang="en-ZA"` on new pages. Needs Brynne's logins: Bing Webmaster Tools, Search Console Request Indexing.
+
 Not covered here (already being built): "SunSynk app alternative" page, comparison pages, help pages, SoftwareApplication + FAQ markup, sitemap.
 
 Source quality: most 2026 sources are SEO vendor blogs with small samples. Google's own pages are marked (G). Claims I could not confirm are marked UNVERIFIED. Size: S = under an hour, M = a day, L = several days.
