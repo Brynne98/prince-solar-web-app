@@ -193,6 +193,7 @@ function GoogleSignIn({ onStart, onDone }) {
         callback: async ({ credential }) => {
           cbs.current.onStart();
           const { error } = await window.sb.auth.signInWithIdToken({ provider: 'google', token: credential, nonce: raw });
+          if (!error) window.track('sign_in_done', { method: 'google' });
           cbs.current.onDone(error);
         },
       });
@@ -456,6 +457,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
       if (mode === 'signin') {
         const { error } = await window.sb.auth.signInWithPassword({ email: addr, password });
         if (error) throw error;
+        window.track('sign_in_done', { method: 'password' });
       } else if (mode === 'signup') {
         const { data, error } = await window.sb.auth.signUp({ email: addr, password, options: { emailRedirectTo: SITE_URL } });
         if (error) throw error;
@@ -467,12 +469,14 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
       } else if (mode === 'forgot') {
         const { error } = await window.sb.auth.resetPasswordForEmail(addr, { redirectTo: RESET_URL });
         if (error) throw error;
+        window.track('password_reset_sent_done');
         setSent({ to: addr, kind: 'reset', from: mode }); go('inbox');
       } else if (mode === 'expired') {
         await resend(addr);
       } else if (mode === 'recovery') {
         const { error } = await window.sb.auth.updateUser({ password });
         if (error) throw error;
+        window.track('password_reset_done');
         onRecovered && onRecovered();
       }
     } catch (ex) {
@@ -594,6 +598,7 @@ window.AuthGate = function AuthGate({ children, fallback = null }) {
 async function signOutHere() {
   // pop-ups stop on this browser with the session (SOLAR-244)
   await window.pushTurnOff?.('sign_out').catch(() => {});
+  window.track('sign_out_done');
   const { error } = await window.sb.auth.signOut({ scope: 'local' }).catch(e => ({ error: e }));
   if (error) await window.sb.auth._removeSession();
 }

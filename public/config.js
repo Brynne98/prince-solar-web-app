@@ -48,6 +48,7 @@ window.POSTHOG_KEY = 'phc_ABkqiYsajciVYVKYX4GZMApcDP7QfD7CKQtgE7XPgjxN';
   // their user id (from the saved Supabase session) so identify doesn't merge a new id
   // onto them every visit.
   var uid = null;
+  var scrub = function (s) { return String(s || '').replace(/[^\s"'<>@]+@[^\s"'<>@]+\.[a-z]{2,}/gi, '[email]'); };
   try { uid = JSON.parse(localStorage.getItem('synsynk.auth')).user.id; } catch (e) {}
   if (on) {
     ph.init(window.POSTHOG_KEY, {
@@ -58,9 +59,16 @@ window.POSTHOG_KEY = 'phc_ABkqiYsajciVYVKYX4GZMApcDP7QfD7CKQtgE7XPgjxN';
       capture_heatmaps: false, capture_dead_clicks: false, capture_performance: false,
       disable_session_recording: true, disable_surveys: true, disable_web_experiments: true,
       advanced_disable_flags: true, disable_external_dependency_loading: true,
+      // An email in an error message is masked before it leaves the browser (SOLAR-423).
+      before_send: function (ev) {
+        try { if (ev && ev.event === '$exception') ev.properties.$exception_list.forEach(function (x) { x.value = scrub(x.value); }); } catch (e) {}
+        return ev;
+      },
     });
-    // The project is shared with the phone apps: filter on app = prince-solar-hub.
-    ph.register({ app: 'prince-solar-hub', app_version: window.APP_VERSION });
+    // The project is shared with the phone apps: filter on app = prince-solar-hub, split by
+    // platform (web, ios, android, edge). app_version is the release on events and errors
+    // alike. ANALYTICS.md has the full list (SOLAR-423).
+    ph.register({ app: 'prince-solar-hub', platform: 'web', app_version: window.APP_VERSION });
   }
   window.track = function (name, props) {
     try { if (on) ph.capture(name, Object.assign({ plant_id: window.CURRENT_PLANT ?? null }, props)); } catch (e) {}
