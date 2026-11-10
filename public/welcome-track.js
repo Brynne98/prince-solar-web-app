@@ -3,7 +3,10 @@
 // config.js; nothing about the visitor is sent.
 (() => {
   window.track('screen_viewed', { stage: 'website', screen: 'welcome' });
-  const sections = [...document.querySelectorAll('main > section')];
+  // Top-level sections only: some sit inside wrapper divs, and the opening one holds
+  // smaller sections of its own.
+  const top = (el) => { let s = el.closest('main section'); while (s?.parentElement.closest('main section')) s = s.parentElement.closest('main section'); return s; };
+  const sections = [...document.querySelectorAll('main section')].filter((s) => top(s) === s);
   const nameOf = (s) => s.id || s.querySelector('.wrap[id]')?.id || s.className.split(' ')[0];
   if ('IntersectionObserver' in window) {
     const io = new IntersectionObserver((seen) => seen.forEach((x) => {
@@ -21,7 +24,7 @@
       : a.getAttribute('href') === '#pricing' ? 'see_pricing'
       : /[?&]signup/.test(a.href) ? 'try_free' : null;
     if (!button) return;
-    const at = a.closest('main > section');
+    const at = top(a);
     window.track('website_button_tapped', { button, section: at ? nameOf(at) : 'header' });
   }, true);
 })();
