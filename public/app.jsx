@@ -1335,7 +1335,7 @@ function Setup({ links }) {
     return pageOk(SETUP_TABS, t) ? t : 'live';
   });
   const [connecting, setConnecting] = useState(false);
-  // Billing's Plan says when the free week ends; it runs from the first login, plant on or not.
+  // Billing's Plan says when the free week ends; it runs from the first plant added.
   const [me, setMe] = useState(null);
   useEffect(() => { window.fetchMe().then(setMe).catch(() => {}); }, []);
   const go = (id) => { setTab(id); setConnecting(false); toTop(); if (location.hash) history.replaceState(history.state, '', location.pathname + location.search); };
