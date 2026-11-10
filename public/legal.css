@@ -1,5 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap');
-/* Terms and Privacy, in the app's colours and type (index.html :root). */
+/* Terms, Privacy, PAIA, help and compare pages, in the app's colours and type (index.html :root). */
 :root {
   --bg: #0a0d12; --line: rgba(255,255,255,0.07);
   --text: #e7ecf2; --muted: #9aa5b3; --pv: #3ddc84;
@@ -27,3 +27,33 @@ a { color: var(--pv); text-underline-offset: 3px; }
 table { width: 100%; border-collapse: collapse; margin: 12px 0; }
 th, td { text-align: left; vertical-align: top; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line); color: #c9d1db; }
 th { color: var(--text); }
+
+/* Help and compare pages (SOLAR-216): the same page, plus the showcase's buttons and gold. */
+header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+h1 em, h2 em { font-style: normal; color: #f2c36b; }
+.lede { font-size: 19px; line-height: 1.55; color: var(--text); margin: 12px 0 0; }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 20px; border-radius: 12px; font: 600 16px var(--display); text-decoration: none; color: #241500; background: linear-gradient(180deg, #ffd877, #f3a83c); box-shadow: 0 6px 20px -6px rgba(243,168,60,0.7); }
+.btn.ghost { color: var(--text); background: transparent; border: 1px solid var(--line); box-shadow: none; }
+header .btn { min-height: 40px; padding: 0 16px; font-size: 15px; }
+figure { margin: 24px 0; }
+figure img { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--line); }
+figure.phone img { max-width: 340px; margin: 0 auto; }
+figure.phone figcaption { text-align: center; }
+figcaption { margin-top: 8px; font-size: 14px; color: var(--muted); }
+.vs { overflow-x: auto; }
+.vs table { min-width: 520px; }
+.vs td:not(:first-child), .vs th:not(:first-child) { width: 30%; }
+.y::before { content: "✓ "; color: var(--pv); font-weight: 700; }
+.n::before { content: "– "; color: var(--muted); }
+details { border-bottom: 1px solid var(--line); padding: 12px 0; }
+summary { cursor: pointer; font-weight: 600; color: var(--text); }
+details p { margin: 8px 0 0; }
+.cta { margin: 48px 0 0; padding: 24px; border-radius: 16px; border: 1px solid rgba(242,195,107,0.35); background: rgba(242,195,107,0.06); }
+.cta h2 { margin-top: 0; }
+.cta .btn { margin: 8px 12px 0 0; }
+.links { list-style: none; padding: 0; }
+.links li { margin: 0; border-bottom: 1px solid var(--line); }
+.links a { display: block; padding: 14px 0; font-weight: 600; text-decoration: none; }
+.links span { display: block; font-weight: 400; color: var(--muted); }
+footer { max-width: 720px; margin: 0 auto; padding: 24px 20px 48px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 15px; }
+footer a { color: var(--muted); text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
