@@ -231,6 +231,11 @@ const CASES = [
     if (kept.length !== 1 || kept[0].on !== yr || kept[0].period !== 'yearly') bad.push('plan-kept emails: ' + JSON.stringify(kept));
     const again = await K.as(u, `select public.api_billing_change('free', null)`);
     if (!again.ok) return [...bad, 'cancel again in the paid year: ' + again.err];
+    // a second tab cancels too: nothing changes, no second email (0176)
+    const twice = await K.as(u, `select public.api_billing_change('free', null)`);
+    if (!twice.ok || twice.v.nextPlan !== 'free' || twice.v.prepaidOn !== d) bad.push('second cancel in the paid year: ' + (twice.ok ? JSON.stringify([twice.v.nextPlan, twice.v.prepaidOn]) : twice.err));
+    const cancels = Number((await K.sql(`select count(*) from public.email_queue where user_id = '${u}' and kind = 'bill_change' and data->>'to' = 'free'`))[0]);
+    if (cancels !== 2) bad.push(`${cancels} cancel emails for two cancels and a repeat`);
     // the paid room holds until the year starts: Home's 2 plants link collecting
     await K.link(u, [{ id: P(4571) }, { id: P(4572) }]);
     if (await K.active(u) !== 2) bad.push(`${await K.active(u)} of 2 plants collect in the paid year`);
@@ -269,11 +274,16 @@ const CASES = [
     if (r.next_plan !== 'free' || r.prepaid_on) bad.push(`cancel lost: next ${r.next_plan}, prepaid_on ${r.prepaid_on}`);
     return bad;
   } },
-  { id: 'C467', title: 'Keep undoes a booked cancel: the plan renews on its date, one plan-kept email (0176)', async run(K) {
+  { id: 'C467', title: 'a second cancel changes nothing; Keep undoes a booked cancel: the plan renews on its date, one email each (0176)', async run(K) {
     const bad = [], u = await K.user('home');
     const d = (await K.row(u)).next_billing_date;
     const c = await K.as(u, `select public.api_billing_change('free', null)`);
     if (!c.ok) return ['cancel refused: ' + c.err];
+    // a second tab cancels too: nothing changes, one cancel email (0176)
+    const c2 = await K.as(u, `select public.api_billing_change('free', null)`);
+    if (!c2.ok || c2.v.nextPlan !== 'free') bad.push('second cancel: ' + (c2.ok ? c2.v.nextPlan : c2.err));
+    const mails = Number((await K.sql(`select count(*) from public.email_queue where user_id = '${u}' and kind = 'bill_change'`))[0]);
+    if (mails !== 1) bad.push(`${mails} cancel emails for one cancel and a repeat`);
     // Keep, tapped twice
     for (let i = 0; i < 2; i++) {
       const k = await K.as(u, `select public.api_billing_change('home', 'monthly')`);

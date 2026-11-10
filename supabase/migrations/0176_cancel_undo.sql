@@ -3,7 +3,8 @@
 -- their date. A cancel books nothing paid, so Keep <plan> undoes it, as for a downgrade. In a
 -- paid year (0138, prepaid_on) the undo goes back to the paid switch to yearly, which stays.
 -- While a cancel is booked the plan still buys nothing more and takes no other change
--- (0175): Keep first. Account delete stays allowed while a cancel is booked.
+-- (0175): Keep first. A second cancel (another tab) changes nothing and is not emailed.
+-- Account delete stays allowed while a cancel is booked.
 
 -- 0175's guard: a cancel may be undone. A paid year still takes only a cancel or its undo.
 create or replace function private.billing_year_paid_guard()
@@ -37,6 +38,10 @@ begin
   end if;
   if b.comped then
     raise exception 'this plan is free of charge' using errcode = '22023';
+  end if;
+  -- a cancel already booked (a second tab): nothing changes
+  if b.next_plan = 'free' and p_plan = 'free' then
+    return;
   end if;
   if b.prepaid_on is not null then
     -- a paid year: a cancel, or its undo back to the paid switch (SOLAR-467)
@@ -82,16 +87,19 @@ end $$;
 -- that year. The paid switch alone is not a booked change to undo.
 create or replace function public.api_billing_change(p_plan text, p_period text default null, p_keep bigint[] default null)
 returns jsonb language plpgsql security definer set search_path = public, private, pg_temp as $$
-declare b private.billing; was_booked boolean; drops bigint[];
+declare b private.billing; was_booked boolean; was_cancel boolean; drops bigint[];
 begin
   if auth.uid() is null then raise exception 'sign in first' using errcode = '42501'; end if;
-  -- for update: a double tap undoes once and emails once
-  select next_plan is not null or (next_period is not null and prepaid_on is null) into was_booked
+  -- for update: a double tap undoes once and emails once; a second cancel is not emailed again
+  select next_plan is not null or (next_period is not null and prepaid_on is null), next_plan is not distinct from 'free'
+    into was_booked, was_cancel
     from private.billing where user_id = auth.uid() for update;
   perform public.billing_book_change(auth.uid(), p_plan, p_period, p_keep);
   select * into b from private.billing where user_id = auth.uid();
   drops := private.billing_drops(b);
-  if b.next_plan is not null or (b.next_period is not null and b.prepaid_on is null) then
+  if was_cancel and b.next_plan = 'free' then
+    null;
+  elsif b.next_plan is not null or (b.next_period is not null and b.prepaid_on is null) then
     insert into public.email_queue (user_id, kind, key, data, priority)
     values (auth.uid(), 'bill_change', 'bill_change:' || gen_random_uuid(),
             jsonb_build_object('from', b.plan, 'to', coalesce(b.next_plan, b.plan),

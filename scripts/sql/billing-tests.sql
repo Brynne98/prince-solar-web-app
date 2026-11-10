@@ -394,6 +394,8 @@ begin
   -- a cancel is undone by Keep (0176): no other change until then; one plan-kept email; rolled back after
   begin
     perform pg_temp.eq('cancel booked', public.api_billing_change('free')->>'nextPlan', 'free');
+    perform pg_temp.eq('second cancel changes nothing', public.api_billing_change('free')->>'nextPlan', 'free');
+    perform pg_temp.eq('second cancel not emailed', (select count(*)::int from public.email_queue where user_id = uh and kind = 'bill_change' and data->>'to' = 'free'), 1);
     perform pg_temp.raises('cancel: no period switch', 'select public.api_billing_change(''home'', ''yearly'')', 'cancelled');
     perform pg_temp.eq('undo cancel', public.api_billing_change('home', 'monthly')->>'nextPlan', null);
     perform public.api_billing_change('home', 'monthly');

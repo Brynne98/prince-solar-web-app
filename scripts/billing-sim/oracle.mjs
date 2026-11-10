@@ -145,6 +145,8 @@ export class Oracle {
   bookChange(plan, period) {
     if (this.plan === 'free') return { err: 'nothing to change on Free' };
     if (this.comped) return { err: 'free of charge' };
+    // a cancel already booked: a second one changes nothing (0176)
+    if (this.nextPlan === 'free' && plan === 'free') return {};
     // a paid year: only a cancel, which keeps the switch and ends the plan a year later (0175),
     // or its undo back to the switch (0176)
     if (this.prepaid !== null) {
