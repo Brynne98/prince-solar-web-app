@@ -90,6 +90,9 @@ Every Supabase read and write goes through a `fetch*` or `save*` here; don't cal
 `window.sb` from a screen. New ones use `must(call, fallback, failed)`, which throws on
 an error and returns `fallback` when there is no row. `fetchFlags` and `saveFlag` cover
 a row of on/off settings (email and push preferences); `saveFlag` sends its own event. `emptyText` is the message for a plant with no data yet.
+Errors go to PostHog through `config.js`: `window.reportClientError(err, props)` for a
+crash, `window.reportServerError(name, error, status)` for a failed Supabase call (`must()`
+and the sign-in screens already call it; it drops refusals and offline).
 
 ## The shell (`app.jsx`)
 

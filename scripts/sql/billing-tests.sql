@@ -300,16 +300,18 @@ end $$;
 -- Free trim (0111): 24 hours kept once every account on the plant is Free past its week
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-000000000061', 't1@t.test'), ('00000000-0000-0000-0000-000000000062', 't2@t.test'),
-  ('00000000-0000-0000-0000-000000000063', 't3@t.test');
+  ('00000000-0000-0000-0000-000000000063', 't3@t.test'), ('00000000-0000-0000-0000-000000000064', 't4@t.test');
 insert into private.free_week_logins (sunsynk_username, user_id, started_at) values
   ('t1@login.test', '00000000-0000-0000-0000-000000000061', now() - interval '10 days'),
   ('t2@login.test', '00000000-0000-0000-0000-000000000062', now() - interval '2 days'),
-  ('t3@login.test', '00000000-0000-0000-0000-000000000063', now() - interval '10 days');
+  ('t3@login.test', '00000000-0000-0000-0000-000000000063', now() - interval '10 days'),
+  ('t4@login.test', '00000000-0000-0000-0000-000000000064', now() - interval '7 days 30 minutes');
 insert into public.plant_users (plant_id, user_id) values
   (9000061, '00000000-0000-0000-0000-000000000061'),   -- Free, week over: trimmed
   (9000062, '00000000-0000-0000-0000-000000000062'),   -- Free, still in its week
   (9000063, '00000000-0000-0000-0000-000000000063'),   -- Free, week over, but shared
-  (9000063, '00000000-0000-0000-0000-0000000000a1');   -- ... with a Family account
+  (9000063, '00000000-0000-0000-0000-0000000000a1'),   -- ... with a Family account
+  (9000064, '00000000-0000-0000-0000-000000000064');   -- Free, week over 30 min ago: the day-7 report goes first (0182)
 insert into public.plant_config (plant_id, timezone, backfill_next, backfill_until, temp_next)
   values (9000061, 'Africa/Johannesburg', current_date - 50, current_date - 1, current_date - 40);
 insert into public.agg_minute (plant_id, ts)
@@ -454,6 +456,11 @@ begin
     where user_id = '00000000-0000-0000-0000-000000000072' and kind = 'report_week'), true);
   perform pg_temp.eq('day 7 report on the first plant', (select plant_id from public.email_queue
     where user_id = '00000000-0000-0000-0000-000000000072' and kind = 'report_week'), 9000072::bigint);
+  perform pg_temp.eq('day 7 report: the free week''s first day', (select (data->>'from')::date from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000072' and kind = 'report_week'),
+    timezone(public.plant_tz(9000072), now() - interval '7 days 2 hours')::date);
+  perform pg_temp.eq('day 7 report: days the trim deletes', (select (data->>'days')::int from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000072' and kind = 'report_week'), 0);
   perform pg_temp.eq('nothing for a week long over', (select count(*)::int from public.email_queue
     where user_id = '00000000-0000-0000-0000-000000000063' and kind in ('free_week_soon', 'report_week')), 0);
   perform private.free_week_mail();

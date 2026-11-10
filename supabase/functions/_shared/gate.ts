@@ -1,5 +1,5 @@
-// The tester accounts: auth user ids in the PAYSTACK_TEST_USERS secret, comma-separated
-// (SOLAR-267). Plain TypeScript so node can test it: scripts/billing-sim/gate.test.mjs.
+// The tester accounts: auth user ids, comma-separated. Billing reads PAYSTACK_TEST_USERS (SOLAR-267),
+// link-sunsynk reads TESTER_USERS (SOLAR-477). Plain TypeScript so node can test it: scripts/billing-sim/gate.test.mjs.
 export const isTestUser = (testUsers: string, userId: string) =>
   testUsers.split(",").map((s) => s.trim()).includes(userId);
 

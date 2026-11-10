@@ -2400,6 +2400,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   const word = b.state === 'past_due' ? 'Payment failed' : null;
   const line = b.comped ? 'Free of charge. Every plant, full history.'
     : weekEnds ? `Free week until ${window.billingFmt.billDay(weekEnds)}.`
+    : !paid && freeWeekEndsAt === null && !b.comped ? '1 plant. 7 days free from when you add your plant.'
     : !paid ? '1 plant, today only. No card needed.' : null;
   // the plants it collects, with any extra plants still held (SOLAR-371)
   const room = planRoom(b.plan, b.extraPlants);

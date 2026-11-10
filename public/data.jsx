@@ -59,15 +59,15 @@ async function getJSON(url) {
   return must(window.sb.rpc(fn, { ...params, p_plant: window.CURRENT_PLANT }), {}, 'RPC ' + fn + ' failed');
 }
 // A Supabase call's data, or its error thrown. fallback stands in for no data.
-// The error also goes to PostHog, since many callers fall back to empty data without a
-// word (SOLAR-243). Not reported: no connection, and a change the database refused on
-// purpose (22023), which the caller explains.
+// A server or database error also goes to PostHog with the RPC or table name and code,
+// since many callers fall back to empty data without a word (SOLAR-243, SOLAR-472).
+// reportServerError in config.js leaves out no connection and deliberate refusals.
 async function must(call, fallback, failed = 'failed') {
-  const { data, error } = await call;
+  const name = String(call?.url?.pathname || '').replace(/^.*\/rest\/v1\//, '') || 'supabase';
+  const { data, error, status } = await call;
   if (error) {
-    const e = new Error(error.message || failed);
-    if (error.code !== '22023' && !/fetch|network|load failed/i.test(e.message)) window.reportClientError?.(e);
-    throw e;
+    window.reportServerError?.(name, error, status);
+    throw new Error(error.message || failed);
   }
   return fallback !== undefined && !data ? fallback : data;
 }
