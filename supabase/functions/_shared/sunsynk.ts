@@ -232,22 +232,56 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export const apiCallCounts = new Map<string, number>();
 const countCall = (acc: Account) => apiCallCounts.set(acc.id, (apiCallCounts.get(acc.id) ?? 0) + 1);
 
+/**
+ * Every SunSynk request by data type and result, with response times (SOLAR-468). The
+ * data type is the path without ids, serials and dates ("/inverter/{sn}/realtime/input"
+ * → "inverter/realtime/input"). poll takes the counts once per run into private.sunsynk_calls.
+ */
+export type CallTally = { kind: string; result: string; calls: number; ms: number; ms_max: number };
+const callTally = new Map<string, CallTally>();
+const kindOf = (pathname: string) =>
+  pathname.split("?")[0].split("/").filter((s) => s && !/\d/.test(s)).join("/") || "other";
+// The gateway also answers 403 for "this app key may not call that path", which
+// no amount of waiting fixes; only treat a 403 as throttling when its message
+// says so. (Survey 2026-09-05: /plant/{id}/realtime is a plain 403 on this key.)
+const throttled = (r: Response) =>
+  r.status === 429 ||
+  (r.status === 403 && /throttl|quota|limit/i.test(r.headers.get("x-ca-error-message") ?? ""));
+const resultOf = (r: Response) =>
+  r.ok ? "ok" : throttled(r) ? (r.status === 429 ? "429" : "403_throttle") : r.status >= 500 ? "5xx" : String(r.status);
+function tallyCall(pathname: string, result: string, ms: number) {
+  const kind = kindOf(pathname);
+  const t = callTally.get(`${kind}|${result}`) ?? { kind, result, calls: 0, ms: 0, ms_max: 0 };
+  t.calls++;
+  t.ms += ms;
+  t.ms_max = Math.max(t.ms_max, ms);
+  callTally.set(`${kind}|${result}`, t);
+}
+/** The counts since the last take, and a fresh start. */
+export function takeCallTally(): CallTally[] {
+  const rows = [...callTally.values()];
+  callTally.clear();
+  return rows;
+}
+
 /** GET a resource for one account and return body.data. */
 export async function apiGet(pathname: string, acc: Account): Promise<any> {
   const doFetch = async (tok: string) => {
     countCall(acc);
-    return fetch(`${baseFor(tok)}${pathname}`, { headers: signedHeaders("GET", pathname, undefined, tok) });
+    const t0 = Date.now();
+    try {
+      const res = await fetch(`${baseFor(tok)}${pathname}`, { headers: signedHeaders("GET", pathname, undefined, tok) });
+      tallyCall(pathname, resultOf(res), Date.now() - t0);
+      return res;
+    } catch (e) {
+      tallyCall(pathname, e instanceof DOMException && e.name === "TimeoutError" ? "timeout" : "network", Date.now() - t0);
+      throw e;
+    }
   };
 
   let res = await doFetch(await accessTokenFor(acc));
   if (res.status === 401) res = await doFetch(await accessTokenFor(acc, true));
 
-  // The gateway also answers 403 for "this app key may not call that path", which
-  // no amount of waiting fixes; only treat a 403 as throttling when its message
-  // says so. (Survey 2026-09-05: /plant/{id}/realtime is a plain 403 on this key.)
-  const throttled = (r: Response) =>
-    r.status === 429 ||
-    (r.status === 403 && /throttl|quota|limit/i.test(r.headers.get("x-ca-error-message") ?? ""));
   for (let attempt = 1; throttled(res) && attempt <= RATE_LIMIT_RETRIES; attempt++) {
     await res.body?.cancel();
     await wait(RATE_LIMIT_BACKOFF_MS * attempt);
