@@ -39,16 +39,13 @@ drop trigger if exists billing_charge_cancel_guard on private.billing_charges;
 create trigger billing_charge_cancel_guard before insert on private.billing_charges
   for each row execute function private.billing_charge_cancel_guard();
 
--- 0136's drops: none while a paid year waits to start; the plants that stop are known once
--- the year has started and the cancel's date is set.
-create or replace function private.billing_drops(b private.billing)
-returns bigint[] language sql stable set search_path = public, private, pg_temp as $$
-  select coalesce(array_agg(plant_id order by plant_id), '{}') from (
-    select pu.plant_id from public.plant_users pu
-     where pu.user_id = b.user_id and not pu.paused and pu.plant_id <> all (coalesce(b.plants_to_remove, '{}'))
-     order by array_position(b.next_keep, pu.plant_id) nulls last, pu.linked_at, pu.plant_id
-    offset private.billing_next_room(b)) x
-   where private.billing_next_room(b) is not null and not coalesce(b.comped, false) and b.prepaid_on is null
+-- 0129's booked room: none while a cancel waits for a paid year to start. The paid plan's
+-- room holds until then; the plants that stop are known once the year has started (0175).
+create or replace function private.billing_next_room(b private.billing)
+returns int language sql immutable as $$
+  select case when b.next_plan is null and b.next_extra_plants is null then null
+              when b.prepaid_on is not null and b.next_plan = 'free' then null
+              else public.billing_room(coalesce(b.next_plan, b.plan), coalesce(b.next_extra_plants, b.extra_plants)) end
 $$;
 
 -- 0155's booking: a cancel is final; in a paid year only a cancel, which keeps the switch.

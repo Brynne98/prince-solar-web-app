@@ -64,6 +64,8 @@ export class Oracle {
   // the room once a booked change (plan or extras) lands; null when nothing is booked
   bookedRoom() {
     if (this.nextPlan === null && this.nextExtra === null) return null;
+    // a cancel waiting for a paid year to start: the paid room holds until then (0175)
+    if (this.prepaid !== null && this.nextPlan === 'free') return null;
     const plan = this.nextPlan ?? this.plan;
     return cover(plan, plan === 'family' ? this.nextExtra ?? this.extra : 0);
   }
@@ -83,8 +85,7 @@ export class Oracle {
   // room, the pick first (0136). Empty when nothing is booked.
   drops() {
     const br = this.bookedRoom();
-    // none while a paid year waits to start: a cancel in it stops plants a year later (0175)
-    if (br === null || this.comped || this.prepaid !== null) return [];
+    if (br === null || this.comped) return [];
     return this.active().filter((p) => !this.rm.has(p.id)).sort((a, b) => this.byPick(a, b)).slice(br).map((p) => p.id);
   }
   // the collecting plants the booked plan keeps, in pick order

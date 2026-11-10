@@ -2423,7 +2423,8 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
 
 const longDay = (d) => window.dayText(d, { day: 'numeric', month: 'short', year: 'numeric' });
 // The same day a year on: a yearly plan's next payment.
-const yearOn = (d) => (+d.slice(0, 4) + 1) + d.slice(4);
+// 29 Feb goes to 28 Feb, as billing_step does.
+const yearOn = (d) => { const y = +d.slice(0, 4) + 1, md = d.slice(4); return y + (md === '-02-29' && y % 4 ? '-02-28' : md); };
 // The day a cancelled plan ends: its billing date, or a year on when that year is paid (SOLAR-457).
 const endDay = (b) => (b.prepaidOn ? yearOn(b.nextDate) : b.nextDate);
 
@@ -2576,7 +2577,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
       {back}
       <div className="page-head">
         <h1>Pick your plan</h1>
-        {!b.comped && !(paid && b.nextPlan === 'free') && <p>{paid ?`Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Upgrades start today.'}</p>}
+        {!b.comped && !(paid && b.nextPlan === 'free') && <p>{b.prepaidOn ? `Your paid year starts on ${billDay(b.nextDate)}.` : paid ? `Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Upgrades start today.'}</p>}
       </div>
       {b.comped ? <p className="field-note">Your plan is free of charge: every plant, full history.</p> : <>
         <Segmented size="sm" className="plan-period" label="Billing" value={view} onChange={setView}

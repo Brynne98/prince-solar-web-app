@@ -393,8 +393,10 @@ begin
   -- Each undo of a booked change is emailed; an undo with nothing booked is not (0134): Family's
   -- downgrade undone above, then its undo with nothing booked.
   perform pg_temp.eq('undo emails', (select count(*) from public.email_queue where user_id = uy and kind = 'bill_kept'), 1::bigint);
-  perform public.api_billing_change('home', 'monthly');
-  perform pg_temp.eq('undo with nothing booked sends nothing', (select count(*) from public.email_queue where user_id = uh and kind = 'bill_kept'), 0::bigint);
+  perform set_config('request.jwt.claims', json_build_object('sub', uy, 'role', 'authenticated')::text, true);
+  perform public.api_billing_change('family');
+  perform pg_temp.eq('undo with nothing booked sends nothing', (select count(*) from public.email_queue where user_id = uy and kind = 'bill_kept'), 1::bigint);
+  perform set_config('request.jwt.claims', json_build_object('sub', uh, 'role', 'authenticated')::text, true);
   perform pg_temp.eq('undo email data', (select data->>'plan' from public.email_queue where user_id = uy and kind = 'bill_kept' limit 1), 'family');
   -- Free: Remove login goes at once
   insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values ('00000000-0000-0000-0000-0000000000f8', ur, 'r2@login.test');

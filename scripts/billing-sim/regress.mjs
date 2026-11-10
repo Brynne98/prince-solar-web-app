@@ -223,6 +223,9 @@ const CASES = [
     if (mail?.on !== yr) bad.push(`cancel email says it ends ${mail?.on}, want ${yr}`);
     const undo = await K.as(u, `select public.api_billing_change('home', 'monthly')`);
     if (undo.ok || !/cancelled/.test(undo.err)) bad.push('undo in the paid year: ' + (undo.ok ? 'undone' : undo.err));
+    // the paid room holds until the year starts: Home's 2 plants link collecting
+    await K.link(u, [{ id: P(4571) }, { id: P(4572) }]);
+    if (await K.active(u) !== 2) bad.push(`${await K.active(u)} of 2 plants collect in the paid year`);
     await K.today(d); await K.run(d);
     const r = await K.row(u);
     if (r.plan !== 'home' || r.period !== 'yearly' || r.prepaid_on || r.next_plan !== 'free' || r.next_billing_date !== yr) {
@@ -232,6 +235,7 @@ const CASES = [
     if (renewals) bad.push(`${renewals} renewal charge(s) on a paid year`);
     await K.today(yr); await K.run(yr);
     if ((await K.row(u)).plan !== 'free') bad.push(`on ${yr}: still ${(await K.row(u)).plan}`);
+    if (await K.active(u) !== 1) bad.push(`on ${yr}: ${await K.active(u)} plants collect on Free`);
     return bad;
   } },
   { id: 'C457b', title: 'a booked cancel is final: no undo, downgrade or upgrade; an upgrade paid after it goes back (0175)', async run(K) {
@@ -248,7 +252,8 @@ const CASES = [
     await K.as(h, `select public.api_billing_change('free', null)`);
     const up = await K.open(h, 'family');
     if (up.ok || !/cancelled/.test(up.err)) bad.push('upgrade after cancel: ' + (up.ok ? 'opened' : up.err));
-    if (early.ok) {
+    if (!early.ok) bad.push('switch before the cancel refused: ' + early.err);
+    else {
       const p = await K.paid(early.v.reference);
       if (!p.ok || p.v.applied !== false) bad.push('a switch paid after the cancel was applied');
     }
