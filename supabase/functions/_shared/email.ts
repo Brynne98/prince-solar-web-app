@@ -807,7 +807,7 @@ export const planChangeBooked = (c: Change) => {
         // No plant deleted: the history that goes leads instead, as in the plan-ended email.
         : c.history?.days ? [{ lead: "Nothing more is charged." },
             { box: { hero: lost(`Deleted on ${c.history.on}`, dayCount(c.history.days), `of history at ${c.history.plant}`),
-              rows: [[`After ${c.on}`, "Today only"], ["Reports", "Stop"]] } }]
+              rows: [[`From ${c.on}`, "Free"], ["You see", "Today only"], ["Reports", "Stop"]] } }]
         : [{ lead: `Nothing more is charged. ${PAID_FREE}` }]
       // A monthly/yearly switch reads like the plan-kept email: what carries on, then the price.
       : switchOnly ? [{ lead: "Your plants, history and reports carry on as before." },
