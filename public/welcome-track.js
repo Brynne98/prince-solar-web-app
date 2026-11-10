@@ -1,5 +1,5 @@
 // Showcase visits (princesolarhub.co.za, SOLAR-472): the page seen, each section reached
-// once, and taps on the sign-in, sign-up, pricing and plan buttons. window.track comes from
+// once (when it crosses the middle of the screen), and taps on the sign-in, sign-up, pricing and plan buttons. window.track comes from
 // config.js; nothing about the visitor is sent.
 (() => {
   window.track('screen_viewed', { stage: 'website', screen: 'welcome' });
@@ -10,7 +10,7 @@
       if (!x.isIntersecting) return;
       io.unobserve(x.target);
       window.track('website_section_viewed', { section: nameOf(x.target) });
-    }), { threshold: 0.3 });
+    }), { rootMargin: '-45% 0px -45% 0px' }); // reached = crosses the middle of the screen, however tall
     sections.forEach((s) => io.observe(s));
   }
   document.addEventListener('click', (e) => {
