@@ -196,8 +196,10 @@
      scrolls as a document; the sidebar and header stay put. The selected page is a
      raised neutral surface: green is kept for the data. */
   /* --stick: how far below the scroll box's top the header ends, for sticky tops and
-     scroll margins. --sb: the scrollbar's width, when the page under the header has one */
-  .frame { --rail-w: 232px; --head-h: 60px; --stick: var(--head-h); display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100dvh; }
+     scroll margins. --sb: the scrollbar's width, when the page under the header has one.
+     --safe-top: the status bar's height when opened from the Home Screen; the page draws
+     under it (viewport-fit=cover, black-translucent), so the header and sidebar start below it (SOLAR-480) */
+  .frame { --rail-w: 232px; --head-h: 60px; --safe-top: env(safe-area-inset-top, 0px); --stick: calc(var(--head-h) + var(--safe-top)); display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100dvh; }
   .frame-body { display: flex; flex-direction: column; min-width: 0; }
   .frame-scroll { flex: 1 0 auto; display: flex; flex-direction: column; }
   /* with a sidebar and a mouse or trackpad, only the page beside it scrolls, so a wheel
@@ -227,7 +229,7 @@
     box-shadow: 0 0 0 4px rgba(244,169,58,0.12);
   }
 
-  .rail { position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column; gap: var(--sp-2xs); padding: var(--sp-lg) var(--sp-md);
+  .rail { position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column; gap: var(--sp-2xs); padding: calc(var(--sp-lg) + var(--safe-top)) var(--sp-md) var(--sp-lg);
     background: var(--bar); border-right: 1px solid var(--line); z-index: 6; }
   .rail-logo { height: calc(var(--head-h) - 14px); display: flex; align-items: center; gap: var(--sp-md); padding-left: var(--sp-sm); margin-bottom: var(--sp-sm);
     font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
@@ -311,7 +313,7 @@
      and refresh over the cards' edges */
   /* the header spans the scrollbar too, so its right edge adds --sb to stay over the cards' edge */
   .head { --pad: max(var(--sp-2xl), calc((100% - var(--sb, 0px) - 1360px) / 2 + var(--sp-2xl)));
-    flex: none; position: sticky; top: 0; z-index: 5; height: var(--head-h); display: flex; align-items: center; gap: var(--sp-lg); padding: 0 calc(var(--pad) + var(--sb, 0px)) 0 var(--pad);
+    flex: none; position: sticky; top: 0; z-index: 5; height: calc(var(--head-h) + var(--safe-top)); display: flex; align-items: center; gap: var(--sp-lg); padding: var(--safe-top) calc(var(--pad) + var(--sb, 0px)) 0 var(--pad);
     background: var(--bg); border-bottom: 1px solid var(--line); }
   .plant { position: relative; min-width: 0; margin-left: calc(-1 * var(--sp-sm)); }
   .plant-btn { display: flex; align-items: center; gap: var(--sp-sm); max-width: 100%; padding: var(--sp-sm) var(--sp-sm); border: 1px solid transparent; border-radius: var(--r-md);
@@ -538,7 +540,7 @@
   @media (max-width: 599px) {
     .frame { --head-h: 56px; grid-template-columns: minmax(0, 1fr); }
     .rail { display: none; }
-    .head { padding: 0 var(--sp-sm) 0 var(--sp-lg); gap: var(--sp-xs); }
+    .head { padding: var(--safe-top) var(--sp-sm) 0 var(--sp-lg); gap: var(--sp-xs); }
     /* header meta stays small so the plant name keeps its room (SOLAR-344) */
     .status-age, .status-sync { font-size: var(--fs-xs); }
     .status-sync { gap: var(--sp-2xs); }
@@ -1790,7 +1792,7 @@
     .setup-head-btn { padding: var(--sp-sm) var(--sp-md); }
     .setup-head-btn span { display: none; }
     /* the phone's content padding: 10 on top, the 56 px bar plus 10 below */
-    .setup-empty { top: calc(var(--head-h) + 10px); height: calc(100dvh - var(--head-h) - 76px - env(safe-area-inset-bottom, 0px)); }
+    .setup-empty { top: calc(var(--stick) + 10px); height: calc(100dvh - var(--stick) - 76px - env(safe-area-inset-bottom, 0px)); }
   }
   /* danger zone in settings */
   .danger-btn { background: none; border: 1px solid var(--bad); color: var(--bad); padding: var(--sp-sm) var(--sp-lg); border-radius: var(--r-md); font-size: var(--fs-sm); cursor: pointer; }
