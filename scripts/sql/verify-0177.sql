@@ -52,6 +52,15 @@ select pg_temp.eq('stop: these are plain emails, not alerts', private.is_alert('
 select public.account_mark('00000000-0000-0000-0000-00000451acc0', 'needs_relink', 'refused again');
 select pg_temp.eq('stop again: nothing new', (select count(*) from public.email_queue where kind = 'share_down'), 2::bigint);
 
+-- ---- Retry timing ---------------------------------------------------------------------
+select pg_temp.eq('retry: not due within the hour of the last try', public.share_retry_due(), null::uuid);
+update private.sunsynk_login_events set at = now() - interval '2 hours' where account_id = '00000000-0000-0000-0000-00000451acc0';
+select pg_temp.eq('retry: due an hour on', public.share_retry_due(), '00000000-0000-0000-0000-00000451acc0'::uuid);
+-- a failed retry is logged as another stop: not due again for an hour, and no new email
+select public.account_mark('00000000-0000-0000-0000-00000451acc0', 'needs_relink', 'retry refused');
+select pg_temp.eq('retry: a failed try restarts the hour', public.share_retry_due(), null::uuid);
+select pg_temp.eq('retry: a failed try sends nothing', (select count(*) from public.email_queue where kind = 'share_down'), 2::bigint);
+
 -- ---- Back -------------------------------------------------------------------------------
 -- what shareAccount() does after a good sign-in
 select public.share_account_set('00000000-0000-0000-0000-00000000451a', 'share451@t.test', 'tok', 0);

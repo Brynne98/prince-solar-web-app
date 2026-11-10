@@ -3,7 +3,8 @@
 -- The share login (kind 'share', 0172) used to stop for good on a SunSynk timeout
 -- during its re-sign-in, and only its own user (the company) was mailed. poll now
 -- treats a timeout as a failed poll and tries a refused share login again hourly
--- (_shared/sunsynk.ts, poll). Here: email_on_relink mails the owners instead.
+-- (_shared/sunsynk.ts, poll). Here: share_retry_due times that retry, and
+-- email_on_relink mails the owners instead.
 --
 -- Body: 0164's email_on_relink, with only the share branch added at the top.
 -- ============================================================================
@@ -94,3 +95,15 @@ begin
   end if;
   return null;
 end $$;
+
+-- The share login, when it is stopped and its last try (account_mark logs each as a
+-- 'died' event) was 55+ minutes ago. poll's shard 0 asks every minute (SOLAR-451).
+create or replace function public.share_retry_due()
+returns uuid language sql stable security definer set search_path = '' as $$
+  select a.id from private.sunsynk_accounts a
+   where a.kind = 'share' and a.status = 'needs_relink'
+     and coalesce((select max(e.at) from private.sunsynk_login_events e
+                    where e.account_id = a.id and e.event = 'died'), '-infinity') < now() - interval '55 minutes'
+$$;
+revoke all on function public.share_retry_due() from public, anon, authenticated;
+grant execute on function public.share_retry_due() to service_role;
