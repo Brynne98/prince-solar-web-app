@@ -48,7 +48,7 @@
 // the spine fetch ran for a day.
 //
 // ?plant=ID restricts a run to one plant and leaves the round-robin cursor alone.
-import { type Account, db, denyUnlessServer, freeTrimmedPlants, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
+import { type Account, db, denyUnlessServer, freeTrimmedPlants, markCursor, type PlantJob, plantsToPoll, rotateJobs, saveCallTally } from "../_shared/sunsynk.ts";
 import { reportError, serve } from "../_shared/errors.ts";
 import {
   bucketizeAgg,
@@ -499,5 +499,7 @@ serve("recover", async (req) => {
     await reportError("recover", e);
     console.error("recover failed:", e);
     return json({ error: String(e instanceof Error ? e.message : e) }, 500);
+  } finally {
+    await saveCallTally();
   }
 });

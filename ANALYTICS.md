@@ -70,7 +70,9 @@ Web (`public/*.jsx`):
 
 Functions (`track()` in `_shared/errors.ts`): `payment_failed`, `plan_cancelled`,
 `winback_resubscribed_done`, `winback_email_sent_done`, `need_a_hand_login_linked_done`,
-`need_a_hand_email_sent_done`.
+`need_a_hand_email_sent_done`. `sunsynk_calls_counted` (SOLAR-468): once a day from `poll` as
+`edge:poll`, no person; yesterday's SunSynk calls, failed calls, calls per plant and slowest
+poll run, from `private.sunsynk_calls` (0178). No user data.
 
 Not sent on purpose: menu opens, hovers, day arrows after the first, chart series toggles.
 

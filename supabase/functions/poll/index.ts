@@ -26,7 +26,7 @@
 //
 // Deliberately NOT ported: the gzipped `raw` payload table. It was 46 MB of the
 // 96 MB SQLite file, has no dashboard consumer, and may embed account identifiers.
-import { reportError, serve } from "../_shared/errors.ts";
+import { reportError, serve, track } from "../_shared/errors.ts";
 import { dayStartEpoch, extrasOf, extrasPaths, historyRows, localDate, parseSeries } from "../_shared/invhistory.ts";
 import {
   aggregate,
@@ -57,6 +57,7 @@ import {
   shareAccount,
   shareSync,
   syncPlants,
+  saveCallTally,
 } from "../_shared/sunsynk.ts";
 
 // The inverter and plant lists change rarely, so they are re-read from SunSynk only
@@ -530,6 +531,24 @@ async function shardSpec(req: Request): Promise<ShardSpec> {
   return { shard, shards, delayMs, account };
 }
 
+// SOLAR-468: this run's SunSynk calls into the daily tally, one write. A shard run also
+// logs itself as a poll_run row (an empty shard too); a one-account run (Check) saves the
+// calls only. At 00:05, 00:10 and 00:15 SA time shard 0 also sends yesterday's totals to
+// PostHog. Every send of a day has the same uuid and time, so PostHog keeps one; the
+// repeats cover a send that failed.
+async function tallyCalls(spec: ShardSpec, runMs: number, plants: number, ts: number): Promise<void> {
+  if (spec.account) return saveCallTally();
+  await saveCallTally({ shard: spec.shard, ms: runMs, plants });
+  const saMinute = Math.floor((ts + 2 * 3600) / 60) % 1440;
+  if (spec.shard !== 0 || ![5, 10, 15].includes(saMinute)) return;
+  try {
+    const day = (await rpc("sunsynk_calls_report", {})) as Record<string, unknown> | null;
+    if (day) await track("sunsynk_calls_counted", "edge:poll", String(day.day), `${day.day}T23:59:00+02:00`, { ...day, $process_person_profile: false });
+  } catch (e) {
+    console.warn("sunsynk_calls_report:", e instanceof Error ? e.message : e);
+  }
+}
+
 // Work that may finish after the response; the runtime keeps the isolate for it.
 const background = (p: Promise<unknown>) => (globalThis as any).EdgeRuntime?.waitUntil?.(p);
 
@@ -548,6 +567,8 @@ async function retryShareLogin() {
     }
   } catch (e) {
     console.warn("share login retry skipped:", e instanceof Error ? e.message : e);
+  } finally {
+    await saveCallTally();
   }
 }
 
@@ -580,7 +601,10 @@ serve("poll", async (req) => {
           console.warn("bootstrap skipped:", e instanceof Error ? e.message : e);
         }
       }
-      if (!jobs.length) return json({ ok: true, ts, ...spec, accounts: 0, note: "no accounts in this shard" });
+      if (!jobs.length) {
+        await tallyCalls(spec, 0, 0, ts);
+        return json({ ok: true, ts, ...spec, accounts: 0, note: "no accounts in this shard" });
+      }
     }
 
     // Group jobs by account.
@@ -593,6 +617,7 @@ serve("poll", async (req) => {
     const mine = [...byAccount.values()];
 
     if (spec.delayMs > 0) await sleep(spec.delayMs);
+    const runStart = Date.now();
 
     // Accounts are independent; one dying must not stop the others.
     const results = await Promise.all(mine.map(async ({ acc, jobs }): Promise<AccountResult> => {
@@ -620,9 +645,12 @@ serve("poll", async (req) => {
       outcome: r.error ? (/^[a-z_]+: /.test(r.error) ? "ours" : "sunsynk")
              : r.inverters > 0 && r.readings === 0 ? "sunsynk" : "ok",
     }));
-    const stepped = await rpc("email_poll_step", {
-      p_ts: ts, p_outcomes: outcomes, p_plants: [...new Set(results.flatMap((r) => r.plants))],
-    }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
+    const [stepped] = await Promise.all([
+      rpc("email_poll_step", {
+        p_ts: ts, p_outcomes: outcomes, p_plants: [...new Set(results.flatMap((r) => r.plants))],
+      }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),
+      tallyCalls(spec, Date.now() - runStart, jobs.length, ts),
+    ]);
     if ((stepped as any)?.error || (stepped as any)?.failed?.length) console.warn("email_poll_step:", JSON.stringify(stepped));
 
     const ok = results.filter((r) => !r.error);
