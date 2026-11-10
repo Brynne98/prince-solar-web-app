@@ -77,15 +77,20 @@ window.POSTHOG_KEY = 'phc_ABkqiYsajciVYVKYX4GZMApcDP7QfD7CKQtgE7XPgjxN';
     try { if (on) { if (!id) ph.reset(); else if (id !== ph.get_distinct_id()) ph.identify(id); } } catch (e) {}
   };
   // A crash in someone's browser is otherwise invisible. Each message once per page
-  // load, at most 20, so a render loop can't flood the project.
+  // load, at most 20, so a render loop can't flood the project. Returns the PostHog event
+  // id, and keeps the last one in window.lastErrorId for "Report this" (SOLAR-428).
   var seen = {}, count = 0;
-  var report = function (err) {
+  var report = function (err, props) {
     try {
       var key = String((err && err.message) || err).slice(0, 200);
-      if (!on || seen[key] || count >= 20) return;
-      seen[key] = true; count++;
-      ph.captureException(err instanceof Error ? err : new Error(key), { page: location.pathname + location.search });
-    } catch (e) {}
+      if (!on) return null;
+      if (seen[key] || count >= 20) return typeof seen[key] === 'string' ? seen[key] : null;
+      count++;
+      var r = ph.captureException(err instanceof Error ? err : new Error(key), Object.assign({ page: location.pathname + location.search }, props));
+      seen[key] = (r && r.uuid) || true;
+      if (r && r.uuid) window.lastErrorId = { id: r.uuid, at: Date.now() };
+      return (r && r.uuid) || null;
+    } catch (e) { return null; }
   };
   window.addEventListener('error', function (e) { report(e.error || e.message); });
   window.addEventListener('unhandledrejection', function (e) { report(e.reason); });
