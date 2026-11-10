@@ -2,7 +2,7 @@
 // judges each check, saves the ones whose state flipped and sends PostHog
 // job_check_failed / job_check_recovered for them, distinct id edge:<job>. Each run also
 // sends job_check_ran, so a PostHog alert hears when the check itself stops.
-import { db } from "../_shared/sunsynk.ts";
+import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { serve, track } from "../_shared/errors.ts";
 
 type Job = { job: string; schedule: string; active: boolean; last_start: string | null; last_status: string | null; last_end: string | null; message: string };
@@ -95,16 +95,9 @@ const rpc = async (fn: string, args: Record<string, unknown> = {}) => {
   return data;
 };
 
-// The gateway has checked the token's signature; only the service role may run this.
-function isService(req: Request): boolean {
-  try {
-    const jwt = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-    return JSON.parse(atob(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).role === "service_role";
-  } catch { return false; }
-}
-
 if (import.meta.main) serve("job-check", async (req) => {
-  if (!isService(req)) return new Response("forbidden", { status: 403 });
+  const denied = denyUnlessServer(req);
+  if (denied) return denied;
   const i = await rpc("job_check_inputs") as Inputs;
   const verdicts = judge(i);
   const changes = verdicts.filter((v) => v.failing != null && v.failing !== (i.checks[v.name]?.failing ?? false));
