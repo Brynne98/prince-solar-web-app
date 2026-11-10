@@ -1350,7 +1350,7 @@
     border-radius: var(--r-lg); }
   @media (max-width: 599px) { .save-bar { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); } }
   .save-bar.dirty { border-color: rgba(var(--accent-rgb),0.4); }
-  /* what a save did (SOLAR-166): centred on the page, where the save bar was, 2.5 s */
+  /* what a save did (SOLAR-166): centred on the page, where the save bar was, 5 s; one with a link stays (SOLAR-479) */
   .toast-host { position: fixed; left: var(--rail-w, 0px); right: 0; bottom: 24px; z-index: 9; display: flex; justify-content: center; padding: 0 var(--sp-lg); pointer-events: none; }
   /* undo the browser's popover box: no centring, frame or fill (display above keeps it drawn) */
   .toast-host[popover] { top: auto; width: auto; height: auto; margin: 0; border: 0; background: none; color: inherit; overflow: visible; }
@@ -1361,10 +1361,14 @@
   /* signed out there is no phone bar to clear */
   .login-wrap .toast-host { bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
   .toast { display: flex; align-items: center; gap: var(--sp-sm); max-width: 560px; padding: var(--sp-sm) var(--sp-lg) var(--sp-sm) var(--sp-md); font-size: var(--fs-md); line-height: 1.35;
-    border-radius: var(--r-lg); animation: toast-in var(--dur-base) var(--ease-out); }
+    border-radius: var(--r-lg); animation: toast-in var(--dur-base) var(--ease-out); pointer-events: auto; cursor: default; }
+  /* one with a link stays until closed: the × sits at its right end */
+  .toast.sticky { padding-right: var(--sp-xs); }
+  .toast .toast-x .ico { stroke: currentColor; }
+  .toast-x { position: static; flex: none; margin: calc(-1 * var(--sp-sm)) 0 calc(-1 * var(--sp-sm)) auto; }
   .toast .ico { stroke: var(--ok); }
   /* a failure, with at most one link */
-  .toast.error { border-color: rgba(var(--bad-rgb),0.45); padding-left: var(--sp-lg); pointer-events: auto; }
+  .toast.error { border-color: rgba(var(--bad-rgb),0.45); padding-left: var(--sp-lg); }
   .toast.info { padding-left: var(--sp-lg); }
   .toast-act { background: none; border: none; padding: 0; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; }
   @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }

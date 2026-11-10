@@ -1234,11 +1234,12 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
   );
 }
 
-// What a save did, one line at the foot of the screen for 2.5 s (SOLAR-166):
+// What a save did, one line at the foot of the screen for 5 s (SOLAR-166, SOLAR-479):
 // window.toast('Saved: rate R3.45 a unit.'). A new one replaces the last. Every failure
 // that isn't one box's typing mistake is window.toast(text, { error: true, action:
-// { label, onClick } }): red, 6 s, at most one link. A note that is neither (still
-// being checked, not open yet) is { info: true }: no tick, 2.5 s (SOLAR-384). Frame mounts the host; the
+// { label, onClick } }): red, at most one link. A note that is neither (still
+// being checked, not open yet) is { info: true }: no tick (SOLAR-384). A toast with a link
+// stays until closed (×, Esc, or a click on it); one without goes after 5 s or on a click. Frame mounts the host; the
 // signed-out screens mount their own (window.SaveToast).
 // A toast sent as its host goes (signing out swaps the frame for the sign-in screen in the
 // same render, as after Delete account, SOLAR-359) moves to the next host.
@@ -1257,6 +1258,8 @@ function SaveToast({ report }) {
     if (toastLast && Date.now() - toastLast.at < 1000) setT(toastLast);
     return () => { toastShow = null; };
   }, []);
+  const act = t && (t.action || (report && t.error && !t.noReport &&
+    { label: 'Report this', onClick: () => openFeedback({ text: t.text, id: recentErrorId() }) }));
   useEffect(() => {
     if (!t) return;
     if (t === toastLast) toastLast = null;   // drawn here: the next host must not show it again (SOLAR-365)
@@ -1264,17 +1267,23 @@ function SaveToast({ report }) {
     // popover again puts each new toast above whatever pop-up is open.
     const h = host.current;
     if (h?.showPopover) { if (h.matches(':popover-open')) h.hidePopover(); h.showPopover(); }
-    const id = setTimeout(() => setT(null), t.error ? 6000 : 2500);
-    return () => clearTimeout(id);
+    // Esc closes it; with a pop-up open, that pop-up's Esc goes first unless the toast has focus.
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (document.querySelector('dialog[open]') && !h?.contains(document.activeElement)) return;
+      setT(null);
+    };
+    document.addEventListener('keydown', onKey);
+    const id = !act && setTimeout(() => setT(null), 5000);
+    return () => { clearTimeout(id); document.removeEventListener('keydown', onKey); };
   }, [t]);
-  const act = t && (t.action || (report && t.error && !t.noReport &&
-    { label: 'Report this', onClick: () => openFeedback({ text: t.text, id: recentErrorId() }) }));
   return (
     <div ref={host} popover="manual" className="toast-host" role={t?.error ? 'alert' : 'status'} aria-live={t?.error ? 'assertive' : 'polite'}>
       {t && (
-        <div key={t.at} className={'toast' + (t.error ? ' error' : t.info ? ' info' : '')}>
+        <div key={t.at} className={'toast' + (t.error ? ' error' : t.info ? ' info' : '') + (act ? ' sticky' : '')} onClick={() => setT(null)}>
           {!t.error && !t.info && <Icon id="tick" />}
           <span>{t.text}{act && <> <button type="button" className="toast-act" onClick={() => { setT(null); act.onClick(); }}>{act.label}</button></>}</span>
+          {act && <button type="button" className="notice-x toast-x" aria-label="Close" onClick={() => setT(null)}><Icon id="close" /></button>}
         </div>
       )}
     </div>
