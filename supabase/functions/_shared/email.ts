@@ -675,6 +675,8 @@ export const PAY_URL = `${PLAN}&pay=1`;
 // Buttons that ask them to pick a plan open Adjust plan: Free, Home and Family side by
 // side (SOLAR-341).
 const PLANS = `${APP}/?tab=plans`;
+// Billing's Payment section: the saved card and its Update button (SOLAR-473).
+const PAYMENT = `${APP}/?tab=account&section=payments`;
 // "To stop it, cancel before": Billing's Cancellation section (SOLAR-361).
 const CANCEL = `${APP}/?tab=account&section=cancel`;
 // Day-2 "Finish setup": Plant settings' Your system, where rate, battery and panels are set (SOLAR-361).
@@ -941,7 +943,7 @@ export const cardExpiring = (c: CardExpiry) => {
       { box: { rows: [["Card", esc(c.card)], ...(c.final ? [["Expires", c.on] as [string, string]] : []),
         ["Next payment", `${rand(c.next.amount)} on ${c.next.date}`]] } },
       { lead: "Update it before your next payment." },
-      { button: { label: "Update card", href: PLAN } },
+      { button: { label: "Update card", href: PAYMENT } },
     ],
     footer: BILL_FOOTER,
   });

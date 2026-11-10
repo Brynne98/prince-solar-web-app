@@ -1158,6 +1158,8 @@ const pageOk = (tabs, id) => isSettings(id) || tabs.some(t => t.id === id);
 // one section since SOLAR-250, so the old ids land on it.
 const SECTION_ALIAS = { tariff: 'system', battery: 'system', plant: 'system' };
 const SECTION_PAGE = { connection: 'billing', system: 'system', steps: 'system', download: 'account', notifications: 'account', plan: 'billing', payments: 'billing', plants: 'billing', cancel: 'billing' };
+// An email's ?section= (logins is the old name for Plants) → the section it opens, in App and Setup.
+const URL_SECTION = { logins: 'connection', notifications: 'notifications', plan: 'plan', payments: 'payments', cancel: 'cancel', system: 'system' };
 // A saved or linked Battery page opens Equipment, where the packs now are; the plant's
 // settings were Settings' System page ('settings') until they moved to the list.
 const tabAlias = (id) => (id === 'battery' ? 'inverters' : id === 'settings' ? 'system' : id);
@@ -1354,6 +1356,13 @@ function Setup({ links }) {
   useEscape(connecting, () => setConnecting(false));
   // An email's Add your plant (?add=plant, link.jsx): the form, as the card's button opens it.
   useEffect(() => { if (window.takeAddAsk()) connect(); }, []);
+  // An email's ?section= opens its Settings page here too, as in App; Plant settings waits for a plant.
+  useEffect(() => {
+    const url = new URL(location.href), section = URL_SECTION[url.searchParams.get('section')];
+    if (!url.searchParams.has('section')) return;
+    url.searchParams.delete('section'); history.replaceState(history.state, '', url);
+    if (section && SECTION_PAGE[section] !== 'system') { setFlash(section); setTab(SECTION_PAGE[section]); }
+  }, []);
   useEffect(() => { window.track('screen_viewed', { stage: 'setup', screen: connecting ? 'connect' : tab }); }, [tab, connecting]);
   const dead = links.accounts.filter(a => a.status === 'needs_relink' && a.kind !== 'share');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
@@ -1604,10 +1613,10 @@ function App({ links }) {
       const url = new URL(location.href);
       const linked = Number(url.searchParams.get('plant'));
       // A report or alert footer adds section=notifications: open Account on the email switches.
-      // A payment email or Paystack's return adds section=plan: Billing.
+      // A payment email or Paystack's return adds section=plan: Billing. Update card adds section=payments.
       // An email's Add your plant (?add=plant, link.jsx): Plants, where the section opens Add plant.
       const section = window.addAsked() ? 'connection'
-        : { logins: 'connection', notifications: 'notifications', plan: 'plan', cancel: 'cancel', system: 'system' }[url.searchParams.get('section')];
+        : URL_SECTION[url.searchParams.get('section')];
       if (url.searchParams.has('section')) {
         url.searchParams.delete('section'); history.replaceState(history.state, '', url);
       }
