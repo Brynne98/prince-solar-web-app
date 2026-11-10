@@ -324,6 +324,34 @@ select pg_temp.eq('no readings: a whole plant back for 15 minutes sends one Read
      from public.email_queue where plant_id = 9007), '1/1');
 select pg_temp.eq('no readings: Readings back says when the readings came back',
   (select (data->>'at')::bigint = pg_temp.now_k(0) - 20 from public.email_queue where plant_id = 9001 and kind = 'logger_back'), true);
+-- SOLAR-458: plant 9006 collected until 2 hours ago, then was stopped. Stopping keeps its
+-- newest reading time. Started again, it waits 30 minutes from the start for readings,
+-- the same as a new link, before No readings.
+update public.plant_users set paused = true where plant_id = 9006;
+update private.plant_alert_state set last_dev = pg_temp.now_k(120), stale = false where plant_id = 9006;
+insert into private.inverter_alert_state (plant_id, sn, last_dev) values (9006, '9006M', pg_temp.now_k(120)), (9006, '9006S', pg_temp.now_k(120))
+  on conflict (plant_id, sn) do update set last_dev = excluded.last_dev, stale = false;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000009006","role":"authenticated"}', true);
+select public.api_plant_start(9006);
+select set_config('request.jwt.claims', '', true);
+select pg_temp.logins('ok', now(), now());
+select public.email_sweep();
+select pg_temp.eq('no readings: a plant started a minute ago sends nothing', pg_temp.sent(9006, 'logger_stale'), 0);
+-- The first reading lands from one inverter; the other has not sent yet.
+update private.plant_alert_state set last_dev = pg_temp.now_k(0) - 30 where plant_id = 9006;
+update private.inverter_alert_state set last_dev = pg_temp.now_k(0) - 30 where plant_id = 9006 and sn = '9006M';
+select public.email_sweep();
+select pg_temp.eq('no readings: an inverter not heard from since a minute-old start sends nothing', pg_temp.sent(9006, 'logger_stale'), 0);
+-- 31 minutes after the start (now() is fixed in a transaction, so the start is back-dated).
+update private.plant_alert_state set started_at = started_at - 1860 where plant_id = 9006;
+select public.email_sweep();
+select pg_temp.eq('no readings: an inverter quiet 31 minutes after the start sends one email',
+  (select count(*)::int from public.email_queue where plant_id = 9006 and kind = 'logger_stale' and data->>'inverter' = 'Inverter 9006S'), 1);
+update private.plant_alert_state set last_dev = pg_temp.now_k(31) where plant_id = 9006;
+select public.email_sweep();
+select pg_temp.eq('no readings: a plant quiet 31 minutes after the start sends one email, with its last reading',
+  (select count(*)::int from public.email_queue where plant_id = 9006 and kind = 'logger_stale' and not data ? 'inverter'
+      and (data->>'since')::bigint = pg_temp.now_k(31)), 1);
 
 -- ---- SunSynk down -----------------------------------------------------------------------
 -- One login, failing for 20 minutes; the others not tried (as with two users, one down).
