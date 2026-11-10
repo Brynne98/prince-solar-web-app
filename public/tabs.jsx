@@ -2482,7 +2482,9 @@ function CancelSection({ billing: b, reload, logins = [] }) {
 // side with a monthly/yearly switch. A smaller plan in either period is booked for the
 // billing date (SOLAR-364); a bigger one is paid today, in the plan's own period or, from
 // monthly, yearly. No extra plants (SOLAR-371): more than Family's 5 is by email.
-const PLAN_TAG = { free: 'See your solar today', home: 'One house, every day kept', family: 'More than one house' };
+// SOLAR-462: what each plan gives in one line, your plan marked by a pill, an offer's terms in
+// one band under the switch rather than on each card.
+const PLAN_GIVES = { free: '1 plant · the last 24 hours', home: '2 plants · full history · reports', family: '5 plants · everything in Home' };
 function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null }) {
   const plants = logins.flatMap(a => a.plants);
   const { useState, useEffect } = React;
@@ -2511,10 +2513,10 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
     <div className="settings-page plan-pop">
       {back}
       <div className="page-head"><h1>Pick your plan</h1></div>
-      <div className="plan-grid plan-cards" aria-hidden="true">{[0, 1, 2].map(i => <window.Skeleton key={i} h={260} r={14} />)}</div>
+      <div className="plan-grid plan-cards" aria-hidden="true">{[0, 1, 2].map(i => <window.Skeleton key={i} h={180} r={14} />)}</div>
     </div>
   );
-  const { rand, billDay, perUnit, offerLine, offerCap, Was } = window.billingFmt;
+  const { rand, billDay, perUnit, Was } = window.billingFmt;
   const unit = perUnit(view);
   const prices = b.prices?.[view] || {};
   const sameView = !paid || view === b.period;
@@ -2528,8 +2530,12 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   const ownDate = () => <div className="plan-cur">{b.nextPlan === 'free' ? 'Ends ' : 'Changes '}{billDay(b.nextDate)}</div>;
   // a smaller plan booked for the billing date in this period; Free has none
   const bookedHere = (p) => b.nextPlan === p && (p === 'free' || (b.nextPeriod || b.period) === view);
-  // The line under a price: Family's says where more plants go
-  const note = (p) => (p === 'family' ? <>More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: b.plan, from: 'plans' })}>Email us</a>.</> : ' ');
+  // The offer's terms, once for every card it lowers in this view
+  const o = b.offer;
+  const offerBand = o && ['free', 'home', 'family'].some(p => list(p) > (price(p) ?? 0)) && <p className="plan-offer">
+    <b>{o.id === 'launch' ? 'Launch price' : 'Offer price'}</b>{' '}
+    <span>{o.until ? `Until ${billDay(o.until)}.` : o.months && !o.held ? `For your first ${view === 'yearly' ? 'year' : o.months + ' months'}.` : 'Yours while you stay.'}
+      {!o.held && o.cap ? ` For the first ${o.cap} members.` : ''}</span></p>;
   const action = (p) => {
     // a paid year changes nothing until it starts (SOLAR-298); a quiet line holds the button's row
     if (b.prepaidOn && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
@@ -2554,12 +2560,6 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
                      : plants.length > planRoom(p, b.nextExtraPlants ?? b.extraPlants) ? setPicking({ plan: p, period: view })
                      : run(() => bookPlan(b, p, view, reload), 'down:' + p))}>Downgrade</button>;
   };
-  // The same four lines on every card, so the cards end level; false is a line the plan lacks
-  const gives = {
-    free: [['1 plant', true], ['The last 24 hours', true], ['Alerts', true], ['Reports by email', false]],
-    home: [['2 plants', true], ['Full history', true], ['Alerts', true], ['Reports by email', true]],
-    family: [['5 plants', true], ['Full history', true], ['Alerts', true], ['Reports by email', true]],
-  };
   return pop(
     <div className="settings-page plan-pop">
       {back}
@@ -2570,24 +2570,19 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
       {b.comped ? <p className="field-note">Your plan is free of charge: every plant, full history.</p> : <>
         <Segmented size="sm" className="plan-period" label="Billing" value={view} onChange={setView}
                    options={[{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly, 2 months free' }]} />
+        {offerBand}
         {/* One paywall on every screen: three cards side by side, stacked on phones (SOLAR-303, SOLAR-304) */}
         <div className="plan-grid plan-cards">
           {['free', 'home', 'family'].map(p => (
             <div key={p} className={'pw-plan' + (p === b.plan ? ' plan-mine' : '')}>
-              {p === b.plan && <div className="plan-band">Your plan</div>}
-              <div className="pw-name">{PLAN_NAME[p]}</div>
-              <div className="plan-tagline">{PLAN_TAG[p]}</div>
-              <div className="pw-price"><Was list={list(p)} price={price(p) ?? 0} /><b>{rand(price(p) ?? 0, true)}</b>{p !== 'free' && ' ' + unit}
-                {b.offer && list(p) > (price(p) ?? 0) && <span className="pw-billed pw-offer">{offerLine(b.offer, list(p), view)}</span>}</div>
-              <div className="plan-note">{note(p)}</div>
+              <div className="pw-name">{PLAN_NAME[p]}{p === b.plan && <span className="plan-pill">Your plan</span>}</div>
+              <div className="pw-price"><Was list={list(p)} price={price(p) ?? 0} /><b>{rand(price(p) ?? 0, true)}</b>{p !== 'free' && ' ' + unit}</div>
+              <div className="plan-gives">{PLAN_GIVES[p]}</div>
               {action(p)}
-              <ul className="pw-gives plan-gives">
-                {gives[p].map(([g, has], i) => <li key={i} className={has ? undefined : 'plan-off'}>{g}</li>)}
-              </ul>
             </div>
           ))}
         </div>
-        <p className="plan-foot">{offerCap(b.offer) && offerCap(b.offer) + ' '}Prices in rand. Cancel any time.</p>
+        <p className="plan-foot">More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: b.plan, from: 'plans' })}>Email us</a>. Cancel any time.</p>
         {cancelling && <CancelPlanDialog b={b} logins={logins} busy={!!busy} onCancel={() => setCancelling(false)}
           onConfirm={(keep) => run(async () => { await bookPlan(b, 'free', null, reload, keep); setCancelling(false); })} />}
         {picking && (
