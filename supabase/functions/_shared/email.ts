@@ -720,6 +720,9 @@ const list = (a: string[]) => esc(a.join(", "));
 const SEE_PLAN = { button: { label: "See your plan", href: PLAN } };
 const CANCEL_BUTTON = { button: { label: "Cancel plan", href: CANCEL } };
 const PAY_BUTTON = (url: string) => ({ button: { label: "Pay with another card", href: url } });
+// A psh_ reference is 36 characters with no break: it wraps anywhere, or it pushes the
+// box past a phone's width (SOLAR-484).
+const ref = (r: string) => `<span style="word-break:break-all">${esc(r)}</span>`;
 
 // Billing wording (SOLAR-415): short, names the plan, date and amount, and never explains
 // what the owner just did themselves. Amounts sit in the box, not in the title, except
@@ -739,7 +742,7 @@ export const paymentReceived = (r: Receipt) =>
     parts: [
       { box: { hero: { label: "Paid", value: rand(r.amount), sub: r.date },
         rows: [["For", esc(`${PLAN_NAME[r.plan]}${r.covers ? `, ${r.covers}` : `, ${r.period}`}`)], ["Card", esc(r.card)],
-          ["Reference", esc(r.reference)], ["Next payment", `${rand(r.next.amount)} on ${r.next.date}`]] } },
+          ["Reference", ref(r.reference)], ["Next payment", `${rand(r.next.amount)} on ${r.next.date}`]] } },
       SEE_PLAN,
     ],
     footer: BILL_FOOTER,
@@ -784,6 +787,7 @@ export type Upgrade = {
   addedPlants?: number; // extra plants on Family: no email since SOLAR-371 (notify skips it)
   paidNow: number; daysLeft: number;
   card?: string;
+  reference?: string; // Paystack's receipt shows the same one (SOLAR-484)
   credit?: number; // Home monthly to Family yearly (SOLAR-364): what the rest of the month came to
   next: { amount: number; date: string };
 };
@@ -794,7 +798,8 @@ export const planUpgraded = (u: Upgrade) =>
     parts: [
       { box: { hero: { label: "Paid today", value: rand(u.paidNow),
           sub: u.credit != null ? `${rand(u.credit)} off for the rest of your month` : `for the rest of this ${u.period === "yearly" ? "year" : "month"}` },
-        rows: [...(u.card ? [["Card", esc(u.card)] as [string, string]] : []), ["Next payment", `${rand(u.next.amount)} on ${u.next.date}`]] } },
+        rows: [...(u.card ? [["Card", esc(u.card)] as [string, string]] : []),
+          ...(u.reference ? [["Reference", ref(u.reference)] as [string, string]] : []), ["Next payment", `${rand(u.next.amount)} on ${u.next.date}`]] } },
       u.to === "family" ? { button: { label: "Add a plant", href: ADD_PLANT } } : SEE_PLAN,
     ],
     footer: BILL_FOOTER,
@@ -809,7 +814,7 @@ export const planSwitched = (s: Switched) =>
     title: "You're on yearly",
     parts: [
       { box: { hero: { label: "Paid today", value: rand(s.amount), sub: s.date },
-        rows: [["For", esc(`${PLAN_NAME[s.plan]}, ${s.covers ?? `from ${s.startsOn}`}`)], ["Card", esc(s.card)], ["Reference", esc(s.reference)]] } },
+        rows: [["For", esc(`${PLAN_NAME[s.plan]}, ${s.covers ?? `from ${s.startsOn}`}`)], ["Card", esc(s.card)], ["Reference", ref(s.reference)]] } },
       SEE_PLAN,
     ],
     footer: BILL_FOOTER,
@@ -883,6 +888,7 @@ export type Failed = {
   freeOn: string; // the day the account moves to Free if it stays unpaid
   payUrl: string;
   disputed?: string; // the bank took a payment back (a lost dispute, 0130): the day it was paid
+  reference?: string; // the declined try, or the payment taken back (SOLAR-484)
 };
 
 // The shared layout (SOLAR-415): the amount big with what it was for, facts as rows
@@ -896,7 +902,7 @@ export const paymentFailed = (f: Failed) => {
       { box: { hero: f.disputed
           ? { label: "Reversed", value: rand(f.amount), tone: "bad", sub: `for ${plan}, paid on ${f.disputed}` }
           : { label: "Declined", value: rand(f.amount), tone: "bad", sub: `for ${plan}` },
-        rows: [["Card", esc(f.card)], ...(f.nextTry ? [["Next try", f.nextTry] as [string, string]] : []), ["Free from", f.freeOn]] } },
+        rows: [["Card", esc(f.card)], ...(f.reference ? [["Reference", ref(f.reference)] as [string, string]] : []), ...(f.nextTry ? [["Next try", f.nextTry] as [string, string]] : []), ["Free from", f.freeOn]] } },
       { lead: `${f.nextTry ? "" : "That was the last try. "}Pay before ${f.freeOn} to keep ${plan}.` },
       PAY_BUTTON(f.payUrl),
       { small: PAID_FREE },
@@ -925,7 +931,7 @@ export const paymentRefunded = (r: Refund) => {
         : "Your plan changed while you paid, so we sent it back." },
       { box: { hero: { label: "Refund", value: refundRand(r.amount), sub: r.card ? `back to ${r.card}` : "back to your card" },
         rows: [...(part ? [["Payment", rand(r.paid!)] as [string, string]] : []),
-          ["Paid on", r.date], ["Arrives in", "3 to 10 working days"], ["Reference", esc(r.reference)]] } },
+          ["Paid on", r.date], ["Arrives in", "3 to 10 working days"], ["Reference", ref(r.reference)]] } },
       SEE_PLAN,
       { small: "Paystack, who handles our payments, emails you about it too." },
     ],
