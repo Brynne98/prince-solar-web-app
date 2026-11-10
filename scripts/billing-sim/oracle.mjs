@@ -83,7 +83,8 @@ export class Oracle {
   // room, the pick first (0136). Empty when nothing is booked.
   drops() {
     const br = this.bookedRoom();
-    if (br === null || this.comped) return [];
+    // none while a paid year waits to start: a cancel in it stops plants a year later (0175)
+    if (br === null || this.comped || this.prepaid !== null) return [];
     return this.active().filter((p) => !this.rm.has(p.id)).sort((a, b) => this.byPick(a, b)).slice(br).map((p) => p.id);
   }
   // the collecting plants the booked plan keeps, in pick order
@@ -143,6 +144,14 @@ export class Oracle {
   bookChange(plan, period) {
     if (this.plan === 'free') return { err: 'nothing to change on Free' };
     if (this.comped) return { err: 'free of charge' };
+    // a booked cancel is final (0175)
+    if (this.nextPlan === 'free') return { err: 'your plan is cancelled' };
+    // a paid year: only a cancel, which keeps the switch and ends the plan a year later (0175)
+    if (this.prepaid !== null) {
+      if (plan !== 'free') return { err: 'your year is paid' };
+      this.nextPlan = 'free'; this.nextKeep = [];
+      return {};
+    }
     if (PLAN_RANK[plan] > PLAN_RANK[this.plan]) return { err: 'upgrade starts at once' };
     if (plan === this.plan && this.period === 'monthly' && period === 'yearly') return { err: 'switch to yearly is paid now' };
     const samePer = (period ?? this.period) === this.period;
@@ -217,6 +226,8 @@ export class Oracle {
     if (kind === 'switch' && this.nextPlan !== null) return { err: 'plan change' };
     if (kind === 'upgrade' && plan === this.plan) return { err: 'nothing to buy' };
     if (kind === 'upgrade' && this.plan === 'family' && plan === 'home') return { err: 'not an upgrade' };
+    // a cancelled plan buys nothing more (0175)
+    if (kind === 'upgrade' && this.nextPlan === 'free') return { err: 'your plan is cancelled' };
     const amount = this.amountFor(kind, plan, per, today);
     const extraTotal = plan !== 'family' ? 0 : kind === 'switch' ? this.nextExtra ?? this.extra : kind === 'start' ? added : this.held() + added;
     return { kind, amount, period: per, added, extraTotal, across };
@@ -230,6 +241,7 @@ export class Oracle {
   // Why a payment no longer applies (refunded), or null: the account moved on since the charge opened.
   stale(c, today) {
     if (this.prepaid !== null) return 'year paid';
+    if (this.nextPlan === 'free' && (c.kind === 'upgrade' || c.kind === 'switch')) return 'plan cancelled';
     if (c.kind === 'switch') {
       if (this.plan !== c.plan || this.period !== 'monthly' || this.state === 'past_due' || this.comped) return 'plan changed';
       if (this.nextPlan !== null) return 'plan change booked';
@@ -315,6 +327,12 @@ export class Oracle {
       this.stat.retries++;
     }
     // the billing date: booked changes apply, the new amount is charged (none for a year a switch paid, 0138)
+    // a cancel booked in a paid year: the year starts as paid, the cancel waits for its end (0175)
+    if (this.plan !== 'free' && !this.comped && this.state === 'active' && this.next <= d && this.prepaid === this.next && this.nextPlan === 'free') {
+      if (this.plan === 'family') this.extra = this.nextExtra ?? this.extra; else this.extra = 0;
+      this.period = 'yearly'; this.next = step(this.next, 'yearly', this.day, 1);
+      this.nextPeriod = null; this.nextExtra = null; this.prepaid = null;
+    }
     if (this.plan !== 'free' && !this.comped && this.state === 'active' && this.next <= d) {
       const plan = this.nextPlan ?? this.plan, per = this.nextPeriod ?? this.period;
       const extra = plan === 'family' ? this.nextExtra ?? this.extra : 0;

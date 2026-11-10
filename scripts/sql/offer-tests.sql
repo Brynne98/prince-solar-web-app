@@ -45,14 +45,16 @@ begin
   -- an extra plant past the 3rd: R29
   perform pg_temp.eq('u2 extra plant yearly', public.billing_amount('family', 'yearly', 1, 't_launch'), 890 + 290);
 
-  -- cancel booked, then undone before the date: price kept
+  -- a booked cancel is final (0175): it has no undo
   perform public.billing_book_change(u1, 'free', null, null);
-  perform public.billing_book_change(u1, 'home', null, null);
-  perform pg_temp.eq('undo keeps offer', (select offer_id from private.billing where user_id = u1), 't_launch');
-  perform pg_temp.eq('undo renews R49', public.billing_amount_due(u1), 49);
+  begin
+    perform public.billing_book_change(u1, 'home', null, null);
+    perform pg_temp.eq('cancel no undo', 'undone', 'refused');
+  exception when sqlstate '22023' then null;
+  end;
+  perform pg_temp.eq('cancel keeps offer to its date', (select offer_id from private.billing where user_id = u1), 't_launch');
 
   -- cancel reaches its date: back to Free, offer gone, place not reopened
-  perform public.billing_book_change(u1, 'free', null, null);
   perform set_config('t.today', '2027-01-01', true);
   perform public.billing_run('2027-01-01');
   perform pg_temp.eq('u1 on Free', (select plan from private.billing where user_id = u1), 'free');
