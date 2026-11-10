@@ -47,15 +47,18 @@ function plantStatus(snap, now) {
   // Say it's loading instead of Offline or Stale; "Fetching history" sits beside it.
   const loading = window.syncProgress(snap.sync) != null;
   const status = loading && bad !== 'live' ? 'loading' : bad;
+  // fresh readings with an inverter silent: the word names it, so the header needs no strip (SOLAR-384)
+  const named = status === 'stale' && ageS <= 180 && offline > 0;
   return {
     status, last, old: status !== 'loading' && ageS > 180,
-    // every login dead (snap.loginCut, set by App): Reconnect in red as soon as the poller
-    // marks it, not after 15 min silent (SOLAR-385). tone is the colour; status stays the age.
+    // every login dead (snap.loginCut, set by App): red as soon as the poller marks it, not
+    // after 15 min silent (SOLAR-385). tone is the colour; status stays the age.
     tone: snap.loginCut ? 'offline' : status,
     // today's figures are not now: greyed (an old reading or a dead login), SOLAR-386
     faded: !!snap.loginCut || (status !== 'loading' && ageS > 180),
-    word: snap.loginCut ? 'Reconnect' : { live: 'Live', stale: 'Stale', offline: 'Offline', loading: 'Setting up' }[status],
-    detail: offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now),
+    word: snap.loginCut ? 'Login stopped' : named ? offline + ' of ' + total + ' offline'
+      : { live: 'Live', stale: 'Stale', offline: 'Offline', loading: 'Setting up' }[status],
+    named, detail: offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now),
   };
 }
 
@@ -68,7 +71,8 @@ function WallStatus({ snap }) {
   const s = plantStatus(snap, useNow(15000));
   return (
     <window.Tip className={'wall-status below status-' + s.tone} text={'Last reading ' + window.fmtTime(s.last)}>
-      <StatusBits word={s.word}><span className="status-detail">{s.detail}</span></StatusBits>
+      {/* the word already names the silent inverter: no detail to repeat it */}
+      <StatusBits word={s.word}>{!s.named && <span className="status-detail">{s.detail}</span>}</StatusBits>
     </window.Tip>
   );
 }
@@ -188,9 +192,9 @@ function PickMenu({ id, label, value, options, onPick }) {
   );
 }
 
-// One menu row's state, by the header's rules (SOLAR-182): a dead login reads Reconnect.
+// One menu row's state, by the header's rules (SOLAR-182): a dead login reads Login stopped.
 function MenuState({ st, cut, now }) {
-  if (cut) return <span className="pm-state status-offline"><span className="pm-dot" />Reconnect</span>;
+  if (cut) return <span className="pm-state status-offline"><span className="pm-dot" />Login stopped</span>;
   if (!st || st.lastTs == null) return null;
   const s = plantStatus({
     inverters: Array.from({ length: st.inverters || 0 }, (_, i) => ({ status: i < (st.online || 0) ? 'online' : 'offline' })),
@@ -388,8 +392,9 @@ function notifDay(day) {
 
 // Billing notices (SOLAR-212): the facts api_notifications pins (0148), in the emails'
 // words (_shared/email.ts). They stay at the top of the list until their state ends.
-// A failed payment and plants about to go are a banner on every page too; only the
-// second can be closed. act: { plan, plans, undo } from App.
+// A failed payment and plants about to go are a card on every page too (NoticeCard,
+// SOLAR-384); only the second can be closed. bodyShort is the card's line on a phone.
+// act: { plan, plans, undo } from App.
 const FREE_PAID = 'readings are kept for 30 days, then you see only today. Alerts stay on; reports stop.';
 function billNotice(n, act) {
   const { rand, billDay } = window.billingFmt;
@@ -398,9 +403,10 @@ function billNotice(n, act) {
     case 'bill_failed': return { banner: true, tone: 'bad', icon: 'card', title: `Payment of ${rand(n.amount)} failed`, short: 'Payment failed',
       body: n.nextTry ? `Next try ${billDay(n.nextTry)}. Moves to Free on ${billDay(n.freeOn)} if unpaid.`
         : `Last try failed. Moves to Free on ${billDay(n.freeOn)} if unpaid.`,
+      bodyShort: `Moves to Free on ${billDay(n.freeOn)} if unpaid.`,
       button: 'Pay with another card', run: () => window.settlePayment() };
     case 'bill_removal_soon': {
-      // up to 3 names, then a count: the banner stays short on a phone
+      // up to 3 names, then a count: the card stays short on a phone
       const p = n.plants, one = p.length === 1;
       const list = p.length > 3 ? `${p.slice(0, 3).join(', ')} and ${p.length - 3} more`
         : p.length > 1 ? `${p.slice(0, -1).join(', ')} and ${p[p.length - 1]}` : p[0] || 'A plant';
@@ -408,9 +414,10 @@ function billNotice(n, act) {
       return { banner: true, tone: 'warn', icon: 'trash', closable: 'bill_removal_soon:' + n.on,
         title: `${list} will be deleted on ${billDay(n.on)}`,
         short: `Deleting ${one ? p[0] : p.length + ' plants'} on ${billDay(n.on)}`,
-        lead: why,
         body: why,
-        button: one ? `Keep ${p[0]}` : 'Keep them', run: act.plan };
+        bodyShort: `Your plan covers ${n.room} plant${n.room === 1 ? '' : 's'}.`,
+        // it opens Billing's plan, where the plants to keep are picked (SOLAR-384)
+        button: 'Choose plants', run: act.plan };
     }
     case 'bill_free': {
       const stopped = n.stopped || [];
@@ -443,9 +450,29 @@ function billNotice(n, act) {
   }
 }
 
-// The banner's close is kept on this device, for that one deletion date.
+// A notice to act on (SOLAR-384): a card the height of an Overview card, two columns of
+// the Overview's grid wide, so it sits with the cards instead of across the page. tone:
+// bad, warn or info. short: the title on a phone, bodyShort its line, so the button
+// fits. onClose: the ×, kept by the caller.
+function NoticeCard({ tone, title, short, body, bodyShort, button, onClick, onClose }) {
+  const two = (long, brief) => brief ? <><span className="nc-long">{long}</span><span className="nc-short">{brief}</span></> : long;
+  return (
+    <div className={'notice-card ' + tone + (onClose ? ' closable' : '')} role={tone === 'bad' ? 'alert' : 'status'}>
+      <div className="nc-text">
+        <b>{two(title, short)}</b>
+        {body && <p>{two(body, bodyShort)}</p>}
+      </div>
+      <button type="button" className="ghost-btn" onClick={onClick}>{button}</button>
+      {onClose && <button type="button" className="notice-x" aria-label="Close" onClick={onClose}><Icon id="close" /></button>}
+    </div>
+  );
+}
+window.NoticeCard = NoticeCard;
+
+// The billing cards above every page (SOLAR-212). A card's close is kept on this device,
+// for that one deletion date.
 const NOTICE_CLOSED = 'synsynk.noticeClosed';
-function BillBanners({ notices }) {
+function BillCards({ notices }) {
   const [closed, setClosed] = useState(() => { try { return localStorage.getItem(NOTICE_CLOSED); } catch (e) { return null; } });
   const close = (n) => {
     window.track('notice_closed', { kind: n.kind });
@@ -455,21 +482,9 @@ function BillBanners({ notices }) {
   const shown = notices.filter(n => n.banner && (!n.closable || n.closable !== closed));
   if (!shown.length) return null;
   return (
-    <div className="bill-banners">
-      {shown.map(n => (
-        <div key={n.kind} className={'bill-banner ' + n.tone + (n.closable ? ' closable' : '')} role={n.closable ? 'status' : 'alert'}>
-          <span className={'nl-glyph g-' + n.tone}><Icon id={n.icon} /></span>
-          <p><b>{n.title}</b><b className="bb-short">{n.short}</b><span>{n.lead || n.body}</span></p>
-          <button type="button" className="ghost-btn" onClick={() => n.act('banner')}>{n.button}</button>
-          {/* phone: one line; the whole row opens the bell, where the details and button are (SOLAR-345) */}
-          <button type="button" className="bill-banner-more" aria-label={n.title + '. Details'}
-                  onClick={() => { window.track('notice_opened', { kind: n.kind }); window.dispatchEvent(new Event('ps-open-bell')); }}>
-            <Icon id="next" />
-          </button>
-          {/* top right at every width, out of the flow, so a wrap never moves it */}
-          {n.closable && <button type="button" className="bill-banner-x" aria-label="Close" onClick={() => close(n)}><Icon id="close" /></button>}
-        </div>
-      ))}
+    <div className="notice-cards">
+      {shown.map(n => <NoticeCard key={n.kind} tone={n.tone} title={n.title} short={n.short} body={n.body} bodyShort={n.bodyShort}
+        button={n.button} onClick={() => n.act('banner')} onClose={n.closable ? () => close(n) : undefined} />)}
     </div>
   );
 }
@@ -479,13 +494,6 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
   const [open, setOpen, ref] = usePopover();
   const shown = useRef(null);
   useEffect(() => { if (open) onOpen(); }, [open]);
-  // a phone banner's tap opens the list (SOLAR-345)
-  useEffect(() => {
-    if (disabled) return;
-    const show = () => setOpen(true);
-    window.addEventListener('ps-open-bell', show);
-    return () => window.removeEventListener('ps-open-bell', show);
-  }, [disabled]);
   // what the open list showed unread, billing notices too (SOLAR-465); read once it closes,
   // so the dots stay while it's open
   useEffect(() => { if (open) shown.current = pinned.filter(n => !n.read).map(n => n.id)
@@ -626,7 +634,7 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
     setMore(true);
     ask(res.items[res.items.length - 1])
       .then(r => { keep(r); setRes(p => ({ ...r, items: p.items.concat(r.items) })); })
-      .catch(() => window.toast('Couldn’t load more. Try again.'))
+      .catch(() => window.toast('Couldn’t load more. Try again.', { error: true }))
       .finally(() => setMore(false));
   };
   const readAll = () => {
@@ -685,25 +693,40 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
   );
 }
 
-// Status word right of the plant, coloured; the age only once it is worth reading.
-function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
+// Status word right of the plant, coloured; the age only once it is worth reading. It also
+// says what the strips under the header used to (SOLAR-384): no connection, couldn't
+// refresh, reconnected and waiting, login stopped with Reconnect in Refresh's place, and
+// Grid off as a tag of its own.
+function HeaderStatus({ snap, onRefresh, busy, idleWord, err, relinkedAt, onReconnect }) {
   const now = useNow(15000);
   if (!snap) {
+    // the server isn't answering: say so plainly, not the Postgres or JWT string behind it
+    const tone = err ? 'offline' : 'idle';
     return (
       <>
-        <div className="status status-idle" role="status"><StatusBits word={idleWord} /></div>
-        <button type="button" className={'refresh' + (busy ? ' busy' : '')} aria-label="Refresh" disabled><Icon id="refresh" /></button>
+        <window.Tip as="div" className={'status below status-' + tone} text={err ? 'Can’t reach the server. Retrying every minute.' : null} role="status">
+          <StatusBits word={err ? 'No connection' : idleWord} />
+        </window.Tip>
+        <button type="button" className={'refresh' + (err ? ' refresh-offline' : '') + (busy ? ' busy' : '')} aria-label="Refresh" disabled><Icon id="refresh" /></button>
       </>
     );
   }
   const s = plantStatus(snap, now);
   const sync = window.syncProgress(snap.sync), pct = sync == null ? null : Math.round(100 * sync);
+  // the login came back and no reading has landed yet; after 15 min plain Offline is back (SOLAR-147)
+  const waiting = s.status === 'offline' && !snap.loginCut && relinkedAt && now - relinkedAt < 900000;
+  const tone = waiting ? 'loading' : err && s.tone === 'live' ? 'stale' : s.tone;
+  // a dead login outranks one failed fetch: its word stays beside Reconnect
+  const word = waiting ? 'Reconnected' : err && !snap.loginCut ? 'Couldn’t refresh' : s.word;
+  const a = snap.aggregate || {};
+  const gridOff = a.gridPresent === false && snap.features?.hasGrid !== false;
   return (
     <>
-      <window.Tip as="div" className={'status below status-' + s.tone + (sync != null ? ' fetching' : '')} text={'Last reading ' + window.fmtTime(s.last)} role="status">
-        <StatusBits word={s.word} />
+      <window.Tip as="div" className={'status below status-' + tone + (sync != null ? ' fetching' : '') + (snap.loginCut ? ' cut' : '')}
+        text={(err ? 'Showing the last good reading. ' : '') + 'Last reading ' + window.fmtTime(s.last)} role="status">
+        <StatusBits word={word} />
         {/* an old reading's date shows from tablet width up; a phone keeps the room for the plant name */}
-        {s.old && (() => { const p = fmtAgo(s.last, now).replace(' ago', '').split(', ');
+        {s.old && !waiting && (() => { const p = fmtAgo(s.last, now).replace(' ago', '').split(', ');
           return <span className="status-age mono">{p.length === 2 && <span className="age-date">{p[0]}, </span>}{p[p.length - 1]}</span>; })()}
         {/* A freshly linked plant: the last 60 days of readings and temperatures
             arrive in 2-minute rounds (0093). Quiet once both are in (SOLAR-176). */}
@@ -714,55 +737,15 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord }) {
           </span>
         )}
       </window.Tip>
-      {/* takes the status colour once something is wrong; the icon alone at every width (SOLAR-375) */}
-      <button type="button" className={'refresh refresh-' + s.tone + (busy ? ' busy' : '') + (sync != null ? ' fetching' : '')} aria-busy={busy} onClick={onRefresh}
-              aria-label={s.status === 'offline' ? 'Retry' : 'Refresh'}>
-        <Icon id="refresh" />
-      </button>
-    </>
-  );
-}
-
-// Says on the page when its numbers are old, and why. Grid off is red, as in Power flow (SOLAR-374, SOLAR-417).
-function PageNotice({ snap, cutOff, onReconnect, relinkedAt }) {
-  const now = useNow(15000);
-  const s = plantStatus(snap, now);
-  const at = readAgo(s.last.getTime(), now); // with the date once it is over a day old
-  const a = snap.aggregate || {};
-  // a reading normally lands within a minute; after 15 the plain offline banner is back
-  if (s.status === 'offline' && relinkedAt && now - relinkedAt < 900000) return (
-    <div className="notice stale" role="status">
-      <p><b>Reconnected.</b> Waiting for the first reading.</p>
-    </div>
-  );
-  // a dead login says so at once, whatever the reading's age (SOLAR-385)
-  if (cutOff) return (
-    <div className="notice offline" role="alert">
-      <p><b>SunSynk login stopped working.</b> Readings paused at {at}.</p>
-      <button type="button" className="save-btn" onClick={onReconnect}>Reconnect</button>
-    </div>
-  );
-  // First load (SOLAR-167): no Offline or Stale banner while the 60 days come in;
-  // the header's "Setting up" and "Fetching history" say it (SOLAR-169)
-  if (s.status === 'loading') return null;
-  if (s.status === 'offline') return (
-    <div className="notice offline" role="alert">
-      <p><b>{s.old ? 'No readings since ' + at + '.' : 'No inverter is reporting.'}</b></p>
-    </div>
-  );
-  // stale readings still say the grid is off, so both banners can show
-  return (
-    <>
-      {s.status === 'stale' && (
-        <div className="notice stale" role="status">
-          <p>{s.old ? <><b>Last reading at {at},</b> {fmtAgo(s.last, Date.now())}.</> : <b>{s.detail}.</b>}</p>
-        </div>
-      )}
-      {a.gridPresent === false && snap.features?.hasGrid !== false && (
-        <div className="notice gridoff" role="status">
-          <p><b>Grid off.</b> {snap.features?.hasBattery === false ? 'Running on solar.' : 'Running on solar and battery.'}</p>
-        </div>
-      )}
+      {/* stale readings can still say the grid is off, so it is a tag beside the status (SOLAR-374) */}
+      {gridOff && <span className="grid-tag" role="status">Grid off</span>}
+      {/* a dead login: Refresh can't help, Reconnect can (SOLAR-385) */}
+      {snap.loginCut
+        ? <button type="button" className="save-btn head-act" onClick={onReconnect}>Reconnect</button>
+        : <button type="button" className={'refresh refresh-' + tone + (busy ? ' busy' : '') + (sync != null ? ' fetching' : '')} aria-busy={busy} onClick={onRefresh}
+                  aria-label={s.status === 'offline' ? 'Retry' : 'Refresh'}>
+            <Icon id="refresh" />
+          </button>}
     </>
   );
 }
@@ -1144,7 +1127,8 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
 // What a save did, one line at the foot of the screen for 2.5 s (SOLAR-166):
 // window.toast('Saved: rate R3.45 a unit.'). A new one replaces the last. Every failure
 // that isn't one box's typing mistake is window.toast(text, { error: true, action:
-// { label, onClick } }): red, 6 s, at most one link. Frame mounts the host; the
+// { label, onClick } }): red, 6 s, at most one link. A note that is neither (still
+// being checked, not open yet) is { info: true }: no tick, 2.5 s (SOLAR-384). Frame mounts the host; the
 // signed-out screens mount their own (window.SaveToast).
 // A toast sent as its host goes (signing out swaps the frame for the sign-in screen in the
 // same render, as after Delete account, SOLAR-359) moves to the next host.
@@ -1175,8 +1159,8 @@ function SaveToast() {
   return (
     <div ref={host} popover="manual" className="toast-host" role={t?.error ? 'alert' : 'status'} aria-live={t?.error ? 'assertive' : 'polite'}>
       {t && (
-        <div key={t.at} className={'toast' + (t.error ? ' error' : '')}>
-          {!t.error && <Icon id="tick" />}
+        <div key={t.at} className={'toast' + (t.error ? ' error' : t.info ? ' info' : '')}>
+          {!t.error && !t.info && <Icon id="tick" />}
           <span>{t.text}{t.action && <> <button type="button" className="toast-act" onClick={() => { setT(null); t.action.onClick(); }}>{t.action.label}</button></>}</span>
         </div>
       )}
@@ -1718,9 +1702,8 @@ function App({ links }) {
       <window.FreeCtx.Provider value={free}>
       <Frame tabs={TABS} tab={tab} onTab={go} account={account} busy steps={steps}
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
-          <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} /><NotifBell disabled /></>}>
-        {err && <div className="notice offline" role="alert"><p><b>Can't reach the server.</b> Retrying every minute.</p></div>}
-        <BillBanners notices={notices} />
+          <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} err={err} /><NotifBell disabled /></>}>
+        <BillCards notices={notices} />
         {null}
         {/* The Settings area never touches the snapshot: it draws for real. It sits in
             the same slot as in the loaded page below, so the first reading doesn't remount
@@ -1738,15 +1721,9 @@ function App({ links }) {
   return (
     <window.FreeCtx.Provider value={free}>
     <Frame tabs={TABS} tab={tab} onTab={go} account={account} steps={steps}
-      head={<>{plantMenu}<HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} />{bell}</>}>
-      {/* The raw error stays in the title; on screen it was a Postgres or JWT string a
-          homeowner cannot act on. */}
-      {err && <div className="notice stale" role="status" title={String(err)}>{/* reuse-check: allow */}<p><b>Couldn't refresh.</b> Showing the last good reading.</p></div>}
-      <BillBanners notices={notices} />
-      {/* For the plant on screen. A plant still read through someone else's copy of the
-          login stays quiet; a dead login still marks the avatar and Account with a dot. */}
-      {dataPage && <PageNotice snap={snap} cutOff={plantCutOff} onReconnect={() => openSettings('connection')}
-        relinkedAt={relinked?.plantId === plantId ? relinked.at : null} />}
+      head={<>{plantMenu}<HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} err={err} onReconnect={() => openSettings('connection')}
+        relinkedAt={relinked?.plantId === plantId ? relinked.at : null} />{bell}</>}>
+      <BillCards notices={notices} />
       <div className={'page' + (old ? ' old' : '')}>
         {dataPage && overCard && <FreeWeekOver onDone={() => setOverSeen(true)} />}
         {!dataPage && (tab === 'alerts' ? alertsPage : settingsPage)}

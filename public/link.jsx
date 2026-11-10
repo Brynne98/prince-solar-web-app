@@ -165,7 +165,7 @@ const billingPaid = (plan, switched = false) => {
 
 // The toast for a payment step that failed: paid plans not open yet, or fallback. A card
 // page that didn't open in time charged nothing, so its fallback's "try again" holds.
-const payFailed = (e, fallback) => (/open soon/.test(e.message) ? window.toast('Paid plans open soon. Nothing was charged.')
+const payFailed = (e, fallback) => (/open soon/.test(e.message) ? window.toast('Paid plans open soon. Nothing was charged.', { info: true })
   : window.toast(fallback, { error: true }));
 // A saved card's charge: the billing function gives Paystack 30 s to charge and 30 s more to
 // check, so the page waits past both (SOLAR-363).
@@ -325,7 +325,7 @@ window.startUpgrade = async function startUpgrade(plan, period, newCard = false,
       billingPaid(plan, paidEvent?.name === 'yearly_switch_done');
     }
     else if (r.status === 'refund') window.toast(REFUND_NOTE, { error: true });
-    else window.toast('Your payment is still being checked. Look again in a minute.');
+    else window.toast('Your payment is still being checked. Look again in a minute.', { info: true });
   } catch (e) {
     payFailed(e, /settle the failed payment/.test(e.message) ? 'Pay the payment that didn’t go through first.'
       : /year is paid/.test(e.message) ? 'Your year is paid. Your plan stays as it is until it starts.'
@@ -391,7 +391,7 @@ window.billingReturn = async function billingReturn(billingStatus) {
     // A full reload: resumed plants join the plant list.
     if (status === 'paid') { if (paidEvent) window.track(paidEvent.name, paidEvent.props); return billingPaid(null, kind === 'switch'); }
     if (status === 'refund') return window.toast(REFUND_NOTE, { error: true });
-    window.toast(status === 'failed' ? 'The payment didn’t go through. Nothing was charged.' : 'Your payment is still being checked. Look again in a minute.', { error: status === 'failed' });
+    window.toast(status === 'failed' ? 'The payment didn’t go through. Nothing was charged.' : 'Your payment is still being checked. Look again in a minute.', status === 'failed' ? { error: true } : { info: true });
   } catch {
     window.toast('Couldn’t check the payment. Look again in a minute.', { error: true });
   }
