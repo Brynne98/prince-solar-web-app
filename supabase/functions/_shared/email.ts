@@ -367,8 +367,8 @@ export const needAHand = () =>
   make("Need a hand adding your plant?", {
     title: "Need a hand adding your plant?",
     parts: [{ lead: "Your plant isn't added yet. It takes about a minute." }, ADD_STEPS,
-      { button: { label: "Add your plant", href: APP } }, { small: "Stuck? Reply to this email and we'll help." }],
-    footer: [],
+      { button: { label: "Add your plant", href: APP } }],
+    footer: [HELP],
   });
 
 
