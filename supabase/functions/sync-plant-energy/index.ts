@@ -10,7 +10,7 @@
 //   * monthly rows for every year with data (drives Lifetime / Monthly / Year)
 //   * daily rows for the last N months, default 6 (drives Week, Month, Daily trends
 //     and the Overview comparison arrows)
-import { db, denyUnlessServer, freeTrimmedPlants, markCursor, type PlantJob, plantsToPoll, rotateJobs } from "../_shared/sunsynk.ts";
+import { db, denyUnlessServer, freeTrimmedPlants, markCursor, type PlantJob, plantsToPoll, rotateJobs, saveCallTally } from "../_shared/sunsynk.ts";
 import { fetchMonthRows, fetchYearRows } from "../_shared/plantfeed.ts";
 import { reportError, serve } from "../_shared/errors.ts";
 
@@ -156,5 +156,7 @@ serve("sync-plant-energy", async (req) => {
     await reportError("sync-plant-energy", e);
     console.error("sync-plant-energy failed:", e);
     return json({ error: String(e instanceof Error ? e.message : e) }, 500);
+  } finally {
+    await saveCallTally();
   }
 });

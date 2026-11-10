@@ -55,7 +55,7 @@ import {
   RelinkNeeded,
   shareSync,
   syncPlants,
-  takeCallTally,
+  saveCallTally,
 } from "../_shared/sunsynk.ts";
 
 // The inverter and plant lists change rarely, so they are re-read from SunSynk only
@@ -528,17 +528,13 @@ async function shardSpec(req: Request): Promise<ShardSpec> {
   return { shard, shards, delayMs, account };
 }
 
-// SOLAR-468: this run's SunSynk calls into the daily tally, one write. Between 00:05 and
-// 00:15 SA time a run also sends yesterday's totals to PostHog; the first to ask gets them.
+// SOLAR-468: this run's SunSynk calls into the daily tally, one write. At 00:05, 00:10 and
+// 00:15 SA time each run also sends yesterday's totals to PostHog. Every send of a day has
+// the same uuid and time, so PostHog keeps one; the repeats cover a send that failed.
 async function tallyCalls(shard: number, runMs: number, plants: number, ts: number): Promise<void> {
-  const rows = takeCallTally();
-  try {
-    await rpc("sunsynk_tally", { p_rows: rows, p_shard: shard, p_run_ms: runMs, p_plants: plants });
-  } catch (e) {
-    console.warn("sunsynk_tally:", e instanceof Error ? e.message : e);
-  }
+  await saveCallTally({ shard, ms: runMs, plants });
   const saMinute = Math.floor((ts + 2 * 3600) / 60) % 1440;
-  if (saMinute < 5 || saMinute > 15) return;
+  if (![5, 10, 15].includes(saMinute)) return;
   try {
     const day = (await rpc("sunsynk_calls_report", {})) as Record<string, unknown> | null;
     if (day) await track("sunsynk_calls_counted", "edge:poll", String(day.day), `${day.day}T23:59:00+02:00`, { ...day, $process_person_profile: false });

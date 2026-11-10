@@ -235,9 +235,9 @@ const countCall = (acc: Account) => apiCallCounts.set(acc.id, (apiCallCounts.get
 /**
  * Every SunSynk request by data type and result, with response times (SOLAR-468). The
  * data type is the path without ids, serials and dates ("/inverter/{sn}/realtime/input"
- * → "inverter/realtime/input"). poll takes the counts once per run into private.sunsynk_calls.
+ * → "inverter/realtime/input"). Each function saves the counts with saveCallTally.
  */
-export type CallTally = { kind: string; result: string; calls: number; ms: number; ms_max: number };
+type CallTally = { kind: string; result: string; calls: number; ms: number; ms_max: number };
 const callTally = new Map<string, CallTally>();
 const kindOf = (pathname: string) =>
   pathname.split("?")[0].split("/").filter((s) => s && !/\d/.test(s)).join("/") || "other";
@@ -249,19 +249,32 @@ const throttled = (r: Response) =>
   (r.status === 403 && /throttl|quota|limit/i.test(r.headers.get("x-ca-error-message") ?? ""));
 const resultOf = (r: Response) =>
   r.ok ? "ok" : throttled(r) ? (r.status === 429 ? "429" : "403_throttle") : r.status >= 500 ? "5xx" : String(r.status);
-function tallyCall(pathname: string, result: string, ms: number) {
-  const kind = kindOf(pathname);
-  const t = callTally.get(`${kind}|${result}`) ?? { kind, result, calls: 0, ms: 0, ms_max: 0 };
-  t.calls++;
-  t.ms += ms;
-  t.ms_max = Math.max(t.ms_max, ms);
-  callTally.set(`${kind}|${result}`, t);
+function addTally(n: CallTally) {
+  const t = callTally.get(`${n.kind}|${n.result}`) ?? { kind: n.kind, result: n.result, calls: 0, ms: 0, ms_max: 0 };
+  t.calls += n.calls;
+  t.ms += n.ms;
+  t.ms_max = Math.max(t.ms_max, n.ms_max);
+  callTally.set(`${n.kind}|${n.result}`, t);
 }
-/** The counts since the last take, and a fresh start. */
-export function takeCallTally(): CallTally[] {
+const tallyCall = (pathname: string, result: string, ms: number) =>
+  addTally({ kind: kindOf(pathname), result, calls: 1, ms, ms_max: ms });
+
+/**
+ * Adds the counts since the last save to private.sunsynk_calls in one write (0177). A poll
+ * run also passes its shard, run time and plants. A failed write keeps the counts for the
+ * next save.
+ */
+export async function saveCallTally(run?: { shard: number; ms: number; plants: number }): Promise<void> {
   const rows = [...callTally.values()];
   callTally.clear();
-  return rows;
+  if (!rows.length && !run) return;
+  const { error } = await db.rpc("sunsynk_tally", {
+    p_rows: rows, p_shard: run?.shard ?? null, p_run_ms: run?.ms ?? 0, p_plants: run?.plants ?? 0,
+  });
+  if (error) {
+    rows.forEach(addTally);
+    console.warn("sunsynk_tally:", error.message);
+  }
 }
 
 /** GET a resource for one account and return body.data. */

@@ -1,10 +1,9 @@
 -- SOLAR-468: count SunSynk calls per day.
--- apiGet (_shared/sunsynk.ts) keeps counts in memory; poll adds them here once per run.
--- One row per SA day, data type and result: calls, total ms, slowest ms. Each poll run also
--- adds a row of kind 'poll_run', result = its shard ('s0', 's1', ...): runs, run time,
--- plants polled and when it last ran (a cheap "poll ran" signal for SOLAR-428).
--- Kind 'report', result 'sent' marks the day whose PostHog totals event went out.
--- Rows are kept 400 days.
+-- apiGet (_shared/sunsynk.ts) keeps counts in memory; each function adds them here in one
+-- write (poll once per run). One row per SA day, data type and result: calls, total ms,
+-- slowest ms. Each poll run also adds a row of kind 'poll_run', result = its shard ('s0',
+-- 's1', ...): runs, run time, plants polled and when it last ran (a cheap "poll ran"
+-- signal for SOLAR-428). Rows are kept 400 days.
 
 create table private.sunsynk_calls (
   day      date   not null,
@@ -20,7 +19,8 @@ create table private.sunsynk_calls (
 alter table private.sunsynk_calls enable row level security;
 
 -- p_rows: [{kind, result, calls, ms, ms_max}], one per data type and result seen this run.
--- The run itself goes in as kind 'poll_run' with p_shard, p_run_ms and p_plants.
+-- A poll run also goes in as kind 'poll_run' with p_shard, p_run_ms and p_plants; other
+-- functions pass p_shard null.
 create or replace function public.sunsynk_tally(p_rows jsonb, p_shard int, p_run_ms int, p_plants int)
 returns void language sql security definer set search_path = public, private, pg_temp as $$
   insert into private.sunsynk_calls as t (day, kind, result, calls, ms_total, ms_max, plants, last_at)
@@ -29,6 +29,7 @@ returns void language sql security definer set search_path = public, private, pg
    where r.kind is not null and r.result is not null
   union all
   select (now() at time zone 'Africa/Johannesburg')::date, 'poll_run', 's' || p_shard, 1, p_run_ms, p_run_ms, p_plants, now()
+   where p_shard is not null
   on conflict (day, kind, result) do update set
     calls    = t.calls + excluded.calls,
     ms_total = t.ms_total + excluded.ms_total,
@@ -39,24 +40,23 @@ $$;
 revoke all on function public.sunsynk_tally(jsonb, int, int, int) from public, anon, authenticated;
 grant execute on function public.sunsynk_tally(jsonb, int, int, int) to service_role;
 
--- Yesterday's totals, once: the first call of the day claims the 'report' row and gets the
--- totals; later calls get null. Calls per plant divides by plants per minute (each shard's
--- plants summed over its runs, over its run count).
+-- Yesterday's totals, null when nothing was counted. Failed = refused or unanswered (429,
+-- throttle 403, 5xx, network, timeout); a 401 retried after a token refresh is not. Calls per
+-- plant divides by plants per minute (each shard's plants over its run count, summed).
 create or replace function public.sunsynk_calls_report()
 returns jsonb language plpgsql security definer set search_path = public, private, pg_temp as $$
 declare
   d date := (now() at time zone 'Africa/Johannesburg')::date - 1;
   out jsonb;
 begin
-  insert into private.sunsynk_calls (day, kind, result, last_at) values (d, 'report', 'sent', now())
-    on conflict do nothing;
-  if not found then return null; end if;
+  delete from private.sunsynk_calls where day < d - 400;
+  if not exists (select 1 from private.sunsynk_calls where day = d) then return null; end if;
 
-  with c as (select * from private.sunsynk_calls where day = d and kind not in ('poll_run', 'report')),
+  with c as (select * from private.sunsynk_calls where day = d and kind <> 'poll_run'),
        r as (select * from private.sunsynk_calls where day = d and kind = 'poll_run'),
        tot as (
          select coalesce(sum(calls), 0) as calls,
-                coalesce(sum(calls) filter (where result <> 'ok'), 0) as failed,
+                coalesce(sum(calls) filter (where result in ('429', '403_throttle', '5xx', 'network', 'timeout')), 0) as failed,
                 coalesce(sum(ms_total), 0) as ms
            from c),
        pl as (select coalesce(sum(plants::numeric / nullif(calls, 0)), 0) as plants,
@@ -79,8 +79,6 @@ begin
                          (select kind, sum(calls) as n from c group by kind) y))
     into out
     from tot, pl;
-
-  delete from private.sunsynk_calls where day < d - 400;
   return out;
 end $$;
 revoke all on function public.sunsynk_calls_report() from public, anon, authenticated;
