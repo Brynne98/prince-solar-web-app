@@ -487,15 +487,17 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
     window.addEventListener('ps-open-bell', show);
     return () => window.removeEventListener('ps-open-bell', show);
   }, [disabled]);
-  // what the open list showed unread; read once it closes, so the dots stay while it's open
-  useEffect(() => { if (open) shown.current = (data?.items || []).filter(it => !it.read).flatMap(it => it.ids || [it.id]); }, [open, data]);
+  // what the open list showed unread, billing notices too (SOLAR-465); read once it closes,
+  // so the dots stay while it's open
+  useEffect(() => { if (open) shown.current = pinned.filter(n => !n.read).map(n => n.id)
+    .concat((data?.items || []).filter(it => !it.read).flatMap(it => it.ids || [it.id])); }, [open, data]);
   useEffect(() => {
     if (open || !shown.current) return;
     if (shown.current.length) onSeen(shown.current);
     shown.current = null;
   }, [open]);
-  // a billing notice counts until its state ends
-  const unread = (data?.unread || 0) + pinned.length;
+  // a billing notice counts until it's seen (SOLAR-465)
+  const unread = data?.unread || 0;
   const close = () => setOpen(false);
   const items = data?.items;
   return (
@@ -537,8 +539,8 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, o
 // Billing notices (SOLAR-212) with their buttons, as the bell list and the full page show them.
 function NoticeRows({ pinned, onAct }) {
   return pinned.map(n => (
-    <div key={n.kind} className="nl-row nl-pin">
-      <span className="nl-dot" />
+    <div key={n.kind} className={'nl-row nl-pin' + (n.read ? '' : ' unread')}>
+      <span className="nl-dot" aria-label={n.read ? undefined : 'Unread'} />
       <span className={'nl-glyph g-' + (n.tone || 'readings')}><Icon id={n.icon} /></span>
       <span className="nl-text">
         <span className="nl-title">{n.title}</span>
@@ -634,6 +636,8 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
     onReadAll();
   };
   const notices = kind === 'all' || kind === 'billing' ? pinned : [];
+  // the notices it shows unread are read once it's left, as its alerts (SOLAR-465)
+  useEffect(() => { onShown(notices.filter(n => !n.read).map(n => n.id)); }, [notices.length]);
   const today = window.localDateStr();
   const days = res ? alertDays(res.items) : [];
   if (res && notices.length && days[0]?.[0] !== today) days.unshift([today, []]);
@@ -1643,7 +1647,8 @@ function App({ links }) {
   // Alerts seen in a list (the bell's as it closes, the full page as it goes): read, then
   // the count again. null: every one.
   const readNotifs = (ids) => {
-    if (!ids) setNotifs(n => n && ({ ...n, unread: 0, items: n.items.map(x => ({ ...x, read: true })) }));
+    if (!ids) setNotifs(n => n && ({ ...n, unread: 0, items: n.items.map(x => ({ ...x, read: true })),
+      pinned: n.pinned.map(x => ({ ...x, read: true })) }));
     window.readNotifications(ids).then(loadNotifs).catch(() => {});
   };
   // See all: the full page; its back goes to the page it came from. What it showed unread
@@ -1676,7 +1681,7 @@ function App({ links }) {
   };
   const notices = (notifs?.pinned || []).map(n => {
     const t = billNotice(n, noticeAct);
-    return t && { ...t, kind: n.kind, act: (where) => { window.track('notice_action_done', { kind: n.kind, where }); t.run(); } };
+    return t && { ...t, kind: n.kind, id: n.key, read: n.read, act: (where) => { window.track('notice_action_done', { kind: n.kind, where }); t.run(); } };
   }).filter(Boolean);
   const bell = <NotifBell data={notifs} pinned={notices} onOpen={loadNotifs} onSeen={readNotifs} onReadAll={() => readNotifs(null)}
                          onSeeAll={seeAll} onSettings={() => openSettings('notifications')} />;
