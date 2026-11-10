@@ -64,7 +64,7 @@ Web (`public/*.jsx`):
 | `plan_page_shown`, `offer_pick_done`, `checkout_opened`, `pay_review_done`, `upgrade_done` | Choosing and paying for a plan |
 | `downgrade_done`, `plan_change_undone`, `extra_plants_done`, `yearly_switch_done` | Plan changes |
 | `card_change_done`, `website_plan_done`, `more_plants_email_done` | Billing |
-| `notice_opened`, `notice_closed`, `notice_action_done` | Billing banners |
+| `notice_closed`, `notice_action_done` | Billing cards (`notice_opened` until SOLAR-384: the phone banner's tap) |
 | `alerts_page_opened`, `alerts_filter_done`, `alerts_read_all_done`, `notification_opened` | Alerts list and pop-ups |
 | `email_pref_change_done`, `push_pref_change_done`, `push_enabled_done`, `push_disabled_done` | Notification settings |
 | `account_delete_done` | Account deleted |

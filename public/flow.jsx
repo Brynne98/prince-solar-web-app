@@ -335,14 +335,14 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
 
   // The one-line summary of what is happening; it opens the card, above the diagram.
   let narrative;
-  // A silent plant's last figures aren't happening now. The page banner says since when;
-  // fullscreen covers the banner, so only there does the card say it.
+  // A silent plant's last figures aren't happening now. The header says since when;
+  // fullscreen covers the header, so only there does the card say it.
   if (silentSince) narrative = wall ? <>No readings since {silentSince}.</> : null;
-  // Stale (SOLAR-386): the last figures stay (the page greys them); the banner says since when.
+  // Stale (SOLAR-386): the last figures stay (the page greys them); the header says since when.
   else if (pausedSince) narrative = wall ? <>Last reading at {pausedSince}.</> : null;
   else if (gridOff) {
     const timeLeft = battRow.k === 'Empty in' ? battRow.v : null;
-    // The page's Grid off banner says it; fullscreen covers the banner (SOLAR-91).
+    // The header's Grid off tag says it; fullscreen covers the header (SOLAR-91).
     const what = hasBatt && agg.battPower > 5 && !charging
       ? <>Your <b style={{ color: T.batt }}>battery</b> is powering the home{timeLeft ? <>, with about {timeLeft} left</> : ''}.</>
       : agg.pvNow > 50 ? <><b style={{ color: T.pv }}>Solar</b> is powering the home.</> : null;

@@ -481,6 +481,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
 
 // Free after its week, once the grid has come back (SOLAR-242): how long it was off and
 // what carried the house, then the plans. Once per outage on this device; × puts it away.
+// A NoticeCard like the billing ones (SOLAR-384).
 function GridOffPrompt({ tz }) {
   const [span, setSpan] = React.useState(null);
   const [seen, setSeen] = React.useState(() => { try { return localStorage.getItem('ps.gridOffSeen'); } catch (e) { return null; } });
@@ -498,10 +499,9 @@ function GridOffPrompt({ tz }) {
     : plantDateStr(tz, to) === today ? 'today' : 'yesterday';
   const close = () => { try { localStorage.setItem('ps.gridOffSeen', span.endedAt); } catch (e) {} setSeen(span.endedAt); };
   return (
-    <div className="notice gridoff grid-off-prompt" role="status">
-      <p><b>Grid was off {dur} {when}.</b></p>
-      <button type="button" className="mini-link" onClick={() => { close(); window.openPlans('grid_off'); }}>See how it held up →</button>
-      <button type="button" className="fs-x" aria-label="Close" onClick={close}><Icon id="close" /></button>
+    <div className="notice-cards">
+      <window.NoticeCard tone="info" title={`Grid was off ${dur} ${when}.`} button="See how it held up"
+        onClick={() => { close(); window.openPlans('grid_off'); }} onClose={close} />
     </div>
   );
 }
@@ -2772,7 +2772,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     const wasAdding = mode === 'add';
     const readError = await refresh();
     setMode(null); onChanged && onChanged(linked, wasAdding);
-    if (readError) { fail('Connected. Reload the page to see it here.'); return; }
+    if (readError) { window.toast('Connected. Reload the page to see it here.'); return; }
     const paused = new Set((linked?.paused || []).map(Number));
     const on = (linked?.plants || []).filter(p => !paused.has(Number(p.id)));
     const off = (linked?.plants || []).filter(p => paused.has(Number(p.id)));
@@ -2824,7 +2824,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
       // a login that is gone. Not changed(): an Add form open meanwhile keeps its fields.
       const [readError] = await Promise.all([refresh(), new Promise(r => setTimeout(r, 240))]); // matches .conn-row.leaving
       onChanged && onChanged();
-      if (readError) fail('Removed. Reload the page to update this list.'); else { setLeaving(null); window.toast(gone); }
+      if (readError) window.toast('Removed. Reload the page to update this list.'); else { setLeaving(null); window.toast(gone); }
     } catch (e) { fail('Couldn’t remove the login. Try again.'); setBusy(null); setLeaving(null); }
   };
   // Each plant once, with its state (SOLAR-208): paused (not on the plan), deleted on the
