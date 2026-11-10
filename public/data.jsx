@@ -379,6 +379,9 @@ async function fetchGridToday(rk, date) {
 async function fetchMe() {
   return must(window.sb.rpc('api_me'), { plan: 'free', freeWeekEndsAt: null, prefs: {}, plants: [] });
 }
+// SOLAR-428: image is a JPEG as base64, or null. Refusals come back as 22023 (see 0179).
+const sendFeedback = (message, page, image) =>
+  must(window.sb.rpc('api_send_feedback', { p_message: message, p_page: page, p_version: window.APP_VERSION, p_image: image }));
 async function savePrefs(patch) {
   return must(window.sb.rpc('api_prefs_set', { p_prefs: patch }), {});
 }
@@ -529,6 +532,6 @@ function emptyText(days, fallback) {
 
 Object.assign(window, {
   fetchSnapshot, fetchDay, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth, fetchGridToday,
-  fetchMe, savePrefs, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount,
+  fetchMe, savePrefs, sendFeedback, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount,
   fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, EMAIL_KINDS, PUSH_KINDS, pushSupport, pushState, pushTurnOn, pushTurnOff, pushResync, emptyText, syncProgress, firstLoadSync, BATT_MAX_KW, TYPICAL_DAYS,
 });
