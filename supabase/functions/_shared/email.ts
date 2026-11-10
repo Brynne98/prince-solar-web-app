@@ -799,14 +799,14 @@ export const planChangeBooked = (c: Change) => {
   const kept: [string, string][] = hero && c.keepPlants?.length ? [["Plants kept", list(c.keepPlants)]] : [];
   return make(title, {
     title,
-    // No Keep buttons in emails (SOLAR-412): an undo is made in Billing. A cancel has no button.
+    // No Keep buttons in emails (SOLAR-412): an undo is made in Billing, a cancel's too (SOLAR-467).
     parts: cancel
-      ? hero ? [{ lead: `Nothing more is charged. ${PAID_FREE}` }, { box: { hero, rows: kept } }]
+      ? hero ? [{ lead: `Nothing more is charged. ${PAID_FREE}` }, { box: { hero, rows: kept } }, SEE_PLAN]
         // No plant deleted: the history that goes leads instead, as in the plan-ended email.
         : c.history?.days ? [{ lead: "Nothing more is charged." },
             { box: { hero: lost(`Deleted on ${c.history.on}`, dayCount(c.history.days), `of history at ${c.history.plant}`),
-              rows: [[`From ${c.on}`, "Free"], ["You see", "Today's readings"], ["Reports", "Stop"]] } }]
-        : [{ lead: `Nothing more is charged. ${PAID_FREE}` }]
+              rows: [[`From ${c.on}`, "Free"], ["You see", "Today's readings"], ["Reports", "Stop"]] } }, SEE_PLAN]
+        : [{ lead: `Nothing more is charged. ${PAID_FREE}` }, SEE_PLAN]
       // A monthly/yearly switch reads like the plan-kept email: what carries on, then the price.
       : switchOnly ? [{ lead: "Your plants, history and reports carry on as before." },
           { box: { rows: [["Next payment", `${c.next ? rand(c.next.amount) : "R0"} on ${c.on}`]] } },
