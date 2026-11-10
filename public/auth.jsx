@@ -98,8 +98,17 @@ window.useSession = function useSession() {
         dropFromAddress(['signup']);
         const u = session.user, last = Date.parse(u.last_sign_in_at);
         window.identifyUser(u.id);
-        if (Math.abs(last - Date.parse(u.email_confirmed_at || u.created_at)) < 60000 && Date.now() - last < 60000)
+        // Every open tab gets this SIGNED_IN, and so does each load in that minute. The
+        // first tab to take the lock marks the user in shared storage; the rest see the
+        // mark and send nothing (SOLAR-456).
+        const key = 'synsynk.signup.' + u.id;
+        const once = () => {
+          if (localStorage.getItem(key)) return;
+          localStorage.setItem(key, '1');
           window.track('sign_up_done', { method: u.app_metadata?.provider });
+        };
+        if (Math.abs(last - Date.parse(u.email_confirmed_at || u.created_at)) < 60000 && Date.now() - last < 60000)
+          navigator.locks ? navigator.locks.request(key, once) : once();
       }
       if (event === 'SIGNED_OUT') window.identifyUser(null);
       if (!alive) return;
