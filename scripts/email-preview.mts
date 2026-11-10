@@ -134,7 +134,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
   // SOLAR-406 (0161)
   "billing-card-changed": [FROM_BILLING, cardChanged({ card: "Visa •••• 4081", was: "Mastercard •••• 5520", at: "Today at 09:12", next: { amount: 199, date: "1 Dec" } })],
   "billing-card-expiring": [FROM_BILLING, cardExpiring({ card: "Visa •••• 4081", on: "30 Nov", next: { amount: 199, date: "1 Dec" } })],
-  "billing-card-expiring-last": [FROM_BILLING, cardExpiring({ card: "Visa •••• 4081", on: "30 Nov", final: true, next: { amount: 199, date: "1 Dec" } })],
+  "billing-card-expiring-last": [FROM_BILLING, cardExpiring({ card: "Visa •••• 4081", on: "30 Nov", final: true, days: 7, next: { amount: 199, date: "1 Dec" } })],
   "billing-moved-to-free-one-plant": [FROM_BILLING, movedToFree({ from: "home", kept: "Home", stopped: [], deleteOn: "7 Jan", amount: 99, days: 58 })],
   "billing-removal-soon": [FROM_BILLING, plantsRemovalSoon(["Cabin", "Office"], "7 Jan", "free", { plan: "family", now: 99, list: 199 }, 154)],
   "event-grid-down": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "grid_down", at: "14:32", chargePct: 62 })],

@@ -398,7 +398,8 @@ async function build(r: Row): Promise<Email | null> {
       return cardChanged({ card: d.card, was: d.was ?? undefined, at: d.at ? `${dayOf(d.at, tz) === "today" ? "Today" : dayOf(d.at, tz)} at ${hhmm(d.at, tz)}` : undefined,
         next: d.nextDate ? { amount: d.nextAmount, date: day(d.nextDate) } : undefined });
     case "bill_card_expiring":
-      return cardExpiring({ card: d.card, on: day(d.on), final: d.final === true, next: { amount: d.nextAmount, date: day(d.nextDate) } });
+      return cardExpiring({ card: d.card, on: day(d.on), final: d.final === true,
+        days: Math.round((Date.parse(d.on) - Date.parse(local("Africa/Johannesburg").date)) / 86400e3), next: { amount: d.nextAmount, date: day(d.nextDate) } });
     case "winback": {
       const h = await historyAt(r.user_id, r.plant_id);
       return winback({ from: d.from, keepUntil: day(d.keepUntil), plant: h?.plant, days: h?.days, price: await priceOf(d.from, r.user_id) });
