@@ -211,6 +211,25 @@ const CASES = [
     const st = await K.as(u, `select public.api_billing_status()`);
     return st.v.nextPlan === 'free' && st.v.nextAmount === 0 ? [] : [JSON.stringify(st.v)];
   } },
+  { id: 'C457', title: 'paid switch to yearly: cancel refused until the year starts (status says prepaid), then books the end of the year', async run(K) {
+    const bad = [], u = await K.user('home');
+    const d = (await K.row(u)).next_billing_date;
+    const o = await K.open(u, 'home', 'yearly'); if (!o.ok) return ['switch refused: ' + o.err];
+    const p = await K.paid(o.v.reference); if (!p.ok) return ['switch not paid: ' + p.err];
+    const st = await K.as(u, `select public.api_billing_status()`);
+    if (st.v.prepaidOn !== d) bad.push(`status prepaidOn ${st.v.prepaidOn}, want ${d} (the screen hides Cancel on it)`);
+    const c1 = await K.as(u, `select public.api_billing_change('free', null)`);
+    if (c1.ok || !/year is paid/.test(c1.err)) bad.push('cancel in the paid year: ' + (c1.ok ? 'booked' : c1.err));
+    await K.today(d); await K.run(d);
+    const r = await K.row(u);
+    if (r.prepaid_on || r.period !== 'yearly') bad.push(`after the date: prepaid_on ${r.prepaid_on}, ${r.period}`);
+    const c2 = await K.as(u, `select public.api_billing_change('free', null)`);
+    if (!c2.ok) bad.push('cancel once the year started: ' + c2.err);
+    const st2 = await K.as(u, `select public.api_billing_status()`);
+    const yr = (+d.slice(0, 4) + 1) + d.slice(4); // the same day a year on
+    if (st2.v.nextPlan !== 'free' || st2.v.nextDate !== yr) bad.push(`cancel booked ${st2.v.nextPlan} on ${st2.v.nextDate}, want free on ${yr}`);
+    return bad;
+  } },
   { id: 'P1', net: true, title: 'a saved card is charged with the email it was saved with', async run(K) {
     const u = await K.user('home');
     await K.sql(`update private.billing set card_email = 'old@sim.test' where user_id = '${u}'`);

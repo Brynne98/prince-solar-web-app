@@ -2468,6 +2468,12 @@ function CancelSection({ billing: b, reload, logins = [] }) {
     </SettingsSection>
   ) : null;
   if (b.comped || b.plan === 'free' || b.nextPlan === 'free') return null;
+  // a paid year changes nothing until it starts (0138), cancel included (SOLAR-457)
+  if (b.prepaidOn) return (
+    <SettingsSection id="cancel" title="Cancellation">
+      <SettingRow label="Cancel plan" note={`You can cancel from ${window.billingFmt.billDay(b.nextDate)}, when your paid year starts.`} />
+    </SettingsSection>
+  );
   return (
     <SettingsSection id="cancel" title="Cancellation">
       <SettingRow label="Cancel plan"
