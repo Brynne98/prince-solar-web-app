@@ -2183,13 +2183,13 @@ function SettingsSection({ id, title, note, bare, action, children }) {
     if (!go || !el) return;
     const to = () => el.scrollIntoView({ block: 'start' });
     to();
-    // The cards above fill in after this (Billing's plan loading) and push it down, below
-    // the fold (SOLAR-473): keep it in view while they settle, until the user scrolls or 3 s pass.
+    // The cards above fill in after this (Billing's plan, the phone's setup card) and push it
+    // down, below the fold (SOLAR-473): keep it in view while they settle, until the user
+    // scrolls or 3 s pass.
     settle.current?.();
-    const ro = new ResizeObserver(to);
-    ro.observe(el.parentElement);
+    const again = setInterval(to, 150);
     const input = ['wheel', 'touchstart', 'keydown'];
-    const stop = () => { ro.disconnect(); clearTimeout(timer); input.forEach(e => removeEventListener(e, stop, true)); settle.current = null; };
+    const stop = () => { clearInterval(again); clearTimeout(timer); input.forEach(e => removeEventListener(e, stop, true)); settle.current = null; };
     const timer = setTimeout(stop, 3000);
     input.forEach(e => addEventListener(e, stop, { capture: true, passive: true }));
     settle.current = stop;
