@@ -346,12 +346,11 @@ const SETTINGS_FOOTER = (line: string) => [line.replace("notification settings",
 
 // Sent once the email is confirmed, before any plant is added. The Add plant
 // card opens on Live when a user has no plant, so the button goes straight there.
-// Wording matches link.jsx ("Add your plant", "Use the login from the
-// SunSynk Connect app").
+// Wording matches link.jsx ("Add your plant", Share plant or SunSynk login, SOLAR-455).
 const ADD_STEPS = {
   box: { checks: [
     { n: 1, name: "Tap Add your plant" },
-    { n: 2, name: "Sign in with SunSynk", text: "Use the email and password from your SunSynk Connect app." },
+    { n: 2, name: "Share it or sign in", text: "Share your plant with admin@princesolarhub.co.za in the SunSynk app, no password needed. Or use your SunSynk login." },
     { n: 3, name: "Watch it fill in", text: "Readings start within a minute. Your last 60 days follow." },
   ] },
 };

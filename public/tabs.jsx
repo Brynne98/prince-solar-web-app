@@ -2166,7 +2166,7 @@ function ConfirmCard({ title, text, children, action, onConfirm, onCancel, cance
 const SettingsFlash = React.createContext(null);
 
 // bare: no card of its own; the children bring their own cards (Billing's logins).
-// action: a button at the top right of the section's title (Billing's Add SunSynk login).
+// action: a button at the top right of the section's title (Billing's Add plant).
 function SettingsSection({ id, title, note, bare, action, children }) {
   const flash = React.useContext(SettingsFlash);
   const flashing = flash && flash.id === id;
@@ -2884,7 +2884,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
       </PlantLine>
     );
   };
-  // Free collects one plant, Home 2, Family 5 plus any extras still held. With that taken, Add login
+  // Free collects one plant, Home 2, Family 5 plus any extras still held. With that taken, Add plant
   // still opens the form: the server links the new plants stopped, and each one's switch offers
   // the upgrade (SOLAR-272). A stopped plant leaves room, as on the server (SOLAR-259).
   const collecting = allPlants.filter(p => !p.paused).length;
@@ -2896,10 +2896,10 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const title = <>Plants{limit != null && allPlants.length > 0 && <span className="sset-count">{collecting} of {limit} on your plan</span>}</>;
   return (
     <SettingsSection id="connection" title={title}
-      action={!unread && <button type="button" className="save-btn" onClick={() => { if (planFull) window.track('add_login_full_done', { plan: billing.plan }); setMode('add'); }}>Add login</button>}>
+      action={!unread && <button type="button" className="save-btn" onClick={() => { if (planFull) window.track('add_login_full_done', { plan: billing.plan }); setMode('add'); }}>Add plant</button>}>
       {!unread && mode === 'add' && (
         // A form over the page (SOLAR-286). Cancel re-reads too: a login with no plant yet is saved but not listed.
-        <window.LinkDialog title="Add login" note={planFull && 'Your plan is full, so new plants are added stopped.'}
+        <window.LinkDialog title="Add plant" note={planFull && 'Your plan is full, so new plants are added stopped.'}
           onLinked={changed} onCancel={() => { setMode(null); refresh(); }} />
       )}
       {unread ? (

@@ -427,7 +427,7 @@ window.sb.auth.onAuthStateChange((event, session) => {
 const NO_PLANT_TEXT = 'has no plant shared with it yet. Your login is saved.';
 
 // One form for a SunSynk login, built from the app's own Settings parts (SOLAR-96).
-// `compact`: inside Account's SunSynk logins section (Add login, Reconnect). Otherwise the
+// `compact`: inside Account's SunSynk logins section (Add plant, Reconnect). Otherwise the
 // Connect card that opens in place on a page with no inverter yet (Setup), with its title.
 // Either way: one line on which login, the two fields, a note, then Cancel and the green
 // button at the right.
@@ -510,7 +510,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
   const invalid = (id) => window.invalidProps(id, bad[id]);
   const green = share ? (busy ? 'Checking…' : 'Check') : noPlants ? (busy ? 'Checking…' : 'Retry now')
     : busy ? (finding ? 'Finding your plant…' : 'Checking your login…')
-    : relink ? (changing ? 'Save password' : 'Reconnect') : compact ? 'Add login' : 'Connect';
+    : relink ? (changing ? 'Save password' : 'Reconnect') : compact ? 'Add plant' : 'Connect';
 
   return (
     <form className={compact ? 'conn-form link-form' : 'link-form link-card'} onSubmit={submit} noValidate aria-busy={busy}>
@@ -571,7 +571,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
 }
 window.LinkForm = LinkForm;
 
-// The link form over the page, as Add plant, Add login and Reconnect open it. Closing it is
+// The link form over the page, as Add plant and Reconnect open it. Closing it is
 // its Cancel. note: a line above the form.
 function LinkDialog({ title, note, onCancel, ...form }) {
   return (
