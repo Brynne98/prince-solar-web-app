@@ -53,6 +53,8 @@ import {
   plantsToPoll,
   pollJobs,
   RelinkNeeded,
+  SignInFailed,
+  shareAccount,
   shareSync,
   syncPlants,
 } from "../_shared/sunsynk.ts";
@@ -101,6 +103,7 @@ type AccountResult = {
   apiCalls: number;
   error?: string;
   needsRelink?: boolean;
+  signInFailed?: boolean;
 };
 
 const emptyResult = (acc: Account): AccountResult => ({
@@ -527,6 +530,27 @@ async function shardSpec(req: Request): Promise<ShardSpec> {
   return { shard, shards, delayMs, account };
 }
 
+// Work that may finish after the response; the runtime keeps the isolate for it.
+const background = (p: Promise<unknown>) => (globalThis as any).EdgeRuntime?.waitUntil?.(p);
+
+async function retryShareLogin() {
+  try {
+    const { data: id, error } = await db.rpc("share_retry_due");   // 0177
+    if (error) throw new Error(error.message);
+    if (!id) return;
+    try {
+      if (await shareAccount()) console.log("share login: signed in again");
+    } catch (e) {
+      // Logged as another stop, which the next try is timed from. Already stopped, so no email.
+      const msg = e instanceof Error ? e.message : String(e);
+      await db.rpc("account_mark", { p_account: id, p_status: "needs_relink", p_error: msg });
+      console.warn("share login retry failed:", msg);
+    }
+  } catch (e) {
+    console.warn("share login retry skipped:", e instanceof Error ? e.message : e);
+  }
+}
+
 serve("poll", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
@@ -538,6 +562,12 @@ serve("poll", async (req) => {
 
     // Only this shard's plants; the shard hash (first 8 hex digits of the account
     // uuid, mod shards) runs in SQL.
+    // SunSynk refused the share login: try the secret again an hour after the last try, so
+    // shared plants restart without an owner pressing Check (SOLAR-451). Checked every
+    // minute on one shard, so a missed minute only delays it a minute. Runs beside the
+    // poll, not before it.
+    if (spec.shard === 0 && !spec.account) background(retryShareLogin());
+
     let jobs = await pollJobs(spec.shard, spec.shards, spec.account);
     if (!jobs.length) {
       if (!spec.account && !(await plantsToPoll()).length) {
@@ -575,14 +605,17 @@ serve("poll", async (req) => {
           p_account: acc.id, p_status: needsRelink ? "needs_relink" : "active", p_error: msg,
         }).catch(() => {});
         console.error(`poll: account ${acc.id} failed:`, msg);
-        return { ...emptyResult(acc), error: msg, ...(needsRelink ? { needsRelink } : {}) };
+        return { ...emptyResult(acc), error: msg, ...(needsRelink ? { needsRelink } : {}),
+          ...(e instanceof SignInFailed ? { signInFailed: true } : {}) };
       }
     }));
 
     // Email state (0102): how each login went, then step the plants just written.
     // SunSynk's fault and ours are told apart so our own outage is never mailed as
-    // SunSynk's: our errors are rpc failures ("fn: message"); a dead login is left out.
-    const outcomes = results.filter((r) => !r.needsRelink).map((r) => ({
+    // SunSynk's: our errors are rpc failures ("fn: message"); a dead login is left out,
+    // and so is one we could not sign in (SOLAR-451): no read was made, so it says
+    // nothing about the inverter.
+    const outcomes = results.filter((r) => !r.needsRelink && !r.signInFailed).map((r) => ({
       account: r.account,
       outcome: r.error ? (/^[a-z_]+: /.test(r.error) ? "ours" : "sunsynk")
              : r.inverters > 0 && r.readings === 0 ? "sunsynk" : "ok",

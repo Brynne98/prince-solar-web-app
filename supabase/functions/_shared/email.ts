@@ -608,7 +608,10 @@ export type LoginEvent =
   | { kind: "needs_relink"; plants: string[]; at?: string }
   | { kind: "relinked"; plants: string[]; since?: string; at: string; lasted: string }
   // the owner removed the plant's share to our login (SOLAR-310, 0172)
-  | { kind: "share_removed"; plants: string[] };
+  | { kind: "share_removed"; plants: string[] }
+  // the share login stopped / works again (SOLAR-451, 0177): owners can't act, so no sign-in
+  | { kind: "share_down"; plants: string[]; at?: string }
+  | { kind: "share_back"; plants: string[]; since?: string; at: string; lasted: string };
 // up to 3 names, then a count, as the app's billing banner
 const andList = (a: string[]) => names(a.length > 3 ? [...a.slice(0, 3), `${a.length - 3} more`] : a);
 export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email {
@@ -636,8 +639,20 @@ export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email
       ],
       footer: [HELP],
     });
-  return make(`SunSynk reconnected for ${plants}`, {
-    title: "SunSynk reconnected",
+  if (e.kind === "share_down")
+    return make(`No readings from ${plants}`, {
+      title: "No readings",
+      parts: [
+        { lead: "We can't read your plants from SunSynk right now. Your power isn't affected. Readings start again on their own." },
+        { box: { hero: e.at ? { label: "Last reading", value: e.at, tone: "warn", sub: day } : undefined, rows: [["Plants", esc(plants)]] } },
+        { note: "We'll email you when readings come back, and get what we can of the gap." },
+        { button: openPage("live", plantId) },
+      ],
+      footer: [HELP],
+    });
+  const back = e.kind === "share_back" ? ["Readings back at", "Readings back"] : ["SunSynk reconnected for", "SunSynk reconnected"];
+  return make(`${back[0]} ${plants}`, {
+    title: back[1],
     parts: [
       { box: { hero: { label: "No readings for", value: e.lasted, sub: e.since ? `${e.since} to ${e.at} ${day}` : `until ${e.at} ${day}` },
         rows: [["Plants", esc(plants)]] } },

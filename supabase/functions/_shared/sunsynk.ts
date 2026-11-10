@@ -85,6 +85,16 @@ export const SHARE_USERNAME = (Deno.env.get("SUNSYNK_SHARE_USERNAME") ?? "").tri
 export const isShareAccount = (acc: Pick<Account, "sunsynk_username">) =>
   !!SHARE_USERNAME && acc.sunsynk_username.toLowerCase() === SHARE_USERNAME.toLowerCase();
 
+/** SunSynk refused the username or password (tokenLogin). */
+export class LoginRejected extends Error {}
+
+/**
+ * The token endpoint failed (timeout, 5xx, network): we could not sign in, and SunSynk
+ * said nothing about the login or the inverter. poll leaves the login out of its email
+ * outcomes, so 30 min of it never reads as "inverter stopped sending" (SOLAR-451).
+ */
+export class SignInFailed extends Error {}
+
 /** Thrown when an account's refresh token is dead; the poller marks it needs_relink. */
 export class RelinkNeeded extends Error {
   constructor(public accountId: string, reason: string) {
@@ -160,7 +170,7 @@ export async function tokenLogin(username: string, password: string): Promise<To
   const d = json?.data;
   if (!d?.access_token || !d?.refresh_token) {
     // Bad credentials come back as a non-Success msg; surface it without echoing input.
-    throw new Error(`login rejected: ${json?.msg ?? "no token in response"}`);
+    throw new LoginRejected(`login rejected: ${json?.msg ?? "no token in response"}`);
   }
   return { access_token: d.access_token, refresh_token: d.refresh_token, expires_in: Number(d.expires_in ?? 604800) };
 }
@@ -200,10 +210,16 @@ async function accessTokenFor(acc: Account, force = false): Promise<string> {
   const refresh = await rpc<string | null>("account_refresh_get", { p_account: acc.id });
   if (!refresh) throw new RelinkNeeded(acc.id, "no refresh token stored");
 
-  let t = await tokenRefresh(refresh);
   // The share login (SOLAR-310) has its password in a secret: sign in again rather than wait for a person.
   const sharePw = isShareAccount(acc) ? Deno.env.get("SUNSYNK_SHARE_PASSWORD") : undefined;
-  if (!t && sharePw) t = await tokenLogin(SHARE_USERNAME, sharePw).catch(() => null);
+  let t: TokenSet | null;
+  try {
+    t = await tokenRefresh(refresh);
+    // Only SunSynk refusing the password stops it; a timeout or 5xx is retried next minute (SOLAR-451).
+    if (!t && sharePw) t = await tokenLogin(SHARE_USERNAME, sharePw).catch((e) => { if (e instanceof LoginRejected) return null; throw e; });
+  } catch (e) {
+    throw new SignInFailed(`account ${acc.id} sign-in failed: ${e instanceof Error ? e.message : e}`);
+  }
   if (!t) throw new RelinkNeeded(acc.id, "refresh token rejected (password changed or revoked)");
 
   const exp = expiresAt(t.expires_in);
