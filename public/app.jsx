@@ -969,7 +969,7 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
   useEffect(() => {
     if (!finished || marked.current === plantId) return;
     marked.current = plantId;
-    saveFirstSteps(me, plantId, { done: true }).then(onSaved).catch(() => { marked.current = null; });
+    saveFirstSteps(me, plantId, { done: true }).then(() => { window.track('first_steps_finished_done'); return onSaved(); }).catch(() => { marked.current = null; });
   }, [finished, plantId]);
   if (!fs || !fs.left.length || fs.mine.hidden || gone || over) return null;
   const ids = fs.steps.map(s => s.id);
@@ -990,7 +990,7 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
   const hide = () => {
     setGone(true); setOpen(false);
     // A failed hide brings the card back, and the red toast says so (SOLAR-166)
-    saveFirstSteps(me, plantId, { hidden: true }).then(onSaved)
+    saveFirstSteps(me, plantId, { hidden: true }).then(() => { window.track('first_steps_hidden_done'); return onSaved(); })
       .catch(() => { setGone(false); window.toast('Couldn’t hide First steps. Try again.', { error: true }); });
   };
   // Skip leaves the step for later; past the last one it comes round again.
@@ -1544,6 +1544,7 @@ function App({ links }) {
     const plant = (me?.plants || []).find(p => p.id === Number(id));
     const cfg = plant?.config;
     window.setCurrentPlant(id, cfg?.currency, cfg?.timezone);
+    window.track('plant_switched');
     setPlantId(Number(id));
     setNotice(window.plantLabel(plant || { id }));
     window.savePrefs({ lastPlant: Number(id) }).catch(() => {});

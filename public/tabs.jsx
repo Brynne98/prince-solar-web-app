@@ -205,6 +205,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
     const el = flowRef.current; if (!el) return;
     // the cards above the flow are Today's (SOLAR-309)
     setWall(true); rememberWall(true); setPeriod('today');
+    window.track('wall_view_opened');
     const req = el.requestFullscreen || el.webkitRequestFullscreen;
     try { const p = req && req.call(el); if (p && p.catch) p.catch(() => {}); } catch (e) {}
   };
@@ -2837,6 +2838,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     setBusy('keep:' + p.plant_id);
     const { error } = await window.billingRpc('api_billing_keep', { p_plant: p.plant_id });
     if (error) fail('Couldn’t keep it. Try again.');
+    else window.track('plant_kept_done');
     await Promise.all([refresh(), reloadBilling && reloadBilling()]);
     setBusy(null);
   };
@@ -3355,7 +3357,7 @@ function FirstStepsSection({ me, plantId, onSaved }) {
   // Done, the card is back on screen; failed, the red toast says so
   const show = () => {
     setBusy(true);
-    window.saveFirstSteps(me, plantId, { hidden: false }).then(onSaved)
+    window.saveFirstSteps(me, plantId, { hidden: false }).then(() => { window.track('first_steps_shown_done'); return onSaved(); })
       .catch(() => window.toast('Couldn’t show First steps. Try again.', { error: true })).finally(() => setBusy(false));
   };
   return (

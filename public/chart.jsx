@@ -75,8 +75,13 @@ function useDayPicker(earliest, today, want) {
   // hand stays picked (SOLAR-150).
   const [was, setWas] = React.useState(todayStr);
   if (was !== todayStr) { setWas(todayStr); if (date === was) setDate(todayStr); }
+  // A past day picked: one event per page load, not one per arrow press
+  const pick = (d) => {
+    if (d !== todayStr && !useDayPicker.sent) { useDayPicker.sent = true; window.track('past_day_viewed'); }
+    setDate(d);
+  };
   return {
-    date, setDate, todayStr, isToday: date === todayStr,
+    date, setDate: pick, todayStr, isToday: date === todayStr,
     canPrev: !earliest || date > earliest, canNext: date < todayStr,
   };
 }

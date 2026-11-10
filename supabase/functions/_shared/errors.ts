@@ -2,12 +2,16 @@
 // browser's crash reports (SOLAR-85, public/config.js). Same project, same public key,
 // EU cloud. Tagged app = prince-solar-hub plus the function name.
 //
-// Only the error's type, message and stack are sent: no request body, no user. Email
-// addresses in a message are masked. A failed send is ignored: the error still goes
-// to the Supabase log as before.
+// Only the error's type, message and stack are sent, with the signed-in user's Supabase
+// id when the request has one (SOLAR-423): no request body, no email. Email addresses
+// in a message are masked. A failed send is ignored: the error still goes to the
+// Supabase log as before.
 
 const POSTHOG_KEY = "phc_ABkqiYsajciVYVKYX4GZMApcDP7QfD7CKQtgE7XPgjxN";
 const POSTHOG_URL = "https://eu.i.posthog.com/i/v0/e/";
+// The release on every error and event: the web app version these functions were last
+// deployed with. npm test fails when it is not public/config.js's APP_VERSION.
+export const APP_VERSION = "v0.49.7";
 
 const scrub = (s: string) => s.replace(/[^\s"'<>@]+@[^\s"'<>@]+\.[a-z]{2,}/gi, "[email]");
 
@@ -22,7 +26,17 @@ function frames(stack: string) {
   }).filter(Boolean).reverse();
 }
 
-export async function reportError(fn: string, e: unknown): Promise<void> {
+// The user id (`sub`) in a request's sign-in token. Not checked here: it only labels the
+// report. The service and publishable keys carry no `sub`, so a cron run has no user.
+export function userOf(req: Request): string | null {
+  try {
+    const jwt = req.headers.get("Authorization")?.replace(/^Bearer /, "").split(".")[1];
+    const sub = jwt && JSON.parse(atob(jwt.replace(/-/g, "+").replace(/_/g, "/"))).sub;
+    return typeof sub === "string" ? sub : null;
+  } catch { return null; }
+}
+
+export async function reportError(fn: string, e: unknown, userId: string | null = null): Promise<void> {
   const err = e instanceof Error ? e : new Error(String(e));
   try {
     await fetch(POSTHOG_URL, {
@@ -32,9 +46,11 @@ export async function reportError(fn: string, e: unknown): Promise<void> {
       body: JSON.stringify({
         api_key: POSTHOG_KEY,
         event: "$exception",
-        distinct_id: `edge:${fn}`,
+        distinct_id: userId ?? `edge:${fn}`,
         properties: {
           app: "prince-solar-hub",
+          platform: "edge",
+          app_version: APP_VERSION,
           function: fn,
           $process_person_profile: false,
           $exception_list: [{
@@ -61,7 +77,7 @@ export async function track(event: string, userId: string, once: string, at: str
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(3000),
-      body: JSON.stringify({ api_key: POSTHOG_KEY, event, uuid, timestamp: at, distinct_id: userId, properties: { app: "prince-solar-hub", ...properties } }),
+      body: JSON.stringify({ api_key: POSTHOG_KEY, event, uuid, timestamp: at, distinct_id: userId, properties: { app: "prince-solar-hub", platform: "edge", app_version: APP_VERSION, ...properties } }),
     });
   } catch { /* PostHog down: the event is lost, nothing else */ }
 }
@@ -73,7 +89,7 @@ export function serve(fn: string, handler: (req: Request) => Response | Promise<
     try {
       return await handler(req);
     } catch (e) {
-      await reportError(fn, e);
+      await reportError(fn, e, userOf(req));
       throw e;
     }
   });

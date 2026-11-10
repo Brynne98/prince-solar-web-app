@@ -6,7 +6,7 @@ not deploy together**.
 
 > The deploy thread ships and verifies. It does not write feature code. Broken builds,
 > leftover debug code, uncommitted work or migration drift get reported, not fixed.
-> The one file it edits is `public/config.js`, to bump the version.
+> The only files it edits are `public/config.js` and `supabase/functions/_shared/errors.ts`, to bump the version.
 
 ---
 
@@ -47,6 +47,9 @@ rewrite. Then edit the one line:
 // public/config.js
 window.APP_VERSION = 'v1.2.3';
 ```
+
+Set the same number in `supabase/functions/_shared/errors.ts` (`APP_VERSION`): it is the
+release on the functions' errors and events. `npm test` fails while the two differ.
 
 Backend-only deploys need no bump — `APP_VERSION` tracks the web app, and bumping it
 would drag a Pages rebuild along for nothing.
