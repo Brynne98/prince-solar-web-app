@@ -356,9 +356,10 @@
   .grid-tag { display: inline-flex; align-items: center; height: 26px; padding: 0 var(--sp-md); flex: none; white-space: nowrap; border-radius: var(--r-pill);
     font-size: var(--fs-sm); font-weight: 600; color: var(--bad); border: 1px solid rgba(var(--bad-rgb),0.45); background: rgba(var(--bad-rgb),0.07); }
   .head-act { height: 38px; flex: none; white-space: nowrap; }
-  /* phone: the dot and Reconnect say a dead login; beside Grid off the time gives way, so the plant name keeps its room */
+  /* phone: the red dot and Reconnect say a dead login, the time gives way to the plant name; beside Grid off the time gives way too */
   @media (max-width: 599px) {
-    .status.cut .status-word { display: none; }
+    .status.cut :is(.status-word, .status-age) { display: none; }
+    .head-act { padding: 0 var(--sp-md); }
     .head:has(.grid-tag) .status-age { display: none; }
   }
   /* spins for as long as a snapshot fetch is in flight (app.jsx holds it ≥ 800 ms) */
@@ -467,9 +468,13 @@
   /* A notice to act on (SOLAR-384): billing and the grid-off prompt. A card the height of an
      Overview card, two of the Overview grid's columns wide (5 desktop, 3 tablet, 2 phone),
      tinted in its tone; the one action is a quiet button, so a fault never wears the solar green. */
-  .notice-cards { --tile-h: 121px; /* an Overview card's height at every width: label, number, trend line */
+  .notice-cards { --tile-h: 128px; /* an Overview card's height: label with its (?), number, trend line; 121 on a phone, which has no (?) */
     display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-lg); margin-bottom: var(--sp-lg); }
-  @media (min-width: 981px) { .notice-cards { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+  /* desktop: as many columns as the Overview has cards (5, or 6 with Exported), so 2 of them line up */
+  @media (min-width: 981px) {
+    .notice-cards { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .frame:has(.today-strip > :nth-child(6)) .notice-cards { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  }
   .notice-card { grid-column: span 2; position: relative; min-width: 0; min-height: var(--tile-h); display: flex; flex-direction: column; justify-content: space-between; gap: var(--sp-sm);
     padding: var(--sp-xl) var(--sp-lg); border-radius: var(--r-xl); border: 1px solid var(--card-edge); background: var(--panel); }
   .notice-card.bad { border-color: rgba(var(--bad-rgb),0.4); background: rgba(var(--bad-rgb),0.07); }
@@ -477,7 +482,11 @@
   .notice-card.closable .nc-text { padding-right: var(--sp-3xl); }
   .nc-text b { display: block; font-size: var(--fs-md); font-weight: 600; line-height: 1.3; }
   .nc-text p { margin: var(--sp-3xs) 0 0; font-size: var(--fs-sm); color: var(--muted); line-height: 1.45; }
+  /* a narrow card (a phone, or 2 of 6 desktop columns) takes the short title and line, so
+     each stays one line and the card keeps the Overview card's height */
+  .notice-card { container-type: inline-size; }
   .nc-short { display: none; }
+  @container (max-width: 370px) { .nc-long { display: none; } .nc-short { display: inline; } }
   .notice-card .ghost-btn { align-self: flex-start; color: var(--text); white-space: nowrap; }
   .notice-card.bad .ghost-btn { border-color: rgba(var(--bad-rgb),0.45); }
   .notice-card.warn .ghost-btn { border-color: rgba(var(--warn-rgb),0.45); }
@@ -486,16 +495,16 @@
     background: none; border: none; color: var(--muted); border-radius: var(--r-md); touch-action: manipulation; }
   .notice-x:hover { color: var(--text); background: rgba(var(--ink-rgb),0.05); }
   .notice-x .ico { width: var(--icon-md); height: var(--icon-md); }
-  /* phone: full width, the short title and line, so the button stays inside the card */
+  /* phone: full width of the 2-column grid */
   @media (max-width: 599px) {
-    .notice-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-sm); margin-bottom: var(--sp-md); }
+    .notice-cards { --tile-h: 121px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-sm); margin-bottom: var(--sp-md); }
     .notice-card { padding: var(--sp-lg); }
-    .nc-long { display: none; }
-    .nc-short { display: inline; }
   }
   /* touch screens: the notice buttons take a full 44 px tap */
   @media (pointer: coarse) {
     .notice-card .ghost-btn, .nl-act { min-height: 44px; touch-action: manipulation; }
+    /* the taller tap target fits the Overview card's height */
+    .notice-card { padding-top: var(--sp-md); padding-bottom: var(--sp-md); }
   }
   .page { display: flex; flex-direction: column; }
   /* Old readings: today's pictures fade, today's words and numbers go grey (SOLAR-343).
