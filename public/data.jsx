@@ -401,11 +401,13 @@ const fetchEmailPrefs = (userId) => fetchFlags('email_prefs', EMAIL_KINDS, userI
 const saveEmailPref = (userId, kind, on) => saveFlag('email_prefs', 'email_pref_change_done', userId, kind, on);
 // The alerts of the last 30 days, {pinned, items, unread} (0124, SOLAR-244).
 // The bell: the billing notices, and the last 30 days of alerts as the full page lists them
-// (SOLAR-411): a start and its "back" are two rows (0166, SOLAR-431). unread counts rows.
+// (SOLAR-411): a start and its "back" are two rows (0166, SOLAR-431). unread counts rows,
+// and the notices not yet seen (0173, SOLAR-465).
 async function fetchNotifications() {
   const [n, a] = await Promise.all([must(window.sb.rpc('api_notifications')),
     fetchAlerts({ from: new Date(Date.now() - 30 * 86400000) })]);
-  return { pinned: n.pinned, items: a.items, unread: a.items.filter(it => !it.read).length };
+  return { pinned: n.pinned, items: a.items,
+    unread: a.items.filter(it => !it.read).length + n.pinned.filter(p => !p.read).length };
 }
 // Every alert, one row each, a "back" too (0166, SOLAR-431): {items, more,
 // unread}. from: a Date or null; kind: an alert switch or null; before: the last item shown.
@@ -413,9 +415,14 @@ async function fetchAlerts({ from, kind, unread, before }) {
   return must(window.sb.rpc('api_alerts', { p_from: from ? from.toISOString() : null, p_switch: kind || null,
     p_unread: !!unread, p_before: before ? before.id : null, p_before_ts: before ? before.ts : null }));
 }
-// null marks every one read.
+// ids: alert ids, and billing notices' keys (strings, 0173). null marks every one read.
 async function readNotifications(ids) {
-  await must(window.sb.rpc('api_notifications_read', { p_ids: ids }));
+  const keys = ids && ids.filter(id => typeof id === 'string');
+  const alerts = ids && ids.filter(id => typeof id !== 'string');
+  await Promise.all([
+    (!ids || alerts.length) && must(window.sb.rpc('api_notifications_read', { p_ids: alerts })),
+    keys?.length && must(window.sb.rpc('api_notices_read', { p_keys: keys })),
+  ]);
 }
 // Which alerts pop up (push_prefs, 0124).
 const PUSH_KINDS = ['grid', 'battery', 'panels', 'readings', 'sunsynk'];
