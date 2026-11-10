@@ -260,7 +260,7 @@ const tallyCall = (pathname: string, result: string, ms: number) =>
   addTally({ kind: kindOf(pathname), result, calls: 1, ms, ms_max: ms });
 
 /**
- * Adds the counts since the last save to private.sunsynk_calls in one write (0177). A poll
+ * Adds the counts since the last save to private.sunsynk_calls in one write (0178). A poll
  * run also passes its shard, run time and plants. A failed write keeps the counts for the
  * next save.
  */
