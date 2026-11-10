@@ -33,7 +33,9 @@ begin
   if p_image is not null and (char_length(p_image) > 1400000 or p_image !~ '^[A-Za-z0-9+/=]+$') then
     raise exception 'bad image' using errcode = '22023';
   end if;
-  -- Ten a day is plenty for a person and stops a stuck button filling hello@.
+  -- Ten a day is plenty for a person and stops a stuck button filling hello@. The lock makes
+  -- parallel sends from one user wait their turn, so they can't all pass the count.
+  perform pg_advisory_xact_lock(hashtextextended('feedback:' || uid::text, 0));
   if (select count(*) from private.feedback where user_id = uid and created_at > now() - interval '1 day') >= 10 then
     raise exception 'feedback limit' using errcode = '22023';
   end if;
@@ -43,9 +45,10 @@ begin
   values (uid, msg, left(p_page, 200), left(p_version, 40), p_image is not null)
   returning id into fid;
 
-  -- No user_id on the row: the mail is to hello@, not to the user (like bill_mail_failed).
-  insert into public.email_queue (to_email, kind, key, data, priority)
-  values ('hello@princesolarhub.co.za', 'feedback', 'feedback:' || fid,
+  -- To hello@ (to_email wins over the user's address in email_claim). user_id is set only so
+  -- deleting the account deletes a feedback email not sent yet; 'feedback' has no switch.
+  insert into public.email_queue (user_id, to_email, kind, key, data, priority)
+  values (uid, 'hello@princesolarhub.co.za', 'feedback', 'feedback:' || fid,
           jsonb_build_object('id', fid, 'user', uid, 'email', em, 'message', msg, 'page', left(p_page, 200),
                              'version', left(p_version, 40), 'image', p_image), 1);
   return fid;

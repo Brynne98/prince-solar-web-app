@@ -332,6 +332,7 @@ function FeedbackDialog({ onClose }) {
   const [msg, setMsg] = useState('');
   const [shot, setShot] = useState(null); // { name, data }
   const [busy, setBusy] = useState(false);
+  const fileRef = React.useRef(null);
   const { bad, flag, edited } = window.useFieldErrors();
   const pick = async (e) => {
     const f = e.target.files?.[0];
@@ -368,7 +369,8 @@ function FeedbackDialog({ onClose }) {
         <div className="field fb-shot">
           {shot
             ? <><span className="fb-shot-name">{shot.name}</span><button type="button" className="ghost-btn" onClick={() => setShot(null)} disabled={busy}>Remove</button></>
-            : <label className="ghost-btn">Add screenshot<input type="file" accept="image/*" hidden onChange={pick} /></label>}
+            : <button type="button" className="ghost-btn" onClick={() => fileRef.current.click()} disabled={busy}>Add screenshot</button>}
+          <input ref={fileRef} type="file" accept="image/*" hidden onChange={pick} />
           {bad['fb-shot'] && <span className="field-err" role="alert">{bad['fb-shot']}</span>}
         </div>
         <div className="conn-form-actions">
