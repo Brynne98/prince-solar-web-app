@@ -357,8 +357,8 @@ async function build(r: Row): Promise<Email | null> {
         covers: covers(d.startsOn, addDays(d.nextDate, -1)),
       });
     case "bill_change": {
-      // The plants that stay: the user's others (SOLAR-415).
-      const { data: pus } = await db.from("plant_users").select("plant_name").eq("user_id", r.user_id).order("linked_at");
+      // The plants that stay: the user's others still collecting (SOLAR-415); stopped ones are not kept (SOLAR-488).
+      const { data: pus } = await db.from("plant_users").select("plant_name").eq("user_id", r.user_id).eq("paused", false).order("linked_at");
       const keep = (pus ?? []).map((x) => x.plant_name ?? "").filter((n) => n && !(d.removePlants ?? []).includes(n));
       return planChangeBooked({ keepPlants: keep,
         from: d.from, to: d.to, fromPeriod: d.fromPeriod, toPeriod: d.toPeriod, on: day(d.on),
