@@ -40,9 +40,11 @@ figure img { display: block; width: 100%; height: auto; border-radius: 14px; bor
 figure.phone img { max-width: 340px; margin: 0 auto; }
 figure.phone figcaption { text-align: center; }
 figcaption { margin-top: 8px; font-size: 14px; color: var(--muted); }
-.vs { overflow-x: auto; }
-.vs table { min-width: 520px; }
-.vs td:not(:first-child), .vs th:not(:first-child) { width: 30%; }
+.vs td:not(:first-child), .vs th:not(:first-child) { width: 34%; }
+@media (max-width: 560px) {
+  .lede { font-size: 17px; }
+  .vs th, .vs td { font-size: 14px; line-height: 1.45; padding-right: 8px; }
+}
 .y::before { content: "✓ "; color: var(--pv); font-weight: 700; }
 .n::before { content: "– "; color: var(--muted); }
 details { border-bottom: 1px solid var(--line); padding: 12px 0; }
