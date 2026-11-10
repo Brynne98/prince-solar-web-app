@@ -58,3 +58,5 @@ Brynne's explicit say-so, every time.
 - Never send emails, names, SunSynk logins or readings as event properties. The user is
   known by their Supabase user id only.
 - New data collected goes in `public/privacy.html`.
+- Event names, the properties every event carries and what the phone apps must send: `ANALYTICS.md`
+  (SOLAR-423). A new event gets a line there.
