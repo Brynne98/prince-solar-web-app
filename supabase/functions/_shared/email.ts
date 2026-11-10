@@ -665,9 +665,9 @@ const CANCEL = `${APP}/?tab=account&section=cancel`;
 // Day-2 "Finish setup": Plant settings' Your system, where rate, battery and panels are set (SOLAR-361).
 const SYSTEM = `${APP}/?tab=account&section=system`;
 // What Free means after its first week, said the same way in every email.
-const FREE_RULE = "Free keeps only the last 24 hours of readings. Alerts stay on; reports stop.";
+const FREE_RULE = "Free shows only today's readings. Alerts stay on; reports stop.";
 // After a paid plan ends, said the same way in every email (SOLAR-329, 0146; SOLAR-415).
-const PAID_FREE = "On Free, one plant updates and you see only the last 24 hours. We keep your history for 30 days in case you come back. Reports stop.";
+const PAID_FREE = "On Free, one plant updates and you see only today. We keep your history for 30 days in case you come back. Reports stop.";
 const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;
 // How many plants each plan keeps (SOLAR-371): said when plants are deleted.
 const PLAN_PLANTS = { free: "one plant", home: "2 plants", family: "5 plants" } as const;
@@ -806,7 +806,7 @@ export const planChangeBooked = (c: Change) => {
         // No plant deleted: the history that goes leads instead, as in the plan-ended email.
         : c.history?.days ? [{ lead: "Nothing more is charged." },
             { box: { hero: lost(`Deleted on ${c.history.on}`, dayCount(c.history.days), `of history at ${c.history.plant}`),
-              rows: [[`After ${c.on}`, "Last 24 hours"], ["Reports", "Stop"]] } }, keep]
+              rows: [[`After ${c.on}`, "Today only"], ["Reports", "Stop"]] } }, keep]
         : [{ lead: `Nothing more is charged. ${PAID_FREE}` }, keep]
       // A monthly/yearly switch reads like the plan-kept email: what carries on, then the price.
       : switchOnly ? [{ lead: "Your plants, history and reports carry on as before." },
@@ -965,7 +965,7 @@ export const movedToFree = (m: MovedToFree) =>
         hero: m.stopped.length ? lost(`Deleted on ${m.deleteOn}`, plantCount(m.stopped.length), withDays(names(m.stopped), m.stoppedDays))
           : m.days ? lost(`Deleted on ${m.deleteOn}`, dayCount(m.days), `of history at ${m.kept}`) : undefined,
         rows: [...(m.stopped.length ? [["Still updating", esc(m.kept)] as [string, string]] : []),
-          ["You see", "Last 24 hours"], ["Reports", "Stop"]],
+          ["You see", "Today only"], ["Reports", "Stop"]],
       } },
       { button: { label: `Pay for ${PLAN_NAME[m.from]}`, href: PLANS } },
     ],
@@ -981,7 +981,7 @@ export const winback = (w: { from: Plan; keepUntil: string; plant?: string; days
       { box: {
         hero: w.days && w.plant ? lost(`Deleted on ${w.keepUntil}`, dayCount(w.days), `of history at ${w.plant}`) : undefined,
         rows: [...(w.days && w.plant ? [] : [["History deleted on", w.keepUntil] as [string, string]]),
-          ["You see", "Last 24 hours"], ["Reports", "Stopped"]],
+          ["You see", "Today only"], ["Reports", "Stopped"]],
       } },
       ...(w.price ? [{ lead: keepOn(w.price, "your history") }] : []),
       { button: { label: "Keep my history", href: PLANS } },
@@ -1018,7 +1018,7 @@ export const freeWeekEndsSoon = (endsOn: string, plant: string, days: number, pr
     parts: [
       { box: {
         hero: days > 0 ? lost(`Deleted on ${wd}`, dayCount(days), `of history at ${plant}`) : undefined,
-        rows: [[`After ${wd}`, "Last 24 hours"], ["Reports", "Stop"]],
+        rows: [[`After ${wd}`, "Today only"], ["Reports", "Stop"]],
       } },
       { lead: price ? keepOn(price, "everything") : "A plan keeps it all." },
       { button: { label: "Keep my history", href: PLANS } },

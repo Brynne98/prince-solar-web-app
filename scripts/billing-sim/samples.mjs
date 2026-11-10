@@ -119,7 +119,7 @@ async function build() {
     const state = g.state === 'past_due' ? 'Payment failed' : ending ? 'Ends ' + billDay(g.nextDate) : 'Active';
     const line = g.comped ? 'Free of charge. Every plant, full history.'
       : paid ? `${rand(g.price)} ${perUnit(g.period)} for ${act === 1 ? '1 plant' : act + ' plants'}. ${ending ? 'Ends' : 'Renews'} on ${longDay(g.nextDate)}.`
-      : '1 plant and the last 24 hours. No card needed.';
+      : '1 plant, today only. No card needed.';
     const extraInv = g.comped ? 0 : g.extraPlants; // comped plants cost nothing
     const prices = g.prices;
     const breakdown = paid && g.plan === 'family' && extraInv > 0

@@ -150,12 +150,11 @@ function CalendarPop({ date, todayStr, earliest, latest = todayStr, days, allDay
 // (on a phone they sit at the card's two ends, SOLAR-27). Today sits inside the box on a phone.
 // The arrows, the calendar and Today reach only days with data (SOLAR-175): ‹ › jump to the
 // nearest one and grey out when there is none. The list is asked again when the calendar opens.
-// Free after its week (SOLAR-242): ‹ past yesterday shows greyed and opens the plans.
-const dayBefore = (k) => { const d = new Date(k + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); };
+// Free after its week (SOLAR-242, SOLAR-464): ‹ past today shows greyed and opens the plans.
 const monthsBack = (a, b) => (Number(a.slice(0, 4)) - Number(b.slice(0, 4))) * 12 + Number(a.slice(5, 7)) - Number(b.slice(5, 7));
 function DateBar({ pick, earliest, locked, children }) {
   const { date, setDate, todayStr } = pick;
-  const floor = window.useFreeOver() ? dayBefore(todayStr) : null;
+  const floor = window.useFreeOver() ? todayStr : null;
   const [open, setOpen, box] = usePopover();
   const close = React.useCallback(() => setOpen(false), []);
   const [days, setDays] = React.useState(null);
