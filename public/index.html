@@ -523,7 +523,7 @@
   /* tablet: an 84 px rail, the icon over its name, initials for the account */
   @media (min-width: 600px) and (max-width: 1023px) {
     .frame { --rail-w: 84px; }
-    .rail { padding: var(--sp-lg) var(--sp-sm); }
+    .rail { padding: calc(var(--sp-lg) + var(--safe-top)) var(--sp-sm) var(--sp-lg); }
     .rail-logo { justify-content: center; padding-left: 0; }
     .rail-logo .app-name { display: none; }
     .nav > button { flex-direction: column; gap: var(--sp-2xs); padding: var(--sp-sm) var(--sp-3xs) var(--sp-sm); font-size: var(--fs-xs); text-align: center; }
