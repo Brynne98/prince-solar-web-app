@@ -203,7 +203,12 @@ async function accessTokenFor(acc: Account, force = false): Promise<string> {
   let t = await tokenRefresh(refresh);
   // The share login (SOLAR-310) has its password in a secret: sign in again rather than wait for a person.
   const sharePw = isShareAccount(acc) ? Deno.env.get("SUNSYNK_SHARE_PASSWORD") : undefined;
-  if (!t && sharePw) t = await tokenLogin(SHARE_USERNAME, sharePw).catch(() => null);
+  // Only SunSynk refusing the password stops it; a timeout or 5xx is a failed poll, tried
+  // again next minute (SOLAR-451). Same rule as link-sunsynk.
+  if (!t && sharePw) {
+    t = await tokenLogin(SHARE_USERNAME, sharePw)
+      .catch((e) => { if (/login rejected/i.test(e?.message ?? "")) return null; throw e; });
+  }
   if (!t) throw new RelinkNeeded(acc.id, "refresh token rejected (password changed or revoked)");
 
   const exp = expiresAt(t.expires_in);

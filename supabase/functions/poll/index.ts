@@ -53,6 +53,7 @@ import {
   plantsToPoll,
   pollJobs,
   RelinkNeeded,
+  shareAccount,
   shareSync,
   syncPlants,
 } from "../_shared/sunsynk.ts";
@@ -527,6 +528,16 @@ async function shardSpec(req: Request): Promise<ShardSpec> {
   return { shard, shards, delayMs, account };
 }
 
+async function retryShareLogin() {
+  try {
+    const { data } = await db.rpc("share_account_get");
+    if (data?.[0]?.status !== "needs_relink") return;
+    if (await shareAccount()) console.log("share login: signed in again");
+  } catch (e) {
+    console.warn("share login retry failed:", e instanceof Error ? e.message : e);
+  }
+}
+
 serve("poll", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
@@ -538,6 +549,10 @@ serve("poll", async (req) => {
 
     // Only this shard's plants; the shard hash (first 8 hex digits of the account
     // uuid, mod shards) runs in SQL.
+    // SunSynk refused the share login: try the secret again hourly, so shared plants
+    // restart without an owner pressing Check (SOLAR-451). One shard only.
+    if (spec.shard === 0 && !spec.account && (ts / 60) % PLANTS_EVERY_MIN === 0) await retryShareLogin();
+
     let jobs = await pollJobs(spec.shard, spec.shards, spec.account);
     if (!jobs.length) {
       if (!spec.account && !(await plantsToPoll()).length) {
