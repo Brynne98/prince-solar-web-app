@@ -373,7 +373,7 @@ function HistoryLock({ where, tile }) {
     <div className="hist-lock">
       <div className="hl-shape" aria-hidden="true">{FAINT.map((h, i) => <i key={i} style={{ height: h + '%' }} />)}</div>
       <button type="button" className="hl-line" onClick={() => openPlans(where)}>
-        <LockIcon /><span>Free keeps the last 24 hours. <b>See every day →</b></span>
+        <LockIcon /><span>Free shows only today. <b>See every day →</b></span>
       </button>
     </div>
   );

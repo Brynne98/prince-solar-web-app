@@ -391,7 +391,7 @@ function notifDay(day) {
 // words (_shared/email.ts). They stay at the top of the list until their state ends.
 // A failed payment and plants about to go are a banner on every page too; only the
 // second can be closed. act: { plan, plans, undo } from App.
-const FREE_PAID = 'readings are kept for 30 days, then only the last 24 hours. Alerts stay on; reports stop.';
+const FREE_PAID = 'readings are kept for 30 days, then you see only today. Alerts stay on; reports stop.';
 function billNotice(n, act) {
   const { rand, billDay } = window.billingFmt;
   const plan = PLAN_NAME[n.plan];
@@ -434,11 +434,11 @@ function billNotice(n, act) {
     case 'free_week_soon': {
       const day = new Date(n.endsAt).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Africa/Johannesburg' });
       return { tone: 'warn', icon: 'clock', title: `${n.days > 1 ? n.days + ' days of history' : 'History'} for ${n.plant || 'your plant'} go${n.days > 1 ? '' : 'es'} on ${day}`,
-        body: `Free keeps only the last 24 hours. Keep it all for R${n.perMonth} a month, billed yearly.`,
+        body: `Free shows only today. Keep it all for R${n.perMonth} a month, billed yearly.`,
         button: 'Keep my history', run: act.plans };
     }
     // FreeWeekOver's words
-    case 'free_week_ended': return { icon: 'clock', title: 'Your free week has ended', body: 'Free keeps the last 24 hours. Upgrade and your last 60 days come back.',
+    case 'free_week_ended': return { icon: 'clock', title: 'Your free week has ended', body: 'Free shows only today. Upgrade and your last 60 days come back.',
       button: 'See plans', run: act.plans };
     default: return null;
   }
@@ -1343,7 +1343,7 @@ function FreeWeekOver({ onDone }) {
   return (
     <section className="card free-over" aria-label="Free week ended">
       <h2>Your free week has ended</h2>
-      <p>Free keeps the last 24 hours. Upgrade and your last 60 days come back.</p>
+      <p>Free shows only today. Upgrade and your last 60 days come back.</p>
       <div className="free-over-acts">
         <button type="button" className="ghost-btn" onClick={() => done('later')}>Not now</button>
         <button type="button" className="save-btn" onClick={() => done('plans')}>See plans</button>

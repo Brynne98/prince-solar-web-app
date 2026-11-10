@@ -2294,7 +2294,7 @@ const listPrice = (b, plan, period, extra = 0) => {
 };
 const cancelText = (b) => {
   const { billDay, rand, perUnit, offerName } = window.billingFmt;
-  const text = `It runs until ${billDay(b.nextDate)}. After that, on Free, readings are kept for 30 days, then only the last 24 hours. Alerts stay on; reports stop.`;
+  const text = `It runs until ${billDay(b.nextDate)}. After that, on Free, readings are kept for 30 days, then you see only today. Alerts stay on; reports stop.`;
   // an offer goes with the plan: coming back costs the list price
   const list = b.offer?.held && listPrice(b, b.plan, b.period, b.extraPlants || 0);
   return list > b.price ? `${text} Your ${offerName(b.offer)} of ${rand(b.price)} ${perUnit(b.period)} goes too; ${PLAN_NAME[b.plan]} costs ${rand(list)} if you come back.` : text;
@@ -2380,7 +2380,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
   const word = b.state === 'past_due' ? 'Payment failed' : null;
   const line = b.comped ? 'Free of charge. Every plant, full history.'
     : weekEnds ? `Free week until ${window.billingFmt.billDay(weekEnds)}.`
-    : !paid ? '1 plant and the last 24 hours. No card needed.' : null;
+    : !paid ? '1 plant, today only. No card needed.' : null;
   // the plants it collects, with any extra plants still held (SOLAR-371)
   const room = planRoom(b.plan, b.extraPlants);
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
@@ -2556,7 +2556,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   };
   // The same four lines on every card, so the cards end level; false is a line the plan lacks
   const gives = {
-    free: [['1 plant', true], ['The last 24 hours', true], ['Alerts', true], ['Reports by email', false]],
+    free: [['1 plant', true], ['Today only', true], ['Alerts', true], ['Reports by email', false]],
     home: [['2 plants', true], ['Full history', true], ['Alerts', true], ['Reports by email', true]],
     family: [['5 plants', true], ['Full history', true], ['Alerts', true], ['Reports by email', true]],
   };
