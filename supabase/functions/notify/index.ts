@@ -27,7 +27,7 @@
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { noteError, reportError, serve, track } from "../_shared/errors.ts";
 import {
-  accountDeleted, type Email, type Price, type History, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
+  accountDeleted, type Email, type Price, type History, freeWeekEnded, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, cardChanged, cardExpiring, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
   offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, needAHand, feedback,
 } from "../_shared/email.ts";
@@ -190,11 +190,12 @@ async function buildHistory(p: Plant): Promise<History | null> {
 }
 
 /** The finished week, month or year before `today`, against the one before it. Null when it has no readings. */
-async function buildReport(p: Plant, period: Period, today: string, linkedOn?: string): Promise<Report | null> {
+// freeFrom: the free week's first day; the day-7 report covers that week (SOLAR-475, 0182).
+async function buildReport(p: Plant, period: Period, today: string, linkedOn?: string, freeFrom?: string): Promise<Report | null> {
   let from: string, to: string, pFrom: string, pTo: string, label: string, prevLabel: string;
   const [y, m] = today.split("-").map(Number);
   if (period === "week") {
-    to = addDays(today, -((new Date(today + "T00:00:00Z").getUTCDay() + 6) % 7 + 1)); from = addDays(to, -6);
+    to = freeFrom ? addDays(freeFrom, 6) : addDays(today, -((new Date(today + "T00:00:00Z").getUTCDay() + 6) % 7 + 1)); from = addDays(to, -6);
     pTo = addDays(from, -1); pFrom = addDays(pTo, -6);
     label = `${fmtDay(from, { day: "numeric", ...(from.slice(5, 7) !== to.slice(5, 7) ? { month: "short" } : {}) })} – ${fmtDay(to, { day: "numeric", month: "short", year: "numeric" })}`;
     prevLabel = "last week";
@@ -319,9 +320,13 @@ async function build(r: Row): Promise<Email | null> {
     case "report_week": case "report_month": case "report_year": {
       const { data: pu } = await db.from("plant_users").select("linked_at").eq("user_id", r.user_id).eq("plant_id", r.plant_id).maybeSingle();
       const linkedOn = pu?.linked_at ? new Date(pu.linked_at).toLocaleDateString("en-CA", { timeZone: tz }) : undefined;
-      const rep = await buildReport(p, r.kind.slice(7) as Period, d.today, linkedOn);
-      // The day-7 report of a Free account's first week (0114) says the week ends.
-      return rep && report({ ...rep, freeWeekEnds: d.freeWeekEnds === true });
+      const free = d.freeWeekEnds === true;
+      const rep = await buildReport(p, r.kind.slice(7) as Period, d.today, linkedOn, free ? d.from : undefined);
+      // The day-7 report of a Free account's first week (0114) says the week has ended (SOLAR-475).
+      if (!free) return rep && report(rep);
+      const fw = { days: d.days ?? 0, price: await priceOf("home", r.user_id) };
+      // No readings in the free week: the notice still goes, without the report.
+      return rep ? report({ ...rep, freeWeekEnds: fw }) : freeWeekEnded(fw, p.name);
     }
     case "free_week_soon":
       return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: tz }).replace(/\bSept\b/, "Sep"),
@@ -569,7 +574,8 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
       // Reports cost two reads each; what isn't built in time goes back untouched.
       if (Date.now() > deadline) { done.push(later(row)); continue; }
       try {
-        if (row.kind.startsWith("report_") && !dry && await historyPending(row)) {
+        // The free week's report can't wait: the trim deletes its days an hour after the week ends (0182).
+        if (row.kind.startsWith("report_") && row.data.freeWeekEnds !== true && !dry && await historyPending(row)) {
           done.push({ id: row.id, status: "queued", error: "waits for history", retry_s: 600, refund: true });
           continue;
         }
@@ -616,6 +622,10 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
       if ((row?.kind === "winback" || row?.kind === "bill_free") && row.user_id) {
         await track("plan_cancelled", row.user_id, String(row.id), new Date().toISOString(),
           { plan: row.data.from, reason: row.kind === "winback" ? "cancelled" : "unpaid" });
+      }
+      // SOLAR-475
+      if (row?.kind === "report_week" && row.data.freeWeekEnds === true && row.user_id) {
+        await track("free_week_ended_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), {});
       }
       // SOLAR-319
       if (row?.kind === "need_a_hand" && row.user_id) {

@@ -79,7 +79,8 @@ Showcase (`public/welcome-track.js`, princesolarhub.co.za, SOLAR-472), no person
 
 Functions (`track()` in `_shared/errors.ts`): `payment_failed`, `plan_cancelled`,
 `winback_resubscribed_done`, `winback_email_sent_done`, `need_a_hand_login_linked_done`,
-`need_a_hand_email_sent_done`. `sunsynk_calls_counted` (SOLAR-468): once a day from `poll` as
+`need_a_hand_email_sent_done`, `free_week_ended_email_sent_done` (SOLAR-475: the day-7 report that says the
+free week has ended went out). `sunsynk_calls_counted` (SOLAR-468): once a day from `poll` as
 `edge:poll`, no person; yesterday's SunSynk calls, failed calls, calls per plant and slowest
 poll run, from `private.sunsynk_calls` (0178). No user data.
 

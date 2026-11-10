@@ -100,7 +100,8 @@ type Part =
   | { stats: { label: string; value: string; unit?: string; tone?: Tone; sub?: string; delta?: Delta }[] } // report tiles, two to a row
   | { chart: { title: string; side?: string; bars: Bars; facts: { label: string; value: string; unit?: string; tone?: Tone; sub?: string }[] } }
   | { facts: { label: string; value: string }[] } // label left, value right
-  | { note: string };
+  | { note: string }
+  | { heading: string }; // small capitals over a section further down (the day-7 report under its notice)
 
 // labels: one under each bar (a week); titles: the hover text per bar, where the mail app
 // shows it (desktop only). The highest bar is drawn full green, the rest dimmer.
@@ -189,6 +190,7 @@ function html(subject: string, b: Body): string {
         `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${big}${lines}${list}</table></td></tr></table>`;
     }
     if ("note" in x) return `<p class="m" style="margin:0 0 16px;font:400 14px/1.55 ${SANS};color:#9aa5b3">${x.note}</p>`;
+    if ("heading" in x) return `<div class="m" style="margin:28px 0 8px;font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(x.heading)}</div>`;
     if ("chart" in x) {
       const c = x.chart;
       // The average sits under the title, not beside it, so the two never crowd on a phone.
@@ -257,6 +259,7 @@ function text(b: Body): string {
     else if ("box" in x) out.push(...(x.box.hero ? [`${x.box.hero.label}: ${x.box.hero.value}${x.box.hero.sub ? ` (${x.box.hero.sub})` : ""}`] : []),
       ...(x.box.rows ?? []).map(([l, v]) => `${l}: ${strip(v)}`), ...(x.box.checks ?? []).map((c) => c.done ? `[x] ${c.name}` : `${c.n ? `${c.n}.` : "[ ]"} ${[c.name, [c.text, c.sub].filter(Boolean).join(" ")].filter(Boolean).join(": ")}`), "");
     else if ("note" in x) out.push(strip(x.note), "");
+    else if ("heading" in x) out.push("", x.heading.toUpperCase());
     else if ("button" in x) out.push(`${x.button.label}: ${x.button.href}`, "");
     else if ("chart" in x) out.push(x.chart.title, ...(x.chart.bars.labels ? [x.chart.bars.labels.map((l, i) => `${l} ${x.chart.bars.values[i] == null ? "–" : x.chart.bars.values[i]!.toFixed(0)}`).join(", ") + " kWh"] : []),
       ...x.chart.facts.map((f) => `${f.label}: ${strip(f.value)}${f.unit ? " " + f.unit : ""}${f.sub ? `, ${f.sub}` : ""}`), "");
@@ -455,7 +458,9 @@ export type Report = {
   bestDay?: { label: string; kwh: number };
   highestUse?: { label: string; kwh: number }; // the day the home used the most ("Busiest day")
   daily?: Bars; // solar kWh per day (per month for a year)
-  freeWeekEnds?: boolean; // the week report sent at the end of a Free account's first week (SOLAR-208)
+  // The report sent when a Free account's first week ends (SOLAR-208): days is the history
+  // the trim deletes, price what keeps it (SOLAR-475).
+  freeWeekEnds?: FreeWeekEnded;
   partialFrom?: string; // first day counted, when after the period starts: "20 Oct" (SOLAR-273)
   partialWhy?: "added" | "history"; // the plant was added then (SOLAR-305), or its history starts then
 };
@@ -482,6 +487,12 @@ export function report(r: Report): Email {
     ...(r.savedRand != null ? [{ label: "Est. saved", value: rand(r.savedRand), ...trend(r.change.saved, r.prevLabel, "up") }] : []),
   ];
   const parts: Part[] = [];
+  const fw = r.freeWeekEnds;
+  // The free week's end comes first, then its report (SOLAR-475).
+  if (fw) parts.push(...freeWeekEndedParts(fw, r.plant),
+    { heading: "Your last weekly report" },
+    { note: `What ${esc(r.plant)} made and used in its free week, ${r.label.replace(/ /g, "&nbsp;").replace("–", "–⁠")}.` },
+  );
   // A Free account's day-7 report is its last, so it promises no next one.
   if (r.partialFrom) parts.push({ note: `From ${r.partialFrom}, when ${r.partialWhy === "added" ? "you added this plant" : "your history starts"}.` +
     "" });
@@ -494,10 +505,8 @@ export function report(r: Report): Email {
     const avg = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 0;
     parts.push({ chart: { title: r.period === "year" ? "Solar each month" : "Solar each day", side: `Average ${kwh(avg).join(" ")} a ${r.period === "year" ? "month" : "day"}`, bars: r.daily, facts } });
   } else if (facts.length) parts.push({ facts: facts.map((f) => ({ label: f.label, value: `${f.sub ? esc(f.sub) + " · " : ""}${f.value}${f.unit ? " " + f.unit : ""}` })) });
-  if (r.freeWeekEnds) {
-    parts.push({ note: `Your free week ends today. From tomorrow, ${FREE_RULE}` });
-    parts.push({ button: { label: "See plans", href: PLANS } });
-  } else parts.push({ button: openPage("live", r.plantId) });
+  if (fw) return freeWeekMail(parts);
+  parts.push({ button: openPage("live", r.plantId) });
   return make(`${EVERY[r.period]} solar report for ${r.plant}: ${r.label}`, {
     title: r.label,
     sub: r.plant,
@@ -505,6 +514,21 @@ export function report(r: Report): Email {
     footer: SETTINGS_FOOTER(`Sent every ${r.period}. Turn it off in notification settings.`),
   });
 }
+
+// When a Free account's first week ends (SOLAR-475): what goes, what stays, what keeps it.
+// Sent on top of the week's report, or alone when the week has no readings.
+export type FreeWeekEnded = { days: number; price?: Price };
+const freeWeekEndedParts = (fw: FreeWeekEnded, plant: string): Part[] => [
+  { box: {
+    hero: fw.days > 0 ? lost("Deleted from today", dayCount(fw.days), `of history at ${plant}`) : undefined,
+    rows: [["You see", "Today's readings"], ["Reports", "Stop"], ["Alerts", "Stay on"]],
+  } },
+  { lead: fw.price ? keepOn(fw.price, "everything") : "A plan keeps it all." },
+  { button: { label: "See plans", href: PLANS } },
+  ...(fw.price ? [{ small: keepSmall(fw.price) }] : []),
+];
+const freeWeekMail = (parts: Part[]) => make("Your free week has ended", { title: "Your free week has ended", parts, footer: [HELP] });
+export const freeWeekEnded = (fw: FreeWeekEnded, plant: string) => freeWeekMail(freeWeekEndedParts(fw, plant));
 
 // ---------------------------------------------------------------- plant events
 
@@ -678,8 +702,6 @@ const PLANS = `${APP}/?tab=plans`;
 const CANCEL = `${APP}/?tab=account&section=cancel`;
 // Day-2 "Finish setup": Plant settings' Your system, where rate, battery and panels are set (SOLAR-361).
 const SYSTEM = `${APP}/?tab=account&section=system`;
-// What Free means after its first week, said the same way in every email.
-const FREE_RULE = "Free shows only today's readings. Alerts stay on; reports stop.";
 // After a paid plan ends, said the same way in every email (SOLAR-329, 0146; SOLAR-415).
 const PAID_FREE = "On Free, one plant updates and you see only today. We keep your history for 30 days in case you come back. Reports stop.";
 const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;

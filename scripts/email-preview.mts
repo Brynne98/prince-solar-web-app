@@ -18,7 +18,7 @@ import type { Email } from "../supabase/functions/_shared/email.ts";
 const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
-  accountDeleted, cardChanged, cardExpiring, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, offerEnds, renewalNotice, winback, needAHand,
+  accountDeleted, cardChanged, cardExpiring, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEnded, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, offerEnds, renewalNotice, winback, needAHand,
   passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, planKept, plantEvent, loginEvent, plantsRemovalSoon, planSwitched, planUpgraded,
   renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
@@ -102,7 +102,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
     daily: { from: "Jan", to: "Dec", values: [1040, 930, 890, 720, 610, 520, 560, 680, 790, 880, 920, 880], labels: ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"] },
   })],
   "report-week-free-ends": [FROM_REPORTS, report({
-    ...base, period: "week", label: "6 – 12 Oct 2026", prevLabel: "last week", freeWeekEnds: true,
+    ...base, period: "week", label: "6 – 12 Oct 2026", prevLabel: "last week", freeWeekEnds: { days: 58, price: { plan: "home", now: 49, list: 99 } },
     madeKwh: 191.3, homeKwh: 208.9, importKwh: 47.2, independencePct: 77, savedRand: 495, change: {},
     bestDay: { label: "Thu 9 Oct", kwh: 33.1 }, highestUse: { label: "Sat 11 Oct", kwh: 38.4 },
     daily: { from: "Mon 6 Oct", to: "Sun 12 Oct", values: [27.4, 29.8, 18.2, 33.1, 30.6, 24.9, 27.3], labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
@@ -112,6 +112,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
     reference: "PSH-7Q2K9X", covers: "1 to 30 Nov", next: { amount: 199, date: "1 Dec" } })],
   "billing-renewal-notice": [FROM_BILLING, renewalNotice({ plan: "family", amount: 1990, on: "1 Feb 2027", card: "Visa •••• 4081" })],
   "billing-offer-ends": [FROM_BILLING, offerEnds({ plan: "home", period: "monthly", was: 49, amount: 99, on: "3 Mar", card: "Visa •••• 4242" })],
+  "free-week-ended-no-readings": [FROM_REPORTS, freeWeekEnded({ days: 58, price: { plan: "home", now: 49, list: 99 } }, "Home")],
   "billing-free-week-ends-soon": [FROM_BILLING, freeWeekEndsSoon("Monday 10 Nov", "Home", 58, { plan: "home", now: 49, list: 99 })],
   "free-week-setup": [FROM_HELLO, freeWeekSetup(["rate", "size", "reserve", "panels"])],
   "free-week-setup-some-done": [FROM_HELLO, freeWeekSetup(["size", "panels"])],
