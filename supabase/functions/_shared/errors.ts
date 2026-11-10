@@ -65,7 +65,7 @@ function send(fn: string, e: unknown, userId: string | null, handled: boolean, p
         }],
       },
     }),
-  }).then(() => {}, () => { /* PostHog down: the Supabase log still has it */ });
+  }).then((r) => r.ok, () => false); // PostHog down: the Supabase log still has it
 }
 
 export async function reportError(fn: string, e: unknown, userId: string | null = null): Promise<void> {
@@ -126,12 +126,13 @@ export async function flushErrors(fn = served): Promise<void> {
   const keyOf = (kind: string) => `error_sent:${fn}:${kind}`;
   const gate = await sentWithinHour(batch.filter(([, n]) => n.hourly).map(([k]) => keyOf(k)));
   const due = batch.filter(([k, n]) => !n.hourly || !gate.recent.has(keyOf(k)));
-  await Promise.all(due.map(([kind, n]) => send(fn, n.e, n.user, true, {
+  const sent = await Promise.all(due.map(([kind, n]) => send(fn, n.e, n.user, true, {
     kind, count: n.count, $exception_fingerprint: `${fn}:${kind}`,
     ...(n.plants.size ? { plant_ids: [...n.plants].slice(0, 50) } : {}),
     ...(n.ref ? { reference: n.ref } : {}),
   }, kind)));
-  await gate.mark(due.filter(([, n]) => n.hourly).map(([k]) => keyOf(k)));
+  // Only what PostHog took starts the hour; a failed send goes again next run.
+  await gate.mark(due.filter(([, n], i) => n.hourly && sent[i]).map(([k]) => keyOf(k)));
 }
 
 // A product event for one user, by Supabase user id only (CLAUDE.md, Analytics). The

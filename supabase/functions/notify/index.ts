@@ -479,9 +479,9 @@ async function sendBatch(outs: Out[], deadline: number, reuse?: string): Promise
   const one = outs.length === 1 && fb(outs[0]);
   const res = await paced(() => one ? post(RESEND_URL, payload(outs[0]), key) : post(`${RESEND_URL}/batch`, outs.map(payload), key));
   if (!res.error) return outs.map((o) => ({ id: o.row.id, status: "sent" }));
-  noteError(`resend_${res.status || "network"}`, new Error(res.error), { hourly: true });
   // 409: the old key was used with a different body (the batch changed since); a fresh one.
   if (res.status === 409 && reuse) return await sendBatch(outs, deadline);
+  noteError(`resend_${res.status || "network"}`, new Error(res.error), { hourly: true });
   if (!refused(res.status)) return outs.map((o) => retry(o.row, res.error!, key));
   if (outs.length === 1) return [{ id: outs[0].row.id, status: "failed", error: res.error }];
   const half = Math.ceil(outs.length / 2);
