@@ -2955,8 +2955,8 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
             const who = shared ? 'Shared plants' : acc.sunsynk_username;
             const at = shared ? 0 : who.indexOf('@') + 1; // 0 when there is no @
             // Amber at the age the header pill calls offline (15 minutes without a reading). A login
-            // with no plant is never read, so its age means nothing (SOLAR-285).
-            const stale = ok && plants.length > 0 && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
+            // with no plant on is never read, so its age means nothing (SOLAR-285, SOLAR-483).
+            const stale = ok && plants.some(p => !p.paused) && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
             return (
               <div key={acc.account_id} className={'login-grp plant-logins' +(leaving === acc.account_id ? ' leaving' : '')}>
                 <div className="login-line">
