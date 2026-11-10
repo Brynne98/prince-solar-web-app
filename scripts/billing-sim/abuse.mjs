@@ -147,8 +147,8 @@ await ensureMock();
 const ALLOW_AUTH = new Set(`_energy_row _erow _hm _plant_day_energy admin_overview api_account_delete api_alerts api_balance api_billing_change
 api_billing_extras api_billing_keep api_billing_quote api_billing_status billing_room api_data_days api_db_stats api_energy api_export api_grid_off_recent api_grid_today api_health
 api_history api_history_earliest api_inverter_history api_link_disconnect api_link_remove api_link_status api_me api_notifications
-api_notifications_read api_offer api_overview api_plant_days api_plant_start api_plant_states api_plant_stop api_prefs_set api_push_sub
-api_push_unsub api_string_health api_trends_by_hour api_trends_compare api_trends_daily calibration_plant cfg client_errors_cap
+api_notifications_read api_notices_read api_offer api_overview api_plant_days api_plant_start api_plant_states api_plant_stop api_prefs_set api_push_sub
+api_push_unsub api_send_feedback api_string_health api_trends_by_hour api_trends_compare api_trends_daily calibration_plant cfg client_errors_cap
 battery_groups_kwh day_start_epoch day_start_epoch_tz email_prefs_touch handle_new_user local_day local_day_tz local_hour local_hour_tz local_minute
 local_minute_tz local_ts local_ts_tz my_plant my_plant_ids panel_kwp plant_cfg plant_config_batt_sign_guard plant_config_features_guard
 plant_config_touch plant_tz profiles_guard q_by_hour q_day_agg q_day_gap_minutes q_grid_present q_recovered_minutes q_stats today_tz`.split(/\s+/));
@@ -496,7 +496,7 @@ await attack("G6d", "Free: remove login and relink does not restart the free wee
 await attack("G6e", "Free: a second account links the same login and gets its own free week", async () => {
   const a = await user("g6e1"), b = await user("g6e2");
   await link(a, "solo@mock"); const r = await link(b, "solo@mock");
-  return { hit: r.status === 200 && active(b) === 1, note: "0121: every account gets one free week, on any plant, even one another account has" };
+  return { hit: r.status === 200 && active(b) === 1, note: "0121, kept 2026-11-10 (SOLAR-476 A): every account gets one free week, on any plant, even one another account has" };
 }, { design: true });
 await attack("G6f", "paid link then cancel: no free-week row, so the plant is never trimmed on Free", async () => {
   const a = await home("g6f"); await link(a, "solo@mock");
@@ -510,6 +510,66 @@ await attack("G6f", "paid link then cancel: no free-week row, so the plant is ne
                       where pu.user_id='${a.id}' and coalesce(b.plan,'free')='free' and fw.s is not null`);
   return { hit: planOf(a) === "free" && rowsBefore === 0 && rule === 0, note: `Free, free-week rows=${rowsBefore}, trimmable=${rule}; shared-plant trim=${trimmed}` };
 });
+// SOLAR-476: the free week runs 7 days from the account's first plant, once per account.
+const weekStart = (u) => sql(`select coalesce(string_agg(started_at::text, ','), '') from private.free_week_logins where user_id='${u.id}'`);
+const weekEnds = async (u) => { const m = await rpc(u, "api_me"); return m.data?.freeWeekEndsAt ? Date.parse(m.data.freeWeekEndsAt) : null; };
+const backdate = (u, days) => sql(`update private.free_week_logins set started_at = started_at - interval '${days} days' where user_id='${u.id}'`);
+const DAY = 864e5;
+await attack("W1", "Free: a sign-up that waits 30 days still gets 7 days from its first plant, and none before", async () => {
+  const a = await user("g6g");
+  sql(`update auth.users set created_at = now() - interval '30 days' where id='${a.id}'`);
+  const before = await weekEnds(a);
+  await link(a, "solo@mock");
+  const after = await weekEnds(a), left = after ? (after - Date.now()) / DAY : 0;
+  return { hit: before !== null || !(left > 6.9 && left <= 7), note: `before plant: ${before}, after: ${left.toFixed(2)} days left` };
+});
+await attack("W2", "Free: stopping and starting the plant does not restart the week", async () => {
+  const a = await user("g6h"); await link(a, "solo@mock"); backdate(a, 5);
+  const t0 = weekStart(a);
+  const s = await rpc(a, "api_plant_stop", { p_plant: 6003 }), g = await rpc(a, "api_plant_start", { p_plant: 6003 });
+  const t1 = weekStart(a);
+  if (!good(s) || !good(g)) throw new Error(`stop ${s.status}, start ${g.status}`);
+  return { hit: t0 !== t1, note: "week start kept: " + (t0 === t1) };
+});
+await attack("W3", "Free: a second and third login on the same account do not add or restart a week", async () => {
+  const a = await user("g6i"); await link(a, "solo@mock"); backdate(a, 3);
+  const t0 = weekStart(a);
+  await link(a, "flat@mock", { confirmCost: true }); await link(a, "farm@mock", { confirmCost: true });
+  const t1 = weekStart(a);
+  return { hit: t0 !== t1 || t1.includes(","), note: `rows: ${t1.split(",").length}, start kept: ${t0 === t1}` };
+});
+await attack("W4", "Free: login removed on day 3, relinked on day 8: the week is over, not restarted", async () => {
+  const a = await user("g6j"); const r = await link(a, "solo@mock"); backdate(a, 3);
+  await rpc(a, "api_link_remove", { p_account: r.data.accountId });
+  backdate(a, 5);
+  const r2 = await link(a, "solo@mock");
+  const ends = await weekEnds(a);
+  return { hit: !r2.data?.accountId || ends === null || ends > Date.now(), note: `relinked: ${!!r2.data?.accountId}, week ended ${ends ? ((Date.now() - ends) / DAY).toFixed(2) + " days ago" : "never"}` };
+});
+await attack("W5", "shared plants: a claim starts the week once; a plant another account has can't be claimed", async () => {
+  const owner = await user("g6k-owner"), a = await user("g6k"), b = await user("g6k-b");
+  const share = await svc("share_account_set", { p_user: owner.id, p_username: `share-${RUN}@mock`, p_access: "x", p_expires: 0 });
+  if (!good(share)) throw new Error("share login: " + share.status);
+  // plants nobody else has (the local seed users hold every mock plant); cleanup removes this range
+  const claim = (u, plant) => svc("share_claim", { p_user: u.id, p_account: share.data, p_plant: plant, p_plant_name: "w5" });
+  await claim(b, 9264477);                                                     // b's plant
+  const c1 = await claim(a, 9264476);
+  backdate(a, 6); const t0 = weekStart(a);
+  const c2 = await claim(a, 9264476), c3 = await claim(a, 9264477);
+  const t1 = weekStart(a), bad = [];
+  if (c1.data !== "claimed") bad.push("first claim " + JSON.stringify(c1.data));
+  if (c2.data !== "yours") bad.push("re-claim " + JSON.stringify(c2.data));
+  if (c3.data !== "taken") bad.push("other's plant " + JSON.stringify(c3.data));
+  if (!t0 || t0 !== t1) bad.push("week restarted");
+  return { hit: bad.length > 0, note: bad.join(",") || "claimed, re-claim yours, other's plant taken, week kept" };
+});
+await attack("W6", "Free: delete the account, sign up again on the same login: a new week", async () => {
+  const a = await user("g6l1"); await link(a, "solo@mock"); backdate(a, 8);
+  await rpc(a, "api_account_delete");
+  const b = await user("g6l2"); await link(b, "solo@mock");
+  const ends = await weekEnds(b);
+  return { hit: ends !== null && ends > Date.now(), note: "decided 2026-11-10 (SOLAR-476, option A): one free week per account, not per login" };
+}, { design: true });
 
 // =================================================================== G7 plan tricks
 await attack("G7a", "book Home (or Free) then link new plants: they stay active after the renewal", async () => {
