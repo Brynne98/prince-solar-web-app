@@ -2264,14 +2264,16 @@ async function bookPlan(b, plan, period, reload, keep) {
 function bookedChange(b) {
   const { billDay, rand, perUnit } = window.billingFmt;
   if (b.plan === 'free' || b.comped || !(b.nextPlan || b.nextPeriod || b.nextExtraPlants != null)) return null;
-  // a paid switch to yearly (SOLAR-298): nothing to undo
-  if (b.prepaidOn) return [`Switches to yearly on ${billDay(b.nextDate)}. Paid.`, null];
+  // a paid switch to yearly (SOLAR-298): nothing to undo; a cancel in it ends the year (SOLAR-457)
+  if (b.prepaidOn) return b.nextPlan === 'free' ? [`Your plan ends on ${longDay(endDay(b))}. Free after that.`, null]
+    : [`Switches to yearly on ${billDay(b.nextDate)}. Paid.`, null];
   // one sentence, as most billing pages put it: the plan, its plants and the price from the
   // billing date (nextAmount), as the booked change leaves it (SOLAR-367)
   const on = `On ${billDay(b.nextDate)} your plan changes to `;
   const then = `${rand(b.nextAmount)} ${perUnit(b.nextPeriod || b.period)}.`;
   const plants = (n) => (n === 1 ? '1 plant' : n + ' plants');
-  return b.nextPlan === 'free' ? [on + 'Free, 1 plant.', `Keep ${PLAN_NAME[b.plan]}`]
+  // a cancel is final: no undo (SOLAR-457)
+  return b.nextPlan === 'free' ? [on + 'Free, 1 plant.', null]
     : b.nextPlan ? [on + `${PLAN_NAME[b.nextPlan]}, ${plants(planRoom(b.nextPlan, b.nextExtraPlants ?? b.extraPlants))}, ` + then, `Keep ${PLAN_NAME[b.plan]}`]
     : b.nextPeriod ? [on + `${b.nextPeriod}, ` + then, `Stay ${b.period}`]
     : [on + `${plants(planRoom(b.plan, b.nextExtraPlants))}, ` + then, `Keep ${plants(planRoom(b.plan, b.extraPlants))}`];
@@ -2294,10 +2296,12 @@ const listPrice = (b, plan, period, extra = 0) => {
 };
 const cancelText = (b) => {
   const { billDay, rand, perUnit, offerName } = window.billingFmt;
-  const text = `It runs until ${billDay(b.nextDate)}. After that, on Free, readings are kept for 30 days, then you see only today. Alerts stay on; reports stop.`;
+  // a paid switch to yearly runs its year first (SOLAR-457)
+  const text = `${b.prepaidOn ? `Your year is paid. It runs until ${longDay(endDay(b))}` : `It runs until ${billDay(b.nextDate)}`}. After that, on Free, readings are kept for 30 days, then you see only today. Alerts stay on; reports stop.`;
   // an offer goes with the plan: coming back costs the list price
   const list = b.offer?.held && listPrice(b, b.plan, b.period, b.extraPlants || 0);
-  return list > b.price ? `${text} Your ${offerName(b.offer)} of ${rand(b.price)} ${perUnit(b.period)} goes too; ${PLAN_NAME[b.plan]} costs ${rand(list)} if you come back.` : text;
+  return (list > b.price ? `${text} Your ${offerName(b.offer)} of ${rand(b.price)} ${perUnit(b.period)} goes too; ${PLAN_NAME[b.plan]} costs ${rand(list)} if you come back.` : text)
+    + ' You can’t undo this.';
 };
 
 // A downgrade's pick (SOLAR-295): the plants the new plan keeps, each with the switch and
@@ -2398,8 +2402,9 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
             {/* a paid switch to yearly (SOLAR-298): when the year starts, what it cost, the payment after it */}
             {b.prepaidOn && <>
               <div className="pay-review-ln"><span>Yearly from</span><b>{longDay(b.nextDate)}</b></div>
-              <div className="pay-review-ln"><span>Year paid</span><b className="paid">{rand(b.nextAmount)}</b></div>
-              <div className="pay-review-ln"><span>Next payment</span><b>{longDay(yearOn(b.nextDate))}</b></div>
+              {/* cancelled in the paid year: it ends then, nothing more is paid (SOLAR-457) */}
+              {!ending && <div className="pay-review-ln"><span>Year paid</span><b className="paid">{rand(b.nextAmount)}</b></div>}
+              {!ending && <div className="pay-review-ln"><span>Next payment</span><b>{longDay(yearOn(b.nextDate))}</b></div>}
             </>}
           </div>
         )}
@@ -2410,7 +2415,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
             <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
           </div>
         )}
-        {booked && !b.prepaidOn && <BookedNotice booked={booked} busy={busy} onUndo={() => run(() => undoBooked(b, reload))} />}
+        {booked && (!b.prepaidOn || ending) && <BookedNotice booked={booked} busy={busy} onUndo={() => run(() => undoBooked(b, reload))} />}
       </PlanCard>
     </SettingsSection>
   );
@@ -2418,7 +2423,10 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
 
 const longDay = (d) => window.dayText(d, { day: 'numeric', month: 'short', year: 'numeric' });
 // The same day a year on: a yearly plan's next payment.
-const yearOn = (d) => (+d.slice(0, 4) + 1) + d.slice(4);
+// 29 Feb goes to 28 Feb, as billing_step does.
+const yearOn = (d) => { const y = +d.slice(0, 4) + 1, md = d.slice(4); return y + (md === '-02-29' && y % 4 ? '-02-28' : md); };
+// The day a cancelled plan ends: its billing date, or a year on when that year is paid (SOLAR-457).
+const endDay = (b) => (b.prepaidOn ? yearOn(b.nextDate) : b.nextDate);
 
 // One card of Billing's Plan section: its title top left, its control top right, the rest under them.
 // hidden: a loading outline.
@@ -2527,7 +2535,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
   const booked = bookedChange(b);
   // the plan's own card while a change is booked: when it ends or changes, in either period
   // built only when shown: a comped plan has no date (SOLAR-433)
-  const ownDate = () => <div className="plan-cur">{b.nextPlan === 'free' ? 'Ends ' : 'Changes '}{billDay(b.nextDate)}</div>;
+  const ownDate = () => <div className="plan-cur">{b.nextPlan === 'free' ? 'Ends ' : 'Changes '}{(b.prepaidOn ? longDay : billDay)(endDay(b))}</div>;
   // a smaller plan booked for the billing date in this period; Free has none
   const bookedHere = (p) => b.nextPlan === p && (p === 'free' || (b.nextPeriod || b.period) === view);
   // The offer's terms, once for every card it lowers in this view
@@ -2537,8 +2545,12 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
     <span>{o.until ? `Until ${billDay(o.until)}.` : o.months && !o.held ? `For your first ${view === 'yearly' ? 'year' : o.months + ' months'}.` : 'Yours while you stay.'}
       {!o.held && o.cap ? ` For the first ${o.cap} members.` : ''}</span></p>;
   const action = (p) => {
-    // a paid year changes nothing until it starts (SOLAR-298); a quiet line holds the button's row
-    if (b.prepaidOn && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
+    // a cancel is final (SOLAR-457): nothing to pick until the plan ends
+    if (paid && b.nextPlan === 'free') return p === b.plan && sameView ? ownDate()
+      : <div className="plan-cur plan-wait">{p === 'free' ? 'From ' : 'After '}{(b.prepaidOn ? longDay : billDay)(endDay(b))}</div>;
+    // a paid year changes nothing until it starts (SOLAR-298), but it can be cancelled (SOLAR-457);
+    // a quiet line holds the button's row
+    if (b.prepaidOn && p !== 'free' && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
     if (p === b.plan && paid && b.nextPlan) return ownDate();
     if (p === b.plan) {
       if (!sameView) return b.nextPeriod === view ? <div className="plan-cur">From {billDay(b.nextDate)}</div>
@@ -2565,7 +2577,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
       {back}
       <div className="page-head">
         <h1>Pick your plan</h1>
-        {!b.comped && <p>{paid ? `Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Upgrades start today.'}</p>}
+        {!b.comped && !(paid && b.nextPlan === 'free') && <p>{b.prepaidOn ? `Your paid year starts on ${billDay(b.nextDate)}.` : paid ? `Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Upgrades start today.'}</p>}
       </div>
       {b.comped ? <p className="field-note">Your plan is free of charge: every plant, full history.</p> : <>
         <Segmented size="sm" className="plan-period" label="Billing" value={view} onChange={setView}
@@ -2843,7 +2855,12 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     setFull(null); setBusy('start:' + p.plant_id);
     const { error } = await window.sb.rpc('api_plant_start', { p_plant: p.plant_id });
     if (error && /no room/.test(error.message)) setFull(p.plant_id);
-    else if (error) fail(/plan change/.test(error.message) ? `Your booked change has no room for it. Tap ${(billing && bookedChange(billing)?.[1]) || 'Keep'} in Plan first.` : 'Couldn’t start it. Try again.');
+    else if (error) {
+      // a cancel has no undo (SOLAR-457): Free's room is the limit
+      const undo = billing && bookedChange(billing)?.[1];
+      fail(!/plan change/.test(error.message) ? 'Couldn’t start it. Try again.'
+        : undo ? `Your booked change has no room for it. Tap ${undo} in Plan first.` : 'Your plan ends soon. Free has room for 1 plant.');
+    }
     else { window.track('plant_start_done'); onChanged && onChanged({ plants: [{ id: p.plant_id }] }, true); }
     await refresh();
     setBusy(null);

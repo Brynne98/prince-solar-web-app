@@ -217,7 +217,18 @@ begin
                                           from public.email_queue where user_id = uj and kind = 'bill_switched'), '990 2027-03-31 2028-03-31');
   -- no undo, no other change, no second switch until the year starts
   perform pg_temp.raises('switch no undo', format('select public.billing_book_change(%L, ''home'', ''monthly'')', uj), 'year is paid');
-  perform pg_temp.raises('switch no cancel', format('select public.billing_book_change(%L, ''free'')', uj), 'year is paid');
+  -- a cancel is allowed and books the end of the paid year (0175); undone after
+  begin
+    perform public.billing_book_change(uj, 'free');
+    perform pg_temp.eq('switch cancel keeps the switch', (select next_plan || ' ' || next_period || ' ' || prepaid_on from private.billing where user_id = uj),
+                       'free yearly 2027-03-31');
+    perform pg_temp.raises('switch cancel final', format('select public.billing_book_change(%L, ''home'', ''monthly'')', uj), 'cancelled');
+    perform pg_temp.eq('switch cancel: the year starts', (public.billing_renew(uj)->>'charge')::int, 0);
+    perform pg_temp.eq('switch cancel: ends a year on', (select period || ' ' || next_billing_date || ' ' || next_plan || ' ' || coalesce(prepaid_on::text, '-')
+                                                          from private.billing where user_id = uj), 'yearly 2028-03-31 free -');
+    raise exception 'undo' using errcode = 'T0001';
+  exception when sqlstate 'T0001' then null;
+  end;
   perform pg_temp.raises('switch no upgrade', format('select public.billing_charge_open(%L, ''family'')', uj), 'year is paid');
   perform pg_temp.raises('switch once', format('select public.billing_charge_open(%L, ''home'', ''yearly'')', uj), 'year is paid');
   -- a move to Free (a lost dispute left unpaid) ends the paid year; undone after
@@ -372,13 +383,21 @@ begin
   perform pg_temp.eq('home monthly now', public.api_billing_status()->>'period', 'monthly');
   perform pg_temp.raises('switch not booked by the app', 'select public.api_billing_change(''home'', ''yearly'')', 'paid now');
   perform pg_temp.eq('switch quote for the app', (select q->>'dueNow' || ' ' || (q->>'switch') from public.api_billing_quote('home', 'yearly') q), '990 true');
-  perform pg_temp.eq('cancel booked', public.api_billing_change('free')->>'nextPlan', 'free');
-  perform pg_temp.eq('undo cancel', public.api_billing_change('home', 'monthly')->>'nextPlan', null);
-  -- Each undo of a booked change is emailed; an undo with nothing booked is not (0134).
-  perform pg_temp.eq('undo emails', (select count(*) from public.email_queue where user_id = uh and kind = 'bill_kept'), 1::bigint);
-  perform public.api_billing_change('home', 'monthly');
-  perform pg_temp.eq('undo with nothing booked sends nothing', (select count(*) from public.email_queue where user_id = uh and kind = 'bill_kept'), 1::bigint);
-  perform pg_temp.eq('undo email data', (select data->>'plan' || ' ' || (data->>'nextAmount') from public.email_queue where user_id = uh and kind = 'bill_kept' limit 1), 'home 99');
+  -- a cancel is final (0175): no undo; rolled back after
+  begin
+    perform pg_temp.eq('cancel booked', public.api_billing_change('free')->>'nextPlan', 'free');
+    perform pg_temp.raises('cancel final', 'select public.api_billing_change(''home'', ''monthly'')', 'cancelled');
+    raise exception 'undo' using errcode = 'T0001';
+  exception when sqlstate 'T0001' then null;
+  end;
+  -- Each undo of a booked change is emailed; an undo with nothing booked is not (0134): Family's
+  -- downgrade undone above, then its undo with nothing booked.
+  perform pg_temp.eq('undo emails', (select count(*) from public.email_queue where user_id = uy and kind = 'bill_kept'), 1::bigint);
+  perform set_config('request.jwt.claims', json_build_object('sub', uy, 'role', 'authenticated')::text, true);
+  perform public.api_billing_change('family');
+  perform pg_temp.eq('undo with nothing booked sends nothing', (select count(*) from public.email_queue where user_id = uy and kind = 'bill_kept'), 1::bigint);
+  perform set_config('request.jwt.claims', json_build_object('sub', uh, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('undo email data', (select data->>'plan' from public.email_queue where user_id = uy and kind = 'bill_kept' limit 1), 'family');
   -- Free: Remove login goes at once
   insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values ('00000000-0000-0000-0000-0000000000f8', ur, 'r2@login.test');
   update public.plant_users set account_id = '00000000-0000-0000-0000-0000000000f8' where user_id = ur;
@@ -626,12 +645,15 @@ begin
   perform pg_temp.eq('receipt', (select count(*)::int from public.email_queue where user_id = k and kind = 'bill_paid'), 1);
   perform pg_temp.raises('nothing left to settle', format('select public.billing_settle_open(%L)', k), 'nothing to pay');
 
-  -- a booked change is emailed; an undo is not
+  -- a booked cancel is emailed; it has no undo (0175); rolled back after
   perform set_config('request.jwt.claims', json_build_object('sub', k, 'role', 'authenticated')::text, true);
-  perform public.api_billing_change('free');
-  perform pg_temp.eq('cancel emailed', (select data->>'to' from public.email_queue where user_id = k and kind = 'bill_change'), 'free');
-  perform public.api_billing_change('home', 'yearly');
-  perform pg_temp.eq('undo not emailed', (select count(*)::int from public.email_queue where user_id = k and kind = 'bill_change'), 1);
+  begin
+    perform public.api_billing_change('free');
+    perform pg_temp.eq('cancel emailed', (select data->>'to' from public.email_queue where user_id = k and kind = 'bill_change'), 'free');
+    perform pg_temp.raises('cancel no undo', 'select public.api_billing_change(''home'', ''yearly'')', 'cancelled');
+    raise exception 'undo' using errcode = 'T0001';
+  exception when sqlstate 'T0001' then null;
+  end;
   perform set_config('request.jwt.claims', '', true);
 
   -- yearly renewal notice 60 days before
