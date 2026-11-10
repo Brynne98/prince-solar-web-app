@@ -2265,15 +2265,15 @@ function bookedChange(b) {
   const { billDay, rand, perUnit } = window.billingFmt;
   if (b.plan === 'free' || b.comped || !(b.nextPlan || b.nextPeriod || b.nextExtraPlants != null)) return null;
   // a paid switch to yearly (SOLAR-298): nothing to undo; a cancel in it ends the year (SOLAR-457)
-  if (b.prepaidOn) return b.nextPlan === 'free' ? [`Your plan ends on ${longDay(endDay(b))}. Free after that.`, null]
+  // and Keep goes back to the paid switch (SOLAR-467)
+  if (b.prepaidOn) return b.nextPlan === 'free' ? [`Your plan ends on ${longDay(endDay(b))}. Free after that.`, `Keep ${PLAN_NAME[b.plan]}`]
     : [`Switches to yearly on ${billDay(b.nextDate)}. Paid.`, null];
   // one sentence, as most billing pages put it: the plan, its plants and the price from the
   // billing date (nextAmount), as the booked change leaves it (SOLAR-367)
   const on = `On ${billDay(b.nextDate)} your plan changes to `;
   const then = `${rand(b.nextAmount)} ${perUnit(b.nextPeriod || b.period)}.`;
   const plants = (n) => (n === 1 ? '1 plant' : n + ' plants');
-  // a cancel is final: no undo (SOLAR-457)
-  return b.nextPlan === 'free' ? [on + 'Free, 1 plant.', null]
+  return b.nextPlan === 'free' ? [on + 'Free, 1 plant.', `Keep ${PLAN_NAME[b.plan]}`]
     : b.nextPlan ? [on + `${PLAN_NAME[b.nextPlan]}, ${plants(planRoom(b.nextPlan, b.nextExtraPlants ?? b.extraPlants))}, ` + then, `Keep ${PLAN_NAME[b.plan]}`]
     : b.nextPeriod ? [on + `${b.nextPeriod}, ` + then, `Stay ${b.period}`]
     : [on + `${plants(planRoom(b.plan, b.nextExtraPlants))}, ` + then, `Keep ${plants(planRoom(b.plan, b.extraPlants))}`];
@@ -2300,8 +2300,7 @@ const cancelText = (b) => {
   const text = `${b.prepaidOn ? `Your year is paid. It runs until ${longDay(endDay(b))}` : `It runs until ${billDay(b.nextDate)}`}. After that, on Free, readings are kept for 30 days, then you see only today. Alerts stay on; reports stop.`;
   // an offer goes with the plan: coming back costs the list price
   const list = b.offer?.held && listPrice(b, b.plan, b.period, b.extraPlants || 0);
-  return (list > b.price ? `${text} Your ${offerName(b.offer)} of ${rand(b.price)} ${perUnit(b.period)} goes too; ${PLAN_NAME[b.plan]} costs ${rand(list)} if you come back.` : text)
-    + ' You can’t undo this.';
+  return list > b.price ? `${text} Your ${offerName(b.offer)} of ${rand(b.price)} ${perUnit(b.period)} goes too; ${PLAN_NAME[b.plan]} costs ${rand(list)} if you come back.` : text;
 };
 
 // A downgrade's pick (SOLAR-295): the plants the new plan keeps, each with the switch and
@@ -2545,7 +2544,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
     <span>{o.until ? `Until ${billDay(o.until)}.` : o.months && !o.held ? `For your first ${view === 'yearly' ? 'year' : o.months + ' months'}.` : 'Yours while you stay.'}
       {!o.held && o.cap ? ` For the first ${o.cap} members.` : ''}</span></p>;
   const action = (p) => {
-    // a cancel is final (SOLAR-457): nothing to pick until the plan ends
+    // a booked cancel: nothing to pick until it ends or Keep undoes it in Billing (SOLAR-457, SOLAR-467)
     if (paid && b.nextPlan === 'free') return p === b.plan && sameView ? ownDate()
       : <div className="plan-cur plan-wait">{p === 'free' ? 'From ' : 'After '}{(b.prepaidOn ? longDay : billDay)(endDay(b))}</div>;
     // a paid year changes nothing until it starts (SOLAR-298), but it can be cancelled (SOLAR-457);
@@ -2855,12 +2854,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     setFull(null); setBusy('start:' + p.plant_id);
     const { error } = await window.sb.rpc('api_plant_start', { p_plant: p.plant_id });
     if (error && /no room/.test(error.message)) setFull(p.plant_id);
-    else if (error) {
-      // a cancel has no undo (SOLAR-457): Free's room is the limit
-      const undo = billing && bookedChange(billing)?.[1];
-      fail(!/plan change/.test(error.message) ? 'Couldn’t start it. Try again.'
-        : undo ? `Your booked change has no room for it. Tap ${undo} in Plan first.` : 'Your plan ends soon. Free has room for 1 plant.');
-    }
+    else if (error) fail(/plan change/.test(error.message) ? `Your booked change has no room for it. Tap ${(billing && bookedChange(billing)?.[1]) || 'Keep'} in Plan first.` : 'Couldn’t start it. Try again.');
     else { window.track('plant_start_done'); onChanged && onChanged({ plants: [{ id: p.plant_id }] }, true); }
     await refresh();
     setBusy(null);

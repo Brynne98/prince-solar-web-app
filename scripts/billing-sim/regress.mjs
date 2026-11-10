@@ -211,7 +211,7 @@ const CASES = [
     const st = await K.as(u, `select public.api_billing_status()`);
     return st.v.nextPlan === 'free' && st.v.nextAmount === 0 ? [] : [JSON.stringify(st.v)];
   } },
-  { id: 'C457', title: 'paid switch to yearly, then cancel: the year starts as paid, the plan ends a year later, no undo (0175)', async run(K) {
+  { id: 'C457', title: 'paid switch to yearly, then cancel: the year starts as paid, the plan ends a year later; Keep goes back to the switch (0175, 0176)', async run(K) {
     const bad = [], u = await K.user('home');
     const d = (await K.row(u)).next_billing_date, yr = (+d.slice(0, 4) + 1) + d.slice(4); // the same day a year on
     const o = await K.open(u, 'home', 'yearly'); if (!o.ok) return ['switch refused: ' + o.err];
@@ -221,8 +221,16 @@ const CASES = [
     if (c.v.nextPlan !== 'free' || c.v.prepaidOn !== d) bad.push(`after cancel: nextPlan ${c.v.nextPlan}, prepaidOn ${c.v.prepaidOn}`);
     const mail = await K.db.json(`select data from public.email_queue where user_id = '${u}' and kind = 'bill_change' order by created_at desc limit 1`);
     if (mail?.on !== yr) bad.push(`cancel email says it ends ${mail?.on}, want ${yr}`);
-    const undo = await K.as(u, `select public.api_billing_change('home', 'monthly')`);
-    if (undo.ok || !/cancelled/.test(undo.err)) bad.push('undo in the paid year: ' + (undo.ok ? 'undone' : undo.err));
+    // Keep, tapped twice: back to the paid switch, one plan-kept email for the year after it (0176)
+    for (let i = 0; i < 2; i++) {
+      const undo = await K.as(u, `select public.api_billing_change('home', 'monthly')`);
+      if (!undo.ok) { bad.push(`undo ${i + 1} in the paid year: ${undo.err}`); break; }
+      if (undo.v.nextPlan || undo.v.prepaidOn !== d || undo.v.nextPeriod !== 'yearly') bad.push(`after undo ${i + 1}: ${JSON.stringify([undo.v.nextPlan, undo.v.nextPeriod, undo.v.prepaidOn])}`);
+    }
+    const kept = await K.db.json(`select coalesce(jsonb_agg(data), '[]') from public.email_queue where user_id = '${u}' and kind = 'bill_kept'`);
+    if (kept.length !== 1 || kept[0].on !== yr || kept[0].period !== 'yearly') bad.push('plan-kept emails: ' + JSON.stringify(kept));
+    const again = await K.as(u, `select public.api_billing_change('free', null)`);
+    if (!again.ok) return [...bad, 'cancel again in the paid year: ' + again.err];
     // the paid room holds until the year starts: Home's 2 plants link collecting
     await K.link(u, [{ id: P(4571) }, { id: P(4572) }]);
     if (await K.active(u) !== 2) bad.push(`${await K.active(u)} of 2 plants collect in the paid year`);
@@ -238,13 +246,13 @@ const CASES = [
     if (await K.active(u) !== 1) bad.push(`on ${yr}: ${await K.active(u)} plants collect on Free`);
     return bad;
   } },
-  { id: 'C457b', title: 'a booked cancel is final: no undo, downgrade or upgrade; an upgrade paid after it goes back (0175)', async run(K) {
+  { id: 'C457b', title: 'a booked cancel takes no downgrade or upgrade until Keep; an upgrade paid after it goes back (0175, 0176)', async run(K) {
     const bad = [], u = await K.user('family');
     const early = await K.open(u, 'family', 'yearly');         // a switch opened before the cancel
     const c = await K.as(u, `select public.api_billing_change('free', null)`);
     if (!c.ok) return ['cancel refused: ' + c.err];
-    for (const [what, q] of [['undo', `select public.api_billing_change('family', 'monthly')`],
-                             ['downgrade', `select public.api_billing_change('home', null)`]]) {
+    for (const [what, q] of [['downgrade', `select public.api_billing_change('home', null)`],
+                             ['period switch', `select public.api_billing_change('family', 'yearly')`]]) {
       const r = await K.as(u, q);
       if (r.ok || !/cancelled/.test(r.err)) bad.push(`${what} after cancel: ${r.ok ? 'allowed' : r.err}`);
     }
@@ -259,6 +267,26 @@ const CASES = [
     }
     const r = await K.row(u);
     if (r.next_plan !== 'free' || r.prepaid_on) bad.push(`cancel lost: next ${r.next_plan}, prepaid_on ${r.prepaid_on}`);
+    return bad;
+  } },
+  { id: 'C467', title: 'Keep undoes a booked cancel: the plan renews on its date, one plan-kept email (0176)', async run(K) {
+    const bad = [], u = await K.user('home');
+    const d = (await K.row(u)).next_billing_date;
+    const c = await K.as(u, `select public.api_billing_change('free', null)`);
+    if (!c.ok) return ['cancel refused: ' + c.err];
+    // Keep, tapped twice
+    for (let i = 0; i < 2; i++) {
+      const k = await K.as(u, `select public.api_billing_change('home', 'monthly')`);
+      if (!k.ok) return [`keep ${i + 1} refused: ${k.err}`];
+      if (k.v.nextPlan || k.v.nextPeriod) bad.push(`after keep ${i + 1}: ${k.v.nextPlan} ${k.v.nextPeriod}`);
+    }
+    const kept = await K.db.json(`select coalesce(jsonb_agg(data), '[]') from public.email_queue where user_id = '${u}' and kind = 'bill_kept'`);
+    if (kept.length !== 1 || kept[0].plan !== 'home' || kept[0].on !== d) bad.push('plan-kept emails: ' + JSON.stringify(kept));
+    await K.today(d); await K.run(d);
+    const r = await K.row(u);
+    if (r.plan !== 'home' || r.next_billing_date <= d) bad.push(`on ${d}: ${r.plan}, next ${r.next_billing_date}`);
+    const renewals = Number((await K.sql(`select count(*) from private.billing_charges where user_id = '${u}' and kind = 'renewal'`))[0]);
+    if (renewals !== 1) bad.push(`${renewals} renewal charge(s) on ${d}`);
     return bad;
   } },
   { id: 'P1', net: true, title: 'a saved card is charged with the email it was saved with', async run(K) {
