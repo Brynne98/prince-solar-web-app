@@ -20,7 +20,8 @@ assert.equal(payClosed("sk_test_x", HOSTED, `${A.slice(0, 8)}`, A), true, "part 
 assert.equal(payClosed("sk_test_x", LOCAL, "", A), false, "local stack: passes");
 assert.equal(payClosed("sk_live_x", HOSTED, "", A), false, "live key: passes");
 assert.equal(mockClosed("installer@mock", HOSTED, B, A), true, "@mock, hosted, not on the list: refused");
+assert.equal(mockClosed("x@mock", HOSTED, "", A), true, "@mock, hosted, TESTER_USERS unset: refused");
 assert.equal(mockClosed("installer@mock", HOSTED, A, A), false, "@mock, hosted, on the list: passes");
 assert.equal(mockClosed("installer@mock", LOCAL, "", A), false, "@mock, local: passes");
 assert.equal(mockClosed("me@gmail.com", HOSTED, "", A), false, "real login: never refused here");
-console.log("gate: 10 cases ok");
+console.log("gate: 11 cases ok");

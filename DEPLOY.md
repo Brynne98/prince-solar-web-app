@@ -213,6 +213,14 @@ accounts in `PAYSTACK_TEST_USERS` can pay (Paystack test cards), everyone else g
    `https://pmakzojwhouamawgszrc.supabase.co/functions/v1/billing/webhook`. Test and live
    modes keep separate URLs; without it refunds and disputes never arrive.
 
+Fake SunSynk logins came back for testers on 2026-11-10 (SOLAR-477): `mock-sunsynk` is
+deployed again, and only user ids in the `TESTER_USERS` secret may link `name@mock`
+(`scripts/set-test-users.sh` sets it; today the +test account). Everyone else gets
+"SunSynk rejected those credentials". Billing ignores the list: testers pay on the live
+key. To switch it off: `supabase secrets unset TESTER_USERS`, then
+`supabase functions delete mock-sunsynk` and the fake-login part of
+`go-live-tester-cleanup.sql`.
+
 Tester events (`upgrade_done` and the rest) are in PostHog under the tester's user id;
 filter that id out of sales numbers.
 

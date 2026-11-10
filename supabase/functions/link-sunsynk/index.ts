@@ -37,7 +37,7 @@ serve("link-sunsynk", async (req) => {
   }
   if (!username || !password) return json({ error: "username and password are required" }, 400, cors);
   // A fake login (SOLAR-270) answers as SunSynk would to a wrong one, except for testers.
-  if (mockClosed(username, Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("PAYSTACK_TEST_USERS") ?? "", userId)) {
+  if (mockClosed(username, Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("TESTER_USERS") ?? "", userId)) {
     return json({ error: "SunSynk rejected those credentials" }, 401, cors);
   }
 
