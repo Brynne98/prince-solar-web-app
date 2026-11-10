@@ -77,6 +77,25 @@ const dropFromAddress = (keys, hash = false) => {
 window.resetAsked = () => resetPending;
 window.takeResetAsk = () => { const r = resetPending; resetPending = false; return r; };
 
+// An email's link to a page (SOLAR-473): ?tab, ?section, ?plant, ?pay, ?add. Signing in with
+// Google or an emailed link comes back to the bare address, so the link is kept a day and
+// put back in the address once signed in, once; the pages then read and clear it as usual.
+const DEEP_KEYS = ['tab', 'section', 'plant', 'pay', 'add'], DEEP_STORE = 'ps.deepLink';
+(() => {
+  const q = new URLSearchParams(location.search), keep = new URLSearchParams();
+  DEEP_KEYS.forEach(k => { if (q.has(k)) keep.set(k, q.get(k)); });
+  if (keep.toString()) try { localStorage.setItem(DEEP_STORE, JSON.stringify({ q: keep.toString(), at: Date.now() })); } catch {}
+})();
+const restoreDeepLink = () => {
+  let kept = null;
+  try { kept = JSON.parse(localStorage.getItem(DEEP_STORE)); localStorage.removeItem(DEEP_STORE); } catch {}
+  if (!kept || Date.now() - kept.at > 86400000) return;
+  const u = new URL(location.href);
+  new URLSearchParams(kept.q).forEach((v, k) => u.searchParams.set(k, v));
+  if (u.href !== location.href) history.replaceState(null, '', u.pathname + u.search + u.hash);
+};
+window.sb.auth.onAuthStateChange((event, session) => { if (session) restoreDeepLink(); });
+
 // Resolves once the initial session lookup is done, so the first render doesn't
 // flash the login form at an already-signed-in user. `recovering` is true from the
 // moment a reset link lands until the user sets a new password.
@@ -87,7 +106,7 @@ window.useSession = function useSession() {
   useEffect(() => {
     let alive = true;
     window.sb.auth.getSession().then(({ data }) => {
-      if (data.session) window.identifyUser(data.session.user.id);
+      if (data.session) { restoreDeepLink(); window.identifyUser(data.session.user.id); }
       if (alive) setState(s => ({ ...s, loading: false, session: data.session || null }));
     });
     const { data: sub } = window.sb.auth.onAuthStateChange((event, session) => {
@@ -117,7 +136,7 @@ window.useSession = function useSession() {
       // last person signed out from: the address loses its page and plant too.
       else if (event === 'SIGNED_OUT') {
         localStorage.removeItem('synsynk.tab');
-        dropFromAddress(['tab', 'plant', 'section'], true);
+        dropFromAddress(['tab', 'plant', 'section', 'pay', 'add'], true);
         setState({ loading: false, session: null, recovering: false });
       }
       else setState(s => ({ ...s, loading: false, session: session || null,

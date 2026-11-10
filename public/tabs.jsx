@@ -2175,10 +2175,26 @@ function SettingsSection({ id, title, note, bare, action, children }) {
   // A reload on #id scrolls back to it without the flash (SOLAR-165). Only on arrival:
   // the flash ending must not scroll again, or the page jumps once the cards above load (SOLAR-275).
   const arrived = React.useRef(false);
+  const settle = React.useRef(null);
   React.useEffect(() => {
-    if (flashing || (!arrived.current && location.hash === '#' + id)) ref.current?.scrollIntoView({ block: 'start' });
+    const go = flashing || (!arrived.current && location.hash === '#' + id);
     arrived.current = true;
+    const el = ref.current;
+    if (!go || !el) return;
+    const to = () => el.scrollIntoView({ block: 'start' });
+    to();
+    // The cards above fill in after this (Billing's plan loading) and push it down, below
+    // the fold (SOLAR-473): keep it in view while they settle, until the user scrolls or 3 s pass.
+    settle.current?.();
+    const ro = new ResizeObserver(to);
+    ro.observe(el.parentElement);
+    const input = ['wheel', 'touchstart', 'keydown'];
+    const stop = () => { ro.disconnect(); clearTimeout(timer); input.forEach(e => removeEventListener(e, stop, true)); settle.current = null; };
+    const timer = setTimeout(stop, 3000);
+    input.forEach(e => addEventListener(e, stop, { capture: true, passive: true }));
+    settle.current = stop;
   }, [flashing]);
+  React.useEffect(() => () => settle.current?.(), []);
   return (
     <section id={'settings-' + id} className="sec" ref={ref} aria-labelledby={'settings-' + id + '-t'}>
       <div className="sec-intro">
