@@ -2758,7 +2758,10 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const { accounts, error, refresh } = links;
   const [busy, setBusy] = useState(null);
   const fail = (text) => window.toast(text, { error: true }); // SOLAR-166
-  const [mode, setMode] = useState(null); // null | 'add' | account_id being reconnected
+  // null | 'add' | account_id being reconnected. An email's Add your plant opens on 'add' (SOLAR-473):
+  // read while rendering, taken once on screen, as React can throw away a first render.
+  const [mode, setMode] = useState(() => (window.addAsked() ? 'add' : null));
+  React.useEffect(() => { if (mode === 'add') window.takeAddAsk(); }, []);
   const live = accounts.filter(a => a.status !== 'disabled');
   // A failed read with nothing listed says nothing about the logins; "No login connected"
   // would be a guess. Try again re-reads.

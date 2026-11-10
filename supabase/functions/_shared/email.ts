@@ -25,6 +25,7 @@ const PREFS = `${APP}/?tab=account&section=notifications`;
 // Reconnect lands on Account's SunSynk logins section and flashes it, like the app's own
 // Reconnect (openSettings('connection')). ?section= needs SOLAR-156.
 const LOGINS = `${APP}/?tab=account&section=logins`;
+const ADD_PLANT = `${APP}/?add=plant`;
 export const FROM_ACCOUNT = "Prince Solar Hub <noreply@princesolarhub.co.za>";
 export const FROM_ALERTS = "Prince Solar Hub <alerts@princesolarhub.co.za>";
 export const FROM_BILLING = "Prince Solar Hub <billing@princesolarhub.co.za>";
@@ -344,8 +345,8 @@ const openPage = (tab: keyof typeof PAGES, plantId: number) => ({ label: `Open $
 
 const SETTINGS_FOOTER = (line: string) => [line.replace("notification settings", `<a href="${PREFS}">notification settings</a>`), HELP];
 
-// Sent once the email is confirmed, before any plant is added. The Add plant
-// card opens on Live when a user has no plant, so the button goes straight there.
+// Sent once the email is confirmed, before any plant is added. ?add=plant opens the
+// Add plant form, kept through sign-in (link.jsx, SOLAR-473).
 // Wording matches link.jsx ("Add your plant", Share plant or SunSynk login, SOLAR-455).
 const ADD_STEPS = {
   box: { checks: [
@@ -357,7 +358,7 @@ const ADD_STEPS = {
 export const welcome = () =>
   make("Welcome to Prince Solar Hub", {
     title: "Welcome to Prince Solar Hub",
-    parts: [{ lead: "Three steps, about a minute." }, ADD_STEPS, { button: { label: "Add your plant", href: APP } }],
+    parts: [{ lead: "Three steps, about a minute." }, ADD_STEPS, { button: { label: "Add your plant", href: ADD_PLANT } }],
     footer: [HELP],
   });
 
@@ -367,7 +368,7 @@ export const needAHand = () =>
   make("Need a hand adding your plant?", {
     title: "Need a hand adding your plant?",
     parts: [{ lead: "Your plant isn't added yet. It takes about a minute." }, ADD_STEPS,
-      { button: { label: "Add your plant", href: APP } }],
+      { button: { label: "Add your plant", href: ADD_PLANT } }],
     footer: [HELP],
   });
 
@@ -770,7 +771,7 @@ export const planUpgraded = (u: Upgrade) =>
       { box: { hero: { label: "Paid today", value: rand(u.paidNow),
           sub: u.credit != null ? `${rand(u.credit)} off for the rest of your month` : `for the rest of this ${u.period === "yearly" ? "year" : "month"}` },
         rows: [...(u.card ? [["Card", esc(u.card)] as [string, string]] : []), ["Next payment", `${rand(u.next.amount)} on ${u.next.date}`]] } },
-      u.to === "family" ? { button: { label: "Add a plant", href: LOGINS } } : SEE_PLAN,
+      u.to === "family" ? { button: { label: "Add a plant", href: ADD_PLANT } } : SEE_PLAN,
     ],
     footer: BILL_FOOTER,
   });

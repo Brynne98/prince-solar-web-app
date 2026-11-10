@@ -1352,6 +1352,8 @@ function Setup({ links }) {
   // The settings pages have no card, so the header's button opens it on Live from them.
   const connect = () => { if (isSettings(tab)) setTab('live'); setConnecting(true); };
   useEscape(connecting, () => setConnecting(false));
+  // An email's Add your plant (?add=plant, link.jsx): the form, as the card's button opens it.
+  useEffect(() => { if (window.takeAddAsk()) connect(); }, []);
   useEffect(() => { window.track('screen_viewed', { stage: 'setup', screen: connecting ? 'connect' : tab }); }, [tab, connecting]);
   const dead = links.accounts.filter(a => a.status === 'needs_relink' && a.kind !== 'share');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
@@ -1603,7 +1605,9 @@ function App({ links }) {
       const linked = Number(url.searchParams.get('plant'));
       // A report or alert footer adds section=notifications: open Account on the email switches.
       // A payment email or Paystack's return adds section=plan: Billing.
-      const section = { logins: 'connection', notifications: 'notifications', plan: 'plan', cancel: 'cancel', system: 'system' }[url.searchParams.get('section')];
+      // An email's Add your plant (?add=plant, link.jsx): Plants, where the section opens Add plant.
+      const section = window.addAsked() ? 'connection'
+        : { logins: 'connection', notifications: 'notifications', plan: 'plan', cancel: 'cancel', system: 'system' }[url.searchParams.get('section')];
       if (url.searchParams.has('section')) {
         url.searchParams.delete('section'); history.replaceState(history.state, '', url);
       }
@@ -1817,7 +1821,6 @@ function App({ links }) {
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
           <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} err={err} /><NotifBell disabled /></>}>
         <BillCards notices={notices} />
-        {null}
         {/* The Settings area never touches the snapshot: it draws for real. It sits in
             the same slot as in the loaded page below, so the first reading doesn't remount
             it (the Plan section flashed back to its outline). */}

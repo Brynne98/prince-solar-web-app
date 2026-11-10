@@ -423,6 +423,17 @@ window.sb.auth.onAuthStateChange((event, session) => {
   });
 });
 
+// "Add your plant" in the emails: ?add=plant (SOLAR-473). Kept for a day like the plan
+// above, so it lives through sign-in. Setup opens its Add plant form, App its Billing
+// Plants section with Add plant open; whichever opens it takes it, so it opens once.
+const ADD_KEY = 'ps.wantAdd';
+if (new URLSearchParams(location.search).get('add') === 'plant') {
+  try { localStorage.setItem(ADD_KEY, String(Date.now())); } catch {}
+  dropFromAddress(['add']);
+}
+window.addAsked = () => { try { return Date.now() - Number(localStorage.getItem(ADD_KEY)) < 86400000; } catch { return false; } };
+window.takeAddAsk = () => { const r = window.addAsked(); try { localStorage.removeItem(ADD_KEY); } catch {} return r; };
+
 // The same moment on the Connect screen and inside Settings; one wording for both.
 const NO_PLANT_TEXT = 'has no plant shared with it yet. Your login is saved.';
 
