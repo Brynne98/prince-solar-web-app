@@ -7,11 +7,11 @@
 // in a message are masked. A failed send is ignored: the error still goes to the
 // Supabase log as before.
 
-const POSTHOG_KEY = "phc_ABkqiYsajciVYVKYX4GZMApcDP7QfD7CKQtgE7XPgjxN";
+const POSTHOG_KEY = "phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v";
 const POSTHOG_URL = "https://eu.i.posthog.com/i/v0/e/";
 // The release on every error and event: the web app version these functions were last
 // deployed with. npm test fails when it is not public/config.js's APP_VERSION.
-export const APP_VERSION = "v0.52.0";
+export const APP_VERSION = "v0.52.1";
 
 const scrub = (s: string) => s.replace(/[^\s"'<>@]+@[^\s"'<>@]+\.[a-z]{2,}/gi, "[email]");
 
