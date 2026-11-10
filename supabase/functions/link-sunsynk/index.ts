@@ -8,7 +8,7 @@
 //
 // This is the only place a SunSynk password ever touches the backend. Keep it that
 // way: no console.log of the body, no error message that includes input.
-import { db, linkAccount, saveCallTally } from "../_shared/sunsynk.ts";
+import { db, linkAccount, LoginRejected, saveCallTally } from "../_shared/sunsynk.ts";
 import { serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { mockClosed } from "../_shared/gate.ts";
@@ -73,8 +73,8 @@ serve("link-sunsynk", async (req) => {
   } catch (e) {
     password = "";
     const msg = e instanceof Error ? e.message : String(e);
-    // "login rejected: ..." comes from tokenLogin and contains only SunSynk's msg.
-    const status = /login rejected/i.test(msg) ? 401 : 502;
+    // LoginRejected comes from tokenLogin and contains only SunSynk's msg.
+    const status = e instanceof LoginRejected ? 401 : 502;
     console.error(`link-sunsynk failed for user ${userId}: ${msg}`);
     return json({ error: status === 401 ? "SunSynk rejected those credentials" : "could not reach SunSynk" }, status, cors);
   } finally {

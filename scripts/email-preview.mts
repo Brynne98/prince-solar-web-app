@@ -147,6 +147,8 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "event-inverter-silent": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "logger_stale", since: "08:15", inverters: [{ name: "Inverter 2508290475", last: "08:15" }] })],
   "event-inverter-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "logger_back", since: "08:15", at: "10:02", lasted: "1h 47m" })],
   "event-relink": [FROM_ALERTS, loginEvent({ kind: "needs_relink", plants: [PLANT, "Cabin"], at: "17:40" }, PLANT_ID)],
+  "event-share-down": [FROM_ALERTS, loginEvent({ kind: "share_down", plants: [PLANT, "Cabin"], at: "17:40" }, PLANT_ID)],
+  "event-share-back": [FROM_ALERTS, loginEvent({ kind: "share_back", plants: [PLANT, "Cabin"], since: "17:40", at: "18:05", lasted: "25 min" }, PLANT_ID)],
   "event-relinked": [FROM_ALERTS, loginEvent({ kind: "relinked", plants: [PLANT, "Cabin"], since: "17:40", at: "19:45", lasted: "2h 5m" }, PLANT_ID)],
   "event-string-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "string_back", string: "String 3", inverter: "Inverter 2508290476", since: "11:40", at: "14:05", lasted: "2h 25m" })],
   "event-one-inverter-silent": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "logger_stale", since: "08:15", inverter: "Inverter 2508290476", inverters: [{ name: "Inverter 2508290475", last: null }, { name: "Inverter 2508290476", last: "08:15" }] })],

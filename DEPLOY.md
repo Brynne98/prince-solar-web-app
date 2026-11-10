@@ -6,7 +6,7 @@ not deploy together**.
 
 > The deploy thread ships and verifies. It does not write feature code. Broken builds,
 > leftover debug code, uncommitted work or migration drift get reported, not fixed.
-> The one file it edits is `public/config.js`, to bump the version.
+> The only files it edits are `public/config.js` and `supabase/functions/_shared/errors.ts`, to bump the version.
 
 ---
 
@@ -27,12 +27,14 @@ supabase migration list             # Local and Remote columns must match
 grep -rn "TEMPORARY\|console.log\|debugger" public/ supabase/functions/
 ```
 
-Then build. `npm run build` compiles `public/*.jsx` into `public/build/*.js` with the same
-Babel settings the browser used to apply (SOLAR-131). It exits 1 on a syntax error; Cloudflare
-runs the same build and keeps the last good deploy live if it fails:
+Then build and test. `npm test` runs `npm run build`, which compiles `public/*.jsx` into
+`public/build/*.js` with the same Babel settings the browser used to apply (SOLAR-131), then
+the warning tests and the reuse check. The reuse check fails when the functions' `APP_VERSION`
+differs from `config.js`. Any failure exits 1; Cloudflare runs only the build and keeps the
+last good deploy live if it fails:
 
 ```bash
-npm run build
+npm test
 ```
 
 A missing function or bad reference will NOT be caught by that — it is a syntax check,
@@ -47,6 +49,9 @@ rewrite. Then edit the one line:
 // public/config.js
 window.APP_VERSION = 'v1.2.3';
 ```
+
+Set the same number in `supabase/functions/_shared/errors.ts` (`APP_VERSION`): it is the
+release on the functions' errors and events. `npm test` fails while the two differ.
 
 Backend-only deploys need no bump — `APP_VERSION` tracks the web app, and bumping it
 would drag a Pages rebuild along for nothing.

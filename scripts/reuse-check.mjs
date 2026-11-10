@@ -26,6 +26,14 @@ for (const f of src.filter(f => f.endsWith('.html'))) {
     if (m[1].trim()) problems.push(`${f}: inline <script> is blocked by the CSP: move it to a .js file`);
 }
 
+// ---- 0b. one release (SOLAR-423) ----
+// Errors and events from the edge functions carry the same app_version as the web app's.
+{
+  const web = read('config.js').match(/APP_VERSION = '([^']+)'/)?.[1];
+  const edge = fs.readFileSync(path.join(PUB, '..', 'supabase/functions/_shared/errors.ts'), 'utf8').match(/APP_VERSION = "([^"]+)"/)?.[1];
+  if (!web || web !== edge) problems.push(`supabase/functions/_shared/errors.ts: APP_VERSION is ${edge}, config.js has ${web}: set both`);
+}
+
 // ---- 1. dead CSS ----
 const html = read('index.html');
 const styleStart = html.indexOf('<style>'), styleEnd = html.indexOf('</style>');

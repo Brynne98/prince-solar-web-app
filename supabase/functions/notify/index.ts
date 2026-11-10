@@ -13,7 +13,7 @@
 //
 // email_claim skips rows whose switch is off (email_wanted, 0091), whose plant the
 // user no longer has, and "back" emails whose "down" never went. needs_relink, relinked,
-// welcome, history and account deleted have no switch.
+// share_down, share_back, welcome, history and account deleted have no switch.
 //
 // After the emails, the pop-ups (SOLAR-244, 0124): push_claim hands over the alerts
 // due one, with their words and the user's browsers, each tried once. A browser the
@@ -309,6 +309,9 @@ async function build(r: Row): Promise<Email | null> {
     case "relinked": return loginEvent({ kind: "relinked", plants: d.plants ?? [], since: d.since == null ? undefined : hhmm(d.since, tz), at: hhmm(d.at, tz),
       lasted: lasted(d.since, d.at) }, p.id, dayOf(d.at, tz));
     case "share_removed": return loginEvent({ kind: "share_removed", plants: d.plants ?? [] }, p.id);
+    case "share_down": return loginEvent({ kind: "share_down", plants: d.plants ?? [], at: hhmm(d.since, tz) }, p.id, dayOf(d.since, tz));
+    case "share_back": return loginEvent({ kind: "share_back", plants: d.plants ?? [], since: hhmm(d.since, tz), at: hhmm(d.at, tz),
+      lasted: lasted(d.since, d.at) }, p.id, dayOf(d.at, tz));
     case "sunsynk_down": return sunsynkDown(p.name, p.id, hhmm(d.since, tz), dayOf(d.since, tz));
     case "sunsynk_back": return sunsynkBack(p.name, p.id, hhmm(d.since, tz), hhmm(d.at, tz), lasted(d.since, d.at), dayOf(d.at, tz));
     case "welcome": return welcome();
@@ -357,7 +360,7 @@ async function build(r: Row): Promise<Email | null> {
         removePlants: d.removePlants, deleteOn: d.deleteOn ? day(d.deleteOn) : undefined, next: d.to === "free" ? undefined : { amount: d.nextAmount },
         days: await historyOf(r.user_id, d.removePlants ?? []),
         // Cancel to Free: history is kept 30 days after the plan ends (SOLAR-329).
-        history: d.to === "free" ? await historyAt(r.user_id).then((h) => h && { ...h, on: day(addDays(d.on, 30)) }) : undefined,
+        history: d.to === "free" ? await historyAt(r.user_id).then((h) => h ? { ...h, on: day(addDays(d.on, 30)) } : undefined) : undefined,
       });
     }
     case "bill_kept": {
@@ -634,6 +637,8 @@ async function renderAll(plantId: number, today?: string) {
   out["reconnect"] = loginEvent({ kind: "needs_relink", plants: [p.name, "Second plant"], at: hhmm(now - 1500, p.tz) }, p.id);
   out["reconnected"] = loginEvent({ kind: "relinked", plants: [p.name, "Second plant"], since: hhmm(now - 7500, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
   out["sharing-stopped"] = loginEvent({ kind: "share_removed", plants: [p.name] }, p.id);
+  out["share-no-readings"] = loginEvent({ kind: "share_down", plants: [p.name], at: hhmm(now - 1500, p.tz) }, p.id);
+  out["share-readings-back"] = loginEvent({ kind: "share_back", plants: [p.name], since: hhmm(now - 7500, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
   // The free week's two emails (0122), from this plant's own day count; steps are a sample.
   const { count: days } = await db.from("plant_energy").select("period", { count: "exact", head: true })
     .eq("plant_id", plantId).eq("bucket", "day").lt("period", today);
