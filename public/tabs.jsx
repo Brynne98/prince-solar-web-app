@@ -2724,13 +2724,11 @@ function InvoicesSection({ billing: b }) {
         <tbody>
           {b.payments.map(p => {
             const line = `${PLAN_NAME[p.plan]}, ${p.period}${what(p) ? ', ' + what(p) : ''}`;
-            // the reference Paystack's receipt shows (SOLAR-484)
-            const ref = p.reference && <span className="pay-ref">{p.reference}</span>;
             return (
             <tr key={p.at}>
               {/* on a phone the Plan column drops and the plan goes under the date */}
-              <td>{day(p.date)}<span className="pay-what-sub">{line}{ref}</span></td>
-              <td className="pay-what">{line}{ref}</td>
+              <td>{day(p.date)}<span className="pay-what-sub">{line}</span></td>
+              <td className="pay-what">{line}</td>
               <td className="mono">{rand(p.amount)}</td>
               <td>Paid</td>
             </tr>
