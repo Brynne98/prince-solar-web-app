@@ -9,10 +9,18 @@ export function payClosed(key: string, supabaseUrl: string, testUsers: string, u
   return key.startsWith("sk_test_") && supabaseUrl.endsWith(".supabase.co") && !isTestUser(testUsers, userId);
 }
 
+// A tester by email (SOLAR-477): a confirmed email matching the TESTER_EMAIL_PATTERN secret,
+// a regular expression (e.g. every +testN address of one inbox). Pass "" for an unconfirmed email.
+export const isTestEmail = (pattern: string, confirmedEmail: string) =>
+  !!pattern && !!confirmedEmail && new RegExp(pattern, "i").test(confirmedEmail);
+
 // Fake SunSynk logins (name@mock, SOLAR-270): only a tester may link one on the hosted
 // project. Local runs link them freely, as the local tests do.
-export const mockClosed = (username: string, supabaseUrl: string, testUsers: string, userId: string) =>
-  username.endsWith("@mock") && supabaseUrl.endsWith(".supabase.co") && !isTestUser(testUsers, userId);
+export const mockClosed = (
+  username: string, supabaseUrl: string, testUsers: string, userId: string, emailPattern = "", confirmedEmail = "",
+) =>
+  username.endsWith("@mock") && supabaseUrl.endsWith(".supabase.co") &&
+  !isTestUser(testUsers, userId) && !isTestEmail(emailPattern, confirmedEmail);
 
 // A call to the fake SunSynk (a name@mock login or its "at:"/"rt:" token) when it is not
 // also the real address: in production, where the fake plants must not count in SunSynk's
