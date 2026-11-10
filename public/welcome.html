@@ -20,6 +20,25 @@
 <link rel="icon" type="image/svg+xml" href="icon.svg" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-180.png" />
+<!-- Search and AI answers (SOLAR-216). The FAQ copy must match the Questions section word for word: npm test checks it. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+{"@type":"Organization","@id":"https://princesolarhub.co.za/#org","name":"Prince Solar Hub","legalName":"Theron and Prince Solutions (Pty) Ltd","url":"https://princesolarhub.co.za/","logo":"https://princesolarhub.co.za/icon-512.png","email":"hello@princesolarhub.co.za","areaServed":"ZA"},
+{"@type":"SoftwareApplication","name":"Prince Solar Hub","description":"Monitoring tool for SunSynk solar in South Africa. Live readings every minute, every day kept, battery time left, fault checks and email alerts when the power goes.","url":"https://princesolarhub.co.za/","applicationCategory":"UtilitiesApplication","operatingSystem":"Web browser","publisher":{"@id":"https://princesolarhub.co.za/#org"},"offers":{"@type":"AggregateOffer","lowPrice":"0","highPrice":"199","priceCurrency":"ZAR","offerCount":"3","description":"Free for 1 plant. Home R99 a month for 2 plants. Family R199 a month for 5. Launch offers lower the paid prices."}},
+{"@type":"FAQPage","mainEntity":[
+{"@type":"Question","name":"What is Prince Solar Hub?","acceptedAnswer":{"@type":"Answer","text":"A monitoring tool for SunSynk solar. See solar, battery, home and grid live, look back at any day, and get an email when something goes wrong. It runs in the browser on your phone or computer. See how it compares to the SunSynk app."}},
+{"@type":"Question","name":"Will it work with my inverter?","acceptedAnswer":{"@type":"Answer","text":"Prince Solar Hub works with SunSynk inverters. If your system shows in the SunSynk app, it shows here too. Other brands are coming soon."}},
+{"@type":"Question","name":"Do I have to give you my SunSynk password?","acceptedAnswer":{"@type":"Answer","text":"No. In the SunSynk app, share your plant with admin@princesolarhub.co.za as Visitor, then type its plant ID in Prince Solar Hub. Or sign in with your SunSynk login if you prefer."}},
+{"@type":"Question","name":"How often does it update?","acceptedAnswer":{"@type":"Answer","text":"Every minute, the same as the SunSynk app."}},
+{"@type":"Question","name":"How far back does my history go?","acceptedAnswer":{"@type":"Answer","text":"When you connect, we bring in your last 60 days from SunSynk. From then on, Home and Family plans keep your full history."}},
+{"@type":"Question","name":"What happens after the free week?","acceptedAnswer":{"@type":"Answer","text":"The 7 days start when you add your plant, not when you sign up. After them you keep today and every alert. Move to a Home or Family plan to keep your full history."}},
+{"@type":"Question","name":"Can I cancel any time?","acceptedAnswer":{"@type":"Answer","text":"Yes. Your plan runs to your billing date, then moves to Free. Nothing more is charged."}},
+{"@type":"Question","name":"Can I delete my account?","acceptedAnswer":{"@type":"Answer","text":"Yes, any time, from Account. Your logins, settings and history go with it, and billing stops. It cannot be undone."}},
+{"@type":"Question","name":"Do my numbers match the SunSynk app?","acceptedAnswer":{"@type":"Answer","text":"Solar, home and battery match. With two or more inverters, our grid total can be higher: SunSynk counts the grid on one inverter, we count them all."}},
+{"@type":"Question","name":"Can I export my data?","acceptedAnswer":{"@type":"Answer","text":"Yes. Pick any days, up to a year at a time, and download them from Account. The file opens in Excel or Google Sheets."}},
+{"@type":"Question","name":"Is there a phone app?","acceptedAnswer":{"@type":"Answer","text":"Coming soon. Until then, add the website to your home screen and it opens like an app."}}]}
+]}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&family=Geist:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
@@ -1035,6 +1054,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   <div class="wrap">
     <h2 class="h2 rv">Questions</h2>
     <div class="qs rv d1">
+      <details><summary>What is Prince Solar Hub?<i></i></summary><p>A monitoring tool for SunSynk solar. See solar, battery, home and grid live, look back at any day, and get an email when something goes wrong. It runs in the browser on your phone or computer. <a href="sunsynk-app-alternative">See how it compares to the SunSynk app</a>.</p></details>
       <details><summary>Will it work with my inverter?<i></i></summary><p>Prince Solar Hub works with SunSynk inverters. If your system shows in the SunSynk app, it shows here too. <a href="#inverters">Other brands are coming soon.</a></p></details>
       <details><summary>Do I have to give you my SunSynk password?<i></i></summary><p>No. In the SunSynk app, share your plant with admin@princesolarhub.co.za as Visitor, then type its plant ID in Prince Solar Hub. Or sign in with your SunSynk login if you prefer.</p></details>
       <details><summary>How often does it update?<i></i></summary><p>Every minute, the same as the SunSynk app.</p></details>
@@ -1078,7 +1098,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
     <div class="wrap">
       <a class="brand" href="#"><span class="orb" aria-hidden="true"></span>Prince Solar Hub</a>
       <span>Theron and Prince Solutions (Pty) Ltd</span>
-      <nav aria-label="Footer"><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="paia.html">PAIA</a><a href="https://app.princesolarhub.co.za">Sign in</a></nav>
+      <nav aria-label="Footer"><a href="sunsynk-app-alternative">Compare</a><a href="help">Help</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="paia.html">PAIA</a><a href="https://app.princesolarhub.co.za">Sign in</a></nav>
     </div>
   </footer>
 </section>

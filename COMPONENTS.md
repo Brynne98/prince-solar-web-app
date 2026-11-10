@@ -153,6 +153,11 @@ and the sign-in screens already call it; it drops refusals and offline).
 
 ## CSS
 
+Website pages outside the app (Terms, Privacy, PAIA, the help and compare pages of SOLAR-216)
+share `public/legal.css`. A new help or compare page copies one of them: header, lede, one
+screenshot from `public/img/`, FAQ as `<details>` with matching ld+json, the `cta` section,
+footer, and `welcome-track.js` with its own `data-screen`. Add it to `sitemap.xml` and `help.html`.
+
 The floating surfaces (menus, the notifications panel, calendar, popovers, the save bar,
 toasts, chart tooltips, info bubbles) share one rule and the `--pop-shadow`,
 `--dlg-shadow` and `--tip-bg` variables; a new floating thing joins that rule. Spinners
