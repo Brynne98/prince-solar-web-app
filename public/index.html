@@ -351,6 +351,17 @@
   .refresh:disabled { cursor: progress; }
   .refresh-stale { color: var(--warn); border-color: rgba(var(--warn-rgb),0.45); }
   .refresh-offline { color: var(--bad); border-color: rgba(var(--bad-rgb),0.5); }
+  /* the header's own notices (SOLAR-384): Grid off as a tag beside the status; a dead
+     login's Reconnect in Refresh's place, the same height */
+  .grid-tag { display: inline-flex; align-items: center; height: 26px; padding: 0 var(--sp-md); flex: none; white-space: nowrap; border-radius: var(--r-pill);
+    font-size: var(--fs-sm); font-weight: 600; color: var(--bad); border: 1px solid rgba(var(--bad-rgb),0.45); background: rgba(var(--bad-rgb),0.07); }
+  .head-act { height: 38px; flex: none; white-space: nowrap; }
+  /* phone: the red dot and Reconnect say a dead login, the time gives way to the plant name; beside Grid off the time gives way too */
+  @media (max-width: 599px) {
+    .status.cut :is(.status-word, .status-age) { display: none; }
+    .head-act { padding: 0 var(--sp-md); }
+    .head:has(.grid-tag) .status-age { display: none; }
+  }
   /* spins for as long as a snapshot fetch is in flight (app.jsx holds it ≥ 800 ms) */
   .refresh.busy .ico { animation: spin .8s linear infinite; }
   @media (prefers-reduced-motion: reduce) { .refresh.busy .ico { animation: none; opacity: .5; } }
@@ -454,52 +465,46 @@
     .head:has(.notif-panel) { z-index: 30; }
   }
 
-  /* the page says when its numbers are old, and why; grid off is calm purple, not a fault */
-  .notice { display: flex; align-items: center; gap: var(--sp-sm) var(--sp-lg); flex-wrap: wrap; padding: var(--sp-md) var(--sp-lg); border-radius: var(--r-lg); margin-bottom: var(--sp-lg); border: 1px solid; font-size: var(--fs-md); }
-  .notice p { margin: 0; flex: 1 1 240px; line-height: 1.45; }
-  .notice p b { font-weight: 600; }
-  .notice.stale { border-color: rgba(var(--warn-rgb),0.35); background: rgba(var(--warn-rgb),0.07); }
-  .notice.offline { border-color: rgba(var(--bad-rgb),0.4); background: rgba(var(--bad-rgb),0.07); }
-  .notice.gridoff { border-color: rgba(var(--bad-rgb),0.4); background: rgba(var(--bad-rgb),0.07); }
-  /* billing banners (SOLAR-212): a raised panel, the status in the glyph and a hairline of
-     its tone; the one action is a quiet button, so a fault never wears the solar green */
-  .bill-banners { display: grid; gap: var(--sp-sm); margin-bottom: var(--sp-lg); }
-  .bill-banner { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: var(--sp-lg); align-items: center;
-    padding: var(--sp-md) var(--sp-lg); border-radius: var(--r-xl); background: var(--panel-2); border: 1px solid; }
-  .bill-banner.closable { padding-right: 52px; }
-  .bill-banner.bad { border-color: rgba(var(--bad-rgb),0.32); }
-  .bill-banner.warn { border-color: rgba(var(--warn-rgb),0.3); }
-  .bill-banner p { margin: 0; display: flex; flex-direction: column; gap: var(--sp-3xs); min-width: 0; }
-  .bill-banner p b { font-size: var(--fs-md); font-weight: 600; line-height: 1.3; }
-  .bill-banner p span { font-size: var(--fs-sm); color: var(--muted); line-height: 1.45; }
-  .bill-banner .ghost-btn { color: var(--text); white-space: nowrap; }
-  .bill-banner.bad .ghost-btn { border-color: rgba(var(--bad-rgb),0.45); }
-  .bill-banner.warn .ghost-btn { border-color: rgba(var(--warn-rgb),0.4); }
+  /* A notice to act on (SOLAR-384): billing and the grid-off prompt. A card the height of an
+     Overview card, two of the Overview grid's columns wide (5 desktop, 3 tablet, 2 phone),
+     tinted in its tone; the one action is a quiet button, so a fault never wears the solar green. */
+  .notice-cards { --tile-h: 128px; /* an Overview card's height: label with its (?), number, trend line; 121 on a phone, which has no (?) */
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-lg); margin-bottom: var(--sp-lg); }
+  /* desktop: as many columns as the Overview has cards (5, or 6 with Exported), so 2 of them line up */
+  @media (min-width: 981px) {
+    .notice-cards { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .frame:has(.today-strip > :nth-child(6)) .notice-cards { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  }
+  .notice-card { grid-column: span 2; position: relative; min-width: 0; min-height: var(--tile-h); display: flex; flex-direction: column; justify-content: space-between; gap: var(--sp-sm);
+    padding: var(--sp-xl) var(--sp-lg); border-radius: var(--r-xl); border: 1px solid var(--card-edge); background: var(--panel); }
+  .notice-card.bad { border-color: rgba(var(--bad-rgb),0.4); background: rgba(var(--bad-rgb),0.07); }
+  .notice-card.warn { border-color: rgba(var(--warn-rgb),0.4); background: rgba(var(--warn-rgb),0.07); }
+  .notice-card.closable .nc-text { padding-right: var(--sp-3xl); }
+  .nc-text b { display: block; font-size: var(--fs-md); font-weight: 600; line-height: 1.3; }
+  .nc-text p { margin: var(--sp-3xs) 0 0; font-size: var(--fs-sm); color: var(--muted); line-height: 1.45; }
+  /* a narrow card (a phone, or 2 of 6 desktop columns) takes the short title and line, so
+     each stays one line and the card keeps the Overview card's height */
+  .notice-card { container-type: inline-size; }
+  .nc-short { display: none; }
+  @container (max-width: 370px) { .nc-long { display: none; } .nc-short { display: inline; } }
+  .notice-card .ghost-btn { align-self: flex-start; color: var(--text); white-space: nowrap; }
+  .notice-card.bad .ghost-btn { border-color: rgba(var(--bad-rgb),0.45); }
+  .notice-card.warn .ghost-btn { border-color: rgba(var(--warn-rgb),0.45); }
   /* a 44 px tap area round a 16 px icon, pinned to the corner */
-  .bill-banner-x { position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; display: grid; place-items: center;
+  .notice-x { position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; display: grid; place-items: center;
     background: none; border: none; color: var(--muted); border-radius: var(--r-md); touch-action: manipulation; }
-  .bill-banner-x:hover { color: var(--text); background: rgba(var(--ink-rgb),0.05); }
-  .bill-banner-x .ico { width: var(--icon-md); height: var(--icon-md); }
-  .bb-short, .bill-banner-more { display: none; }
-  /* phone: each banner is one line (SOLAR-345); the row opens the bell, which holds the
-     details and the button, so two banners never fill the top of the page */
+  .notice-x:hover { color: var(--text); background: rgba(var(--ink-rgb),0.05); }
+  .notice-x .ico { width: var(--icon-md); height: var(--icon-md); }
+  /* phone: full width of the 2-column grid */
   @media (max-width: 599px) {
-    .bill-banners { gap: var(--sp-xs); margin-bottom: var(--sp-md); }
-    .bill-banner { grid-template-columns: 24px minmax(0, 1fr) 16px; gap: var(--sp-md); min-height: 48px; padding: var(--sp-sm) var(--sp-md); border-radius: var(--r-lg); }
-    .bill-banner.closable { padding-right: 52px; }
-    .bill-banner .nl-glyph { width: 24px; height: 24px; border-radius: var(--r-sm); }
-    .bill-banner .nl-glyph .ico { width: var(--icon-sm); height: var(--icon-sm); }
-    .bill-banner p b, .bill-banner p span, .bill-banner > .ghost-btn { display: none; }
-    .bill-banner p .bb-short { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    /* the whole row is the tap; the X sits above it */
-    .bill-banner-more { display: grid; place-items: center end; position: absolute; inset: 0; padding: 0 var(--sp-md); background: none; border: 0; border-radius: inherit; color: var(--muted); touch-action: manipulation; }
-    .bill-banner.closable .bill-banner-more { right: 44px; padding-right: 0; }
-    .bill-banner-more .ico { width: var(--icon-sm); height: var(--icon-sm); }
-    .bill-banner-x { top: 2px; right: 2px; z-index: 1; }
+    .notice-cards { --tile-h: 121px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-sm); margin-bottom: var(--sp-md); }
+    .notice-card { padding: var(--sp-lg); }
   }
   /* touch screens: the notice buttons take a full 44 px tap */
   @media (pointer: coarse) {
-    .bill-banner .ghost-btn, .nl-act { min-height: 44px; touch-action: manipulation; }
+    .notice-card .ghost-btn, .nl-act { min-height: 44px; touch-action: manipulation; }
+    /* the taller tap target fits the Overview card's height */
+    .notice-card { padding-top: var(--sp-md); padding-bottom: var(--sp-md); }
   }
   .page { display: flex; flex-direction: column; }
   /* Old readings: today's pictures fade, today's words and numbers go grey (SOLAR-343).
@@ -1360,6 +1365,7 @@
   .toast .ico { stroke: var(--ok); }
   /* a failure, with at most one link */
   .toast.error { border-color: rgba(var(--bad-rgb),0.45); padding-left: var(--sp-lg); pointer-events: auto; }
+  .toast.info { padding-left: var(--sp-lg); }
   .toast-act { background: none; border: none; padding: 0; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; }
   @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
   @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
@@ -1933,8 +1939,6 @@
   .free-over h2 { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.01em; }
   .free-over p { margin: 0; font-size: var(--fs-md); line-height: 1.5; color: var(--muted); }
   .free-over-acts { display: flex; justify-content: flex-end; gap: var(--sp-sm); margin-top: var(--sp-xs); }
-  .grid-off-prompt .mini-link { color: var(--text); font-weight: 600; }
-  .grid-off-prompt .fs-x { margin: calc(-1 * var(--sp-2xs)) calc(-1 * var(--sp-xs)) calc(-1 * var(--sp-2xs)) 0; }
   /* the review before a saved card is charged (SOLAR-276) */
   /* No lines (SOLAR-368): today's amount leads, large; the bill and card sit in a darker box. */
   .pay-review-t { margin: 0 0 var(--sp-lg); font-size: var(--fs-lg); font-weight: 600; }
