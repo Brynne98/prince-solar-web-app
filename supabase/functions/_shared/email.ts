@@ -914,14 +914,17 @@ export const cardChanged = (c: CardChange) =>
 
 // The saved card's last day (end of its expiry month) falls before the next payment
 // (SOLAR-406, 0161): 30 days before, then a last reminder 7 days before. A card first
-// seen 7 days or less before gets one email, not called a last reminder.
-export type CardExpiry = { card: string; on: string; final?: boolean; next: { amount: number; date: string } };
+// seen 7 days or less before gets one email, not called a last reminder. The last one
+// counts the days left (0 to 7) in its title and moves the date into the box.
+export type CardExpiry = { card: string; on: string; final?: boolean; days?: number; next: { amount: number; date: string } };
 export const cardExpiring = (c: CardExpiry) => {
-  const title = `${c.final ? "Last reminder: your" : "Your"} card expires on ${c.on}`;
+  const left = c.days === 0 ? "today" : c.days === 1 ? "tomorrow" : `in ${c.days} days`;
+  const title = c.final ? `Your card expires ${left}` : `Your card expires on ${c.on}`;
   return make(c.final ? title : `Your ${c.card} expires on ${c.on}`, {
-    title: c.final ? title : `Your card expires on ${c.on}`,
+    title,
     parts: [
-      { box: { rows: [["Card", esc(c.card)], ["Next payment", `${rand(c.next.amount)} on ${c.next.date}`]] } },
+      { box: { rows: [["Card", esc(c.card)], ...(c.final ? [["Expires", c.on] as [string, string]] : []),
+        ["Next payment", `${rand(c.next.amount)} on ${c.next.date}`]] } },
       { lead: "Update it before your next payment." },
       { button: { label: "Update card", href: PLAN } },
     ],
