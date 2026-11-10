@@ -215,9 +215,12 @@ accounts in `PAYSTACK_TEST_USERS` can pay (Paystack test cards), everyone else g
 
 Fake SunSynk logins came back for testers on 2026-11-10 (SOLAR-477): `mock-sunsynk` is
 deployed again, and only user ids in the `TESTER_USERS` secret may link `name@mock`
-(`scripts/set-test-users.sh` sets it; today the +test account). Everyone else gets
+(`scripts/set-test-users.sh` sets it; today the +test account), or whose confirmed email
+matches the `TESTER_EMAIL_PATTERN` secret (a regular expression; today every
+brynneprince98+testN@gmail.com). Email sign-up must stay confirm-first, or anyone could
+claim a matching address. Everyone else gets
 "SunSynk rejected those credentials". Billing ignores the list: testers pay on the live
-key. To switch it off: `supabase secrets unset TESTER_USERS`, then
+key. To switch it off: `supabase secrets unset TESTER_USERS TESTER_EMAIL_PATTERN`, then
 `supabase functions delete mock-sunsynk` and the fake-login part of
 `go-live-tester-cleanup.sql`.
 

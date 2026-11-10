@@ -9,6 +9,7 @@ import { join } from "node:path";
 const copy = join(mkdtempSync(join(tmpdir(), "gate-")), "gate.mts");
 copyFileSync(new URL("../../supabase/functions/_shared/gate.ts", import.meta.url), copy);
 const { payClosed, mockClosed, fakeSunsynk } = await import(copy);
+const PAT = String.raw`^brynneprince98\+test\d*@gmail\.com$`;
 
 const HOSTED = "https://pmakzojwhouamawgszrc.supabase.co", LOCAL = "http://127.0.0.1:55321";
 const A = "11111111-1111-1111-1111-111111111111", B = "22222222-2222-2222-2222-222222222222";
@@ -30,4 +31,9 @@ assert.equal(fakeSunsynk("at:solo@mock", REAL, MOCK), true, "production: a fake 
 assert.equal(fakeSunsynk("me@gmail.com", REAL, MOCK), false, "production: a real login is counted");
 assert.equal(fakeSunsynk("eyJreal.token", REAL, MOCK), false, "production: a real token is counted");
 assert.equal(fakeSunsynk("solo@mock", LOCAL_MOCK, LOCAL_MOCK), false, "local: every call goes to the mock and counts");
-console.log("gate: 16 cases ok");
+for (const e of ["brynneprince98+test@gmail.com", "brynneprince98+test2@gmail.com", "Brynneprince98+Test17@gmail.com"])
+  assert.equal(mockClosed("flat@mock", HOSTED, "", A, PAT, e), false, `${e}: passes`);
+for (const e of ["brynneprince98+testx@gmail.com", "someone+test2@gmail.com", "brynneprince98+test2@gmail.com.evil.com", "x.brynneprince98+test2@gmail.com", ""])
+  assert.equal(mockClosed("flat@mock", HOSTED, "", A, PAT, e), true, `${e || "unconfirmed"}: refused`);
+assert.equal(mockClosed("flat@mock", HOSTED, "", A, "", "brynneprince98+test2@gmail.com"), true, "no pattern set: refused");
+console.log("gate: 25 cases ok");
