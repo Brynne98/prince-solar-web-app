@@ -467,7 +467,10 @@ section#features{padding-top:0;scroll-margin-top:112px}
 #start .st-f{display:block;flex:none;width:100%;height:42px;padding:0 13px;border-radius:10px;border:1px solid var(--hair-2);background:rgba(255,255,255,.03);font:400 14px var(--sans);color:#e7ecf2;outline:none;transition:border-color .15s}
 #start .st-f::placeholder{color:#8d99a8}
 #start .st-f:focus{border-color:rgba(242,195,107,.7)}
-#start .st-ct{font:600 16px var(--sans)}#start .st-cs{font-size:12.5px;color:#9aa5b3;margin-top:-4px}
+#start .st-ct{font:600 16px var(--sans)}
+#start .st-seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:3px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid var(--hair)}
+#start .st-seg span{display:grid;place-items:center;height:28px;border-radius:7px;font:600 13px var(--sans);color:#9aa5b3}
+#start .st-seg .on{background:rgba(255,255,255,.09);color:#e7ecf2}#start .st-cs{font-size:12.5px;color:#9aa5b3;margin-top:-4px}
 #start .st-go{display:flex;align-items:center;justify-content:center;height:40px;border-radius:10px;background:var(--solar);color:#07130c;font:600 14px var(--sans)}
 #start .st-fs{justify-content:flex-start;gap:8px;background:radial-gradient(120% 70% at 20% 0,rgba(61,220,132,.06),transparent 60%),linear-gradient(180deg,#121b19,#0c1117);border-color:rgba(61,220,132,.22)}
 #start .st-fs-top{display:flex;justify-content:space-between;font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:#9aa5b3}
@@ -933,13 +936,13 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
       <span class="st-n">2</span>
       <div class="st-shot">
         <div class="st-ct">Add your plant</div>
-        <div class="st-cs">Use the login from the SunSynk Connect app.</div>
-        <input class="st-f" type="email" placeholder="SunSynk email" aria-label="SunSynk email" autocomplete="off">
-        <input class="st-f" type="password" placeholder="SunSynk password" aria-label="SunSynk password" autocomplete="off">
-        <button type="button" class="st-go">Connect</button>
+        <div class="st-seg" aria-hidden="true"><span>SunSynk login</span><span class="on">Share plant</span></div>
+        <div class="st-cs">No password. Share it with us in the SunSynk app.</div>
+        <input class="st-f" type="text" placeholder="Plant ID or inverter serial" aria-label="Plant ID or inverter serial" autocomplete="off">
+        <button type="button" class="st-go">Check</button>
       </div>
       <h3 class="st-h">Add your plant</h3>
-      <p class="st-p">Your SunSynk login, once.</p>
+      <p class="st-p">Share it with us, or use your SunSynk login.</p>
     </div>
     <div>
       <span class="st-n">3</span>
@@ -1033,6 +1036,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
     <h2 class="h2 rv">Questions</h2>
     <div class="qs rv d1">
       <details><summary>Will it work with my inverter?<i></i></summary><p>Prince Solar Hub works with SunSynk inverters. If your system shows in the SunSynk app, it shows here too. <a href="#inverters">Other brands are coming soon.</a></p></details>
+      <details><summary>Do I have to give you my SunSynk password?<i></i></summary><p>No. In the SunSynk app, share your plant with admin@princesolarhub.co.za as Visitor, then type its plant ID in Prince Solar Hub. Or sign in with your SunSynk login if you prefer.</p></details>
       <details><summary>How often does it update?<i></i></summary><p>Every minute, the same as the SunSynk app.</p></details>
       <details><summary>How far back does my history go?<i></i></summary><p>When you connect, we bring in your last 60 days from SunSynk. From then on, Home and Family plans keep your full history.</p></details>
       <details><summary>What happens after the free week?<i></i></summary><p>You keep today and every alert. Move to a Home or Family plan to keep your full history.</p></details>
