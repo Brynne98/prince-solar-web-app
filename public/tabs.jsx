@@ -2544,8 +2544,10 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
     <span>{o.until ? `Until ${billDay(o.until)}.` : o.months && !o.held ? `For your first ${view === 'yearly' ? 'year' : o.months + ' months'}.` : 'Yours while you stay.'}
       {!o.held && o.cap ? ` For the first ${o.cap} members.` : ''}</span></p>;
   const action = (p) => {
-    // a booked cancel: nothing to pick until it ends or Keep undoes it in Billing (SOLAR-457, SOLAR-467)
-    if (paid && b.nextPlan === 'free') return p === b.plan && sameView ? ownDate()
+    // a booked cancel: nothing to pick until it ends; Keep on your own card undoes it (SOLAR-457, SOLAR-467)
+    if (paid && b.nextPlan === 'free') return p === b.plan && sameView ? <>{ownDate()}
+        <button type="button" className="save-btn" disabled={!!busy} aria-busy={busy === 'keep'}
+                onClick={() => run(() => undoBooked(b, reload), 'keep')}>Keep {PLAN_NAME[b.plan]}</button></>
       : <div className="plan-cur plan-wait">{p === 'free' ? 'From ' : 'After '}{(b.prepaidOn ? longDay : billDay)(endDay(b))}</div>;
     // a paid year changes nothing until it starts (SOLAR-298), but it can be cancelled (SOLAR-457);
     // a quiet line holds the button's row
