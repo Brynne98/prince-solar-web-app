@@ -1158,6 +1158,8 @@ const pageOk = (tabs, id) => isSettings(id) || tabs.some(t => t.id === id);
 // one section since SOLAR-250, so the old ids land on it.
 const SECTION_ALIAS = { tariff: 'system', battery: 'system', plant: 'system' };
 const SECTION_PAGE = { connection: 'billing', system: 'system', steps: 'system', download: 'account', notifications: 'account', plan: 'billing', payments: 'billing', plants: 'billing', cancel: 'billing' };
+// An email's ?section= (logins is the old name for Plants) → the section it opens, in App and Setup.
+const URL_SECTION = { logins: 'connection', notifications: 'notifications', plan: 'plan', payments: 'payments', cancel: 'cancel', system: 'system' };
 // A saved or linked Battery page opens Equipment, where the packs now are; the plant's
 // settings were Settings' System page ('settings') until they moved to the list.
 const tabAlias = (id) => (id === 'battery' ? 'inverters' : id === 'settings' ? 'system' : id);
@@ -1234,11 +1236,12 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
   );
 }
 
-// What a save did, one line at the foot of the screen for 2.5 s (SOLAR-166):
+// What a save did, one line at the foot of the screen for 5 s (SOLAR-166, SOLAR-479):
 // window.toast('Saved: rate R3.45 a unit.'). A new one replaces the last. Every failure
 // that isn't one box's typing mistake is window.toast(text, { error: true, action:
-// { label, onClick } }): red, 6 s, at most one link. A note that is neither (still
-// being checked, not open yet) is { info: true }: no tick, 2.5 s (SOLAR-384). Frame mounts the host; the
+// { label, onClick } }): red, at most one link. A note that is neither (still
+// being checked, not open yet) is { info: true }: no tick (SOLAR-384). A toast with a link
+// stays until closed (×, Esc, or a click on it); one without goes after 5 s or on a click. Frame mounts the host; the
 // signed-out screens mount their own (window.SaveToast).
 // A toast sent as its host goes (signing out swaps the frame for the sign-in screen in the
 // same render, as after Delete account, SOLAR-359) moves to the next host.
@@ -1257,6 +1260,8 @@ function SaveToast({ report }) {
     if (toastLast && Date.now() - toastLast.at < 1000) setT(toastLast);
     return () => { toastShow = null; };
   }, []);
+  const act = t && (t.action || (report && t.error && !t.noReport &&
+    { label: 'Report this', onClick: () => openFeedback({ text: t.text, id: recentErrorId() }) }));
   useEffect(() => {
     if (!t) return;
     if (t === toastLast) toastLast = null;   // drawn here: the next host must not show it again (SOLAR-365)
@@ -1264,17 +1269,23 @@ function SaveToast({ report }) {
     // popover again puts each new toast above whatever pop-up is open.
     const h = host.current;
     if (h?.showPopover) { if (h.matches(':popover-open')) h.hidePopover(); h.showPopover(); }
-    const id = setTimeout(() => setT(null), t.error ? 6000 : 2500);
-    return () => clearTimeout(id);
+    // Esc closes it; with a pop-up open, that pop-up's Esc goes first unless the toast has focus.
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (document.querySelector('dialog[open]') && !h?.contains(document.activeElement)) return;
+      setT(null);
+    };
+    document.addEventListener('keydown', onKey);
+    const id = !act && setTimeout(() => setT(null), 5000);
+    return () => { clearTimeout(id); document.removeEventListener('keydown', onKey); };
   }, [t]);
-  const act = t && (t.action || (report && t.error && !t.noReport &&
-    { label: 'Report this', onClick: () => openFeedback({ text: t.text, id: recentErrorId() }) }));
   return (
     <div ref={host} popover="manual" className="toast-host" role={t?.error ? 'alert' : 'status'} aria-live={t?.error ? 'assertive' : 'polite'}>
       {t && (
-        <div key={t.at} className={'toast' + (t.error ? ' error' : t.info ? ' info' : '')}>
+        <div key={t.at} className={'toast' + (t.error ? ' error' : t.info ? ' info' : '') + (act ? ' sticky' : '')} onClick={() => setT(null)}>
           {!t.error && !t.info && <Icon id="tick" />}
           <span>{t.text}{act && <> <button type="button" className="toast-act" onClick={() => { setT(null); act.onClick(); }}>{act.label}</button></>}</span>
+          {act && <button type="button" className="notice-x toast-x" aria-label="Close" onClick={() => setT(null)}><Icon id="close" /></button>}
         </div>
       )}
     </div>
@@ -1352,6 +1363,15 @@ function Setup({ links }) {
   // The settings pages have no card, so the header's button opens it on Live from them.
   const connect = () => { if (isSettings(tab)) setTab('live'); setConnecting(true); };
   useEscape(connecting, () => setConnecting(false));
+  // An email's Add your plant (?add=plant, link.jsx): the form, as the card's button opens it.
+  useEffect(() => { if (window.takeAddAsk()) connect(); }, []);
+  // An email's ?section= opens its Settings page here too, as in App; Plant settings waits for a plant.
+  useEffect(() => {
+    const url = new URL(location.href), section = URL_SECTION[url.searchParams.get('section')];
+    if (!url.searchParams.has('section')) return;
+    url.searchParams.delete('section'); history.replaceState(history.state, '', url);
+    if (section && SECTION_PAGE[section] !== 'system') { setFlash(section); setTab(SECTION_PAGE[section]); }
+  }, []);
   useEffect(() => { window.track('screen_viewed', { stage: 'setup', screen: connecting ? 'connect' : tab }); }, [tab, connecting]);
   const dead = links.accounts.filter(a => a.status === 'needs_relink' && a.kind !== 'share');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
@@ -1602,8 +1622,10 @@ function App({ links }) {
       const url = new URL(location.href);
       const linked = Number(url.searchParams.get('plant'));
       // A report or alert footer adds section=notifications: open Account on the email switches.
-      // A payment email or Paystack's return adds section=plan: Billing.
-      const section = { logins: 'connection', notifications: 'notifications', plan: 'plan', cancel: 'cancel', system: 'system' }[url.searchParams.get('section')];
+      // A payment email or Paystack's return adds section=plan: Billing. Update card adds section=payments.
+      // An email's Add your plant (?add=plant, link.jsx): Plants, where the section opens Add plant.
+      const section = window.addAsked() ? 'connection'
+        : URL_SECTION[url.searchParams.get('section')];
       if (url.searchParams.has('section')) {
         url.searchParams.delete('section'); history.replaceState(history.state, '', url);
       }
@@ -1817,7 +1839,6 @@ function App({ links }) {
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
           <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} err={err} /><NotifBell disabled /></>}>
         <BillCards notices={notices} />
-        {null}
         {/* The Settings area never touches the snapshot: it draws for real. It sits in
             the same slot as in the loaded page below, so the first reading doesn't remount
             it (the Plan section flashed back to its outline). */}

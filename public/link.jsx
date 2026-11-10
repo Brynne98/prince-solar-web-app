@@ -423,6 +423,12 @@ window.sb.auth.onAuthStateChange((event, session) => {
   });
 });
 
+// "Add your plant" in the emails: ?add=plant (SOLAR-473), kept through sign-in with the
+// rest of an email's link (auth.jsx). Setup opens its Add plant form, App its Billing Plants
+// section with Add plant open; whichever opens it takes it out of the address, so it opens once.
+window.addAsked = () => new URLSearchParams(location.search).get('add') === 'plant';
+window.takeAddAsk = () => { const r = window.addAsked(); if (r) dropFromAddress(['add']); return r; };
+
 // The same moment on the Connect screen and inside Settings; one wording for both.
 const NO_PLANT_TEXT = 'has no plant shared with it yet. Your login is saved.';
 

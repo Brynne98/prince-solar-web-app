@@ -2175,10 +2175,26 @@ function SettingsSection({ id, title, note, bare, action, children }) {
   // A reload on #id scrolls back to it without the flash (SOLAR-165). Only on arrival:
   // the flash ending must not scroll again, or the page jumps once the cards above load (SOLAR-275).
   const arrived = React.useRef(false);
+  const settle = React.useRef(null);
   React.useEffect(() => {
-    if (flashing || (!arrived.current && location.hash === '#' + id)) ref.current?.scrollIntoView({ block: 'start' });
+    const go = flashing || (!arrived.current && location.hash === '#' + id);
     arrived.current = true;
+    const el = ref.current;
+    if (!go || !el) return;
+    const to = () => el.scrollIntoView({ block: 'start' });
+    to();
+    // The cards above fill in after this (Billing's plan, the phone's setup card) and push it
+    // down, below the fold (SOLAR-473): keep it in view while they settle, until the user
+    // scrolls or 3 s pass.
+    settle.current?.();
+    const again = setInterval(to, 150);
+    const input = ['wheel', 'touchstart', 'keydown'];
+    const stop = () => { clearInterval(again); clearTimeout(timer); input.forEach(e => removeEventListener(e, stop, true)); settle.current = null; };
+    const timer = setTimeout(stop, 3000);
+    input.forEach(e => addEventListener(e, stop, { capture: true, passive: true }));
+    settle.current = stop;
   }, [flashing]);
+  React.useEffect(() => () => settle.current?.(), []);
   return (
     <section id={'settings-' + id} className="sec" ref={ref} aria-labelledby={'settings-' + id + '-t'}>
       <div className="sec-intro">
@@ -2759,7 +2775,10 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const { accounts, error, refresh } = links;
   const [busy, setBusy] = useState(null);
   const fail = (text) => window.toast(text, { error: true }); // SOLAR-166
-  const [mode, setMode] = useState(null); // null | 'add' | account_id being reconnected
+  // null | 'add' | account_id being reconnected. An email's Add your plant opens on 'add' (SOLAR-473):
+  // read while rendering, taken once on screen, as React can throw away a first render.
+  const [mode, setMode] = useState(() => (window.addAsked() ? 'add' : null));
+  React.useEffect(() => { if (mode === 'add') window.takeAddAsk(); }, []);
   const live = accounts.filter(a => a.status !== 'disabled');
   // A failed read with nothing listed says nothing about the logins; "No login connected"
   // would be a guess. Try again re-reads.
