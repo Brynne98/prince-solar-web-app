@@ -214,6 +214,20 @@ for (const f of jsx) {
   });
 }
 
+// ---- 2h. email buttons go somewhere (SOLAR-473) ----
+// A button to the bare app address opens whatever page was last used, not what its label
+// names. Each href (or the const it names) must carry a path or query after APP.
+{
+  const consts = Object.fromEntries([...mail.matchAll(/^const ([A-Z_]+) = (`[^`\n]*`|"[^"\n]*");/gm)].map(m => [m[1], m[2]]));
+  const bare = (v) => v === 'APP' || /^`\$\{APP\}\/?`$/.test(v) || /^"https:\/\/app\.princesolarhub\.co\.za\/?"$/.test(v);
+  // Every href, each branch of a ternary too (Finish setup), the const it names looked up.
+  for (const m of mail.matchAll(/button: \{ label(?:: .*?)?, href: (.*?) \}(?=[ ,)}\n])/g)) {
+    for (const href of m[1].split(/ [?:] /).slice(m[1].includes(' ? ') ? 1 : 0)) {
+      if (bare(href) || bare(consts[href] ?? '')) problems.push(`email.ts:${mail.slice(0, m.index).split('\n').length} button href ${href} is the bare app address: link the page or dialog the label names`);
+    }
+  }
+}
+
 // ---- 3. one global scope ----
 const seen = new Map();
 for (const f of jsx) {

@@ -25,6 +25,7 @@ const PREFS = `${APP}/?tab=account&section=notifications`;
 // Reconnect lands on Account's SunSynk logins section and flashes it, like the app's own
 // Reconnect (openSettings('connection')). ?section= needs SOLAR-156.
 const LOGINS = `${APP}/?tab=account&section=logins`;
+const ADD_PLANT = `${APP}/?add=plant`;
 export const FROM_ACCOUNT = "Prince Solar Hub <noreply@princesolarhub.co.za>";
 export const FROM_ALERTS = "Prince Solar Hub <alerts@princesolarhub.co.za>";
 export const FROM_BILLING = "Prince Solar Hub <billing@princesolarhub.co.za>";
@@ -347,8 +348,8 @@ const openPage = (tab: keyof typeof PAGES, plantId: number) => ({ label: `Open $
 
 const SETTINGS_FOOTER = (line: string) => [line.replace("notification settings", `<a href="${PREFS}">notification settings</a>`), HELP];
 
-// Sent once the email is confirmed, before any plant is added. The Add plant
-// card opens on Live when a user has no plant, so the button goes straight there.
+// Sent once the email is confirmed, before any plant is added. ?add=plant opens the
+// Add plant form, kept through sign-in (link.jsx, SOLAR-473).
 // Wording matches link.jsx ("Add your plant", Share plant or SunSynk login, SOLAR-455).
 const ADD_STEPS = {
   box: { checks: [
@@ -360,7 +361,7 @@ const ADD_STEPS = {
 export const welcome = () =>
   make("Welcome to Prince Solar Hub", {
     title: "Welcome to Prince Solar Hub",
-    parts: [{ lead: "Three steps, about a minute." }, ADD_STEPS, { button: { label: "Add your plant", href: APP } }],
+    parts: [{ lead: "Three steps, about a minute." }, ADD_STEPS, { button: { label: "Add your plant", href: ADD_PLANT } }],
     footer: [HELP],
   });
 
@@ -370,7 +371,7 @@ export const needAHand = () =>
   make("Need a hand adding your plant?", {
     title: "Need a hand adding your plant?",
     parts: [{ lead: "Your plant isn't added yet. It takes about a minute." }, ADD_STEPS,
-      { button: { label: "Add your plant", href: APP } }],
+      { button: { label: "Add your plant", href: ADD_PLANT } }],
     footer: [HELP],
   });
 
@@ -698,6 +699,8 @@ export const PAY_URL = `${PLAN}&pay=1`;
 // Buttons that ask them to pick a plan open Adjust plan: Free, Home and Family side by
 // side (SOLAR-341).
 const PLANS = `${APP}/?tab=plans`;
+// Billing's Payment section: the saved card and its Update button (SOLAR-473).
+const PAYMENT = `${APP}/?tab=account&section=payments`;
 // "To stop it, cancel before": Billing's Cancellation section (SOLAR-361).
 const CANCEL = `${APP}/?tab=account&section=cancel`;
 // Day-2 "Finish setup": Plant settings' Your system, where rate, battery and panels are set (SOLAR-361).
@@ -792,7 +795,7 @@ export const planUpgraded = (u: Upgrade) =>
       { box: { hero: { label: "Paid today", value: rand(u.paidNow),
           sub: u.credit != null ? `${rand(u.credit)} off for the rest of your month` : `for the rest of this ${u.period === "yearly" ? "year" : "month"}` },
         rows: [...(u.card ? [["Card", esc(u.card)] as [string, string]] : []), ["Next payment", `${rand(u.next.amount)} on ${u.next.date}`]] } },
-      u.to === "family" ? { button: { label: "Add a plant", href: LOGINS } } : SEE_PLAN,
+      u.to === "family" ? { button: { label: "Add a plant", href: ADD_PLANT } } : SEE_PLAN,
     ],
     footer: BILL_FOOTER,
   });
@@ -962,7 +965,7 @@ export const cardExpiring = (c: CardExpiry) => {
       { box: { rows: [["Card", esc(c.card)], ...(c.final ? [["Expires", c.on] as [string, string]] : []),
         ["Next payment", `${rand(c.next.amount)} on ${c.next.date}`]] } },
       { lead: "Update it before your next payment." },
-      { button: { label: "Update card", href: PLAN } },
+      { button: { label: "Update card", href: PAYMENT } },
     ],
     footer: BILL_FOOTER,
   });

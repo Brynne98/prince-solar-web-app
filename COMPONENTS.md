@@ -66,6 +66,7 @@ Formatting and dates (also `components.jsx`):
 | `PasswordInput`, `PasswordField` | A password box with the eye, bare or with label. |
 | `SignOutButton`, `signOutHere` | Sign out, as a button or a call. |
 | `explainAuthError` | A Supabase auth error as a sentence for people. |
+| `restoreDeepLink` | An email's `?tab`, `?section`, `?plant`, `?pay`, `?add`, kept a day at load and put back in the address once signed in. A new deep-link key goes in `DEEP_KEYS`, not a keeper of its own. |
 
 ## Dialogs and SunSynk (`link.jsx`)
 
