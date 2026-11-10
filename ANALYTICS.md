@@ -46,7 +46,7 @@ Web (`public/*.jsx`):
 | `password_reset_sent_done` | Asked for a reset link |
 | `password_reset_done` | New password set from the link |
 | `password_change_done` | Password changed in Settings |
-| `feedback_sent_done` | Feedback sent from the account menu (`page`, `image`: true or false). Never the message |
+| `feedback_sent_done` | Feedback sent from the account menu or "Report this" (`page`, `image`, `report`: true or false, `error_id`: the PostHog error id or null). Never the message |
 | `plant_linked` | SunSynk login linked, or a shared plant taken |
 | `share_check_done`, `link_mode_picked`, `share_taken_email_done` | Linking steps |
 | `plant_switched` | Another plant picked |
@@ -75,6 +75,15 @@ Functions (`track()` in `_shared/errors.ts`): `payment_failed`, `plan_cancelled`
 `edge:poll`, no person; yesterday's SunSynk calls, failed calls, calls per plant and slowest
 poll run, from `private.sunsynk_calls` (0178). No user data.
 
+Job checks (SOLAR-428, `job-check`, every 5 min from pg_cron, 0180), no person:
+`job_check_failed` and `job_check_recovered` once each time a check changes state, as
+`edge:<job>` (`edge:poll`, `edge:notify`, `edge:sunsynk`, `edge:<cron job name>`), with
+`check` (`poll:s<n>`, `cron:<job>`, `sunsynk`, `email-queue`) and its numbers; a cron
+failure carries the first 200 characters of pg_cron's message, emails masked.
+`job_check_ran` once a run as `edge:job-check`, with the checks still failing. PostHog
+alerts: "Timed job failed or recovered" (hourly) and "Job check stopped running" (no run
+in 15 min).
+
 Not sent on purpose: menu opens, hovers, day arrows after the first, chart series toggles.
 
 ## Errors
@@ -82,6 +91,10 @@ Not sent on purpose: menu opens, hovers, day arrows after the first, chart serie
 - Web: uncaught errors and failed promises go to PostHog error tracking (`$exception`),
   each message once per page load, at most 20 (`public/config.js`). PostHog reads the
   public `build/*.js.map` files to show the source lines.
+- Web: a page that throws while drawing shows "This page stopped working" with Reload and
+  Report this (`PageBoundary`, `app.jsx`); the crash is reported with its component stack.
+  Red toasts offer "Report this" too. Both open the feedback box with the error and its
+  PostHog id.
 - Functions: anything a handler throws (`serve()` in `_shared/errors.ts`), with the
   signed-in user's id when the request has one.
 - `app_version` is the release. The functions' copy in `_shared/errors.ts` must match

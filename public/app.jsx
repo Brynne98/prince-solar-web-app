@@ -315,7 +315,11 @@ function AccountMenu({ user, plantCount, alert, onSettings, active, variant }) {
 // "Send feedback" (SOLAR-428): a message and an optional screenshot, emailed to hello@ with
 // reply-to the user (0179). The screenshot is shrunk here to a JPEG under 1 MB, so a phone's
 // full-size photo still goes; it travels only in the email, never stored.
-const openFeedback = () => { const close = mountNode(<FeedbackDialog onClose={() => close()} />); };
+// "Report this" (an error toast, a page that crashed) opens it with `report` = { text, id }:
+// the error's words and its PostHog id go in the message, and the user's line is optional.
+const openFeedback = (report) => { const close = mountNode(<FeedbackDialog report={report} onClose={() => close()} />); };
+// The PostHog id of a browser error reported in the last 2 minutes (config.js), if any.
+const recentErrorId = () => (window.lastErrorId && Date.now() - window.lastErrorId.at < 120000 ? window.lastErrorId.id : null);
 async function shrinkShot(file) {
   const img = await createImageBitmap(file);
   const s = Math.min(1, 1600 / Math.max(img.width, img.height));
@@ -331,7 +335,7 @@ async function shrinkShot(file) {
   }
   throw new Error('too big');
 }
-function FeedbackDialog({ onClose }) {
+function FeedbackDialog({ onClose, report }) {
   const { useState } = React;
   const [msg, setMsg] = useState('');
   const [shot, setShot] = useState(null); // { name, data }
@@ -347,27 +351,29 @@ function FeedbackDialog({ onClose }) {
   };
   const submit = async (e) => {
     e.preventDefault();
-    if (!msg.trim()) return flag({ 'fb-msg': 'Write a message' });
+    if (!msg.trim() && !report) return flag({ 'fb-msg': 'Write a message' });
     setBusy(true);
     try {
       const page = new URLSearchParams(location.search).get('tab') || 'home';
-      await window.sendFeedback(msg, page, shot?.data ?? null);
-      window.track('feedback_sent_done', { page, image: !!shot });
+      const text = report ? [msg.trim(), `Error: ${report.text}`, report.id && `Error ID: ${report.id}`].filter(Boolean).join('\n\n') : msg;
+      await window.sendFeedback(text, page, shot?.data ?? null);
+      window.track('feedback_sent_done', { page, image: !!shot, report: !!report, error_id: report?.id ?? null });
       onClose();
       window.toast('Feedback sent');
     } catch (ex) {
-      window.toast(/feedback limit/.test(ex.message) ? 'You’ve sent 10 today. Try again tomorrow.' : 'Not sent. Try again.', { error: true });
+      window.toast(/feedback limit/.test(ex.message) ? 'You’ve sent 10 today. Try again tomorrow.' : 'Not sent. Try again.', { error: true, noReport: true });
     } finally {
       setBusy(false);
     }
   };
   return (
-    <window.Dialog keep busy={busy} label="Send feedback" onClose={onClose}>
-      <div className="confirm-title">Send feedback</div>
+    <window.Dialog keep busy={busy} label={report ? 'Report a problem' : 'Send feedback'} onClose={onClose}>
+      <div className="confirm-title">{report ? 'Report a problem' : 'Send feedback'}</div>
+      {report && <p className="confirm-text fb-error">“{report.text}” is sent with your message.</p>}
       <form className="conn-form link-form" onSubmit={submit} noValidate aria-busy={busy}>
         <div className="field">
-          <window.FieldLabel id="fb-msg" label="Message" error={bad['fb-msg']} />
-          <textarea id="fb-msg" className="input fb-msg" rows={5} maxLength={4000} autoFocus value={msg}
+          <window.FieldLabel id="fb-msg" label={report ? 'What were you doing? (optional)' : 'Message'} error={bad['fb-msg']} />
+          <textarea id="fb-msg" className="input fb-msg" rows={5} maxLength={report ? 3500 : 4000} autoFocus value={msg}
                     onChange={(e) => { setMsg(e.target.value); edited('fb-msg'); }} {...window.invalidProps('fb-msg', bad['fb-msg'])} />
         </div>
         <div className="field fb-shot">
@@ -1179,6 +1185,32 @@ const comingOn = (r) => {
 // Back to the top of the page: the box under the header scrolls beside a sidebar, the document on a phone.
 const toTop = () => { document.querySelector('.frame-scroll')?.scrollTo({ top: 0 }); window.scrollTo({ top: 0 }); };
 
+// A page that throws while drawing shows this card instead of a blank screen; the sidebar,
+// header and other pages keep working (SOLAR-428). The crash goes to PostHog first, so
+// "Report this" carries its id. A new tab starts clean (keyed by tab).
+class PageBoundary extends React.Component {
+  state = { failed: null };
+  static getDerivedStateFromError() { return { failed: {} }; }
+  componentDidCatch(error, info) {
+    const id = window.reportClientError?.(error, { component_stack: String(info?.componentStack || '').slice(0, 2000) }) ?? null;
+    this.setState({ failed: { text: String(error?.message || error).slice(0, 300), id } });
+  }
+  render() {
+    const f = this.state.failed;
+    if (!f) return this.props.children;
+    return (
+      <section className="card free-over page-crash" role="alert">
+        <h2>This page stopped working</h2>
+        <p>Reload to try again. Other pages still work.</p>
+        <div className="free-over-acts">
+          <button type="button" className="ghost-btn" onClick={() => openFeedback({ text: f.text || 'Page crashed', id: f.id })}>Report this</button>
+          <button type="button" className="save-btn" onClick={() => location.reload()}>Reload</button>
+        </div>
+      </section>
+    );
+  }
+}
+
 // The frame around every page: sidebar, header, content, phone bar.
 // `steps` draws First steps for 'rail' or 'phone'; a phone leaves it off Settings and
 // Plant settings, where it would sit on the save bar.
@@ -1193,11 +1225,11 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
         </header>
         {/* phone: First steps sits at the top of the page, in the flow, so it never covers a chart (SOLAR-345) */}
         <div className="frame-scroll">
-          <main className="content" aria-busy={busy || undefined}>{steps && !isSettings(tab) && tab !== 'system' && steps('phone')}{children}</main>
+          <main className="content" aria-busy={busy || undefined}>{steps && !isSettings(tab) && tab !== 'system' && steps('phone')}<PageBoundary key={tab}>{children}</PageBoundary></main>
         </div>
       </div>
       <PhoneBar tabs={tabs} tab={tab} onTab={onTab} />
-      <SaveToast />
+      <SaveToast report={!!account} />
     </div>
   );
 }
@@ -1216,7 +1248,8 @@ window.toast = (text, opts = {}) => {
   toastLast = { text, ...opts, at: Date.now() };
   if (toastShow) toastShow(toastLast);
 };
-function SaveToast() {
+// `report`: signed in, so a red toast with no link of its own offers "Report this" (SOLAR-428).
+function SaveToast({ report }) {
   const [t, setT] = useState(null);
   const host = useRef(null);
   useEffect(() => {
@@ -1234,12 +1267,14 @@ function SaveToast() {
     const id = setTimeout(() => setT(null), t.error ? 6000 : 2500);
     return () => clearTimeout(id);
   }, [t]);
+  const act = t && (t.action || (report && t.error && !t.noReport &&
+    { label: 'Report this', onClick: () => openFeedback({ text: t.text, id: recentErrorId() }) }));
   return (
     <div ref={host} popover="manual" className="toast-host" role={t?.error ? 'alert' : 'status'} aria-live={t?.error ? 'assertive' : 'polite'}>
       {t && (
         <div key={t.at} className={'toast' + (t.error ? ' error' : t.info ? ' info' : '')}>
           {!t.error && !t.info && <Icon id="tick" />}
-          <span>{t.text}{t.action && <> <button type="button" className="toast-act" onClick={() => { setT(null); t.action.onClick(); }}>{t.action.label}</button></>}</span>
+          <span>{t.text}{act && <> <button type="button" className="toast-act" onClick={() => { setT(null); act.onClick(); }}>{act.label}</button></>}</span>
         </div>
       )}
     </div>
