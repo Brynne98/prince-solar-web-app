@@ -73,7 +73,7 @@ Showcase (`public/welcome-track.js`, princesolarhub.co.za, SOLAR-472), no person
 
 | Event | Sent when |
 |---|---|
-| `screen_viewed` | The page opens (`stage`: `website`, `screen`: `welcome`, or a help or compare page's `<body data-screen>`: `alternative`, `vs_<name>`, `help`, `help_<topic>`; SOLAR-216) |
+| `screen_viewed` | The page opens (`stage`: `website`, `screen`: `welcome`, or a help or compare page's `<body data-screen>`: `alternative`, `feature_<topic>`, `help`, `help_<topic>`; SOLAR-216, SOLAR-490) |
 | `website_section_viewed` | A section crosses the middle of the screen, once per visit (`section`: its id, e.g. `day`, `pricing`, `questions`) |
 | `website_button_tapped` | `button`: `try_free`, `sign_in`, `see_pricing`, `get_home`, `get_family`; `section` it sits in, or `header` |
 
