@@ -797,23 +797,22 @@ export const planChangeBooked = (c: Change) => {
   const hero = c.removePlants.length
     ? lost(`Deleted on ${c.deleteOn ?? c.on}`, plantCount(c.removePlants.length), withDays(names(c.removePlants), c.days)) : undefined;
   const kept: [string, string][] = hero && c.keepPlants?.length ? [["Plants kept", list(c.keepPlants)]] : [];
-  const keep = { button: { label: `Keep ${PLAN_NAME[c.from]}`, href: PLAN } };
   return make(title, {
     title,
-    // A cancel is final (SOLAR-457): no Keep button.
+    // No Keep buttons in emails (SOLAR-412): an undo is made in Billing. A cancel has no button.
     parts: cancel
       ? hero ? [{ lead: `Nothing more is charged. ${PAID_FREE}` }, { box: { hero, rows: kept } }]
         // No plant deleted: the history that goes leads instead, as in the plan-ended email.
         : c.history?.days ? [{ lead: "Nothing more is charged." },
             { box: { hero: lost(`Deleted on ${c.history.on}`, dayCount(c.history.days), `of history at ${c.history.plant}`),
-              rows: [[`From ${c.on}`, "Free"], ["You see", "Today only"], ["Reports", "Stop"]] } }]
+              rows: [[`From ${c.on}`, "Free"], ["You see", "Today's readings"], ["Reports", "Stop"]] } }]
         : [{ lead: `Nothing more is charged. ${PAID_FREE}` }]
       // A monthly/yearly switch reads like the plan-kept email: what carries on, then the price.
       : switchOnly ? [{ lead: "Your plants, history and reports carry on as before." },
           { box: { rows: [["Next payment", `${c.next ? rand(c.next.amount) : "R0"} on ${c.on}`]] } },
-          { button: { label: `Keep ${c.fromPeriod}`, href: PLAN } }]
+          SEE_PLAN]
       : [{ box: { hero, rows: [["Next payment", `${c.next ? rand(c.next.amount) : "R0"} on ${c.on}`], ...kept] } },
-         hero ? keep : SEE_PLAN],
+         SEE_PLAN],
     footer: BILL_FOOTER,
   });
 };
@@ -968,7 +967,7 @@ export const movedToFree = (m: MovedToFree) =>
         hero: m.stopped.length ? lost(`Deleted on ${m.deleteOn}`, plantCount(m.stopped.length), withDays(names(m.stopped), m.stoppedDays))
           : m.days ? lost(`Deleted on ${m.deleteOn}`, dayCount(m.days), `of history at ${m.kept}`) : undefined,
         rows: [...(m.stopped.length ? [["Still updating", esc(m.kept)] as [string, string]] : []),
-          ["You see", "Today only"], ["Reports", "Stop"]],
+          ["You see", "Today's readings"], ["Reports", "Stop"]],
       } },
       { button: { label: `Pay for ${PLAN_NAME[m.from]}`, href: PLANS } },
     ],
@@ -984,10 +983,10 @@ export const winback = (w: { from: Plan; keepUntil: string; plant?: string; days
       { box: {
         hero: w.days && w.plant ? lost(`Deleted on ${w.keepUntil}`, dayCount(w.days), `of history at ${w.plant}`) : undefined,
         rows: [...(w.days && w.plant ? [] : [["History deleted on", w.keepUntil] as [string, string]]),
-          ["You see", "Today only"], ["Reports", "Stopped"]],
+          ["You see", "Today's readings"], ["Reports", "Stopped"]],
       } },
       ...(w.price ? [{ lead: keepOn(w.price, "your history") }] : []),
-      { button: { label: "Keep my history", href: PLANS } },
+      { button: { label: "See plans", href: PLANS } },
       ...(w.price ? [{ small: keepSmall(w.price) }] : []),
     ],
     footer: [HELP],
@@ -1004,7 +1003,7 @@ export const plantsRemovalSoon = (plants: string[], on: string, plan?: Plan, pri
     parts: [
       { box: { hero: lost(`Deleted on ${on}`, plantCount(plants.length), withDays(names(plants), days)) } },
       { lead: `${plan ? `${PLAN_NAME[plan]} keeps ${PLAN_PLANTS[plan]}. ` : ""}${price ? keepOn(price, them) : `Choose a plan to keep ${them}.`}` },
-      { button: { label: plants.length === 1 ? "Keep my plant" : "Keep my plants", href: PLANS } },
+      { button: { label: "See plans", href: PLANS } },
       ...(price ? [{ small: keepSmall(price) }] : []),
     ],
     footer: BILL_FOOTER,
@@ -1021,10 +1020,10 @@ export const freeWeekEndsSoon = (endsOn: string, plant: string, days: number, pr
     parts: [
       { box: {
         hero: days > 0 ? lost(`Deleted on ${wd}`, dayCount(days), `of history at ${plant}`) : undefined,
-        rows: [[`After ${wd}`, "Today only"], ["Reports", "Stop"]],
+        rows: [[`After ${wd}`, "Today's readings"], ["Reports", "Stop"]],
       } },
       { lead: price ? keepOn(price, "everything") : "A plan keeps it all." },
-      { button: { label: "Keep my history", href: PLANS } },
+      { button: { label: "See plans", href: PLANS } },
       ...(price ? [{ small: keepSmall(price) }] : []),
     ],
     footer: BILL_FOOTER,
