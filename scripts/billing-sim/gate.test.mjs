@@ -8,7 +8,7 @@ import { join } from "node:path";
 // The repo is commonjs, so node reads the .ts as ESM only under .mts (as card-tests.mts does).
 const copy = join(mkdtempSync(join(tmpdir(), "gate-")), "gate.mts");
 copyFileSync(new URL("../../supabase/functions/_shared/gate.ts", import.meta.url), copy);
-const { payClosed, mockClosed } = await import(copy);
+const { payClosed, mockClosed, fakeSunsynk } = await import(copy);
 
 const HOSTED = "https://pmakzojwhouamawgszrc.supabase.co", LOCAL = "http://127.0.0.1:55321";
 const A = "11111111-1111-1111-1111-111111111111", B = "22222222-2222-2222-2222-222222222222";
@@ -24,4 +24,10 @@ assert.equal(mockClosed("x@mock", HOSTED, "", A), true, "@mock, hosted, TESTER_U
 assert.equal(mockClosed("installer@mock", HOSTED, A, A), false, "@mock, hosted, on the list: passes");
 assert.equal(mockClosed("installer@mock", LOCAL, "", A), false, "@mock, local: passes");
 assert.equal(mockClosed("me@gmail.com", HOSTED, "", A), false, "real login: never refused here");
-console.log("gate: 11 cases ok");
+const REAL = "https://openapi.sunsynk.net", MOCK = `${HOSTED}/functions/v1/mock-sunsynk`, LOCAL_MOCK = "http://127.0.0.1:4010";
+assert.equal(fakeSunsynk("solo@mock", REAL, MOCK), true, "production: a fake login is not counted");
+assert.equal(fakeSunsynk("at:solo@mock", REAL, MOCK), true, "production: a fake token is not counted");
+assert.equal(fakeSunsynk("me@gmail.com", REAL, MOCK), false, "production: a real login is counted");
+assert.equal(fakeSunsynk("eyJreal.token", REAL, MOCK), false, "production: a real token is counted");
+assert.equal(fakeSunsynk("solo@mock", LOCAL_MOCK, LOCAL_MOCK), false, "local: every call goes to the mock and counts");
+console.log("gate: 16 cases ok");

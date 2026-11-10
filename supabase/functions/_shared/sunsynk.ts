@@ -24,6 +24,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { createHash, createHmac } from "node:crypto";
 import { type InverterInfo, num, pick } from "./extract.ts";
 import { noteError } from "./errors.ts";
+import { fakeSunsynk } from "./gate.ts";
 
 const API_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? "https://openapi.sunsynk.net";
 // Fake logins (name@mock, SOLAR-270) go to the mock: locally the mock server is API_BASE
@@ -31,6 +32,7 @@ const API_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? "https://openapi.sunsynk.ne
 // (link-sunsynk). Its tokens are "at:<login>" and "rt:<login>", unlike any SunSynk token.
 const MOCK_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? `${Deno.env.get("SUPABASE_URL")}/functions/v1/mock-sunsynk`;
 const baseFor = (loginOrToken: string) => (loginOrToken.endsWith("@mock") ? MOCK_BASE : API_BASE);
+const isFake = (loginOrToken: string) => fakeSunsynk(loginOrToken, API_BASE, MOCK_BASE);
 const APP_KEY = Deno.env.get("SUNSYNK_APP_KEY") ?? "";
 const APP_SECRET = Deno.env.get("SUNSYNK_APP_SECRET") ?? "";
 const CLIENT_ID = "openapi";
@@ -151,24 +153,25 @@ function signedHeaders(method: string, pathWithQuery: string, body?: string, bea
 async function postToken(payload: Record<string, string>): Promise<any> {
   const body = JSON.stringify(payload);
   const t0 = Date.now();
+  const who = payload.username ?? payload.refresh_token ?? "";
   let res: Response;
   try {
-    res = await fetch(`${baseFor(payload.username ?? payload.refresh_token ?? "")}/oauth/token`, {
+    res = await fetch(`${baseFor(who)}/oauth/token`, {
       method: "POST",
       headers: signedHeaders("POST", "/oauth/token", body),
       body,
     });
   } catch (e) {
-    tallyCall("/oauth/token", failResult(e), Date.now() - t0);
-    sunsynkFailed("/oauth/token", failResult(e), e);
+    tallyCall(who, "/oauth/token", failResult(e), Date.now() - t0);
+    sunsynkFailed(who, "/oauth/token", failResult(e), e);
     throw e;
   }
-  tallyCall("/oauth/token", resultOf(res), Date.now() - t0);
+  tallyCall(who, "/oauth/token", resultOf(res), Date.now() - t0);
   const gatewayErr = res.headers.get("x-ca-error-message");
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const e = new Error(`token endpoint HTTP ${res.status}: ${gatewayErr ?? json?.msg ?? ""}`);
-    sunsynkFailed("/oauth/token", resultOf(res), e);
+    sunsynkFailed(who, "/oauth/token", resultOf(res), e);
     throw e;
   }
   return json;
@@ -287,12 +290,13 @@ function addTally(n: CallTally) {
   callTally.set(`${n.kind}|${n.result}`, t);
 }
 const failResult = (e: unknown) => (e instanceof DOMException && e.name === "TimeoutError" ? "timeout" : "network");
-const tallyCall = (pathname: string, result: string, ms: number) =>
-  addTally({ kind: kindOf(pathname), result, calls: 1, ms, ms_max: ms });
+// Fake SunSynk calls (SOLAR-477) are left out: `who` is the login or token used.
+const tallyCall = (who: string, pathname: string, result: string, ms: number) =>
+  isFake(who) || addTally({ kind: kindOf(pathname), result, calls: 1, ms, ms_max: ms });
 // A SunSynk call that failed for good (after the retries), as one PostHog issue per data
 // type and result, sent at most once an hour (SOLAR-336). The full counts are in the tally.
-const sunsynkFailed = (pathname: string, result: string, e: unknown) =>
-  noteError(`sunsynk_${result}:${kindOf(pathname)}`, e, { hourly: true });
+const sunsynkFailed = (who: string, pathname: string, result: string, e: unknown) =>
+  isFake(who) || noteError(`sunsynk_${result}:${kindOf(pathname)}`, e, { hourly: true });
 
 /**
  * Adds the counts since the last save to private.sunsynk_calls in one write (0178). A poll
@@ -318,12 +322,15 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
     countCall(acc);
     const t0 = Date.now();
     try {
-      const res = await fetch(`${baseFor(tok)}${pathname}`, { headers: signedHeaders("GET", pathname, undefined, tok) });
-      tallyCall(pathname, resultOf(res), Date.now() - t0);
+      const go = () => fetch(`${baseFor(tok)}${pathname}`, { headers: signedHeaders("GET", pathname, undefined, tok) });
+      // About a quarter of production's calls to the fake SunSynk fail in 1-2 ms and never
+      // reach it (2026-11-10, SOLAR-477); one more try gets them through. Real calls don't retry here.
+      const res = await go().catch((e) => (isFake(tok) ? go() : Promise.reject(e)));
+      tallyCall(tok, pathname, resultOf(res), Date.now() - t0);
       return res;
     } catch (e) {
-      tallyCall(pathname, failResult(e), Date.now() - t0);
-      sunsynkFailed(pathname, failResult(e), e);
+      tallyCall(tok, pathname, failResult(e), Date.now() - t0);
+      sunsynkFailed(tok, pathname, failResult(e), e);
       throw e;
     }
   };
@@ -338,14 +345,14 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
   }
   if (throttled(res)) {
     const e = new Error(`API ${pathname} -> HTTP ${res.status} (rate-limited after ${RATE_LIMIT_RETRIES} retries)`);
-    sunsynkFailed(pathname, resultOf(res), e);
+    sunsynkFailed(acc.sunsynk_username, pathname, resultOf(res), e);
     throw e;
   }
   const gatewayErr = res.headers.get("x-ca-error-message");
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const e = new Error(`API ${pathname} -> HTTP ${res.status} ${gatewayErr ?? body?.msg ?? ""}`);
-    sunsynkFailed(pathname, resultOf(res), e);
+    sunsynkFailed(acc.sunsynk_username, pathname, resultOf(res), e);
     throw e;
   }
   return body?.data;
