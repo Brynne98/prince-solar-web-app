@@ -347,7 +347,7 @@ async function build(r: Row): Promise<Email | null> {
       return planUpgraded({
         from: d.from, to: d.to, period: d.period, addedPlants: d.from === d.to ? d.added : undefined,
         paidNow: d.amount, daysLeft: d.daysLeft, credit: d.credit ?? undefined, next: { amount: d.nextAmount, date: day(d.nextDate) },
-        card: (await billFacts(r.user_id))?.card ?? undefined,
+        card: (await billFacts(r.user_id))?.card ?? undefined, reference: d.reference,
       });
     case "bill_switched":
       return planSwitched({
@@ -379,6 +379,9 @@ async function build(r: Row): Promise<Email | null> {
         plan: d.plan, period: d.period, amount: d.amount, card: d.card,
         nextTry: d.nextTry ? day(d.nextTry) : undefined, freeOn: day(d.freeOn), payUrl: PAY_URL,
         disputed: d.disputed ? day(d.disputed) : undefined,
+        // The key is bill:<ref> of the declined try; a reversal names the payment taken back (0183).
+        reference: d.disputed ? await rpc<string | null>("email_reversed_reference", { p_reference: String(r.key).slice(5) }).catch(() => null) ?? undefined
+          : String(r.key).slice(5),
       });
     case "bill_refund":
       return paymentRefunded({ amount: Number(d.amount), date: day(d.date), reference: d.reference,
