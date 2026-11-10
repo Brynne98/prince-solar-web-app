@@ -198,8 +198,10 @@
   /* --stick: how far below the scroll box's top the header ends, for sticky tops and
      scroll margins. --sb: the scrollbar's width, when the page under the header has one.
      --safe-top: the status bar's height when opened from the Home Screen; the page draws
-     under it (viewport-fit=cover, black-translucent), so the header and sidebar start below it (SOLAR-480) */
-  .frame { --rail-w: 232px; --head-h: 60px; --safe-top: env(safe-area-inset-top, 0px); --stick: calc(var(--head-h) + var(--safe-top)); display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100dvh; }
+     under it (viewport-fit=cover, black-translucent), so the header and sidebar start below it (SOLAR-480).
+     Plus 10px when there is a status bar: iOS fades its blur out past the bar's edge, onto the header.
+     min() keeps it 0 in a browser tab, where the inset is 0 */
+  .frame { --rail-w: 232px; --head-h: 60px; --safe-top: calc(env(safe-area-inset-top, 0px) + min(10px, env(safe-area-inset-top, 0px))); --stick: calc(var(--head-h) + var(--safe-top)); display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100dvh; }
   .frame-body { display: flex; flex-direction: column; min-width: 0; }
   .frame-scroll { flex: 1 0 auto; display: flex; flex-direction: column; }
   /* with a sidebar and a mouse or trackpad, only the page beside it scrolls, so a wheel
