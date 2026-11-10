@@ -149,11 +149,19 @@ function signedHeaders(method: string, pathWithQuery: string, body?: string, bea
 
 async function postToken(payload: Record<string, string>): Promise<any> {
   const body = JSON.stringify(payload);
-  const res = await fetch(`${baseFor(payload.username ?? payload.refresh_token ?? "")}/oauth/token`, {
-    method: "POST",
-    headers: signedHeaders("POST", "/oauth/token", body),
-    body,
-  });
+  const t0 = Date.now();
+  let res: Response;
+  try {
+    res = await fetch(`${baseFor(payload.username ?? payload.refresh_token ?? "")}/oauth/token`, {
+      method: "POST",
+      headers: signedHeaders("POST", "/oauth/token", body),
+      body,
+    });
+  } catch (e) {
+    tallyCall("/oauth/token", failResult(e), Date.now() - t0);
+    throw e;
+  }
+  tallyCall("/oauth/token", resultOf(res), Date.now() - t0);
   const gatewayErr = res.headers.get("x-ca-error-message");
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`token endpoint HTTP ${res.status}: ${gatewayErr ?? json?.msg ?? ""}`);
@@ -272,6 +280,7 @@ function addTally(n: CallTally) {
   t.ms_max = Math.max(t.ms_max, n.ms_max);
   callTally.set(`${n.kind}|${n.result}`, t);
 }
+const failResult = (e: unknown) => (e instanceof DOMException && e.name === "TimeoutError" ? "timeout" : "network");
 const tallyCall = (pathname: string, result: string, ms: number) =>
   addTally({ kind: kindOf(pathname), result, calls: 1, ms, ms_max: ms });
 
@@ -303,7 +312,7 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
       tallyCall(pathname, resultOf(res), Date.now() - t0);
       return res;
     } catch (e) {
-      tallyCall(pathname, e instanceof DOMException && e.name === "TimeoutError" ? "timeout" : "network", Date.now() - t0);
+      tallyCall(pathname, failResult(e), Date.now() - t0);
       throw e;
     }
   };
