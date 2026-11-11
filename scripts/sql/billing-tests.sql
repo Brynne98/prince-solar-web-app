@@ -740,6 +740,43 @@ begin
   perform pg_temp.eq('prev skips unapplied', pays->4->>'prev', 'home');
 end $$;
 
+-- The pick as a whole set (0186, SOLAR-486): Family with 4 plants books Home, then ticks 2.
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000e5', 'pick@t.test');
+insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
+  values ('00000000-0000-0000-0000-0000000000e5', 'family', 'monthly', 1, '2026-12-01');
+insert into public.plant_users (plant_id, user_id, linked_at, paused) values
+  (9000501, '00000000-0000-0000-0000-0000000000e5', '2026-01-01', false),
+  (9000502, '00000000-0000-0000-0000-0000000000e5', '2026-01-02', false),
+  (9000503, '00000000-0000-0000-0000-0000000000e5', '2026-01-03', false),
+  (9000504, '00000000-0000-0000-0000-0000000000e5', '2026-01-04', false),
+  (9000505, '00000000-0000-0000-0000-0000000000e5', '2026-01-05', true);
+do $$
+declare b private.billing;
+begin
+  perform set_config('request.jwt.claims', json_build_object('sub', '00000000-0000-0000-0000-0000000000e5', 'role', 'authenticated')::text, true);
+  perform pg_temp.raises('no pick without a booked change', 'select public.api_billing_keep_set(''{9000501,9000502}'')', 'nothing to pick');
+  perform public.api_billing_change('home');
+  select * into b from private.billing where user_id = '00000000-0000-0000-0000-0000000000e5';
+  perform pg_temp.eq('no pick: first linked kept', private.billing_drops(b), '{9000503,9000504}'::bigint[]);
+  perform pg_temp.raises('one too few', 'select public.api_billing_keep_set(''{9000503}'')', 'pick 2 plants');
+  perform pg_temp.raises('one too many', 'select public.api_billing_keep_set(''{9000501,9000502,9000503}'')', 'pick 2 plants');
+  perform pg_temp.raises('a stopped plant', 'select public.api_billing_keep_set(''{9000501,9000505}'')', 'pick 2 plants');
+  perform pg_temp.raises('a plant not yours', 'select public.api_billing_keep_set(''{9000501,9000011}'')', 'pick 2 plants');
+  perform pg_temp.raises('the same plant twice', 'select public.api_billing_keep_set(''{9000501,9000501}'')', 'pick 2 plants');
+  -- untick 9000501, tick 9000504: 9000501 is the one that stops, not the last picked
+  perform public.api_billing_keep_set('{9000502,9000504}');
+  select * into b from private.billing where user_id = '00000000-0000-0000-0000-0000000000e5';
+  perform pg_temp.eq('the unticked plant stops', private.billing_drops(b), '{9000501,9000503}'::bigint[]);
+  perform pg_temp.eq('no email for a pick', (select count(*)::int from public.email_queue where user_id = '00000000-0000-0000-0000-0000000000e5' and kind = 'bill_change'), 1);
+  -- a cancel keeps 1
+  perform public.api_billing_change('free');
+  perform public.api_billing_keep_set('{9000503}');
+  select * into b from private.billing where user_id = '00000000-0000-0000-0000-0000000000e5';
+  perform pg_temp.eq('cancel keeps the ticked one', private.billing_drops(b), '{9000501,9000502,9000504}'::bigint[]);
+  perform set_config('request.jwt.claims', '', true);
+end $$;
+select pg_temp.eq('keep set is for signed-in users', has_function_privilege('anon', 'public.api_billing_keep_set(bigint[])', 'execute'), false);
+
 \set QUIET off
 do $$ begin
   if exists (select 1 from pg_temp.fails) then

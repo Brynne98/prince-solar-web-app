@@ -2140,8 +2140,7 @@ const focusNoScroll = (el) => el && el.focus({ preventScroll: true });
 // modal: over the page in a Dialog rather than in place under its row.
 // danger: the action is red, as it undoes something; otherwise green. No action: Cancel alone.
 // label names a modal one, the action's words by default.
-// confirmDisabled: the action waits on a choice in the children (KeepPicker's plants).
-function ConfirmCard({ title, text, children, action, onConfirm, onCancel, cancelLabel = 'Cancel', busy = false, modal = false, danger = true, label, confirmDisabled }) {
+function ConfirmCard({ title, text, children, action, onConfirm, onCancel, cancelLabel = 'Cancel', busy = false, modal = false, danger = true, label }) {
   const cancel = React.useRef(null);
   React.useEffect(() => focusNoScroll(cancel.current), []);
   const body = <>
@@ -2150,7 +2149,7 @@ function ConfirmCard({ title, text, children, action, onConfirm, onCancel, cance
     {children}
     <div className="conn-form-actions">
       <button type="button" className="ghost-btn" onClick={onCancel} ref={cancel} disabled={busy}>{cancelLabel}</button>
-      {action && <window.BusyButton className={danger ? 'danger-btn' : 'save-btn'} onClick={onConfirm} busy={busy} disabled={confirmDisabled}>{action}</window.BusyButton>}
+      {action && <window.BusyButton className={danger ? 'danger-btn' : 'save-btn'} onClick={onConfirm} busy={busy}>{action}</window.BusyButton>}
     </div>
   </>;
   if (modal) return <window.Dialog label={label || action} busy={busy} onClose={onCancel}>{body}</window.Dialog>;
@@ -2317,57 +2316,93 @@ const cancelOffer = (b) => {
   const list = b.offer?.held && listPrice(b, b.plan, b.period, b.extraPlants || 0);
   return list > b.price ? `Your ${offerName(b.offer)} of ${rand(b.price)} ${perUnit(b.period)} goes too; ${PLAN_NAME[b.plan]} costs ${rand(list)} if you come back.` : null;
 };
-// The plants a cancel leaves, ranked as private.billing_drops ranks them with no pick:
+// The plants a smaller plan leaves, ranked as private.billing_drops ranks them with no pick:
 // collecting, not already up for removal, the first linked kept (SOLAR-488). A plant on a
-// switched-off login still counts, as on the server.
-const cancelPlants = (links) => {
+// switched-off login still counts, as on the server. room: how many the plan keeps.
+const cancelPlants = (links, room = 1) => {
   const seen = new Set();
   const on = (links?.accounts || []).flatMap(a => a.plants || [])
     .filter(p => !p.paused && !(p.remove_on && !p.drop) && !seen.has(p.plant_id) && seen.add(p.plant_id))
     .sort((x, y) => (x.linked_at < y.linked_at ? -1 : x.linked_at > y.linked_at ? 1 : x.plant_id - y.plant_id));
-  return { keep: on[0], stop: on.length - 1 };
+  return { keep: on.slice(0, room), stop: Math.max(on.length - room, 0) };
 };
+// "Office", "Office and Shop", "Office, Shop and Barn"
+const andList = (names) => (names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0] || '');
 
-// A downgrade's pick (SOLAR-295): the plants the new plan keeps, each with the switch and
-// under the login Billing shows it with. One on for Home and Free; Family's room for Family.
-// Starts from the plants kept now: those not stopping, then link order.
-function KeepPicker({ b, room, logins, title, text, action, cancelLabel = 'Cancel', danger = false, busy, onPick, onCancel }) {
-  const { useState } = React;
+// While a cancel or a smaller plan that stops plants is booked (SOLAR-486): the plants it
+// keeps, ticked, in a card above Plants. Ticked: the plants not dropping. A full set saves at
+// once (api_billing_keep_set, 0186); with room for one, a tick swaps it in. Plants keeps its
+// switches meanwhile.
+function KeepCard({ b, links, reload }) {
+  const { useState, useEffect } = React;
+  const plants = pickableLogins(links).flatMap(a => a.plants);
+  const drops = plants.filter(p => p.drop);
+  const kept = plants.filter(p => !p.drop).map(p => p.plant_id);
+  const [picked, setPicked] = useState(kept);
+  const [busy, setBusy] = useState(false);
+  // a fresh list (a save, or a plant turned on or off) resets the ticks
+  useEffect(() => setPicked(kept), [kept.join()]);
+  if (!b || !drops.length) return null;
   const { billDay } = window.billingFmt;
-  const plants = logins.flatMap(a => a.plants);
-  const [keep, setKeep] = useState(() => [...plants.filter(p => !p.drop), ...plants.filter(p => p.drop)].slice(0, room).map(p => p.plant_id));
-  const one = room === 1;
-  // only plants still listed: the list re-reads while this is open
-  const picked = keep.filter(id => plants.some(p => p.plant_id === id));
-  const toggle = (id) => setKeep(k => k.includes(id) ? k.filter(x => x !== id) : one ? [id] : picked.length < room ? [...picked, id] : k);
+  const room = kept.length;
+  const day = b.prepaidOn ? longDay : billDay;
+  const stops = day(endDay(b)), gone = day(drops[0].remove_on);
+  const save = async (ids) => {
+    setPicked(ids); setBusy(true);
+    const { error } = await window.billingRpc('api_billing_keep_set', { p_keep: ids });
+    if (error) { window.toast('Couldn’t save your pick. Try again.', { error: true }); setPicked(kept); }
+    else window.track('keep_pick_done', { plan: b.nextPlan || b.plan, room });
+    await Promise.all([links.refresh(), reload()]);
+    setBusy(false);
+  };
+  const tick = (id) => {
+    if (picked.includes(id)) { if (room > 1) setPicked(picked.filter(x => x !== id)); return; }
+    const next = room === 1 ? [id] : [...picked, id];
+    if (next.length === room) save(next); else setPicked(next);
+  };
+  const left = room - picked.length;
   return (
-    <ConfirmCard modal title={title || (one ? 'Pick the plant to keep' : `Pick ${room} plants to keep`)} text={text} action={action}
-      cancelLabel={cancelLabel} danger={danger} busy={busy} confirmDisabled={picked.length !== room}
-      onConfirm={() => onPick(picked)} onCancel={onCancel}>
-      <div className="login-list keep-picks">
-        {logins.map(a => (
-          <div key={a.account_id} className="login-grp">
-            <div className="login-line"><span className="login-email">{a.sunsynk_username}</span></div>
-            {a.plants.map(p => {
-              const on = keep.includes(p.plant_id);
-              const name = window.plantLabel(p);
-              return (
-                <PlantLine key={p.plant_id} name={name} off={!on}>
-                  <window.Switch on={on} label={'Keep ' + name} disabled={busy || (!one && !on && picked.length >= room)} onChange={() => toggle(p.plant_id)} />
-                </PlantLine>
-              );
-            })}
-          </div>
-        ))}
+    <SettingsSection id="keep" title={`Keep on ${PLAN_NAME[b.nextPlan || b.plan]}`}
+      note={`Tick ${room === 1 ? 'the plant' : room + ' plants'} to keep. ` + (stops === gone ? `On ${stops} the others stop and their history is deleted.` : `On ${stops} the others stop. Their history is deleted on ${gone}.`)}>
+      <div className="keep-list">
+        {plants.map(p => {
+          const on = picked.includes(p.plant_id);
+          return (
+            <label key={p.plant_id} className={'keep-row' + (on ? '' : ' off')}>
+              <input type="checkbox" checked={on} disabled={busy || (!on && room > 1 && left <= 0)} onChange={() => tick(p.plant_id)} />{/* reuse-check: allow: tick boxes, not switches, for the keep pick (SOLAR-486) */}
+              <span>{window.plantLabel(p)}</span>
+            </label>
+          );
+        })}
       </div>
-      <div className="confirm-text keep-note">Others collect until {billDay(b.nextDate)}, then stop. Their history is deleted on {billDay(window.shiftDate(b.nextDate, 30))}.</div>
+      {room > 1 && <div className="field-note keep-count">{picked.length} of {room} ticked.{left > 0 && ` Tick ${left} more.`}</div>}
+    </SettingsSection>
+  );
+}
+
+// A smaller paid plan that stops plants (SOLAR-486): what happens when, as Cancel says it,
+// and where to pick. A downgrade that stops none books with no question.
+function DowngradeDialog({ b, plan, period, price, links, busy, onConfirm, onCancel }) {
+  const { billDay, rand, perUnit } = window.billingFmt;
+  const ends = billDay(b.nextDate), gone = billDay(window.shiftDate(b.nextDate, 30));
+  const room = planRoom(plan);
+  const { keep, stop } = cancelPlants(links, room);
+  return (
+    <ConfirmCard modal title={<>Downgrade to {PLAN_NAME[plan]}?</>} action="Downgrade" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
+      busy={busy} onConfirm={onConfirm} onCancel={onCancel}>
+      <div className="pay-review-box cancel-steps">
+        <div><b>Until {ends}</b>Nothing changes.</div>
+        <div><b>From {ends}</b>You’re on {PLAN_NAME[plan]}, {rand(price)} {perUnit(period)}. {room} plants keep updating and the other{stop > 1 ? ` ${stop} stop` : ' stops'}.</div>
+        <div><b>On {gone}</b>{stop > 1 ? `The ${stop} stopped plants and their history are deleted. They` : 'The stopped plant and its history are deleted. It'} can’t be brought back.</div>
+      </div>
+      <div className="confirm-text cancel-choose">Tick the plants to keep in Billing before {ends}. If you don’t, we keep {andList(keep.map(window.plantLabel))}.</div>
     </ConfirmCard>
   );
 }
 
 // Cancel plan, from Billing or Adjust plan. Nothing changes until the plan ends, so there is
 // no pick here (SOLAR-488): it says what happens when, and with more plants than Free keeps,
-// sends them to Plants, where each plant up for deletion has its Keep.
+// sends them to Keep on Free in Billing (SOLAR-486).
 function CancelPlanDialog({ b, links, busy, onConfirm, onCancel }) {
   const { billDay } = window.billingFmt;
   // a paid switch to yearly runs its year first (SOLAR-457)
@@ -2384,7 +2419,7 @@ function CancelPlanDialog({ b, links, busy, onConfirm, onCancel }) {
         <div><b>On {gone}</b>{stop > 0 ? `${stop > 1 ? `The ${stop} stopped plants` : 'The stopped plant'} and all history are deleted. ${stop > 1 ? 'They' : 'It'} can’t be brought back.` : 'Your history is deleted.'}</div>
       </div>
       {offer && <div className="confirm-text keep-note">{offer}</div>}
-      {stop > 0 && <div className="confirm-text cancel-choose">Choose the plant to keep under Plants in Billing before {ends}. If you don’t, we keep {window.plantLabel(keep)}.</div>}
+      {stop > 0 && <div className="confirm-text cancel-choose">Tick the plant to keep in Billing before {ends}. If you don’t, we keep {window.plantLabel(keep[0])}.</div>}
     </ConfirmCard>
   );
 }
@@ -2541,7 +2576,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
   useEffect(() => { if (paid) setView(b.period); }, [paid, b?.period]);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  // A downgrade that needs a pick first (SOLAR-295): { plan, period }
+  // A downgrade that stops plants, asked first (SOLAR-486): { plan, period }
   const [picking, setPicking] = useState(null);
   // Home monthly on the Yearly tab: Family yearly is paid now, from today (SOLAR-364)
   const across = paid && b.plan === 'home' && b.period === 'monthly' && view === 'yearly';
@@ -2636,10 +2671,11 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
         </div>
         <p className="plan-foot">More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: b.plan, from: 'plans' })}>Email us</a>. Cancel any time.</p>
         {cancelling && <CancelPlanDialog b={b} links={links} busy={!!busy} onCancel={() => setCancelling(false)}
-          onConfirm={() => run(async () => { await bookPlan(b, 'free', null, reload); setCancelling(false); })} />}
+          onConfirm={() => run(async () => { const ok = await bookPlan(b, 'free', null, reload); setCancelling(false); if (ok) onBack(); })} />}
+        {/* booked, it goes back to Billing, where Keep on <plan> takes the pick (SOLAR-486) */}
         {picking && (
-          <KeepPicker b={b} room={planRoom(picking.plan)} logins={logins} busy={!!busy} action="Downgrade"
-            onPick={(keep) => run(async () => { await bookPlan(b, picking.plan, picking.period, reload, keep); setPicking(null); })}
+          <DowngradeDialog b={b} plan={picking.plan} period={picking.period} price={price(picking.plan)} links={links} busy={!!busy}
+            onConfirm={() => run(async () => { const ok = await bookPlan(b, picking.plan, picking.period, reload); setPicking(null); if (ok) onBack(); })}
             onCancel={() => setPicking(null)} />
         )}
       </>}
@@ -2874,7 +2910,8 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const plantOk = {};
   live.forEach(a => (a.plants || []).forEach(p => { plantOk[p.plant_id] = plantOk[p.plant_id] || a.status === 'active'; }));
   // A stopped plant booked for deletion shows its date and Keep too, so the booking is never hidden.
-  const state = (p) => p.remove_on ? 'going' : p.paused ? 'paused' : plantOk[p.plant_id] ? 'on' : 'off';
+  // A plant a booked plan change stops (drop) keeps its switch: Keep on <plan> above picks (SOLAR-486).
+  const state = (p) => p.remove_on && !p.drop ? 'going' : p.paused ? 'paused' : plantOk[p.plant_id] ? 'on' : 'off';
   const allPlants = [...new Map(live.flatMap(a => a.plants || []).map(p => [p.plant_id, p])).values()];
   const keep = async (p) => {
     setBusy('keep:' + p.plant_id);
@@ -3689,6 +3726,7 @@ function BillingPage({ billing, reload, reloadPlan, links, onPage, freeWeekEndsA
     <div className="settings-page">
       <div className="page-head"><h1>Billing</h1></div>
       <PlanSection billing={billing} reload={reloadPlan} onAdjust={() => onCollect(null)} freeWeekEndsAt={freeWeekEndsAt} />
+      {links && <KeepCard b={billing} links={links} reload={reload} />}
       {links && <SunSynkConnectionSection onChanged={onSaved} links={links} billing={billing} reloadBilling={reload} onCollect={(id) => onCollect(id ?? null)} />}
       <PaymentsSection billing={billing} />
       <InvoicesSection billing={billing} />
