@@ -72,7 +72,7 @@ Formatting and dates (also `components.jsx`):
 
 | Name | Use it for |
 |---|---|
-| `Dialog` | Any modal. `label`, `onClose`, `keep` (no outside-click close), `busy` (dims, blocks closing), `size`. |
+| `Dialog` | Any modal. `label`, `onClose`, `keep` (no outside-click close), `busy` (dims, blocks closing), `size`. With `onClose` it draws its own X (`.pop-x`) top right, and on a phone it is a sheet from the bottom with the More sheet's grip (SOLAR-516); never add a second close button. No `onClose` (the working spinner): no X, centred. |
 | `LinkForm` | The SunSynk sign-in form, inline (`compact`) or as a card. |
 | `LinkDialog` | `LinkForm` in a `Dialog` with a `title` and `note`: add a plant, re-link, change login. |
 | `PayReview` | The price, next bill and card before a saved card is charged. `parts`: the lines the bill is made of. Its `.pay-review-box` is also Billing's darker box. |

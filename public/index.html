@@ -1349,11 +1349,18 @@
   .pop-dlg:focus { outline: none; }   /* a pop-up with nothing to press takes focus itself; no ring round it */
   .pop-dlg.pop-wide { width: min(940px, calc(100vw - 32px)); }
   .pop-wide .pop-body { padding: var(--sp-2xl) var(--sp-2xl) var(--sp-2xl); }
-  /* the plan picker inside its pop-up (SOLAR-292): no page padding, a close button top right */
+  /* the plan picker inside its pop-up (SOLAR-292): no page padding */
   .plan-pop { max-width: none; padding-bottom: 0; }
   .plan-pop .page-head { padding-right: var(--sp-4xl); }
-  /* sticky, so it stays in view when the picker scrolls on a short screen */
-  .pop-x { position: sticky; top: 0; z-index: 1; align-self: flex-end; margin: calc(-1 * var(--sp-sm)) calc(-1 * var(--sp-sm)) calc(-1 * var(--sp-2xl)) 0; width: 34px; height: 34px; display: grid; place-items: center; border: none; border-radius: var(--r-md); background: var(--panel-2); color: var(--dim); cursor: pointer; }
+  /* The X every pop-up that can close has (Dialog, SOLAR-516). It comes after the body, so
+     it never takes first focus; the column's order puts it first, with no height of its own.
+     sticky, so it stays in view when the pop-up scrolls on a short screen */
+  .pop-dlg[open], .pop-dlg.leaving { display: flex; flex-direction: column; }
+  .pop-body { flex: none; }
+  .pop-x { order: -1; flex: none; position: sticky; top: var(--sp-md); z-index: 1; align-self: flex-end; --x: 34px; margin: var(--sp-md) var(--sp-md) calc(-1 * var(--x) - var(--sp-md)) 0; width: var(--x); height: var(--x); display: grid; place-items: center; border: none; border-radius: var(--r-md); background: var(--panel-2); color: var(--dim); cursor: pointer; }
+  .pop-dlg > .sheet-grip { display: none; }
+  /* a long title stops short of the X */
+  .pop-dlg:has(> .pop-x) .pop-body > :is(.confirm-title, .confirm-text, .pay-review-t):first-child { padding-right: var(--sp-2xl); }
   .pop-x .ico { width: var(--icon-md); height: var(--icon-md); }
   .pop-x:disabled { opacity: .4; cursor: default; }
   .pop-x:hover { background: var(--panel); color: var(--text); }
@@ -1373,6 +1380,15 @@
   .cancel-steps b { display: block; font-weight: 600; color: var(--text); }
   @media (max-width: 599px) {
     .pop-dlg { width: calc(100vw - 24px); max-width: none; }
+    /* a pop-up that can close is a sheet from the bottom, as the More menu is (SOLAR-516) */
+    .pop-dlg:has(> .pop-x) { width: 100vw; margin: auto 0 0; border-width: 1px 0 0; border-radius: var(--r-xl) var(--r-xl) 0 0; }
+    .pop-dlg[open]:has(> .pop-x) { animation-name: sheet-in; }
+    .pop-dlg.leaving:has(> .pop-x) { animation-name: sheet-out; }
+    .pop-dlg > .sheet-grip { display: block; order: -2; flex: none; margin: var(--sp-sm) auto 0; }
+    /* level with the title, under the grip; sticky again, which the tap-target rule's relative undoes */
+    .pop-dlg > .pop-x { position: sticky; margin-top: var(--sp-sm); margin-bottom: calc(-1 * var(--x) - var(--sp-sm)); }
+    .pop-dlg:has(> .pop-x) .pop-body { padding-top: var(--sp-lg); padding-bottom: calc(var(--sp-xl) + env(safe-area-inset-bottom, 0px)); }
+    .pop-wide:has(> .pop-x) .pop-body { padding-bottom: calc(var(--sp-2xl) + env(safe-area-inset-bottom, 0px)); }
   }
 
   .confirm-card .conn-form-actions { margin-top: var(--sp-md); }

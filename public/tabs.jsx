@@ -2640,15 +2640,9 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
   useEffect(() => { window.track('plan_page_shown', { plan: b?.plan }); }, []);
   // It can't close while a change is saving, so the result is never lost from view.
   const close = () => { if (!busy) onBack(); };
-  const pop = (body) => <window.Dialog size="wide" label="Change plan" onClose={close}>{body}</window.Dialog>;
-  const back = (
-    <button type="button" className="pop-x" aria-label="Close" disabled={busy} onClick={close}>
-      <Icon id="close" />
-    </button>
-  );
+  const pop = (body) => <window.Dialog size="wide" label="Change plan" busy={busy} onClose={close}>{body}</window.Dialog>;
   if (!b) return pop(
     <div className="settings-page plan-pop">
-      {back}
       <div className="page-head"><h1>Change plan</h1></div>
       <div className="plan-grid plan-cards" aria-hidden="true">{[0, 1, 2].map(i => <window.Skeleton key={i} h={180} r={14} />)}</div>
     </div>
@@ -2706,7 +2700,6 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
   };
   return pop(
     <div className="settings-page plan-pop">
-      {back}
       <div className="page-head">
         <h1>Change plan</h1>
         {!b.comped && !(paid && b.nextPlan === 'free') && <p>{failed ? 'Pay the failed payment to change your plan.' : b.prepaidOn ? `Your paid year starts on ${billDay(b.nextDate)}.` : paid ? `Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Upgrades start today.'}</p>}
