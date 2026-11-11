@@ -1174,13 +1174,43 @@ const TAB_KEY = 'synsynk.tab';
 const savedTab = () => window.resetAsked() ? 'account'
   : tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem(TAB_KEY) || '');
 // Remembers the page, and puts it (and the plant) in the address, so a reload opens them.
-const writeTab = (tab, plant) => {
+// A new page adds a history entry, so Back and Forward move between pages (SOLAR-515).
+// replace: a change the app made itself (the first write, an email's ?section=). A plant
+// switch changes the entry in place: Back goes to the last page, on the plant now shown.
+const writeTab = (tab, plant, replace) => {
   localStorage.setItem(TAB_KEY, tab);
-  const url = new URL(location.href);
+  const url = new URL(location.href), was = url.searchParams.get('tab');
   url.searchParams.set('tab', tab);
   if (plant != null) url.searchParams.set('plant', plant);
-  if (url.href !== location.href) history.replaceState(history.state, '', url);
+  if (url.href === location.href) return;
+  if (replace || !was || was === tab) history.replaceState(history.state, '', url);
+  else history.pushState(null, '', url);
 };
+// Keeps the address on the page shown, and shows the page of the entry Back or Forward
+// lands on (onBack). Setup and App both use it.
+function usePageHistory(tab, plant, onBack) {
+  const first = useRef(true);
+  useEffect(() => { writeTab(tab, plant, first.current); first.current = false; }, [tab, plant]);
+  const back = useRef(onBack);
+  back.current = onBack;
+  useEffect(() => {
+    const on = () => back.current(tabAlias(new URLSearchParams(location.search).get('tab') || ''));
+    window.addEventListener('popstate', on);
+    return () => window.removeEventListener('popstate', on);
+  }, []);
+}
+// The browser tab names the page: "Solar · Prince Solar Hub". No name: the app's alone.
+// 'prefs' is the Settings list on a phone and Account beside the menu on a desktop.
+const SITE_TITLE = document.title;
+const PAGE_TITLE = { prefs: 'Settings', account: 'Account', notifications: 'Notifications', plants: 'Plants', billing: 'Billing', plans: 'Change plan', alerts: 'Notifications' };
+function usePageTitle(tab) {
+  useEffect(() => {
+    const id = tab === 'prefs' && !window.matchMedia('(max-width: 599px)').matches ? 'account' : tab;
+    const name = id && (PAGE_TITLE[id] || TABS.find(t => t.id === id)?.label);
+    document.title = name ? `${name} · ${SITE_TITLE}` : SITE_TITLE;
+    return () => { document.title = SITE_TITLE; };
+  }, [tab]);
+}
 // Setup has no plant to set: its list leaves Plant settings out.
 const SETUP_TABS = TABS.filter(t => t.id !== 'system');
 
@@ -1365,7 +1395,9 @@ function Setup({ links }) {
     history.replaceState(history.state, '', url);
   }, []);
   // The address names the page here too, as in App, so a reload stays on it.
-  useEffect(() => writeTab(tab), [tab]);
+  usePageHistory(tab, null, (t) => { if (pageOk(SETUP_TABS, t)) { setTab(t); setConnecting(false); toTop(); } });
+  // The outline pages have no plant to name; the Settings pages are real.
+  usePageTitle(isSettings(tab) ? tab : null);
   // The settings pages have no card, so the header's button opens it on Live from them.
   const connect = () => { if (isSettings(tab)) setTab('live'); setConnecting(true); };
   useEscape(connecting, () => setConnecting(false));
@@ -1376,7 +1408,7 @@ function Setup({ links }) {
     const url = new URL(location.href), section = URL_SECTION[url.searchParams.get('section')];
     if (!url.searchParams.has('section')) return;
     url.searchParams.delete('section'); history.replaceState(history.state, '', url);
-    if (section && SECTION_PAGE[section] !== 'system') { setFlash(section); setTab(SECTION_PAGE[section]); }
+    if (section && SECTION_PAGE[section] !== 'system') { setFlash(section); writeTab(SECTION_PAGE[section], null, true); setTab(SECTION_PAGE[section]); }
   }, []);
   useEffect(() => { window.track('screen_viewed', { stage: 'setup', screen: connecting ? 'connect' : tab }); }, [tab, connecting]);
   const dead = links.accounts.filter(a => a.status === 'needs_relink' && a.kind !== 'share');
@@ -1523,9 +1555,12 @@ function App({ links }) {
   // "Set your rate", "Set pack size", Reconnect: open the page that holds that section
   // (SECTION_PAGE) and flash it once; the section scrolls itself into view.
   // The address keeps it as #section, so a reload scrolls back to it (SOLAR-165).
-  const openSettings = (asked) => {
-    const section = SECTION_ALIAS[asked] || asked;
-    setFlashSection(section); setTab(SECTION_PAGE[section] || 'system'); toTop();
+  // arrived: an email's link asked for it, so the page takes the entry it landed on.
+  const openSettings = (asked, arrived) => {
+    const section = SECTION_ALIAS[asked] || asked, page = SECTION_PAGE[section] || 'system';
+    setFlashSection(section); setTab(page); toTop();
+    // the new page's entry first, so the #section goes on it, not on the page being left
+    writeTab(page, null, arrived);
     history.replaceState(history.state, '', '#' + section);
   };
   const user = useUser();
@@ -1559,7 +1594,8 @@ function App({ links }) {
 
   // The address names the page and plant, so a reload opens them; the saved page is for a
   // bare address (SOLAR-165). ?section= is left for loadMe to read.
-  useEffect(() => writeTab(tab, plantId), [tab, plantId]);
+  usePageHistory(tab, plantId, (t) => { if (pageOk(TABS, t) || t === 'alerts') { setTab(t); setOpenDay(null); toTop(); } });
+  usePageTitle(tab);
 
   // spin = false on the 60 s auto tick, so the icon only turns for something the
   // person asked for (a click, first load, a plant switch).
@@ -1635,7 +1671,7 @@ function App({ links }) {
       if (url.searchParams.has('section')) {
         url.searchParams.delete('section'); history.replaceState(history.state, '', url);
       }
-      if (section) openSettings(section);
+      if (section) openSettings(section, true);
       if (ids.includes(linked)) window.savePrefs({ lastPlant: linked }).catch(() => {});
       const wanted = ids.includes(linked) ? linked
         : m.prefs && ids.includes(Number(m.prefs.lastPlant)) ? Number(m.prefs.lastPlant) : (ids[0] ?? null);

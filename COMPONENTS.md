@@ -110,7 +110,8 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `plantStatus` | A plant's status word and tone from its last reading. |
 | `StepField` | A number box with a unit, as in First steps. |
 | `stepNum`, `wholeNum`, `cfgFields`, `sumPatch` | Reading, checking and saving system config (size, panels, reserve, rate). |
-| `savedTab`, `writeTab`, `TAB_KEY` | The last tab and plant, kept across visits. |
+| `savedTab`, `writeTab`, `TAB_KEY` | The last tab and plant, kept across visits. `writeTab` adds a history entry for a new page; pass `replace` for a change the app made itself. |
+| `usePageHistory(tab, plant, onBack)`, `usePageTitle(tab)` | The address follows the page and Back/Forward show the entry's page; the browser tab reads "Solar · Prince Solar Hub" (SOLAR-515). |
 | `window.toast(text)` | A short message at the bottom. Use instead of `alert()`. `{ error: true }` for a failure (red), `{ info: true }` for a note that is neither (no tick). One sent just before sign-out shows on the sign-in screen. Signed in, a red one with no `action` offers "Report this"; `noReport: true` turns that off. Goes after 5 s; one with a link stays until closed (×, Esc). A click on any toast closes it. |
 | `PageBoundary` | Wraps each page in `Frame`: a crash shows a card with Reload and Report this, not a blank screen. |
 | `openFeedback(report)` | The feedback box; `report` = { text, id } makes it "Report a problem" with the error attached. |
