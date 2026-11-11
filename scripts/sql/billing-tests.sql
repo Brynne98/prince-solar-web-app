@@ -807,6 +807,33 @@ begin
   perform pg_temp.eq('paid year: pick kept over the start', private.billing_drops(b), '{9000601}'::bigint[]);
   perform pg_temp.eq('paid year: both plants still collect', (select count(*)::int from public.plant_users where user_id = u and not paused), 2);
 end $$;
+-- A smaller paid plan deletes its stopped plants on the billing date (0187, SOLAR-492).
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000e7', 'downgrade@t.test');
+insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
+  values ('00000000-0000-0000-0000-0000000000e7', 'family', 'monthly', 1, '2026-12-01');
+insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values ('00000000-0000-0000-0000-00000000f7a0', '00000000-0000-0000-0000-0000000000e7', 'downgrade@login.test');
+insert into public.plant_users (plant_id, user_id, linked_at, account_id) values
+  (9000701, '00000000-0000-0000-0000-0000000000e7', '2026-01-01', '00000000-0000-0000-0000-00000000f7a0'),
+  (9000702, '00000000-0000-0000-0000-0000000000e7', '2026-01-02', '00000000-0000-0000-0000-00000000f7a0'),
+  (9000703, '00000000-0000-0000-0000-0000000000e7', '2026-01-03', '00000000-0000-0000-0000-00000000f7a0');
+do $$
+declare b private.billing; u constant uuid := '00000000-0000-0000-0000-0000000000e7';
+begin
+  perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
+  perform public.api_billing_change('home');
+  perform pg_temp.eq('downgrade: deleted on the billing date',
+    (select (p->>'remove_on')::date from public.api_link_status() s, jsonb_array_elements(s.plants) p where (p->>'plant_id')::bigint = 9000703), date '2026-12-01');
+  perform pg_temp.eq('downgrade: email deletion date',
+    (select (data->>'deleteOn')::date from public.email_queue where user_id = u and kind = 'bill_change'), date '2026-12-01');
+  perform set_config('request.jwt.claims', '', true);
+  perform public.billing_renew(u);
+  select * into b from private.billing where user_id = u;
+  perform pg_temp.eq('downgrade: on Home', b.plan, 'home');
+  perform pg_temp.eq('downgrade: stopped plant gone on the day', (select count(*)::int from public.plant_users where user_id = u and plant_id = 9000703), 0);
+  perform pg_temp.eq('downgrade: kept plants collect', (select count(*)::int from public.plant_users where user_id = u and not paused), 2);
+  perform pg_temp.eq('downgrade: nothing booked for later', coalesce(cardinality(b.plants_to_remove), 0), 0);
+end $$;
+-- a cancel still keeps 30 days (0146): the paid-year case above reads year end + 30
 select pg_temp.eq('keep set is for signed-in users', has_function_privilege('anon', 'public.api_billing_keep_set(bigint[])', 'execute'), false);
 
 \set QUIET off
