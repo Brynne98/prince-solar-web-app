@@ -1240,7 +1240,22 @@
   /* Account: Delete is off while a paid plan runs, with this note under it */
   /* Billing */
   .plan-head .plan-name { font-size: var(--fs-xl); }
-  .plan-line { font-size: var(--fs-md); color: var(--text); margin-top: var(--sp-2xs); }
+  /* SOLAR-512: name, then price, as billing pages show the plan; what it gives and its date under them */
+  .plan-id { display: flex; flex-direction: column; gap: var(--sp-2xs); min-width: 0; }
+  .plan-price { font: 600 var(--fs-2xl) var(--mono); letter-spacing: -0.01em; color: var(--money); font-variant-numeric: tabular-nums; }
+  .plan-per { margin-left: var(--sp-xs); font: 400 var(--fs-md) var(--display); letter-spacing: 0; color: var(--muted); }
+  .plan-meta { margin-top: var(--sp-md); font-size: var(--fs-md); color: var(--muted); }
+  .plan-meta.plan-when { margin-top: var(--sp-3xs); }
+  .plan-price .plan-word { font-family: var(--display); letter-spacing: -0.01em; }   /* a word, not a figure */
+  .plan-offer-ln { color: var(--offer); }
+  /* a scheduled change or a failed payment: a tint, no rule, its buttons right (SOLAR-512) */
+  .plan-note { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-md) var(--sp-lg); flex-wrap: wrap;
+    margin-top: var(--sp-lg); padding: var(--sp-md) var(--sp-lg); border-radius: var(--r-lg); font-size: var(--fs-md); }
+  .plan-note.warn { background: rgba(var(--warn-rgb), 0.08); }
+  .plan-note.bad { background: rgba(var(--bad-rgb), 0.08); }
+  .plan-note-t { flex: 1 1 260px; min-width: 0; }
+  .plan-note .plan-acts { align-items: center; gap: var(--sp-sm) var(--sp-lg); }
+  .plan-manage { color: var(--text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--muted); white-space: nowrap; }
   .plan-name .conn-status { margin-left: var(--sp-sm); font-size: var(--fs-sm); font-weight: 500; vertical-align: 2px; }
   .plan-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-md) var(--sp-lg); flex-wrap: wrap; }
   .plan-acts { display: flex; gap: var(--sp-sm); flex-wrap: wrap; }
@@ -1259,7 +1274,7 @@
   .settings-page > .save-bar { order: 1; }
 
   /* No rules inside Settings cards: space alone sets rows apart (SOLAR-250) */
-  .settings-page :is(.conn-row, .notif-push, .plan-alert) { border-top: none; }
+  .settings-page :is(.conn-row, .notif-push) { border-top: none; }
   .settings-page #settings-system .conn-row.sset-row { border-top: none; padding: 0; }
   .settings-page #settings-system .conn-row.sset-row + .conn-row.sset-row { margin-top: var(--sp-4xl); }
   .settings-page #settings-system .conn-row.sset-row:first-child { padding-top: 0; }
@@ -1270,9 +1285,9 @@
   .settings-page .sset-cards > .sset + .sset { margin-top: var(--sp-sm); }
   /* a card here that is also a .conn-row keeps the top border the row rules above strip (SOLAR-279) */
   .settings-page .sset-cards > .sset.conn-row { padding: var(--sp-lg) var(--sp-lg); border-top: 1px solid var(--line); }
-  .sset-cards .conn-status::before, .plan-name .conn-status::before, .plan-booked .conn-status::before { display: none; }   /* the word alone, no dot */
+  .sset-cards .conn-status::before, .plan-name .conn-status::before { display: none; }   /* the word alone, no dot */
   @media (max-width: 900px) { .settings-page .sset-cards > .sset.conn-row { padding: var(--sp-md) var(--sp-lg); } }
-  .settings-page .notif-push, .settings-page .plan-alert { padding-top: var(--sp-sm); }
+  .settings-page .notif-push { padding-top: var(--sp-sm); }
   /* Every Settings row: a switch or button lines up with the top of its name (SOLAR-250) */
   .settings-page .conn-actions, .settings-page .conn-row > .plant-state { align-self: flex-start; }
   .settings-page #settings-actions .conn-row:not(:has(form)) { align-items: flex-start; }
@@ -1324,9 +1339,9 @@
   .pop-dlg.pop-mid { width: min(560px, calc(100vw - 32px)); }
   /* working (SOLAR-294): a turning ring on a button while its change saves, and the small
      pop-up a payment step shows */
-  .spin, :is(.ghost-btn, .save-btn, .danger-btn, .plan-undo)[aria-busy="true"]::after { content: ''; display: inline-block; flex: none; width: 12px; height: 12px;
+  .spin, :is(.ghost-btn, .save-btn, .danger-btn)[aria-busy="true"]::after { content: ''; display: inline-block; flex: none; width: 12px; height: 12px;
     border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
-  :is(.ghost-btn, .save-btn, .danger-btn, .plan-undo)[aria-busy="true"]::after { margin-left: var(--sp-sm); }
+  :is(.ghost-btn, .save-btn, .danger-btn)[aria-busy="true"]::after { margin-left: var(--sp-sm); }
   @media (prefers-reduced-motion: reduce) { .spin, [aria-busy="true"]::after { animation-duration: 2s; } }
   .pop-wait { display: flex; align-items: center; gap: var(--sp-md); font-size: var(--fs-md); }
   .pop-wait .spin { width: 16px; height: 16px; color: var(--accent); }
@@ -1736,12 +1751,7 @@
   .pw-plan button { margin-top: var(--sp-sm); align-self: stretch; }
   /* Plan section in Account (SOLAR-208) */
   .plan-name { font-size: var(--fs-lg); font-weight: 600; color: var(--text); }
-  .plan-booked { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-md); flex-wrap: wrap; margin-top: var(--sp-sm); font-size: var(--fs-sm); }
-  .plan-undo { background: none; border: none; padding: 0; font: inherit; font-weight: 500; color: var(--text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--muted); cursor: pointer; }
-  .plan-undo:disabled { opacity: .5; cursor: default; }
-  .plan-undo { white-space: nowrap; margin-right: var(--sp-md); }   /* the gap after, so a link that wraps starts at the edge */
   /* every plan side by side, the user's own marked (SOLAR-238) */
-  .plan-alert { margin: var(--sp-lg) 0 0; padding-top: var(--sp-lg); border-top: 1px solid var(--line); }
   .plan-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-md); margin-top: var(--sp-lg); }
   .plan-grid .pw-plan > button { white-space: nowrap; }
   .plan-grid .pw-plan { position: relative; }
@@ -1757,8 +1767,12 @@
   .plan-pill { padding: var(--sp-3xs) var(--sp-sm); border-radius: var(--r-pill); background: rgba(var(--accent-rgb),0.14); color: var(--accent); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; }
   .plan-cards .pw-price { margin-top: var(--sp-md); font-size: var(--fs-md); color: var(--muted); }
   .plan-cards .pw-plan .pw-price b { font-size: var(--fs-4xl); letter-spacing: -0.03em; line-height: 1; }
-  .plan-gives { margin: var(--sp-2xs) 0 var(--sp-md); font-size: var(--fs-sm); color: var(--muted); }   /* its bottom: the button's least gap, as it sits at the card's foot */
-  .plan-cards .pw-plan > button, .plan-cards .plan-cur { width: 100%; min-height: 44px; margin: var(--sp-md) 0 0; font-size: var(--fs-md); }
+  /* what each plan gives, ticked, under its button (SOLAR-512) */
+  .plan-cards .pw-plan > .plan-feats { list-style: none; margin: var(--sp-lg) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-sm); font-size: var(--fs-md); color: var(--text); }
+  .plan-feats li { display: flex; align-items: center; gap: var(--sp-sm); }
+  .plan-feats .ico { width: var(--icon-sm); height: var(--icon-sm); flex: none; color: var(--accent); }
+  .plan-save { margin-left: var(--sp-2xs); padding: 1px var(--sp-xs); border-radius: var(--r-pill); background: rgba(var(--accent-rgb),0.14); color: var(--accent); font-size: var(--fs-2xs); font-weight: 600; }
+  .plan-cards .pw-plan > button, .plan-cards .plan-cur { width: 100%; min-height: 44px; margin: var(--sp-lg) 0 0; font-size: var(--fs-md); }
   .plan-cards .pw-plan > button { padding-block: 0; }   /* the label in the middle of its 44px */
   .plan-cards .plan-cur.plan-wait { color: var(--dim); }
   .pw-plan.plan-mine { border-color: rgba(var(--accent-rgb),0.55); background: linear-gradient(rgba(var(--accent-rgb),0.05), rgba(var(--accent-rgb),0.05)), var(--panel-2); }
@@ -1984,7 +1998,6 @@
   .pay-review-acts { display: flex; justify-content: flex-end; gap: var(--sp-sm); padding-top: var(--sp-2xl); }
   /* SOLAR-330: an offer price, the list price struck out before it, its terms below */
   .pw-was { margin-right: var(--sp-xs); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: var(--fs-md); font-weight: 600; color: var(--dim); }
-  .pw-offer { font-size: var(--fs-sm); line-height: 1.45; color: var(--money); }
   .cal-day.shut, .hv-daynav.shut { color: var(--dim); opacity: 0.45; }
   .cal-day.shut:hover, .hv-daynav.shut:hover { opacity: 0.8; }
   @media (max-width: 599px) {
