@@ -4,9 +4,13 @@ export const isTestUser = (testUsers: string, userId: string) =>
   testUsers.split(",").map((s) => s.trim()).includes(userId);
 
 // Paystack's public test cards go through as paid on a test key, so the hosted project
-// takes no payment on one (SOLAR-214), except from the tester accounts. Local runs still test.
-export function payClosed(key: string, supabaseUrl: string, testUsers: string, userId: string) {
-  return key.startsWith("sk_test_") && supabaseUrl.endsWith(".supabase.co") && !isTestUser(testUsers, userId);
+// takes no payment on one (SOLAR-214), except from the tester accounts, by id or by email (SOLAR-506).
+// Local runs still test.
+export function payClosed(
+  key: string, supabaseUrl: string, testUsers: string, userId: string, emailPattern = "", confirmedEmail = "",
+) {
+  return key.startsWith("sk_test_") && supabaseUrl.endsWith(".supabase.co") &&
+    !isTestUser(testUsers, userId) && !isTestEmail(emailPattern, confirmedEmail);
 }
 
 // A tester by email (SOLAR-477): a confirmed email matching the TESTER_EMAIL_PATTERN secret,

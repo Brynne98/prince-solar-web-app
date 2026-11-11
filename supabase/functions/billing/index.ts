@@ -32,6 +32,7 @@ const PAYSTACK = Deno.env.get("PAYSTACK_URL") ?? "https://api.paystack.co";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 // Secret: auth user ids allowed to pay on a test key in production, comma-separated (SOLAR-267).
 const TEST_USERS = Deno.env.get("PAYSTACK_TEST_USERS") ?? "";
+const TESTER_EMAILS = Deno.env.get("TESTER_EMAIL_PATTERN") ?? "";
 
 type Card = Record<string, unknown>;
 type Tx = {
@@ -337,7 +338,8 @@ serve("billing", async (req) => {
   }
 
   if (route !== "pay") return json({ error: "not found" }, 404, cors);
-  if (payClosed(SECRET, SUPABASE_URL, TEST_USERS, user.id)) return json({ error: "paid plans open soon" }, 503, cors);
+  const confirmedEmail = user.email_confirmed_at ? user.email ?? "" : "";
+  if (payClosed(SECRET, SUPABASE_URL, TEST_USERS, user.id, TESTER_EMAILS, confirmedEmail)) return json({ error: "paid plans open soon" }, 503, cors);
   // The card page sends the user back here; only an allowed app origin.
   if (!origin || !cors["Access-Control-Allow-Origin"]) return json({ error: "origin not allowed" }, 403, cors);
 

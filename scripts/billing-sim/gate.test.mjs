@@ -36,4 +36,10 @@ for (const e of ["brynneprince98+test@gmail.com", "brynneprince98+test2@gmail.co
 for (const e of ["brynneprince98+testx@gmail.com", "someone+test2@gmail.com", "brynneprince98+test2@gmail.com.evil.com", "x.brynneprince98+test2@gmail.com", ""])
   assert.equal(mockClosed("flat@mock", HOSTED, "", A, PAT, e), true, `${e || "unconfirmed"}: refused`);
 assert.equal(mockClosed("flat@mock", HOSTED, "", A, "", "brynneprince98+test2@gmail.com"), true, "no pattern set: refused");
-console.log("gate: 25 cases ok");
+const PAY = String.raw`^(brynneprince98\+test\d*|zogenheimer)@gmail\.com$`;
+for (const e of ["brynneprince98+test3@gmail.com", "zogenheimer@gmail.com"])
+  assert.equal(payClosed("sk_test_x", HOSTED, "", A, PAY, e), false, `pay, ${e}: passes`);
+for (const e of ["brynneprince98@gmail.com", "xzogenheimer@gmail.com", "zogenheimer@gmail.com.evil.com", ""])
+  assert.equal(payClosed("sk_test_x", HOSTED, "", A, PAY, e), true, `pay, ${e || "unconfirmed"}: refused`);
+assert.equal(payClosed("sk_live_x", HOSTED, "", A, PAY, "someone@gmail.com"), false, "pay, live key: anyone passes");
+console.log("gate: 32 cases ok");
