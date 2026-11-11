@@ -139,7 +139,8 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `DaysPanel` | The per-day bars with retry and the free-week lock. |
 | `TabSkeleton` | A whole tab while it loads. |
 | `ConfirmCard` | Any "are you sure". Inline or `modal`; `danger`, `busy`. Use instead of `confirm()`. |
-| `KeepCard` | Billing's "Keep on <plan>": tick boxes for the plants a booked cancel or smaller plan keeps (SOLAR-486). |
+| `KeepPicker` | The plants a cancel or smaller plan keeps, grouped by login: circles for 1, else tick boxes; too-many and last-tick lines (SOLAR-496). In the cancel and downgrade pop-ups and in `KeepDialog`. |
+| `KeepDialog` | Billing's Manage pop-up: changes a booked cancel's or smaller plan's pick (api_billing_keep_set) (SOLAR-496). |
 | `PlanCard`, `BookedNotice` | A card in Billing's Plan section (title top left, control top right); a change booked for the billing date with its undo. |
 | `SettingsSection` | A Settings card with title, note and an `action`. |
 | `SettingRow` | One row in a Settings card: `label`, `note`, `action`, `lead`. |

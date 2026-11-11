@@ -1340,8 +1340,10 @@
   .pop-x .ico { width: var(--icon-md); height: var(--icon-md); }
   .pop-x:disabled { opacity: .4; cursor: default; }
   .pop-x:hover { background: var(--panel); color: var(--text); }
-  /* Keep on <plan> (SOLAR-486): a tick box per plant while a smaller plan is booked, in Plants'
-     rows (.login-plant) with the box on the right (SOLAR-496) */
+  /* The keep pick (KeepPicker, SOLAR-496): in Plants' rows (.login-plant), a circle or tick box
+     on the right, in the cancel and downgrade pop-ups and Manage */
+  .keep-pick { margin-top: var(--sp-lg); }
+  .keep-pick .keep-ask { margin-bottom: var(--sp-sm); font-weight: 600; color: var(--text); }
   .keep-row { cursor: pointer; }
   .keep-row input { width: 20px; height: 20px; margin: 0; flex: none; accent-color: var(--accent); cursor: pointer; }
   .keep-row input:disabled { cursor: default; }
@@ -1352,7 +1354,6 @@
   .cancel-steps { margin-top: var(--sp-lg); font-size: var(--fs-md); line-height: 1.5; color: var(--muted); }
   .cancel-steps > div + div { margin-top: var(--sp-md); }
   .cancel-steps b { display: block; font-weight: 600; color: var(--text); }
-  .pop-body .confirm-text.cancel-choose { margin-top: var(--sp-lg); font-weight: 600; color: var(--text); }
   @media (max-width: 599px) {
     .pop-dlg { width: calc(100vw - 24px); max-width: none; }
   }
