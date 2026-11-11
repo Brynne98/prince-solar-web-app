@@ -91,7 +91,8 @@ type Hero = { label: string; value: string; tone?: Tone; sub?: string };
 // and struck through, name only; an open line has an empty circle, or its step number n,
 // then the name, a line under it, and a dimmer line under that.
 type Check = { name: string; done?: boolean; n?: number; text?: string; sub?: string };
-type Box = { hero?: Hero; rows?: [label: string, value: string][]; checks?: Check[] };
+// steps: what happens when, by date: the date in bold, a sentence under it (a cancel, SOLAR-488).
+type Box = { hero?: Hero; rows?: [label: string, value: string][]; checks?: Check[]; steps?: [when: string, what: string][] };
 
 type Part =
   | { lead: string } // grey sentence under the title: what happened, only when the box can't say it
@@ -165,7 +166,7 @@ function html(subject: string, b: Body): string {
     if ("lead" in x) return `<p class="m" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#9aa5b3">${x.lead}</p>`;
     if ("small" in x) return `<p class="d" style="margin:0;font:400 13px/1.5 ${SANS};color:#7f8da0">${x.small}</p>`;
     if ("box" in x) {
-      const { hero, rows: r = [], checks = [] } = x.box;
+      const { hero, rows: r = [], checks = [], steps = [] } = x.box;
       const big = hero ? `<tr><td colspan="2" style="padding:0 0 ${r.length ? 12 : 0}px">` +
         `<div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(hero.label)}</div>` +
         `<div class="${hero.tone ?? "t"}" style="margin-top:8px;font:700 40px/1 ${MONO};font-variant-numeric:tabular-nums;color:${hero.tone ? C[hero.tone] : "#e7ecf2"}">${esc(hero.value)}</div>` +
@@ -187,8 +188,10 @@ function html(subject: string, b: Body): string {
               (c.sub ? `<div class="d" style="margin-top:6px;font:400 13px/1.5 ${SANS};color:#7f8da0">${esc(c.sub)}</div>` : "")) +
           `</td></tr>`;
       }).join("");
-      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px"><tr><td style="padding:${checks.length ? "4px 18px" : `${hero ? 18 : 12}px 18px ${r.length ? 12 : 18}px`};background:#141a22;border-radius:10px">` +
-        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${big}${lines}${list}</table></td></tr></table>`;
+      const when = steps.map(([w, t], i) => `<tr><td style="padding:${i ? 14 : 0}px 0 0"><div class="t" style="font:700 15px/1.3 ${SANS};color:#e7ecf2">${esc(w)}</div>` +
+        `<div class="m" style="margin-top:3px;font:400 14px/1.5 ${SANS};color:#c3ccd6">${esc(t)}</div></td></tr>`).join("");
+      return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px"><tr><td style="padding:${steps.length ? "16px 18px" : checks.length ? "4px 18px" : `${hero ? 18 : 12}px 18px ${r.length ? 12 : 18}px`};background:#141a22;border-radius:10px">` +
+        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${big}${lines}${list}${when}</table></td></tr></table>`;
     }
     if ("note" in x) return `<p class="m" style="margin:0 0 16px;font:400 14px/1.55 ${SANS};color:#9aa5b3">${x.note}</p>`;
     if ("heading" in x) return `<div class="m" style="margin:28px 0 8px;font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(x.heading)}</div>`;
@@ -258,7 +261,8 @@ function text(b: Body): string {
     if ("lead" in x) out.push(strip(x.lead), "");
     else if ("small" in x) out.push(strip(x.small), "");
     else if ("box" in x) out.push(...(x.box.hero ? [`${x.box.hero.label}: ${x.box.hero.value}${x.box.hero.sub ? ` (${x.box.hero.sub})` : ""}`] : []),
-      ...(x.box.rows ?? []).map(([l, v]) => `${l}: ${strip(v)}`), ...(x.box.checks ?? []).map((c) => c.done ? `[x] ${c.name}` : `${c.n ? `${c.n}.` : "[ ]"} ${[c.name, [c.text, c.sub].filter(Boolean).join(" ")].filter(Boolean).join(": ")}`), "");
+      ...(x.box.rows ?? []).map(([l, v]) => `${l}: ${strip(v)}`), ...(x.box.checks ?? []).map((c) => c.done ? `[x] ${c.name}` : `${c.n ? `${c.n}.` : "[ ]"} ${[c.name, [c.text, c.sub].filter(Boolean).join(" ")].filter(Boolean).join(": ")}`),
+      ...(x.box.steps ?? []).map(([w, t]) => `${w}: ${t}`), "");
     else if ("note" in x) out.push(strip(x.note), "");
     else if ("heading" in x) out.push("", x.heading.toUpperCase());
     else if ("button" in x) out.push(`${x.button.label}: ${x.button.href}`, "");
@@ -835,7 +839,7 @@ export type Change = {
 };
 
 export const planChangeBooked = (c: Change) => {
-  const cancel = c.to === "free";
+  const cancel = c.to === "free", stop = c.removePlants.length, gone = c.history?.on ?? c.deleteOn;
   const switchOnly = c.from === c.to;
   const title = cancel ? `${PLAN_NAME[c.from]} ends on ${c.on}` : switchOnly ? `${PLAN_NAME[c.from]} goes ${c.toPeriod} on ${c.on}` : `You move to ${PLAN_NAME[c.to]} on ${c.on}`;
   // Plants to delete lead, in amber, as in the later "deleted on" email (SOLAR-415).
@@ -846,12 +850,15 @@ export const planChangeBooked = (c: Change) => {
     title,
     // No Keep buttons in emails (SOLAR-412): an undo is made in Billing, a cancel's too (SOLAR-467).
     parts: cancel
-      ? hero ? [{ lead: `Nothing more is charged. ${PAID_FREE}` }, { box: { hero, rows: kept } }, SEE_PLAN]
-        // No plant deleted: the history that goes leads instead, as in the plan-ended email.
-        : c.history?.days ? [{ lead: "Nothing more is charged." },
-            { box: { hero: lost(`Deleted on ${c.history.on}`, dayCount(c.history.days), `of history at ${c.history.plant}`),
-              rows: [[`From ${c.on}`, "Free"], ["You see", "Today's readings"], ["Reports", "Stop"]] } }, SEE_PLAN]
-        : [{ lead: `Nothing more is charged. ${PAID_FREE}` }, SEE_PLAN]
+      // What happens when, as in the Cancel window (SOLAR-488). Nothing changes until the plan
+      // ends; the plant Free keeps is picked under Plants, the first linked if none is.
+      ? [{ lead: `You cancelled ${PLAN_NAME[c.from]}. Nothing more is charged.` },
+         { box: { steps: [[`Until ${c.on}`, "Nothing changes."],
+           [`From ${c.on}`, `You're on Free. ${stop ? `One plant keeps updating and the other${stop > 1 ? ` ${stop} stop` : " stops"}. ` : ""}You see today's readings only. Alerts stay on. Reports stop.`],
+           // no date when there is nothing to delete (no plant linked)
+           ...(gone ? [[`On ${gone}`, stop ? `${stop > 1 ? `The ${stop} stopped plants` : "The stopped plant"} and all history are deleted. ${stop > 1 ? "They" : "It"} can't be brought back.` : "Your history is deleted."] as [string, string]] : [])] } },
+         ...(stop ? [{ note: `<b style="color:#e7ecf2">Choose the plant to keep under Plants in Billing before ${c.on}.${c.keepPlants?.[0] ? ` If you don't, we keep ${esc(c.keepPlants[0])}.` : ""}</b>` },
+                     { button: { label: "Choose plant", href: LOGINS } }] : [SEE_PLAN])]
       // A monthly/yearly switch reads like the plan-kept email: what carries on, then the price.
       : switchOnly ? [{ lead: "Your plants, history and reports carry on as before." },
           { box: { rows: [["Next payment", `${c.next ? rand(c.next.amount) : "R0"} on ${c.on}`]] } },
