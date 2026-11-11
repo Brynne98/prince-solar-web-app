@@ -2289,7 +2289,7 @@ function bookedChange(b) {
   const on = `On ${billDay(b.nextDate)} your plan changes to `;
   const then = `${rand(b.nextAmount)} ${perUnit(b.nextPeriod || b.period)}.`;
   const plants = (n) => (n === 1 ? '1 plant' : n + ' plants');
-  return b.nextPlan === 'free' ? [on + 'Free, 1 plant.', `Keep ${PLAN_NAME[b.plan]}`]
+  return b.nextPlan === 'free' ? [on + 'Free.', `Keep ${PLAN_NAME[b.plan]}`]
     : b.nextPlan ? [on + `${PLAN_NAME[b.nextPlan]}, ${plants(planRoom(b.nextPlan, b.nextExtraPlants ?? b.extraPlants))}, ` + then, `Keep ${PLAN_NAME[b.plan]}`]
     : b.nextPeriod ? [on + `${b.nextPeriod}, ` + then, `Stay ${b.period}`]
     : [on + `${plants(planRoom(b.plan, b.nextExtraPlants))}, ` + then, `Keep ${plants(planRoom(b.plan, b.extraPlants))}`];
@@ -2326,13 +2326,12 @@ const cancelPlants = (links, room = 1) => {
     .sort((x, y) => (x.linked_at < y.linked_at ? -1 : x.linked_at > y.linked_at ? 1 : x.plant_id - y.plant_id));
   return { keep: on.slice(0, room), stop: Math.max(on.length - room, 0) };
 };
-// "Office", "Office and Shop", "Office, Shop and Barn"
-const andList = (names) => (names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0] || '');
 
 // The pick itself, in the cancel and downgrade pop-ups and in Manage (SOLAR-496): each login's
 // plants under its email, as Plants lays them out; a circle each when the plan keeps 1, else a
-// tick box. Past the room it says so (Upgrade where there is one); the last tick stays.
-function KeepPicker({ links, plan, room, value, onChange, onUpgrade }) {
+// tick box. Past the room it says so, and that keeping the plan as it is has room (keep: its
+// label and undo); the last tick stays. Neither line is red: nothing went wrong.
+function KeepPicker({ links, plan, room, value, onChange, keep }) {
   const [say, setSay] = React.useState(null); // 'last' | 'full'
   const one = room === 1;
   const tick = (id) => {
@@ -2360,15 +2359,15 @@ function KeepPicker({ links, plan, room, value, onChange, onUpgrade }) {
           })}
         </div>
       ))}
-      {say === 'last' ? <div className="field-note keep-count bad">At least one plant needs to be selected.</div>
-        : say === 'full' ? <div className="field-note keep-count bad">{PLAN_NAME[plan]} keeps {room} plants. Untick one first{onUpgrade ? <>, or <button type="button" className="mini-link" onClick={onUpgrade}>upgrade</button></> : ''}.</div>
+      {say === 'last' ? <div className="field-note keep-count">At least one plant needs to be selected.</div>
+        : say === 'full' ? <div className="field-note keep-count">{PLAN_NAME[plan]} keeps {room} plants. Untick one first{keep ? <>, or <button type="button" className="mini-link" onClick={keep.run}>{keep.label}</button></> : ''}.</div>
         : !one && <div className="field-note keep-count">{value.length} of {room} ticked.{left > 0 && ` Tick ${left} more.`}</div>}
     </div>
   );
 }
 // Billing's Manage (SOLAR-496): the pick a booked cancel or smaller plan keeps, changed any time
 // before the date. Saves the whole pick (api_billing_keep_set, 0186).
-function KeepDialog({ b, links, reload, onClose, onUpgrade }) {
+function KeepDialog({ b, links, reload, onClose, onKeep }) {
   const plants = pickableLogins(links).flatMap(a => a.plants);
   const kept = plants.filter(p => !p.drop).map(p => p.plant_id);
   const [picked, setPicked] = React.useState(kept);
@@ -2389,7 +2388,7 @@ function KeepDialog({ b, links, reload, onClose, onUpgrade }) {
       text={`The others are deleted on ${(b.prepaidOn ? longDay : window.billingFmt.billDay)(endDay(b))}.`}
       action="Save" busy={busy} onConfirm={save} onCancel={onClose}>
       <KeepPicker links={links} plan={plan} room={room} value={picked} onChange={setPicked}
-        onUpgrade={onUpgrade && (() => { window.track('keep_upgrade_done', { plan, room }); onClose(); onUpgrade(); })} />
+        keep={{ label: 'keep ' + PLAN_NAME[b.plan], run: () => { onClose(); onKeep(); } }} />
     </ConfirmCard>
   );
 }
@@ -2411,7 +2410,8 @@ function DowngradeDialog({ b, plan, period, price, links, busy, onConfirm, onCan
         <div><b>Until {ends}</b>Nothing changes.</div>
         <div><b>On {ends}</b>You’re on {PLAN_NAME[plan]}, {rand(price)} {perUnit(period)}. {room} plants keep updating. {stop > 1 ? `The other ${stop} and their history are deleted. They` : 'The other one and its history are deleted. It'} can’t be brought back.</div>
       </div>
-      <KeepPicker links={links} plan={plan} room={room} value={picked} onChange={setPicked} />
+      <KeepPicker links={links} plan={plan} room={room} value={picked} onChange={setPicked}
+        keep={{ label: 'keep ' + PLAN_NAME[b.plan], run: onCancel }} />
     </ConfirmCard>
   );
 }
@@ -2480,12 +2480,9 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
   // the plants it collects, with any extra plants still held (SOLAR-371)
   const room = planRoom(b.plan, b.extraPlants);
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
-  // A booked cancel or smaller plan that stops plants: which stay and which go, and Manage to
-  // change it (SOLAR-496)
-  const pick = pickableLogins(links).flatMap(a => a.plants);
-  const drops = pick.filter(p => p.drop), stays = pick.filter(p => !p.drop);
-  const keepLine = booked && drops.length > 0 && stays.length > 0
-    && `${andList(stays.map(window.plantLabel))} ${stays.length === 1 ? 'stays' : 'stay'}. ${andList(drops.map(window.plantLabel))} ${drops.length === 1 ? 'is' : 'are'} deleted.`;
+  // A booked cancel or smaller plan that stops plants: Manage beside Keep changes the pick (SOLAR-496)
+  const manage = booked && pickableLogins(links).some(a => a.plants.some(p => p.drop));
+  const undo = () => run(() => undoBooked(b, reload));
   return (
     <SettingsSection id="plan" title="Plan" bare>
       {/* the plan top left, its button top right; its price and renewal in the darker box under them */}
@@ -2513,13 +2510,8 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
             <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
           </div>
         )}
-        {booked && (!b.prepaidOn || ending) && <BookedNotice booked={booked} busy={busy} onUndo={() => run(() => undoBooked(b, reload))} />}
-        {keepLine && (
-          <div className="plan-booked">
-            <span className="conn-status warn">{keepLine} <button type="button" className="plan-undo" disabled={!!busy} onClick={() => setManaging(true)}>Manage</button></span>
-          </div>
-        )}
-        {managing && <KeepDialog b={b} links={links} reload={reload} onClose={() => setManaging(false)} onUpgrade={onAdjust} />}
+        {booked && (!b.prepaidOn || ending) && <BookedNotice booked={booked} busy={busy} onUndo={undo} onManage={manage && (() => setManaging(true))} />}
+        {managing && <KeepDialog b={b} links={links} reload={reload} onClose={() => setManaging(false)} onKeep={undo} />}
       </PlanCard>
     </SettingsSection>
   );
@@ -2550,10 +2542,12 @@ function PlanCard({ title, action, hidden, children }) {
 
 // A change booked for the billing date, the undo a link in the notice, so the card keeps one
 // button (SOLAR-283).
-function BookedNotice({ booked, busy, onUndo }) {
+// onManage: a booked change that stops plants has Manage too, for the pick (SOLAR-496).
+function BookedNotice({ booked, busy, onUndo, onManage }) {
   return (
     <div className="plan-booked plan-alert">
-      <span className="conn-status warn">{booked[0]} {booked[1] && <button type="button" className="plan-undo" disabled={busy} aria-busy={busy} onClick={onUndo}>{booked[1]}</button>}</span>
+      <span className="conn-status warn">{booked[0]} {booked[1] && <button type="button" className="plan-undo" disabled={busy} aria-busy={busy} onClick={onUndo}>{booked[1]}</button>}
+        {onManage && <button type="button" className="plan-undo plan-manage" disabled={busy} onClick={onManage}>Manage</button>}</span>
     </div>
   );
 }
