@@ -2246,15 +2246,7 @@ function PlantLine({ name, off, children }) {
 const PLAN_RANK = { free: 0, home: 1, family: 2 };
 // Since SOLAR-371: Home 2, Family 5. Extra plants are no longer sold; those already held still count.
 const planRoom = (plan, extra) => (plan === 'family' ? 5 + (extra || 0) : plan === 'home' ? 2 : 1);
-// The plants a downgrade picks from, under their logins as Billing lists them: collecting
-// and not up for deletion, except those that stop on the billing date (drop), which can
-// still be picked. A plant two logins share shows under the first.
-const pickableLogins = (links) => {
-  const seen = new Set();
-  return (links?.accounts || []).filter(a => a.status !== 'disabled').map(a => ({ ...a,
-    plants: (a.plants || []).filter(p => !p.paused && (!p.remove_on || p.drop) && !seen.has(p.plant_id) && seen.add(p.plant_id)) }))
-    .filter(a => a.plants.length);
-};
+// pickableLogins: the plants a downgrade picks from (link.jsx).
 // Sends a change for the billing date, then reads the plan again. Failed: the toast says
 // failed(error) and it re-reads anyway, as a change that ran out of time may still have landed.
 // True once saved.
@@ -2278,19 +2270,23 @@ async function bookPlan(b, plan, period, reload, keep) {
   return ok;
 }
 // A change booked for the billing date: what it says, and the button that undoes it.
-function bookedChange(b) {
-  const { billDay, rand, perUnit } = window.billingFmt;
+// links: with them, a cancel or smaller plan also says which plants stay and what is deleted (SOLAR-505).
+function bookedChange(b, links) {
+  const { billDay, rand, perUnit, lossLine } = window.billingFmt;
   if (b.plan === 'free' || b.comped || !(b.nextPlan || b.nextPeriod || b.nextExtraPlants != null)) return null;
   // a paid switch to yearly (SOLAR-298): nothing to undo; a cancel in it ends the year (SOLAR-457)
   // and Keep goes back to the paid switch (SOLAR-467)
-  if (b.prepaidOn) return b.nextPlan === 'free' ? [`Your plan ends on ${longDay(endDay(b))}. Free after that.`, `Keep ${PLAN_NAME[b.plan]}`]
+  if (b.prepaidOn) return b.nextPlan === 'free' ? [`${PLAN_NAME[b.plan]} ends on ${longDay(endDay(b))}. ${lossLine(links, true)}`, `Keep ${PLAN_NAME[b.plan]}`]
     : [`Switches to yearly on ${billDay(b.nextDate)}. Paid.`, null];
   // one sentence, as most billing pages put it: the plan, its plants and the price from the
   // billing date (nextAmount), as the booked change leaves it (SOLAR-367)
   const on = `On ${billDay(b.nextDate)} your plan changes to `;
   const then = `${rand(b.nextAmount)} ${perUnit(b.nextPeriod || b.period)}.`;
   const plants = (n) => (n === 1 ? '1 plant' : n + ' plants');
-  return b.nextPlan === 'free' ? [on + 'Free.', `Keep ${PLAN_NAME[b.plan]}`]
+  // the names say how many stay, so the count goes when plants are deleted
+  const loss = b.nextPlan && b.nextPlan !== 'free' ? lossLine(links, false) : '';
+  return b.nextPlan === 'free' ? [`${PLAN_NAME[b.plan]} ends on ${billDay(b.nextDate)}. ${lossLine(links, true)}`, `Keep ${PLAN_NAME[b.plan]}`]
+    : loss ? [on + `${PLAN_NAME[b.nextPlan]}, ` + then + ' ' + loss, `Keep ${PLAN_NAME[b.plan]}`]
     : b.nextPlan ? [on + `${PLAN_NAME[b.nextPlan]}, ${plants(planRoom(b.nextPlan, b.nextExtraPlants ?? b.extraPlants))}, ` + then, `Keep ${PLAN_NAME[b.plan]}`]
     : b.nextPeriod ? [on + `${b.nextPeriod}, ` + then, `Stay ${b.period}`]
     : [on + `${plants(planRoom(b.plan, b.nextExtraPlants))}, ` + then, `Keep ${plants(planRoom(b.plan, b.extraPlants))}`];
@@ -2437,7 +2433,7 @@ function CancelPlanDialog({ b, links, busy, onConfirm, onCancel }) {
   // a paid switch to yearly runs its year first (SOLAR-457)
   const day = b.prepaidOn ? longDay : billDay;
   // history and stopped plants go on the end date (SOLAR-495, 0188)
-  const ends = day(endDay(b)), gone = ends;
+  const ends = day(endDay(b));
   const { keep, stop } = cancelPlants(links);
   const [picked, setPicked] = React.useState(keep.map(p => p.plant_id));
   const offer = cancelOffer(b);
@@ -2447,8 +2443,7 @@ function CancelPlanDialog({ b, links, busy, onConfirm, onCancel }) {
       busy={busy} onConfirm={() => onConfirm(stop > 0 ? picked : null)} onCancel={onCancel}>
       <div className="pay-review-box cancel-steps">
         <div><b>Until {ends}</b>Nothing changes.</div>
-        <div><b>From {ends}</b>You’re on Free. {stop > 0 && `One plant keeps updating and the other${stop > 1 ? ` ${stop} stop` : ' stops'}. `}You see today’s readings only. Alerts stay on. Reports stop.</div>
-        <div><b>On {gone}</b>{stop > 0 ? `${stop > 1 ? `The ${stop} stopped plants` : 'The stopped plant'} and all history are deleted. ${stop > 1 ? 'They' : 'It'} can’t be brought back.` : 'Your history is deleted.'}</div>
+        <div><b>On {ends}</b>You’re on Free. {stop > 0 ? `One plant keeps updating. The other ${stop > 1 ? stop : 'one'} and all history are deleted. They can’t be brought back.` : 'All history is deleted and can’t be brought back.'} Reports stop.</div>
       </div>
       {offer && <div className="confirm-text keep-note">{offer}</div>}
       {stop > 0 && <KeepPicker links={links} plan="free" room={1} value={picked} onChange={setPicked} />}
@@ -2456,7 +2451,8 @@ function CancelPlanDialog({ b, links, busy, onConfirm, onCancel }) {
   );
 }
 
-function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
+// payBanner: the failed-payment banner is on the page, so the card does not repeat it (SOLAR-505).
+function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links, payBanner }) {
   const { useState } = React;
   const [busy, setBusy] = useState(false);
   const [managing, setManaging] = useState(false);
@@ -2479,8 +2475,11 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
   const { rand, perUnit } = window.billingFmt;
   const b = billing;
   const paid = b.plan !== 'free' && !b.comped;
-  const booked = bookedChange(b);
+  const booked = bookedChange(b, links);
   const ending = paid && b.nextPlan === 'free';
+  // On Free after a failed payment (SOLAR-500): the stopped plants and the history wait 30 days
+  const waiting = b.plan === 'free' && b.removeOn ? (b.removePlants || []).map(p => p.name) : [];
+  const was = (b.payments || []).find(p => p.status !== 'refunded')?.plan;
   // The free week (api_me, 0122): a Free account sees full history until it ends.
   const weekEnds = b.plan === 'free' && !b.comped && freeWeekEndsAt && Date.parse(freeWeekEndsAt) > Date.now()
     ? new Date(freeWeekEndsAt).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }) : null;
@@ -2508,7 +2507,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
           <div className="pay-review-box">
             <div className="pay-review-ln"><span>{room === 1 ? '1 plant' : room + ' plants'}</span><b>{rand(b.price)} {perUnit(b.period)}</b></div>
             {/* past due and ending say their date below */}
-            {b.state !== 'past_due' && !ending && !b.prepaidOn && <div className="pay-review-ln"><span>Renews</span><b>{longDay(b.nextDate)}</b></div>}
+            {b.state !== 'past_due' && !booked && !b.prepaidOn && <div className="pay-review-ln"><span>Renews</span><b>{longDay(b.nextDate)}</b></div>}
             {/* a paid switch to yearly (SOLAR-298): when the year starts, what it cost, the payment after it */}
             {b.prepaidOn && <>
               <div className="pay-review-ln"><span>Yearly from</span><b>{longDay(b.nextDate)}</b></div>
@@ -2519,12 +2518,22 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
           </div>
         )}
         {paid && b.offer?.held && <div className="conn-meta pw-offer">{window.billingFmt.offerLine(b.offer, listPrice(b, b.plan, b.period, b.extraPlants || 0), b.period)}</div>}
-        {b.state === 'past_due' && (
+        {waiting.length > 0 && (
+          <div className="plan-booked plan-alert">
+            <span className="conn-status warn">{window.billingFmt.andList(waiting)} and all history are kept until {window.billingFmt.billDay(b.removeOn)}. {was ? `Pay for ${PLAN_NAME[was]} to keep them.` : 'Upgrade to keep them.'}</span>
+          </div>
+        )}
+        {/* the banner above says it failed, the Free date and how to pay; without it the card says it all */}
+        {b.state === 'past_due' && (payBanner ? b.nextTry && (
+          <div className="plan-booked plan-alert">
+            <span className="conn-status bad">Next try {window.billingFmt.billDay(b.nextTry)}.</span>
+          </div>
+        ) : (
           <div className="plan-booked plan-alert">
             <span className="conn-status bad">Payment failed.{b.nextTry && <> Next try {window.billingFmt.billDay(b.nextTry)}.</>} Pay before {window.billingFmt.billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.</span>
             <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
           </div>
-        )}
+        ))}
         {booked && (!b.prepaidOn || ending) && <BookedNotice booked={booked} busy={busy} onUndo={undo} manage={manage} onManage={() => setManaging(true)} />}
         {managing && <KeepDialog b={b} links={links} reload={reload} onClose={() => setManaging(false)} onKeep={undo} />}
       </PlanCard>
@@ -3003,7 +3012,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         {/* the owner removed the share in SunSynk (SOLAR-310): nothing is read until it's back */}
         {p.share_gone && <span className="conn-status plant-state bad">Share removed</span>}
         {s === 'going' ? <>
-          <span className="conn-status plant-state bad">Deleted {billDay(p.remove_on)}</span>
+          <span className="conn-status plant-state warn">Kept until {billDay(p.remove_on)}</span>
           {swap ? sw : <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
         </> : sw}
         {stopping === p.plant_id && (
@@ -3656,7 +3665,7 @@ const SETTINGS_NAV = [['account', 'Account', 'Notifications, your data, password
 let billingSeen = null;
 let weekEndSeen;
 window.sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') { billingSeen = null; weekEndSeen = undefined; } });
-function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, flash, onFlashed }) {
+function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, flash, onFlashed, payBanner }) {
   const { useState, useEffect } = React;
   const [user, setUser] = useState(null);
   useEffect(() => { window.sb.auth.getSession().then(({ data }) => setUser(data?.session?.user || null)).catch(() => {}); }, []);
@@ -3700,7 +3709,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
         <div className="set-main">
           <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><Icon id="back" />Settings</button>
           {shown === 'account' && <AccountPage user={user} billing={billing} plants={onPlants} plantId={plantId} ready={!!me} onBilling={(section) => onPage('billing', section)} />}
-          {(page === 'billing' || page === 'plans') && <BillingPage billing={billing} reload={reloadBilling} reloadPlan={reloadPlan} links={links} onPage={onPage} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} onSaved={onPlantConfigSaved}
+          {(page === 'billing' || page === 'plans') && <BillingPage payBanner={payBanner} billing={billing} reload={reloadBilling} reloadPlan={reloadPlan} links={links} onPage={onPage} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} onSaved={onPlantConfigSaved}
                                               onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}
           {/* Adjust plan opens over Billing, not as a page of its own (SOLAR-292) */}
           {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadPlan} onBack={() => onPage('billing')} forPlant={forPlant}
@@ -3765,12 +3774,12 @@ function AccountPage({ user, billing, plants, plantId, ready, onBilling }) {
 }
 
 // Billing holds the plants and the logins they come from (moved from Plant, SOLAR-250).
-function BillingPage({ billing, reload, reloadPlan, links, onPage, freeWeekEndsAt, onSaved, onCollect }) {
+function BillingPage({ billing, reload, reloadPlan, links, onPage, freeWeekEndsAt, onSaved, onCollect, payBanner }) {
   React.useEffect(() => { if (billing) try { localStorage.setItem(BILL_SHAPE, JSON.stringify(shapeOf(billing))); } catch (e) {} }, [billing]);
   return (
     <div className="settings-page">
       <div className="page-head"><h1>Billing</h1></div>
-      <PlanSection billing={billing} reload={reloadPlan} onAdjust={() => onCollect(null)} freeWeekEndsAt={freeWeekEndsAt} links={links} />
+      <PlanSection billing={billing} reload={reloadPlan} onAdjust={() => onCollect(null)} freeWeekEndsAt={freeWeekEndsAt} links={links} payBanner={payBanner} />
       {links && <SunSynkConnectionSection onChanged={onSaved} links={links} billing={billing} reloadBilling={reload} onCollect={(id) => onCollect(id ?? null)} />}
       <PaymentsSection billing={billing} />
       <InvoicesSection billing={billing} />

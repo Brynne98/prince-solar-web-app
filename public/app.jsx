@@ -480,7 +480,8 @@ function notifDay(day) {
 // SOLAR-384); only the second can be closed. bodyShort is the card's line on a phone.
 // act: { plan, plans, undo } from App.
 const FREE_PAID = 'readings are kept for 30 days, then you see only today. Alerts stay on; reports stop.';
-function billNotice(n, act) {
+// links: the logins, for the plants a booked change keeps and deletes (SOLAR-505).
+function billNotice(n, act, links) {
   const { rand, billDay } = window.billingFmt;
   const plan = PLAN_NAME[n.plan];
   switch (n.kind) {
@@ -506,15 +507,18 @@ function billNotice(n, act) {
     case 'bill_free': {
       const stopped = n.stopped || [];
       return { icon: 'card', title: 'Your account is now on Free',
-        body: `On Free, ${FREE_PAID}` + (stopped.length ? ` Stopped, deleted on ${billDay(n.deleteOn)}: ${stopped.join(', ')}.` : ''),
+        body: stopped.length ? `${window.billingFmt.andList(stopped)} and all history are kept until ${billDay(n.deleteOn)}.` : `On Free, ${FREE_PAID}`,
         button: stopped.length ? 'Pay to keep these plants' : 'Pay now', run: act.plans };
     }
     case 'bill_change': {
       const cancel = n.nextPlan === 'free', on = billDay(n.on);
-      return { icon: 'calendar', title: cancel ? `${plan} ends on ${on}` : n.nextPlan ? `You move to ${PLAN_NAME[n.nextPlan]} on ${on}`
+      // what it deletes, as Billing's Plan card says it; in the last 3 days a banner on every
+      // page, as the email of those days (SOLAR-505)
+      const loss = n.nextPlan ? window.billingFmt.lossLine(links, cancel) : '';
+      const soon = !!loss && Date.parse(n.on) - Date.now() <= 3 * 864e5;
+      return { banner: soon, tone: soon ? 'warn' : undefined, icon: 'calendar', title: cancel ? `${plan} ends on ${on}` : n.nextPlan ? `You move to ${PLAN_NAME[n.nextPlan]} on ${on}`
           : n.nextPeriod ? `You switch to ${n.nextPeriod} on ${on}` : `Extra plants drop to ${n.nextExtraPlants} on ${on}`,
-        // a cancel deletes history on its end date; only a failed payment keeps 30 days (SOLAR-495)
-        body: cancel ? `After that, on Free, you see only today. Alerts stay on; reports stop.` : '',
+        body: loss,
         // the same undo as Billing's Plan section (bookedChange)
         button: n.nextPlan ? `Keep ${plan}` : n.nextPeriod ? `Stay ${n.period}` : `Keep ${5 + (n.extraPlants || 0)} plants`,   // Family's 5 plus the extras held (SOLAR-367, SOLAR-371)
         run: () => act.undo(n) };
@@ -1800,7 +1804,7 @@ function App({ links }) {
     }) : openSettings('plan')),
   };
   const notices = (notifs?.pinned || []).map(n => {
-    const t = billNotice(n, noticeAct);
+    const t = billNotice(n, noticeAct, links);
     return t && { ...t, kind: n.kind, id: n.key, read: n.read, act: (where) => { window.track('notice_action_done', { kind: n.kind, where }); t.run(); } };
   }).filter(Boolean);
   const bell = <NotifBell data={notifs} pinned={notices} onOpen={loadNotifs} onSeen={readNotifs} onReadAll={() => readNotifs(null)}
@@ -1824,7 +1828,7 @@ function App({ links }) {
     ? <window.PlantSettings key="system" me={me} plantId={plantId} onSaved={reloadPlantConfig}
         flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />
     : <window.SettingsArea key="settings" page={tab} onPage={(p, section) => (section ? openSettings(section) : go(p))}
-        me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} links={links}
+        me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} links={links} payBanner={notices.some(n => n.kind === 'bill_failed')}
         flash={flashSection} onFlashed={() => setFlashSection(null)} />;
   const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);
 

@@ -854,11 +854,12 @@ export const planChangeBooked = (c: Change) => {
       // ends; the plant Free keeps is picked under Plants, the first linked if none is.
       ? [{ lead: `You cancelled ${PLAN_NAME[c.from]}. Nothing more is charged.` },
          { box: { steps: [[`Until ${c.on}`, "Nothing changes."],
-           [`From ${c.on}`, `You're on Free. ${stop ? `One plant keeps updating and the other${stop > 1 ? ` ${stop} stop` : " stops"}. ` : ""}You see today's readings only. Alerts stay on. Reports stop.`],
-           // no date when there is nothing to delete (no plant linked)
-           ...(gone ? [[`On ${gone}`, stop ? `${stop > 1 ? `The ${stop} stopped plants` : "The stopped plant"} and all history are deleted. ${stop > 1 ? "They" : "It"} can't be brought back.` : "Your history is deleted."] as [string, string]] : [])] } },
-         ...(stop ? [{ note: `<b style="color:#e7ecf2">Choose the plant to keep under Plants in Billing before ${c.on}.${c.keepPlants?.[0] ? ` If you don't, we keep ${esc(c.keepPlants[0])}.` : ""}</b>` },
-                     { button: { label: "Choose plant", href: LOGINS } }] : [SEE_PLAN])]
+           // one step for the day: a cancel deletes on its end date (SOLAR-495, SOLAR-502). Nothing to
+           // delete (no plant linked): no such line.
+           [`On ${c.on}`, `You're on Free. ${!gone ? "" : stop ? `One plant keeps updating. The other ${stop > 1 ? stop : "one"} and all history are deleted. They can't be brought back. ` : "All history is deleted and can't be brought back. "}Reports stop.`]] } },
+         // the pick is under Choose plant in Billing's Plan card (SOLAR-496)
+         ...(stop ? [{ note: `<b style="color:#e7ecf2">Choose the plant to keep in Billing.${c.keepPlants?.[0] ? ` If you don't, we keep ${esc(c.keepPlants[0])}.` : ""}</b>` },
+                     { button: { label: "Choose plant", href: PLAN } }] : [SEE_PLAN])]
       // A monthly/yearly switch reads like the plan-kept email: what carries on, then the price.
       : switchOnly ? [{ lead: "Your plants, history and reports carry on as before." },
           { box: { rows: [["Next payment", `${c.next ? rand(c.next.amount) : "R0"} on ${c.on}`]] } },
