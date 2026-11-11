@@ -63,7 +63,7 @@ Web (`public/*.jsx`):
 | `lock_tapped` | A paid-only lock tapped |
 | `plan_page_shown`, `offer_pick_done`, `checkout_opened`, `pay_review_done`, `upgrade_done` | Choosing and paying for a plan |
 | `downgrade_done`, `plan_change_undone`, `extra_plants_done`, `yearly_switch_done` | Plan changes |
-| `keep_pick_done` | Plants ticked in Keep on <plan> while a smaller plan is booked (`plan`, `room`) |
+| `keep_pick_done` | Keep pick saved in Billing's Choose plant(s) pop-up while a cancel or smaller plan is booked (`plan`, `room`) |
 | `card_change_done`, `website_plan_done`, `more_plants_email_done` | Billing |
 | `notice_closed`, `notice_action_done` | Billing cards (`notice_opened` until SOLAR-384: the phone banner's tap) |
 | `alerts_page_opened`, `alerts_filter_done`, `alerts_read_all_done`, `notification_opened` | Alerts list and pop-ups |
