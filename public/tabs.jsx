@@ -2486,12 +2486,23 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links, payBann
   // A word beside the name only when something is wrong; an active plan needs none.
   // an ending plan says so in the notice under it (SOLAR-364)
   const word = b.state === 'past_due' ? 'Payment failed' : null;
-  const line = b.comped ? 'Free of charge. Every plant, full history.'
+  // the plant count is in the box, so the line under it says what the box can't (SOLAR-505)
+  const line = b.comped ? null
     : weekEnds ? `Free week until ${window.billingFmt.billDay(weekEnds)}.`
-    : !paid && freeWeekEndsAt === null && !b.comped ? '1 plant. 7 days free from when you add your plant.'
-    : !paid ? '1 plant, today only. No card needed.' : null;
+    : !paid && freeWeekEndsAt === null ? '7 days free from when you add your plant.'
+    : !paid ? 'Today’s readings only.' : null;
   // the plants it collects, with any extra plants still held (SOLAR-371)
   const room = planRoom(b.plan, b.extraPlants);
+  // Every card's box (SOLAR-505): plants, price, and the plan's date, whatever is booked or failed.
+  const L = (k, v, cls) => <div className="pay-review-ln"><span>{k}</span><b className={cls}>{v}</b></div>;
+  const dateRow = !paid ? null
+    : b.state === 'past_due' ? (b.nextTry ? L('Next try', longDay(b.nextTry)) : L('Moves to Free', longDay(b.freeOn)))
+    : b.prepaidOn ? <>
+        {L('Yearly from', longDay(b.nextDate))}
+        {/* cancelled in the paid year: it ends then, nothing more is paid (SOLAR-457) */}
+        {ending ? L('Ends', longDay(endDay(b))) : <>{L('Year paid', rand(b.nextAmount), 'paid')}{L('Next payment', longDay(yearOn(b.nextDate)))}</>}
+      </>
+    : L(ending ? 'Ends' : booked ? 'Changes' : 'Renews', longDay(b.nextDate));
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
   // A booked cancel or smaller plan that stops plants: Choose plant(s) beside Keep changes the pick (SOLAR-496)
   const drops = booked ? pickableLogins(links).flatMap(a => a.plants).filter(p => p.drop) : [];
@@ -2502,38 +2513,25 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links, payBann
       {/* the plan top left, its button top right; its price and renewal in the darker box under them */}
       <PlanCard title={<>{PLAN_NAME[b.plan]}{word && <span className="conn-status bad">{word}</span>}</>}
         action={!b.comped && <button type="button" className={paid ? 'ghost-btn' : 'save-btn'} onClick={onAdjust}>Adjust plan</button>}>
+        <div className="pay-review-box">
+          {b.comped ? L('Every plant', 'Free of charge')
+            : L(room === 1 ? '1 plant' : room + ' plants', paid ? `${rand(b.price)} ${perUnit(b.period)}` : 'R0')}
+          {dateRow}
+        </div>
         {line && <div className="plan-line">{line}</div>}
-        {paid && (
-          <div className="pay-review-box">
-            <div className="pay-review-ln"><span>{room === 1 ? '1 plant' : room + ' plants'}</span><b>{rand(b.price)} {perUnit(b.period)}</b></div>
-            {/* past due and ending say their date below */}
-            {b.state !== 'past_due' && !booked && !b.prepaidOn && <div className="pay-review-ln"><span>Renews</span><b>{longDay(b.nextDate)}</b></div>}
-            {/* a paid switch to yearly (SOLAR-298): when the year starts, what it cost, the payment after it */}
-            {b.prepaidOn && <>
-              <div className="pay-review-ln"><span>Yearly from</span><b>{longDay(b.nextDate)}</b></div>
-              {/* cancelled in the paid year: it ends then, nothing more is paid (SOLAR-457) */}
-              {!ending && <div className="pay-review-ln"><span>Year paid</span><b className="paid">{rand(b.nextAmount)}</b></div>}
-              {!ending && <div className="pay-review-ln"><span>Next payment</span><b>{longDay(yearOn(b.nextDate))}</b></div>}
-            </>}
-          </div>
-        )}
         {paid && b.offer?.held && <div className="conn-meta pw-offer">{window.billingFmt.offerLine(b.offer, listPrice(b, b.plan, b.period, b.extraPlants || 0), b.period)}</div>}
         {waiting.length > 0 && (
           <div className="plan-booked plan-alert">
             <span className="conn-status warn">{window.billingFmt.andList(waiting)} and all history are kept until {window.billingFmt.billDay(b.removeOn)}. {was ? `Pay for ${PLAN_NAME[was]} to keep them.` : 'Upgrade to keep them.'}</span>
           </div>
         )}
-        {/* the banner above says it failed, the Free date and how to pay; without it the card says it all */}
-        {b.state === 'past_due' && (payBanner ? b.nextTry && (
+        {/* the next try is in the box; without the banner the card also says the deadline and pays */}
+        {b.state === 'past_due' && !payBanner && (
           <div className="plan-booked plan-alert">
-            <span className="conn-status bad">Next try {window.billingFmt.billDay(b.nextTry)}.</span>
-          </div>
-        ) : (
-          <div className="plan-booked plan-alert">
-            <span className="conn-status bad">Payment failed.{b.nextTry && <> Next try {window.billingFmt.billDay(b.nextTry)}.</>} Pay before {window.billingFmt.billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.</span>
+            <span className="conn-status bad">Pay before {window.billingFmt.billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.</span>
             <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
           </div>
-        ))}
+        )}
         {booked && (!b.prepaidOn || ending) && <BookedNotice booked={booked} busy={busy} onUndo={undo} manage={manage} onManage={() => setManaging(true)} />}
         {managing && <KeepDialog b={b} links={links} reload={reload} onClose={() => setManaging(false)} onKeep={undo} />}
       </PlanCard>
