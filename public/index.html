@@ -1335,7 +1335,10 @@
   /* a form inside: no box of its own, fields stacked */
   .pop-body .conn-form { margin: var(--sp-lg) 0 0; padding: 0; border: none; background: none; animation: none; }
   .pop-body .field-row { grid-template-columns: minmax(0, 1fr); }
-  .pop-dlg { max-height: calc(100dvh - 24px); overflow: auto; }
+  .pop-dlg { max-height: calc(100dvh - 24px); overflow: auto; overscroll-behavior: contain; }
+  /* the page behind an open pop-up does not scroll: on a phone the document scrolls, and a
+     modal dialog does not stop that by itself (SOLAR-521) */
+  html:has(.pop-dlg[open]) { overflow: hidden; }
   .pop-dlg.pop-mid { width: min(560px, calc(100vw - 32px)); }
   /* working (SOLAR-294): a turning ring on a button while its change saves, and the small
      pop-up a payment step shows */
@@ -1358,7 +1361,6 @@
   .pop-dlg[open], .pop-dlg.leaving { display: flex; flex-direction: column; }
   .pop-body { flex: none; }
   .pop-x { order: -1; flex: none; position: sticky; top: var(--sp-md); z-index: 1; align-self: flex-end; --x: 34px; margin: var(--sp-md) var(--sp-md) calc(-1 * var(--x) - var(--sp-md)) 0; width: var(--x); height: var(--x); display: grid; place-items: center; border: none; border-radius: var(--r-md); background: var(--panel-2); color: var(--dim); cursor: pointer; }
-  .pop-dlg > .sheet-grip { display: none; }
   /* a long title stops short of the X */
   .pop-dlg:has(> .pop-x) .pop-body > :is(.confirm-title, .confirm-text, .pay-review-t):first-child { padding-right: var(--sp-2xl); }
   .pop-x .ico { width: var(--icon-md); height: var(--icon-md); }
@@ -1380,15 +1382,10 @@
   .cancel-steps b { display: block; font-weight: 600; color: var(--text); }
   @media (max-width: 599px) {
     .pop-dlg { width: calc(100vw - 24px); max-width: none; }
-    /* a pop-up that can close is a sheet from the bottom, as the More menu is (SOLAR-516) */
-    .pop-dlg:has(> .pop-x) { width: 100vw; margin: auto 0 0; border-width: 1px 0 0; border-radius: var(--r-xl) var(--r-xl) 0 0; }
-    .pop-dlg[open]:has(> .pop-x) { animation-name: sheet-in; }
-    .pop-dlg.leaving:has(> .pop-x) { animation-name: sheet-out; }
-    .pop-dlg > .sheet-grip { display: block; order: -2; flex: none; margin: var(--sp-sm) auto 0; }
-    /* level with the title, under the grip; sticky again, which the tap-target rule's relative undoes */
-    .pop-dlg > .pop-x { position: sticky; margin-top: var(--sp-sm); margin-bottom: calc(-1 * var(--x) - var(--sp-sm)); }
-    .pop-dlg:has(> .pop-x) .pop-body { padding-top: var(--sp-lg); padding-bottom: calc(var(--sp-xl) + env(safe-area-inset-bottom, 0px)); }
-    .pop-wide:has(> .pop-x) .pop-body { padding-bottom: calc(var(--sp-2xl) + env(safe-area-inset-bottom, 0px)); }
+    /* sticky again, which the tap-target rule's relative undoes */
+    .pop-dlg > .pop-x { position: sticky; }
+    /* the More sheet and the full-screen notifications hold the page still too (SOLAR-521) */
+    html:has(.sheet, .notif-panel) { overflow: hidden; }
   }
 
   .confirm-card .conn-form-actions { margin-top: var(--sp-md); }
