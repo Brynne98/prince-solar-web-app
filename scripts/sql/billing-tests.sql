@@ -653,6 +653,11 @@ begin
     where (x->>'amount')::int = 99 and x->>'card' is null), 0);
   perform pg_temp.eq('no card: past due', (select state from private.billing where user_id = n), 'past_due');
   perform pg_temp.raises('past due cannot upgrade', format('select public.billing_charge_open(%L, %L)', n, 'family'), 'settle the failed payment first');
+  -- nor cancel, nor switch period (0189, SOLAR-497); the plan as it is books nothing and is allowed
+  perform pg_temp.raises('past due cannot cancel', format('select public.billing_book_change(%L, %L)', n, 'free'), 'pay the failed payment first');
+  perform pg_temp.raises('past due cannot switch period', format('select public.billing_book_change(%L, %L, %L)', n, 'home', 'yearly'), 'pay the failed payment first');
+  perform public.billing_book_change(n, 'home', 'monthly');
+  perform pg_temp.eq('past due: nothing booked', (select coalesce(next_plan, '-') || coalesce(next_period, '-') from private.billing where user_id = n), '--');
 
   -- settle: pays the failed renewal with another card
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, past_due_since)
@@ -663,6 +668,9 @@ begin
   perform pg_temp.eq('settle amount', (o->>'amount')::int, 999);
   perform public.billing_charge_paid(o->>'reference', v_card);
   perform pg_temp.eq('settled: active', (select state || coalesce(past_due_since::text, '-') from private.billing where user_id = k), 'active-');
+  perform public.billing_book_change(k, 'free');
+  perform pg_temp.eq('settled: a cancel books again', (select next_plan from private.billing where user_id = k), 'free');
+  perform public.billing_book_change(k, 'home', 'yearly');
   perform pg_temp.eq('receipt', (select count(*)::int from public.email_queue where user_id = k and kind = 'bill_paid'), 1);
   perform pg_temp.raises('nothing left to settle', format('select public.billing_settle_open(%L)', k), 'nothing to pay');
 

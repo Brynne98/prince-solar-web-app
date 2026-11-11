@@ -2272,7 +2272,8 @@ async function billingChange(rpc, args, reload, failed) {
 // (none: the first linked). True once booked.
 async function bookPlan(b, plan, period, reload, keep) {
   const ok = await billingChange('api_billing_change', { p_plan: plan, p_period: period ?? null, p_keep: keep ?? null }, reload,
-    () => 'Couldn’t change your plan. Try again.');
+    // a failed payment refuses a change that books with no pop-up (0189)
+    (e) => /failed payment/.test(e.message) ? 'Pay the failed payment first.' : 'Couldn’t change your plan. Try again.');
   if (ok) window.track(plan === b.plan ? 'plan_change_undone' : 'downgrade_done', { plan, period: period ?? b.period });
   return ok;
 }
@@ -2393,6 +2394,17 @@ function KeepDialog({ b, links, reload, onClose, onKeep }) {
   );
 }
 
+// A cancel or smaller plan asked for while a payment has failed (SOLAR-497, 0189): refused
+// until it is paid, so the pop-up says so and pays. want: 'cancel' | 'downgrade'.
+function PayFirstDialog({ b, want, onCancel }) {
+  React.useEffect(() => { window.track('pay_first_shown', { plan: b.plan, want }); }, []);
+  return (
+    <ConfirmCard modal danger={false} title="Pay the failed payment first" label="Pay the failed payment first"
+      text={`Then you can ${want === 'cancel' ? 'cancel' : 'change your plan'}. Unpaid, you move to Free on ${window.billingFmt.billDay(b.freeOn)}.`}
+      action="Pay with another card" cancelLabel="Close" onConfirm={() => { onCancel(); window.settlePayment(); }} onCancel={onCancel} />
+  );
+}
+
 // A smaller paid plan that stops plants (SOLAR-486): what happens when, as Cancel says it,
 // and which plants stay, the first linked already ticked (SOLAR-496). onConfirm(keep). A
 // downgrade that stops none books with no question.
@@ -2428,6 +2440,7 @@ function CancelPlanDialog({ b, links, busy, onConfirm, onCancel }) {
   const { keep, stop } = cancelPlants(links);
   const [picked, setPicked] = React.useState(keep.map(p => p.plant_id));
   const offer = cancelOffer(b);
+  if (b.state === 'past_due') return <PayFirstDialog b={b} want="cancel" onCancel={onCancel} />;
   return (
     <ConfirmCard modal title={<>Cancel {PLAN_NAME[b.plan]}?</>} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
       busy={busy} onConfirm={() => onConfirm(stop > 0 ? picked : null)} onCancel={onCancel}>
@@ -2507,7 +2520,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
         {paid && b.offer?.held && <div className="conn-meta pw-offer">{window.billingFmt.offerLine(b.offer, listPrice(b, b.plan, b.period, b.extraPlants || 0), b.period)}</div>}
         {b.state === 'past_due' && (
           <div className="plan-booked plan-alert">
-            <span className="conn-status bad">Payment failed.{b.nextTry && <> Next try {window.billingFmt.billDay(b.nextTry)}.</>} Pay by {window.billingFmt.billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.</span>
+            <span className="conn-status bad">Payment failed.{b.nextTry && <> Next try {window.billingFmt.billDay(b.nextTry)}.</>} Pay before {window.billingFmt.billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.</span>
             <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
           </div>
         )}
@@ -2604,6 +2617,9 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
   const [cancelling, setCancelling] = useState(false);
   // A downgrade that stops plants, asked first (SOLAR-486): { plan, period }
   const [picking, setPicking] = useState(null);
+  // A downgrade or switch asked for while a payment has failed (SOLAR-497)
+  const [payFirst, setPayFirst] = useState(false);
+  const failed = b?.state === 'past_due';
   // Home monthly on the Yearly tab: Family yearly is paid now, from today (SOLAR-364)
   const across = paid && b.plan === 'home' && b.period === 'monthly' && view === 'yearly';
   const period = paid && !across ? b.period : view;
@@ -2658,7 +2674,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
         // monthly to yearly is paid now (SOLAR-298); yearly to monthly is booked
         : view === 'yearly' ? <button type="button" className="ghost-btn" onClick={() => window.startUpgrade(b.plan, 'yearly', false, null, null,
             { name: 'yearly_switch_done', props: { plan: b.plan } })}>Switch</button>
-        : <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'switch'} onClick={() => run(() => bookPlan(b, b.plan, view, reload), 'switch')}>Switch</button>;
+        : <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'switch'} onClick={() => (failed ? setPayFirst(true) : run(() => bookPlan(b, b.plan, view, reload), 'switch'))}>Switch</button>;
       // in the button's place, so the card for your plan has no empty row (SOLAR-303)
       return <div className="plan-cur">{paid ? (booked ? 'Changes ' : 'Renews ') + billDay(b.nextDate) : 'No card needed'}</div>;
     }
@@ -2670,6 +2686,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
     // a smaller plan in either period, from the billing date (SOLAR-364)
     return <button type="button" className="ghost-btn" disabled={!!busy || cancelling} aria-busy={busy === 'down:' + p}
                    onClick={() => (p === 'free' ? setCancelling(true)
+                     : failed ? setPayFirst(true)
                      : plants.length > planRoom(p, b.nextExtraPlants ?? b.extraPlants) ? setPicking({ plan: p, period: view })
                      : run(() => bookPlan(b, p, view, reload), 'down:' + p))}>Downgrade</button>;
   };
@@ -2678,7 +2695,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
       {back}
       <div className="page-head">
         <h1>Pick your plan</h1>
-        {!b.comped && !(paid && b.nextPlan === 'free') && <p>{b.prepaidOn ? `Your paid year starts on ${billDay(b.nextDate)}.` : paid ? `Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Upgrades start today.'}</p>}
+        {!b.comped && !(paid && b.nextPlan === 'free') && <p>{failed ? 'Pay the failed payment to change your plan.' : b.prepaidOn ? `Your paid year starts on ${billDay(b.nextDate)}.` : paid ? `Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Upgrades start today.'}</p>}
       </div>
       {b.comped ? <p className="field-note">Your plan is free of charge: every plant, full history.</p> : <>
         <Segmented size="sm" className="plan-period" label="Billing" value={view} onChange={setView}
@@ -2699,6 +2716,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
         {cancelling && <CancelPlanDialog b={b} links={links} busy={!!busy} onCancel={() => setCancelling(false)}
           onConfirm={(keep) => run(async () => { const ok = await bookPlan(b, 'free', null, reload, keep); setCancelling(false); if (ok) onBack(); })} />}
         {/* booked, it goes back to Billing, where Manage changes the pick (SOLAR-496) */}
+        {payFirst && <PayFirstDialog b={b} want="downgrade" onCancel={() => setPayFirst(false)} />}
         {picking && (
           <DowngradeDialog b={b} plan={picking.plan} period={picking.period} price={price(picking.plan)} links={links} busy={!!busy}
             onConfirm={(keep) => run(async () => { const ok = await bookPlan(b, picking.plan, picking.period, reload, keep); setPicking(null); if (ok) onBack(); })}

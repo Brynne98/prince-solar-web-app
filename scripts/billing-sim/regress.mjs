@@ -1132,5 +1132,32 @@ const CASES = [
     if (st.v.plan !== 'home' || st.v.state !== 'active') bad.push(`plan became ${st.v.plan} ${st.v.state}`);
     return bad;
   } },
+  { id: 'PF1', title: 'a failed payment: no cancel, smaller plan or switch until it is paid; a change booked before it can still be undone (SOLAR-497)', async run(K) {
+    const bad = [], u = await K.user('family');
+    const booked = await K.as(u, `select public.api_billing_change('home', null)`);
+    if (!booked.ok) return ['downgrade refused while active: ' + booked.err];
+    const d = (await K.row(u)).next_billing_date;
+    await K.sql(`update private.billing set state = 'past_due', past_due_since = '${d}' where user_id = '${u}';
+                 delete from public.email_queue where user_id = '${u}'`);
+    for (const [what, q] of [['cancel', `select public.api_billing_change('free', null)`],
+                             ['another plan', `select public.api_billing_change('home', 'yearly')`],
+                             ['a switch to yearly', `select public.api_billing_change('family', 'yearly')`]]) {
+      const r = await K.as(u, q);
+      if (r.ok) bad.push(`${what} allowed while the payment is failed`);
+      else if (!/pay the failed payment first/.test(r.err)) bad.push(`${what} refused for another reason: ${r.err}`);
+    }
+    if ((await K.row(u)).next_plan !== 'home') bad.push('the downgrade booked before the failure was lost');
+    await K.held(u, 2);
+    const x = await K.extras(u, 1);
+    if (x.ok) bad.push('a drop of extra plants allowed while the payment is failed');
+    await K.held(u, 0);
+    if (Number((await K.sql(`select count(*) from public.email_queue where user_id = '${u}' and kind = 'bill_change'`))[0])) bad.push('a refused change was emailed');
+    const undo = await K.as(u, `select public.api_billing_change('family', 'monthly')`);
+    if (!undo.ok) bad.push('Keep Family refused: ' + undo.err);
+    const b = await K.row(u);
+    if (b.next_plan !== null) bad.push('Keep Family left the downgrade booked');
+    if (b.state !== 'past_due') bad.push(`state became ${b.state}`);
+    return bad;
+  } },
 ];
 const addD = (d, k) => new Date(Date.parse(d) + k * 864e5).toISOString().slice(0, 10);
