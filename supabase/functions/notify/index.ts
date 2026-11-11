@@ -29,7 +29,7 @@ import { noteError, reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type Price, type History, freeWeekEnded, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, cardChanged, cardExpiring, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
-  offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, needAHand, feedback,
+  offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, cancelEndsSoon, needAHand, feedback,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -364,8 +364,8 @@ async function build(r: Row): Promise<Email | null> {
         from: d.from, to: d.to, fromPeriod: d.fromPeriod, toPeriod: d.toPeriod, on: day(d.on),
         removePlants: d.removePlants, deleteOn: d.deleteOn ? day(d.deleteOn) : undefined, next: d.to === "free" ? undefined : { amount: d.nextAmount },
         days: await historyOf(r.user_id, d.removePlants ?? []),
-        // Cancel to Free: history is kept 30 days after the plan ends (SOLAR-329).
-        history: d.to === "free" ? await historyAt(r.user_id).then((h) => h ? { ...h, on: day(addDays(d.on, 30)) } : undefined) : undefined,
+        // Cancel to Free: history is deleted on the end date (SOLAR-495).
+        history: d.to === "free" ? await historyAt(r.user_id).then((h) => h ? { ...h, on: day(d.on) } : undefined) : undefined,
       });
     }
     case "bill_kept": {
@@ -413,8 +413,11 @@ async function build(r: Row): Promise<Email | null> {
         days: Math.round((Date.parse(d.on) - Date.parse(local("Africa/Johannesburg").date)) / 86400e3), next: { amount: d.nextAmount, date: day(d.nextDate) } });
     case "winback": {
       const h = await historyAt(r.user_id, r.plant_id);
-      return winback({ from: d.from, keepUntil: day(d.keepUntil), plant: h?.plant, days: h?.days, price: await priceOf(d.from, r.user_id) });
+      // days counted when queued, before the trim deletes them (0188)
+      return winback({ from: d.from, plant: h?.plant, days: d.days ?? h?.days, price: await priceOf(d.from, r.user_id) });
     }
+    case "bill_cancel_soon":
+      return cancelEndsSoon({ from: d.from, on: day(d.on), days: (await historyAt(r.user_id))?.days });
     case "need_a_hand": return needAHand();
     case "feedback":
       return feedback({ email: String(d.email ?? ""), message: String(d.message ?? ""), page: String(d.page ?? ""),

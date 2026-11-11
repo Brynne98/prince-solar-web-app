@@ -835,7 +835,7 @@ export type Change = {
   deleteOn?: string;
   next?: { amount: number }; // absent on Free
   days?: number; // day totals the plants to delete hold between them
-  history?: { plant: string; days: number; on: string }; // cancel: the first plant's history, deleted 30 days after
+  history?: { plant: string; days: number; on: string }; // cancel: the first plant's history, deleted on the end date (SOLAR-495)
 };
 
 export const planChangeBooked = (c: Change) => {
@@ -1052,22 +1052,38 @@ export const movedToFree = (m: MovedToFree) =>
     footer: BILL_FOOTER,
   });
 
-// Once, when a cancelled plan ends on its date (SOLAR-328, 0144). History is kept 30
-// days after (SOLAR-329). days: history the first plant holds.
-export const winback = (w: { from: Plan; keepUntil: string; plant?: string; days?: number; price?: Price }) =>
+// Once, when a cancelled plan ends on its date (SOLAR-328, 0144). History is deleted that
+// day (SOLAR-495, 0188). days: history the first plant held, counted when queued.
+export const winback = (w: { from: Plan; plant?: string; days?: number; price?: Price }) =>
   make(`Your ${PLAN_NAME[w.from]} plan has ended`, {
     title: `Your ${PLAN_NAME[w.from]} plan has ended`,
     parts: [
       { box: {
-        hero: w.days && w.plant ? lost(`Deleted on ${w.keepUntil}`, dayCount(w.days), `of history at ${w.plant}`) : undefined,
-        rows: [...(w.days && w.plant ? [] : [["History deleted on", w.keepUntil] as [string, string]]),
-          ["You see", "Today's readings"], ["Reports", "Stopped"]],
+        hero: w.days && w.plant ? lost("Deleted from today", dayCount(w.days), `of history at ${w.plant}`) : undefined,
+        rows: [["You see", "Today's readings"], ["Reports", "Stopped"]],
       } },
-      ...(w.price ? [{ lead: keepOn(w.price, "your history") }] : []),
+      ...(w.price ? [{ lead: keepOn(w.price, "everything") }] : []),
       { button: { label: "See plans", href: PLANS } },
       ...(w.price ? [{ small: keepSmall(w.price) }] : []),
     ],
     footer: [HELP],
+  });
+
+// Up to 3 days before a cancelled plan ends (SOLAR-495, 0188), laid out as the free week's
+// "ends soon": that day the history and any stopped plants are deleted. No plant names, as
+// the cancel email. days: history the first plant holds. No Keep button (SOLAR-412).
+export const cancelEndsSoon = (c: { from: Plan; on: string; days?: number }) =>
+  make(`${PLAN_NAME[c.from]} ends on ${c.on}`, {
+    title: `${PLAN_NAME[c.from]} ends on ${c.on}`,
+    parts: [
+      { box: {
+        hero: c.days ? lost(`Deleted on ${c.on}`, dayCount(c.days), "of history") : undefined,
+        rows: [[`From ${c.on}`, "Today's readings"], ["Plants updating", "1"], ["Reports", "Stop"]],
+      } },
+      { lead: `To keep everything, tap Keep ${PLAN_NAME[c.from]} in Billing before ${c.on}.` },
+      SEE_PLAN,
+    ],
+    footer: BILL_FOOTER,
   });
 
 // 3 days before plants are deleted (after a downgrade, cancel or failed payment). plan:

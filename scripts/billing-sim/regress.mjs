@@ -384,6 +384,44 @@ const CASES = [
     if (await K.active(u) !== 1 || await K.paused(u, P(1))) bad.push('first plant not the one kept');
     return bad;
   } },
+  // ---- SOLAR-495 (0188): a cancel deletes on its end date; a failed payment keeps 30 days ----
+  { id: 'E495a', title: 'Home with 2 plants cancels: warned 3 days before; on the end date 1 stays, the other is deleted, no 30 days kept', async run(K) {
+    const bad = [], u = await K.user('home');
+    await K.link(u, [{ id: P(1) }, { id: P(2) }]);
+    const c = await K.as(u, `select public.api_billing_change('free', null)`); if (!c.ok) return ['cancel refused: ' + c.err];
+    const end = (await K.row(u)).next_billing_date;
+    const mail = await K.db.json(`select data from public.email_queue where user_id = '${u}' and kind = 'bill_change' order by id desc limit 1`);
+    if (mail?.deleteOn !== end) bad.push(`cancel email deletes on ${mail?.deleteOn}, not the end date ${end}`);
+    const ls = await K.as(u, `select coalesce(jsonb_agg(p), '[]') from public.api_link_status() s, jsonb_array_elements(s.plants) p`);
+    const drop = (ls.v || []).find((p) => p.drop);
+    if (drop?.remove_on !== end) bad.push(`Billing dates the drop ${drop?.remove_on}, not ${end}`);
+    const d3 = addD(end, -3); await K.today(d3); await K.run(d3);
+    const soon = await K.db.json(`select data from public.email_queue where user_id = '${u}' and kind = 'bill_cancel_soon'`);
+    if (soon?.on !== end || soon?.from !== 'home') bad.push(`3-day email: ${JSON.stringify(soon)}`);
+    await K.today(end); await K.run(end);
+    const r = await K.row(u);
+    if (r.plan !== 'free') bad.push('not on Free');
+    if (r.keep_until !== null) bad.push(`keep_until ${r.keep_until}: history kept after a cancel`);
+    if (r.remove_on !== null || (r.plants_to_remove || []).length) bad.push(`still booked: ${r.plants_to_remove} on ${r.remove_on}`);
+    const left = await K.db.json(`select coalesce(jsonb_agg(plant_id), '[]') from public.plant_users where user_id = '${u}'`);
+    if (left.length !== 1 || left[0] !== P(1)) bad.push(`plants left: ${JSON.stringify(left)}`);
+    const wb = await K.db.json(`select data from public.email_queue where user_id = '${u}' and kind = 'winback'`);
+    if (!wb || 'keepUntil' in wb || !('days' in wb)) bad.push(`plan-ended email: ${JSON.stringify(wb)}`);
+    return bad;
+  } },
+  { id: 'E495b', title: 'a failed payment\'s move to Free still keeps 30 days: keep_until and the stopped plant\'s delete date', async run(K) {
+    const bad = [], u = await K.user('home', { card: false });
+    await K.link(u, [{ id: P(1) }, { id: P(2) }]);
+    const d = (await K.row(u)).next_billing_date;
+    let d8;
+    for (const k of [0, 1, 3, 7, 8]) { d8 = addD(d, k); await K.today(d8); const x = await K.run(d8); if (!x.ok) bad.push(`run ${d8}: ${x.err}`); }
+    const r = await K.row(u);
+    if (r.plan !== 'free') return [...bad, 'not on Free'];
+    if (r.keep_until !== addD(d8, 30)) bad.push(`keep_until ${r.keep_until}, not ${addD(d8, 30)}`);
+    if (r.remove_on !== addD(d8, 30) || !(r.plants_to_remove || []).includes(P(2))) bad.push(`stopped plant: ${r.plants_to_remove} on ${r.remove_on}`);
+    if (await K.db.json(`select to_jsonb(count(*)) from public.email_queue where user_id = '${u}' and kind in ('winback', 'bill_cancel_soon')`) !== 0) bad.push('cancel emails sent for a failed payment');
+    return bad;
+  } },
   // ---- SOLAR-264 second pass: the daily run, refund events, paid plants that do not start ----
   { id: 'A1', title: 'a renewal the run handed out but never reported: offered again with its reference, not failed', async run(K) {
     const bad = [], u = await K.user('home');
