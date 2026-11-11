@@ -1154,16 +1154,16 @@ const TABS = [
   { id: 'inverters', label: 'Equipment' },
   { id: 'system', label: 'Plant settings' },
 ];
-// The Settings area's pages (SOLAR-250), reached from the account menu rather than the page
-// list: the phone's menu list, Account, Billing and Adjust plan. All of them are the
+// The Settings area's pages (SOLAR-250, SOLAR-513), reached from the account menu rather than the page
+// list: the phone's menu list, Account, Notifications, Plants, Billing and Adjust plan. All of them are the
 // account's; the plant's own settings are a page in the list ('system').
-const SETTINGS_PAGES = ['prefs', 'account', 'billing', 'plans'];
+const SETTINGS_PAGES = ['prefs', 'account', 'notifications', 'plants', 'billing', 'plans'];
 const isSettings = (id) => SETTINGS_PAGES.includes(id);
 const pageOk = (tabs, id) => isSettings(id) || tabs.some(t => t.id === id);
 // A section a link or a button opens, and the page that holds it. The plant's fields are
 // one section since SOLAR-250, so the old ids land on it.
 const SECTION_ALIAS = { tariff: 'system', battery: 'system', plant: 'system' };
-const SECTION_PAGE = { connection: 'billing', system: 'system', steps: 'system', download: 'account', notifications: 'account', plan: 'billing', payments: 'billing', plants: 'billing', cancel: 'billing' };
+const SECTION_PAGE = { connection: 'plants', system: 'system', steps: 'system', download: 'account', notifications: 'notifications', plan: 'billing', payments: 'billing', plants: 'plants', cancel: 'billing' };
 // An email's ?section= (logins is the old name for Plants) → the section it opens, in App and Setup.
 const URL_SECTION = { logins: 'connection', notifications: 'notifications', plan: 'plan', payments: 'payments', cancel: 'cancel', system: 'system' };
 // A saved or linked Battery page opens Equipment, where the packs now are; the plant's
@@ -1385,7 +1385,7 @@ function Setup({ links }) {
   // Every plant on a working login switched off: turning one on comes first, adding one second.
   const plantsOff = !relink && links.accounts.some(a => a.status !== 'disabled' && (a.plants || []).length > 0);
   const [flash, setFlash] = useState(null);
-  const turnOn = () => { window.track('setup_turn_on_done'); setConnecting(false); setFlash('connection'); setTab('billing'); toTop(); };
+  const turnOn = () => { window.track('setup_turn_on_done'); setConnecting(false); setFlash('connection'); setTab('plants'); toTop(); };
   const connectBtn = (cls, onClick = connect) => (
     <button type="button" className={(plantsOff ? 'ghost-btn' : 'save-btn') + ' setup-btn ' + cls} onClick={onClick} aria-label="Add plant"><Icon id="plug" /><span>Add plant</span></button>
   );
@@ -1627,7 +1627,7 @@ function App({ links }) {
       // Account on the logins, as the in-app Reconnect does.
       const url = new URL(location.href);
       const linked = Number(url.searchParams.get('plant'));
-      // A report or alert footer adds section=notifications: open Account on the email switches.
+      // A report or alert footer adds section=notifications: open Notifications.
       // A payment email or Paystack's return adds section=plan: Billing. Update card adds section=payments.
       // An email's Add your plant (?add=plant, link.jsx): Plants, where the section opens Add plant.
       const section = window.addAsked() ? 'connection'

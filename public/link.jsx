@@ -588,7 +588,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
             <window.PasswordInput id="ss-pass" className="input" value={password} onChange={(v) => { setPassword(v); edited('ss-pass'); }} aria={invalid('ss-pass')} />
           </div>
         </div>
-        {!compact && <div className="field-note link-note">Disconnect any time in Billing.</div>}
+        {!compact && <div className="field-note link-note">Disconnect any time in Plants.</div>}
       </>)}
       <div className="conn-form-actions link-actions">
         {noPlants
