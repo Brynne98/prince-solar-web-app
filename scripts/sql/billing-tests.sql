@@ -792,10 +792,10 @@ begin
   select * into b from private.billing where user_id = u;
   perform pg_temp.eq('paid year: cancel stops the second plant', private.billing_drops(b), '{9000602}'::bigint[]);
   perform pg_temp.eq('paid year: Home''s room holds for starts', private.billing_next_room(b), null::int);
-  perform pg_temp.eq('paid year: deleted 30 days after the year ends',
-    (select (p->>'remove_on')::date from public.api_link_status() s, jsonb_array_elements(s.plants) p where (p->>'plant_id')::bigint = 9000602), date '2027-12-31');
+  perform pg_temp.eq('paid year: deleted the day the year ends (0188)',
+    (select (p->>'remove_on')::date from public.api_link_status() s, jsonb_array_elements(s.plants) p where (p->>'plant_id')::bigint = 9000602), date '2027-12-01');
   perform pg_temp.eq('paid year: email deletion date',
-    (select (data->>'deleteOn')::date from public.email_queue where user_id = u and kind = 'bill_change'), date '2027-12-31');
+    (select (data->>'deleteOn')::date from public.email_queue where user_id = u and kind = 'bill_change'), date '2027-12-01');
   perform public.api_billing_keep_set('{9000602}');
   select * into b from private.billing where user_id = u;
   perform pg_temp.eq('paid year: the ticked plant stays', private.billing_drops(b), '{9000601}'::bigint[]);

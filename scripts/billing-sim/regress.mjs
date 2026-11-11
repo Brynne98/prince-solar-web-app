@@ -1054,7 +1054,10 @@ const CASES = [
     list = await due();
     if (list.includes(b.v.reference)) bad.push('listed again after Paystack took the refund');
     const st = await K.as(u, `select public.api_billing_status()`);
-    if ((st.v.payments || []).length !== 2) bad.push(`${(st.v.payments || []).length} payments listed, want the start and the upgrade`);
+    // 0184: the refunded payment stays listed, with a status
+    const pay = st.v.payments || [];
+    if (pay.length !== 3) bad.push(`${pay.length} payments listed, want the start, the upgrade and the refunded one`);
+    if (pay.filter(p => p.status === 'refunded').length !== 1) bad.push(`statuses ${pay.map(p => p.status).join(', ')}, want one refunded`);
     return bad;
   } },
   { id: 'RF4', title: 'Paystack\'s refund event before our refund call: the refund email still goes, once', async run(K) {
@@ -1115,7 +1118,7 @@ const CASES = [
     if ((await K.row(u)).plan !== 'free') bad.push('not on Free on day 8');
     return bad;
   } },
-  { id: 'RF3', title: 'a hand refund of R40 on a renewal: R40 recorded, off the payment list, the plan stays', async run(K) {
+  { id: 'RF3', title: 'a hand refund of R40 on a renewal: R40 recorded, listed as partly refunded, the plan stays', async run(K) {
     const bad = [], u = await K.user('home');
     const start = await K.db.json(`select to_jsonb(reference) from private.billing_charges where user_id = '${u}' and kind = 'start'`);
     await K.db.t(`select to_jsonb(public.billing_charge_refund_event('${start}', 'processed', null, 4000, 'rf_1'))`);
@@ -1123,7 +1126,9 @@ const CASES = [
     const c = await K.charge(start);
     if (c.refunded_cents !== 4000 || c.refund_status !== 'done') bad.push(`recorded ${c.refunded_cents} cents, ${c.refund_status}`);
     const st = await K.as(u, `select public.api_billing_status()`);
-    if ((st.v.payments || []).length) bad.push('refunded payment still listed');
+    // 0184: the payment stays listed, with a status
+    const pay = st.v.payments || [];
+    if (pay.length !== 1 || pay[0].status !== 'part_refunded') bad.push(`payments ${JSON.stringify(pay.map(p => p.status))}, want one part_refunded`);
     if (st.v.plan !== 'home' || st.v.state !== 'active') bad.push(`plan became ${st.v.plan} ${st.v.state}`);
     return bad;
   } },
