@@ -2407,7 +2407,8 @@ function CancelPlanDialog({ b, links, busy, onConfirm, onCancel }) {
   const { billDay } = window.billingFmt;
   // a paid switch to yearly runs its year first (SOLAR-457)
   const day = b.prepaidOn ? longDay : billDay;
-  const ends = day(endDay(b)), gone = day(window.shiftDate(endDay(b), 30));
+  // history and stopped plants go on the end date (SOLAR-495, 0188)
+  const ends = day(endDay(b)), gone = ends;
   const { keep, stop } = cancelPlants(links);
   const offer = cancelOffer(b);
   return (

@@ -18,7 +18,7 @@ import type { Email } from "../supabase/functions/_shared/email.ts";
 const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
-  accountDeleted, cardChanged, cardExpiring, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEnded, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, offerEnds, renewalNotice, winback, needAHand,
+  accountDeleted, cardChanged, cardExpiring, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEnded, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, offerEnds, renewalNotice, winback, cancelEndsSoon, needAHand,
   passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, planKept, plantEvent, loginEvent, plantsRemovalSoon, planSwitched, planUpgraded,
   renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
@@ -117,15 +117,16 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "free-week-setup": [FROM_HELLO, freeWeekSetup(["rate", "size", "reserve", "panels"])],
   "free-week-setup-some-done": [FROM_HELLO, freeWeekSetup(["size", "panels"])],
   "free-week-setup-no-battery": [FROM_HELLO, freeWeekSetup(["panels"], undefined, false)],
-  "winback": [FROM_HELLO, winback({ from: "home", keepUntil: "3 Jan 2027", plant: "Home", days: 94, price: { plan: "home", now: 49, list: 99 } })],
+  "winback": [FROM_HELLO, winback({ from: "home", plant: "Home", days: 94, price: { plan: "home", now: 49, list: 99 } })],
+  "billing-cancel-ends-soon": [FROM_BILLING, cancelEndsSoon({ from: "home", on: "11 Dec", days: 94 })],
   "need-a-hand": [FROM_HELLO, needAHand()],
   "billing-switched": [FROM_BILLING, planSwitched({ plan: "home", period: "yearly", amount: 990, date: "1 Nov 2026", card: "Visa •••• 4081",
     reference: "psh_c1d481bc37294140ad0cd37e846a3077", startsOn: "1 Dec 2026", covers: "1 Dec 2026 to 30 Nov 2027", next: { amount: 990, date: "1 Dec 2027" } })],
   "billing-upgraded": [FROM_BILLING, planUpgraded({ from: "home", to: "family", period: "monthly", paidNow: 53, daysLeft: 16, card: "Visa •••• 4081", reference: "psh_8f7a9f9eb1454ec7abf4597c1990f074", next: { amount: 199, date: "1 Dec" } })],
   "billing-downgrade-booked": [FROM_BILLING, planChangeBooked({ from: "family", to: "home", fromPeriod: "monthly", on: "1 Dec", removePlants: ["Cabin", "Office"], keepPlants: ["Home", "Plot"], next: { amount: 99 }, days: 154 })],
-  "billing-cancel-booked-plants": [FROM_BILLING, planChangeBooked({ from: "home", to: "free", fromPeriod: "monthly", on: "11 Dec", removePlants: ["Office"], keepPlants: ["Grid-tied"], deleteOn: "10 Jan", history: { plant: "Grid-tied", days: 164, on: "10 Jan" } })],
-  "billing-cancel-booked-family": [FROM_BILLING, planChangeBooked({ from: "family", to: "free", fromPeriod: "monthly", on: "11 Dec", removePlants: ["Office", "Warehouse", "Shop", "Cabin"], keepPlants: ["Grid-tied"], deleteOn: "10 Jan", history: { plant: "Grid-tied", days: 164, on: "10 Jan" } })],
-  "billing-cancel-booked": [FROM_BILLING, planChangeBooked({ from: "home", to: "free", fromPeriod: "monthly", on: "1 Dec", removePlants: [], history: { plant: "Home", days: 58, on: "31 Dec" } })],
+  "billing-cancel-booked-plants": [FROM_BILLING, planChangeBooked({ from: "home", to: "free", fromPeriod: "monthly", on: "11 Dec", removePlants: ["Office"], keepPlants: ["Grid-tied"], deleteOn: "11 Dec", history: { plant: "Grid-tied", days: 164, on: "11 Dec" } })],
+  "billing-cancel-booked-family": [FROM_BILLING, planChangeBooked({ from: "family", to: "free", fromPeriod: "monthly", on: "11 Dec", removePlants: ["Office", "Warehouse", "Shop", "Cabin"], keepPlants: ["Grid-tied"], deleteOn: "11 Dec", history: { plant: "Grid-tied", days: 164, on: "11 Dec" } })],
+  "billing-cancel-booked": [FROM_BILLING, planChangeBooked({ from: "home", to: "free", fromPeriod: "monthly", on: "1 Dec", removePlants: [], history: { plant: "Home", days: 58, on: "1 Dec" } })],
   "billing-change-kept": [FROM_BILLING, planKept({ plan: "home", period: "monthly", next: { amount: 99, date: "1 Dec" }, undone: { to: "free" } })],
   "billing-switch-booked": [FROM_BILLING, planChangeBooked({ from: "home", to: "home", fromPeriod: "yearly", toPeriod: "monthly", on: "1 Dec", removePlants: [], next: { amount: 99 } })],
   "billing-failed-1": [FROM_BILLING, paymentFailed({ plan: "family", period: "monthly", amount: 199, card: "Visa •••• 4081", nextTry: "3 Dec", freeOn: "8 Dec", payUrl: PAY_URL, reference: "psh_eba118e34c1f46f3a9d31fa62a6cd20a" })],

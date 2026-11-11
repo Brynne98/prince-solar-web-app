@@ -513,7 +513,8 @@ function billNotice(n, act) {
       const cancel = n.nextPlan === 'free', on = billDay(n.on);
       return { icon: 'calendar', title: cancel ? `${plan} ends on ${on}` : n.nextPlan ? `You move to ${PLAN_NAME[n.nextPlan]} on ${on}`
           : n.nextPeriod ? `You switch to ${n.nextPeriod} on ${on}` : `Extra plants drop to ${n.nextExtraPlants} on ${on}`,
-        body: cancel ? `After that, on Free, ${FREE_PAID}` : '',
+        // a cancel deletes history on its end date; only a failed payment keeps 30 days (SOLAR-495)
+        body: cancel ? `After that, on Free, you see only today. Alerts stay on; reports stop.` : '',
         // the same undo as Billing's Plan section (bookedChange)
         button: n.nextPlan ? `Keep ${plan}` : n.nextPeriod ? `Stay ${n.period}` : `Keep ${5 + (n.extraPlants || 0)} plants`,   // Family's 5 plus the extras held (SOLAR-367, SOLAR-371)
         run: () => act.undo(n) };
