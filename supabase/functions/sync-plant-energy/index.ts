@@ -12,7 +12,7 @@
 //     and the Overview comparison arrows)
 import { db, denyUnlessServer, freeTrimmedPlants, markCursor, type PlantJob, plantsToPoll, rotateJobs, saveCallTally } from "../_shared/sunsynk.ts";
 import { fetchMonthRows, fetchYearRows } from "../_shared/plantfeed.ts";
-import { reportError, serve } from "../_shared/errors.ts";
+import { noteError, reportError, serve } from "../_shared/errors.ts";
 
 const DEFAULT_DAILY_MONTHS = 6;
 const MAX_YEARS_BACK = 10;
@@ -29,15 +29,22 @@ function localParts(tz: string, d = new Date()) {
   return { y, m, day };
 }
 
+/** The grid multiplier from q_grid_feed_scale. A failed lookup gives 1 and the error,
+ *  so the day rows are still written (SOLAR-522): on a new plant it times out while
+ *  the minute backfill writes, and the next daily run puts the right figure back. */
+export function gridScale(res: { data: unknown; error: { message: string } | null }) {
+  if (res.error) return { gridMul: 1, gridErr: `q_grid_feed_scale: ${res.error.message}` };
+  return { gridMul: Number(res.data ?? 1) || 1, gridErr: undefined };
+}
+
 async function syncPlant(job: PlantJob, dailyMonths: number, started: number) {
   const { plantId, account, timezone: tz } = job;
 
   // SunSynk counts grid import/export only on CT-bearing inverters (the slave has
   // no CT), while PV and load are already full-plant. Scale grid up so these rows
   // share the convention of the live grid tile and the arrows compare like for like.
-  const { data: gm, error: gmErr } = await db.rpc("q_grid_feed_scale", { p_plant: plantId });
-  if (gmErr) throw new Error(`q_grid_feed_scale: ${gmErr.message}`);
-  const gridMul = Number(gm ?? 1) || 1;
+  const { gridMul, gridErr } = gridScale(await db.rpc("q_grid_feed_scale", { p_plant: plantId }));
+  if (gridErr) noteError("grid_scale_failed", new Error(gridErr), { plant: plantId, hourly: true });
 
   const now = localParts(tz);
   // One stamp for the whole sweep. synced_at was absent from the upsert payload, so
@@ -105,10 +112,10 @@ async function syncPlant(job: PlantJob, dailyMonths: number, started: number) {
     if (error) throw new Error(`plant_energy upsert: ${error.message}`);
   }
 
-  return { plantId, gridMul, rows: upserts.length, years: synced.years, months: synced.months };
+  return { plantId, gridMul, ...(gridErr ? { gridErr } : {}), rows: upserts.length, years: synced.years, months: synced.months };
 }
 
-serve("sync-plant-energy", async (req) => {
+if (import.meta.main) serve("sync-plant-energy", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
   const started = Date.now();

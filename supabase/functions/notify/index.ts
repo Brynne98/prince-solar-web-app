@@ -264,6 +264,30 @@ async function historyPending(row: Row): Promise<boolean> {
   return (link != null && Date.now() - Date.parse(link.linked_at) < 600e3) || cfg?.backfill_next != null || (count ?? 0) > 0;
 }
 
+/** The 60-days email waits for the plant's day totals (plant_energy). Without them
+ *  it counts only the 15 days agg_minute covers (SOLAR-522). Two hours after it was
+ *  queued it goes anyway. */
+export const HISTORY_HOLD_MS = 2 * 3600e3;
+export const historyHeld = (dayRows: number, queuedAt: string, now = Date.now()) =>
+  dayRows === 0 && now - Date.parse(queuedAt) < HISTORY_HOLD_MS;
+
+async function historyWaits(row: Row): Promise<boolean> {
+  const [{ count }, { data: q }] = await Promise.all([
+    db.from("plant_energy").select("plant_id", { count: "exact", head: true }).eq("plant_id", row.plant_id).eq("bucket", "day"),
+    db.from("email_queue").select("created_at").eq("id", row.id).maybeSingle(),
+  ]);
+  return !!q && historyHeld(count ?? 0, q.created_at);
+}
+
+// The runtime keeps the isolate for this after the response.
+const background = (p: Promise<unknown>) => (globalThis as any).EdgeRuntime?.waitUntil?.(p);
+
+/** Runs the day sync again for a plant whose link kick wrote no day totals. */
+const resync = (plant: number) => background(
+  db.functions.invoke(`sync-plant-energy?plant=${plant}`, { body: {} })
+    .then(({ error }) => { if (error) throw error; })
+    .catch((e) => noteError("history_resync_failed", e, { plant, hourly: true })));
+
 // ------------------------------------------------------------------- building
 
 type Row = {
@@ -585,6 +609,15 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
           done.push({ id: row.id, status: "queued", error: "waits for history", retry_s: 600, refund: true });
           continue;
         }
+        // Checked every 10 minutes; each check runs the day sync again (SOLAR-522).
+        if (row.kind === "history" && row.plant_id && await historyWaits(row)) {
+          if (dry) lines.push({ kind: row.kind, key: row.key, held: "waits for day totals" });
+          else {
+            resync(row.plant_id);
+            done.push({ id: row.id, status: "queued", error: "waits for day totals", retry_s: 600, refund: true });
+          }
+          continue;
+        }
         const mail = await build(row);
         if (!mail) {
           // History waits for the day sync (plant_energy) to land: try again hourly.
@@ -690,7 +723,7 @@ async function renderAll(plantId: number, today?: string) {
   return out;
 }
 
-serve("notify", async (req) => {
+if (import.meta.main) serve("notify", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
   const url = new URL(req.url);
