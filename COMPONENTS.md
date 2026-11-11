@@ -153,8 +153,8 @@ and the sign-in screens already call it; it drops refusals and offline).
 
 ## CSS
 
-Website pages outside the app (Terms, Privacy, PAIA, the help and compare pages of SOLAR-216)
-share `public/legal.css`. A new help or compare page copies one of them: header, lede, one
+Website pages outside the app (Terms, Privacy, PAIA, the help and feature pages of SOLAR-216 and SOLAR-490)
+share `public/legal.css`. A new help or feature page copies one of them: header, lede, one
 screenshot from `public/img/`, FAQ as `<details>` with matching ld+json, the `cta` section,
 footer, and `welcome-track.js` with its own `data-screen`. Add it to `sitemap.xml` and `help.html`.
 

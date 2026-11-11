@@ -1,0 +1,5 @@
+# Cloudflare Pages redirects. The compare pages went in SOLAR-490; their links land on the alternative page.
+/vs-sunsynk-connect /sunsynk-app-alternative 301
+/vs-solarman /sunsynk-app-alternative 301
+/vs-solarassistant /sunsynk-app-alternative 301
+/vs-pvbiz /sunsynk-app-alternative 301

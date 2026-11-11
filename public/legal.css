@@ -1,5 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap');
-/* Terms, Privacy, PAIA, help and compare pages, in the app's colours and type (index.html :root). */
+/* Terms, Privacy, PAIA, help and feature pages, in the app's colours and type (index.html :root). */
 :root {
   --bg: #0a0d12; --line: rgba(255,255,255,0.07);
   --text: #e7ecf2; --muted: #9aa5b3; --pv: #3ddc84;
@@ -28,7 +28,7 @@ table { width: 100%; border-collapse: collapse; margin: 12px 0; }
 th, td { text-align: left; vertical-align: top; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line); color: #c9d1db; }
 th { color: var(--text); }
 
-/* Help and compare pages (SOLAR-216): the same page, plus the showcase's buttons and gold. */
+/* Help and feature pages (SOLAR-216, SOLAR-490): the same page, plus the showcase's buttons and gold. */
 header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 h1 em, h2 em { font-style: normal; color: #f2c36b; }
 .lede { font-size: 19px; line-height: 1.55; color: var(--text); margin: 12px 0 0; }
@@ -37,8 +37,8 @@ h1 em, h2 em { font-style: normal; color: #f2c36b; }
 header .btn { min-height: 40px; padding: 0 16px; font-size: 15px; }
 figure { margin: 24px 0; }
 figure img { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--line); }
-figure.phone img { max-width: 300px; margin: 0 auto; }
-figure.phone figcaption { text-align: center; }
+figure.narrow img { max-width: 420px; margin: 0 auto; }
+figure.narrow figcaption { text-align: center; }
 figcaption { margin-top: 8px; font-size: 14px; color: var(--muted); }
 .vs td:not(:first-child), .vs th:not(:first-child) { width: 34%; }
 @media (max-width: 560px) {
