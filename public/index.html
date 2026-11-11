@@ -1343,6 +1343,11 @@
   /* A downgrade's pick of plants to keep (SOLAR-295): Billing's login groups and switches */
   .keep-picks { margin-top: var(--sp-lg); }
   .keep-note { margin-top: var(--sp-sm); color: var(--muted); font-size: var(--fs-md); }
+  /* a cancel's steps by date, in Billing's darker box (SOLAR-488) */
+  .cancel-steps { margin-top: var(--sp-lg); font-size: var(--fs-md); line-height: 1.5; color: var(--muted); }
+  .cancel-steps > div + div { margin-top: var(--sp-md); }
+  .cancel-steps b { display: block; font-weight: 600; color: var(--text); }
+  .pop-body .confirm-text.cancel-choose { margin-top: var(--sp-lg); font-weight: 600; color: var(--text); }
   @media (max-width: 599px) {
     .pop-dlg { width: calc(100vw - 24px); max-width: none; }
   }

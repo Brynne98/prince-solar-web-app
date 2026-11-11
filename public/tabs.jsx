@@ -2311,13 +2311,21 @@ const listPrice = (b, plan, period, extra = 0) => {
   const lp = b.listPrices?.[period] || {};
   return plan === 'free' ? 0 : plan === 'family' ? (lp.family ?? 0) + extra * (lp.extra ?? 0) : lp[plan];
 };
-const cancelText = (b) => {
-  const { billDay, rand, perUnit, offerName } = window.billingFmt;
-  // a paid switch to yearly runs its year first (SOLAR-457)
-  const text = `${b.prepaidOn ? `Your year is paid. It runs until ${longDay(endDay(b))}` : `It runs until ${billDay(b.nextDate)}`}. After that, on Free, readings are kept for 30 days, then you see only today. Alerts stay on; reports stop.`;
-  // an offer goes with the plan: coming back costs the list price
+// An offer goes with the plan: coming back costs the list price.
+const cancelOffer = (b) => {
+  const { rand, perUnit, offerName } = window.billingFmt;
   const list = b.offer?.held && listPrice(b, b.plan, b.period, b.extraPlants || 0);
-  return list > b.price ? `${text} Your ${offerName(b.offer)} of ${rand(b.price)} ${perUnit(b.period)} goes too; ${PLAN_NAME[b.plan]} costs ${rand(list)} if you come back.` : text;
+  return list > b.price ? `Your ${offerName(b.offer)} of ${rand(b.price)} ${perUnit(b.period)} goes too; ${PLAN_NAME[b.plan]} costs ${rand(list)} if you come back.` : null;
+};
+// The plants a cancel leaves, ranked as private.billing_drops ranks them with no pick:
+// collecting, not already up for removal, the first linked kept (SOLAR-488). A plant on a
+// switched-off login still counts, as on the server.
+const cancelPlants = (links) => {
+  const seen = new Set();
+  const on = (links?.accounts || []).flatMap(a => a.plants || [])
+    .filter(p => !p.paused && !(p.remove_on && !p.drop) && !seen.has(p.plant_id) && seen.add(p.plant_id))
+    .sort((x, y) => (x.linked_at < y.linked_at ? -1 : x.linked_at > y.linked_at ? 1 : x.plant_id - y.plant_id));
+  return { keep: on[0], stop: on.length - 1 };
 };
 
 // A downgrade's pick (SOLAR-295): the plants the new plan keeps, each with the switch and
@@ -2357,15 +2365,28 @@ function KeepPicker({ b, room, logins, title, text, action, cancelLabel = 'Cance
   );
 }
 
-// Cancel plan, from Billing or Adjust plan: with more than one plant it first picks the one
-// Free keeps. onConfirm(keep), keep undefined when there was nothing to pick.
-function CancelPlanDialog({ b, logins, busy, onConfirm, onCancel }) {
-  const title = <>Cancel {PLAN_NAME[b.plan]}?</>, keepLabel = 'Keep ' + PLAN_NAME[b.plan];
-  return logins.flatMap(a => a.plants).length > 1
-    ? <KeepPicker b={b} room={1} logins={logins} title={title} text={cancelText(b) + ' Pick the plant to keep.'}
-        action="Cancel plan" danger cancelLabel={keepLabel} busy={busy} onPick={onConfirm} onCancel={onCancel} />
-    : <ConfirmCard modal title={title} text={cancelText(b)} action="Cancel plan" cancelLabel={keepLabel}
-        busy={busy} onConfirm={() => onConfirm()} onCancel={onCancel} />;
+// Cancel plan, from Billing or Adjust plan. Nothing changes until the plan ends, so there is
+// no pick here (SOLAR-488): it says what happens when, and with more plants than Free keeps,
+// sends them to Plants, where each plant up for deletion has its Keep.
+function CancelPlanDialog({ b, links, busy, onConfirm, onCancel }) {
+  const { billDay } = window.billingFmt;
+  // a paid switch to yearly runs its year first (SOLAR-457)
+  const day = b.prepaidOn ? longDay : billDay;
+  const ends = day(endDay(b)), gone = day(window.shiftDate(endDay(b), 30));
+  const { keep, stop } = cancelPlants(links);
+  const offer = cancelOffer(b);
+  return (
+    <ConfirmCard modal title={<>Cancel {PLAN_NAME[b.plan]}?</>} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
+      busy={busy} onConfirm={() => onConfirm()} onCancel={onCancel}>
+      <div className="pay-review-box cancel-steps">
+        <div><b>Until {ends}</b>Nothing changes.</div>
+        <div><b>From {ends}</b>You’re on Free. {stop > 0 && `One plant keeps updating and the other${stop > 1 ? ` ${stop} stop` : ' stops'}. `}You see today’s readings only. Alerts stay on. Reports stop.</div>
+        <div><b>On {gone}</b>{stop > 0 ? `${stop > 1 ? `The ${stop} stopped plants` : 'The stopped plant'} and all history are deleted. ${stop > 1 ? 'They' : 'It'} can’t be brought back.` : 'Your history is deleted.'}</div>
+      </div>
+      {offer && <div className="confirm-text keep-note">{offer}</div>}
+      {stop > 0 && <div className="confirm-text cancel-choose">Choose the plant to keep under Plants in Billing before {ends}. If you don’t, we keep {window.plantLabel(keep)}.</div>}
+    </ConfirmCard>
+  );
 }
 
 function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt }) {
@@ -2483,7 +2504,7 @@ const shapeOf = (b) => ({
 });
 
 // Cancellation, last on Billing as on most billing pages: a paid plan not already ending.
-function CancelSection({ billing: b, reload, logins = [] }) {
+function CancelSection({ billing: b, reload, links }) {
   const { useState } = React;
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -2497,8 +2518,8 @@ function CancelSection({ billing: b, reload, logins = [] }) {
     <SettingsSection id="cancel" title="Cancellation">
       <SettingRow label="Cancel plan"
         action={<button type="button" className="danger-btn" disabled={busy || cancelling} onClick={() => setCancelling(true)}>Cancel</button>} />
-      {cancelling && <CancelPlanDialog b={b} logins={logins} busy={busy} onCancel={() => setCancelling(false)}
-        onConfirm={async (keep) => { setBusy(true); await bookPlan(b, 'free', null, reload, keep); setBusy(false); setCancelling(false); }} />}
+      {cancelling && <CancelPlanDialog b={b} links={links} busy={busy} onCancel={() => setCancelling(false)}
+        onConfirm={async () => { setBusy(true); await bookPlan(b, 'free', null, reload); setBusy(false); setCancelling(false); }} />}
     </SettingsSection>
   );
 }
@@ -2510,7 +2531,7 @@ function CancelSection({ billing: b, reload, logins = [] }) {
 // SOLAR-462: what each plan gives in one line, your plan marked by a pill, an offer's terms in
 // one band under the switch rather than on each card.
 const PLAN_GIVES = { free: '1 plant · today only', home: '2 plants · full history · reports', family: '5 plants · everything in Home' };
-function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null }) {
+function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant = null }) {
   const plants = logins.flatMap(a => a.plants);
   const { useState, useEffect } = React;
   const b = billing;
@@ -2614,8 +2635,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], forPlant = null 
           ))}
         </div>
         <p className="plan-foot">More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: b.plan, from: 'plans' })}>Email us</a>. Cancel any time.</p>
-        {cancelling && <CancelPlanDialog b={b} logins={logins} busy={!!busy} onCancel={() => setCancelling(false)}
-          onConfirm={(keep) => run(async () => { await bookPlan(b, 'free', null, reload, keep); setCancelling(false); })} />}
+        {cancelling && <CancelPlanDialog b={b} links={links} busy={!!busy} onCancel={() => setCancelling(false)}
+          onConfirm={() => run(async () => { await bookPlan(b, 'free', null, reload); setCancelling(false); })} />}
         {picking && (
           <KeepPicker b={b} room={planRoom(picking.plan)} logins={logins} busy={!!busy} action="Downgrade"
             onPick={(keep) => run(async () => { await bookPlan(b, picking.plan, picking.period, reload, keep); setPicking(null); })}
@@ -3601,7 +3622,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
                                               onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}
           {/* Adjust plan opens over Billing, not as a page of its own (SOLAR-292) */}
           {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadPlan} onBack={() => onPage('billing')} forPlant={forPlant}
-                                               logins={pickableLogins(links)} />}
+                                               logins={pickableLogins(links)} links={links} />}
         </div>
       </div>
     </SettingsFlash.Provider>
@@ -3671,7 +3692,7 @@ function BillingPage({ billing, reload, reloadPlan, links, onPage, freeWeekEndsA
       {links && <SunSynkConnectionSection onChanged={onSaved} links={links} billing={billing} reloadBilling={reload} onCollect={(id) => onCollect(id ?? null)} />}
       <PaymentsSection billing={billing} />
       <InvoicesSection billing={billing} />
-      <CancelSection billing={billing} reload={reloadPlan} logins={pickableLogins(links)} />
+      <CancelSection billing={billing} reload={reloadPlan} links={links} />
     </div>
   );
 }
