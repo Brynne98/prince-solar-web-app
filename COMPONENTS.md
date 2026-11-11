@@ -138,8 +138,8 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `SharePie` | A hollow pie of a day's parts with their sum in the middle and each part's kWh beside it. `dayFlows` gives the parts. `empty`: a note for a day with nothing to share; the bare ring keeps the card's shape (SOLAR-345). |
 | `DaysPanel` | The per-day bars with retry and the free-week lock. |
 | `TabSkeleton` | A whole tab while it loads. |
-| `ConfirmCard` | Any "are you sure". Inline or `modal`; `danger`, `busy`, `confirmDisabled`. Use instead of `confirm()`. |
-| `KeepPicker` | Choosing which plants to keep when a plan gets smaller. |
+| `ConfirmCard` | Any "are you sure". Inline or `modal`; `danger`, `busy`. Use instead of `confirm()`. |
+| `KeepCard` | Billing's "Keep on <plan>": tick boxes for the plants a booked cancel or smaller plan keeps (SOLAR-486). |
 | `PlanCard`, `BookedNotice` | A card in Billing's Plan section (title top left, control top right); a change booked for the billing date with its undo. |
 | `SettingsSection` | A Settings card with title, note and an `action`. |
 | `SettingRow` | One row in a Settings card: `label`, `note`, `action`, `lead`. |
