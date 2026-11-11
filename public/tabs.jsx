@@ -3441,8 +3441,21 @@ function DeleteAccountRow({ email, billing, onBilling }) {
   const blocked = !!billing && (owed || (billing.plan !== 'free' && !billing.comped && billing.nextPlan !== 'free'));
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // The word to type before the red button deletes (SOLAR-517). Focus starts in its field:
+  // the next thing to do, and Enter there with nothing typed deletes nothing.
+  const [word, setWord] = useState('');
+  const { bad, setBad, flag, edited } = window.useFieldErrors();
+  const asking = confirming && !blocked;
+  // After the pop-up's own timer, which takes focus back from whatever a mouse opened it onto.
+  React.useEffect(() => {
+    if (!asking) return;
+    const t = setTimeout(() => document.getElementById('del-word')?.focus({ preventScroll: true }));
+    return () => clearTimeout(t);
+  }, [asking]);
+  const close = () => { setConfirming(false); setWord(''); setBad({}); };
   const del = async () => {
-    setConfirming(false);
+    if (word.trim().toUpperCase() !== 'DELETE') return flag({ 'del-word': 'Doesn’t match' });
+    close();
     setBusy(true);
     // The account is gone; signing out here is what moves the screen to sign-in, once.
     // No reload after it: that blanked the page and drew sign-in again (SOLAR-98).
@@ -3472,7 +3485,16 @@ function DeleteAccountRow({ email, billing, onBilling }) {
       )}
       {!blocked && confirming && (
         <ConfirmCard modal title={<>Delete <b>{email || 'this account'}</b>?</>} text="Your plants’ history goes too, unless another account shares them. It cannot be undone."
-          action="Delete account" onConfirm={del} onCancel={() => setConfirming(false)} />
+          action="Delete account" onConfirm={del} onCancel={close}>
+          <div className="conn-form link-form">
+            <div className="field link-last">
+              <window.FieldLabel id="del-word" label="Type DELETE to confirm" error={bad['del-word']} />
+              <input id="del-word" className="input" type="text" autoComplete="off" autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+                     value={word} onChange={(e) => { setWord(e.target.value); edited('del-word'); }}
+                     onKeyDown={(e) => { if (e.key === 'Enter') del(); }} {...window.invalidProps('del-word', bad['del-word'])} />
+            </div>
+          </div>
+        </ConfirmCard>
       )}
     </SettingRow>
   );
