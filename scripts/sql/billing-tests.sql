@@ -775,6 +775,38 @@ begin
   perform pg_temp.eq('cancel keeps the ticked one', private.billing_drops(b), '{9000501,9000502,9000504}'::bigint[]);
   perform set_config('request.jwt.claims', '', true);
 end $$;
+-- A cancel in a paid year picks the same way (0186): Home with its year paid from 1 Dec.
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000e6', 'paidyear@t.test');
+insert into private.billing (user_id, plan, period, billing_day, next_billing_date, prepaid_on)
+  values ('00000000-0000-0000-0000-0000000000e6', 'home', 'monthly', 1, '2026-12-01', '2026-12-01');
+insert into public.plant_users (plant_id, user_id, linked_at) values
+  (9000601, '00000000-0000-0000-0000-0000000000e6', '2026-01-01'),
+  (9000602, '00000000-0000-0000-0000-0000000000e6', '2026-01-02');
+insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values ('00000000-0000-0000-0000-0000000000f6', '00000000-0000-0000-0000-0000000000e6', 'paidyear@login.test');
+update public.plant_users set account_id = '00000000-0000-0000-0000-0000000000f6' where user_id = '00000000-0000-0000-0000-0000000000e6';
+do $$
+declare b private.billing; u constant uuid := '00000000-0000-0000-0000-0000000000e6';
+begin
+  perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
+  perform public.api_billing_change('free');
+  select * into b from private.billing where user_id = u;
+  perform pg_temp.eq('paid year: cancel stops the second plant', private.billing_drops(b), '{9000602}'::bigint[]);
+  perform pg_temp.eq('paid year: Home''s room holds for starts', private.billing_next_room(b), null::int);
+  perform pg_temp.eq('paid year: deleted 30 days after the year ends',
+    (select (p->>'remove_on')::date from public.api_link_status() s, jsonb_array_elements(s.plants) p where (p->>'plant_id')::bigint = 9000602), date '2027-12-31');
+  perform pg_temp.eq('paid year: email deletion date',
+    (select (data->>'deleteOn')::date from public.email_queue where user_id = u and kind = 'bill_change'), date '2027-12-31');
+  perform public.api_billing_keep_set('{9000602}');
+  select * into b from private.billing where user_id = u;
+  perform pg_temp.eq('paid year: the ticked plant stays', private.billing_drops(b), '{9000601}'::bigint[]);
+  perform set_config('request.jwt.claims', '', true);
+  -- the year starts as paid: the pick waits for its end
+  perform public.billing_renew(u);
+  select * into b from private.billing where user_id = u;
+  perform pg_temp.eq('paid year: plan still Home', b.plan, 'home');
+  perform pg_temp.eq('paid year: pick kept over the start', private.billing_drops(b), '{9000601}'::bigint[]);
+  perform pg_temp.eq('paid year: both plants still collect', (select count(*)::int from public.plant_users where user_id = u and not paused), 2);
+end $$;
 select pg_temp.eq('keep set is for signed-in users', has_function_privilege('anon', 'public.api_billing_keep_set(bigint[])', 'execute'), false);
 
 \set QUIET off
