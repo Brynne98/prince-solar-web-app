@@ -1340,13 +1340,13 @@
   .pop-x .ico { width: var(--icon-md); height: var(--icon-md); }
   .pop-x:disabled { opacity: .4; cursor: default; }
   .pop-x:hover { background: var(--panel); color: var(--text); }
-  /* Keep on <plan> (SOLAR-486): a tick box per plant while a smaller plan is booked */
-  .keep-row { display: flex; align-items: center; gap: var(--sp-md); min-height: 44px; font-size: var(--fs-md); cursor: pointer; }
-  .keep-row.off { color: var(--muted); }
+  /* Keep on <plan> (SOLAR-486): a tick box per plant while a smaller plan is booked, in Plants'
+     rows (.login-plant) with the box on the right (SOLAR-496) */
+  .keep-row { cursor: pointer; }
   .keep-row input { width: 20px; height: 20px; margin: 0; flex: none; accent-color: var(--accent); cursor: pointer; }
   .keep-row input:disabled { cursor: default; }
   .keep-count { margin-top: var(--sp-sm); }
-  @media (min-width: 901px) { .keep-row { min-height: 36px; } }
+  .keep-count.bad { color: var(--bad); }
   .keep-note { margin-top: var(--sp-sm); color: var(--muted); font-size: var(--fs-md); }
   /* a cancel's steps by date, in Billing's darker box (SOLAR-488) */
   .cancel-steps { margin-top: var(--sp-lg); font-size: var(--fs-md); line-height: 1.5; color: var(--muted); }

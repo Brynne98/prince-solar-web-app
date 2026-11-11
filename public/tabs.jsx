@@ -2331,20 +2331,29 @@ const andList = (names) => (names.length > 1 ? names.slice(0, -1).join(', ') + '
 
 // While a cancel or a smaller plan that stops plants is booked (SOLAR-486): the plants it
 // keeps, ticked, in a card above Plants. Ticked: the plants not dropping. A full set saves at
-// once (api_billing_keep_set, 0186); with room for one, a tick swaps it in. Plants keeps its
-// switches meanwhile.
-function KeepCard({ b, links, reload }) {
+// once (api_billing_keep_set, 0186); with room for one, a tick moves to the plant tapped. Plants
+// keeps its switches meanwhile. Laid out as Plants (SOLAR-496): each login's plants under its
+// email, the box on the right; a plant that can't be kept is greyed with its state. Past the
+// room, a tick asks to untick one or upgrade, as Plants' "Your plan is full"; the last tick stays.
+function KeepCard({ b, links, reload, onUpgrade }) {
   const { useState, useEffect } = React;
-  const plants = pickableLogins(links).flatMap(a => a.plants);
+  const can = (p) => !p.paused && (!p.remove_on || p.drop);
+  // every plant once, under the first login that lists it
+  const seen = new Set();
+  const logins = (links?.accounts || []).filter(a => a.status !== 'disabled').map(a => ({ ...a,
+    plants: (a.plants || []).filter(p => !seen.has(p.plant_id) && seen.add(p.plant_id)) })).filter(a => a.plants.length);
+  const plants = logins.flatMap(a => a.plants).filter(can);
   const drops = plants.filter(p => p.drop);
   const kept = plants.filter(p => !p.drop).map(p => p.plant_id);
   const [picked, setPicked] = useState(kept);
   const [busy, setBusy] = useState(false);
+  const [say, setSay] = useState(null); // 'last': the last tick can't go; 'full': past the room
   // a fresh list (a save, or a plant turned on or off) resets the ticks
   useEffect(() => setPicked(kept), [kept.join()]);
   if (!b || !drops.length) return null;
   const { billDay } = window.billingFmt;
   const room = kept.length;
+  const plan = PLAN_NAME[b.nextPlan || b.plan];
   const day = b.prepaidOn ? longDay : billDay;
   const stops = day(endDay(b)), gone = day(drops[0].remove_on);
   const save = async (ids) => {
@@ -2356,26 +2365,47 @@ function KeepCard({ b, links, reload }) {
     setBusy(false);
   };
   const tick = (id) => {
-    if (picked.includes(id)) { if (room > 1) setPicked(picked.filter(x => x !== id)); return; }
-    const next = room === 1 ? [id] : [...picked, id];
+    setSay(null);
+    if (picked.includes(id)) {
+      if (picked.length === 1) setSay('last'); else setPicked(picked.filter(x => x !== id));
+      return;
+    }
+    if (room === 1) return save([id]);
+    if (picked.length >= room) return setSay('full');
+    const next = [...picked, id];
     if (next.length === room) save(next); else setPicked(next);
   };
   const left = room - picked.length;
   return (
-    <SettingsSection id="keep" title={`Keep on ${PLAN_NAME[b.nextPlan || b.plan]}`}
+    <SettingsSection id="keep" title={`Keep on ${plan}`}
       note={`Tick ${room === 1 ? 'the plant' : room + ' plants'} to keep. ` + (stops === gone ? `On ${stops} the others stop and their history is deleted.` : `On ${stops} the others stop. Their history is deleted on ${gone}.`)}>
-      <div className="keep-list">
-        {plants.map(p => {
-          const on = picked.includes(p.plant_id);
-          return (
-            <label key={p.plant_id} className={'keep-row' + (on ? '' : ' off')}>
-              <input type="checkbox" checked={on} disabled={busy || (!on && room > 1 && left <= 0)} onChange={() => tick(p.plant_id)} />{/* reuse-check: allow: tick boxes, not switches, for the keep pick (SOLAR-486) */}
-              <span>{window.plantLabel(p)}</span>
-            </label>
-          );
-        })}
-      </div>
-      {room > 1 && <div className="field-note keep-count">{picked.length} of {room} ticked.{left > 0 && ` Tick ${left} more.`}</div>}
+      {logins.map(acc => (
+        <div key={acc.account_id} className="login-grp plant-logins">
+          <div className="login-line"><div className="login-who"><span className="login-email">{acc.kind === 'share' ? 'Shared plants' : acc.sunsynk_username}</span></div></div>
+          {acc.plants.map(p => {
+            const name = window.plantLabel(p);
+            if (!can(p)) return (
+              <PlantLine key={p.plant_id} name={name} off>
+                <span className="conn-status plant-state">{p.paused ? 'Stopped' : 'Deleted ' + billDay(p.remove_on)}</span>
+              </PlantLine>
+            );
+            const on = picked.includes(p.plant_id);
+            return (
+              <label key={p.plant_id} className={'login-plant keep-row' + (on ? '' : ' off')}>
+                <span className="conn-user plant-nm">{name}</span>
+                <input type="checkbox" checked={on} disabled={busy} aria-label={'Keep ' + name} onChange={() => tick(p.plant_id)} />{/* reuse-check: allow: tick boxes, not switches, for the keep pick (SOLAR-486) */}
+              </label>
+            );
+          })}
+        </div>
+      ))}
+      {say === 'last' ? <div className="field-note keep-count bad">At least one plant needs to be selected.</div>
+        : room > 1 && <div className="field-note keep-count">{picked.length} of {room} ticked.{left > 0 && ` Tick ${left} more.`}</div>}
+      {say === 'full' && (
+        <ConfirmCard modal danger={false} label={`${plan} keeps ${room} plants`} title={`${plan} keeps ${room} plants`}
+          text="Untick one first, or upgrade." action={onUpgrade && 'Upgrade'} onCancel={() => setSay(null)}
+          onConfirm={() => { setSay(null); window.track('keep_upgrade_done', { plan: b.nextPlan || b.plan, room }); onUpgrade(); }} />
+      )}
     </SettingsSection>
   );
 }
@@ -3727,7 +3757,7 @@ function BillingPage({ billing, reload, reloadPlan, links, onPage, freeWeekEndsA
     <div className="settings-page">
       <div className="page-head"><h1>Billing</h1></div>
       <PlanSection billing={billing} reload={reloadPlan} onAdjust={() => onCollect(null)} freeWeekEndsAt={freeWeekEndsAt} />
-      {links && <KeepCard b={billing} links={links} reload={reload} />}
+      {links && <KeepCard b={billing} links={links} reload={reload} onUpgrade={() => onCollect(null)} />}
       {links && <SunSynkConnectionSection onChanged={onSaved} links={links} billing={billing} reloadBilling={reload} onCollect={(id) => onCollect(id ?? null)} />}
       <PaymentsSection billing={billing} />
       <InvoicesSection billing={billing} />
