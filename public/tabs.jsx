@@ -2578,9 +2578,12 @@ function BookedNotice({ booked, busy, onUndo, manage, onManage }) {
 // the plan loads they draw as outlines in their places rather than popping in under it.
 const BILL_SHAPE = 'synsynk.billShape';
 const billShape = () => { try { return JSON.parse(localStorage.getItem(BILL_SHAPE)) || {}; } catch (e) { return {}; } };
+// On Free the card stays saved for a later upgrade, which pays without the card page (SOLAR-504).
+const payNote = (b) => b.plan === 'free' ? 'Kept for upgrades. Not charged on Free.'
+  : b.nextPlan !== 'free' ? 'Your card pays for renewals and upgrades.' : null;
 const shapeOf = (b) => ({
   pay: !b.comped && !(b.plan === 'free' && !b.card), card: !!b.card,
-  payNote: b.plan !== 'free' && b.nextPlan !== 'free', update: b.plan !== 'free' && b.state !== 'past_due',
+  payNote: payNote(b), update: b.plan !== 'free' && b.state !== 'past_due',
   inv: b.comped ? 0 : (b.payments || []).length,
   cancel: !(b.comped || b.plan === 'free' || b.nextPlan === 'free'),
 });
@@ -2770,7 +2773,7 @@ function PaymentsSection({ billing }) {
   if (!b) {
     const s = billShape();
     return s.pay ? (
-      <SettingsSection id="payments" title="Payment" note={s.payNote ? 'Your card pays for renewals and upgrades.' : null}>
+      <SettingsSection id="payments" title="Payment" note={typeof s.payNote === 'string' ? s.payNote : null}>
         {s.card ? (
           <SettingRow hidden lead={<window.Skeleton w={46} h={30} r={5} style={{ flex: 'none' }} />}
             label={<window.SkelLine w={150} />} note={<window.SkelLine w={90} />} action={s.update && <window.Skeleton w={84} h={34} r={9} />} />
@@ -2781,7 +2784,7 @@ function PaymentsSection({ billing }) {
   if (b.comped || (b.plan === 'free' && !b.card)) return null;
   const c = b.card;
   return (
-    <SettingsSection id="payments" title="Payment" note={b.plan !== 'free' && b.nextPlan !== 'free' ? 'Your card pays for renewals and upgrades.' : null}>
+    <SettingsSection id="payments" title="Payment" note={payNote(b)}>
       {c ? (
         // past due: Pay with another card in Plan changes it and pays
         <SettingRow lead={<CardLogo brand={c.brand} />} label={<>{c.name} •••• <span className="mono">{c.last4}</span></>}
