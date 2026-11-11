@@ -231,7 +231,7 @@ window.addEventListener('pageshow', (e) => { try { if (e.persisted && sessionSto
 // unless keep (a form: a stray tap must not throw away what was typed). Closing hands focus
 // back to what had it, e.g. the plant's switch. size: 'wide' for the plan cards, 'mid' for
 // the lock's plans. busy: a change is on its way, so nothing closes it until it lands.
-// With onClose it has an X top right, and on a phone it is a sheet from the bottom (SOLAR-516).
+// With onClose it has an X top right (SOLAR-516).
 function Dialog({ label, onClose, keep = false, busy = false, size = null, children }) {
   const ref = React.useRef(null);
   // What had focus, read at first render before a child takes it, and whether it showed a ring
@@ -267,9 +267,8 @@ function Dialog({ label, onClose, keep = false, busy = false, size = null, child
             onCancel={(e) => { e.preventDefault(); if (!busy && e.target === ref.current) onClose(); }}   // only its own Escape, not one from a pop-up opened over it
             onClick={(e) => { if (!keep && !busy && e.target === ref.current) onClose(); }}>
       <div className="pop-body">{children}</div>
-      {/* Only a pop-up that can close (SOLAR-516): the grip a phone's sheet shows, and the X.
-          After the body, so first focus stays where each pop-up puts it; CSS draws them on top. */}
-      {onClose && <div className="sheet-grip" aria-hidden="true" />}
+      {/* Only a pop-up that can close has the X (SOLAR-516). After the body, so first focus
+          stays where each pop-up puts it; CSS draws it on top. */}
       {onClose && <button type="button" className="pop-x" aria-label="Close" disabled={busy} onClick={onClose}><Icon id="close" /></button>}
     </dialog>
   );
