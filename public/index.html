@@ -1121,7 +1121,7 @@
   .sset-body > .sset-row:last-child { padding-bottom: 0; }
   /* no margin at a card's top or bottom edge, so the space above and below its content is the padding alone (SOLAR-284) */
   .sset-body > :first-child:not(dialog), .dl-field > :first-child { margin-top: 0; }
-  .sset-body > :last-child:not(dialog), .sset-body > :last-child > :last-child:not(dialog) { margin-bottom: 0; }   /* a pop-up keeps margin: auto, which centres it (SOLAR-291) */
+  .sset-body > :last-child:not(dialog), .sset-body > :last-child:not(dialog) > :last-child:not(dialog) { margin-bottom: 0; }   /* a pop-up keeps margin: auto, which centres it (SOLAR-291), and its X keeps its own (SOLAR-521) */
   /* the fields are First steps' own (SOLAR-170): one field on the right, or the sum box under the name */
   .sset-one { flex-direction: column; align-items: flex-end; gap: var(--sp-xs); }
   .sset-one .fs-in { width: 300px; }   /* one width for every field in Settings */
