@@ -140,6 +140,8 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `TabSkeleton` | A whole tab while it loads. |
 | `ConfirmCard` | Any "are you sure". Inline or `modal`; `danger`, `busy`. Use instead of `confirm()`. |
 | `KeepPicker` | The plants a cancel or smaller plan keeps, grouped by login: circles for 1, else tick boxes; too-many and last-tick lines (SOLAR-496). In the cancel and downgrade pop-ups and in `KeepDialog`. |
+| `billingFmt.lossLine(links, cancel)` | What a booked cancel or smaller plan deletes, in one line: which plants stay, which go, and for a cancel all history. Billing's Plan card, the bell and the banner all use it (link.jsx, SOLAR-505). `billingFmt.andList(names)`: "A, B and C". `pickableLogins(links)`: the plants such a change can keep. |
+| `PayFirstDialog` | In place of the cancel and downgrade pop-ups while a payment has failed: "Pay the failed payment first", with Pay with another card (SOLAR-497). |
 | `KeepDialog` | Billing's Choose plant(s) pop-up: changes a booked cancel's or smaller plan's pick (api_billing_keep_set) (SOLAR-496). |
 | `PlanCard`, `BookedNotice` | A card in Billing's Plan section (title top left, control top right); a change booked for the billing date with its undo. |
 | `SettingsSection` | A Settings card with title, note and an `action`. |

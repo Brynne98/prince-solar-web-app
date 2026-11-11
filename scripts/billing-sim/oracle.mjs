@@ -147,6 +147,8 @@ export class Oracle {
     if (this.comped) return { err: 'free of charge' };
     // a cancel already booked: a second one changes nothing (0176)
     if (this.nextPlan === 'free' && plan === 'free') return {};
+    // a failed payment: no cancel, smaller plan or period switch until it is paid (0189); the undo still works
+    if (this.state === 'past_due' && !(plan === this.plan && (period ?? this.period) === this.period)) return { err: 'pay the failed payment first' };
     // a paid year: only a cancel, which keeps the switch and ends the plan a year later (0175),
     // or its undo back to the switch (0176)
     if (this.prepaid !== null) {
@@ -194,6 +196,7 @@ export class Oracle {
   bookExtras(n) {
     if (this.plan !== 'family' || this.comped) return { err: 'extra plants are on Family only' };
     if (n < 0 || n > this.extra) return { err: 'pay to add extra plants' };
+    if (this.state === 'past_due' && n !== this.extra) return { err: 'pay the failed payment first' };
     if (this.nextPlan !== null && n !== this.extra) return { err: 'plan change' };
     const nextExtra = n === this.extra ? null : n;
     if (this.yearPaid({ nextPlan: this.nextPlan, nextPeriod: this.nextPeriod, nextExtra })) return { err: 'your year is paid' };

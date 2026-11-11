@@ -653,6 +653,11 @@ begin
     where (x->>'amount')::int = 99 and x->>'card' is null), 0);
   perform pg_temp.eq('no card: past due', (select state from private.billing where user_id = n), 'past_due');
   perform pg_temp.raises('past due cannot upgrade', format('select public.billing_charge_open(%L, %L)', n, 'family'), 'settle the failed payment first');
+  -- nor cancel, nor switch period (0189, SOLAR-497); the plan as it is books nothing and is allowed
+  perform pg_temp.raises('past due cannot cancel', format('select public.billing_book_change(%L, %L)', n, 'free'), 'pay the failed payment first');
+  perform pg_temp.raises('past due cannot switch period', format('select public.billing_book_change(%L, %L, %L)', n, 'home', 'yearly'), 'pay the failed payment first');
+  perform public.billing_book_change(n, 'home', 'monthly');
+  perform pg_temp.eq('past due: nothing booked', (select coalesce(next_plan, '-') || coalesce(next_period, '-') from private.billing where user_id = n), '--');
 
   -- settle: pays the failed renewal with another card
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, past_due_since)
@@ -663,6 +668,9 @@ begin
   perform pg_temp.eq('settle amount', (o->>'amount')::int, 999);
   perform public.billing_charge_paid(o->>'reference', v_card);
   perform pg_temp.eq('settled: active', (select state || coalesce(past_due_since::text, '-') from private.billing where user_id = k), 'active-');
+  perform public.billing_book_change(k, 'free');
+  perform pg_temp.eq('settled: a cancel books again', (select next_plan from private.billing where user_id = k), 'free');
+  perform public.billing_book_change(k, 'home', 'yearly');
   perform pg_temp.eq('receipt', (select count(*)::int from public.email_queue where user_id = k and kind = 'bill_paid'), 1);
   perform pg_temp.raises('nothing left to settle', format('select public.billing_settle_open(%L)', k), 'nothing to pay');
 
@@ -792,10 +800,10 @@ begin
   select * into b from private.billing where user_id = u;
   perform pg_temp.eq('paid year: cancel stops the second plant', private.billing_drops(b), '{9000602}'::bigint[]);
   perform pg_temp.eq('paid year: Home''s room holds for starts', private.billing_next_room(b), null::int);
-  perform pg_temp.eq('paid year: deleted 30 days after the year ends',
-    (select (p->>'remove_on')::date from public.api_link_status() s, jsonb_array_elements(s.plants) p where (p->>'plant_id')::bigint = 9000602), date '2027-12-31');
+  perform pg_temp.eq('paid year: deleted the day the year ends (0188)',
+    (select (p->>'remove_on')::date from public.api_link_status() s, jsonb_array_elements(s.plants) p where (p->>'plant_id')::bigint = 9000602), date '2027-12-01');
   perform pg_temp.eq('paid year: email deletion date',
-    (select (data->>'deleteOn')::date from public.email_queue where user_id = u and kind = 'bill_change'), date '2027-12-31');
+    (select (data->>'deleteOn')::date from public.email_queue where user_id = u and kind = 'bill_change'), date '2027-12-01');
   perform public.api_billing_keep_set('{9000602}');
   select * into b from private.billing where user_id = u;
   perform pg_temp.eq('paid year: the ticked plant stays', private.billing_drops(b), '{9000601}'::bigint[]);

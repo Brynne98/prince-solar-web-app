@@ -140,7 +140,31 @@ const offerCap = (o) => (o && !o.held && o.cap ? `${o.id === 'launch' ? 'Launch 
 // The list price struck out before an offer price; nothing when they're the same.
 const Was = ({ list, price }) => (list > price ? <s className="pw-was">{rand(list)}</s> : null);
 
-window.billingFmt = { rand, billDay, perUnit, offerName, offerLine, offerCap, Was };
+// "Office", "Office and Shop", "Office, Shop and Barn"
+const andList = (names) => (names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0] || '');
+// The plants a downgrade picks from, under their logins as Billing lists them: collecting
+// and not up for deletion, except those that stop on the billing date (drop), which can
+// still be picked. A plant two logins share shows under the first. Here, not in tabs.jsx,
+// so the header's notices can name them before tabs loads (SOLAR-505).
+const pickableLogins = (links) => {
+  const seen = new Set();
+  return (links?.accounts || []).filter(a => a.status !== 'disabled').map(a => ({ ...a,
+    plants: (a.plants || []).filter(p => !p.paused && (!p.remove_on || p.drop) && !seen.has(p.plant_id) && seen.add(p.plant_id)) }))
+    .filter(a => a.plants.length);
+};
+// What a booked cancel or smaller plan deletes on its date, said once in the same words on
+// Billing, in the bell and in the banner (SOLAR-505): which plants stay, which go. Up to two
+// are named; more are counted. A cancel takes all history too. '' when a smaller plan stops none.
+const lossLine = (links, cancel) => {
+  const plants = pickableLogins(links).flatMap(a => a.plants);
+  const kept = plants.filter(p => !p.drop).map(window.plantLabel), gone = plants.filter(p => p.drop).map(window.plantLabel);
+  if (!gone.length) return cancel ? 'All history is deleted then.' : '';
+  const stays = kept.length ? `${andList(kept)} ${kept.length > 1 ? 'stay' : 'stays'}. ` : '';
+  const what = gone.length > 2 ? `The other ${gone.length} plants` : andList(gone);
+  return stays + what + (cancel ? ' and all history are deleted then.' : ` and ${gone.length > 1 ? 'their' : 'its'} history are deleted then.`);
+};
+
+window.billingFmt = { rand, billDay, perUnit, offerName, offerLine, offerCap, Was, andList, lossLine };
 
 // Paystack (SOLAR-208, the billing function). A saved card is charged at once;
 // otherwise, or after the saved card is declined, Paystack's card page opens and
