@@ -3589,7 +3589,7 @@ function NotificationsSection({ userId, head }) {
   );
   return (
     <SettingsSection id="notifications" title="Notifications" head={head}
-                     note="Every alert stays in your Notifications list.">
+                     note="Every alert also stays under the bell.">
       {failed ? (
         <SettingRow label="Couldn’t load your notification settings" action={<button type="button" className="ghost-btn" onClick={load}>Try again</button>} />
       ) : (
@@ -3725,7 +3725,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
           {shown === 'billing' && <BillingPage payBanner={payBanner} billing={billing} reload={reloadPlan} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen}
                                               links={links} onAdjust={() => adjust('billing')} />}
           {/* Adjust plan opens over Billing or Plants, not as a page of its own (SOLAR-292) */}
-          {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadPlan} onBack={() => onPage(planFrom)} forPlant={forPlant}
+          {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadPlan} onBack={() => { onPage(planFrom); setPlanFrom('billing'); }} forPlant={forPlant}
                                                logins={pickableLogins(links)} links={links} />}
         </div>
       </div>
