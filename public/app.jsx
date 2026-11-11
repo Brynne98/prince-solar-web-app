@@ -429,8 +429,8 @@ function Sheet({ label, onClose, opener, className = '', children }) {
 
 // Phone: at most five slots. Settings opens from the account menu (SOLAR-224). More than
 // five pages (App's six, with Plant settings): the first four, then More, which opens a
-// sheet with the rest and, last, Settings (SOLAR-518), with the account menu's red dot.
-function PhoneBar({ tabs, tab, onTab, account }) {
+// sheet with the rest.
+function PhoneBar({ tabs, tab, onTab }) {
   const [more, setMore] = useState(false);
   const [moreShown, moreLeaving] = useExit(more);
   const split = tabs.length > 5;
@@ -447,21 +447,13 @@ function PhoneBar({ tabs, tab, onTab, account }) {
       <nav className="phonebar" aria-label="Pages">
         {bar.map(slot)}
         {split && (
-          <button type="button" className={'bar-more' + (rest.some(t => t.id === tab) || (account && account.active) ? ' on' : '')} aria-expanded={more} aria-haspopup="dialog"
+          <button type="button" className={'bar-more' + (rest.some(t => t.id === tab) ? ' on' : '')} aria-expanded={more} aria-haspopup="dialog"
                   onClick={() => setMore(m => !m)} disabled={!onTab}>
             <Icon id="more" /><span>More</span>
           </button>
         )}
       </nav>
-      {moreShown && <Sheet label="More pages" className={moreLeaving ? 'leaving' : ''} onClose={() => setMore(false)} opener=".phonebar .bar-more">
-        {rest.map(slot)}
-        {account && (
-          <button type="button" aria-current={account.active ? 'page' : undefined} onClick={() => { setMore(false); account.onSettings(); }}>
-            <Icon id="settings" /><span>Settings</span>
-            {account.alert && <span className="dot" aria-label="A login needs reconnecting" />}
-          </button>
-        )}
-      </Sheet>}
+      {moreShown && <Sheet label="More pages" className={moreLeaving ? 'leaving' : ''} onClose={() => setMore(false)} opener=".phonebar .bar-more">{rest.map(slot)}</Sheet>}
     </>
   );
 }
@@ -1274,7 +1266,7 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
           <main className="content" aria-busy={busy || undefined}>{steps && !isSettings(tab) && tab !== 'system' && steps('phone')}<PageBoundary key={tab}>{children}</PageBoundary></main>
         </div>
       </div>
-      <PhoneBar tabs={tabs} tab={tab} onTab={onTab} account={account} />
+      <PhoneBar tabs={tabs} tab={tab} onTab={onTab} />
       <SaveToast report={!!account} />
     </div>
   );
