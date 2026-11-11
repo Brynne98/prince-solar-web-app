@@ -249,6 +249,21 @@ function Dialog({ label, onClose, keep = false, busy = false, size = null, child
     });
     return () => { clearTimeout(t); if (d.open) d.close(); if (back.el && back.el.isConnected) back.el.focus({ preventScroll: true, focusVisible: back.ring }); };
   }, []);
+  // A phone's keyboard covers the page without shrinking it, so the page scrolls again under
+  // an open pop-up whatever CSS says (SOLAR-521). A swipe moves only what scrolls inside a
+  // pop-up; a pinch and a drag of selected text in a field are left alone.
+  React.useEffect(() => {
+    const block = (e) => {
+      const at = e.target, sel = at.selectionStart != null && at.selectionStart !== at.selectionEnd;
+      if (e.touches.length > 1 || sel) return;
+      for (let el = at; el && el !== document.documentElement; el = el.parentElement) {
+        if (el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(el).overflowY) && el.closest('dialog[open]')) return;
+      }
+      e.preventDefault();
+    };
+    document.addEventListener('touchmove', block, { passive: false });
+    return () => document.removeEventListener('touchmove', block);
+  }, []);
   // Closing (SOLAR-351): the dialog goes with whatever held it, so its content moves to a
   // copy that fades out on top for --dur-fast. Runs before React removes the dialog.
   React.useLayoutEffect(() => () => {
