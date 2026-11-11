@@ -529,7 +529,8 @@ function billNotice(n, act, links) {
     case 'free_week_soon': {
       const day = new Date(n.endsAt).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Africa/Johannesburg' });
       return { tone: 'warn', icon: 'clock', title: `${n.days > 1 ? n.days + ' days of history' : 'History'} for ${n.plant || 'your plant'} go${n.days > 1 ? '' : 'es'} on ${day}`,
-        body: `Free shows only today. Keep it all for R${n.perMonth} a month, billed yearly.`,
+        // the email's words (keepOn): Home's monthly price at the account's offer (SOLAR-503)
+        body: `Free shows only today. Keep everything on Home for ${rand(n.perMonth)} a month${n.perMonth < n.list ? ', the launch price' : ''}.`,
         button: 'Keep my history', run: act.plans };
     }
     // FreeWeekOver's words
