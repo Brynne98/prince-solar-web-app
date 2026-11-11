@@ -361,8 +361,14 @@ export class Oracle {
           this.freeRm = new Set([...this.freeRm].filter((id) => !this.rm.has(id)));
           this.rm = new Set();
         }
-        stopped.forEach((id) => { this.rm.add(id); this.freeRm.add(id); });
-        this.rmOn = addDays(dueOn, 30);
+        // on Free, deleted 30 days on; a smaller paid plan deletes them today (0187, SOLAR-492)
+        if (plan === 'free') {
+          stopped.forEach((id) => { this.rm.add(id); this.freeRm.add(id); });
+          this.rmOn = addDays(dueOn, 30);
+        } else {
+          this.plants = this.plants.filter((p) => !stopped.includes(p.id));
+          this.stat.removals += stopped.length;
+        }
       }
       if (plan !== 'free' && amount > 0) { out.push({ kind: 'renewal', amount, dueOn, plan, period: per }); this.stat.renewals++; }
     }

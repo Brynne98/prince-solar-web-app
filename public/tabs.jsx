@@ -2384,7 +2384,8 @@ function KeepCard({ b, links, reload }) {
 // and where to pick. A downgrade that stops none books with no question.
 function DowngradeDialog({ b, plan, period, price, links, busy, onConfirm, onCancel }) {
   const { billDay, rand, perUnit } = window.billingFmt;
-  const ends = billDay(b.nextDate), gone = billDay(window.shiftDate(b.nextDate, 30));
+  // a smaller paid plan deletes the plants it stops on the day it starts (SOLAR-492, 0187)
+  const ends = billDay(b.nextDate);
   const room = planRoom(plan);
   const { keep, stop } = cancelPlants(links, room);
   return (
@@ -2392,8 +2393,7 @@ function DowngradeDialog({ b, plan, period, price, links, busy, onConfirm, onCan
       busy={busy} onConfirm={onConfirm} onCancel={onCancel}>
       <div className="pay-review-box cancel-steps">
         <div><b>Until {ends}</b>Nothing changes.</div>
-        <div><b>From {ends}</b>You’re on {PLAN_NAME[plan]}, {rand(price)} {perUnit(period)}. {room} plants keep updating and the other{stop > 1 ? ` ${stop} stop` : ' stops'}.</div>
-        <div><b>On {gone}</b>{stop > 1 ? `The ${stop} stopped plants and their history are deleted. They` : 'The stopped plant and its history are deleted. It'} can’t be brought back.</div>
+        <div><b>On {ends}</b>You’re on {PLAN_NAME[plan]}, {rand(price)} {perUnit(period)}. {room} plants keep updating. {stop > 1 ? `The other ${stop} and their history are deleted. They` : 'The other one and its history are deleted. It'} can’t be brought back.</div>
       </div>
       <div className="confirm-text cancel-choose">Tick the plants to keep in Billing before {ends}. If you don’t, we keep {andList(keep.map(window.plantLabel))}.</div>
     </ConfirmCard>
