@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 case "$*" in *"'"*) echo "no quotes in emails" >&2; exit 1 ;; esac
 emails=$(printf "'%s'," "$@")
 got=$(supabase db query --linked -o csv \
-  "select count(*) || ' ' || coalesce(string_agg(id::text, ','), '') from auth.users where email in (${emails%,})" 2>/dev/null | tail -1)
+  "select count(*) || ' ' || coalesce(string_agg(id::text, ','), '') from auth.users where email in (${emails%,})" 2>/dev/null | tail -1 | tr -d '"')
 n=${got%% *} ids=${got#* }
 if [ "$n" != "$#" ]; then echo "found $n of $# accounts; check the emails" >&2; exit 1; fi
 supabase secrets set TESTER_USERS="$ids"
