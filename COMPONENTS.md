@@ -143,7 +143,7 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `billingFmt.lossLine(links, cancel)` | What a booked cancel or smaller plan deletes, in one line: which plants stay, which go, and for a cancel all history. Billing's Plan card, the bell and the banner all use it (link.jsx, SOLAR-505). `billingFmt.andList(names)`: "A, B and C". `pickableLogins(links)`: the plants such a change can keep. |
 | `PayFirstDialog` | In place of the cancel and downgrade pop-ups while a payment has failed: "Pay the failed payment first", with Pay with another card (SOLAR-497). |
 | `KeepDialog` | Billing's Choose plant(s) pop-up: changes a booked cancel's or smaller plan's pick (api_billing_keep_set) (SOLAR-496). |
-| `PlanCard`, `BookedNotice` | A card in Billing's Plan section (title top left, control top right); a change booked for the billing date with its undo. |
+| `PlanCard`, `PlanNote`, `BookedNotice` | A card in Billing's Plan section (name and price top left, control top right); a tinted note in it with its buttons right (failed payment, kept plants); a change booked for the billing date with its undo, as a `PlanNote` (SOLAR-512). |
 | `SettingsSection` | A Settings card with title, note and an `action`. |
 | `SettingRow` | One row in a Settings card: `label`, `note`, `action`, `lead`. |
 | `AppearanceSection` | Account's Theme switch: Device, Light, Dark. Calls `window.setTheme` from `theme.js` (SOLAR-318). |
