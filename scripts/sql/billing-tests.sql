@@ -712,6 +712,34 @@ begin
   perform pg_temp.eq('not trimmed', (select count(*)::int from public.free_trimmed_plants() x where x in (9000081, 9000082)), 0);
 end $$;
 
+-- Invoices keep every payment, with its status (0184, SOLAR-489). Disputes are not shown:
+-- an open one stays paid, a lost one is written as a refund.
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000b9', 'inv@t.test');
+insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, settled_at,
+                                     error, refund_status, refunded_cents, dispute, dispute_lost) values
+  ('psh_i1', '00000000-0000-0000-0000-0000000000b9', 'start',   'home',   'monthly', 49, 'paid', '2026-06-01', '2026-06-01', '2026-06-01 10:00', null, null, null, null, false),
+  ('psh_i2', '00000000-0000-0000-0000-0000000000b9', 'upgrade', 'family', 'monthly', 50, 'paid', '2026-06-02', '2026-06-02', '2026-06-02 10:00', 'refund: paid plants did not start', 'done', 5000, null, false),
+  ('psh_i3', '00000000-0000-0000-0000-0000000000b9', 'renewal', 'home',   'monthly', 49, 'paid', '2026-07-01', '2026-07-01', '2026-07-01 10:00', 'card not reusable: not saved', null, null, null, false),
+  ('psh_i4', '00000000-0000-0000-0000-0000000000b9', 'renewal', 'home',   'monthly', 49, 'paid', '2026-08-01', '2026-08-01', '2026-08-01 10:00', null, 'asked', null, null, false),
+  ('psh_i5', '00000000-0000-0000-0000-0000000000b9', 'renewal', 'home',   'monthly', 49, 'paid', '2026-09-01', '2026-09-01', '2026-09-01 10:00', null, 'done', 2000, null, false),
+  ('psh_i6', '00000000-0000-0000-0000-0000000000b9', 'renewal', 'home',   'monthly', 49, 'paid', '2026-10-01', '2026-10-01', '2026-10-01 10:00', null, 'done', 4900, 'lost', true),
+  ('psh_i7', '00000000-0000-0000-0000-0000000000b9', 'renewal', 'home',   'monthly', 49, 'paid', '2026-11-01', '2026-11-01', '2026-11-01 10:00', null, 'failed', null, 'awaiting-merchant-feedback', false),
+  ('psh_i8', '00000000-0000-0000-0000-0000000000b9', 'card',    'home',   'monthly', 1,  'paid', '2026-11-02', '2026-11-02', '2026-11-02 10:00', null, 'done', 100, null, false),
+  ('psh_i9', '00000000-0000-0000-0000-0000000000b9', 'renewal', 'home',   'monthly', 49, 'failed', '2026-11-03', '2026-11-03', '2026-11-03 10:00', 'declined', null, null, null, false);
+do $$
+declare pays jsonb;
+begin
+  perform set_config('request.jwt.claims', json_build_object('sub', '00000000-0000-0000-0000-0000000000b9', 'role', 'authenticated')::text, true);
+  pays := public.api_billing_status()->'payments';
+  perform set_config('request.jwt.claims', '', true);
+  -- newest first, six at most: i7..i2 (i1 is the seventh; card check and failed charge left out)
+  perform pg_temp.eq('invoice statuses', (select string_agg(p->>'status', ' ' order by o) from jsonb_array_elements(pays) with ordinality x(p, o)),
+    'paid refunded part_refunded refunded paid refunded');
+  perform pg_temp.eq('refunded keeps amount', (pays->1->>'amount')::int, 49);
+  -- prev skips the upgrade that applied nothing (refunded as 'refund: ...')
+  perform pg_temp.eq('prev skips unapplied', pays->4->>'prev', 'home');
+end $$;
+
 \set QUIET off
 do $$ begin
   if exists (select 1 from pg_temp.fails) then

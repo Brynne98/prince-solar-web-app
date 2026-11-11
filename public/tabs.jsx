@@ -2685,7 +2685,7 @@ function PaymentsSection({ billing }) {
     </SettingsSection>
   );
 }
-// The last six card payments (api_billing_status lists paid ones only). No PDF yet (SOLAR-265).
+// The last six card payments, refunded ones too (SOLAR-489). No PDF yet (SOLAR-265).
 function InvoicesSection({ billing: b }) {
   if (!b) {
     const n = billShape().inv || 0;
@@ -2704,6 +2704,7 @@ function InvoicesSection({ billing: b }) {
   }
   if (b.comped || !(b.payments || []).length) return null;
   const { rand } = window.billingFmt;
+  const STATUS = { paid: 'Paid', refunded: 'Refunded', part_refunded: 'Part refunded' };
   const day = (d) => window.dayText(d, { day: 'numeric', month: 'short', year: 'numeric' });
   // What each payment was for (SOLAR-302). Extra plants bought on the same plan are an
   // 'upgrade' charge too, so the plan before it tells them apart from a real upgrade.
@@ -2730,7 +2731,7 @@ function InvoicesSection({ billing: b }) {
               <td>{day(p.date)}<span className="pay-what-sub">{line}</span></td>
               <td className="pay-what">{line}</td>
               <td className="mono">{rand(p.amount)}</td>
-              <td>Paid</td>
+              <td>{STATUS[p.status] || 'Paid'}</td>
             </tr>
             );
           })}
