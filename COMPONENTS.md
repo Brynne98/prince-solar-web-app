@@ -65,6 +65,7 @@ Formatting and dates (also `components.jsx`):
 | `invalidProps` | `aria-invalid` and `aria-describedby` for a field. |
 | `PasswordInput`, `PasswordField` | A password box with the eye, bare or with label. |
 | `SignOutButton`, `signOutHere` | Sign out, as a button or a call. |
+| `checkSession` | Moves a tab to sign-in when its session ended elsewhere or its account is gone. Runs when a tab is back on screen and when `must()` fails. |
 | `explainAuthError` | A Supabase auth error as a sentence for people. |
 | `restoreDeepLink` | An email's `?tab`, `?section`, `?plant`, `?pay`, `?add`, kept a day at load and put back in the address once signed in. A new deep-link key goes in `DEEP_KEYS`, not a keeper of its own. |
 
