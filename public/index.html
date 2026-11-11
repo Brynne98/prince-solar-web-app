@@ -1071,6 +1071,8 @@
   .sec-intro > button { flex: none; white-space: nowrap; }
   .sset { padding: var(--sp-xl) var(--sp-2xl); background: var(--panel); border: 1px solid var(--card-edge); box-shadow: var(--card-shadow); border-radius: var(--r-xl); min-width: 0; }
   .sset-title { margin: 0 0 var(--sp-2xs); font-size: var(--fs-lg); font-weight: 600; }
+  .sset-title.sset-head { font-size: var(--fs-2xl); letter-spacing: -0.01em; }   /* a one-section page: its title is the page's (SOLAR-513) */
+  .settings-page > .sec:first-child { margin-top: 0; padding-top: 0; }   /* that section starts where a page-head would */
   .sset-note { margin: 0; font-size: var(--fs-sm); line-height: 1.5; color: var(--muted); }
   .sset-count { margin-left: var(--sp-sm); font-variant-numeric: tabular-nums; font-size: var(--fs-sm); font-weight: 500; color: var(--dim); }
   /* the inverter's own answers, folded away under the battery */

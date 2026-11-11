@@ -38,7 +38,7 @@ Web (`public/*.jsx`):
 
 | Event | Sent when |
 |---|---|
-| `screen_viewed` | A screen or tab opens (`screen`) |
+| `screen_viewed` | A screen or tab opens (`screen`: the page id; Settings is `prefs`, `account`, `notifications`, `plants`, `billing`, `plans` since SOLAR-513) |
 | `sign_up_done` | First sign-in of a new account (`method`) |
 | `sign_in_done` | Signed in (`method`: `password`, `google`) |
 | `sign_out_done` | Signed out |

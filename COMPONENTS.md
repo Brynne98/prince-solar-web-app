@@ -144,7 +144,7 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `PayFirstDialog` | In place of the cancel and downgrade pop-ups while a payment has failed: "Pay the failed payment first", with Pay with another card (SOLAR-497). |
 | `KeepDialog` | Billing's Choose plant(s) pop-up: changes a booked cancel's or smaller plan's pick (api_billing_keep_set) (SOLAR-496). |
 | `PlanCard`, `BookedNotice` | A card in Billing's Plan section (title top left, control top right); a change booked for the billing date with its undo. |
-| `SettingsSection` | A Settings card with title, note and an `action`. |
+| `SettingsSection` | A Settings card with title, note and an `action`. `head`: the section is the whole page, its title the page's. |
 | `SettingRow` | One row in a Settings card: `label`, `note`, `action`, `lead`. |
 | `AppearanceSection` | Account's Theme switch: Device, Light, Dark. Calls `window.setTheme` from `theme.js` (SOLAR-318). |
 | `PlantLine` | A plant's name with an "off" marker, in Settings lists. |

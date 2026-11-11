@@ -2165,9 +2165,10 @@ function ConfirmCard({ title, text, children, action, onConfirm, onCancel, cance
 // it scrolls itself into view first.
 const SettingsFlash = React.createContext(null);
 
-// bare: no card of its own; the children bring their own cards (Billing's logins).
-// action: a button at the top right of the section's title (Billing's Add plant).
-function SettingsSection({ id, title, note, bare, action, children }) {
+// bare: no card of its own; the children bring their own cards (Plants' logins).
+// action: a button at the top right of the section's title (Plants' Add plant).
+// head: the section is the whole page, so its title is the page's title (SOLAR-513).
+function SettingsSection({ id, title, note, bare, action, head, children }) {
   const flash = React.useContext(SettingsFlash);
   const flashing = flash && flash.id === id;
   const ref = React.useRef(null);
@@ -2198,7 +2199,7 @@ function SettingsSection({ id, title, note, bare, action, children }) {
     <section id={'settings-' + id} className="sec" ref={ref} aria-labelledby={'settings-' + id + '-t'}>
       <div className="sec-intro">
         <div>
-          <h2 id={'settings-' + id + '-t'} className="sset-title">{title}</h2>
+          {React.createElement(head ? 'h1' : 'h2', { id: 'settings-' + id + '-t', className: 'sset-title' + (head ? ' sset-head' : '') }, title)}
           {note && <p className="sset-note">{note}</p>}
         </div>
         {action}
@@ -2853,13 +2854,13 @@ function InvoicesSection({ billing: b }) {
   );
 }
 
-// Billing's Plants: the signed-in user's SunSynk logins, each with its plants and their state, one row each with its plants, a reconnect in
+// Plants: the signed-in user's SunSynk logins, each with its plants and their state, one row each with its plants, a reconnect in
 // place when the token has died, and a remove. Adding or removing a login changes
 // which plants the app can see, so the app reloads its plant list afterwards; when
 // the last login goes there is nothing left to show and the app turns to its empty pages.
 // `links` is the gate's own list (LinkGate), already read before the page opened, so the
 // section draws at once and its changes reach the rest of the app (SOLAR-96).
-// Plant states (stopped, deleted) and their buttons are on Billing since SOLAR-250.
+// Plant states (stopped, deleted) and their buttons were on Billing from SOLAR-250, on Plants since SOLAR-513.
 // A login's quiet actions: change its password, remove it (SOLAR-251). The header's menus
 // (usePopover, MenuList in app.jsx) do the opening, closing and arrow keys.
 function LoginMenu({ email, busy, onPassword, onRemove, removeLabel = 'Remove login' }) {
@@ -2883,7 +2884,7 @@ function LoginMenu({ email, busy, onPassword, onRemove, removeLabel = 'Remove lo
   );
 }
 
-function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, onCollect }) {
+function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, onCollect, head }) {
   const { useState } = React;
   const { accounts, error, refresh } = links;
   const [busy, setBusy] = useState(null);
@@ -3044,7 +3045,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   // plan room, as the server does: a plant whose login expired still takes it (SOLAR-440).
   const title = <>Plants{limit != null && allPlants.length > 0 && <span className="sset-count">{collecting} of {limit} on your plan</span>}</>;
   return (
-    <SettingsSection id="connection" title={title}
+    <SettingsSection id="connection" title={title} head={head}
       action={!unread && <button type="button" className="save-btn" onClick={() => { if (planFull) window.track('add_login_full_done', { plan: billing.plan }); setMode('add'); }}>Add plant</button>}>
       {!unread && mode === 'add' && (
         // A form over the page (SOLAR-286). Cancel re-reads too: a login with no plant yet is saved but not listed.
@@ -3526,7 +3527,7 @@ const NOTIF_GROUPS = [
     ['monthly', 'Monthly'],
     ['yearly', 'Yearly']] },
 ];
-function NotificationsSection({ userId }) {
+function NotificationsSection({ userId, head }) {
   const { useState, useEffect } = React;
   // each channel's switches, by channel id; null while on its way
   const [prefs, setPrefs] = useState({});
@@ -3587,8 +3588,8 @@ function NotificationsSection({ userId }) {
     </div>
   );
   return (
-    <SettingsSection id="notifications" title="Notifications"
-                     note="Every alert stays in your Notifications list.">
+    <SettingsSection id="notifications" title="Notifications" head={head}
+                     note="Every alert also stays under the bell.">
       {failed ? (
         <SettingRow label="Couldn’t load your notification settings" action={<button type="button" className="ghost-btn" onClick={load}>Try again</button>} />
       ) : (
@@ -3651,14 +3652,16 @@ function NotificationsSection({ userId }) {
 }
 
 // ---------------------------------------------------------------- SETTINGS AREA
-// One area, two pages, both the account's (SOLAR-250): Account (the person) and Billing
-// (the plan, plants and card). The plant on screen has its own page in the list
+// One area, four pages, all the account's (SOLAR-250, split in SOLAR-513): Account (the
+// person), Notifications, Plants (SunSynk logins and plants) and Billing (plan, card,
+// invoices). The plant on screen has its own page in the list
 // (PlantSettings). A side menu on a desktop. On a phone 'prefs' is that menu as a list you
 // tap into, and each page has a back link to it; on a desktop 'prefs' shows Account. Adjust
-// plan ('plans') is a page under Billing. The plan is read once here: Billing shows it,
+// plan ('plans') opens over Billing, or over Plants when a plant's Collect opened it. The plan is read once here: Billing shows it,
 // Account's Delete needs it.
-// the note shows on the phone's list only, so two rows read as what each holds (SOLAR-411)
-const SETTINGS_NAV = [['account', 'Account', 'Notifications, your data, password'], ['billing', 'Billing', 'Plan, plants, card']];
+// the note shows on the phone's list only, so the rows read as what each holds (SOLAR-411)
+const SETTINGS_NAV = [['account', 'Account', 'Password, theme, your data'], ['notifications', 'Notifications', 'Emails and pop-ups'],
+  ['plants', 'Plants', 'SunSynk logins, plants on or off'], ['billing', 'Billing', 'Plan, card, invoices']];
 // Setup and App each draw their own SettingsArea, so the first plant switched on or the last
 // one off mounts a new one; it starts from the plan last read, not the Plan outline. The
 // free week's end too, so Plan's line doesn't drop it until the new screen reads api_me.
@@ -3674,6 +3677,8 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
   if (me) weekEndSeen = me.freeWeekEndsAt;
   // The stopped plant whose "plan is full" sent the user to the plans: extra room is for it.
   const [forPlant, setForPlant] = useState(null);
+  // The page Adjust plan opened over, and goes back to: Plants for a plant's Collect.
+  const [planFrom, setPlanFrom] = useState('billing');
   const reloadBilling = () => window.billingRpc('api_billing_status').then(({ data }) => { if (data) { billingSeen = data; setBilling(data); } return data; });
   // A booked change moves which plants stop on the billing date, shown on the plant rows.
   const reloadPlan = () => Promise.all([reloadBilling(), links?.refresh?.()]).then(([b]) => b);
@@ -3690,10 +3695,11 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
   const plants = [...new Map(live.flatMap(a => a.plants || []).map(p => [p.plant_id, p])).values()];
   // Account's Your data: the plants on, from the logins, which are here before api_me answers.
   const onPlants = plants.filter(p => !p.paused).map(p => ({ id: Number(p.plant_id), name: p.plant_name }));
-  // Billing holds the logins too, so a dead one marks it as a failed payment does.
+  // A dead login marks Plants, as a failed payment marks Billing.
   const relink = live.some(a => a.status === 'needs_relink' && a.kind !== 'share');
-  const dot = { billing: billing?.state === 'past_due' || relink };
-  const shown = page === 'prefs' ? 'account' : page === 'plans' ? 'billing' : page;
+  const dot = { billing: billing?.state === 'past_due', plants: relink };
+  const shown = page === 'prefs' ? 'account' : page === 'plans' ? planFrom : page;
+  const adjust = (from, id) => { setPlanFrom(from); setForPlant(id ?? null); onPage('plans'); };
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
       <div className={'set-area' + (page === 'prefs' ? ' set-list' : '')}>
@@ -3702,7 +3708,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
           <div className="set-nav-list">{SETTINGS_NAV.map(([id, label, note]) => (
             <button key={id} type="button" aria-current={shown === id ? 'page' : undefined} onClick={() => onPage(id)}>
               <span className="set-nav-text"><span>{label}</span><small className="set-nav-note">{note}</small></span>
-              {dot[id] && <span className="dot" aria-label={billing?.state === 'past_due' ? 'Needs you' : 'A login needs reconnecting'} />}
+              {dot[id] && <span className="dot" aria-label={id === 'billing' ? 'Needs you' : 'A login needs reconnecting'} />}
               <Icon id="next" className="set-chev" />
             </button>
           ))}</div>
@@ -3710,10 +3716,16 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
         <div className="set-main">
           <button type="button" className="back-link set-back" onClick={() => onPage('prefs')}><Icon id="back" />Settings</button>
           {shown === 'account' && <AccountPage user={user} billing={billing} plants={onPlants} plantId={plantId} ready={!!me} onBilling={(section) => onPage('billing', section)} />}
-          {(page === 'billing' || page === 'plans') && <BillingPage payBanner={payBanner} billing={billing} reload={reloadBilling} reloadPlan={reloadPlan} links={links} onPage={onPage} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} onSaved={onPlantConfigSaved}
-                                              onCollect={(id) => { setForPlant(id); onPage('plans'); }} />}
-          {/* Adjust plan opens over Billing, not as a page of its own (SOLAR-292) */}
-          {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadPlan} onBack={() => onPage('billing')} forPlant={forPlant}
+          {shown === 'notifications' && <div className="settings-page"><NotificationsSection userId={user?.id} head /></div>}
+          {shown === 'plants' && links && (
+            <div className="settings-page">
+              <SunSynkConnectionSection head onChanged={onPlantConfigSaved} links={links} billing={billing} reloadBilling={reloadBilling} onCollect={(id) => adjust('plants', id)} />
+            </div>
+          )}
+          {shown === 'billing' && <BillingPage payBanner={payBanner} billing={billing} reload={reloadPlan} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen}
+                                              links={links} onAdjust={() => adjust('billing')} />}
+          {/* Adjust plan opens over Billing or Plants, not as a page of its own (SOLAR-292) */}
+          {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadPlan} onBack={() => { onPage(planFrom); setPlanFrom('billing'); }} forPlant={forPlant}
                                                logins={pickableLogins(links)} links={links} />}
         </div>
       </div>
@@ -3755,7 +3767,6 @@ function AccountPage({ user, billing, plants, plantId, ready, onBilling }) {
         <h1>Account</h1>
         <p>{email ? <>{email}<span className="set-method"> · Signs in with {method}</span></> : <window.SkelLine w={260} />}</p>
       </div>
-      <NotificationsSection userId={user?.id} />
       <AppearanceSection />
       {plants.length > 0 && <DownloadSection plants={plants} plantId={plantId} ready={ready} />}
       <SettingsSection id="actions" title="Account actions">
@@ -3774,17 +3785,16 @@ function AccountPage({ user, billing, plants, plantId, ready, onBilling }) {
   );
 }
 
-// Billing holds the plants and the logins they come from (moved from Plant, SOLAR-250).
-function BillingPage({ billing, reload, reloadPlan, links, onPage, freeWeekEndsAt, onSaved, onCollect, payBanner }) {
+// Billing: the money only. The plants and their logins have their own page (SOLAR-513).
+function BillingPage({ billing, reload, links, freeWeekEndsAt, onAdjust, payBanner }) {
   React.useEffect(() => { if (billing) try { localStorage.setItem(BILL_SHAPE, JSON.stringify(shapeOf(billing))); } catch (e) {} }, [billing]);
   return (
     <div className="settings-page">
       <div className="page-head"><h1>Billing</h1></div>
-      <PlanSection billing={billing} reload={reloadPlan} onAdjust={() => onCollect(null)} freeWeekEndsAt={freeWeekEndsAt} links={links} payBanner={payBanner} />
-      {links && <SunSynkConnectionSection onChanged={onSaved} links={links} billing={billing} reloadBilling={reload} onCollect={(id) => onCollect(id ?? null)} />}
+      <PlanSection billing={billing} reload={reload} onAdjust={onAdjust} freeWeekEndsAt={freeWeekEndsAt} links={links} payBanner={payBanner} />
       <PaymentsSection billing={billing} />
       <InvoicesSection billing={billing} />
-      <CancelSection billing={billing} reload={reloadPlan} links={links} />
+      <CancelSection billing={billing} reload={reload} links={links} />
     </div>
   );
 }
