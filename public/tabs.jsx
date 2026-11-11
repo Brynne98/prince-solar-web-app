@@ -2396,11 +2396,12 @@ function KeepDialog({ b, links, reload, onClose, onKeep }) {
 
 // A cancel or smaller plan asked for while a payment has failed (SOLAR-497, 0189): refused
 // until it is paid, so the pop-up says so and pays. want: 'cancel' | 'downgrade'.
+// The Free date is on the Plan card and the banner, so it is not said again here.
 function PayFirstDialog({ b, want, onCancel }) {
   React.useEffect(() => { window.track('pay_first_shown', { plan: b.plan, want }); }, []);
   return (
     <ConfirmCard modal danger={false} title="Pay the failed payment first" label="Pay the failed payment first"
-      text={`Then you can ${want === 'cancel' ? 'cancel' : 'change your plan'}. Unpaid, you move to Free on ${window.billingFmt.billDay(b.freeOn)}.`}
+      text={`Then you can ${want === 'cancel' ? 'cancel' : 'change your plan'}.`}
       action="Pay with another card" cancelLabel="Close" onConfirm={() => { onCancel(); window.settlePayment(); }} onCancel={onCancel} />
   );
 }
