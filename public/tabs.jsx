@@ -2330,7 +2330,7 @@ const cancelPlants = (links, room = 1) => {
 // The pick itself, in the cancel and downgrade pop-ups and in Manage (SOLAR-496): each login's
 // plants under its email, as Plants lays them out; a circle each when the plan keeps 1, else a
 // tick box. Past the room it says so, and that keeping the plan as it is has room (keep: its
-// label and undo); the last tick stays. Neither line is red: nothing went wrong.
+// label and undo); the last tick stays. Both lines in amber: they need reading, but nothing failed.
 function KeepPicker({ links, plan, room, value, onChange, keep }) {
   const [say, setSay] = React.useState(null); // 'last' | 'full'
   const one = room === 1;
@@ -2359,13 +2359,13 @@ function KeepPicker({ links, plan, room, value, onChange, keep }) {
           })}
         </div>
       ))}
-      {say === 'last' ? <div className="field-note keep-count">At least one plant needs to be selected.</div>
-        : say === 'full' ? <div className="field-note keep-count">{PLAN_NAME[plan]} keeps {room} plants. Untick one first{keep ? <>, or <button type="button" className="mini-link" onClick={keep.run}>{keep.label}</button></> : ''}.</div>
+      {say === 'last' ? <div className="field-note keep-count warn">At least one plant needs to be selected.</div>
+        : say === 'full' ? <div className="field-note keep-count warn">{PLAN_NAME[plan]} keeps {room} plants. Untick one first{keep ? <>, or <button type="button" className="mini-link" onClick={keep.run}>{keep.label}</button></> : ''}.</div>
         : !one && <div className="field-note keep-count">{value.length} of {room} ticked.{left > 0 && ` Tick ${left} more.`}</div>}
     </div>
   );
 }
-// Billing's Manage (SOLAR-496): the pick a booked cancel or smaller plan keeps, changed any time
+// Billing's Choose plant(s) (SOLAR-496): the pick a booked cancel or smaller plan keeps, changed any time
 // before the date. Saves the whole pick (api_billing_keep_set, 0186).
 function KeepDialog({ b, links, reload, onClose, onKeep }) {
   const plants = pickableLogins(links).flatMap(a => a.plants);
@@ -2417,7 +2417,7 @@ function DowngradeDialog({ b, plan, period, price, links, busy, onConfirm, onCan
 }
 
 // Cancel plan, from Billing or Adjust plan: what happens when, and with more plants than Free
-// keeps, which one stays, the first linked already picked (SOLAR-496; Manage in Billing
+// keeps, which one stays, the first linked already picked (SOLAR-496; Choose plant(s) in Billing
 // changes it later). onConfirm(keep): null when there is nothing to pick.
 function CancelPlanDialog({ b, links, busy, onConfirm, onCancel }) {
   const { billDay } = window.billingFmt;
@@ -2480,8 +2480,9 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
   // the plants it collects, with any extra plants still held (SOLAR-371)
   const room = planRoom(b.plan, b.extraPlants);
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
-  // A booked cancel or smaller plan that stops plants: Manage beside Keep changes the pick (SOLAR-496)
-  const manage = booked && pickableLogins(links).some(a => a.plants.some(p => p.drop));
+  // A booked cancel or smaller plan that stops plants: Choose plant(s) beside Keep changes the pick (SOLAR-496)
+  const drops = booked ? pickableLogins(links).flatMap(a => a.plants).filter(p => p.drop) : [];
+  const manage = drops.length > 0 && (b.nextPlan === 'free' ? 'Choose plant' : 'Choose plants');
   const undo = () => run(() => undoBooked(b, reload));
   return (
     <SettingsSection id="plan" title="Plan" bare>
@@ -2510,7 +2511,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
             <button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>
           </div>
         )}
-        {booked && (!b.prepaidOn || ending) && <BookedNotice booked={booked} busy={busy} onUndo={undo} onManage={manage && (() => setManaging(true))} />}
+        {booked && (!b.prepaidOn || ending) && <BookedNotice booked={booked} busy={busy} onUndo={undo} manage={manage} onManage={() => setManaging(true)} />}
         {managing && <KeepDialog b={b} links={links} reload={reload} onClose={() => setManaging(false)} onKeep={undo} />}
       </PlanCard>
     </SettingsSection>
@@ -2542,12 +2543,12 @@ function PlanCard({ title, action, hidden, children }) {
 
 // A change booked for the billing date, the undo a link in the notice, so the card keeps one
 // button (SOLAR-283).
-// onManage: a booked change that stops plants has Manage too, for the pick (SOLAR-496).
-function BookedNotice({ booked, busy, onUndo, onManage }) {
+// manage: a booked change that stops plants has a second link, Choose plant(s), for the pick (SOLAR-496).
+function BookedNotice({ booked, busy, onUndo, manage, onManage }) {
   return (
     <div className="plan-booked plan-alert">
       <span className="conn-status warn">{booked[0]} {booked[1] && <button type="button" className="plan-undo" disabled={busy} aria-busy={busy} onClick={onUndo}>{booked[1]}</button>}
-        {onManage && <button type="button" className="plan-undo plan-manage" disabled={busy} onClick={onManage}>Manage</button>}</span>
+        {manage && <button type="button" className="plan-undo plan-manage" disabled={busy} onClick={onManage}>{manage}</button>}</span>
     </div>
   );
 }
@@ -2935,7 +2936,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const plantOk = {};
   live.forEach(a => (a.plants || []).forEach(p => { plantOk[p.plant_id] = plantOk[p.plant_id] || a.status === 'active'; }));
   // A stopped plant booked for deletion shows its date and Keep too, so the booking is never hidden.
-  // A plant a booked plan change stops (drop) keeps its switch: Manage in Plan picks (SOLAR-496).
+  // A plant a booked plan change stops (drop) keeps its switch: Choose plant(s) in Plan picks (SOLAR-496).
   const state = (p) => p.remove_on && !p.drop ? 'going' : p.paused ? 'paused' : plantOk[p.plant_id] ? 'on' : 'off';
   const allPlants = [...new Map(live.flatMap(a => a.plants || []).map(p => [p.plant_id, p])).values()];
   const keep = async (p) => {
