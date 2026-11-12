@@ -18,6 +18,11 @@ window.GOOGLE_CLIENT_ID = '357189209576-890oqvan5eeuc2vash5ralv04k0m0pa2.apps.go
 // the VAPID_KEYS secret on the notify function.
 window.VAPID_PUBLIC = 'BJV8XqKj_ZTALuCxzfsKRYSvHZFnauOhVdKzs1njlexSoV8eabU5lgvt6VyL6l_Quoa9QbO3IEnKaKEvQP0aocg';
 
+// Bot check on sign-in, sign-up and reset (SOLAR-533): the Cloudflare Turnstile site key.
+// Public by design; its secret half is in Supabase (Authentication > Bot and Abuse Protection).
+// Empty: no check is shown and no token is sent. Local runs use Cloudflare's always-pass test key.
+window.TURNSTILE_SITE_KEY = /^(localhost|127\.0\.0\.1|)$/.test(location.hostname) ? '1x00000000000000000000AA' : '';
+
 window.SUNSYNK_CONFIG = (function () {
   var local = {
     url: 'http://127.0.0.1:55321',
@@ -48,7 +53,15 @@ window.POSTHOG_KEY = 'phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v';
   // their user id (from the saved Supabase session) so identify doesn't merge a new id
   // onto them every visit.
   var uid = null;
-  var scrub = function (s) { return String(s || '').replace(/[^\s"'<>@]+@[^\s"'<>@]+\.[a-z]{2,}/gi, '[email]'); };
+  // An address keeps its host and path only: a query or #hash can hold a payment reference,
+  // a plant id or a sign-in token (SOLAR-533).
+  var bare = function (u) { return typeof u === 'string' && /^https?:\/\//i.test(u) ? u.split(/[?#]/)[0] : u; };
+  var scrub = function (s) {
+    return String(s || '').replace(/[^\s"'<>@]+@[^\s"'<>@]+\.[a-z]{2,}/gi, '[email]')
+      .replace(/(https?:\/\/[^\s"'<>?#]+)[?#][^\s"'<>]*/gi, '$1');
+  };
+  // Database and server error text: quoted values, bracketed values and long numbers out, 80 characters.
+  var mask = function (s) { return scrub(s).replace(/"[^"]*"|'[^']*'|\([^)]*\)/g, '…').replace(/\d{4,}/g, '#').slice(0, 80); };
   try { uid = JSON.parse(localStorage.getItem('synsynk.auth')).user.id; } catch (e) {}
   if (on) {
     ph.init(window.POSTHOG_KEY, {
@@ -59,9 +72,14 @@ window.POSTHOG_KEY = 'phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v';
       capture_heatmaps: false, capture_dead_clicks: false, capture_performance: false,
       disable_session_recording: true, disable_surveys: true, disable_web_experiments: true,
       advanced_disable_flags: true, disable_external_dependency_loading: true,
-      // An email in an error message is masked before it leaves the browser (SOLAR-423).
+      // Before anything leaves the browser: every address loses its query and #hash (SOLAR-533),
+      // and an email in an error message is masked (SOLAR-423).
       before_send: function (ev) {
-        try { if (ev && ev.event === '$exception') ev.properties.$exception_list.forEach(function (x) { x.value = scrub(x.value); }); } catch (e) {}
+        try {
+          var p = ev.properties || {};
+          [p, p.$set, p.$set_once, ev.$set, ev.$set_once].forEach(function (o) { for (var k in o) o[k] = bare(o[k]); });
+          if (ev.event === '$exception') p.$exception_list.forEach(function (x) { x.value = scrub(x.value); });
+        } catch (e) {}
         return ev;
       },
     });
@@ -94,7 +112,7 @@ window.POSTHOG_KEY = 'phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v';
       // Error with no stack): PostHog would group them all under one old issue, so a new one
       // sends no "new error" email. Group these by their message instead (SOLAR-472).
       var stackless = !(err instanceof Error) || !/:\d+:\d+/.test(err.stack || '');
-      var r = ph.captureException(err instanceof Error ? err : new Error(key), Object.assign({ page: location.pathname + location.search },
+      var r = ph.captureException(err instanceof Error ? err : new Error(key), Object.assign({ page: location.pathname },
         stackless ? { $exception_fingerprint: 'message:' + scrub(key).slice(0, 120) } : {}, props));
       seen[key] = (r && r.uuid) || true;
       if (r && r.uuid) window.lastErrorId = { id: r.uuid, at: Date.now() };
@@ -114,7 +132,7 @@ window.POSTHOG_KEY = 'phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v';
     var dbFault = /^[0-9A-Z]{5}$/.test(code) && !/^(22|23|28|P0)|^42501$/.test(code);
     if (!(status >= 500 || dbFault || code === 'PGRST202') || serverErrors >= 5) return null;
     serverErrors++;
-    return report(new Error(name + ': ' + (code || status) + ' ' + ((error && error.message) || '')), {
+    return report(new Error(name + ': ' + (code || status) + ' ' + mask(error && error.message)), {
       $exception_fingerprint: 'rpc:' + name + ':' + (code || status), rpc: name, code: code || null, status: status || null,
     });
   };

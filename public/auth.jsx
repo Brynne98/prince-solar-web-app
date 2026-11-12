@@ -242,6 +242,51 @@ function GoogleSignIn({ onStart, onDone }) {
   );
 }
 
+/** The bot check (SOLAR-533): Cloudflare Turnstile's box. Supabase refuses sign-in, sign-up,
+ *  reset and resend without its token once the check is on. `hold` is a ref; the form calls
+ *  `await hold.current?.()` for a token and passes it as `captchaToken`. A token works once,
+ *  so each take starts the next one. `quiet` shows the box only when Cloudflare needs a tap.
+ *  No site key (config.js): draws nothing and the take answers undefined. */
+function BotCheck({ hold, quiet }) {
+  const { useEffect, useRef } = React;
+  const box = useRef(null);
+  const key = window.TURNSTILE_SITE_KEY;
+  useEffect(() => {
+    if (!key) { hold.current = null; return; }
+    let alive = true, tries = 0, id = null, token = null, waiting = null;
+    const got = (t) => { token = t; if (waiting) { waiting(t); waiting = null; } };
+    // Cloudflare's script loads only where a check is shown. No integrity hash: Cloudflare updates it in place.
+    if (!document.getElementById('cf-turnstile')) {
+      const s = document.createElement('script');
+      s.id = 'cf-turnstile'; s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; s.async = true;
+      document.head.appendChild(s);
+    }
+    const setup = () => {
+      if (!alive) return;
+      // async script: wait up to 10 s, then give up on it.
+      if (!window.turnstile?.render) return ++tries > 50 ? got(null) : setTimeout(setup, 200);
+      id = window.turnstile.render(box.current, {
+        sitekey: key, size: 'flexible', appearance: quiet ? 'interaction-only' : 'always',
+        theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark',
+        callback: got,
+        'expired-callback': () => { token = null; },
+        'error-callback': () => { got(null); return true; },
+      });
+    };
+    setup();
+    hold.current = async () => {
+      // Not ready yet (still checking, or waiting for a tap): give it 10 s.
+      const t = token || await new Promise((done) => { waiting = done; setTimeout(() => done(null), 10000); });
+      if (!t) throw { code: 'captcha_failed' };
+      token = null;
+      if (id != null) window.turnstile.reset(id);
+      return t;
+    };
+    return () => { alive = false; hold.current = null; if (id != null) window.turnstile.remove(id); };
+  }, []);
+  return key ? <div ref={box} className={'bot-check' + (quiet ? ' quiet' : '')} /> : null;
+}
+
 /** The product's mark, shared by every gate screen. */
 function AuthBrand() {
   return (
@@ -342,6 +387,7 @@ function explain(ex) {
   if (code === 'same_password') return { field: 'auth-password', text: 'That’s your current password' };
   if (code === 'email_address_invalid') return { field: 'auth-email', text: 'Use a different email' };
   if (code === 'signup_disabled') return { text: 'New accounts are closed right now.' };
+  if (code === 'captcha_failed') return { text: 'The bot check didn’t finish. Try again.' };
   if (code === 'over_email_send_rate_limit') return { text: 'Too many emails sent. Try again in a few minutes.' };
   if (code === 'over_request_rate_limit' || ex?.status === 429) return { text: 'Too many tries. Try again in a minute.' };
   if (ex?.name === 'AuthRetryableFetchError' || ex instanceof TypeError) return { text: 'Can’t reach Prince Solar Hub. Check your connection.' };
@@ -365,6 +411,7 @@ function InboxCard({ kind, email, onBack, onSignIn }) {
   const { useState, useEffect } = React;
   const [wait, setWait] = useState(RESEND_WAIT);
   const [busy, setBusy] = useState(false);
+  const bot = React.useRef(null);
   useEffect(() => {
     if (wait <= 0) return;
     const t = setTimeout(() => setWait(w => w - 1), 1000);
@@ -374,16 +421,19 @@ function InboxCard({ kind, email, onBack, onSignIn }) {
     e.preventDefault();
     if (busy || wait > 0) return;
     setBusy(true);
-    const { error } = await (kind === 'reset'
-      ? window.sb.auth.resetPasswordForEmail(email, { redirectTo: RESET_URL })
-      : window.sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: SITE_URL } })
-    ).catch(e => ({ error: e }));
+    const { error } = await (async () => {
+      const captchaToken = await bot.current?.();
+      return kind === 'reset'
+        ? window.sb.auth.resetPasswordForEmail(email, { redirectTo: RESET_URL, captchaToken })
+        : window.sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: SITE_URL, captchaToken } });
+    })().catch(e => ({ error: e }));
     setBusy(false);
     if (error) sayError(explain(error).text);
     else { window.track('email_resend_done', { kind }); window.toast?.('Email sent again.'); setWait(RESEND_WAIT); }
   };
   return (
     <AuthCard title="Check your inbox" sub={<>We sent a link to <b>{email}</b>. Tap it to carry on.</>} onSubmit={resend} busy={busy}>
+      <BotCheck hold={bot} />
       <button type="submit" className="auth-resend" disabled={busy || wait > 0} aria-busy={busy}>
         {busy ? 'Sending…' : wait > 0 ? `Resend in ${wait}s` : 'Resend email'}
       </button>
@@ -408,6 +458,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const [busy, setBusy] = useState(false);
   // Where the link went and why ('signup' or 'reset'), for Check your inbox.
   const [sent, setSent] = useState(null);
+  const bot = React.useRef(null);
   // Signed out, the app frame (and its toast) isn't mounted, so each screen mounts it (SOLAR-163).
   const toastHost = window.SaveToast ? <window.SaveToast /> : null;
   const showError = (error) => {
@@ -419,7 +470,8 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   // A new confirmation link, from the expired-link card or the not-confirmed toast (SOLAR-196).
   // Supabase answers the same for unknown and already-confirmed emails, so this always moves on.
   const resend = async (addr) => {
-    const { error } = await window.sb.auth.resend({ type: 'signup', email: addr, options: { emailRedirectTo: SITE_URL } });
+    const captchaToken = await bot.current?.();
+    const { error } = await window.sb.auth.resend({ type: 'signup', email: addr, options: { emailRedirectTo: SITE_URL, captchaToken } });
     if (error) throw error;
     window.track('email_resend_done', { kind: 'signup', from: 'expired_link' });
     setSent({ to: addr, kind: 'signup', from: mode }); go('inbox');
@@ -475,12 +527,14 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     const addr = email.trim();
     setBusy('form'); setBad({});
     try {
+      // recovery has no check: updateUser needs none
+      const captchaToken = mode === 'expired' ? undefined : await bot.current?.();
       if (mode === 'signin') {
-        const { error } = await window.sb.auth.signInWithPassword({ email: addr, password });
+        const { error } = await window.sb.auth.signInWithPassword({ email: addr, password, options: { captchaToken } });
         if (error) throw error;
         window.track('sign_in_done', { method: 'password' });
       } else if (mode === 'signup') {
-        const { data, error } = await window.sb.auth.signUp({ email: addr, password, options: { emailRedirectTo: SITE_URL } });
+        const { data, error } = await window.sb.auth.signUp({ email: addr, password, options: { emailRedirectTo: SITE_URL, captchaToken } });
         if (error) throw error;
         // An email that already has an account gets a fake user with no identities and no
         // email, so the inbox card would wait for nothing (SOLAR-266).
@@ -488,7 +542,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         // With email confirmation on, signUp returns a user but no session.
         if (!data.session) { setSent({ to: addr, kind: 'signup', from: mode }); go('inbox'); }
       } else if (mode === 'forgot') {
-        const { error } = await window.sb.auth.resetPasswordForEmail(addr, { redirectTo: RESET_URL });
+        const { error } = await window.sb.auth.resetPasswordForEmail(addr, { redirectTo: RESET_URL, captchaToken });
         if (error) throw error;
         window.track('password_reset_sent_done');
         setSent({ to: addr, kind: 'reset', from: mode }); go('inbox');
@@ -566,6 +620,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
                          autoComplete="new-password" />
         )}
 
+        {mode !== 'recovery' && <BotCheck hold={bot} />}
         <button type="submit" disabled={!!busy} aria-busy={busy === 'form'}>{busy === 'form' ? copy.busy : copy.cta}</button>
         {/* covers Google above too (SOLAR-91); on sign-in, Google can create an account */}
         {(mode === 'signin' || mode === 'signup') && <div className="login-fine">By continuing, you agree to
@@ -652,4 +707,4 @@ function SignOutButton({ className, children = 'Sign out', busyText = 'Signing o
   return <window.BusyButton className={className} onClick={click} busy={busy} busyText={busyText}>{children}</window.BusyButton>;
 }
 // Shared with the Connect screen so it looks like the same product.
-Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, AuthCard, PasswordInput, PasswordField, FieldLabel, useFieldErrors, invalidProps, SignOutButton, signOutHere, checkSession, explainAuthError: explain });
+Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, AuthCard, BotCheck, PasswordInput, PasswordField, FieldLabel, useFieldErrors, invalidProps, SignOutButton, signOutHere, checkSession, explainAuthError: explain });

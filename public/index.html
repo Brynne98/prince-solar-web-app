@@ -1635,6 +1635,9 @@
   .auth-brand-tag { font-size: var(--fs-md); color: var(--dim); margin-top: var(--sp-xs); letter-spacing: 0.01em; }
   .login-title { font-size: var(--fs-3xl); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; margin-top: var(--sp-xl); }
   .login-sub { font-size: var(--fs-lg); color: var(--muted); line-height: 1.5; margin-top: calc(-1 * var(--sp-sm)); margin-bottom: var(--sp-sm); }
+  /* Cloudflare's bot check: its box is 65px tall, held open so the card doesn't jump when it draws. */
+  .bot-check { min-height: 65px; }
+  .bot-check.quiet { min-height: 0; }
   .auth-field { display: flex; flex-direction: column; gap: var(--sp-sm); }
   .auth-label-row { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-md); }
   .auth-field > label, .auth-field .auth-label-row > label { font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
