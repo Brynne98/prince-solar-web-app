@@ -13,3 +13,14 @@
 
 /build/*
   Cache-Control: public, max-age=31536000, immutable
+
+# Every file here also answers on app., admin. and pages.dev. Search engines list only
+# princesolarhub.co.za (SOLAR-527); the app pages already carry a noindex meta tag.
+https://app.princesolarhub.co.za/*
+  X-Robots-Tag: noindex
+
+https://admin.princesolarhub.co.za/*
+  X-Robots-Tag: noindex
+
+https://:project.pages.dev/*
+  X-Robots-Tag: noindex

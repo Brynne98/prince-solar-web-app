@@ -34,13 +34,29 @@
 <li>Choose Download.</li>
 </ol>
 <h2>What’s in it</h2>
-<p>Your readings as a CSV file: every minute for the last 31 days, every 5 minutes before that.</p>
+<p>Your readings as a CSV file: every minute for the last 31 days, every 5 minutes before that. One row per reading, with these columns:</p>
+<ul>
+<li><strong>Time.</strong> When the reading was taken.</li>
+<li><strong>Solar (W).</strong> What the panels made.</li>
+<li><strong>Home (W).</strong> What the house used.</li>
+<li><strong>From grid (W).</strong> What came in from the grid.</li>
+<li><strong>Battery charging (W)</strong> and <strong>Battery discharging (W).</strong> Power into and out of the battery.</li>
+<li><strong>Battery (%).</strong> How full it was.</li>
+</ul>
 <h2>What owners use it for</h2>
 <ul>
 <li>Checking the electricity bill against the grid you used.</li>
 <li>Showing your installer how the panels did.</li>
-<li>Keeping your own copy.</li>
+<li>Keeping your own copy, in case <a href="sunsynk-history-missing">SunSynk’s history has gaps</a>.</li>
 </ul>
+<h2>Open it in Excel</h2>
+<p>Double-click the file, or drag it into Excel or Google Sheets. Each power column is in watts. To get kWh from minute rows, add up the column and divide by 60,000. For 5-minute rows, divide by 12,000.</p>
+<h2>Check your electricity bill</h2>
+<ol>
+<li>Download the days your bill covers.</li>
+<li>Add up the From grid (W) column and turn it into kWh as above.</li>
+<li>Compare it with the kWh on the bill. A big gap is worth a question to the municipality or Eskom.</li>
+</ol>
 <h2>What else it does</h2>
 <ul class="links">
 <li><a href="sunsynk-battery-time-left">Battery time left<span>How long until it reaches its reserve.</span></a></li>
@@ -58,7 +74,7 @@
 <a class="btn" href="https://app.princesolarhub.co.za/?signup">Try it free</a><a class="btn ghost" href="https://princesolarhub.co.za/#pricing">See pricing</a>
 </section>
 </main>
-<footer><a href="https://princesolarhub.co.za/">Home</a><a href="sunsynk-app-alternative">Why us</a><a href="help">Help</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a></footer>
+<footer><a href="https://princesolarhub.co.za/">Home</a><a href="sunsynk-app-alternative">Why us</a><a href="help">Help</a><a href="terms">Terms</a><a href="privacy">Privacy</a></footer>
 <script src="https://cdn.jsdelivr.net/npm/posthog-js@1.438.12/dist/array.js" integrity="sha384-V7ZjE0gYGudHl0Vasfe9rvuMXnSi9e2iK98FPVvvTGBWH/TZUasBuz9a53hbGoj0" crossorigin="anonymous"></script>
 <script src="config.js"></script>
 <script src="welcome-track.js"></script>

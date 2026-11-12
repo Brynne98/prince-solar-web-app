@@ -30,7 +30,7 @@
 <h2>Why it happens</h2>
 <ul>
 <li><strong>The logger is off Wi-Fi.</strong> The router restarted, the Wi-Fi password changed, or the signal near the inverter is weak.</li>
-<li><strong>The router has no power.</strong> In a power cut, a router not on backup takes the logger offline with it.</li>
+<li><strong>The router has no power.</strong> In a power cut, a router not on backup takes the logger offline with it. See <a href="sunsynk-logger-offline">logger keeps going offline</a>.</li>
 <li><strong>SunSynk is slow or down.</strong> Owners on the forums report it at the same time.</li>
 <li><strong>A second inverter lags.</strong> With two or more inverters, the second can send its readings only every 5 minutes.</li>
 <li><strong>The app is stuck.</strong> An old sign-in after an update.</li>
@@ -43,6 +43,8 @@
 <li>Logger online but the app frozen? Sign out, clear the app’s data or reinstall it, and sign in again.</li>
 <li>Still stuck? Look on <a href="https://powerforum.co.za" rel="nofollow">PowerForum</a> or MyBroadband. If others report the same, it is SunSynk, and it comes back on its own.</li>
 </ol>
+<h2>SunSynk app not showing data or power flow?</h2>
+<p>Same cause. With the logger offline, SunSynk has no new reading, so the app has nothing to show in the power flow. Get the logger back online and the numbers return. Hours missed while it was offline usually stay missing: see <a href="sunsynk-history-missing">gaps in your SunSynk history</a>.</p>
 <h2>How Prince Solar Hub helps</h2>
 <p>It reads from the same logger, so it can’t bring an offline logger back. It tells you sooner: each inverter shows when it last reported, and you get an email when nothing has come in for 30 minutes. When the logger is back, so are your readings.</p>
 <h2>More help</h2>
@@ -62,7 +64,7 @@
 <a class="btn" href="https://app.princesolarhub.co.za/?signup">Try it free</a><a class="btn ghost" href="https://princesolarhub.co.za/#pricing">See pricing</a>
 </section>
 </main>
-<footer><a href="https://princesolarhub.co.za/">Home</a><a href="sunsynk-app-alternative">Why us</a><a href="help">Help</a><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a></footer>
+<footer><a href="https://princesolarhub.co.za/">Home</a><a href="sunsynk-app-alternative">Why us</a><a href="help">Help</a><a href="terms">Terms</a><a href="privacy">Privacy</a></footer>
 <script src="https://cdn.jsdelivr.net/npm/posthog-js@1.438.12/dist/array.js" integrity="sha384-V7ZjE0gYGudHl0Vasfe9rvuMXnSi9e2iK98FPVvvTGBWH/TZUasBuz9a53hbGoj0" crossorigin="anonymous"></script>
 <script src="config.js"></script>
 <script src="welcome-track.js"></script>
