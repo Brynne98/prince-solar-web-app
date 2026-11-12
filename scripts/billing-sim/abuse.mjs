@@ -275,7 +275,7 @@ await attack("G3b", "tick a plant past the plan with no payment (Free, Home, Fam
   return { hit: bad.length > 0, note: bad.join(",") };
 });
 // The cheat this rule closes (review 2026-11-12, finding 2): a Home account watching more than 2 plants in turns.
-await attack("G3d", "Home: a third plant in turns, by a second change or by removing the login and linking it again", async () => {
+await attack("G3g", "Home: a third plant in turns, by a second change or by removing the login and linking it again", async () => {
   const bad = [];
   const h = await home("g3d"); const l = await link(h, "installer@mock"); await fill(h, 2);
   const [third, fourth] = locked(h);
