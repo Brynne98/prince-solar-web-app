@@ -539,8 +539,14 @@ const server = () => pushServer ??= webpush.importVapidKeys(JSON.parse(VAPID_KEY
   webpush.ApplicationServer.new({ contactInformation: "mailto:hello@princesolarhub.co.za", vapidKeys }))
   .catch((e) => { pushServer = null; throw e; });
 
+// The push services browsers issue addresses on; the same test as push_subs_endpoint_ok (0194).
+const PUSH_HOST =
+  /^https:\/\/(fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com|[a-z0-9-]+\.push\.apple\.com|[a-z0-9.-]+\.notify\.windows\.com)\/\S+$/;
+
 /** One pop-up to one browser: "ok", "gone" (delete it), or "failed" (left as is). */
 async function pushOne(r: PushRow, s: PushRow["subs"][number]): Promise<"ok" | "gone" | "failed"> {
+  // A row saved before 0194 can hold any address: never call it, and remove it.
+  if (!PUSH_HOST.test(s.endpoint)) return "gone";
   // data is fields, not a link, so the phone apps can map them to their own screens.
   // tag: a Grid back replaces its Grid down on screen, per plant.
   const msg = JSON.stringify({
