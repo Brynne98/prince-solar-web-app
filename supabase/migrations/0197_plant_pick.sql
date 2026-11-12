@@ -176,6 +176,8 @@ create or replace function public.api_plant_picks()
 returns jsonb language sql stable security definer set search_path = public, private, pg_temp as $$
   select jsonb_build_object(
     'plan', coalesce((select b.plan from private.billing b where b.user_id = auth.uid()), 'free'),
+    -- free of charge: no limit, so the screens show no number
+    'comped', coalesce((select b.comped from private.billing b where b.user_id = auth.uid()), false),
     'room', (select public.billing_room(b.plan, b.extra_plants)
                from (select auth.uid() u) me left join private.billing b on b.user_id = me.u),
     'change_on', (select c.changed_on + 90 from private.plant_change c

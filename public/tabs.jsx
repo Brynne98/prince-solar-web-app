@@ -2851,7 +2851,8 @@ function LoginMenu({ email, busy, onPassword, onRemove, removeLabel = 'Remove lo
 // its place: it is listed too, so it can be taken out.
 // logins: the logins with their plants; picks: api_plant_picks' answer. onDone(added, out).
 function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
-  const { plan, room } = picks;
+  // free of charge: every plant may run, so there is no number to fit
+  const { plan } = picks, free = picks.comped, room = free ? Infinity : picks.room;
   const linked = logins.flatMap(a => a.plants);
   // ticks that hold a place with no plant listed: a removed login's
   const away = picks.picks.filter(k => k.held && !k.linked);
@@ -2872,11 +2873,12 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
   };
   const save = async () => {
     setBusy(true);
-    let error = null, rest = added;
+    let error = null, rest = added, changed = false;
     if (out.length) {
       ({ error } = await window.sb.rpc('api_plant_change', { p_out: out[0], p_in: added[0] }));
       rest = added.slice(1);
-      if (!error) window.track('plant_change_done');
+      changed = !error;
+      if (changed) window.track('plant_change_done');
     }
     if (!error && rest.length) {
       ({ error } = await window.sb.rpc('api_plant_pick', { p_plants: rest }));
@@ -2887,8 +2889,8 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
     if (next) window.track('plant_change_refused_done');
     if (error) window.toast(next ? `You can change a plant again on ${longDay(next[1])}.`
       : /no room|place taken/.test(error.message) ? 'Your plan has no place open for that.' : 'Couldn’t save your plants. Try again.', { error: true });
-    // a change that went through before a later step failed still shows
-    if (!error || (out.length && rest !== added && !next)) onDone(added, out);
+    // a change that went through before a later tick failed still shows
+    if (!error) onDone(added, out); else if (changed) onDone(added.slice(0, 1), out);
   };
   const row = (p) => {
     const name = window.plantLabel(p), ticked = on.includes(p.plant_id);
@@ -2906,7 +2908,7 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
     <ConfirmCard modal danger={out.length > 0} label="Choose plants" title="Choose plants" busy={busy}
       action={out.length ? 'Change plant' : 'Save'} onConfirm={() => (added.length ? save() : !out.length && onCancel())} onCancel={onCancel}>
       <div className="keep-pick">
-        <div className="confirm-text keep-ask">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}.</div>
+        {!free && <div className="confirm-text keep-ask">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}.</div>}
         {logins.map(acc => (
           <div key={acc.account_id} className="login-grp plant-logins">
             <div className="login-line"><div className="login-who"><span className="login-email">{acc.kind === 'share' ? 'Shared plants' : acc.sunsynk_username}</span></div></div>
@@ -2923,7 +2925,7 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
           : say === 'date' ? <div className="field-note keep-count warn">You can change a plant again on {longDay(picks.change_on)}.</div>
           : say === 'one' ? <div className="field-note keep-count warn">One change every 90 days. Tick {nameOf(out[0])} again first.</div>
           : out.length ? <div className="field-note keep-count warn">{added.length ? `${nameOf(out[0])}’s history is deleted straight away and can’t be brought back. You can change again in 90 days.` : `Tick the plant to run in place of ${nameOf(out[0])}.`}</div>
-          : <div className="field-note keep-count">{on.length} of {room} ticked.{added.length > 0 && ' After this you can change one plant every 90 days.'}</div>}
+          : !free && <div className="field-note keep-count">{on.length} of {room} ticked.{added.length > 0 && ' After this you can change one plant every 90 days.'}</div>}
       </div>
     </ConfirmCard>
   );
@@ -3027,7 +3029,9 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   // The ticks and the day the next change opens (api_plant_picks), read with the list.
   const [picks, setPicks] = useState(null);
   const loadPicks = () => window.sb.rpc('api_plant_picks').then(({ data }) => { if (data) setPicks(data); });
-  React.useEffect(() => { loadPicks(); }, [accounts]);
+  // again only when a plant is added, removed, locked or started, not on each minute's re-read
+  const plantsKey = live.map(a => a.account_id + ':' + (a.plants || []).map(p => p.plant_id + (p.paused ? '-' : '+')).join()).join('|');
+  React.useEffect(() => { loadPicks(); }, [plantsKey]);
   const [choosing, setChoosing] = useState(false);
   const chosen = async (added, out) => {
     setChoosing(false);
@@ -3059,8 +3063,8 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
             {!p.paused && <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
           </>
           : p.paused ? <span className="pm-state"><window.LockIcon />Locked</span>
-          : !ok && !shared ? <MenuState cut />
-          : !states.at ? null
+          /* a login that stopped says so once, on its own line above */
+          : (!ok && !shared) || !states.at ? null
           /* its first 60 days are still arriving, or no reading yet: the header's words and % (SOLAR-176) */
           : fetching != null ? <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Fetching history<span className="mono pm-pct">{Math.round(100 * fetching)}%</span></span>
           : <MenuState st={st} now={states.at || Date.now()} />}
@@ -3079,7 +3083,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   return (
     <SettingsSection id="connection" title={title} head={head}
       action={!unread && <div className="plants-acts">
-        {lockedAny && picks && !billing?.comped && <button type="button" className="ghost-btn" onClick={() => setChoosing(true)}>Choose plants</button>}
+        {lockedAny && picks && <button type="button" className="ghost-btn" onClick={() => setChoosing(true)}>Choose plants</button>}
         <button type="button" className="save-btn" onClick={() => setMode('add')}>Add plant</button>
       </div>}>
       {!unread && mode === 'add' && (

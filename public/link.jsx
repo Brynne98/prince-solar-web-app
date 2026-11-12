@@ -555,7 +555,9 @@ function PlantPickDialog({ logins, from, onDone }) {
     window.sb.rpc('api_plant_picks').then(({ data, error }) => {
       if (!alive) return;
       if (error || !data) { window.toast('Couldn’t load your plan. Try again.', { error: true }); return onDone([]); }
-      const open = Math.min(all.length, data.room - data.picks.filter(k => k.held).length);
+      // a place for each: one not held, and for a plant never ticked, one more tick the plan allows
+      const open = Math.min(all.length, data.room - data.picks.filter(k => k.held).length,
+        data.room - data.picks.length + all.filter(p => p.picked).length);
       if (open < 1) return onDone([]);
       setPlaces({ plan: data.plan, open });
       // they all fit: ticked already, one tap to add
@@ -607,7 +609,6 @@ function PickAfterPay({ links, onDone }) {
   return <PlantPickDialog logins={logins} from="upgrade" onDone={(ids) => { close(); if (ids.length) onDone({ plants: ids.map(id => ({ id })), paused: [] }); }} />;
 }
 window.PickAfterPay = PickAfterPay;
-window.startableLogins = startableLogins;
 
 // Connect card that opens in place on a page with no inverter yet (Setup), with its title.
 // Either way: one line on which login, the two fields, a note, then Cancel and the green
@@ -648,7 +649,8 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
   // (SOLAR-537). { logins, done }: the pop-up is up; done(ids) carries on with the plants ticked.
   const [pick, setPick] = useState(null);
   const linked = async (r) => {
-    const locked = new Set((r.paused || []).map(Number));
+    // not after Reconnect or a new password: no login was added
+    const locked = new Set((relink ? [] : r.paused || []).map(Number));
     const { data } = locked.size ? await window.sb.rpc('api_link_status') : {};
     const logins = startableLogins(data, locked);
     if (!logins.length) return onLinked(r);
