@@ -3016,7 +3016,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         {s === 'going' && <span className="conn-status plant-state warn">Kept until {billDay(p.remove_on)}</span>}
         {s === 'going' && !p.paused && <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
         {p.paused && !p.share_gone && <>
-          {s === 'paused' && <span className="conn-status plant-state">Locked</span>}
+          {s === 'paused' && <span className="plant-state locked">Locked</span>}
           {p.can_start ? <button type="button" className="ghost-btn" onClick={() => setAdding(window.startableLogins(live))}>Add</button>
             : billing?.comped ? null
             /* Family is the biggest plan; more than its 5 plants is by email (SOLAR-371) */
