@@ -51,7 +51,7 @@ alter table private.plant_picks enable row level security;
 
 create table if not exists private.plant_change (
   user_id    uuid primary key references auth.users (id) on delete cascade,
-  changed_at timestamptz not null
+  changed_on date not null  -- the South African day (private.billing_today)
 );
 alter table private.plant_change enable row level security;
 
@@ -177,9 +177,8 @@ returns jsonb language sql stable security definer set search_path = public, pri
   select jsonb_build_object(
     'room', (select public.billing_room(b.plan, b.extra_plants)
                from (select auth.uid() u) me left join private.billing b on b.user_id = me.u),
-    'change_on', (select ((c.changed_at + interval '90 days') at time zone 'Africa/Johannesburg')::date
-                    from private.plant_change c
-                   where c.user_id = auth.uid() and c.changed_at + interval '90 days' > now()),
+    'change_on', (select c.changed_on + 90 from private.plant_change c
+                   where c.user_id = auth.uid() and c.changed_on + 90 > private.billing_today()),
     'picks', coalesce((select jsonb_agg(jsonb_build_object(
                          'plant_id', k.plant_id,
                          'plant_name', coalesce(pu.plant_name, k.plant_name, 'Plant ' || k.plant_id),
@@ -250,15 +249,14 @@ create or replace function public.api_plant_change(p_out bigint, p_in bigint)
 returns jsonb language plpgsql security definer set search_path = public, private, pg_temp as $$
 declare
   uid uuid := auth.uid();
-  last timestamptz;
+  last date;
   plant_in public.plant_users;
 begin
   if uid is null then raise exception 'sign in first' using errcode = '42501'; end if;
   perform private.billing_lock(uid);
-  select changed_at into last from private.plant_change where user_id = uid;
-  if last + interval '90 days' > now() then
-    raise exception 'next change %', to_char((last + interval '90 days') at time zone 'Africa/Johannesburg', 'YYYY-MM-DD')
-      using errcode = '22023';
+  select changed_on into last from private.plant_change where user_id = uid;
+  if last + 90 > private.billing_today() then
+    raise exception 'next change %', to_char(last + 90, 'YYYY-MM-DD') using errcode = '22023';
   end if;
   if p_out is null or p_in is null or p_out = p_in
      or not exists (select 1 from private.plant_picks where user_id = uid and plant_id = p_out) then
@@ -280,8 +278,8 @@ begin
   on conflict do nothing;
   perform private.plant_run(uid, p_in);
 
-  insert into private.plant_change (user_id, changed_at) values (uid, now())
-  on conflict (user_id) do update set changed_at = excluded.changed_at;
+  insert into private.plant_change (user_id, changed_on) values (uid, private.billing_today())
+  on conflict (user_id) do update set changed_on = excluded.changed_on;
   return public.api_plant_picks();
 end $$;
 revoke all on function public.api_plant_change(bigint, bigint) from public, anon;
@@ -358,12 +356,16 @@ begin
   -- a kept plant that was locked starts only with its tick (0197), and refetches as every start does (0131)
   if exists (select 1 from public.plant_users pu join private.plant_picks k on k.user_id = pu.user_id and k.plant_id = pu.plant_id
               where pu.user_id = p_user and pu.plant_id = keep and pu.paused and pu.share_gone_at is null) then
-    if not exists (select 1 from public.plant_users where plant_id = keep and not paused) then
-      update public.plant_users set paused = false where user_id = p_user and plant_id = keep;
-      perform private.plant_start_fill(keep);
-    else
-      update public.plant_users set paused = false where user_id = p_user and plant_id = keep;
-    end if;
+    begin
+      if not exists (select 1 from public.plant_users where plant_id = keep and not paused) then
+        update public.plant_users set paused = false where user_id = p_user and plant_id = keep;
+        perform private.plant_start_fill(keep);
+      else
+        update public.plant_users set paused = false where user_id = p_user and plant_id = keep;
+      end if;
+    exception when sqlstate '22023' then
+      null;  -- its place is held by a plant whose login is removed: it stays locked
+    end;
   end if;
   insert into public.email_queue (user_id, kind, key, data, priority)
   values (p_user, 'bill_free', 'bill_free:' || p_today,

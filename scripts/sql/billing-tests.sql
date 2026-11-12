@@ -905,11 +905,11 @@ begin
   perform pg_temp.eq('change: the plant out loses its history at once', (select count(*)::int from private.plant_wipe where plant_id = 9000901), 1);
   perform pg_temp.eq('change: and its tick', (select string_agg(plant_id::text, ',' order by plant_id) from private.plant_picks where user_id = p), '9000902,9000903');
   perform pg_temp.eq('change: next one opens 90 days on', public.api_plant_picks()->>'change_on',
-    ((now() + interval '90 days') at time zone 'Africa/Johannesburg')::date::text);
+    (t + 90)::text);
   perform pg_temp.raises('change: a second is refused with the date', 'select public.api_plant_change(9000902, 9000901)',
-    'next change ' || ((now() + interval '90 days') at time zone 'Africa/Johannesburg')::date);
+    'next change ' || (t + 90));
   perform pg_temp.eq('change: the refused one changed nothing', (select count(*)::int from public.plant_users where user_id = p and not paused and plant_id in (9000902, 9000903)), 2);
-  update private.plant_change set changed_at = now() - interval '89 days' where user_id = p;
+  update private.plant_change set changed_on = t - 89 where user_id = p;
   perform pg_temp.raises('change: still refused on day 89', 'select public.api_plant_change(9000902, 9000901)', 'next change');
 
   -- cancel, then buy again: the same plants come back, the change is not used
@@ -930,7 +930,7 @@ begin
     (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
     '9000901:true,9000902:false,9000903:false');
   perform pg_temp.eq('buy again: the change date did not move',
-    (select changed_at < now() - interval '88 days' from private.plant_change where user_id = p), true);
+    (select changed_on = t - 89 from private.plant_change where user_id = p), true);
 
   -- remove the login and link it again: no fresh pick
   perform set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true);
@@ -956,13 +956,13 @@ begin
   perform public.api_plant_pick(array[9000901]);
   perform pg_temp.eq('gone: its place takes another plant without a change',
     (select paused from public.plant_users where user_id = p and plant_id = 9000901)::text || ' ' ||
-    (select changed_at < now() - interval '88 days' from private.plant_change where user_id = p), 'false true');
+    (select changed_on = t - 89 from private.plant_change where user_id = p), 'false true');
   perform public.plant_users_upsert(p, acc, three);
   perform pg_temp.eq('gone: back in the list it waits locked',
     (select paused and share_gone_at is null from public.plant_users where user_id = p and plant_id = 9000903), true);
 
   -- 90 days on, the change opens
-  update private.plant_change set changed_at = now() - interval '91 days' where user_id = p;
+  update private.plant_change set changed_on = t - 90 where user_id = p;
   perform pg_temp.eq('change: open again after 90 days', public.api_plant_picks()->>'change_on', null::text);
   perform public.api_plant_change(9000902, 9000903);
   perform pg_temp.eq('change: the second one, 90 days on', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
