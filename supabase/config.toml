@@ -212,8 +212,8 @@ token_verifications = 30
 # Number of Web3 logins that can be made in a 5 minute interval per IP address.
 web3 = 30
 
-# Bot check (SOLAR-533): Cloudflare Turnstile. Live has it on, set in the dashboard
-# (Authentication > Bot and Abuse Protection) with the real secret; this file is never pushed.
+# Bot check (SOLAR-533): Cloudflare Turnstile. Live's switch and its real secret are set in the
+# dashboard (Authentication > Bot and Abuse Protection), not here; this file is never pushed.
 # Off here: the check scripts under scripts/ sign in with a password and send no token.
 # To try it locally set enabled = true and restart; the secret below is Cloudflare's public
 # always-pass test secret, the pair of the test site key in public/config.js.
