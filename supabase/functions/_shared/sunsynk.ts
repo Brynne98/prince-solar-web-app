@@ -509,7 +509,7 @@ export async function syncPlants(acc: Account, linked?: { plants: PlantInfo[]; i
     p_user: acc.user_id, p_account: acc.id,
     p_rows: all.slice().sort((a, b) => a.id - b.id).map((p) => ({ plant_id: p.id, plant_name: p.name })),
   });
-  // Only plants this user has active go on: a paused plant is not seeded, imported or polled.
+  // Only plants this user has active go on: a paused plant gets its config row, nothing more.
   const { data: pausedRows, error: pausedErr } = await db.from("plant_users").select("plant_id")
     .eq("user_id", acc.user_id).eq("paused", true).in("plant_id", all.map((p) => p.id));
   if (pausedErr) throw new Error(`plant_users: ${pausedErr.message}`);
@@ -521,6 +521,10 @@ export async function syncPlants(acc: Account, linked?: { plants: PlantInfo[]; i
  * The part of syncPlants after plant_users: store a paused plant's serials, and seed,
  * import and kick the active plants that have no plant_config row yet. A claimed shared
  * plant (SOLAR-310) comes through here too. Returns the active plants.
+ *
+ * A paused plant with no row gets one too, with SunSynk's zone and lat/lon but no
+ * history bookmarks (0192): the state a stopped plant is in. Starting it
+ * (plant_start_fill) then sets the bookmarks in the plant's own zone (SOLAR-481).
  */
 export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<number>, invs?: InverterInfo[]): Promise<PlantInfo[]> {
   const plants = all.filter((p) => !paused.has(p.id));
@@ -537,23 +541,24 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
     }
   }
   const { data: seeded, error } = await db.from("plant_config").select("plant_id")
-    .in("plant_id", plants.map((p) => p.id));
+    .in("plant_id", all.map((p) => p.id));
   if (error) throw new Error(`plant_config: ${error.message}`);
   const have = new Set((seeded ?? []).map((r: any) => Number(r.plant_id)));
-  const missing = plants.filter((p) => !have.has(p.id));
+  const missing = all.filter((p) => !have.has(p.id));
   const details = await Promise.allSettled(missing.map((p) => getPlantDetail(acc, p.id)));
   const rows = details
     .filter((r): r is PromiseFulfilledResult<PlantDetail> => r.status === "fulfilled")
     .map((r) => ({
       plant_id: r.value.id, timezone: r.value.timezone,
-      lat: r.value.lat, lon: r.value.lon,
+      lat: r.value.lat, lon: r.value.lon, paused: paused.has(r.value.id),
     }));
   if (rows.length) await rpc("plant_config_seed", { p_rows: rows });
+  const activeRows = rows.filter((r) => !r.paused);
   // Free past its week (0111, SOLAR-241): recover never walks these plants back, so
   // drop the 60-day bookmarks now rather than show "Fetching history" until the trim.
-  if (rows.length) {
+  if (activeRows.length) {
     const trimmed = await freeTrimmedPlants();
-    const cut = rows.map((r) => r.plant_id).filter((id) => trimmed.has(id));
+    const cut = activeRows.map((r) => r.plant_id).filter((id) => trimmed.has(id));
     if (cut.length) {
       const { error } = await db.from("plant_config").update({ backfill_next: null, backfill_until: null, temp_next: null }).in("plant_id", cut);
       if (error) {
@@ -566,8 +571,8 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
   // ask SunSynk for per-inverter history before the first poll has run, then fire
   // sync-plant-energy and recover for each. Best effort — a failure here leaves
   // the plant on the nightly schedule, which is where it was before 0044.
-  if (rows.length) {
-    const seededIds = rows.map((r) => r.plant_id);
+  if (activeRows.length) {
+    const seededIds = activeRows.map((r) => r.plant_id);
     const wanted = new Set(seededIds);
     try {
       const seed = (invs ?? await getInverters(acc)).filter((i) => i.plantId != null && wanted.has(Number(i.plantId)));
