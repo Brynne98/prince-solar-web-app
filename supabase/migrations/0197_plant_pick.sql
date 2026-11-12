@@ -169,12 +169,13 @@ create trigger plant_users_gone before update of share_gone_at on public.plant_u
 update public.plant_users set paused = true where share_gone_at is not null and not paused;
 
 -- ---------------------------------------------------------------------------
--- What the pick screens read: the plan's places, the ticks, and the day the next
--- change opens (null: ready).
+-- What the pick screens read: the plan and its places, the ticks, and the day the
+-- next change opens (null: ready).
 -- ---------------------------------------------------------------------------
 create or replace function public.api_plant_picks()
 returns jsonb language sql stable security definer set search_path = public, private, pg_temp as $$
   select jsonb_build_object(
+    'plan', coalesce((select b.plan from private.billing b where b.user_id = auth.uid()), 'free'),
     'room', (select public.billing_room(b.plan, b.extra_plants)
                from (select auth.uid() u) me left join private.billing b on b.user_id = me.u),
     'change_on', (select c.changed_on + 90 from private.plant_change c

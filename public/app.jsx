@@ -215,8 +215,9 @@ function MenuState({ st, cut, now }) {
 
 // The plant on screen, left in the header; a menu once there is more than one. Each row
 // says how its plant is doing, asked when the menu opens (SOLAR-182).
-// Grouped by SunSynk login (SOLAR-251): each login's email, then its plants. A stopped
-// plant has no readings to open; it reads Stopped and opens Billing, where it starts.
+// Grouped by SunSynk login (SOLAR-251): each login's email, then its plants. A locked
+// plant (SOLAR-537) has no readings to open; it reads Locked and opens Plants, where it is
+// added or the plan upgraded.
 function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accounts, onStopped }) {
   const plants = me?.plants || [];
   const current = plants.find(p => p.id === plantId);
@@ -256,7 +257,7 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
                     <button key={row.plant_id} type="button" role="menuitem" className="pm-stopped"
                             onClick={() => { setOpen(false); onStopped && onStopped(); }}>
                       <span className="tick" aria-hidden="true" /><span className="nm">{window.plantLabel(row)}</span>
-                      <span className="pm-state">Stopped</span>
+                      <span className="pm-state">Locked</span>
                     </button>
                   );
                 }
@@ -1220,7 +1221,7 @@ function usePageTitle(tab) {
 // Setup has no plant to set: its list leaves Plant settings out.
 const SETUP_TABS = TABS.filter(t => t.id !== 'system');
 
-// The plants a link-sunsynk answer brings that collect now, not added stopped (plan full).
+// The plants a link-sunsynk answer brings that run now, not locked (SOLAR-537).
 const comingOn = (r) => {
   const paused = new Set((r?.paused || []).map(Number));
   return (r?.plants || []).map(p => Number(p.id)).filter(id => !paused.has(id));
@@ -1416,7 +1417,7 @@ function Setup({ links }) {
   const dead = links.accounts.filter(a => a.status === 'needs_relink' && a.kind !== 'share');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
   const account = { user, plantCount: 0, alert: dead.length > 0, onSettings: () => go('prefs'), active: isSettings(tab) };
-  // Every plant on a working login switched off: turning one on comes first, adding one second.
+  // Every plant on a working login locked (SOLAR-537): choosing one comes first, adding one second.
   const plantsOff = !relink && links.accounts.some(a => a.status !== 'disabled' && (a.plants || []).length > 0);
   const [flash, setFlash] = useState(null);
   const turnOn = () => { window.track('setup_turn_on_done'); setConnecting(false); setFlash('connection'); setTab('plants'); toTop(); };
@@ -1424,18 +1425,18 @@ function Setup({ links }) {
     <button type="button" className={(plantsOff ? 'ghost-btn' : 'save-btn') + ' setup-btn ' + cls} onClick={onClick} aria-label="Add plant"><Icon id="plug" /><span>Add plant</span></button>
   );
   // The header's Add plant with plants off: the form over the page, so Cancel leaves you where
-  // you were. A plant that comes on goes to Live; plants added stopped (plan full) close the
-  // form with a toast, and their switches offer the upgrade (SOLAR-368).
+  // you were. A plant that comes on goes to Live; plants added locked close the form with a
+  // toast, and their rows in Plants offer Add or the upgrade (SOLAR-368, SOLAR-537).
   const [adding, setAdding] = useState(false);
   const addedFromHead = (r) => {
     const on = comingOn(r).length, n = (r?.plants || []).length;
     if (on) setTab('live');
-    else if (n) window.toast(n === 1 ? `${window.plantLabel(r.plants[0])} added. It's off: your plan is full.` : `${n} plants added. They're off: your plan is full.`);
+    else if (n) window.toast(n === 1 ? `${window.plantLabel(r.plants[0])} added. It’s locked.` : `${n} plants added. They’re locked.`);
     if (on || n) setAdding(false);
     return linked(r);
   };
   const turnOnBtn = (cls) => (
-    <button type="button" className={'save-btn setup-btn ' + cls} onClick={turnOn} aria-label="Turn on a plant"><Icon id="power" /><span>Turn on a plant</span></button>
+    <button type="button" className={'save-btn setup-btn ' + cls} onClick={turnOn} aria-label="Choose plants"><Icon id="power" /><span>Choose plants</span></button>
   );
   // App opens on the page the address names. A plant just added opens on Live, as in App
   // (SOLAR-174); one switched back on stays put.
@@ -1456,8 +1457,8 @@ function Setup({ links }) {
   ) : plantsOff ? (
     <div className="setup-empty-box">
       <Icon id="power" />
-      <h2>Your plants are off</h2>
-      <p>Turn one on, or add another, to see your solar, battery, grid and home here.</p>
+      <h2>Your plants are locked</h2>
+      <p>Choose one, or add another, to see your solar, battery, grid and home here.</p>
       <div className="setup-btns">{turnOnBtn('')}{connectBtn('')}</div>
     </div>
   ) : (
@@ -1478,7 +1479,7 @@ function Setup({ links }) {
   // Account and Billing work; Plant settings waits for a plant.
   return (
     <Frame tabs={SETUP_TABS} tab={tab} onTab={go} account={account}
-      head={<><PlantMenu fallback={plantsOff ? 'Plants off' : 'No plant yet'} />
+      head={<><PlantMenu fallback={plantsOff ? 'Plants locked' : 'No plant yet'} />
         {!connecting && (plantsOff
           ? <span className="setup-head-btns">{turnOnBtn('setup-head-btn')}{connectBtn('setup-head-btn', () => setAdding(true))}</span>
           : connectBtn('setup-head-btn'))}</>}>

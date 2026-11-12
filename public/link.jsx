@@ -485,6 +485,108 @@ const NO_PLANT_TEXT = 'has no plant shared with it yet. Your login is saved.';
 
 // One form for a SunSynk login, built from the app's own Settings parts (SOLAR-96).
 // `compact`: inside Account's SunSynk logins section (Add plant, Reconnect). Otherwise the
+// The pick itself: plants under their login's email, as Plants lays them out; a circle each
+// when exactly 1 must be picked, else a tick box. Past the room it says so; the last tick
+// stays unless min is 0. Both lines in amber: they need reading, but nothing failed.
+// Two uses. The plants a cancel or smaller plan keeps (SOLAR-496): links, plan, keep (the
+// label and undo of "keep the plan as it is"). The plants a login adds (SOLAR-537): logins
+// (the plants to choose from), ask and full (its two lines), min 0, verb 'Add'.
+function KeepPicker({ links, plan, room, value, onChange, keep, logins, ask, full, min = 1, verb = 'Keep' }) {
+  const [say, setSay] = React.useState(null); // 'last' | 'full'
+  const one = room === 1 && min > 0;
+  const tick = (id) => {
+    setSay(null);
+    if (one) return onChange([id]);
+    if (value.includes(id)) return value.length <= min ? setSay('last') : onChange(value.filter(x => x !== id));
+    if (value.length >= room) return setSay('full');
+    onChange([...value, id]);
+  };
+  const left = room - value.length;
+  return (
+    <div className="keep-pick">
+      <div className="confirm-text keep-ask">{ask || `${PLAN_NAME[plan]} keeps ${one ? '1 plant. Which one?' : `${room} plants. Which ones?`}`}</div>
+      {(logins || pickableLogins(links)).map(acc => (
+        <div key={acc.account_id} className="login-grp plant-logins">
+          <div className="login-line"><div className="login-who"><span className="login-email">{acc.kind === 'share' ? 'Shared plants' : acc.sunsynk_username}</span></div></div>
+          {acc.plants.map(p => {
+            const name = window.plantLabel(p), on = value.includes(p.plant_id);
+            return (
+              <label key={p.plant_id} className={'login-plant keep-row' + (on ? '' : ' off')}>
+                <span className="conn-user plant-nm">{name}</span>
+                <input type={one ? 'radio' : 'checkbox'} name="keep-pick" checked={on} aria-label={verb + ' ' + name} onChange={() => tick(p.plant_id)} />{/* reuse-check: allow: tick boxes, not switches, for the keep pick (SOLAR-486) */}
+              </label>
+            );
+          })}
+        </div>
+      ))}
+      {say === 'last' ? <div className="field-note keep-count warn">At least one plant needs to be selected.</div>
+        : say === 'full' ? <div className="field-note keep-count warn">{full || <>{PLAN_NAME[plan]} keeps {room} plants. Untick one first{keep ? <>, or <button type="button" className="mini-link" onClick={keep.run}>{keep.label}</button></> : ''}.</>}</div>
+        : !one && <div className="field-note keep-count">{value.length} of {room} ticked.{min > 0 && left > 0 && ` Tick ${left} more.`}</div>}
+    </div>
+  );
+}
+
+// The plants of the logins given that are locked and have a place open (api_link_status
+// can_start), under their logins. only: keep just these plant ids.
+const startableLogins = (accounts, only) => {
+  const seen = new Set();
+  return (accounts || []).filter(a => a.status !== 'disabled').map(a => ({ ...a,
+    plants: (a.plants || []).filter(p => p.can_start && (!only || only.has(Number(p.plant_id))) && !seen.has(p.plant_id) && seen.add(p.plant_id)) }))
+    .filter(a => a.plants.length);
+};
+// The owner ticks which locked plants run (SOLAR-537, 0197), up to the places the plan has
+// open. After a login links, and from Add on a locked plant. Fewer ticks is fine: the rest
+// stay locked and an open place can be filled later. A tick stays, so the pop-up says what
+// changing it costs. Asks the server for the places (api_plant_picks) before it shows.
+// onDone(ids): the plants now running; [] when closed with none.
+function PlantPickDialog({ logins, from, onDone }) {
+  const { useState, useEffect } = React;
+  const all = logins.flatMap(a => a.plants);
+  const [places, setPlaces] = useState(null); // { plan, open }
+  const [picked, setPicked] = useState([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    window.sb.rpc('api_plant_picks').then(({ data, error }) => {
+      if (!alive) return;
+      if (error || !data) { window.toast('Couldn’t load your plan. Try again.', { error: true }); return onDone([]); }
+      const open = Math.min(all.length, data.room - data.picks.filter(k => k.held).length);
+      if (open < 1) return onDone([]);
+      setPlaces({ plan: data.plan, open });
+      // they all fit: ticked already, one tap to add
+      if (all.length <= open) setPicked(all.map(p => p.plant_id));
+    });
+    return () => { alive = false; };
+  }, []);
+  if (!places) return null;
+  const { plan, open } = places;
+  const add = async () => {
+    if (!picked.length) return onDone([]);
+    setBusy(true);
+    const { error } = await window.sb.rpc('api_plant_pick', { p_plants: picked });
+    setBusy(false);
+    if (error) return window.toast(/no room/.test(error.message) ? 'Your plan has no place open for that.' : 'Couldn’t add your plants. Try again.', { error: true });
+    window.track('plant_pick_done', { from, count: picked.length, of: all.length, plan });
+    onDone(picked);
+  };
+  const more = open === 1 ? '1 more plant' : open + ' more plants';
+  return (
+    <Dialog keep label="Choose your plants" busy={busy} onClose={() => onDone([])}>
+      <div className="confirm-title">Choose your plants</div>
+      <KeepPicker logins={logins} room={open} value={picked} onChange={setPicked} min={0} verb="Add"
+        ask={`${PLAN_NAME[plan]} has room for ${more}.${all.length > open ? (open === 1 ? ' Which one?' : ' Which ones?') : ''}`}
+        full={`${PLAN_NAME[plan]} has room for ${more}. Untick one first.`} />
+      <div className="confirm-text keep-note">After this you can change one plant every 90 days.</div>
+      <div className="conn-form-actions">
+        <button type="button" className="ghost-btn" onClick={() => onDone([])} disabled={busy}>Not now</button>
+        <window.BusyButton className="save-btn" onClick={add} busy={busy} disabled={!picked.length}>{picked.length > 1 ? 'Add plants' : 'Add plant'}</window.BusyButton>
+      </div>
+    </Dialog>
+  );
+}
+window.PlantPickDialog = PlantPickDialog;
+window.startableLogins = startableLogins;
+
 // Connect card that opens in place on a page with no inverter yet (Setup), with its title.
 // Either way: one line on which login, the two fields, a note, then Cancel and the green
 // button at the right.
@@ -520,12 +622,24 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
   // A plant someone else has: its id, for the line on how to get it back.
   const [taken, setTaken] = useState(null);
   const share = mode === 'share' && !relink;
+  // The plants a link brought that are locked with a place open: the owner ticks which run
+  // (SOLAR-537). { logins, done }: the pop-up is up; done(ids) carries on with the plants ticked.
+  const [pick, setPick] = useState(null);
+  const linked = async (r) => {
+    const locked = new Set((r.paused || []).map(Number));
+    const { data } = locked.size ? await window.sb.rpc('api_link_status') : {};
+    const logins = startableLogins(data, locked);
+    if (!logins.length) return onLinked(r);
+    const on = await new Promise(done => setPick({ logins, done }));
+    setPick(null);
+    return onLinked({ ...r, paused: (r.paused || []).filter(id => !on.includes(Number(id))) });
+  };
 
   const check = async () => {
     if (!ref.trim()) return flag({ 'ss-ref': 'Enter a plant ID or serial' });
     setBusy(true); setBad({}); setTaken(null);
     try {
-      await onLinked(await window.claimShare(ref.trim()));
+      await linked(await window.claimShare(ref.trim()));
     } catch (ex) {
       if (ex.taken) setTaken(ex.taken);
       else if (ex.field) flag({ 'ss-ref': ex.message });
@@ -554,7 +668,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
         return;
       }
       // Busy until the caller has the new login list, or the screen sits idle before it changes.
-      await onLinked(r);
+      await linked(r);
       setPassword(''); setNoPlants(false);
     } catch (ex) {
       fail(ex instanceof TypeError ? 'Can’t reach Prince Solar Hub. Check your connection and try again.' : ex.message);
@@ -571,6 +685,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
 
   return (
     <form className={compact ? 'conn-form link-form' : 'link-form link-card'} onSubmit={submit} noValidate aria-busy={busy}>
+      {pick && <PlantPickDialog logins={pick.logins} from="link" onDone={pick.done} />}
       {!compact && <h2 className="sset-title">{noPlants ? 'Connected, but no plant yet' : relink ? 'Reconnect SunSynk' : 'Add your plant'}</h2>}
       {!relink && !noPlants && (
         <window.Segmented block label="How to add it" className="link-mode" value={mode}
