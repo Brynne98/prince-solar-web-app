@@ -133,7 +133,10 @@ Not sent on purpose: menu opens, hovers, day arrows after the first, chart serie
   wrong currency or amount, payment not applied, disputes, webhook, daily run, pay),
   claim-share and link-sunsynk 502s (not a wrong password), poll, notify (retryable Resend
   errors as `resend_<status>`, emails given up as `email_failed`, push), recover, SunSynk
-  calls.
+  calls. A kind about one day also sends `days` (`"<plant id>:<YYYY-MM-DD>"`, up to 50)
+  (SOLAR-525): recover's `history_day_given_up` (a first-load day that failed 3 tries) and
+  `gap_day_given_up` (the 14-day window's oldest day, still missing minutes because
+  SunSynk history did not answer), sent every time, not hourly.
 - Alerts: a new or reopened issue calls `error-alert` (PostHog webhook with the
   `x-alert-key` secret header, `ERROR_ALERT_KEY`), which emails admin@theronprince.co.za.
   The insight alerts above and "Web app errors jumped" email admin@ from PostHog.

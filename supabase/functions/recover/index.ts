@@ -232,11 +232,14 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
   if (!gaps.length) return { day, banked: 0, reason: "no gaps" };
   const wanted = gaps.length;
 
-  // 1. per-inverter history
+  // 1. per-inverter history. historyFailed: an endpoint did not answer, so the
+  // minutes the plant feed can't fill may still be in the cloud (SOLAR-525).
   let bankedHistory = 0;
+  let historyFailed = false;
   try {
     const h = await historySpine(acc, plantId, tz, day);
     const failed = h?.days.reduce((n, d) => n + d.failed, 0) ?? 0;
+    historyFailed = !h || failed > 0;
     if (historyOnly && (!h || failed > 0)) {
       return { day, banked: 0, missing: wanted, failed: true, reason: h ? `${failed} history endpoint(s) did not answer` : "no history came back" };
     }
@@ -251,6 +254,7 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
       }
     }
   } catch (e) {
+    historyFailed = true;
     console.warn(`invhistory ${plantId} ${day}:`, e instanceof Error ? e.message : e);
     noteError("invhistory_failed", e, { plant: plantId, hourly: true });
   }
@@ -259,7 +263,7 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
 
   // 2. the plant feed for what is left
   const feed = await plantFeedForDay(acc, plantId, day);
-  if (!feed) return { day, banked: bankedHistory, bankedHistory, missing: wanted, reason: "cloud no longer has this day" };
+  if (!feed) return { day, banked: bankedHistory, bankedHistory, missing: wanted, historyFailed, reason: "cloud no longer has this day" };
 
   // Calibrate against this day's own poller rows when there are enough of them
   // (>= 3 h); otherwise borrow the current scale.
@@ -284,7 +288,7 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
       soc: e.soc == null ? null : Math.round(e.soc),
     });
   }
-  if (!rows.length) return { day, banked: bankedHistory, bankedHistory, missing: wanted, reason: "feed had no matching buckets" };
+  if (!rows.length) return { day, banked: bankedHistory, bankedHistory, missing: wanted, historyFailed, reason: "feed had no matching buckets" };
 
   const banked = await rpc("q_insert_recovered", { p_plant: plantId, p_rows: rows, p_source: "plantfeed" });
 
@@ -294,6 +298,7 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
     bankedHistory,
     bankedPlantFeed: Number(banked ?? 0),
     missing: wanted,
+    historyFailed,
     scale: {
       pv: +scale.pv.toFixed(2), batt: +scale.batt.toFixed(2),
       grid: +scale.grid.toFixed(2), load: +scale.load.toFixed(2),
@@ -346,6 +351,11 @@ async function backfillPlant(job: PlantJob, started: number) {
     if (error) throw new Error(`backfill bookmark ${plantId}: ${error.message}`);
     if (!moved?.length) { stoppedEarly = `another run moved the bookmark at ${day}`; break; }
     if (retry) { stoppedEarly = `${day} failed (try ${tries + 1}); next run retries it`; break; }
+    if (r.failed) {
+      const why = `history ${plantId} ${day} given up after ${BACKFILL_MAX_TRIES} tries: ${r.error ?? r.reason}`;
+      console.error(why);
+      noteError("history_day_given_up", new Error(why), { plant: plantId, day });
+    }
     tries = 0;
   }
   return { banked: total, scanned: `${from} back to ${floor}`, stoppedEarly, days: results };
@@ -375,17 +385,30 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number, 
   let total = 0;
   let stoppedEarly: string | null = null;
 
+  // The window's oldest day gets its last try here: tomorrow it is outside. Minutes
+  // still missing there because SunSynk did not answer are given up (SOLAR-525). Not
+  // while a first load runs (every 2 min); the scheduled runs see the same day.
+  const lastTry = addDays(tz, today, -(windowDays - 1));
+  const giveUp = (day: string, why: string) => {
+    if (day !== lastTry || day >= today || pending || keeps24h) return;
+    console.error(`gap repair ${plantId} ${day} given up: ${why}`);
+    noteError("gap_day_given_up", new Error(`gap repair ${plantId} ${day} given up: ${why}`), { plant: plantId, day });
+  };
   for (let day = today; day >= floor; day = addDays(tz, day, -1)) {
     if (Date.now() - started > windowBudget) {
       stoppedEarly = `time budget reached at ${day}; remaining days will be picked up next run`;
       break;
     }
     try {
-      const r = await recoverDay(account, plantId, tz, day);
+      const r: any = await recoverDay(account, plantId, tz, day);
       total += r.banked;
       if (r.banked > 0 || r.reason) results.push(r);
+      const left = (r.missing ?? 0) - r.banked;
+      if (r.historyFailed && left > 0) giveUp(day, `${left} of ${r.missing} minutes unfilled; history did not answer${r.reason ? `, ${r.reason}` : ""}`);
     } catch (e) {
-      results.push({ day, banked: 0, error: String(e instanceof Error ? e.message : e) });
+      const error = String(e instanceof Error ? e.message : e);
+      results.push({ day, banked: 0, error });
+      giveUp(day, error);
     }
   }
 

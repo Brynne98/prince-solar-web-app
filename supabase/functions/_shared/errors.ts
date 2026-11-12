@@ -80,15 +80,17 @@ export async function reportError(fn: string, e: unknown, userId: string | null 
 // hourly: a kind that can repeat every minute (SunSynk, Resend) sends at most once an
 // hour; the gap is kept in app_config, so it holds across runs. Only ids go with it:
 // the user's Supabase id, plant ids, a payment reference.
-type Note = { e: unknown; count: number; user: string | null; plants: Set<number>; ref?: string; hourly: boolean };
+// day: a date the failure is about (SOLAR-525); every "plant:day" pair is sent as `days`.
+type Note = { e: unknown; count: number; user: string | null; plants: Set<number>; days: string[]; ref?: string; hourly: boolean };
 const notes = new Map<string, Note>();
 let served = "edge";
 
 export function noteError(kind: string, e: unknown,
-  at: { user?: string | null; plant?: number | string | null; ref?: string; hourly?: boolean } = {}) {
-  const n = notes.get(kind) ?? { e, count: 0, user: at.user ?? null, plants: new Set<number>(), ref: at.ref, hourly: !!at.hourly };
+  at: { user?: string | null; plant?: number | string | null; day?: string; ref?: string; hourly?: boolean } = {}) {
+  const n = notes.get(kind) ?? { e, count: 0, user: at.user ?? null, plants: new Set<number>(), days: [], ref: at.ref, hourly: !!at.hourly };
   n.count++;
   if (at.plant != null && Number.isSafeInteger(Number(at.plant))) n.plants.add(Number(at.plant));
+  if (at.day) n.days.push(`${at.plant ?? "?"}:${at.day}`);
   notes.set(kind, n);
 }
 
@@ -129,6 +131,7 @@ export async function flushErrors(fn = served): Promise<void> {
   const sent = await Promise.all(due.map(([kind, n]) => send(fn, n.e, n.user, true, {
     kind, count: n.count, $exception_fingerprint: `${fn}:${kind}`,
     ...(n.plants.size ? { plant_ids: [...n.plants].slice(0, 50) } : {}),
+    ...(n.days.length ? { days: n.days.slice(0, 50) } : {}),
     ...(n.ref ? { reference: n.ref } : {}),
   }, kind)));
   // Only what PostHog took starts the hour; a failed send goes again next run.
