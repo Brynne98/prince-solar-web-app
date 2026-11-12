@@ -2842,47 +2842,88 @@ function LoginMenu({ email, busy, onPassword, onRemove, removeLabel = 'Remove lo
   );
 }
 
-// Change a plant (SOLAR-537, 0197): one ticked plant out, one locked plant in, once per 90
-// days. The plant that goes out loses its history at once, so the pop-up says so before the
-// red button. picks: the account's ticks (api_plant_picks); locked: the plants that can come in.
-// onDone(out, into).
-function ChangePlantDialog({ picks, locked, onDone, onCancel }) {
-  const [out, setOut] = React.useState(picks.length === 1 ? picks[0].plant_id : null);
-  const [into, setInto] = React.useState(locked.length === 1 ? locked[0].plant_id : null);
+// Choose plants (SOLAR-537, 0197): the one place the owner manages which plants run. Every
+// plant under its login with a tick box: running plants ticked, locked ones not. A tick into an
+// open place is free (api_plant_pick). On a full plan a tick needs a place: unticking one
+// running plant is the change, one per 90 days (api_plant_change), and that plant loses its
+// history at once, so the pop-up says so before the red button. Inside the 90 days no plant
+// can be unticked; it gives the date. A plant ticked before whose login is removed still holds
+// its place: it is listed too, so it can be taken out.
+// logins: the logins with their plants; picks: api_plant_picks' answer. onDone(added, out).
+function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
+  const { plan, room } = picks;
+  const linked = logins.flatMap(a => a.plants);
+  // ticks that hold a place with no plant listed: a removed login's
+  const away = picks.picks.filter(k => k.held && !k.linked);
+  const was = [...linked.filter(p => !p.paused).map(p => p.plant_id), ...away.map(k => k.plant_id)];
+  const [on, setOn] = React.useState(was);
+  const [say, setSay] = React.useState(null); // 'full' | 'date' | 'one'
+  const [want, setWant] = React.useState(null); // the plant a full plan refused: Upgrade is for it
   const [busy, setBusy] = React.useState(false);
-  const going = picks.find(k => k.plant_id === out), coming = locked.find(p => p.plant_id === into);
+  const out = was.filter(id => !on.includes(id)), added = on.filter(id => !was.includes(id));
+  const nameOf = (id) => window.plantLabel(linked.find(p => p.plant_id === id) || away.find(k => k.plant_id === id) || { plant_id: id });
+  const tick = (id) => {
+    setSay(null);
+    if (!on.includes(id)) return on.length >= room ? (setWant(id), setSay('full')) : setOn([...on, id]);
+    if (!was.includes(id)) return setOn(on.filter(x => x !== id));
+    if (picks.change_on) return setSay('date');
+    if (out.length) return setSay('one');
+    setOn(on.filter(x => x !== id));
+  };
   const save = async () => {
-    if (!going || !coming) return;
     setBusy(true);
-    const { error } = await window.sb.rpc('api_plant_change', { p_out: out, p_in: into });
+    let error = null, rest = added;
+    if (out.length) {
+      ({ error } = await window.sb.rpc('api_plant_change', { p_out: out[0], p_in: added[0] }));
+      rest = added.slice(1);
+      if (!error) window.track('plant_change_done');
+    }
+    if (!error && rest.length) {
+      ({ error } = await window.sb.rpc('api_plant_pick', { p_plants: rest }));
+      if (!error) window.track('plant_pick_done', { from: 'plants', count: rest.length, of: linked.filter(p => p.paused).length, plan });
+    }
     setBusy(false);
     const next = error && /next change (\d{4}-\d\d-\d\d)/.exec(error.message);
     if (next) window.track('plant_change_refused_done');
-    if (error) return window.toast(next ? `You can change a plant again on ${longDay(next[1])}.` : 'Couldn’t change the plant. Try again.', { error: true });
-    window.track('plant_change_done');
-    onDone(going, coming);
+    if (error) window.toast(next ? `You can change a plant again on ${longDay(next[1])}.`
+      : /no room|place taken/.test(error.message) ? 'Your plan has no place open for that.' : 'Couldn’t save your plants. Try again.', { error: true });
+    // a change that went through before a later step failed still shows
+    if (!error || (out.length && rest !== added && !next)) onDone(added, out);
   };
-  const list = (rows, value, set, verb) => rows.map(r => {
-    const name = window.plantLabel(r), on = value === r.plant_id;
+  const row = (p) => {
+    const name = window.plantLabel(p), ticked = on.includes(p.plant_id);
     return (
-      <label key={r.plant_id} className={'login-plant keep-row' + (on ? '' : ' off')}>
+      <label key={p.plant_id} className={'login-plant keep-row' + (ticked ? '' : ' off')}>
         <span className="conn-user plant-nm">{name}</span>
-        <input type="radio" name={'change-' + verb} checked={on} aria-label={verb + ' ' + name} onChange={() => set(r.plant_id)} />
+        <input type="checkbox" checked={ticked} disabled={p.share_gone} aria-label={'Run ' + name} onChange={() => tick(p.plant_id)} />{/* reuse-check: allow: tick boxes, not switches, as the keep pick (SOLAR-486) */}
       </label>
     );
-  });
+  };
+  const more = plan === 'family'
+    ? <>More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: 'family', from: 'choose_plants' })}>Email us</a>.</>
+    : onUpgrade && <button type="button" className="mini-link" onClick={() => onUpgrade(want)}>upgrade</button>;
   return (
-    <ConfirmCard modal label="Change a plant" title="Change a plant" action="Change plant" busy={busy}
-      onConfirm={save} onCancel={onCancel}>
+    <ConfirmCard modal danger={out.length > 0} label="Choose plants" title="Choose plants" busy={busy}
+      action={out.length ? 'Change plant' : 'Save'} onConfirm={() => added.length && save()} onCancel={onCancel}>
       <div className="keep-pick">
-        <div className="confirm-text keep-ask">Take out</div>
-        <div className="login-grp plant-logins">{list(picks, out, setOut, 'Take out')}</div>
-        <div className="confirm-text keep-ask">Put in</div>
-        <div className="login-grp plant-logins">{list(locked, into, setInto, 'Put in')}</div>
-        <div className="field-note keep-count warn">
-          {going ? `${window.plantLabel(going)}’s history is deleted straight away and can’t be brought back. ` : 'The plant you take out loses its history straight away. '}
-          You can change again in 90 days.
-        </div>
+        <div className="confirm-text keep-ask">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}.</div>
+        {logins.map(acc => (
+          <div key={acc.account_id} className="login-grp plant-logins">
+            <div className="login-line"><div className="login-who"><span className="login-email">{acc.kind === 'share' ? 'Shared plants' : acc.sunsynk_username}</span></div></div>
+            {acc.plants.map(row)}
+          </div>
+        ))}
+        {away.length > 0 && (
+          <div className="login-grp plant-logins">
+            <div className="login-line"><div className="login-who"><span className="login-email">Login removed</span></div></div>
+            {away.map(row)}
+          </div>
+        )}
+        {say === 'full' ? <div className="field-note keep-count warn">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}. Untick one first{more && plan !== 'family' ? <>, or {more}</> : ''}.{plan === 'family' && <> {more}</>}</div>
+          : say === 'date' ? <div className="field-note keep-count warn">You can change a plant again on {longDay(picks.change_on)}.</div>
+          : say === 'one' ? <div className="field-note keep-count warn">One change every 90 days. Tick {nameOf(out[0])} again first.</div>
+          : out.length ? <div className="field-note keep-count warn">{added.length ? `${nameOf(out[0])}’s history is deleted straight away and can’t be brought back. You can change again in 90 days.` : `Tick the plant to run in place of ${nameOf(out[0])}.`}</div>
+          : <div className="field-note keep-count">{on.length} of {room} ticked.</div>}
       </div>
     </ConfirmCard>
   );
@@ -2981,60 +3022,47 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     await Promise.all([refresh(), reloadBilling && reloadBilling()]);
     setBusy(null);
   };
-  // The owner ticks which plants run, up to the plan's number (SOLAR-537, 0197). A locked plant
-  // has no switch: with a place open, Add ticks it (the pop-up, as after a link); on a full plan
-  // it offers the upgrade, or on Family the email. adding: the pop-up's plants, by login.
-  const [adding, setAdding] = useState(null);
-  const added = async (ids) => {
-    setAdding(null);
-    if (!ids.length) return;
-    onChanged && onChanged({ plants: ids.map(id => ({ id })) }, true);
-    await Promise.all([refresh(), loadPicks()]);
-    window.toast(plantsLine(allPlants.filter(p => ids.includes(p.plant_id)), 'now in your plant list').trim());
-  };
+  // The owner ticks which plants run, up to the plan's number (SOLAR-537, 0197). The list only
+  // says how each plant is doing; Choose plants (one pop-up) is where they are ticked or changed.
   // The ticks and the day the next change opens (api_plant_picks), read with the list.
   const [picks, setPicks] = useState(null);
   const loadPicks = () => window.sb.rpc('api_plant_picks').then(({ data }) => { if (data) setPicks(data); });
   React.useEffect(() => { loadPicks(); }, [accounts]);
-  const [changing, setChanging] = useState(false);
-  const changedPlant = async (out, into) => {
-    setChanging(false);
-    onChanged && onChanged({ plants: [{ id: into.plant_id }] }, true);
+  const [choosing, setChoosing] = useState(false);
+  const chosen = async (added, out) => {
+    setChoosing(false);
+    onChanged && onChanged({ plants: added.map(id => ({ id })) }, true);
     await Promise.all([refresh(), loadPicks()]);
-    window.toast(`${window.plantLabel(into)} added. ${window.plantLabel(out)} removed.`);
+    const label = (ids) => window.billingFmt.andList(allPlants.filter(p => ids.includes(p.plant_id)).map(window.plantLabel));
+    window.toast(`${label(added)} added.` + (out.length ? ` ${label(out) || 'The other plant'} removed.` : ''));
   };
-  // A plant's name, then what it needs. Running: nothing. Up for deletion on a date: that, and
-  // Keep. Locked: the word, and the one way out the plan gives.
-  const plantRow = (p, shared) => {
+  // How each running plant is doing, as the header's plant menu says it (api_plant_states).
+  const [states, setStates] = useState({});
+  React.useEffect(() => {
+    let alive = true;
+    window.fetchPlantStates().then(rows => { if (alive) setStates({ at: Date.now(), ...Object.fromEntries(rows.map(r => [r.id, r])) }); }).catch(() => {});
+    return () => { alive = false; };
+  }, [accounts]);
+  // A plant: a panel, its name, then its state in a word. Running: Live, Setting up or what is
+  // wrong. Locked: a lock and the word. Up for deletion on a date: that, and Keep.
+  const plantRow = (p, shared, ok) => {
     const s = state(p);
     const name = window.plantLabel(p);
-    const family = billing?.plan === 'family';
+    const st = states[p.plant_id] && { ...states[p.plant_id], sync: window.firstLoadSync(states[p.plant_id].sync, p.linked_at) };
     return (
-      <PlantLine key={p.plant_id} name={name} off={s === 'paused' || (s === 'going' && p.paused)}>
+      <PlantLine key={p.plant_id} name={<><Icon id="panel" />{name}</>} off={p.paused}>
         {/* gone from SunSynk: the owner removed the share (SOLAR-310), or the login no longer lists it */}
-        {p.share_gone && <span className="conn-status plant-state bad">{shared ? 'Share removed' : 'Not on this login'}</span>}
-        {s === 'going' && <span className="conn-status plant-state warn">Kept until {billDay(p.remove_on)}</span>}
-        {s === 'going' && !p.paused && <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
-        {p.paused && !p.share_gone && <>
-          {s === 'paused' && <span className="plant-state locked">Locked</span>}
-          {p.can_start ? <button type="button" className="ghost-btn" onClick={() => setAdding(window.startableLogins(live))}>Add</button>
-            : billing?.comped ? null
-            /* Family is the biggest plan; more than its 5 plants is by email (SOLAR-371) */
-            : family ? <a className="ghost-btn" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: 'family', from: 'locked' })}>Email us</a>
-            : onCollect && <button type="button" className="ghost-btn" onClick={() => onCollect(p.plant_id)}>Upgrade</button>}
-        </>}
+        {p.share_gone ? <span className="pm-state status-offline">{shared ? 'Share removed' : 'Not on this login'}</span>
+          : s === 'going' ? <>
+            <span className="pm-state status-stale">Kept until {billDay(p.remove_on)}</span>
+            {!p.paused && <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
+          </>
+          : p.paused ? <span className="pm-state"><window.LockIcon />Locked</span>
+          : <MenuState st={st} cut={!ok && !shared} now={states.at || Date.now()} />}
       </PlantLine>
     );
   };
-  // One change per 90 days (0197): a ticked plant out, a locked one in. Offered under the list
-  // while a plant is locked with no place open; inside the 90 days it gives the date instead.
-  const lockedOut = allPlants.filter(p => p.paused && !p.share_gone && !p.can_start);
-  const changeLine = !!lockedOut.length && !!picks?.picks.length && !billing?.comped && (
-    <div className="field-note plant-change">
-      {picks.change_on ? `You can change a plant again on ${longDay(picks.change_on)}.`
-        : <button type="button" className="mini-link" onClick={() => setChanging(true)}>Change a plant</button>}
-    </div>
-  );
+  const lockedAny = allPlants.some(p => p.paused && !p.share_gone) || !!picks?.picks.some(k => k.held && !k.linked);
   // Free runs one plant, Home 2, Family 5 plus any extras still held. With that taken, Add plant
   // still opens the form: the new plants link locked (SOLAR-272, SOLAR-537).
   const collecting = allPlants.filter(p => !p.paused).length;
@@ -3045,7 +3073,10 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   const title = <>Plants{limit != null && allPlants.length > 0 && <span className="sset-count">{collecting} of {limit} on your plan</span>}</>;
   return (
     <SettingsSection id="connection" title={title} head={head}
-      action={!unread && <button type="button" className="save-btn" onClick={() => setMode('add')}>Add plant</button>}>
+      action={!unread && <div className="plants-acts">
+        {lockedAny && picks && !billing?.comped && <button type="button" className="ghost-btn" onClick={() => setChoosing(true)}>Choose plants</button>}
+        <button type="button" className="save-btn" onClick={() => setMode('add')}>Add plant</button>
+      </div>}>
       {!unread && mode === 'add' && (
         // A form over the page (SOLAR-286). Cancel re-reads too: a login with no plant yet is saved but not listed.
         <window.LinkDialog title="Add plant"
@@ -3061,8 +3092,9 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         // heading with Reconnect and Manage at its right, its plants under it.
         // Its state shows only when it needs something.
         <>
-          {adding && <window.PlantPickDialog logins={adding} from="plants" onDone={added} />}
-          {changing && <ChangePlantDialog picks={picks.picks} locked={lockedOut} onDone={changedPlant} onCancel={() => setChanging(false)} />}
+          {choosing && <ChoosePlantsDialog logins={live.map(a => ({ ...a, plants: (a.plants || []).filter(p => allPlants.includes(p)) })).filter(a => a.plants.length)}
+            picks={picks} onUpgrade={onCollect && ((id) => { setChoosing(false); onCollect(id); })}
+            onDone={chosen} onCancel={() => setChoosing(false)} />}
           {live.map(acc => {
             const ok = acc.status === 'active';
             const plants = acc.plants || [];
@@ -3097,11 +3129,10 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                     action={shared ? 'Remove plants' : 'Remove login'} onConfirm={() => remove(acc)} onCancel={() => setConfirming(null)}>
                     {removeList(acc)}                  </ConfirmCard>
                 )}
-                {plants.length ? plants.map(p => plantRow(p, shared)) : <div className="conn-meta">No plant shared with this login.</div>}
+                {plants.length ? plants.map(p => plantRow(p, shared, ok)) : <div className="conn-meta">No plant shared with this login.</div>}
               </div>
             );
           })}
-          {changeLine}
         </>
       )}
     </SettingsSection>

@@ -535,7 +535,7 @@ const startableLogins = (accounts, only) => {
     .filter(a => a.plants.length);
 };
 // The owner ticks which locked plants run (SOLAR-537, 0197), up to the places the plan has
-// open. After a login links, and from Add on a locked plant. Fewer ticks is fine: the rest
+// open, after a login links. Fewer ticks is fine: the rest
 // stay locked and an open place can be filled later. A tick stays, so the pop-up says what
 // changing it costs. Asks the server for the places (api_plant_picks) before it shows.
 // onDone(ids): the plants now running; [] when closed with none.
