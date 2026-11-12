@@ -67,6 +67,8 @@ async function must(call, fallback, failed = 'failed') {
   const { data, error, status } = await call;
   if (error) {
     window.reportServerError?.(name, error, status);
+    // the cause may be a session ended elsewhere or a deleted account (SOLAR-520)
+    window.checkSession();
     throw new Error(error.message || failed);
   }
   return fallback !== undefined && !data ? fallback : data;

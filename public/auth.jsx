@@ -624,6 +624,26 @@ async function signOutHere() {
   if (error) await window.sb.auth._removeSession();
 }
 
+// A tab moves to sign-in only when SIGNED_OUT reaches it. A tab asleep when another tab
+// signed out or deleted the account can miss it, and a second device is never sent one:
+// both stayed on the app (SOLAR-520). So when a tab comes back on screen, and when a
+// request fails (must() in data.jsx), look: no stored session means another tab ended it,
+// so tell this tab only; an account that is gone ends the session for this browser.
+// A failed lookup (no connection) changes nothing.
+let signedIn = false, checking = null;
+window.sb.auth.onAuthStateChange((event, session) => { signedIn = !!session; });
+function checkSession() {
+  if (!signedIn || checking) return checking;
+  checking = (async () => {
+    const { data, error } = await window.sb.auth.getSession();
+    if (error) return;
+    if (!data.session) { if (signedIn) await window.sb.auth._notifyAllSubscribers('SIGNED_OUT', null, false); }
+    else if ((await window.sb.auth.getUser()).error?.code === 'user_not_found' && signedIn) await window.sb.auth._removeSession();
+  })().catch(() => {}).finally(() => { checking = null; });
+  return checking;
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkSession(); });
+
 // That still waits on a server round trip before the screen changes, so the button says
 // it is working. It is never reset: the session ends either way, and that unmounts it.
 function SignOutButton({ className, children = 'Sign out', busyText = 'Signing out…' }) {
@@ -632,4 +652,4 @@ function SignOutButton({ className, children = 'Sign out', busyText = 'Signing o
   return <window.BusyButton className={className} onClick={click} busy={busy} busyText={busyText}>{children}</window.BusyButton>;
 }
 // Shared with the Connect screen so it looks like the same product.
-Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, AuthCard, PasswordInput, PasswordField, FieldLabel, useFieldErrors, invalidProps, SignOutButton, signOutHere, explainAuthError: explain });
+Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, AuthCard, PasswordInput, PasswordField, FieldLabel, useFieldErrors, invalidProps, SignOutButton, signOutHere, checkSession, explainAuthError: explain });
