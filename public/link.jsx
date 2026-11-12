@@ -542,7 +542,8 @@ const startableLogins = (accounts, only) => {
 // The owner ticks which locked plants run (SOLAR-537, 0197), up to the places the plan has
 // open, after a login links. Fewer ticks is fine: the rest
 // stay locked and an open place can be filled later. A tick stays, so the pop-up says what
-// changing it costs. Asks the server for the places (api_plant_picks) before it shows.
+// changing it costs. Asks the server for the places (api_plant_picks) before it shows. With
+// one plant to choose and a place for it, it shows nothing and starts that plant.
 // onDone(ids): the plants now running; [] when closed with none.
 function PlantPickDialog({ logins, from, onDone }) {
   const { useState, useEffect } = React;
@@ -559,6 +560,13 @@ function PlantPickDialog({ logins, from, onDone }) {
       const open = Math.min(all.length, data.room - data.picks.filter(k => k.held).length,
         data.room - data.picks.length + all.filter(p => p.picked).length);
       if (open < 1) return onDone([]);
+      // one plant and a place for it: nothing to choose, so it starts with no pop-up
+      if (all.length === 1) {
+        return window.sb.rpc('api_plant_pick', { p_plants: [all[0].plant_id] }).then(({ error }) => {
+          if (!error) window.track('plant_pick_done', { from, count: 1, of: 1, plan: data.plan, asked: false });
+          if (alive) onDone(error ? [] : [all[0].plant_id]);
+        });
+      }
       setPlaces({ plan: data.plan, open });
       // they all fit: ticked already, one tap to add
       if (all.length <= open) setPicked(all.map(p => p.plant_id));
