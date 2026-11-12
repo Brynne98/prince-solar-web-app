@@ -504,7 +504,7 @@ end $$;
 
 -- ---------------------------------------------------------------------------
 -- 0188's api_link_status, with each plant's tick: picked, and can_start (it is
--- locked and a place is open for it, so the owner's tick starts it).
+-- locked and a place is open for it, so the owner's tick starts it); and started_at.
 -- ---------------------------------------------------------------------------
 create or replace function public.api_link_status()
  returns table(account_id uuid, sunsynk_username text, status text, linked_at timestamptz, last_ok_at timestamptz, plants jsonb, kind text)
@@ -536,6 +536,8 @@ as $function$
                                                         -- gone from SunSynk: the share removed (0172), or off its login's list (0197)
                                                         'share_gone', pu.share_gone_at is not null,
                                                         'picked', k.plant_id is not null,
+                                                        -- epoch it last started collecting (0174): a plant with no reading 30 min on says so
+                                                        'started_at', (select s.started_at from private.plant_alert_state s where s.plant_id = pu.plant_id),
                                                         'can_start', pu.paused and pu.share_gone_at is null
                                                                      and (b.comped or (b.act < b.room and case
                                                                            when k.plant_id is null then b.picks < b.room

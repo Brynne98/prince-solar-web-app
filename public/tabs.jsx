@@ -3047,13 +3047,16 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     window.fetchPlantStates().then(rows => { if (alive) setStates({ at: Date.now(), ...Object.fromEntries(rows.map(r => [r.id, r])) }); }).catch(() => {});
     return () => { alive = false; };
   }, [accounts]);
-  // A plant: a panel, its name, then its state in a word. Running: Live, Setting up or what is
-  // wrong. Locked: a lock and the word. Up for deletion on a date: that, and Keep.
+  // A plant: a panel, its name, then its state in a word. Running: Live, Fetching history,
+  // No readings yet or what is wrong. Locked: a lock and the word. Up for deletion on a date: that, and Keep.
   const plantRow = (p, shared, ok) => {
     const s = state(p);
     const name = window.plantLabel(p);
     const st = states[p.plant_id] && { ...states[p.plant_id], sync: window.firstLoadSync(states[p.plant_id].sync, p.linked_at) };
     const fetching = st?.lastTs != null ? window.syncProgress(st.sync) : 0;
+    // no reading at all 30 minutes after it started, when the No readings email goes too (0174)
+    const since = Math.max((p.started_at || 0) * 1000, Date.parse(p.linked_at) || 0);
+    const silent = st?.lastTs == null && (states.at || 0) - since > 30 * 60000;
     return (
       <PlantLine key={p.plant_id} name={<><Icon id="panel" />{name}</>} off={p.paused}>
         {/* gone from SunSynk: the owner removed the share (SOLAR-310), or the login no longer lists it */}
@@ -3066,6 +3069,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
           /* a login that stopped says so once, on its own line above */
           : (!ok && !shared) || !states.at ? null
           /* its first 60 days are still arriving, or no reading yet: the header's words and % (SOLAR-176) */
+          : silent ? <span className="pm-state status-stale"><span className="pm-dot" />No readings yet</span>
           : fetching != null ? <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Fetching history<span className="mono pm-pct">{Math.round(100 * fetching)}%</span></span>
           : <MenuState st={st} now={states.at || Date.now()} />}
       </PlantLine>
