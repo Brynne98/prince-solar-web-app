@@ -46,6 +46,7 @@ window.useLinkStatus = function useLinkStatus() {
   const { useState, useEffect, useRef, useCallback } = React;
   const [state, setState] = useState({ loading: true, accounts: [], error: null });
   const latest = useRef(null);
+  const hadLogins = useRef(false);
   const refresh = useCallback(() => {
     // Ten seconds, then it counts as a failed read. Raced here rather than with an abort
     // signal: supabase-js waits on the stored session before the request even starts, and
@@ -57,6 +58,13 @@ window.useLinkStatus = function useLinkStatus() {
       // A failed re-read keeps the logins already shown; an empty list would send a
       // signed-in household from the dashboard back to the Connect screen.
       // `|| 'failed'`: a failure with no message must still read as one, not as "no logins".
+      // Every login gone at once may be the account deleted on another device: its answers
+      // come back empty, not refused, so a tab left on screen would never look (SOLAR-526).
+      if (!error && read === latest.current) {
+        const some = (data || []).length > 0;
+        if (hadLogins.current && !some) window.checkSession();
+        hadLogins.current = some;
+      }
       if (read === latest.current) setState(s => ({ loading: false, accounts: error ? s.accounts : (data || []), error: error ? (error.message || 'failed') : null }));
       return error || null;
     });
