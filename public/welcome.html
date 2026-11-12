@@ -663,7 +663,8 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 @media (max-width:860px) and (max-height:760px){.card .today,.card .stats{display:none}}
 /* small phones: header buttons and the Yearly switch keep to one line */
 @media (max-width:374px){.top .wrap{gap:8px}.top .end{gap:8px}.brand{font-size:14px;gap:6px}.signin{font-size:14px}.top .btn{padding:0 10px;font-size:14px}.brand,.signin,.top .btn,.period button{white-space:nowrap}.period button{padding:0 12px;font-size:14px}}
-@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition-duration:.01s!important}.rv{opacity:1;transform:none;filter:none}}
+/* less motion (SOLAR-507): the power lines slow down, never stop; a still line reads as no power */
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*:not(.dots){animation:none!important;}.dots.on{animation-duration:6s}*{transition-duration:.01s!important}.rv{opacity:1;transform:none;filter:none}}
 
 </style>
 </head>
