@@ -345,7 +345,6 @@
   .status-sync { display: inline-flex; align-items: center; gap: var(--sp-sm); font-size: var(--fs-sm); color: var(--muted); padding-left: var(--sp-sm); border-left: 1px solid var(--line-2); }
   .sync-arc { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(var(--ink-rgb),0.14); border-top-color: var(--muted); animation: spin 0.9s linear infinite; flex: none; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .sync-arc { animation: none; border-top-color: var(--muted); } }
   /* the header's square buttons: Refresh and the bell share one box (SOLAR-248) */
   .refresh, .bell-btn { height: 38px; min-width: 38px; padding: 0; flex: none; border-radius: var(--r-md);
     background: var(--panel); border: 1px solid var(--line-2); color: var(--text); transition: border-color var(--dur-fast) var(--ease-out); }
@@ -735,8 +734,9 @@
   .wall .mflow { flex: none; width: 440px; max-width: none; margin: 0 auto; zoom: var(--wall-zoom, 1); }
   /* slide a whole number of dash-periods so the loop is seamless: 195 = 15 (desktop "2 13") × 13 (mobile "2 11") */
   @keyframes flow { to { stroke-dashoffset: -195; } }
-  /* the moving dashes are the one piece of continuous motion on the page */
-  @media (prefers-reduced-motion: reduce) { .pflow-lane *, .mflow-links * { animation: none !important; } }
+  /* the moving dashes are the one piece of continuous motion on the page. Less motion slows
+     them 3x and keeps them moving: a still line reads as no power (SOLAR-507). flow.jsx reads --flow-slow. */
+  @media (prefers-reduced-motion: reduce) { .pflow-lane, .mflow-links { --flow-slow: 3; } }
   /* ---------- power-flow box, shared by both layouts (SOLAR-39) ---------- */
   /* the type matches the overview cards above (SOLAR-16): label, number and unit */
   .fbox { border: 1.3px solid var(--line); border-radius: var(--r-lg); min-width: 0; overflow: hidden; transition: border-color var(--dur-base) var(--ease-out); }
@@ -1345,7 +1345,8 @@
   .spin, :is(.ghost-btn, .save-btn, .danger-btn)[aria-busy="true"]::after { content: ''; display: inline-block; flex: none; width: 12px; height: 12px;
     border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
   :is(.ghost-btn, .save-btn, .danger-btn)[aria-busy="true"]::after { margin-left: var(--sp-sm); }
-  @media (prefers-reduced-motion: reduce) { .spin, [aria-busy="true"]::after { animation-duration: 2s; } }
+  /* less motion slows the spinners, never stops them: a still loader reads as stuck (SOLAR-507) */
+  @media (prefers-reduced-motion: reduce) { .spin, [aria-busy="true"]::after, .sync-arc { animation-duration: 2s; } }
   .pop-wait { display: flex; align-items: center; gap: var(--sp-md); font-size: var(--fs-md); }
   .pop-wait .spin { width: 16px; height: 16px; color: var(--accent); }
   .pop-dlg:has(.pop-wait) { width: fit-content; min-width: 240px; }   /* auto fills a modal dialog edge to edge (SOLAR-337) */

@@ -131,7 +131,7 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
         {active && (
           <path d={d} fill="none" stroke={color} strokeOpacity="1" strokeWidth={fixed ? 2.2 : 2.8}
             strokeDasharray="2 13" strokeLinecap="round" vectorEffect={ve}
-            style={{ animation: `flow ${dur}s linear infinite ${reverse ? 'reverse' : 'normal'}` }} />
+            style={{ animation: `flow calc(${dur}s * var(--flow-slow, 1)) linear infinite ${reverse ? 'reverse' : 'normal'}` }} />
         )}
       </g>
     );
