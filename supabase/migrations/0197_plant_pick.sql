@@ -553,8 +553,9 @@ $function$;
 
 -- ---------------------------------------------------------------------------
 -- 0155's payment, one test changed: "paid plants did not start" counts only plants
--- that have a tick. A locked plant never ticked is not started by a payment that
--- does not name it, so it no longer reads as a start refused part way.
+-- that could start. A locked plant never ticked is not started by a payment that
+-- does not name it, and a plant whose place waits for another plant (a removed
+-- login's tick) stays locked: neither reads as a start refused part way.
 -- ---------------------------------------------------------------------------
 create or replace function public.billing_charge_paid(p_reference text, p_card jsonb default null, p_quiet boolean default false,
   p_cents bigint default null, p_email text default null, p_paid_at timestamptz default null)
@@ -693,8 +694,11 @@ begin
         room := least(public.billing_room(b.plan, b.extra_plants), coalesce(private.billing_next_room(b), 2147483647));
         -- Room left and a plant to start still stopped: the start was refused part way.
         if (select count(*) from public.plant_users where user_id = c.user_id and not paused) < room
-           and exists (select 1 from public.plant_users pu where pu.user_id = c.user_id and pu.paused
+           and exists (select 1 from public.plant_users pu where pu.user_id = c.user_id and pu.paused and pu.share_gone_at is null
+                        -- a plant that could start: it has a tick, and a place is not held for another plant (0197)
                         and exists (select 1 from private.plant_picks k where k.user_id = pu.user_id and k.plant_id = pu.plant_id)
+                        and (select count(*) from private.plant_picks k where k.user_id = pu.user_id and k.held)
+                            < public.billing_room(b.plan, b.extra_plants)
                         and ((cardinality(named) = 0 and not room_only) or pu.plant_id = any (named))) then
           raise exception 'paid plants did not start' using errcode = 'BL001';
         end if;

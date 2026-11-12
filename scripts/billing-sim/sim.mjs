@@ -92,15 +92,15 @@ async function household(h) {
     const span = 365 * YEARS;
     const n = rng.int(12, 30) * YEARS;
     for (let k = 0; k < n; k++) {
-      const type = rng.weighted({ upgrade: 13, book: 14, remove: 6, keep: 4, stop: 8, start: 8, card: 3, settle: 5, late: 4, probe: 6, extras: 6, linkmore: 4 });
+      const type = rng.weighted({ upgrade: 13, book: 14, remove: 6, keep: 4, pick: 8, change: 8, card: 3, settle: 5, late: 4, probe: 6, extras: 6, linkmore: 4 });
       push(U, addDays(T, rng.int(-8, span)), type, {});
     }
-    // daily switchers: a stretch of days with a stop, start, booking or new plant every day or two
+    // daily switchers: a stretch of days with a pick, plant change, booking or new plant every day or two
     if (rng.chance(0.15)) {
       let d = addDays(T, rng.int(0, span - 90));
       const until = addDays(d, rng.int(30, 90));
       while (d < until) {
-        push(U, d, rng.weighted({ stop: 5, start: 6, book: 3, keep: 1, extras: 2, upgrade: 1, linkmore: 1 }), {});
+        push(U, d, rng.weighted({ change: 5, pick: 6, book: 3, keep: 1, extras: 2, upgrade: 1, linkmore: 1 }), {});
         d = addDays(d, rng.int(1, 2));
       }
     }
@@ -117,6 +117,13 @@ create or replace function private.billing_today() returns date language sql sta
 update private.offers set joins_until = date '2000-01-01';
 create or replace function public.plant_bootstrap_kick(p_plant bigint) returns void language plpgsql as $$ begin return; end $$;
 create or replace function private.plant_start_fill(p_plant bigint) returns void language plpgsql as $$ begin return; end $$;
+-- the owner's pick (0197): each plant is ticked as it links, while the plan has places
+create function pg_temp.tick() returns trigger language plpgsql as $$
+begin
+  if not new.paused then perform private.plant_pick_add(new.user_id, new.plant_id, new.plant_name); end if;
+  return new;
+end $$;
+create trigger a_sim_tick before insert on public.plant_users for each row execute function pg_temp.tick();
 select set_config('sim.today', '${t0}', true);`);
   try {
     for (const U of H.users) {
@@ -265,6 +272,8 @@ async function check(H, U, what, pre) {
   const pausedWant = o.plants.map((p) => [p.id, p.paused]).sort((x, y) => x[0] - y[0]);
   const pausedGot = [...dbPaused.entries()].sort((x, y) => x[0] - y[0]);
   if (JSON.stringify(pausedWant) !== JSON.stringify(pausedGot)) bad.push(['plants collecting (paused flags)', pausedGot, pausedWant]);
+  eq('ticks (plant, holds a place)', s.ticks, [...o.ticks].sort((x, y) => x[0] - y[0]));
+  eq('last plant change', s.changed, o.changedOn);
   const st = o.status(), g = s.st;
   eq('screen: plan', g.plan, st.plan); eq('screen: period', g.period, st.period); eq('screen: state', g.state, st.state);
   eq('screen: nextAmount', g.nextAmount, st.nextAmount); eq('screen: price', g.price, st.price); eq('screen: nextDate', g.nextDate, st.nextDate);
@@ -292,6 +301,7 @@ async function resyncUser(U, s) {
   const o = U.o, b = s.b;
   if (b) { o.plan = b.plan; o.period = b.period; o.day = b.billing_day; o.next = b.next_billing_date; o.state = b.state; o.pds = b.past_due_since; o.nextPlan = b.next_plan; o.nextPeriod = b.next_period; o.rm = new Set(b.plants_to_remove); o.rmOn = b.remove_on; o.extra = b.extra_plants; o.nextExtra = b.next_extra_plants; o.prepaid = b.prepaid_on; o.nextKeep = b.next_keep; }
   else { o.plan = 'free'; o.period = o.day = o.next = o.pds = o.nextPlan = o.nextPeriod = o.rmOn = o.nextExtra = o.prepaid = null; o.extra = 0; o.rm = new Set(); o.nextKeep = []; }
+  o.ticks = new Map(s.ticks); o.changedOn = s.changed;
   const paused = new Map(s.plants.map((p) => [p.id, p.paused]));
   o.plants = o.plants.filter((p) => paused.has(p.id));
   for (const p of o.plants) p.paused = paused.get(p.id);
@@ -323,8 +333,8 @@ async function runEvent(H, U, ev) {
     case 'book': return doBook(H, U);
     case 'remove': return doRemove(H, U);
     case 'keep': return doKeep(H, U);
-    case 'stop': return doStopStart(H, U, 'stop');
-    case 'start': return doStopStart(H, U, 'start');
+    case 'pick': return doPick(H, U);
+    case 'change': return doChange(H, U);
     case 'card': return doCard(H, U);
     case 'settle': return doSettle(H, U);
     case 'late': return doLate(H, U);
@@ -361,6 +371,7 @@ async function doLink(H, U, login) {
     if (invRows.length) await db.exec(`insert into private.inverters (sn, plant_id, account_id) values ${invRows.join(',')} on conflict (sn) do update set account_id = excluded.account_id;`);
     await db.exec(`select public.billing_free_week_start('${U.id}', '${uname}');`);
     for (const pl of plan) o.plants.push({ id: pl.id, inv: H.inv.get(pl.id), seq: H.seq, paused: pl.paused, acc: accId });
+    o.ticks = plan.ticks;
     // the rest of the login's plants are on it too (already linked via another login): nothing to do
   }
   U.accts.set(uname, accId);
@@ -549,7 +560,7 @@ async function doRemove(H, U) {
 async function doKeep(H, U) {
   const o = U.o;
   // booked for deletion, or stopped by a booked downgrade (0136)
-  const ids = [...new Set([...o.rm, ...o.drops()])]; if (!ids.length) return doStopStart(H, U, 'stop');
+  const ids = [...new Set([...o.rm, ...o.drops()])]; if (!ids.length) return doChange(H, U);
   const id = H.rng.pick(ids);
   const before = await snap(U);
   const exp = o.clone().keep(id);
@@ -564,22 +575,43 @@ async function doKeep(H, U) {
   await check(H, U, 'keep plant');
 }
 
-async function doStopStart(H, U, what) {
+// Tick a locked plant into an open place (0197).
+async function doPick(H, U) {
   const o = U.o, rng = H.rng;
   if (!o.plants.length) return;
-  const cand = o.plants.filter((p) => (what === 'stop' ? !p.paused : p.paused));
+  const cand = o.plants.filter((p) => p.paused);
   const p = cand.length && rng.chance(0.9) ? rng.pick(cand) : rng.pick(o.plants);
   const before = await snap(U);
-  const exp = o.clone()[what](p.id);
-  const r = await db.u(U.id, `select public.api_plant_${what}(${p.id})`);
-  const ctx = ctxOf(H, U, 'plant ' + what);
+  const exp = o.clone().pick(p.id);
+  const r = await db.u(U.id, `select public.api_plant_pick(array[${p.id}]::bigint[])`);
+  const ctx = ctxOf(H, U, 'plant pick');
   if (exp.err) {
-    if (r.ok) { fail(ctx, `plant ${what}: allowed but the rules refuse (${exp.err})`, {}); await resyncUser(U, await snap(U)); return; }
-    inc(cov.refused, what); await sameState(H, U, 'plant ' + what, before); return;
+    if (r.ok) { fail(ctx, `plant pick: allowed but the rules refuse (${exp.err})`, {}); await resyncUser(U, await snap(U)); return; }
+    inc(cov.refused, 'pick'); await sameState(H, U, 'plant pick', before); return;
   }
-  if (!r.ok) { fail(ctx, `plant ${what}: refused but the rules allow it`, { err: r.err, plan: o.plan, comped: o.comped, active: o.active().length, next: o.nextPlan }); await resyncUser(U, await snap(U)); return; }
-  inc(cov.allowed, what); o[what](p.id);
-  await check(H, U, 'plant ' + what);
+  if (!r.ok) { fail(ctx, 'plant pick: refused but the rules allow it', { err: r.err, plan: o.plan, comped: o.comped, active: o.active().length, ticks: [...o.ticks] }); await resyncUser(U, await snap(U)); return; }
+  inc(cov.allowed, 'pick'); o.pick(p.id);
+  await check(H, U, 'plant pick');
+}
+
+// One ticked plant out, one locked plant in: one per 90 days (0197).
+async function doChange(H, U) {
+  const o = U.o, rng = H.rng;
+  if (!o.plants.length) return;
+  const locked = o.plants.filter((p) => p.paused), ticked = [...o.ticks.keys()];
+  const into = (locked.length && rng.chance(0.9) ? rng.pick(locked) : rng.pick(o.plants)).id;
+  const out = ticked.length && rng.chance(0.9) ? rng.pick(ticked) : rng.pick(o.plants).id;
+  const before = await snap(U);
+  const exp = o.clone().change(out, into, H.today);
+  const r = await db.u(U.id, `select public.api_plant_change(${out}, ${into})`);
+  const ctx = ctxOf(H, U, 'plant change');
+  if (exp.err) {
+    if (r.ok) { fail(ctx, `plant change: allowed but the rules refuse (${exp.err})`, { out, into }); await resyncUser(U, await snap(U)); return; }
+    inc(cov.refused, 'change'); await sameState(H, U, 'plant change', before); return;
+  }
+  if (!r.ok) { fail(ctx, 'plant change: refused but the rules allow it', { err: r.err, out, into, plan: o.plan, ticks: [...o.ticks], last: o.changedOn }); await resyncUser(U, await snap(U)); return; }
+  inc(cov.allowed, 'change'); o.change(out, into, H.today);
+  await check(H, U, 'plant change');
 }
 
 async function doCard(H, U) {
@@ -676,7 +708,7 @@ async function doProbe(H, U) {
     if (o.plan !== 'free') return payFlow(H, U, { plan: o.plan, period: null, label: 'probe: same plan' });
     return;
   }
-  return doStopStart(H, U, 'start');
+  return doPick(H, U);
 }
 
 // ---- end of a user's run ------------------------------------------------------------------------------

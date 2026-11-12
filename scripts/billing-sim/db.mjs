@@ -85,6 +85,9 @@ begin
     'card', (select card->>'last4' from private.billing where user_id = uid),
     'plants', coalesce((select jsonb_agg(jsonb_build_object('id', plant_id, 'paused', paused) order by linked_at, plant_id)
                           from public.plant_users where user_id = uid), '[]'),
+    'ticks', coalesce((select jsonb_agg(jsonb_build_array(plant_id, held) order by plant_id)
+                         from private.plant_picks where user_id = uid), '[]'),
+    'changed', (select changed_on from private.plant_change where user_id = uid),
     'st', st,
     'due', public.billing_amount_due(uid));
 end $f$;
