@@ -2895,7 +2895,7 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
     return (
       <label key={p.plant_id} className={'login-plant keep-row' + (ticked ? '' : ' off')}>
         <span className="conn-user plant-nm">{name}</span>
-        <input type="checkbox" checked={ticked} disabled={p.share_gone} aria-label={'Run ' + name} onChange={() => tick(p.plant_id)} />{/* reuse-check: allow: tick boxes, not switches, as the keep pick (SOLAR-486) */}
+        <input type="checkbox" checked={ticked} aria-label={'Run ' + name} onChange={() => tick(p.plant_id)} />{/* reuse-check: allow: tick boxes, not switches, as the keep pick (SOLAR-486) */}
       </label>
     );
   };
@@ -2904,7 +2904,7 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
     : onUpgrade && <button type="button" className="mini-link" onClick={() => onUpgrade(want)}>upgrade</button>;
   return (
     <ConfirmCard modal danger={out.length > 0} label="Choose plants" title="Choose plants" busy={busy}
-      action={out.length ? 'Change plant' : 'Save'} onConfirm={() => added.length && save()} onCancel={onCancel}>
+      action={out.length ? 'Change plant' : 'Save'} onConfirm={() => (added.length ? save() : !out.length && onCancel())} onCancel={onCancel}>
       <div className="keep-pick">
         <div className="confirm-text keep-ask">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}.</div>
         {logins.map(acc => (
@@ -3049,6 +3049,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     const s = state(p);
     const name = window.plantLabel(p);
     const st = states[p.plant_id] && { ...states[p.plant_id], sync: window.firstLoadSync(states[p.plant_id].sync, p.linked_at) };
+    const fetching = st?.lastTs != null ? window.syncProgress(st.sync) : 0;
     return (
       <PlantLine key={p.plant_id} name={<><Icon id="panel" />{name}</>} off={p.paused}>
         {/* gone from SunSynk: the owner removed the share (SOLAR-310), or the login no longer lists it */}
@@ -3058,9 +3059,11 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
             {!p.paused && <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
           </>
           : p.paused ? <span className="pm-state"><window.LockIcon />Locked</span>
-          /* no reading yet: it is still being set up */
-          : st?.lastTs != null || (!ok && !shared) ? <MenuState st={st} cut={!ok && !shared} now={states.at || Date.now()} />
-          : <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Setting up</span>}
+          : !ok && !shared ? <MenuState cut />
+          : !states.at ? null
+          /* its first 60 days are still arriving, or no reading yet: the header's words and % (SOLAR-176) */
+          : fetching != null ? <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Fetching history<span className="mono pm-pct">{Math.round(100 * fetching)}%</span></span>
+          : <MenuState st={st} now={states.at || Date.now()} />}
       </PlantLine>
     );
   };
@@ -3094,7 +3097,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         // heading with Reconnect and Manage at its right, its plants under it.
         // Its state shows only when it needs something.
         <>
-          {choosing && <ChoosePlantsDialog logins={live.map(a => ({ ...a, plants: (a.plants || []).filter(p => allPlants.includes(p)) })).filter(a => a.plants.length)}
+          {choosing && <ChoosePlantsDialog logins={live.map(a => ({ ...a, plants: (a.plants || []).filter(p => allPlants.includes(p) && !p.share_gone) })).filter(a => a.plants.length)}
             picks={picks} onUpgrade={onCollect && ((id) => { setChoosing(false); onCollect(id); })}
             onDone={chosen} onCancel={() => setChoosing(false)} />}
           {live.map(acc => {
@@ -3763,6 +3766,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
   return (
     <SettingsFlash.Provider value={flash ? { id: flash, done: onFlashed } : null}>
       <div className={'set-area' + (page === 'prefs' ? ' set-list' : '')}>
+        {links && <window.PickAfterPay links={links} onDone={(r) => onPlantConfigSaved && onPlantConfigSaved(r, true)} />}
         <nav className="set-nav" aria-label="Settings">
           <h1 className="set-nav-title">Settings</h1>
           <div className="set-nav-list">{SETTINGS_NAV.map(([id, label, note]) => (

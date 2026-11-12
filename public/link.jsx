@@ -427,7 +427,12 @@ window.billingReturn = async function billingReturn(billingStatus) {
     if (billingStatus?.state === 'past_due') await window.settlePayment();
     return;
   }
-  if (done === 'paid') { window.toast('Payment received. Your plan is updated.'); return; }
+  if (done === 'paid') {
+    window.toast('Payment received. Your plan is updated.');
+    // a bigger plan may have places open for locked plants: PickAfterPay asks which run (SOLAR-537)
+    window.pickAsked = true; window.dispatchEvent(new Event('ps-pick'));
+    return;
+  }
   // The event a card-page payment was opened with: sent only if it was paid.
   let paidEvent = null;
   try { paidEvent = JSON.parse(sessionStorage.getItem(PAID_EVENT)); sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
@@ -571,8 +576,8 @@ function PlantPickDialog({ logins, from, onDone }) {
   };
   const more = open === 1 ? '1 more plant' : open + ' more plants';
   return (
-    <Dialog keep label="Choose your plants" busy={busy} onClose={() => onDone([])}>
-      <div className="confirm-title">Choose your plants</div>
+    <Dialog keep label="Choose plants" busy={busy} onClose={() => onDone([])}>
+      <div className="confirm-title">Choose plants</div>
       <KeepPicker logins={logins} room={open} value={picked} onChange={setPicked} min={0} verb="Add"
         ask={`${PLAN_NAME[plan]} has room for ${more}.${all.length > open ? (open === 1 ? ' Which one?' : ' Which ones?') : ''}`}
         full={`${PLAN_NAME[plan]} has room for ${more}. Untick one first.`} />
@@ -585,6 +590,23 @@ function PlantPickDialog({ logins, from, onDone }) {
   );
 }
 window.PlantPickDialog = PlantPickDialog;
+// After a payment (billingReturn): the pick pop-up, when a locked plant has a place open.
+// With no place open there is nothing to choose, so nothing shows. onDone(r): the plants now
+// running, in link-sunsynk's shape. In Settings, where a payment comes back to.
+function PickAfterPay({ links, onDone }) {
+  const [ask, setAsk] = React.useState(() => !!window.pickAsked);
+  React.useEffect(() => {
+    const on = () => setAsk(true);
+    window.addEventListener('ps-pick', on);
+    return () => window.removeEventListener('ps-pick', on);
+  }, []);
+  const logins = ask && !links.loading ? startableLogins(links.accounts) : [];
+  const close = () => { window.pickAsked = false; setAsk(false); };
+  React.useEffect(() => { if (ask && !links.loading && !logins.length) close(); });
+  if (!logins.length) return null;
+  return <PlantPickDialog logins={logins} from="upgrade" onDone={(ids) => { close(); if (ids.length) onDone({ plants: ids.map(id => ({ id })), paused: [] }); }} />;
+}
+window.PickAfterPay = PickAfterPay;
 window.startableLogins = startableLogins;
 
 // Connect card that opens in place on a page with no inverter yet (Setup), with its title.

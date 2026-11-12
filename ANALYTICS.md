@@ -51,7 +51,7 @@ Web (`public/*.jsx`):
 | `plant_linked` | SunSynk login linked, or a shared plant taken |
 | `share_check_done`, `link_mode_picked`, `share_taken_email_done` | Linking steps |
 | `plant_switched` | Another plant picked |
-| `plant_pick_done` | Locked plants ticked to run (`from`: link or plants, `count`, `of`: how many could be ticked, `plan`) |
+| `plant_pick_done` | Locked plants ticked to run (`from`: link, plants or upgrade, `count`, `of`: how many could be ticked, `plan`) |
 | `plant_change_done`, `plant_change_refused_done` | One plant changed for another; a change refused inside its 90 days |
 | `plant_kept_done` | Plant kept from deletion |
 | `login_remove_done` | SunSynk login removed |
