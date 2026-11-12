@@ -9,7 +9,7 @@
 // Shown in Settings -> About. Bumped on every deploy; semver, so patch for fixes,
 // minor for features, major for a rewrite. Lives here rather than in the JSX so it sits
 // with the other deploy-time config and loads before anything renders.
-window.APP_VERSION = 'v0.55.8';
+window.APP_VERSION = 'v0.55.9';
 // Shown in Settings → About and on error screens.
 window.SUPPORT_EMAIL = 'hello@princesolarhub.co.za';
 // Google sign-in client (Google Cloud project prince-solar, "Supabase web"). Public by design.
@@ -21,7 +21,8 @@ window.VAPID_PUBLIC = 'BJV8XqKj_ZTALuCxzfsKRYSvHZFnauOhVdKzs1njlexSoV8eabU5lgvt6
 // Bot check on sign-in, sign-up and reset (SOLAR-533): the Cloudflare Turnstile site key.
 // Public by design; its secret half is in Supabase (Authentication > Bot and Abuse Protection).
 // Empty: no check is shown and no token is sent. Local runs use Cloudflare's always-pass test key.
-window.TURNSTILE_SITE_KEY = /^(localhost|127\.0\.0\.1|)$/.test(location.hostname) ? '1x00000000000000000000AA' : '';
+window.TURNSTILE_SITE_KEY = /^(localhost|127\.0\.0\.1|)$/.test(location.hostname) ? '1x00000000000000000000AA'
+  : location.hostname === 'app.princesolarhub.co.za' ? '0x4AAAAAAF-QtcA91pYqz9Sp' : '';
 
 window.SUNSYNK_CONFIG = (function () {
   var local = {
