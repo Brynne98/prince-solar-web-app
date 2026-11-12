@@ -1,5 +1,5 @@
 // Lock-order race (SOLAR-264 round 3): a card payment applying (billing_charge_paid -> billing_resume) while the
-// user starts a stopped plant (api_plant_start), each in its own session, many times. Since 0156 no extra plants
+// user ticks a locked plant (api_plant_pick), each in its own session, many times. The plants are ticked, so the payment starts them (0197). Since 0156 no extra plants
 // are sold, so the payment is a Home (2 plants) to Family (5) upgrade that starts the stopped ones. Exit 0 = no deadlock, 1 = deadlock.
 // A deadlock makes billing_charge_paid fail and a paid charge can stay pending, unapplied (since 0130 the
 // webhook answers 500 then, so Paystack sends the event again). Commits rows for users race-N@s264.test and deletes them at the end.
@@ -32,6 +32,7 @@ try {
          values ('${u}', 'race-${i}@s264.test', 'authenticated', 'authenticated', '', '', '', '');
        insert into private.billing (user_id, plan, plants_to_remove, remove_on)
          values ('${u}', 'free', '{${pl(2)},${pl(3)}}', private.billing_today());
+       insert into private.plant_picks (user_id, plant_id) select '${u}', ${pl(0)} + k from generate_series(1, 3) k;
        insert into public.plant_users (plant_id, user_id, plant_name, linked_at, paused)
          select ${pl(0)} + k, '${u}', 'r' || k, now() + k * interval '1 s', k > 1 from generate_series(1, 3) k;
        insert into public.plant_users (plant_id, user_id, plant_name) select ${pl(0)} + k, '${HELPER}', 'h' from generate_series(1, 3) k;`);
@@ -52,6 +53,7 @@ try {
          values ('${u}', 'race-${i}@s264.test', 'authenticated', 'authenticated', '', '', '', '');
        insert into private.billing (user_id, plan, period, billing_day, next_billing_date, card)
          values ('${u}', 'home', 'monthly', 10, private.billing_today() + 10, '{"authorization_code":"R","reusable":true}');
+       insert into private.plant_picks (user_id, plant_id) values ('${u}', ${one}), ('${u}', ${hi}), ('${u}', ${lo});
        insert into public.plant_users (plant_id, user_id, plant_name, linked_at, paused) values
          (${one}, '${u}', 'one', now(), false), (${hi}, '${u}', 'hi', now() + interval '1 s', true), (${lo}, '${u}', 'lo', now() + interval '2 s', true);
        insert into public.plant_users (plant_id, user_id, account_id, plant_name) values (${hi}, '${HELPER}', '${acc}', 'h'), (${lo}, '${HELPER}', '${acc}', 'h');`);
@@ -91,6 +93,7 @@ try {
          values ('${u}', 'race-${i}@s264.test', 'authenticated', 'authenticated', '', '', '', '');
        insert into private.billing (user_id, plan, period, billing_day, next_billing_date, card)
          values ('${u}', 'home', 'monthly', 10, private.billing_today() + 10, '{"authorization_code":"R","reusable":true}');
+       insert into private.plant_picks (user_id, plant_id) select '${u}', 95000000 + ${i} * 10 + k from generate_series(1, 5) k;
        insert into public.plant_users (plant_id, user_id, plant_name, linked_at, paused)
          select 95000000 + ${i} * 10 + k, '${u}', 'r' || k, now() + k * interval '1 s', k > 2 from generate_series(1, 5) k;`);
     const ref = q(`select public.billing_charge_open('${u}', 'family')->>'reference'`);
@@ -99,7 +102,7 @@ try {
     q(`insert into public.plant_users (plant_id, user_id, plant_name) select 95000000 + ${i} * 10 + k, '${HELPER}', 'h' from generate_series(1, 5) k`);
     const [a, b] = await Promise.all([
       bg(`begin; select private.billing_lock('${u}'); select pg_sleep(0.6); select public.billing_charge_paid('${ref}', null, true, null); commit;`),
-      new Promise((r) => setTimeout(r, 150)).then(() => bg(`begin; select set_config('request.jwt.claims', json_build_object('sub','${u}','role','authenticated')::text, true); select public.api_plant_start(${plant}); select pg_sleep(0.3); commit;`)),
+      new Promise((r) => setTimeout(r, 150)).then(() => bg(`begin; select set_config('request.jwt.claims', json_build_object('sub','${u}','role','authenticated')::text, true); select public.api_plant_pick(array[${plant}]::bigint[]); select pg_sleep(0.3); commit;`)),
     ]);
     if (/deadlock detected/.test(a + b)) deadlocks++;
     if (q(`select status from private.billing_charges where reference = '${ref}'`) === 'pending') unapplied++;
