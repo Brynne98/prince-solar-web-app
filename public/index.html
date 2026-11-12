@@ -1190,7 +1190,9 @@
   @media (min-width: 901px) { .login-plant, .login-plant .plant-nm { min-height: 36px; } }
   .login-plant.off .plant-nm { color: var(--dim); }
   .login-plant .plant-nm > .ico { flex: none; margin-right: var(--sp-sm); color: var(--muted); }   /* a panel before each plant (SOLAR-537) */
-  .plants-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-sm); }
+  /* Plants' two buttons stay side by side; on a phone they go under the title, at the right */
+  .sec-intro:has(.plants-acts) { flex-wrap: wrap; }
+  .plants-acts { display: flex; gap: var(--sp-sm); margin-left: auto; }
   .plants-acts button { white-space: nowrap; }
   /* Billing's Plants (SOLAR-377): one full-width card laid out as Notifications. Each login a small
      grey heading, Reconnect then Manage at its right; its plants under it as rows, a switch each. */

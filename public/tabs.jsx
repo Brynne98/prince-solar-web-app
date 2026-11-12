@@ -2919,11 +2919,11 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
             {away.map(row)}
           </div>
         )}
-        {say === 'full' ? <div className="field-note keep-count warn">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}. Untick one first{more && plan !== 'family' ? <>, or {more}</> : ''}.{plan === 'family' && <> {more}</>}</div>
+        {say === 'full' ? <div className="field-note keep-count warn">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}. Untick one first{more && plan !== 'family' ? <>, or {more} for more plants</> : ''}.{plan === 'family' && <> {more}</>}</div>
           : say === 'date' ? <div className="field-note keep-count warn">You can change a plant again on {longDay(picks.change_on)}.</div>
           : say === 'one' ? <div className="field-note keep-count warn">One change every 90 days. Tick {nameOf(out[0])} again first.</div>
           : out.length ? <div className="field-note keep-count warn">{added.length ? `${nameOf(out[0])}’s history is deleted straight away and can’t be brought back. You can change again in 90 days.` : `Tick the plant to run in place of ${nameOf(out[0])}.`}</div>
-          : <div className="field-note keep-count">{on.length} of {room} ticked.</div>}
+          : <div className="field-note keep-count">{on.length} of {room} ticked.{added.length > 0 && ' After this you can change one plant every 90 days.'}</div>}
       </div>
     </ConfirmCard>
   );
@@ -3058,7 +3058,9 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
             {!p.paused && <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
           </>
           : p.paused ? <span className="pm-state"><window.LockIcon />Locked</span>
-          : <MenuState st={st} cut={!ok && !shared} now={states.at || Date.now()} />}
+          /* no reading yet: it is still being set up */
+          : st?.lastTs != null || (!ok && !shared) ? <MenuState st={st} cut={!ok && !shared} now={states.at || Date.now()} />
+          : <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Setting up</span>}
       </PlantLine>
     );
   };
