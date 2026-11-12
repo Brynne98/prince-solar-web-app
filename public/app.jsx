@@ -1167,12 +1167,18 @@ const SECTION_PAGE = { connection: 'plants', system: 'system', steps: 'system', 
 // An email's ?section= (logins is the old name for Plants) → the section it opens, in App and Setup.
 const URL_SECTION = { logins: 'connection', notifications: 'notifications', plan: 'plan', payments: 'payments', cancel: 'cancel', system: 'system' };
 // A saved or linked Battery page opens Equipment, where the packs now are; the plant's
-// settings were Settings' System page ('settings') until they moved to the list.
-const tabAlias = (id) => (id === 'battery' ? 'inverters' : id === 'settings' ? 'system' : id);
-// The page to open: Account for a password reset, else the address's, else the one last shown here ('' for none).
+// settings were Settings' System page ('settings') until they moved to the list. Equipment's
+// page is 'inverters'; a hand-typed ?tab=equipment opens it too.
+const TAB_ALIAS = { battery: 'inverters', equipment: 'inverters', settings: 'system' };
+const tabAlias = (id) => TAB_ALIAS[id] || id;
+// The page to open: Account for a password reset, else the address's, else the one last shown here.
+// ok says which pages this screen has; anything else (none, or a key the app doesn't know) opens Live.
 const TAB_KEY = 'synsynk.tab';
-const savedTab = () => window.resetAsked() ? 'account'
-  : tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem(TAB_KEY) || '');
+const savedTab = (ok) => {
+  const t = window.resetAsked() ? 'account'
+    : tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem(TAB_KEY) || '');
+  return ok(t) ? t : 'live';
+};
 // Remembers the page, and puts it (and the plant) in the address, so a reload opens them.
 // A new page adds a history entry, so Back and Forward move between pages (SOLAR-515).
 // replace: a change the app made itself (the first write, an email's ?section=). A plant
@@ -1337,8 +1343,7 @@ function BootShell() {
   // last sign-out: most likely a new account on its way to Connect SunSynk. A skeleton
   // would flash a dashboard it will never get, so show the empty sign-in backdrop.
   if (!localStorage.getItem(TAB_KEY)) return <div className="login-wrap" />;
-  const saved = savedTab();
-  const tab = pageOk(TABS, saved) ? saved : 'live';
+  const tab = savedTab(t => pageOk(TABS, t));
   return (
     <Frame tabs={TABS} tab={tab} busy account={{ user, plantCount: null, onSettings: () => {} }}
       head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /><NotifBell disabled /></>}>
@@ -1377,10 +1382,7 @@ function Setup({ links }) {
   const user = useUser();
   // The remembered page too, so removing the last login on Account stays on Account.
   // Plant settings isn't here, so the address or memory naming it opens Live.
-  const [tab, setTab] = useState(() => {
-    const t = savedTab();
-    return pageOk(SETUP_TABS, t) ? t : 'live';
-  });
+  const [tab, setTab] = useState(() => savedTab(t => pageOk(SETUP_TABS, t)));
   const [connecting, setConnecting] = useState(false);
   // Billing's Plan says when the free week ends; it runs from the first plant added.
   const [me, setMe] = useState(null);
@@ -1516,7 +1518,7 @@ function App({ links }) {
   const [plantId, setPlantId] = useState(null);
   const shownPlant = useRef(null);
   shownPlant.current = plantId;
-  const [tab, setTab] = useState(() => savedTab() || 'live');
+  const [tab, setTab] = useState(() => savedTab(t => pageOk(TABS, t) || t === 'alerts'));
   const auto = true; // refresh runs on its own; the header button forces one now
   const [rawSnap, setSnap] = useState(null);
   // Every login of the plant needs a reconnect and no reading lands (SOLAR-373): nothing is
