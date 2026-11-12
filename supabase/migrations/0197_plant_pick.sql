@@ -742,4 +742,24 @@ begin
   return jsonb_build_object('status', 'paid', 'plan', b.plan, 'kind', c.kind);
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- 0114's email rule: no mail for a locked plant, but the "share removed" email
+-- still goes. The plant is locked in the statement that queues it (plant_users_gone).
+-- ---------------------------------------------------------------------------
+create or replace function private.email_skip_paused()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if new.plant_id is not null and new.kind <> 'share_removed' and exists (select 1 from public.plant_users pu
+       where pu.user_id = new.user_id and pu.plant_id = new.plant_id and pu.paused) then
+    return null;
+  end if;
+  -- Free with a free week on record: no reports but the day-7 one.
+  if new.kind like 'report\_%' and not coalesce((new.data->>'freeWeekEnds')::boolean, false)
+     and coalesce((select b.plan from private.billing b where b.user_id = new.user_id), 'free') = 'free'
+     and exists (select 1 from private.free_week_logins f where f.user_id = new.user_id) then
+    return null;
+  end if;
+  return new;
+end $$;
+
 notify pgrst, 'reload schema';
