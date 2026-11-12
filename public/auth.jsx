@@ -246,25 +246,32 @@ function GoogleSignIn({ onStart, onDone }) {
  *  reset and resend without its token once the check is on. `hold` is a ref; the form calls
  *  `await hold.current?.()` for a token and passes it as `captchaToken`. A token works once,
  *  so each take starts the next one. `quiet` shows the box only when Cloudflare needs a tap.
- *  No site key (config.js): draws nothing and the take answers undefined. */
+ *  No site key (config.js): draws nothing and the take answers undefined. No token in time,
+ *  or Cloudflare's script blocked: the take answers undefined too, and Supabase decides. */
 function BotCheck({ hold, quiet }) {
   const { useEffect, useRef } = React;
   const box = useRef(null);
   const key = window.TURNSTILE_SITE_KEY;
   useEffect(() => {
     if (!key) { hold.current = null; return; }
-    let alive = true, tries = 0, id = null, token = null, waiting = null;
+    let alive = true, tries = 0, id = null, token = null, waiting = null, off = false;
     const got = (t) => { token = t; if (waiting) { waiting(t); waiting = null; } };
     // Cloudflare's script loads only where a check is shown. No integrity hash: Cloudflare updates it in place.
-    if (!document.getElementById('cf-turnstile')) {
-      const s = document.createElement('script');
+    let s = document.getElementById('cf-turnstile');
+    if (!s) {
+      s = document.createElement('script');
       s.id = 'cf-turnstile'; s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; s.async = true;
+      // Blocked (ad blocker, strict network): marked, so no take waits for it (SOLAR-536)
+      s.onerror = () => { s.dataset.failed = '1'; };
       document.head.appendChild(s);
     }
     const setup = () => {
       if (!alive) return;
-      // async script: wait up to 10 s, then give up on it.
-      if (!window.turnstile?.render) return ++tries > 50 ? got(null) : setTimeout(setup, 200);
+      // async script: wait up to 10 s, or until it fails to load, then give up on it.
+      if (!window.turnstile?.render) {
+        if (s.dataset.failed || ++tries > 50) { off = true; return got(null); }
+        return setTimeout(setup, 200);
+      }
       id = window.turnstile.render(box.current, {
         sitekey: key, size: 'flexible', appearance: quiet ? 'interaction-only' : 'always',
         theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark',
@@ -275,9 +282,11 @@ function BotCheck({ hold, quiet }) {
     };
     setup();
     hold.current = async () => {
-      // Not ready yet (still checking, or waiting for a tap): give it 10 s.
-      const t = token || await new Promise((done) => { waiting = done; setTimeout(() => done(null), 10000); });
-      if (!t) throw { code: 'captcha_failed' };
+      // Not ready yet (still checking, or waiting for a tap): give it 10 s. No wait when the script never loaded.
+      const t = token || (off ? null : await new Promise((done) => { waiting = done; setTimeout(() => done(null), 10000); }));
+      // No token: the request goes without one and Supabase decides. It answers
+      // captcha_failed when it requires one, and lets the call through when it doesn't (SOLAR-536).
+      if (!t) return undefined;
       token = null;
       if (id != null) window.turnstile.reset(id);
       return t;

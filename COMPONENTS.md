@@ -64,7 +64,7 @@ Formatting and dates (also `components.jsx`):
 | `useFieldErrors()` | `{ bad, setBad, flag, edited }`: which fields are wrong, cleared on edit. |
 | `invalidProps` | `aria-invalid` and `aria-describedby` for a field. |
 | `PasswordInput`, `PasswordField` | A password box with the eye, bare or with label. |
-| `BotCheck` | Cloudflare's bot check box: `hold` (a ref; `await hold.current?.()` gives the `captchaToken` for a Supabase sign-in, sign-up, reset or resend), `quiet` (shown only when a tap is needed). Any new call to those needs one. |
+| `BotCheck` | Cloudflare's bot check box: `hold` (a ref; `await hold.current?.()` gives the `captchaToken` for a Supabase sign-in, sign-up, reset or resend), `quiet` (shown only when a tap is needed). Any new call to those needs one. No token (script blocked, no tap in 10 s): gives `undefined`, the call goes and Supabase decides. |
 | `SignOutButton`, `signOutHere` | Sign out, as a button or a call. |
 | `checkSession` | Moves a tab to sign-in when its session ended elsewhere or its account is gone. Runs when a tab is back on screen and when `must()` fails. |
 | `explainAuthError` | A Supabase auth error as a sentence for people. |

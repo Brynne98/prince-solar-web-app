@@ -116,7 +116,9 @@ Not sent on purpose: menu opens, hovers, day arrows after the first, chart serie
   through `reportServerError` in `config.js`, with `rpc` (RPC or table), `code` and `status`,
   and a message of the code plus at most 80 characters of the error text with quoted values,
   bracketed values and long numbers masked (SOLAR-533),
-  one issue per RPC and code (`rpc:<name>:<code>`), at most 5 per page load. A 5xx from
+  one issue per RPC and code (`rpc:<name>:<code>`), at most 5 per page load. One 42501 is
+  reported: "permission denied ..." to a signed-in user (status 403), which means a table or
+  function right is missing (SOLAR-536). A 5xx from
   sign-in, sign-up or a reset request is reported as `rpc: auth` (often a failed sign-in
   email). 4xx refusals and no connection are not sent.
 - Outside: an uptime service calls `/functions/v1/health` every 5 min and emails admin@ on a

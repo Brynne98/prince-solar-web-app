@@ -126,11 +126,15 @@ window.POSTHOG_KEY = 'phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v';
   // A Supabase call the server or database failed (SOLAR-472): a 5xx, or a Postgres error
   // that isn't a deliberate refusal (22: bad value such as 22023, 23: constraint, 28 and
   // 42501: not allowed, P0: raised by our own code). Not sent: offline (status 0) and other
-  // 4xx. Each RPC and code is its own issue; at most 5 per page load.
+  // 4xx. 42501 is sent when Postgres itself says "permission denied ..." to a signed-in user
+  // (403): a table or function right is missing, which is our mistake, not a refusal. Signed
+  // out (401, a session that ended) it is expected and stays unsent (SOLAR-536).
+  // Each RPC and code is its own issue; at most 5 per page load.
   var serverErrors = 0;
   window.reportServerError = function (name, error, status) {
     var code = String((error && error.code) || '');
-    var dbFault = /^[0-9A-Z]{5}$/.test(code) && !/^(22|23|28|P0)|^42501$/.test(code);
+    var dbFault = /^[0-9A-Z]{5}$/.test(code) && !/^(22|23|28|P0)|^42501$/.test(code)
+      || code === '42501' && status !== 401 && /^permission denied/.test((error && error.message) || '');
     if (!(status >= 500 || dbFault || code === 'PGRST202') || serverErrors >= 5) return null;
     serverErrors++;
     return report(new Error(name + ': ' + (code || status) + ' ' + mask(error && error.message)), {

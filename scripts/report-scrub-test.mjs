@@ -51,6 +51,16 @@ assert.ok(!/secret_col|plants|495944|sam@/.test(msg), msg);
 assert.ok(msg.length <= 'api_overview: 42703 '.length + 80, msg);
 assert.equal(sent[0].props.page, '/');
 
+// 42501 (SOLAR-536): a deliberate refusal and a signed-out call stay unsent; a missing table right is sent
+window.reportServerError('api_me', { code: '42501', message: 'permission denied for function api_me' }, 401);
+window.reportServerError('api_overview', { code: '42501', message: 'not linked' }, 403);
+window.reportServerError('api_plant_stop', { code: '42501', message: 'sign in first' }, 403);
+assert.equal(sent.length, 1);
+window.reportServerError('plant_config', { code: '42501', message: 'permission denied for table plant_config' }, 403);
+assert.equal(sent.length, 2);
+assert.ok(sent[1].err.message.startsWith('plant_config: 42501 permission denied for table'), sent[1].err.message);
+assert.equal(sent[1].props.$exception_fingerprint, 'rpc:plant_config:42501');
+
 // the bot check key: none off a local host until the live one is filled in, or the live one
 assert.ok(window.TURNSTILE_SITE_KEY !== '1x00000000000000000000AA');
 console.log('report-scrub-test: ok');

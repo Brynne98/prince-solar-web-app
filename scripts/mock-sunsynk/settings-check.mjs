@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Settings round-trips as a signed-in user: the plant_config triggers that keep
-// batt_sign_source / features_source honest, and the client_errors insert path.
+// Settings round-trips as a signed-in user: plant_config saves its settings columns and
+// refuses the server's own (0196), and the client_errors insert path.
 //   eval "$(supabase status -o env | grep -E '^(API_URL|ANON_KEY)=')"; node scripts/mock-sunsynk/settings-check.mjs
 const API = (process.env.API_URL || "http://127.0.0.1:55321").replace(/"/g, "");
 const ANON = (process.env.ANON_KEY || "").replace(/"/g, "");
@@ -21,16 +21,18 @@ async function patch(jwt, plant, body) {
 const s = await session("shared@local.test");
 const jwt = s.access_token;
 console.log("shared@local.test on plant 6004");
-let r = await patch(jwt, 6004, { battery_banks: "shared", tariff_export: 1.25 });
-check(r.status === 200 && r.row?.battery_banks === "shared" && Number(r.row?.tariff_export) === 1.25, `battery_banks=shared, tariff_export=1.25 (${r.status})`);
-r = await patch(jwt, 6004, { batt_positive_means: "charging" });
-check(r.row?.batt_sign_source === "user", `manual battery sign -> source=user (${r.row?.batt_sign_source})`);
-r = await patch(jwt, 6004, { batt_positive_means: null });
-check(r.row?.batt_sign_source === "default" && r.row?.batt_positive_means == null, `Auto -> source=default, value cleared`);
-r = await patch(jwt, 6004, { has_battery: true, has_grid: true });
-check(r.row?.features_source === "user", `equipment set by hand -> features_source=user`);
-r = await patch(jwt, 6004, { has_battery: null, has_grid: null });
-check(r.row?.features_source === "default", `equipment back to auto -> features_source=default`);
+// 0196 (SOLAR-536): a user saves the settings columns only. Same values written back.
+const cur = (await (await fetch(`${API}/rest/v1/plant_config?plant_id=eq.6004`, { headers: h(jwt) })).json())[0];
+const SETTINGS = ["tariff_import", "battery_reserve_pct", "battery_reserve_confirmed", "battery_kwh", "battery_groups", "system_kwp", "panel_groups"];
+let r = await patch(jwt, 6004, Object.fromEntries(SETTINGS.map(k => [k, cur[k]])));
+check(r.status === 200 && r.row?.updated_by === s.user.id, `settings save, updated_by set by the trigger (${r.status})`);
+for (const body of [{ backfill_next: "2020-01-01", backfill_until: "2026-01-01" }, { backfill_tries: 0 }, { temp_next: null, temp_tries: 0 },
+  { has_battery: true, has_grid: true }, { features_source: "detected" }, { batt_positive_means: "charging" }, { batt_sign_source: "detected" },
+  { battery_banks: "shared" }, { tariff_export: 1.25 }, { timezone: "UTC" }, { currency: "USD" }, { updated_by: null },
+  { tariff_import: cur.tariff_import, has_grid: false }]) {
+  r = await patch(jwt, 6004, body);
+  check(r.status === 403, `${Object.keys(body).join(", ")} refused (${r.status})`);
+}
 r = await patch(jwt, 6004, { plan: "pro" });
 check(r.status >= 400 || r.row?.plan === undefined, `unknown column refused (${r.status})`);
 // another user's plant: RLS makes the update a no-op
