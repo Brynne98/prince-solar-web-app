@@ -953,6 +953,9 @@ begin
   perform pg_temp.eq('gone: locked, its tick gone',
     (select paused and share_gone_at is not null from public.plant_users where user_id = p and plant_id = 9000903)::text || ' ' ||
     (select count(*) from private.plant_picks where user_id = p and plant_id = 9000903), 'true 0');
+  perform pg_temp.eq('gone: its owner is told once, with the login',
+    (select count(*) || ' ' || max(data->>'login') || ' ' || max(data->'plants'->>0) from public.email_queue where user_id = p and kind = 'plant_off_login'),
+    '1 p@login.test Three');
   perform public.api_plant_pick(array[9000901]);
   perform pg_temp.eq('gone: its place takes another plant without a change',
     (select paused from public.plant_users where user_id = p and plant_id = 9000901)::text || ' ' ||

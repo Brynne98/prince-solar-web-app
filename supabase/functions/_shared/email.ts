@@ -638,6 +638,8 @@ export type LoginEvent =
   | { kind: "relinked"; plants: string[]; since?: string; at: string; lasted: string }
   // the owner removed the plant's share to our login (SOLAR-310, 0172)
   | { kind: "share_removed"; plants: string[] }
+  // SunSynk no longer lists the plant on its password login (SOLAR-537, 0197): locked, not read
+  | { kind: "plant_off_login"; plants: string[]; login?: string }
   // the share login stopped / works again (SOLAR-451, 0177): owners can't act, so no sign-in
   | { kind: "share_down"; plants: string[]; at?: string }
   | { kind: "share_back"; plants: string[]; since?: string; at: string; lasted: string };
@@ -665,6 +667,25 @@ export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email
         { box: { rows: [["Plants", esc(plants)]] } },
         { lead: "To start again, share it as Visitor, then add it in the app with Share plant." },
         { button: { label: "Open Prince Solar Hub", href: LOGINS } },
+      ],
+      footer: [HELP],
+    });
+  // What happened, then each way it can happen with what the owner can do about it
+  // (Brynne 2026-11-13). We can't tell which it was: SunSynk's list only drops the plant.
+  if (e.kind === "plant_off_login")
+    return make(`${plants} is no longer on your SunSynk login`, {
+      title: "Plant no longer on your login",
+      parts: [
+        { lead: `SunSynk stopped listing ${esc(plants)} on your login. We looked twice, an hour apart, then stopped reading it. Your history is safe.` },
+        { box: { rows: [["Plant", esc(plants)], ...(e.login ? [["Login", esc(e.login)] as [string, string]] : [])] } },
+        { heading: "What may have happened" },
+        { box: { steps: [
+          ["Someone shared it with you, and the share was removed", "Ask the plant's owner to share it with this login again in SunSynk."],
+          ["It moved to another SunSynk login", "Add that login in Plants with Add plant."],
+          ["It was deleted in SunSynk", "There is nothing to do. It stays in your list, locked."],
+        ] } },
+        { note: "When SunSynk lists it again, it shows as Locked. Turn it on in Plants with Choose plants." },
+        { button: { label: "Open Plants", href: LOGINS } },
       ],
       footer: [HELP],
     });

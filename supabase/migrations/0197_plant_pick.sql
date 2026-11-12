@@ -385,8 +385,9 @@ revoke all on function private.billing_to_free(uuid, date) from public, anon, au
 -- 0170's upsert, with two additions for a password login:
 --   - a login with one plant ticks it when a place is open, so it starts with no pop-up;
 --   - a plant of this login missing from SunSynk's list twice, 50 minutes apart, is
---     marked gone (the share columns, 0172): locked, its place open. Back in the
---     list, the mark clears and the plant waits locked for its owner's tick.
+--     marked gone (the share columns, 0172): locked, its place open, and its owner
+--     gets one plant_off_login email. Back in the list, the mark clears and the plant
+--     waits locked for its owner's tick.
 -- ---------------------------------------------------------------------------
 create or replace function public.plant_users_upsert(p_user uuid, p_account uuid, p_rows jsonb)
  RETURNS void
@@ -398,6 +399,7 @@ declare
   p bigint;
   ids bigint[] := array(select (r->>'plant_id')::bigint from jsonb_array_elements(p_rows) r);
   login boolean;
+  who text;
 begin
   perform pg_advisory_xact_lock_shared(3, 0);  -- waits for a billing run, before any other lock (0170)
   perform private.billing_lock(p_user);
@@ -405,7 +407,7 @@ begin
   for p in select distinct x from unnest(ids) x order by 1 loop
     perform pg_advisory_xact_lock(p);
   end loop;
-  select kind = 'login' into login from private.sunsynk_accounts where id = p_account and status <> 'disabled';
+  select kind = 'login', sunsynk_username into login, who from private.sunsynk_accounts where id = p_account and status <> 'disabled';
   if not found then
     raise exception 'plant_users_upsert: account % is removed or disabled', p_account;
   end if;
@@ -432,9 +434,17 @@ begin
     update public.plant_users set share_missing_at = null, share_gone_at = null
      where account_id = p_account and user_id = p_user and not via_share and plant_id = any (ids)
        and (share_missing_at is not null or share_gone_at is not null);
-    update public.plant_users set share_gone_at = now()
-     where account_id = p_account and user_id = p_user and not via_share and share_gone_at is null
-       and share_missing_at < now() - interval '50 minutes' and plant_id <> all (ids);
+    -- gone: locked (plant_users_gone), and its owner is told once what can be done
+    with g as (
+      update public.plant_users set share_gone_at = now()
+       where account_id = p_account and user_id = p_user and not via_share and share_gone_at is null
+         and share_missing_at < now() - interval '50 minutes' and plant_id <> all (ids)
+      returning user_id, plant_id, plant_name)
+    insert into public.email_queue (user_id, plant_id, kind, key, data, priority)
+    select g.user_id, g.plant_id, 'plant_off_login', 'plant_off_login:' || g.plant_id || ':' || extract(epoch from now())::bigint,
+           jsonb_build_object('plants', jsonb_build_array(coalesce(g.plant_name, 'Plant ' || g.plant_id)), 'login', who), 1
+      from g
+    on conflict do nothing;
     update public.plant_users set share_missing_at = now()
      where account_id = p_account and user_id = p_user and not via_share and share_gone_at is null
        and share_missing_at is null and plant_id <> all (ids);
@@ -754,13 +764,14 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 0114's email rule: no mail for a locked plant, but the "share removed" email
--- still goes. The plant is locked in the statement that queues it (plant_users_gone).
+-- 0114's email rule: no mail for a locked plant, but the "share removed" and "plant
+-- no longer on your login" emails still go. The plant is locked in the statement that
+-- queues them (plant_users_gone).
 -- ---------------------------------------------------------------------------
 create or replace function private.email_skip_paused()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
-  if new.plant_id is not null and new.kind <> 'share_removed' and exists (select 1 from public.plant_users pu
+  if new.plant_id is not null and new.kind not in ('share_removed', 'plant_off_login') and exists (select 1 from public.plant_users pu
        where pu.user_id = new.user_id and pu.plant_id = new.plant_id and pu.paused) then
     return null;
   end if;
