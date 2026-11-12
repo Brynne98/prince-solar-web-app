@@ -1783,6 +1783,21 @@ function App({ links }) {
     };
   }, [auto, plantId]);
 
+  // A login removed on another device takes its plants with it, and that device's re-read of
+  // the logins (each minute, or on coming back) is the only word this one gets. The plant on
+  // screen leaving the list moves the app to the next plant, as a removal here does; with no
+  // plant left LinkGate turns to the empty pages (SOLAR-524). Only a plant that was listed and
+  // left: a plant just added can reach api_me before the login list.
+  const listedIds = links.accounts.flatMap(a => (a.plants || []).filter(p => !p.paused).map(p => Number(p.plant_id)));
+  const listedBefore = useRef(listedIds);
+  useEffect(() => {
+    const was = listedBefore.current;
+    listedBefore.current = listedIds;
+    if (plantId != null && was.includes(plantId) && !listedIds.includes(plantId)) {
+      loadMe().then(() => { setRefreshKey(k => k + 1); loadLive(); loadToday(); });
+    }
+  }, [listedIds.join()]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const plantLogins = loginsFor(plantId);
   // useLinkStatus reads the logins again each minute (SOLAR-153), so one that dies later
   // shows as cut off and Reconnect reads as a reconnect.
