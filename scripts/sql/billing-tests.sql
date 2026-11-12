@@ -4,6 +4,14 @@
 -- Exit code decides: any wrong case raises.
 \set QUIET on
 begin;
+-- Fixture links are ticked in link order while the plan has places (0197): the owner's
+-- pick, made here for every plant_users insert. The pick's own rules are at the end.
+create function pg_temp.tick() returns trigger language plpgsql as $$
+begin
+  if not new.paused then perform private.plant_pick_add(new.user_id, new.plant_id, new.plant_name); end if;
+  return new;
+end $$;
+create trigger a_test_tick before insert on public.plant_users for each row execute function pg_temp.tick();
 -- list prices: offers closed (0145); offer cases are in offer-tests.sql
 update private.offers set joins_until = date '2000-01-01';
 
@@ -271,7 +279,7 @@ begin
   perform pg_temp.eq('no mail for a paused plant', (select count(*)::int from public.email_queue where key = 'test:paused'), 0);
   perform pg_temp.eq('mail for an active plant', (select count(*)::int from public.email_queue where key = 'test:active'), 1);
   perform set_config('request.jwt.claims', json_build_object('sub', uy, 'role', 'authenticated')::text, true);
-  perform pg_temp.raises('no room to start it', 'select public.api_plant_start(9000025)', 'no room');
+  perform pg_temp.raises('no room to tick it', 'select public.api_plant_pick(array[9000025])', 'no room');
   perform set_config('request.jwt.claims', '', true);
 
   -- The paywall's reader answers for the signed-in user only
@@ -566,10 +574,16 @@ begin
   perform pg_temp.eq('card saved', (select card->>'authorization_code' from private.billing where user_id = s), 'AUTH_t1');
   perform pg_temp.eq('one upgrade email', (select count(*)::int from public.email_queue where user_id = s and kind = 'bill_upgraded'), 1);
   perform pg_temp.eq('card label', (select data->>'card' from public.email_queue where user_id = s and kind = 'bill_upgraded'), 'Visa •••• 4081');
+  -- a payment that names no plant starts none that was never ticked (0197); the owner ticks it
+  perform pg_temp.eq('Home paid: the locked plants wait for a tick', (select count(*)::int from public.plant_users where user_id = s and paused), 2);
+  perform set_config('request.jwt.claims', json_build_object('sub', s, 'role', 'authenticated')::text, true);
+  perform public.api_plant_pick(array[9000092]);
+  perform pg_temp.raises('Home is full: no third tick', 'select public.api_plant_pick(array[9000094])', 'no room');
+  perform set_config('request.jwt.claims', '', true);
   perform pg_temp.eq('Home covers two of three plants', (select count(*)::int from public.plant_users where user_id = s and paused), 1);
 
-  -- upgrade: Home to Family resumes the paused plant, charges the saved card
-  o := public.billing_charge_open(s, 'family');
+  -- upgrade: Home to Family for the locked plant starts it, charges the saved card
+  o := public.billing_charge_open(s, 'family', p_plants => array[9000094]::bigint[]);
   perform pg_temp.eq('upgrade uses the saved card', o->>'card', 'AUTH_t1');
   perform pg_temp.eq('upgrade on day 1 is the whole difference', (o->>'amount')::int, 100);
   perform public.billing_charge_paid(o->>'reference', v_card);
@@ -620,13 +634,17 @@ begin
   perform pg_temp.eq('login kept: it still has a plant', (select count(*)::int from private.sunsynk_accounts where user_id = s), 1);
   perform pg_temp.eq('booking cleared', (select cardinality(plants_to_remove) from private.billing where user_id = s), 0);
 
-  -- paying Family after the move to Free resumes the stopped plant and keeps it
+  -- paying Family after the move to Free brings back the plant that ran before (its tick
+  -- stayed, 0197) and keeps it; a plant never ticked stays locked
   o := public.billing_charge_open(s, 'family', 'monthly');
   insert into public.plant_users (plant_id, user_id, account_id, plant_name, linked_at, paused) values
-    (9000095, s, '00000000-0000-0000-0000-000000000094', 'Home three', '2026-01-03', true);
-  update private.billing set plants_to_remove = '{9000095}', remove_on = t + 30 where user_id = s;
+    (9000094, s, '00000000-0000-0000-0000-000000000094', 'Home three', '2026-01-03', true),
+    (9000095, s, '00000000-0000-0000-0000-000000000094', 'Home four', '2026-01-04', true);
+  update private.billing set plants_to_remove = '{9000094}', remove_on = t + 30 where user_id = s;
   perform public.billing_charge_paid(o->>'reference', v_card);
-  perform pg_temp.eq('resumed after Free', (select count(*)::int from public.plant_users where user_id = s and paused), 0);
+  perform pg_temp.eq('resumed after Free', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = s),
+    '9000091:false,9000094:false,9000095:true');
+  delete from public.plant_users where plant_id = 9000095;
   perform pg_temp.eq('no longer booked', (select cardinality(plants_to_remove)::text || coalesce(remove_on::text, '-') from private.billing where user_id = s), '0-');
 
   -- a second card page paid after the first: kept for a refund, nothing applied
@@ -713,7 +731,7 @@ begin
   perform pg_temp.raises('no renewal', format('select public.billing_renew(%L)', u), 'nothing to renew');
   perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
   perform pg_temp.eq('status says comped', (public.api_billing_status()->>'comped')::boolean, true);
-  perform public.api_plant_start(9000082);
+  perform public.api_plant_pick(array[9000082]);
   perform pg_temp.eq('a stopped plant starts', (select count(*)::int from public.plant_users where user_id = u and paused), 0);
   perform pg_temp.eq('remove login at once', public.api_link_remove('00000000-0000-0000-0000-000000000082')->>'result', 'removed');
   perform set_config('request.jwt.claims', '', true);
@@ -842,6 +860,125 @@ begin
   perform pg_temp.eq('downgrade: nothing booked for later', coalesce(cardinality(b.plants_to_remove), 0), 0);
 end $$;
 -- a cancel still keeps 30 days (0146): the paid-year case above reads year end + 30
+-- ---------------------------------------------------------------------------
+-- The plant pick (0197, SOLAR-537): the owner ticks which plants run, then one change
+-- per 90 days. p = Home, one login with 3 plants, linked the way link-sunsynk links it.
+-- q = Free, a login with one plant.
+-- ---------------------------------------------------------------------------
+drop trigger a_test_tick on public.plant_users;
+insert into auth.users (id, email) values
+  ('00000000-0000-0000-0000-0000000009a1', 'p@t.test'), ('00000000-0000-0000-0000-0000000009a2', 'q@t.test');
+insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values
+  ('00000000-0000-0000-0000-0000000009a1', 'home', 'monthly', 1, '2026-12-01');
+insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values
+  ('00000000-0000-0000-0000-0000000009b1', '00000000-0000-0000-0000-0000000009a1', 'p@login.test'),
+  ('00000000-0000-0000-0000-0000000009b2', '00000000-0000-0000-0000-0000000009a2', 'q@login.test');
+do $$
+declare
+  p constant uuid := '00000000-0000-0000-0000-0000000009a1';
+  q constant uuid := '00000000-0000-0000-0000-0000000009a2';
+  acc constant uuid := '00000000-0000-0000-0000-0000000009b1';
+  three constant jsonb := '[{"plant_id": 9000901, "plant_name": "One"}, {"plant_id": 9000902, "plant_name": "Two"}, {"plant_id": 9000903, "plant_name": "Three"}]';
+  v_card constant jsonb := '{"authorization_code": "AUTH_p1", "card_type": "visa ", "last4": "4081", "reusable": true}';
+  t date := private.billing_today();
+  o jsonb;
+begin
+  -- link: nothing runs until the owner ticks
+  perform public.plant_users_upsert(p, acc, three);
+  perform pg_temp.eq('pick: 3 plants link locked', (select count(*)::int from public.plant_users where user_id = p and paused), 3);
+  perform set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('pick: all three can start', (select count(*)::int from public.api_link_status() s, jsonb_array_elements(s.plants) x where (x->>'can_start')::boolean), 3);
+  perform pg_temp.raises('pick: 3 ticks on Home refused', 'select public.api_plant_pick(array[9000901, 9000902, 9000903])', 'no room');
+  perform pg_temp.eq('pick: a refused pick ticks none', (select count(*)::int from private.plant_picks where user_id = p), 0);
+  perform pg_temp.raises('pick: another account''s plant refused', 'select public.api_plant_pick(array[9000001])', 'not linked');
+  perform public.api_plant_pick(array[9000901, 9000902]);
+  perform pg_temp.eq('pick: 2 ticked run', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
+    '9000901:false,9000902:false,9000903:true');
+  perform pg_temp.eq('pick: the third is locked, no place', (select count(*)::int from public.api_link_status() s, jsonb_array_elements(s.plants) x where (x->>'can_start')::boolean), 0);
+  perform pg_temp.raises('pick: third tick refused', 'select public.api_plant_pick(array[9000903])', 'no room');
+
+  -- the change: one out, one in; the first is ready at once
+  perform pg_temp.eq('change: ready from day one', public.api_plant_picks()->>'change_on', null::text);
+  perform public.api_plant_change(9000901, 9000903);
+  perform pg_temp.eq('change: one out, one in', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
+    '9000901:true,9000902:false,9000903:false');
+  perform pg_temp.eq('change: the plant out loses its history at once', (select count(*)::int from private.plant_wipe where plant_id = 9000901), 1);
+  perform pg_temp.eq('change: and its tick', (select string_agg(plant_id::text, ',' order by plant_id) from private.plant_picks where user_id = p), '9000902,9000903');
+  perform pg_temp.eq('change: next one opens 90 days on', public.api_plant_picks()->>'change_on',
+    ((now() + interval '90 days') at time zone 'Africa/Johannesburg')::date::text);
+  perform pg_temp.raises('change: a second is refused with the date', 'select public.api_plant_change(9000902, 9000901)',
+    'next change ' || ((now() + interval '90 days') at time zone 'Africa/Johannesburg')::date);
+  perform pg_temp.eq('change: the refused one changed nothing', (select count(*)::int from public.plant_users where user_id = p and not paused and plant_id in (9000902, 9000903)), 2);
+  update private.plant_change set changed_at = now() - interval '89 days' where user_id = p;
+  perform pg_temp.raises('change: still refused on day 89', 'select public.api_plant_change(9000902, 9000901)', 'next change');
+
+  -- cancel, then buy again: the same plants come back, the change is not used
+  perform public.api_billing_change('free', null, array[9000902]);
+  perform set_config('request.jwt.claims', '', true);
+  update private.billing set next_billing_date = t where user_id = p;
+  perform public.billing_run(t);
+  perform pg_temp.eq('cancel: on Free, one plant runs, the other is deleted',
+    (select plan from private.billing where user_id = p) || ' ' ||
+    (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p), 'free 9000901:true,9000902:false');
+  perform public.plant_users_upsert(p, acc, three);  -- the hourly sync lists the deleted plant again
+  perform set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true);
+  perform pg_temp.raises('cancel: Free has no place for it', 'select public.api_plant_pick(array[9000903])', 'no room');
+  perform set_config('request.jwt.claims', '', true);
+  o := public.billing_charge_open(p, 'home', 'monthly');
+  perform public.billing_charge_paid(o->>'reference', v_card);
+  perform pg_temp.eq('buy again: the same two run, the third stays locked',
+    (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
+    '9000901:true,9000902:false,9000903:false');
+  perform pg_temp.eq('buy again: the change date did not move',
+    (select changed_at < now() - interval '88 days' from private.plant_change where user_id = p), true);
+
+  -- remove the login and link it again: no fresh pick
+  perform set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true);
+  perform public.api_link_remove(acc);
+  perform pg_temp.eq('remove: the ticks stay', (select count(*)::int from private.plant_picks where user_id = p and held), 2);
+  perform set_config('request.jwt.claims', '', true);
+  insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values (acc, p, 'p@login.test');
+  perform public.plant_users_upsert(p, acc, three);
+  perform pg_temp.eq('link again: the ticked two start on their own, the third is locked',
+    (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
+    '9000901:true,9000902:false,9000903:false');
+  perform set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true);
+  perform pg_temp.raises('link again: no fresh pick', 'select public.api_plant_pick(array[9000901])', 'no room');
+
+  -- a plant gone from the login's list, twice 50 minutes apart, frees its place
+  perform public.plant_users_upsert(p, acc, three - 2);
+  perform pg_temp.eq('gone: one miss changes nothing', (select paused or share_gone_at is not null from public.plant_users where user_id = p and plant_id = 9000903), false);
+  update public.plant_users set share_missing_at = now() - interval '1 hour' where user_id = p and plant_id = 9000903;
+  perform public.plant_users_upsert(p, acc, three - 2);
+  perform pg_temp.eq('gone: locked, its tick gone',
+    (select paused and share_gone_at is not null from public.plant_users where user_id = p and plant_id = 9000903)::text || ' ' ||
+    (select count(*) from private.plant_picks where user_id = p and plant_id = 9000903), 'true 0');
+  perform public.api_plant_pick(array[9000901]);
+  perform pg_temp.eq('gone: its place takes another plant without a change',
+    (select paused from public.plant_users where user_id = p and plant_id = 9000901)::text || ' ' ||
+    (select changed_at < now() - interval '88 days' from private.plant_change where user_id = p), 'false true');
+  perform public.plant_users_upsert(p, acc, three);
+  perform pg_temp.eq('gone: back in the list it waits locked',
+    (select paused and share_gone_at is null from public.plant_users where user_id = p and plant_id = 9000903), true);
+
+  -- 90 days on, the change opens
+  update private.plant_change set changed_at = now() - interval '91 days' where user_id = p;
+  perform pg_temp.eq('change: open again after 90 days', public.api_plant_picks()->>'change_on', null::text);
+  perform public.api_plant_change(9000902, 9000903);
+  perform pg_temp.eq('change: the second one, 90 days on', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
+    '9000901:false,9000902:true,9000903:false');
+  perform set_config('request.jwt.claims', '', true);
+
+  -- a login with one plant and an open place starts it with no pick
+  perform public.plant_users_upsert(q, '00000000-0000-0000-0000-0000000009b2', '[{"plant_id": 9000911, "plant_name": "Only"}]');
+  perform pg_temp.eq('one plant: runs at once', (select paused from public.plant_users where user_id = q and plant_id = 9000911), false);
+end $$;
+select pg_temp.eq('stop is gone',  (select count(*)::int from pg_proc where proname = 'api_plant_stop'), 0);
+select pg_temp.eq('start is gone', (select count(*)::int from pg_proc where proname = 'api_plant_start'), 0);
+select pg_temp.eq('pick is for signed-in users',   has_function_privilege('anon', 'public.api_plant_pick(bigint[])', 'execute'), false);
+select pg_temp.eq('change is for signed-in users', has_function_privilege('anon', 'public.api_plant_change(bigint, bigint)', 'execute'), false);
+select pg_temp.eq('ticks table closed', has_table_privilege('authenticated', 'private.plant_picks', 'select'), false);
+
 select pg_temp.eq('keep set is for signed-in users', has_function_privilege('anon', 'public.api_billing_keep_set(bigint[])', 'execute'), false);
 
 \set QUIET off
