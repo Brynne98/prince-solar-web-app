@@ -212,11 +212,15 @@ token_verifications = 30
 # Number of Web3 logins that can be made in a 5 minute interval per IP address.
 web3 = 30
 
-# Configure one of the supported captcha providers: `hcaptcha`, `turnstile`.
-# [auth.captcha]
-# enabled = true
-# provider = "hcaptcha"
-# secret = ""
+# Bot check (SOLAR-533): Cloudflare Turnstile. Live has it on, set in the dashboard
+# (Authentication > Bot and Abuse Protection) with the real secret; this file is never pushed.
+# Off here: the check scripts under scripts/ sign in with a password and send no token.
+# To try it locally set enabled = true and restart; the secret below is Cloudflare's public
+# always-pass test secret, the pair of the test site key in public/config.js.
+[auth.captcha]
+enabled = false
+provider = "turnstile"
+secret = "1x0000000000000000000000000000000AA"
 
 [auth.email]
 # Allow/disallow new user signups via email to your project.

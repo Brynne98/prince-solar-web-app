@@ -23,7 +23,8 @@ id is anonymous. Function events with no user use `edge:<function>`.
 
 Never send an email, a name, a SunSynk login, a token, or a reading (power, energy,
 battery, voltage) as a property. Error messages have email addresses masked before they
-are sent.
+are sent. Every address the web app sends (`$current_url`, `$referrer`, an error's `page`,
+an address inside an error message) is cut to host and path: no query, no `#` part (SOLAR-533).
 
 ## Event names
 
@@ -113,6 +114,8 @@ Not sent on purpose: menu opens, hovers, day arrows after the first, chart serie
 - Web: a Supabase call that fails on the server (5xx, or a Postgres error other than a
   deliberate refusal: classes 22, 23, 28, P0 and 42501) is reported by `must()` in `data.jsx`
   through `reportServerError` in `config.js`, with `rpc` (RPC or table), `code` and `status`,
+  and a message of the code plus at most 80 characters of the error text with quoted values,
+  bracketed values and long numbers masked (SOLAR-533),
   one issue per RPC and code (`rpc:<name>:<code>`), at most 5 per page load. A 5xx from
   sign-in, sign-up or a reset request is reported as `rpc: auth` (often a failed sign-in
   email). 4xx refusals and no connection are not sent.

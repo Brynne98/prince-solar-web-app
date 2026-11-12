@@ -3264,6 +3264,7 @@ function PasswordRow({ email }) {
   const [pw2, setPw2] = useState('');
   const { bad, setBad, flag, edited } = window.useFieldErrors();
   const [busy, setBusy] = useState(false);
+  const bot = React.useRef(null);
   useEffect(() => { if (open) document.getElementById('pw-current')?.focus(); }, [open]);
 
   const close = () => { window.takeResetAsk(); setOpen(false); setCur(''); setPw(''); setPw2(''); setBad({}); };
@@ -3286,7 +3287,7 @@ function PasswordRow({ email }) {
     if (Object.keys(problems).length) return flag(problems);
     setBusy(true); setBad({});
     try {
-      const { error: wrong } = await window.sb.auth.signInWithPassword({ email, password: cur });
+      const { error: wrong } = await window.sb.auth.signInWithPassword({ email, password: cur, options: { captchaToken: await bot.current?.() } });
       if (wrong?.code === 'invalid_credentials') return flag({ 'pw-current': 'Wrong password' });
       if (wrong) throw wrong;
       const { error } = await window.sb.auth.updateUser({ password: pw });
@@ -3324,6 +3325,8 @@ function PasswordRow({ email }) {
             {field('pw-current', 'Current password', cur, setCur, 'current-password')}
             {field('pw-new', 'New password', pw, setPw, 'new-password', '8+ characters', ['pw-confirm'])}
             {field('pw-confirm', 'Confirm password', pw2, setPw2, 'new-password')}
+            {/* checking the current password is a sign-in, so it needs the bot check's token */}
+            <window.BotCheck hold={bot} quiet />
             <div className="conn-form-actions">
               <button type="button" className="ghost-btn" onClick={close} disabled={busy}>Cancel</button>
               <window.BusyButton type="submit" className="save-btn" busy={busy} busyText="Saving…">Save password</window.BusyButton>
