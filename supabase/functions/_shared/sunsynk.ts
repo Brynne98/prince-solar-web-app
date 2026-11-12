@@ -461,9 +461,11 @@ export async function getInvertersCached(acc: Account): Promise<InverterInfo[]> 
  * Returns the account id and its plants. The password is dropped on return.
  */
 /**
- * A plant the plan has no room for links paused (decided 2026-10-27): shown in Account,
- * not polled. The database decides which (0127 trigger), under a per-user lock, so two
- * links at once can't both take the last place. Returns the plants and which are paused.
+ * A login's plants link locked (paused): shown in Plants, not polled, until their owner
+ * ticks which run (0197, SOLAR-537). A login with one plant starts it when the plan has a
+ * place open, and a plant ticked before starts again. The database decides which (trigger),
+ * under a per-user lock, so two links at once can't both take the last place. Returns the
+ * plants and which are paused. `reason` is from before the pick; nothing reads it.
  */
 export async function linkAccount(userId: string, username: string, password: string) {
   const t = await tokenLogin(username, password);
@@ -502,9 +504,9 @@ const MAX_BOOTSTRAP_KICKS = 5;
 export async function syncPlants(acc: Account, linked?: { plants: PlantInfo[]; invs: InverterInfo[] }): Promise<PlantInfo[]> {
   const all = linked?.plants ?? await getPlants(acc);
   const invs = linked?.invs;
-  // The hourly refresh links a plant SunSynk shows later. The database links it stopped
-  // when the plan has no room (0129 trigger); the user sees it in Account and can upgrade.
-  // Plant id order, so the same new plants fill the room on every path.
+  // The hourly refresh links a plant SunSynk shows later. The database links it locked
+  // (0197 trigger); the user sees it in Plants and ticks it or upgrades. The whole list goes:
+  // a plant of this login missing from it twice is marked gone (plant_users_upsert).
   await rpc("plant_users_upsert", {
     p_user: acc.user_id, p_account: acc.id,
     p_rows: all.slice().sort((a, b) => a.id - b.id).map((p) => ({ plant_id: p.id, plant_name: p.name })),
