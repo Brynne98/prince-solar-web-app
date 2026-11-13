@@ -670,21 +670,23 @@ export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email
       ],
       footer: [HELP],
     });
-  // What happened, then each way it can happen with what the owner can do about it
-  // (Brynne 2026-11-13). We can't tell which it was: SunSynk's list only drops the plant.
+  // The error, what it means, then what the owner can do (Brynne 2026-11-13). We can't
+  // tell why SunSynk's list dropped the plant, so each fix names the case it is for.
   if (e.kind === "plant_off_login")
-    return make(`${plants} is no longer on your SunSynk login`, {
-      title: "Plant no longer on your login",
+    return make(`We can't find ${plants} on your SunSynk login`, {
+      title: "Plant not found on your login",
       parts: [
-        { lead: `SunSynk stopped listing ${esc(plants)} on your login. We looked twice, an hour apart, then stopped reading it. Your history is safe.` },
+        { lead: `We can't find ${esc(plants)} on your SunSynk login.` },
         { box: { rows: [["Plant", esc(plants)], ...(e.login ? [["Login", esc(e.login)] as [string, string]] : [])] } },
-        { heading: "What may have happened" },
+        { heading: "What it means" },
+        { lead: "We can't read this plant, so it is locked. Its history is kept." },
+        { heading: "How to fix it" },
         { box: { steps: [
-          ["Someone shared it with you, and the share was removed", "Ask the plant's owner to share it with this login again in SunSynk."],
-          ["It moved to another SunSynk login", "Add that login in Plants with Add plant."],
-          ["It was deleted in SunSynk", "There is nothing to do. It stays in your list, locked."],
+          ["If someone shared it with you", "Ask them to share it with this login again in SunSynk."],
+          ["If it is on another SunSynk login", "Add that login in Plants with Add plant."],
+          ["If you deleted it in SunSynk", "There is nothing to do."],
         ] } },
-        { note: "When SunSynk lists it again, it shows as Locked. Turn it on in Plants with Choose plants." },
+        { note: "Once it is back on this login, turn it on in Plants with Choose plants." },
         { button: { label: "Open Plants", href: LOGINS } },
       ],
       footer: [HELP],
