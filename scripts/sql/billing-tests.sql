@@ -886,6 +886,7 @@ declare
   v_card constant jsonb := '{"authorization_code": "AUTH_p1", "card_type": "visa ", "last4": "4081", "reusable": true}';
   t date := private.billing_today();
   o jsonb;
+  sh uuid;
 begin
   -- link: nothing runs until the owner ticks
   perform public.plant_users_upsert(p, acc, three);
@@ -997,6 +998,35 @@ begin
     (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
     '9000901:false,9000902:false,9000903:false');
   perform set_config('request.jwt.claims', '', true);
+
+  -- a failed payment again, Family with 2 places open: a new login with one plant and a
+  -- share claim link locked, with no tick (0200, SOLAR-548)
+  insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values
+    ('00000000-0000-0000-0000-0000000009b3', p, 'p2@login.test'), ('00000000-0000-0000-0000-0000000009b4', p, 'p3@login.test');
+  sh := coalesce((select id from private.sunsynk_accounts where kind = 'share'), gen_random_uuid());
+  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, kind) values (sh, q, 'share@login.test', 'share')
+  on conflict (id) do nothing;
+  update private.billing set state = 'past_due', past_due_since = t where user_id = p;
+  insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on)
+  values ('psh_p10', p, 'renewal', 'family', 'monthly', 199, 'failed', t, t);
+  perform public.plant_users_upsert(p, '00000000-0000-0000-0000-0000000009b3', '[{"plant_id": 9000904, "plant_name": "Four"}]');
+  perform pg_temp.eq('past due: a new login''s one plant links locked',
+    (select paused from public.plant_users where user_id = p and plant_id = 9000904), true);
+  perform pg_temp.eq('past due: a share claim links locked', public.share_claim(p, sh, 9000905, 'Five'), 'claimed_paused');
+  perform pg_temp.eq('past due: neither has a tick',
+    (select count(*)::int from private.plant_picks where user_id = p and plant_id in (9000904, 9000905)), 0);
+  perform pg_temp.eq('past due: neither is read', (select count(*)::int from public.poll_jobs(0, 1) where plant_id in (9000904, 9000905)), 0);
+  o := public.billing_settle_open(p);
+  perform public.billing_charge_paid(o->>'reference', v_card);
+  perform set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('paid: both wait for the owner''s tick, and can start',
+    (select count(*)::int from public.api_link_status() s, jsonb_array_elements(s.plants) x
+      where (x->>'can_start')::boolean and (x->>'plant_id')::bigint in (9000904, 9000905)), 2);
+  perform set_config('request.jwt.claims', '', true);
+  perform public.plant_users_upsert(p, '00000000-0000-0000-0000-0000000009b4', '[{"plant_id": 9000906, "plant_name": "Six"}]');
+  perform pg_temp.eq('paid: a new login''s one plant runs at once',
+    (select paused from public.plant_users where user_id = p and plant_id = 9000906), false);
+  perform pg_temp.eq('paid: a share claim runs at once', public.share_claim(p, sh, 9000907, 'Seven'), 'claimed');
 
   -- a login with one plant and an open place starts it with no pick
   perform public.plant_users_upsert(q, '00000000-0000-0000-0000-0000000009b2', '[{"plant_id": 9000911, "plant_name": "Only"}]');
@@ -1262,6 +1292,45 @@ select pg_temp.eq('row rule, paid: all totals', :paid_days, 4);
 select pg_temp.eq('plant week closed to users', has_table_privilege('authenticated', 'private.plant_week', 'select'), false);
 select pg_temp.eq('read limit not for anon', has_function_privilege('anon', 'public.my_read_from(bigint)', 'execute'), false);
 select pg_temp.eq('full list not for anon', has_function_privilege('anon', 'public.my_full_plant_ids()', 'execute'), false);
+
+-- A paid account from before 0199 has no free-week row (0200, SOLAR-548). m = Home, its
+-- plant linked the old way. 0200 gives it a row 15 days back; then it drops to Free.
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-00000000e548', 'm@t.test');
+insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
+  values ('00000000-0000-0000-0000-00000000e548', 'home', 'monthly', 1, current_date + 20);
+insert into private.plant_picks (user_id, plant_id, plant_name) values ('00000000-0000-0000-0000-00000000e548', 9000961, 'M');
+insert into public.plant_users (plant_id, user_id) values (9000961, '00000000-0000-0000-0000-00000000e548');
+do $$
+declare m uuid := '00000000-0000-0000-0000-00000000e548';
+begin
+  perform pg_temp.eq('old paid account: no row', (select count(*)::int from private.free_week_logins where user_id = m), 0);
+  -- 0200's insert
+  insert into private.free_week_logins (sunsynk_username, user_id, started_at)
+  select '', pu.user_id, now() - interval '15 days' from public.plant_users pu group by pu.user_id
+  on conflict (user_id) do nothing;
+  perform pg_temp.eq('0200: every account with a plant has a row',
+    (select count(*)::int from public.plant_users pu
+      where not exists (select 1 from private.free_week_logins f where f.user_id = pu.user_id)), 0);
+  perform pg_temp.eq('0200: a row that was there keeps its date',
+    (select started_at > now() - interval '6 days' from private.free_week_logins where user_id = '00000000-0000-0000-0000-000000000071'), true);
+  insert into public.email_queue (user_id, plant_id, kind, key, data) values (m, 9000961, 'report_week', 'test:m-paid-report', '{}');
+  perform pg_temp.eq('old paid account, still paid: reports go', (select count(*)::int from public.email_queue where key = 'test:m-paid-report'), 1);
+  update private.billing set plan = 'free', period = null, billing_day = null, next_billing_date = null where user_id = m;
+  insert into public.email_queue (user_id, plant_id, kind, key, data) values
+    (m, 9000961, 'report_week', 'test:m-week', '{}'), (m, 9000961, 'report_month', 'test:m-month', '{}'),
+    (m, 9000961, 'report_year', 'test:m-year', '{}');
+  perform pg_temp.eq('old paid account on Free: no reports',
+    (select count(*)::int from public.email_queue where key in ('test:m-week', 'test:m-month', 'test:m-year')), 0);
+  perform pg_temp.eq('old paid account on Free: no free week', pg_temp.week_ends(m) < now() - interval '7 days', true);
+  perform private.free_week_mail();
+  perform pg_temp.eq('old paid account on Free: no free-week email',
+    (select count(*)::int from public.email_queue where user_id = m and kind in ('free_week_soon', 'report_week')
+       and key <> 'test:m-paid-report'), 0);
+  perform set_config('request.jwt.claims', json_build_object('sub', m, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('old paid account on Free: no free-week notice',
+    (select count(*)::int from jsonb_array_elements(private.billing_notices()) n where n->>'kind' in ('free_week_soon', 'free_week_ended')), 0);
+  perform set_config('request.jwt.claims', '', true);
+end $$;
 
 select pg_temp.eq('keep set is for signed-in users', has_function_privilege('anon', 'public.api_billing_keep_set(bigint[])', 'execute'), false);
 
