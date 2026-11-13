@@ -85,6 +85,7 @@ Formatting and dates (also `components.jsx`):
 | `edgePost(path, body, signal)` | A POST to one of our edge functions as the signed-in user; returns `[response, json]`. |
 | `mountNode(node)` | Render something into its own root outside the app (dialogs opened from plain code). |
 | `payFailed(e, fallback)` | The toast for a payment call that failed. |
+| `payFirst(e)` | "Pay the failed payment first." when a failed payment refused a plan or plant change; else false. |
 
 ## Data (`data.jsx`)
 

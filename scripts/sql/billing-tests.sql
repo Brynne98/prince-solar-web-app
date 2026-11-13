@@ -968,6 +968,30 @@ begin
   perform public.api_plant_change(9000902, 9000901);
   perform pg_temp.eq('change: the second one, 90 days on', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
     '9000901:false,9000902:true,9000903:false');
+
+  -- a failed payment: no change and no new tick until it is paid (0198, SOLAR-546).
+  -- Family, so a place is open; the change is open too. A paid account is the tests above.
+  perform set_config('request.jwt.claims', '', true);
+  update private.billing set plan = 'family', state = 'past_due', past_due_since = t where user_id = p;
+  update private.plant_change set changed_on = t - 90 where user_id = p;
+  insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on)
+  values ('psh_p9', p, 'renewal', 'family', 'monthly', 199, 'failed', t, t);
+  perform set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true);
+  perform pg_temp.raises('past due: a change is refused', 'select public.api_plant_change(9000901, 9000902)', 'pay the failed payment first');
+  perform pg_temp.raises('past due: a tick is refused', 'select public.api_plant_pick(array[9000902])', 'pay the failed payment first');
+  perform pg_temp.eq('past due: nothing moved, the change is not used',
+    (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p) || ' ' ||
+    (select changed_on = t - 90 from private.plant_change where user_id = p), '9000901:false,9000902:true,9000903:false true');
+  perform set_config('request.jwt.claims', '', true);
+  o := public.billing_settle_open(p);
+  perform public.billing_charge_paid(o->>'reference', v_card);
+  perform pg_temp.eq('paid: active again', (select state from private.billing where user_id = p), 'active');
+  perform set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true);
+  perform public.api_plant_change(9000901, 9000902);
+  perform public.api_plant_pick(array[9000901]);
+  perform pg_temp.eq('paid: the change and the tick both work',
+    (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
+    '9000901:false,9000902:false,9000903:false');
   perform set_config('request.jwt.claims', '', true);
 
   -- a login with one plant and an open place starts it with no pick

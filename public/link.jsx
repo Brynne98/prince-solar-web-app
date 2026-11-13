@@ -199,6 +199,8 @@ const billingPaid = (plan, switched = false) => {
 // page that didn't open in time charged nothing, so its fallback's "try again" holds.
 const payFailed = (e, fallback) => (/open soon/.test(e.message) ? window.toast('Paid plans open soon. Nothing was charged.', { info: true })
   : window.toast(fallback, { error: true }));
+// What to say when a failed payment refused a plan or plant change (0189, 0198); else false.
+const payFirst = (e) => /failed payment/.test(e.message) && 'Pay the failed payment first.';
 // A saved card's charge: the billing function gives Paystack 30 s to charge and 30 s more to
 // check, so the page waits past both (SOLAR-363).
 const PAY_WAIT = 70000;
@@ -580,7 +582,7 @@ function PlantPickDialog({ logins, from, onDone }) {
     setBusy(true);
     const { error } = await window.sb.rpc('api_plant_pick', { p_plants: picked });
     setBusy(false);
-    if (error) return window.toast(/no room/.test(error.message) ? 'Your plan has no place open for that.' : 'Couldn’t add your plants. Try again.', { error: true });
+    if (error) return window.toast(payFirst(error) || (/no room/.test(error.message) ? 'Your plan has no place open for that.' : 'Couldn’t add your plants. Try again.'), { error: true });
     window.track('plant_pick_done', { from, count: picked.length, of: all.length, plan });
     onDone(picked);
   };
