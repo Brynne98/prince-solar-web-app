@@ -22,9 +22,11 @@
 --   - api_plant_change: one plant out, one locked plant in. The plant that goes out
 --     loses its tick, and its history at once (private.plant_wipe, as 0125's stop).
 --     One per account per 90 days (private.plant_change); the first is ready at once.
---   - A plant gone from SunSynk loses its tick, so its place opens: a removed share
---     (share_gone_at, 0172), or a plant missing from its login's list twice, 50
---     minutes apart (the same two columns, set in plant_users_upsert).
+--   - A plant gone from SunSynk keeps its tick and its place (Brynne 2026-11-13): it
+--     stays on screen with its history and only gets no new readings. Gone is a
+--     removed share (share_gone_at, 0172), or a plant missing from its password
+--     login's list twice, 50 minutes apart (the same two columns, set in
+--     plant_users_upsert), which sends its owner one plant_off_login email.
 --   - A login with one plant starts it with no pop-up when a place is open. A share
 --     claim counts as a tick. A payment that names a plant ticks it.
 --   - api_plant_stop and api_plant_start are gone. To delete a plant's data the
@@ -61,8 +63,7 @@ insert into private.plant_picks (user_id, plant_id, plant_name, held)
 select pu.user_id, pu.plant_id, pu.plant_name, not pu.paused
   from public.plant_users pu
   left join private.billing b on b.user_id = pu.user_id
- where pu.share_gone_at is null
-   and (not pu.paused or pu.plant_id = any (coalesce(b.free_removals, '{}')))
+ where not pu.paused or pu.plant_id = any (coalesce(b.free_removals, '{}'))
 on conflict do nothing;
 
 -- ---------------------------------------------------------------------------
@@ -149,24 +150,6 @@ begin
   raise exception '%', why using errcode = '22023';
 end $$;
 revoke all on function private.plant_users_plan_limit() from public, anon, authenticated;
-
--- A plant gone from SunSynk is locked and loses its tick: its place opens.
-create or replace function private.plant_users_gone()
-returns trigger language plpgsql security definer set search_path = public, private, pg_temp as $$
-begin
-  if new.share_gone_at is not null and old.share_gone_at is null then
-    new.paused := true;
-    delete from private.plant_picks where user_id = new.user_id and plant_id = new.plant_id;
-  end if;
-  return new;
-end $$;
-revoke all on function private.plant_users_gone() from public, anon, authenticated;
-drop trigger if exists plant_users_gone on public.plant_users;
-create trigger plant_users_gone before update of share_gone_at on public.plant_users
-  for each row execute function private.plant_users_gone();
-
--- Shares removed before this migration.
-update public.plant_users set paused = true where share_gone_at is not null and not paused;
 
 -- ---------------------------------------------------------------------------
 -- What the pick screens read: the plan and its places, the ticks, and the day the
@@ -385,9 +368,9 @@ revoke all on function private.billing_to_free(uuid, date) from public, anon, au
 -- 0170's upsert, with two additions for a password login:
 --   - a login with one plant ticks it when a place is open, so it starts with no pop-up;
 --   - a plant of this login missing from SunSynk's list twice, 50 minutes apart, is
---     marked gone (the share columns, 0172): locked, its place open, and its owner
---     gets one plant_off_login email. Back in the list, the mark clears and the plant
---     waits locked for its owner's tick.
+--     marked gone (the share columns, 0172): nothing reads it (poll_jobs), it keeps
+--     its place and stays on screen, and its owner gets one plant_off_login email.
+--     Back in the list, the mark clears and it is read again.
 -- ---------------------------------------------------------------------------
 create or replace function public.plant_users_upsert(p_user uuid, p_account uuid, p_rows jsonb)
  RETURNS void
@@ -434,7 +417,7 @@ begin
     update public.plant_users set share_missing_at = null, share_gone_at = null
      where account_id = p_account and user_id = p_user and not via_share and plant_id = any (ids)
        and (share_missing_at is not null or share_gone_at is not null);
-    -- gone: locked (plant_users_gone), and its owner is told once what can be done
+    -- gone: not read any more; its owner is told once what can be done
     with g as (
       update public.plant_users set share_gone_at = now()
        where account_id = p_account and user_id = p_user and not via_share and share_gone_at is null
@@ -761,27 +744,6 @@ begin
     on conflict do nothing;
   end if;
   return jsonb_build_object('status', 'paid', 'plan', b.plan, 'kind', c.kind);
-end $$;
-
--- ---------------------------------------------------------------------------
--- 0114's email rule: no mail for a locked plant, but the "share removed" and "plant
--- no longer on your login" emails still go. The plant is locked in the statement that
--- queues them (plant_users_gone).
--- ---------------------------------------------------------------------------
-create or replace function private.email_skip_paused()
-returns trigger language plpgsql security definer set search_path = '' as $$
-begin
-  if new.plant_id is not null and new.kind not in ('share_removed', 'plant_off_login') and exists (select 1 from public.plant_users pu
-       where pu.user_id = new.user_id and pu.plant_id = new.plant_id and pu.paused) then
-    return null;
-  end if;
-  -- Free with a free week on record: no reports but the day-7 one.
-  if new.kind like 'report\_%' and not coalesce((new.data->>'freeWeekEnds')::boolean, false)
-     and coalesce((select b.plan from private.billing b where b.user_id = new.user_id), 'free') = 'free'
-     and exists (select 1 from private.free_week_logins f where f.user_id = new.user_id) then
-    return null;
-  end if;
-  return new;
 end $$;
 
 notify pgrst, 'reload schema';

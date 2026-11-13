@@ -945,29 +945,27 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true);
   perform pg_temp.raises('link again: no fresh pick', 'select public.api_plant_pick(array[9000901])', 'no room');
 
-  -- a plant gone from the login's list, twice 50 minutes apart, frees its place
+  -- a plant gone from the login's list, twice 50 minutes apart: not read, but it keeps its place
   perform public.plant_users_upsert(p, acc, three - 2);
   perform pg_temp.eq('gone: one miss changes nothing', (select paused or share_gone_at is not null from public.plant_users where user_id = p and plant_id = 9000903), false);
   update public.plant_users set share_missing_at = now() - interval '1 hour' where user_id = p and plant_id = 9000903;
   perform public.plant_users_upsert(p, acc, three - 2);
-  perform pg_temp.eq('gone: locked, its tick gone',
-    (select paused and share_gone_at is not null from public.plant_users where user_id = p and plant_id = 9000903)::text || ' ' ||
-    (select count(*) from private.plant_picks where user_id = p and plant_id = 9000903), 'true 0');
+  perform pg_temp.eq('gone: marked, still on screen, its tick stays',
+    (select not paused and share_gone_at is not null from public.plant_users where user_id = p and plant_id = 9000903)::text || ' ' ||
+    (select count(*) from private.plant_picks where user_id = p and plant_id = 9000903 and held), 'true 1');
+  perform pg_temp.eq('gone: nothing reads it', (select count(*)::int from public.poll_jobs(0, 1) where plant_id = 9000903), 0);
   perform pg_temp.eq('gone: its owner is told once, with the login',
     (select count(*) || ' ' || max(data->>'login') || ' ' || max(data->'plants'->>0) from public.email_queue where user_id = p and kind = 'plant_off_login'),
     '1 p@login.test Three');
-  perform public.api_plant_pick(array[9000901]);
-  perform pg_temp.eq('gone: its place takes another plant without a change',
-    (select paused from public.plant_users where user_id = p and plant_id = 9000901)::text || ' ' ||
-    (select changed_on = t - 89 from private.plant_change where user_id = p), 'false true');
+  perform pg_temp.raises('gone: it still takes its place', 'select public.api_plant_pick(array[9000901])', 'no room');
   perform public.plant_users_upsert(p, acc, three);
-  perform pg_temp.eq('gone: back in the list it waits locked',
-    (select paused and share_gone_at is null from public.plant_users where user_id = p and plant_id = 9000903), true);
+  perform pg_temp.eq('gone: back in the list it is read again',
+    (select not paused and share_gone_at is null and share_missing_at is null from public.plant_users where user_id = p and plant_id = 9000903), true);
 
   -- 90 days on, the change opens
   update private.plant_change set changed_on = t - 90 where user_id = p;
   perform pg_temp.eq('change: open again after 90 days', public.api_plant_picks()->>'change_on', null::text);
-  perform public.api_plant_change(9000902, 9000903);
+  perform public.api_plant_change(9000902, 9000901);
   perform pg_temp.eq('change: the second one, 90 days on', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
     '9000901:false,9000902:true,9000903:false');
   perform set_config('request.jwt.claims', '', true);

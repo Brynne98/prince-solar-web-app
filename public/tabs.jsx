@@ -3105,7 +3105,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
         // heading with Reconnect and Manage at its right, its plants under it.
         // Its state shows only when it needs something.
         <>
-          {choosing && <ChoosePlantsDialog logins={live.map(a => ({ ...a, plants: (a.plants || []).filter(p => allPlants.includes(p) && !p.share_gone) })).filter(a => a.plants.length)}
+          {choosing && <ChoosePlantsDialog logins={live.map(a => ({ ...a, plants: (a.plants || []).filter(p => allPlants.includes(p) && !(p.share_gone && p.paused)) })).filter(a => a.plants.length)}
             picks={picks} onUpgrade={onCollect && ((id) => { setChoosing(false); onCollect(id); })}
             onDone={chosen} onCancel={() => setChoosing(false)} />}
           {live.map(acc => {
