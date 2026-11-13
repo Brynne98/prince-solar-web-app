@@ -701,12 +701,13 @@ AS $function$
       from inv i left join batt b on b.sn = i.sn left join last l on l.sn = i.sn), '[]'::jsonb))
 $function$;
 
-CREATE OR REPLACE FUNCTION public.api_trends_compare(p_plant bigint DEFAULT NULL::bigint)
- RETURNS jsonb
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
+create or replace function public.api_trends_compare(p_plant bigint default null)
+returns jsonb
+language sql
+stable
+security definer
+set search_path to public, pg_temp
+as $fn$
   with pl as (select public.my_plant(p_plant) as id),
   tz as (select public.plant_tz((select id from pl)) as tz, public.my_read_from((select id from pl)) as rf),
   t as (select public.today_tz((select tz from tz)) as d),
@@ -817,21 +818,27 @@ AS $function$
       from per group by k
     having bool_and(found)
   ),
+  -- the matching day from the minute history, 5-minute power summed to kWh: the grid
+  -- figure always, solar and home when no inverter counters cover that day (SOLAR-508)
   ig as (
     select tc.k,
            coalesce(sum(case when a.grid_w > 0 then a.grid_w * (5.0/60) / 1000 else 0 end), 0) as imp,
+           coalesce(sum(greatest(a.pv_w, 0) * (5.0/60) / 1000), 0) as pv,
+           coalesce(sum(greatest(a.load_w, 0) * (5.0/60) / 1000), 0) as load,
            count(a.hm) as n
       from tc left join lateral (
-        select q.hm, q.grid_w from public.q_day_agg((select id from pl), tc.prev, null) q
+        select q.hm, q.grid_w, q.pv_w, q.load_w from public.q_day_agg((select id from pl), tc.prev, null) q
          where q.hm <= to_char(public.local_ts_tz(tc.cut, (select tz from tz)), 'HH24:MI')) a on true
      group by tc.k
   ),
+  -- counters first; a plant just imported has none for yesterday, only the minute history
   nowv as (
-    select c.k, jsonb_build_object(
-             'pv',   coalesce(round(c.pv::numeric, 1), 0),
-             'load', coalesce(round(c.load::numeric, 1), 0),
+    select g.k, jsonb_build_object(
+             'pv',   coalesce(round(coalesce(c.pv, g.pv)::numeric, 1), 0),
+             'load', coalesce(round(coalesce(c.load, g.load)::numeric, 1), 0),
              'imp',  coalesce(round((case when g.n > 5 then g.imp else c.imp end)::numeric, 1), 0)) as v
-      from ctr c join ig g on g.k = c.k
+      from ig g left join ctr c on c.k = g.k
+     where c.k is not null or g.n > 5
   )
   select coalesce((select jsonb_object_agg(s.k, s.v || jsonb_build_object('now', (select v from nowv where nowv.k = s.k))) from sums s), '{}'::jsonb)
          || jsonb_build_object('today', jsonb_build_object(
@@ -839,6 +846,6 @@ AS $function$
               'prev', coalesce((select v from nowv where k = 'today'), jsonb_build_object('pv', 0, 'load', 0, 'imp', 0)),
               'days', case when exists (select 1 from nowv where k = 'today') then 1 else 0 end,
               'span', 1))
-$function$;
+$fn$;
 
 notify pgrst, 'reload schema';
