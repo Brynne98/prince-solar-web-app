@@ -2266,7 +2266,7 @@ async function billingChange(rpc, args, reload, failed) {
 async function bookPlan(b, plan, period, reload, keep) {
   const ok = await billingChange('api_billing_change', { p_plan: plan, p_period: period ?? null, p_keep: keep ?? null }, reload,
     // a failed payment refuses a change that books with no pop-up (0189)
-    (e) => /failed payment/.test(e.message) ? 'Pay the failed payment first.' : 'Couldn’t change your plan. Try again.');
+    (e) => payFirst(e) || 'Couldn’t change your plan. Try again.');
   if (ok) window.track(plan === b.plan ? 'plan_change_undone' : 'downgrade_done', { plan, period: period ?? b.period });
   return ok;
 }
@@ -2888,7 +2888,7 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
     const next = error && /next change (\d{4}-\d\d-\d\d)/.exec(error.message);
     if (next) window.track('plant_change_refused_done');
     if (error) window.toast(next ? `You can change a plant again on ${longDay(next[1])}.`
-      : /no room|place taken/.test(error.message) ? 'Your plan has no place open for that.' : 'Couldn’t save your plants. Try again.', { error: true });
+      : payFirst(error) || (/no room|place taken/.test(error.message) ? 'Your plan has no place open for that.' : 'Couldn’t save your plants. Try again.'), { error: true });
     // a change that went through before a later tick failed still shows
     if (!error) onDone(added, out); else if (changed) onDone(added.slice(0, 1), out);
   };
