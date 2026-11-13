@@ -3053,7 +3053,8 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     const s = state(p);
     const name = window.plantLabel(p);
     const st = states[p.plant_id] && { ...states[p.plant_id], sync: window.firstLoadSync(states[p.plant_id].sync, p.linked_at) };
-    const fetching = st?.lastTs != null ? window.syncProgress(st.sync) : 0;
+    // the first 60 days still arriving: its real progress, also before the first reading lands
+    const fetching = st ? window.syncProgress(st.sync) : null;
     // no reading at all 30 minutes after it started, when the No readings email goes too (0174)
     const since = Math.max((p.started_at || 0) * 1000, Date.parse(p.linked_at) || 0);
     const silent = st?.lastTs == null && (states.at || 0) - since > 30 * 60000;
@@ -3069,8 +3070,10 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
           /* a login that stopped says so once, on its own line above */
           : (!ok && !shared) || !states.at ? null
           /* its first 60 days are still arriving, or no reading yet: the header's words and % (SOLAR-176) */
-          : silent ? <span className="pm-state status-stale"><span className="pm-dot" />No readings yet</span>
+          : silent ? <span className="pm-state status-stale">No readings yet</span>
           : fetching != null ? <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Fetching history<span className="mono pm-pct">{Math.round(100 * fetching)}%</span></span>
+          /* nothing read yet and nothing being fetched: it waits for its first reading */
+          : st?.lastTs == null ? <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Waiting for readings</span>
           : <MenuState st={st} now={states.at || Date.now()} />}
       </PlantLine>
     );
