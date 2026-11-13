@@ -305,7 +305,7 @@ begin
   perform pg_temp.eq('api_me free', public.api_me()->>'plan', 'free');
 end $$;
 
--- Free trim (0111): 24 hours kept once every account on the plant is Free past its week
+-- Free trim (0111): 24 hours kept once every account on the plant is Free and the plant's week is over (0199)
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-000000000061', 't1@t.test'), ('00000000-0000-0000-0000-000000000062', 't2@t.test'),
   ('00000000-0000-0000-0000-000000000063', 't3@t.test'), ('00000000-0000-0000-0000-000000000064', 't4@t.test');
@@ -320,6 +320,9 @@ insert into public.plant_users (plant_id, user_id) values
   (9000063, '00000000-0000-0000-0000-000000000063'),   -- Free, week over, but shared
   (9000063, '00000000-0000-0000-0000-0000000000a1'),   -- ... with a Family account
   (9000064, '00000000-0000-0000-0000-000000000064');   -- Free, week over 30 min ago: the day-7 report goes first (0182)
+insert into private.plant_week (plant_id, started_at) values
+  (9000061, now() - interval '10 days'), (9000062, now() - interval '2 days'),
+  (9000063, now() - interval '10 days'), (9000064, now() - interval '7 days 30 minutes');
 insert into public.plant_config (plant_id, timezone, backfill_next, backfill_until, temp_next)
   values (9000061, 'Africa/Johannesburg', current_date - 50, current_date - 1, current_date - 40);
 insert into public.agg_minute (plant_id, ts)
@@ -336,9 +339,10 @@ insert into public.grid_off (plant_id, started_at, ended_at, last_off_at, minute
 do $$
 declare r jsonb;
 begin
-  perform pg_temp.eq('trimmed set', (select array_agg(x order by x) from public.free_trimmed_plants() x), array[9000061::bigint]);
+  -- 9000001 and 9000031: Free accounts' plants with no week on record are trimmed too (0199)
+  perform pg_temp.eq('trimmed set', (select array_agg(x order by x) from public.free_trimmed_plants() x), array[9000001, 9000031, 9000061]::bigint[]);
   r := private.free_trim();
-  perform pg_temp.eq('trim ran on one plant', (r->>'plants')::int, 1);
+  perform pg_temp.eq('trim ran on three plants', (r->>'plants')::int, 3);
   perform pg_temp.eq('free past week keeps 24 h', (select count(*)::int from public.agg_minute where plant_id = 9000061), 2);
   perform pg_temp.eq('free in its week keeps all', (select count(*)::int from public.agg_minute where plant_id = 9000062), 5);
   perform pg_temp.eq('shared with a payer keeps all', (select count(*)::int from public.agg_minute where plant_id = 9000063), 5);
@@ -357,7 +361,7 @@ begin
   -- Upgrading leaves the trim
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
     values ('00000000-0000-0000-0000-000000000061', 'home', 'monthly', 1, current_date + 30);
-  perform pg_temp.eq('upgrade leaves trim', (select count(*)::int from public.free_trimmed_plants()), 0);
+  perform pg_temp.eq('upgrade leaves trim', (select count(*)::int from public.free_trimmed_plants() x where x = 9000061), 0);
   perform private.free_trim();
   perform pg_temp.eq('unmarked on leaving', (select count(*)::int from private.free_trim_done where plant_id = 9000061), 0);
 end $$;
@@ -1003,6 +1007,195 @@ select pg_temp.eq('start is gone', (select count(*)::int from pg_proc where pron
 select pg_temp.eq('pick is for signed-in users',   has_function_privilege('anon', 'public.api_plant_pick(bigint[])', 'execute'), false);
 select pg_temp.eq('change is for signed-in users', has_function_privilege('anon', 'public.api_plant_change(bigint, bigint)', 'execute'), false);
 select pg_temp.eq('ticks table closed', has_table_privilege('authenticated', 'private.plant_picks', 'select'), false);
+
+-- ---------------------------------------------------------------------------
+-- The free week belongs to the plant (0199, SOLAR-547). Links go through
+-- plant_users_upsert, as link-sunsynk and the hourly sync call it. Each login here
+-- has one plant, so it starts with no pick. Ticks and the 90-day change: the 0197
+-- and 0198 cases above, unchanged.
+-- ---------------------------------------------------------------------------
+insert into auth.users (id, email) values
+  ('00000000-0000-0000-0000-000000000a01', 'w1@t.test'), ('00000000-0000-0000-0000-000000000a02', 'w2@t.test'),
+  ('00000000-0000-0000-0000-000000000a03', 'w3@t.test'), ('00000000-0000-0000-0000-000000000a04', 'w4@t.test'),
+  ('00000000-0000-0000-0000-000000000a05', 'w5@t.test'), ('00000000-0000-0000-0000-000000000a06', 'w6@t.test'),
+  ('00000000-0000-0000-0000-000000000a07', 'w7@t.test'), ('00000000-0000-0000-0000-000000000a08', 'w8@t.test');
+insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
+  values ('00000000-0000-0000-0000-000000000a04', 'home', 'monthly', 1, current_date + 20);
+insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values
+  ('00000000-0000-0000-0000-00000000ac01', '00000000-0000-0000-0000-000000000a01', 'W1@login.test'),
+  ('00000000-0000-0000-0000-00000000ac02', '00000000-0000-0000-0000-000000000a02', 'w2@login.test'),
+  ('00000000-0000-0000-0000-00000000ac03', '00000000-0000-0000-0000-000000000a03', 'w3@login.test'),
+  ('00000000-0000-0000-0000-00000000ac04', '00000000-0000-0000-0000-000000000a04', 'w4@login.test'),
+  ('00000000-0000-0000-0000-00000000ac05', '00000000-0000-0000-0000-000000000a05', 'w5@login.test'),
+  ('00000000-0000-0000-0000-00000000ac06', '00000000-0000-0000-0000-000000000a06', 'w6@login.test'),
+  ('00000000-0000-0000-0000-00000000ac07', '00000000-0000-0000-0000-000000000a07', 'w7@login.test');
+-- 9000951's readings: one row an hour old, one 30 hours old, one 10 days old. A link
+-- to a plant with no account left wipes it first (0050), so the cases fill it after.
+create function pg_temp.fill() returns void language sql as $$
+  insert into public.plant_config (plant_id, timezone) values (9000951, 'Africa/Johannesburg') on conflict do nothing;
+  insert into public.agg_minute (plant_id, ts)
+    select 9000951, extract(epoch from now() - h * interval '1 hour')::bigint from unnest(array[1, 30, 240]) h;
+  insert into public.plant_energy (plant_id, bucket, period)
+    select 9000951, b, d from (values ('day', public.today_tz('Africa/Johannesburg')), ('day', public.today_tz('Africa/Johannesburg') - 1),
+      ('day', public.today_tz('Africa/Johannesburg') - 5), ('month', date_trunc('month', public.today_tz('Africa/Johannesburg'))::date)) v(b, d);
+$$;
+-- rows of 9000951 the caller's export holds
+create function pg_temp.rows_as(u uuid) returns int language plpgsql as $$
+declare n int;
+begin
+  perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
+  n := array_length(string_to_array(trim(trailing e'\n' from public.api_export(public.today_tz('Africa/Johannesburg') - 20, public.today_tz('Africa/Johannesburg'), 9000951)), e'\n'), 1) - 1;
+  perform set_config('request.jwt.claims', '', true);
+  return n;
+end $$;
+create function pg_temp.week_ends(u uuid) returns timestamptz language plpgsql as $$
+declare e timestamptz;
+begin
+  perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
+  e := (public.api_me()->>'freeWeekEndsAt')::timestamptz;
+  perform set_config('request.jwt.claims', '', true);
+  return e;
+end $$;
+do $$
+declare
+  w1 uuid := '00000000-0000-0000-0000-000000000a01'; w2 uuid := '00000000-0000-0000-0000-000000000a02';
+  w3 uuid := '00000000-0000-0000-0000-000000000a03'; w4 uuid := '00000000-0000-0000-0000-000000000a04';
+  w5 uuid := '00000000-0000-0000-0000-000000000a05'; w6 uuid := '00000000-0000-0000-0000-000000000a06';
+  w7 uuid := '00000000-0000-0000-0000-000000000a07'; w8 uuid := '00000000-0000-0000-0000-000000000a08';
+  one jsonb := '[{"plant_id": 9000951, "plant_name": "House"}]';
+  two jsonb := '[{"plant_id": 9000952, "plant_name": "Farm"}]';
+  sh uuid;
+begin
+  -- a plant never linked: its full week, from the link
+  perform public.plant_users_upsert(w1, '00000000-0000-0000-0000-00000000ac01', one);
+  perform pg_temp.fill();
+  perform pg_temp.eq('new plant: its week starts at the link',
+    (select started_at > now() - interval '1 minute' from private.plant_week where plant_id = 9000951), true);
+  perform pg_temp.eq('new plant: the account has 7 days',
+    pg_temp.week_ends(w1) between now() + interval '6 days 23 hours' and now() + interval '7 days', true);
+  perform pg_temp.eq('new plant: the account row is written by the link',
+    (select sunsynk_username from private.free_week_logins where user_id = w1), 'w1@login.test');
+  perform pg_temp.eq('new plant: full history', pg_temp.rows_as(w1), 3);
+  perform pg_temp.eq('new plant: not trimmed, so the 60 days are fetched',
+    (select count(*)::int from public.free_trimmed_plants() x where x = 9000951), 0);
+  -- the hourly sync sends the same list again: nothing moves
+  update private.plant_week set started_at = now() - interval '10 days' where plant_id = 9000951;
+  perform public.plant_users_upsert(w1, '00000000-0000-0000-0000-00000000ac01', one);
+  perform pg_temp.eq('sync again: the plant week stays',
+    (select started_at < now() - interval '9 days' from private.plant_week where plant_id = 9000951), true);
+
+  -- the plant's week is over: a second account gets no week
+  perform public.plant_users_upsert(w2, '00000000-0000-0000-0000-00000000ac02', one);
+  perform pg_temp.eq('second account: its week is the plant''s, over', pg_temp.week_ends(w2) < now(), true);
+  perform pg_temp.eq('second account: 24 hours only', pg_temp.rows_as(w2), 1);
+  perform pg_temp.eq('second account: no 60-day fetch (the plant is on the trim list)',
+    (select count(*)::int from public.free_trimmed_plants() x where x = 9000951), 1);
+  perform private.free_week_mail();
+  perform pg_temp.eq('second account: no free-week email',
+    (select count(*)::int from public.email_queue where user_id = w2 and kind in ('free_week_soon', 'report_week')), 0);
+  perform set_config('request.jwt.claims', json_build_object('sub', w2, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('second account: no free-week notice',
+    (select count(*)::int from jsonb_array_elements(private.billing_notices()) n where n->>'kind' in ('free_week_soon', 'free_week_ended')), 0);
+  perform pg_temp.eq('second account: days with data', jsonb_array_length(public.api_data_days(9000951)), 1);
+  perform set_config('request.jwt.claims', '', true);
+
+  -- delete and sign up again: the plant's record stays, with no account in it
+  perform set_config('request.jwt.claims', json_build_object('sub', w1, 'role', 'authenticated')::text, true);
+  perform public.api_account_delete();
+  perform set_config('request.jwt.claims', json_build_object('sub', w2, 'role', 'authenticated')::text, true);
+  perform public.api_account_delete();
+  perform set_config('request.jwt.claims', '', true);
+  perform pg_temp.eq('delete: the account''s week row goes',
+    (select count(*)::int from private.free_week_logins where user_id in (w1, w2)), 0);
+  perform pg_temp.eq('delete: the plant''s week stays',
+    (select count(*)::int from private.plant_week where plant_id = 9000951), 1);
+  perform pg_temp.eq('plant week: a plant number and a date, nothing else',
+    (select string_agg(column_name, ',' order by ordinal_position) from information_schema.columns
+      where table_schema = 'private' and table_name = 'plant_week'), 'plant_id,started_at');
+  perform public.plant_users_upsert(w3, '00000000-0000-0000-0000-00000000ac03', one);
+  perform pg_temp.fill();
+  perform pg_temp.eq('sign up again: no week', pg_temp.week_ends(w3) < now(), true);
+  perform pg_temp.eq('sign up again: 24 hours only', pg_temp.rows_as(w3), 1);
+  perform pg_temp.eq('sign up again: no 60-day fetch',
+    (select count(*)::int from public.free_trimmed_plants() x where x = 9000951), 1);
+
+  -- a paid account on the same plant: it reads everything and the history is kept;
+  -- the Free account still reads 24 hours
+  perform public.plant_users_upsert(w4, '00000000-0000-0000-0000-00000000ac04', one);
+  perform pg_temp.eq('paid holder: the plant is not trimmed',
+    (select count(*)::int from public.free_trimmed_plants() x where x = 9000951), 0);
+  perform pg_temp.eq('paid: full history', pg_temp.rows_as(w4), 3);
+  perform pg_temp.eq('free beside a paid account: 24 hours only', pg_temp.rows_as(w3), 1);
+  -- a failed card's 30 days read everything, as the trim keeps it (0146)
+  insert into private.billing (user_id, plan) values (w3, 'free');
+  update private.billing set keep_until = private.billing_today() + 5 where user_id = w3;
+  perform pg_temp.eq('30 days kept: full history', pg_temp.rows_as(w3), 3);
+  update private.billing set keep_until = null where user_id = w3;
+
+  -- a plant only a paid account linked has no week yet; a Free link starts it
+  perform public.plant_users_upsert(w4, '00000000-0000-0000-0000-00000000ac04', two);
+  perform pg_temp.eq('paid link: no plant week', (select count(*)::int from private.plant_week where plant_id = 9000952), 0);
+  perform public.plant_users_upsert(w5, '00000000-0000-0000-0000-00000000ac05', two);
+  perform pg_temp.eq('free link after it: the week starts',
+    (select started_at > now() - interval '1 minute' from private.plant_week where plant_id = 9000952), true);
+
+  -- a join on day 3 has the 4 days left
+  update private.plant_week set started_at = now() - interval '3 days' where plant_id = 9000952;
+  perform public.plant_users_upsert(w6, '00000000-0000-0000-0000-00000000ac06', two);
+  perform pg_temp.eq('join on day 3: 4 days left',
+    pg_temp.week_ends(w6) between now() + interval '3 days 23 hours' and now() + interval '4 days 1 hour', true);
+  perform set_config('request.jwt.claims', json_build_object('sub', w6, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('join on day 3: full history', public.my_read_from(9000952), 0::bigint);
+  perform pg_temp.eq('another plant: 24 hours', public.my_read_from(9000951) > 0, true);
+  perform set_config('request.jwt.claims', '', true);
+  perform pg_temp.eq('the server reads everything', public.my_read_from(9000951), 0::bigint);
+
+  -- a share claim on a plant whose week is over: no week
+  update private.plant_week set started_at = now() - interval '10 days' where plant_id = 9000952;
+  delete from public.plant_users where plant_id = 9000952;
+  sh := coalesce((select id from private.sunsynk_accounts where kind = 'share'), gen_random_uuid());
+  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, kind) values (sh, w8, 'share@login.test', 'share')
+  on conflict (id) do nothing;
+  perform pg_temp.eq('share claim: claimed', public.share_claim(w7, sh, 9000952, 'Farm'), 'claimed');
+  perform pg_temp.eq('share claim on a used plant: no week', pg_temp.week_ends(w7) < now(), true);
+  perform pg_temp.eq('share claim: the plant week did not move',
+    (select started_at < now() - interval '9 days' from private.plant_week where plant_id = 9000952), true);
+end $$;
+-- every reader that skips the row rules runs for both, and the day count holds the limit
+do $$
+declare
+  u uuid; d date := public.today_tz('Africa/Johannesburg') - 10; n int;
+begin
+  foreach u in array array['00000000-0000-0000-0000-000000000a03', '00000000-0000-0000-0000-000000000a04']::uuid[] loop
+    perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
+    perform public.api_overview(9000951), public.api_balance(9000951), public.api_string_health(9000951),
+            public.api_trends_compare(9000951), public.api_grid_today(9000951, d), public.api_inverter_history(d, 9000951),
+            public.api_history(d, 9000951), public.api_energy('month', 9000951), public.api_trends_daily(30, 9000951);
+    n := (public.api_plant_days(9000951)->>'days')::int;
+    perform set_config('request.jwt.claims', '', true);
+    perform pg_temp.eq('days with data, ' || case when u::text like '%a03' then 'free' else 'paid' end, n,
+                       case when u::text like '%a03' then 1 else 3 end);
+  end loop;
+end $$;
+-- the row rules, as the browser's role: w3 is Free on 9000951 (week over), w4 is paid
+select set_config('request.jwt.claims', json_build_object('sub', '00000000-0000-0000-0000-000000000a03', 'role', 'authenticated')::text, true);
+set local role authenticated;
+select (select count(*) from public.agg_minute where plant_id = 9000951) as free_min,
+       (select count(*) from public.plant_energy where plant_id = 9000951) as free_days \gset
+reset role;
+select set_config('request.jwt.claims', json_build_object('sub', '00000000-0000-0000-0000-000000000a04', 'role', 'authenticated')::text, true);
+set local role authenticated;
+select (select count(*) from public.agg_minute where plant_id = 9000951) as paid_min,
+       (select count(*) from public.plant_energy where plant_id = 9000951) as paid_days \gset
+reset role;
+select set_config('request.jwt.claims', '', true);
+select pg_temp.eq('row rule, free: minutes of the last 24 hours', :free_min, 1);
+select pg_temp.eq('row rule, free: day totals of today and yesterday', :free_days, 2);
+select pg_temp.eq('row rule, paid: all minutes', :paid_min, 3);
+select pg_temp.eq('row rule, paid: all totals', :paid_days, 4);
+select pg_temp.eq('plant week closed to users', has_table_privilege('authenticated', 'private.plant_week', 'select'), false);
+select pg_temp.eq('read limit not for anon', has_function_privilege('anon', 'public.my_read_from(bigint)', 'execute'), false);
+select pg_temp.eq('full list not for anon', has_function_privilege('anon', 'public.my_full_plant_ids()', 'execute'), false);
 
 select pg_temp.eq('keep set is for signed-in users', has_function_privilege('anon', 'public.api_billing_keep_set(bigint[])', 'execute'), false);
 

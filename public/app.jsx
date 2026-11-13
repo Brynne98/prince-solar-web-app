@@ -1871,7 +1871,9 @@ function App({ links }) {
   // The free week (SOLAR-242): after it, history locks.
   const free = window.freeState(me);
   const [overSeen, setOverSeen] = useState(false);
-  const overCard = free?.over && !overSeen && !me?.prefs?.freeWeekOverSeen;
+  // An account that joined a plant after its week (0199) never had one: no card.
+  const hadWeek = (me?.plants || []).some(p => Date.parse(p.linkedAt) < Date.parse(me.freeWeekEndsAt));
+  const overCard = free?.over && hadWeek && !overSeen && !me?.prefs?.freeWeekOverSeen;
   const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, onSettings: () => go('prefs'), active: isSettings(tab) };
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync}
                                accounts={links.accounts} onStopped={() => openSettings('connection')} />;
