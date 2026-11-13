@@ -1190,6 +1190,7 @@
   @media (min-width: 901px) { .login-plant, .login-plant .plant-nm { min-height: 36px; } }
   .login-plant.off .plant-nm { color: var(--dim); }
   .login-plant .plant-nm > .ico { flex: none; margin-right: var(--sp-sm); color: var(--muted); }   /* a panel before each plant (SOLAR-537) */
+  .login-plant .pm-state:not(.status-live) .pm-dot { display: none; }   /* in Plants only Live has its dot (SOLAR-542) */
   /* Plants' two buttons stay side by side; on a phone they go under the title, at the right */
   .sec-intro:has(.plants-acts) { flex-wrap: wrap; }
   .plants-acts { display: flex; gap: var(--sp-sm); margin-left: auto; }

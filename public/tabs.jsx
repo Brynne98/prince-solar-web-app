@@ -3070,7 +3070,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
           /* a login that stopped says so once, on its own line above */
           : (!ok && !shared) || !states.at ? null
           /* its first 60 days are still arriving, or no reading yet: the header's words and % (SOLAR-176) */
-          : silent ? <span className="pm-state status-stale"><span className="pm-dot" />No readings yet</span>
+          : silent ? <span className="pm-state status-stale">No readings yet</span>
           : fetching != null ? <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Fetching history<span className="mono pm-pct">{Math.round(100 * fetching)}%</span></span>
           /* nothing read yet and nothing being fetched: it waits for its first reading */
           : st?.lastTs == null ? <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Waiting for readings</span>
