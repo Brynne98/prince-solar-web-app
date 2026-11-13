@@ -3060,7 +3060,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     return (
       <PlantLine key={p.plant_id} name={<><Icon id="panel" />{name}</>} off={p.paused}>
         {/* gone from SunSynk: the owner removed the share (SOLAR-310), or the login no longer lists it */}
-        {p.share_gone ? <span className="pm-state status-offline">{shared ? 'Share removed' : 'Not on this login'}</span>
+        {p.share_gone ? <span className="pm-state status-offline">{shared ? 'Share removed' : 'Not in SunSynk'}</span>
           : s === 'going' ? <>
             <span className="pm-state status-stale">Kept until {billDay(p.remove_on)}</span>
             {!p.paused && <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
