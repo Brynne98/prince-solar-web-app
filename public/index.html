@@ -1189,7 +1189,11 @@
   /* 36px rows on desktop so plants under one login sit as close as a login to its plant; phones keep 44px to tap (SOLAR-286) */
   @media (min-width: 901px) { .login-plant, .login-plant .plant-nm { min-height: 36px; } }
   .login-plant.off .plant-nm { color: var(--dim); }
-  .login-plant .plant-state { font-size: var(--fs-sm); white-space: nowrap; }
+  .login-plant .plant-nm > .ico { flex: none; margin-right: var(--sp-sm); color: var(--muted); }   /* a panel before each plant (SOLAR-537) */
+  /* Plants' two buttons stay side by side; on a phone they go under the title, at the right */
+  .sec-intro:has(.plants-acts) { flex-wrap: wrap; }
+  .plants-acts { display: flex; gap: var(--sp-sm); margin-left: auto; }
+  .plants-acts button { white-space: nowrap; }
   /* Billing's Plants (SOLAR-377): one full-width card laid out as Notifications. Each login a small
      grey heading, Reconnect then Manage at its right; its plants under it as rows, a switch each. */
   .plant-logins + .plant-logins { margin-top: var(--sp-2xl); }
@@ -1289,7 +1293,7 @@
   @media (max-width: 900px) { .settings-page .sset-cards > .sset.conn-row { padding: var(--sp-md) var(--sp-lg); } }
   .settings-page .notif-push { padding-top: var(--sp-sm); }
   /* Every Settings row: a switch or button lines up with the top of its name (SOLAR-250) */
-  .settings-page .conn-actions, .settings-page .conn-row > .plant-state { align-self: flex-start; }
+  .settings-page .conn-actions { align-self: flex-start; }
   .settings-page #settings-actions .conn-row:not(:has(form)) { align-items: flex-start; }
   .settings-page :is(.toggle-row) { align-items: flex-start; }
   /* just the number, centred under the last section */

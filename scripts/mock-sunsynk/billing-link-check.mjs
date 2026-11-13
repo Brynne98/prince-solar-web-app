@@ -33,6 +33,10 @@ async function link(u, username, extra = {}) {
 }
 const accounts = (u) => Number(sql(`select count(*) from private.sunsynk_accounts where user_id = '${u.id}'`));
 const plants = (u, paused) => Number(sql(`select count(*) from public.plant_users where user_id = '${u.id}' and paused = ${paused}`));
+// A login with more than one plant links them locked; the owner ticks which run (0197).
+// pick: the pop-up's Add for these plants; locked: the user's locked plants, oldest id first.
+const locked = (u) => sql(`select coalesce(string_agg(plant_id::text, ',' order by plant_id), '') from public.plant_users where user_id = '${u.id}' and paused`).split(",").filter(Boolean).map(Number);
+const pick = async (u, ids) => (await fetch(`${API}/rest/v1/rpc/api_plant_pick`, { method: "POST", headers: { apikey: ANON, Authorization: `Bearer ${u.jwt}`, "Content-Type": "application/json" }, body: JSON.stringify({ p_plants: ids }) })).status;
 
 const u1 = await user("free1"), u2 = await user("free2"), u3 = await user("family"), u4 = await user("family5");
 console.log("Free user");
@@ -43,7 +47,8 @@ r = await link(u1, "solo@mock");
 check(r.status === 200 && plants(u1, false) === 1, `same login again (relink) still allowed: ${r.status}`);
 r = await link(u1, "installer@mock");
 check(r.status === 200 && r.body?.paused?.length === 4 && plants(u1, false) === 1 && plants(u1, true) === 4,
-  `installer login: its 4 new plants link paused: ${r.status} paused=${JSON.stringify(r.body?.paused)}`);
+  `installer login: its 4 new plants link locked: ${r.status} paused=${JSON.stringify(r.body?.paused)}`);
+check(await pick(u1, locked(u1).slice(0, 1)) >= 400 && plants(u1, false) === 1, "Free is full: a locked plant can't be ticked");
 check(accounts(u1) === 2, "both logins listed");
 console.log("Second free account");
 r = await link(u2, "solo@mock");
@@ -58,32 +63,34 @@ sql(`insert into private.billing (user_id, plan, period, billing_day, next_billi
 // Family's price at the offer the account pays at, with n extra plants held
 const price = (u, n) => Number(sql(`select public.billing_amount('family', 'monthly', ${n}, private.billing_offer('${u.id}', '${nd}'))`));
 r = await link(u3, "export@mock");
-check(r.status === 200 && plants(u3, false) === 2, `2 plants: ${r.status}`);
+check(r.status === 200 && plants(u3, false) === 0 && r.body?.paused?.length === 2, `a login with 2 plants links both locked: ${r.status}`);
+check(await pick(u3, locked(u3)) < 300 && plants(u3, false) === 2, "ticked, the 2 plants run");
 r = await link(u3, "shared@mock");
 r = await link(u3, "nobatt@mock");
 check(r.status === 200 && plants(u3, false) === 4, `4 plants covered: ${r.status}`);
-// 0129: no cost question at link time. 0156: Family covers 5; a plant past that links stopped.
+// 0129: no cost question at link time. 0156: Family covers 5. 0197: one place left, so one tick.
 r = await link(u3, "farm@mock");
-check(r.status === 200 && plants(u3, false) === 5 && plants(u3, true) === 1, `farm's 2 plants: the 5th collects, the 6th links stopped: ${r.status} ${JSON.stringify(r.body)}`);
+check(r.status === 200 && await pick(u3, locked(u3)) >= 400 && plants(u3, false) === 4, `farm's 2 plants can't both be ticked: ${r.status} ${JSON.stringify(r.body)}`);
+check(await pick(u3, locked(u3).slice(0, 1)) < 300 && plants(u3, false) === 5 && plants(u3, true) === 1, "the 5th is ticked and runs, the 6th stays locked");
 check(Number(sql(`select public.billing_amount_due('${u3.id}')`)) === price(u3, 0), `stopped plant not billed: R${price(u3, 0)}`);
 // 0156: extra plants are no longer sold.
 let sold = true; try { execFileSync(PSQL, [DB, "-XAtc", `select public.billing_charge_open('${u3.id}', 'family', null, 1)`], { stdio: "pipe" }); } catch { sold = false; }
 check(!sold, "a charge for an extra plant is refused");
 // An account still holding extras keeps them on top of the 5 (set here, as regress.mjs does).
 sql(`update private.billing set extra_plants = 1 where user_id = '${u3.id}'`);
-const stoppedId = sql(`select plant_id from public.plant_users where user_id = '${u3.id}' and paused limit 1`);
-const st = await (await fetch(`${API}/rest/v1/rpc/api_plant_start`, { method: "POST", headers: { apikey: ANON, Authorization: `Bearer ${u3.jwt}`, "Content-Type": "application/json" }, body: JSON.stringify({ p_plant: Number(stoppedId) }) })).status;
-check(st < 300 && plants(u3, false) === 6 && plants(u3, true) === 0, `1 extra held: the stopped plant starts: ${st}`);
+const st = await pick(u3, locked(u3));
+check(st < 300 && plants(u3, false) === 6 && plants(u3, true) === 0, `1 extra held: the locked plant is ticked and runs: ${st}`);
 check(Number(sql(`select public.billing_amount_due('${u3.id}')`)) === price(u3, 1), `next bill Family + 1 extra: R${price(u3, 1)}`);
 sql(`delete from private.link_attempts where user_id = '${u3.id}'`); // past the 5-an-hour link cap (0107)
 r = await link(u3, "business@mock");
-check(r.status === 200 && plants(u3, false) === 6 && plants(u3, true) === 3, `room full: business's 3 plants link stopped: ${r.status} paused=${JSON.stringify(r.body?.paused)}`);
+check(r.status === 200 && plants(u3, false) === 6 && plants(u3, true) === 3, `room full: business's 3 plants link locked: ${r.status} paused=${JSON.stringify(r.body?.paused)}`);
 check(Number(sql(`select public.billing_amount_due('${u3.id}')`)) === price(u3, 1), "linking does not change the bill");
 
 console.log("Family user, one login with 5 plants");
 sql(`insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values ('${u4.id}', 'family', 'monthly', extract(day from current_date + 15)::int, '${nd}')`);
 r = await link(u4, "installer@mock");
-check(r.status === 200 && plants(u4, false) === 5 && !r.body?.paused?.length, `5 plants on one login all collect: ${r.status} paused=${JSON.stringify(r.body?.paused)}`);
+check(r.status === 200 && r.body?.paused?.length === 5 && await pick(u4, locked(u4)) < 300 && plants(u4, false) === 5,
+  `5 plants on one login link locked; ticked, all 5 run: ${r.status} paused=${JSON.stringify(r.body?.paused)}`);
 // 0127 (SOLAR-264): a paid account's first link starts its week too, so a later move to Free trims.
 check(sql(`select count(*) from private.free_week_logins where user_id = '${u3.id}'`) === "1", "paid links record the free week");
 

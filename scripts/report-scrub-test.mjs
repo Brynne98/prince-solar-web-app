@@ -54,7 +54,7 @@ assert.equal(sent[0].props.page, '/');
 // 42501 (SOLAR-536): a deliberate refusal and a signed-out call stay unsent; a missing table right is sent
 window.reportServerError('api_me', { code: '42501', message: 'permission denied for function api_me' }, 401);
 window.reportServerError('api_overview', { code: '42501', message: 'not linked' }, 403);
-window.reportServerError('api_plant_stop', { code: '42501', message: 'sign in first' }, 403);
+window.reportServerError('api_plant_pick', { code: '42501', message: 'sign in first' }, 403);
 assert.equal(sent.length, 1);
 window.reportServerError('plant_config', { code: '42501', message: 'permission denied for table plant_config' }, 403);
 assert.equal(sent.length, 2);

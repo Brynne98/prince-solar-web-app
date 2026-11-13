@@ -142,7 +142,9 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `DaysPanel` | The per-day bars with retry and the free-week lock. |
 | `TabSkeleton` | A whole tab while it loads. |
 | `ConfirmCard` | Any "are you sure". Inline or `modal`; `danger`, `busy`. Use instead of `confirm()`. |
-| `KeepPicker` | The plants a cancel or smaller plan keeps, grouped by login: circles for 1, else tick boxes; too-many and last-tick lines (SOLAR-496). In the cancel and downgrade pop-ups and in `KeepDialog`. |
+| `KeepPicker` | A pick of plants, grouped by login: circles for exactly 1, else tick boxes; too-many and last-tick lines (link.jsx). The plants a cancel or smaller plan keeps (SOLAR-496), in the cancel and downgrade pop-ups and `KeepDialog`; and, with `logins`, `ask`, `full`, `min={0}`, the plants a login adds (`PlantPickDialog`). |
+| `PlantPickDialog` | "Choose plants": the owner ticks which locked plants run, up to the places the plan has open (api_plant_pick). After a login links, and after a payment when a place is open (`PickAfterPay`, in Settings) (link.jsx, SOLAR-537). `startableLogins(accounts, only)`: the locked plants with a place open, by login. |
+| `ChoosePlantsDialog` | "Choose plants", from Plants: every plant with a tick box. A tick into an open place is free (api_plant_pick); on a full plan, unticking one running plant is the change, once per 90 days (api_plant_change), and it says that plant loses its history (SOLAR-537). |
 | `billingFmt.lossLine(links, cancel)` | What a booked cancel or smaller plan deletes, in one line: which plants stay, which go, and for a cancel all history. Billing's Plan card, the bell and the banner all use it (link.jsx, SOLAR-505). `billingFmt.andList(names)`: "A, B and C". `pickableLogins(links)`: the plants such a change can keep. |
 | `PayFirstDialog` | In place of the cancel and downgrade pop-ups while a payment has failed: "Pay the failed payment first", with Pay with another card (SOLAR-497). |
 | `KeepDialog` | Billing's Choose plant(s) pop-up: changes a booked cancel's or smaller plan's pick (api_billing_keep_set) (SOLAR-496). |

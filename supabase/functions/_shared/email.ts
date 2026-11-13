@@ -638,6 +638,8 @@ export type LoginEvent =
   | { kind: "relinked"; plants: string[]; since?: string; at: string; lasted: string }
   // the owner removed the plant's share to our login (SOLAR-310, 0172)
   | { kind: "share_removed"; plants: string[] }
+  // SunSynk no longer lists the plant on its password login (SOLAR-537, 0197): shown, not read
+  | { kind: "plant_off_login"; plants: string[]; login?: string }
   // the share login stopped / works again (SOLAR-451, 0177): owners can't act, so no sign-in
   | { kind: "share_down"; plants: string[]; at?: string }
   | { kind: "share_back"; plants: string[]; since?: string; at: string; lasted: string };
@@ -665,6 +667,27 @@ export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email
         { box: { rows: [["Plants", esc(plants)]] } },
         { lead: "To start again, share it as Visitor, then add it in the app with Share plant." },
         { button: { label: "Open Prince Solar Hub", href: LOGINS } },
+      ],
+      footer: [HELP],
+    });
+  // The error, what it means, then what the owner can do (Brynne 2026-11-13). We can't
+  // tell why SunSynk's list dropped the plant, so each fix names the case it is for.
+  if (e.kind === "plant_off_login")
+    return make(`We can't find ${plants} on your SunSynk login`, {
+      title: "Plant not found on your login",
+      parts: [
+        { lead: `We can't find ${esc(plants)} on your SunSynk login.` },
+        { box: { rows: [["Plant", esc(plants)], ...(e.login ? [["Login", esc(e.login)] as [string, string]] : [])] } },
+        { heading: "What it means" },
+        { lead: "We can't read this plant. You still see its history, with no new readings." },
+        { heading: "How to fix it" },
+        { box: { steps: [
+          ["If someone shared it with you", "Ask them to share it with this login again in SunSynk."],
+          ["If it is on another SunSynk login", "Add that login in Plants with Add plant."],
+          ["If you deleted it in SunSynk", "There is nothing to do."],
+        ] } },
+        { note: "Once it is back on this login, readings start again on their own." },
+        { button: { label: "Open Plants", href: LOGINS } },
       ],
       footer: [HELP],
     });

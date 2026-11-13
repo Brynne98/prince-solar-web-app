@@ -50,6 +50,8 @@ export class Oracle {
     this.rm = new Set(); this.rmOn = null; this.comped = false;
     this.freeRm = new Set();  // plants the move to Free booked (0133): kept only by a start
     this.plants = []; // {id, inv, seq, paused, acc}
+    this.ticks = new Map(); // plant id -> holds a place: the plants the owner ticked (0197). Stays when a login is removed.
+    this.changedOn = null;  // the day of the last plant change: the next opens 90 days on (0197)
     this.hasCard = false;
     this.nextKeep = [];   // the plants a booked downgrade keeps, picked first (0136)
     this.prepaid = null;  // the billing date a paid switch to yearly covers (0138)
@@ -59,7 +61,6 @@ export class Oracle {
   }
   ordered() { return this.plants.slice().sort((a, b) => a.seq - b.seq || a.id - b.id); }
   active() { return this.ordered().filter((p) => !p.paused); }
-  kept() { return this.active().filter((p) => !this.rm.has(p.id)).length; }
   held() { return this.plan === 'family' ? this.extra : 0; }
   // the room once a booked change (plan or extras) lands; null when nothing is booked
   bookedRoom() {
@@ -69,16 +70,30 @@ export class Oracle {
     const plan = this.nextPlan ?? this.plan;
     return cover(plan, plan === 'family' ? this.nextExtra ?? this.extra : 0);
   }
-  // The room: why a plant may not start, or null. Booked-for-removal plants count (they collect until
-  // their date). A new link also links stopped once the booked plan is full; a start under a booked
-  // downgrade is allowed while the plan has room now: it collects to the billing date (0136).
-  blocked(link = false) {
-    if (this.comped) return null;
-    if (this.active().length >= cover(this.plan, this.held())) return 'no room';
-    const br = this.bookedRoom();
-    if (link && br !== null && this.kept() >= br) return 'plan change';
-    return null;
+  room() { return cover(this.plan, this.held()); }
+  // A new tick, while the account has fewer ticks than its plan has places (0197).
+  tick(id) {
+    if (this.ticks.has(id)) return true;
+    if (!this.comped && this.ticks.size >= this.room()) return false;
+    this.ticks.set(id, false); return true;
   }
+  // Why plant `id` may not start, or null (its tick then holds a place). A plant starts only with a
+  // tick and a place: 'no room' (as many run as the plan allows), 'plan change' (a new link under a
+  // full booked plan), 'not picked', 'place taken' (its tick lost its place and every place is held).
+  run(id, link = false) {
+    if (this.comped) { this.ticks.set(id, true); return null; }
+    const others = this.active().filter((p) => p.id !== id), br = this.bookedRoom();
+    let why = null;
+    if (others.length >= this.room()) why = 'no room';
+    else if (link && br !== null && others.filter((p) => !this.rm.has(p.id)).length >= br) why = 'plan change';
+    else if (!this.ticks.has(id)) why = 'not picked';
+    else if (!this.ticks.get(id) && [...this.ticks].filter(([k, h]) => h && k !== id).length >= this.room()) why = 'place taken';
+    if (why === null) this.ticks.set(id, true);
+    else if (link && this.ticks.has(id)) this.ticks.set(id, false);
+    return why;
+  }
+  // A running plant locked by the plan (a smaller plan, a failed card): its tick stays, without its place.
+  lock(p) { if (!p.paused) { p.paused = true; if (this.ticks.has(p.id)) this.ticks.set(p.id, false); } }
   pickIdx(id) { const i = this.nextKeep.indexOf(id); return i < 0 ? Infinity : i; }
   byPick(a, b) { return this.pickIdx(a.id) - this.pickIdx(b.id) || a.seq - b.seq || a.id - b.id; }
   // The plants that stop on the billing date: collecting, not booked for deletion, past the booked
@@ -112,27 +127,32 @@ export class Oracle {
   }
 
   // ---- plants ----
-  // New plants of one link, in plant-id order: each collects if the limit lets it, else links stopped.
-  // Mutates nothing; returns [{id, paused}].
+  // New plants of one link, in plant-id order. The simulator ticks each one as it links, while the
+  // plan has places (the owner's pick, sim.mjs a_sim_tick); a plant with no tick or no place links locked.
+  // Mutates nothing; returns [{id, paused}] with the ticks after the link in `.ticks`.
   planLink(freshIds) {
     const c = this.clone();
-    return freshIds.map((id) => { const paused = c.blocked(true) !== null; c.plants.push({ id, inv: 1, seq: Infinity, paused }); return { id, paused }; });
+    const rows = freshIds.map((id) => { c.tick(id); const paused = c.run(id, true) !== null; c.plants.push({ id, inv: 1, seq: Infinity, paused }); return { id, paused }; });
+    rows.ticks = c.ticks; return rows;
   }
-  // Start stopped plants after a paid start or upgrade: the oldest stopped, while there is room.
+  // Start locked plants after a paid start or upgrade: the oldest that has a tick, while there is room.
+  // A plant never ticked waits for its owner (0197).
   // More room on the same plan (0131): at most `max`, the newest linked first.
   resume(max = Infinity, newest = false) {
     // newest: more room on the same plan, plants booked for removal left out (0131)
     const stopped = this.ordered().filter((x) => x.paused && !(newest && this.rm.has(x.id)));
     if (newest) stopped.reverse();
     for (const p of stopped.slice(0, max)) {
-      if (this.blocked() !== null) break;  // only the room now stops it (0136)
+      const why = this.run(p.id);
+      if (why === 'no room') break;  // the room is full
+      if (why) continue;             // no tick, or its place is taken
       p.paused = false;
       // a plant that is collecting again is no longer up for deletion (0116: plants stopped by a move to Free come back)
       this.freeRm.delete(p.id);
       if (this.rm.delete(p.id)) { this.unbooked = (this.unbooked || 0) + 1; if (this.rm.size === 0) this.rmOn = null; }
     }
   }
-  clone() { const c = Object.assign(new Oracle(), this); c.plants = this.plants.map((p) => ({ ...p })); c.rm = new Set(this.rm); c.freeRm = new Set(this.freeRm); c.nextKeep = this.nextKeep.slice(); return c; }
+  clone() { const c = Object.assign(new Oracle(), this); c.plants = this.plants.map((p) => ({ ...p })); c.rm = new Set(this.rm); c.freeRm = new Set(this.freeRm); c.nextKeep = this.nextKeep.slice(); c.ticks = new Map(this.ticks); return c; }
   // A paid year holds plan, period, extras and anything booked as they are until it starts (0138).
   yearPaid(next) {
     if (this.prepaid === null) return false;
@@ -188,9 +208,21 @@ export class Oracle {
     if (this.rm.size === 0) this.rmOn = null;
     return {};
   }
-  stop(id) {
-    const p = this.get(id); if (!p) return { err: 'not linked' };
-    p.paused = true; return {};
+  // One ticked plant out, one locked plant in; one per 90 days (0197).
+  change(out, into, today) {
+    if (this.changedOn !== null && dayNo(today) - dayNo(this.changedOn) < 90) return { err: 'next change' };
+    if (out === into || !this.ticks.has(out)) return { err: 'not picked' };
+    const p = this.get(into); if (!p) return { err: 'not linked' };
+    if (!p.paused) return { err: 'already on' };
+    const c = this.clone(), q = c.get(out);
+    if (q) c.lock(q);
+    c.ticks.delete(out);
+    if (!c.ticks.has(into)) c.ticks.set(into, false);
+    const why = c.run(into); if (why) return { err: why };
+    c.started(c.get(into));
+    c.changedOn = today;
+    Object.assign(this, c);
+    return {};
   }
   // Fewer extra plants from the billing date, or undo a drop (n = those held). More is a payment.
   bookExtras(n) {
@@ -204,14 +236,22 @@ export class Oracle {
     this.nextExtra = nextExtra;
     return {};
   }
-  start(id) {
+  // Tick a locked plant into an open place (0197).
+  pick(id) {
     const p = this.get(id); if (!p) return { err: 'not linked' };
     if (!p.paused) return {};
-    const why = this.blocked(); if (why) return { err: why };
+    const had = this.ticks.has(id);
+    if (!this.tick(id)) return { err: 'no room' };
+    const held = this.ticks.get(id), why = this.run(id);
+    if (why) { if (had) this.ticks.set(id, held); else this.ticks.delete(id); return { err: why }; }
+    this.started(p);
+    return {};
+  }
+  started(p) {
     p.paused = false;
     // on Free the plant started is the one kept (0130); on any plan one the move to Free booked (0133)
-    if ((this.plan === 'free' || this.freeRm.has(id)) && this.rm.delete(id) && this.rm.size === 0) this.rmOn = null;
-    this.freeRm.delete(id);
+    if ((this.plan === 'free' || this.freeRm.has(p.id)) && this.rm.delete(p.id) && this.rm.size === 0) this.rmOn = null;
+    this.freeRm.delete(p.id);
     return {};
   }
 
@@ -319,10 +359,12 @@ export class Oracle {
       // not booked for deletion first, then collecting, then the pick, then the first linked (0131, 0136)
       const keep = this.plants.slice().sort((a, b) => this.rm.has(a.id) - this.rm.has(b.id) || a.paused - b.paused || this.byPick(a, b))[0];
       const stop = this.plants.filter((p) => p !== keep).map((p) => p.id);
-      for (const p of this.plants) p.paused = p !== keep;
+      for (const p of this.plants) if (p !== keep) this.lock(p);
       stop.forEach((id) => { this.rm.add(id); this.freeRm.add(id); });
       if (stop.length) this.rmOn = addDays(d, 30);
-      this.plan = 'free'; this.period = null; this.day = null; this.next = null;
+      this.plan = 'free'; this.period = null; this.day = null; this.next = null; this.extra = 0;
+      // the kept plant, if locked, starts only with its tick and a place (0197)
+      if (keep && keep.paused && this.ticks.has(keep.id) && this.run(keep.id) === null) keep.paused = false;
       this.nextPlan = null; this.nextPeriod = null; this.state = 'active'; this.pds = null;
       this.extra = 0; this.nextExtra = null; this.nextKeep = []; this.prepaid = null;
       this.stat.toFree++;
@@ -354,7 +396,7 @@ export class Oracle {
       // the plants fit the new room: booked for deletion last, then the pick, then link order (0136)
       const ki = (id) => { const i = keep.indexOf(id); return i < 0 ? Infinity : i; };
       const fitted = this.active().sort((a, b) => this.rm.has(a.id) - this.rm.has(b.id) || ki(a.id) - ki(b.id) || a.seq - b.seq || a.id - b.id);
-      fitted.slice(cover(this.plan, this.held())).forEach((p) => { p.paused = true; });
+      fitted.slice(cover(this.plan, this.held())).forEach((p) => this.lock(p));
       // stopped by the change: deleted 30 days on, only a start keeps one; removals due today go now
       const stopped = this.plants.filter((p) => p.paused && before.has(p.id) && !this.rm.has(p.id)).map((p) => p.id);
       if (stopped.length) {

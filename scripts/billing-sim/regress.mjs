@@ -23,6 +23,13 @@ create or replace function private.billing_today() returns date language sql sta
 update private.offers set joins_until = date '2000-01-01';
 create or replace function public.plant_bootstrap_kick(p_plant bigint) returns void language plpgsql as $$ begin return; end $$;
 create or replace function private.plant_start_fill(p_plant bigint) returns void language plpgsql as $$ begin return; end $$;
+-- the owner's pick (0197): each plant is ticked as it links, while the plan has places
+create function pg_temp.tick() returns trigger language plpgsql as $$
+begin
+  if not new.paused then perform private.plant_pick_add(new.user_id, new.plant_id, new.plant_name); end if;
+  return new;
+end $$;
+create trigger a_sim_tick before insert on public.plant_users for each row execute function pg_temp.tick();
 select set_config('sim.today', '2027-03-10', true);`);
     let bad;
     try { bad = await c.run(kit(db)); }
@@ -74,6 +81,9 @@ function kit(db) {
     due: async (uid) => Number((await db.exec(`select public.billing_amount_due('${uid}')`))[0]),
     paid: (ref, cents = null) => db.t(`select public.billing_charge_paid('${ref}', null, true, ${cents ?? 'null'})`),
     failed: (ref) => db.t(`select public.billing_charge_failed('${ref}', 'declined')`),
+    // tick a locked plant into an open place; lock a plant as a smaller plan does (its tick stays)
+    pick: (uid, id) => db.u(uid, `select public.api_plant_pick(array[${id}]::bigint[])`),
+    lock: (uid, ids) => db.exec(`update public.plant_users set paused = true where user_id = '${uid}' and plant_id in (${[].concat(ids).join(',')});`),
     active: async (uid) => Number((await db.exec(`select count(*) from public.plant_users where user_id = '${uid}' and not paused`))[0]),
     paused: async (uid, id) => (await db.exec(`select paused from public.plant_users where user_id = '${uid}' and plant_id = ${id}`))[0] === 't',
     row: (uid) => db.json(`select to_jsonb(b) from private.billing b where user_id = '${uid}'`),
@@ -109,11 +119,10 @@ const CASES = [
     if (await K.paused(u, P(2))) bad.push('the kept plant stopped, the one booked for deletion was kept');
     return bad;
   } },
-  { id: 'F2', title: 'Free (no billing row): starting stopped plants one after another stops at 1', async run(K) {
+  { id: 'F2', title: 'Free (no billing row): ticking locked plants one after another stops at 1', async run(K) {
     const u = await K.user('free');
     await K.link(u, [{ id: P(1) }, { id: P(2) }, { id: P(3) }]);
-    await K.as(u, `select public.api_plant_stop(${P(1)})`);
-    for (const p of [1, 2, 3]) await K.as(u, `select public.api_plant_start(${P(p)})`);
+    for (const p of [1, 2, 3]) await K.pick(u, P(p));
     return (await K.active(u)) === 1 ? [] : [`${await K.active(u)} collect on Free`];
   } },
   { id: 'F3', title: 'Family: a 6th plant inserted as a link inserts it (no app pause) links stopped', async run(K) {
@@ -132,14 +141,14 @@ const CASES = [
     if (!(await K.paused(u, P(6)))) bad.push('new plant collects unpaid');
     return bad;
   } },
-  { id: 'F11', title: 'booked Home, stopped plants booked for deletion: starting all of them keeps 1 past the date', async run(K) {
+  { id: 'F11', title: 'booked Home, locked plants booked for deletion: ticking all of them keeps 1 past the date', async run(K) {
     const u = await K.user('family');
     await K.link(u, [{ id: P(1) }, { id: P(2) }, { id: P(3) }]);
-    for (const p of [1, 2, 3]) await K.as(u, `select public.api_plant_stop(${P(p)})`);
+    await K.lock(u, [P(1), P(2), P(3)]);
     for (const p of [1, 2]) await K.db.t(`select to_jsonb(1) from (select public.billing_book_removal('${u}', ${P(p)})) x`);
     await K.as(u, `select public.api_billing_change('home', null)`);
     // P1 and P2 collect on Family until their date; of the plants kept, Home's 1 only
-    for (const p of [1, 2, 3]) await K.as(u, `select public.api_plant_start(${P(p)})`);
+    for (const p of [1, 2, 3]) await K.pick(u, P(p));
     const kept = Number((await K.sql(`select count(*) from public.plant_users where user_id = '${u}' and not paused and plant_id not in (${P(1)}, ${P(2)})`))[0]);
     return kept === 1 ? [] : [`${kept} kept plants collect with Home booked`];
   } },
@@ -198,8 +207,8 @@ const CASES = [
   { id: 'F9', title: 'comped Family: a 4th and 5th plant start and link with no limit', async run(K) {
     const bad = [], u = await K.user('family', { comped: true });
     await K.link(u, [{ id: P(1) }, { id: P(2) }, { id: P(3) }, { id: P(4) }]);
-    await K.as(u, `select public.api_plant_stop(${P(4)})`);
-    const s = await K.as(u, `select public.api_plant_start(${P(4)})`);
+    await K.lock(u, P(4));
+    const s = await K.pick(u, P(4));
     if (!s.ok) bad.push('start refused: ' + s.err);
     await K.link(u, [{ id: P(5), inv: 3 }]);
     if (await K.active(u) !== 5) bad.push(`${await K.active(u)} of 5 collect`);
@@ -363,15 +372,15 @@ const CASES = [
     if ((await K.row(f)).extra_plants !== 0) bad.push('extras changed');
     return bad;
   } },
-  { id: 'G7c', title: 'room held stays: stop the 6th, renew (still billed), start it again without paying', async run(K) {
+  { id: 'G7c', title: 'room held stays: the 6th locked, renew (still billed), it starts again without paying', async run(K) {
     const bad = [], u = await K.user('family');
     await K.held(u, 1);
     await K.link(u, [1, 2, 3, 4, 5, 6].map((i) => ({ id: P(i) })));
-    await K.as(u, `select public.api_plant_stop(${P(6)})`);
+    await K.lock(u, P(6));
     const r = await K.row(u); await K.today(r.next_billing_date); await K.run(r.next_billing_date);
     const ren = await K.db.json(`select to_jsonb(amount) from private.billing_charges where user_id = '${u}' and kind = 'renewal'`);
     if (ren !== 248) bad.push(`renewal R${ren}, want R248`);
-    const s = await K.as(u, `select public.api_plant_start(${P(6)})`);
+    const s = await K.pick(u, P(6));
     if (!s.ok) bad.push('start refused: ' + s.err);
     return bad;
   } },
@@ -644,7 +653,7 @@ const CASES = [
     const on = await K.db.t(`select public.billing_set_comped('${u}', true)`); if (!on.ok) return [...bad, 'switch on refused: ' + on.err];
     const r = await K.row(u);
     if (!r.comped || r.plan !== 'family') bad.push(`switched on: ${r.plan}, comped ${r.comped}`);
-    if (!(await K.as(u, `select public.api_plant_start(${P(4)})`)).ok) bad.push('comped again, a 4th plant may not start');
+    if (!(await K.pick(u, P(4))).ok) bad.push('comped again, a 4th plant may not start');
     return bad;
   } },
   { id: 'R1', title: 'a refund Paystack refuses once: tried again, and a later success is dated', async run(K) {
@@ -698,7 +707,7 @@ const CASES = [
     await K.sql(`update public.plant_users set paused = true where user_id = '${u}' and plant_id = ${P(2)};
       insert into private.billing (user_id, plan, plants_to_remove, remove_on) values ('${u}', 'free', '{${P(2)}}', '2027-04-09')
       on conflict (user_id) do update set plants_to_remove = '{${P(2)}}', remove_on = '2027-04-09'`);
-    await K.as(u, `select public.api_plant_stop(${P(1)})`); await K.as(u, `select public.api_plant_start(${P(2)})`);
+    const ch = await K.as(u, `select public.api_plant_change(${P(1)}, ${P(2)})`); if (!ch.ok) return ['change refused: ' + ch.err];
     await K.today('2027-04-09'); await K.run('2027-04-09');
     return (await K.active(u)) === 1 ? [] : [`${await K.active(u)} collecting after the removal date: the plant the user chose was deleted`];
   } },
@@ -712,24 +721,28 @@ const CASES = [
     const after = (await K.row(u)).card_email;
     return after === before ? [] : [`card_email became ${after} after a paid renewal: the next renewal is refused by Paystack`];
   } },
-  { id: 'X11', title: 'room bought while a plant stopped on purpose is older: the plant bought for starts', async run(K) {
+  { id: 'X11', title: 'room bought while an older plant is locked: the plant bought for starts', async run(K) {
     const u = await K.user('home');
-    await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i) })));                   // 3-7 link stopped
-    await K.as(u, `select public.api_plant_stop(${P(1)})`);                                 // 1 stopped on purpose
-    await K.as(u, `select public.api_plant_start(${P(3)})`);                                // 3 fills the room
+    await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i) })));                   // 3-7 link locked
+    const ch = await K.as(u, `select public.api_plant_change(${P(1)}, ${P(3)})`);           // 1 out, 3 fills the room
+    if (!ch.ok) return ['change refused: ' + ch.err];
     const o = await K.open(u, 'family', null, null, [P(7)]); if (!o.ok) return ['open refused: ' + o.err];
     await K.paid(o.v.reference);                                                            // bought for P7
     return (await K.paused(u, P(7))) ? ['paid for P7, but it stays stopped'] : [];
   } },
   // ---- round 3 fixes (0130): delete, disputes, refunds ----
-  { id: 'X13', title: 'Free to Family bought for one stopped plant: that plant starts, and the rest of the room fills too', async run(K) {
-    // UI walk 2026-10-31: "plan is full" → Upgrade → Family named plant 2; only it started, the rest of the room stayed empty.
+  { id: 'X13', title: 'Free to Family bought for one locked plant: that plant starts, and the owner ticks the rest of the room', async run(K) {
+    // UI walk 2026-10-31: Upgrade named one plant; only it started, the rest of the room stayed empty.
+    // Since 0197 the owner ticks which plants fill the rest (the pick pop-up after the payment).
     const bad = [], u = await K.user('free');
     await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i) })));                  // 1 collects on Free
     const o = await K.open(u, 'family', 'monthly', null, [P(6)]); if (!o.ok) return ['refused: ' + o.err];
     const p = await K.paid(o.v.reference);
     if (!p.ok || p.v.applied === false) bad.push('paid but not applied: ' + JSON.stringify(p.v ?? p.err));
     if (await K.paused(u, P(6))) bad.push('the plant it was bought for stays stopped');
+    if (await K.active(u) !== 2) bad.push(`${await K.active(u)} collect on Family before the owner ticks, want 2`);
+    for (const i of [2, 3, 4]) { const r = await K.pick(u, P(i)); if (!r.ok) bad.push(`tick of plant ${i} refused: ${r.err}`); }
+    if ((await K.pick(u, P(7))).ok) bad.push('a 6th plant ticked on Family');
     if (await K.active(u) !== 5) bad.push(`${await K.active(u)} collect on Family, want 5`);
     return bad;
   } },
@@ -759,7 +772,7 @@ const CASES = [
     await K.paid(o.v.reference);
     if (!(await K.paused(u, P(8)))) bad.push('the plant booked for removal started');
     if (!(await K.row(u)).plants_to_remove.includes(P(8))) bad.push('the removal booking went');
-    if (await K.active(u) !== 5) bad.push(`${await K.active(u)} collect on Family, want 5`);
+    if (await K.active(u) !== 2) bad.push(`${await K.active(u)} collect on Family before the owner ticks, want 2`);
     return bad;
   } },
   { id: 'RF5', title: 'a refund Paystack accepts and then fails 7 times: hello@ is told', async run(K) {
@@ -941,8 +954,8 @@ const CASES = [
     await K.sql(`select private.billing_to_free('${u}', '2027-03-10')`);
     const o = await K.open(u, 'family', 'monthly'); if (!o.ok) return ['start refused: ' + o.err];
     await K.paid(o.v.reference);
-    await K.as(u, `select public.api_plant_stop(${P(3)})`);
-    const st = await K.as(u, `select public.api_plant_start(${P(4)})`);                   // swap P4 in
+    await K.lock(u, P(3));
+    const st = await K.pick(u, P(4));                                                     // P4 collects
     if (!st.ok) return ['start refused: ' + st.err];
     await K.today('2027-04-09'); await K.run('2027-04-09');
     const left = Number(await K.db.json(`select to_jsonb(count(*)) from public.plant_users where user_id = '${u}'`));

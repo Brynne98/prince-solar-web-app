@@ -66,12 +66,12 @@ for (const [email, logins] of Object.entries(USERS)) {
     const r = await link(jwt, u);
     console.log(email, "->", u, r.ok ? `ok plants=${(r.plants || []).map((p) => p.id).join(",")}${r.warning ? " (" + r.warning + ")" : ""}` : `FAIL ${JSON.stringify(r)}`);
   }
-  // A relink keeps a stopped plant stopped; start them, the way the Plants page does.
+  // A login with more than one plant links them locked (0197); tick them, the way the pick pop-up does.
   const stopped = execFileSync("supabase", ["db", "query", "--local", "-o", "csv",
     `select plant_id from public.plant_users where user_id = '${id}' and paused`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split("\n").slice(1).filter((l) => /^\d+$/.test(l.trim()));
   for (const p of stopped) {
-    const r = await fetch(`${API}/rest/v1/rpc/api_plant_start`, { method: "POST", headers: { apikey: ANON, Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }, body: JSON.stringify({ p_plant: Number(p) }) });
-    console.log(email, "start", p.trim(), r.ok ? "ok" : `FAIL ${r.status} ${await r.text()}`);
+    const r = await fetch(`${API}/rest/v1/rpc/api_plant_pick`, { method: "POST", headers: { apikey: ANON, Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }, body: JSON.stringify({ p_plants: [Number(p)] }) });
+    console.log(email, "tick", p.trim(), r.ok ? "ok" : `FAIL ${r.status} ${await r.text()}`);
   }
   console.log("user", email, id);
 }

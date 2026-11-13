@@ -13,7 +13,7 @@
 //
 // email_claim skips rows whose switch is off (email_wanted, 0091), whose plant the
 // user no longer has, and "back" emails whose "down" never went. needs_relink, relinked,
-// share_down, share_back, welcome, history and account deleted have no switch.
+// share_down, share_back, plant_off_login, welcome, history and account deleted have no switch.
 //
 // After the emails, the pop-ups (SOLAR-244, 0124): push_claim hands over the alerts
 // due one, with their words and the user's browsers, each tried once. A browser the
@@ -334,6 +334,7 @@ async function build(r: Row): Promise<Email | null> {
     case "relinked": return loginEvent({ kind: "relinked", plants: d.plants ?? [], since: d.since == null ? undefined : hhmm(d.since, tz), at: hhmm(d.at, tz),
       lasted: lasted(d.since, d.at) }, p.id, dayOf(d.at, tz));
     case "share_removed": return loginEvent({ kind: "share_removed", plants: d.plants ?? [] }, p.id);
+    case "plant_off_login": return loginEvent({ kind: "plant_off_login", plants: d.plants ?? [], login: d.login ?? undefined }, p.id);
     case "share_down": return loginEvent({ kind: "share_down", plants: d.plants ?? [], at: hhmm(d.since, tz) }, p.id, dayOf(d.since, tz));
     case "share_back": return loginEvent({ kind: "share_back", plants: d.plants ?? [], since: hhmm(d.since, tz), at: hhmm(d.at, tz),
       lasted: lasted(d.since, d.at) }, p.id, dayOf(d.at, tz));
@@ -719,6 +720,7 @@ async function renderAll(plantId: number, today?: string) {
   out["reconnect"] = loginEvent({ kind: "needs_relink", plants: [p.name, "Second plant"], at: hhmm(now - 1500, p.tz) }, p.id);
   out["reconnected"] = loginEvent({ kind: "relinked", plants: [p.name, "Second plant"], since: hhmm(now - 7500, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
   out["sharing-stopped"] = loginEvent({ kind: "share_removed", plants: [p.name] }, p.id);
+  out["plant-off-login"] = loginEvent({ kind: "plant_off_login", plants: [p.name], login: "you@example.com" }, p.id);
   out["share-no-readings"] = loginEvent({ kind: "share_down", plants: [p.name], at: hhmm(now - 1500, p.tz) }, p.id);
   out["share-readings-back"] = loginEvent({ kind: "share_back", plants: [p.name], since: hhmm(now - 7500, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
   // The free week's two emails (0122), from this plant's own day count; steps are a sample.

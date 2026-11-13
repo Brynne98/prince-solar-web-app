@@ -7,6 +7,13 @@
 \set QUIET on
 \set ON_ERROR_STOP on
 begin;
+-- Fixture links are ticked in link order while the plan has places (0197).
+create function pg_temp.tick() returns trigger language plpgsql as $$
+begin
+  if not new.paused then perform private.plant_pick_add(new.user_id, new.plant_id, new.plant_name); end if;
+  return new;
+end $$;
+create trigger a_test_tick before insert on public.plant_users for each row execute function pg_temp.tick();
 
 -- Never on a live database: email_sweep locks and steps every plant. A login that polled
 -- in the last hour means a poller is running here. A local poller only reads the mock
@@ -332,7 +339,7 @@ update private.plant_alert_state set last_dev = pg_temp.now_k(120), stale = fals
 insert into private.inverter_alert_state (plant_id, sn, last_dev) values (9006, '9006M', pg_temp.now_k(120)), (9006, '9006S', pg_temp.now_k(120))
   on conflict (plant_id, sn) do update set last_dev = excluded.last_dev, stale = false;
 select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000009006","role":"authenticated"}', true);
-select public.api_plant_start(9006);
+select public.api_plant_pick(array[9006]::bigint[]);
 select set_config('request.jwt.claims', '', true);
 select pg_temp.logins('ok', now(), now());
 select public.email_sweep();

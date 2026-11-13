@@ -66,6 +66,8 @@ async function build() {
       const addPlants = async (from, to) => {
         for (let k = from; k < to; k++) {
           const pid = 8100000 + S.n * 10 + k, [inv, st] = S.plants[k];
+          // a plant that runs is ticked first (0197)
+          if (st !== 'off') await db.exec(`insert into private.plant_picks (user_id, plant_id) values ('${id}', ${pid}) on conflict do nothing;`);
           await db.exec(`insert into public.plant_users (plant_id, user_id, account_id, plant_name, linked_at, paused)
             values (${pid}, '${id}', '${acc}', 'Sample ${S.n} plant ${k + 1}', timestamptz '2026-10-01 00:00:00+00' + interval '${k + 1} minutes', ${st === 'off'});`);
           for (let j = 0; j < inv; j++) await db.exec(`insert into private.inverters (sn, plant_id, account_id) values ('UISAMPLE-${pid}-${j}', ${pid}, '${acc}');`);
