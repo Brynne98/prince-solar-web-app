@@ -152,7 +152,7 @@ try {
 await ensureMock();
 // =================================================================== G1 inventory
 const ALLOW_AUTH = new Set(`_energy_row _erow _hm _plant_day_energy admin_overview api_account_delete api_alerts api_balance api_billing_change
-api_billing_extras api_billing_keep api_billing_quote api_billing_status billing_room api_data_days api_db_stats api_energy api_export api_grid_off_recent api_grid_today api_health
+api_billing_extras api_billing_keep api_billing_keep_set api_billing_quote api_billing_status billing_room api_data_days api_db_stats api_energy api_export api_grid_off_recent api_grid_today api_health
 api_history api_history_earliest api_inverter_history api_link_disconnect api_link_remove api_link_status api_me api_notifications
 api_notifications_read api_notices_read api_offer api_overview api_plant_change api_plant_days api_plant_pick api_plant_picks api_plant_states api_prefs_set api_push_sub
 api_push_unsub api_send_feedback api_string_health api_trends_by_hour api_trends_compare api_trends_daily calibration_plant cfg client_errors_cap
@@ -576,7 +576,9 @@ await attack("W4", "Free: login removed on day 3, relinked on day 8: the week is
 });
 await attack("W5", "shared plants: a claim starts the week once; a plant another account has can't be claimed", async () => {
   const owner = await user("g6k-owner"), a = await user("g6k"), b = await user("g6k-b");
-  const share = await svc("share_account_set", { p_user: owner.id, p_username: `share-${RUN}@mock`, p_access: "x", p_expires: 0 });
+  // only one share login may exist (0172): the local database's own, if it has one
+  const have = sql("select id from private.sunsynk_accounts where kind = 'share'");
+  const share = have ? { status: 200, data: have } : await svc("share_account_set", { p_user: owner.id, p_username: `share-${RUN}@mock`, p_access: "x", p_expires: 0 });
   if (!good(share)) throw new Error("share login: " + share.status);
   // plants nobody else has (the local seed users hold every mock plant); cleanup removes this range
   const claim = (u, plant) => svc("share_claim", { p_user: u.id, p_account: share.data, p_plant: plant, p_plant_name: "w5" });

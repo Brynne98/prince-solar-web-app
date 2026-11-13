@@ -273,6 +273,9 @@ select pg_temp.gap('strings: an input broken before it ever made power is report
   'by design since SOLAR-188: an input that never made 200 W is never checked');
 
 -- ---- No readings (logger_stale, email_sweep) --------------------------------------------
+-- The local database may be in a SunSynk outage left by an earlier run (email_system_state):
+-- email_sweep sends no No readings during one, nor for 15 minutes after. Start from none.
+update private.email_system_state set sunsynk_down = false, up_at = null, clear_since = null where id = 1;
 -- The inverters SunSynk lists for each plant (an inverter no longer listed is left alone).
 insert into private.inverters (sn, plant_id, account_id)
   select p || x, p, ('00000000-0000-0000-0000-0000000a' || p)::uuid from unnest(array[9001, 9006, 9007]) p, unnest(array['M', 'S']) x;
