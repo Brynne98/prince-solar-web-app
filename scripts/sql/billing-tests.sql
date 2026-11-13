@@ -1161,6 +1161,72 @@ begin
   perform pg_temp.eq('share claim: the plant week did not move',
     (select started_at < now() - interval '9 days' from private.plant_week where plant_id = 9000952), true);
 end $$;
+-- Both locks (Brynne 2026-11-14): one week per account and one per plant. Each user has
+-- two logins of one plant; Free has one place, so the second plant links locked and the
+-- owner's change (ready at once) puts it in.
+insert into auth.users (id, email) values
+  ('00000000-0000-0000-0000-000000000b01', 'k1@t.test'), ('00000000-0000-0000-0000-000000000b02', 'k2@t.test'),
+  ('00000000-0000-0000-0000-000000000b03', 'k3@t.test');
+insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values
+  ('00000000-0000-0000-0000-00000000bc11', '00000000-0000-0000-0000-000000000b01', 'k1a@login.test'),
+  ('00000000-0000-0000-0000-00000000bc12', '00000000-0000-0000-0000-000000000b01', 'k1b@login.test'),
+  ('00000000-0000-0000-0000-00000000bc21', '00000000-0000-0000-0000-000000000b02', 'k2a@login.test'),
+  ('00000000-0000-0000-0000-00000000bc22', '00000000-0000-0000-0000-000000000b02', 'k2b@login.test'),
+  ('00000000-0000-0000-0000-00000000bc31', '00000000-0000-0000-0000-000000000b03', 'k3a@login.test'),
+  ('00000000-0000-0000-0000-00000000bc32', '00000000-0000-0000-0000-000000000b03', 'k3b@login.test');
+insert into private.plant_week (plant_id, started_at) values (9000962, now() - interval '10 days');
+do $$
+declare
+  k1 uuid := '00000000-0000-0000-0000-000000000b01'; k2 uuid := '00000000-0000-0000-0000-000000000b02';
+  k3 uuid := '00000000-0000-0000-0000-000000000b03';
+  r bigint;
+begin
+  -- k1: day 3 of its own week, adds a plant that had its week: today only
+  perform public.plant_users_upsert(k1, '00000000-0000-0000-0000-00000000bc11', '[{"plant_id": 9000961, "plant_name": "First"}]');
+  update private.free_week_logins set started_at = now() - interval '3 days' where user_id = k1;
+  perform public.plant_users_upsert(k1, '00000000-0000-0000-0000-00000000bc12', '[{"plant_id": 9000962, "plant_name": "Used"}]');
+  perform set_config('request.jwt.claims', json_build_object('sub', k1, 'role', 'authenticated')::text, true);
+  perform public.api_plant_change(9000961, 9000962);
+  r := public.my_read_from(9000962);
+  perform set_config('request.jwt.claims', '', true);
+  perform pg_temp.eq('in its week + used plant: today only', r > 0, true);
+  perform pg_temp.eq('in its week + used plant: the plant week did not move',
+    (select started_at < now() - interval '9 days' from private.plant_week where plant_id = 9000962), true);
+  perform pg_temp.eq('in its week + used plant: the account keeps its own 4 days',
+    pg_temp.week_ends(k1) between now() + interval '3 days 23 hours' and now() + interval '4 days 1 hour', true);
+
+  -- k2: day 3 of its own week, adds a plant never linked: 7 days on that plant
+  perform public.plant_users_upsert(k2, '00000000-0000-0000-0000-00000000bc21', '[{"plant_id": 9000963, "plant_name": "First"}]');
+  update private.free_week_logins set started_at = now() - interval '3 days' where user_id = k2;
+  perform public.plant_users_upsert(k2, '00000000-0000-0000-0000-00000000bc22', '[{"plant_id": 9000964, "plant_name": "New"}]');
+  perform pg_temp.eq('in its week + new plant: the plant''s week starts',
+    (select started_at > now() - interval '1 minute' from private.plant_week where plant_id = 9000964), true);
+  perform set_config('request.jwt.claims', json_build_object('sub', k2, 'role', 'authenticated')::text, true);
+  perform public.api_plant_change(9000963, 9000964);
+  r := public.my_read_from(9000964);
+  perform set_config('request.jwt.claims', '', true);
+  perform pg_temp.eq('in its week + new plant: full history on it', r, 0::bigint);
+  perform pg_temp.eq('in its week + new plant: not trimmed, so the 60 days are fetched',
+    (select count(*)::int from public.free_trimmed_plants() x where x = 9000964), 0);
+
+  -- k3: its own week is over, adds a plant never linked: today only, and the plant keeps its week
+  perform public.plant_users_upsert(k3, '00000000-0000-0000-0000-00000000bc31', '[{"plant_id": 9000965, "plant_name": "First"}]');
+  update private.free_week_logins set started_at = now() - interval '10 days' where user_id = k3;
+  perform public.plant_users_upsert(k3, '00000000-0000-0000-0000-00000000bc32', '[{"plant_id": 9000966, "plant_name": "New"}]');
+  perform pg_temp.eq('past its week + new plant: the plant''s week is not started',
+    (select count(*)::int from private.plant_week where plant_id = 9000966), 0);
+  perform set_config('request.jwt.claims', json_build_object('sub', k3, 'role', 'authenticated')::text, true);
+  perform public.api_plant_change(9000965, 9000966);
+  r := public.my_read_from(9000966);
+  perform set_config('request.jwt.claims', '', true);
+  perform pg_temp.eq('past its week + new plant: today only', r > 0, true);
+  perform pg_temp.eq('past its week + new plant: no 60-day fetch (on the trim list)',
+    (select count(*)::int from public.free_trimmed_plants() x where x = 9000966), 1);
+  -- the hourly sync sends the list again: still no week
+  perform public.plant_users_upsert(k3, '00000000-0000-0000-0000-00000000bc32', '[{"plant_id": 9000966, "plant_name": "New"}]');
+  perform pg_temp.eq('past its week + new plant: a sync starts none either',
+    (select count(*)::int from private.plant_week where plant_id = 9000966), 0);
+end $$;
 -- every reader that skips the row rules runs for both, and the day count holds the limit
 do $$
 declare

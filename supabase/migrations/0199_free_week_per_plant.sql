@@ -11,9 +11,12 @@
 -- Now:
 --   - private.plant_week: one row per plant, the time its week started. No account,
 --     name or login. It stays after an account delete.
---   - A link by a Free account starts the week of each plant that has none
---     (plant_users_upsert, so a password link, the hourly sync and a share claim).
---     A plant only paid accounts ever linked has no week yet.
+--   - Two locks, and both must hold: one week per account (0121) and one per plant.
+--     A link by a Free account that has no week yet, or is inside its own 7 days,
+--     starts the week of each plant that has none (plant_users_upsert, so a password
+--     link, the hourly sync and a share claim). An account past its own week starts
+--     none: a plant it adds shows today only. A plant only paid accounts ever linked
+--     has no week yet.
 --   - The account's own row (private.free_week_logins) is written in the same call,
 --     for every account. It starts at the earliest week among the plants of the
 --     account's first link: a join on day 3 has 4 days left; a plant whose week is
@@ -199,7 +202,12 @@ begin
     set account_id = excluded.account_id, plant_name = excluded.plant_name;
 
   if cardinality(fresh) > 0 then
-    if coalesce((select plan from private.billing where user_id = p_user), 'free') = 'free' then
+    -- Both locks: the account's own week must be open too, so not started yet (its
+    -- first link) or inside its 7 days. Past it, a new plant shows today only and
+    -- keeps its week for an account that has one.
+    if coalesce((select plan from private.billing where user_id = p_user), 'free') = 'free'
+       and coalesce((select f.started_at > now() - interval '7 days'
+                       from private.free_week_logins f where f.user_id = p_user), true) then
       insert into private.plant_week (plant_id) select x from unnest(fresh) x
       on conflict (plant_id) do nothing;
     end if;
