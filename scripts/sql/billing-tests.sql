@@ -1334,6 +1334,54 @@ end $$;
 
 select pg_temp.eq('keep set is for signed-in users', has_function_privilege('anon', 'public.api_billing_keep_set(bigint[])', 'execute'), false);
 
+-- Two stores with a cap (0201, SOLAR-549). n = free week over 8 days ago: one notice.
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-00000000e549', 'cap549@t.test');
+insert into private.free_week_logins (sunsynk_username, user_id, started_at)
+  values ('n-549', '00000000-0000-0000-0000-00000000e549', now() - interval '8 days');
+do $$
+declare n uuid := '00000000-0000-0000-0000-00000000e549'; real text; small jsonb;
+begin
+  perform set_config('request.jwt.claims', json_build_object('sub', n, 'role', 'authenticated')::text, true);
+  real := public.api_notifications()->'pinned'->0->>'key';
+  perform pg_temp.eq('notice read: the account has one notice', jsonb_array_length(public.api_notifications()->'pinned'), 1);
+  perform public.api_notices_read(array['made-up', 'free_week_ended:' || md5('x'), repeat('k', 1000)]);
+  perform pg_temp.eq('notice read: a made-up key is not stored', (select count(*)::int from private.notice_reads where user_id = n), 0);
+  perform public.api_notices_read((select array_agg('junk-' || g) from generate_series(1, 20000) g));
+  perform pg_temp.eq('notice read: 20,000 keys store none', (select count(*)::int from private.notice_reads where user_id = n), 0);
+  perform public.api_notices_read((select array_agg('junk-' || g) || real from generate_series(1, 20000) g));
+  perform pg_temp.eq('notice read: 20,000 keys and the real one store the real one',
+    (select array_agg(key) from private.notice_reads where user_id = n), array[real]);
+  perform pg_temp.eq('notice read: the notice reads as read', (public.api_notifications()->'pinned'->0->>'read')::boolean, true);
+  delete from private.notice_reads where user_id = n;
+  perform public.api_notices_read(array[real]);
+  perform pg_temp.eq('notice read: a real key is stored', (select count(*)::int from private.notice_reads where user_id = n), 1);
+  delete from private.notice_reads where user_id = n;
+  perform public.api_notifications_read(null);
+  perform pg_temp.eq('notice read: Mark all read stores it', (select count(*)::int from private.notice_reads where user_id = n), 1);
+
+  -- prefs: the app's largest write is firstSteps, about 100 bytes a plant
+  small := jsonb_build_object('lastPlant', 9000961, 'freeWeekOverSeen', true, 'firstSteps',
+    (select jsonb_object_agg(9000000 + g, jsonb_build_object('at', now(), 'done', true, 'hidden', true, 'reserve', true))
+       from generate_series(1, 20) g));
+  perform pg_temp.eq('prefs: a normal write passes', public.api_prefs_set(small) ? 'firstSteps', true);
+  perform pg_temp.eq('prefs: 20 plants of steps stay under 3,000 bytes',
+    (select octet_length(prefs::text) < 3000 from public.profiles where user_id = n), true);
+  perform pg_temp.raises('prefs: 5 MB is refused',
+    format('select public.api_prefs_set(jsonb_build_object(''x'', repeat(''a'', 5000000)))'), 'profiles_prefs_size');
+  perform pg_temp.raises('prefs: 5 MB by a table write is refused',
+    format('update public.profiles set prefs = jsonb_build_object(''x'', repeat(''a'', 5000000)) where user_id = %L', n), 'profiles_prefs_size');
+  perform pg_temp.raises('prefs: 21,000 bytes is refused',
+    format('select public.api_prefs_set(jsonb_build_object(''x'', repeat(''a'', 21000)))'), 'profiles_prefs_size');
+  perform pg_temp.eq('prefs: 17,000 bytes more passes', public.api_prefs_set(jsonb_build_object('x', repeat('a', 17000))) ? 'x', true);
+  perform pg_temp.eq('prefs: the row keeps its last good value',
+    (select prefs ? 'lastPlant' from public.profiles where user_id = n), true);
+  perform set_config('request.jwt.claims', '', true);
+  -- rows from before the rule: each one fits, and saves again
+  perform pg_temp.eq('prefs: no row in the database is over the limit',
+    (select count(*)::int from public.profiles where octet_length(prefs::text) > 20000), 0);
+  update public.profiles set prefs = prefs || '{"lastPlant": 1}' where user_id <> n;
+end $$;
+
 \set QUIET off
 do $$ begin
   if exists (select 1 from pg_temp.fails) then
