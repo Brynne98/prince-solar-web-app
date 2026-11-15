@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0202 — the free week: every plant of one login runs, up to 5; the week starts
+-- 0203 — the free week: every plant of one login runs, up to 5; the week starts
 --        only for plants that run (SOLAR-552, decided by Brynne 2026-11-15).
 --
 -- Before: an unpaid account had one place. A login with several plants linked them

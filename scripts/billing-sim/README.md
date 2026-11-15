@@ -9,7 +9,7 @@ Local database only (`SIM_DB_URL` to change; default is the local Supabase on 55
 - `--regress` runs only the fixed cases: every bug found so far (F1–F11, P1, P3, G-cases). They open charges with named
   arguments, so they also run against older code, where they fail.
 - `--only H --trace` replays one household with every step printed.
-- `oracle.mjs` is the price oracle, written from the rules text (headers of 0110, 0127, 0136, 0138, 0139, 0155, 0156, 0197, 0198, 0200, 0202, 0204), not from the SQL.
+- `oracle.mjs` is the price oracle, written from the rules text (headers of 0110, 0127, 0136, 0138, 0139, 0155, 0156, 0197, 0198, 0200, 0203, 0205), not from the SQL.
 - `abuse.mjs [--seed N] [ids]` attacks as signed-in users through the REST API and link-sunsynk, with the mock SunSynk server.
   The C attacks fire many requests at once, in an order set by the seed.
 - `node scripts/billing-sim/samples.mjs` builds 14 committed `ui-sample-N@sim.test` users at real today and writes

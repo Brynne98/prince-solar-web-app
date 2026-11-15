@@ -115,7 +115,7 @@ const LINK_ERRORS = {
   'sign in first': 'Your session ended. Sign in again.',
   'session invalid': 'Your session ended. Sign in again.',
   'too many attempts': 'Too many tries. Try again in an hour.',
-  // one SunSynk login with no plan (0202)
+  // one SunSynk login with no plan (0203)
   'one login': 'The free week runs one SunSynk login. Choose a plan to add another.',
 };
 

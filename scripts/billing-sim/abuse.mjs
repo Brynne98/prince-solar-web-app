@@ -90,12 +90,12 @@ async function pay(u, body = {}) {
 // A plan's price at the offer a charge was opened with (0145: the launch offer charges less).
 const priceAt = (ref, plan, period, extras = 0) => num(`select public.billing_amount('${plan}', '${period}', ${extras},
   (select offer_id from private.billing_charges where reference = '${ref}'))`);
-// 0199, 0203: the account's week and the week of each of its plants are over
+// 0199, 0204: the account's week and the week of each of its plants are over
 const weekOver = (u) => sql(`update private.plant_week set started_at = now() - interval '8 days'
   where plant_id in (select plant_id from public.plant_users where user_id='${u.id}') and started_at > now() - interval '8 days';
   update private.free_week_logins set started_at = now() - interval '8 days' where user_id='${u.id}' and started_at > now() - interval '8 days'`);
 const firstPlant = (u) => num(`select min(plant_id) from public.plant_users where user_id='${u.id}' and not paused`);
-// how many of its plants the user may read (0203's one rule)
+// how many of its plants the user may read (0204's one rule)
 const reads = async (u) => { const r = await rpc(u, "my_plant_ids"); if (!good(r)) throw new Error("my_plant_ids " + r.status); return r.data.length; };
 const weekEnds = async (u) => { const m = await rpc(u, "api_me"); return m.data?.freeWeekEndsAt ? Date.parse(m.data.freeWeekEndsAt) : null; };
 const logins = (u) => num(`select count(*) from private.sunsynk_accounts where user_id='${u.id}' and kind='login'`);
@@ -244,7 +244,7 @@ await attack("G2b", "plant_config of a plant I do not collect (not mine, or stop
   const a = await user("g2b"); const bad = [];
   const r1 = await rest(a, "PATCH", "plant_config?plant_id=eq.6004", { backfill_tries: 0 });   // not linked
   if (rows(r1) > 0) bad.push("unlinked plant");
-  await link(a, "installer@mock"); lock(a, 6004);        // 6004 runs with the login's other plants (0202): lock it
+  await link(a, "installer@mock"); lock(a, 6004);        // 6004 runs with the login's other plants (0203): lock it
   const r2 = await rest(a, "PATCH", "plant_config?plant_id=eq.6004", { backfill_tries: 0 });
   if (rows(r2) > 0) bad.push("own paused plant");
   const r3 = await rest(a, "GET", "plant_config?plant_id=eq.6004");
@@ -271,7 +271,7 @@ await attack("G3a", "tick, change or keep another user's plant", async () => {
 });
 await attack("G3b", "run a plant past the plan with no payment (no plan, Home, Family)", async () => {
   const bad = [];
-  const f = await user("g3f"); await link(f, "installer@mock");                      // no plan: the login's 5 plants all run (0202)
+  const f = await user("g3f"); await link(f, "installer@mock");                      // no plan: the login's 5 plants all run (0203)
   if (active(f) !== 5) bad.push("no plan: the login's 5 plants did not all start: " + active(f));
   if (good(await link(f, "farm@mock")) || logins(f) !== 1) bad.push("no plan: a second login");
   const h = await home("g3h"); await link(h, "installer@mock"); await fill(h, 2);
@@ -581,7 +581,7 @@ await attack("W2", "no plan: removing the login and linking it again does not re
   if (!good(s) || !good(g)) throw new Error(`remove ${s.status}, link ${g.status}`);
   return { hit: t0 !== t1, note: "week start kept: " + (t0 === t1) };
 });
-await attack("W3", "no plan: a second and third login are refused, and do not add or restart a week (0202)", async () => {
+await attack("W3", "no plan: a second and third login are refused, and do not add or restart a week (0203)", async () => {
   const a = await user("g6i"); await link(a, "solo@mock"); backdate(a, 3);
   const t0 = weekStart(a);
   const l2 = await link(a, "flat@mock", { confirmCost: true }), l3 = await link(a, "farm@mock", { confirmCost: true });
@@ -628,7 +628,7 @@ await attack("W7", "no plan, week over, beside a paid account on one plant: read
   if (paid !== 1 || rows(paidRow) !== 1) throw new Error(`the paid account does not read its plant: ${paid} plants, ${rows(paidRow)} rows`);
   return { hit: n > 0 || rows(row) > 0 || good(exp) || !me.data?.wall, note: `no plan reads ${n} plants, ${rows(row)} rows, export ${exp.status}, pay screen ${!!me.data?.wall}; paid reads its plant` };
 });
-await attack("W9", "no plan: keep a plant at a plan's start that is another account's, or keep while on a plan (0204)", async () => {
+await attack("W9", "no plan: keep a plant at a plan's start that is another account's, or keep while on a plan (0205)", async () => {
   const a = await user("w9a"), h = await home("w9h"), bad = [];
   await link(a, "installer@mock"); await link(h, "solo@mock");
   if (!good(await rpc(a, "api_billing_start_keep", { p_plants: [firstPlant(a)] }))) bad.push("its own running plant refused");

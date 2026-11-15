@@ -53,7 +53,7 @@ serve("link-sunsynk", async (req) => {
   }
   if (!allowed) return json({ error: "too many attempts" }, 429, { ...cors, "Retry-After": "3600" });
 
-  // One SunSynk login for an account with no plan (0202). Asked before SunSynk is.
+  // One SunSynk login for an account with no plan (0203). Asked before SunSynk is.
   const { data: oneLogin, error: oneErr } = await db.rpc("link_login_allowed", { p_user: userId, p_username: username });
   if (!oneErr && oneLogin === false) return json({ error: "one login" }, 409, cors);
 

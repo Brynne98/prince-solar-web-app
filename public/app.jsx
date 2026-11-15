@@ -1374,7 +1374,7 @@ function useUser() {
 // what will appear there (the same card, one size, on each page). Add plant, there or
 // in the header, opens that card into the form where it stands; Cancel or Esc folds it back
 // (SOLAR-96). Once a login lists a plant the gate's refresh swaps this for App (SOLAR-93, SOLAR-94).
-// wall: api_me's wall (0203). No plan and the free week or the paid time is over: every
+// wall: api_me's wall (0204). No plan and the free week or the paid time is over: every
 // page is the outline with one card that opens the plans (SOLAR-552). Account and Billing work.
 function Setup({ links, wall }) {
   const user = useUser();
@@ -1934,7 +1934,7 @@ const loadPages = () => pagesLoad || (pagesLoad = Promise.all(
 function SignedIn() {
   const [pages, setPages] = useState('loading'); // loading | ready | failed
   useEffect(() => { loadPages().then(() => setPages('ready'), () => setPages('failed')); }, []);
-  // api_me's wall (0203), read before the first screen: undefined until it answers, null for
+  // api_me's wall (0204), read before the first screen: undefined until it answers, null for
   // none. A payment reloads the page (billingReturn), so it is read again then.
   const [wall, setWall] = useState(undefined);
   useEffect(() => { window.fetchMe().then(m => setWall(m.wall || null), () => setWall(null)); }, []);

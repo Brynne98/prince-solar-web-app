@@ -10,7 +10,7 @@ export const PLAN_RANK = { free: 0, home: 1, family: 2 };
 // those already held keep their price.
 const BASE = { home: { monthly: 99, yearly: 990 }, family: { monthly: 199, yearly: 1990 } };
 const EXTRA = { monthly: 49, yearly: 588 }; // per extra plant held, per period
-// plants a plan runs; no plan: the free week's 5 (0202)
+// plants a plan runs; no plan: the free week's 5 (0203)
 export const cover = (plan, extra = 0) => (plan === 'family' ? 5 + extra : plan === 'home' ? 2 : 5);
 
 export function price(plan, period, extra = 0) {
@@ -212,7 +212,7 @@ export class Oracle {
   }
   // One ticked plant out, one locked plant in; one per 90 days (0197).
   change(out, into, today) {
-    if (this.plan === 'free') return { err: 'no change without a plan' };   // the free week's ticks are fixed (0202)
+    if (this.plan === 'free') return { err: 'no change without a plan' };   // the free week's ticks are fixed (0203)
     if (this.state === 'past_due') return { err: 'pay the failed payment first' };   // 0198
     if (this.changedOn !== null && dayNo(today) - dayNo(this.changedOn) < 90) return { err: 'next change' };
     if (out === into || !this.ticks.has(out)) return { err: 'not picked' };
@@ -331,7 +331,7 @@ export class Oracle {
     const room = c.kind === 'upgrade' && this.plan === c.plan && c.added > 0;
     this.extra = c.extraTotal; this.nextExtra = null;
     // a first plan with fewer places than plants running: the plants over it are locked, the pick first,
-    // then the first linked (0204's billing_restart)
+    // then the first linked (0205's billing_restart)
     if (c.kind === 'start') {
       this.active().sort((a, b) => this.byPick(a, b)).slice(cover(this.plan, this.held())).forEach((p) => this.lock(p));
       this.nextKeep = [];

@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0203 — no Free plan after the free week: an account with no plan reads nothing
+-- 0204 — no Free plan after the free week: an account with no plan reads nothing
 --        (SOLAR-552, decided by Brynne 2026-11-15).
 --
 -- Before (0199): an account with no plan read a plant in full while the plant's
@@ -180,19 +180,21 @@ $$;
 revoke all on function public.api_me() from public, anon;
 grant execute on function public.api_me() to authenticated, service_role;
 
--- 0101's api_plant_states, for the plants the caller may read.
-CREATE OR REPLACE FUNCTION public.api_plant_states()
- RETURNS jsonb
- LANGUAGE plpgsql
- STABLE SECURITY DEFINER
- SET search_path TO 'public', 'private', 'pg_temp'
-AS $function$
+-- 0202's api_plant_states (SOLAR-555), for the plants the caller may read.
+create or replace function public.api_plant_states()
+returns jsonb
+language plpgsql
+stable security definer
+set search_path = public, private, pg_temp
+as $$
 declare
   -- a variable, not now() in the query, so the planner cuts to the last 2 days
   v_floor bigint := extract(epoch from now())::bigint - 2 * 86400;
   v_out   jsonb := '[]'::jsonb;
   p       record;
   v_ts    bigint;
+  v_lo    bigint;
+  v_from  bigint;
   v_total int;
   v_on    int;
   v_sync  jsonb;
@@ -204,9 +206,18 @@ begin
     if v_ts is null then
       select max(ts) into v_ts from public.readings where plant_id = p.plant_id;
     end if;
-    select count(*), count(*) filter (where rd.status::text in ('1', 'online', 'true'))
+    -- known inverters with a row in the last 2 days, or on v_ts's day when that is older
+    -- (SOLAR-555); online = in the newest minute and flagged online. One sn_ts probe per
+    -- inverter.
+    v_lo := public.day_start_epoch_tz((to_timestamp(v_ts) at time zone public.plant_tz(p.plant_id))::date, public.plant_tz(p.plant_id));
+    v_from := least(v_floor, v_lo);
+    select count(*), count(*) filter (where x.ts = v_ts and x.status::text in ('1', 'online', 'true'))
       into v_total, v_on
-      from public.readings rd where rd.plant_id = p.plant_id and rd.ts = v_ts;
+      from private.inverters i
+      cross join lateral (select rd.ts, rd.status from public.readings rd
+                           where rd.sn = i.sn and rd.plant_id = p.plant_id and rd.ts >= v_from and rd.ts <= v_ts
+                           order by rd.ts desc limit 1) x
+     where i.plant_id = p.plant_id;
 
     select jsonb_build_object(
              'pending', s.spine or s.inv, 'spinePending', s.spine, 'invPending', s.inv,
@@ -235,7 +246,7 @@ begin
       'id', p.plant_id, 'lastTs', v_ts, 'inverters', v_total, 'online', v_on, 'sync', v_sync));
   end loop;
   return v_out;
-end $function$;
+end $$;
 
 -- 0173's api_notifications, for the plants the caller may read.
 CREATE OR REPLACE FUNCTION public.api_notifications()
@@ -274,7 +285,7 @@ CREATE OR REPLACE FUNCTION public.api_alerts(p_from timestamp with time zone DEF
  SET search_path TO ''
 AS $function$
   with a as (
-    -- every alert the user can still see: plants still linked, and readable (0203)
+    -- every alert the user can still see: plants still linked, and readable (0204)
     select q.id, q.kind, q.key, q.plant_id, pu.plant_name, q.read_at, q.created_at, q.data
       from public.email_queue q
       join public.plant_users pu on pu.user_id = q.user_id and pu.plant_id = q.plant_id
@@ -318,6 +329,7 @@ $function$;
 -- The ten readers of 0199, each without its my_read_from limit: the bodies they
 -- had before 0199. my_plant (or the row rules, for the two that run as the
 -- caller) decides the plant.
+-- api_trends_compare is 0202's body (SOLAR-555), also without the limit.
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.q_day_agg(p_plant bigint, p_day date, p_source text DEFAULT NULL::text)
@@ -860,10 +872,17 @@ as $fn$
            lateral (select public.day_start_epoch_tz(p.prev, (select tz from tz)) as lo) x
      where p.prev is not null
   ),
-  -- each inverter in today's poll: its last good reading on the matching day at or
+  -- each known inverter with a row in the last 2 days (SOLAR-555; was: those in today's
+  -- latest poll, which drops one the poller left out): its last good reading on the matching day at or
   -- before the moment, from readings, else the 5-minute history (counters as at the
   -- bucket's end). One index probe per inverter per pair.
-  inv as (select r.sn from public.readings r, latest where r.plant_id = (select id from pl) and r.ts = latest.ts),
+  inv as (
+    select i.sn from private.inverters i
+     where i.plant_id = (select id from pl)
+       and exists (select 1 from public.readings r
+                    where r.sn = i.sn and r.plant_id = i.plant_id
+                      and r.ts > extract(epoch from now())::bigint - 2 * 86400 and r.ts <= (select ts from latest))
+  ),
   per as (
     select tc.k, i.sn,
            coalesce(x.pv, y.pv) as pv, coalesce(x.load, y.load) as load, coalesce(x.imp, y.imp) as imp,

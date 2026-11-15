@@ -68,7 +68,7 @@ $$;
 -- One owner and login per plant: a locked plant gets no email. Users first: plant_row_guard drops rows of an ownerless plant.
 insert into auth.users (id, email)
   select ('00000000-0000-0000-0000-00000000' || p)::uuid, p || '@t.test' from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
--- On a plan: a plant nobody pays for gets no alert (0205).
+-- On a plan: a plant nobody pays for gets no alert (0206).
 insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
   select ('00000000-0000-0000-0000-00000000' || p)::uuid, 'home', 'monthly', 1, current_date + 20 from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
 insert into private.sunsynk_accounts (id, user_id, sunsynk_username, last_try, last_try_at)

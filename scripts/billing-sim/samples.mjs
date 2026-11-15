@@ -44,7 +44,7 @@ const SAMPLES = [
   { n: 11, kind: 'Family yearly, 1 extra plant held from before 0156', plan: 'family', period: 'yearly', plants: [[1, 'on'], [1, 'on'], [1, 'on'], [2, 'on'], [1, 'on'], [2, 'on']], heldExtras: 1 },
   { n: 12, kind: 'Comped Family', plan: 'family', comped: true, plants: [[1, 'on'], [2, 'on'], [1, 'on'], [3, 'on']] },
   { n: 13, kind: 'Home monthly, switch to yearly paid, starts on its date', plan: 'home', period: 'monthly', plants: [[1, 'on']], switchPaid: true },
-  // weekOver: the free week ended 3 days ago, so the app shows the pay screen (0203)
+  // weekOver: the free week ended 3 days ago, so the app shows the pay screen (0204)
   { n: 14, kind: 'No plan, free week over (pay screen)', plan: 'free', plants: [[1, 'on'], [1, 'on'], [2, 'on']], weekOver: true },
 ];
 
@@ -80,7 +80,7 @@ async function build() {
         await addPlants(0, S.plants.length);
       } else if (S.plan === 'free') {
         await addPlants(0, S.plants.length);
-        await db.exec(`select private.week_start('${id}', array[${S.plants.map((_, k) => 8100000 + S.n * 10 + k).join(',')}]::bigint[]);`);   // as plant_users_upsert does (0202)
+        await db.exec(`select private.week_start('${id}', array[${S.plants.map((_, k) => 8100000 + S.n * 10 + k).join(',')}]::bigint[]);`);   // as plant_users_upsert does (0203)
         if (S.weekOver) await db.exec(`update private.free_week_logins set started_at = now() - interval '10 days' where user_id = '${id}';
           update private.plant_week set started_at = now() - interval '10 days' where plant_id between ${8100000 + S.n * 10} and ${8100000 + S.n * 10 + 9};`);
       } else {

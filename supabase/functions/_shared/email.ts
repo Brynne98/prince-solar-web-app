@@ -1079,7 +1079,7 @@ export const movedToFree = (m: MovedToFree) => {
 };
 
 // Once, when a cancelled plan ends on its date (SOLAR-328, 0144). History is deleted 30
-// days later (SOLAR-552, 0205). days: history the first plant held, counted when queued.
+// days later (SOLAR-552, 0206). days: history the first plant held, counted when queued.
 export const winback = (w: { from: Plan; plant?: string; days?: number; price?: Price; deleteOn?: string }) =>
   make(`Your ${PLAN_NAME[w.from]} plan has ended`, {
     title: `Your ${PLAN_NAME[w.from]} plan has ended`,
@@ -1151,7 +1151,7 @@ export const freeWeekEndsSoon = (endsOn: string, plant: string, days: number, pr
   });
 };
 
-// An account with no plan (SOLAR-552, 0205): 14 days after its free week or its paid time
+// An account with no plan (SOLAR-552, 0206): 14 days after its free week or its paid time
 // ended, and again 3 days before the history is deleted. since: the day the reading
 // stopped. price: the plan that holds the plants it ticked. unsub: the page that turns
 // these two emails off.

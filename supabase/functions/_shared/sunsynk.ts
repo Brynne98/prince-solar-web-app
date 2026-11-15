@@ -555,7 +555,7 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
     }));
   if (rows.length) await rpc("plant_config_seed", { p_rows: rows });
   const activeRows = rows.filter((r) => !r.paused);
-  // A plant that is not read (0204: no plan, the free week over): recover never walks
+  // A plant that is not read (0205: no plan, the free week over): recover never walks
   // it back, so drop the 60-day bookmarks now rather than show "Fetching history".
   if (activeRows.length) {
     const live = await livePlants();
@@ -643,13 +643,13 @@ export type PlantJob = {
   account: Account;
 };
 
-/** Every plant that is read, each through one login: poll_jobs as one shard (0204). */
+/** Every plant that is read, each through one login: poll_jobs as one shard (0205). */
 export const plantsToPoll = (): Promise<PlantJob[]> => pollJobs(0, 1);
 
 /**
  * One poll shard's jobs (0100). The database picks the plants and each plant's login
  * (the earliest-linked working login of an account that has a plan or is in its free
- * week, 0204), and the shard filter runs there, so a shard reads only its own accounts.
+ * week, 0205), and the shard filter runs there, so a shard reads only its own accounts.
  * account set = only plants read through that account, whatever the shard.
  */
 export async function pollJobs(shard: number, shards: number, account?: string): Promise<PlantJob[]> {
@@ -683,7 +683,7 @@ export async function pollJobs(shard: number, shards: number, account?: string):
  * could starve run after run (READINESS P3). The id of the last plant a run
  * finished is kept in app_config under `key`; the next run starts after it.
  */
-/** The plants that are read (0204): an account that runs the plant has a plan or is in its free week. */
+/** The plants that are read (0205): an account that runs the plant has a plan or is in its free week. */
 export async function livePlants(): Promise<Set<number>> {
   const ids = await rpc<number[]>("live_plants", {});
   return new Set((ids ?? []).map(Number));

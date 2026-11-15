@@ -2348,7 +2348,7 @@ function DowngradeDialog({ b, plan, period, price, links, busy, onConfirm, onCan
 }
 
 // Starting a plan with fewer places than plants running (the free week runs 5, Home 2;
-// SOLAR-552): which stay. The others are locked and lose their history (0204).
+// SOLAR-552): which stay. The others are locked and lose their history (0205).
 // onConfirm(keep): the plants ticked.
 function StartPickDialog({ plan, links, busy, onConfirm, onCancel }) {
   const room = planRoom(plan);
@@ -2846,7 +2846,7 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
     setSay(null);
     if (!on.includes(id)) return on.length >= room ? (setWant(id), setSay('full')) : setOn([...on, id]);
     if (!was.includes(id)) return setOn(on.filter(x => x !== id));
-    if (plan === 'free') return setSay('fixed'); // the free week's plants stay as chosen (0202)
+    if (plan === 'free') return setSay('fixed'); // the free week's plants stay as chosen (0203)
     if (picks.change_on) return setSay('date');
     if (out.length) return setSay('one');
     setOn(on.filter(x => x !== id));

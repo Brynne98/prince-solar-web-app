@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0204 — a plant nobody pays for is not read, and its data goes 30 days later
+-- 0205 — a plant nobody pays for is not read, and its data goes 30 days later
 --        (SOLAR-552, decided by Brynne 2026-11-15).
 --
 -- Before: a plant of an account with no plan was read every minute for good, and
@@ -7,12 +7,12 @@
 --
 -- Now:
 --   - public.live_plants: the plants read. A plant is read when an account that
---     runs it has a plan or is in its free week on that plant (plant_live, 0203).
+--     runs it has a plan or is in its free week on that plant (plant_live, 0204).
 --     poll_jobs and plantsToPoll (sunsynk.ts) go by it, so the minute poll, recover
 --     and the day totals all stop at day 7. An account in a failed card's 30 days
 --     reads its history; the plant is not read for it.
 --   - private.unpaid_delete, hourly: a plant's readings are deleted when every
---     account that runs it has had no plan for 30 days (unpaid_since, 0203): day 37
+--     account that runs it has had no plan for 30 days (unpaid_since, 0204): day 37
 --     from the link, or 30 days after the paid time ended. A cancel no longer
 --     deletes on its end date (0188). The link, the settings and the ticks stay.
 --   - Paying starts the reading again and fetches the last 60 days
@@ -21,7 +21,7 @@
 --     free-trim job) and the "free week ended" notice (the pay screen says it).
 --
 -- Existing accounts with no plan, past their week: counted from this migration,
--- so nothing is deleted at deploy and the two emails (0205) go on day 14 and 27.
+-- so nothing is deleted at deploy and the two emails (0206) go on day 14 and 27.
 -- ============================================================================
 
 insert into private.billing (user_id, ended_at)

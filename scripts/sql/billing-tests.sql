@@ -300,7 +300,7 @@ begin
   perform pg_temp.eq('api_me free', public.api_me()->>'plan', 'free');
 end $$;
 
--- No plan after the free week (0203, 0204): the plant is not read, and its readings go 30 days after the week ends
+-- No plan after the free week (0204, 0205): the plant is not read, and its readings go 30 days after the week ends
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-000000000061', 't1@t.test'), ('00000000-0000-0000-0000-000000000062', 't2@t.test'),
   ('00000000-0000-0000-0000-000000000063', 't3@t.test'), ('00000000-0000-0000-0000-000000000064', 't4@t.test'),
@@ -469,7 +469,7 @@ begin
   perform pg_temp.eq('free in its week: no report', (select count(*)::int from public.email_queue where key = 'test:free-week-report'), 0);
   perform pg_temp.eq('free: alerts go', (select count(*)::int from public.email_queue where key = 'test:free-alert'), 1);
   perform pg_temp.eq('paid: reports go', (select count(*)::int from public.email_queue where key = 'test:paid-report'), 1);
-  perform pg_temp.eq('no plan and no week on record: no report either (0205)',
+  perform pg_temp.eq('no plan and no week on record: no report either (0206)',
     (select count(*)::int from public.email_queue where key = 'test:old-free-report'), 0);
   perform private.free_week_mail();
   perform pg_temp.eq('day 5 heads-up queued', (select count(*)::int from public.email_queue
@@ -540,7 +540,7 @@ begin
   perform set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}', true);
   perform pg_temp.eq('api_me: paid has none', public.api_me()->'freeWeekEndsAt', 'null'::jsonb);
   perform set_config('request.jwt.claims', '', true);
-  -- paying fetches the 60 days of a plant that was not read (0204)
+  -- paying fetches the 60 days of a plant that was not read (0205)
   update public.plant_config set backfill_next = null, backfill_until = null where plant_id in (9000073, 9000074);
   insert into private.billing (user_id, plan) values ('00000000-0000-0000-0000-000000000074', 'free');
   perform pg_temp.eq('free row: no refill', (select backfill_next from public.plant_config where plant_id = 9000074), null::date);
@@ -587,7 +587,7 @@ begin
   perform pg_temp.eq('card saved', (select card->>'authorization_code' from private.billing where user_id = s), 'AUTH_t1');
   perform pg_temp.eq('one upgrade email', (select count(*)::int from public.email_queue where user_id = s and kind = 'bill_upgraded'), 1);
   perform pg_temp.eq('card label', (select data->>'card' from public.email_queue where user_id = s and kind = 'bill_upgraded'), 'Visa •••• 4081');
-  -- Home has 2 places: the plant over it is locked, the first linked kept (0204)
+  -- Home has 2 places: the plant over it is locked, the first linked kept (0205)
   perform pg_temp.eq('Home paid: the third plant is locked', (select string_agg(plant_id::text, ',') from public.plant_users where user_id = s and paused), '9000094');
   perform pg_temp.eq('Home paid: it keeps its tick without its place', (select held from private.plant_picks where user_id = s and plant_id = 9000094), false);
   perform pg_temp.eq('Home paid: its history is booked to go', (select count(*)::int from private.plant_wipe where plant_id = 9000094), 1);
@@ -809,7 +809,7 @@ begin
   select * into b from private.billing where user_id = '00000000-0000-0000-0000-0000000000e5';
   perform pg_temp.eq('the unticked plant stops', private.billing_drops(b), '{9000501,9000503}'::bigint[]);
   perform pg_temp.eq('no email for a pick', (select count(*)::int from public.email_queue where user_id = '00000000-0000-0000-0000-0000000000e5' and kind = 'bill_change'), 1);
-  -- a cancel stops no plant: nothing is read after it, and the history goes 30 days on (0204)
+  -- a cancel stops no plant: nothing is read after it, and the history goes 30 days on (0205)
   perform public.api_billing_change('free');
   select * into b from private.billing where user_id = '00000000-0000-0000-0000-0000000000e5';
   perform pg_temp.eq('cancel drops no plant', private.billing_drops(b), '{}'::bigint[]);
@@ -1044,7 +1044,7 @@ select pg_temp.eq('change is for signed-in users', has_function_privilege('anon'
 select pg_temp.eq('ticks table closed', has_table_privilege('authenticated', 'private.plant_picks', 'select'), false);
 
 -- ---------------------------------------------------------------------------
--- No Free plan after the free week (0202 to 0205, SOLAR-552). Links go through
+-- No Free plan after the free week (0203 to 0206, SOLAR-552). Links go through
 -- plant_users_upsert, as link-sunsynk and the hourly sync call it.
 -- ---------------------------------------------------------------------------
 insert into auth.users (id, email) select ('00000000-0000-0000-0000-000000000a0' || i)::uuid, 'w' || i || '@t.test' from generate_series(1, 8) i;
@@ -1171,7 +1171,7 @@ begin
     where plant_id between 9007701 and 9007703 and backfill_next = (now() at time zone 'Africa/Johannesburg')::date - 60), 3);
   perform pg_temp.eq('paid: the other account on the plant still reads nothing', pg_temp.as_user(w3, 'select count(*) from public.my_plant_ids()'), '0');
 
-  -- a first plan with fewer places than plants running: the ticked ones stay (0204)
+  -- a first plan with fewer places than plants running: the ticked ones stay (0205)
   perform pg_temp.eq('start keep: another account''s plant refused',
     pg_temp.as_user(w2, 'select public.api_billing_start_keep(array[9007701])'), 'REFUSED: a plant is not running for this user');
   perform pg_temp.as_user(w2, 'select public.api_billing_start_keep(array[9007714, 9007715])');

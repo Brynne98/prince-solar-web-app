@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0205 — no alert or report for a plant that is not read, and two emails to an
+-- 0206 — no alert or report for a plant that is not read, and two emails to an
 --        account with no plan (SOLAR-552, decided by Brynne 2026-11-15).
 --
 -- Before: every account on a plant got its alerts. An account with no plan got no
@@ -7,7 +7,7 @@
 --
 -- Now:
 --   - email_queue's insert trigger drops an alert for a plant that is not read for
---     that account (plant_live, 0203). The pop-up and the app's list come from the
+--     that account (plant_live, 0204). The pop-up and the app's list come from the
 --     same row, so they stop too. Reports go to accounts with a plan only, as 0114
 --     held them back; the free week's last report (day 7) still goes.
 --   - unpaid_reminder, 14 days after the account stopped being paid for or free
@@ -113,7 +113,7 @@ end $$;
 revoke all on function private.billing_winback() from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
--- 0182's free_week_mail. Added: the two reminders, by unpaid_since (0203), for an
+-- 0182's free_week_mail. Added: the two reminders, by unpaid_since (0204), for an
 -- account that still runs a plant. The day-7 report counts every day total, since
 -- nothing is trimmed, and carries the delete date.
 -- ---------------------------------------------------------------------------

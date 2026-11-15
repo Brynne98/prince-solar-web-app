@@ -69,7 +69,7 @@ function kit(db) {
         `(${p.id}, '${uid}', '${acc}', 'P${p.id}', timestamptz '2027-01-01' + interval '${++n} seconds')`).join(',')};`);
       const inv = sorted.flatMap((p) => Array.from({ length: p.inv ?? 1 }, (_, k) => `('REG-${p.id}-${k}', ${p.id}, '${acc}')`));
       if (inv.length) await db.exec(`insert into private.inverters (sn, plant_id, account_id) values ${inv.join(',')} on conflict (sn) do nothing;`);
-      await db.exec(`select private.week_start('${uid}', array[${sorted.map((p) => p.id).join(',')}]::bigint[]);`);   // as plant_users_upsert does (0202)
+      await db.exec(`select private.week_start('${uid}', array[${sorted.map((p) => p.id).join(',')}]::bigint[]);`);   // as plant_users_upsert does (0203)
       return acc;
     },
     // extras: the extra plants wanted on Family in all
@@ -115,13 +115,13 @@ const CASES = [
     // a plant started outside the rules (as before 0127)
     await K.sql(`alter table public.plant_users disable trigger plant_users_plan_limit; insert into public.plant_users (plant_id, user_id, plant_name, linked_at) values (${P(3)}, '${u}', 'x', '2027-02-01'); alter table public.plant_users enable trigger plant_users_plan_limit;`);
     const r = await K.row(u); await K.today(r.next_billing_date); await K.run(r.next_billing_date);
-    // no plan: nothing is read (0204); a cancel stops no plant
+    // no plan: nothing is read (0205); a cancel stops no plant
     const live = Number((await K.sql(`select count(*) from public.live_plants() x where x in (select plant_id from public.plant_users where user_id = '${u}')`))[0]);
     if (live) bad.push(`${live} plants are read with no plan after the date`);
     if (await K.paused(u, P(2))) bad.push('the kept plant stopped');
     return bad;
   } },
-  { id: 'F2', title: 'no plan (no billing row): ticking locked plants one after another stops at 5 (0202)', async run(K) {
+  { id: 'F2', title: 'no plan (no billing row): ticking locked plants one after another stops at 5 (0203)', async run(K) {
     const u = await K.user('free');
     await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i) })));
     for (const p of [1, 2, 3, 4, 5, 6, 7]) await K.pick(u, P(p));
@@ -397,7 +397,7 @@ const CASES = [
     return bad;
   } },
   // ---- SOLAR-495 (0188): a cancel deletes on its end date; a failed payment keeps 30 days ----
-  { id: 'E495a', title: 'Home with 2 plants cancels: warned 3 days before; on the end date no plant is read, both stay, the history goes 30 days later (0204)', async run(K) {
+  { id: 'E495a', title: 'Home with 2 plants cancels: warned 3 days before; on the end date no plant is read, both stay, the history goes 30 days later (0205)', async run(K) {
     const bad = [], u = await K.user('home');
     await K.link(u, [{ id: P(1) }, { id: P(2) }]);
     const c = await K.as(u, `select public.api_billing_change('free', null)`); if (!c.ok) return ['cancel refused: ' + c.err];
@@ -704,7 +704,7 @@ const CASES = [
     await K.db.t(`select to_jsonb(public.billing_charge_refund_event('${b.v.reference}', 'failed', 'bank rejected'))`);
     return (await K.charge(b.v.reference)).refunded_at ? ['refunded_at still set after refund.failed: the money reads as given back'] : [];
   } },
-  { id: 'Q3', net: true, title: 'no plan after day 8: a plant change is refused, the ticks are fixed without a plan (0202)', async run(K) {
+  { id: 'Q3', net: true, title: 'no plan after day 8: a plant change is refused, the ticks are fixed without a plan (0203)', async run(K) {
     const u = await K.user('free');
     await K.link(u, [{ id: P(1) }, { id: P(2) }]);
     await K.sql(`update public.plant_users set paused = true where user_id = '${u}' and plant_id = ${P(2)};
@@ -734,7 +734,7 @@ const CASES = [
   } },
   // ---- round 3 fixes (0130): delete, disputes, refunds ----
   { id: 'X13', title: 'no plan with 5 plants running buys Family for a 6th: paid, the 5 keep running, the 6th has no place', async run(K) {
-    // Family and the free week both run 5 (0202), so the payment starts no more plants.
+    // Family and the free week both run 5 (0203), so the payment starts no more plants.
     const bad = [], u = await K.user('free');
     await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i) })));
     for (const i of [1, 2, 3, 4, 5]) await K.pick(u, P(i));
