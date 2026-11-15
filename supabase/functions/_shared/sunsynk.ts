@@ -481,7 +481,6 @@ export async function linkAccount(userId: string, username: string, password: st
   });
   await rpc("account_refresh_set", { p_account: acc.id, p_refresh: t.refresh_token });
   const active = new Set((await syncPlants(acc, { plants, invs })).map((p) => p.id));
-  await rpc("billing_free_week_start", { p_user: userId, p_sunsynk_username: username });
   const paused = plants.filter((p) => !active.has(p.id)).map((p) => p.id);
   return { accountId: acc.id, plants, paused, reason: paused.length ? "upgrade_needed" : null };
 }
@@ -556,11 +555,11 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
     }));
   if (rows.length) await rpc("plant_config_seed", { p_rows: rows });
   const activeRows = rows.filter((r) => !r.paused);
-  // Free past its week (0111, SOLAR-241): recover never walks these plants back, so
-  // drop the 60-day bookmarks now rather than show "Fetching history" until the trim.
+  // A plant that is not read (0205: no plan, the free week over): recover never walks
+  // it back, so drop the 60-day bookmarks now rather than show "Fetching history".
   if (activeRows.length) {
-    const trimmed = await freeTrimmedPlants();
-    const cut = activeRows.map((r) => r.plant_id).filter((id) => trimmed.has(id));
+    const live = await livePlants();
+    const cut = activeRows.map((r) => r.plant_id).filter((id) => !live.has(id));
     if (cut.length) {
       const { error } = await db.from("plant_config").update({ backfill_next: null, backfill_until: null, temp_next: null }).in("plant_id", cut);
       if (error) {
@@ -644,53 +643,13 @@ export type PlantJob = {
   account: Account;
 };
 
-export async function plantsToPoll(): Promise<PlantJob[]> {
-  // accounts_active orders by linked_at, so index = seniority.
-  const accounts = await rpc<Account[]>("accounts_active", {});
-  if (!accounts?.length) return [];
-  const rank = new Map(accounts.map((a, i) => [a.id, i]));
-  const byId = new Map(accounts.map((a) => [a.id, a]));
-  const { data, error } = await db
-    .from("plant_users").select("plant_id, plant_name, account_id")
-    .in("account_id", [...byId.keys()]).eq("paused", false).is("share_gone_at", null);
-  if (error) throw new Error(`plant_users: ${error.message}`);
-  const { data: cfgRows } = await db.from("plant_config").select("plant_id, timezone, batt_positive_means, backfill_next, backfill_until, backfill_tries, has_grid, temp_next, temp_tries");
-  const cfg = new Map((cfgRows ?? []).map((c: any) => [Number(c.plant_id), c]));
-  // One job per plant even if several users share it. A plant paused for every user
-  // (0110) has no row here, so it is not polled and no data is saved for it. The plant is read through
-  // the EARLIEST-linked active account, and that choice is stable from minute to
-  // minute — the inverter cache (freshness gate, carry run) is keyed by account,
-  // so a flip would throw it away every time. If that account dies (needs_relink)
-  // the next-oldest takes over on the following minute.
-  const best = new Map<number, { row: any; acc: Account }>();
-  for (const r of data ?? []) {
-    const pid = Number(r.plant_id);
-    if (!r.account_id) continue;
-    const acc = byId.get(r.account_id);
-    if (!acc) continue;
-    const cur = best.get(pid);
-    if (!cur || (rank.get(acc.id) ?? 1e9) < (rank.get(cur.acc.id) ?? 1e9)) best.set(pid, { row: r, acc });
-  }
-  return [...best.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([pid, { row, acc }]) => ({
-      plantId: pid,
-      plantName: row.plant_name ?? null,
-      timezone: String(cfg.get(pid)?.timezone ?? "Africa/Johannesburg"),
-      battPositiveMeans: cfg.get(pid)?.batt_positive_means ?? null,
-      backfillNext: cfg.get(pid)?.backfill_next ?? null,
-      backfillUntil: cfg.get(pid)?.backfill_until ?? null,
-      backfillTries: Number(cfg.get(pid)?.backfill_tries ?? 0),
-      tempNext: cfg.get(pid)?.temp_next ?? null,
-      tempTries: Number(cfg.get(pid)?.temp_tries ?? 0),
-      hasGrid: cfg.get(pid)?.has_grid ?? null,
-      account: acc,
-    }));
-}
+/** Every plant that is read, each through one login: poll_jobs as one shard (0205). */
+export const plantsToPoll = (): Promise<PlantJob[]> => pollJobs(0, 1);
 
 /**
- * One poll shard's jobs (0100): same plants and account choice as plantsToPoll(),
- * but the shard filter runs in SQL, so a shard reads only its own accounts.
+ * One poll shard's jobs (0100). The database picks the plants and each plant's login
+ * (the earliest-linked working login of an account that has a plan or is in its free
+ * week, 0205), and the shard filter runs there, so a shard reads only its own accounts.
  * account set = only plants read through that account, whatever the shard.
  */
 export async function pollJobs(shard: number, shards: number, account?: string): Promise<PlantJob[]> {
@@ -701,7 +660,7 @@ export async function pollJobs(shard: number, shards: number, account?: string):
       id: r.account_id, user_id: r.user_id, sunsynk_username: r.sunsynk_username,
       access_token: r.access_token, access_expires_at: r.access_expires_at,
     };
-    accs.set(acc.id, acc); // one object per account, as plantsToPoll() gave
+    accs.set(acc.id, acc); // one object per account: its token is refreshed in place
     return {
       plantId: Number(r.plant_id),
       plantName: r.plant_name ?? null,
@@ -724,9 +683,9 @@ export async function pollJobs(shard: number, shards: number, account?: string):
  * could starve run after run (READINESS P3). The id of the last plant a run
  * finished is kept in app_config under `key`; the next run starts after it.
  */
-/** Plants on Free past their first week (0111): they keep 24 hours, so nothing fetches older days. */
-export async function freeTrimmedPlants(): Promise<Set<number>> {
-  const ids = await rpc<number[]>("free_trimmed_plants", {});
+/** The plants that are read (0205): an account that runs the plant has a plan or is in its free week. */
+export async function livePlants(): Promise<Set<number>> {
+  const ids = await rpc<number[]>("live_plants", {});
   return new Set((ids ?? []).map(Number));
 }
 

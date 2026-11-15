@@ -5,6 +5,8 @@
 // to it; no sign-in, the per-user token is the proof (email_unsub_token, 0091).
 // A GET changes nothing, because mail scanners open links on their own; it sends
 // the reader to the Notifications section instead. verify_jwt is off for this function.
+// The app's unsubscribe.html (SOLAR-552) posts here from its button, so the answers
+// can be read from that page (CORS).
 import { createClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { serve } from "../_shared/errors.ts";
 
@@ -19,14 +21,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 serve("unsubscribe", async (req) => {
   if (req.method === "GET") return Response.redirect(SETTINGS, 303);
   if (req.method !== "POST") return new Response(null, { status: 405, headers: { Allow: "GET, POST" } });
+  const cors = { "Access-Control-Allow-Origin": "*" };
 
   const url = new URL(req.url);
   const token = url.searchParams.get("t") ?? "";
   const kind = url.searchParams.get("k") ?? "";
-  if (!UUID.test(token)) return new Response("Not found", { status: 404 });
+  if (!UUID.test(token)) return new Response("Not found", { status: 404, headers: cors });
 
   const { data, error } = await db.rpc("email_unsubscribe", { p_token: token, p_kind: kind });
-  if (error) return new Response("Try again later", { status: 500 });
-  if (!data) return new Response("Not found", { status: 404 });
-  return new Response("Unsubscribed", { status: 200 });
+  if (error) return new Response("Try again later", { status: 500, headers: cors });
+  if (!data) return new Response("Not found", { status: 404, headers: cors });
+  return new Response("Unsubscribed", { status: 200, headers: cors });
 });

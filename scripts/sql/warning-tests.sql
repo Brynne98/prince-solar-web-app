@@ -65,10 +65,12 @@ returns void language sql as $$
   update private.sunsynk_accounts set last_try = outcome, last_try_at = at, last_ok_at = ok_at where sunsynk_username like who
 $$;
 
--- One owner and login per plant: a free plan holds one plant and pauses the rest, and a
--- paused plant gets no email. Users first: plant_row_guard drops rows of an ownerless plant.
+-- One owner and login per plant: a locked plant gets no email. Users first: plant_row_guard drops rows of an ownerless plant.
 insert into auth.users (id, email)
   select ('00000000-0000-0000-0000-00000000' || p)::uuid, p || '@t.test' from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
+-- On a plan: a plant nobody pays for gets no alert (0206).
+insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
+  select ('00000000-0000-0000-0000-00000000' || p)::uuid, 'home', 'monthly', 1, current_date + 20 from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
 insert into private.sunsynk_accounts (id, user_id, sunsynk_username, last_try, last_try_at)
   select ('00000000-0000-0000-0000-0000000a' || p)::uuid, ('00000000-0000-0000-0000-00000000' || p)::uuid, 'w' || p, 'ok', now()
     from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;

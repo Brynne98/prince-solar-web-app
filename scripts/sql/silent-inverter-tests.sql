@@ -23,6 +23,8 @@ create temp table fx as
 grant select on fx to authenticated;
 
 insert into auth.users (id, email) select u, 'silent@t.test' from fx;
+-- on a plan: with none, a plant is read only in its free week (0204, SOLAR-552)
+insert into private.billing (user_id, plan, period, billing_day, next_billing_date) select u, 'home', 'monthly', 1, current_date + 20 from fx;
 insert into public.plant_config (plant_id) select p from fx;
 -- the owner's pick (0197), as billing-tests.sql makes it: an unpicked link starts paused,
 -- and readings for a paused plant are refused
@@ -55,6 +57,8 @@ create temp table fy as
          public.day_start_epoch_tz(public.today_tz('Africa/Johannesburg'), 'Africa/Johannesburg') - 3600 as y
     from fx;
 insert into auth.users (id, email) select u, 'silent2@t.test' from fy;
+-- on a plan: with none, a plant is read only in its free week (0204, SOLAR-552)
+insert into private.billing (user_id, plan, period, billing_day, next_billing_date) select u, 'home', 'monthly', 1, current_date + 20 from fy;
 insert into public.plant_config (plant_id) select p from fy;
 select private.plant_pick_add(u, p, 'Silent 2') from fy \g /dev/null
 insert into public.plant_users (plant_id, user_id, plant_name) select p, u, 'Silent 2' from fy;

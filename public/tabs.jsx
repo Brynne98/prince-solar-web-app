@@ -293,18 +293,16 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   React.useEffect(() => {
     let armed = false;
     try { armed = localStorage.getItem('synsynk.flowFs') === '1'; } catch (e) {}
-    if (!armed || over) return; // Free after its week: no wall view (SOLAR-333)
+    if (!armed) return;
     const resume = () => { cleanup(); enterWall(); };
     const cleanup = () => { window.removeEventListener('pointerdown', resume); window.removeEventListener('keydown', resume); };
     window.addEventListener('pointerdown', resume, { once: true });
     window.addEventListener('keydown', resume, { once: true });
     return cleanup;
-  }, [over]);
+  }, []);
 
   // ---- period-over-period trend arrows on the Overview cards ----
   const cmp = useCompare(refreshKey, snap);
-  // Free after its week (SOLAR-242): Today stays; the month's figures blur, the rest is a faint shape
-  const over = window.useFreeOver();
 
   // ---- period overview: Today / Week / Month / Year / Lifetime ----
   const [period, setPeriod] = React.useState('today');
@@ -420,7 +418,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
 
   // Overview's cards, drawn under the chart and, in fullscreen, above the flow (SOLAR-309)
   const strip = (
-    <div className={'today-strip' + (over && period === 'month' ? ' blurred' : '')} data-today={period === 'today' || undefined}>
+    <div className="today-strip" data-today={period === 'today' || undefined}>
       <MiniStat loading={pending} label="Made" value={window.fmtEnergyParts(pPv)} color={CC.pv} trend={tGen} trendDelta={dGen} trendFrom={cmpPhrase} trendVs={cmpVs}
         info={OV_INFO.made} />
       <MiniStat loading={pending} label="Home" value={window.fmtEnergyParts(pLoad)} color={CC.load} trend={tCon} trendDelta={dCon} trendInvert trendFrom={cmpPhrase} trendVs={cmpVs}
@@ -438,15 +436,13 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         value={(rate > 0 || rateExp > 0) && pSaved != null ? window.fmtRandSmart(pSaved) : '—'}
         trend={tSaved} trendDelta={dSaved} trendDeltaFmt={window.fmtRandSmart} trendFrom={cmpPhrase} trendVs={cmpVs}
         // no rate yet: the line under the dash opens Settings on Tariff
-        sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>{RATE_ASK}</button>
-          : over && period === 'month' ? <button type="button" className="lock-btn" onClick={() => window.openPlans('month_saved')}><window.LockIcon />On paid plans</button> : undefined}
+        sub={!(rate > 0 || rateExp > 0) ? <button type="button" className="mini-link" onClick={() => onOpenSettings('tariff')}>{RATE_ASK}</button> : undefined}
         info={rateExp > 0 ? OV_INFO.saved.slice(0, -1) + ', plus what you exported at your feed-in rate.' : OV_INFO.saved} />
     </div>
   );
 
   return (
     <>
-    {over && hasGrid && <GridOffPrompt tz={tz} />}
     <div className="live-grid">
       <div className="overview-section">
         <div className="overview-head">
@@ -455,7 +451,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             options={PERIODS}
             value={period} onChange={setPeriod} />
         </div>
-        {over && period !== 'today' && period !== 'month' ? <window.HistoryLock where={'overview_' + period} /> : strip}
+        {strip}
       </div>
       <div className={'flow-fs-wrap' + (wall ? ' wall' : '') + (wall && idle ? ' idle' : '')} ref={flowRef}>
         {wall && (
@@ -471,8 +467,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
         {wall && strip}
         <Card className="flow-card">
           {!wall && <SectionTitle right={
-            over ? <button className="flow-fs-btn" onClick={() => window.openPlans('wall')}><window.LockIcon /><span>Fullscreen</span></button>
-            : <button className="flow-fs-btn" onClick={enterWall}>
+            <button className="flow-fs-btn" onClick={enterWall}>
               <FsEnterIcon /><span>Fullscreen</span>
             </button>
           }>POWER FLOW</SectionTitle>}
@@ -491,32 +486,6 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   );
 }
 
-// Free after its week, once the grid has come back (SOLAR-242): how long it was off and
-// what carried the house, then the plans. Once per outage on this device; × puts it away.
-// A NoticeCard like the billing ones (SOLAR-384).
-function GridOffPrompt({ tz }) {
-  const [span, setSpan] = React.useState(null);
-  const [seen, setSeen] = React.useState(() => { try { return localStorage.getItem('ps.gridOffSeen'); } catch (e) { return null; } });
-  React.useEffect(() => {
-    let alive = true;
-    window.sb.rpc('api_grid_off_recent', { p_plant: window.CURRENT_PLANT }).then(({ data }) => { if (alive) setSpan(data || null); });
-    return () => { alive = false; };
-  }, [window.CURRENT_PLANT]);
-  if (!span || !span.endedAt || seen === span.endedAt) return null;
-  const from = new Date(span.startedAt), to = new Date(span.endedAt);
-  const mins = (to - from) / 60000;
-  const dur = window.fmtDuration(Math.max(1, Math.round(mins)));
-  const h = window.plantHour(tz, from), today = plantDateStr(tz);
-  const when = (h >= 18 || h < 6) && window.plantHour(tz, to) < 12 && plantDateStr(tz, to) === today ? 'last night'
-    : plantDateStr(tz, to) === today ? 'today' : 'yesterday';
-  const close = () => { try { localStorage.setItem('ps.gridOffSeen', span.endedAt); } catch (e) {} setSeen(span.endedAt); };
-  return (
-    <div className="notice-cards">
-      <window.NoticeCard tone="info" title={`Grid was off ${dur} ${when}.`} button="See how it held up"
-        onClick={() => { close(); window.openPlans('grid_off'); }} onClose={close} />
-    </div>
-  );
-}
 // tip: the whole sentence for the hover, when the caller has one (Overview's cards)
 function TrendBadge({ pct, unit = '%', invert, title, tip, delta, deltaFmt }) {
   if (pct == null) return null;                       // only hide when there is no prior period
@@ -687,17 +656,17 @@ function SharePie({ parts, word, empty, whole }) {
   );
 }
 // Solar, Home and Grid's last-30-days card body: why there are no bars yet, or the bars.
-function DaysPanel({ daily, onRetry, over, rows, ...bars }) {
+function DaysPanel({ daily, onRetry, rows, ...bars }) {
   if (daily === false) return <div className="solar-note">Couldn’t load. <button type="button" className="mini-link" onClick={onRetry}>Try again</button></div>;
   if (!daily) return <PlotSkeleton heights={[170, 220]} r={10} />;
-  if (!over && rows.length < 2) return <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>;
+  if (rows.length < 2) return <div className="solar-note">{window.emptyText(window.PLANT_DAYS)}</div>;
   return <DaysBars rows={rows} {...bars} />;
 }
 // The total tiles of Solar, Home and Grid (now, today, week…): a kWh figure in the page's
-// colour. locked: the lock's place on a plan past its free week; Today is never locked.
-const totalTile = (accent, locked) => (label, v, sub) => {
+// colour.
+const totalTile = (accent) => (label, v, sub) => {
   const [n, u] = window.fmtEnergyParts(v);
-  return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null} sub={sub || NBSP} locked={locked && label !== 'TODAY' ? locked : null} />;
+  return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null} sub={sub || NBSP} />;
 };
 
 // ---------------------------------------------------------------- PANELS
@@ -942,11 +911,7 @@ function bestDay(rows, field, today) {
 // pointer brightens and shows its date and total; clicking one opens that day in the chart
 // above, whose day is outlined here.
 // `rgb` is `color` as "r,g,b", for the lighter fills.
-// Free after its week (SOLAR-242): the 30 days are a faint shape and a lock
-function DaysBars(props) {
-  return window.useFreeOver() ? <window.HistoryLock where={'days_' + props.field} /> : <DaysBarsChart {...props} />;
-}
-function DaysBarsChart({ rows, field, color, rgb, word, label, today, selected, earliest, onPick }) {
+function DaysBars({ rows, field, color, rgb, word, label, today, selected, earliest, onPick }) {
   const [ref, width, height] = useChartSize([170, 220]);
   const [hover, setHover] = React.useState(null);
   const mobile = width < 560;
@@ -1166,9 +1131,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const tot = periodTotals('pv', a.pvToday, energy, plantToday);
   // Every tile keeps its second line, empty or not: the trends and the since-date land after
   // the totals, and a row whose tiles had none yet was 29px short until they did.
-  // Free after its week (SOLAR-242): every total but Today is a faint shape and a lock
-  const over = window.useFreeOver();
-  const tile = totalTile(CC.pv, over && 'solar_totals');
+  const tile = totalTile(CC.pv);
   const trend = (k, min, word) => periodTrend(cmp, k, 'pv', min, word);
   const kwp = cfg.systemKwp;
   React.useEffect(() => { try { localStorage.setItem('synsynk.kwpSet', kwp > 0 ? '1' : '0'); } catch (e) {} }, [kwp]);
@@ -1216,15 +1179,14 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 
   // ---- last 30 days ----
   const bars = withLiveToday(daily, plantToday, 'pv', a.pvToday);
-  const best = over ? null : bestDay(bars, 'pv', plantToday);
+  const best = bestDay(bars, 'pv', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('solar-day'); };
 
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
         <StatTile label="SOLAR NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.pv}
-          sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? (over ? <window.Locked where="panel_pct" label="Keep your insights"><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW</window.Locked>
-              : <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>)
+          sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>
             : <button type="button" className="mini-link" onClick={() => onOpenSettings('plant')}>Add your panels to see this</button>} />
         {tile('TODAY', a.pvToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.pv)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
@@ -1254,7 +1216,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
           <SectionTitle right={best ? <>Best <b>{fmtKwh(best.pv)}</b> on {window.dayText(best.date)}</> : RIGHT_HOLD}>
             {titled('SOLAR', 'last 30 days')}
           </SectionTitle>
-          <DaysPanel daily={daily} onRetry={loadDaily} over={over} rows={bars} field="pv" color={CC.pv} rgb="61,220,132" word="Solar" label="Solar per day for the last 30 days"
+          <DaysPanel daily={daily} onRetry={loadDaily} rows={bars} field="pv" color={CC.pv} rgb="61,220,132" word="Solar" label="Solar per day for the last 30 days"
             today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />
         </Card>
       </div>
@@ -1303,9 +1265,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
   const [earliest, setEarliest] = React.useState(null);
   React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
   const tot = periodTotals('load', a.loadToday, energy, plantToday);
-  // Free after its week (SOLAR-242): every total but Today is a faint shape and a lock
-  const over = window.useFreeOver();
-  const tile = totalTile(CC.load, over && 'home_totals');
+  const tile = totalTile(CC.load);
   // less used is better, as on Grid
   const trend = (k, min, word) => periodTrend(cmp, k, 'load', min, word, true);
   const [nowN, nowU] = fmtPowerParts(a.loadNow);
@@ -1335,7 +1295,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
 
   // ---- last 30 days ----
   const bars = withLiveToday(daily, plantToday, 'load', a.loadToday);
-  const most = over ? null : bestDay(bars, 'load', plantToday);
+  const most = bestDay(bars, 'load', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('home-day'); };
 
   return (
@@ -1369,7 +1329,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
           <SectionTitle right={most && most.load > 0 ? <>Most <b>{fmtKwh(most.load)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
             {titled('HOME', 'last 30 days')}
           </SectionTitle>
-          <DaysPanel daily={daily} onRetry={loadDaily} over={over} rows={bars} field="load" color={CC.load} rgb="248,113,113" word="Used" label="Home use per day for the last 30 days"
+          <DaysPanel daily={daily} onRetry={loadDaily} rows={bars} field="load" color={CC.load} rgb="248,113,113" word="Used" label="Home use per day for the last 30 days"
             today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />
         </Card>
       </div>
@@ -1441,9 +1401,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   // Today is the logger's own integral, as Live's Imported tile uses: one inverter's CT on a
   // two-inverter plant reads nothing, so the inverters' own counters undercount.
   const tot = periodTotals('imp', a.gridFromToday, energy, plantToday);
-  // Free after its week (SOLAR-242): every total but Today is a faint shape and a lock
-  const over = window.useFreeOver();
-  const tile = totalTile(CC.grid, over && 'grid_totals');
+  const tile = totalTile(CC.grid);
   const trend = (k, min, word) => periodTrend(cmp, k, 'imp', min, word, true);
   // Every grid-tied inverter leaks a little backflow, so a plant not paid for export only
   // counts as sending power out above 100 W.
@@ -1508,7 +1466,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
 
   // ---- last 30 days ----
   const bars = withLiveToday(daily, plantToday, 'imp', a.gridFromToday);
-  const most = over ? null : bestDay(bars, 'imp', plantToday);
+  const most = bestDay(bars, 'imp', plantToday);
   const openDay = (d) => { pick.setDate(d); scrollToDay('grid-day'); };
 
   return (
@@ -1548,7 +1506,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
           <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
             {titled('GRID', 'last 30 days')}
           </SectionTitle>
-          <DaysPanel daily={daily} onRetry={loadDaily} over={over} rows={bars} field="imp" color={CC.grid} rgb="250,204,21" word="Imported" label="Energy imported from the grid per day for the last 30 days"
+          <DaysPanel daily={daily} onRetry={loadDaily} rows={bars} field="imp" color={CC.grid} rgb="250,204,21" word="Imported" label="Energy imported from the grid per day for the last 30 days"
             today={plantToday} selected={pick.date} earliest={earliest} onPick={openDay} />
         </Card>
       </div>
@@ -2258,7 +2216,7 @@ function PlantLine({ name, off, children }) {
 // the plants it keeps (SOLAR-295): the others collect until the billing date, then stop.
 const PLAN_RANK = { free: 0, home: 1, family: 2 };
 // Since SOLAR-371: Home 2, Family 5. Extra plants are no longer sold; those already held still count.
-const planRoom = (plan, extra) => (plan === 'family' ? 5 + (extra || 0) : plan === 'home' ? 2 : 1);
+const planRoom = (plan, extra) => (plan === 'family' ? 5 + (extra || 0) : plan === 'home' ? 2 : 5);
 // pickableLogins: the plants a downgrade picks from (link.jsx).
 // Sends a change for the billing date, then reads the plan again. Failed: the toast says
 // failed(error) and it re-reads anyway, as a change that ran out of time may still have landed.
@@ -2329,7 +2287,7 @@ const cancelOffer = (b) => {
 // The plants a smaller plan leaves, ranked as private.billing_drops ranks them with no pick:
 // collecting, not already up for removal, the first linked kept (SOLAR-488). A plant on a
 // switched-off login still counts, as on the server. room: how many the plan keeps.
-const cancelPlants = (links, room = 1) => {
+const cancelPlants = (links, room) => {
   const seen = new Set();
   const on = (links?.accounts || []).flatMap(a => a.plants || [])
     .filter(p => !p.paused && !(p.remove_on && !p.drop) && !seen.has(p.plant_id) && seen.add(p.plant_id))
@@ -2368,7 +2326,7 @@ function KeepDialog({ b, links, reload, onClose, onKeep }) {
 
 // A cancel or smaller plan asked for while a payment has failed (SOLAR-497, 0189): refused
 // until it is paid, so the pop-up says so and pays. want: 'cancel' | 'downgrade'.
-// The Free date is on the Plan card and the banner, so it is not said again here.
+// The day the plan ends is on the Plan card and the banner, so it is not said again here.
 function PayFirstDialog({ b, want, onCancel }) {
   React.useEffect(() => { window.track('pay_first_shown', { plan: b.plan, want }); }, []);
   return (
@@ -2401,28 +2359,39 @@ function DowngradeDialog({ b, plan, period, price, links, busy, onConfirm, onCan
   );
 }
 
-// Cancel plan, from Billing or Adjust plan: what happens when, and with more plants than Free
-// keeps, which one stays, the first linked already picked (SOLAR-496; Choose plant(s) in Billing
-// changes it later). onConfirm(keep): null when there is nothing to pick.
-function CancelPlanDialog({ b, links, busy, onConfirm, onCancel }) {
+// Starting a plan with fewer places than plants running (the free week runs 5, Home 2;
+// SOLAR-552): which stay. The others are locked and lose their history (0205).
+// onConfirm(keep): the plants ticked.
+function StartPickDialog({ plan, links, busy, onConfirm, onCancel }) {
+  const room = planRoom(plan);
+  const { keep, stop } = cancelPlants(links, room);
+  const [picked, setPicked] = React.useState(keep.map(p => p.plant_id));
+  return (
+    <ConfirmCard modal danger={false} title={<>Start {PLAN_NAME[plan]}?</>} action="Continue" busy={busy}
+      onConfirm={() => onConfirm(picked)} onCancel={onCancel}>
+      <div className="confirm-text">The other {stop > 1 ? `${stop} plants are` : 'plant is'} locked and {stop > 1 ? 'their' : 'its'} history is deleted. Family runs 5 plants.</div>
+      <KeepPicker links={links} plan={plan} room={room} value={picked} onChange={setPicked} />
+    </ConfirmCard>
+  );
+}
+
+// Cancel plan, from Billing: what happens when. Nothing is picked: every plant stops being
+// read on the end date and the history goes 30 days later (SOLAR-552).
+function CancelPlanDialog({ b, busy, onConfirm, onCancel }) {
   const { billDay } = window.billingFmt;
   // a paid switch to yearly runs its year first (SOLAR-457)
   const day = b.prepaidOn ? longDay : billDay;
-  // history and stopped plants go on the end date (SOLAR-495, 0188)
   const ends = day(endDay(b));
-  const { keep, stop } = cancelPlants(links);
-  const [picked, setPicked] = React.useState(keep.map(p => p.plant_id));
   const offer = cancelOffer(b);
   if (b.state === 'past_due') return <PayFirstDialog b={b} want="cancel" onCancel={onCancel} />;
   return (
     <ConfirmCard modal title={<>Cancel {PLAN_NAME[b.plan]}?</>} action="Cancel plan" cancelLabel={'Keep ' + PLAN_NAME[b.plan]}
-      busy={busy} onConfirm={() => onConfirm(stop > 0 ? picked : null)} onCancel={onCancel}>
+      busy={busy} onConfirm={() => onConfirm(null)} onCancel={onCancel}>
       <div className="pay-review-box cancel-steps">
         <div><b>Until {ends}</b>Nothing changes.</div>
-        <div><b>On {ends}</b>You’re on Free. {stop > 0 ? `One plant keeps updating. The other ${stop > 1 ? stop : 'one'} and all history are deleted. They can’t be brought back.` : 'All history is deleted and can’t be brought back.'} Reports stop.</div>
+        <div><b>On {ends}</b>Your plan ends. Readings, alerts and reports stop. Your history is deleted 30 days later.</div>
       </div>
       {offer && <div className="confirm-text keep-note">{offer}</div>}
-      {stop > 0 && <KeepPicker links={links} plan="free" room={1} value={picked} onChange={setPicked} />}
     </ConfirmCard>
   );
 }
@@ -2435,7 +2404,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links, payBann
   const kind = !billing ? null : billing.comped ? 'comped' : billing.plan !== 'free' ? 'paid' : 'free';
   React.useEffect(() => { if (kind) try { localStorage.setItem('synsynk.planKind', kind); } catch (e) {} }, [kind]);
   // Its outline while the plan loads, from the last plan seen on this device, so the
-  // sections below don't jump down (SOLAR-221). Free waits for api_me too (undefined until
+  // sections below don't jump down (SOLAR-221). No plan waits for api_me too (undefined until
   // it answers): its line depends on whether the free week is still on.
   if (!billing || (kind === 'free' && freeWeekEndsAt === undefined)) {
     const last = (() => { try { return localStorage.getItem('synsynk.planKind'); } catch (e) { return null; } })() || 'free';
@@ -2453,10 +2422,10 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links, payBann
   const paid = b.plan !== 'free' && !b.comped;
   const booked = bookedChange(b, links);
   const ending = paid && b.nextPlan === 'free';
-  // On Free after a failed payment (SOLAR-500): the stopped plants and the history wait 30 days
+  // After a failed payment ended the plan (SOLAR-500): the stopped plants and the history wait 30 days
   const waiting = b.plan === 'free' && b.removeOn ? (b.removePlants || []).map(p => p.name) : [];
   const was = (b.payments || []).find(p => p.status !== 'refunded')?.plan;
-  // The free week (api_me, 0122): a Free account sees full history until it ends.
+  // The free week (api_me, 0122): an account with no plan sees everything until it ends.
   const weekEnds = b.plan === 'free' && !b.comped && freeWeekEndsAt && Date.parse(freeWeekEndsAt) > Date.now()
     ? new Date(freeWeekEndsAt).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }) : null;
   // A word beside the name only when something is wrong or ending; an active plan needs none.
@@ -2467,14 +2436,14 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links, payBann
   // As other billing pages lay it out (SOLAR-512): name and price, what it gives, then its date.
   const gives = b.comped ? 'Every plant, full history, reports.'
     : paid ? `${room} plants, full history, reports.`
-    : weekEnds ? '1 plant, full history.' : '1 plant, today’s readings.';
+    : weekEnds || freeWeekEndsAt === null ? 'Up to 5 plants, full history, alerts.' : 'Readings, alerts and reports have stopped.';
   // the date line; a booked change says its date in the notice instead, so it is said once
   const when = b.comped ? null
-    : b.state === 'past_due' ? (b.nextTry ? `We try your card again on ${longDay(b.nextTry)}.` : payBanner ? `Moves to Free on ${longDay(b.freeOn)}.` : null)
+    : b.state === 'past_due' ? (b.nextTry ? `We try your card again on ${longDay(b.nextTry)}.` : payBanner ? `Plan ends on ${longDay(b.freeOn)}.` : null)
     : showBooked ? null
     : b.prepaidOn ? `Switches to yearly on ${longDay(b.nextDate)}. ${rand(b.nextAmount)} paid. Next payment ${longDay(yearOn(b.nextDate))}.`
     : paid ? `Renews on ${longDay(b.nextDate)}.`
-    : weekEnds ? `Free week until ${billDay(weekEnds)}.`
+    : weekEnds ? `Until ${billDay(weekEnds)}.`
     : freeWeekEndsAt === null ? '7 days free from when you add your plant.' : null;
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
   // A booked cancel or smaller plan that stops plants: Choose plant(s) beside Keep changes the pick (SOLAR-496)
@@ -2483,16 +2452,16 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links, payBann
   const undo = () => run(() => undoBooked(b, reload));
   return (
     <SettingsSection id="plan" title="Plan" bare>
-      <PlanCard title={<>{PLAN_NAME[b.plan]}{word && <span className={'conn-status ' + word[1]}>{word[0]}</span>}</>}
+      <PlanCard title={<>{paid || b.comped ? PLAN_NAME[b.plan] : weekEnds || freeWeekEndsAt === null ? 'Free week' : 'No plan'}{word && <span className={'conn-status ' + word[1]}>{word[0]}</span>}</>}
         sub={b.comped ? <span className="plan-word">Free of charge</span> : paid
           ? <><Was list={listPrice(b, b.plan, b.period, b.extraPlants || 0)} price={b.price} />{rand(b.price)}<span className="plan-per">{perUnit(b.period)}</span></>
           : 'R0'}
         action={!b.comped && (paid ? <button type="button" className="ghost-btn" onClick={onAdjust}>Change plan</button>
-          : <button type="button" className="save-btn" onClick={onAdjust}>Upgrade</button>)}>
+          : <button type="button" className="save-btn" onClick={onAdjust}>Choose plan</button>)}>
         <div className="plan-meta">{gives}
           {paid && b.offer?.held && !ending && <> <span className="plan-offer-ln">{offerLine(b.offer, listPrice(b, b.plan, b.period, b.extraPlants || 0), b.period)}</span></>}</div>
         {when && <div className="plan-meta plan-when">{when}</div>}
-        {waiting.length > 0 && <PlanNote tone="warn">{andList(waiting)} and all history are kept until {billDay(b.removeOn)}. {was ? `Pay for ${PLAN_NAME[was]} to keep them.` : 'Upgrade to keep them.'}</PlanNote>}
+        {waiting.length > 0 && <PlanNote tone="warn">{andList(waiting)} and all history are kept until {billDay(b.removeOn)}. {was ? `Pay for ${PLAN_NAME[was]} to keep them.` : 'Choose a plan to keep them.'}</PlanNote>}
         {/* without the failed-payment banner on the page, the card says the deadline and pays */}
         {b.state === 'past_due' && !payBanner && (
           <PlanNote tone="bad" acts={<button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay</button>}>
@@ -2555,8 +2524,8 @@ function BookedNotice({ booked, busy, onUndo, manage, onManage }) {
 // the plan loads they draw as outlines in their places rather than popping in under it.
 const BILL_SHAPE = 'synsynk.billShape';
 const billShape = () => { try { return JSON.parse(localStorage.getItem(BILL_SHAPE)) || {}; } catch (e) { return {}; } };
-// On Free the card stays saved for a later upgrade, which pays without the card page (SOLAR-504).
-const payNote = (b) => b.plan === 'free' ? 'Kept for upgrades. Not charged on Free.'
+// With no plan the card stays saved for a later plan, which pays without the card page (SOLAR-504).
+const payNote = (b) => b.plan === 'free' ? 'Kept for your next plan. Not charged now.'
   : b.nextPlan !== 'free' ? 'Your card pays for renewals and upgrades.' : null;
 const shapeOf = (b) => ({
   pay: !b.comped && !(b.plan === 'free' && !b.card), card: !!b.card,
@@ -2566,7 +2535,7 @@ const shapeOf = (b) => ({
 });
 
 // Cancellation, last on Billing as on most billing pages: a paid plan not already ending.
-function CancelSection({ billing: b, reload, links }) {
+function CancelSection({ billing: b, reload }) {
   const { useState } = React;
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -2580,20 +2549,20 @@ function CancelSection({ billing: b, reload, links }) {
     <SettingsSection id="cancel" title="Cancellation">
       <SettingRow label="Cancel plan"
         action={<button type="button" className="danger-btn" disabled={busy || cancelling} onClick={() => setCancelling(true)}>Cancel</button>} />
-      {cancelling && <CancelPlanDialog b={b} links={links} busy={busy} onCancel={() => setCancelling(false)}
+      {cancelling && <CancelPlanDialog b={b} busy={busy} onCancel={() => setCancelling(false)}
         onConfirm={async (keep) => { setBusy(true); await bookPlan(b, 'free', null, reload, keep); setBusy(false); setCancelling(false); }} />}
     </SettingsSection>
   );
 }
 
-// Adjust plan (SOLAR-250): a page of its own, back to Billing. Free, Home and Family side by
-// side with a monthly/yearly switch. A smaller plan in either period is booked for the
+// Adjust plan (SOLAR-250): a page of its own, back to Billing. Home and Family side by
+// side with a monthly/yearly switch (no Free plan since SOLAR-552; Cancel is on Billing). A smaller plan in either period is booked for the
 // billing date (SOLAR-364); a bigger one is paid today, in the plan's own period or, from
 // monthly, yearly. No extra plants (SOLAR-371): more than Family's 5 is by email.
 // SOLAR-462: what each plan gives in one line, your plan marked by a pill, an offer's terms in
 // one band under the switch rather than on each card.
 // SOLAR-512: laid out as pricing pages are, the button under the price and a ticked list under it.
-const PLAN_FEATS = { free: ['1 plant', 'Today’s readings'], home: ['2 plants', 'Full history', 'Reports'], family: ['5 plants', 'Everything in Home'] };
+const PLAN_FEATS = { home: ['2 plants', 'Full history', 'Reports'], family: ['5 plants', 'Everything in Home'] };
 function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant = null }) {
   const plants = logins.flatMap(a => a.plants);
   const { useState, useEffect } = React;
@@ -2603,11 +2572,12 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
   // Opened before the plan loaded (straight to the plans page): show the plan's own period.
   useEffect(() => { if (paid) setView(b.period); }, [paid, b?.period]);
   const [busy, setBusy] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
   // A downgrade that stops plants, asked first (SOLAR-486): { plan, period }
   const [picking, setPicking] = useState(null);
   // A downgrade or switch asked for while a payment has failed (SOLAR-497)
   const [payFirst, setPayFirst] = useState(false);
+  // A first plan with fewer places than plants running, asked first (SOLAR-552): the plan
+  const [starting, setStarting] = useState(null);
   const failed = b?.state === 'past_due';
   // Home monthly on the Yearly tab: Family yearly is paid now, from today (SOLAR-364)
   const across = paid && b.plan === 'home' && b.period === 'monthly' && view === 'yearly';
@@ -2615,18 +2585,19 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
   useEffect(() => { window.track('plan_page_shown', { plan: b?.plan }); }, []);
   // It can't close while a change is saving, so the result is never lost from view.
   const close = () => { if (!busy) onBack(); };
-  const pop = (body) => <window.Dialog size="wide" label="Change plan" busy={busy} onClose={close}>{body}</window.Dialog>;
+  const heading = !b || paid || b.comped ? 'Change plan' : 'Choose plan';
+  const pop = (body) => <window.Dialog size="wide" label={heading} busy={busy} onClose={close}>{body}</window.Dialog>;
   if (!b) return pop(
     <div className="settings-page plan-pop">
-      <div className="page-head"><h1>Change plan</h1></div>
-      <div className="plan-grid plan-cards" aria-hidden="true">{[0, 1, 2].map(i => <window.Skeleton key={i} h={180} r={14} />)}</div>
+      <div className="page-head"><h1>{heading}</h1></div>
+      <div className="plan-grid plan-cards" aria-hidden="true">{[0, 1].map(i => <window.Skeleton key={i} h={180} r={14} />)}</div>
     </div>
   );
   const { rand, billDay, perUnit, Was } = window.billingFmt;
   const unit = perUnit(view);
   const prices = b.prices?.[view] || {};
   const sameView = !paid || view === b.period;
-  const price = (p) => p === 'free' ? 0 : p === b.plan && sameView ? b.price : prices[p];
+  const price = (p) => p === b.plan && sameView ? b.price : prices[p];
   // its list price, with the extra plants still held on your own Family card
   const list = (p) => listPrice(b, p, view, p === b.plan && sameView ? b.extraPlants || 0 : 0);
   const run = async (fn, key = true) => { setBusy(key); try { await fn(); } finally { setBusy(false); } };
@@ -2634,11 +2605,11 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
   // the plan's own card while a change is booked: when it ends or changes, in either period
   // built only when shown: a comped plan has no date (SOLAR-433)
   const ownDate = () => <div className="plan-cur">{b.nextPlan === 'free' ? 'Ends ' : 'Changes '}{(b.prepaidOn ? longDay : billDay)(endDay(b))}</div>;
-  // a smaller plan booked for the billing date in this period; Free has none
-  const bookedHere = (p) => b.nextPlan === p && (p === 'free' || (b.nextPeriod || b.period) === view);
+  // a smaller plan booked for the billing date in this period
+  const bookedHere = (p) => b.nextPlan === p && (b.nextPeriod || b.period) === view;
   // The offer's terms, once for every card it lowers in this view
   const o = b.offer;
-  const offerBand = o && ['free', 'home', 'family'].some(p => list(p) > (price(p) ?? 0)) && <p className="plan-offer">
+  const offerBand = o && ['home', 'family'].some(p => list(p) > (price(p) ?? 0)) && <p className="plan-offer">
     <b>{o.id === 'launch' ? 'Launch price' : 'Offer price'}</b>{' '}
     <span>{o.until ? `Until ${billDay(o.until)}.` : o.months && !o.held ? `For your first ${view === 'yearly' ? 'year' : o.months + ' months'}.` : 'Yours while you stay.'}
       {!o.held && o.cap ? ` For the first ${o.cap} members.` : ''}</span></p>;
@@ -2647,10 +2618,10 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
     if (paid && b.nextPlan === 'free') return p === b.plan && sameView ? <>{ownDate()}
         <button type="button" className="save-btn" disabled={!!busy} aria-busy={busy === 'keep'}
                 onClick={() => run(() => undoBooked(b, reload), 'keep')}>Keep {PLAN_NAME[b.plan]}</button></>
-      : <div className="plan-cur plan-wait">{p === 'free' ? 'From ' : 'After '}{(b.prepaidOn ? longDay : billDay)(endDay(b))}</div>;
+      : <div className="plan-cur plan-wait">After {(b.prepaidOn ? longDay : billDay)(endDay(b))}</div>;
     // a paid year changes nothing until it starts (SOLAR-298), but it can be cancelled (SOLAR-457);
     // a quiet line holds the button's row
-    if (b.prepaidOn && p !== 'free' && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
+    if (b.prepaidOn && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
     if (p === b.plan && paid && b.nextPlan) return ownDate();
     if (p === b.plan) {
       if (!sameView) return b.nextPeriod === view ? <div className="plan-cur">From {billDay(b.nextDate)}</div>
@@ -2664,41 +2635,49 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
     // a bigger plan is bought in the plan's own period
     if (!sameView && !across && PLAN_RANK[p] > PLAN_RANK[b.plan]) return <div className="plan-cur plan-wait">Available {b.period}</div>;
     if (PLAN_RANK[p] > PLAN_RANK[b.plan]) return <button type="button" className="save-btn"
-      onClick={() => (b.offer && window.track('offer_pick_done', { offer: b.offer.id, plan: p, period }), window.startUpgrade(p, period, !paid, null, forPlant ? [forPlant] : null))}>Upgrade</button>;
+      onClick={() => (b.offer && window.track('offer_pick_done', { offer: b.offer.id, plan: p, period }),
+        !paid && cancelPlants(links, planRoom(p)).stop > 0 ? setStarting(p) : window.startUpgrade(p, period, !paid, null, forPlant ? [forPlant] : null))}>{paid ? 'Upgrade' : 'Start ' + PLAN_NAME[p]}</button>;
     if (bookedHere(p)) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
     // a smaller plan in either period, from the billing date (SOLAR-364)
-    return <button type="button" className="ghost-btn" disabled={!!busy || cancelling} aria-busy={busy === 'down:' + p}
-                   onClick={() => (p === 'free' ? setCancelling(true)
-                     : failed ? setPayFirst(true)
+    return <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'down:' + p}
+                   onClick={() => (failed ? setPayFirst(true)
                      : plants.length > planRoom(p, b.nextExtraPlants ?? b.extraPlants) ? setPicking({ plan: p, period: view })
                      : run(() => bookPlan(b, p, view, reload), 'down:' + p))}>Downgrade</button>;
   };
   return pop(
     <div className="settings-page plan-pop">
       <div className="page-head">
-        <h1>Change plan</h1>
-        {!b.comped && !(paid && b.nextPlan === 'free') && <p>{failed ? 'Pay the failed payment to change your plan.' : b.prepaidOn ? `Your paid year starts on ${billDay(b.nextDate)}.` : paid ? `Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Upgrades start today.'}</p>}
+        <h1>{heading}</h1>
+        {!b.comped && !(paid && b.nextPlan === 'free') && <p>{failed ? 'Pay the failed payment to change your plan.' : b.prepaidOn ? `Your paid year starts on ${billDay(b.nextDate)}.` : paid ? `Upgrades start today. Downgrades start on ${billDay(b.nextDate)}.` : 'Your plan starts today.'}</p>}
       </div>
       {b.comped ? <p className="field-note">Your plan is free of charge: every plant, full history.</p> : <>
         <Segmented size="sm" className="plan-period" label="Billing" value={view} onChange={setView}
                    options={[{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: <>Yearly <span className="plan-save">2 months free</span></> }]} />
         {offerBand}
-        {/* One paywall on every screen: three cards side by side, stacked on phones (SOLAR-303, SOLAR-304) */}
+        {/* One paywall on every screen: the cards side by side, stacked on phones (SOLAR-303, SOLAR-304) */}
         <div className="plan-grid plan-cards">
-          {['free', 'home', 'family'].map(p => (
+          {['home', 'family'].map(p => (
             <div key={p} className={'pw-plan' + (p === b.plan ? ' plan-mine' : '')}>
               <div className="pw-name">{PLAN_NAME[p]}{p === b.plan && <span className="plan-pill">Current</span>}</div>
-              <div className="pw-price"><Was list={list(p)} price={price(p) ?? 0} /><b>{rand(price(p) ?? 0, true)}</b>{p !== 'free' && ' ' + unit}</div>
+              <div className="pw-price"><Was list={list(p)} price={price(p) ?? 0} /><b>{rand(price(p) ?? 0, true)}</b>{' ' + unit}</div>
               {action(p)}
               <ul className="plan-feats">{PLAN_FEATS[p].map(f => <li key={f}><Icon id="tick" />{f}</li>)}</ul>
             </div>
           ))}
         </div>
         <p className="plan-foot">More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: b.plan, from: 'plans' })}>Email us</a>. Cancel any time.</p>
-        {cancelling && <CancelPlanDialog b={b} links={links} busy={!!busy} onCancel={() => setCancelling(false)}
-          onConfirm={(keep) => run(async () => { const ok = await bookPlan(b, 'free', null, reload, keep); setCancelling(false); if (ok) onBack(); })} />}
         {/* booked, it goes back to Billing, where Manage changes the pick (SOLAR-496) */}
         {payFirst && <PayFirstDialog b={b} want="downgrade" onCancel={() => setPayFirst(false)} />}
+        {starting && (
+          <StartPickDialog plan={starting} links={links} busy={!!busy} onCancel={() => setStarting(null)}
+            onConfirm={(keep) => run(async () => {
+              const { error } = await window.sb.rpc('api_billing_start_keep', { p_plants: keep });
+              if (error) return window.toast('Couldn’t save your plants. Try again.', { error: true });
+              window.track('start_keep_done', { plan: starting, kept: keep.length });
+              setStarting(null);
+              window.startUpgrade(starting, period, true);
+            })} />
+        )}
         {picking && (
           <DowngradeDialog b={b} plan={picking.plan} period={picking.period} price={price(picking.plan)} links={links} busy={!!busy}
             onConfirm={(keep) => run(async () => { const ok = await bookPlan(b, picking.plan, picking.period, reload, keep); setPicking(null); if (ok) onBack(); })}
@@ -2870,7 +2849,7 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
   const away = picks.picks.filter(k => k.held && !k.linked);
   const was = [...linked.filter(p => !p.paused).map(p => p.plant_id), ...away.map(k => k.plant_id)];
   const [on, setOn] = React.useState(was);
-  const [say, setSay] = React.useState(null); // 'full' | 'date' | 'one'
+  const [say, setSay] = React.useState(null); // 'full' | 'fixed' | 'date' | 'one'
   const [want, setWant] = React.useState(null); // the plant a full plan refused: Upgrade is for it
   const [busy, setBusy] = React.useState(false);
   const out = was.filter(id => !on.includes(id)), added = on.filter(id => !was.includes(id));
@@ -2879,6 +2858,7 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
     setSay(null);
     if (!on.includes(id)) return on.length >= room ? (setWant(id), setSay('full')) : setOn([...on, id]);
     if (!was.includes(id)) return setOn(on.filter(x => x !== id));
+    if (plan === 'free') return setSay('fixed'); // the free week's plants stay as chosen (0203)
     if (picks.change_on) return setSay('date');
     if (out.length) return setSay('one');
     setOn(on.filter(x => x !== id));
@@ -2913,8 +2893,10 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
       </label>
     );
   };
-  const more = plan === 'family'
-    ? <>More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: 'family', from: 'choose_plants' })}>Email us</a>.</>
+  // Family and the free week both run 5: no plan runs more, so the line offers the email
+  const top = plan !== 'home';
+  const more = top
+    ? <>More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan, from: 'choose_plants' })}>Email us</a>.</>
     : onUpgrade && <button type="button" className="mini-link" onClick={() => onUpgrade(want)}>upgrade</button>;
   return (
     <ConfirmCard modal danger={out.length > 0} label="Choose plants" title="Choose plants" busy={busy}
@@ -2933,7 +2915,8 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
             {away.map(row)}
           </div>
         )}
-        {say === 'full' ? <div className="field-note keep-count warn">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}. Untick one first{more && plan !== 'family' ? <>, or {more} for more plants</> : ''}.{plan === 'family' && <> {more}</>}</div>
+        {say === 'full' ? <div className="field-note keep-count warn">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}.{plan !== 'free' && <> Untick one first{more && !top ? <>, or {more} for more plants</> : ''}.</>}{top && <> {more}</>}</div>
+          : say === 'fixed' ? <div className="field-note keep-count warn">Plants can’t be changed in the free week.</div>
           : say === 'date' ? <div className="field-note keep-count warn">You can change a plant again on {longDay(picks.change_on)}.</div>
           : say === 'one' ? <div className="field-note keep-count warn">One change every 90 days. Tick {nameOf(out[0])} again first.</div>
           : out.length ? <div className="field-note keep-count warn">{added.length ? `${nameOf(out[0])}’s history is deleted straight away and can’t be brought back. You can change again in 90 days.` : `Tick the plant to run in place of ${nameOf(out[0])}.`}</div>
@@ -3091,7 +3074,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     );
   };
   const lockedAny = allPlants.some(p => p.paused && !p.share_gone) || !!picks?.picks.some(k => k.held && !k.linked);
-  // Free runs one plant, Home 2, Family 5 plus any extras still held. With that taken, Add plant
+  // The free week runs 5 plants, Home 2, Family 5 plus any extras still held. With that taken, Add plant
   // still opens the form: the new plants link locked (SOLAR-272, SOLAR-537).
   const collecting = allPlants.filter(p => !p.paused).length;
   const limit = billing && !billing.comped ? planRoom(billing.plan, billing.extraPlants) : null;
@@ -3424,7 +3407,6 @@ function DayField({ id, value, todayStr, earliest, latest, bad, onPick }) {
 // On Account, so it picks its own plant, starting on the one on screen; one plant, no picker.
 function DownloadSection({ plants, plantId, ready }) {
   const { useState } = React;
-  const over = window.useFreeOver(); // Free after its week (SOLAR-242): the button is a lock
   const today = window.localDateStr(new Date());
   const weekAgo = window.localDateStr(new Date(Date.now() - 6 * 86400000));
   // The plant on screen until one is picked; it's still loading when a reload opens Account.
@@ -3488,9 +3470,8 @@ function DownloadSection({ plants, plantId, ready }) {
       </div>
       {bad && <p className="sset-err" id="dl-err" role="alert">{bad}</p>}
       <div className="conn-form-actions">
-        {/* the plan isn't known yet, so neither is the lock: the button's place shimmers */}
+        {/* api_me hasn't answered yet, so the plants it may read aren't known: the button's place shimmers */}
         {!ready ? <window.Skeleton w={104} h={41} r={9} style={{ flex: 'none' }} />
-          : over ? <button type="button" className="ghost-btn lock-cta" onClick={() => window.openPlans('csv')}><window.LockIcon />Download</button>
           : <window.BusyButton className="save-btn" onClick={submit} busy={busy} busyText="Preparing…">Download</window.BusyButton>}
       </div>
     </SettingsSection>
@@ -3780,7 +3761,8 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
   const live = (links?.accounts || []).filter(a => a.status !== 'disabled');
   const plants = [...new Map(live.flatMap(a => a.plants || []).map(p => [p.plant_id, p])).values()];
   // Account's Your data: the plants on, from the logins, which are here before api_me answers.
-  const onPlants = plants.filter(p => !p.paused).map(p => ({ id: Number(p.plant_id), name: p.plant_name }));
+  // With no plan after the free week (api_me's wall) nothing can be read, so none.
+  const onPlants = me?.wall ? [] : plants.filter(p => !p.paused).map(p => ({ id: Number(p.plant_id), name: p.plant_name }));
   // A dead login marks Plants, as a failed payment marks Billing.
   const relink = live.some(a => a.status === 'needs_relink' && a.kind !== 'share');
   const dot = { billing: billing?.state === 'past_due', plants: relink };
@@ -3821,7 +3803,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
 }
 
 // Account: the person. Email and sign-in method, emails, their plants' readings as a file,
-// then the account's actions. ready: api_me has answered, so Your data knows if it's locked.
+// then the account's actions. ready: api_me has answered, so Your data knows its plants.
 const HAD_PASSWORD = 'synsynk.hasPassword';
 const hadPassword = () => { try { return localStorage.getItem(HAD_PASSWORD) !== '0'; } catch (e) { return true; } };
 // Dark, Light or the device's (SOLAR-318). Kept on this device by theme.js, not the account.
@@ -3881,7 +3863,7 @@ function BillingPage({ billing, reload, links, freeWeekEndsAt, onAdjust, payBann
       <PlanSection billing={billing} reload={reload} onAdjust={onAdjust} freeWeekEndsAt={freeWeekEndsAt} links={links} payBanner={payBanner} />
       <PaymentsSection billing={billing} />
       <InvoicesSection billing={billing} />
-      <CancelSection billing={billing} reload={reload} links={links} />
+      <CancelSection billing={billing} reload={reload} />
     </div>
   );
 }

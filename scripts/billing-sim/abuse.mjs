@@ -90,11 +90,15 @@ async function pay(u, body = {}) {
 // A plan's price at the offer a charge was opened with (0145: the launch offer charges less).
 const priceAt = (ref, plan, period, extras = 0) => num(`select public.billing_amount('${plan}', '${period}', ${extras},
   (select offer_id from private.billing_charges where reference = '${ref}'))`);
-// 0199: the week of each of the user's plants is over; the first second the user may read of its first running plant
+// 0199, 0204: the account's week and the week of each of its plants are over
 const weekOver = (u) => sql(`update private.plant_week set started_at = now() - interval '8 days'
-  where plant_id in (select plant_id from public.plant_users where user_id='${u.id}') and started_at > now() - interval '8 days'`);
+  where plant_id in (select plant_id from public.plant_users where user_id='${u.id}') and started_at > now() - interval '8 days';
+  update private.free_week_logins set started_at = now() - interval '8 days' where user_id='${u.id}' and started_at > now() - interval '8 days'`);
 const firstPlant = (u) => num(`select min(plant_id) from public.plant_users where user_id='${u.id}' and not paused`);
-const readFrom = async (u) => { const r = await rpc(u, "my_read_from", { p_plant: firstPlant(u) }); if (!good(r)) throw new Error("my_read_from " + r.status); return Number(r.data); };
+// how many of its plants the user may read (0204's one rule)
+const reads = async (u) => { const r = await rpc(u, "my_plant_ids"); if (!good(r)) throw new Error("my_plant_ids " + r.status); return r.data.length; };
+const weekEnds = async (u) => { const m = await rpc(u, "api_me"); return m.data?.freeWeekEndsAt ? Date.parse(m.data.freeWeekEndsAt) : null; };
+const logins = (u) => num(`select count(*) from private.sunsynk_accounts where user_id='${u.id}' and kind='login'`);
 const active = (u) => num(`select count(*) from public.plant_users where user_id='${u.id}' and not paused`);
 // The plant pick (0197): a login with more than one plant links them locked and the owner ticks which run.
 // pick: tick these plants; locked: the user's locked plants, lowest id first; fill: tick the first n of them;
@@ -158,19 +162,19 @@ try {
 await ensureMock();
 // =================================================================== G1 inventory
 const ALLOW_AUTH = new Set(`_energy_row _erow _hm _plant_day_energy admin_overview api_account_delete api_alerts api_balance api_billing_change
-api_billing_extras api_billing_keep api_billing_keep_set api_billing_quote api_billing_status billing_room api_data_days api_db_stats api_energy api_export api_grid_off_recent api_grid_today api_health
+api_billing_extras api_billing_keep api_billing_keep_set api_billing_quote api_billing_start_keep api_billing_status billing_room api_data_days api_db_stats api_energy api_export api_grid_today api_health
 api_history api_history_earliest api_inverter_history api_link_disconnect api_link_remove api_link_status api_me api_notifications
 api_notifications_read api_notices_read api_offer api_overview api_plant_change api_plant_days api_plant_pick api_plant_picks api_plant_states api_prefs_set api_push_sub
 api_push_unsub api_send_feedback api_string_health api_trends_by_hour api_trends_compare api_trends_daily calibration_plant cfg client_errors_cap
 battery_groups_kwh day_start_epoch day_start_epoch_tz email_prefs_touch handle_new_user local_day local_day_tz local_hour local_hour_tz local_minute
-local_minute_tz local_ts local_ts_tz my_full_plant_ids my_plant my_plant_ids my_read_from panel_kwp plant_cfg plant_config_batt_sign_guard plant_config_features_guard
+local_minute_tz local_ts local_ts_tz my_plant my_plant_ids panel_kwp plant_cfg plant_config_batt_sign_guard plant_config_features_guard
 plant_config_touch plant_tz profiles_guard q_by_hour q_day_agg q_day_gap_minutes q_grid_present q_recovered_minutes q_stats today_tz`.split(/\s+/));
 // api_offer: the website reads prices and the offer before sign-in (0145).
 const ALLOW_ANON = new Set("api_health api_offer client_errors_cap email_prefs_touch handle_new_user local_day local_hour my_plant_ids panel_kwp plant_config_batt_sign_guard plant_config_features_guard plant_config_touch profiles_guard".split(" "));
 const SERVICE_ONLY = ["billing_charge_open", "billing_charge_paid", "billing_charge_failed", "billing_charge_refunded", "billing_run", "billing_renew",
-  "billing_set_comped", "billing_charge_disputed", "billing_refunds_due", "billing_charge_refund_event", "billing_book_change", "billing_book_removal", "billing_free_week_start", "billing_may_link", "billing_upgrade_quote",
+  "billing_set_comped", "billing_charge_disputed", "billing_refunds_due", "billing_charge_refund_event", "billing_book_change", "billing_book_removal", "billing_may_link", "billing_upgrade_quote",
   "billing_amount_due", "billing_settle_open", "billing_card_open", "plant_users_upsert", "account_upsert",
-  "inverters_seed", "plant_config_seed", "link_attempt", "free_trimmed_plants", "accounts_active", "poll_jobs", "plant_bootstrap_kick",
+  "inverters_seed", "plant_config_seed", "link_attempt", "live_plants", "link_login_allowed", "poll_jobs", "plant_bootstrap_kick",
   "billing_charge_user"];
 
 await attack("G1a", "authenticated can run only the known functions", async () => {
@@ -240,7 +244,7 @@ await attack("G2b", "plant_config of a plant I do not collect (not mine, or stop
   const a = await user("g2b"); const bad = [];
   const r1 = await rest(a, "PATCH", "plant_config?plant_id=eq.6004", { backfill_tries: 0 });   // not linked
   if (rows(r1) > 0) bad.push("unlinked plant");
-  await link(a, "installer@mock");                       // 6004 comes in paused
+  await link(a, "installer@mock"); lock(a, 6004);        // 6004 runs with the login's other plants (0203): lock it
   const r2 = await rest(a, "PATCH", "plant_config?plant_id=eq.6004", { backfill_tries: 0 });
   if (rows(r2) > 0) bad.push("own paused plant");
   const r3 = await rest(a, "GET", "plant_config?plant_id=eq.6004");
@@ -251,7 +255,7 @@ await attack("G2c", "co-owner edits shared plant settings and history pointers (
   const a = await user("g2c"); await link(a, "solo@mock");           // 6003, shared with nobatt@local.test
   const cur = sql("select backfill_tries from public.plant_config where plant_id=6003");
   const r = await rest(a, "PATCH", "plant_config?plant_id=eq.6003", { backfill_tries: Number(cur || 0), backfill_next: null });
-  return { hit: rows(r) > 0, note: "any user linked to a plant can write backfill_*/temp_* and settings; recover skips free-trimmed plants" };
+  return { hit: rows(r) > 0, note: "any user linked to a plant can write backfill_*/temp_* and settings; recover skips plants that are not read" };
 }, { design: true });
 
 // =================================================================== G3 RPCs as a user
@@ -265,11 +269,11 @@ await attack("G3a", "tick, change or keep another user's plant", async () => {
   if (before !== after) bad.push("rows changed");
   return { hit: bad.length > 0, note: bad.join(",") };
 });
-await attack("G3b", "tick a plant past the plan with no payment (Free, Home, Family)", async () => {
+await attack("G3b", "run a plant past the plan with no payment (no plan, Home, Family)", async () => {
   const bad = [];
-  const f = await user("g3f"); await link(f, "installer@mock"); await fill(f, 1);   // 5 link locked, 1 ticked
-  if (active(f) !== 1) bad.push("free: the first tick did not start: " + active(f));
-  if (good(await pick(f, locked(f)[0]))) bad.push("free");
+  const f = await user("g3f"); await link(f, "installer@mock");                      // no plan: the login's 5 plants all run (0203)
+  if (active(f) !== 5) bad.push("no plan: the login's 5 plants did not all start: " + active(f));
+  if (good(await link(f, "farm@mock")) || logins(f) !== 1) bad.push("no plan: a second login");
   const h = await home("g3h"); await link(h, "installer@mock"); await fill(h, 2);
   if (active(h) !== 2) bad.push("home: 2 ticks did not start: " + active(h));
   if (good(await pick(h, locked(h)[0]))) bad.push("home");
@@ -299,9 +303,9 @@ await attack("G3g", "Home: a third plant in turns, by a second change or by remo
   if (active(h) > 2) bad.push(active(h) + " run on Home");
   return { hit: bad.length > 0, note: bad.join("; ") };
 });
-await attack("G3c", "parallel api_plant_pick goes past the plan's plant limit (Free has no billing row)", async () => {
+await attack("G3c", "parallel api_plant_pick goes past the plan's plant limit (no plan has no billing row)", async () => {
   const bad = [];
-  for (const [kind, mk, lim] of [["free", () => user("g3c-free"), 1], ["home", () => home("g3c-home"), 2], ["family", () => family("g3c-fam"), 5]]) {
+  for (const [kind, mk, lim] of [["free", () => user("g3c-free"), 5], ["home", () => home("g3c-home"), 2], ["family", () => family("g3c-fam"), 5]]) {
     const a = await mk(); await link(a, "installer@mock", { confirmCost: "paused" }); await link(a, "farm@mock", { confirmCost: "paused" });
     const ids = sql(`select plant_id from public.plant_users where user_id='${a.id}' order by plant_id`).split("\n").map(Number);
     const hasRow = num(`select count(*) from private.billing where user_id='${a.id}'`);
@@ -454,7 +458,7 @@ await attack("G4f", "charge paid twice, and two start charges both paid", async 
 await attack("G5a", "settle and card-change are refused when they do not apply", async () => {
   const a = await home("g5a"); const f = await user("g5f"); const bad = [];
   if (good(await svc("billing_settle_open", { p_user: a.id }))) bad.push("settle when not past due");
-  if (good(await svc("billing_card_open", { p_user: f.id }))) bad.push("card change on Free");
+  if (good(await svc("billing_card_open", { p_user: f.id }))) bad.push("card change with no plan");
   sql(`update private.billing set state='past_due', past_due_since=current_date where user_id='${a.id}'`);
   if (good(await svc("billing_charge_open", { p_user: a.id, p_plan: "family", p_period: null })) ) bad.push("upgrade while past due");
   return { hit: bad.length > 0, note: bad.join(",") };
@@ -499,12 +503,13 @@ await attack("G6a", "Family: parallel links of six logins (8 plants) pass the 5-
   const n = active(a);
   return { hit: n > 5, note: `${n} plants collecting on Family (5 covered), statuses ${rs.map((r) => r.status).join(",")}` };
 });
-await attack("G6b", "Free and Home: parallel links stay at 1 and 2 plants", async () => {
+await attack("G6b", "no plan and Home: parallel links stay at 5 and 2 plants, and no plan at one login", async () => {
   const bad = [];
-  for (const [mk, lim] of [[() => user("g6b-free"), 1], [() => home("g6b-home"), 2]]) {
+  for (const [mk, lim] of [[() => user("g6b-free"), 5], [() => home("g6b-home"), 2]]) {
     const a = await mk();
     await Promise.all(["nobatt@mock", "shared@mock", "export@mock", "brynne@mock", "installer@mock"].map((l) => link(a, l, { confirmCost: true })));
     if (active(a) > lim) bad.push(`${planOf(a)} active=${active(a)}`);
+    if (planOf(a) === "free" && logins(a) > 1) bad.push(`no plan: ${logins(a)} logins`);
   }
   return { hit: bad.length > 0, note: bad.join(",") };
 });
@@ -519,7 +524,7 @@ await attack("G6c", "old confirmCost values on a Family 6th+7th plant: no cost q
   }
   return { hit: bad.length > 0, note: bad.join("; ") };
 });
-await attack("G6d", "Free: remove login and relink does not restart the free week", async () => {
+await attack("G6d", "no plan: remove login and relink does not restart the free week", async () => {
   const a = await user("g6d"); const r = await link(a, "solo@mock");
   const t0 = sql(`select started_at from private.free_week_logins where user_id='${a.id}'`);
   await rpc(a, "api_link_remove", { p_account: r.data.accountId });
@@ -527,26 +532,24 @@ await attack("G6d", "Free: remove login and relink does not restart the free wee
   const t1 = sql(`select started_at from private.free_week_logins where user_id='${a.id}'`);
   return { hit: t0 !== t1 || !r2.data?.accountId, note: "week start kept: " + (t0 === t1) };
 });
-await attack("G6e", "Free: a second account on a plant whose week is over gets a week or full history", async () => {
+await attack("G6e", "a second account on a plant whose week is over gets a week or reads the plant", async () => {
   const a = await user("g6e1"), b = await user("g6e2");
   await link(a, "solo@mock"); weekOver(a);
   const r = await link(b, "solo@mock");
-  const ends = await weekEnds(b), from = await readFrom(b);
-  return { hit: !good(r) || ends === null || ends > Date.now() || from === 0, note: `0199: week ends ${ends ? new Date(ends).toISOString() : "none"}, reads from ${from}` };
+  const ends = await weekEnds(b), n = await reads(b);
+  return { hit: !good(r) || ends === null || ends > Date.now() || n > 0, note: `0199: week ends ${ends ? new Date(ends).toISOString() : "none"}, reads ${n} plants` };
 });
-await attack("G6f", "paid link then cancel: on Free the account still reads full history", async () => {
+await attack("G6f", "paid link then cancel: with no plan the account still reads its plant", async () => {
   const a = await home("g6f"); await link(a, "solo@mock");
   await rpc(a, "api_billing_change", { p_plan: "free" });
   sql(`update private.billing set next_billing_date = current_date where user_id='${a.id}'`);
   await svc("billing_renew", { p_user: a.id });
-  weekOver(a);
-  const from = await readFrom(a);
-  return { hit: planOf(a) !== "free" || from === 0, note: `plan ${planOf(a)}, reads from ${from}` };
+  const n = await reads(a);
+  return { hit: planOf(a) !== "free" || n > 0, note: `plan ${planOf(a)}, reads ${n} plants` };
 });
 // SOLAR-476: the free week runs 7 days from the account's first plant, once per account.
 // SOLAR-547 (0199): the week belongs to the plant; a plant whose week is over gives none.
 const weekStart = (u) => sql(`select coalesce(string_agg(started_at::text, ','), '') from private.free_week_logins where user_id='${u.id}'`);
-const weekEnds = async (u) => { const m = await rpc(u, "api_me"); return m.data?.freeWeekEndsAt ? Date.parse(m.data.freeWeekEndsAt) : null; };
 const backdate = (u, days) => sql(`update private.free_week_logins set started_at = started_at - interval '${days} days' where user_id='${u.id}'`);
 const DAY = 864e5;
 // only one share login may exist (0172): the local database's own, if it has one
@@ -562,7 +565,7 @@ const shareLogin = async () => {
 };
 // plants nobody else has (the local seed users hold every mock plant); cleanup removes this range
 const claim = async (u, plant) => svc("share_claim", { p_user: u.id, p_account: await shareLogin(), p_plant: plant, p_plant_name: "w" });
-await attack("W1", "Free: a sign-up that waits 30 days still gets 7 days from its first plant (one never linked), and none before", async () => {
+await attack("W1", "no plan: a sign-up that waits 30 days still gets 7 days from its first plant (one never linked), and none before", async () => {
   const a = await user("g6g");
   sql(`update auth.users set created_at = now() - interval '30 days' where id='${a.id}'`);
   const before = await weekEnds(a);
@@ -570,7 +573,7 @@ await attack("W1", "Free: a sign-up that waits 30 days still gets 7 days from it
   const after = await weekEnds(a), left = after ? (after - Date.now()) / DAY : 0;
   return { hit: before !== null || !(left > 6.9 && left <= 7), note: `before plant: ${before}, after: ${left.toFixed(2)} days left` };
 });
-await attack("W2", "Free: removing the login and linking it again does not restart the week", async () => {
+await attack("W2", "no plan: removing the login and linking it again does not restart the week", async () => {
   const a = await user("g6h"); const l = await link(a, "solo@mock"); backdate(a, 5);
   const t0 = weekStart(a);
   const s = await rpc(a, "api_link_remove", { p_account: l.data?.accountId }), g = await link(a, "solo@mock");
@@ -578,14 +581,14 @@ await attack("W2", "Free: removing the login and linking it again does not resta
   if (!good(s) || !good(g)) throw new Error(`remove ${s.status}, link ${g.status}`);
   return { hit: t0 !== t1, note: "week start kept: " + (t0 === t1) };
 });
-await attack("W3", "Free: a second and third login on the same account do not add or restart a week", async () => {
+await attack("W3", "no plan: a second and third login are refused, and do not add or restart a week (0203)", async () => {
   const a = await user("g6i"); await link(a, "solo@mock"); backdate(a, 3);
   const t0 = weekStart(a);
-  await link(a, "flat@mock", { confirmCost: true }); await link(a, "farm@mock", { confirmCost: true });
+  const l2 = await link(a, "flat@mock", { confirmCost: true }), l3 = await link(a, "farm@mock", { confirmCost: true });
   const t1 = weekStart(a);
-  return { hit: t0 !== t1 || t1.includes(","), note: `rows: ${t1.split(",").length}, start kept: ${t0 === t1}` };
+  return { hit: good(l2) || good(l3) || logins(a) !== 1 || t0 !== t1 || t1.includes(","), note: `logins ${logins(a)}, answers ${l2.status},${l3.status}, start kept: ${t0 === t1}` };
 });
-await attack("W4", "Free: login removed on day 3, relinked on day 8: the week is over, not restarted", async () => {
+await attack("W4", "no plan: login removed on day 3, relinked on day 8: the week is over, not restarted", async () => {
   const a = await user("g6j"); const r = await link(a, "solo@mock"); backdate(a, 3);
   await rpc(a, "api_link_remove", { p_account: r.data.accountId });
   backdate(a, 5);
@@ -606,21 +609,33 @@ await attack("W5", "shared plants: a claim starts the week once; a plant another
   if (!t0 || t0 !== t1) bad.push("week restarted");
   return { hit: bad.length > 0, note: bad.join(",") || "claimed, re-claim yours, other's plant taken, week kept" };
 });
-await attack("W6", "Free: delete the account, sign up again on the same login: a new week or full history", async () => {
+await attack("W6", "delete the account, sign up again on the same login: a new week or the plant read", async () => {
   const a = await user("g6l1"); await link(a, "solo@mock"); weekOver(a);
   await rpc(a, "api_account_delete");
   const b = await user("g6l2"); await link(b, "solo@mock");
-  const ends = await weekEnds(b), from = await readFrom(b);
-  return { hit: ends === null || ends > Date.now() || from === 0, note: `0199: week ends ${ends ? new Date(ends).toISOString() : "none"}, reads from ${from}` };
+  const ends = await weekEnds(b), n = await reads(b);
+  return { hit: ends === null || ends > Date.now() || n > 0, note: `0199: week ends ${ends ? new Date(ends).toISOString() : "none"}, reads ${n} plants` };
 });
-await attack("W7", "Free beside a paid account on one plant: reads past 24 hours", async () => {
+await attack("W7", "no plan, week over, beside a paid account on one plant: reads the plant the payer keeps", async () => {
   const h = await home("w7-paid"), b = await user("w7-free");
   await link(h, "solo@mock"); await link(b, "solo@mock"); weekOver(b);
-  const p = firstPlant(b), cut = Math.floor(Date.now() / 1000) - 86400 - 60;
-  const from = await readFrom(b), paid = await readFrom(h);
-  const old = await rest(b, "GET", `agg_minute?plant_id=eq.${p}&ts=lt.${cut}&select=ts&limit=1`);
-  if (paid !== 0) throw new Error("the paid account is limited: reads from " + paid);
-  return { hit: from === 0 || rows(old) > 0, note: `free reads from ${from}, rows past 24 h: ${rows(old)}; paid reads all` };
+  const p = firstPlant(b);
+  sql(`insert into public.agg_minute (plant_id, ts) values (${p}, extract(epoch from now())::bigint / 60 * 60) on conflict do nothing`);
+  const n = await reads(b), paid = await reads(h);
+  const row = await rest(b, "GET", `agg_minute?plant_id=eq.${p}&select=ts&limit=1`), paidRow = await rest(h, "GET", `agg_minute?plant_id=eq.${p}&select=ts&limit=1`);
+  const exp = await rpc(b, "api_export", { p_from: "2026-01-01", p_to: "2026-01-02", p_plant: p });
+  const me = await rpc(b, "api_me");
+  if (paid !== 1 || rows(paidRow) !== 1) throw new Error(`the paid account does not read its plant: ${paid} plants, ${rows(paidRow)} rows`);
+  return { hit: n > 0 || rows(row) > 0 || good(exp) || !me.data?.wall, note: `no plan reads ${n} plants, ${rows(row)} rows, export ${exp.status}, pay screen ${!!me.data?.wall}; paid reads its plant` };
+});
+await attack("W9", "no plan: keep a plant at a plan's start that is another account's, or keep while on a plan (0205)", async () => {
+  const a = await user("w9a"), h = await home("w9h"), bad = [];
+  await link(a, "installer@mock"); await link(h, "solo@mock");
+  if (!good(await rpc(a, "api_billing_start_keep", { p_plants: [firstPlant(a)] }))) bad.push("its own running plant refused");
+  if (good(await rpc(a, "api_billing_start_keep", { p_plants: [9264470] }))) bad.push("a plant that is not the account's kept");
+  if (good(await rpc(h, "api_billing_start_keep", { p_plants: [firstPlant(h)] }))) bad.push("kept while on a plan");
+  if (good(await rpc(null, "api_billing_start_keep", { p_plants: [firstPlant(a)] }))) bad.push("signed out");
+  return { hit: bad.length > 0, note: bad.join(", ") || "all refused" };
 });
 await attack("W8", "a share claim on a plant whose week is over gives a week", async () => {
   const a = await user("w8a"), b = await user("w8b");
@@ -631,7 +646,7 @@ await attack("W8", "a share claim on a plant whose week is over gives a week", a
 });
 
 // =================================================================== G7 plan tricks
-await attack("G7a", "book Home (or Free) then link new plants: they stay active after the renewal", async () => {
+await attack("G7a", "book Home (or a cancel) then link new plants: they stay active after the renewal", async () => {
   const bad = [];
   for (const target of ["home", "free"]) {
     const a = await family("g7a");
@@ -687,7 +702,7 @@ const ARGS = { api_energy: { p_period: "week" }, api_export: { p_from: "2026-10-
   api_inverter_history: { p_date: "2026-10-29" }, api_trends_by_hour: { p_days: 7 }, api_trends_daily: { p_days: 7 }, q_by_hour: { p_days: 7 },
   q_day_agg: { p_day: "2026-10-29" }, q_day_gap_minutes: { p_day: "2026-10-29" }, q_grid_present: { p_ts: Math.floor(Date.now() / 1000) - 600 },
   q_recovered_minutes: { p_day: "2026-10-29" }, _plant_day_energy: { p_from: "2026-10-01", p_to: "2026-10-30" } };
-const PLANT_FNS = ["api_balance", "api_data_days", "api_db_stats", "api_energy", "api_export", "api_grid_off_recent", "api_health", "api_history", "api_history_earliest",
+const PLANT_FNS = ["api_balance", "api_data_days", "api_db_stats", "api_energy", "api_export", "api_health", "api_history", "api_history_earliest",
   "api_inverter_history", "api_overview", "api_plant_days", "api_string_health", "api_trends_by_hour", "api_trends_compare", "api_trends_daily",
   "plant_cfg", "plant_tz", "q_by_hour", "q_day_agg", "q_day_gap_minutes", "q_grid_present", "q_recovered_minutes", "q_stats", "_plant_day_energy"];
 async function readLeaks(u, plant) {

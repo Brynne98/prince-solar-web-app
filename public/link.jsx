@@ -115,6 +115,8 @@ const LINK_ERRORS = {
   'sign in first': 'Your session ended. Sign in again.',
   'session invalid': 'Your session ended. Sign in again.',
   'too many attempts': 'Too many tries. Try again in an hour.',
+  // one SunSynk login with no plan (0203)
+  'one login': 'The free week runs one SunSynk login. Choose a plan to add another.',
 };
 
 
@@ -127,7 +129,7 @@ const rand = (n, narrow) => 'R' + Number(n).toLocaleString('en-US').replace(/,/g
 const billDay = (d) => !d ? '' : window.dayText(d, { day: 'numeric', month: 'short', year: d.slice(0, 4) === String(new Date().getFullYear()) ? undefined : 'numeric' });
 const perUnit = (period) => (period === 'yearly' ? 'a year' : 'a month');
 // here, not in tabs.jsx, so the billing notices in the header can name a plan before tabs loads
-const PLAN_NAME = { free: 'Free', home: 'Home', family: 'Family' };
+const PLAN_NAME = { free: 'The free week', home: 'Home', family: 'Family' };
 // extras: the extra plants wanted on Family in all; null keeps those held (SOLAR-264).
 // A billing read or change that takes too long ends as an error, so no button or pop-up waits
 // forever (SOLAR-294). The caller says "try again"; a change may still land, so it re-reads.
@@ -166,7 +168,7 @@ const pickableLogins = (links) => {
 const lossLine = (links, cancel) => {
   const plants = pickableLogins(links).flatMap(a => a.plants);
   const kept = plants.filter(p => !p.drop).map(window.plantLabel), gone = plants.filter(p => p.drop).map(window.plantLabel);
-  if (!gone.length) return cancel ? 'All history is deleted then.' : '';
+  if (!gone.length) return cancel ? 'Readings stop then. Your history is deleted 30 days later.' : '';
   const stays = kept.length ? `${andList(kept)} ${kept.length > 1 ? 'stay' : 'stays'}. ` : '';
   const what = gone.length > 2 ? `The other ${gone.length} plants` : andList(gone);
   return stays + what + (cancel ? ' and all history are deleted then.' : ` and ${gone.length > 1 ? 'their' : 'its'} history are deleted then.`);
