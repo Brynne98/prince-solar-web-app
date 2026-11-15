@@ -108,7 +108,7 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `motionMs(name)` | A `--dur-*` step in ms; 0 under reduced motion. |
 | `MenuList`, `PickMenu` | A dropdown menu; `PickMenu` is the replacement for `<select>`. |
 | `Sheet` | A phone bottom sheet. |
-| `StatusBits` | The dot and word of a status pill. |
+| `StatusBits` | The word of a status pill; no dot (SOLAR-556). |
 | `fmtAgo`, `readAgo`, `useNow` | "5 min ago", "Read 2 h ago", a ticking clock. |
 | `plantStatus` | A plant's status word and tone from its last reading. |
 | `StepField` | A number box with a unit, as in First steps. |
