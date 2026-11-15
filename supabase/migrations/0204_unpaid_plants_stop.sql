@@ -126,9 +126,40 @@ end $$;
 revoke all on function private.plant_start_fill(bigint) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
--- A plan starts on an account that had none: each plant it runs that was not
--- read starts again with the 60-day fetch (plant_start_fill). A plant in the
--- account's free week, or read for another account, has its history already.
+-- The plants to keep when a plan with fewer places starts: the free week runs up
+-- to 5 plants and Home has 2. The owner ticks them before paying; the start reads
+-- the list (billing_restart) and clears it. With none ticked, the first linked stay.
+-- ---------------------------------------------------------------------------
+create or replace function public.api_billing_start_keep(p_plants bigint[])
+returns void
+language plpgsql security definer set search_path = public, private, pg_temp
+as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then raise exception 'sign in first' using errcode = '42501'; end if;
+  perform private.billing_lock(uid);
+  if coalesce((select plan from private.billing where user_id = uid), 'free') <> 'free' then
+    raise exception 'nothing to pick' using errcode = '22023';
+  end if;
+  if exists (select 1 from unnest(coalesce(p_plants, '{}')) x
+              where not exists (select 1 from public.plant_users pu where pu.user_id = uid and pu.plant_id = x and not pu.paused)) then
+    raise exception 'a plant is not running for this user' using errcode = '42501';
+  end if;
+  insert into private.billing (user_id, next_keep) values (uid, coalesce(p_plants, '{}'))
+  on conflict (user_id) do update set next_keep = excluded.next_keep, updated_at = now();
+end $$;
+revoke all on function public.api_billing_start_keep(bigint[]) from public, anon;
+grant execute on function public.api_billing_start_keep(bigint[]) to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- A plan starts on an account that had none.
+--   - More plants run than the plan has places: the plants over it are locked,
+--     the ticked ones (api_billing_start_keep) kept first, then the first linked.
+--     A locked plant keeps its tick without its place and loses its history, as a
+--     plant changed out does (0197); a bigger plan starts it again with a fetch.
+--   - Each plant it runs that was not read starts again with the 60-day fetch
+--     (plant_start_fill). A plant in the account's free week, or read for another
+--     account, has its history already.
 -- ---------------------------------------------------------------------------
 create or replace function private.billing_restart()
 returns trigger
@@ -137,6 +168,23 @@ as $$
 declare p bigint;
 begin
   if new.plan = 'free' or (tg_op = 'UPDATE' and old.plan <> 'free') then return new; end if;
+  if not new.comped then
+    with stop as (
+      update public.plant_users set paused = true
+       where user_id = new.user_id and plant_id in (
+         select plant_id from public.plant_users
+          where user_id = new.user_id and not paused
+          order by array_position(new.next_keep, plant_id) nulls last, linked_at, plant_id
+         offset public.billing_room(new.plan, new.extra_plants))
+      returning plant_id)
+    insert into private.plant_wipe (plant_id)
+    select s.plant_id from stop s
+     -- the rows just locked still read as running inside this statement
+     where not exists (select 1 from public.plant_users o
+                        where o.plant_id = s.plant_id and o.user_id <> new.user_id and not o.paused)
+    on conflict (plant_id) do nothing;
+    update private.billing set next_keep = '{}' where user_id = new.user_id and next_keep <> '{}';
+  end if;
   for p in
     select pu.plant_id from public.plant_users pu
      where pu.user_id = new.user_id and not pu.paused and pu.share_gone_at is null

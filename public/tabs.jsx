@@ -2347,6 +2347,22 @@ function DowngradeDialog({ b, plan, period, price, links, busy, onConfirm, onCan
   );
 }
 
+// Starting a plan with fewer places than plants running (the free week runs 5, Home 2;
+// SOLAR-552): which stay. The others are locked and lose their history (0204).
+// onConfirm(keep): the plants ticked.
+function StartPickDialog({ plan, links, busy, onConfirm, onCancel }) {
+  const room = planRoom(plan);
+  const { keep, stop } = cancelPlants(links, room);
+  const [picked, setPicked] = React.useState(keep.map(p => p.plant_id));
+  return (
+    <ConfirmCard modal danger={false} title={<>Start {PLAN_NAME[plan]}?</>} action="Continue" busy={busy}
+      onConfirm={() => onConfirm(picked)} onCancel={onCancel}>
+      <div className="confirm-text">The other {stop > 1 ? `${stop} plants are` : 'plant is'} locked and {stop > 1 ? 'their' : 'its'} history is deleted. Family runs 5 plants.</div>
+      <KeepPicker links={links} plan={plan} room={room} value={picked} onChange={setPicked} />
+    </ConfirmCard>
+  );
+}
+
 // Cancel plan, from Billing: what happens when. Nothing is picked: every plant stops being
 // read on the end date and the history goes 30 days later (SOLAR-552).
 function CancelPlanDialog({ b, busy, onConfirm, onCancel }) {
@@ -2548,6 +2564,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
   const [picking, setPicking] = useState(null);
   // A downgrade or switch asked for while a payment has failed (SOLAR-497)
   const [payFirst, setPayFirst] = useState(false);
+  // A first plan with fewer places than plants running, asked first (SOLAR-552): the plan
+  const [starting, setStarting] = useState(null);
   const failed = b?.state === 'past_due';
   // Home monthly on the Yearly tab: Family yearly is paid now, from today (SOLAR-364)
   const across = paid && b.plan === 'home' && b.period === 'monthly' && view === 'yearly';
@@ -2605,7 +2623,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
     // a bigger plan is bought in the plan's own period
     if (!sameView && !across && PLAN_RANK[p] > PLAN_RANK[b.plan]) return <div className="plan-cur plan-wait">Available {b.period}</div>;
     if (PLAN_RANK[p] > PLAN_RANK[b.plan]) return <button type="button" className="save-btn"
-      onClick={() => (b.offer && window.track('offer_pick_done', { offer: b.offer.id, plan: p, period }), window.startUpgrade(p, period, !paid, null, forPlant ? [forPlant] : null))}>{paid ? 'Upgrade' : 'Start ' + PLAN_NAME[p]}</button>;
+      onClick={() => (b.offer && window.track('offer_pick_done', { offer: b.offer.id, plan: p, period }),
+        !paid && cancelPlants(links, planRoom(p)).stop > 0 ? setStarting(p) : window.startUpgrade(p, period, !paid, null, forPlant ? [forPlant] : null))}>{paid ? 'Upgrade' : 'Start ' + PLAN_NAME[p]}</button>;
     if (bookedHere(p)) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
     // a smaller plan in either period, from the billing date (SOLAR-364)
     return <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'down:' + p}
@@ -2637,6 +2656,16 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
         <p className="plan-foot">More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: b.plan, from: 'plans' })}>Email us</a>. Cancel any time.</p>
         {/* booked, it goes back to Billing, where Manage changes the pick (SOLAR-496) */}
         {payFirst && <PayFirstDialog b={b} want="downgrade" onCancel={() => setPayFirst(false)} />}
+        {starting && (
+          <StartPickDialog plan={starting} links={links} busy={!!busy} onCancel={() => setStarting(null)}
+            onConfirm={(keep) => run(async () => {
+              const { error } = await window.sb.rpc('api_billing_start_keep', { p_plants: keep });
+              if (error) return window.toast('Couldn’t save your plants. Try again.', { error: true });
+              window.track('start_keep_done', { plan: starting, kept: keep.length });
+              setStarting(null);
+              window.startUpgrade(starting, period, true);
+            })} />
+        )}
         {picking && (
           <DowngradeDialog b={b} plan={picking.plan} period={picking.period} price={price(picking.plan)} links={links} busy={!!busy}
             onConfirm={(keep) => run(async () => { const ok = await bookPlan(b, picking.plan, picking.period, reload, keep); setPicking(null); if (ok) onBack(); })}

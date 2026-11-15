@@ -66,6 +66,7 @@ Web (`public/*.jsx`):
 | `data_download_done` | CSV downloaded |
 | `plan_page_shown`, `offer_pick_done`, `checkout_opened`, `pay_review_done`, `upgrade_done` | Choosing and paying for a plan |
 | `downgrade_done`, `plan_change_undone`, `extra_plants_done`, `yearly_switch_done` | Plan changes |
+| `start_keep_done` | The plants to keep ticked before a first plan with fewer places is paid (`plan`, `kept`; SOLAR-552) |
 | `pay_first_shown` | Cancel or downgrade asked for while a payment has failed: the pay-first pop-up (`plan`, `want`: cancel or downgrade) |
 | `keep_pick_done` | Keep pick saved in Billing's Choose plant(s) pop-up while a cancel or smaller plan is booked (`plan`, `room`) |
 | `card_change_done`, `website_plan_done`, `more_plants_email_done` | Billing |

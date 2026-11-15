@@ -6,10 +6,10 @@
 -- report but the free week's last one (0114).
 --
 -- Now:
---   - email_queue's insert trigger drops an alert or a report for a plant that is
---     not read for that account (plant_live, 0203). The pop-up and the app's list
---     come from the same row, so they stop too. The free week's last report (day 7)
---     still goes. The hold-back of 0114 is gone: it is this rule now.
+--   - email_queue's insert trigger drops an alert for a plant that is not read for
+--     that account (plant_live, 0203). The pop-up and the app's list come from the
+--     same row, so they stop too. Reports go to accounts with a plan only, as 0114
+--     held them back; the free week's last report (day 7) still goes.
 --   - unpaid_reminder, 14 days after the account stopped being paid for or free
 --     (day 21 from the link), and unpaid_last, 27 days after (day 34, 3 days before
 --     the delete). free_week_mail queues them, once per time the account lapses.
@@ -71,8 +71,8 @@ returns text language sql immutable as $$
   end
 $$;
 
--- 0114's insert trigger: no mail for a locked plant, and no alert or report for a
--- plant that is not read for this account, but the free week's last report.
+-- 0114's insert trigger: no mail for a locked plant, no report without a plan, and
+-- no alert for a plant that is not read for this account.
 create or replace function private.email_skip_paused()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
@@ -80,9 +80,13 @@ begin
        where pu.user_id = new.user_id and pu.plant_id = new.plant_id and pu.paused) then
     return null;
   end if;
-  if new.plant_id is not null and new.user_id is not null
-     and (private.is_alert(new.kind) or new.kind like 'report\_%')
-     and not coalesce((new.data->>'freeWeekEnds')::boolean, false)
+  -- No plan: no report but the free week's last one (0114), in the week too.
+  if new.kind like 'report\_%' and not coalesce((new.data->>'freeWeekEnds')::boolean, false)
+     and coalesce((select b.plan from private.billing b where b.user_id = new.user_id), 'free') = 'free' then
+    return null;
+  end if;
+  -- An alert for a plant that is not read for this account.
+  if new.plant_id is not null and new.user_id is not null and private.is_alert(new.kind)
      and not private.plant_live(new.user_id, new.plant_id) then
     return null;
   end if;
