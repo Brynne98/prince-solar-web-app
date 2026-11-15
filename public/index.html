@@ -701,7 +701,9 @@
              max(var(--wall-pad), env(safe-area-inset-bottom)) max(var(--wall-pad), env(safe-area-inset-left));
     font-size: clamp(14px, 1.6vmin + 4px, 24px); }
   html:has(.flow-fs-wrap.wall) { overflow: hidden; }
-  .wall-bar { display: flex; align-items: center; justify-content: space-between; gap: 1em; }
+  /* as wide as the zoomed diagram, like the cards and the sentence (SOLAR-550) */
+  .wall-bar { display: flex; align-items: center; justify-content: space-between; gap: 1em;
+    width: calc(var(--wall-w, 1100px) * var(--wall-zoom, 1)); max-width: 100%; margin-inline: auto; }
   .wall-status { display: inline-flex; align-items: center; gap: .6em; min-width: 0; white-space: nowrap; }
   .wall-status .status-dot { width: .55em; height: .55em; }
   .wall-status .status-word { font-size: 1em; }
