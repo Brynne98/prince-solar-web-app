@@ -643,55 +643,13 @@ export type PlantJob = {
   account: Account;
 };
 
-export async function plantsToPoll(): Promise<PlantJob[]> {
-  // accounts_active orders by linked_at, so index = seniority.
-  const accounts = await rpc<Account[]>("accounts_active", {});
-  if (!accounts?.length) return [];
-  const rank = new Map(accounts.map((a, i) => [a.id, i]));
-  const byId = new Map(accounts.map((a) => [a.id, a]));
-  const { data, error } = await db
-    .from("plant_users").select("plant_id, plant_name, account_id")
-    .in("account_id", [...byId.keys()]).eq("paused", false).is("share_gone_at", null);
-  if (error) throw new Error(`plant_users: ${error.message}`);
-  const { data: cfgRows } = await db.from("plant_config").select("plant_id, timezone, batt_positive_means, backfill_next, backfill_until, backfill_tries, has_grid, temp_next, temp_tries");
-  const cfg = new Map((cfgRows ?? []).map((c: any) => [Number(c.plant_id), c]));
-  // One job per plant even if several users share it. A plant paused for every user
-  // (0110) has no row here, and a plant nobody pays for is not in livePlants (0204),
-  // so neither is polled and no data is saved for it. The plant is read through
-  // the EARLIEST-linked active account, and that choice is stable from minute to
-  // minute — the inverter cache (freshness gate, carry run) is keyed by account,
-  // so a flip would throw it away every time. If that account dies (needs_relink)
-  // the next-oldest takes over on the following minute.
-  const live = await livePlants();
-  const best = new Map<number, { row: any; acc: Account }>();
-  for (const r of data ?? []) {
-    const pid = Number(r.plant_id);
-    if (!r.account_id || !live.has(pid)) continue;
-    const acc = byId.get(r.account_id);
-    if (!acc) continue;
-    const cur = best.get(pid);
-    if (!cur || (rank.get(acc.id) ?? 1e9) < (rank.get(cur.acc.id) ?? 1e9)) best.set(pid, { row: r, acc });
-  }
-  return [...best.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([pid, { row, acc }]) => ({
-      plantId: pid,
-      plantName: row.plant_name ?? null,
-      timezone: String(cfg.get(pid)?.timezone ?? "Africa/Johannesburg"),
-      battPositiveMeans: cfg.get(pid)?.batt_positive_means ?? null,
-      backfillNext: cfg.get(pid)?.backfill_next ?? null,
-      backfillUntil: cfg.get(pid)?.backfill_until ?? null,
-      backfillTries: Number(cfg.get(pid)?.backfill_tries ?? 0),
-      tempNext: cfg.get(pid)?.temp_next ?? null,
-      tempTries: Number(cfg.get(pid)?.temp_tries ?? 0),
-      hasGrid: cfg.get(pid)?.has_grid ?? null,
-      account: acc,
-    }));
-}
+/** Every plant that is read, each through one login: poll_jobs as one shard (0204). */
+export const plantsToPoll = (): Promise<PlantJob[]> => pollJobs(0, 1);
 
 /**
- * One poll shard's jobs (0100): same plants and account choice as plantsToPoll(),
- * but the shard filter runs in SQL, so a shard reads only its own accounts.
+ * One poll shard's jobs (0100). The database picks the plants and each plant's login
+ * (the earliest-linked working login of an account that has a plan or is in its free
+ * week, 0204), and the shard filter runs there, so a shard reads only its own accounts.
  * account set = only plants read through that account, whatever the shard.
  */
 export async function pollJobs(shard: number, shards: number, account?: string): Promise<PlantJob[]> {
@@ -702,7 +660,7 @@ export async function pollJobs(shard: number, shards: number, account?: string):
       id: r.account_id, user_id: r.user_id, sunsynk_username: r.sunsynk_username,
       access_token: r.access_token, access_expires_at: r.access_expires_at,
     };
-    accs.set(acc.id, acc); // one object per account, as plantsToPoll() gave
+    accs.set(acc.id, acc); // one object per account: its token is refreshed in place
     return {
       plantId: Number(r.plant_id),
       plantName: r.plant_name ?? null,

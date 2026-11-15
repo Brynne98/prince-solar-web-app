@@ -1171,6 +1171,17 @@ begin
     where plant_id between 9007701 and 9007703 and backfill_next = (now() at time zone 'Africa/Johannesburg')::date - 60), 3);
   perform pg_temp.eq('paid: the other account on the plant still reads nothing', pg_temp.as_user(w3, 'select count(*) from public.my_plant_ids()'), '0');
 
+  -- a first plan with fewer places than plants running: the ticked ones stay (0204)
+  perform pg_temp.eq('start keep: another account''s plant refused',
+    pg_temp.as_user(w2, 'select public.api_billing_start_keep(array[9007701])'), 'REFUSED: a plant is not running for this user');
+  perform pg_temp.as_user(w2, 'select public.api_billing_start_keep(array[9007714, 9007715])');
+  insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values (w2, 'home', 'monthly', 1, t + 30)
+  on conflict (user_id) do update set plan = 'home', period = 'monthly', billing_day = 1, next_billing_date = t + 30;
+  perform pg_temp.eq('start keep: the two ticked run on Home', (select string_agg(plant_id::text, ',' order by plant_id) from public.plant_users where user_id = w2 and not paused), '9007714,9007715');
+  perform pg_temp.eq('start keep: the list is cleared', (select next_keep from private.billing where user_id = w2), '{}'::bigint[]);
+  perform pg_temp.eq('start keep: not on a plan', pg_temp.as_user(w2, 'select public.api_billing_start_keep(array[9007714])'), 'REFUSED: nothing to pick');
+  perform pg_temp.eq('one login: capitals do not make a second', public.link_login_allowed(w1, 'W1@Login.Test'), true);
+
   -- a failed card: 8 days, then 30 days of history with nothing read, then the pay screen
   perform public.plant_users_upsert(w6, a6, pg_temp.rows(31));
   perform pg_temp.days_on(w6, 60);

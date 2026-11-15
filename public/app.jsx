@@ -1647,6 +1647,8 @@ function App({ links }) {
   const loadMe = useCallback(async () => {
     try {
       const m = await window.fetchMe();
+      // The free week ended with the app open: SignedIn reads the wall again and shows the pay screen.
+      if (m.wall) { location.reload(); return; }
       setMe(m);
       const ids = (m.plants || []).map(p => p.id);
       // The address names its plant (?plant=, from an email or a reload); one that isn't the

@@ -1,0 +1,11 @@
+SunSynk is down
+
+SunSynk isn't answering for anyone, so no readings come in.
+
+Down since: 09:10 (today)
+
+Open Live: https://app.princesolarhub.co.za/?tab=live&plant=538820
+
+--
+You get SunSynk alerts for Home. Turn them off in notification settings: https://app.princesolarhub.co.za/?tab=account&section=notifications.
+Need help? Email hello@princesolarhub.co.za.

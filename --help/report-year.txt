@@ -1,0 +1,19 @@
+2026
+Home
+
+Made: 9.42 MWh (↑ 6% vs 2025)
+Home: 10.87 MWh (↑ 2% vs 2025)
+Imported: 2.71 MWh (↓ 9% vs 2025)
+Independence: 75% (↑ 3% vs 2025)
+Est. saved: R25,300 (↑ 11% vs 2025)
+
+Solar each month
+J 1040, F 930, M 890, A 720, M 610, J 520, J 560, A 680, S 790, O 880, N 920, D 880 kWh
+Best day: 41.2 kWh, 3 Jan
+Busiest day: 52.3 kWh, 21 Jun
+
+Open Live: https://app.princesolarhub.co.za/?tab=live&plant=538820
+
+--
+Sent every year. Turn it off in notification settings: https://app.princesolarhub.co.za/?tab=account&section=notifications.
+Need help? Email hello@princesolarhub.co.za.

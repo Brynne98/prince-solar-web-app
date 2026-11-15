@@ -1,0 +1,19 @@
+6 – 12 Oct 2026
+Home
+
+Made: 191 kWh (↑ 4% vs last week)
+Home: 209 kWh (↑ 1% vs last week)
+Imported: 47.2 kWh (↓ 8% vs last week)
+Independence: 77% (↑ 2% vs last week)
+Est. saved: R495 (↑ 5% vs last week)
+
+Solar each day
+Mon 27, Tue 30, Wed 18, Thu 33, Fri 31, Sat 25, Sun 27 kWh
+Best day: 33.1 kWh, Thu 9 Oct
+Busiest day: 38.4 kWh, Sat 11 Oct
+
+Open Live: https://app.princesolarhub.co.za/?tab=live&plant=538820
+
+--
+Sent every week. Turn it off in notification settings: https://app.princesolarhub.co.za/?tab=account&section=notifications.
+Need help? Email hello@princesolarhub.co.za.

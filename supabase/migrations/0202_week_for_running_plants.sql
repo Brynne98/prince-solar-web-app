@@ -40,7 +40,7 @@ language sql stable security definer set search_path = public, private, pg_temp
 as $$
   select coalesce((select b.plan from private.billing b where b.user_id = p_user), 'free') <> 'free'
       or not exists (select 1 from private.sunsynk_accounts a
-                      where a.user_id = p_user and a.kind = 'login' and a.sunsynk_username <> p_username)
+                      where a.user_id = p_user and a.kind = 'login' and lower(a.sunsynk_username) <> lower(p_username))
 $$;
 revoke all on function public.link_login_allowed(uuid, text) from public, anon, authenticated;
 grant execute on function public.link_login_allowed(uuid, text) to service_role;

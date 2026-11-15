@@ -257,6 +257,11 @@ begin
      order by pu.plant_id
   loop
     perform pg_advisory_xact_lock(p);
+    -- a payment or a link that landed while this run waited for the lock
+    continue when exists (select 1 from public.plant_users pu
+                           where pu.plant_id = p and not pu.paused
+                             and (private.plant_live(pu.user_id, p)
+                                  or private.unpaid_since(pu.user_id) + interval '30 days' > now()));
     continue when not (exists (select 1 from public.agg_minute where plant_id = p)
                     or exists (select 1 from public.agg_5m where plant_id = p)
                     or exists (select 1 from public.readings where plant_id = p)
@@ -272,6 +277,8 @@ begin
 end $$;
 revoke all on function private.unpaid_delete() from public, anon, authenticated;
 
+-- plantsToPoll (sunsynk.ts) reads poll_jobs now, so the second list of logins is not used.
+drop function if exists public.accounts_active();
 drop function if exists private.free_trim();
 drop function if exists public.free_trimmed_plants();
 drop table if exists private.free_trim_done;

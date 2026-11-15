@@ -1,0 +1,10 @@
+Grid down at Home
+
+Grid: Off (since 14:32 today)
+Battery: 62%
+
+Open Grid: https://app.princesolarhub.co.za/?tab=grid&plant=538820
+
+--
+You get grid alerts for Home. Turn them off in notification settings: https://app.princesolarhub.co.za/?tab=account&section=notifications.
+Need help? Email hello@princesolarhub.co.za.

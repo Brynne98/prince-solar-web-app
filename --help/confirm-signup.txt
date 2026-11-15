@@ -1,0 +1,11 @@
+Confirm your email
+
+Tap the button to finish signing up as you@example.com.
+
+Confirm email: https://app.princesolarhub.co.za/#sample-link
+
+The link works once, for 24 hours.
+
+--
+Didn't sign up? Ignore this email.
+Need help? Email hello@princesolarhub.co.za.

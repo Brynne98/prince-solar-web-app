@@ -1,0 +1,11 @@
+Panels stopped producing at Home
+
+String 3: No power (since 11:40 today)
+Inverter: 2508290476
+Other strings: Producing
+
+Open Equipment: https://app.princesolarhub.co.za/?tab=inverters&plant=538820
+
+--
+You get panel alerts for Home. Turn them off in notification settings: https://app.princesolarhub.co.za/?tab=account&section=notifications.
+Need help? Email hello@princesolarhub.co.za.

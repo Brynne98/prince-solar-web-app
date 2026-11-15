@@ -1,0 +1,15 @@
+Finish your setup
+
+Two numbers are still empty. Each one turns on part of the app.
+
+[x] Sign up
+[x] Add plant
+[x] Electricity rate
+[ ] Battery size: Shows how long your battery will last. Add up all your batteries, from their labels.
+[x] Battery reserve
+[ ] Solar panels: Shows how much your panels make against what they can. Add up their watts, from your installer's invoice.
+
+Finish setup: https://app.princesolarhub.co.za/?tab=account&section=system
+
+--
+Need help? Email hello@princesolarhub.co.za.
