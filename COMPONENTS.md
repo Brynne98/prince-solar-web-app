@@ -35,7 +35,7 @@ Look and feel (sizes, colours, radii) is in `DESIGN.md`. This file is about code
 | `Meter` | A thin progress bar: `pct`, `color`. |
 | `Skeleton` | A loading shape: `w`, `h`, `r`, `as`. |
 | `SkelLine` | A one-line text skeleton: `w`, `h`, `max`. |
-| `Locked`, `HistoryLock`, `LockIcon` | Paid-only content behind the free-week lock. |
+| `LockIcon` | The lock beside a locked plant's name. |
 
 Formatting and dates (also `components.jsx`):
 

@@ -58,11 +58,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
     // a 0 W battery can still report "discharging"; it reads as Resting, like the flow line
     return { k: charging ? 'Charging slowly' : agg.battState === 'discharging' && agg.battPower > 5 ? 'Discharging' : 'Resting', v: '' };
   })();
-  // Free after its week (SOLAR-242): the time to full or empty shows greyed, with a lock
-  const over = window.useFreeOver();
   const battState = battRow.on
     ? <button type="button" className="mini-link" onClick={battRow.on}>{battRow.v}</button>
-    : over && battRow.v ? <window.Locked where="battery_time" label="Keep your insights">{battRow.k}<b>{battRow.v}</b></window.Locked>
     : <>{battRow.k}{battRow.v && <b>{battRow.v}</b>}</>;
 
   // Where the home's power is coming from right now: the battery only while discharging,

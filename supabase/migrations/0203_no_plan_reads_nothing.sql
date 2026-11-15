@@ -17,7 +17,8 @@
 --     rules, and the limit in the ten readers of 0199. api_grid_off_recent (the
 --     "Grid was off" prompt of the Free plan) is gone.
 --   - api_me gives the plants the caller may read, and 'wall' when the account
---     must pay: the number of its ticked plants and the time its history is deleted.
+--     must pay: the number of its ticked plants, the time its history is deleted,
+--     and whether it ever paid.
 --   - api_plant_states, api_notifications and api_alerts list readable plants only.
 --
 -- private.billing.ended_at: when the account's paid time ended (a cancel's end
@@ -158,7 +159,10 @@ as $$
     -- no plan, the free week over, and not in a failed card's 30 days: the pay screen
     'wall', (select jsonb_build_object(
                       'plants', (select count(*) from private.plant_picks k where k.user_id = auth.uid()),
-                      'deleteAt', u.since + interval '30 days')
+                      'deleteAt', u.since + interval '30 days',
+                      -- it had a plan: the screen says the plan ended, not the free week
+                      'paid', exists (select 1 from private.billing_charges c
+                                       where c.user_id = auth.uid() and c.status = 'paid'))
                from (select private.unpaid_since(auth.uid()) as since) u
               where u.since <= now()
                 and not exists (select 1 from private.billing b

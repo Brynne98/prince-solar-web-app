@@ -56,13 +56,14 @@ Web (`public/*.jsx`):
 | `plant_kept_done` | Plant kept from deletion |
 | `login_remove_done` | SunSynk login removed |
 | `plant_settings_save_done` | Plant settings saved (field names only) |
-| `setup_turn_on_done`, `free_week_card_done` | Setup and free-week cards |
+| `setup_turn_on_done` | Setup card |
+| `pay_wall_shown` | The pay screen shown: no plan, and the free week or the paid time is over (`plants`: plants ticked, `after`: `free_week` or `plan`; SOLAR-552) |
+| `email_unsubscribe_done` | Unsubscribe pressed on `unsubscribe.html` (`kind`: the email choice, `reminders`; SOLAR-552) |
 | `first_steps_hidden_done`, `first_steps_shown_done`, `first_steps_finished_done` | First steps card |
 | `past_day_viewed` | A past day picked on a chart (once per page load) |
 | `wall_view_opened` | Full-screen power flow opened |
 | `theme_changed` | Theme picked |
 | `data_download_done` | CSV downloaded |
-| `lock_tapped` | A paid-only lock tapped |
 | `plan_page_shown`, `offer_pick_done`, `checkout_opened`, `pay_review_done`, `upgrade_done` | Choosing and paying for a plan |
 | `downgrade_done`, `plan_change_undone`, `extra_plants_done`, `yearly_switch_done` | Plan changes |
 | `pay_first_shown` | Cancel or downgrade asked for while a payment has failed: the pay-first pop-up (`plan`, `want`: cancel or downgrade) |
@@ -84,7 +85,9 @@ Showcase (`public/welcome-track.js`, princesolarhub.co.za, SOLAR-472), no person
 Functions (`track()` in `_shared/errors.ts`): `payment_failed`, `plan_cancelled`,
 `winback_resubscribed_done`, `winback_email_sent_done`, `need_a_hand_login_linked_done`,
 `need_a_hand_email_sent_done`, `free_week_ended_email_sent_done` (SOLAR-475: the day-7 report that says the
-free week has ended went out). `sunsynk_calls_counted` (SOLAR-468): once a day from `poll` as
+free week has ended went out), `unpaid_reminder_email_sent_done` and `unpaid_last_email_sent_done`
+(SOLAR-552: the two emails to an account with no plan, 14 and 27 days after its free week or
+paid time ended, went out). `sunsynk_calls_counted` (SOLAR-468): once a day from `poll` as
 `edge:poll`, no person; yesterday's SunSynk calls, failed calls, calls per plant and slowest
 poll run, from `private.sunsynk_calls` (0178). No user data.
 

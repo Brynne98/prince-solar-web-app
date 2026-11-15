@@ -1774,7 +1774,7 @@
   /* Plan section in Account (SOLAR-208) */
   .plan-name { font-size: var(--fs-lg); font-weight: 600; color: var(--text); }
   /* every plan side by side, the user's own marked (SOLAR-238) */
-  .plan-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-md); margin-top: var(--sp-lg); }
+  .plan-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-md); margin-top: var(--sp-lg); }
   .plan-grid .pw-plan > button { white-space: nowrap; }
   .plan-grid .pw-plan { position: relative; }
   .plan-grid .pw-plan > :last-child { margin-top: auto; }
@@ -1972,27 +1972,8 @@
     .fs-back { height: 44px; margin: calc(-1 * var(--sp-md)) var(--sp-2xs) calc(-1 * var(--sp-md)) calc(-1 * var(--sp-sm)); }
   }
 
-  /* ---- the free week (SOLAR-242) ---- */
+  /* ---- a locked plant's lock, and the card a crashed page shows ---- */
   .lock-ico { flex: none; }
-  .lock-btn { display: inline-flex; align-items: center; gap: var(--sp-2xs); padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-sm); font-weight: 600;
-    color: var(--muted); cursor: pointer; white-space: nowrap; }
-  .lock-btn:hover { color: var(--text); }
-  .locked { display: inline-flex; align-items: baseline; gap: var(--sp-2xs) var(--sp-sm); flex-wrap: wrap; }
-  .locked-v { color: var(--dim); opacity: .55; }
-  .locked-v b { color: inherit; }
-  .locked.blur .locked-v { filter: blur(5px); }
-  .faint-num { display: block; width: 62%; height: 0.8em; margin: 0.1em 0; border-radius: var(--r-md); background: rgba(var(--ink-rgb),0.06); }
-  .hist-lock { position: relative; display: grid; gap: var(--sp-md); }
-  .hl-shape { display: flex; align-items: flex-end; gap: var(--sp-xs); height: 110px; }
-  .hl-shape i { flex: 1; border-radius: var(--r-sm) var(--r-sm) var(--r-xs) var(--r-xs); background: rgba(var(--ink-rgb),0.05); }
-  .hl-line { display: inline-flex; align-items: center; gap: var(--sp-sm); align-self: start; justify-self: start; padding: 0; border: 0; background: none;
-    font: inherit; font-size: var(--fs-md); color: var(--muted); text-align: left; cursor: pointer; }
-  .hl-line b { color: var(--accent); font-weight: 600; white-space: nowrap; }
-  .hl-line:hover b { text-decoration: underline; }
-  .overview-section .hist-lock { padding: var(--sp-lg) var(--sp-xl); border: 1px solid var(--card-edge); box-shadow: var(--card-shadow); border-radius: var(--r-xl); background: var(--panel); }
-  .today-strip.blurred .mini-value { filter: blur(7px); }
-  .today-strip.blurred .mini-trend { visibility: hidden; }
-  .lock-cta { display: inline-flex; align-items: center; gap: var(--sp-xs); }
   .free-over { margin-bottom: var(--sp-lg); border-color: rgba(var(--accent-rgb),0.35); display: grid; gap: var(--sp-sm); }
   .page-crash { border-color: rgba(var(--bad-rgb),0.45); }
   .free-over h2 { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.01em; }
@@ -2020,11 +2001,6 @@
   .pay-review-acts { display: flex; justify-content: flex-end; gap: var(--sp-sm); padding-top: var(--sp-2xl); }
   /* SOLAR-330: an offer price, the list price struck out before it, its terms below */
   .pw-was { margin-right: var(--sp-xs); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: var(--fs-md); font-weight: 600; color: var(--dim); }
-  .cal-day.shut, .hv-daynav.shut { color: var(--dim); opacity: 0.45; }
-  .cal-day.shut:hover, .hv-daynav.shut:hover { opacity: 0.8; }
-  @media (max-width: 599px) {
-    .hl-shape { height: 80px; gap: var(--sp-2xs); }
-  }
   /* Tap targets (SOLAR-343): on a phone every control is 44px or more to tap. Where the
      drawn size stays small (header buttons, switches, badges, the Today link), an
      invisible pad centred on it makes up the rest. */
