@@ -208,7 +208,8 @@ function MenuState({ st, cut, now }) {
     <span className={'pm-state status-' + status}>
       {p != null && <span className="sync-arc" aria-hidden="true" />}{word}
       {p != null && <span className="mono pm-pct">{Math.round(100 * p)}%</span>}
-      {status === 'stale' && <span className="mono pm-pct">{window.fmtTime(s.last)}</span>}
+      {/* the last reading's time only when it is old: "1 of 2 offline" has a fresh one (SOLAR-558) */}
+      {status === 'stale' && s.old && <span className="mono pm-pct">{window.fmtTime(s.last)}</span>}
     </span>
   );
 }
