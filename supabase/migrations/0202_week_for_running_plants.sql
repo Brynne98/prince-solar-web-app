@@ -54,6 +54,9 @@ create or replace function public.account_upsert(p_user uuid, p_username text, p
 as $function$
 declare acc uuid;
 begin
+  -- plant_users_upsert's order (0170), so two links at once queue here and the second sees the first's login
+  perform pg_advisory_xact_lock_shared(3, 0);
+  perform private.billing_lock(p_user);
   if not public.link_login_allowed(p_user, p_username) then
     raise exception 'one login' using errcode = '22023';
   end if;

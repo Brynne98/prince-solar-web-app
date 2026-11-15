@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// UI sample users (SOLAR-264): 13 users in clearly different billing states, left in the local database
+// UI sample users (SOLAR-264): 14 users in clearly different billing states, left in the local database
 // at real today, so the Billing screen can be looked at. Writes ui-samples.json.
 //   node scripts/billing-sim/samples.mjs           build (replaces earlier samples)
 //   node scripts/billing-sim/samples.mjs --remove  delete them
@@ -14,7 +14,7 @@ const longDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { d
 const billDay = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 const rand = (n) => 'R' + Number(n).toLocaleString('en-US').replace(/,/g, '\u00a0'); // as link.jsx
 const perUnit = (p) => (p === 'yearly' ? 'a year' : 'a month');
-const NAME = { free: 'Free', home: 'Home', family: 'Family' };
+const NAME = { free: 'Free week', home: 'Home', family: 'Family' };
 const uuid = (n) => `00000000-0000-4000-8000-0000000051${String(n).padStart(2, '0')}`;
 const email = (n) => `ui-sample-${n}@sim.test`;
 
@@ -31,7 +31,7 @@ delete from auth.users where email like 'ui-sample-%@sim.test';`);
 // heldExtras: extra plants bought before 0156 (none are sold now; an account that has them keeps them), set by SQL.
 // switchPaid: a monthly-to-yearly switch, paid now and held to its date (0138).
 const SAMPLES = [
-  { n: 1, kind: 'Free', plan: 'free', plants: [[1, 'on']] },
+  { n: 1, kind: 'Free week', plan: 'free', plants: [[1, 'on']] },
   { n: 2, kind: 'Home monthly', plan: 'home', period: 'monthly', plants: [[1, 'on']] },
   { n: 3, kind: 'Home yearly', plan: 'home', period: 'yearly', plants: [[2, 'on']] },
   { n: 4, kind: 'Family monthly, 3 plants', plan: 'family', period: 'monthly', plants: [[1, 'on'], [1, 'on'], [2, 'on']] },
@@ -44,6 +44,8 @@ const SAMPLES = [
   { n: 11, kind: 'Family yearly, 1 extra plant held from before 0156', plan: 'family', period: 'yearly', plants: [[1, 'on'], [1, 'on'], [1, 'on'], [2, 'on'], [1, 'on'], [2, 'on']], heldExtras: 1 },
   { n: 12, kind: 'Comped Family', plan: 'family', comped: true, plants: [[1, 'on'], [2, 'on'], [1, 'on'], [3, 'on']] },
   { n: 13, kind: 'Home monthly, switch to yearly paid, starts on its date', plan: 'home', period: 'monthly', plants: [[1, 'on']], switchPaid: true },
+  // weekOver: the free week ended 3 days ago, so the app shows the pay screen (0203)
+  { n: 14, kind: 'No plan, free week over (pay screen)', plan: 'free', plants: [[1, 'on'], [1, 'on'], [2, 'on']], weekOver: true },
 ];
 
 async function must(sql) { const r = await db.t(sql); if (!r.ok) throw new Error(`${r.err}\n--- ${sql}`); return r.v; }
@@ -78,7 +80,9 @@ async function build() {
         await addPlants(0, S.plants.length);
       } else if (S.plan === 'free') {
         await addPlants(0, S.plants.length);
-        await db.exec(`select public.billing_free_week_start('${id}', '${login}');`);
+        await db.exec(`select private.week_start('${id}', array[${S.plants.map((_, k) => 8100000 + S.n * 10 + k).join(',')}]::bigint[]);`);   // as plant_users_upsert does (0202)
+        if (S.weekOver) await db.exec(`update private.free_week_logins set started_at = now() - interval '10 days' where user_id = '${id}';
+          update private.plant_week set started_at = now() - interval '10 days' where plant_id between ${8100000 + S.n * 10} and ${8100000 + S.n * 10 + 9};`);
       } else {
         // pay first, with no plants linked yet: the payment then has nothing to resume (a resume would call
         // plant_bootstrap_kick, which posts to the hosted functions). The plants appear afterwards.
@@ -121,12 +125,12 @@ async function build() {
     const state = g.state === 'past_due' ? 'Payment failed' : ending ? 'Ends ' + billDay(g.nextDate) : 'Active';
     const line = g.comped ? 'Free of charge. Every plant, full history.'
       : paid ? `${rand(g.price)} ${perUnit(g.period)} for ${act === 1 ? '1 plant' : act + ' plants'}. ${ending ? 'Ends' : 'Renews'} on ${longDay(g.nextDate)}.`
-      : '1 plant, today only. No card needed.';
+      : S.weekOver ? 'Readings, alerts and reports have stopped.' : 'Up to 5 plants, full history, alerts.';
     const extraInv = g.comped ? 0 : g.extraPlants; // comped plants cost nothing
     const prices = g.prices;
     const breakdown = paid && g.plan === 'family' && extraInv > 0
       ? `Family ${rand(prices[g.period].family)} + ${extraInv === 1 ? '1 extra plant' : extraInv + ' extra plants'} ${rand(extraInv * prices[g.period].extra)}` : null;
-    const booked = !paid ? null : g.prepaidOn ? `Switches to yearly on ${billDay(g.nextDate)}. Paid.` : g.nextPlan === 'free' ? `Ends on ${billDay(g.nextDate)}, then you’re on Free.`
+    const booked = !paid ? null : g.prepaidOn ? `Switches to yearly on ${billDay(g.nextDate)}. Paid.` : g.nextPlan === 'free' ? `Ends on ${billDay(g.nextDate)}. Readings stop then.`
       : g.nextPlan ? `Moves to ${NAME[g.nextPlan]} on ${billDay(g.nextDate)}.` : g.nextPeriod ? `Switches to ${g.nextPeriod} on ${billDay(g.nextDate)}.` : null;
     const removal = g.removePlants.map((p) => p.name);
     // what each sample must show, written by hand from the kind
@@ -141,7 +145,7 @@ async function build() {
     manifest.push({
       email: email(S.n), kind: S.kind,
       billingScreen: {
-        planName: NAME[g.plan], comped: g.comped, stateWord: state, priceLine: line,
+        planName: S.weekOver ? 'No plan' : NAME[g.plan], payScreen: !!S.weekOver, comped: g.comped, stateWord: state, priceLine: line,
         price: g.price, nextAmount: g.nextAmount, period: g.period, billingState: g.state,
         plantsCollecting: act, plantsTotal: names.length, extraInverters: extraInv, extraBreakdown: breakdown,
         nextDate: g.nextDate, nextDateLong: g.nextDate ? longDay(g.nextDate) : null,

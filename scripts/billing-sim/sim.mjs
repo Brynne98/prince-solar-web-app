@@ -369,7 +369,7 @@ async function doLink(H, U, login) {
     await db.exec(`insert into public.plant_users (plant_id, user_id, account_id, plant_name, linked_at) values ${fresh.map((id) => `(${id}, '${U.id}', '${accId}', 'Plant ${id}', ${ts})`).join(',')};`);
     const invRows = fresh.flatMap((id) => Array.from({ length: H.inv.get(id) }, (_, k) => `('SIM-${id}-${k}', ${id}, '${accId}')`));
     if (invRows.length) await db.exec(`insert into private.inverters (sn, plant_id, account_id) values ${invRows.join(',')} on conflict (sn) do update set account_id = excluded.account_id;`);
-    await db.exec(`select public.billing_free_week_start('${U.id}', '${uname}');`);
+    await db.exec(`select private.week_start('${U.id}', array[${fresh.join(',')}]::bigint[]);`);   // as plant_users_upsert does (0202)
     for (const pl of plan) o.plants.push({ id: pl.id, inv: H.inv.get(pl.id), seq: H.seq, paused: pl.paused, acc: accId });
     o.ticks = plan.ticks;
     // the rest of the login's plants are on it too (already linked via another login): nothing to do

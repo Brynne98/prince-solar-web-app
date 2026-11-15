@@ -2881,8 +2881,10 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
       </label>
     );
   };
-  const more = plan === 'family'
-    ? <>More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: 'family', from: 'choose_plants' })}>Email us</a>.</>
+  // Family and the free week both run 5: no plan runs more, so the line offers the email
+  const top = plan !== 'home';
+  const more = top
+    ? <>More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan, from: 'choose_plants' })}>Email us</a>.</>
     : onUpgrade && <button type="button" className="mini-link" onClick={() => onUpgrade(want)}>upgrade</button>;
   return (
     <ConfirmCard modal danger={out.length > 0} label="Choose plants" title="Choose plants" busy={busy}
@@ -2901,7 +2903,7 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
             {away.map(row)}
           </div>
         )}
-        {say === 'full' ? <div className="field-note keep-count warn">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}. Untick one first{more && plan !== 'family' ? <>, or {more} for more plants</> : ''}.{plan === 'family' && <> {more}</>}</div>
+        {say === 'full' ? <div className="field-note keep-count warn">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}.{plan !== 'free' && <> Untick one first{more && !top ? <>, or {more} for more plants</> : ''}.</>}{top && <> {more}</>}</div>
           : say === 'fixed' ? <div className="field-note keep-count warn">Plants can’t be changed in the free week.</div>
           : say === 'date' ? <div className="field-note keep-count warn">You can change a plant again on {longDay(picks.change_on)}.</div>
           : say === 'one' ? <div className="field-note keep-count warn">One change every 90 days. Tick {nameOf(out[0])} again first.</div>

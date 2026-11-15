@@ -69,7 +69,7 @@ function kit(db) {
         `(${p.id}, '${uid}', '${acc}', 'P${p.id}', timestamptz '2027-01-01' + interval '${++n} seconds')`).join(',')};`);
       const inv = sorted.flatMap((p) => Array.from({ length: p.inv ?? 1 }, (_, k) => `('REG-${p.id}-${k}', ${p.id}, '${acc}')`));
       if (inv.length) await db.exec(`insert into private.inverters (sn, plant_id, account_id) values ${inv.join(',')} on conflict (sn) do nothing;`);
-      await db.exec(`select public.billing_free_week_start('${uid}', 'reg-${n}@login.test');`);
+      await db.exec(`select private.week_start('${uid}', array[${sorted.map((p) => p.id).join(',')}]::bigint[]);`);   // as plant_users_upsert does (0202)
       return acc;
     },
     // extras: the extra plants wanted on Family in all
@@ -107,23 +107,25 @@ const CASES = [
     if (await K.active(u) !== 2) bad.push(`after the renewal: ${await K.active(u)} collect on Home`);
     return bad;
   } },
-  { id: 'F1b', title: 'Home cancels, then plants collect anyway: the renewal leaves 1, not the one booked for deletion', async run(K) {
+  { id: 'F1b', title: 'Family cancels, then a plant collects outside the rules: after the end date no plant is read, and the kept plant is not stopped', async run(K) {
     const bad = [], u = await K.user('family');
     await K.link(u, [{ id: P(1) }, { id: P(2) }]);
     await K.db.t(`select to_jsonb(1) from (select public.billing_book_removal('${u}', ${P(1)})) x`);
     const b = await K.as(u, `select public.api_billing_change('free', null)`); if (!b.ok) return ['cancel refused: ' + b.err];
-    // a plant started outside the rules (as before 0127): the renewal must still fit the plan
+    // a plant started outside the rules (as before 0127)
     await K.sql(`alter table public.plant_users disable trigger plant_users_plan_limit; insert into public.plant_users (plant_id, user_id, plant_name, linked_at) values (${P(3)}, '${u}', 'x', '2027-02-01'); alter table public.plant_users enable trigger plant_users_plan_limit;`);
     const r = await K.row(u); await K.today(r.next_billing_date); await K.run(r.next_billing_date);
-    if (await K.active(u) !== 1) bad.push(`${await K.active(u)} collect on Free after the date`);
-    if (await K.paused(u, P(2))) bad.push('the kept plant stopped, the one booked for deletion was kept');
+    // no plan: nothing is read (0204); a cancel stops no plant
+    const live = Number((await K.sql(`select count(*) from public.live_plants() x where x in (select plant_id from public.plant_users where user_id = '${u}')`))[0]);
+    if (live) bad.push(`${live} plants are read with no plan after the date`);
+    if (await K.paused(u, P(2))) bad.push('the kept plant stopped');
     return bad;
   } },
-  { id: 'F2', title: 'Free (no billing row): ticking locked plants one after another stops at 1', async run(K) {
+  { id: 'F2', title: 'no plan (no billing row): ticking locked plants one after another stops at 5 (0202)', async run(K) {
     const u = await K.user('free');
-    await K.link(u, [{ id: P(1) }, { id: P(2) }, { id: P(3) }]);
-    for (const p of [1, 2, 3]) await K.pick(u, P(p));
-    return (await K.active(u)) === 1 ? [] : [`${await K.active(u)} collect on Free`];
+    await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i) })));
+    for (const p of [1, 2, 3, 4, 5, 6, 7]) await K.pick(u, P(p));
+    return (await K.active(u)) === 5 ? [] : [`${await K.active(u)} run with no plan`];
   } },
   { id: 'F3', title: 'Family: a 6th plant inserted as a link inserts it (no app pause) links stopped', async run(K) {
     const u = await K.user('family');
@@ -189,11 +191,11 @@ const CASES = [
     if ((await K.row(u)).plan !== 'home') bad.push('plan became ' + (await K.row(u)).plan);
     return bad;
   } },
-  { id: 'F8b', title: 'paid link then cancel: the account has a free week on record, so Free trims it', async run(K) {
+  { id: 'F8b', title: 'paid link then cancel: the account has a free week on record, so it gets no second week', async run(K) {
     const u = await K.user('home');
     await K.link(u, [{ id: P(1) }]);
     const n = Number((await K.db.exec(`select count(*) from private.free_week_logins where user_id = '${u}'`))[0]);
-    return n === 1 ? [] : ['no free-week row: never trimmed on Free'];
+    return n === 1 ? [] : ['no free-week row'];
   } },
   { id: 'F8c', title: 'a same-plan charge with nothing to buy is refused and keeps a booked change', async run(K) {
     const u = await K.user('family');
@@ -257,7 +259,8 @@ const CASES = [
     if (renewals) bad.push(`${renewals} renewal charge(s) on a paid year`);
     await K.today(yr); await K.run(yr);
     if ((await K.row(u)).plan !== 'free') bad.push(`on ${yr}: still ${(await K.row(u)).plan}`);
-    if (await K.active(u) !== 1) bad.push(`on ${yr}: ${await K.active(u)} plants collect on Free`);
+    const live = Number((await K.sql(`select count(*) from public.live_plants() x where x in (select plant_id from public.plant_users where user_id = '${u}')`))[0]);
+    if (live) bad.push(`on ${yr}: ${live} plants are read with no plan`);
     return bad;
   } },
   { id: 'C457b', title: 'a booked cancel takes no downgrade or upgrade until Keep; an upgrade paid after it goes back (0175, 0176)', async run(K) {
@@ -394,28 +397,28 @@ const CASES = [
     return bad;
   } },
   // ---- SOLAR-495 (0188): a cancel deletes on its end date; a failed payment keeps 30 days ----
-  { id: 'E495a', title: 'Home with 2 plants cancels: warned 3 days before; on the end date 1 stays, the other is deleted, no 30 days kept', async run(K) {
+  { id: 'E495a', title: 'Home with 2 plants cancels: warned 3 days before; on the end date no plant is read, both stay, the history goes 30 days later (0204)', async run(K) {
     const bad = [], u = await K.user('home');
     await K.link(u, [{ id: P(1) }, { id: P(2) }]);
     const c = await K.as(u, `select public.api_billing_change('free', null)`); if (!c.ok) return ['cancel refused: ' + c.err];
     const end = (await K.row(u)).next_billing_date;
-    const mail = await K.db.json(`select data from public.email_queue where user_id = '${u}' and kind = 'bill_change' order by id desc limit 1`);
-    if (mail?.deleteOn !== end) bad.push(`cancel email deletes on ${mail?.deleteOn}, not the end date ${end}`);
     const ls = await K.as(u, `select coalesce(jsonb_agg(p), '[]') from public.api_link_status() s, jsonb_array_elements(s.plants) p`);
-    const drop = (ls.v || []).find((p) => p.drop);
-    if (drop?.remove_on !== end) bad.push(`Billing dates the drop ${drop?.remove_on}, not ${end}`);
+    if ((ls.v || []).some((p) => p.drop)) bad.push('a cancel books a plant to stop');
     const d3 = addD(end, -3); await K.today(d3); await K.run(d3);
     const soon = await K.db.json(`select data from public.email_queue where user_id = '${u}' and kind = 'bill_cancel_soon'`);
     if (soon?.on !== end || soon?.from !== 'home') bad.push(`3-day email: ${JSON.stringify(soon)}`);
     await K.today(end); await K.run(end);
     const r = await K.row(u);
-    if (r.plan !== 'free') bad.push('not on Free');
-    if (r.keep_until !== null) bad.push(`keep_until ${r.keep_until}: history kept after a cancel`);
+    if (r.plan !== 'free') bad.push('still on a plan');
+    if (r.keep_until !== null) bad.push(`keep_until ${r.keep_until}: history readable after a cancel`);
+    if (r.ended_at === null) bad.push('the end of the paid time is not recorded');
     if (r.remove_on !== null || (r.plants_to_remove || []).length) bad.push(`still booked: ${r.plants_to_remove} on ${r.remove_on}`);
-    const left = await K.db.json(`select coalesce(jsonb_agg(plant_id), '[]') from public.plant_users where user_id = '${u}'`);
-    if (left.length !== 1 || left[0] !== P(1)) bad.push(`plants left: ${JSON.stringify(left)}`);
+    const left = await K.db.json(`select coalesce(jsonb_agg(plant_id order by plant_id), '[]') from public.plant_users where user_id = '${u}' and not paused`);
+    if (left.length !== 2) bad.push(`plants left running: ${JSON.stringify(left)}`);
+    const live = Number((await K.sql(`select count(*) from public.live_plants() x where x in (select plant_id from public.plant_users where user_id = '${u}')`))[0]);
+    if (live) bad.push(`${live} plants are read with no plan`);
     const wb = await K.db.json(`select data from public.email_queue where user_id = '${u}' and kind = 'winback'`);
-    if (!wb || 'keepUntil' in wb || !('days' in wb)) bad.push(`plan-ended email: ${JSON.stringify(wb)}`);
+    if (!wb || 'keepUntil' in wb || !('days' in wb) || wb.deleteOn !== addD(end, 30)) bad.push(`plan-ended email: ${JSON.stringify(wb)}`);
     return bad;
   } },
   { id: 'E495b', title: 'a failed payment\'s move to Free still keeps 30 days: keep_until and the stopped plant\'s delete date', async run(K) {
@@ -641,19 +644,19 @@ const CASES = [
     const c = await K.charge(o.v.reference);
     return (p.v?.applied === false || c.refunded_at) ? [] : ['upgrade applied and the refund is lost: plan given, money back, nothing on record'];
   } },
-  { id: 'K1', title: 'comped switched off to Free by hand: the next run leaves 1 plant collecting', async run(K) {
+  { id: 'K1', title: 'comped switched off by hand: no plan, so no plant is read; switched on again, they are', async run(K) {
     const u = await K.user('family', { comped: true });
     await K.link(u, [{ id: P(1) }, { id: P(2) }, { id: P(3) }, { id: P(4) }]);
-    // Decided 2026-10-31: the switch is billing_set_comped, which fits the plants.
+    // Decided 2026-10-31: the switch is billing_set_comped.
     const s = await K.db.t(`select public.billing_set_comped('${u}', false)`); if (!s.ok) return ['switch refused: ' + s.err];
     await K.today('2027-03-11'); await K.run('2027-03-11');
-    const bad = [], n = await K.active(u);
-    if (n !== 1) bad.push(`${n} plants collect on Free after comped went off`);
-    if (await K.paused(u, P(1))) bad.push('the first linked plant is not the one kept');
+    const bad = [], live = async () => Number((await K.sql(`select count(*) from public.live_plants() x where x in (select plant_id from public.plant_users where user_id = '${u}')`))[0]);
+    if (await live()) bad.push(`${await live()} plants are read after comped went off`);
     const on = await K.db.t(`select public.billing_set_comped('${u}', true)`); if (!on.ok) return [...bad, 'switch on refused: ' + on.err];
     const r = await K.row(u);
     if (!r.comped || r.plan !== 'family') bad.push(`switched on: ${r.plan}, comped ${r.comped}`);
     if (!(await K.pick(u, P(4))).ok) bad.push('comped again, a 4th plant may not start');
+    if (await live() !== 4) bad.push(`comped again: ${await live()} of 4 plants are read`);
     return bad;
   } },
   { id: 'R1', title: 'a refund Paystack refuses once: tried again, and a later success is dated', async run(K) {
@@ -701,15 +704,14 @@ const CASES = [
     await K.db.t(`select to_jsonb(public.billing_charge_refund_event('${b.v.reference}', 'failed', 'bank rejected'))`);
     return (await K.charge(b.v.reference)).refunded_at ? ['refunded_at still set after refund.failed: the money reads as given back'] : [];
   } },
-  { id: 'Q3', net: true, title: 'Free after day 8: a plant swapped in to collect is taken off the delete list', async run(K) {
+  { id: 'Q3', net: true, title: 'no plan after day 8: a plant change is refused, the ticks are fixed without a plan (0202)', async run(K) {
     const u = await K.user('free');
     await K.link(u, [{ id: P(1) }, { id: P(2) }]);
     await K.sql(`update public.plant_users set paused = true where user_id = '${u}' and plant_id = ${P(2)};
       insert into private.billing (user_id, plan, plants_to_remove, remove_on) values ('${u}', 'free', '{${P(2)}}', '2027-04-09')
       on conflict (user_id) do update set plants_to_remove = '{${P(2)}}', remove_on = '2027-04-09'`);
-    const ch = await K.as(u, `select public.api_plant_change(${P(1)}, ${P(2)})`); if (!ch.ok) return ['change refused: ' + ch.err];
-    await K.today('2027-04-09'); await K.run('2027-04-09');
-    return (await K.active(u)) === 1 ? [] : [`${await K.active(u)} collecting after the removal date: the plant the user chose was deleted`];
+    const ch = await K.as(u, `select public.api_plant_change(${P(1)}, ${P(2)})`);
+    return !ch.ok && /no change without a plan/.test(ch.err) ? [] : ['change not refused: ' + JSON.stringify(ch.v ?? ch.err)];
   } },
   { id: 'E2', title: 'email changed after the card was saved: a paid renewal keeps card_email, so the next one still works', async run(K) {
     const u = await K.user('home');
@@ -731,19 +733,16 @@ const CASES = [
     return (await K.paused(u, P(7))) ? ['paid for P7, but it stays stopped'] : [];
   } },
   // ---- round 3 fixes (0130): delete, disputes, refunds ----
-  { id: 'X13', title: 'Free to Family bought for one locked plant: that plant starts, and the owner ticks the rest of the room', async run(K) {
-    // UI walk 2026-10-31: Upgrade named one plant; only it started, the rest of the room stayed empty.
-    // Since 0197 the owner ticks which plants fill the rest (the pick pop-up after the payment).
+  { id: 'X13', title: 'no plan with 5 plants running buys Family for a 6th: paid, the 5 keep running, the 6th has no place', async run(K) {
+    // Family and the free week both run 5 (0202), so the payment starts no more plants.
     const bad = [], u = await K.user('free');
-    await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i) })));                  // 1 collects on Free
+    await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i) })));
+    for (const i of [1, 2, 3, 4, 5]) await K.pick(u, P(i));
     const o = await K.open(u, 'family', 'monthly', null, [P(6)]); if (!o.ok) return ['refused: ' + o.err];
     const p = await K.paid(o.v.reference);
     if (!p.ok || p.v.applied === false) bad.push('paid but not applied: ' + JSON.stringify(p.v ?? p.err));
-    if (await K.paused(u, P(6))) bad.push('the plant it was bought for stays stopped');
-    if (await K.active(u) !== 2) bad.push(`${await K.active(u)} collect on Family before the owner ticks, want 2`);
-    for (const i of [2, 3, 4]) { const r = await K.pick(u, P(i)); if (!r.ok) bad.push(`tick of plant ${i} refused: ${r.err}`); }
+    if (await K.active(u) !== 5) bad.push(`${await K.active(u)} run on Family, want 5`);
     if ((await K.pick(u, P(7))).ok) bad.push('a 6th plant ticked on Family');
-    if (await K.active(u) !== 5) bad.push(`${await K.active(u)} collect on Family, want 5`);
     return bad;
   } },
   { id: 'T1', title: 'day 8 to Free after the login of the oldest plant was removed: Free keeps a plant not booked for deletion', async run(K) {
