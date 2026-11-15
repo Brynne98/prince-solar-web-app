@@ -196,7 +196,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const [idle, setIdle] = React.useState(false);
   const idleRef = React.useRef(false);
   const revealedAt = React.useRef(0);
-  const stacked = useFlowMobile();
+  const stacked = useFlowMobile(wall);
   const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
   // Remembered here, not in an effect on `wall`: that effect's first run would clear the
   // flag before the re-enter effect below could read it.
@@ -271,10 +271,18 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
       const m = wrap.querySelector('.mflow, .pflow'), n = wrap.querySelector('.flow-narrative');
       if (!m || !n) return;
       wrap.style.setProperty('--wall-zoom', '1');
-      const room = card.clientHeight - n.offsetHeight - parseFloat(getComputedStyle(n).marginBottom);
-      if (!m.offsetWidth || !m.offsetHeight) return;
-      const z = Math.min(card.clientWidth / m.offsetWidth, room / m.offsetHeight);
-      if (z > 0) wrap.style.setProperty('--wall-zoom', z.toFixed(3));
+      // Today's cards grow with the zoom too, out of the same height, so they count
+      // on both sides (SOLAR-550). Hidden on a phone, they measure 0.
+      const s = wrap.querySelector('.today-strip'), sH = s ? s.offsetHeight : 0;
+      const room = card.clientHeight + sH - n.offsetHeight - parseFloat(getComputedStyle(n).marginBottom);
+      const mW = m.offsetWidth, mH = m.offsetHeight;
+      if (!mW || !mH) return;
+      const z = Math.min(card.clientWidth / mW, room / (mH + sH));
+      if (!(z > 0)) return;
+      wrap.style.setProperty('--wall-zoom', z.toFixed(3));
+      // the cards' borders and icons don't shrink, so under zoom 1 they stand a little taller than counted
+      const z2 = s ? (room - s.offsetHeight) / mH : z;
+      if (z2 > 0 && z2 < z) wrap.style.setProperty('--wall-zoom', z2.toFixed(3));
     };
     const ro = new ResizeObserver(fit);
     [card, wrap.querySelector('.flow-narrative'), wrap.querySelector('.mflow, .pflow')].forEach(el => el && ro.observe(el));

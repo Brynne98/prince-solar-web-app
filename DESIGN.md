@@ -422,7 +422,9 @@ on phones). Single fields in a row sit at the right at 300px wide, full width on
 A fullscreen "wall display" mode drops the card for the bare ground with safe-area
 padding. The live status and an Exit button sit in a bar at the top; the summary sentence
 is centred as the headline and the diagram fills the rest, every size taken from the
-screen. On an upright tablet the stacked tiles are zoomed to fill the width. After 3
+screen. Today's cards above it are as wide as the diagram, never wider, so a very wide
+screen leaves its sides empty. On an upright screen of any width the stacked tiles are
+zoomed to fill the width. After 3
 seconds idle the Exit button and cursor hide until a move, tap or key. Where there is no
 Fullscreen API (an iPad home-screen app) the same view covers the page, and the screen
 is kept awake while it shows.
