@@ -29,7 +29,7 @@ import { noteError, reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type Price, type History, freeWeekEnded, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, cardChanged, cardExpiring, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
-  offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, cancelEndsSoon, needAHand, feedback,
+  offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, cancelEndsSoon, needAHand, feedback, unpaidReminder, unpaidLast, APP,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -75,6 +75,7 @@ const fmtDay = (d: string, o: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...o }).format(new Date(d + "T00:00:00Z")).replace(/\bSept\b/, "Sep");
 /** "1 Nov 2026", as the billing emails write a date. */
 const day = (d: string) => fmtDay(d, { day: "numeric", month: "short", year: "numeric" });
+const dayMonth = (d: string) => fmtDay(d, { day: "numeric", month: "short" });
 const hhmm = (epoch: number, tz: string) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(epoch * 1000));
 /** "today", or the event's date when it was on another local day ("Tue 21 Oct"). */
@@ -347,15 +348,22 @@ async function build(r: Row): Promise<Email | null> {
       const linkedOn = pu?.linked_at ? new Date(pu.linked_at).toLocaleDateString("en-CA", { timeZone: tz }) : undefined;
       const free = d.freeWeekEnds === true;
       const rep = await buildReport(p, r.kind.slice(7) as Period, d.today, linkedOn, free ? d.from : undefined);
-      // The day-7 report of a Free account's first week (0114) says the week has ended (SOLAR-475).
+      // The free week's day-7 report (0114) says the week has ended (SOLAR-475).
       if (!free) return rep && report(rep);
-      const fw = { days: d.days ?? 0, price: await priceOf("home", r.user_id) };
+      const fw = { days: d.days ?? 0, price: await priceOf("home", r.user_id), deleteOn: d.deleteOn ? dayMonth(d.deleteOn) : undefined };
       // No readings in the free week: the notice still goes, without the report.
       return rep ? report({ ...rep, freeWeekEnds: fw }) : freeWeekEnded(fw, p.name);
     }
     case "free_week_soon":
       return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: tz }).replace(/\bSept\b/, "Sep"),
-        p.name, d.days ?? 0, await priceOf("home", r.user_id));
+        p.name, d.days ?? 0, await priceOf("home", r.user_id), dayMonth(local(tz, new Date((d.endsAt + 30 * 86400) * 1000)).date));
+    case "unpaid_reminder": case "unpaid_last": {
+      // the plan that holds the plants it ticked: Home for 1 or 2, Family for 3 to 5
+      const u = { since: dayMonth(local(tz, new Date(d.since * 1000)).date), deleteOn: dayMonth(local(tz, new Date(d.deleteAt * 1000)).date),
+        price: await priceOf(d.plants > 2 ? "family" : "home", r.user_id),
+        unsub: `${APP}/unsubscribe.html?t=${r.unsub_token ?? ""}&k=reminders` };
+      return r.kind === "unpaid_reminder" ? unpaidReminder(u) : unpaidLast(u);
+    }
     case "free_week_setup": return d.steps?.length ? freeWeekSetup(d.steps, r.plant_id ?? undefined, d.battery !== false) : null;
     case "account_deleted": return accountDeleted(r.to_email);
     // Billing (0116): amounts in whole rand, dates as "2026-11-01".
@@ -419,7 +427,7 @@ async function build(r: Row): Promise<Email | null> {
         amount: (await lastMail(r.user_id, "bill_failed", r.id))?.amount ?? undefined,
         days: (await historyAt(r.user_id, r.plant_id))?.days, stoppedDays: await historyOf(r.user_id, d.stopped) });
     case "bill_removal_soon": {
-      // The next plan up keeps them: Free to Home if 2 plants fit, else Family.
+      // The next plan up keeps them: no plan to Home if 2 plants fit, else Family.
       const plan = (await billFacts(r.user_id))?.plan;
       const up = plan === "free" ? (d.plants.length + 1 <= 2 ? "home" : "family") : plan === "home" ? "family" : null;
       return plantsRemovalSoon(d.plants, day(d.on), plan, up ? await priceOf(up, r.user_id) : undefined, await historyOf(r.user_id, d.plants));
@@ -438,11 +446,11 @@ async function build(r: Row): Promise<Email | null> {
         days: Math.round((Date.parse(d.on) - Date.parse(local("Africa/Johannesburg").date)) / 86400e3), next: { amount: d.nextAmount, date: day(d.nextDate) } });
     case "winback": {
       const h = await historyAt(r.user_id, r.plant_id);
-      // days counted when queued, before the trim deletes them (0188)
-      return winback({ from: d.from, plant: h?.plant, days: d.days ?? h?.days, price: await priceOf(d.from, r.user_id) });
+      return winback({ from: d.from, plant: h?.plant, days: d.days ?? h?.days, price: await priceOf(d.from, r.user_id),
+        deleteOn: d.deleteOn ? dayMonth(d.deleteOn) : undefined });
     }
     case "bill_cancel_soon":
-      return cancelEndsSoon({ from: d.from, on: day(d.on), days: (await historyAt(r.user_id))?.days });
+      return cancelEndsSoon({ from: d.from, on: day(d.on), days: (await historyAt(r.user_id))?.days, deleteOn: dayMonth(addDays(d.on, 30)) });
     case "need_a_hand": return needAHand();
     case "feedback":
       return feedback({ email: String(d.email ?? ""), message: String(d.message ?? ""), page: String(d.page ?? ""),
@@ -611,7 +619,7 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
       // Reports cost two reads each; what isn't built in time goes back untouched.
       if (Date.now() > deadline) { done.push(later(row)); continue; }
       try {
-        // The free week's report can't wait: the trim deletes its days an hour after the week ends (0182).
+        // The free week's report doesn't wait: it goes on the day the week ends (0182).
         if (row.kind.startsWith("report_") && row.data.freeWeekEnds !== true && !dry && await historyPending(row)) {
           done.push({ id: row.id, status: "queued", error: "waits for history", retry_s: 600, refund: true });
           continue;
@@ -664,7 +672,7 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
         await track("winback_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), { plan: row.data.from });
       }
       // SOLAR-243: a paid plan ended. Each email goes once per end: a cancel that ran
-      // out (winback, 0144) or a failed payment that moved it to Free (bill_free).
+      // out (winback, 0144) or a failed payment that ended it (bill_free).
       if ((row?.kind === "winback" || row?.kind === "bill_free") && row.user_id) {
         await track("plan_cancelled", row.user_id, String(row.id), new Date().toISOString(),
           { plan: row.data.from, reason: row.kind === "winback" ? "cancelled" : "unpaid" });
@@ -672,6 +680,10 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
       // SOLAR-475
       if (row?.kind === "report_week" && row.data.freeWeekEnds === true && row.user_id) {
         await track("free_week_ended_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), {});
+      }
+      // SOLAR-552
+      if ((row?.kind === "unpaid_reminder" || row?.kind === "unpaid_last") && row.user_id) {
+        await track(`${row.kind}_email_sent_done`, row.user_id, String(row.id), new Date().toISOString(), {});
       }
       // SOLAR-319
       if (row?.kind === "need_a_hand" && row.user_id) {

@@ -481,7 +481,6 @@ export async function linkAccount(userId: string, username: string, password: st
   });
   await rpc("account_refresh_set", { p_account: acc.id, p_refresh: t.refresh_token });
   const active = new Set((await syncPlants(acc, { plants, invs })).map((p) => p.id));
-  await rpc("billing_free_week_start", { p_user: userId, p_sunsynk_username: username });
   const paused = plants.filter((p) => !active.has(p.id)).map((p) => p.id);
   return { accountId: acc.id, plants, paused, reason: paused.length ? "upgrade_needed" : null };
 }
@@ -556,11 +555,11 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
     }));
   if (rows.length) await rpc("plant_config_seed", { p_rows: rows });
   const activeRows = rows.filter((r) => !r.paused);
-  // Free past its week (0111, SOLAR-241): recover never walks these plants back, so
-  // drop the 60-day bookmarks now rather than show "Fetching history" until the trim.
+  // A plant that is not read (0204: no plan, the free week over): recover never walks
+  // it back, so drop the 60-day bookmarks now rather than show "Fetching history".
   if (activeRows.length) {
-    const trimmed = await freeTrimmedPlants();
-    const cut = activeRows.map((r) => r.plant_id).filter((id) => trimmed.has(id));
+    const live = await livePlants();
+    const cut = activeRows.map((r) => r.plant_id).filter((id) => !live.has(id));
     if (cut.length) {
       const { error } = await db.from("plant_config").update({ backfill_next: null, backfill_until: null, temp_next: null }).in("plant_id", cut);
       if (error) {
@@ -657,15 +656,17 @@ export async function plantsToPoll(): Promise<PlantJob[]> {
   const { data: cfgRows } = await db.from("plant_config").select("plant_id, timezone, batt_positive_means, backfill_next, backfill_until, backfill_tries, has_grid, temp_next, temp_tries");
   const cfg = new Map((cfgRows ?? []).map((c: any) => [Number(c.plant_id), c]));
   // One job per plant even if several users share it. A plant paused for every user
-  // (0110) has no row here, so it is not polled and no data is saved for it. The plant is read through
+  // (0110) has no row here, and a plant nobody pays for is not in livePlants (0204),
+  // so neither is polled and no data is saved for it. The plant is read through
   // the EARLIEST-linked active account, and that choice is stable from minute to
   // minute — the inverter cache (freshness gate, carry run) is keyed by account,
   // so a flip would throw it away every time. If that account dies (needs_relink)
   // the next-oldest takes over on the following minute.
+  const live = await livePlants();
   const best = new Map<number, { row: any; acc: Account }>();
   for (const r of data ?? []) {
     const pid = Number(r.plant_id);
-    if (!r.account_id) continue;
+    if (!r.account_id || !live.has(pid)) continue;
     const acc = byId.get(r.account_id);
     if (!acc) continue;
     const cur = best.get(pid);
@@ -724,9 +725,9 @@ export async function pollJobs(shard: number, shards: number, account?: string):
  * could starve run after run (READINESS P3). The id of the last plant a run
  * finished is kept in app_config under `key`; the next run starts after it.
  */
-/** Plants on Free past their first week (0111): they keep 24 hours, so nothing fetches older days. */
-export async function freeTrimmedPlants(): Promise<Set<number>> {
-  const ids = await rpc<number[]>("free_trimmed_plants", {});
+/** The plants that are read (0204): an account that runs the plant has a plan or is in its free week. */
+export async function livePlants(): Promise<Set<number>> {
+  const ids = await rpc<number[]>("live_plants", {});
   return new Set((ids ?? []).map(Number));
 }
 

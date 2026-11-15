@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Unsubscribe · Prince Solar Hub</title>
+<!-- The Unsubscribe link in the two emails to an account with no plan (SOLAR-552). The
+     button posts the email's token to the unsubscribe function; opening the page changes
+     nothing, because mail scanners open links on their own. No sign-in. -->
+<meta name="robots" content="noindex" />
+<meta name="theme-color" content="#0a0d12" />
+<link rel="icon" type="image/svg+xml" href="/icon.svg" />
+<style>
+:root{color-scheme:dark light;--bg:#0a0d12;--ink:#e7ecf2;--mute:#7f8da0;--accent:#3ddc84;--on-accent:#07130c}
+@media (prefers-color-scheme:light){:root{--bg:#eaedf2;--ink:#0f172a;--mute:#5b6779}}
+*{box-sizing:border-box;margin:0}
+body{min-height:100dvh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--ink);
+  font:400 16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;text-align:center}
+main{max-width:340px}
+h1{font-size:22px;line-height:1.25;margin-bottom:8px}
+p{color:var(--mute);margin-bottom:20px}
+button{font:600 16px/1 inherit;padding:14px 22px;border:0;border-radius:12px;background:var(--accent);color:var(--on-accent);cursor:pointer}
+button:disabled{opacity:.6;cursor:default}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Stop these emails?</h1>
+  <p id="text">The reminders about your plan and your history.</p>
+  <button id="go" type="button">Unsubscribe</button>
+</main>
+<script src="/config.js"></script>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search), go = document.getElementById('go');
+  var say = function (title, text) {
+    document.getElementById('title').textContent = title;
+    document.getElementById('text').textContent = text;
+  };
+  go.addEventListener('click', function () {
+    go.disabled = true;
+    fetch(window.SUNSYNK_CONFIG.url + '/functions/v1/unsubscribe?t=' + encodeURIComponent(q.get('t') || '') + '&k=' + encodeURIComponent(q.get('k') || ''), { method: 'POST' })
+      .then(function (r) {
+        if (!r.ok) throw new Error(String(r.status));
+        go.remove();
+        say('Unsubscribed', 'You get no more of these emails.');
+        if (window.track) window.track('email_unsubscribe_done', { kind: q.get('k') || '' });
+      })
+      .catch(function () {
+        go.disabled = false;
+        say('That did not work', 'Try again, or email ' + (window.SUPPORT_EMAIL || 'us') + '.');
+      });
+  });
+})();
+</script>
+</body>
+</html>
