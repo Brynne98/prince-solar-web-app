@@ -355,17 +355,21 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const rawRow = (cmp && cmp[period]) ? cmp[period] : null;
   const plus = (x, y) => ({ pv: x.pv + y.pv, load: x.load + y.load, imp: x.imp + y.imp });
   const liveToday = { pv: a.pvToday || 0, load: a.loadToday || 0, imp: hasGrid ? (a.gridFromToday || 0) : 0 };
+  // An inverter offline: today's figures miss its share while the other day has it, so
+  // today is not compared at all; Week, Month and Year keep their finished days (SOLAR-561)
+  const invOff = (snap.inverters || []).some(i => i.status !== 'online');
+  const now = rawRow && !invOff ? rawRow.now : null;
   // today is in the slice either way; it counts as compared only with a counterpart
   const cmpRow = (!rawRow || period === 'today') ? rawRow : {
-    cur: rawRow.now ? plus(rawRow.cur, liveToday) : rawRow.cur,
-    prev: rawRow.now ? plus(rawRow.prev, rawRow.now) : rawRow.prev,
-    days: (rawRow.days || 0) + (rawRow.now ? 1 : 0),
+    cur: now ? plus(rawRow.cur, liveToday) : rawRow.cur,
+    prev: now ? plus(rawRow.prev, now) : rawRow.prev,
+    days: (rawRow.days || 0) + (now ? 1 : 0),
     span: (rawRow.span || 0) + 1,
   };
   const cmpDays = cmpRow ? (cmpRow.days || 0) : 0;
   // one compared day is enough: the arrow should always show (Brynne, 2026-10-06)
-  const prev = (cmpRow && cmpDays >= 1) ? cmpRow.prev : null;
   const useLive = period === 'today';
+  const prev = (cmpRow && cmpDays >= 1 && !(useLive && invOff)) ? cmpRow.prev : null;
   const cPv = useLive ? pPv : (cmpRow ? cmpRow.cur.pv : null);
   const cLoad = useLive ? pLoad : (cmpRow ? cmpRow.cur.load : null);
   const cImp = useLive ? pImp : (cmpRow ? cmpRow.cur.imp : null);
