@@ -538,7 +538,7 @@ function show(n) {
   card.classList.toggle('warn', !!s.title);
   document.getElementById('fl-head').textContent = s.title ? '1 thing needs a look' : 'Everything is working';
   if (s.title) [['title', s.title], ['todo', s.todo], ['since', s.since]].forEach(([k, v]) => document.getElementById('fl-' + k).textContent = v);
-  if (!tiles.children.length) tiles.innerHTML = s.tiles.map(() => '<div class="fl-tile"><div class="v"></div><div class="l"></div><div class="s"><i></i><span></span></div></div>').join('');
+  if (!tiles.children.length) tiles.innerHTML = s.tiles.map(() => '<div class="fl-tile"><div class="v"></div><div class="l"></div><div class="s"><span></span></div></div>').join('');
   s.tiles.forEach(([l, c, v, u, [tone, word]], j) => {
     const t = tiles.children[j];
     t.className = 'fl-tile ' + tone;
@@ -676,7 +676,7 @@ const PL = [
 const kwAt = (p, m) => Math.max(0, Math.sin(Math.PI * (m - 360) / 760)) * p.peak * (.88 + .12 * Math.sin(m / 23));
 PL.forEach(p => { p.now = kwAt(p, 785); let e = 0; for (let m = 360; m < 785; m += 5) e += (kwAt(p, m) + kwAt(p, m + 5)) / 2 * 5 / 60; p.made = e; });
 menu.innerHTML = [...new Set(PL.map(p => p.login))].map(l => `<div role="group" aria-label="${l}"><div class="pl-login" aria-hidden="true">${l}</div>`
-  + PL.map((p, i) => p.login !== l ? '' : `<button type="button" role="option"><span class="tick" aria-hidden="true"></span><b>${p.name}</b><span class="st"><i></i>Live</span></button>`).join('') + '</div>').join('');
+  + PL.map((p, i) => p.login !== l ? '' : `<button type="button" role="option"><span class="tick" aria-hidden="true"></span><b>${p.name}</b><span class="st">Live</span></button>`).join('') + '</div>').join('');
 const rows = [...menu.querySelectorAll('button')];
 // solar so far today, 06:00 to now (13:05), against a whole day's width
 const curve = p => { const pts = []; for (let m = 360; m <= 785; m += 5) pts.push([20 + (m - 360) / 760 * 480, 92 - kwAt(p, m) / 7 * 80]); return pts; };

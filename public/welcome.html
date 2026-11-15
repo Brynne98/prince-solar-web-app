@@ -355,8 +355,8 @@ section#features{padding-top:0;scroll-margin-top:112px}
 /* faults: the Equipment card */
 #faults{align-items:start}#faults>div:first-child{padding-top:24px}
 #faults .fl-head{display:flex;align-items:center;gap:10px;margin-top:16px;font:600 22px var(--sans);letter-spacing:-.01em}
-#faults .fl-dot,#faults .fl-tile i{flex:none;width:9px;height:9px;border-radius:50%;background:var(--ok);transition:background .3s}
-#faults .warn .fl-dot,#faults .fl-tile.warn i{background:var(--warn)}
+#faults .fl-head{color:var(--ok);transition:color .3s}#faults .warn .fl-head{color:var(--warn)}
+#faults .fl-tile.warn .s{color:var(--warn)}
 #faults .fl-issue{display:grid;grid-template-rows:0fr;transition:grid-template-rows .35s cubic-bezier(.2,.8,.2,1)}
 #faults .fl-issue>div{overflow:hidden}
 #faults .warn .fl-issue{grid-template-rows:1fr}
@@ -372,7 +372,6 @@ section#features{padding-top:0;scroll-margin-top:112px}
 #faults .fl-tile .v small{font-size:13px;font-weight:500;color:#9aa5b3;margin-left:3px}
 #faults .fl-tile .l{margin-top:10px;font-size:13px;font-weight:600;color:#c8d0da}
 #faults .fl-tile .s{display:flex;align-items:center;gap:7px;margin-top:4px;font-size:12.5px;color:#9aa5b3}
-#faults .fl-tile i{width:7px;height:7px}
 
 /* savings */
 #save .sv-card{margin-top:56px}
@@ -426,7 +425,6 @@ section#features{padding-top:0;scroll-margin-top:112px}
 #plants .pl-menu b{font:500 15px var(--sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #plants .pl-menu [aria-selected="true"] b{font-weight:600}
 #plants .pl-menu .st{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--ok)}
-#plants .pl-menu .st i{width:7px;height:7px;border-radius:50%;background:currentColor}
 #plants .pl-view{margin-top:18px;transition:opacity .25s}
 #plants .pl-view.swap{opacity:.25}
 #plants .pl-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
@@ -511,7 +509,6 @@ section#features{padding-top:0;scroll-margin-top:112px}
 #inverters .inv.soon{background:transparent;border:1px dashed var(--hair-2)}
 #inverters .inv b{display:block;font:600 22px var(--sans);letter-spacing:-.01em}
 #inverters .inv .st{display:inline-flex;align-items:center;gap:7px;margin-top:8px;font-size:14px;font-weight:600;color:var(--ok)}
-#inverters .inv .st i{width:7px;height:7px;border-radius:50%;background:currentColor}
 #inverters .inv.soon .st{color:var(--dim)}
 #inverters .inv p{margin-top:12px;font-size:16px;line-height:1.5;color:var(--muted)}
 @media(max-width:860px){#inverters .inv-row{grid-template-columns:1fr;margin-top:36px}}
@@ -852,7 +849,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   </div>
   <div class="app demo rv d2" id="fl-card" aria-live="polite">
     <div class="demo-top"><span class="lbl mut">Equipment</span><span class="mut">Example plant</span></div>
-    <div class="fl-head"><i class="fl-dot"></i><span id="fl-head">Everything is working</span></div>
+    <div class="fl-head"><span id="fl-head">Everything is working</span></div>
     <div class="fl-issue"><div><section><header><b id="fl-title"></b><small id="fl-since"></small></header><p id="fl-todo"></p></section></div></div>
     <div class="fl-tiles" id="fl-tiles"></div>
   </div>
@@ -991,8 +988,8 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   <h2 class="h2 rv">Works with <em>SunSynk.</em></h2>
   <p class="lede rv d1">More brands are on the way.</p>
   <div class="inv-row rv d2">
-    <div class="inv"><b>SunSynk</b><span class="st"><i></i>Works now</span><p>Any system in the SunSynk Connect app.</p></div>
-    <div class="inv soon"><b>Other brands</b><span class="st"><i></i>Coming soon</span><p>We're adding more inverter brands.</p></div>
+    <div class="inv"><b>SunSynk</b><span class="st">Works now</span><p>Any system in the SunSynk Connect app.</p></div>
+    <div class="inv soon"><b>Other brands</b><span class="st">Coming soon</span><p>We're adding more inverter brands.</p></div>
   </div>
   </div>
 </section>

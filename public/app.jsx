@@ -62,8 +62,8 @@ function plantStatus(snap, now) {
   };
 }
 
-// The status pill's dot and word, then what it adds (children).
-const StatusBits = ({ word, children }) => <><span className="status-dot" /><span className="status-word">{word}</span>{children}</>;
+// The status pill's word, then what it adds (children). No dot: the word says it (SOLAR-556).
+const StatusBits = ({ word, children }) => <><span className="status-word">{word}</span>{children}</>;
 
 // The same status on the fullscreen flow, which covers the header. Its own clock, so
 // the tick re-renders this line and not the Live tab.
@@ -195,7 +195,7 @@ function PickMenu({ id, label, value, options, onPick }) {
 
 // One menu row's state, by the header's rules (SOLAR-182): a dead login reads Login stopped.
 function MenuState({ st, cut, now }) {
-  if (cut) return <span className="pm-state status-offline"><span className="pm-dot" />Login stopped</span>;
+  if (cut) return <span className="pm-state status-offline">Login stopped</span>;
   if (!st || st.lastTs == null) return null;
   const s = plantStatus({
     inverters: Array.from({ length: st.inverters || 0 }, (_, i) => ({ status: i < (st.online || 0) ? 'online' : 'offline' })),
@@ -206,9 +206,10 @@ function MenuState({ st, cut, now }) {
   const status = p != null ? 'loading' : s.status, word = p != null ? 'Setting up' : s.word;
   return (
     <span className={'pm-state status-' + status}>
-      {p != null ? <span className="sync-arc" aria-hidden="true" /> : <span className="pm-dot" />}{word}
+      {p != null && <span className="sync-arc" aria-hidden="true" />}{word}
       {p != null && <span className="mono pm-pct">{Math.round(100 * p)}%</span>}
-      {status === 'stale' && <span className="mono pm-pct">{window.fmtTime(s.last)}</span>}
+      {/* the last reading's time only when it is old: "1 of 2 offline" has a fresh one (SOLAR-558) */}
+      {status === 'stale' && s.old && <span className="mono pm-pct">{window.fmtTime(s.last)}</span>}
     </span>
   );
 }
