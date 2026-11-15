@@ -6,16 +6,20 @@
 
 // 900, not 600: under that the wide layout's boxes are too narrow for a figure and a
 // Today column side by side, so tablets get the stacked layout.
-function useFlowMobile(bp = 900) {
+// Fullscreen zooms either layout to fit, so there the screen's shape decides, not its
+// width: upright is stacked, sideways is wide (SOLAR-550).
+function useFlowMobile(wall) {
+  const q = wall ? '(orientation:portrait)' : '(max-width:900px)';
   const [mobile, setMobile] = React.useState(
-    () => typeof window !== 'undefined' && window.matchMedia(`(max-width:${bp}px)`).matches
+    () => typeof window !== 'undefined' && window.matchMedia(q).matches
   );
   React.useEffect(() => {
-    const mq = window.matchMedia(`(max-width:${bp}px)`);
+    const mq = window.matchMedia(q);
     const h = (e) => setMobile(e.matches);
+    setMobile(mq.matches);
     mq.addEventListener('change', h);
     return () => mq.removeEventListener('change', h);
-  }, []);
+  }, [q]);
   return mobile;
 }
 
@@ -27,7 +31,7 @@ function flowAlpha(color, a) {
 
 function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince, pausedSince, keepToday }) {
   const C = window.COLORS, T = window.COLORS_TEXT;
-  const mobile = useFlowMobile();
+  const mobile = useFlowMobile(wall);
   // The boxes stretch with the card (SOLAR-39); its width only decides the lane's.
   const [wrapRef, wrapW] = useChartSize();
   const feat = features || {};

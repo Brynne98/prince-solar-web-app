@@ -714,10 +714,14 @@
   .wall.idle, .wall.idle * { cursor: none !important; }
   @media (prefers-reduced-motion: reduce) { .wall .wall-exit { transition: none; } }
   .wall .flow-card { background: none; border: 0; box-shadow: none; border-radius: 0; padding: 0; min-height: 0; grid-row: -2; }
-  /* Today's cards between the bar and the flow, one row (SOLAR-309); none on a phone */
-  .wall .today-strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+  /* Today's cards between the bar and the flow, one row (SOLAR-309); none on a phone.
+     As wide as the zoomed diagram and centred like it, never wider (SOLAR-550). */
+  /* five cards need about 750px at their own size, so over the 440px stacked diagram they are drawn smaller */
+  .wall:has(.mflow) { --wall-w: 440px; --strip-k: .587; }
+  .wall .today-strip { --z: calc(var(--wall-zoom, 1) * var(--strip-k, 1)); grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+    width: calc(var(--wall-w, 1100px) * var(--wall-zoom, 1)); max-width: 100%; margin-inline: auto; gap: calc(var(--sp-lg) * var(--z)); }
   /* drawn like the flow's boxes and at their zoom: clear, with the card's own plain border */
-  .wall .mini-stat { --z: var(--wall-zoom, 1); background: transparent;
+  .wall .mini-stat { background: transparent;
     padding: calc(var(--sp-lg) * var(--z)) calc(var(--sp-xl) * var(--z)) calc(var(--sp-lg) * var(--z)); border-radius: calc(var(--r-xl) * var(--z)); }
   .wall .mini-label { font-size: calc(var(--fs-xs) * var(--z)); }
   .wall .mini-value { font-size: calc(var(--fs-3xl) * var(--z)); margin-top: calc(var(--sp-sm) * var(--z)); }
@@ -726,7 +730,6 @@
   .wall .flow-wrap { height: 100%; display: flex; flex-direction: column; justify-content: center; }
   /* left, on the diagram's own left edge: as wide as the zoomed layout, centred like it */
   .wall .flow-narrative { flex: none; text-align: left; text-wrap: balance; max-width: 100%; margin-inline: auto;
-  .wall:has(.mflow) { --wall-w: 440px; }
     width: calc(var(--wall-w, 1100px) * var(--wall-zoom, 1));
     font-size: clamp(18px, 2vmin + 8px, 40px); margin-bottom: clamp(10px, 2.5vmin, 36px); }
   /* both layouts are HTML at screen sizes; tabs.jsx sets the zoom that fills the room */
