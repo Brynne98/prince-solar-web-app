@@ -1586,7 +1586,7 @@ function InvertersSkeleton() {
         <Segmented size="sm" value={detailed ? 'detailed' : 'simple'} onChange={() => {}} options={[{ value: 'simple', label: 'Simple' }, { value: 'detailed', label: 'Detailed' }]} />
       </div>
       <section className="eq-status" aria-label="Status">
-        <div className="eq-head"><i className="eq-dot" />{line(240, 20)}</div>
+        <div className="eq-head">{line(240, 20)}</div>
         <div className="eq-head-sub">{line(150)}</div>
       </section>
       {!detailed ? (
@@ -2104,7 +2104,7 @@ function InvertersTab({ snap, today, refreshKey }) {
       {/* the one place that says whether things are OK */}
       <section className="eq-status" aria-label="Status">
         {/* red, as the problem cards under it are (SOLAR-407) */}
-        <div className="eq-head"><i className={'eq-dot ' + (n ? 'bad' : 'ok')} />{head}</div>
+        <div className={'eq-head ' + (n ? 'bad' : 'ok')}>{head}</div>
         {n === 0 && st.lastAt && <div className="eq-head-sub">Last reading {window.fmtAgo(new Date(st.lastAt), now)}</div>}
       </section>
       {n > 0 && (

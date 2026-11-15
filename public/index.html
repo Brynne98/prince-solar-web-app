@@ -288,7 +288,7 @@
   .menu button .ico { width: var(--icon-md); height: var(--icon-md); color: var(--muted); }
   .menu hr { border: none; border-top: 1px solid var(--line); margin: var(--sp-2xs) 0; }
   /* the small status dots: one size, each its own colour */
-  .menu .dot, .pm-dot, .fbox-grid i, .set-nav .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .menu .dot, .fbox-grid i, .set-nav .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
   .menu .dot { background: var(--bad); margin-left: auto; }
   .acct-menu { left: 0; right: 0; bottom: calc(100% + 6px); }
   /* who is signed in, above Account and Sign out (back in SOLAR-97) */
@@ -297,7 +297,6 @@
   .plant-menu button { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; row-gap: var(--sp-sm); padding: var(--sp-sm) var(--sp-md); white-space: nowrap; }
   /* each plant's state on the right; a turning ring while it sets up (SOLAR-182) */
   .pm-state { display: inline-flex; align-items: center; gap: var(--sp-xs); font-size: var(--fs-sm); font-weight: 600; color: var(--muted); }
-  .pm-dot { background: currentColor; }
   .pm-pct { font-weight: 500; }
   .pm-state.status-live { color: var(--ok); } .pm-state.status-stale { color: var(--warn); }
   .pm-state.status-offline { color: var(--bad); } .pm-state.status-loading { color: var(--muted); }
@@ -327,20 +326,12 @@
   .status { margin-left: auto; display: flex; align-items: center; gap: var(--sp-sm); white-space: nowrap; flex: none; }
   .status-age { font-size: var(--fs-sm); }
   .status-word { font-size: var(--fs-md); font-weight: 600; }
-  /* every state breathes, in its own colour; --ring is the halo */
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none;
-    --ring: rgba(var(--ink-rgb),0.14); box-shadow: 0 0 0 3px var(--ring); animation: status-breathe 2.4s ease-in-out infinite; }
-  .status-live .status-dot { background: var(--ok); --ring: rgba(var(--ok-rgb),0.18); }
+  /* each state in its own colour, the word only: no dot (SOLAR-556) */
   .status-live .status-word { color: var(--ok); }
-  .status-stale .status-dot { background: var(--warn); --ring: rgba(var(--warn-rgb),0.18); }
   .status-stale .status-word, .status-stale .status-age { color: var(--warn); }
-  .status-offline .status-dot { background: var(--bad); --ring: rgba(var(--bad-rgb),0.18); }
   .status-offline .status-word, .status-offline .status-age { color: var(--bad); }
   .status-idle .status-word { color: var(--muted); }
-  .status-loading .status-dot { background: var(--muted); --ring: rgba(var(--ink-rgb),0.12); }
   .status-loading .status-word { color: var(--muted); }
-  @keyframes status-breathe { 0%, 100% { box-shadow: 0 0 0 3px var(--ring); } 50% { box-shadow: 0 0 0 5px transparent; } }
-  @media (prefers-reduced-motion: reduce) { .status-dot { animation: none; } }
   /* "Fetching history" beside the status while a fresh plant's 60 days arrive (0048) */
   .status-sync { display: inline-flex; align-items: center; gap: var(--sp-sm); font-size: var(--fs-sm); color: var(--muted); padding-left: var(--sp-sm); border-left: 1px solid var(--line-2); }
   .sync-arc { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(var(--ink-rgb),0.14); border-top-color: var(--muted); animation: spin 0.9s linear infinite; flex: none; }
@@ -551,7 +542,7 @@
     .status-sync { display: none; }
     .refresh, .bell-btn { height: 36px; min-width: 36px; }
     /* first load: only "Fetching history" and its %, no status word or refresh (SOLAR-182) */
-    .status.fetching .status-dot, .status.fetching .status-word, .status.fetching .status-age, .refresh.fetching { display: none; }
+    .status.fetching .status-word, .status.fetching .status-age, .refresh.fetching { display: none; }
     .status.fetching .status-sync { display: inline-flex; padding-left: 0; border-left: none; }
     /* the plant name needs the room more; the page's banner already says how old the reading is */
     @media (max-width: 359px) { .status-age { display: none; } }
@@ -705,7 +696,6 @@
   .wall-bar { display: flex; align-items: center; justify-content: space-between; gap: 1em;
     width: calc(var(--wall-w, 1100px) * var(--wall-zoom, 1)); max-width: 100%; margin-inline: auto; }
   .wall-status { display: inline-flex; align-items: center; gap: .6em; min-width: 0; white-space: nowrap; }
-  .wall-status .status-dot { width: .55em; height: .55em; }
   .wall-status .status-word { font-size: 1em; }
   .wall-status .status-detail { font-size: .9em; padding-left: .6em; }
   .wall .wall-exit { font-size: .85em; padding: .5em .9em; gap: .5em; border-radius: .7em; flex: none;
@@ -967,12 +957,9 @@
      spec sheets). */
   .eq-top { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-md); }
   .eq-label { font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.16em; color: var(--muted); text-transform: uppercase; }
-  .eq-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--dim); }
-  .eq-dot.ok { background: var(--ok); box-shadow: 0 0 0 4px rgba(var(--ok-rgb),0.15); }
-  .eq-dot.warn { background: var(--warn); box-shadow: 0 0 0 4px rgba(var(--warn-rgb),0.15); }
-  .eq-dot.bad { background: var(--bad); box-shadow: 0 0 0 4px rgba(var(--bad-rgb),0.15); }
   .eq-head { display: flex; align-items: center; gap: var(--sp-md); font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; }
-  .eq-head-sub { margin: var(--sp-xs) 0 0 var(--sp-2xl); font-size: var(--fs-md); color: var(--muted); }
+  .eq-head.ok { color: var(--ok); } .eq-head.bad { color: var(--bad); }   /* the word in the tone, no dot (SOLAR-556) */
+  .eq-head-sub { margin: var(--sp-xs) 0 0; font-size: var(--fs-md); color: var(--muted); }
   .eq-problems { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-md); }
   .eq-problem { border: 1px solid rgba(var(--bad-rgb),0.42); background: rgba(var(--bad-rgb),0.06); border-radius: var(--r-xl); padding: var(--sp-lg) var(--sp-lg); }
   .eq-problem-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-md); }
@@ -1195,7 +1182,6 @@
   @media (min-width: 901px) { .login-plant, .login-plant .plant-nm { min-height: 36px; } }
   .login-plant.off .plant-nm { color: var(--dim); }
   .login-plant .plant-nm > .ico { flex: none; margin-right: var(--sp-sm); color: var(--muted); }   /* a panel before each plant (SOLAR-537) */
-  .login-plant .pm-state:not(.status-live) .pm-dot { display: none; }   /* in Plants only Live has its dot (SOLAR-542) */
   /* Plants' two buttons stay side by side; on a phone they go under the title, at the right */
   .sec-intro:has(.plants-acts) { flex-wrap: wrap; }
   .plants-acts { display: flex; gap: var(--sp-sm); margin-left: auto; }
