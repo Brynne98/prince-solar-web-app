@@ -6,17 +6,24 @@
 -- vanished: on 538820 (15 Nov 22:16) Made today read 19.2 kWh, the slave alone, not 43.9,
 -- and the header and plant menu counted 1 inverter of 1.
 --
--- Now each takes the plant's known inverters (private.inverters) that have a row on the
--- newest reading's local day, and each one's own last row of that day:
---   api_overview        day counters and the inverter list from those rows; live power,
+-- Now each takes the plant's known inverters (private.inverters) that have a row in the
+-- last 2 days (the existing floor; the newest reading's day when that is older), and
+-- each one's own last row in that window:
+--   api_overview        the inverter list from those rows. Day counters (made, used,
+--                       battery and grid today, on the totals and each inverter) count a
+--                       row only when it is from the newest reading's local day; a row
+--                       from yesterday gives 0, never yesterday's totals. Live power,
 --                       battery %, grid present and phase down from rows at the newest
 --                       minute only. A silent inverter keeps its own readAt, so the app
 --                       marks it offline once that is over 15 min old (READ_FRESH_MS).
---   api_plant_states    inverters = known inverters with a row today; online = in the
---                       newest minute and flagged online.
+--   api_plant_states    inverters = known inverters with a row in the window; online =
+--                       in the newest minute and flagged online.
 --   api_trends_compare  the inv list as above; the per-inverter laterals are unchanged.
--- An inverter with no row today (dead since before midnight, or one taken off the plant
--- that private.inverters still holds) is left out, as before.
+--                       An inverter with no row on a matching day fails that pair's
+--                       counter sum (bool_and(found)), so the pair falls back to the
+--                       plant's minute history, which covers every inverter.
+-- An inverter silent for over 2 days (or one taken off the plant that private.inverters
+-- still holds) is left out.
 -- api_balance (TODO app only) is left as it is.
 -- Bodies are 0089, 0101 and 0199's otherwise.
 
@@ -31,7 +38,8 @@ declare
   -- a variable, not now() in the query, so the planner cuts to the last 2 days
   v_floor bigint := extract(epoch from now())::bigint - 2 * 86400;
   v_ts    bigint;
-  v_lo    bigint;  -- start of v_ts's local day
+  v_lo    bigint;  -- start of v_ts's local day: day counters count from here
+  v_from  bigint;  -- the inverter list's window: the 2-day floor, or v_ts's day if older
   v_out   jsonb;
 begin
   select max(ts) into v_ts from public.readings where plant_id = v_plant and ts > v_floor;
@@ -40,24 +48,28 @@ begin
     select max(ts) into v_ts from public.readings where plant_id = v_plant;
   end if;
   v_lo := public.day_start_epoch_tz((to_timestamp(v_ts) at time zone public.plant_tz(v_plant))::date, public.plant_tz(v_plant));
+  v_from := least(v_floor, v_lo);
 
   with pl as (select v_plant as id),
   cfg as (select * from public.plant_cfg(v_plant)),
-  -- each known inverter's own last row of v_ts's day (SOLAR-555). An inverter the poller
+  -- each known inverter's own last row in the window (SOLAR-555). An inverter the poller
   -- left out of the newest minute (SOLAR-296) keeps its day totals and its readAt; only
-  -- the live figures below are limited to rows at v_ts. Bounds are variables, not a join
-  -- to a CTE, so each probe opens that day's partition only (sn_ts index).
+  -- the live figures below are limited to rows at v_ts. A row from before v_lo (silent
+  -- since yesterday) lists the inverter but adds 0 to today's counters. Bounds are
+  -- variables, not a join to a CTE, so each probe opens only the window's partitions
+  -- (sn_ts index).
   r as (
-    select x.* from private.inverters i
+    select x.*, x.ts >= v_lo as is_today from private.inverters i
       cross join lateral (select rd.* from public.readings rd
-                           where rd.sn = i.sn and rd.plant_id = v_plant and rd.ts >= v_lo and rd.ts <= v_ts
+                           where rd.sn = i.sn and rd.plant_id = v_plant and rd.ts >= v_from and rd.ts <= v_ts
                            order by rd.ts desc limit 1) x
      where i.plant_id = v_plant
   ),
   st as (
-    select s.sn, jsonb_agg(jsonb_build_object('id', null, 'no', s.no, 'power', s.power_w, 'voltage', s.volt_v, 'current', s.current_a, 'today', s.today_kwh) order by s.no) as strings
+    select s.sn, jsonb_agg(jsonb_build_object('id', null, 'no', s.no, 'power', s.power_w, 'voltage', s.volt_v, 'current', s.current_a,
+             'today', case when r.is_today then s.today_kwh else 0 end) order by s.no) as strings
       from r join public.strings s on s.plant_id = v_plant and s.sn = r.sn and s.ts = r.ts
-     where s.ts >= v_lo and s.ts <= v_ts
+     where s.ts >= v_from and s.ts <= v_ts
      group by s.sn
   ),
   inv as (
@@ -69,7 +81,7 @@ begin
              -- guarded: one malformed device_time must not take the whole snapshot down with a cast error
              'readAt', case when r.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
                          then extract(epoch from (r.device_time::timestamp at time zone public.plant_tz(v_plant)))::bigint end,
-             'pv', jsonb_build_object('power', round(r.pv_w), 'today', r.pv_today_kwh, 'total', r.pv_total_kwh, 'strings', coalesce(st.strings, '[]'::jsonb),
+             'pv', jsonb_build_object('power', round(r.pv_w), 'today', case when r.is_today then r.pv_today_kwh else 0 end, 'total', r.pv_total_kwh, 'strings', coalesce(st.strings, '[]'::jsonb),
                      -- inputs the inverter reports, wired or not (0061); the page shows the rest as unused
                      'stringSlots', m.string_slots),
              'battery', jsonb_build_object(
@@ -77,7 +89,8 @@ begin
                'status', case when r.batt_w > 5 then 'charging' when r.batt_w < -5 then 'discharging' else 'idle' end,
                'soc', r.batt_soc, 'voltage', r.batt_voltage_v, 'current', r.batt_current_a, 'temperature', r.batt_temp_c,
                'capacity', m.capacity_ah, 'numberOfBatteries', m.number_of_batteries,
-               'todayCharged', r.batt_chg_today_kwh, 'todayDischarged', r.batt_dischg_today_kwh,
+               'todayCharged', case when r.is_today then r.batt_chg_today_kwh else 0 end,
+               'todayDischarged', case when r.is_today then r.batt_dischg_today_kwh else 0 end,
                'totalCharged', r.batt_chg_total_kwh, 'totalDischarged', r.batt_dischg_total_kwh,
                -- second bank (the API's *2 fields), only when the firmware reports one (0042)
                'bank2', case when r.batt2_soc is not null then jsonb_build_object(
@@ -85,16 +98,20 @@ begin
                  'power', r.batt2_power_w, 'temperature', r.batt2_temp_c) end),
              'grid', jsonb_build_object(
                'power', round(r.grid_w), 'direction', case when r.grid_w >= 0 then 'importing' else 'exporting' end,
-               'todayImport', r.grid_import_today_kwh, 'todayExport', r.grid_export_today_kwh,
+               'todayImport', case when r.is_today then r.grid_import_today_kwh else 0 end,
+               'todayExport', case when r.is_today then r.grid_export_today_kwh else 0 end,
                'totalImport', r.grid_import_total_kwh, 'totalExport', r.grid_export_total_kwh,
                'frequency', r.grid_freq_hz, 'powerFactor', r.grid_pf,
                'voltage', r.grid_volt_v, 'relay', r.grid_relay_status,
                -- one entry per phase this inverter reports (L1 [, L2, L3])
                'voltages', (select jsonb_agg(v) from unnest(array[r.grid_volt_v, r.grid_volt_l2_v, r.grid_volt_l3_v]) v where v is not null)),
-             'load', jsonb_build_object('power', round(r.load_w), 'today', r.load_today_kwh, 'total', r.load_total_kwh, 'frequency', r.load_freq_hz),
+             'load', jsonb_build_object('power', round(r.load_w), 'today', case when r.is_today then r.load_today_kwh else 0 end, 'total', r.load_total_kwh, 'frequency', r.load_freq_hz),
              'output', jsonb_build_object('power', round(r.output_w), 'voltage', r.output_volt_v, 'frequency', r.output_freq_hz,
                'voltages', (select jsonb_agg(v) from unnest(array[r.output_volt_v, r.output_volt_l2_v, r.output_volt_l3_v]) v where v is not null))) as snap,
-           r.ts, r.pv_w, r.load_w, r.grid_w, r.batt_w, r.batt_soc, r.pv_today_kwh, r.grid_import_today_kwh, r.grid_export_today_kwh,
+           r.ts, r.pv_w, r.load_w, r.grid_w, r.batt_w, r.batt_soc,
+           case when r.is_today then r.pv_today_kwh else 0 end as pv_today_kwh,
+           case when r.is_today then r.grid_import_today_kwh else 0 end as grid_import_today_kwh,
+           case when r.is_today then r.grid_export_today_kwh else 0 end as grid_export_today_kwh,
            r.grid_volt_v, r.grid_volt_l2_v, r.grid_volt_l3_v,
            coalesce(m.ord, 9999) as ord
       from r left join private.meta m on m.sn = r.sn left join st on st.sn = r.sn
@@ -203,6 +220,7 @@ declare
   p       record;
   v_ts    bigint;
   v_lo    bigint;
+  v_from  bigint;
   v_total int;
   v_on    int;
   v_sync  jsonb;
@@ -212,14 +230,16 @@ begin
     if v_ts is null then
       select max(ts) into v_ts from public.readings where plant_id = p.plant_id;
     end if;
-    -- known inverters with a row on v_ts's day (SOLAR-555); online = in the newest minute
-    -- and flagged online. One sn_ts probe per inverter.
+    -- known inverters with a row in the last 2 days, or on v_ts's day when that is older
+    -- (SOLAR-555); online = in the newest minute and flagged online. One sn_ts probe per
+    -- inverter.
     v_lo := public.day_start_epoch_tz((to_timestamp(v_ts) at time zone public.plant_tz(p.plant_id))::date, public.plant_tz(p.plant_id));
+    v_from := least(v_floor, v_lo);
     select count(*), count(*) filter (where x.ts = v_ts and x.status::text in ('1', 'online', 'true'))
       into v_total, v_on
       from private.inverters i
       cross join lateral (select rd.ts, rd.status from public.readings rd
-                           where rd.sn = i.sn and rd.plant_id = p.plant_id and rd.ts >= v_lo and rd.ts <= v_ts
+                           where rd.sn = i.sn and rd.plant_id = p.plant_id and rd.ts >= v_from and rd.ts <= v_ts
                            order by rd.ts desc limit 1) x
      where i.plant_id = p.plant_id;
 
@@ -343,15 +363,16 @@ as $fn$
            lateral (select public.day_start_epoch_tz(p.prev, (select tz from tz)) as lo) x
      where p.prev is not null
   ),
-  -- each known inverter with a row today (SOLAR-555; was: those in today's latest poll,
-  -- which drops one the poller left out): its last good reading on the matching day at or
+  -- each known inverter with a row in the last 2 days (SOLAR-555; was: those in today's
+  -- latest poll, which drops one the poller left out): its last good reading on the matching day at or
   -- before the moment, from readings, else the 5-minute history (counters as at the
   -- bucket's end). One index probe per inverter per pair.
   inv as (
-    select i.sn from private.inverters i, tlo
+    select i.sn from private.inverters i
      where i.plant_id = (select id from pl)
        and exists (select 1 from public.readings r
-                    where r.sn = i.sn and r.plant_id = i.plant_id and r.ts >= tlo.lo and r.ts <= (select ts from latest))
+                    where r.sn = i.sn and r.plant_id = i.plant_id
+                      and r.ts > extract(epoch from now())::bigint - 2 * 86400 and r.ts <= (select ts from latest))
   ),
   per as (
     select tc.k, i.sn,
