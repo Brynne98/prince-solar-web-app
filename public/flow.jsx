@@ -29,7 +29,7 @@ function flowAlpha(color, a) {
   return `color-mix(in srgb, ${color} ${Math.round(a * 100)}%, transparent)`;
 }
 
-function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince, pausedSince, keepToday }) {
+function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince, pausedSince }) {
   const C = window.COLORS, T = window.COLORS_TEXT;
   const mobile = useFlowMobile(wall);
   // The boxes stretch with the card (SOLAR-39); its width only decides the lane's.
@@ -104,16 +104,17 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
       // since the grid may be off (SOLAR-417)
       state: gridOff ? null : gridExport > 0 ? 'Exporting' : gridImport > 0 ? 'Importing' : gridKnown ? 'On, not in use' : 'Not known yet',
       idle: gridKnown && !gridOff && !gridExport && !gridImport,
-      today: today(['Imported', agg.gridFromToday ?? 0], ['Exported', agg.gridToToday ?? 0]) },
+      // a silent plant's missing counters (silent since before midnight) drop, not read as 0
+      today: today(['Imported', agg.gridFromToday ?? (silentSince ? null : 0)], ['Exported', agg.gridToToday ?? (silentSince ? null : 0)]) },
     home: { key: 'home', label: 'Home', color: C.load, w: agg.loadNow, icon: 'home',
       split: [['Solar', C.pv, solarIn, T.pv], ['Battery', C.batt, battIn, T.batt], ['Grid', C.grid, gridIn, T.grid]],
       today: today(['Used', agg.loadToday]) },
   };
-  // A silent plant: each box keeps its name and shows a dash, with no state, share, charge,
-  // grid chip or Today figures, and no line runs. The sentence above says since when.
-  // A dead login keeps today's figures: they are today's, only the live watts are not now (SOLAR-386).
+  // A silent plant: each box shows a dash, with no state, share, charge (nor the battery
+  // icon's fill) or grid chip, and no line runs: none of it is known now. Today's figures
+  // stay, as at the last reading (SOLAR-557; a dead login, SOLAR-386).
   if (silentSince) Object.values(nodes).forEach(n => n && Object.assign(n, {
-    w: 0, dash: true, state: null, split: null, charge: null, known: false, off: false, reverse: false, today: keepToday ? n.today : [] }));
+    w: 0, dash: true, state: null, split: null, charge: null, soc: null, known: false, off: false, reverse: false }));
 
   const CEIL = 8000;
   const pw = w => window.fmtPowerParts(w);
@@ -256,8 +257,9 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   // lines are drawn one unit per pixel. Under 1000 wide the lane and the inverter shrink.
   function renderDesktop() {
     const narrow = !wall && wrapW < 1000;
-    // A silent plant's boxes hold a name and a dash only, so they sit low rather than as tall empty boxes (SOLAR-411)
-    const LW = narrow ? 200 : 240, R = narrow ? 40 : 47, BH = silentSince && !keepToday ? 104 : 176, GAP = 22, H = 2 * BH + GAP;
+    // A silent plant with no Today figures holds a name and a dash, so its boxes sit low rather than tall and empty (SOLAR-411)
+    const short = silentSince && !Object.values(nodes).some(n => n && n.today.length);
+    const LW = narrow ? 200 : 240, R = narrow ? 40 : 47, BH = short ? 104 : 176, GAP = 22, H = 2 * BH + GAP;
     const cx = LW / 2, cy = H / 2, row1 = BH / 2, row2 = BH + GAP + BH / 2;
     // a plant without a battery or grid centres the one box left on that side
     const solarY = nodes.bat ? row1 : cy, homeY = nodes.grid ? row2 : cy;

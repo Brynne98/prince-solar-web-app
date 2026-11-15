@@ -473,7 +473,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             </button>
           }>POWER FLOW</SectionTitle>}
           <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} silentSince={silent ? window.readAgo(ps.last.getTime(), Date.now()) : null}
-            pausedSince={!silent && ps.faded ? window.readAgo(ps.last.getTime(), Date.now()) : null} keepToday={cut} />
+            pausedSince={!silent && ps.faded ? window.readAgo(ps.last.getTime(), Date.now()) : null} />
         </Card>
       </div>
 
