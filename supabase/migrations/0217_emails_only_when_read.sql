@@ -26,19 +26,8 @@
 --     got no warning (a payer held the plant then) gets no email after the delete.
 --   - api_link_status: each plant carries week_used, so the Choose plants pop-up
 --     can say which plants have had their free week.
---   - had_plan: a payment that was taken, not applied and marked for refund
---     ('refund: ...', billing_charge_paid) no longer counts as a plan. Before, that
---     account lost the launch price and, with no plant yet, its free week.
 -- Bodies are 0102's, 0209's, 0214's, 0215's and the latest api_link_status otherwise.
 -- ============================================================================
-
--- 0207's had_plan. Added: not a payment marked for refund, which never became a plan.
-create or replace function private.had_plan(p_user uuid)
-returns boolean language sql stable set search_path = public, private, pg_temp as $$
-  select exists (select 1 from private.billing_charges c
-                  where c.user_id = p_user and c.status = 'paid' and coalesce(c.error, '') not like 'refund%')
-$$;
-revoke all on function private.had_plan(uuid) from public, anon, authenticated;
 
 create or replace function public.email_claim(p_limit int, p_peek boolean default false)
 returns table (id bigint, user_id uuid, to_email text, plant_id bigint, plant_name text, tz text,

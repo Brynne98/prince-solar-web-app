@@ -59,6 +59,7 @@ import {
   syncPlants,
   saveCallTally,
 } from "../_shared/sunsynk.ts";
+import { holdLastGood } from "./hold.mts";
 
 // The inverter and plant lists change rarely, so they are re-read from SunSynk only
 // on minutes divisible by these and served from private.inverters/meta (0031)
@@ -236,6 +237,8 @@ function canCarry(inv: InverterInfo, inputTime: string | null): boolean {
   if (!prev || inputTime == null || prev.device_time == null) return false;
   if (prev.device_time !== inputTime) return false;
   if ((inv.carriedRun ?? 0) >= MAX_CARRIED_RUN) return false;
+  // after a hold, read in full: a carry would copy the held figures forward unmarked (SOLAR-551)
+  if (prev.held) return false;
   if (outageSignal(prev) !== null) return false;
   return true;
 }
@@ -434,7 +437,12 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   // left absent so recover can bank it from the cloud later.
   if (!usable.length) return result;
 
-  const readings = usable.map((f) => readingRow(f, ts));
+  // A row that mixes two uploads keeps the last balanced row's power figures (SOLAR-551).
+  const readings = usable.map((f) => {
+    const row = readingRow(f, ts);
+    holdLastGood(row, f.inv.lastReading);
+    return row;
+  });
   // Strings come from input, which is always fetched, so they are fresh every minute.
   const strings = usable.flatMap(({ inv, raw }) =>
     extractStrings(inv, raw).map((s) => ({ ts, plant_id: inv.plantId ?? null, ...s }))

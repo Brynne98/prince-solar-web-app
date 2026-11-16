@@ -1263,7 +1263,7 @@ begin
   perform pg_temp.eq('payer lapsed: no deleted email without the warning',
     (select count(*)::int from public.email_queue where kind = 'unpaid_deleted' and user_id = w5), 0);
 end $$;
--- A first payment taken, not applied and marked for refund is not a plan (0217, SOLAR-572):
+-- A first payment taken, not applied and marked for refund is not a plan (0219, SOLAR-572):
 -- w7's first plant still gets its free week. w8's payment applied: no week.
 insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, error, due_on, created_on, settled_at) values
   ('psh_w7', '00000000-0000-0000-0000-000000000a07', 'start', 'home', 'monthly', 99, 'paid', 'refund: paid plants did not start', current_date, current_date, now()),
@@ -1275,6 +1275,39 @@ select public.plant_users_upsert('00000000-0000-0000-0000-000000000a08', '000000
 select pg_temp.eq('refunded, never applied: its first plant gets the free week',
   pg_temp.week_ends('00000000-0000-0000-0000-000000000a07') > now() + interval '6 days', true);
 select pg_temp.eq('applied payment: no free week', pg_temp.week_ends('00000000-0000-0000-0000-000000000a08') <= now(), true);
+-- 'deleted in 3 days' only when the plant goes on that account's day: not when another
+-- account on it has a later delete day (0218, SOLAR-573)
+do $$
+declare
+  v1 uuid := '00000000-0000-0000-0000-000000000b01'; v2 uuid := '00000000-0000-0000-0000-000000000b02';
+  v3 uuid := '00000000-0000-0000-0000-000000000b03'; v4 uuid := '00000000-0000-0000-0000-000000000b04';
+  c1 uuid := '00000000-0000-0000-0000-00000000bc01'; c2 uuid := '00000000-0000-0000-0000-00000000bc02';
+  c3 uuid := '00000000-0000-0000-0000-00000000bc03'; c4 uuid := '00000000-0000-0000-0000-00000000bc04';
+  t date := private.billing_today();
+begin
+  insert into auth.users (id, email) values (v1, 'v1@t.test'), (v2, 'v2@t.test'), (v3, 'v3@t.test'), (v4, 'v4@t.test');
+  insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values
+    (c1, v1, 'v1@login.test'), (c2, v2, 'v2@login.test'), (c3, v3, 'v3@login.test'), (c4, v4, 'v4@login.test');
+  -- v1's week ends; v2 adds the plant on v1's day 8 (no week), so its delete day is 8 days later
+  perform public.plant_users_upsert(v1, c1, pg_temp.rows(60));
+  perform pg_temp.days_on(v1, 8);
+  perform public.plant_users_upsert(v2, c2, pg_temp.rows(60));
+  perform pg_temp.days_on(v1, 26);
+  update private.free_week_logins set started_at = started_at - interval '26 days', over_at = over_at - interval '26 days' where user_id = v2;
+  perform private.free_week_mail();
+  perform pg_temp.eq('shared, other delete day later: no deleted-in-3-days', (select count(*)::int from public.email_queue where user_id = v1 and kind = 'unpaid_last'), 0);
+  perform pg_temp.eq('shared, other delete day later: plant kept on the day', private.unpaid_since(v2) + interval '30 days' > private.unpaid_since(v1) + interval '30 days', true);
+  -- v3 paid, lapsed 35 days ago; v4's week ended 27 days ago: v4's day is the later one, so v4 is warned
+  insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values (v3, 'home', 'monthly', 1, t + 30);
+  perform public.plant_users_upsert(v3, c3, pg_temp.rows(61));
+  perform public.plant_users_upsert(v4, c4, pg_temp.rows(61));
+  perform pg_temp.days_on(v4, 34);
+  perform pg_temp.days_on(v3, 40);
+  update private.billing set plan = 'free', period = null, billing_day = null, next_billing_date = null where user_id = v3;
+  update private.billing set ended_at = now() - interval '35 days' where user_id = v3;
+  perform private.free_week_mail();
+  perform pg_temp.eq('shared, own delete day the last: deleted-in-3-days goes', (select count(*)::int from public.email_queue where user_id = v4 and kind = 'unpaid_last'), 1);
+end $$;
 select pg_temp.eq('plant week closed to users', has_table_privilege('authenticated', 'private.plant_week', 'select'), false);
 select pg_temp.eq('readable plants not for anon', has_function_privilege('anon', 'public.my_plant_ids()', 'execute'), false);
 select pg_temp.eq('the 24-hour rule is gone', (select count(*)::int from pg_policies where policyname like '%\_free\_read'), 0);
