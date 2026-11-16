@@ -489,16 +489,16 @@ function weekLine(plan, now, list, many) {
   const price = `${rand(now)} a month${list > now ? `, normally ${rand(list)}` : ''}`;
   return { long: `Recommended for your ${many ? 'plants' : 'plant'}: ${PLAN_NAME[plan]}, ${price}.`, short: `${PLAN_NAME[plan]}: ${price}.` };
 }
-// From Billing's prices: Home for up to 2 plants, Family above.
-function weekOffer(b, links) {
-  const n = (links?.accounts || []).filter(a => a.status !== 'disabled').flatMap(a => a.plants || []).length;
+// From Billing's prices: Home for up to 2 plants, Family above. n: the plants the account added
+// (api_me's plants), not every plant on its SunSynk logins.
+function weekOffer(b, n) {
   const plan = n > 2 ? 'family' : 'home', now = b?.prices?.monthly?.[plan];
   return now == null ? null : weekLine(plan, now, b.listPrices?.monthly?.[plan], n > 1);
 }
 // Days 1 to 4 of the free week: a card on Live with the date and the price (SOLAR-553). Days 5
 // to 7 the free_week_soon notice takes over, on every page. endsAt: api_me's freeWeekEndsAt.
-function weekCard(endsAt, b, links, plans) {
-  const o = weekOffer(b, links);
+function weekCard(endsAt, b, n, plans) {
+  const o = weekOffer(b, n);
   if (!endsAt || !o || b.plan !== 'free' || b.comped || Date.parse(endsAt) - Date.now() <= 2 * 864e5) return null;
   const day = new Date(endsAt).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
   return { kind: 'free_week_price', banner: true, tone: 'info', closable: 'free_week_price:' + day,
@@ -508,7 +508,7 @@ function weekCard(endsAt, b, links, plans) {
     button: 'See plans', act: (where) => { window.track('notice_action_done', { kind: 'free_week_price', where }); plans(); } };
 }
 
-// week: api_billing_status while the free week is on, for its prices (SOLAR-553).
+// week: { b: api_billing_status while the free week is on, n: plants added } for its price line (SOLAR-553).
 function billNotice(n, act, links, week) {
   const { rand, billDay } = window.billingFmt;
   const plan = PLAN_NAME[n.plan];
@@ -552,7 +552,7 @@ function billNotice(n, act, links, week) {
       const day = new Date(n.endsAt).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Africa/Johannesburg' });
       // days 5 to 7: a card on every page but Billing and plans, not only the bell (SOLAR-553).
       // The plan for the plants added, at the account's offer; Home from the notice until Billing's prices load.
-      const o = weekOffer(week, links) || weekLine('home', n.perMonth, n.list, false);
+      const o = (week && weekOffer(week.b, week.n)) || weekLine('home', n.perMonth, n.list, false);
       return { banner: true, tone: 'warn', icon: 'clock', title: `Your free week ends on ${day}`, short: `Free week ends ${day}`,
         body: `Readings, alerts and reports stop then. ${o.long}`, bodyShort: o.short,
         button: 'See plans', run: act.plans };
@@ -1877,11 +1877,11 @@ function App({ links }) {
     }) : openSettings('plan')),
   };
   const notices = (notifs?.pinned || []).map(n => {
-    const t = billNotice(n, noticeAct, links, week);
+    const t = billNotice(n, noticeAct, links, { b: week, n: (me?.plants || []).length });
     return t && { ...t, kind: n.kind, id: n.key, read: n.read, act: (where) => { window.track('notice_action_done', { kind: n.kind, where }); t.run(); } };
   }).filter(Boolean);
   // the free week's price card joins them on Live until the day-5 notice comes (SOLAR-553)
-  const priceCard = tab === 'live' && !notices.some(n => n.kind === 'free_week_soon') && weekCard(weekEndsAt, week, links, noticeAct.plans);
+  const priceCard = tab === 'live' && !notices.some(n => n.kind === 'free_week_soon') && weekCard(weekEndsAt, week, (me?.plants || []).length, noticeAct.plans);
   const cards = priceCard ? [...notices, priceCard] : notices;
   const bell = <NotifBell data={notifs} pinned={notices} onOpen={loadNotifs} onSeen={readNotifs} onReadAll={() => readNotifs(null)}
                          onSeeAll={seeAll} onSettings={() => openSettings('notifications')} />;
