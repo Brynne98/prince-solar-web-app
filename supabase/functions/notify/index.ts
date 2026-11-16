@@ -451,7 +451,7 @@ async function build(r: Row): Promise<Email | null> {
     }
     case "bill_cancel_soon":
       return cancelEndsSoon({ from: d.from, on: day(d.on), days: (await historyAt(r.user_id))?.days, deleteOn: dayMonth(addDays(d.on, 30)) });
-    case "need_a_hand": return needAHand();
+    case "need_a_hand": return needAHand(d.choose === true);
     case "feedback":
       return feedback({ email: String(d.email ?? ""), message: String(d.message ?? ""), page: String(d.page ?? ""),
         version: String(d.version ?? ""), user: String(d.user ?? ""), image: !!d.image });
@@ -687,7 +687,7 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
       }
       // SOLAR-319
       if (row?.kind === "need_a_hand" && row.user_id) {
-        await track("need_a_hand_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), {});
+        await track("need_a_hand_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), { choose: row.data?.choose === true });
       }
     }
   }
@@ -705,7 +705,7 @@ async function renderAll(plantId: number, today?: string) {
   if (!pu) throw new Error(`no users on plant ${plantId}`);
   const p: Plant = { id: plantId, name: pu.plant_name || "your plant", tz: await rpc<string>("plant_tz", { p_plant: plantId }) };
   const now = Math.floor(Date.now() / 1000);
-  const out: Record<string, Email> = { welcome: welcome(), "account-deleted": accountDeleted("you@example.com") };
+  const out: Record<string, Email> = { welcome: welcome(), "need-a-hand-choose": needAHand(true), "account-deleted": accountDeleted("you@example.com") };
   const h = await buildHistory(p);
   if (h) out["history-synced"] = historySynced(h);
   today ??= local(p.tz).date;
