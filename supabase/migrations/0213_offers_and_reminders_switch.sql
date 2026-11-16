@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0211 — "Offers and reminders": one switch for every email that offers a plan (SOLAR-569).
+-- 0213 — "Offers and reminders": one switch for every email that offers a plan (SOLAR-569).
 --
 -- Before: 'reminders' (0206) held the day 21, 34 and 37 emails. Unsubscribe in one of
 -- them turned it off, and the app could not turn it back on: the owner had no column

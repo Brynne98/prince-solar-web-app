@@ -401,7 +401,7 @@ async function saveFlag(table, event, userId, kind, on) {
   window.track(event, { kind, on });
 }
 // Which report and alert emails the user wants (0091, SOLAR-158), and the emails that offer
-// a plan (reminders, 0211, SOLAR-569).
+// a plan (reminders, 0213, SOLAR-569).
 const EMAIL_KINDS = ['weekly', 'monthly', 'yearly', 'grid', 'battery', 'panels', 'readings', 'sunsynk', 'reminders'];
 const fetchEmailPrefs = (userId) => fetchFlags('email_prefs', EMAIL_KINDS, userId);
 const saveEmailPref = (userId, kind, on) => saveFlag('email_prefs', 'email_pref_change_done', userId, kind, on);
