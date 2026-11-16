@@ -1454,8 +1454,8 @@ function Setup({ links, wall }) {
   const card = wall ? (
     <div className="setup-empty-box">
       <Icon id="card" />
-      <h2>{wall.paid ? 'Your plan has ended' : 'Your free week has ended'}</h2>
-      <p>{wall.plants > 2 ? 'Family' : 'Home'} covers your {wall.plants > 1 ? wall.plants + ' plants' : 'plant'}. Start it to see your solar, battery, grid and home again.</p>
+      <h2>{wall.paid ? 'Your plan has ended' : wall.noWeek ? (wall.plants > 1 ? 'These plants have had their free week' : 'This plant has had its free week') : 'Your free week has ended'}</h2>
+      <p>{wall.plants > 2 ? 'Family' : 'Home'} covers your {wall.plants > 1 ? wall.plants + ' plants' : 'plant'}. Start it to see your solar, battery, grid and home{wall.noWeek && !wall.paid ? '' : ' again'}.</p>
       {wallKept && <p>Your history is kept until {wallKept}.</p>}
       <button type="button" className="save-btn setup-btn" onClick={() => go('plans')}>See plans</button>
     </div>
