@@ -500,7 +500,7 @@ const NO_PLANT_TEXT = 'has no plant shared with it yet. Your login is saved.';
 // Two uses. The plants a cancel or smaller plan keeps (SOLAR-496): links, plan, keep (the
 // label and undo of "keep the plan as it is"). The plants a login adds (SOLAR-537): logins
 // (the plants to choose from), ask and full (its two lines), min 0, verb 'Add'.
-function KeepPicker({ links, plan, room, value, onChange, keep, logins, ask, full, min = 1, verb = 'Keep' }) {
+function KeepPicker({ links, plan, room, value, onChange, keep, logins, ask, full, min = 1, verb = 'Keep', tag }) {
   const [say, setSay] = React.useState(null); // 'last' | 'full'
   const one = room === 1 && min > 0;
   const tick = (id) => {
@@ -522,6 +522,7 @@ function KeepPicker({ links, plan, room, value, onChange, keep, logins, ask, ful
             return (
               <label key={p.plant_id} className={'login-plant keep-row' + (on ? '' : ' off')}>
                 <span className="conn-user plant-nm">{name}</span>
+                {tag && tag(p) && <span className="keep-tag">{tag(p)}</span>}
                 <input type={one ? 'radio' : 'checkbox'} name="keep-pick" checked={on} aria-label={verb + ' ' + name} onChange={() => tick(p.plant_id)} />{/* reuse-check: allow: tick boxes, not switches, for the keep pick (SOLAR-486) */}
               </label>
             );
@@ -589,13 +590,19 @@ function PlantPickDialog({ logins, from, onDone }) {
     onDone(picked);
   };
   const more = open === 1 ? '1 more plant' : open + ' more plants';
+  // no plan: the free week, where the ticks are fixed (0203)
+  const free = plan === 'free', upTo = open === 1 ? '1 plant' : open + ' plants';
   return (
     <Dialog keep label="Choose plants" busy={busy} onClose={() => onDone([])}>
       <div className="confirm-title">Choose plants</div>
-      <KeepPicker logins={logins} room={open} value={picked} onChange={setPicked} min={0} verb="Add"
-        ask={`${PLAN_NAME[plan]} has room for ${more}.${all.length > open ? (open === 1 ? ' Which one?' : ' Which ones?') : ''}`}
-        full={`${PLAN_NAME[plan]} has room for ${more}. Untick one first.`} />
-      <div className="confirm-text keep-note">After this you can change one plant every 90 days.</div>
+      {/* pick-steady: the line under the rows keeps two lines' height, so the pop-up does not jump (SOLAR-572) */}
+      <div className="pick-steady">
+        <KeepPicker logins={logins} room={open} value={picked} onChange={setPicked} min={0} verb="Add"
+          tag={p => free && p.week_used ? 'Free week used' : null}
+          ask={free ? `Choose up to ${upTo}.` : `${PLAN_NAME[plan]} has room for ${more}.${all.length > open ? (open === 1 ? ' Which one?' : ' Which ones?') : ''}`}
+          full={free ? `Up to ${upTo}. Untick one first.` : `${PLAN_NAME[plan]} has room for ${more}. Untick one first.`} />
+      </div>
+      <div className="confirm-text keep-note">{free ? 'Plants can’t be changed in the free week.' : 'After this you can change one plant every 90 days.'}</div>
       <div className="conn-form-actions">
         <button type="button" className="ghost-btn" onClick={() => onDone([])} disabled={busy}>Not now</button>
         <window.BusyButton className="save-btn" onClick={add} busy={busy} disabled={!picked.length}>{picked.length > 1 ? 'Add plants' : 'Add plant'}</window.BusyButton>

@@ -1139,6 +1139,8 @@ begin
   perform pg_temp.eq('used plant: nothing read', pg_temp.as_user(w3, 'select count(*) from public.my_plant_ids()'), '0');
   perform pg_temp.eq('used plant: still not polled', (select count(*)::int from public.live_plants() x where x = 9007701), 0);
   -- the plant's history is loaded: its email is queued at the link, and skipped when it is sent (0217, SOLAR-572)
+  perform pg_temp.eq('used plant: the chooser is told its free week is used',
+    pg_temp.as_user(w3, 'select plants->0->>''week_used'' from public.api_link_status()'), 'true');
   perform pg_temp.eq('used plant: history email queued', (select count(*)::int from public.email_queue where kind = 'history' and user_id = w3), 1);
   perform pg_temp.eq('used plant: history email not sent', (select count(*)::int from public.email_claim(100000, true) c where c.kind = 'history' and c.user_id = w3), 0);
   -- skipped, then the history loads again (a payment's 60-day fetch): the row is queued again
@@ -1155,6 +1157,8 @@ begin
   perform public.plant_users_upsert(w5, a5, pg_temp.rows(21));
   perform pg_temp.eq('join on day 3: 4 days left', pg_temp.week_ends(w5) between now() + interval '3 days 23 hours' and now() + interval '4 days 1 hour', true);
   perform pg_temp.eq('join on day 3: reads the plant', pg_temp.as_user(w5, 'select string_agg(x::text, '','') from public.my_plant_ids() x'), '9007721');
+  perform pg_temp.eq('join on day 3: the plant''s free week is not used',
+    pg_temp.as_user(w5, 'select plants->0->>''week_used'' from public.api_link_status()'), 'false');
   perform pg_temp.eq('join on day 3: history email sent', (select count(*)::int from public.email_claim(100000, true) c where c.kind = 'history' and c.user_id = w5), 1);
   -- day 2 setup email: to the account that reads its plant, not to the one at the pay screen (0217)
   update public.plant_users set linked_at = now() - interval '2 days 1 hour' where user_id in (w3, w5);
@@ -1248,6 +1252,16 @@ begin
   perform private.free_week_mail();
   perform pg_temp.eq('payer''s plant: no deleted-in-3-days email', (select count(*)::int from public.email_queue where user_id = w5 and kind = 'unpaid_last'), 0);
   perform pg_temp.eq('payer''s plant: its readings are not deleted', (select 9007721 in (select public.live_plants())), true);
+  -- the payer lapses and 30 days pass: the plant is deleted, and the account that got no warning gets no email
+  update private.billing set plan = 'free', period = null, billing_day = null, next_billing_date = null where user_id = w4;
+  update private.billing set ended_at = now() - interval '31 days' where user_id = w4;
+  perform pg_temp.days_on(w4, 31);   -- its week row too: it ended at the payment
+  perform pg_temp.days_on(w5, 3);
+  insert into public.agg_minute (plant_id, ts) values (9007721, extract(epoch from now() - interval '5 days')::bigint);
+  perform private.unpaid_delete();
+  perform pg_temp.eq('payer lapsed: readings gone', (select count(*)::int from public.agg_minute where plant_id = 9007721), 0);
+  perform pg_temp.eq('payer lapsed: no deleted email without the warning',
+    (select count(*)::int from public.email_queue where kind = 'unpaid_deleted' and user_id = w5), 0);
 end $$;
 select pg_temp.eq('plant week closed to users', has_table_privilege('authenticated', 'private.plant_week', 'select'), false);
 select pg_temp.eq('readable plants not for anon', has_function_privilege('anon', 'public.my_plant_ids()', 'execute'), false);

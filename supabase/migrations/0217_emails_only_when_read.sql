@@ -21,7 +21,12 @@
 --   - email_on_history: when a plant's history finishes loading again (a payment
 --     starts the 60-day fetch), a history row skipped as 'not read' is removed
 --     first, so the account that now pays gets the email.
--- Bodies are 0102's, 0214's and 0215's otherwise.
+--   - unpaid_delete: the 'history has been deleted' email goes only to an account
+--     whose 'deleted in 3 days' email was queued for this lapse. An account that
+--     got no warning (a payer held the plant then) gets no email after the delete.
+--   - api_link_status: each plant carries week_used, so the Choose plants pop-up
+--     can say which plants have had their free week.
+-- Bodies are 0102's, 0209's, 0214's, 0215's and the latest api_link_status otherwise.
 -- ============================================================================
 
 create or replace function public.email_claim(p_limit int, p_peek boolean default false)
@@ -187,5 +192,116 @@ begin
   end if;
   return null;
 end $$;
+
+-- 0209's unpaid_delete. Added: the email only after the warning.
+CREATE OR REPLACE FUNCTION private.unpaid_delete()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+declare
+  p bigint;
+  plants int := 0;
+  total bigint := 0;
+begin
+  for p in
+    select pu.plant_id
+      from public.plant_users pu
+      left join private.billing b on b.user_id = pu.user_id
+     where not pu.paused
+     group by pu.plant_id
+    having bool_and(not private.plant_live(pu.user_id, pu.plant_id)
+                    and private.unpaid_since(pu.user_id) + interval '30 days' <= now()
+                    and (b.keep_until is null or b.keep_until < private.billing_today()))
+     order by pu.plant_id
+  loop
+    perform pg_advisory_xact_lock(p);
+    -- a payment or a link that landed while this run waited for the lock
+    continue when exists (select 1 from public.plant_users pu
+                           where pu.plant_id = p and not pu.paused
+                             and (private.plant_live(pu.user_id, p)
+                                  or private.unpaid_since(pu.user_id) + interval '30 days' > now()));
+    continue when not (exists (select 1 from public.agg_minute where plant_id = p)
+                    or exists (select 1 from public.agg_5m where plant_id = p)
+                    or exists (select 1 from public.readings where plant_id = p)
+                    or exists (select 1 from public.plant_energy where plant_id = p)
+                    or exists (select 1 from public.grid_off where plant_id = p));
+    plants := plants + 1;
+    total := total + (select coalesce(sum(v::bigint), 0) from jsonb_each_text(private.plant_readings_delete(p)) as t(k, v));
+    update public.plant_config
+       set backfill_next = null, backfill_until = null, backfill_tries = 0, temp_next = null
+     where plant_id = p;
+    -- the day-37 email, to each account with no plan that runs the plant: once per lapse
+    insert into public.email_queue (user_id, kind, key, data, priority)
+    select pu.user_id, 'unpaid_deleted', 'unpaid_deleted:' || pu.user_id || ':' || private.unpaid_since(pu.user_id)::date,
+           jsonb_build_object('plants', (select count(*) from private.plant_picks k where k.user_id = pu.user_id),
+             'paid', private.had_plan(pu.user_id)), 1
+      from public.plant_users pu
+     where pu.plant_id = p and not pu.paused and private.unpaid_since(pu.user_id) is not null
+       and not private.no_week(pu.user_id)
+       -- only after its 'deleted in 3 days' email was queued: none comes without the warning
+       and exists (select 1 from public.email_queue e
+                    where e.user_id = pu.user_id and e.kind = 'unpaid_last'
+                      and e.created_at >= private.unpaid_since(pu.user_id))
+    on conflict do nothing;
+  end loop;
+  return jsonb_build_object('plants', plants, 'rows', total);
+end $function$;
+revoke all on function private.unpaid_delete() from public, anon, authenticated;
+
+-- api_link_status. Added: week_used on each plant.
+CREATE OR REPLACE FUNCTION public.api_link_status()
+ RETURNS TABLE(account_id uuid, sunsynk_username text, status text, linked_at timestamp with time zone, last_ok_at timestamp with time zone, plants jsonb, kind text)
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+  with me as (select auth.uid() u),
+  b as (select me.u user_id, bl.plants_to_remove, bl.remove_on, bl.free_removals, bl.prepaid_on, bl.next_billing_date, bl.billing_day,
+               coalesce(bl.comped, false) comped,
+               coalesce(private.billing_drops(bl), '{}') drops,
+               public.billing_room(bl.plan, bl.extra_plants) room,
+               (select count(*) from public.plant_users x where x.user_id = me.u and not x.paused) act,
+               (select count(*) from private.plant_picks k where k.user_id = me.u) picks,
+               (select count(*) from private.plant_picks k where k.user_id = me.u and k.held) held
+          from me left join private.billing bl on bl.user_id = me.u)
+  select a.id, a.sunsynk_username, a.status,
+         -- the share login: when this user first claimed through it
+         case when a.kind = 'share' then (select min(x.linked_at) from public.plant_users x where x.account_id = a.id and x.user_id = auth.uid())
+              else a.linked_at end,
+         a.last_ok_at,
+         coalesce((select jsonb_agg(jsonb_build_object('plant_id', pu.plant_id, 'plant_name', pu.plant_name,
+                                                        'paused', pu.paused, 'linked_at', pu.linked_at,
+                                                        'inverters', (select count(*) from private.inverters i where i.plant_id = pu.plant_id),
+                                                        'remove_on', case when pu.plant_id = any (b.plants_to_remove) then b.remove_on
+                                                                          when pu.plant_id = any (b.drops) then private.billing_end_day(b.prepaid_on, b.next_billing_date, b.billing_day) end,
+                                                        'drop', coalesce(pu.plant_id = any (b.drops), false),
+                                                        'free_removal', coalesce(pu.plant_id = any (b.plants_to_remove) and pu.plant_id = any (b.free_removals), false),
+                                                        -- gone from SunSynk: the share removed (0172), or off its login's list (0197)
+                                                        'share_gone', pu.share_gone_at is not null,
+                                                        'picked', k.plant_id is not null,
+                                                        -- the plant's free week is over (0199): the chooser says so to an account with no plan
+                                                        'week_used', exists (select 1 from private.plant_week w
+                                                                              where w.plant_id = pu.plant_id and w.started_at <= now() - interval '7 days'),
+                                                        -- epoch it last started collecting (0174): a plant with no reading 30 min on says so
+                                                        'started_at', (select s.started_at from private.plant_alert_state s where s.plant_id = pu.plant_id),
+                                                        'can_start', pu.paused and pu.share_gone_at is null
+                                                                     and (b.comped or (b.act < b.room and case
+                                                                           when k.plant_id is null then b.picks < b.room
+                                                                           when k.held then true
+                                                                           else b.held < b.room end)))
+                                    order by pu.linked_at, pu.plant_id)
+                     from public.plant_users pu
+                     join b on b.user_id = pu.user_id
+                     left join private.plant_picks k on k.user_id = pu.user_id and k.plant_id = pu.plant_id
+                    where pu.account_id = a.id and pu.user_id = auth.uid()),
+                  '[]'::jsonb),
+         a.kind
+    from private.sunsynk_accounts a
+   where a.user_id = auth.uid()
+      or (a.kind = 'share' and exists (select 1 from public.plant_users x where x.account_id = a.id and x.user_id = auth.uid()))
+   order by 4 desc
+$function$;
 
 notify pgrst, 'reload schema';
