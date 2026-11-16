@@ -1159,10 +1159,22 @@ begin
   -- day 37: gone
   perform private.unpaid_delete();
   perform pg_temp.eq('day 34: readings still there', (select count(*)::int from public.agg_minute where plant_id = 9007701), 3);
+  perform pg_temp.eq('day 34: no email about a delete yet', (select count(*)::int from public.email_queue where kind = 'unpaid_deleted' and user_id in (w1, w3)), 0);
   perform pg_temp.days_on(w1, 3);
   perform pg_temp.days_on(w3, 30);     -- the second account on plant 1 is past its 30 days too
   perform private.unpaid_delete();
   perform pg_temp.eq('day 37: readings gone', (select count(*)::int from public.agg_minute where plant_id = 9007701), 0);
+  -- the email after the delete (0207): once per account, with the plants ticked, under the reminders switch
+  perform private.unpaid_delete();
+  perform pg_temp.eq('day 37: the email, once for each account on the plant',
+    (select array_agg(user_id order by user_id) from public.email_queue where kind = 'unpaid_deleted' and user_id in (w1, w3)), array[w1, w3]);
+  perform pg_temp.eq('day 37: it carries the plants ticked', (select data from public.email_queue where kind = 'unpaid_deleted' and user_id = w1),
+    '{"plants": 3, "paid": false}'::jsonb);
+  perform pg_temp.eq('day 37: it has the reminders switch', private.email_switch('unpaid_deleted'), 'reminders');
+  perform pg_temp.eq('day 37: not sent to the account that unsubscribed, sent to the other',
+    (select array_agg(c.user_id) from public.email_claim(100000, true) c where c.kind = 'unpaid_deleted' and c.user_id in (w1, w3)), array[w3]);
+  perform pg_temp.eq('day 5 and day 7 carry the plants ticked', (select (data->>'plants')::int from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000071' and kind = 'free_week_soon'), 1);
   -- paying: read again, the 60 days booked
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values (w1, 'family', 'monthly', 1, t + 30);
   perform pg_temp.eq('paid: no wall', pg_temp.as_user(w1, 'select public.api_me()->>''wall'''), null);
@@ -1180,6 +1192,12 @@ begin
   perform pg_temp.eq('start keep: the two ticked run on Home', (select string_agg(plant_id::text, ',' order by plant_id) from public.plant_users where user_id = w2 and not paused), '9007714,9007715');
   perform pg_temp.eq('start keep: the list is cleared', (select next_keep from private.billing where user_id = w2), '{}'::bigint[]);
   perform pg_temp.eq('start keep: not on a plan', pg_temp.as_user(w2, 'select public.api_billing_start_keep(array[9007714])'), 'REFUSED: nothing to pick');
+  -- an account with a plan: its readings stay, so no email about a delete
+  perform pg_temp.days_on(w2, 60);
+  insert into public.agg_minute (plant_id, ts) values (9007714, extract(epoch from now() - interval '5 days')::bigint);
+  perform private.unpaid_delete();
+  perform pg_temp.eq('paid: readings kept', (select count(*)::int from public.agg_minute where plant_id = 9007714), 1);
+  perform pg_temp.eq('paid: no email about a delete', (select count(*)::int from public.email_queue where kind = 'unpaid_deleted' and user_id in (w1, w2)), 1);
   perform pg_temp.eq('one login: capitals do not make a second', public.link_login_allowed(w1, 'W1@Login.Test'), true);
 
   -- a failed card: 8 days, then 30 days of history with nothing read, then the pay screen

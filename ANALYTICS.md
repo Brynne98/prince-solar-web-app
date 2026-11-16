@@ -88,7 +88,8 @@ Functions (`track()` in `_shared/errors.ts`): `payment_failed`, `plan_cancelled`
 `need_a_hand_email_sent_done`, `free_week_ended_email_sent_done` (SOLAR-475: the day-7 report that says the
 free week has ended went out), `unpaid_reminder_email_sent_done` and `unpaid_last_email_sent_done`
 (SOLAR-552: the two emails to an account with no plan, 14 and 27 days after its free week or
-paid time ended, went out). `sunsynk_calls_counted` (SOLAR-468): once a day from `poll` as
+paid time ended, went out), `unpaid_deleted_email_sent_done` (SOLAR-559: the email after its
+history was deleted went out). `sunsynk_calls_counted` (SOLAR-468): once a day from `poll` as
 `edge:poll`, no person; yesterday's SunSynk calls, failed calls, calls per plant and slowest
 poll run, from `private.sunsynk_calls` (0178). No user data.
 

@@ -29,7 +29,7 @@ import { noteError, reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type Price, type History, freeWeekEnded, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
   PAY_URL, cardChanged, cardExpiring, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
-  offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, cancelEndsSoon, needAHand, feedback, unpaidReminder, unpaidLast, APP,
+  offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, cancelEndsSoon, needAHand, feedback, unpaidReminder, unpaidLast, unpaidDeleted, APP,
 } from "../_shared/email.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -101,11 +101,11 @@ const billFacts = (user: string | null) =>
   user ? rpc<{ card: string | null; plan: "free" | "home" | "family" } | null>("email_billing_facts", { p_user: user }) : Promise.resolve(null);
 /** A plan's monthly price and its usual price (SOLAR-415). With a user, the price that user
  *  pays today: an offer they already left is not quoted again (SOLAR-443, 0169). */
-type Prices = { prices: { monthly: Record<string, number> }; listPrices: { monthly: Record<string, number> } };
+type Prices = { prices: { monthly: Record<string, number> }; listPrices: { monthly: Record<string, number> }; offer?: Price["offer"] };
 let offerNow: Prices | null = null;
 async function priceOf(plan: "home" | "family", user: string | null): Promise<Price> {
   const o = user ? await rpc<Prices>("email_prices", { p_user: user }) : (offerNow ??= await rpc<Prices>("api_offer"));
-  return { plan, now: o.prices.monthly[plan], list: o.listPrices.monthly[plan] };
+  return { plan, now: o.prices.monthly[plan], list: o.listPrices.monthly[plan], offer: o.offer && { ...o.offer, until: o.offer.until && dayMonth(o.offer.until) } };
 }
 /** The account's first plant (or the one given), its name and how many day totals it holds. */
 async function historyAt(user: string | null, plantId?: number | null): Promise<{ plant: string; days: number } | null> {
@@ -350,19 +350,20 @@ async function build(r: Row): Promise<Email | null> {
       const rep = await buildReport(p, r.kind.slice(7) as Period, d.today, linkedOn, free ? d.from : undefined);
       // The free week's day-7 report (0114) says the week has ended (SOLAR-475).
       if (!free) return rep && report(rep);
-      const fw = { days: d.days ?? 0, price: await priceOf("home", r.user_id), deleteOn: d.deleteOn ? dayMonth(d.deleteOn) : undefined };
+      const fw = await priceOf(d.plants > 2 ? "family" : "home", r.user_id);
       // No readings in the free week: the notice still goes, without the report.
-      return rep ? report({ ...rep, freeWeekEnds: fw }) : freeWeekEnded(fw, p.name);
+      return rep ? report({ ...rep, freeWeekEnds: fw }) : freeWeekEnded(fw);
     }
     case "free_week_soon":
       return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: tz }).replace(/\bSept\b/, "Sep"),
-        p.name, d.days ?? 0, await priceOf("home", r.user_id), dayMonth(local(tz, new Date((d.endsAt + 30 * 86400) * 1000)).date));
-    case "unpaid_reminder": case "unpaid_last": {
+        await priceOf(d.plants > 2 ? "family" : "home", r.user_id));
+    case "unpaid_reminder": case "unpaid_last": case "unpaid_deleted": {
       // the plan that holds the plants it ticked: Home for 1 or 2, Family for 3 to 5
-      const u = { since: dayMonth(local(tz, new Date(d.since * 1000)).date), deleteOn: dayMonth(local(tz, new Date(d.deleteAt * 1000)).date),
-        price: await priceOf(d.plants > 2 ? "family" : "home", r.user_id),
+      const u = { price: await priceOf(d.plants > 2 ? "family" : "home", r.user_id), paid: d.paid === true,
         unsub: `${APP}/unsubscribe.html?t=${r.unsub_token ?? ""}&k=reminders` };
-      return r.kind === "unpaid_reminder" ? unpaidReminder(u) : unpaidLast(u);
+      if (r.kind === "unpaid_deleted") return unpaidDeleted(u);
+      const k = { ...u, plants: d.plants ?? 1, since: dayMonth(local(tz, new Date(d.since * 1000)).date), deleteOn: dayMonth(local(tz, new Date(d.deleteAt * 1000)).date) };
+      return r.kind === "unpaid_reminder" ? unpaidReminder(k) : unpaidLast(k);
     }
     case "free_week_setup": return d.steps?.length ? freeWeekSetup(d.steps, r.plant_id ?? undefined, d.battery !== false) : null;
     case "account_deleted": return accountDeleted(r.to_email);
@@ -681,8 +682,8 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
       if (row?.kind === "report_week" && row.data.freeWeekEnds === true && row.user_id) {
         await track("free_week_ended_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), {});
       }
-      // SOLAR-552
-      if ((row?.kind === "unpaid_reminder" || row?.kind === "unpaid_last") && row.user_id) {
+      // SOLAR-552, SOLAR-559
+      if (row?.kind.startsWith("unpaid_") && row.user_id) {
         await track(`${row.kind}_email_sent_done`, row.user_id, String(row.id), new Date().toISOString(), {});
       }
       // SOLAR-319
@@ -735,11 +736,9 @@ async function renderAll(plantId: number, today?: string) {
   out["plant-off-login"] = loginEvent({ kind: "plant_off_login", plants: [p.name], login: "you@example.com" }, p.id);
   out["share-no-readings"] = loginEvent({ kind: "share_down", plants: [p.name], at: hhmm(now - 1500, p.tz) }, p.id);
   out["share-readings-back"] = loginEvent({ kind: "share_back", plants: [p.name], since: hhmm(now - 7500, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
-  // The free week's two emails (0122), from this plant's own day count; steps are a sample.
-  const { count: days } = await db.from("plant_energy").select("period", { count: "exact", head: true })
-    .eq("plant_id", plantId).eq("bucket", "day").lt("period", today);
+  // The free week's two emails (0122); steps are a sample.
   out["free-week-setup"] = freeWeekSetup(["size", "reserve", "panels"]);
-  out["free-week-ends-soon"] = freeWeekEndsSoon("Monday 10 Nov", p.name, days ?? 0, await priceOf("home", null));
+  out["free-week-ends-soon"] = freeWeekEndsSoon("Monday 10 Nov", await priceOf("home", null));
   return out;
 }
 

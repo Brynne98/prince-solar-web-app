@@ -18,7 +18,7 @@ import type { Email } from "../supabase/functions/_shared/email.ts";
 const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
-  accountDeleted, cardChanged, cardExpiring, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEnded, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, offerEnds, renewalNotice, winback, cancelEndsSoon, needAHand, unpaidReminder, unpaidLast,
+  accountDeleted, cardChanged, cardExpiring, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_BILLING, FROM_HELLO, FROM_REPORTS, PAY_URL, REPLY_TO, freeWeekEnded, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree, offerEnds, renewalNotice, winback, cancelEndsSoon, needAHand, unpaidReminder, unpaidLast, unpaidDeleted,
   passwordChanged, paymentFailed, paymentReceived, paymentRefunded, planChangeBooked, planKept, plantEvent, loginEvent, plantsRemovalSoon, planSwitched, planUpgraded,
   renderAuthTemplates, report, resetPassword, SITE, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
@@ -102,7 +102,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
     daily: { from: "Jan", to: "Dec", values: [1040, 930, 890, 720, 610, 520, 560, 680, 790, 880, 920, 880], labels: ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"] },
   })],
   "report-week-free-ends": [FROM_REPORTS, report({
-    ...base, period: "week", label: "6 – 12 Oct 2026", prevLabel: "last week", freeWeekEnds: { days: 58, price: { plan: "home", now: 49, list: 99 } },
+    ...base, period: "week", label: "6 – 12 Oct 2026", prevLabel: "last week", freeWeekEnds: { plan: "home", now: 49, list: 99, offer: { id: "launch", cap: 100 } },
     madeKwh: 191.3, homeKwh: 208.9, importKwh: 47.2, independencePct: 77, savedRand: 495, change: {},
     bestDay: { label: "Thu 9 Oct", kwh: 33.1 }, highestUse: { label: "Sat 11 Oct", kwh: 38.4 },
     daily: { from: "Mon 6 Oct", to: "Sun 12 Oct", values: [27.4, 29.8, 18.2, 33.1, 30.6, 24.9, 27.3], labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
@@ -112,16 +112,20 @@ const mails: Record<string, [from: string, mail: Email]> = {
     reference: "psh_c23ad15c95f845f8a58227af7edf1c9e", covers: "1 to 30 Nov", next: { amount: 199, date: "1 Dec" } })],
   "billing-renewal-notice": [FROM_BILLING, renewalNotice({ plan: "family", amount: 1990, on: "1 Feb 2027", card: "Visa •••• 4081" })],
   "billing-offer-ends": [FROM_BILLING, offerEnds({ plan: "home", period: "monthly", was: 49, amount: 99, on: "3 Mar", card: "Visa •••• 4242" })],
-  "free-week-ended-no-readings": [FROM_REPORTS, freeWeekEnded({ days: 58, price: { plan: "home", now: 49, list: 99 } }, "Home")],
-  "billing-free-week-ends-soon": [FROM_BILLING, freeWeekEndsSoon("Monday 10 Nov", "Home", 58, { plan: "home", now: 49, list: 99 })],
+  "free-week-ended-no-readings": [FROM_REPORTS, freeWeekEnded({ plan: "home", now: 49, list: 99, offer: { id: "launch", cap: 100 } })],
+  "billing-free-week-ends-soon": [FROM_BILLING, freeWeekEndsSoon("Monday 10 Nov", { plan: "home", now: 49, list: 99, offer: { id: "launch", cap: 100 } })],
   "free-week-setup": [FROM_HELLO, freeWeekSetup(["rate", "size", "reserve", "panels"])],
   "free-week-setup-some-done": [FROM_HELLO, freeWeekSetup(["size", "panels"])],
   "free-week-setup-no-battery": [FROM_HELLO, freeWeekSetup(["panels"], undefined, false)],
   "winback": [FROM_HELLO, winback({ from: "home", plant: "Home", days: 94, price: { plan: "home", now: 49, list: 99 } })],
   "billing-cancel-ends-soon": [FROM_BILLING, cancelEndsSoon({ from: "home", on: "11 Dec", days: 94 })],
   "need-a-hand": [FROM_HELLO, needAHand()],
-  "unpaid-reminder": [FROM_HELLO, unpaidReminder({ since: "22 Nov", deleteOn: "22 Dec", price: { plan: "home", now: 49, list: 99 }, unsub: "https://app.princesolarhub.co.za/unsubscribe.html?t=00000000-0000-0000-0000-000000000000&k=reminders" })],
-  "unpaid-last": [FROM_HELLO, unpaidLast({ since: "22 Nov", deleteOn: "22 Dec", price: { plan: "family", now: 99, list: 199 }, unsub: "https://app.princesolarhub.co.za/unsubscribe.html?t=00000000-0000-0000-0000-000000000000&k=reminders" })],
+  "unpaid-reminder": [FROM_HELLO, unpaidReminder({ since: "22 Nov", deleteOn: "22 Dec", plants: 1, price: { plan: "home", now: 49, list: 99, offer: { id: "launch", cap: 100 } }, unsub: "https://app.princesolarhub.co.za/unsubscribe.html?t=00000000-0000-0000-0000-000000000000&k=reminders" })],
+  "unpaid-reminder-4-plants": [FROM_HELLO, unpaidReminder({ since: "22 Nov", deleteOn: "22 Dec", plants: 4, price: { plan: "family", now: 99, list: 199, offer: { id: "launch", cap: 100 } }, unsub: "https://app.princesolarhub.co.za/unsubscribe.html?t=00000000-0000-0000-0000-000000000000&k=reminders" })],
+  "unpaid-reminder-no-offer": [FROM_HELLO, unpaidReminder({ since: "22 Nov", deleteOn: "22 Dec", plants: 1, paid: true, price: { plan: "home", now: 99, list: 99 }, unsub: "https://app.princesolarhub.co.za/unsubscribe.html?t=00000000-0000-0000-0000-000000000000&k=reminders" })],
+  "unpaid-reminder-other-offer": [FROM_HELLO, unpaidReminder({ since: "22 Nov", deleteOn: "22 Dec", plants: 1, price: { plan: "home", now: 79, list: 99, offer: { id: "summer", months: 3 } }, unsub: "https://app.princesolarhub.co.za/unsubscribe.html?t=00000000-0000-0000-0000-000000000000&k=reminders" })],
+  "unpaid-last": [FROM_HELLO, unpaidLast({ since: "22 Nov", deleteOn: "22 Dec", plants: 1, price: { plan: "home", now: 49, list: 99, offer: { id: "launch", cap: 100 } }, unsub: "https://app.princesolarhub.co.za/unsubscribe.html?t=00000000-0000-0000-0000-000000000000&k=reminders" })],
+  "unpaid-deleted": [FROM_HELLO, unpaidDeleted({ price: { plan: "home", now: 49, list: 99, offer: { id: "launch", cap: 100 } }, unsub: "https://app.princesolarhub.co.za/unsubscribe.html?t=00000000-0000-0000-0000-000000000000&k=reminders" })],
   "billing-switched": [FROM_BILLING, planSwitched({ plan: "home", period: "yearly", amount: 990, date: "1 Nov 2026", card: "Visa •••• 4081",
     reference: "psh_c1d481bc37294140ad0cd37e846a3077", startsOn: "1 Dec 2026", covers: "1 Dec 2026 to 30 Nov 2027", next: { amount: 990, date: "1 Dec 2027" } })],
   "billing-upgraded": [FROM_BILLING, planUpgraded({ from: "home", to: "family", period: "monthly", paidNow: 53, daysLeft: 16, card: "Visa •••• 4081", reference: "psh_8f7a9f9eb1454ec7abf4597c1990f074", next: { amount: 199, date: "1 Dec" } })],
