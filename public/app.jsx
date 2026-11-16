@@ -482,7 +482,34 @@ function notifDay(day) {
 // SOLAR-384); only the second can be closed. bodyShort is the card's line on a phone.
 // act: { plan, plans, undo } from App.
 // links: the logins, for the plants a booked change keeps and deletes (SOLAR-505).
-function billNotice(n, act, links) {
+// The free week's price line, in the free-week emails' words (startPlan in _shared/email.ts,
+// SOLAR-553): "Recommended for your plant: Home, R49 a month, normally R99." short: the phone line.
+function weekLine(plan, now, list, many) {
+  const { rand } = window.billingFmt;
+  const price = `${rand(now)} a month${list > now ? `, normally ${rand(list)}` : ''}`;
+  return { long: `Recommended for your ${many ? 'plants' : 'plant'}: ${PLAN_NAME[plan]}, ${price}.`, short: `${PLAN_NAME[plan]}: ${price}.` };
+}
+// From Billing's prices: Home for up to 2 plants, Family above.
+function weekOffer(b, links) {
+  const n = (links?.accounts || []).filter(a => a.status !== 'disabled').flatMap(a => a.plants || []).length;
+  const plan = n > 2 ? 'family' : 'home', now = b?.prices?.monthly?.[plan];
+  return now == null ? null : weekLine(plan, now, b.listPrices?.monthly?.[plan], n > 1);
+}
+// Days 1 to 4 of the free week: a card on Live with the date and the price (SOLAR-553). Days 5
+// to 7 the free_week_soon notice takes over, on every page. endsAt: api_me's freeWeekEndsAt.
+function weekCard(endsAt, b, links, plans) {
+  const o = weekOffer(b, links);
+  if (!endsAt || !o || b.plan !== 'free' || b.comped || Date.parse(endsAt) - Date.now() <= 2 * 864e5) return null;
+  const day = new Date(endsAt).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+  return { kind: 'free_week_price', banner: true, tone: 'info', closable: 'free_week_price:' + day,
+    title: `Free week until ${window.dayText(day, { weekday: 'long', day: 'numeric', month: 'short' })}`,
+    short: `Free week until ${window.dayText(day)}`,
+    body: `${o.long} Readings, history and alerts carry on.`, bodyShort: o.short,
+    button: 'See plans', act: (where) => { window.track('notice_action_done', { kind: 'free_week_price', where }); plans(); } };
+}
+
+// week: api_billing_status while the free week is on, for its prices (SOLAR-553).
+function billNotice(n, act, links, week) {
   const { rand, billDay } = window.billingFmt;
   const plan = PLAN_NAME[n.plan];
   switch (n.kind) {
@@ -523,9 +550,11 @@ function billNotice(n, act, links) {
       button: 'Go to cancel plan', run: act.cancel };
     case 'free_week_soon': {
       const day = new Date(n.endsAt).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Africa/Johannesburg' });
-      return { tone: 'warn', icon: 'clock', title: `Your free week ends on ${day}`,
-        // the email's words (keepOn): Home's monthly price at the account's offer (SOLAR-503)
-        body: `Readings, alerts and reports stop then. Keep everything on Home for ${rand(n.perMonth)} a month${n.perMonth < n.list ? ', the launch price' : ''}.`,
+      // days 5 to 7: a card on every page but Billing and plans, not only the bell (SOLAR-553).
+      // The plan for the plants added, at the account's offer; Home from the notice until Billing's prices load.
+      const o = weekOffer(week, links) || weekLine('home', n.perMonth, n.list, false);
+      return { banner: true, tone: 'warn', icon: 'clock', title: `Your free week ends on ${day}`, short: `Free week ends ${day}`,
+        body: `Readings, alerts and reports stop then. ${o.long}`, bodyShort: o.short,
         button: 'See plans', run: act.plans };
     }
     default: return null;
@@ -554,14 +583,21 @@ window.NoticeCard = NoticeCard;
 // The billing cards above every page (SOLAR-212). A card's close is kept on this device,
 // for that one deletion date.
 const NOTICE_CLOSED = 'synsynk.noticeClosed';
-function BillCards({ notices }) {
+// tab: Billing and plans already say when the free week ends, so its cards stay off them (SOLAR-553).
+const WEEK_CARDS = { free_week_price: 'price', free_week_soon: 'ends_soon' };
+const weekCardsSeen = new Set();
+function BillCards({ notices, tab }) {
   const [closed, setClosed] = useState(() => { try { return localStorage.getItem(NOTICE_CLOSED); } catch (e) { return null; } });
   const close = (n) => {
     window.track('notice_closed', { kind: n.kind });
     try { localStorage.setItem(NOTICE_CLOSED, n.closable); } catch (e) { /* private mode: closed until reload */ }
     setClosed(n.closable);
   };
-  const shown = notices.filter(n => n.banner && (!n.closable || n.closable !== closed));
+  const shown = notices.filter(n => n.banner && (!n.closable || n.closable !== closed)
+    && !(WEEK_CARDS[n.kind] && (tab === 'billing' || tab === 'plans')));
+  // once a session for each free-week card
+  useEffect(() => { shown.forEach(n => { if (WEEK_CARDS[n.kind] && !weekCardsSeen.has(n.kind)) {
+    weekCardsSeen.add(n.kind); window.track('free_week_card_shown', { stage: WEEK_CARDS[n.kind] }); } }); });
   if (!shown.length) return null;
   return (
     <div className="notice-cards">
@@ -1537,6 +1573,10 @@ function App({ links }) {
     return /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? { date: d } : null;
   });
   const [notifs, setNotifs] = useState(null);
+  // While the free week is on, Billing's prices for its price line (SOLAR-553); read once.
+  const weekEndsAt = me?.freeWeekEndsAt && Date.parse(me.freeWeekEndsAt) > Date.now() ? me.freeWeekEndsAt : null;
+  const [week, setWeek] = useState(null);
+  useEffect(() => { if (weekEndsAt && !week) window.billingRpc('api_billing_status').then(({ data }) => { if (data) setWeek(data); }).catch(() => {}); }, [weekEndsAt]);
   // "Set your rate", "Set pack size", Reconnect: open the page that holds that section
   // (SECTION_PAGE) and flash it once; the section scrolls itself into view.
   // The address keeps it as #section, so a reload scrolls back to it (SOLAR-165).
@@ -1837,9 +1877,12 @@ function App({ links }) {
     }) : openSettings('plan')),
   };
   const notices = (notifs?.pinned || []).map(n => {
-    const t = billNotice(n, noticeAct, links);
+    const t = billNotice(n, noticeAct, links, week);
     return t && { ...t, kind: n.kind, id: n.key, read: n.read, act: (where) => { window.track('notice_action_done', { kind: n.kind, where }); t.run(); } };
   }).filter(Boolean);
+  // the free week's price card joins them on Live until the day-5 notice comes (SOLAR-553)
+  const priceCard = tab === 'live' && !notices.some(n => n.kind === 'free_week_soon') && weekCard(weekEndsAt, week, links, noticeAct.plans);
+  const cards = priceCard ? [...notices, priceCard] : notices;
   const bell = <NotifBell data={notifs} pinned={notices} onOpen={loadNotifs} onSeen={readNotifs} onReadAll={() => readNotifs(null)}
                          onSeeAll={seeAll} onSettings={() => openSettings('notifications')} />;
   const alertsPage = <AlertsPage key="alerts" pinned={notices} onBack={() => go(alertsFrom.current)} onSettings={() => openSettings('notifications')}
@@ -1871,7 +1914,7 @@ function App({ links }) {
       <Frame tabs={TABS} tab={tab} onTab={go} account={account} busy steps={steps}
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
           <HeaderStatus idleWord={notice ? 'Switching' : 'Connecting'} busy={busy > 0} err={err} /><NotifBell disabled /></>}>
-        <BillCards notices={notices} />
+        <BillCards notices={cards} tab={tab} />
         {/* The Settings area never touches the snapshot: it draws for real. It sits in
             the same slot as in the loaded page below, so the first reading doesn't remount
             it (the Plan section flashed back to its outline). */}
@@ -1888,7 +1931,7 @@ function App({ links }) {
     <Frame tabs={TABS} tab={tab} onTab={go} account={account} steps={steps}
       head={<>{plantMenu}<HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} err={err} onReconnect={() => openSettings('connection')}
         relinkedAt={relinked?.plantId === plantId ? relinked.at : null} />{bell}</>}>
-      <BillCards notices={notices} />
+      <BillCards notices={cards} tab={tab} />
       <div className={'page' + (old ? ' old' : '')}>
         {!dataPage && (tab === 'alerts' ? alertsPage : settingsPage)}
         {tab === 'live' && <window.LiveTab snap={snap} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}

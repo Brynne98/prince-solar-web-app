@@ -71,6 +71,7 @@ Web (`public/*.jsx`):
 | `keep_pick_done` | Keep pick saved in Billing's Choose plant(s) pop-up while a cancel or smaller plan is booked (`plan`, `room`) |
 | `card_change_done`, `website_plan_done`, `more_plants_email_done` | Billing |
 | `notice_closed`, `notice_action_done` | Billing cards (`notice_opened` until SOLAR-384: the phone banner's tap) |
+| `free_week_card_shown` | A free-week card shown, once a session each (`stage`: `price` on Live days 1 to 4, `ends_soon` on every page days 5 to 7; SOLAR-553). Its taps and closes are `notice_action_done` and `notice_closed` with `kind` `free_week_price` or `free_week_soon` |
 | `alerts_page_opened`, `alerts_filter_done`, `alerts_read_all_done`, `notification_opened` | Alerts list and pop-ups |
 | `email_pref_change_done`, `push_pref_change_done`, `push_enabled_done`, `push_disabled_done` | Notification settings |
 | `account_delete_done` | Account deleted |

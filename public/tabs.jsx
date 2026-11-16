@@ -2568,7 +2568,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
   const { useState, useEffect } = React;
   const b = billing;
   const paid = !!b && b.plan !== 'free' && !b.comped;
-  const [view, setView] = useState(paid ? b.period : 'monthly');
+  // not paid yet: yearly first, monthly one tap away (SOLAR-553)
+  const [view, setView] = useState(paid ? b.period : 'yearly');
   // Opened before the plan loaded (straight to the plans page): show the plan's own period.
   useEffect(() => { if (paid) setView(b.period); }, [paid, b?.period]);
   const [busy, setBusy] = useState(false);

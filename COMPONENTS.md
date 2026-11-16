@@ -120,6 +120,7 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `openFeedback(report)` | The feedback box; `report` = { text, id } makes it "Report a problem" with the error attached. |
 | `NotifRows`, `alertSpan` | Alert rows under day headings (the bell list, the full Notifications page); "14:02 to 16:47, 2h 45m" (SOLAR-327). Billing notices (`NoticeRows`) lead the Today group in both, one list (SOLAR-353). |
 | `billNotice`, `BillCards` | A billing notice from `api_notifications`' pinned facts, in the emails' words; the cards above every page (SOLAR-212). On a phone each card shows `short` and `bodyShort` (SOLAR-384). |
+| `weekLine`, `weekOffer`, `weekCard` | The free week's price line in the emails' words ("Recommended for your plant: Home, R49 a month, normally R99."); Live's day 1 to 4 card built from it (app.jsx, SOLAR-553). |
 | `NoticeCard` | A notice to act on: Overview-card height, 2 columns of the Overview grid, tone bad/warn/info, one quiet button, optional ×. Billing and the grid-off prompt. Wrap in `.notice-cards`. Plant problems go in `HeaderStatus` instead (SOLAR-384). |
 
 ## Charts (`chart.jsx`)
