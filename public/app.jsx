@@ -505,13 +505,6 @@ function billNotice(n, act, links) {
         // it opens Billing's plan, where the plants to keep are picked (SOLAR-384)
         button: 'Choose plants', run: act.plan };
     }
-    case 'bill_free': {
-      const stopped = n.stopped || [];
-      return { icon: 'card', title: 'Your plan has ended',
-        body: stopped.length ? `${window.billingFmt.andList(stopped)} and all history are kept until ${billDay(n.deleteOn)}.`
-          : `Readings, alerts and reports have stopped. Your history is kept until ${billDay(n.deleteOn)}.`,
-        button: stopped.length ? 'Pay to keep these plants' : 'Pay now', run: act.plans };
-    }
     case 'bill_change': {
       const cancel = n.nextPlan === 'free', on = billDay(n.on);
       // what it deletes, as Billing's Plan card says it; in the last 3 days a banner on every

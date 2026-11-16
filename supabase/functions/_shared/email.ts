@@ -97,7 +97,7 @@ type Box = { hero?: Hero; rows?: [label: string, value: string][]; checks?: Chec
 
 type Part =
   | { lead: string } // grey sentence under the title: what happened, only when the box can't say it
-  | { pair: [head: string, text: string] } // one fact: a white line, its sentence under it in the body grey (SOLAR-559)
+  | { pair: [head: string, text: string] } // one fact: a white line, its sentence under it in the body grey (SOLAR-559); text is HTML, as lead
   | { box: Box }
   | { small: string } // small print under the button ("The link works once, for 24 hours.")
   | { button: { label: string; href: string } }
@@ -166,7 +166,7 @@ const deltaText = (d: Delta) => { const r = Math.round(d.n); return `${r > 0 ? "
 function html(subject: string, b: Body): string {
   const rows = b.parts.map((x) => {
     if ("lead" in x) return `<p class="m" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#9aa5b3">${x.lead}</p>`;
-    if ("pair" in x) return `<p class="m" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#9aa5b3"><span class="t" style="display:block;margin:0 0 3px;font-weight:600;color:#e7ecf2">${esc(x.pair[0])}</span>${esc(x.pair[1])}</p>`;
+    if ("pair" in x) return `<p class="m" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#9aa5b3"><span class="t" style="display:block;margin:0 0 3px;font-weight:600;color:#e7ecf2">${esc(x.pair[0])}</span>${x.pair[1]}</p>`;
     if ("small" in x) return `<p class="d" style="margin:0;font:400 13px/1.5 ${SANS};color:#7f8da0">${x.small}</p>`;
     if ("box" in x) {
       const { hero, rows: r = [], checks = [], steps = [] } = x.box;
@@ -264,7 +264,7 @@ function text(b: Body): string {
   const out = [b.title, b.sub ?? "", ""];
   for (const x of b.parts) {
     if ("lead" in x) out.push(strip(x.lead), "");
-    else if ("pair" in x) out.push(...x.pair, "");
+    else if ("pair" in x) out.push(x.pair[0], strip(x.pair[1]), "");
     else if ("small" in x) out.push(strip(x.small), "");
     else if ("box" in x) out.push(...(x.box.hero ? [`${x.box.hero.label}: ${x.box.hero.value}${x.box.hero.sub ? ` (${x.box.hero.sub})` : ""}`] : []),
       ...(x.box.rows ?? []).map(([l, v]) => `${l}: ${strip(v)}`), ...(x.box.checks ?? []).map((c) => c.done ? `[x] ${c.name}` : `${c.n ? `${c.n}.` : "[ ]"} ${[c.name, [c.text, c.sub].filter(Boolean).join(" ")].filter(Boolean).join(": ")}`),
@@ -746,8 +746,6 @@ const PAYMENT = `${APP}/?tab=account&section=payments`;
 const CANCEL = `${APP}/?tab=account&section=cancel`;
 // Day-2 "Finish setup": Plant settings' Your system, where rate, battery and panels are set (SOLAR-361).
 const SYSTEM = `${APP}/?tab=account&section=system`;
-// After a paid plan ends, said the same way in every email (SOLAR-329, 0146; SOLAR-415).
-const PLAN_ENDS = "After that, readings, alerts and reports stop. We keep your history for 30 days in case you come back.";
 const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;
 // How many plants each plan keeps (SOLAR-371): said when plants are deleted.
 const PLAN_PLANTS = { home: "2 plants", family: "5 plants" } as const;
@@ -927,29 +925,26 @@ export const planKept = (k: Kept) => {
 // A failed charge is retried on day 1, 3 and 7 after the billing date. The first email
 // goes as soon as the billing-day charge fails; each retry that fails sends another.
 export type Failed = {
-  plan: Plan; period: BillPeriod; amount: number; card: string;
+  plan: Plan; period: BillPeriod; amount: number;
   nextTry?: string; // absent after the last try
   freeOn: string; // the day the plan ends if it stays unpaid
   payUrl: string;
   disputed?: string; // the bank took a payment back (a lost dispute, 0130): the day it was paid
-  reference?: string; // the declined try, or the payment taken back (SOLAR-484)
 };
 
-// The shared layout (SOLAR-415): the amount big with what it was for, facts as rows
-// (card, next try, the day the plan ends), one line on what to do, the button, then what
-// that means in small print.
+// Fact pairs, as the free week's emails (SOLAR-564): what failed and the next try, then
+// the day to pay by and what happens if it stays unpaid.
 export const paymentFailed = (f: Failed) => {
   const plan = PLAN_NAME[f.plan];
   return make(f.disputed ? "Your bank reversed a payment" : `Your payment of ${rand(f.amount)} didn't go through`, {
     title: f.disputed ? "Your bank reversed a payment" : "Your payment didn't go through",
     parts: [
-      { box: { hero: f.disputed
-          ? { label: "Reversed", value: rand(f.amount), tone: "bad", sub: `for ${plan}, paid on ${f.disputed}` }
-          : { label: "Declined", value: rand(f.amount), tone: "bad", sub: `for ${plan}` },
-        rows: [["Card", esc(f.card)], ...(f.reference ? [["Reference", ref(f.reference)] as [string, string]] : []), ...(f.nextTry ? [["Next try", f.nextTry] as [string, string]] : []), ["Plan ends", f.freeOn]] } },
-      { lead: `${f.nextTry ? "" : "That was the last try. "}Pay before ${f.freeOn} to keep ${plan}.` },
+      f.disputed
+        ? { pair: [`Your bank took back ${rand(f.amount)} for your ${plan} plan`, `It was paid on ${white(f.disputed)}.`] }
+        : { pair: [`We couldn't take ${rand(f.amount)} for your ${plan} plan`,
+            f.nextTry ? `We'll try your card again on ${white(f.nextTry)}.` : "That was our last try."] },
+      { pair: [`Pay by ${f.freeOn}`, `If it isn't paid by then, your ${plan} plan ends and the app stops.`] },
       PAY_BUTTON(f.payUrl),
-      { small: PLAN_ENDS },
     ],
     footer: BILL_FOOTER,
   });
@@ -1069,24 +1064,22 @@ const plantCount = (n: number) => `${n} plant${n === 1 ? "" : "s"}`;
 const lost = (label: string, value: string, sub: string): Hero => ({ label, value, tone: "warn", sub });
 const withDays = (who: string, days?: number) => days ? `${who}, with ${dayCount(days)} of history` : who;
 
-// Unpaid after the last try: the plan has ended and nothing is read. The history can be
-// seen for 30 days, then it is deleted (SOLAR-552). kept and stopped: the account's plants
-// (0197 keeps one unlocked). days and stoppedDays: day totals they hold.
-// No offer price here: the line above names what they were paying.
-export type MovedToFree = { from: Plan; kept: string; stopped: string[]; deleteOn: string; amount?: number; days?: number; stoppedDays?: number };
+// Day 8 of a failed card: the plan has ended as a cancel's does. Nothing is read, every
+// plant stays linked, and the history is deleted 30 days later (SOLAR-564, 0211).
+// price: the plan they were on, at the price they would pay now (with plants: those ticked).
+export type MovedToFree = { from: Plan; deleteOn: string; amount?: number; price: Price };
 
 export const movedToFree = (m: MovedToFree) => {
-  const all = [m.kept, ...m.stopped].filter(Boolean), days = (m.days ?? 0) + (m.stoppedDays ?? 0);
-  return make(`Your ${PLAN_NAME[m.from]} plan has ended`, {
-    title: `Your ${PLAN_NAME[m.from]} plan has ended`,
+  const plan = PLAN_NAME[m.from], pay = PLAN_NAME[m.price.plan];
+  return make(`Your ${plan} plan has ended`, {
+    title: `Your ${plan} plan has ended`,
     parts: [
-      { lead: `We couldn't charge ${m.amount != null ? rand(m.amount) : "your card"} for ${PLAN_NAME[m.from]}.` },
-      { box: {
-        hero: all.length > 1 ? lost(`Deleted on ${m.deleteOn}`, plantCount(all.length), withDays(names(all), days || undefined))
-          : days ? lost(`Deleted on ${m.deleteOn}`, dayCount(days), `of history at ${m.kept}`) : undefined,
-        rows: STOPPED,
-      } },
-      { button: { label: `Pay for ${PLAN_NAME[m.from]}`, href: PLANS } },
+      { pair: ["The app has stopped",
+        `We couldn't take ${m.amount != null ? white(rand(m.amount)) : "the payment"} for your ${plan} plan, so readings and alerts stopped today.`] },
+      { pair: [`Your history is kept until ${m.deleteOn}`, `After that, we delete it for all ${white(plantCount(m.price.plants ?? 1))}.`] },
+      { pair: [`Pay for ${pay} to carry on`, "Readings start again, with the days you missed filled in."] },
+      { lead: `${pay} is ${white(`${rand(m.price.now)} a month`)}. Cancel any time.` },
+      { button: { label: `Pay for ${pay}`, href: PLANS } },
     ],
     footer: BILL_FOOTER,
   });
