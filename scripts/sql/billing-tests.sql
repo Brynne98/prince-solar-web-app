@@ -1263,6 +1263,18 @@ begin
   perform pg_temp.eq('payer lapsed: no deleted email without the warning',
     (select count(*)::int from public.email_queue where kind = 'unpaid_deleted' and user_id = w5), 0);
 end $$;
+-- A first payment taken, not applied and marked for refund is not a plan (0219, SOLAR-572):
+-- w7's first plant still gets its free week. w8's payment applied: no week.
+insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, error, due_on, created_on, settled_at) values
+  ('psh_w7', '00000000-0000-0000-0000-000000000a07', 'start', 'home', 'monthly', 99, 'paid', 'refund: paid plants did not start', current_date, current_date, now()),
+  ('psh_w8', '00000000-0000-0000-0000-000000000a08', 'start', 'home', 'monthly', 99, 'paid', null, current_date, current_date, now());
+select pg_temp.eq('refunded, never applied: not a plan', private.had_plan('00000000-0000-0000-0000-000000000a07'), false);
+select pg_temp.eq('applied payment: a plan', private.had_plan('00000000-0000-0000-0000-000000000a08'), true);
+select public.plant_users_upsert('00000000-0000-0000-0000-000000000a07', '00000000-0000-0000-0000-00000000ac07', pg_temp.rows(41));
+select public.plant_users_upsert('00000000-0000-0000-0000-000000000a08', '00000000-0000-0000-0000-00000000ac08', pg_temp.rows(42));
+select pg_temp.eq('refunded, never applied: its first plant gets the free week',
+  pg_temp.week_ends('00000000-0000-0000-0000-000000000a07') > now() + interval '6 days', true);
+select pg_temp.eq('applied payment: no free week', pg_temp.week_ends('00000000-0000-0000-0000-000000000a08') <= now(), true);
 -- 'deleted in 3 days' only when the plant goes on that account's day: not when another
 -- account on it has a later delete day (0218, SOLAR-573)
 do $$
