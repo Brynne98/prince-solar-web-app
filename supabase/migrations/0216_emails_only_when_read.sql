@@ -18,7 +18,10 @@
 --   - free_week_mail: free_week_setup only while the first plant is read for the
 --     account; unpaid_last only when a running plant of the account is read for
 --     nobody (not in live_plants, 0205).
--- Bodies are 0214's and 0215's otherwise.
+--   - email_on_history: when a plant's history finishes loading again (a payment
+--     starts the 60-day fetch), a history row skipped as 'not read' is removed
+--     first, so the account that now pays gets the email.
+-- Bodies are 0102's, 0214's and 0215's otherwise.
 -- ============================================================================
 
 create or replace function public.email_claim(p_limit int, p_peek boolean default false)
@@ -172,5 +175,17 @@ begin
 end $function$
 ;
 revoke all on function private.free_week_mail() from public, anon, authenticated;
+
+-- 0102's email_on_history. Added: a row skipped as 'not read' makes way for a new one.
+create or replace function private.email_on_history()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if private.history_done(new) and not private.history_done(old) then
+    delete from public.email_queue q
+     where q.plant_id = new.plant_id and q.kind = 'history' and q.status = 'skipped' and q.last_error = 'not read';
+    perform private.email_enqueue_plant(new.plant_id, 'history', 'history:' || new.plant_id, '{}'::jsonb, null, 1::smallint);
+  end if;
+  return null;
+end $$;
 
 notify pgrst, 'reload schema';

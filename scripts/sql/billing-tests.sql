@@ -1141,6 +1141,12 @@ begin
   -- the plant's history is loaded: its email is queued at the link, and skipped when it is sent (0216, SOLAR-572)
   perform pg_temp.eq('used plant: history email queued', (select count(*)::int from public.email_queue where kind = 'history' and user_id = w3), 1);
   perform pg_temp.eq('used plant: history email not sent', (select count(*)::int from public.email_claim(100000, true) c where c.kind = 'history' and c.user_id = w3), 0);
+  -- skipped, then the history loads again (a payment's 60-day fetch): the row is queued again
+  update public.email_queue set status = 'skipped', last_error = 'not read' where kind = 'history' and user_id = w3;
+  update public.plant_config set backfill_next = current_date where plant_id = 9007701;
+  update public.plant_config set backfill_next = null where plant_id = 9007701;
+  perform pg_temp.eq('used plant: history email queued again after a new fetch',
+    (select status from public.email_queue where kind = 'history' and user_id = w3), 'queued');
 
   -- a join on day 3 has the 4 days left, and reads
   perform public.plant_users_upsert(w4, a4, pg_temp.rows(21));
