@@ -1,0 +1,14 @@
+-- ============================================================================
+-- 0216 — readings.held: how many minutes in a row this row's power figures were
+--        held from the last balanced row (SOLAR-551).
+--
+-- For 20-40 s after an upload SunSynk serves each realtime endpoint old or new on its
+-- own, so one read can mix two uploads and solar + grid + battery stops matching home.
+-- The poller then stores the previous row's pv_w, batt_w, grid_w, load_w again
+-- (poll/hold.mts). held = 1..5 on such a row, null otherwise. The poller reads it back
+-- from the last row (inverters_cached returns to_jsonb of it) to cap the run at 5, and
+-- refuses to carry the minute after a hold, so the next minute is read in full.
+-- poll_commit inserts via jsonb_populate_recordset(null::public.readings), so the
+-- column passes through with no function change.
+-- ============================================================================
+alter table public.readings add column if not exists held smallint;
