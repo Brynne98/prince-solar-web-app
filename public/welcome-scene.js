@@ -337,8 +337,6 @@ addEventListener('DOMContentLoaded', async () => {
       pr.querySelector(`.per[data-offer="${p}"] .${k}`).textContent = `Save ${R(was[k][p] - at[k][p])} ${unit[k]}`;
     }
   }
-  // Free keeps its price level with the struck-out prices beside it
-  pr.querySelector('.price[data-offer="free"]').innerHTML = '<s aria-hidden="true" style="visibility:hidden">R0</s>R0';
   const o = r.offer, off = Math.round(100 * (1 - at.m.home / was.m.home));
   const head = `${o.id === 'launch' ? 'Launch price' : 'Offer price'}: ${off >= 45 && off <= 55 ? 'half off' : `${off}% off`}${o.cap ? ` for the first ${o.cap} new members` : ''}`;
   const keep = o.months ? `For your first ${o.months} months, then the usual price.` : 'Keep it while your plan stays paid.';
