@@ -85,7 +85,8 @@ Showcase (`public/welcome-track.js`, princesolarhub.co.za, SOLAR-472), no person
 
 Functions (`track()` in `_shared/errors.ts`): `payment_failed`, `plan_cancelled`,
 `winback_resubscribed_done`, `winback_email_sent_done`, `need_a_hand_login_linked_done`,
-`need_a_hand_email_sent_done`, `free_week_ended_email_sent_done` (SOLAR-475: the day-7 report that says the
+`need_a_hand_email_sent_done` (`choose`: true for the SOLAR-567 version to a login whose plants
+all wait to be chosen), `free_week_ended_email_sent_done` (SOLAR-475: the day-7 report that says the
 free week has ended went out), `unpaid_reminder_email_sent_done` and `unpaid_last_email_sent_done`
 (SOLAR-552: the two emails to an account with no plan, 14 and 27 days after its free week or
 paid time ended, went out), `unpaid_deleted_email_sent_done` (SOLAR-559: the email after its
