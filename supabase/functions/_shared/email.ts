@@ -38,7 +38,7 @@ export const senderFor = (kind: string) =>
     : kind.startsWith("bill_") || kind === "free_week_soon" ? FROM_BILLING
     : kind.startsWith("report_") ? FROM_REPORTS
     : kind === "welcome" || kind === "history" || kind === "free_week_setup" || kind === "winback" || kind === "need_a_hand"
-      || kind === "unpaid_reminder" || kind === "unpaid_last" ? FROM_HELLO
+      || kind.startsWith("unpaid_") ? FROM_HELLO
     : FROM_ALERTS;
 // Supabase's link lifetime (Auth -> mailer OTP expiry): 24 hours since SOLAR-196.
 const LINK_LIFE = "The link works once, for 24 hours.";
@@ -97,6 +97,7 @@ type Box = { hero?: Hero; rows?: [label: string, value: string][]; checks?: Chec
 
 type Part =
   | { lead: string } // grey sentence under the title: what happened, only when the box can't say it
+  | { pair: [head: string, text: string] } // one fact: a white line, its sentence under it in the body grey (SOLAR-559)
   | { box: Box }
   | { small: string } // small print under the button ("The link works once, for 24 hours.")
   | { button: { label: string; href: string } }
@@ -165,6 +166,7 @@ const deltaText = (d: Delta) => { const r = Math.round(d.n); return `${r > 0 ? "
 function html(subject: string, b: Body): string {
   const rows = b.parts.map((x) => {
     if ("lead" in x) return `<p class="m" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#9aa5b3">${x.lead}</p>`;
+    if ("pair" in x) return `<p class="m" style="margin:0 0 16px;font:400 15px/1.55 ${SANS};color:#9aa5b3"><span class="t" style="display:block;margin:0 0 3px;font-weight:600;color:#e7ecf2">${esc(x.pair[0])}</span>${esc(x.pair[1])}</p>`;
     if ("small" in x) return `<p class="d" style="margin:0;font:400 13px/1.5 ${SANS};color:#7f8da0">${x.small}</p>`;
     if ("box" in x) {
       const { hero, rows: r = [], checks = [], steps = [] } = x.box;
@@ -219,12 +221,14 @@ function html(subject: string, b: Body): string {
         `<td align="right" style="padding:6px 0;font:700 14px/1.3 ${MONO};font-variant-numeric:tabular-nums;color:#e7ecf2">${f.value}</td></tr>`).join("")}</table>`;
     if ("button" in x)
       return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 12px"><tr><td style="border-radius:8px;background:${ACCENT}"><a href="${x.button.href}" style="display:inline-block;padding:13px 24px;font:600 15px/1 ${SANS};color:#0a0d12;text-decoration:none;border-radius:8px">${esc(x.button.label)}</a></td></tr></table>`;
-    // The change line always takes its space, so a card with nothing to compare (Imported
-    // with the grid off) stays as tall as the card beside it (SOLAR-452).
+    // When one card has a change line, every card keeps its space, so a card with nothing
+    // to compare (Imported with the grid off) stays as tall as the card beside it
+    // (SOLAR-452). When none has, the line goes (SOLAR-559).
+    const chg = x.stats.some((s) => s.delta || s.sub);
     const cells = x.stats.map((s) => `<td class="tile" width="50%" style="padding:16px;background:#141a22;border-radius:8px;vertical-align:top">
 <div class="m" style="font:500 11px/1 ${SANS};letter-spacing:.12em;text-transform:uppercase;color:#9aa5b3">${esc(s.label)}</div>
 <div class="${s.tone ?? "t"}" style="margin-top:8px;font:700 24px/1.1 ${MONO};font-variant-numeric:tabular-nums;color:${s.tone ? C[s.tone] : "#e7ecf2"}">${esc(s.value)}${s.unit ? `<span style="font-size:14px;opacity:.85"> ${esc(s.unit)}</span>` : ""}</div>
-<div class="d chg" style="margin-top:6px;font:400 12px/1.4 ${SANS};color:#7f8da0">${s.delta ? deltaHtml(s.delta) : s.sub ? esc(s.sub) : "&nbsp;"}</div></td>`);
+${chg ? `<div class="d chg" style="margin-top:6px;font:400 12px/1.4 ${SANS};color:#7f8da0">${s.delta ? deltaHtml(s.delta) : s.sub ? esc(s.sub) : "&nbsp;"}</div>` : ""}</td>`);
     // Every card takes half the width, a lone one included. Below 340 px (the smallest
     // phones) every card goes full width.
     const boxes = cells.map((c, i) => c.replace(/^<td class="tile" width="50%" style="/,
@@ -260,6 +264,7 @@ function text(b: Body): string {
   const out = [b.title, b.sub ?? "", ""];
   for (const x of b.parts) {
     if ("lead" in x) out.push(strip(x.lead), "");
+    else if ("pair" in x) out.push(...x.pair, "");
     else if ("small" in x) out.push(strip(x.small), "");
     else if ("box" in x) out.push(...(x.box.hero ? [`${x.box.hero.label}: ${x.box.hero.value}${x.box.hero.sub ? ` (${x.box.hero.sub})` : ""}`] : []),
       ...(x.box.rows ?? []).map(([l, v]) => `${l}: ${strip(v)}`), ...(x.box.checks ?? []).map((c) => c.done ? `[x] ${c.name}` : `${c.n ? `${c.n}.` : "[ ]"} ${[c.name, [c.text, c.sub].filter(Boolean).join(" ")].filter(Boolean).join(": ")}`),
@@ -464,9 +469,9 @@ export type Report = {
   bestDay?: { label: string; kwh: number };
   highestUse?: { label: string; kwh: number }; // the day the home used the most ("Busiest day")
   daily?: Bars; // solar kWh per day (per month for a year)
-  // The report sent when the free week ends (SOLAR-208): days is the history held,
-  // price what keeps it (SOLAR-475).
-  freeWeekEnds?: FreeWeekEnded;
+  // The report sent when the free week ends (SOLAR-208): the plan that holds the
+  // account's plants, at its price (SOLAR-559).
+  freeWeekEnds?: Price;
   partialFrom?: string; // first day counted, when after the period starts: "20 Oct" (SOLAR-273)
   partialWhy?: "added" | "history"; // the plant was added then (SOLAR-305), or its history starts then
 };
@@ -495,9 +500,9 @@ export function report(r: Report): Email {
   const parts: Part[] = [];
   const fw = r.freeWeekEnds;
   // The free week's end comes first, then its report (SOLAR-475).
-  if (fw) parts.push(...freeWeekEndedParts(fw, r.plant),
-    { heading: "Your last weekly report" },
-    { note: `What ${esc(r.plant)} made and used in its free week, ${r.label.replace(/ /g, "&nbsp;").replace("–", "–⁠")}.` },
+  if (fw) parts.push(...freeWeekEndedParts(fw),
+    { heading: "Your free week" },
+    { note: `What ${esc(r.plant)} made and used, ${r.label.replace(/ /g, "&nbsp;").replace("–", "–⁠")}.` },
   );
   // The free week's day-7 report is the last without a plan, so it promises no next one.
   if (r.partialFrom) parts.push({ note: `From ${r.partialFrom}, when ${r.partialWhy === "added" ? "you added this plant" : "your history starts"}.` +
@@ -521,22 +526,16 @@ export function report(r: Report): Email {
   });
 }
 
-// When the free week ends (SOLAR-475, SOLAR-552): what stopped, when the history goes,
-// what keeps it. Sent on top of the week's report, or alone when the week has no readings.
-// deleteOn: 30 days after the week's end, "22 Dec".
-export type FreeWeekEnded = { days: number; price?: Price; deleteOn?: string };
+// When the free week ends (SOLAR-475, SOLAR-559): what stopped and the plan that carries
+// on. Sent on top of the week's report, or alone when the week has no readings.
 const STOPPED: [string, string][] = [["Readings", "Stopped"], ["Alerts and reports", "Stopped"]];
-const freeWeekEndedParts = (fw: FreeWeekEnded, plant: string): Part[] => [
-  { box: {
-    hero: fw.days > 0 ? lost(fw.deleteOn ? `Deleted on ${fw.deleteOn}` : "Deleted in 30 days", dayCount(fw.days), `of history at ${plant}`) : undefined,
-    rows: STOPPED,
-  } },
-  { lead: fw.price ? keepOn(fw.price, "everything") : "A plan keeps it all." },
-  { button: { label: "See plans", href: PLANS } },
-  ...(fw.price ? [{ small: keepSmall(fw.price) }] : []),
+const freeWeekEndedParts = (price: Price): Part[] => [
+  { pair: ["Readings stopped today", "The app stopped with them: live view, history, alerts and reports."] },
+  { pair: [`Upgrade to ${PLAN_NAME[price.plan]}`, "Readings carry on."] },
+  ...startPlan(price),
 ];
 const freeWeekMail = (parts: Part[]) => make("Your free week has ended", { title: "Your free week has ended", parts, footer: [HELP] });
-export const freeWeekEnded = (fw: FreeWeekEnded, plant: string) => freeWeekMail(freeWeekEndedParts(fw, plant));
+export const freeWeekEnded = (price: Price) => freeWeekMail(freeWeekEndedParts(price));
 
 // ---------------------------------------------------------------- plant events
 
@@ -1046,7 +1045,10 @@ export const feedback = (f: { email: string; message: string; page: string; vers
 // Emails where the owner loses something: a big amber number for what goes and when,
 // then the plan that keeps it at today's price (SOLAR-415).
 // Price: the live offer's monthly price, and the usual price when the offer is lower.
-export type Price = { plan: Plan; now: number; list: number };
+// offer: the terms of the offer behind `now`, as the server gives them (billing_offer_json).
+export type Offer = { id: string; months?: number | null; cap?: number | null; until?: string | null; held?: boolean };
+// plants: how many the account ticked, for the emails to an account with no plan.
+export type Price = { plan: Plan; now: number; list: number; offer?: Offer | null; plants?: number };
 const keepOn = (p: Price, what: string) =>
   `Keep ${what} on ${PLAN_NAME[p.plan]} for ${rand(p.now)} a month${p.now < p.list ? ", the launch price" : ""}.`;
 const keepSmall = (p: Price) => `${p.now < p.list ? `${PLAN_NAME[p.plan]} is normally ${rand(p.list)} a month. ` : ""}Cancel any time.`;
@@ -1131,46 +1133,60 @@ export const plantsRemovalSoon = (plants: string[], on: string, plan?: Plan, pri
   });
 };
 
-// Two days before the free week ends (SOLAR-242): what stops, and when the history goes.
-// The day-7 report says it again. endsOn: "Monday 10 Nov". days: day totals the plant
-// holds; 0 when unknown. deleteOn: 30 days after the end, "10 Dec".
-export const freeWeekEndsSoon = (endsOn: string, plant: string, days: number, price?: Price, deleteOn?: string) => {
-  const wd = endsOn.split(" ")[0];
-  return make(`Your free week ends on ${endsOn}`, {
-    title: `Your free week ends on ${endsOn}`,
+// The emails to an account with no plan, and to one about to have none (SOLAR-559): facts
+// as pairs, then the price in one sentence with only the price in white, then one button.
+// The offer's terms are worded as the plans page words them (tabs.jsx offerBand).
+const white = (t: string) => `<span class="t" style="font-weight:600;color:#e7ecf2">${t}</span>`;
+const startPlan = (p: Price): Part[] => {
+  const o = p.now < p.list ? p.offer : null, name = PLAN_NAME[p.plan];
+  const terms = !o ? "" : ` ${o.id === "launch" ? "Launch price" : "Offer price"}${!o.held && o.cap ? ` for the first ${o.cap} members` : ""}, ` +
+    `${o.until ? `until ${o.until}` : o.months && !o.held ? `for your first ${o.months} months` : "yours while you stay"}.`;
+  const rec = `Recommended for your ${(p.plants ?? 1) > 1 ? "plants" : "plant"}: `;
+  return [
+    { lead: rec + (p.now < p.list ? `${name} is ${white(`${rand(p.now)} a month`)}, normally ${rand(p.list)}.${terms} Cancel any time.`
+      : `${name} is ${white(`${rand(p.list)} a month`)}. Cancel any time.`) },
+    { button: { label: "See plans", href: PLANS } },
+  ];
+};
+
+// Two days before the free week ends (SOLAR-242): when it stops. The delete is not
+// named here. endsOn: "Monday 10 Nov".
+export const freeWeekEndsSoon = (endsOn: string, price: Price) => {
+  const wd = endsOn.split(" ")[0], title = `Your free week ends on ${wd}`;
+  return make(title, {
+    title,
     parts: [
-      { box: {
-        hero: days > 0 ? lost(deleteOn ? `Deleted on ${deleteOn}` : "Deleted 30 days later", dayCount(days), `of history at ${plant}`) : undefined,
-        rows: [[`From ${wd}`, "Readings stop"], ["Alerts and reports", "Stop"]],
-      } },
-      { lead: price ? keepOn(price, "everything") : "A plan keeps it all." },
-      { button: { label: "See plans", href: PLANS } },
-      ...(price ? [{ small: keepSmall(price) }] : []),
+      { pair: [endsOn, "Readings stop, and the app with them: live view, history, alerts and reports."] },
+      { pair: [`Upgrade to ${PLAN_NAME[price.plan]}`, `Do it before ${wd} and nothing stops.`] },
+      ...startPlan(price),
     ],
-    footer: BILL_FOOTER,
+    footer: [HELP],
   });
 };
 
-// An account with no plan (SOLAR-552, 0206): 14 days after its free week or its paid time
-// ended, and again 3 days before the history is deleted. since: the day the reading
-// stopped. price: the plan that holds the plants it ticked. unsub: the page that turns
-// these two emails off.
-export type Unpaid = { since: string; deleteOn: string; price?: Price; unsub: string };
-const unpaidMail = (title: string, u: Unpaid) => make(title, {
+// An account with no plan (SOLAR-552, SOLAR-559): 14 days after its free week or its paid
+// time ended (0206), 3 days before the history is deleted, and once after the delete ran
+// (0207). since: the day the reading stopped. price: the plan that holds the plants it
+// ticked. paid: it had a plan. unsub: the page that turns the three emails off.
+export type Unpaid = { price: Price; paid?: boolean; unsub: string };
+export type UnpaidKept = Unpaid & { since: string; deleteOn: string };
+const unpaidMail = (title: string, u: Unpaid, pairs: [string, string][]) => make(title, {
   title,
-  parts: [
-    { box: { hero: lost(`Deleted on ${u.deleteOn}`, "Your history", `before ${u.since}`),
-      rows: [["Readings", `Stopped on ${u.since}`], ["Alerts and reports", "Stopped"]] } },
-    { lead: u.price
-      ? `Start ${PLAN_NAME[u.price.plan]} for ${rand(u.price.now)} a month${u.price.now < u.price.list ? ", the launch price" : ""}. Readings start again and your last 60 days come back.`
-      : "Start a plan. Readings start again and your last 60 days come back." },
-    { button: { label: "See plans", href: PLANS } },
-    ...(u.price ? [{ small: keepSmall(u.price) }] : []),
-  ],
-  footer: [`You get this because your free week or plan ended. <a href="${u.unsub}">Unsubscribe</a>.`, HELP],
+  parts: [...pairs.map((pair) => ({ pair })), ...startPlan(u.price)],
+  footer: [`You get this because your ${u.paid ? "plan" : "free week"} ended. <a href="${u.unsub}">Unsubscribe</a>.`, HELP],
 });
-export const unpaidReminder = (u: Unpaid) => unpaidMail("Your solar history is still here", u);
-export const unpaidLast = (u: Unpaid) => unpaidMail(`Your history is deleted on ${u.deleteOn}`, u);
+const start = (u: Unpaid) => `Upgrade to ${PLAN_NAME[u.price.plan]}`;
+export const unpaidReminder = (u: UnpaidKept) => unpaidMail("Your solar data is still here", u, [
+  ["Your history is still here", `Readings stopped on ${u.since}, and the app with them.`],
+  [start(u), "Readings start again, with the days you missed filled in."],
+]);
+export const unpaidLast = (u: UnpaidKept) => unpaidMail("Your history is deleted in 3 days", u, [
+  [u.deleteOn, `We delete the history stored for your ${(u.price.plants ?? 1) > 1 ? "plants" : "plant"}.`],
+  [start(u), `Do it before ${u.deleteOn} and your history stays, and readings start again.`],
+]);
+export const unpaidDeleted = (u: Unpaid) => unpaidMail("Your history has been deleted", u, [
+  ["You can still come back", `${start(u)} and readings start again. Your history builds from there.`],
+]);
 
 // Two days after the account's first plant, once, while a number is still empty (0163):
 // a checklist. Sign up and Add plant are done by then; each number is ticked when set.
