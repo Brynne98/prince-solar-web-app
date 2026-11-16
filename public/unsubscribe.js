@@ -12,6 +12,7 @@
         if (!r.ok) throw new Error(String(r.status));
         go.remove();
         say('Unsubscribed', 'You get no more of these emails.');
+        document.getElementById('back').hidden = false;
         if (window.track) window.track('email_unsubscribe_done', { kind: q.get('k') || '' });
       })
       .catch(function () {

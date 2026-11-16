@@ -3594,6 +3594,9 @@ const NOTIF_GROUPS = [
     ['monthly', 'Monthly'],
     ['yearly', 'Yearly']] },
 ];
+// Rows outside a group, shown open, and outside All. reminders: every email that offers a
+// plan, the one its Unsubscribe link turns off (SOLAR-569).
+const NOTIF_SINGLE = [['reminders', 'Offers and reminders', 'About your plan']];
 function NotificationsSection({ userId, head }) {
   const { useState, useEffect } = React;
   // each channel's switches, by channel id; null while on its way
@@ -3642,6 +3645,15 @@ function NotificationsSection({ userId, head }) {
                           disabled={idle(ch)} label={name}
                           onChange={() => p && kinds.forEach(k => { if (p[k] === anyOn) flip(ch, k, !anyOn, name.toLowerCase()); })} />;
   };
+  const row = ([kind, label, hint]) => (
+    <div key={kind} className="notif-row">
+      <span className="toggle-text">
+        <span className="toggle-label">{label}</span>
+        {hint && <span className="toggle-hint">{hint}</span>}
+      </span>
+      {NOTIF_CHANNELS.map(ch => cell(ch, kind, label))}
+    </div>
+  );
   // Alerts and Reports fold open to their rows, as before SOLAR-402
   const [open, setOpen] = useState({});
   const cols = { '--notif-cols': NOTIF_CHANNELS.length };
@@ -3667,7 +3679,7 @@ function NotificationsSection({ userId, head }) {
           </div>
           <div className="notif-row">
             <span className="toggle-text"><span className="toggle-label">All</span></span>
-            {NOTIF_CHANNELS.map(ch => setCell(ch, ch.kinds, 'All'))}
+            {NOTIF_CHANNELS.map(ch => setCell(ch, NOTIF_GROUPS.flatMap(g => g.rows.map(([k]) => k)), 'All'))}
           </div>
           {NOTIF_GROUPS.map(g => (
             <div key={g.label} className="notif-group">
@@ -3680,18 +3692,11 @@ function NotificationsSection({ userId, head }) {
                 {NOTIF_CHANNELS.map(ch => setCell(ch, g.rows.map(([k]) => k), g.label))}
               </div>
               <div id={'notif-' + g.label} className="notif-rows" role="group" aria-label={g.label} hidden={!open[g.label]}>
-                {g.rows.map(([kind, label, hint]) => (
-                  <div key={kind} className="notif-row">
-                    <span className="toggle-text">
-                      <span className="toggle-label">{label}</span>
-                      {hint && <span className="toggle-hint">{hint}</span>}
-                    </span>
-                    {NOTIF_CHANNELS.map(ch => cell(ch, kind, label))}
-                  </div>
-                ))}
+                {g.rows.map(row)}
               </div>
             </div>
           ))}
+          {NOTIF_SINGLE.map(row)}
         </div>
       )}
       {/* This browser's pop-up state is still being read: its row, with the switch shimmering */}
