@@ -481,8 +481,8 @@ begin
   perform pg_temp.eq('day 7 report: the free week''s first day', (select (data->>'from')::date from public.email_queue
     where user_id = '00000000-0000-0000-0000-000000000072' and kind = 'report_week'),
     timezone(public.plant_tz(9000072), now() - interval '7 days 2 hours')::date);
-  perform pg_temp.eq('day 7 report: days of history', (select (data->>'days')::int from public.email_queue
-    where user_id = '00000000-0000-0000-0000-000000000072' and kind = 'report_week'), 0);
+  perform pg_temp.eq('day 7 report: the plants ticked', (select (data->>'plants')::int from public.email_queue
+    where user_id = '00000000-0000-0000-0000-000000000072' and kind = 'report_week'), 1);
   perform pg_temp.eq('nothing for a week long over', (select count(*)::int from public.email_queue
     where user_id = '00000000-0000-0000-0000-000000000063' and kind in ('free_week_soon', 'report_week')), 0);
   perform private.free_week_mail();

@@ -49,7 +49,8 @@ $$;
 
 -- ---------------------------------------------------------------------------
 -- 0206's free_week_mail. Added: 'plants' on the day-5 and day-7 rows, 'paid' on
--- the two reminders.
+-- the two reminders. Gone from the day-5 and day-7 rows: 'days' and 'deleteOn',
+-- which their emails no longer show.
 -- ---------------------------------------------------------------------------
 create or replace function private.free_week_mail()
 returns int language plpgsql security definer set search_path = public, private, pg_temp as $$
@@ -84,10 +85,6 @@ begin
   union all
   select fw.user_id, fp.plant_id, 'free_week_soon', 'free_week_soon:' || fw.user_id,
          jsonb_build_object('endsAt', extract(epoch from fw.started + interval '7 days')::bigint,
-           -- days with a total, before today
-           'days', (select count(*) from public.plant_energy e
-                     where e.plant_id = fp.plant_id and e.bucket = 'day'
-                       and e.period < public.today_tz(public.plant_tz(fp.plant_id))),
            'plants', (select count(*) from private.plant_picks p where p.user_id = fw.user_id),
            'perMonth', round(public.billing_amount('home', 'yearly', 0,
                          private.billing_offer_open(fw.user_id, private.billing_today())) / 12.0)::int), 1
@@ -97,11 +94,7 @@ begin
   select fw.user_id, fp.plant_id, 'report_week', 'report_week:free:' || fw.user_id,
          jsonb_build_object('today', timezone(public.plant_tz(fp.plant_id), now())::date, 'freeWeekEnds', true,
            'plants', (select count(*) from private.plant_picks p where p.user_id = fw.user_id),
-           'from', timezone(public.plant_tz(fp.plant_id), fw.started)::date,
-           'deleteOn', timezone(public.plant_tz(fp.plant_id), fw.started + interval '37 days')::date,
-           'days', (select count(*) from public.plant_energy e
-                     where e.plant_id = fp.plant_id and e.bucket = 'day'
-                       and e.period < public.today_tz(public.plant_tz(fp.plant_id)))), 2
+           'from', timezone(public.plant_tz(fp.plant_id), fw.started)::date), 2
     from fw join first_plant fp on fp.user_id = fw.user_id
    where now() >= fw.started + interval '7 days' and now() < fw.started + interval '8 days'
   union all
