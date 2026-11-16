@@ -357,9 +357,9 @@ async function build(r: Row): Promise<Email | null> {
       // The free week's day-7 report (0114) says the week has ended (SOLAR-475).
       if (!free) return rep && report(rep);
       const fw = await pickedPlan(d.plants, r.user_id);
-      // No readings in the free week: the notice still goes, without the report. Offers
-      // switched off (data.offer false, 0213): no plan and no link.
-      const end = { price: fw, unsub: d.offer === false ? null : unsubOf(r) };
+      // No readings in the free week: the notice still goes, without the report. It sits
+      // behind Offers and reminders (0214), so the plan and the link always go in.
+      const end = { price: fw, unsub: unsubOf(r) };
       return rep ? report({ ...rep, freeWeekEnds: end }) : freeWeekEnded(end);
     }
     case "free_week_soon":

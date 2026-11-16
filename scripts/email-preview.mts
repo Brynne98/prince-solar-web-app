@@ -113,7 +113,6 @@ const mails: Record<string, [from: string, mail: Email]> = {
   "billing-renewal-notice": [FROM_BILLING, renewalNotice({ plan: "family", amount: 1990, on: "1 Feb 2027", card: "Visa •••• 4081" })],
   "billing-offer-ends": [FROM_BILLING, offerEnds({ plan: "home", period: "monthly", was: 49, amount: 99, on: "3 Mar", card: "Visa •••• 4242" })],
   "free-week-ended-no-readings": [FROM_REPORTS, freeWeekEnded({ price: { plan: "home", now: 49, list: 99, offer: { id: "launch", cap: 100 } }, unsub: "https://app.princesolarhub.co.za/unsubscribe.html?t=00000000-0000-0000-0000-000000000000&k=reminders" })],
-  "free-week-ended-offers-off": [FROM_REPORTS, freeWeekEnded({ price: { plan: "home", now: 49, list: 99 }, unsub: null })],
   "billing-free-week-ends-soon": [FROM_BILLING, freeWeekEndsSoon("Monday 10 Nov", { plan: "home", now: 49, list: 99, offer: { id: "launch", cap: 100 } }, "https://app.princesolarhub.co.za/unsubscribe.html?t=00000000-0000-0000-0000-000000000000&k=reminders")],
   "free-week-setup": [FROM_HELLO, freeWeekSetup(["rate", "size", "reserve", "panels"])],
   "free-week-setup-some-done": [FROM_HELLO, freeWeekSetup(["size", "panels"])],
