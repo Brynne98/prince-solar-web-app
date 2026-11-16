@@ -504,7 +504,7 @@ function weekCard(endsAt, b, n, plans) {
   return { kind: 'free_week_price', banner: true, tone: 'info', closable: 'free_week_price:' + day,
     title: `Free week until ${window.dayText(day, { weekday: 'long', day: 'numeric', month: 'short' })}`,
     short: `Free week until ${window.dayText(day)}`,
-    body: `${o.long} Readings, history and alerts carry on.`, bodyShort: o.short,
+    body: `${o.long} Start it and readings, history and alerts carry on.`, bodyShort: o.short,
     button: 'See plans', act: (where) => { window.track('notice_action_done', { kind: 'free_week_price', where }); plans(); } };
 }
 
@@ -1478,7 +1478,7 @@ function Setup({ links, wall }) {
     return links.refresh();
   };
   // Home holds 2 plants, Family 5: the plan that holds the plants this account ticked.
-  const wallKept = wall && Date.parse(wall.deleteAt) > Date.now()
+  const wallKept = wall && !wall.noWeek && Date.parse(wall.deleteAt) > Date.now()
     && window.billingFmt.billDay(new Date(wall.deleteAt).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }));
   const card = wall ? (
     <div className="setup-empty-box">
@@ -1497,7 +1497,7 @@ function Setup({ links, wall }) {
     <div className="setup-empty-box">
       <Icon id="power" />
       <h2>Your plants are locked</h2>
-      <p>Choose one, or add another, to see your solar, battery, grid and home here.</p>
+      <p>Choose your plants to see your solar, battery, grid and home here.</p>
       <div className="setup-btns">{turnOnBtn('')}{connectBtn('')}</div>
     </div>
   ) : (
