@@ -378,12 +378,16 @@ export const welcome = () =>
 // 24 hours after sign-up, only if no SunSynk login was ever added (SOLAR-319). The
 // welcome email's steps again; from hello@, so a reply reaches us.
 // choose (SOLAR-567, 0210): a login is added but its plants all wait to be chosen,
-// and no week has started. Every page then shows the locked card with Choose plants.
+// and no week has started. Laid out as the free week's emails: facts as pairs, one
+// button. Every page then shows the locked card with Choose plants.
 export const needAHand = (choose = false) => choose
-  ? make("Choose your plants to start your free week", {
-    title: "Choose your plants to start your free week",
-    parts: [{ lead: "Your SunSynk login is added. Its plants stay locked until you choose up to 5." },
-      { button: { label: "Choose plants", href: `${APP}/?tab=live` } }],
+  ? make("Your free week hasn't started", {
+    title: "Your free week hasn't started",
+    parts: [
+      { pair: ["Your plants are locked", "Your SunSynk login is added, but we read none of its plants yet."] },
+      { pair: ["Choose up to 5", "Your free week starts then: 7 days, no card."] },
+      { button: { label: "Choose plants", href: `${APP}/?tab=live` } },
+    ],
     footer: [HELP],
   })
   : make("Need a hand adding your plant?", {
