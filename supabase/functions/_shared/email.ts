@@ -531,7 +531,7 @@ export function report(r: Report): Email {
 const STOPPED: [string, string][] = [["Readings", "Stopped"], ["Alerts and reports", "Stopped"]];
 const freeWeekEndedParts = (price: Price): Part[] => [
   { pair: ["Readings stopped today", "The app stopped with them: live view, history, alerts and reports."] },
-  { pair: [`Start the ${PLAN_NAME[price.plan]} plan`, "Readings carry on."] },
+  { pair: [`Upgrade to ${PLAN_NAME[price.plan]}`, "Readings carry on."] },
   ...startPlan(price),
 ];
 const freeWeekMail = (parts: Part[]) => make("Your free week has ended", { title: "Your free week has ended", parts, footer: [HELP] });
@@ -1047,7 +1047,8 @@ export const feedback = (f: { email: string; message: string; page: string; vers
 // Price: the live offer's monthly price, and the usual price when the offer is lower.
 // offer: the terms of the offer behind `now`, as the server gives them (billing_offer_json).
 export type Offer = { id: string; months?: number | null; cap?: number | null; until?: string | null; held?: boolean };
-export type Price = { plan: Plan; now: number; list: number; offer?: Offer | null };
+// plants: how many the account ticked, for the emails to an account with no plan.
+export type Price = { plan: Plan; now: number; list: number; offer?: Offer | null; plants?: number };
 const keepOn = (p: Price, what: string) =>
   `Keep ${what} on ${PLAN_NAME[p.plan]} for ${rand(p.now)} a month${p.now < p.list ? ", the launch price" : ""}.`;
 const keepSmall = (p: Price) => `${p.now < p.list ? `${PLAN_NAME[p.plan]} is normally ${rand(p.list)} a month. ` : ""}Cancel any time.`;
@@ -1140,9 +1141,10 @@ const startPlan = (p: Price): Part[] => {
   const o = p.now < p.list ? p.offer : null, name = PLAN_NAME[p.plan];
   const terms = !o ? "" : ` ${o.id === "launch" ? "Launch price" : "Offer price"}${!o.held && o.cap ? ` for the first ${o.cap} members` : ""}, ` +
     `${o.until ? `until ${o.until}` : o.months && !o.held ? `for your first ${o.months} months` : "yours while you stay"}.`;
+  const rec = `Recommended for your ${(p.plants ?? 1) > 1 ? "plants" : "plant"}: `;
   return [
-    { lead: p.now < p.list ? `${name} is ${white(`${rand(p.now)} a month`)}, normally ${rand(p.list)}.${terms} Cancel any time.`
-      : `${name} is ${white(`${rand(p.list)} a month`)}. Cancel any time.` },
+    { lead: rec + (p.now < p.list ? `${name} is ${white(`${rand(p.now)} a month`)}, normally ${rand(p.list)}.${terms} Cancel any time.`
+      : `${name} is ${white(`${rand(p.list)} a month`)}. Cancel any time.`) },
     { button: { label: "See plans", href: PLANS } },
   ];
 };
@@ -1155,7 +1157,7 @@ export const freeWeekEndsSoon = (endsOn: string, price: Price) => {
     title,
     parts: [
       { pair: [endsOn, "Readings stop, and the app with them: live view, history, alerts and reports."] },
-      { pair: [`Start the ${PLAN_NAME[price.plan]} plan`, `Do it before ${wd} and nothing stops.`] },
+      { pair: [`Upgrade to ${PLAN_NAME[price.plan]}`, `Do it before ${wd} and nothing stops.`] },
       ...startPlan(price),
     ],
     footer: [HELP],
@@ -1165,28 +1167,25 @@ export const freeWeekEndsSoon = (endsOn: string, price: Price) => {
 // An account with no plan (SOLAR-552, SOLAR-559): 14 days after its free week or its paid
 // time ended (0206), 3 days before the history is deleted, and once after the delete ran
 // (0207). since: the day the reading stopped. price: the plan that holds the plants it
-// ticked. plants: how many it ticked. paid: it had a plan. unsub: the page that turns the
-// three emails off.
+// ticked. paid: it had a plan. unsub: the page that turns the three emails off.
 export type Unpaid = { price: Price; paid?: boolean; unsub: string };
-export type UnpaidKept = Unpaid & { since: string; deleteOn: string; plants: number };
+export type UnpaidKept = Unpaid & { since: string; deleteOn: string };
 const unpaidMail = (title: string, u: Unpaid, pairs: [string, string][]) => make(title, {
   title,
   parts: [...pairs.map((pair) => ({ pair })), ...startPlan(u.price)],
   footer: [`You get this because your ${u.paid ? "plan" : "free week"} ended. <a href="${u.unsub}">Unsubscribe</a>.`, HELP],
 });
-const yourPlants = (n: number) => n > 1 ? "your plants" : "your plant";
-const start = (u: Unpaid) => `Start the ${PLAN_NAME[u.price.plan]} plan`;
+const start = (u: Unpaid) => `Upgrade to ${PLAN_NAME[u.price.plan]}`;
 export const unpaidReminder = (u: UnpaidKept) => unpaidMail("Your solar data is still here", u, [
-  [`Nothing recorded at ${yourPlants(u.plants)} is lost`, `Readings stopped on ${u.since}, and the app with them.`],
+  ["Your history is still here", `Readings stopped on ${u.since}, and the app with them.`],
   [start(u), "Readings start again, with the days you missed filled in."],
 ]);
 export const unpaidLast = (u: UnpaidKept) => unpaidMail("Your history is deleted in 3 days", u, [
-  [u.deleteOn, `We delete the history stored for ${yourPlants(u.plants)}.`],
-  [start(u), `Do it before ${u.deleteOn} and all of it stays, and readings start again.`],
+  [u.deleteOn, `We delete the history stored for your ${(u.price.plants ?? 1) > 1 ? "plants" : "plant"}.`],
+  [start(u), `Do it before ${u.deleteOn} and your history stays, and readings start again.`],
 ]);
 export const unpaidDeleted = (u: Unpaid) => unpaidMail("Your history has been deleted", u, [
-  ["You can still come back", `${start(u)} and readings start again.`],
-  ["Your last 60 days come back", "They come in from SunSynk, and your history builds from there."],
+  ["You can still come back", `${start(u)} and readings start again. Your history builds from there.`],
 ]);
 
 // Two days after the account's first plant, once, while a number is still empty (0163):

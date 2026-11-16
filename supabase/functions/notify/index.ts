@@ -107,6 +107,9 @@ async function priceOf(plan: "home" | "family", user: string | null): Promise<Pr
   const o = user ? await rpc<Prices>("email_prices", { p_user: user }) : (offerNow ??= await rpc<Prices>("api_offer"));
   return { plan, now: o.prices.monthly[plan], list: o.listPrices.monthly[plan], offer: o.offer && { ...o.offer, until: o.offer.until && dayMonth(o.offer.until) } };
 }
+/** The plan that holds the plants the account ticked: Home for 1 or 2, Family for 3 to 5. */
+const pickedPlan = async (plants: number | undefined, user: string | null): Promise<Price> =>
+  ({ ...await priceOf((plants ?? 1) > 2 ? "family" : "home", user), plants: plants ?? 1 });
 /** The account's first plant (or the one given), its name and how many day totals it holds. */
 async function historyAt(user: string | null, plantId?: number | null): Promise<{ plant: string; days: number } | null> {
   if (!user) return null;
@@ -350,19 +353,18 @@ async function build(r: Row): Promise<Email | null> {
       const rep = await buildReport(p, r.kind.slice(7) as Period, d.today, linkedOn, free ? d.from : undefined);
       // The free week's day-7 report (0114) says the week has ended (SOLAR-475).
       if (!free) return rep && report(rep);
-      const fw = await priceOf(d.plants > 2 ? "family" : "home", r.user_id);
+      const fw = await pickedPlan(d.plants, r.user_id);
       // No readings in the free week: the notice still goes, without the report.
       return rep ? report({ ...rep, freeWeekEnds: fw }) : freeWeekEnded(fw);
     }
     case "free_week_soon":
       return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: tz }).replace(/\bSept\b/, "Sep"),
-        await priceOf(d.plants > 2 ? "family" : "home", r.user_id));
+        await pickedPlan(d.plants, r.user_id));
     case "unpaid_reminder": case "unpaid_last": case "unpaid_deleted": {
-      // the plan that holds the plants it ticked: Home for 1 or 2, Family for 3 to 5
-      const u = { price: await priceOf(d.plants > 2 ? "family" : "home", r.user_id), paid: d.paid === true,
+      const u = { price: await pickedPlan(d.plants, r.user_id), paid: d.paid === true,
         unsub: `${APP}/unsubscribe.html?t=${r.unsub_token ?? ""}&k=reminders` };
       if (r.kind === "unpaid_deleted") return unpaidDeleted(u);
-      const k = { ...u, plants: d.plants ?? 1, since: dayMonth(local(tz, new Date(d.since * 1000)).date), deleteOn: dayMonth(local(tz, new Date(d.deleteAt * 1000)).date) };
+      const k = { ...u, since: dayMonth(local(tz, new Date(d.since * 1000)).date), deleteOn: dayMonth(local(tz, new Date(d.deleteAt * 1000)).date) };
       return r.kind === "unpaid_reminder" ? unpaidReminder(k) : unpaidLast(k);
     }
     case "free_week_setup": return d.steps?.length ? freeWeekSetup(d.steps, r.plant_id ?? undefined, d.battery !== false) : null;
