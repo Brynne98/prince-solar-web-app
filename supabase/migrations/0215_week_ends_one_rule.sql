@@ -48,7 +48,12 @@ revoke all on function private.week_ends(uuid) from public, anon, authenticated;
 -- Week over at the arrival, dated back (0203/0208): the real date is written_at.
 update private.free_week_logins
    set started_at = written_at, over_at = written_at, over_why = 'plant'
- where written_at >= started_at + interval '7 days';
+ where written_at >= started_at + interval '7 days'
+   -- as 0203/0208 dated it, not a comp set-back's row (billing_set_comped: the first link)
+   and (started_at = written_at - interval '15 days'
+        or started_at = (select min(w.started_at) from private.plant_week w
+                           join public.plant_users pu on pu.plant_id = w.plant_id
+                          where pu.user_id = free_week_logins.user_id));
 
 -- Week borrowed from a plant's open week (0208): the real date is written_at, the end the plant's.
 update private.free_week_logins f
@@ -84,6 +89,7 @@ declare
   run bigint[] := array(select pu.plant_id from public.plant_users pu
                          where pu.user_id = p_user and pu.plant_id = any (p_plants) and not pu.paused);
   v_plan text := coalesce((select b.plan from private.billing b where b.user_id = p_user), 'free');
+  paid boolean := v_plan <> 'free' or private.had_plan(p_user);
 begin
   if cardinality(run) = 0 then return; end if;
   if v_plan = 'free' and coalesce(private.week_ends(p_user) > now(), true) then
@@ -95,10 +101,10 @@ begin
                            join private.sunsynk_accounts a on a.id = pu.account_id
                           where pu.user_id = p_user and pu.plant_id = run[1]), '')),
          p_user, now(), e.at, e.why
-    from (select case when v_plan <> 'free' or private.had_plan(p_user) then now()
+    from (select case when paid then now()
                       when w.open is null then now()
                       when w.open < now() then w.open + interval '7 days' end as at,
-                 case when v_plan <> 'free' or private.had_plan(p_user) then 'plan'
+                 case when paid then 'plan'
                       when w.open is null or w.open < now() then 'plant' end as why
             from (select max(started_at) filter (where started_at > now() - interval '7 days') as open
                     from private.plant_week where plant_id = any (run)) w) e
@@ -111,8 +117,7 @@ create or replace function private.billing_week_used()
 returns trigger language plpgsql set search_path = public, private, pg_temp as $$
 begin
   update private.free_week_logins set over_at = now(), over_why = 'plan'
-   where user_id = new.user_id
-     and least(started_at + interval '7 days', coalesce(over_at, 'infinity')) > now();
+   where user_id = new.user_id and private.week_ends(new.user_id) > now();
   return null;
 end $$;
 revoke all on function private.billing_week_used() from public, anon, authenticated;
@@ -163,8 +168,7 @@ as $$
       or (not exists (select 1 from private.sunsynk_accounts a
                        where a.user_id = p_user and a.kind = 'login' and lower(a.sunsynk_username) <> lower(p_username))
           and not exists (select 1 from private.free_week_logins f
-                           where f.user_id = p_user
-                             and least(f.started_at + interval '7 days', coalesce(f.over_at, 'infinity')) > now()
+                           where f.user_id = p_user and private.week_ends(p_user) > now()
                              and f.sunsynk_username not in ('', lower(p_username))
                              and f.sunsynk_username not in (select lower(s.sunsynk_username) from private.sunsynk_accounts s
                                                              where s.kind = 'share')))
@@ -262,7 +266,7 @@ begin
   select fw.user_id, fp.plant_id, 'report_week', 'report_week:free:' || fw.user_id,
          jsonb_build_object('today', timezone(public.plant_tz(fp.plant_id), now())::date, 'freeWeekEnds', true,
            'plants', (select count(*) from private.plant_picks p where p.user_id = fw.user_id),
-           'from', timezone(public.plant_tz(fp.plant_id), fw.started)::date), 2
+           'from', timezone(public.plant_tz(fp.plant_id), fw.ends - interval '7 days')::date), 2
     from fw join first_plant fp on fp.user_id = fw.user_id
    where now() >= fw.ends and now() < fw.ends + interval '1 day'
   union all
@@ -293,7 +297,7 @@ declare
   b private.billing;
   today date := private.billing_today();
   st jsonb;
-  started timestamptz;  -- the week's end (week_ends)
+  week_end timestamptz;
   first_plant bigint;
   out jsonb := '[]';
   booked boolean;
@@ -334,13 +338,13 @@ begin
 
   -- the free week: never paid, as free_week_mail (0145) reads it
   if coalesce(b.plan, 'free') = 'free' and not coalesce(b.comped, false) and b.keep_until is null then
-    select private.week_ends(me) into started from private.free_week_logins f
+    select private.week_ends(me) into week_end from private.free_week_logins f
      where f.user_id = me and f.over_why is distinct from 'plan';
-    if now() >= started - interval '2 days' and now() < started then
+    if now() >= week_end - interval '2 days' and now() < week_end then
       select pu.plant_id into first_plant from plant_users pu where pu.user_id = me and not pu.paused
        order by pu.linked_at, pu.plant_id limit 1;
       out := out || jsonb_build_object('kind', 'free_week_soon',
-        'endsAt', started,
+        'endsAt', week_end,
         'plant', (select coalesce(pu.plant_name, 'Plant ' || pu.plant_id) from plant_users pu
                    where pu.user_id = me and pu.plant_id = first_plant),
         'days', (select count(*) from plant_energy e
