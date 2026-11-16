@@ -330,8 +330,8 @@ export const passwordChanged = (email: string) =>
 export const accountDeleted = (email: string) =>
   make("Your account is deleted", {
     title: "Your account is deleted",
-    parts: [{ lead: `The settings and readings for ${addr(esc(email))} are gone. Your SunSynk account and inverter aren't affected.` },
-      { note: "Sign up again any time. Your last 60 days come back from SunSynk." }],
+    parts: [{ lead: `The settings and readings for ${addr(esc(email))} are gone. Your inverter and its login aren't affected.` },
+      { note: "You can sign up again any time." }],
     footer: [HELP],
   });
 
