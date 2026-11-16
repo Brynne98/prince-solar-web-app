@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0210 — a failed card ends like a cancel; offers are for new members (SOLAR-564,
+-- 0211 — a failed card ends like a cancel; offers are for new members (SOLAR-564,
 --        decided by Brynne 2026-11-16).
 --
 -- Before: day 8 of a failed card moved the account to the old Free plan
