@@ -1065,7 +1065,7 @@ const lost = (label: string, value: string, sub: string): Hero => ({ label, valu
 const withDays = (who: string, days?: number) => days ? `${who}, with ${dayCount(days)} of history` : who;
 
 // Day 8 of a failed card: the plan has ended as a cancel's does. Nothing is read, every
-// plant stays linked, and the history is deleted 30 days later (SOLAR-564, 0211).
+// plant stays linked, and the history is deleted 30 days later (SOLAR-564, 0212).
 // price: the plan they were on, at the price they would pay now (with plants: those ticked).
 export type MovedToFree = { from: Plan; deleteOn: string; amount?: number; price: Price };
 
