@@ -412,12 +412,9 @@ async function build(r: Row): Promise<Email | null> {
     }
     case "bill_failed":
       return paymentFailed({
-        plan: d.plan, period: d.period, amount: d.amount, card: d.card,
+        plan: d.plan, period: d.period, amount: d.amount,
         nextTry: d.nextTry ? day(d.nextTry) : undefined, freeOn: day(d.freeOn), payUrl: PAY_URL,
         disputed: d.disputed ? day(d.disputed) : undefined,
-        // The key is bill:<ref> of the declined try; a reversal names the payment taken back (0183).
-        reference: d.disputed ? await rpc<string | null>("email_reversed_reference", { p_reference: String(r.key).slice(5) }).catch(() => null) ?? undefined
-          : String(r.key).slice(5),
       });
     case "bill_refund":
       return paymentRefunded({ amount: Number(d.amount), date: day(d.date), reference: d.reference,
@@ -426,9 +423,9 @@ async function build(r: Row): Promise<Email | null> {
     case "bill_mail_failed":
       return billMailFailed({ kind: String(d.kind), key: String(d.key), user: String(d.user ?? ""), error: String(d.error ?? "") });
     case "bill_free":
-      return movedToFree({ from: d.from, kept: d.kept, stopped: d.stopped, deleteOn: day(d.deleteOn),
+      return movedToFree({ from: d.from, deleteOn: day(d.deleteOn),
         amount: (await lastMail(r.user_id, "bill_failed", r.id))?.amount ?? undefined,
-        days: (await historyAt(r.user_id, r.plant_id))?.days, stoppedDays: await historyOf(r.user_id, d.stopped) });
+        price: { ...await priceOf(d.from, r.user_id), plants: d.plants } });
     case "bill_removal_soon": {
       // The next plan up keeps them: no plan to Home if 2 plants fit, else Family.
       const plan = (await billFacts(r.user_id))?.plan;

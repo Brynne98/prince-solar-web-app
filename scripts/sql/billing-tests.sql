@@ -637,30 +637,26 @@ begin
   perform pg_temp.eq('four failure emails', (select count(*)::int from public.email_queue where user_id = s and kind = 'bill_failed'), 4);
   perform public.billing_run(t + 8);
   perform pg_temp.eq('day 8: Free', (select plan || state from private.billing where user_id = s), 'freeactive');
-  perform pg_temp.eq('first plant kept', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = s),
-    '9000091:false,9000092:true,9000094:true');
-  perform pg_temp.eq('second booked for day 38', (select remove_on from private.billing where user_id = s), t + 38);
-  perform pg_temp.eq('moved-to-Free email', (select data->>'kept' || '/' || (data->'stopped'->>0) from public.email_queue where user_id = s and kind = 'bill_free'), 'Home one/Home two');
+  -- day 8 ends like a cancel (SOLAR-564): every plant stays as it was, nothing booked, the pay screen at once
+  perform pg_temp.eq('day 8: plants as they were', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = s),
+    '9000091:false,9000092:false,9000094:false');
+  perform pg_temp.eq('day 8: nothing booked', (select coalesce(cardinality(plants_to_remove), 0)::text || coalesce(remove_on::text, '-') from private.billing where user_id = s), '0-');
+  perform pg_temp.eq('day 8: no 30 days of reading', (select keep_until is null and ended_at is not null from private.billing where user_id = s), true);
+  perform pg_temp.eq('day 8 email', (select data->>'from' || '/' || (data->>'deleteOn') || '/' || (data->>'plants') from public.email_queue where user_id = s and kind = 'bill_free'),
+    'family/' || (t + 38) || '/' || (select count(*) from private.plant_picks where user_id = s));
   perform public.billing_run(t + 35);
-  perform pg_temp.eq('warned 3 days before', (select data->'plants'->>0 from public.email_queue where user_id = s and kind = 'bill_removal_soon'), 'Home two');
+  perform pg_temp.eq('no removal warning', (select count(*)::int from public.email_queue where user_id = s and kind = 'bill_removal_soon'), 0);
   perform public.billing_run(t + 38);
-  perform pg_temp.eq('second plant deleted', (select count(*)::int from public.plant_users where user_id = s), 1);
-  perform pg_temp.eq('tombstoned', (select count(*)::int from private.plant_purge where plant_id = 9000092), 1);
-  perform pg_temp.eq('login kept: it still has a plant', (select count(*)::int from private.sunsynk_accounts where user_id = s), 1);
-  perform pg_temp.eq('booking cleared', (select cardinality(plants_to_remove) from private.billing where user_id = s), 0);
+  perform pg_temp.eq('day 38: every plant still linked', (select count(*)::int from public.plant_users where user_id = s), 3);
 
-  -- paying Family after the move to Free brings back the plant that ran before (its tick
-  -- stayed, 0197) and keeps it; a plant never ticked stays locked
+  -- paying Family after the plan ended starts the ticked plants again; a plant never ticked stays locked
   o := public.billing_charge_open(s, 'family', 'monthly');
   insert into public.plant_users (plant_id, user_id, account_id, plant_name, linked_at, paused) values
-    (9000094, s, '00000000-0000-0000-0000-000000000094', 'Home three', '2026-01-03', true),
     (9000095, s, '00000000-0000-0000-0000-000000000094', 'Home four', '2026-01-04', true);
-  update private.billing set plants_to_remove = '{9000094}', remove_on = t + 30 where user_id = s;
   perform public.billing_charge_paid(o->>'reference', v_card);
   perform pg_temp.eq('resumed after Free', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = s),
-    '9000091:false,9000094:false,9000095:true');
+    '9000091:false,9000092:false,9000094:false,9000095:true');
   delete from public.plant_users where plant_id = 9000095;
-  perform pg_temp.eq('no longer booked', (select cardinality(plants_to_remove)::text || coalesce(remove_on::text, '-') from private.billing where user_id = s), '0-');
 
   -- a second card page paid after the first: kept for a refund, nothing applied
   update private.billing set plan = 'free', period = null, billing_day = null, next_billing_date = null where user_id = s;
@@ -1067,7 +1063,7 @@ create function pg_temp.week_ends(u uuid) returns timestamptz language sql as $$
 create function pg_temp.days_on(u uuid, d numeric) returns void language sql as $$
   update private.plant_week set started_at = started_at - d * interval '1 day'
    where plant_id in (select plant_id from public.plant_users where user_id = u);
-  update private.free_week_logins set started_at = started_at - d * interval '1 day' where user_id = u $$;
+  update private.free_week_logins set started_at = started_at - d * interval '1 day', written_at = written_at - d * interval '1 day' where user_id = u $$;
 do $$
 declare
   w1 uuid := '00000000-0000-0000-0000-000000000a01'; w2 uuid := '00000000-0000-0000-0000-000000000a02';
@@ -1200,21 +1196,25 @@ begin
   perform pg_temp.eq('paid: no email about a delete', (select count(*)::int from public.email_queue where kind = 'unpaid_deleted' and user_id in (w1, w2)), 1);
   perform pg_temp.eq('one login: capitals do not make a second', public.link_login_allowed(w1, 'W1@Login.Test'), true);
 
-  -- a failed card: 8 days, then 30 days of history with nothing read, then the pay screen
+  -- a failed card: 8 days, then the pay screen at once and nothing read; the history goes 30 days later (SOLAR-564)
   perform public.plant_users_upsert(w6, a6, pg_temp.rows(31));
   perform pg_temp.days_on(w6, 60);
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, past_due_since) values (w6, 'home', 'monthly', 1, t, 'past_due', t - 8);
   insert into public.agg_minute (plant_id, ts) values (9007731, extract(epoch from now() - interval '5 days')::bigint);
   perform private.billing_to_free(w6, t);
-  perform pg_temp.eq('failed card: history read for 30 days', pg_temp.as_user(w6, 'select string_agg(x::text, '','') from public.my_plant_ids() x'), '9007731');
-  perform pg_temp.eq('failed card: no wall in the 30 days', pg_temp.as_user(w6, 'select public.api_me()->>''wall'''), null);
+  perform pg_temp.eq('failed card: nothing read', pg_temp.as_user(w6, 'select string_agg(x::text, '','') from public.my_plant_ids() x'), null);
+  perform pg_temp.eq('failed card: the pay screen at once', pg_temp.as_user(w6, 'select public.api_me()->''wall'' is not null'), 'true');
   perform pg_temp.eq('failed card: not polled', (select count(*)::int from public.live_plants() x where x = 9007731), 0);
   perform private.unpaid_delete();
   perform pg_temp.eq('failed card: kept in the 30 days', (select count(*)::int from public.agg_minute where plant_id = 9007731), 1);
-  update private.billing set keep_until = t - 1, ended_at = now() - interval '31 days', remove_on = null, plants_to_remove = '{}', free_removals = '{}' where user_id = w6;
+  update private.billing set ended_at = now() - interval '31 days' where user_id = w6;
   perform pg_temp.eq('failed card: the pay screen after', pg_temp.as_user(w6, 'select public.api_me()->''wall''->>''paid'''), 'false');
   perform private.unpaid_delete();
   perform pg_temp.eq('failed card: gone after', (select count(*)::int from public.agg_minute where plant_id = 9007731), 0);
+  -- no free-week row (a login of more than 5 plants): the pay screen from the end of its paid time (SOLAR-564)
+  delete from private.free_week_logins where user_id = w6;
+  perform pg_temp.eq('no week row: the pay screen', pg_temp.as_user(w6, 'select public.api_me()->''wall'' is not null'), 'true');
+  perform pg_temp.eq('no week row: deleted 30 days after', (select private.unpaid_since(w6) < now() - interval '30 days'), true);
 end $$;
 select pg_temp.eq('plant week closed to users', has_table_privilege('authenticated', 'private.plant_week', 'select'), false);
 select pg_temp.eq('readable plants not for anon', has_function_privilege('anon', 'public.my_plant_ids()', 'execute'), false);
