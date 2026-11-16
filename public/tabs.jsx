@@ -3594,8 +3594,8 @@ const NOTIF_GROUPS = [
     ['monthly', 'Monthly'],
     ['yearly', 'Yearly']] },
 ];
-// Rows outside a group, shown open. reminders: every email that offers a plan, the one
-// its Unsubscribe link turns off (SOLAR-569).
+// Rows outside a group, shown open, and outside All. reminders: every email that offers a
+// plan, the one its Unsubscribe link turns off (SOLAR-569).
 const NOTIF_SINGLE = [['reminders', 'Offers and reminders', 'About your plan']];
 function NotificationsSection({ userId, head }) {
   const { useState, useEffect } = React;
@@ -3679,7 +3679,7 @@ function NotificationsSection({ userId, head }) {
           </div>
           <div className="notif-row">
             <span className="toggle-text"><span className="toggle-label">All</span></span>
-            {NOTIF_CHANNELS.map(ch => setCell(ch, ch.kinds, 'All'))}
+            {NOTIF_CHANNELS.map(ch => setCell(ch, NOTIF_GROUPS.flatMap(g => g.rows.map(([k]) => k)), 'All'))}
           </div>
           {NOTIF_GROUPS.map(g => (
             <div key={g.label} className="notif-group">

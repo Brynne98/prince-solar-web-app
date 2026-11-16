@@ -9,8 +9,9 @@
 -- Now:
 --   - The owner may read and set email_prefs.reminders, so the app shows it as a switch.
 --   - free_week_soon and winback sit behind 'reminders'.
---   - The day-7 row is a report_week with data.freeWeekEnds; it sits behind 'reminders',
---     not 'weekly'. private.email_switch_of() reads the row's data for that.
+--   - The day-7 row (report_week with data.freeWeekEnds) stays behind 'weekly': it is the
+--     week's report and says the readings stopped. Its offer part follows 'reminders':
+--     email_claim adds data.offer, and notify leaves the offer and the link out when false.
 --   - All of them carry the unsubscribe token, so notify can put the link in the footer.
 -- ============================================================================
 
@@ -32,15 +33,8 @@ returns text language sql immutable as $$
   end
 $$;
 
--- A queued row's switch: as email_switch, but the free week's day-7 report is an offer.
-create or replace function private.email_switch_of(p_kind text, p_data jsonb)
-returns text language sql immutable as $$
-  select case when p_kind = 'report_week' and p_data->>'freeWeekEnds' = 'true' then 'reminders'
-              else private.email_switch(p_kind) end
-$$;
-revoke all on function private.email_switch_of(text, jsonb) from public, anon, authenticated;
-
--- 0210's email_claim. Changed: the switch is email_switch_of(kind, data), worked out once.
+-- 0210's email_claim. Changed: the day-7 report carries data.offer, the owner's
+-- 'reminders' switch.
 create or replace function public.email_claim(p_limit int, p_peek boolean default false)
 returns table (id bigint, user_id uuid, to_email text, plant_id bigint, plant_name text, tz text,
                kind text, key text, data jsonb, tries int, switch text, unsub_token uuid, batch_key text)
@@ -55,9 +49,9 @@ begin
      where q.status = 'sending' and q.claimed_at < now() - interval '10 minutes';
   end if;
 
-  create temp table if not exists _claim (id bigint primary key, skip text, sw text) on commit drop;
+  create temp table if not exists _claim (id bigint primary key, skip text) on commit drop;
   truncate _claim;
-  insert into _claim (id, skip, sw)
+  insert into _claim (id, skip)
   select q.id,
          case
            when sw is not null and q.user_id is not null and not public.email_wanted(q.user_id, sw) then 'switched off'
@@ -73,9 +67,8 @@ begin
                   select 1 from public.email_queue d where d.user_id is not distinct from q.user_id and d.key = q.pair_key
                      and d.status in ('sent', 'sending', 'queued'))
              then 'down not sent'
-         end,
-         sw
-    from (select q0.*, private.email_switch_of(q0.kind, q0.data) as sw
+         end
+    from (select q0.*, private.email_switch(q0.kind) as sw
             from public.email_queue q0
            where q0.status = 'queued' and q0.due_at <= now()
              -- a "back" waits while its "down" is still on its way
@@ -100,9 +93,12 @@ begin
          case when q.plant_id is not null then public.plant_tz(q.plant_id) else 'Africa/Johannesburg' end,
          q.kind, q.key,
          case when q.kind = 'need_a_hand' and exists (select 1 from private.sunsynk_accounts a where a.user_id = q.user_id)
-              then coalesce(q.data, '{}'::jsonb) || '{"choose": true}'::jsonb else q.data end,
-         q.tries, c.sw,
-         case when c.sw is not null and q.user_id is not null and not p_peek
+                then coalesce(q.data, '{}'::jsonb) || '{"choose": true}'::jsonb
+              when q.kind = 'report_week' and q.data->>'freeWeekEnds' = 'true' and q.user_id is not null
+                then q.data || jsonb_build_object('offer', public.email_wanted(q.user_id, 'reminders'))
+              else q.data end,
+         q.tries, private.email_switch(q.kind),
+         case when private.email_switch(q.kind) is not null and q.user_id is not null and not p_peek
               then public.email_unsub_token(q.user_id) end,
          q.batch_key
     from _claim c

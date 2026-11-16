@@ -300,8 +300,8 @@ type Row = {
   batch_key: string | null;
 };
 
-// The unsubscribe page for a row behind a switch (email_claim's switch and token, SOLAR-569).
-const unsubOf = (r: Row) => `${APP}/unsubscribe.html?t=${r.unsub_token ?? ""}&k=${r.switch ?? ""}`;
+// The page that turns offers and reminders off, by email_claim's token (SOLAR-569).
+const unsubOf = (r: Row) => `${APP}/unsubscribe.html?t=${r.unsub_token ?? ""}&k=reminders`;
 
 /** The email for one queued row; null = nothing to say (an empty report), skip it. */
 async function build(r: Row): Promise<Email | null> {
@@ -357,8 +357,10 @@ async function build(r: Row): Promise<Email | null> {
       // The free week's day-7 report (0114) says the week has ended (SOLAR-475).
       if (!free) return rep && report(rep);
       const fw = await pickedPlan(d.plants, r.user_id);
-      // No readings in the free week: the notice still goes, without the report.
-      return rep ? report({ ...rep, freeWeekEnds: fw, unsub: unsubOf(r) }) : freeWeekEnded(fw, unsubOf(r));
+      // No readings in the free week: the notice still goes, without the report. Offers
+      // switched off (data.offer false, 0213): no plan and no link.
+      const end = { price: fw, unsub: d.offer === false ? null : unsubOf(r) };
+      return rep ? report({ ...rep, freeWeekEnds: end }) : freeWeekEnded(end);
     }
     case "free_week_soon":
       return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: tz }).replace(/\bSept\b/, "Sep"),
