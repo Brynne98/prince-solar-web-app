@@ -246,6 +246,29 @@ for (const f of jsx) {
   }
 }
 
+// ---- 2i. every email switch is in the app (SOLAR-569) ----
+// An Unsubscribe link turns a switch off; the app must be able to turn it back on. Every
+// switch the newest private.email_switch (migrations) or notify's unsubscribe link names
+// must be in EMAIL_KINDS (data.jsx) and have a row in tabs.jsx. The link is written once,
+// in email.ts's OFFER_FOOTER.
+{
+  const MIG = path.join(PUB, '..', 'supabase', 'migrations');
+  const last = fs.readdirSync(MIG).filter(f => f.endsWith('.sql')).sort().reverse()
+    .find(f => /function private\.email_switch\(p_kind text\)/.test(fs.readFileSync(path.join(MIG, f), 'utf8')));
+  const body = fs.readFileSync(path.join(MIG, last), 'utf8').split(/function private\.email_switch\(p_kind text\)/)[1].split('$$;')[0];
+  const switches = new Set([...body.matchAll(/then '([a-z]+)'/g)].map(m => m[1]));
+  const notify = fs.readFileSync(path.join(PUB, '..', 'supabase', 'functions', 'notify', 'index.ts'), 'utf8');
+  for (const m of notify.matchAll(/unsubscribe\.html\?[^`"]*&k=([a-z]+)/g)) switches.add(m[1]);
+  const kinds = (read('data.jsx').match(/const EMAIL_KINDS = \[([^\]]*)\]/) || ['', ''])[1];
+  const tabs = read('tabs.jsx');
+  for (const s of switches) {
+    if (!kinds.includes(`'${s}'`)) problems.push(`email switch '${s}' (${last}) is not in EMAIL_KINDS (data.jsx): the app can't turn it back on`);
+    if (!tabs.includes(`['${s}', '`)) problems.push(`email switch '${s}' (${last}) has no row in Notifications (tabs.jsx)`);
+  }
+  const links = (mail.match(/Unsubscribe<\/a>/g) || []).length;
+  if (links !== 1) problems.push(`email.ts has ${links} Unsubscribe links: write it once, in OFFER_FOOTER`);
+}
+
 // ---- 3. one global scope ----
 const seen = new Map();
 for (const f of jsx) {

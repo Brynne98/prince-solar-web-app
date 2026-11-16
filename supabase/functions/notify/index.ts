@@ -300,6 +300,9 @@ type Row = {
   batch_key: string | null;
 };
 
+// The unsubscribe page for a row behind a switch (email_claim's switch and token, SOLAR-569).
+const unsubOf = (r: Row) => `${APP}/unsubscribe.html?t=${r.unsub_token ?? ""}&k=${r.switch ?? ""}`;
+
 /** The email for one queued row; null = nothing to say (an empty report), skip it. */
 async function build(r: Row): Promise<Email | null> {
   const d = r.data, tz = r.tz;
@@ -355,14 +358,14 @@ async function build(r: Row): Promise<Email | null> {
       if (!free) return rep && report(rep);
       const fw = await pickedPlan(d.plants, r.user_id);
       // No readings in the free week: the notice still goes, without the report.
-      return rep ? report({ ...rep, freeWeekEnds: fw }) : freeWeekEnded(fw);
+      return rep ? report({ ...rep, freeWeekEnds: fw, unsub: unsubOf(r) }) : freeWeekEnded(fw, unsubOf(r));
     }
     case "free_week_soon":
       return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: tz }).replace(/\bSept\b/, "Sep"),
-        await pickedPlan(d.plants, r.user_id));
+        await pickedPlan(d.plants, r.user_id), unsubOf(r));
     case "unpaid_reminder": case "unpaid_last": case "unpaid_deleted": {
       const u = { price: await pickedPlan(d.plants, r.user_id), paid: d.paid === true,
-        unsub: `${APP}/unsubscribe.html?t=${r.unsub_token ?? ""}&k=reminders` };
+        unsub: unsubOf(r) };
       if (r.kind === "unpaid_deleted") return unpaidDeleted(u);
       const k = { ...u, since: dayMonth(local(tz, new Date(d.since * 1000)).date), deleteOn: dayMonth(local(tz, new Date(d.deleteAt * 1000)).date) };
       return r.kind === "unpaid_reminder" ? unpaidReminder(k) : unpaidLast(k);
@@ -450,7 +453,7 @@ async function build(r: Row): Promise<Email | null> {
     case "winback": {
       const h = await historyAt(r.user_id, r.plant_id);
       return winback({ from: d.from, plant: h?.plant, days: d.days ?? h?.days, price: await priceOf(d.from, r.user_id),
-        deleteOn: d.deleteOn ? dayMonth(d.deleteOn) : undefined });
+        deleteOn: d.deleteOn ? dayMonth(d.deleteOn) : undefined, unsub: unsubOf(r) });
     }
     case "bill_cancel_soon":
       return cancelEndsSoon({ from: d.from, on: day(d.on), days: (await historyAt(r.user_id))?.days, deleteOn: dayMonth(addDays(d.on, 30)) });
@@ -740,7 +743,7 @@ async function renderAll(plantId: number, today?: string) {
   out["share-readings-back"] = loginEvent({ kind: "share_back", plants: [p.name], since: hhmm(now - 7500, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
   // The free week's two emails (0122); steps are a sample.
   out["free-week-setup"] = freeWeekSetup(["size", "reserve", "panels"]);
-  out["free-week-ends-soon"] = freeWeekEndsSoon("Monday 10 Nov", await priceOf("home", null));
+  out["free-week-ends-soon"] = freeWeekEndsSoon("Monday 10 Nov", await priceOf("home", null), `${APP}/unsubscribe.html?t=&k=reminders`);
   return out;
 }
 

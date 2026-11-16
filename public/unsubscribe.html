@@ -4,9 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Unsubscribe · Prince Solar Hub</title>
-<!-- The Unsubscribe link in the two emails to an account with no plan (SOLAR-552). The
+<!-- The Unsubscribe link in every email that offers a plan (SOLAR-552, SOLAR-569). The
      button posts the email's token to the unsubscribe function; opening the page changes
-     nothing, because mail scanners open links on their own. No sign-in. -->
+     nothing, because mail scanners open links on their own. No sign-in. After it, a link
+     to the app's switch ("Offers and reminders"), which turns them back on. -->
 <meta name="robots" content="noindex" />
 <meta name="theme-color" content="#0a0d12" />
 <link rel="icon" type="image/svg+xml" href="/icon.svg" />
@@ -21,14 +22,16 @@ h1{font-size:22px;line-height:1.25;margin-bottom:8px}
 p{color:var(--mute);margin-bottom:20px}
 button{font:600 16px/1 inherit;padding:14px 22px;border:0;border-radius:12px;background:var(--accent);color:var(--on-accent);cursor:pointer}
 button:disabled{opacity:.6;cursor:default}
+a{color:var(--accent);font-weight:600}
 :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 </style>
 </head>
 <body>
 <main>
   <h1 id="title">Stop these emails?</h1>
-  <p id="text">The reminders about your plan and your history.</p>
+  <p id="text">Offers and reminders about your plan.</p>
   <button id="go" type="button">Unsubscribe</button>
+  <a id="back" href="/?tab=account&amp;section=notifications" hidden>Turn them back on in the app</a>
 </main>
 <script src="/config.js"></script>
 <script src="/unsubscribe.js"></script>

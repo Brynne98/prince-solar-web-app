@@ -484,6 +484,7 @@ export type Report = {
   // The report sent when the free week ends (SOLAR-208): the plan that holds the
   // account's plants, at its price (SOLAR-559).
   freeWeekEnds?: Price;
+  unsub?: string; // with freeWeekEnds: the page that turns offers and reminders off (SOLAR-569)
   partialFrom?: string; // first day counted, when after the period starts: "20 Oct" (SOLAR-273)
   partialWhy?: "added" | "history"; // the plant was added then (SOLAR-305), or its history starts then
 };
@@ -528,7 +529,7 @@ export function report(r: Report): Email {
     const avg = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 0;
     parts.push({ chart: { title: r.period === "year" ? "Solar each month" : "Solar each day", side: `Average ${kwh(avg).join(" ")} a ${r.period === "year" ? "month" : "day"}`, bars: r.daily, facts } });
   } else if (facts.length) parts.push({ facts: facts.map((f) => ({ label: f.label, value: `${f.sub ? esc(f.sub) + " · " : ""}${f.value}${f.unit ? " " + f.unit : ""}` })) });
-  if (fw) return freeWeekMail(parts);
+  if (fw) return freeWeekMail(parts, r.unsub ?? "");
   parts.push({ button: openPage("live", r.plantId) });
   return make(`${EVERY[r.period]} solar report for ${r.plant}: ${r.label}`, {
     title: r.label,
@@ -546,8 +547,12 @@ const freeWeekEndedParts = (price: Price): Part[] => [
   { pair: [`Upgrade to ${PLAN_NAME[price.plan]}`, "Readings carry on."] },
   ...startPlan(price),
 ];
-const freeWeekMail = (parts: Part[]) => make("Your free week has ended", { title: "Your free week has ended", parts, footer: [HELP] });
-export const freeWeekEnded = (price: Price) => freeWeekMail(freeWeekEndedParts(price));
+const freeWeekMail = (parts: Part[], unsub: string) => make("Your free week has ended",
+  { title: "Your free week has ended", parts, footer: OFFER_FOOTER("your free week ended", unsub) });
+export const freeWeekEnded = (price: Price, unsub: string) => freeWeekMail(freeWeekEndedParts(price), unsub);
+// Every email that offers a plan says why it came and links the page that turns the
+// 'reminders' switch off ("Offers and reminders" in the app, SOLAR-569; POPIA s69(4)).
+const OFFER_FOOTER = (why: string, unsub: string) => [`You get this because ${why}. <a href="${unsub}">Unsubscribe</a>.`, HELP];
 
 // ---------------------------------------------------------------- plant events
 
@@ -1094,7 +1099,7 @@ export const movedToFree = (m: MovedToFree) => {
 
 // Once, when a cancelled plan ends on its date (SOLAR-328, 0144). History is deleted 30
 // days later (SOLAR-552, 0206). days: history the first plant held, counted when queued.
-export const winback = (w: { from: Plan; plant?: string; days?: number; price?: Price; deleteOn?: string }) =>
+export const winback = (w: { from: Plan; plant?: string; days?: number; price?: Price; deleteOn?: string; unsub: string }) =>
   make(`Your ${PLAN_NAME[w.from]} plan has ended`, {
     title: `Your ${PLAN_NAME[w.from]} plan has ended`,
     parts: [
@@ -1106,7 +1111,7 @@ export const winback = (w: { from: Plan; plant?: string; days?: number; price?: 
       { button: { label: "See plans", href: PLANS } },
       ...(w.price ? [{ small: keepSmall(w.price) }] : []),
     ],
-    footer: [HELP],
+    footer: OFFER_FOOTER("your plan ended", w.unsub),
   });
 
 // Up to 3 days before a cancelled plan ends (SOLAR-495, 0188), laid out as the free week's
@@ -1163,7 +1168,7 @@ const startPlan = (p: Price): Part[] => {
 
 // Two days before the free week ends (SOLAR-242): when it stops. The delete is not
 // named here. endsOn: "Monday 10 Nov".
-export const freeWeekEndsSoon = (endsOn: string, price: Price) => {
+export const freeWeekEndsSoon = (endsOn: string, price: Price, unsub: string) => {
   const wd = endsOn.split(" ")[0], title = `Your free week ends on ${wd}`;
   return make(title, {
     title,
@@ -1172,20 +1177,20 @@ export const freeWeekEndsSoon = (endsOn: string, price: Price) => {
       { pair: [`Upgrade to ${PLAN_NAME[price.plan]}`, `Do it before ${wd} and nothing stops.`] },
       ...startPlan(price),
     ],
-    footer: [HELP],
+    footer: OFFER_FOOTER("your free week ends soon", unsub),
   });
 };
 
 // An account with no plan (SOLAR-552, SOLAR-559): 14 days after its free week or its paid
 // time ended (0206), 3 days before the history is deleted, and once after the delete ran
 // (0207). since: the day the reading stopped. price: the plan that holds the plants it
-// ticked. paid: it had a plan. unsub: the page that turns the three emails off.
+// ticked. paid: it had a plan. unsub: the page that turns offers and reminders off.
 export type Unpaid = { price: Price; paid?: boolean; unsub: string };
 export type UnpaidKept = Unpaid & { since: string; deleteOn: string };
 const unpaidMail = (title: string, u: Unpaid, pairs: [string, string][]) => make(title, {
   title,
   parts: [...pairs.map((pair) => ({ pair })), ...startPlan(u.price)],
-  footer: [`You get this because your ${u.paid ? "plan" : "free week"} ended. <a href="${u.unsub}">Unsubscribe</a>.`, HELP],
+  footer: OFFER_FOOTER(`your ${u.paid ? "plan" : "free week"} ended`, u.unsub),
 });
 const start = (u: Unpaid) => `Upgrade to ${PLAN_NAME[u.price.plan]}`;
 export const unpaidReminder = (u: UnpaidKept) => unpaidMail("Your solar data is still here", u, [

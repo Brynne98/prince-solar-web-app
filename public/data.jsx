@@ -400,8 +400,9 @@ async function saveFlag(table, event, userId, kind, on) {
   await must(window.sb.from(table).upsert({ user_id: userId, [kind]: on }));
   window.track(event, { kind, on });
 }
-// Which report and alert emails the user wants (0091, SOLAR-158).
-const EMAIL_KINDS = ['weekly', 'monthly', 'yearly', 'grid', 'battery', 'panels', 'readings', 'sunsynk'];
+// Which report and alert emails the user wants (0091, SOLAR-158), and the emails that offer
+// a plan (reminders, 0211, SOLAR-569).
+const EMAIL_KINDS = ['weekly', 'monthly', 'yearly', 'grid', 'battery', 'panels', 'readings', 'sunsynk', 'reminders'];
 const fetchEmailPrefs = (userId) => fetchFlags('email_prefs', EMAIL_KINDS, userId);
 const saveEmailPref = (userId, kind, on) => saveFlag('email_prefs', 'email_pref_change_done', userId, kind, on);
 // The alerts of the last 30 days, {pinned, items, unread} (0124, SOLAR-244).
