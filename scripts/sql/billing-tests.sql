@@ -511,7 +511,7 @@ insert into public.plant_config (plant_id, tariff_import, has_battery, battery_k
   (9000075, 0, false, null, 20, 8), (9000076, 0, true, 10, 30, 8);
 insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
   values ('00000000-0000-0000-0000-000000000075', 'home', 'monthly', 1, '2026-12-01');
--- 73, 74 and 76 have no plan: day 2 of their free week, so their plants are read (0216)
+-- 73, 74 and 76 have no plan: day 2 of their free week, so their plants are read (0217)
 insert into private.plant_week (plant_id, started_at) select x, now() - interval '2 days 2 hours' from unnest(array[9000073, 9000074, 9000076]) x
   on conflict (plant_id) do update set started_at = excluded.started_at;
 insert into private.free_week_logins (sunsynk_username, user_id, started_at)
@@ -1138,7 +1138,7 @@ begin
   perform pg_temp.eq('used plant: the new account is at the pay screen', pg_temp.as_user(w3, 'select public.api_me()->''wall'' is not null'), 'true');
   perform pg_temp.eq('used plant: nothing read', pg_temp.as_user(w3, 'select count(*) from public.my_plant_ids()'), '0');
   perform pg_temp.eq('used plant: still not polled', (select count(*)::int from public.live_plants() x where x = 9007701), 0);
-  -- the plant's history is loaded: its email is queued at the link, and skipped when it is sent (0216, SOLAR-572)
+  -- the plant's history is loaded: its email is queued at the link, and skipped when it is sent (0217, SOLAR-572)
   perform pg_temp.eq('used plant: history email queued', (select count(*)::int from public.email_queue where kind = 'history' and user_id = w3), 1);
   perform pg_temp.eq('used plant: history email not sent', (select count(*)::int from public.email_claim(100000, true) c where c.kind = 'history' and c.user_id = w3), 0);
   -- skipped, then the history loads again (a payment's 60-day fetch): the row is queued again
@@ -1156,7 +1156,7 @@ begin
   perform pg_temp.eq('join on day 3: 4 days left', pg_temp.week_ends(w5) between now() + interval '3 days 23 hours' and now() + interval '4 days 1 hour', true);
   perform pg_temp.eq('join on day 3: reads the plant', pg_temp.as_user(w5, 'select string_agg(x::text, '','') from public.my_plant_ids() x'), '9007721');
   perform pg_temp.eq('join on day 3: history email sent', (select count(*)::int from public.email_claim(100000, true) c where c.kind = 'history' and c.user_id = w5), 1);
-  -- day 2 setup email: to the account that reads its plant, not to the one at the pay screen (0216)
+  -- day 2 setup email: to the account that reads its plant, not to the one at the pay screen (0217)
   update public.plant_users set linked_at = now() - interval '2 days 1 hour' where user_id in (w3, w5);
   perform private.free_week_mail();
   perform pg_temp.eq('setup email: only where the plant is read',
@@ -1239,7 +1239,7 @@ begin
   delete from private.free_week_logins where user_id = w6;
   perform pg_temp.eq('no week row: the pay screen', pg_temp.as_user(w6, 'select public.api_me()->''wall'' is not null'), 'true');
   perform pg_temp.eq('no week row: deleted 30 days after', (select private.unpaid_since(w6) < now() - interval '30 days'), true);
-  -- an account with no plan on a plant another account pays for: the reminder goes, 'deleted in 3 days' does not (0216)
+  -- an account with no plan on a plant another account pays for: the reminder goes, 'deleted in 3 days' does not (0217)
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date) values (w4, 'home', 'monthly', 1, t + 30);
   perform pg_temp.days_on(w5, 18.5);
   perform private.free_week_mail();

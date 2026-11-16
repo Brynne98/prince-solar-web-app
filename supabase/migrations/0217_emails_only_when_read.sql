@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0216 — three emails to an account that cannot read the plant (SOLAR-572).
+-- 0217 — three emails to an account that cannot read the plant (SOLAR-572).
 --
 -- Before:
 --   - history ("Your last 60 days are in") went to every account linked to a plant

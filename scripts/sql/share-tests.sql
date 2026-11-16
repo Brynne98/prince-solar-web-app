@@ -1,11 +1,16 @@
 -- Shared plant tests (SOLAR-310, 0172): claim, taken, share removed and back, takeover,
--- Account listing and removal. Needs the local database at the latest migration and the
--- local seed users. Runs inside one transaction, then rolls it all back.
+-- Account listing and removal. Needs the local database at the latest migration. Makes its
+-- own three users when the local seed users are not there. Runs inside one transaction,
+-- then rolls it all back.
 --   psql "$DB_URL" -v ON_ERROR_STOP=1 -f scripts/sql/share-tests.sql
 -- Exit code decides: any wrong case raises.
 \set ON_ERROR_STOP 1
 begin;
 create temp table t(step text, got text, want text);
+insert into auth.users (id, email) values
+  ('5def03da-7ce5-4626-a836-d2d711f8831a', 'share-a@t.test'), ('259a4d2e-ab10-4571-8004-5cec4fa07781', 'share-b@t.test'),
+  ('bc4ef05b-7dec-48f9-9606-1dc6067b2876', 'share-co@t.test')
+on conflict (id) do nothing;
 do $$
 declare
   a uuid := '5def03da-7ce5-4626-a836-d2d711f8831a';  -- export@
@@ -43,7 +48,8 @@ begin
   -- B sees it in api_link_status, as the share kind, without the company user's other rows
   perform set_config('request.jwt.claims', json_build_object('sub', b, 'role', 'authenticated')::text, true);
   insert into t values ('B link status kind', (select kind from public.api_link_status() where account_id = acc), 'share');
-  insert into t values ('B link status plants', (select jsonb_array_length(plants)::text from public.api_link_status() where account_id = acc), '1');
+  insert into t values ('B link status plants', (select jsonb_array_length(plants)::text from public.api_link_status() where account_id = acc),
+    (select count(*)::text from public.plant_users where user_id = b and account_id = acc));  -- 2 when B also got plant 5001 above
   j := public.api_link_remove(acc);
   insert into t values ('B removed', (select count(*)::text from public.plant_users where plant_id = x), '0');
   insert into t values ('share login kept', (select count(*)::text from private.sunsynk_accounts where id = acc), '1');
