@@ -2890,6 +2890,7 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
     return (
       <label key={p.plant_id} className={'login-plant keep-row' + (ticked ? '' : ' off')}>
         <span className="conn-user plant-nm">{name}</span>
+        {plan === 'free' && p.week_used && <span className="keep-tag">Free week used</span>}
         <input type="checkbox" checked={ticked} aria-label={'Run ' + name} onChange={() => tick(p.plant_id)} />{/* reuse-check: allow: tick boxes, not switches, as the keep pick (SOLAR-486) */}
       </label>
     );
@@ -2902,8 +2903,9 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
   return (
     <ConfirmCard modal danger={out.length > 0} label="Choose plants" title="Choose plants" busy={busy}
       action={out.length ? 'Change plant' : 'Save'} onConfirm={() => (added.length ? save() : !out.length && onCancel())} onCancel={onCancel}>
-      <div className="keep-pick">
-        {!free && <div className="confirm-text keep-ask">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}.</div>}
+      {/* pick-steady: the line under the rows keeps two lines' height, so the pop-up does not jump (SOLAR-572) */}
+      <div className="keep-pick pick-steady">
+        {!free && <div className="confirm-text keep-ask">{plan === 'free' ? `Choose up to ${room} plants.` : `${PLAN_NAME[plan]} runs ${room === 1 ? '1 plant' : room + ' plants'}.`}</div>}
         {logins.map(acc => (
           <div key={acc.account_id} className="login-grp plant-logins">
             <div className="login-line"><div className="login-who"><span className="login-email">{acc.kind === 'share' ? 'Shared plants' : acc.sunsynk_username}</span></div></div>
@@ -2916,12 +2918,12 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
             {away.map(row)}
           </div>
         )}
-        {say === 'full' ? <div className="field-note keep-count warn">{PLAN_NAME[plan]} runs {room === 1 ? '1 plant' : room + ' plants'}.{plan !== 'free' && <> Untick one first{more && !top ? <>, or {more} for more plants</> : ''}.</>}{top && <> {more}</>}</div>
+        {say === 'full' ? <div className="field-note keep-count warn">{plan === 'free' ? `Up to ${room} plants.` : `${PLAN_NAME[plan]} runs ${room === 1 ? '1 plant' : room + ' plants'}.`}{plan !== 'free' && <> Untick one first{more && !top ? <>, or {more} for more plants</> : ''}.</>}{top && <> {more}</>}</div>
           : say === 'fixed' ? <div className="field-note keep-count warn">Plants can’t be changed in the free week.</div>
           : say === 'date' ? <div className="field-note keep-count warn">You can change a plant again on {longDay(picks.change_on)}.</div>
           : say === 'one' ? <div className="field-note keep-count warn">One change every 90 days. Tick {nameOf(out[0])} again first.</div>
           : out.length ? <div className="field-note keep-count warn">{added.length ? `${nameOf(out[0])}’s history is deleted straight away and can’t be brought back. You can change again in 90 days.` : `Tick the plant to run in place of ${nameOf(out[0])}.`}</div>
-          : !free && <div className="field-note keep-count">{on.length} of {room} ticked.{added.length > 0 && ' After this you can change one plant every 90 days.'}</div>}
+          : !free && <div className="field-note keep-count">{on.length} of {room} ticked.{added.length > 0 && (plan === 'free' ? ' They can’t be changed in the free week.' : ' After this you can change one plant every 90 days.')}</div>}
       </div>
     </ConfirmCard>
   );

@@ -1082,7 +1082,7 @@ export const movedToFree = (m: MovedToFree) => {
     parts: [
       { pair: ["The app has stopped",
         `We couldn't take ${m.amount != null ? white(rand(m.amount)) : "the payment"} for your ${plan} plan, so readings and alerts stopped today.`] },
-      { pair: [`Your history is kept until ${m.deleteOn}`, `After that, we delete it for all ${white(plantCount(m.price.plants ?? 1))}.`] },
+      { pair: [`Your history is kept until ${m.deleteOn}`, (m.price.plants ?? 1) > 1 ? `After that, we delete it for all ${white(plantCount(m.price.plants!))}.` : "After that, we delete it."] },
       { pair: [`Pay for ${pay} to carry on`, "Readings start again, with the days you missed filled in."] },
       { lead: `${pay} is ${white(`${rand(m.price.now)} a month`)}. Cancel any time.` },
       { button: { label: `Pay for ${pay}`, href: PLANS } },
