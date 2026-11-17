@@ -478,8 +478,8 @@ function notifDay(day) {
 
 // Billing notices (SOLAR-212): the facts api_notifications pins (0148), in the emails'
 // words (_shared/email.ts). They stay at the top of the list until their state ends.
-// A failed payment and plants about to go are a card on every page too (NoticeCard,
-// SOLAR-384); only the second can be closed. bodyShort is the card's line on a phone.
+// A failed payment and plants about to go are a card on Live too (NoticeCard,
+// SOLAR-384, SOLAR-577); only the second can be closed. bodyShort is the card's line on a phone.
 // act: { plan, plans, undo } from App.
 // links: the logins, for the plants a booked change keeps and deletes (SOLAR-505).
 // The free week's price line, in the free-week emails' words (startPlan in _shared/email.ts,
@@ -496,7 +496,7 @@ function weekOffer(b, n) {
   return now == null ? null : weekLine(plan, now, b.listPrices?.monthly?.[plan], n > 1);
 }
 // Days 1 to 4 of the free week: a card on Live with the date and the price (SOLAR-553). Days 5
-// to 7 the free_week_soon notice takes over, on every page. endsAt: api_me's freeWeekEndsAt.
+// to 7 the free_week_soon notice takes over. endsAt: api_me's freeWeekEndsAt.
 function weekCard(endsAt, b, n, plans) {
   const o = weekOffer(b, n);
   if (!endsAt || !o || b.plan !== 'free' || b.comped || Date.parse(endsAt) - Date.now() <= 2 * 864e5) return null;
@@ -534,8 +534,8 @@ function billNotice(n, act, links, week) {
     }
     case 'bill_change': {
       const cancel = n.nextPlan === 'free', on = billDay(n.on);
-      // what it deletes, as Billing's Plan card says it; in the last 3 days a banner on every
-      // page, as the email of those days (SOLAR-505)
+      // what it deletes, as Billing's Plan card says it; in the last 3 days a card on Live,
+      // as the email of those days (SOLAR-505, SOLAR-577)
       const loss = n.nextPlan ? window.billingFmt.lossLine(links, cancel) : '';
       const soon = !!loss && Date.parse(n.on) - Date.now() <= 3 * 864e5;
       return { banner: soon, tone: soon ? 'warn' : undefined, icon: 'calendar', title: cancel ? `${plan} ends on ${on}` : n.nextPlan ? `You move to ${PLAN_NAME[n.nextPlan]} on ${on}`
@@ -550,7 +550,7 @@ function billNotice(n, act, links, week) {
       button: 'Go to cancel plan', run: act.cancel };
     case 'free_week_soon': {
       const day = new Date(n.endsAt).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Africa/Johannesburg' });
-      // days 5 to 7: a card on every page but Billing and plans, not only the bell (SOLAR-553).
+      // days 5 to 7: a card on Live, not only the bell (SOLAR-553, SOLAR-577).
       // The plan for the plants added, at the account's offer; Home from the notice until Billing's prices load.
       const o = (week && weekOffer(week.b, week.n)) || weekLine('home', n.perMonth, n.list, false);
       return { banner: true, tone: 'warn', icon: 'clock', title: `Your free week ends on ${day}`, short: `Free week ends ${day}`,
@@ -580,10 +580,9 @@ function NoticeCard({ tone, title, short, body, bodyShort, button, onClick, onCl
 }
 window.NoticeCard = NoticeCard;
 
-// The billing cards above every page (SOLAR-212). A card's close is kept on this device,
-// for that one deletion date.
+// The billing cards, at the top of Live only (SOLAR-212, SOLAR-577); the bell lists them on every
+// page. A card's close is kept on this device, for that one deletion date.
 const NOTICE_CLOSED = 'synsynk.noticeClosed';
-// tab: Billing and plans already say when the free week ends, so its cards stay off them (SOLAR-553).
 const WEEK_CARDS = { free_week_price: 'price', free_week_soon: 'ends_soon' };
 const weekCardsSeen = new Set();
 function BillCards({ notices, tab }) {
@@ -593,8 +592,7 @@ function BillCards({ notices, tab }) {
     try { localStorage.setItem(NOTICE_CLOSED, n.closable); } catch (e) { /* private mode: closed until reload */ }
     setClosed(n.closable);
   };
-  const shown = notices.filter(n => n.banner && (!n.closable || n.closable !== closed)
-    && !(WEEK_CARDS[n.kind] && (tab === 'billing' || tab === 'plans')));
+  const shown = tab !== 'live' ? [] : notices.filter(n => n.banner && (!n.closable || n.closable !== closed));
   // once a session for each free-week card
   useEffect(() => { shown.forEach(n => { if (WEEK_CARDS[n.kind] && !weekCardsSeen.has(n.kind)) {
     weekCardsSeen.add(n.kind); window.track('free_week_card_shown', { stage: WEEK_CARDS[n.kind] }); } }); });
@@ -1607,7 +1605,10 @@ function App({ links }) {
   // Back from Paystack's card page without paying, on a page outside Settings (which checks it itself).
   useEffect(() => { if (!isSettings(tab)) window.billingReturn(); }, []);
 
-  const loadNotifs = useCallback(() => { window.fetchNotifications().then(setNotifs).catch(() => {}); }, []);
+  // notifsTried: the first answer (or failure) is in. Live draws nothing below the header until
+  // then, so its cards are there on the first frame and don't push the page down (SOLAR-577).
+  const [notifsTried, setNotifsTried] = useState(false);
+  const loadNotifs = useCallback(() => { window.fetchNotifications().then(setNotifs).catch(() => {}).finally(() => setNotifsTried(true)); }, []);
   // ?day= and ?opened= (a pop-up's tap) are read once, then leave the address, as ?section= does.
   useEffect(() => {
     const url = new URL(location.href);
@@ -1904,7 +1905,7 @@ function App({ links }) {
     ? <window.PlantSettings key="system" me={me} plantId={plantId} onSaved={reloadPlantConfig}
         flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />
     : <window.SettingsArea key="settings" page={tab} onPage={(p, section) => (section ? openSettings(section) : go(p))}
-        me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} links={links} payBanner={notices.some(n => n.kind === 'bill_failed')}
+        me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} links={links}
         flash={flashSection} onFlashed={() => setFlashSection(null)} />;
   const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);
 
@@ -1913,7 +1914,7 @@ function App({ links }) {
   // The whole frame with skeletons where the data will go. Pages stay live while loading:
   // there is no reason to trap someone on Live because the first snapshot hasn't landed.
   const dataPage = !isSettings(tab) && tab !== 'system' && tab !== 'alerts';
-  if (!snap) {
+  if (!snap || (tab === 'live' && !notifsTried)) {
     return (
       <Frame tabs={TABS} tab={tab} onTab={go} account={account} busy steps={steps}
         head={<>{(me?.plants || []).length > 0 && !err ? plantMenu : <PlantMenu fallback={err ? 'Connection error' : 'Connecting to SunSynk…'} />}
@@ -1924,7 +1925,7 @@ function App({ links }) {
             it (the Plan section flashed back to its outline). */}
         <div className="page">
           {!dataPage && (tab === 'alerts' ? alertsPage : settingsPage)}
-          {dataPage && <window.TabSkeleton tab={tab} cfg={(me?.plants || []).find(p => p.id === plantId)?.config} />}
+          {dataPage && (tab !== 'live' || notifsTried) && <window.TabSkeleton tab={tab} cfg={(me?.plants || []).find(p => p.id === plantId)?.config} />}
         </div>
       </Frame>
     );
