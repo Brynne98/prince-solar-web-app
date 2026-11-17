@@ -1197,12 +1197,16 @@ const URL_SECTION = { logins: 'connection', notifications: 'notifications', plan
 // page is 'inverters'; a hand-typed ?tab=equipment opens it too.
 const TAB_ALIAS = { battery: 'inverters', equipment: 'inverters', settings: 'system' };
 const tabAlias = (id) => TAB_ALIAS[id] || id;
-// The page to open: Account for a password reset, else the address's, else the one last shown here.
+// The page to open: Account for a password reset, else the page holding an email's ?section=,
+// else the address's, else the one last shown here. Opening the section's page from the first
+// frame means no jump from ?tab= to it once the account loads (SOLAR-576).
 // ok says which pages this screen has; anything else (none, or a key the app doesn't know) opens Live.
 const TAB_KEY = 'synsynk.tab';
 const savedTab = (ok) => {
+  const q = new URLSearchParams(location.search), sectionPage = SECTION_PAGE[URL_SECTION[q.get('section')]];
   const t = window.resetAsked() ? 'account'
-    : tabAlias(new URLSearchParams(location.search).get('tab') || localStorage.getItem(TAB_KEY) || '');
+    : sectionPage && ok(sectionPage) ? sectionPage
+    : tabAlias(q.get('tab') || localStorage.getItem(TAB_KEY) || '');
   return ok(t) ? t : 'live';
 };
 // Remembers the page, and puts it (and the plant) in the address, so a reload opens them.
