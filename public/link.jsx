@@ -415,41 +415,57 @@ window.changeCard = async function changeCard() {
   }
 };
 
+// The card-page payment to check on this page load: back from Paystack (?reference=), or a
+// card page closed without paying (OPEN_REF). SignedIn waits for it before reading the
+// plan, the plants and the pay screen, so a paid one shows on this load, not after a
+// second (SOLAR-579). Once per page; null when there is none.
+let returnCheck = null;
+window.checkReturn = () => returnCheck || (returnCheck = (async () => {
+  const q = new URLSearchParams(location.search);
+  let open = null;
+  try { open = sessionStorage.getItem(OPEN_REF); sessionStorage.removeItem(OPEN_REF); } catch (e) {}
+  const ref = q.get('reference') || (!q.get('billing') && !q.get('pay') ? open : null);
+  return ref ? billingCall('verify', { reference: ref }).catch(() => ({ status: 'error' })) : null;
+})());
+const paidNow = () => {
+  window.toast('Payment received. Your plan is updated.');
+  // a bigger plan may have places open for locked plants: PickAfterPay asks which run (SOLAR-537)
+  window.pickAsked = true; window.dispatchEvent(new Event('ps-pick'));
+};
+
 // Once, when Account opens: back from Paystack's card page (?reference=), after a
 // payment (?billing=paid), or from the "Pay with another card" email (?pay=1). Also once
 // on any other page, for a card page closed without paying (OPEN_REF).
 window.billingReturn = async function billingReturn(billingStatus) {
   const q = new URLSearchParams(location.search);
   const done = q.get('billing'), pay = q.get('pay');
-  let ref = q.get('reference'), open = null;
-  try { open = sessionStorage.getItem(OPEN_REF); sessionStorage.removeItem(OPEN_REF); } catch (e) {}
-  const fromUrl = !!(ref || done || pay);
-  ref = ref || (!done && !pay ? open : null);
-  if (!ref && !done && !pay) return;
-  if (fromUrl) history.replaceState(null, '', planUrl());
+  const check = await window.checkReturn();
+  returnCheck = Promise.resolve(null);
+  if (!check && !done && !pay) return;
+  if (q.get('reference') || done || pay) history.replaceState(null, '', planUrl());
   if (pay) {
     if (billingStatus?.state === 'past_due') await window.settlePayment();
     return;
   }
-  if (done === 'paid') {
-    window.toast('Payment received. Your plan is updated.');
-    // a bigger plan may have places open for locked plants: PickAfterPay asks which run (SOLAR-537)
-    window.pickAsked = true; window.dispatchEvent(new Event('ps-pick'));
-    return;
-  }
+  if (done === 'paid') return paidNow();
   // The event a card-page payment was opened with: sent only if it was paid.
   let paidEvent = null;
   try { paidEvent = JSON.parse(sessionStorage.getItem(PAID_EVENT)); sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
   try {
-    const { status, kind } = await billingCall('verify', { reference: ref });
+    const { status, kind } = check;
+    if (status === 'error') throw new Error();
     // A card change changes no plan: the caller re-reads the card ('card').
     if (status === 'paid' && kind === 'card') {
       window.track('card_change_done');
       window.toast('Card changed. The R1 check goes back to your card.');
       return 'card';
     }
-    // A full reload: resumed plants join the plant list.
-    if (status === 'paid') { if (paidEvent) window.track(paidEvent.name, paidEvent.props); return billingPaid(null, kind === 'switch'); }
+    // Checked before this page read anything, so the new plan and resumed plants are on it.
+    if (status === 'paid') {
+      if (paidEvent) window.track(paidEvent.name, paidEvent.props);
+      if (kind !== 'switch') window.track('upgrade_done', {});
+      return paidNow();
+    }
     if (status === 'refund') return window.toast(REFUND_NOTE, { error: true });
     window.toast(status === 'failed' ? 'The payment didn’t go through. Nothing was charged.' : 'Your payment is still being checked. Look again in a minute.', status === 'failed' ? { error: true } : { info: true });
   } catch {
