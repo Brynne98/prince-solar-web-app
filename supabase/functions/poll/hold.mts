@@ -13,7 +13,10 @@
 // Plain TypeScript with no imports: the replay test runs it under Node.
 
 export const HOLD_GAP_W = 400;
-export const MAX_HOLD_RUN = 5;
+// One minute: a mixed read clears by the next full read, a real step does not. At 5 a
+// real step was held 5 minutes: 538820's geysers at 04:00 on 13-17 Nov, where the slave's
+// own loss at ~5 kW is ~550 W (SOLAR-551). Until SunSynk opens /inverter/{sn}/flow.
+export const MAX_HOLD_RUN = 1;
 const POWER = ["pv_w", "batt_w", "grid_w", "load_w"] as const;
 
 /** pv + grid − batt − load (batt + = charging, grid + = import); null when a figure is missing. */

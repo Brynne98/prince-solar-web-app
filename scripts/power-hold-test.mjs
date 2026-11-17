@@ -50,7 +50,7 @@ console.log(`power hold: ${today.n} minutes scored; off >400 W today ${today.off
   `longest hold ${held.longest} min; oldest figures ${today.oldest} min today, ${held.oldest} min with hold`);
 assert.equal(today.n, 668, 'minutes scored');
 assert.equal(today.off, 57, 'baseline matches score-recording.js');
-assert.ok(held.off <= 5, `with hold: ${held.off} minutes off, want <= 5`);
+assert.ok(held.off <= 9, `with hold: ${held.off} minutes off, want <= 9`);
 assert.ok(held.longest <= MAX_HOLD_RUN, `longest hold ${held.longest} min, want <= ${MAX_HOLD_RUN}`);
 // a hold is followed by a full read, never by carries of the held figures
 assert.ok(held.oldest <= MAX_HOLD_RUN + MAX_CARRIED_RUN - 1, `figures ${held.oldest} min old`);
@@ -70,4 +70,10 @@ r = { ...bad, ts: 3600 }; holdLastGood(r, good);
 assert.equal(r.held, null, 'no hold from a row older than the minute before');
 r = { ...bad, batt_w: 600 }; holdLastGood(r, { ...good, batt_w: 590, load_w: 790 });
 assert.equal(r.held, null, 'no hold on a steady loss near 400 W (no jump)');
+// a real step (538820 slave, geysers at 04:02 on 17 Nov): held one minute at most
+const before = { ts: 0, pv_w: 0, batt_w: -360, grid_w: 0, load_w: 300 };
+const step = (ts) => ({ ts, pv_w: 0, batt_w: -5328, grid_w: 0, load_w: 4771 });
+const m1 = step(60); holdLastGood(m1, before);
+const m2 = step(120); holdLastGood(m2, m1);
+assert.deepEqual([m1.held, m2.held, m2.load_w], [1, null, 4771], 'real step shows by the second minute');
 console.log('power hold: ok');
