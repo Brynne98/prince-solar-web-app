@@ -2396,8 +2396,7 @@ function CancelPlanDialog({ b, busy, onConfirm, onCancel }) {
   );
 }
 
-// payBanner: the failed-payment banner is on the page, so the card does not repeat it (SOLAR-505).
-function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links, payBanner }) {
+function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
   const { useState } = React;
   const [busy, setBusy] = useState(false);
   const [managing, setManaging] = useState(false);
@@ -2439,7 +2438,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links, payBann
     : weekEnds || freeWeekEndsAt === null ? 'Up to 5 plants, full history, alerts.' : 'Readings, alerts and reports have stopped.';
   // the date line; a booked change says its date in the notice instead, so it is said once
   const when = b.comped ? null
-    : b.state === 'past_due' ? (b.nextTry ? `We try your card again on ${longDay(b.nextTry)}.` : payBanner ? `Plan ends on ${longDay(b.freeOn)}.` : null)
+    : b.state === 'past_due' ? (b.nextTry ? `We try your card again on ${longDay(b.nextTry)}.` : null)
     : showBooked ? null
     : b.prepaidOn ? `Switches to yearly on ${longDay(b.nextDate)}. ${rand(b.nextAmount)} paid. Next payment ${longDay(yearOn(b.nextDate))}.`
     : paid ? `Renews on ${longDay(b.nextDate)}.`
@@ -2462,8 +2461,8 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links, payBann
           {paid && b.offer?.held && !ending && <> <span className="plan-offer-ln">{offerLine(b.offer, listPrice(b, b.plan, b.period, b.extraPlants || 0), b.period)}</span></>}</div>
         {when && <div className="plan-meta plan-when">{when}</div>}
         {waiting.length > 0 && <PlanNote tone="warn">{andList(waiting)} and all history are kept until {billDay(b.removeOn)}. {was ? `Pay for ${PLAN_NAME[was]} to keep them.` : 'Choose a plan to keep them.'}</PlanNote>}
-        {/* without the failed-payment banner on the page, the card says the deadline and pays */}
-        {b.state === 'past_due' && !payBanner && (
+        {/* the failed-payment card is on Live only, so here the plan says the deadline and pays (SOLAR-577) */}
+        {b.state === 'past_due' && (
           <PlanNote tone="bad" acts={<button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay</button>}>
             Pay before {billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.
           </PlanNote>
@@ -3744,7 +3743,7 @@ const SETTINGS_NAV = [['account', 'Account', 'Password, theme, your data'], ['no
 let billingSeen = null;
 let weekEndSeen;
 window.sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') { billingSeen = null; weekEndSeen = undefined; } });
-function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, flash, onFlashed, payBanner }) {
+function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, flash, onFlashed }) {
   const { useState, useEffect } = React;
   const [user, setUser] = useState(null);
   useEffect(() => { window.sb.auth.getSession().then(({ data }) => setUser(data?.session?.user || null)).catch(() => {}); }, []);
@@ -3799,7 +3798,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
               <SunSynkConnectionSection head onChanged={onPlantConfigSaved} links={links} billing={billing} reloadBilling={reloadBilling} onCollect={(id) => adjust('plants', id)} />
             </div>
           )}
-          {shown === 'billing' && <BillingPage payBanner={payBanner} billing={billing} reload={reloadPlan} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen}
+          {shown === 'billing' && <BillingPage billing={billing} reload={reloadPlan} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen}
                                               links={links} onAdjust={() => adjust('billing')} />}
           {/* Adjust plan opens over Billing or Plants, not as a page of its own (SOLAR-292) */}
           {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadPlan} onBack={() => { onPage(planFrom); setPlanFrom('billing'); }} forPlant={forPlant}
@@ -3863,12 +3862,12 @@ function AccountPage({ user, billing, plants, plantId, ready, onBilling }) {
 }
 
 // Billing: the money only. The plants and their logins have their own page (SOLAR-513).
-function BillingPage({ billing, reload, links, freeWeekEndsAt, onAdjust, payBanner }) {
+function BillingPage({ billing, reload, links, freeWeekEndsAt, onAdjust }) {
   React.useEffect(() => { if (billing) try { localStorage.setItem(BILL_SHAPE, JSON.stringify(shapeOf(billing))); } catch (e) {} }, [billing]);
   return (
     <div className="settings-page">
       <div className="page-head"><h1>Billing</h1></div>
-      <PlanSection billing={billing} reload={reload} onAdjust={onAdjust} freeWeekEndsAt={freeWeekEndsAt} links={links} payBanner={payBanner} />
+      <PlanSection billing={billing} reload={reload} onAdjust={onAdjust} freeWeekEndsAt={freeWeekEndsAt} links={links} />
       <PaymentsSection billing={billing} />
       <InvoicesSection billing={billing} />
       <CancelSection billing={billing} reload={reload} />
