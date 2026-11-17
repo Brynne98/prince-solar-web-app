@@ -2433,9 +2433,9 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
   const room = planRoom(b.plan, b.extraPlants);
   const showBooked = booked && (!b.prepaidOn || ending);
   // As other billing pages lay it out (SOLAR-512): name and price, what it gives, then its date.
-  const gives = b.comped ? 'Every plant, full history, reports.'
-    : paid ? `${room} plants, full history, reports.`
-    : weekEnds || freeWeekEndsAt === null ? 'Up to 5 plants, full history, alerts.' : 'Readings, alerts and reports have stopped.';
+  const gives = b.comped ? 'Every plant.'
+    : paid ? `${room} plants.`
+    : weekEnds || freeWeekEndsAt === null ? 'Up to 5 plants.' : 'Readings, alerts and reports have stopped.';
   // the date line; a booked change says its date in the notice instead, so it is said once
   const when = b.comped ? null
     : b.state === 'past_due' ? (b.nextTry ? `We try your card again on ${longDay(b.nextTry)}.` : null)
