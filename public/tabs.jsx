@@ -3759,7 +3759,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
   const reloadBilling = () => window.billingRpc('api_billing_status').then(({ data }) => { if (data) { billingSeen = data; setBilling(data); } return data; });
   // A booked change moves which plants stop on the billing date, shown on the plant rows.
   const reloadPlan = () => Promise.all([reloadBilling(), links?.refresh?.()]).then(([b]) => b);
-  // Back from a payment: billingReturn checks it (a paid one reloads the page).
+  // Back from a payment: billingReturn says how it went (checked before this page loaded its data).
   useEffect(() => { reloadBilling().then(b => window.billingReturn(b)).then(r => r === 'card' && reloadBilling()); }, []);
   // a change undone from the Notifications list (SOLAR-212)
   useEffect(() => {

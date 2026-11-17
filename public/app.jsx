@@ -1977,10 +1977,16 @@ function SignedIn() {
   const [pages, setPages] = useState('loading'); // loading | ready | failed
   useEffect(() => { loadPages().then(() => setPages('ready'), () => setPages('failed')); }, []);
   // api_me's wall (0204), read before the first screen: undefined until it answers, null for
-  // none. A payment reloads the page (billingReturn), so it is read again then.
+  // none. Back from a card page, the payment is checked first (checkReturn), so the logins
+  // and the wall read here already have it (SOLAR-579).
+  const [checked, setChecked] = useState(false);
   const [wall, setWall] = useState(undefined);
-  useEffect(() => { window.fetchMe().then(m => setWall(m.wall || null), () => setWall(null)); }, []);
+  useEffect(() => {
+    window.checkReturn().then(() => { setChecked(true); return window.fetchMe(); })
+      .then(m => setWall(m.wall || null), () => setWall(null));
+  }, []);
   if (pages === 'failed') return <div className="login-fine">The app didn’t load. Check your connection and reload.</div>;
+  if (!checked) return <BootShell />;
   return (
     <window.LinkGate fallback={<BootShell />}>
       {(links) => (pages !== 'ready' || wall === undefined ? <BootShell />
