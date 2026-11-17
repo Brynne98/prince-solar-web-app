@@ -2454,7 +2454,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
       <PlanCard title={<>{paid || b.comped ? PLAN_NAME[b.plan] : weekEnds || freeWeekEndsAt === null ? 'Free week' : 'No plan'}{word && <span className={'conn-status ' + word[1]}>{word[0]}</span>}</>}
         sub={b.comped ? <span className="plan-word">Free of charge</span> : paid
           ? <><Was list={listPrice(b, b.plan, b.period, b.extraPlants || 0)} price={b.price} />{rand(b.price)}<span className="plan-per">{perUnit(b.period)}</span></>
-          : 'R0'}
+          : weekEnds || freeWeekEndsAt === null ? 'R0' : null}
         action={!b.comped && (paid ? <button type="button" className="ghost-btn" onClick={onAdjust}>Change plan</button>
           : <button type="button" className="save-btn" onClick={onAdjust}>Choose plan</button>)}>
         <div className="plan-meta">{gives}
@@ -2928,7 +2928,9 @@ function ChoosePlantsDialog({ logins, picks, onUpgrade, onDone, onCancel }) {
   );
 }
 
-function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, onCollect, head }) {
+// noPlan: api_me's wall, no plan after the free week or the paid time. Nothing is read, so no
+// fault words, no count and no Add plant; Billing's Choose plan is the way on (SOLAR-578).
+function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, onCollect, head, noPlan }) {
   const { useState } = React;
   const { accounts, error, refresh } = links;
   const [busy, setBusy] = useState(null);
@@ -3063,6 +3065,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
             <span className="pm-state status-stale">Kept until {billDay(p.remove_on)}</span>
             {!p.paused && <button type="button" className="ghost-btn" disabled={busy === 'keep:' + p.plant_id} onClick={() => keep(p)}>Keep</button>}
           </>
+          : noPlan ? <span className="pm-state">Paused, no plan</span>
           : p.paused ? <span className="pm-state"><window.LockIcon />Locked</span>
           /* a login that stopped says so once, on its own line above */
           : (!ok && !shared) || !states.at ? null
@@ -3079,7 +3082,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
   // The free week runs 5 plants, Home 2, Family 5 plus any extras still held. With that taken, Add plant
   // still opens the form: the new plants link locked (SOLAR-272, SOLAR-537).
   const collecting = allPlants.filter(p => !p.paused).length;
-  const limit = billing && !billing.comped ? planRoom(billing.plan, billing.extraPlants) : null;
+  const limit = billing && !billing.comped && !noPlan ? planRoom(billing.plan, billing.extraPlants) : null;
   // Plants on out of what the plan allows, so it shows the room left (SOLAR-285); none when
   // free of charge. A plant up for deletion still collects until its date. Counts what takes
   // plan room, as the server does: a plant whose login expired still takes it (SOLAR-440).
@@ -3088,7 +3091,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
     <SettingsSection id="connection" title={title} head={head}
       action={!unread && <div className="plants-acts">
         {lockedAny && picks && <button type="button" className="ghost-btn" onClick={() => setChoosing(true)}>Choose plants</button>}
-        <button type="button" className="save-btn" onClick={() => setMode('add')}>Add plant</button>
+        {!noPlan && <button type="button" className="save-btn" onClick={() => setMode('add')}>Add plant</button>}
       </div>}>
       {!unread && mode === 'add' && (
         // A form over the page (SOLAR-286). Cancel re-reads too: a login with no plant yet is saved but not listed.
@@ -3117,7 +3120,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
             const at = shared ? 0 : who.indexOf('@') + 1; // 0 when there is no @
             // Amber at the age the header pill calls offline (15 minutes without a reading). A login
             // with no plant on is never read, so its age means nothing (SOLAR-285, SOLAR-483).
-            const stale = ok && plants.some(p => !p.paused) && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
+            const stale = ok && !noPlan && plants.some(p => !p.paused) && acc.last_ok_at && (Date.now() - new Date(acc.last_ok_at).getTime()) > 900_000;
             return (
               <div key={acc.account_id} className={'login-grp plant-logins' +(leaving === acc.account_id ? ' leaving' : '')}>
                 <div className="login-line">
@@ -3795,7 +3798,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
           {shown === 'notifications' && <div className="settings-page"><NotificationsSection userId={user?.id} head /></div>}
           {shown === 'plants' && links && (
             <div className="settings-page">
-              <SunSynkConnectionSection head onChanged={onPlantConfigSaved} links={links} billing={billing} reloadBilling={reloadBilling} onCollect={(id) => adjust('plants', id)} />
+              <SunSynkConnectionSection head onChanged={onPlantConfigSaved} links={links} billing={billing} reloadBilling={reloadBilling} onCollect={(id) => adjust('plants', id)} noPlan={!!me?.wall} />
             </div>
           )}
           {shown === 'billing' && <BillingPage billing={billing} reload={reloadPlan} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen}
