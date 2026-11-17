@@ -123,9 +123,9 @@ async function build() {
     const paid = g.plan !== 'free' && !g.comped;
     const ending = paid && g.nextPlan === 'free';
     const state = g.state === 'past_due' ? 'Payment failed' : ending ? 'Ends ' + billDay(g.nextDate) : 'Active';
-    const line = g.comped ? 'Free of charge. Every plant, full history.'
+    const line = g.comped ? 'Free of charge. Every plant.'
       : paid ? `${rand(g.price)} ${perUnit(g.period)} for ${act === 1 ? '1 plant' : act + ' plants'}. ${ending ? 'Ends' : 'Renews'} on ${longDay(g.nextDate)}.`
-      : S.weekOver ? 'Readings, alerts and reports have stopped.' : 'Up to 5 plants, full history, alerts.';
+      : S.weekOver ? 'Readings, alerts and reports have stopped.' : 'Up to 5 plants.';
     const extraInv = g.comped ? 0 : g.extraPlants; // comped plants cost nothing
     const prices = g.prices;
     const breakdown = paid && g.plan === 'family' && extraInv > 0
