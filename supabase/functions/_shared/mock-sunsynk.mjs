@@ -135,6 +135,20 @@ const ACCOUNTS = {
   "business@mock": { plants: [6010, 6011, 6012] },
 };
 
+// Real-time test (SOLAR-585): live1@mock to live12@mock, one fresh plant each (6013 to 6024),
+// so every test account starts with a plant whose free week is unused.
+for (let i = 1; i <= 12; i++) {
+  const id = 6012 + i;
+  PLANTS[id] = {
+    name: `Test home ${i}`, tz: "Africa/Johannesburg", currency: "ZAR", lat: -26.1 - i / 100, lon: 28.0 + i / 100,
+    kwp: 5, battKwh: 10, gridMode: "import", phases: 1, battSign: "discharging", banks: "per-inverter",
+    loadBase: 500, inverters: [
+      { sn: `L${id}A`, alias: "House", share: 1, upload: 60, ct: true, model: "SUNSYNK-5K-SG04LP1" },
+    ],
+  };
+  ACCOUNTS[`live${i}@mock`] = { plants: [id] };
+}
+
 // ---------------------------------------------------------------------------
 // Time helpers
 // ---------------------------------------------------------------------------

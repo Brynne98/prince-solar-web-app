@@ -165,6 +165,17 @@ begin
   perform pg_temp.eq('website: the new offer', private.billing_offer_open(null, '2027-01-01'), 't_dec');
 end $$;
 
+-- Test accounts pay the offer price but take no place (SOLAR-585).
+do $$
+declare u uuid := pg_temp.uid(9013); before int;
+begin
+  insert into private.test_users (user_id) values (u);
+  before := (select count(*)::int from private.offer_members where offer_id = 't_dec');
+  perform pg_temp.eq('test account pays the offer', pg_temp.start(u, 'home', 'monthly'), 49);
+  perform pg_temp.eq('test account holds the offer', (select offer_id from private.billing where user_id = u), 't_dec');
+  perform pg_temp.eq('test account takes no place', (select count(*)::int from private.offer_members where offer_id = 't_dec'), before);
+end $$;
+
 \set QUIET off
 do $$ begin
   if exists (select 1 from pg_temp.fails) then
