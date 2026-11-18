@@ -1125,8 +1125,9 @@ begin
   perform pg_temp.eq('day 8: not polled', (select count(*)::int from public.live_plants() x where x between 9007701 and 9007703), 0);
   insert into public.email_queue (user_id, plant_id, kind, key, data) values
     (w1, 9007701, 'grid_down', 'test:w1-alert', '{}'), (w1, 9007701, 'report_week', 'test:w1-report', '{}'),
-    (w1, 9007701, 'report_week', 'test:w1-last', '{"freeWeekEnds": true}');
-  perform pg_temp.eq('day 8: no alert, no report, but the week''s last report',
+    (w1, 9007701, 'report_week', 'test:w1-last', '{"freeWeekEnds": true}'),
+    (w1, 9007701, 'share_down', 'test:w1-share-down', '{}'), (w1, 9007701, 'share_back', 'test:w1-share-back', '{}');
+  perform pg_temp.eq('day 8: no alert, no report, no shared-plant mail (SOLAR-582), but the week''s last report',
     (select array_agg(key order by key) from public.email_queue where key like 'test:w1-%'), array['test:w1-last']);
   perform private.unpaid_delete();
   perform pg_temp.eq('day 8: readings kept', (select count(*)::int from public.agg_minute where plant_id = 9007701), 3);
