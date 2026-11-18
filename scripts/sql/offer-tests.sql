@@ -23,7 +23,7 @@ begin
 end $$;
 create function pg_temp.uid(n int) returns uuid language sql as $$ select ('00000000-0000-0000-0000-' || lpad(to_hex(n), 12, '0'))::uuid $$;
 
-insert into auth.users (id, email) select pg_temp.uid(n), 'o' || n || '@t.test' from generate_series(9001, 9012) n;
+insert into auth.users (id, email) select pg_temp.uid(n), 'o' || n || '@t.test' from generate_series(9001, 9013) n;
 
 -- Two places only, for life.
 insert into private.offers (id, home_monthly, home_yearly, family_monthly, family_yearly, extra_monthly, extra_yearly, opens_on, max_payers)
