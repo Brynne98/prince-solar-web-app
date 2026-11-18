@@ -1393,6 +1393,51 @@ begin
   update public.profiles set prefs = prefs || '{"lastPlant": 1}' where user_id <> n;
 end $$;
 
+-- SOLAR-584: the counts behind plants_linked_done and plan_started_done (0224).
+do $$
+declare
+  old_u constant uuid := '00000000-0000-4000-9584-000000000001';
+  new_u constant uuid := '00000000-0000-4000-9584-000000000002';
+  acc constant uuid := '00000000-0000-4000-9584-000000000011';
+  f record;
+begin
+  insert into auth.users (id, email, created_at) values (old_u, 'old@s584.test', now() - interval '90 days'), (new_u, 'new@s584.test', now());
+  insert into private.plant_week (plant_id, started_at) values (9584001, now() - interval '20 days'), (9584002, now() + interval '1 minute');
+  perform pg_temp.eq('seen before: a week before the account counts, a later week or none does not',
+    public.plants_seen_before(new_u, array[9584001, 9584002, 9584003]::bigint[]), 1);
+  perform pg_temp.eq('seen before: no plants', public.plants_seen_before(new_u, null), 0);
+  insert into private.sunsynk_accounts (id, user_id, sunsynk_username) values (acc, old_u, 'old@login.s584.test');
+  insert into public.plant_users (user_id, plant_id, account_id, plant_name, paused) values (old_u, 9584001, acc, 'P', true);
+  perform pg_temp.eq('seen before: another account holds it, a share not a rejoin', public.plants_seen_before(new_u, array[9584001]::bigint[]), 0);
+  update public.plant_users set share_gone_at = now() where user_id = old_u and plant_id = 9584001;
+  perform pg_temp.eq('seen before: a holder whose share is gone does not count', public.plants_seen_before(new_u, array[9584001]::bigint[]), 1);
+
+  -- never paid, its free week lapsed (0205 set ended_at): not returning
+  insert into private.billing (user_id, ended_at) values (old_u, now() - interval '12 days')
+    on conflict (user_id) do update set ended_at = excluded.ended_at;
+  insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on)
+  values ('psh_s584new', old_u, 'start', 'home', 'monthly', 99, 'pending', current_date, current_date);
+  select * into f from public.billing_start_facts('psh_s584new');
+  perform pg_temp.eq('start facts: the user', f.user_id, old_u);
+  perform pg_temp.eq('start facts: never paid is not returning', f.days_since_plan, null::int);
+  insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on)
+  values ('psh_s584old', old_u, 'renewal', 'home', 'monthly', 99, 'failed', current_date - 60, current_date - 60);
+  select * into f from public.billing_start_facts('psh_s584new');
+  perform pg_temp.eq('start facts: a failed charge is not a payment', f.days_since_plan, null::int);
+  update private.billing_charges set status = 'paid' where reference = 'psh_s584old';
+  select * into f from public.billing_start_facts('psh_s584new');
+  perform pg_temp.eq('start facts: paid before, ended 12 days ago', f.days_since_plan, 12);
+  update private.billing set ended_at = null where user_id = old_u;
+  select * into f from public.billing_start_facts('psh_s584new');
+  perform pg_temp.eq('start facts: no end date is not returning', f.days_since_plan, null::int);
+  perform pg_temp.eq('start facts: a renewal gives no row', (select count(*)::int from public.billing_start_facts('psh_s584old')), 0);
+  perform pg_temp.eq('start facts: an unknown reference gives no row', (select count(*)::int from public.billing_start_facts('psh_none')), 0);
+  perform pg_temp.eq('start facts: owners cannot read them',
+    has_function_privilege('authenticated', 'public.billing_start_facts(text)', 'execute')
+    or has_function_privilege('authenticated', 'public.plants_seen_before(uuid, bigint[])', 'execute')
+    or has_function_privilege('anon', 'public.billing_start_facts(text)', 'execute'), false);
+end $$;
+
 \set QUIET off
 do $$ begin
   if exists (select 1 from pg_temp.fails) then

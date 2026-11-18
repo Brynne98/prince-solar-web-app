@@ -12,6 +12,8 @@ Local database only (`SIM_DB_URL` to change; default is the local Supabase on 55
 - `oracle.mjs` is the price oracle, written from the rules text (headers of 0110, 0127, 0136, 0138, 0139, 0155, 0156, 0197, 0198, 0200, 0203, 0205), not from the SQL.
 - `abuse.mjs [--seed N] [ids]` attacks as signed-in users through the REST API and link-sunsynk, with the mock SunSynk server.
   The C attacks fire many requests at once, in an order set by the seed.
+- `events-check.mjs` sends links, share claims and payments through the three functions and reads what reached a
+  stand-in PostHog (SOLAR-584). Setup is in its header.
 - `node scripts/billing-sim/samples.mjs` builds 14 committed `ui-sample-N@sim.test` users at real today and writes
   `ui-samples.json`. `--remove` deletes them. No sign-in links are made.
 Time travel: `private.billing_today()` is redefined inside each rolled-back transaction only.

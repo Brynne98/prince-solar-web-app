@@ -8,7 +8,8 @@
 // Supabase log as before.
 
 const POSTHOG_KEY = "phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v";
-const POSTHOG_URL = "https://eu.i.posthog.com/i/v0/e/";
+// POSTHOG_URL is set only by local test runs, so their events stay off the real project.
+const POSTHOG_URL = Deno.env.get("POSTHOG_URL") ?? "https://eu.i.posthog.com/i/v0/e/";
 // The release on every error and event: the web app version these functions were last
 // deployed with. npm test fails when it is not public/config.js's APP_VERSION.
 export const APP_VERSION = "v0.60.0";
