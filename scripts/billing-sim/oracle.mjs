@@ -51,9 +51,7 @@ export class Oracle {
     this.rm = new Set(); this.rmOn = null; this.comped = false;
     this.freeRm = new Set();  // plants the move to Free booked (0133): kept only by a start
     this.plants = []; // {id, inv, seq, paused, acc}
-    this.ticks = new Map(); // plant id -> holds a place: the plants the owner ticked (0197). Stays when a login is removed.
-    this.changedOn = null;  // the day of the last plant change: the next opens 90 days on (0197)
-    this.hasCard = false;
+    this.ticks = new Map(); // plant id -> holds a place: the plants the owner ticked (0197). Stays when a login is removed.    this.hasCard = false;
     this.nextKeep = [];   // the plants a booked downgrade keeps, picked first (0136)
     this.prepaid = null;  // the billing date a paid switch to yearly covers (0138)
     this.charges = []; // expected charges {ref, kind, amount, plan, period, dueOn, createdOn, status, named, added}
@@ -210,23 +208,9 @@ export class Oracle {
     if (this.rm.size === 0) this.rmOn = null;
     return {};
   }
-  // One ticked plant out, one locked plant in; one per 90 days (0197).
-  change(out, into, today) {
-    if (this.plan === 'free') return { err: 'no change without a plan' };   // the free week's ticks are fixed (0203)
-    if (this.state === 'past_due') return { err: 'pay the failed payment first' };   // 0198
-    if (this.changedOn !== null && dayNo(today) - dayNo(this.changedOn) < 90) return { err: 'next change' };
-    if (out === into || !this.ticks.has(out)) return { err: 'not picked' };
-    const p = this.get(into); if (!p) return { err: 'not linked' };
-    if (!p.paused) return { err: 'already on' };
-    const c = this.clone(), q = c.get(out);
-    if (q) c.lock(q);
-    c.ticks.delete(out);
-    if (!c.ticks.has(into)) c.ticks.set(into, false);
-    const why = c.run(into); if (why) return { err: why };
-    c.started(c.get(into));
-    c.changedOn = today;
-    Object.assign(this, c);
-    return {};
+  // One ticked plant out, one locked plant in: never by the owner, the pick is final (0223).
+  change() {
+    return { err: 'no owner change' };
   }
   // Fewer extra plants from the billing date, or undo a drop (n = those held). More is a payment.
   bookExtras(n) {

@@ -52,7 +52,8 @@ Web (`public/*.jsx`):
 | `share_check_done`, `link_mode_picked`, `share_taken_email_done` | Linking steps |
 | `plant_switched` | Another plant picked |
 | `plant_pick_done` | Locked plants ticked to run (`from`: link, plants or upgrade, `count`, `of`: how many could be ticked, `plan`, `asked`: false when one plant started with no pop-up) |
-| `plant_change_done`, `plant_change_refused_done` | One plant changed for another; a change refused inside its 90 days |
+| `plant_change_refused_done` | The owner tried to untick a running plant; picks are final while a plan runs, fixed in the free week (`plan`) (SOLAR-583) |
+| `plant_swap_email_done` | "Email us" tapped under that refusal, to swap a plant by hand (`plan`) |
 | `plant_kept_done` | Plant kept from deletion |
 | `login_remove_done` | SunSynk login removed |
 | `plant_settings_save_done` | Plant settings saved (field names only) |

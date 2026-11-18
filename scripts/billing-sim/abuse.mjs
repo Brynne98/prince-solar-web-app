@@ -164,7 +164,7 @@ await ensureMock();
 const ALLOW_AUTH = new Set(`_energy_row _erow _hm _plant_day_energy admin_overview api_account_delete api_alerts api_balance api_billing_change
 api_billing_extras api_billing_keep api_billing_keep_set api_billing_quote api_billing_start_keep api_billing_status billing_room api_data_days api_db_stats api_energy api_export api_grid_today api_health
 api_history api_history_earliest api_inverter_history api_link_disconnect api_link_remove api_link_status api_me api_notifications
-api_notifications_read api_notices_read api_offer api_overview api_plant_change api_plant_days api_plant_pick api_plant_picks api_plant_states api_prefs_set api_push_sub
+api_notifications_read api_notices_read api_offer api_overview api_plant_days api_plant_pick api_plant_picks api_plant_states api_prefs_set api_push_sub
 api_push_unsub api_send_feedback api_string_health api_trends_by_hour api_trends_compare api_trends_daily calibration_plant cfg client_errors_cap
 battery_groups_kwh day_start_epoch day_start_epoch_tz email_prefs_touch handle_new_user local_day local_day_tz local_hour local_hour_tz local_minute
 local_minute_tz local_ts local_ts_tz my_plant my_plant_ids panel_kwp plant_cfg plant_config_batt_sign_guard plant_config_features_guard
@@ -285,17 +285,15 @@ await attack("G3b", "run a plant past the plan with no payment (no plan, Home, F
   return { hit: bad.length > 0, note: bad.join(",") };
 });
 // The cheat this rule closes (review 2026-11-12, finding 2): a Home account watching more than 2 plants in turns.
-await attack("G3g", "Home: a third plant in turns, by a second change or by removing the login and linking it again", async () => {
+await attack("G3g", "Home: a third plant in turns, by an owner change or by removing the login and linking it again", async () => {
   const bad = [];
   const h = await home("g3d"); const l = await link(h, "installer@mock"); await fill(h, 2);
   const [third, fourth] = locked(h);
   const on = () => sql(`select string_agg(plant_id::text, ',' order by plant_id) from public.plant_users where user_id='${h.id}' and not paused`);
   const first = Number(on().split(",")[0]);
-  const c1 = await rpc(h, "api_plant_change", { p_out: first, p_in: third });
-  if (!good(c1)) bad.push("the first change was refused: " + c1.status);
   const two = on();
-  const c2 = await rpc(h, "api_plant_change", { p_out: third, p_in: fourth });
-  if (good(c2) || !/next change \d{4}-\d\d-\d\d/.test(JSON.stringify(c2.data))) bad.push("a second change: " + c2.status + " " + JSON.stringify(c2.data));
+  if (good(await rpc(h, "api_plant_change", { p_out: first, p_in: third }))) bad.push("an owner change went through (0223: none)");
+  if (sql("select has_function_privilege('authenticated', 'private.plant_swap(uuid, bigint, bigint)', 'execute')") === "t") bad.push("owners may run the support swap");
   await rpc(h, "api_link_remove", { p_account: l.data?.accountId });
   await link(h, "installer@mock");
   if (on() !== two) bad.push(`after remove and link again: ${on()} run, want ${two}`);

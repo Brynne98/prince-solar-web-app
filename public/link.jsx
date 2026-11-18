@@ -203,6 +203,8 @@ const payFailed = (e, fallback) => (/open soon/.test(e.message) ? window.toast('
   : window.toast(fallback, { error: true }));
 // What to say when a failed payment refused a plan or plant change (0189, 0198); else false.
 const payFirst = (e) => /failed payment/.test(e.message) && 'Pay the failed payment first.';
+// A pick on a paid plan is final while the plan runs (SOLAR-583, 0223): the confirm step's line.
+const finalPickText = (names) => `You can’t swap ${andList(names)} for another plant while your plan runs.`;
 // A saved card's charge: the billing function gives Paystack 30 s to charge and 30 s more to
 // check, so the page waits past both (SOLAR-363).
 const PAY_WAIT = 70000;
@@ -562,16 +564,18 @@ const startableLogins = (accounts, only) => {
 };
 // The owner ticks which locked plants run (SOLAR-537, 0197), up to the places the plan has
 // open, after a login links. Fewer ticks is fine: the rest
-// stay locked and an open place can be filled later. A tick stays, so the pop-up says what
-// changing it costs. Asks the server for the places (api_plant_picks) before it shows. With
-// one plant to choose and a place for it, it shows nothing and starts that plant.
+// stay locked and an open place can be filled later. On a paid plan a tick is final while
+// the plan runs (SOLAR-583), so Add asks once more before it saves. Asks the server for the
+// places (api_plant_picks) before it shows. With one plant to choose and a place for it, it
+// shows nothing and starts that plant.
 // onDone(ids): the plants now running; [] when closed with none.
 function PlantPickDialog({ logins, from, onDone }) {
   const { useState, useEffect } = React;
   const all = logins.flatMap(a => a.plants);
-  const [places, setPlaces] = useState(null); // { plan, open }
+  const [places, setPlaces] = useState(null); // { plan, open, comped }
   const [picked, setPicked] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [sure, setSure] = useState(false); // the confirm step of a final pick
   useEffect(() => {
     let alive = true;
     window.sb.rpc('api_plant_picks').then(({ data, error }) => {
@@ -581,23 +585,32 @@ function PlantPickDialog({ logins, from, onDone }) {
       const open = Math.min(all.length, data.room - data.picks.filter(k => k.held).length,
         data.room - data.picks.length + all.filter(p => p.picked).length);
       if (open < 1) return onDone([]);
-      // one plant and a place for it: nothing to choose, so it starts with no pop-up
+      // one plant and a place for it: nothing to choose, so it starts with no pop-up; on a
+      // paid plan the pick is final, so only the confirm step shows (SOLAR-583)
+      if (all.length === 1 && data.plan !== 'free' && !data.comped) {
+        setPlaces({ plan: data.plan, open, comped: false });
+        setPicked([all[0].plant_id]);
+        return setSure(true);
+      }
       if (all.length === 1) {
         return window.sb.rpc('api_plant_pick', { p_plants: [all[0].plant_id] }).then(({ error }) => {
           if (!error) window.track('plant_pick_done', { from, count: 1, of: 1, plan: data.plan, asked: false });
           if (alive) onDone(error ? [] : [all[0].plant_id]);
         });
       }
-      setPlaces({ plan: data.plan, open });
+      setPlaces({ plan: data.plan, open, comped: data.comped });
       // they all fit: ticked already, one tap to add
       if (all.length <= open) setPicked(all.map(p => p.plant_id));
     });
     return () => { alive = false; };
   }, []);
   if (!places) return null;
-  const { plan, open } = places;
+  const { plan, open, comped } = places;
+  // no plan: the free week, where the ticks are fixed (0203) and reset when a plan starts
+  const free = plan === 'free', upTo = open === 1 ? '1 plant' : open + ' plants';
   const add = async () => {
     if (!picked.length) return onDone([]);
+    if (!free && !comped && !sure) return setSure(true);
     setBusy(true);
     const { error } = await window.sb.rpc('api_plant_pick', { p_plants: picked });
     setBusy(false);
@@ -606,8 +619,17 @@ function PlantPickDialog({ logins, from, onDone }) {
     onDone(picked);
   };
   const more = open === 1 ? '1 more plant' : open + ' more plants';
-  // no plan: the free week, where the ticks are fixed (0203)
-  const free = plan === 'free', upTo = open === 1 ? '1 plant' : open + ' plants';
+  const adds = picked.length > 1 ? 'Add plants' : 'Add plant';
+  if (sure) return (
+    <Dialog keep label={adds} busy={busy} onClose={() => onDone([])}>
+      <div className="confirm-title">{adds}?</div>
+      <div className="confirm-text">{finalPickText(all.filter(p => picked.includes(p.plant_id)).map(window.plantLabel))}</div>
+      <div className="conn-form-actions">
+        <button type="button" className="ghost-btn" onClick={() => setSure(false)} disabled={busy}>Back</button>
+        <window.BusyButton className="save-btn" onClick={add} busy={busy}>{adds}</window.BusyButton>
+      </div>
+    </Dialog>
+  );
   return (
     <Dialog keep label="Choose plants" busy={busy} onClose={() => onDone([])}>
       <div className="confirm-title">Choose plants</div>
@@ -618,10 +640,10 @@ function PlantPickDialog({ logins, from, onDone }) {
           ask={free ? `Choose up to ${upTo}.` : `${PLAN_NAME[plan]} has room for ${more}.${all.length > open ? (open === 1 ? ' Which one?' : ' Which ones?') : ''}`}
           full={free ? `Up to ${upTo}. Untick one first.` : `${PLAN_NAME[plan]} has room for ${more}. Untick one first.`} />
       </div>
-      <div className="confirm-text keep-note">{free ? 'Plants can’t be changed in the free week.' : 'After this you can change one plant every 90 days.'}</div>
+      {free && <div className="confirm-text keep-note">Plants can’t be changed in the free week.</div>}
       <div className="conn-form-actions">
         <button type="button" className="ghost-btn" onClick={() => onDone([])} disabled={busy}>Not now</button>
-        <window.BusyButton className="save-btn" onClick={add} busy={busy} disabled={!picked.length}>{picked.length > 1 ? 'Add plants' : 'Add plant'}</window.BusyButton>
+        <window.BusyButton className="save-btn" onClick={add} busy={busy} disabled={!picked.length}>{adds}</window.BusyButton>
       </div>
     </Dialog>
   );
