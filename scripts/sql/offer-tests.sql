@@ -23,7 +23,7 @@ begin
 end $$;
 create function pg_temp.uid(n int) returns uuid language sql as $$ select ('00000000-0000-0000-0000-' || lpad(to_hex(n), 12, '0'))::uuid $$;
 
-insert into auth.users (id, email) select pg_temp.uid(n), 'o' || n || '@t.test' from generate_series(9001, 9012) n;
+insert into auth.users (id, email) select pg_temp.uid(n), 'o' || n || '@t.test' from generate_series(9001, 9013) n;
 
 -- Two places only, for life.
 insert into private.offers (id, home_monthly, home_yearly, family_monthly, family_yearly, extra_monthly, extra_yearly, opens_on, max_payers)
@@ -163,6 +163,17 @@ begin
   perform pg_temp.eq('late payer: no new offer', private.billing_offer_open(pg_temp.uid(9006), '2027-01-01'), null::text);
   perform pg_temp.eq('never paid: the new offer', private.billing_offer_open(pg_temp.uid(9012), '2027-01-01'), 't_dec');
   perform pg_temp.eq('website: the new offer', private.billing_offer_open(null, '2027-01-01'), 't_dec');
+end $$;
+
+-- Test accounts pay the offer price but take no place (SOLAR-585).
+do $$
+declare u uuid := pg_temp.uid(9013); before int;
+begin
+  insert into private.test_users (user_id) values (u);
+  before := (select count(*)::int from private.offer_members where offer_id = 't_dec');
+  perform pg_temp.eq('test account pays the offer', pg_temp.start(u, 'home', 'monthly'), 49);
+  perform pg_temp.eq('test account holds the offer', (select offer_id from private.billing where user_id = u), 't_dec');
+  perform pg_temp.eq('test account takes no place', (select count(*)::int from private.offer_members where offer_id = 't_dec'), before);
 end $$;
 
 \set QUIET off
