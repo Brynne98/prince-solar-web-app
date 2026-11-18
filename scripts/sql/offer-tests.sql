@@ -51,15 +51,15 @@ begin
   perform pg_temp.eq('undo keeps offer', (select offer_id from private.billing where user_id = u1), 't_launch');
   perform pg_temp.eq('undo renews R49', public.billing_amount_due(u1), 49);
 
-  -- cancel reaches its date: back to Free, offer gone, place not reopened; coming back, u1 gets its offer
-  -- again although both places are taken (SOLAR-564)
+  -- cancel reaches its date: back to Free, offer gone, place not reopened; coming back, u1 pays
+  -- list price (SOLAR-581: leaving loses the offer)
   perform public.billing_book_change(u1, 'free', null, null);
   perform set_config('t.today', '2027-01-01', true);
   perform public.billing_run('2027-01-01');
   perform pg_temp.eq('u1 on Free', (select plan from private.billing where user_id = u1), 'free');
   perform pg_temp.eq('u1 offer gone', (select offer_id from private.billing where user_id = u1), null::text);
-  perform pg_temp.eq('u1 returns at its offer', pg_temp.start(u1, 'home', 'monthly'), 49);
-  perform pg_temp.eq('u1 holds it again', (select offer_id from private.billing where user_id = u1), 't_launch');
+  perform pg_temp.eq('u1 returns at list', pg_temp.start(u1, 'home', 'monthly'), 99);
+  perform pg_temp.eq('u1 holds none', (select offer_id from private.billing where user_id = u1), null::text);
   perform pg_temp.eq('place not reopened', (select count(*)::int from private.offer_members where offer_id = 't_launch'), 2);
   perform pg_temp.eq('new account at list', pg_temp.start(pg_temp.uid(9004), 'home', 'monthly'), 99);
 end $$;
@@ -135,8 +135,8 @@ begin
   perform set_config('request.jwt.claims', '', true);
 end $$;
 
--- Emails quote the price this user pays (SOLAR-443). A member who left gets its offer again
--- while it is open, and its months count from the day it first joined (SOLAR-564).
+-- Emails quote the price this user pays (SOLAR-443). A member who left pays list price,
+-- while the offer is still open to new accounts (SOLAR-581).
 do $$
 declare u uuid := pg_temp.uid(9011);
 begin
@@ -148,18 +148,12 @@ begin
   perform public.billing_run('2027-01-01');
   perform pg_temp.eq('leaver on Free', (select plan from private.billing where user_id = u), 'free');
   perform pg_temp.eq('website still R49', (public.api_offer()->'prices'->'monthly'->>'home')::int, 49);
-  perform pg_temp.eq('leaver email home R49', (public.email_prices(u)->'prices'->'monthly'->>'home')::int, 49);
-  perform pg_temp.eq('leaver email family R89', (public.email_prices(u)->'prices'->'monthly'->>'family')::int, 89);
-  perform pg_temp.eq('leaver email list', (public.email_prices(u)->'listPrices'->'monthly'->>'home')::int, 99);
-  perform pg_temp.eq('leaver pays what email says', pg_temp.start(u, 'home', 'monthly'), 49);
-  perform pg_temp.eq('leaver months from the first join', (select offer_until from private.billing where user_id = u), date '2027-03-01');
-  -- its months run out: not quoted again
-  perform public.billing_book_change(u, 'free', null, null);
-  perform set_config('t.today', '2027-02-01', true);
-  perform public.billing_run('2027-02-01');
-  perform pg_temp.eq('leaver in its months: offer still quoted', private.billing_offer_open(u, '2027-02-28'), 't_dec');
-  perform set_config('t.today', '2027-03-01', true);
-  perform pg_temp.eq('leaver back after its months: list', pg_temp.start(u, 'home', 'monthly'), 99);
+  perform pg_temp.eq('leaver email home R99', (public.email_prices(u)->'prices'->'monthly'->>'home')::int, 99);
+  perform pg_temp.eq('leaver email family R199', (public.email_prices(u)->'prices'->'monthly'->>'family')::int, 199);
+  perform pg_temp.eq('leaver email no offer', public.email_prices(u)->'offer', 'null'::jsonb);
+  perform pg_temp.eq('leaver not quoted the offer', private.billing_offer_open(u, '2027-01-01'), null::text);
+  perform pg_temp.eq('leaver pays what email says', pg_temp.start(u, 'home', 'monthly'), 99);
+  perform pg_temp.eq('leaver holds none', (select offer_id from private.billing where user_id = u), null::text);
 end $$;
 
 -- New members only (SOLAR-564): an account that paid before gets no new offer.

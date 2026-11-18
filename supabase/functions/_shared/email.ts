@@ -1150,8 +1150,8 @@ export const plantsRemovalSoon = (plants: string[], on: string, plan?: Plan, pri
 const white = (t: string) => `<span class="t" style="font-weight:600;color:#e7ecf2">${t}</span>`;
 const startPlan = (p: Price): Part[] => {
   const o = p.now < p.list ? p.offer : null, name = PLAN_NAME[p.plan];
-  const terms = !o ? "" : ` ${o.id === "launch" ? "Launch price" : "Offer price"}${!o.held && o.cap ? ` for the first ${o.cap} members` : ""}, ` +
-    `${o.until ? `until ${o.until}` : o.months && !o.held ? `for your first ${o.months} months` : "yours while you stay"}.`;
+  const terms = !o ? "" : ` ${o.id === "launch" ? "Launch price" : "Offer price"}${!o.held && o.cap ? ` for the first ${o.cap} new members` : ""}, ` +
+    `${o.until ? `until ${o.until}` : o.months && !o.held ? `for your first ${o.months} months` : "yours until your plan ends"}.`;
   const rec = `Recommended for your ${(p.plants ?? 1) > 1 ? "plants" : "plant"}: `;
   return [
     { lead: rec + (p.now < p.list ? `${name} is ${white(`${rand(p.now)} a month`)}, normally ${rand(p.list)}.${terms} Cancel any time.`
