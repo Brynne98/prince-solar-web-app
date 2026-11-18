@@ -2611,8 +2611,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
   const o = b.offer;
   const offerBand = o && ['home', 'family'].some(p => list(p) > (price(p) ?? 0)) && <p className="plan-offer">
     <b>{o.id === 'launch' ? 'Launch price' : 'Offer price'}</b>{' '}
-    <span>{o.until ? `Until ${billDay(o.until)}.` : o.months && !o.held ? `For your first ${view === 'yearly' ? 'year' : o.months + ' months'}.` : 'Yours while you stay.'}
-      {!o.held && o.cap ? ` For the first ${o.cap} members.` : ''}</span></p>;
+    <span>{o.until ? `Until ${billDay(o.until)}.` : o.months && !o.held ? `For your first ${view === 'yearly' ? 'year' : o.months + ' months'}.` : 'Yours until your plan ends.'}
+      {!o.held && o.cap ? ` For the first ${o.cap} new members.` : ''}</span></p>;
   const action = (p) => {
     // a booked cancel: nothing to pick until it ends; Keep on your own card undoes it (SOLAR-457, SOLAR-467)
     if (paid && b.nextPlan === 'free') return p === b.plan && sameView ? <>{ownDate()}

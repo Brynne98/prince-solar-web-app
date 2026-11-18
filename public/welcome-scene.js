@@ -339,7 +339,7 @@ addEventListener('DOMContentLoaded', async () => {
   }
   const o = r.offer, off = Math.round(100 * (1 - at.m.home / was.m.home));
   const head = `${o.id === 'launch' ? 'Launch price' : 'Offer price'}: ${off >= 45 && off <= 55 ? 'half off' : `${off}% off`}${o.cap ? ` for the first ${o.cap} new members` : ''}`;
-  const keep = o.months ? `For your first ${o.months} months, then the usual price.` : 'Keep it while your plan stays paid.';
+  const keep = o.months ? `For your first ${o.months} months, then the usual price.` : 'Keep it until your plan ends.';
   const band = pr.querySelector('.offer-band');
   band.innerHTML = `<b>${head}.</b> ${keep}`;
   band.hidden = false;
@@ -349,10 +349,10 @@ addEventListener('DOMContentLoaded', async () => {
   document.documentElement.style.setProperty('--bar', bar.offsetHeight + 'px');
   const q = document.querySelector('.offer-q');
   q.querySelector('summary').firstChild.textContent = `What is the ${o.id === 'launch' ? 'launch' : 'offer'} price?`;
-  // new members only; a member who left gets it back while it runs (SOLAR-564)
+  // new members only; a plan that ends loses it (SOLAR-581)
   q.querySelector('p').textContent = [o.cap ? `The first ${o.cap} new members to pay` : 'New members who join now',
     ` get Home for ${R(at.m.home)} and Family for ${R(at.m.family)} a month, instead of ${R(was.m.home)} and ${R(was.m.family)}. `,
-    o.months ? `It lasts your first ${o.months} months, then the usual price applies.` : 'You keep it while your plan stays paid, and get it back if you return while it runs.',
+    o.months ? `It lasts your first ${o.months} months, then the usual price applies.` : 'You keep it until your plan ends. Come back after that and you pay the usual price.',
     o.cap ? ` Once ${o.cap} members have joined, it's gone.` : ''].join('');
   q.hidden = false;
 });

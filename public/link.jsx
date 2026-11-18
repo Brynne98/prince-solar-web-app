@@ -144,9 +144,9 @@ const offerName = (o) => (o.id === 'launch' ? 'launch price' : 'offer price');
 const offerLine = (o, list, period) => !o ? null
   : o.until ? `Until ${billDay(o.until)}. Then ${rand(list)} ${perUnit(period)}.`
   : o.months && !o.held ? `For your first ${period === 'yearly' ? 'year' : o.months + ' months'}. Then ${rand(list)} ${perUnit(period)}.`
-  : `${o.id === 'launch' ? 'Launch price. ' : ''}Yours while you stay.`;
+  : `${o.id === 'launch' ? 'Launch price. ' : ''}Yours until your plan ends.`;
 // Who can still join: the cap, before joining.
-const offerCap = (o) => (o && !o.held && o.cap ? `${o.id === 'launch' ? 'Launch price' : 'Offer'} for the first ${o.cap} members.` : null);
+const offerCap = (o) => (o && !o.held && o.cap ? `${o.id === 'launch' ? 'Launch price' : 'Offer'} for the first ${o.cap} new members.` : null);
 // The list price struck out before an offer price; nothing when they're the same.
 const Was = ({ list, price }) => (list > price ? <s className="pw-was">{rand(list)}</s> : null);
 
