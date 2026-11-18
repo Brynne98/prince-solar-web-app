@@ -293,7 +293,7 @@ await attack("G3g", "Home: a third plant in turns, by an owner change or by remo
   const first = Number(on().split(",")[0]);
   const two = on();
   if (good(await rpc(h, "api_plant_change", { p_out: first, p_in: third }))) bad.push("an owner change went through (0223: none)");
-  if (good(await rpc(h, "plant_swap", { p_user: h.id, p_out: first, p_in: fourth }))) bad.push("an owner reached the support swap");
+  if (sql("select has_function_privilege('authenticated', 'private.plant_swap(uuid, bigint, bigint)', 'execute')") === "t") bad.push("owners may run the support swap");
   await rpc(h, "api_link_remove", { p_account: l.data?.accountId });
   await link(h, "installer@mock");
   if (on() !== two) bad.push(`after remove and link again: ${on()} run, want ${two}`);

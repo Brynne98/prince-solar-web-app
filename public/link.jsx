@@ -585,7 +585,13 @@ function PlantPickDialog({ logins, from, onDone }) {
       const open = Math.min(all.length, data.room - data.picks.filter(k => k.held).length,
         data.room - data.picks.length + all.filter(p => p.picked).length);
       if (open < 1) return onDone([]);
-      // one plant and a place for it: nothing to choose, so it starts with no pop-up
+      // one plant and a place for it: nothing to choose, so it starts with no pop-up; on a
+      // paid plan the pick is final, so only the confirm step shows (SOLAR-583)
+      if (all.length === 1 && data.plan !== 'free' && !data.comped) {
+        setPlaces({ plan: data.plan, open, comped: false });
+        setPicked([all[0].plant_id]);
+        return setSure(true);
+      }
       if (all.length === 1) {
         return window.sb.rpc('api_plant_pick', { p_plants: [all[0].plant_id] }).then(({ error }) => {
           if (!error) window.track('plant_pick_done', { from, count: 1, of: 1, plan: data.plan, asked: false });
