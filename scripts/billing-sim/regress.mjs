@@ -711,7 +711,7 @@ const CASES = [
       insert into private.billing (user_id, plan, plants_to_remove, remove_on) values ('${u}', 'free', '{${P(2)}}', '2027-04-09')
       on conflict (user_id) do update set plants_to_remove = '{${P(2)}}', remove_on = '2027-04-09'`);
     const ch = await K.as(u, `select public.api_plant_change(${P(1)}, ${P(2)})`);
-    return !ch.ok && /no change without a plan/.test(ch.err) ? [] : ['change not refused: ' + JSON.stringify(ch.v ?? ch.err)];
+    return !ch.ok ? [] : ['change not refused: ' + JSON.stringify(ch.v ?? ch.err)];   // no owner change at all (0223)
   } },
   { id: 'E2', title: 'email changed after the card was saved: a paid renewal keeps card_email, so the next one still works', async run(K) {
     const u = await K.user('home');
@@ -726,8 +726,8 @@ const CASES = [
   { id: 'X11', title: 'room bought while an older plant is locked: the plant bought for starts', async run(K) {
     const u = await K.user('home');
     await K.link(u, [1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: P(i) })));                   // 3-7 link locked
-    const ch = await K.as(u, `select public.api_plant_change(${P(1)}, ${P(3)})`);           // 1 out, 3 fills the room
-    if (!ch.ok) return ['change refused: ' + ch.err];
+    const ch = await K.db.t(`select private.plant_swap('${u}', ${P(1)}, ${P(3)})`);       // our swap: 1 out, 3 fills the room (0223)
+    if (!ch.ok) return ['swap refused: ' + ch.err];
     const o = await K.open(u, 'family', null, null, [P(7)]); if (!o.ok) return ['open refused: ' + o.err];
     await K.paid(o.v.reference);                                                            // bought for P7
     return (await K.paused(u, P(7))) ? ['paid for P7, but it stays stopped'] : [];

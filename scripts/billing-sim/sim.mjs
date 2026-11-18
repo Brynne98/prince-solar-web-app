@@ -273,7 +273,6 @@ async function check(H, U, what, pre) {
   const pausedGot = [...dbPaused.entries()].sort((x, y) => x[0] - y[0]);
   if (JSON.stringify(pausedWant) !== JSON.stringify(pausedGot)) bad.push(['plants collecting (paused flags)', pausedGot, pausedWant]);
   eq('ticks (plant, holds a place)', s.ticks, [...o.ticks].sort((x, y) => x[0] - y[0]));
-  eq('last plant change', s.changed, o.changedOn);
   const st = o.status(), g = s.st;
   eq('screen: plan', g.plan, st.plan); eq('screen: period', g.period, st.period); eq('screen: state', g.state, st.state);
   eq('screen: nextAmount', g.nextAmount, st.nextAmount); eq('screen: price', g.price, st.price); eq('screen: nextDate', g.nextDate, st.nextDate);
@@ -301,7 +300,7 @@ async function resyncUser(U, s) {
   const o = U.o, b = s.b;
   if (b) { o.plan = b.plan; o.period = b.period; o.day = b.billing_day; o.next = b.next_billing_date; o.state = b.state; o.pds = b.past_due_since; o.nextPlan = b.next_plan; o.nextPeriod = b.next_period; o.rm = new Set(b.plants_to_remove); o.rmOn = b.remove_on; o.extra = b.extra_plants; o.nextExtra = b.next_extra_plants; o.prepaid = b.prepaid_on; o.nextKeep = b.next_keep; }
   else { o.plan = 'free'; o.period = o.day = o.next = o.pds = o.nextPlan = o.nextPeriod = o.rmOn = o.nextExtra = o.prepaid = null; o.extra = 0; o.rm = new Set(); o.nextKeep = []; }
-  o.ticks = new Map(s.ticks); o.changedOn = s.changed;
+  o.ticks = new Map(s.ticks);
   const paused = new Map(s.plants.map((p) => [p.id, p.paused]));
   o.plants = o.plants.filter((p) => paused.has(p.id));
   for (const p of o.plants) p.paused = paused.get(p.id);
@@ -594,7 +593,7 @@ async function doPick(H, U) {
   await check(H, U, 'plant pick');
 }
 
-// One ticked plant out, one locked plant in: one per 90 days (0197).
+// One ticked plant out, one locked plant in: gone for owners, the pick is final (0223).
 async function doChange(H, U) {
   const o = U.o, rng = H.rng;
   if (!o.plants.length) return;
@@ -609,7 +608,7 @@ async function doChange(H, U) {
     if (r.ok) { fail(ctx, `plant change: allowed but the rules refuse (${exp.err})`, { out, into }); await resyncUser(U, await snap(U)); return; }
     inc(cov.refused, 'change'); await sameState(H, U, 'plant change', before); return;
   }
-  if (!r.ok) { fail(ctx, 'plant change: refused but the rules allow it', { err: r.err, out, into, plan: o.plan, ticks: [...o.ticks], last: o.changedOn }); await resyncUser(U, await snap(U)); return; }
+  if (!r.ok) { fail(ctx, 'plant change: refused but the rules allow it', { err: r.err, out, into, plan: o.plan, ticks: [...o.ticks] }); await resyncUser(U, await snap(U)); return; }
   inc(cov.allowed, 'change'); o.change(out, into, H.today);
   await check(H, U, 'plant change');
 }

@@ -873,8 +873,9 @@ begin
 end $$;
 -- a cancel still keeps 30 days (0146): the paid-year case above reads year end + 30
 -- ---------------------------------------------------------------------------
--- The plant pick (0197, SOLAR-537): the owner ticks which plants run, then one change
--- per 90 days. p = Home, one login with 3 plants, linked the way link-sunsynk links it.
+-- The plant pick (0197, SOLAR-537): the owner ticks which plants run, final while the
+-- plan runs; a swap is ours, by hand (0223, SOLAR-583). p = Home, one login with 3
+-- plants, linked the way link-sunsynk links it.
 -- q = Free, a login with one plant.
 -- ---------------------------------------------------------------------------
 drop trigger a_test_tick on public.plant_users;
@@ -910,22 +911,20 @@ begin
   perform pg_temp.eq('pick: the third is locked, no place', (select count(*)::int from public.api_link_status() s, jsonb_array_elements(s.plants) x where (x->>'can_start')::boolean), 0);
   perform pg_temp.raises('pick: third tick refused', 'select public.api_plant_pick(array[9000903])', 'no room');
 
-  -- the change: one out, one in; the first is ready at once
-  perform pg_temp.eq('change: ready from day one', public.api_plant_picks()->>'change_on', null::text);
-  perform public.api_plant_change(9000901, 9000903);
-  perform pg_temp.eq('change: one out, one in', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
+  -- no change by the owner (0223): the pick is final, the screens get no date
+  perform pg_temp.eq('final: no owner change', to_regprocedure('public.api_plant_change(bigint, bigint)') is null, true);
+  perform pg_temp.eq('final: no change date', public.api_plant_picks() ? 'change_on', false);
+  perform pg_temp.eq('final: the swap is not for owners', has_function_privilege('authenticated', 'private.plant_swap(uuid, bigint, bigint)', 'execute'), false);
+  -- our swap, by hand: one out, one in
+  perform private.plant_swap(p, 9000901, 9000903);
+  perform pg_temp.eq('swap: one out, one in', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
     '9000901:true,9000902:false,9000903:false');
-  perform pg_temp.eq('change: the plant out loses its history at once', (select count(*)::int from private.plant_wipe where plant_id = 9000901), 1);
-  perform pg_temp.eq('change: and its tick', (select string_agg(plant_id::text, ',' order by plant_id) from private.plant_picks where user_id = p), '9000902,9000903');
-  perform pg_temp.eq('change: next one opens 90 days on', public.api_plant_picks()->>'change_on',
-    (t + 90)::text);
-  perform pg_temp.raises('change: a second is refused with the date', 'select public.api_plant_change(9000902, 9000901)',
-    'next change ' || (t + 90));
-  perform pg_temp.eq('change: the refused one changed nothing', (select count(*)::int from public.plant_users where user_id = p and not paused and plant_id in (9000902, 9000903)), 2);
-  update private.plant_change set changed_on = t - 89 where user_id = p;
-  perform pg_temp.raises('change: still refused on day 89', 'select public.api_plant_change(9000902, 9000901)', 'next change');
+  perform pg_temp.eq('swap: the plant out loses its history at once', (select count(*)::int from private.plant_wipe where plant_id = 9000901), 1);
+  perform pg_temp.eq('swap: and its tick', (select string_agg(plant_id::text, ',' order by plant_id) from private.plant_picks where user_id = p), '9000902,9000903');
+  perform pg_temp.raises('swap: a plant not picked is refused', 'select private.plant_swap(''' || p || ''', 9000901, 9000903)', 'not picked');
+  perform pg_temp.raises('swap: a plant already running is refused', 'select private.plant_swap(''' || p || ''', 9000902, 9000903)', 'already runs');
 
-  -- cancel, then buy again: the same plants come back, the change is not used
+  -- cancel, then buy again: the same plants come back
   perform public.api_billing_change('free', null, array[9000902]);
   perform set_config('request.jwt.claims', '', true);
   update private.billing set next_billing_date = t where user_id = p;
@@ -942,8 +941,6 @@ begin
   perform pg_temp.eq('buy again: the same two run, the third stays locked',
     (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
     '9000901:true,9000902:false,9000903:false');
-  perform pg_temp.eq('buy again: the change date did not move',
-    (select changed_on = t - 89 from private.plant_change where user_id = p), true);
 
   -- remove the login and link it again: no fresh pick
   perform set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true);
@@ -975,34 +972,29 @@ begin
   perform pg_temp.eq('gone: back in the list it is read again',
     (select not paused and share_gone_at is null and share_missing_at is null from public.plant_users where user_id = p and plant_id = 9000903), true);
 
-  -- 90 days on, the change opens
-  update private.plant_change set changed_on = t - 90 where user_id = p;
-  perform pg_temp.eq('change: open again after 90 days', public.api_plant_picks()->>'change_on', null::text);
-  perform public.api_plant_change(9000902, 9000901);
-  perform pg_temp.eq('change: the second one, 90 days on', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
+  -- a second swap by hand: no wait
+  perform private.plant_swap(p, 9000902, 9000901);
+  perform pg_temp.eq('swap: a second one, the same day', (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
     '9000901:false,9000902:true,9000903:false');
 
-  -- a failed payment: no change and no new tick until it is paid (0198, SOLAR-546).
-  -- Family, so a place is open; the change is open too. A paid account is the tests above.
+  -- a failed payment: no new tick until it is paid (0198, SOLAR-546).
+  -- Family, so a place is open. A paid account is the tests above.
   perform set_config('request.jwt.claims', '', true);
   update private.billing set plan = 'family', state = 'past_due', past_due_since = t where user_id = p;
-  update private.plant_change set changed_on = t - 90 where user_id = p;
   insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on)
   values ('psh_p9', p, 'renewal', 'family', 'monthly', 199, 'failed', t, t);
   perform set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true);
-  perform pg_temp.raises('past due: a change is refused', 'select public.api_plant_change(9000901, 9000902)', 'pay the failed payment first');
   perform pg_temp.raises('past due: a tick is refused', 'select public.api_plant_pick(array[9000902])', 'pay the failed payment first');
-  perform pg_temp.eq('past due: nothing moved, the change is not used',
-    (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p) || ' ' ||
-    (select changed_on = t - 90 from private.plant_change where user_id = p), '9000901:false,9000902:true,9000903:false true');
+  perform pg_temp.eq('past due: nothing moved',
+    (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p), '9000901:false,9000902:true,9000903:false');
   perform set_config('request.jwt.claims', '', true);
   o := public.billing_settle_open(p);
   perform public.billing_charge_paid(o->>'reference', v_card);
   perform pg_temp.eq('paid: active again', (select state from private.billing where user_id = p), 'active');
   perform set_config('request.jwt.claims', json_build_object('sub', p, 'role', 'authenticated')::text, true);
-  perform public.api_plant_change(9000901, 9000902);
+  perform private.plant_swap(p, 9000901, 9000902);
   perform public.api_plant_pick(array[9000901]);
-  perform pg_temp.eq('paid: the change and the tick both work',
+  perform pg_temp.eq('paid: the swap and the tick both work',
     (select string_agg(plant_id || ':' || paused, ',' order by plant_id) from public.plant_users where user_id = p),
     '9000901:false,9000902:false,9000903:false');
   perform set_config('request.jwt.claims', '', true);
@@ -1043,7 +1035,6 @@ end $$;
 select pg_temp.eq('stop is gone',  (select count(*)::int from pg_proc where proname = 'api_plant_stop'), 0);
 select pg_temp.eq('start is gone', (select count(*)::int from pg_proc where proname = 'api_plant_start'), 0);
 select pg_temp.eq('pick is for signed-in users',   has_function_privilege('anon', 'public.api_plant_pick(bigint[])', 'execute'), false);
-select pg_temp.eq('change is for signed-in users', has_function_privilege('anon', 'public.api_plant_change(bigint, bigint)', 'execute'), false);
 select pg_temp.eq('ticks table closed', has_table_privilege('authenticated', 'private.plant_picks', 'select'), false);
 
 -- ---------------------------------------------------------------------------
@@ -1112,7 +1103,7 @@ begin
   perform pg_temp.eq('5 ticked: their weeks start', (select count(*)::int from private.plant_week where plant_id between 9007711 and 9007715), 5);
   perform pg_temp.eq('the plant not ticked keeps its week', (select count(*)::int from private.plant_week where plant_id = 9007716), 0);
   perform pg_temp.eq('5 ticked: the account week starts', pg_temp.week_ends(w2) > now() + interval '6 days', true);
-  perform pg_temp.eq('the ticks are fixed', pg_temp.as_user(w2, 'select public.api_plant_change(9007711, 9007716)::text'), 'REFUSED: no change without a plan');
+  perform pg_temp.eq('the ticks are fixed: a 6th on its own is refused', pg_temp.as_user(w2, 'select public.api_plant_pick(array[9007716])::text'), 'REFUSED: no room');
 
   -- day 8: the pay screen, nothing read, not polled, no alert or report
   perform pg_temp.days_on(w1, 8);
