@@ -89,8 +89,7 @@ Functions (`track()` in `_shared/errors.ts`): `payment_failed`, `plan_cancelled`
 `plants_linked_done` (SOLAR-584: a login or shared plant linked; `via`: login or share, `count`,
 `seen_before`: plants that had their free week before this account was made and no other account
 holds, the sign of an account deleted and made again), `plan_started_done` (SOLAR-584: a first
-payment applied; `returning`: an earlier plan had ended, `days_since_plan`, `picked_since`: running
-plants ticked after that plan ended), `winback_resubscribed_done`, `winback_email_sent_done`, `need_a_hand_login_linked_done`,
+payment applied; `returning`: the account paid before and that plan ended, `days_since_plan`), `winback_resubscribed_done`, `winback_email_sent_done`, `need_a_hand_login_linked_done`,
 `need_a_hand_email_sent_done` (`choose`: true for the SOLAR-567 version to a login whose plants
 all wait to be chosen), `free_week_ended_email_sent_done` (SOLAR-475: the day-7 report that says the
 free week has ended went out), `unpaid_reminder_email_sent_done` and `unpaid_last_email_sent_done`

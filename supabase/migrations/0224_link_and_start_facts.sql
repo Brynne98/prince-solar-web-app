@@ -8,9 +8,9 @@
 --     An account deleted and made again, coming back to its plant, counts here.
 --     Called by link-sunsynk and claim-share after a good link.
 --   - billing_start_facts(reference): for a first payment ('start') not yet applied,
---     how long the account's last plan has been over, and how many of its running
---     plants were ticked after that plan ended (picked again while unpaid). Called by
---     billing before billing_charge_paid, which clears ended_at.
+--     how long the account's last plan has been over. Null when the account never paid
+--     before: 0205 gave lapsed free weeks an ended_at too. Called by billing before
+--     billing_charge_paid, which clears ended_at.
 -- No plant ids, names or logins leave the database: counts and days only.
 -- ============================================================================
 
@@ -27,13 +27,12 @@ revoke all on function public.plants_seen_before(uuid, bigint[]) from public, an
 grant execute on function public.plants_seen_before(uuid, bigint[]) to service_role;
 
 create or replace function public.billing_start_facts(p_reference text)
-returns table (user_id uuid, days_since_plan int, picked_since int)
+returns table (user_id uuid, days_since_plan int)
 language sql stable security definer set search_path = public, private, pg_temp as $$
   select c.user_id,
-         (private.billing_today() - (b.ended_at at time zone 'Africa/Johannesburg')::date)::int,
-         (select count(*)::int from private.plant_picks k
-            join public.plant_users pu on pu.user_id = k.user_id and pu.plant_id = k.plant_id and not pu.paused
-           where k.user_id = c.user_id and k.picked_at > b.ended_at)
+         case when exists (select 1 from private.billing_charges e
+                            where e.user_id = c.user_id and e.status = 'paid' and e.reference <> c.reference)
+              then (private.billing_today() - (b.ended_at at time zone 'Africa/Johannesburg')::date)::int end
     from private.billing_charges c
     left join private.billing b on b.user_id = c.user_id
    where c.reference = p_reference and c.kind = 'start'

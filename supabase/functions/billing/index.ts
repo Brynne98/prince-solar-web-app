@@ -121,13 +121,13 @@ async function settle(tx: Tx, out: { kind?: string } = {}, renewal = false): Pro
   if (tx.status === "success" && tx.currency === "ZAR") {
     // SOLAR-584: read before the payment applies, which clears the last plan's end date.
     const { data: facts } = await db.rpc("billing_start_facts", { p_reference: tx.reference })
-      .maybeSingle<{ user_id: string; days_since_plan: number | null; picked_since: number | null }>();
+      .maybeSingle<{ user_id: string; days_since_plan: number | null }>();
     // The email Paystack saved the card under: a renewal charges the card with it. The
     // price is judged on the day Paystack took the money (0130).
     const { data: r, error } = await db.rpc("billing_charge_paid", {
       p_reference: tx.reference, p_card: tx.authorization ?? null, p_cents: tx.amount,
       p_email: tx.customer?.email ?? null, p_paid_at: tx.paid_at ?? null,
-    }) as { data: { kind?: string; refund?: boolean; applied?: boolean } | null; error: { message: string } | null };
+    }) as { data: { kind?: string; refund?: boolean; applied?: boolean; again?: boolean } | null; error: { message: string } | null };
     if (error && /^paid \d+ cents, charge is/.test(error.message)) {
       // Another amount than the charge: never ours to keep, so it goes back.
       console.error(`billing ${tx.reference}: ${error.message}: refunding`);
@@ -152,12 +152,12 @@ async function settle(tx: Tx, out: { kind?: string } = {}, renewal = false): Pro
     if (r?.kind === "start") {
       const { data: w } = await db.rpc("winback_return", { p_reference: tx.reference }).maybeSingle<{ user_id: string; email_id: number; days: number; at: string }>();
       if (w) await track("winback_resubscribed_done", w.user_id, String(w.email_id), w.at, { days: w.days });
-      // SOLAR-584: a plan started; returning when an earlier plan ended, and how many
-      // running plants were ticked after it ended (picked again while unpaid).
-      if (facts) {
-        const back = facts.days_since_plan !== null;
+      // SOLAR-584: a plan started; returning when the account paid before and that plan
+      // ended. Sent on the first settle only: /verify and the webhook both settle, and the
+      // second one reads the facts after ended_at was cleared.
+      if (facts && !r.again) {
         await track("plan_started_done", facts.user_id, tx.reference, tx.paid_at ?? new Date().toISOString(),
-          { returning: back, days_since_plan: facts.days_since_plan, picked_since: back ? facts.picked_since : null });
+          { returning: facts.days_since_plan !== null, days_since_plan: facts.days_since_plan });
       }
     }
     return "paid";
