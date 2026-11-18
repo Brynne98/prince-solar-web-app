@@ -1,4 +1,4 @@
--- 0223 — test accounts do not take offer places (SOLAR-585, decided by Brynne 2026-11-19).
+-- 0225 — test accounts do not take offer places (SOLAR-585, decided by Brynne 2026-11-19).
 --
 -- An offer counts its places as rows in private.offer_members (0145, 0221). A test account
 -- that paid took a launch place for good. Now private.test_users lists the test accounts;
