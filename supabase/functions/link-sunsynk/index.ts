@@ -73,6 +73,13 @@ serve("link-sunsynk", async (req) => {
       await track("need_a_hand_login_linked_done", userId, String(hand.id), new Date().toISOString(),
         { hours: Math.round((Date.now() - Date.parse(hand.sent_at)) / 3_600_000) });
     }
+    // SOLAR-584: how many of the plants had a free week before this account was made and
+    // no other account holds now (an account deleted and made again). A count only.
+    if (plants.length) {
+      const { data: seen } = await db.rpc("plants_seen_before", { p_user: userId, p_plants: plants.map((p) => p.id) });
+      await track("plants_linked_done", userId, `${accountId}:${Date.now()}`, new Date().toISOString(),
+        { via: "login", count: plants.length, seen_before: seen ?? 0 });
+    }
     if (!plants.length) {
       // Linked, but SunSynk returned no plants: the login works but sees nothing —
       // typical when the installer owns the plant and hasn't shared it yet.

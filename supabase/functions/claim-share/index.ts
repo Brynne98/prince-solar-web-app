@@ -8,7 +8,7 @@
 // 404 {error: "not_shared"}, 409 {error: "taken"}, 429 too many tries. A taken plant's id
 // is not sent back: a serial typed from someone else's inverter would reveal it.
 import { claimShared, db, saveCallTally } from "../_shared/sunsynk.ts";
-import { noteError, serve } from "../_shared/errors.ts";
+import { noteError, serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 
 serve("claim-share", async (req) => {
@@ -50,6 +50,10 @@ serve("claim-share", async (req) => {
       console.error(`claim-share refund failed for user ${userId}: ${refundErr.message}`);
       noteError("try_refund_failed", new Error(`link_succeeded: ${refundErr.message}`), { user: userId });
     }
+    // SOLAR-584: the plant had a free week before this account was made, and nobody holds it now.
+    const { data: seen } = await db.rpc("plants_seen_before", { p_user: userId, p_plants: [r.plantId] });
+    await track("plants_linked_done", userId, `${r.plantId}:${Date.now()}`, new Date().toISOString(),
+      { via: "share", count: 1, seen_before: seen ?? 0 });
     return json({ ok: true, ...r }, 200, cors);
   } catch (e) {
     console.error(`claim-share failed for user ${userId}: ${e instanceof Error ? e.message : e}`);

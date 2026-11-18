@@ -119,6 +119,9 @@ async function settle(tx: Tx, out: { kind?: string } = {}, renewal = false): Pro
     return "refund";
   }
   if (tx.status === "success" && tx.currency === "ZAR") {
+    // SOLAR-584: read before the payment applies, which clears the last plan's end date.
+    const { data: facts } = await db.rpc("billing_start_facts", { p_reference: tx.reference })
+      .maybeSingle<{ user_id: string; days_since_plan: number | null; picked_since: number | null }>();
     // The email Paystack saved the card under: a renewal charges the card with it. The
     // price is judged on the day Paystack took the money (0130).
     const { data: r, error } = await db.rpc("billing_charge_paid", {
@@ -149,6 +152,13 @@ async function settle(tx: Tx, out: { kind?: string } = {}, renewal = false): Pro
     if (r?.kind === "start") {
       const { data: w } = await db.rpc("winback_return", { p_reference: tx.reference }).maybeSingle<{ user_id: string; email_id: number; days: number; at: string }>();
       if (w) await track("winback_resubscribed_done", w.user_id, String(w.email_id), w.at, { days: w.days });
+      // SOLAR-584: a plan started; returning when an earlier plan ended, and how many
+      // running plants were ticked after it ended (picked again while unpaid).
+      if (facts) {
+        const back = facts.days_since_plan !== null;
+        await track("plan_started_done", facts.user_id, tx.reference, tx.paid_at ?? new Date().toISOString(),
+          { returning: back, days_since_plan: facts.days_since_plan, picked_since: back ? facts.picked_since : null });
+      }
     }
     return "paid";
   }
