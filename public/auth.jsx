@@ -62,8 +62,10 @@ let linkHash = location.hash.slice(1);
 // Mail scanners (Outlook Safe Links) open every link first; Supabase's own one-time link
 // was spent by that visit, and the person then saw "expired". Here the link is spent only
 // when the person taps the button. Taken out of the address at once.
+// Read after the last '#': the email adds its own after the caller-set address, which
+// could carry a #verify of its own.
 let pendingLink = (() => {
-  const p = new URLSearchParams(linkHash), token_hash = p.get('verify'), type = p.get('type');
+  const p = new URLSearchParams(location.hash.split('#').pop()), token_hash = p.get('verify'), type = p.get('type');
   if (!token_hash || !['signup', 'recovery'].includes(type)) return null;
   linkHash = '';
   history.replaceState(null, '', location.pathname + location.search);
@@ -553,7 +555,8 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     const { error } = await window.sb.auth.verifyOtp(link).catch(e => ({ error: e }));
     if (!error) return window.track('email_link_done', { kind: link.type });
     setBusy(false);
-    if (error.code !== 'otp_expired') return showError(error);
+    // not spent (offline, busy server): put it back so the button works again
+    if (error.code !== 'otp_expired') { pendingLink = link; return showError(error); }
     if (link.type === 'recovery') { go('forgot'); sayError('That link has expired.'); }
     else go('expired');
   };
