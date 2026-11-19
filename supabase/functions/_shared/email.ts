@@ -290,7 +290,29 @@ const keep = (h: string) => h
   // Mail apps turn a long number (an inverter serial) into a blue phone link; a
   // zero-width space inside it stops that and shows nothing.
   .replace(/>([^<]*)</g, (_m, t: string) => `>${t.replace(/\b(\d{4})(\d{5,})\b/g, "$1&#8203;$2")}<`);
-const make = (subject: string, b: Body): Email => ({ subject, html: keep(html(subject, b)), text: text(b) });
+// Outlook on the web in dark mode rewrites every inline text and background colour, and
+// marks the element data-ogsc (text) or data-ogsb (background): the dark card goes grey,
+// green goes dull, the grey bars vanish (SOLAR-587). Each inline hex colour gets a class
+// here (c<hex>, b<hex>), and rules that match only a marked element put it back. Other mail
+// apps never mark anything, so nothing changes there. The rules get their own <style> so a
+// mail app that rejects attribute selectors drops only these, not the layout's.
+const outlook = (h: string) => {
+  const fg = new Set<string>(), bg = new Set<string>();
+  const out = h.replace(/<([a-z][a-z0-9]*)([^>]*?) style="([^"]*)"/g, (m, tag: string, attrs: string, style: string) => {
+    const c = /(?:^|;)color:#([0-9a-f]{3,6})\b/i.exec(style)?.[1]?.toLowerCase();
+    const b = /(?:^|;)background:#([0-9a-f]{3,6})\b/i.exec(style)?.[1]?.toLowerCase();
+    if (!c && !b) return m;
+    if (c) fg.add(c);
+    if (b) bg.add(b);
+    const add = [c && `c${c}`, b && `b${b}`].filter(Boolean).join(" ");
+    const cls = / class="([^"]*)"/.exec(attrs);
+    return `<${tag}${cls ? attrs.replace(cls[0], ` class="${cls[1]} ${add}"`) : `${attrs} class="${add}"`} style="${style}"`;
+  });
+  const rules = [...[...fg].map((x) => `[data-ogsc] .c${x},.c${x}[data-ogsc]{color:#${x}!important}`),
+    ...[...bg].map((x) => `[data-ogsb] .b${x},.b${x}[data-ogsb]{background-color:#${x}!important}`)].join("\n");
+  return out.replace("</head>", `<style>\n${rules}\n</style></head>`);
+};
+const make = (subject: string, b: Body): Email => ({ subject, html: outlook(keep(html(subject, b))), text: text(b) });
 
 
 // ---------------------------------------------------------------- account mail
