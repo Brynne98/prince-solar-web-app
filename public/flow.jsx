@@ -57,7 +57,8 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
     const m = battInfo && /^(.*) to (empty|full)$/.exec(battInfo);
     if (m) return { k: m[2] === 'empty' ? 'Empty in' : 'Full in', v: m[1] };
     // "Set pack size" stands alone, a link to Settings (SOLAR-23)
-    if (battInfo) return { k: '', v: battInfo, on: onBattInfo };
+    // with no link (fullscreen) it is plain words, not a value: a value never wraps (SOLAR-550)
+    if (battInfo) return onBattInfo ? { k: '', v: battInfo, on: onBattInfo } : { k: battInfo, v: '' };
     // under 200 W there is no time (tabs.jsx), but the power is still moving (SOLAR-44)
     // a 0 W battery can still report "discharging"; it reads as Resting, like the flow line
     return { k: charging ? 'Charging slowly' : agg.battState === 'discharging' && agg.battPower > 5 ? 'Discharging' : 'Resting', v: '' };

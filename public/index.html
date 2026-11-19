@@ -718,7 +718,8 @@
   .wall .mini-label { font-size: calc(var(--fs-xs) * var(--z)); }
   .wall .mini-value { font-size: calc(var(--fs-3xl) * var(--z)); margin-top: calc(var(--sp-sm) * var(--z)); }
   .wall :is(.mini-sub, .mini-trend) { font-size: calc(var(--fs-sm) * var(--z)); }
-  @media (max-width: 600px) { .wall .today-strip { display: none; } }
+  /* a phone on its side too: the cards took half the height and the diagram drew at 5px (SOLAR-550) */
+  @media (max-width: 600px), (max-height: 480px) { .wall .today-strip { display: none; } }
   .wall .flow-wrap { height: 100%; display: flex; flex-direction: column; justify-content: center; }
   /* left, on the diagram's own left edge: as wide as the zoomed layout, centred like it */
   .wall .flow-narrative { flex: none; text-align: left; text-wrap: balance; max-width: 100%; margin-inline: auto;
