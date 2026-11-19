@@ -46,6 +46,7 @@ Web (`public/*.jsx`):
 | `email_resend_done` | Confirm or reset email sent again |
 | `password_reset_sent_done` | Asked for a reset link |
 | `password_reset_done` | New password set from the link |
+| `email_link_done` | Confirm or reset link's button tapped and accepted (`kind`: `signup`, `recovery`; SOLAR-586) |
 | `password_change_done` | Password changed in Settings |
 | `feedback_sent_done` | Feedback sent from the account menu or "Report this" (`page`, `image`, `report`: true or false, `error_id`: the PostHog error id or null). Never the message |
 | `plant_linked` | SunSynk login linked, or a shared plant taken |
