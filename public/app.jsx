@@ -463,7 +463,8 @@ function PhoneBar({ tabs, tab, onTab }) {
 // ---- Notifications (SOLAR-244, SOLAR-327) ------------------------------------
 // A bell in the header with the unread count. It opens the alerts of the last 30 days
 // (api_notifications): a panel under the bell, a full page on a phone. Closing it marks
-// what it showed as read; a row is not a link. The full page (SOLAR-327) went in SOLAR-598.
+// what it showed as read; a row is not a link. See all opens AlertsPage: every alert,
+// one row each with when it went back (api_alerts), filtered by time, kind and unread.
 
 // the icon and colour of each alert switch
 const NOTIF_GLYPH = { grid: 'grid', battery: 'battery', panels: 'solar', readings: 'live', sunsynk: 'live' };
@@ -605,7 +606,7 @@ function BillCards({ notices, tab }) {
 }
 
 // disabled: the loading header holds its place, dimmed like Refresh (SOLAR-248)
-function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, disabled }) {
+function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, onSeeAll, disabled }) {
   const [open, setOpen, ref] = usePopover();
   const shown = useRef(null);
   useEffect(() => { if (open) onOpen(); }, [open]);
@@ -636,7 +637,7 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, d
             {data?.unread > 0 && <button type="button" className="nl-all" onClick={onReadAll}>Mark all read</button>}
             <button type="button" className="nl-gear" aria-label="Notification settings" onClick={() => { close(); onSettings(); }}><Icon id="settings" /></button>
           </div>
-          {/* only the list scrolls: the head stays, so the scroll bar runs between them (SOLAR-390) */}
+          {/* only the list scrolls: the head and See all stay, so the scroll bar runs between them (SOLAR-390) */}
           <div className="nl-scroll">
           {/* one list (SOLAR-353): billing notices lead Today, above its alerts */}
           {pinned.length > 0 && <div className="nl-day">Today</div>}
@@ -649,13 +650,16 @@ function NotifBell({ data, pinned = [], onOpen, onSeen, onReadAll, onSettings, d
           )}
           {items && items.length > 0 && <NotifRows items={items} when={alertSpan} from={pinned.length ? window.localDateStr() : null} />}
           </div>
+          {/* older alerts can be there with none in the last 30 days */}
+          {/* its unread rows go with it, read once the page is left, so the page still shows them */}
+          {items && <button type="button" className="nl-foot" onClick={() => { const ids = shown.current || []; shown.current = null; close(); onSeeAll(ids); }}>See all</button>}
         </div>
       )}
     </div>
   );
 }
 
-// Billing notices (SOLAR-212) with their buttons, as the bell list shows them.
+// Billing notices (SOLAR-212) with their buttons, as the bell list and the full page show them.
 function NoticeRows({ pinned, onAct }) {
   return pinned.map(n => (
     <div key={n.kind} className={'nl-row nl-pin' + (n.read ? '' : ' unread')}>
@@ -670,13 +674,13 @@ function NoticeRows({ pinned, onAct }) {
   ));
 }
 
-// Alert rows under day headings, as the bell list shows them.
-// when(it): the time line after the plant's name.
+// Alert rows under day headings, as the bell list and the full page show them.
+// when(it): the time line after the plant's name. heads={false}: no day headings.
 // from: the day whose heading is already above (the bell's Today over its notices).
-function NotifRows({ items, when, from = null }) {
+function NotifRows({ items, when, heads = true, from = null }) {
   let day = from;
   return items.map(it => {
-    const head = it.day !== day ? <div className="nl-day">{notifDay(it.day)}</div> : null;
+    const head = heads && it.day !== day ? <div className="nl-day">{notifDay(it.day)}</div> : null;
     day = it.day;
     return (
       <React.Fragment key={it.id}>
@@ -706,6 +710,103 @@ function alertSpan(it) {
   const dur = window.fmtDuration(Math.max(1, Math.round((it.endAt - it.at) / 60)));
   // over within the minute: "14:40, 1 min", not "14:40 to 14:40" (SOLAR-409)
   return end === it.time ? `${it.time}, ${dur}` : `${it.time} to ${end}, ${dur}`;
+}
+
+// [[day, items]] in the order given
+const alertDays = (items) => [...items.reduce((m, it) => m.set(it.day, [...(m.get(it.day) || []), it]), new Map())];
+
+const ALERT_RANGES = [['day', 'Day', 1], ['week', 'Week', 7], ['month', 'Month', 30], ['year', 'Year', 365], ['all', 'All', null]];
+// Billing is a kind like the alert switches: one list, filtered by kind (SOLAR-353)
+const ALERT_KINDS = [{ value: 'all', label: 'All' }, { value: 'billing', label: 'Billing' }, { value: 'grid', label: 'Grid' }, { value: 'battery', label: 'Battery' },
+  { value: 'panels', label: 'Panels' }, { value: 'readings', label: 'Readings' }, { value: 'sunsynk', label: 'SunSynk' }];
+
+// The full page (SOLAR-327). onShown(ids): unread rows it showed, read once the page is left.
+// pinned: the billing notices the bell shows; they lead Today's card unless the kind filter
+// picks an alert switch.
+function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
+  const [range, setRange] = useState('month');
+  const [kind, setKind] = useState('all');
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [res, setRes] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [more, setMore] = useState(false);
+  const ask = (before) => {
+    if (kind === 'billing') return Promise.resolve({ items: [], unread: 0, more: false });
+    const days = ALERT_RANGES.find(r => r[0] === range)[2];
+    return window.fetchAlerts({ from: days ? new Date(Date.now() - days * 86400000) : null, kind: kind === 'all' ? null : kind,
+      unread: unreadOnly, before });
+  };
+  const keep = (r) => { onShown(r.items.filter(it => !it.read).flatMap(it => it.ids)); return r; };
+  // only the latest filters' answer lands
+  const req = useRef(0);
+  const load = () => {
+    const n = ++req.current;
+    setRes(null); setFailed(false);
+    ask().then(r => n === req.current && setRes(keep(r))).catch(() => n === req.current && setFailed(true));
+  };
+  useEffect(() => { load(); }, [range, kind, unreadOnly]);
+  const filter = (name, value, set) => { window.track('alerts_filter_done', { filter: name, value }); set(value); };
+  const showMore = () => {
+    setMore(true);
+    ask(res.items[res.items.length - 1])
+      .then(r => { keep(r); setRes(p => ({ ...r, items: p.items.concat(r.items) })); })
+      .catch(() => window.toast('Couldn’t load more. Try again.', { error: true }))
+      .finally(() => setMore(false));
+  };
+  const readAll = () => {
+    window.track('alerts_read_all_done');
+    setRes(p => (unreadOnly ? { ...p, unread: 0, items: [], more: false } : { ...p, unread: 0, items: p.items.map(it => ({ ...it, read: true })) }));
+    onReadAll();
+  };
+  const notices = kind === 'all' || kind === 'billing' ? pinned : [];
+  // the notices it shows unread are read once it's left, as its alerts (SOLAR-465)
+  useEffect(() => { onShown(notices.filter(n => !n.read).map(n => n.id)); }, [notices.length]);
+  const today = window.localDateStr();
+  const days = res ? alertDays(res.items) : [];
+  if (res && notices.length && days[0]?.[0] !== today) days.unshift([today, []]);
+  return (
+    <div className="alerts-page">
+      <div className="nl-head alerts-head">
+        <button type="button" className="nl-back" aria-label="Back" onClick={onBack}><Icon id="back" /></button>
+        <div className="page-head"><h1>Notifications</h1></div>
+        {res?.unread > 0 && <button type="button" className="nl-all" onClick={readAll}>Mark all read</button>}
+        <button type="button" className="nl-gear" aria-label="Notification settings" onClick={onSettings}><Icon id="settings" /></button>
+      </div>
+      <div className="alerts-filters">
+        <Segmented label="Time" size="sm" className="alerts-range" value={range} onChange={v => filter('range', v, setRange)}
+                   options={ALERT_RANGES.map(([value, label]) => ({ value, label }))} />
+        <div className="alerts-row2">
+          <div className="alerts-kind"><PickMenu label="Kind" value={kind} options={ALERT_KINDS} onPick={v => filter('kind', v, setKind)} /></div>
+          <label className="alerts-unread">Unread only<Switch on={unreadOnly} label="Unread only" onChange={v => filter('unread', v, setUnreadOnly)} /></label>
+        </div>
+      </div>
+      {failed && (
+        <div className="nl-empty">
+          <b>Couldn’t load your notifications</b>
+          <p>Check your connection, then try again.</p>
+          <button type="button" className="save-btn" onClick={load}>Try again</button>
+        </div>
+      )}
+      {!failed && !res && <div className="alerts-list">{[0, 1, 2].map(i => <Skeleton key={i} h={150} r={16} style={{ marginTop: 40 }} />)}</div>}
+      {/* a card per day, under its date, as Settings puts each section's card under its title */}
+      {days.length > 0 && <div className="alerts-list">{days.map(([day, rows]) => (
+        <section key={day} className="alerts-day" aria-label={notifDay(day)}>
+          <div className="nl-day">{notifDay(day)}</div>
+          <Card className="alerts-card">
+            {day === today && <NoticeRows pinned={notices} onAct={n => n.act('page')} />}
+            <NotifRows items={rows} when={alertSpan} heads={false} />
+          </Card>
+        </section>
+      ))}</div>}
+      {res && !days.length && (
+        <div className="nl-empty">
+          <span className="nl-glyph g-readings"><Icon id="bell" /></span>
+          <b>No notifications</b>
+        </div>
+      )}
+      {res?.more && <div className="alerts-more"><BusyButton className="ghost-btn" busy={more} busyText="Loading…" onClick={showMore}>Show more</BusyButton></div>}
+    </div>
+  );
 }
 
 // Status word right of the plant, coloured; the age only once it is worth reading. It also
@@ -1135,7 +1236,7 @@ function usePageHistory(tab, plant, onBack) {
 // The browser tab names the page: "Solar · Prince Solar Hub". No name: the app's alone.
 // 'prefs' is the Settings list on a phone and Account beside the menu on a desktop.
 const SITE_TITLE = document.title;
-const PAGE_TITLE = { prefs: 'Settings', account: 'Account', notifications: 'Notifications', plants: 'Plants', billing: 'Billing', plans: 'Change plan' };
+const PAGE_TITLE = { prefs: 'Settings', account: 'Account', notifications: 'Notifications', plants: 'Plants', billing: 'Billing', plans: 'Change plan', alerts: 'Notifications' };
 function usePageTitle(tab) {
   useEffect(() => {
     const id = tab === 'prefs' && !window.matchMedia('(max-width: 599px)').matches ? 'account' : tab;
@@ -1438,7 +1539,7 @@ function App({ links }) {
   const [plantId, setPlantId] = useState(null);
   const shownPlant = useRef(null);
   shownPlant.current = plantId;
-  const [tab, setTab] = useState(() => savedTab(t => pageOk(TABS, t)));
+  const [tab, setTab] = useState(() => savedTab(t => pageOk(TABS, t) || t === 'alerts'));
   const auto = true; // refresh runs on its own; the header button forces one now
   const [rawSnap, setSnap] = useState(null);
   // Every login of the plant needs a reconnect and no reading lands (SOLAR-373): nothing is
@@ -1523,7 +1624,7 @@ function App({ links }) {
 
   // The address names the page and plant, so a reload opens them; the saved page is for a
   // bare address (SOLAR-165). ?section= is left for loadMe to read.
-  usePageHistory(tab, plantId, (t) => { if (pageOk(TABS, t)) { setTab(t); setOpenDay(null); toTop(); } });
+  usePageHistory(tab, plantId, (t) => { if (pageOk(TABS, t) || t === 'alerts') { setTab(t); setOpenDay(null); toTop(); } });
   usePageTitle(tab);
 
   // spin = false on the 60 s auto tick, so the icon only turns for something the
@@ -1750,12 +1851,26 @@ function App({ links }) {
   const refresh = () => { if (busy) return; loadLive(); loadToday(); refreshEnergy(true); setRefreshKey(k => k + 1); };
 
   const go = (id) => { setTab(id); setOpenDay(null); toTop(); if (location.hash) history.replaceState(history.state, '', location.pathname + location.search); };
-  // Alerts seen in a list (the bell's as it closes): read, then
+  // Alerts seen in a list (the bell's as it closes, the full page as it goes): read, then
   // the count again. null: every one.
   const readNotifs = (ids) => {
     if (!ids) setNotifs(n => n && ({ ...n, unread: 0, items: n.items.map(x => ({ ...x, read: true })),
       pinned: n.pinned.map(x => ({ ...x, read: true })) }));
     window.readNotifications(ids).then(loadNotifs).catch(() => {});
+  };
+  // See all: the full page; its back goes to the page it came from. What it showed unread
+  // is read once it's left: here, not as it unmounts, since the first reading remounts it.
+  const alertsFrom = useRef('live');
+  const alertsShown = useRef(new Set());
+  useEffect(() => {
+    if (tab === 'alerts' || !alertsShown.current.size) return;
+    readNotifs([...alertsShown.current]);
+    alertsShown.current.clear();
+  }, [tab]);
+  const seeAll = (ids) => {
+    ids.forEach(id => alertsShown.current.add(id));
+    if (tab !== 'alerts') alertsFrom.current = tab;
+    window.track('alerts_page_opened'); go('alerts');
   };
   // Billing notices (SOLAR-212). An undo re-reads the list, so the notice goes, and tells
   // an open Billing page (ps-billing) to re-read the plan. Before tabs.js is here, Billing.
@@ -1779,7 +1894,10 @@ function App({ links }) {
   const priceCard = tab === 'live' && !notices.some(n => n.kind === 'free_week_soon') && weekCard(weekEndsAt, week, (me?.plants || []).length, noticeAct.plans);
   const cards = priceCard ? [...notices, priceCard] : notices;
   const bell = <NotifBell data={notifs} pinned={notices} onOpen={loadNotifs} onSeen={readNotifs} onReadAll={() => readNotifs(null)}
-                         onSettings={() => openSettings('notifications')} />;
+                         onSeeAll={seeAll} onSettings={() => openSettings('notifications')} />;
+  const alertsPage = <AlertsPage key="alerts" pinned={notices} onBack={() => go(alertsFrom.current)} onSettings={() => openSettings('notifications')}
+                                 onShown={ids => ids.forEach(id => alertsShown.current.add(id))}
+                                 onReadAll={() => { alertsShown.current.clear(); readNotifs(null); }} />;
   const loginDead = links.accounts.some(a => a.status === 'needs_relink' && a.kind !== 'share');
   const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, onSettings: () => go('prefs'), active: isSettings(tab) };
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync}
@@ -1800,7 +1918,7 @@ function App({ links }) {
   //
   // The whole frame with skeletons where the data will go. Pages stay live while loading:
   // there is no reason to trap someone on Live because the first snapshot hasn't landed.
-  const dataPage = !isSettings(tab) && tab !== 'system';
+  const dataPage = !isSettings(tab) && tab !== 'system' && tab !== 'alerts';
   if (!snap || (tab === 'live' && !notifsTried)) {
     return (
       <Frame tabs={TABS} tab={tab} onTab={go} account={account} busy steps={steps}
@@ -1811,7 +1929,7 @@ function App({ links }) {
             the same slot as in the loaded page below, so the first reading doesn't remount
             it (the Plan section flashed back to its outline). */}
         <div className="page">
-          {!dataPage && settingsPage}
+          {!dataPage && (tab === 'alerts' ? alertsPage : settingsPage)}
           {dataPage && (tab !== 'live' || notifsTried) && <window.TabSkeleton tab={tab} cfg={(me?.plants || []).find(p => p.id === plantId)?.config} />}
         </div>
       </Frame>
@@ -1825,7 +1943,7 @@ function App({ links }) {
         relinkedAt={relinked?.plantId === plantId ? relinked.at : null} />{bell}</>}>
       <BillCards notices={cards} tab={tab} />
       <div className={'page' + (old ? ' old' : '')}>
-        {!dataPage && settingsPage}
+        {!dataPage && (tab === 'alerts' ? alertsPage : settingsPage)}
         {tab === 'live' && <window.LiveTab snap={snap} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
           onOpenSettings={openSettings} />}
         {tab === 'solar' && <window.SolarTab alertDay={openDay} snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
