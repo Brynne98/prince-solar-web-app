@@ -68,6 +68,14 @@ if (serveAt === -1) {
       });
       fs.writeFileSync(file, html);
     }
+    // sw.js's kept offline page is named after its three files (SOLAR-592), so a change to
+    // any of them is a new worker, and the old copy goes.
+    const sw = path.join(PUB, 'sw.js');
+    const h = crypto.createHash('sha256');
+    for (const f of ['offline.html', 'offline.js', 'theme.js']) h.update(fs.readFileSync(path.join(PUB, f)));
+    const swSrc = fs.readFileSync(sw, 'utf8');
+    if (!swSrc.includes("const OFFLINE = 'offline-dev';")) { console.error('sw.js has no offline-dev name to stamp'); process.exit(1); }
+    fs.writeFileSync(sw, swSrc.replace("const OFFLINE = 'offline-dev';", `const OFFLINE = 'offline-${h.digest('hex').slice(0, 10)}';`));
   }
   console.log('built', sources().length, 'files into public/build/');
 } else {

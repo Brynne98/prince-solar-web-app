@@ -1,13 +1,50 @@
-// Pop-up alerts (SOLAR-244). Registered only when someone turns pop-ups on in
-// Account > Notifications. It shows the pop-up notify sends and opens the app on a tap.
-// No fetch handler: the app loads from the network as it always has.
+// Pop-up alerts (SOLAR-244) and the offline page (SOLAR-592). Every app load registers it
+// (app.jsx); pop-ups still start only when someone turns them on in Account > Notifications.
+// It shows the pop-up notify sends and opens the app on a tap.
 // Kept at the site root, not in /build: a worker's scope is its folder, and /build
 // files are cached for a year.
 
-// A new version takes over at once (it caches nothing, so nothing can go stale), and
-// takes the open app over, so a tap can steer it without a reload first.
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+// The offline page (SOLAR-592): the only thing kept. Pages load from the network as they
+// always have; only when that fails is a page load answered with offline.html. The app,
+// its scripts, Supabase and every other request are never touched.
+// OFFLINE is the kept copy's name. Cloudflare's build stamps it with a hash of the three
+// files (scripts/build-jsx.js), so a change to any of them changes this file, the browser
+// installs the new worker, and activate drops the old copy.
+const OFFLINE = 'offline-dev';
+const OFFLINE_FILES = ['/offline.html', '/offline.js', '/theme.js'];
+
+// A new version takes over at once, and takes the open app over, so a tap can steer it
+// without a reload first.
+self.addEventListener('install', (e) => e.waitUntil((async () => {
+  const c = await caches.open(OFFLINE);
+  // past the browser's own cache, so the copy kept is the one just pushed
+  await c.addAll(OFFLINE_FILES.map((u) => new Request(u, { cache: 'reload' })));
+  await self.skipWaiting();
+})()));
+self.addEventListener('activate', (e) => e.waitUntil((async () => {
+  for (const k of await caches.keys()) if (k !== OFFLINE) await caches.delete(k);
+  await self.clients.claim();
+})()));
+
+self.addEventListener('fetch', (e) => {
+  const r = e.request;
+  if (r.method !== 'GET') return;
+  const url = new URL(r.url);
+  // a page load that fails: the offline page, at the address asked for
+  if (r.mode === 'navigate') {
+    // A fresh Response: Cloudflare (and serve) redirect /offline.html to /offline, and the
+    // browser refuses a redirected answer to a page load.
+    e.respondWith(fetch(r).catch(async () => {
+      const kept = await caches.match('/offline.html', { cacheName: OFFLINE });
+      return kept ? new Response(kept.body, kept) : Response.error();
+    }));
+    return;
+  }
+  // the offline page's own two files, from the copy only when the network fails
+  if (url.origin === self.location.origin && OFFLINE_FILES.includes(url.pathname) && url.pathname !== '/offline.html') {
+    e.respondWith(fetch(r).catch(() => caches.match(url.pathname, { cacheName: OFFLINE })));
+  }
+});
 
 self.addEventListener('push', (e) => {
   let m = {};
