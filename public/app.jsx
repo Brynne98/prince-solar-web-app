@@ -1638,7 +1638,12 @@ function App({ links }) {
     const t0 = Date.now();
     if (spin) setBusy(b => b + 1);
     clearTimeout(liveRetry.current);
-    try { setSnap(await window.fetchSnapshot()); setErr(null); liveFails.current = 0; }
+    try {
+      const s = await window.fetchSnapshot();
+      setSnap(s); setErr(null); liveFails.current = 0;
+      // for the offline page (offline.js, SOLAR-592)
+      if (s.lastReading) try { localStorage.setItem('ps.lastReading', JSON.stringify({ t: s.lastReading.getTime(), tz: window.PLANT_TZ || null })); } catch (e) {}
+    }
     catch (e) {
       liveFails.current += 1;
       if (spin || liveFails.current >= 2) setErr(e.message);
@@ -1955,6 +1960,8 @@ const legalPage = new URLSearchParams(location.search).get('page');
 if (legalPage === 'terms' || legalPage === 'privacy') {
   location.replace(`${legalPage}.html`);
 } else {
+  // The worker (sw.js) shows the offline page when a page load fails (SOLAR-592).
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   ReactDOM.createRoot(document.getElementById('root')).render(
     <window.AuthGate fallback={<BootShell />}><SignedIn /></window.AuthGate>
   );
