@@ -11,7 +11,8 @@
 #     peak, so treat this as "you'll know within the hour", not a pager.
 #   * GitHub disables cron workflows in repos with no pushes for 60 days. It emails
 #     you first. Any commit re-arms it.
-#   * It only calls api_health(), which returns nothing but a staleness number.
+#   * It only calls api_health(), which returns nothing but {"stale": true|false}
+#     (SOLAR-530: no reading time for a signed-out caller).
 name: Check the logger is alive
 
 on:
@@ -48,12 +49,10 @@ jobs:
           fi
 
           stale=$(jq -r '.stale' /tmp/health.json)
-          age=$(jq -r '.ageSeconds // "null"' /tmp/health.json)
 
           if [ "$stale" != "false" ]; then
-            mins=$([ "$age" = "null" ] && echo "?" || echo $(( age / 60 )))
-            echo "::error::Logger appears stopped — last row was ${mins} minutes ago. Check cron.job_run_details and net._http_response in the SQL editor."
+            echo "::error::Logger appears stopped — no row in the last 15 minutes. Check cron.job_run_details and net._http_response in the SQL editor."
             exit 1
           fi
 
-          echo "OK — last logged $(( age / 60 ))m $(( age % 60 ))s ago"
+          echo "OK — logged in the last 15 minutes"
