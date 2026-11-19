@@ -15,6 +15,7 @@
 //             sign-in in another tab of this browser reaches this one too
 //             (supabase-js broadcasts it), so the screen moves on by itself.
 //   forgot    email → reset link
+//   link      from a confirm or reset email: one button that spends the link (SOLAR-586)
 //   recovery  reached from the reset link. Supabase signs the user in with a
 //             short-lived session and fires PASSWORD_RECOVERY; we ask for the new
 //             password and call updateUser. Until then the app is gated.
@@ -57,6 +58,17 @@ const RESET_URL = SITE_URL + '?link=reset';
 // A failed emailed link comes back as #error_code=…. supabase-js reads it on start and
 // signs out, and the sign-out clears the hash, so keep it from before that (SOLAR-340).
 let linkHash = location.hash.slice(1);
+// Confirm and reset emails link here as #verify=<token hash>&type=signup|recovery (SOLAR-586).
+// Mail scanners (Outlook Safe Links) open every link first; Supabase's own one-time link
+// was spent by that visit, and the person then saw "expired". Here the link is spent only
+// when the person taps the button. Taken out of the address at once.
+let pendingLink = (() => {
+  const p = new URLSearchParams(linkHash), token_hash = p.get('verify'), type = p.get('type');
+  if (!token_hash || !['signup', 'recovery'].includes(type)) return null;
+  linkHash = '';
+  history.replaceState(null, '', location.pathname + location.search);
+  return { token_hash, type };
+})();
 
 // "Reset password" in the password-changed email links to ?reset=1 (SOLAR-155). Signed in,
 // it opens Change password on Account; signed out, "Forgot password?". Read once and taken
@@ -459,6 +471,8 @@ function InboxCard({ kind, email, onBack, onSignIn }) {
 function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const { useState, useEffect } = React;
   const [mode, setMode] = useState(initialMode);
+  // Kept: pendingLink is cleared at the tap, and the busy label still needs the kind.
+  const [linkType] = useState(pendingLink?.type);
   useEffect(() => { window.track('screen_viewed', { stage: 'sign_in', screen: mode }); }, [mode]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -529,8 +543,24 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   };
 
 
+  // The tap on a confirm or reset link's page. A recovery link fires PASSWORD_RECOVERY,
+  // which opens Choose a new password; a sign-up link signs in.
+  const useLink = async () => {
+    // Cleared first: the sign-in event re-renders AuthGate before verifyOtp returns.
+    const link = pendingLink;
+    pendingLink = null;
+    setBusy('form');
+    const { error } = await window.sb.auth.verifyOtp(link).catch(e => ({ error: e }));
+    if (!error) return window.track('email_link_done', { kind: link.type });
+    setBusy(false);
+    if (error.code !== 'otp_expired') return showError(error);
+    if (link.type === 'recovery') { go('forgot'); sayError('That link has expired.'); }
+    else go('expired');
+  };
+
   const submit = async (e) => {
     e.preventDefault();
+    if (mode === 'link') return useLink();
     const problems = check();
     if (Object.keys(problems).length) return flag(problems);
     const addr = email.trim();
@@ -575,6 +605,9 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     signup:   { h: 'Create your account',   p: null,                                                   cta: 'Create account',  busy: 'Creating account…' },
     forgot:   { h: 'Reset your password',   p: 'We’ll email you a link to choose a new one.',          cta: 'Send reset link', busy: 'Sending…' },
     recovery: { h: 'Choose a new password', p: 'Set a new password to continue.',                      cta: 'Save password',   busy: 'Saving…' },
+    link:     linkType === 'recovery'
+              ? { h: 'Reset your password', p: null, cta: 'Continue', busy: 'Opening…' }
+              : { h: 'Confirm your email',  p: null, cta: 'Confirm email', busy: 'Confirming…' },
     expired:  { h: 'That link has expired', p: 'Links last 24 hours. Enter your email and we’ll send a new one.', cta: 'Send a new link', busy: 'Sending…' },
   }[mode];
 
@@ -607,7 +640,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
           <div className="login-or"><span>or with email</span></div>
         </>)}
 
-        {mode !== 'recovery' && (
+        {mode !== 'recovery' && mode !== 'link' && (
           <div className="auth-field">
             <FieldLabel id="auth-email" label="Email" error={bad['auth-email']} />
             <input id="auth-email" type="email" placeholder="you@example.com" value={email} autoComplete="username"
@@ -615,7 +648,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
                    {...invalidProps('auth-email', bad['auth-email'])} />
           </div>
         )}
-        {mode !== 'forgot' && mode !== 'expired' && (
+        {mode !== 'forgot' && mode !== 'expired' && mode !== 'link' && (
           <PasswordField id="auth-password" label={mode === 'recovery' ? 'New password' : 'Password'}
                          value={password} error={bad['auth-password']}
                          onChange={(v) => { setPassword(v); edited('auth-password', 'auth-password2'); }}
@@ -629,14 +662,14 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
                          autoComplete="new-password" />
         )}
 
-        {mode !== 'recovery' && <BotCheck hold={bot} />}
+        {mode !== 'recovery' && mode !== 'link' && <BotCheck hold={bot} />}
         <button type="submit" disabled={!!busy} aria-busy={busy === 'form'}>{busy === 'form' ? copy.busy : copy.cta}</button>
         {/* covers Google above too (SOLAR-91); on sign-in, Google can create an account */}
         {(mode === 'signin' || mode === 'signup') && <div className="login-fine">By continuing, you agree to
           the <a href="terms.html" target="_blank" rel="noopener">Terms</a> and <a href="privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</div>}
 
         {/* Grey links that go back on the left, the way forward in green on the right. */}
-        <div className="login-links">
+        {mode !== 'link' && <div className="login-links">
           {mode === 'signin' && (<>
             <button type="button" className="login-link quiet" onClick={() => go('forgot')}>Forgot password?</button>
             <button type="button" className="login-link" onClick={() => go('signup')}>Create an account</button>
@@ -653,7 +686,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
           {mode === 'recovery' && (
             <SignOutButton className="login-link quiet" busyText="Cancelling…">Cancel</SignOutButton>
           )}
-        </div>
+        </div>}
       </AuthCard>
       {toastHost}
     </div>
@@ -670,7 +703,8 @@ window.AuthGate = function AuthGate({ children, fallback = null }) {
   // card's mode (and its busy Cancel) after Cancel signs out.
   if (recovering) return <AuthScreen key="recovery" initialMode="recovery" onRecovered={doneRecovering} />;
   // ?signup (the showcase's Try it free and plan buttons) opens Create an account
-  if (!session) return <AuthScreen key="signin" initialMode={window.takeResetAsk() ? 'forgot' : new URLSearchParams(location.search).has('signup') ? 'signup' : 'signin'} />;
+  // A confirm or reset link shows its button even over another signed-in account (SOLAR-586).
+  if (!session || pendingLink) return <AuthScreen key="signin" initialMode={pendingLink ? 'link' : window.takeResetAsk() ? 'forgot' : new URLSearchParams(location.search).has('signup') ? 'signup' : 'signin'} />;
   return children;
 };
 

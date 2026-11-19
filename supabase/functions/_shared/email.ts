@@ -9,7 +9,7 @@
 // header made them look like a mailing list to Gmail.
 //
 // Account mail is sent by Supabase Auth, not by us: renderAuthTemplates() fills the
-// links with Supabase's Go placeholders ({{ .ConfirmationURL }}) and the output is
+// links with Supabase's Go placeholders ({{ .TokenHash }}) and the output is
 // pasted into Dashboard -> Authentication -> Emails.
 //
 // Look: DESIGN.md. Dark only, like the app (decided 2026-10-18, SOLAR-117); colour
@@ -361,10 +361,12 @@ export const accountDeleted = (email: string) =>
 export function renderAuthTemplates(): Record<string, Email> {
   // Only what the app uses: password sign-up and reset. No email sign-in link, and
   // the email address can't be changed yet.
-  const URL = "{{ .ConfirmationURL }}";
+  // The link opens the app, which spends the token only when the person taps a button
+  // (auth.jsx, SOLAR-586): mail scanners that open every link no longer use it up.
+  const link = (type: string) => `{{ .RedirectTo }}#verify={{ .TokenHash }}&type=${type}`;
   return {
-    confirmation: confirmSignup(URL, "{{ .Email }}"),
-    recovery: resetPassword(URL, "{{ .Email }}"),
+    confirmation: confirmSignup(link("signup"), "{{ .Email }}"),
+    recovery: resetPassword(link("recovery"), "{{ .Email }}"),
     password_changed_notification: passwordChanged("{{ .Email }}"),
   };
 }
