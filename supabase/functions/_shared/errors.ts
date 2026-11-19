@@ -7,6 +7,8 @@
 // in a message are masked. A failed send is ignored: the error still goes to the
 // Supabase log as before.
 
+import { isFakePlant, isTestUser } from "./gate.ts";
+
 const POSTHOG_KEY = "phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v";
 // POSTHOG_URL is set only by local test runs, so their events stay off the real project.
 const POSTHOG_URL = Deno.env.get("POSTHOG_URL") ?? "https://eu.i.posthog.com/i/v0/e/";
@@ -120,12 +122,22 @@ async function sentWithinHour(keys: string[]): Promise<{ recent: Set<string>; ma
   } catch { return none; }
 }
 
+// A note that only the tester set-up made (SOLAR-595): every plant it names is a fake plant,
+// or it names none and its user is a tester. It goes to the Supabase log, not PostHog, so
+// the admin inbox gets real problems only. A note that also names a real plant is sent whole.
+const testOnly = (n: Note) =>
+  n.plants.size ? [...n.plants].every(isFakePlant) : !!n.user && isTestUser(Deno.env.get("TESTER_USERS") ?? "", n.user);
+
 /** Sends what noteError gathered. serve() calls it when a request ends; work left
  *  running after the response calls it itself. */
 export async function flushErrors(fn = served): Promise<void> {
-  if (!notes.size) return;
-  const batch = [...notes.entries()];
+  const batch = [...notes.entries()].filter(([kind, n]) => {
+    if (!testOnly(n)) return true;
+    console.warn(`${fn} ${kind} x${n.count}, test plants only, not sent:`, n.e);
+    return false;
+  });
   notes.clear();
+  if (!batch.length) return;
   const keyOf = (kind: string) => `error_sent:${fn}:${kind}`;
   const gate = await sentWithinHour(batch.filter(([, n]) => n.hourly).map(([k]) => keyOf(k)));
   const due = batch.filter(([k, n]) => !n.hourly || !gate.recent.has(keyOf(k)));

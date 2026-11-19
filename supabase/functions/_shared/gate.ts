@@ -31,3 +31,8 @@ export const mockClosed = (
 // call totals or failures (SOLAR-477). Locally every call goes to the mock and counts.
 export const fakeSunsynk = (loginOrToken: string, apiBase: string, mockBase: string) =>
   loginOrToken.endsWith("@mock") && mockBase !== apiBase;
+
+// Fake plants (SOLAR-270): the mock moves its plant ids up by MOCK_PLANT_OFFSET, so they sit in
+// 900000000 to 900999999 and never share an id with a real SunSynk plant (go-live-tester-cleanup.sql).
+export const MOCK_PLANT_OFFSET = 900_000_000;
+export const isFakePlant = (plantId: number) => plantId >= MOCK_PLANT_OFFSET && plantId < MOCK_PLANT_OFFSET + 1_000_000;
