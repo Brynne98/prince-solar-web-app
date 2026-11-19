@@ -137,7 +137,7 @@ After deploying `poll`, confirm the logger survived:
 curl -s -X POST https://pmakzojwhouamawgszrc.supabase.co/rest/v1/rpc/api_health \
   -H "apikey: sb_publishable_PTYy9-EiqSFUVaFMLlCMnQ_DejfmixB" \
   -H 'Content-Type: application/json' -d '{}'
-# expect {"stale": false, "ageSeconds": <small>}
+# expect {"stale": false}
 ```
 
 ## 4. Frontend
