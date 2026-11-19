@@ -110,7 +110,26 @@ Supabase project.
 `scripts/mock-sunsynk/` stands in for openapi.sunsynk.net with five pretend logins:
 a two-inverter home, a shared plant seen by two logins, a three-phase exporter in
 London, an off-grid cabin, a grid-tied plant with no battery, and two inverters on
-one shared battery. READINESS.md has the table and the three commands to bring it up.
+one shared battery.
+
+| SunSynk login | plant | shape |
+|---|---|---|
+| brynne@mock | 5001 Prince home (JHB, ZAR) | 2 inverters, master 60 s + slave 5 min, battery per inverter, import only |
+| family@mock | 5001 (same plant, shared login) | second dashboard user on one plant |
+| export@mock | 3001 Old exporter (London, GBP) | 1 inverter, 3-phase, exports, firmware sign = charging positive, lower plant id than 5001 |
+| export@mock | 6002 Cabin (Windhoek, NAD) | off-grid, 1 inverter, battery; login paginates at 1 per page |
+| nobatt@mock | 6003 Grid-tied (Sydney, AUD) | no battery, exports |
+| shared@mock | 6004 Shared bank (Cape Town, ZAR) | 2 inverters, one shared pack, second-bank fields |
+
+Dashboard users: one per customer shape (`export@`, `nobatt@`, `shared@`, `family@local.test`) so tenancy is tested per customer, plus `dev@local.test`, which links every login so the plant selector shows all shapes on one screen. Password for all: `devpassword123`.
+
+```bash
+node scripts/mock-sunsynk/server.js &
+supabase functions serve --env-file scripts/mock-sunsynk/mock.env --no-verify-jwt &
+eval "$(supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY|ANON_KEY)=')"; node scripts/mock-sunsynk/seed-users.mjs
+curl -s -X POST http://127.0.0.1:55321/functions/v1/poll -H "Authorization: Bearer $SERVICE_ROLE_KEY" -d '{}'
+```
+
 Two checks run against it and decide by exit code:
 
 ```bash

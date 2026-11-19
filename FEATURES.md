@@ -1,8 +1,7 @@
 # SunSynk Dashboard — Feature Ideas
 
 A running backlog of what the dashboard could become. It started as a personal tool
-for two inverters and is now heading to outside users; launch readiness is tracked in
-`LAUNCH.md`, this file is the feature list.
+for two inverters and is now heading to outside users; this file is the feature list.
 
 See `API.md` for the field catalog this references.
 

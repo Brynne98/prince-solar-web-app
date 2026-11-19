@@ -58,7 +58,7 @@ that log.
 - **Freshness:** a master inverter reports every minute; a slave every 5 minutes. About
   a third of polls currently time out at the gateway on the free quota, so a minute with
   no data is ordinary and must be shown as a gap, not hidden.
-- **Backlog and readiness** live in `FEATURES.md`, `LAUNCH.md` and `READINESS.md`.
+- **Backlog** lives in Plane (project Prince Solar) and `FEATURES.md`.
 
 ## Capabilities and Constraints
 

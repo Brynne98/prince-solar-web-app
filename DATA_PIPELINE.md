@@ -372,7 +372,6 @@ ride the minute poll the way the grid and battery alerts do.
   `grid_down` / `grid_back`. Migrations `0016`–`0019`, `0021`, `0029`. Debounce and
   hysteresis (fire below 20% SoC, re-arm above 30%) are in SQL.
 - Grid alerts depend on the unresolved grid-presence question in `FEATURES.md`.
-- No one receives alerts today, until a sender is built (`LAUNCH.md`).
 
 ---
 
