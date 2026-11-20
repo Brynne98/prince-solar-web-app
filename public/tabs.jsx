@@ -3808,7 +3808,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
               <SunSynkConnectionSection head onChanged={onPlantConfigSaved} links={links} billing={billing} reloadBilling={reloadBilling} onCollect={(id) => adjust('plants', id)} noPlan={!!me?.wall} />
             </div>
           )}
-          {shown === 'billing' && <BillingPage billing={billing} reload={reloadPlan} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} noWeek={me?.wall?.noWeek ? me.wall.plants : 0}
+          {shown === 'billing' && <BillingPage billing={billing} reload={reloadPlan} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} noWeek={me?.wall?.noWeek ? me.wall.plants || 1 : 0}
                                               links={links} onAdjust={() => adjust('billing')} />}
           {/* Adjust plan opens over Billing or Plants, not as a page of its own (SOLAR-292) */}
           {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadPlan} onBack={() => { onPage(planFrom); setPlanFrom('billing'); }} forPlant={forPlant}
