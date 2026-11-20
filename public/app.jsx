@@ -201,16 +201,22 @@ function PickMenu({ id, label, value, options, onPick }) {
 }
 
 // One menu row's state, by the header's rules (SOLAR-182): a dead login reads Login stopped.
-function MenuState({ st, cut, now }) {
+// The plant on screen also takes the header's reconnect and failed refresh (SOLAR-625, SOLAR-606),
+// from window.CURRENT_LIVE, which App sets each render.
+function MenuState({ st, id, cut, now }) {
+  const cur = window.CURRENT_LIVE;
+  const mine = !!cur && String(cur.plantId) === String(id);
   if (cut) return <span className="pm-state status-offline">Login stopped</span>;
   if (!st || st.lastTs == null) return null;
   const s = plantStatus({
     inverters: Array.from({ length: st.inverters || 0 }, (_, i) => ({ status: i < (st.online || 0) ? 'online' : 'offline' })),
-    lastReading: new Date(st.lastTs * 1000), updated: new Date(now), sync: st.sync, relinkedAt: st.relinkedAt,
+    lastReading: new Date(st.lastTs * 1000), updated: new Date(now), sync: st.sync,
+    relinkedAt: mine ? cur.relinkedAt : null, fetchFailed: mine && cur.fetchFailed,
   }, now);
   const p = window.syncProgress(st.sync);
   // still on its first load: Setting up, even when its readings are live
-  const status = p != null || s.waiting ? 'loading' : s.status, word = p != null ? 'Setting up' : s.word;
+  // the colour is the header's tone: Couldn't refresh is amber, Reconnected grey (SOLAR-625)
+  const status = p != null ? 'loading' : s.tone, word = p != null ? 'Setting up' : s.word;
   return (
     <span className={'pm-state status-' + status}>
       {p != null && <span className="sync-arc" aria-hidden="true" />}{word}
@@ -226,7 +232,7 @@ function MenuState({ st, cut, now }) {
 // Grouped by SunSynk login (SOLAR-251): each login's email, then its plants. A locked
 // plant (SOLAR-537) has no readings to open; it reads Locked and opens Plants, where it is
 // added or the plan upgraded.
-function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, currentRelinkedAt, accounts, onStopped }) {
+function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accounts, onStopped }) {
   const plants = me?.plants || [];
   const current = plants.find(p => p.id === plantId);
   const name = current ? window.plantLabel(current) : (fallback || '');
@@ -270,13 +276,12 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, curren
                   );
                 }
                 // the plant on screen takes the header's progress, so the two % always match
-                const st = states[p.id] && { ...states[p.id], sync: p.id === plantId && currentSync ? currentSync : window.firstLoadSync(states[p.id].sync, p.linkedAt),
-                  relinkedAt: p.id === plantId ? currentRelinkedAt : null };
+                const st = states[p.id] && { ...states[p.id], sync: p.id === plantId && currentSync ? currentSync : window.firstLoadSync(states[p.id].sync, p.linkedAt) };
                 return (
                   <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
                           onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
                     <span className="tick" aria-hidden="true">{p.id === plantId ? '✓' : ''}</span><span className="nm">{window.plantLabel(p)}</span>
-                    <MenuState st={st} cut={cutOff && cutOff(p.id)} now={states.at || Date.now()} />
+                    <MenuState st={st} id={p.id} cut={cutOff && cutOff(p.id)} now={states.at || Date.now()} />
                   </button>
                 );
               })}
@@ -1459,6 +1464,8 @@ function App({ links }) {
   // a failed refresh and a fresh reconnect ride on the snapshot, so every status line reads them (SOLAR-603, SOLAR-606)
   const snap = React.useMemo(() => (!rawSnap ? rawSnap : loginCut ? { ...rawSnap, sync: null, loginCut: true, fetchFailed: !!err }
     : { ...rawSnap, sync: window.firstLoadSync(rawSnap.sync, linkedAt), fetchFailed: !!err, relinkedAt }), [rawSnap, loginCut, linkedAt, err, relinkedAt]);
+  // the menu and Settings > Plants read the plant on screen's reconnect and failed refresh from here
+  window.CURRENT_LIVE = { plantId, relinkedAt, fetchFailed: !!err };
   // Readings starting or stopping can mean a login came back or died: read the logins
   // again at once, so the sidebar's "Reconnect a login" turns with the header instead of
   // on the next minute's read (SOLAR-389).
@@ -1792,7 +1799,7 @@ function App({ links }) {
                          onSettings={() => openSettings('notifications')} />;
   const loginDead = links.accounts.some(a => a.status === 'needs_relink' && a.kind !== 'share');
   const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, onSettings: () => go('prefs'), active: isSettings(tab) };
-  const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync} currentRelinkedAt={relinkedAt}
+  const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync}
                                accounts={links.accounts} onStopped={() => openSettings('connection')} />;
   // A page's section, from Billing's Reconnect: openSettings; otherwise the page itself
   // key: the loading and loaded pages put it at different child positions; without it the

@@ -618,7 +618,7 @@ function dayFlows(points) {
 const WIW_INFO = {
   solar: 'Solar goes to the house first, then the battery, then the grid. Worked out from readings every 5 minutes, so it can come in a little under Today.',
   home: 'The house uses solar first, then the battery, then the grid. Worked out from readings every 5 minutes, so it can come in a little under Today.',
-  grid: 'Imported power goes to the house first, then the battery. Worked out from readings every 5 minutes, so it can come in a little under Today.',
+  grid: 'Imported power goes to the house first, then the battery. Power sent out came from solar first, then the battery. Worked out from readings every 5 minutes, so it can come in a little under Today.',
 };
 // Where a day's energy went or came from (SOLAR-332): a hollow pie of its parts
 // ([name, kWh, colour]) with their sum in the middle, and each part's kWh beside it.
@@ -1403,16 +1403,15 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const tot = periodTotals('imp', a.gridFromToday, energy, plantToday);
   const tile = totalTile(CC.grid);
   const trend = (k, min, word) => periodTrend(cmp, k, 'imp', min, word, true);
-  // Every grid-tied inverter leaks a little backflow, so a plant not paid for export only
-  // counts as sending power out above 100 W.
-  const exporting = a.gridPower < (sells ? -5 : -100);
-  // signed as the chart is: + bought, − exported (a small backflow reads 0)
-  const [nowN, nowU] = fmtPowerParts(exporting || a.gridPower > 5 ? a.gridPower : 0);
+  // Any power out is exporting, as Live's Grid box says (no deadband, 2026-11-07; SOLAR-628)
+  const exporting = a.gridPower < 0;
+  // signed as the chart is: + bought, − exported
+  const [nowN, nowU] = fmtPowerParts(a.gridPower);
   // Presence is mains voltage, not usage: nothing is bought on a sunny afternoon with the
   // grid live, and a blackout reads 0 W too.
   const nowSub = a.gridPresent === false ? <span style={{ color: 'var(--bad)' }}>The grid is off</span>
     : exporting ? 'Exporting'
-    : a.gridPower > 5 ? 'Importing' : 'Not importing';
+    : a.gridPower > 0 ? 'Importing' : 'Not importing';
   const importPeak = (pts) => {
     let pk = null;
     (pts || []).forEach(p => { if (p.grid != null && p.grid > 50 && (!pk || p.grid > pk.grid)) pk = p; });
@@ -1463,6 +1462,12 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const dests = toDayTotal([['Home', flows.gridHome, CC.load, true], ['Battery', flows.gridBatt, CC.batt, hasBatt]], shownTotal)
     .filter(d => d[3] && d[1] >= 0.05);
   const splitTotal = dests.reduce((t, d) => t + d[1], 0);
+  // What was sent out, and from where (SOLAR-629): solar's part is the figure Solar's card
+  // shows, the rest came from the battery. The total is Live's Exported for the day.
+  const sentOut = dayTotal(daily, plantToday, pick.date, 'exp', a.gridToToday);
+  const solarOut = sentOut > 0 ? Math.min(sentOut, (toDayTotal([['Home', flows.pvHome, '', true], ['Battery', flows.pvBatt, '', hasBatt], ['Grid', flows.pvGrid, '', true]],
+    dayTotal(daily, plantToday, pick.date, 'pv', a.pvToday)).find(d => d[0] === 'Grid') || [])[1] || 0) : 0;
+  const battOut = sentOut > 0 && hasBatt ? Math.round((sentOut - solarOut) * 10) / 10 : 0;
 
   // ---- last 30 days ----
   const bars = withLiveToday(daily, plantToday, 'imp', a.gridFromToday);
@@ -1501,6 +1506,9 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
           <SectionTitle>{titled('WHERE IT WENT', dayWord)}<window.InfoDot text={WIW_INFO.grid} /></SectionTitle>
           {!day ? <WiwBodySkeleton />
             : <SharePie parts={dests} word="Imported" whole={[shownTotal, CC.grid]} empty={(noReadings || splitTotal < 0.05) && (noReadings || (!points.some(p => p.grid != null) ? 'No grid readings for this day.' : view.isToday ? 'Nothing imported yet today.' : 'Nothing imported on this day.'))} />}
+          {day && !noReadings && sentOut >= 0.05 && (
+            <p className="wiw-out">Sent out <b>{fmtKwh(sentOut)}</b>: <b style={{ color: CC.pv }}>{fmtKwh(solarOut)}</b> from solar{battOut >= 0.05 && <>, <b style={{ color: CC.batt }}>{fmtKwh(battOut)}</b> from the battery</>}.</p>
+          )}
         </Card>
         <Card>
           <SectionTitle right={most && most.imp > 0 ? <>Most <b>{fmtKwh(most.imp)}</b> on {window.dayText(most.date)}</> : RIGHT_HOLD}>
@@ -3069,7 +3077,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
           : fetching != null ? <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Fetching history<span className="mono pm-pct">{Math.round(100 * fetching)}%</span></span>
           /* nothing read yet and nothing being fetched: it waits for its first reading */
           : st?.lastTs == null ? <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Waiting for readings</span>
-          : <MenuState st={st} now={states.at || Date.now()} />}
+          : <MenuState st={st} id={p.plant_id} now={states.at || Date.now()} />}
       </PlantLine>
     );
   };
@@ -3122,7 +3130,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                   <div className="login-who">
                     {/* a narrow card breaks a long email after the @, not mid-word */}
                     <span className="login-email">{at ? <>{who.slice(0, at)}<wbr />{who.slice(at)}</> : who}</span>
-                    {(!ok || stale) && <window.Tip className={'login-state ' + (ok && !shared ? 'warn' : 'bad')} text={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : null}>{!ok && !shared ? 'Sign-in expired' : 'Not updating'}</window.Tip>}
+                    {(!ok || stale) && <window.Tip className={'login-state ' + (ok && !shared ? 'warn' : 'bad')} text={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : null}>{!ok && !shared ? 'Login stopped' : 'Not updating'}</window.Tip>}
                   </div>
                   {!ok && !shared && mode !== acc.account_id && <button type="button" className="ghost-btn login-fix" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
                   <LoginMenu email={who} busy={busy === acc.account_id} removeLabel={shared ? 'Remove plants' : undefined}
