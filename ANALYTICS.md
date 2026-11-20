@@ -48,7 +48,8 @@ Web (`public/*.jsx`):
 | `password_reset_done` | New password set from the link |
 | `email_link_done` | Confirm or reset link's button tapped and accepted (`kind`: `signup`, `recovery`; SOLAR-586) |
 | `password_change_done` | Password changed in Settings |
-| `feedback_sent_done` | Feedback sent from the account menu or "Report this" (`page`, `image`, `report`: true or false, `error_id`: the PostHog error id or null). Never the message |
+| `feedback_sent_done` | Feedback sent from the account menu (`page`, `image`). Never the message |
+| `error_toast_shown` | A red toast showed (`page`: the tab, `error_id`: the PostHog id of a browser error reported in the last 2 minutes, or null). Never the toast text: it can name a plant (SOLAR-588) |
 | `plant_linked` | SunSynk login linked, or a shared plant taken |
 | `share_check_done`, `link_mode_picked`, `share_taken_email_done` | Linking steps |
 | `plant_switched` | Another plant picked |
@@ -136,10 +137,9 @@ Not sent on purpose: menu opens, hovers, day arrows after the first, chart serie
   email). 4xx refusals and no connection are not sent.
 - Outside: an uptime service calls `/functions/v1/health` every 5 min and emails admin@ on a
   503 (database down, or job-check silent over 15 min) (SOLAR-469). It sees no user data.
-- Web: a page that throws while drawing shows "This page stopped working" with Reload and
-  Report this (`PageBoundary`, `app.jsx`); the crash is reported with its component stack.
-  Red toasts offer "Report this" too. Both open the feedback box with the error and its
-  PostHog id.
+- Web: a page that throws while drawing shows "This page stopped working" with Reload
+  (`PageBoundary`, `app.jsx`); the crash is reported with its component stack. A red toast
+  sends `error_toast_shown` (SOLAR-588). No "Report this" link on either since SOLAR-588.
 - Functions: anything a handler throws (`serve()` in `_shared/errors.ts`), with the
   signed-in user's id when the request has one.
 - Functions, caught failures (SOLAR-336): a failure the code handles and carries on from

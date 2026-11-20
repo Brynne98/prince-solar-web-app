@@ -330,9 +330,7 @@ function AccountMenu({ user, plantCount, alert, onSettings, active, variant }) {
 // "Send feedback" (SOLAR-428): a message and an optional screenshot, emailed to hello@ with
 // reply-to the user (0179). The screenshot is shrunk here to a JPEG under 1 MB, so a phone's
 // full-size photo still goes; it travels only in the email, never stored.
-// "Report this" (an error toast, a page that crashed) opens it with `report` = { text, id }:
-// the error's words and its PostHog id go in the message, and the user's line is optional.
-const openFeedback = (report) => { const close = mountNode(<FeedbackDialog report={report} onClose={() => close()} />); };
+const openFeedback = () => { const close = mountNode(<FeedbackDialog onClose={() => close()} />); };
 // The PostHog id of a browser error reported in the last 2 minutes (config.js), if any.
 const recentErrorId = () => (window.lastErrorId && Date.now() - window.lastErrorId.at < 120000 ? window.lastErrorId.id : null);
 async function shrinkShot(file) {
@@ -350,7 +348,7 @@ async function shrinkShot(file) {
   }
   throw new Error('too big');
 }
-function FeedbackDialog({ onClose, report }) {
+function FeedbackDialog({ onClose }) {
   const { useState } = React;
   const [msg, setMsg] = useState('');
   const [shot, setShot] = useState(null); // { name, data }
@@ -366,29 +364,27 @@ function FeedbackDialog({ onClose, report }) {
   };
   const submit = async (e) => {
     e.preventDefault();
-    if (!msg.trim() && !report) return flag({ 'fb-msg': 'Write a message' });
+    if (!msg.trim()) return flag({ 'fb-msg': 'Write a message' });
     setBusy(true);
     try {
       const page = new URLSearchParams(location.search).get('tab') || 'home';
-      const text = report ? [msg.trim(), `Error: ${report.text}`, report.id && `Error ID: ${report.id}`].filter(Boolean).join('\n\n') : msg;
-      await window.sendFeedback(text, page, shot?.data ?? null);
-      window.track('feedback_sent_done', { page, image: !!shot, report: !!report, error_id: report?.id ?? null });
+      await window.sendFeedback(msg, page, shot?.data ?? null);
+      window.track('feedback_sent_done', { page, image: !!shot });
       onClose();
       window.toast('Feedback sent');
     } catch (ex) {
-      window.toast(/feedback limit/.test(ex.message) ? 'You’ve sent 10 today. Try again tomorrow.' : 'Not sent. Try again.', { error: true, noReport: true });
+      window.toast(/feedback limit/.test(ex.message) ? 'You’ve sent 10 today. Try again tomorrow.' : 'Not sent. Try again.', { error: true });
     } finally {
       setBusy(false);
     }
   };
   return (
-    <window.Dialog keep busy={busy} label={report ? 'Report a problem' : 'Send feedback'} onClose={onClose}>
-      <div className="confirm-title">{report ? 'Report a problem' : 'Send feedback'}</div>
-      {report && <p className="confirm-text fb-error">“{report.text}” is sent with your message.</p>}
+    <window.Dialog keep busy={busy} label="Send feedback" onClose={onClose}>
+      <div className="confirm-title">Send feedback</div>
       <form className="conn-form link-form" onSubmit={submit} noValidate aria-busy={busy}>
         <div className="field">
-          <window.FieldLabel id="fb-msg" label={report ? 'What were you doing? (optional)' : 'Message'} error={bad['fb-msg']} />
-          <textarea id="fb-msg" className="input fb-msg" rows={5} maxLength={report ? 3500 : 4000} autoFocus value={msg}
+          <window.FieldLabel id="fb-msg" label="Message" error={bad['fb-msg']} />
+          <textarea id="fb-msg" className="input fb-msg" rows={5} maxLength={4000} autoFocus value={msg}
                     onChange={(e) => { setMsg(e.target.value); edited('fb-msg'); }} {...window.invalidProps('fb-msg', bad['fb-msg'])} />
         </div>
         <div className="field fb-shot">
@@ -1161,24 +1157,21 @@ const comingOn = (r) => {
 const toTop = () => { document.querySelector('.frame-scroll')?.scrollTo({ top: 0 }); window.scrollTo({ top: 0 }); };
 
 // A page that throws while drawing shows this card instead of a blank screen; the sidebar,
-// header and other pages keep working (SOLAR-428). The crash goes to PostHog first, so
-// "Report this" carries its id. A new tab starts clean (keyed by tab).
+// header and other pages keep working (SOLAR-428). The crash goes to PostHog as an
+// exception. A new tab starts clean (keyed by tab).
 class PageBoundary extends React.Component {
-  state = { failed: null };
-  static getDerivedStateFromError() { return { failed: {} }; }
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
   componentDidCatch(error, info) {
-    const id = window.reportClientError?.(error, { component_stack: String(info?.componentStack || '').slice(0, 2000) }) ?? null;
-    this.setState({ failed: { text: String(error?.message || error).slice(0, 300), id } });
+    window.reportClientError?.(error, { component_stack: String(info?.componentStack || '').slice(0, 2000) });
   }
   render() {
-    const f = this.state.failed;
-    if (!f) return this.props.children;
+    if (!this.state.failed) return this.props.children;
     return (
       <section className="card free-over page-crash" role="alert">
         <h2>This page stopped working</h2>
         <p>Reload to try again. Other pages still work.</p>
         <div className="free-over-acts">
-          <button type="button" className="ghost-btn" onClick={() => openFeedback({ text: f.text || 'Page crashed', id: f.id })}>Report this</button>
           <button type="button" className="save-btn" onClick={() => location.reload()}>Reload</button>
         </div>
       </section>
@@ -1204,7 +1197,7 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
         </div>
       </div>
       <PhoneBar tabs={tabs} tab={tab} onTab={onTab} />
-      <SaveToast report={!!account} />
+      <SaveToast />
     </div>
   );
 }
@@ -1224,8 +1217,9 @@ window.toast = (text, opts = {}) => {
   toastLast = { text, ...opts, at: Date.now() };
   if (toastShow) toastShow(toastLast);
 };
-// `report`: signed in, so a red toast with no link of its own offers "Report this" (SOLAR-428).
-function SaveToast({ report }) {
+// A red toast sends error_toast_shown: the page and the id of a browser error reported in
+// the last 2 minutes, never the text (it can name a plant) (SOLAR-588).
+function SaveToast() {
   const [t, setT] = useState(null);
   const host = useRef(null);
   useEffect(() => {
@@ -1233,10 +1227,10 @@ function SaveToast({ report }) {
     if (toastLast && Date.now() - toastLast.at < 1000) setT(toastLast);
     return () => { toastShow = null; };
   }, []);
-  const act = t && (t.action || (report && t.error && !t.noReport &&
-    { label: 'Report this', onClick: () => openFeedback({ text: t.text, id: recentErrorId() }) }));
+  const act = t?.action;
   useEffect(() => {
     if (!t) return;
+    if (t.error) window.track('error_toast_shown', { page: new URLSearchParams(location.search).get('tab') || 'home', error_id: recentErrorId() });
     if (t === toastLast) toastLast = null;   // drawn here: the next host must not show it again (SOLAR-365)
     // A pop-up's backdrop sits in the top layer over everything else; showing the host as a
     // popover again puts each new toast above whatever pop-up is open.
