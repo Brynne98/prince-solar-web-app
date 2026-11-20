@@ -2636,7 +2636,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
     if (paid && b.nextPlan === 'free') return p === b.plan && sameView ? <>{ownDate()}
         <button type="button" className="save-btn" disabled={!!busy} aria-busy={busy === 'keep'}
                 onClick={() => run(() => undoBooked(b, reload), 'keep')}>Keep {PLAN_NAME[b.plan]}</button></>
-      : <div className="plan-cur plan-wait">After {(b.prepaidOn ? longDay : billDay)(endDay(b))}</div>;
+      // other plans: keep this one first, or choose after it ends; a bare date read as a start date (SOLAR-620)
+      : <div className="plan-cur plan-wait">Keep {PLAN_NAME[b.plan]} first, or choose this plan after {(b.prepaidOn ? longDay : billDay)(endDay(b))}.</div>;
     // a paid year changes nothing until it starts (SOLAR-298), but it can be cancelled (SOLAR-457);
     // a quiet line holds the button's row
     if (b.prepaidOn && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
