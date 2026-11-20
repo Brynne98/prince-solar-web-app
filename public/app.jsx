@@ -670,8 +670,8 @@ function NoticeRows({ pinned, onAct }) {
 
 // Alert cards under day headings in the bell list (SOLAR-598):
 // laid out as a phone pop-up, the kind's icon left, what happened and when, then the numbers.
-// The plant leads the numbers when there are two or more, but not on SunSynk and login
-// alerts, which are not one plant (as the pop-up, 0229).
+// With two or more plants the plant's name is a line of its own on top, but not on SunSynk
+// and login alerts, which are not one plant (as the pop-up, 0229).
 // from: the day whose heading is already above (the bell's Today over its notices).
 function NotifRows({ items, multi, onOpen, from = null }) {
   const groups = [];
@@ -691,9 +691,10 @@ function NotifRows({ items, multi, onOpen, from = null }) {
               <Icon id={it.kind === 'needs_relink' || it.kind === 'relinked' ? 'plug' : NOTIF_GLYPH[it.switch] || 'live'} />
               {!it.read && <span className="nl-dot" aria-label="Unread" />}
             </span>
+            {multi && !sunsynk && <span className="nl-plant">{it.plantName || 'Plant ' + it.plant}</span>}
             <span className="nl-title">{it.title}</span>
             <span className="nl-time mono">{it.open ? 'Not back yet' : it.time}</span>
-            <span className="nl-body">{multi && !sunsynk && <span className="nl-src">{it.plantName || 'Plant ' + it.plant} · </span>}{it.body}</span>
+            <span className="nl-body">{it.body}</span>
           </button>
         );
       })}</div>

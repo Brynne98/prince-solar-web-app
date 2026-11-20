@@ -393,12 +393,12 @@
   button.nl-card { cursor: pointer; }
   button.nl-card:hover { background-image: linear-gradient(rgba(var(--ink-rgb),0.04), rgba(var(--ink-rgb),0.04)); }
   .notif-panel .nl-card { border-color: var(--line); box-shadow: none; }
-  .nl-card > .nl-glyph { grid-row: 1 / span 3; align-self: start; position: relative; }
+  .nl-card > .nl-glyph { grid-row: 1 / span 4; align-self: start; position: relative; }
   .nl-card:not(.unread) > .nl-glyph { opacity: .6; }
   .nl-dot { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px var(--panel); }
   .nl-time { grid-column: 3; font-size: var(--fs-xs); color: var(--dim); white-space: nowrap; }
   .nl-card > .nl-body, .nl-card > .nl-act-wrap { grid-column: 2 / -1; }
-  .nl-src { color: var(--dim); }
+  .nl-plant { grid-column: 2 / -1; font-size: var(--fs-xs); font-weight: 500; color: var(--dim); line-height: 1.2; }
   .nl-glyph { width: 32px; height: 32px; border-radius: var(--r-md); display: grid; place-items: center; flex: none; }
   .nl-glyph .ico { width: var(--icon-md); height: var(--icon-md); }
   .g-grid { background: rgba(var(--grid-rgb),0.12); color: var(--grid-text); }
