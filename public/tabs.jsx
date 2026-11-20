@@ -1756,7 +1756,8 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
     st.battTemp != null ? Math.round(st.battTemp) + ' °C' : null].filter(Boolean).join(' · ');
   // ---- inverters: the warmest one now, and the warmest of them through the day ----
   const n = st.invs.length, live = n - st.quiet.length;
-  const invState = !st.quiet.length ? ['ok', n === 1 ? 'On' : n === 2 ? 'Both on' : 'All on']
+  // before the first reading nothing is known to be on (SOLAR-622)
+  const invState = st.ps.none ? ['stale', 'No reading yet'] : !st.quiet.length ? ['ok', n === 1 ? 'On' : n === 2 ? 'Both on' : 'All on']
     : st.allQuiet ? QUIET
     : ['warn', live + ' of ' + n + ' reporting'];
   const temps = Object.values(st.invT);
@@ -1960,7 +1961,7 @@ function EqInvertersCard({ st, now }) {
   const invs = st.invs;
   const down = inv => st.quiet.includes(inv);
   const rows = [
-    ['State', invs.map(inv => down(inv) ? { v: 'Not reporting', cls: 'warn', sub: inv.readAt ? 'Since ' + window.readAgo(inv.readAt, now) : null }
+    ['State', invs.map(inv => st.ps.none ? { v: 'No reading yet' } : down(inv) ? { v: 'Not reporting', cls: 'warn', sub: inv.readAt ? 'Since ' + window.readAgo(inv.readAt, now) : null }
       : { v: 'On', sub: 'Read ' + eqReadAt(inv, now) })],
     ['To the house now', invs.map(inv => ({ v: down(inv) ? '—' : fmtPower(inv.output) }))],
     ['Temperature', invs.map(inv => {
@@ -2075,7 +2076,7 @@ function InvertersTab({ snap, today, refreshKey }) {
   const n = issues.length;
   // no problem found, but the plant isn't live: say what the header says, not that all is well (SOLAR-601)
   const late = n === 0 && (st.ps.status === 'stale' || st.ps.status === 'offline');
-  const head = st.ps.waiting && n === 0 ? 'Reconnected' : late ? 'No new reading yet'
+  const head = st.ps.none && n === 0 ? 'No reading yet' : st.ps.waiting && n === 0 ? 'Reconnected' : late ? 'No new reading yet'
     : n === 0 ? 'Everything is working' : n === 1 ? '1 thing needs a look' : n + ' things need a look';
 
   return (
@@ -2088,7 +2089,8 @@ function InvertersTab({ snap, today, refreshKey }) {
       {/* the one place that says whether things are OK */}
       <section className="eq-status" aria-label="Status">
         {/* red, as the problem cards under it are (SOLAR-407) */}
-        <div className={'eq-head ' + (n ? 'bad' : st.ps.waiting ? 'wait' : late ? 'warn' : 'ok')}>{head}</div>
+        <div className={'eq-head ' + (n ? 'bad' : st.ps.waiting || st.ps.none ? 'wait' : late ? 'warn' : 'ok')}>{head}</div>
+        {n === 0 && st.ps.none && <div className="eq-head-sub">Waiting for the first reading.</div>}
         {n === 0 && st.lastAt && <div className="eq-head-sub">{st.ps.waiting ? 'Waiting for the first reading. ' : ''}Last reading {window.fmtAgo(new Date(st.lastAt), now)}</div>}
       </section>
       {n > 0 && (
