@@ -457,6 +457,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             value={period} onChange={setPeriod} />
         </div>
         {strip}
+        {isAgg && histLoading() && <p className="overview-loading">{HIST_LOADING}: these totals grow as it comes in.</p>}
       </div>
       <div className={'flow-fs-wrap' + (wall ? ' wall' : '') + (wall && idle ? ' idle' : '')} ref={flowRef}>
         {wall && (
@@ -669,9 +670,13 @@ function DaysPanel({ daily, onRetry, rows, ...bars }) {
 }
 // The total tiles of Solar, Home and Grid (now, today, week…): a kWh figure in the page's
 // colour.
+// While the history loads, Week to Lifetime hold only the days in so far: they say so (SOLAR-624).
+const HIST_LOADING = 'Still loading history';
+const histLoading = () => window.syncProgress(window.SYNC) != null;
+const PAST_TODAY = ['THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'];
 const totalTile = (accent) => (label, v, sub) => {
   const [n, u] = window.fmtEnergyParts(v);
-  return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null} sub={sub || NBSP} />;
+  return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null} sub={PAST_TODAY.includes(label) && histLoading() ? HIST_LOADING : sub || NBSP} />;
 };
 
 // ---------------------------------------------------------------- PANELS
