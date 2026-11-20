@@ -1920,14 +1920,18 @@ function EqBatteryCard({ st, snap, now }) {
   // each figure keeps its unit on its line when the row wraps (SOLAR-411)
   const nb = s => String(s).replace(/ /g, NBSP);
   if (a.battChgTotal > 0) rows.push(['In · out since installed', nb(window.fmtEnergySmart(a.battChgTotal)) + ' · ' + nb(window.fmtEnergySmart(a.battDischgTotal))]);
-  const packs = st.shared ? Math.min(1, st.withBatt.length) : st.withBatt.length;
   const modules = st.shared ? Math.max(0, ...st.withBatt.map(i => i.numberOfBatteries || 0)) : st.withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
   // each pack under the inverter that reads its sensor: the slaves on a shared pack read -100.
   // One whose answer came back empty this minute is likely it, so it keeps the pack.
   const packInv = st.withBatt.find(i => cleanTemp(i.battTemp) != null) || st.withBatt.find(i => i.battSoc == null) || st.withBatt[0];
   const packLine = (soc, volt, t) => [soc != null ? soc + '%' : '—', volt != null ? volt.toFixed(1) + ' V' : '—', t != null ? Math.round(t) + ' °C' : '—'].join(' · ');
+  // a second bank on an inverter is a pack of its own (SOLAR-632)
+  const packInvs = st.shared ? [packInv].filter(Boolean) : st.withBatt;
+  const packs = packInvs.reduce((n, i) => n + (i.bank2 ? 2 : 1), 0);
+  // the big % is the first bank's: with one inverter's two banks it says so and gives the other
+  const bank2 = packInvs.length === 1 && packInvs[0].bank2;
   const more = [];
-  (st.shared ? [packInv].filter(Boolean) : st.withBatt).forEach((inv, k, all) => {
+  packInvs.forEach((inv, k, all) => {
     const name = all.length > 1 ? invName(inv) + ', pack' : 'Pack';
     more.push([inv.bank2 ? name + ' 1' : name, packLine(inv.battSoc, inv.battVolt, cleanTemp(inv.battTemp))]);
     if (inv.bank2) more.push([name + ' 2', packLine(inv.bank2.soc, inv.bank2.voltage, cleanTemp(inv.bank2.temperature))]);
@@ -1939,6 +1943,7 @@ function EqBatteryCard({ st, snap, now }) {
     <Card className="eq-card">
       <SectionTitle right={<>{packs} {packs === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'}</>}>BATTERY</SectionTitle>
       <div className={'eq-big mono' + (st.battStale ? ' stale' : '')} style={st.battStale ? undefined : { color: CC.batt }}>{a.battSoc ?? '—'}{a.battSoc != null && <span className="u">%</span>}</div>
+      {bank2 && !st.battStale && <div className="eq-big-sub">Pack 1{bank2.soc != null ? '. Pack 2 is ' + bank2.soc + '%' : ''}</div>}
       <div className={'eq-meter' + (st.battStale ? ' stale' : '')}><i style={{ width: soc + '%', background: CC.batt }} /><b style={{ left: reserve + '%' }} /></div>
       <div className="eq-meter-scale"><span style={reserve > 60 ? { right: (100 - reserve) + '%' } : { left: reserve + '%' }}>{reserve}% reserve</span></div>
       <dl className="eq-rows">
