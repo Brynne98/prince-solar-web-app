@@ -354,7 +354,8 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
   }
   // Exporting while the battery also feeds the home: solar alone isn't covering it (SOLAR-46).
   // Solar is only named when it is making something; a battery can export after dark (SOLAR-63).
-  else if (gridExport > 50) {
+  // any export is named, as the Grid box shows it (no deadband; SOLAR-628)
+  else if (gridExport > 0) {
     const sending = <>sending <b style={{ color: T.grid }}>{window.fmtPower(gridExport)}</b> to the grid</>;
     const sun = agg.pvNow > 50;
     narrative = sun && battIn > 50

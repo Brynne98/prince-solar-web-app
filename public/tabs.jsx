@@ -1403,16 +1403,15 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const tot = periodTotals('imp', a.gridFromToday, energy, plantToday);
   const tile = totalTile(CC.grid);
   const trend = (k, min, word) => periodTrend(cmp, k, 'imp', min, word, true);
-  // Every grid-tied inverter leaks a little backflow, so a plant not paid for export only
-  // counts as sending power out above 100 W.
-  const exporting = a.gridPower < (sells ? -5 : -100);
-  // signed as the chart is: + bought, − exported (a small backflow reads 0)
-  const [nowN, nowU] = fmtPowerParts(exporting || a.gridPower > 5 ? a.gridPower : 0);
+  // Any power out is exporting, as Live's Grid box says (no deadband, 2026-11-07; SOLAR-628)
+  const exporting = a.gridPower < 0;
+  // signed as the chart is: + bought, − exported
+  const [nowN, nowU] = fmtPowerParts(a.gridPower);
   // Presence is mains voltage, not usage: nothing is bought on a sunny afternoon with the
   // grid live, and a blackout reads 0 W too.
   const nowSub = a.gridPresent === false ? <span style={{ color: 'var(--bad)' }}>The grid is off</span>
     : exporting ? 'Exporting'
-    : a.gridPower > 5 ? 'Importing' : 'Not importing';
+    : a.gridPower > 0 ? 'Importing' : 'Not importing';
   const importPeak = (pts) => {
     let pk = null;
     (pts || []).forEach(p => { if (p.grid != null && p.grid > 50 && (!pk || p.grid > pk.grid)) pk = p; });
@@ -3069,7 +3068,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
           : fetching != null ? <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Fetching history<span className="mono pm-pct">{Math.round(100 * fetching)}%</span></span>
           /* nothing read yet and nothing being fetched: it waits for its first reading */
           : st?.lastTs == null ? <span className="pm-state status-loading"><span className="sync-arc" aria-hidden="true" />Waiting for readings</span>
-          : <MenuState st={st} now={states.at || Date.now()} />}
+          : <MenuState st={st} id={p.plant_id} now={states.at || Date.now()} />}
       </PlantLine>
     );
   };
@@ -3122,7 +3121,7 @@ function SunSynkConnectionSection({ onChanged, links, billing, reloadBilling, on
                   <div className="login-who">
                     {/* a narrow card breaks a long email after the @, not mid-word */}
                     <span className="login-email">{at ? <>{who.slice(0, at)}<wbr />{who.slice(at)}</> : who}</span>
-                    {(!ok || stale) && <window.Tip className={'login-state ' + (ok && !shared ? 'warn' : 'bad')} text={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : null}>{!ok && !shared ? 'Sign-in expired' : 'Not updating'}</window.Tip>}
+                    {(!ok || stale) && <window.Tip className={'login-state ' + (ok && !shared ? 'warn' : 'bad')} text={acc.last_ok_at ? 'Last reading ' + ago(acc.last_ok_at) : null}>{!ok && !shared ? 'Login stopped' : 'Not updating'}</window.Tip>}
                   </div>
                   {!ok && !shared && mode !== acc.account_id && <button type="button" className="ghost-btn login-fix" onClick={() => setMode(acc.account_id)}>Reconnect</button>}
                   <LoginMenu email={who} busy={busy === acc.account_id} removeLabel={shared ? 'Remove plants' : undefined}
