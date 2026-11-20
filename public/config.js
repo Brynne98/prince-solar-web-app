@@ -97,7 +97,7 @@ window.POSTHOG_KEY = 'phc_nSjRSg8gz7TMY2vis42JcKchyia6FpwYJqFrV5CKSu3v';
   };
   // A crash in someone's browser is otherwise invisible. Each message once per page
   // load, at most 20, so a render loop can't flood the project. Returns the PostHog event
-  // id, and keeps the last one in window.lastErrorId for "Report this" (SOLAR-428).
+  // id, and keeps the last one in window.lastErrorId for error_toast_shown (SOLAR-588).
   var seen = {}, count = 0;
   var report = function (err, props) {
     try {
