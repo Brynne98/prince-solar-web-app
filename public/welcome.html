@@ -206,9 +206,9 @@ a{color:inherit;text-decoration-color:rgba(242,195,107,.5);text-underline-offset
 
 /* ---------- after the day ---------- */
 .night{position:relative;background:var(--night);font-family:var(--body)}
-section.blk{padding:150px 0 0;scroll-margin-top:-38px}
+section.blk{padding:150px 0 0;scroll-margin-top:-8px}
 /* nav jumps: heading 40px under the 72px bar (phone: 28px under 60px) */
-section#features{padding-top:0;scroll-margin-top:112px}
+section#features{padding-top:0;scroll-margin-top:140px}
 .h2{font:600 60px/1.04 var(--display);font-variation-settings:'opsz' 96;letter-spacing:-.035em;text-wrap:balance}
 .h2 em{font-style:normal;color:var(--gold)}
 .lede{margin-top:20px;font-size:20px;line-height:1.5;color:var(--muted);max-width:36em;text-wrap:pretty}
@@ -663,6 +663,23 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 /* less motion (SOLAR-507): the power lines slow down, never stop; a still line reads as no power */
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*:not(.dots){animation:none!important;}.dots.on{animation-duration:6s}*{transition-duration:.01s!important}.rv{opacity:1;transform:none;filter:none}}
 
+/* SOLAR-627 */
+.moment .fine{margin-top:14px;font-size:15px;color:var(--ink-soft)}
+.menu{display:none}
+.menu summary{list-style:none;display:grid;place-items:center;width:44px;height:44px;margin-right:-10px;cursor:pointer}.menu summary::-webkit-details-marker{display:none}
+.menu nav{position:absolute;right:16px;top:calc(100% + 6px);display:grid;min-width:200px;padding:6px;border-radius:14px;background:#11161f;border:1px solid var(--hair-2);box-shadow:0 20px 40px -12px rgba(0,0,0,.6)}
+.menu nav a{display:flex;align-items:center;min-height:44px;padding:0 14px;border-radius:9px;color:#e7ecf2;text-decoration:none;font:500 16px var(--sans)}.menu nav a:active{background:rgba(255,255,255,.06)}
+footer nav a{white-space:nowrap}
+#mail .ib-ch{gap:12px}
+@media(max-width:860px){
+  .menu{display:block}.top .wrap{position:relative}.menu{position:static}
+  .top .end .signin{display:none}
+  #faults #fl-picks{order:1;margin-top:20px}#faults #fl-card{order:2;margin-top:20px}
+  #mail .ib-ch{flex-wrap:wrap;row-gap:2px}
+  footer nav{flex-wrap:wrap;gap:0 20px}
+  .moment .fine{display:none}
+}
+#pricing .wrap{text-align:center}#pricing .lede{margin-left:auto;margin-right:auto}#pricing .plans{margin-left:auto;margin-right:auto;text-align:left}
 </style>
 </head>
 <body>
@@ -672,7 +689,9 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   <div class="wrap">
     <a class="brand" href="#"><span class="orb" aria-hidden="true"></span>Prince Solar Hub</a>
     <nav class="links" aria-label="Main"><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#questions">Questions</a></nav>
-    <div class="end"><a class="signin" href="https://app.princesolarhub.co.za">Sign in</a><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a></div>
+    <div class="end"><a class="signin" href="https://app.princesolarhub.co.za">Sign in</a><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a>
+      <details class="menu"><summary aria-label="Menu"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></summary>
+        <nav aria-label="Menu"><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#questions">Questions</a><a href="https://app.princesolarhub.co.za">Sign in</a></nav></details></div>
   </div>
 </header>
 
@@ -716,16 +735,9 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
       <div class="moments">
         <section class="moment" data-k="0">
           <h1>Your SunSynk, <em>live.</em></h1>
-          <p>See where every watt goes, look back on every day, and know the moment the power goes.</p>
+          <p>Know when the power goes, how long the battery will last, and what your solar saves you.</p>
           <div class="cta"><a class="btn sun" href="https://app.princesolarhub.co.za/?signup">Try it free</a><a class="btn ghost" href="#pricing">See pricing</a></div>
-        </section>
-        <section class="moment" data-k="1">
-          <h2>See the sun <em>arrive.</em></h2>
-          <p>Watch the sun run the house and fill the battery, minute by minute.</p>
-        </section>
-        <section class="moment" data-k="2">
-          <h2>Catch the <em>peak.</em></h2>
-          <p>9.99 kW at 12:20. Your best days, always there.</p>
+          <p class="fine">7 days free. No card.</p>
         </section>
         <section class="moment" data-k="3">
           <h2>Know when <em>the power goes.</em></h2>
@@ -787,7 +799,38 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 
 <div class="night">
 <!-- ================= ANY DAY ================= -->
-<section class="blk" id="features" aria-label="Look back at any day">
+<!-- ================= SAVINGS ================= -->
+<section class="blk" id="features" aria-label="Savings">
+  <div class="wrap" id="save">
+  <h2 class="h2 rv">See what <em>it saves you.</em></h2>
+  <p class="lede rv d1">Rand saved, and how much of the house ran on your own power.</p>
+  <p class="need rv d1">Needs your electricity rate, from your bill.</p>
+  <div class="app demo sv-card rv d2">
+    <div class="demo-top"><span class="plant">Example plant</span><div class="seg" id="sv-seg" role="group" aria-label="Period"><button type="button" data-k="week" aria-pressed="false">Week</button><button type="button" data-k="month" aria-pressed="true">Month</button><button type="button" data-k="year" aria-pressed="false">Year</button></div></div>
+    <div class="sv-body">
+      <div>
+        <div>
+          <div class="sv-l">Saved</div>
+          <div class="sv-v" id="sv-saved">R1 284</div>
+          <div class="sv-t" id="sv-st"></div>
+        </div>
+        <div class="sv-ind">
+          <div class="sv-l">Independence</div>
+          <div class="sv-v" id="sv-ind">81%</div>
+          <div class="sv-meter"><i id="sv-bar" style="transform:scaleX(.81)"></i></div>
+          <div class="sv-t" id="sv-it"></div>
+        </div>
+      </div>
+      <div>
+        <div class="sv-ch"><b id="sv-ct">Saved so far</b><span class="sv-key"><span><i></i><span id="sv-k1">October</span></span><span><i class="prev"></i><span id="sv-k2">September</span></span></span></div>
+        <svg id="sv-svg" viewBox="0 0 560 220" role="img" aria-label="Saved so far, against the time before"></svg>
+      </div>
+    </div>
+  </div>
+  </div>
+</section>
+
+<section class="blk" aria-label="Look back at any day">
   <div class="wrap" id="back">
  <h2 class="h2 lb-h2 rv">Look back at <em>any day.</em></h2>
  <p class="sub rv d1">Last summer's best day or last night's outage, hour by hour.</p>
@@ -867,37 +910,6 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
       <div id="ib-rows"></div>
     </div>
     <div class="ib-view" id="ib-view" role="tabpanel" aria-live="polite"></div>
-  </div>
-  </div>
-</section>
-
-<!-- ================= SAVINGS ================= -->
-<section class="blk" aria-label="Savings">
-  <div class="wrap" id="save">
-  <h2 class="h2 rv">See what <em>it saves you.</em></h2>
-  <p class="lede rv d1">Rand saved, and how much of the house ran on your own power.</p>
-  <p class="need rv d1">Needs your electricity rate, from your bill.</p>
-  <div class="app demo sv-card rv d2">
-    <div class="demo-top"><span class="plant">Example plant</span><div class="seg" id="sv-seg" role="group" aria-label="Period"><button type="button" data-k="week" aria-pressed="false">Week</button><button type="button" data-k="month" aria-pressed="true">Month</button><button type="button" data-k="year" aria-pressed="false">Year</button></div></div>
-    <div class="sv-body">
-      <div>
-        <div>
-          <div class="sv-l">Saved</div>
-          <div class="sv-v" id="sv-saved">R1 284</div>
-          <div class="sv-t" id="sv-st"></div>
-        </div>
-        <div class="sv-ind">
-          <div class="sv-l">Independence</div>
-          <div class="sv-v" id="sv-ind">81%</div>
-          <div class="sv-meter"><i id="sv-bar" style="transform:scaleX(.81)"></i></div>
-          <div class="sv-t" id="sv-it"></div>
-        </div>
-      </div>
-      <div>
-        <div class="sv-ch"><b id="sv-ct">Saved so far</b><span class="sv-key"><span><i></i><span id="sv-k1">October</span></span><span><i class="prev"></i><span id="sv-k2">September</span></span></span></div>
-        <svg id="sv-svg" viewBox="0 0 560 220" role="img" aria-label="Saved so far, against the time before"></svg>
-      </div>
-    </div>
   </div>
   </div>
 </section>
@@ -998,6 +1010,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
 <section class="blk" id="pricing" data-period="m">
   <div class="wrap">
     <h2 class="h2 rv">7 days free. <em>Then pick a plan.</em></h2>
+    <p class="lede rv d1">No card to start.</p>
     <div class="period rv d1" role="group" aria-label="Billing period">
       <button type="button" data-p="m" aria-pressed="true">Monthly</button>
       <button type="button" data-p="y" aria-pressed="false">Yearly <span>(2 months free)</span></button>
@@ -1010,7 +1023,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
         <div class="per" data-offer="home"><span class="m">About R3 a day</span><span class="y">About R83 a month</span></div>
         <ul>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>2 plants</li>
-          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Every day since you joined, plus 60 before</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Every day kept, from 60 days before you join</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Battery time left</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Weekly, monthly and yearly reports</li>
           <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>Fault checks</li>
@@ -1039,6 +1052,7 @@ footer a{text-decoration:none}footer a:hover{text-decoration:underline}
   <div class="wrap">
     <h2 class="h2 rv">Questions</h2>
     <div class="qs rv d1">
+      <details><summary>Why pay when the SunSynk app is free?<i></i></summary><p>The SunSynk app shows your system. Prince Solar Hub adds what it doesn't: how long the battery will last, an email when the power goes and comes back, checks on your panels, rand saved, and every day kept. <a href="sunsynk-app-alternative">See what it adds</a>.</p></details>
       <details><summary>What is Prince Solar Hub?<i></i></summary><p>A monitoring tool for SunSynk solar. See solar, battery, home and grid live, look back at any day, and get an email when something goes wrong. It runs in the browser on your phone or computer. <a href="sunsynk-app-alternative">See how it compares to the SunSynk app</a>.</p></details>
       <details><summary>Will it work with my inverter?<i></i></summary><p>Prince Solar Hub works with SunSynk inverters. If your system shows in the SunSynk app, it shows here too. <a href="#inverters">Other brands are coming soon.</a></p></details>
       <details><summary>Do I have to give you my SunSynk password?<i></i></summary><p>No. In the SunSynk app, share your plant with admin@princesolarhub.co.za as Visitor, then type its plant ID in Prince Solar Hub. Or sign in with your SunSynk login if you prefer.</p></details>

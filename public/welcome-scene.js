@@ -145,7 +145,7 @@ const st = $('stars'); let seed = 7; const rnd = () => (seed = (seed * 16807) % 
 for (let i = 0; i < 140; i++) { const s = document.createElement('i'); s.style.left = rnd() * 100 + '%'; s.style.top = rnd() * 62 + '%'; s.style.opacity = (.25 + rnd() * .75).toFixed(2); if (rnd() > .85) { s.style.width = s.style.height = '3px'; } st.appendChild(s); }
 
 /* ---------- five moments: each one sets the sky and the card once ---------- */
-const MO = [[0, 0], [9.0, 540], [12.333, 740], [18.333, 1100], [21.5, 1290]];
+const MO = [[13.5, 810], [18.333, 1100], [21.5, 1290]];
 $('chEmpty').textContent = 'Empty in ' + hm((D.soc[1290] - RES) * CAP / -D.bat[1290]);
 const day = $('day'), stage = $('stage'), top = $('top'), cardEl = $('card');
 const card = { tGrid: $('tGrid') };
@@ -344,7 +344,7 @@ addEventListener('DOMContentLoaded', async () => {
   band.innerHTML = `<b>${head}.</b> ${keep}`;
   band.hidden = false;
   const bar = document.querySelector('.offer-bar');
-  bar.firstChild.textContent = head + '. ';
+  bar.firstChild.textContent = `${o.id === 'launch' ? 'Launch price' : 'Offer price'}: Home ${R(at.m.home)} a month. `;
   bar.hidden = false;
   document.documentElement.style.setProperty('--bar', bar.offsetHeight + 'px');
   const q = document.querySelector('.offer-q');
@@ -561,7 +561,7 @@ const g = id => document.getElementById('sv-' + id);
 const P = {
   week: { saved: 1027, prev: 978, ind: 81, indPrev: 77, n: 7, k1: '19-25 Oct', k2: '12-18 Oct', from: 'the week before', ax: [[0, 'Mon'], [3, 'Thu'], [6, 'Sun']] },
   month: { saved: 4509, prev: 4208, ind: 81, indPrev: 78, n: 31, k1: 'October', k2: 'September', from: 'September', ax: [[0, '1'], [14, '15'], [30, '31']] },
-  year: { saved: 48960, prev: 43410, ind: 79, indPrev: 77, n: 12, k1: '2025', k2: '2024', from: '2024', ax: [[0, 'Jan'], [5, 'Jun'], [11, 'Dec']] },
+  year: { saved: 40800, prev: 36170, ind: 79, indPrev: 77, n: 10, k1: '2026', k2: '2025', from: '2025', ax: [[0, 'Jan'], [4, 'May'], [9, 'Oct']] },
 };
 // each day's or month's share, uneven like real weather, summed so the line ends on the total
 const run = (n, total, seed) => { const v = Array.from({ length: n }, (_, i) => 1 + .32 * Math.sin(i * 1.9 + seed) + .18 * Math.sin(i * 4.3 + seed * 2)); const s = v.reduce((a, b) => a + b, 0); let c = 0; return v.map(x => c += x / s * total); };
@@ -709,3 +709,6 @@ document.addEventListener('click', e => { if (!card.contains(e.target)) open(fal
 card.addEventListener('keydown', e => { if (e.key === 'Escape') { open(false); pick.focus(); } });
 render(0);
 })();
+
+// phone menu closes once a link is picked (SOLAR-627)
+document.querySelector('.menu')?.addEventListener('click', e => { if (e.target.closest('a')) e.currentTarget.open = false; });
