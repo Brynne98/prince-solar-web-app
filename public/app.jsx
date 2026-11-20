@@ -37,6 +37,8 @@ function plantStatus(snap, now) {
   const online = snap.inverters.filter(i => i.status === 'online').length;
   const total = snap.inverters.length;
   const offline = total - online;
+  // a plant linked minutes ago has no reading yet: not Live, not "just now" (SOLAR-622)
+  const none = !snap.lastReading && !snap.loginCut;
   const last = snap.lastReading || snap.updated;
   // Judged as of the last answer, not the clock: a hidden page stops asking (SOLAR-140),
   // and coming back read red until the catch-up landed (SOLAR-149).
@@ -46,7 +48,7 @@ function plantStatus(snap, now) {
   // the load's, not the inverters', and a slow second inverter isn't news yet.
   // Say it's loading instead of Offline or Stale; "Fetching history" sits beside it.
   const loading = window.syncProgress(snap.sync) != null;
-  const status = loading && bad !== 'live' ? 'loading' : bad;
+  const status = none || (loading && bad !== 'live') ? 'loading' : bad;
   // fresh readings with an inverter silent: the word names it, so the header needs no strip (SOLAR-384)
   const named = status === 'stale' && ageS <= 180 && offline > 0;
   // the login came back and no reading has landed yet, whatever the age; after 15 min the
@@ -55,17 +57,17 @@ function plantStatus(snap, now) {
   // the last fetch failed: said on every status line, the header's and fullscreen's (SOLAR-603)
   const failed = !!snap.fetchFailed && !snap.loginCut && !waiting;
   return {
-    status, last, waiting, old: status !== 'loading' && ageS > 180,
+    status, last: none ? null : last, none, waiting, old: status !== 'loading' && ageS > 180,
     // every login dead (snap.loginCut, set by App): red as soon as the poller marks it, not
     // after 15 min silent (SOLAR-385). tone is the colour; status stays the age.
     tone: snap.loginCut ? 'offline' : waiting ? 'loading' : failed && status === 'live' ? 'stale' : status,
     // today's figures are not now: greyed (an old reading or a dead login), SOLAR-386
     faded: !!snap.loginCut || (status !== 'loading' && ageS > 180),
-    word: snap.loginCut ? 'Login stopped' : waiting ? 'Reconnected' : failed ? 'Couldn’t refresh'
+    word: snap.loginCut ? 'Login stopped' : waiting ? 'Reconnected' : failed ? 'Couldn’t refresh' : none ? 'No reading yet'
       : named ? offline + ' of ' + total + ' offline'
       : { live: 'Live', stale: 'Stale', offline: 'Offline', loading: 'Setting up' }[status],
     // a stopped login or a reconnect is the plant's state, not its inverters' (SOLAR-602)
-    named, detail: snap.loginCut || waiting ? null : offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now),
+    named, detail: snap.loginCut || waiting || none ? null : offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now),
   };
 }
 
@@ -77,7 +79,7 @@ const StatusBits = ({ word, children }) => <><span className="status-word">{word
 function WallStatus({ snap }) {
   const s = plantStatus(snap, useNow(15000));
   return (
-    <window.Tip className={'wall-status below status-' + s.tone} text={'Last reading ' + window.fmtTime(s.last)}>
+    <window.Tip className={'wall-status below status-' + s.tone} text={s.last ? 'Last reading ' + window.fmtTime(s.last) : null}>
       {/* the word already names the silent inverter: no detail to repeat it */}
       <StatusBits word={s.word}>{!s.named && s.detail && <span className="status-detail">{s.detail}</span>}</StatusBits>
     </window.Tip>
@@ -296,10 +298,10 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
 
 // The person: avatar, name and plant count in the sidebar; the avatar alone in a phone's
 // header. A dead SunSynk login puts a red dot on the avatar and on Account.
-function AccountMenu({ user, plantCount, alert, onSettings, active, variant }) {
+function AccountMenu({ user, plantCount, paused, alert, onSettings, active, variant }) {
   const [open, setOpen, ref] = usePopover();
   // plantCount is null while the plants load: the row shows, its count shimmers
-  const sub = alert ? 'Reconnect a login' : plantCount == null ? '' : plantCount + (plantCount === 1 ? ' plant' : ' plants');
+  const sub = alert ? 'Reconnect a login' : plantCount == null ? '' : plantCount + (plantCount === 1 ? ' plant' : ' plants') + (paused ? ', paused' : '');
   return (
     <div className={'acct acct-' + variant} ref={ref}>
       <button type="button" className={'acct-btn' + (alert ? ' needs' : '')} aria-haspopup="menu" aria-expanded={open}
@@ -739,7 +741,7 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord, err, onReconnect }) {
   return (
     <>
       <window.Tip as="div" className={'status below status-' + tone + (sync != null ? ' fetching' : '') + (snap.loginCut ? ' cut' : '')}
-        text={(snap.fetchFailed ? 'Showing the last good reading. ' : '') + 'Last reading ' + window.fmtTime(s.last)} role="status">
+        text={s.none ? null : (snap.fetchFailed ? 'Showing the last good reading. ' : '') + 'Last reading ' + window.fmtTime(s.last)} role="status">
         <StatusBits word={word} />
         {/* an old reading's date shows from tablet width up; a phone keeps the room for the plant name */}
         {s.old && !waiting && (() => { const p = fmtAgo(s.last, now).replace(' ago', '').split(', ');
@@ -1344,7 +1346,8 @@ function Setup({ links, wall }) {
   useEffect(() => { if (wall) window.track('pay_wall_shown', { plants: wall.plants, after: wall.paid ? 'plan' : 'free_week' }); }, []);
   const dead = links.accounts.filter(a => a.status === 'needs_relink' && a.kind !== 'share');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
-  const account = { user, plantCount: 0, alert: dead.length > 0, onSettings: () => go('prefs'), active: isSettings(tab) };
+  // no plan: the plants are still yours, paused, as Settings > Plants lists them (SOLAR-631)
+  const account = { user, plantCount: wall ? wall.plants : 0, paused: !!wall, alert: dead.length > 0, onSettings: () => go('prefs'), active: isSettings(tab) };
   // Every plant on a working login locked (SOLAR-537): choosing one comes first, adding one second.
   const plantsOff = !relink && links.accounts.some(a => a.status !== 'disabled' && (a.plants || []).length > 0);
   const [flash, setFlash] = useState(null);

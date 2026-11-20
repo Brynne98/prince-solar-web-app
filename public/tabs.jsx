@@ -132,6 +132,9 @@ function LiveSkeleton({ cfg }) {
   );
 }
 
+// before the first reading a figure is a dash with this under it, not 0 (SOLAR-623)
+const WAITING = 'Waiting for the first reading';
+
 function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings }) {
   const a = snap.aggregate;
   const feat = snap.features || {};
@@ -161,7 +164,9 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const cap = snap.config?.battCapacity ?? null;
   const availKwh = cap && a.battSoc != null ? Math.max(0, (a.battSoc - RESERVE) / 100 * cap) : null;
   const headroomKwh = cap && a.battSoc != null ? Math.max(0, (100 - a.battSoc) / 100 * cap) : null;
-  const fmtDur = (hrs) => window.fmtDuration(Math.round(hrs * 60));
+  // over a day, hours and minutes stop reading as a time: "about 5 days" (SOLAR-630)
+  const fmtDur = (hrs) => hrs >= 24 ? (Math.round(hrs / 24) > 1 ? 'about ' + Math.round(hrs / 24) + ' days' : 'about a day') : window.fmtDuration(Math.round(hrs * 60));
+  const approx = (hrs) => hrs >= 24 ? '' : '≈ ';
   const fmtEta = (hrs) => {
     const d = new Date(snap.updated.getTime() + hrs * 3600000);
     return window.fmtPlantTime(d, tz) + ', ' + d.toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz || undefined });
@@ -174,16 +179,16 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const cut = !!snap.loginCut;
   const silent = ps.status === 'offline' || cut;
   let battEta = null, battInfo = null;
-  if (!hasBatt || silent || ps.faded) { /* nothing to estimate */ }
+  if (!hasBatt || silent || ps.faded || ps.none) { /* nothing to estimate */ }
   else if (!cap) { battInfo = 'Add battery size to see this'; } // a link on the flow's battery node
   // Under 200 W the battery is only trickling and a time would read in days, so it gives none.
   else if (a.battState === 'discharging' && a.battPower >= 200) {
     const hrs = availKwh / (a.battPower / 1000);
-    battEta = <span className="batt-eta"><span className="bel">≈ <b>{fmtDur(hrs)}</b> until {RESERVE}% reserve</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
+    battEta = <span className="batt-eta"><span className="bel">{approx(hrs)}<b>{fmtDur(hrs)}</b> until {RESERVE}% reserve</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
     battInfo = `${fmtDur(hrs)} to empty`;
   } else if (a.battState === 'charging' && a.battPower >= 200) {
     const hrs = headroomKwh / (a.battPower / 1000);
-    battEta = <span className="batt-eta"><span className="bel">≈ <b>{fmtDur(hrs)}</b> to full</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
+    battEta = <span className="batt-eta"><span className="bel">{approx(hrs)}<b>{fmtDur(hrs)}</b> to full</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
     battInfo = `${fmtDur(hrs)} to full`;
   }
 
@@ -452,6 +457,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
             value={period} onChange={setPeriod} />
         </div>
         {strip}
+        {isAgg && histLoading() && <p className="overview-loading">{HIST_LOADING}: these totals grow as it comes in.</p>}
       </div>
       <div className={'flow-fs-wrap' + (wall ? ' wall' : '') + (wall && idle ? ' idle' : '')} ref={flowRef}>
         {wall && (
@@ -471,7 +477,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
               <FsEnterIcon /><span>Fullscreen</span>
             </button>
           }>POWER FLOW</SectionTitle>}
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} total={snap.inverters.length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} silentSince={silent ? window.readAgo(ps.last.getTime(), Date.now()) : null}
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} total={snap.inverters.length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} waiting={ps.none} silentSince={silent ? window.readAgo(ps.last.getTime(), Date.now()) : null}
             pausedSince={!silent && ps.faded ? window.readAgo(ps.last.getTime(), Date.now()) : null} />
         </Card>
       </div>
@@ -664,9 +670,14 @@ function DaysPanel({ daily, onRetry, rows, ...bars }) {
 }
 // The total tiles of Solar, Home and Grid (now, today, week…): a kWh figure in the page's
 // colour.
-const totalTile = (accent) => (label, v, sub) => {
+// While the history loads, Week to Lifetime hold only the days in so far: they say so (SOLAR-624).
+const HIST_LOADING = 'Still loading history';
+const histLoading = () => window.syncProgress(window.SYNC) != null;
+const PAST_TODAY = ['THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'];
+// none: no reading yet, so a missing figure is a dash, not a load that never ends (SOLAR-623)
+const totalTile = (accent) => (label, v, sub, none) => {
   const [n, u] = window.fmtEnergyParts(v);
-  return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null} sub={sub || NBSP} />;
+  return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null && !none} sub={none && v == null ? WAITING : PAST_TODAY.includes(label) && histLoading() ? HIST_LOADING : sub || NBSP} />;
 };
 
 // ---------------------------------------------------------------- PANELS
@@ -1185,10 +1196,10 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
-        <StatTile label="SOLAR NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.pv}
-          sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>
+        <StatTile label="SOLAR NOW" value={silent || ps.none ? '—' : nowN} unit={silent || ps.none ? '' : nowU} accent={CC.pv}
+          sub={ps.none ? WAITING : silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>
             : <button type="button" className="mini-link" onClick={() => onOpenSettings('plant')}>Add your panels to see this</button>} />
-        {tile('TODAY', a.pvToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.pv)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
+        {tile('TODAY', a.pvToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.pv)}</b> at <b>{HM(todayPeak.t)}</b></> : null, ps.none)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
         {tile('THIS YEAR', tot.year)}
@@ -1301,9 +1312,9 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
-        <StatTile label="HOME NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.load}
-          sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : solarNow != null ? <><b>{solarNow}%</b> from solar right now</> : NBSP} />
-        {tile('TODAY', a.loadToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.load)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
+        <StatTile label="HOME NOW" value={silent || ps.none ? '—' : nowN} unit={silent || ps.none ? '' : nowU} accent={CC.load}
+          sub={ps.none ? WAITING : silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : solarNow != null ? <><b>{solarNow}%</b> from solar right now</> : NBSP} />
+        {tile('TODAY', a.loadToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.load)}</b> at <b>{HM(todayPeak.t)}</b></> : null, ps.none)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
         {tile('THIS YEAR', tot.year)}
@@ -1477,8 +1488,8 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
-        <StatTile label="GRID NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.grid} sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : nowSub} />
-        {tile('TODAY', a.gridFromToday, sells ? <>Exported <b>{fmtKwh(a.gridToToday)}</b></> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
+        <StatTile label="GRID NOW" value={silent || ps.none ? '—' : nowN} unit={silent || ps.none ? '' : nowU} accent={CC.grid} sub={ps.none ? WAITING : silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : nowSub} />
+        {tile('TODAY', a.gridFromToday, sells ? <>Exported <b>{fmtKwh(a.gridToToday)}</b></> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null, ps.none)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
         {tile('THIS YEAR', tot.year)}
@@ -1739,7 +1750,9 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const pts = (today && today.points) || [];
   const rows = (hist || []).filter(r => r.points && r.points.length);
   // ---- solar panels ----
-  const pvState = st.allQuiet ? QUIET
+  // before the first reading nothing is known: each tile says so (SOLAR-622)
+  const NONE = ['stale', 'No reading yet'];
+  const pvState = st.ps.none ? NONE : st.allQuiet ? QUIET
     : st.quiet.length ? ['stale', 'Not all reporting']
     : alerts.length ? ['warn', 'Needs a look']
     : st.night ? ['ok', 'Resting for the night']
@@ -1747,14 +1760,15 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const pvVals = pts.map(p => [p.t, p.pv == null ? null : Math.max(0, p.pv)]);
   const pvMax = Math.max(500, ...pvVals.map(v => v[1] || 0));
   // ---- battery ----
-  const battState = st.allQuiet ? QUIET : st.battStale ? ['stale', last(st.battAt)]
+  const battState = st.ps.none ? NONE : st.allQuiet ? QUIET : st.battStale ? ['stale', last(st.battAt)]
     : st.hot || st.badSensor ? ['warn', 'Needs a look']
     : ['ok', a.battOut > 5 ? 'Powering the house' : a.battOut < -5 ? 'Charging' : 'Resting'];
   const battSub = st.battStale ? null : [a.battOut > 5 ? fmtPower(a.battOut) + ' out' : a.battOut < -5 ? fmtPower(-a.battOut) + ' in' : null,
     st.battTemp != null ? Math.round(st.battTemp) + ' °C' : null].filter(Boolean).join(' · ');
   // ---- inverters: the warmest one now, and the warmest of them through the day ----
   const n = st.invs.length, live = n - st.quiet.length;
-  const invState = !st.quiet.length ? ['ok', n === 1 ? 'On' : n === 2 ? 'Both on' : 'All on']
+  // before the first reading nothing is known to be on (SOLAR-622)
+  const invState = st.ps.none ? NONE : !st.quiet.length ? ['ok', n === 1 ? 'On' : n === 2 ? 'Both on' : 'All on']
     : st.allQuiet ? QUIET
     : ['warn', live + ' of ' + n + ' reporting'];
   const temps = Object.values(st.invT);
@@ -1762,7 +1776,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const hot = temps.some(t => t.ac > EQ_HOT_AC || (t.dc != null && t.dc > EQ_HOT_DC));
   const out = st.invs.filter(i => !st.quiet.includes(i)).reduce((s, i) => s + (i.output || 0), 0);
   // no temperature yet today (it comes every six hours): the power to the house is the figure, not a dash (SOLAR-407)
-  const outParts = !warm && !st.allQuiet ? fmtPowerParts(out) : null;
+  const outParts = !warm && !st.allQuiet && !st.ps.none ? fmtPowerParts(out) : null;
   const heatVals = Array.from({ length: DAY_LAST + 1 }, (_, i) => {
     const vs = rows.map(r => r.points[i] && r.points[i].ac).filter(v => v != null);
     return [i * 5, vs.length ? Math.max(...vs) : null];
@@ -1788,7 +1802,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
         sub={battSub} spark={pts.some(p => p.soc != null) && <EqSpark vals={pts.map(p => [p.t, p.soc])} lo={0} hi={100} stroke={CC.batt} />} />}
       <EqTile label={n === 1 ? 'Inverter' : 'Inverters'} state={hot && !st.allQuiet ? ['warn', 'Running hot'] : invState}
         value={warm ? Math.round(warm.ac) : outParts ? outParts[0] : '—'} unit={warm ? ' °C' : outParts ? outParts[1] : null} stale={st.allQuiet}
-        sub={outParts ? 'to the house now' : [warm && (n > 1 ? 'warmest at ' : 'at ') + HM(warm.at), !st.allQuiet && fmtPower(out) + ' to the house'].filter(Boolean).join(' · ')}
+        sub={outParts ? 'to the house now' : [warm && (n > 1 ? 'warmest at ' : 'at ') + HM(warm.at), !st.allQuiet && !st.ps.none && fmtPower(out) + ' to the house'].filter(Boolean).join(' · ')}
         spark={heatVals.some(v => v[1] != null) && <EqSpark vals={heatVals} lo={30} hi={70} heat={EQ_HOT_AC} />} />
       {st.hasGrid && <EqTile label="Grid" state={gridState} value={volt ? Math.round(volt) : '—'} unit={volt ? ' V' : null} color={CC.grid} stale={st.allQuiet || !volt}
         sub={gb.length ? (offMin ? 'Off ' + window.fmtDuration(offMin) + ' today' : 'No outage today') : null}
@@ -1918,14 +1932,18 @@ function EqBatteryCard({ st, snap, now }) {
   // each figure keeps its unit on its line when the row wraps (SOLAR-411)
   const nb = s => String(s).replace(/ /g, NBSP);
   if (a.battChgTotal > 0) rows.push(['In · out since installed', nb(window.fmtEnergySmart(a.battChgTotal)) + ' · ' + nb(window.fmtEnergySmart(a.battDischgTotal))]);
-  const packs = st.shared ? Math.min(1, st.withBatt.length) : st.withBatt.length;
   const modules = st.shared ? Math.max(0, ...st.withBatt.map(i => i.numberOfBatteries || 0)) : st.withBatt.reduce((n, i) => n + (i.numberOfBatteries || 0), 0);
   // each pack under the inverter that reads its sensor: the slaves on a shared pack read -100.
   // One whose answer came back empty this minute is likely it, so it keeps the pack.
   const packInv = st.withBatt.find(i => cleanTemp(i.battTemp) != null) || st.withBatt.find(i => i.battSoc == null) || st.withBatt[0];
   const packLine = (soc, volt, t) => [soc != null ? soc + '%' : '—', volt != null ? volt.toFixed(1) + ' V' : '—', t != null ? Math.round(t) + ' °C' : '—'].join(' · ');
+  // a second bank on an inverter is a pack of its own (SOLAR-632)
+  const packInvs = st.shared ? [packInv].filter(Boolean) : st.withBatt;
+  const packs = packInvs.reduce((n, i) => n + (i.bank2 ? 2 : 1), 0);
+  // the big % is the first bank's: with one inverter's two banks it says so and gives the other
+  const bank2 = packInvs.length === 1 && packInvs[0].bank2;
   const more = [];
-  (st.shared ? [packInv].filter(Boolean) : st.withBatt).forEach((inv, k, all) => {
+  packInvs.forEach((inv, k, all) => {
     const name = all.length > 1 ? invName(inv) + ', pack' : 'Pack';
     more.push([inv.bank2 ? name + ' 1' : name, packLine(inv.battSoc, inv.battVolt, cleanTemp(inv.battTemp))]);
     if (inv.bank2) more.push([name + ' 2', packLine(inv.bank2.soc, inv.bank2.voltage, cleanTemp(inv.bank2.temperature))]);
@@ -1937,6 +1955,7 @@ function EqBatteryCard({ st, snap, now }) {
     <Card className="eq-card">
       <SectionTitle right={<>{packs} {packs === 1 ? 'pack' : 'packs'} · {modules} {modules === 1 ? 'battery' : 'batteries'}</>}>BATTERY</SectionTitle>
       <div className={'eq-big mono' + (st.battStale ? ' stale' : '')} style={st.battStale ? undefined : { color: CC.batt }}>{a.battSoc ?? '—'}{a.battSoc != null && <span className="u">%</span>}</div>
+      {bank2 && !st.battStale && <div className="eq-big-sub">Pack 1{bank2.soc != null ? '. Pack 2 is ' + bank2.soc + '%' : ''}</div>}
       <div className={'eq-meter' + (st.battStale ? ' stale' : '')}><i style={{ width: soc + '%', background: CC.batt }} /><b style={{ left: reserve + '%' }} /></div>
       <div className="eq-meter-scale"><span style={reserve > 60 ? { right: (100 - reserve) + '%' } : { left: reserve + '%' }}>{reserve}% reserve</span></div>
       <dl className="eq-rows">
@@ -1953,7 +1972,7 @@ function EqInvertersCard({ st, now }) {
   const invs = st.invs;
   const down = inv => st.quiet.includes(inv);
   const rows = [
-    ['State', invs.map(inv => down(inv) ? { v: 'Not reporting', cls: 'warn', sub: inv.readAt ? 'Since ' + window.readAgo(inv.readAt, now) : null }
+    ['State', invs.map(inv => st.ps.none ? { v: 'No reading yet' } : down(inv) ? { v: 'Not reporting', cls: 'warn', sub: inv.readAt ? 'Since ' + window.readAgo(inv.readAt, now) : null }
       : { v: 'On', sub: 'Read ' + eqReadAt(inv, now) })],
     ['To the house now', invs.map(inv => ({ v: down(inv) ? '—' : fmtPower(inv.output) }))],
     ['Temperature', invs.map(inv => {
@@ -2068,7 +2087,7 @@ function InvertersTab({ snap, today, refreshKey }) {
   const n = issues.length;
   // no problem found, but the plant isn't live: say what the header says, not that all is well (SOLAR-601)
   const late = n === 0 && (st.ps.status === 'stale' || st.ps.status === 'offline');
-  const head = st.ps.waiting && n === 0 ? 'Reconnected' : late ? 'No new reading yet'
+  const head = st.ps.none && n === 0 ? 'No reading yet' : st.ps.waiting && n === 0 ? 'Reconnected' : late ? 'No new reading yet'
     : n === 0 ? 'Everything is working' : n === 1 ? '1 thing needs a look' : n + ' things need a look';
 
   return (
@@ -2081,7 +2100,8 @@ function InvertersTab({ snap, today, refreshKey }) {
       {/* the one place that says whether things are OK */}
       <section className="eq-status" aria-label="Status">
         {/* red, as the problem cards under it are (SOLAR-407) */}
-        <div className={'eq-head ' + (n ? 'bad' : st.ps.waiting ? 'wait' : late ? 'warn' : 'ok')}>{head}</div>
+        <div className={'eq-head ' + (n ? 'bad' : st.ps.waiting || st.ps.none ? 'wait' : late ? 'warn' : 'ok')}>{head}</div>
+        {n === 0 && st.ps.none && <div className="eq-head-sub">Waiting for the first reading.</div>}
         {n === 0 && st.lastAt && <div className="eq-head-sub">{st.ps.waiting ? 'Waiting for the first reading. ' : ''}Last reading {window.fmtAgo(new Date(st.lastAt), now)}</div>}
       </section>
       {n > 0 && (
