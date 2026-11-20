@@ -674,9 +674,10 @@ function DaysPanel({ daily, onRetry, rows, ...bars }) {
 const HIST_LOADING = 'Still loading history';
 const histLoading = () => window.syncProgress(window.SYNC) != null;
 const PAST_TODAY = ['THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'];
-const totalTile = (accent) => (label, v, sub) => {
+// none: no reading yet, so a missing figure is a dash, not a load that never ends (SOLAR-623)
+const totalTile = (accent) => (label, v, sub, none) => {
   const [n, u] = window.fmtEnergyParts(v);
-  return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null} sub={PAST_TODAY.includes(label) && histLoading() ? HIST_LOADING : sub || NBSP} />;
+  return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null && !none} sub={none && v == null ? WAITING : PAST_TODAY.includes(label) && histLoading() ? HIST_LOADING : sub || NBSP} />;
 };
 
 // ---------------------------------------------------------------- PANELS
@@ -1198,7 +1199,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
         <StatTile label="SOLAR NOW" value={silent || ps.none ? '—' : nowN} unit={silent || ps.none ? '' : nowU} accent={CC.pv}
           sub={ps.none ? WAITING : silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>
             : <button type="button" className="mini-link" onClick={() => onOpenSettings('plant')}>Add your panels to see this</button>} />
-        {tile('TODAY', a.pvToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.pv)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
+        {tile('TODAY', a.pvToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.pv)}</b> at <b>{HM(todayPeak.t)}</b></> : null, ps.none)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
         {tile('THIS YEAR', tot.year)}
@@ -1313,7 +1314,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
       <div className="solar-stats">
         <StatTile label="HOME NOW" value={silent || ps.none ? '—' : nowN} unit={silent || ps.none ? '' : nowU} accent={CC.load}
           sub={ps.none ? WAITING : silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : solarNow != null ? <><b>{solarNow}%</b> from solar right now</> : NBSP} />
-        {tile('TODAY', a.loadToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.load)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
+        {tile('TODAY', a.loadToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.load)}</b> at <b>{HM(todayPeak.t)}</b></> : null, ps.none)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
         {tile('THIS YEAR', tot.year)}
@@ -1488,7 +1489,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
     <div className="stack solar-tab">
       <div className="solar-stats">
         <StatTile label="GRID NOW" value={silent || ps.none ? '—' : nowN} unit={silent || ps.none ? '' : nowU} accent={CC.grid} sub={ps.none ? WAITING : silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : nowSub} />
-        {tile('TODAY', a.gridFromToday, sells ? <>Exported <b>{fmtKwh(a.gridToToday)}</b></> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
+        {tile('TODAY', a.gridFromToday, sells ? <>Exported <b>{fmtKwh(a.gridToToday)}</b></> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null, ps.none)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
         {tile('THIS YEAR', tot.year)}
@@ -1749,7 +1750,9 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const pts = (today && today.points) || [];
   const rows = (hist || []).filter(r => r.points && r.points.length);
   // ---- solar panels ----
-  const pvState = st.allQuiet ? QUIET
+  // before the first reading nothing is known: each tile says so (SOLAR-622)
+  const NONE = ['stale', 'No reading yet'];
+  const pvState = st.ps.none ? NONE : st.allQuiet ? QUIET
     : st.quiet.length ? ['stale', 'Not all reporting']
     : alerts.length ? ['warn', 'Needs a look']
     : st.night ? ['ok', 'Resting for the night']
@@ -1757,7 +1760,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const pvVals = pts.map(p => [p.t, p.pv == null ? null : Math.max(0, p.pv)]);
   const pvMax = Math.max(500, ...pvVals.map(v => v[1] || 0));
   // ---- battery ----
-  const battState = st.allQuiet ? QUIET : st.battStale ? ['stale', last(st.battAt)]
+  const battState = st.ps.none ? NONE : st.allQuiet ? QUIET : st.battStale ? ['stale', last(st.battAt)]
     : st.hot || st.badSensor ? ['warn', 'Needs a look']
     : ['ok', a.battOut > 5 ? 'Powering the house' : a.battOut < -5 ? 'Charging' : 'Resting'];
   const battSub = st.battStale ? null : [a.battOut > 5 ? fmtPower(a.battOut) + ' out' : a.battOut < -5 ? fmtPower(-a.battOut) + ' in' : null,
@@ -1765,7 +1768,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   // ---- inverters: the warmest one now, and the warmest of them through the day ----
   const n = st.invs.length, live = n - st.quiet.length;
   // before the first reading nothing is known to be on (SOLAR-622)
-  const invState = st.ps.none ? ['stale', 'No reading yet'] : !st.quiet.length ? ['ok', n === 1 ? 'On' : n === 2 ? 'Both on' : 'All on']
+  const invState = st.ps.none ? NONE : !st.quiet.length ? ['ok', n === 1 ? 'On' : n === 2 ? 'Both on' : 'All on']
     : st.allQuiet ? QUIET
     : ['warn', live + ' of ' + n + ' reporting'];
   const temps = Object.values(st.invT);
@@ -1773,7 +1776,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
   const hot = temps.some(t => t.ac > EQ_HOT_AC || (t.dc != null && t.dc > EQ_HOT_DC));
   const out = st.invs.filter(i => !st.quiet.includes(i)).reduce((s, i) => s + (i.output || 0), 0);
   // no temperature yet today (it comes every six hours): the power to the house is the figure, not a dash (SOLAR-407)
-  const outParts = !warm && !st.allQuiet ? fmtPowerParts(out) : null;
+  const outParts = !warm && !st.allQuiet && !st.ps.none ? fmtPowerParts(out) : null;
   const heatVals = Array.from({ length: DAY_LAST + 1 }, (_, i) => {
     const vs = rows.map(r => r.points[i] && r.points[i].ac).filter(v => v != null);
     return [i * 5, vs.length ? Math.max(...vs) : null];
@@ -1799,7 +1802,7 @@ function EquipmentSimple({ st, now, today, hist, gridDay }) {
         sub={battSub} spark={pts.some(p => p.soc != null) && <EqSpark vals={pts.map(p => [p.t, p.soc])} lo={0} hi={100} stroke={CC.batt} />} />}
       <EqTile label={n === 1 ? 'Inverter' : 'Inverters'} state={hot && !st.allQuiet ? ['warn', 'Running hot'] : invState}
         value={warm ? Math.round(warm.ac) : outParts ? outParts[0] : '—'} unit={warm ? ' °C' : outParts ? outParts[1] : null} stale={st.allQuiet}
-        sub={outParts ? 'to the house now' : [warm && (n > 1 ? 'warmest at ' : 'at ') + HM(warm.at), !st.allQuiet && fmtPower(out) + ' to the house'].filter(Boolean).join(' · ')}
+        sub={outParts ? 'to the house now' : [warm && (n > 1 ? 'warmest at ' : 'at ') + HM(warm.at), !st.allQuiet && !st.ps.none && fmtPower(out) + ' to the house'].filter(Boolean).join(' · ')}
         spark={heatVals.some(v => v[1] != null) && <EqSpark vals={heatVals} lo={30} hi={70} heat={EQ_HOT_AC} />} />
       {st.hasGrid && <EqTile label="Grid" state={gridState} value={volt ? Math.round(volt) : '—'} unit={volt ? ' V' : null} color={CC.grid} stale={st.allQuiet || !volt}
         sub={gb.length ? (offMin ? 'Off ' + window.fmtDuration(offMin) + ' today' : 'No outage today') : null}
