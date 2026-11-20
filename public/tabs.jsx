@@ -2481,7 +2481,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links, noWeek 
         {waiting.length > 0 && <PlanNote tone="warn">{andList(waiting)} and all history are kept until {billDay(b.removeOn)}. {was ? `Pay for ${PLAN_NAME[was]} to keep them.` : 'Choose a plan to keep them.'}</PlanNote>}
         {/* the failed-payment card is on Live only, so here the plan says the deadline and pays (SOLAR-577) */}
         {b.state === 'past_due' && (
-          <PlanNote tone="bad" acts={<button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay</button>}>
+          <PlanNote tone="bad" acts={<button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>}>
             Pay before {billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.
           </PlanNote>
         )}
