@@ -161,7 +161,9 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const cap = snap.config?.battCapacity ?? null;
   const availKwh = cap && a.battSoc != null ? Math.max(0, (a.battSoc - RESERVE) / 100 * cap) : null;
   const headroomKwh = cap && a.battSoc != null ? Math.max(0, (100 - a.battSoc) / 100 * cap) : null;
-  const fmtDur = (hrs) => window.fmtDuration(Math.round(hrs * 60));
+  // over a day, hours and minutes stop reading as a time: "about 5 days" (SOLAR-630)
+  const fmtDur = (hrs) => hrs >= 24 ? (Math.round(hrs / 24) > 1 ? 'about ' + Math.round(hrs / 24) + ' days' : 'about a day') : window.fmtDuration(Math.round(hrs * 60));
+  const approx = (hrs) => hrs >= 24 ? '' : '≈ ';
   const fmtEta = (hrs) => {
     const d = new Date(snap.updated.getTime() + hrs * 3600000);
     return window.fmtPlantTime(d, tz) + ', ' + d.toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short', timeZone: tz || undefined });
@@ -179,11 +181,11 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   // Under 200 W the battery is only trickling and a time would read in days, so it gives none.
   else if (a.battState === 'discharging' && a.battPower >= 200) {
     const hrs = availKwh / (a.battPower / 1000);
-    battEta = <span className="batt-eta"><span className="bel">≈ <b>{fmtDur(hrs)}</b> until {RESERVE}% reserve</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
+    battEta = <span className="batt-eta"><span className="bel">{approx(hrs)}<b>{fmtDur(hrs)}</b> until {RESERVE}% reserve</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
     battInfo = `${fmtDur(hrs)} to empty`;
   } else if (a.battState === 'charging' && a.battPower >= 200) {
     const hrs = headroomKwh / (a.battPower / 1000);
-    battEta = <span className="batt-eta"><span className="bel">≈ <b>{fmtDur(hrs)}</b> to full</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
+    battEta = <span className="batt-eta"><span className="bel">{approx(hrs)}<b>{fmtDur(hrs)}</b> to full</span><span className="bel sub">~{fmtEta(hrs)}</span></span>;
     battInfo = `${fmtDur(hrs)} to full`;
   }
 
