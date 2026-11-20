@@ -2411,7 +2411,7 @@ function CancelPlanDialog({ b, busy, onConfirm, onCancel }) {
   );
 }
 
-function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
+function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links, noWeek }) {
   const { useState } = React;
   const [busy, setBusy] = useState(false);
   const [managing, setManaging] = useState(false);
@@ -2450,7 +2450,10 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
   // As other billing pages lay it out (SOLAR-512): name and price, what it gives, then its date.
   const gives = b.comped ? 'Every plant.'
     : paid ? `${room} plants.`
-    : weekEnds || freeWeekEndsAt === null ? 'Up to 5 plants.' : 'Readings, alerts and reports have stopped.';
+    : weekEnds || freeWeekEndsAt === null ? 'Up to 5 plants.'
+    // its plants' weeks were used before it came: nothing ran, so nothing stopped (SOLAR-618)
+    : noWeek ? (noWeek > 1 ? 'These plants have had their free week.' : 'This plant has had its free week.')
+    : 'Readings, alerts and reports have stopped.';
   // the date line; a booked change says its date in the notice instead, so it is said once
   const when = b.comped ? null
     : b.state === 'past_due' ? (b.nextTry ? `We try your card again on ${longDay(b.nextTry)}.` : null)
@@ -2478,7 +2481,7 @@ function PlanSection({ billing, reload, onAdjust, freeWeekEndsAt, links }) {
         {waiting.length > 0 && <PlanNote tone="warn">{andList(waiting)} and all history are kept until {billDay(b.removeOn)}. {was ? `Pay for ${PLAN_NAME[was]} to keep them.` : 'Choose a plan to keep them.'}</PlanNote>}
         {/* the failed-payment card is on Live only, so here the plan says the deadline and pays (SOLAR-577) */}
         {b.state === 'past_due' && (
-          <PlanNote tone="bad" acts={<button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay</button>}>
+          <PlanNote tone="bad" acts={<button type="button" className="save-btn" onClick={() => window.settlePayment()}>Pay with another card</button>}>
             Pay before {billDay(b.freeOn)} to keep {PLAN_NAME[b.plan]}.
           </PlanNote>
         )}
@@ -2633,7 +2636,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
     if (paid && b.nextPlan === 'free') return p === b.plan && sameView ? <>{ownDate()}
         <button type="button" className="save-btn" disabled={!!busy} aria-busy={busy === 'keep'}
                 onClick={() => run(() => undoBooked(b, reload), 'keep')}>Keep {PLAN_NAME[b.plan]}</button></>
-      : <div className="plan-cur plan-wait">After {(b.prepaidOn ? longDay : billDay)(endDay(b))}</div>;
+      // other plans: keep this one first, or choose after it ends; a bare date read as a start date (SOLAR-620)
+      : <div className="plan-cur plan-wait">Keep {PLAN_NAME[b.plan]} first, or choose this plan after {(b.prepaidOn ? longDay : billDay)(endDay(b))}.</div>;
     // a paid year changes nothing until it starts (SOLAR-298), but it can be cancelled (SOLAR-457);
     // a quiet line holds the button's row
     if (b.prepaidOn && !(p === b.plan && !sameView)) return <div className="plan-cur plan-wait">{p === b.plan ? 'Yearly from ' : 'After '}{billDay(b.nextDate)}</div>;
@@ -3804,7 +3808,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
               <SunSynkConnectionSection head onChanged={onPlantConfigSaved} links={links} billing={billing} reloadBilling={reloadBilling} onCollect={(id) => adjust('plants', id)} noPlan={!!me?.wall} />
             </div>
           )}
-          {shown === 'billing' && <BillingPage billing={billing} reload={reloadPlan} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen}
+          {shown === 'billing' && <BillingPage billing={billing} reload={reloadPlan} freeWeekEndsAt={me ? me.freeWeekEndsAt : weekEndSeen} noWeek={me?.wall?.noWeek ? me.wall.plants || 1 : 0}
                                               links={links} onAdjust={() => adjust('billing')} />}
           {/* Adjust plan opens over Billing or Plants, not as a page of its own (SOLAR-292) */}
           {page === 'plans' && <AdjustPlanPage billing={billing} reload={reloadPlan} onBack={() => { onPage(planFrom); setPlanFrom('billing'); }} forPlant={forPlant}
@@ -3868,12 +3872,12 @@ function AccountPage({ user, billing, plants, plantId, ready, onBilling }) {
 }
 
 // Billing: the money only. The plants and their logins have their own page (SOLAR-513).
-function BillingPage({ billing, reload, links, freeWeekEndsAt, onAdjust }) {
+function BillingPage({ billing, reload, links, freeWeekEndsAt, onAdjust, noWeek }) {
   React.useEffect(() => { if (billing) try { localStorage.setItem(BILL_SHAPE, JSON.stringify(shapeOf(billing))); } catch (e) {} }, [billing]);
   return (
     <div className="settings-page">
       <div className="page-head"><h1>Billing</h1></div>
-      <PlanSection billing={billing} reload={reload} onAdjust={onAdjust} freeWeekEndsAt={freeWeekEndsAt} links={links} />
+      <PlanSection billing={billing} reload={reload} onAdjust={onAdjust} freeWeekEndsAt={freeWeekEndsAt} links={links} noWeek={noWeek} />
       <PaymentsSection billing={billing} />
       <InvoicesSection billing={billing} />
       <CancelSection billing={billing} reload={reload} />

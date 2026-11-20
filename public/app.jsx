@@ -249,7 +249,8 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
   // Each plant once, under the first login that brings it.
   const seen = new Set();
   const groups = (accounts || []).filter(a => a.status !== 'disabled').map(a => ({
-    login: a.sunsynk_username,
+    // our own share login's username is never shown: shared plants go under one heading, as on Plants (SOLAR-619)
+    login: a.kind === 'share' ? 'Shared plants' : a.sunsynk_username,
     plants: (a.plants || []).filter(p => !seen.has(p.plant_id) && seen.add(p.plant_id)),
   })).filter(g => g.plants.length);
   const total = groups.reduce((n, g) => n + g.plants.length, 0);
