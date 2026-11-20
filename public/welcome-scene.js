@@ -1,3 +1,8 @@
+// the example plant's dates move with today in whole weeks, so each weekday stays right (SOLAR-633)
+const exDay = (() => { const w = Math.max(0, Math.floor((Date.now() - new Date(2026, 9, 28)) / 6048e5)); return (y, m, d) => new Date(y, m, d + w * 7); })();
+const exMon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], exDow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const exDM = d => d.getDate() + ' ' + exMon[d.getMonth()], exWDM = d => exDow[d.getDay()] + ' ' + exDM(d);
+const exRange = (a, b) => (a.getMonth() === b.getMonth() ? a.getDate() : exDM(a)) + ' – ' + exDM(b) + ' ' + b.getFullYear();
 (() => {
 const $ = id => document.getElementById(id);
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -60,11 +65,11 @@ el('path', { d: path(D.home, TW, TH, 10.5, 5, false), fill: 'none', stroke: '#f8
 
 /* ---------- look back at any day: a year of example days, the chart glides between them ---------- */
 (() => {
-const TODAY=new Date(2026,9,28),FIRST=new Date(2025,10,1);
+const TODAY=exDay(2026,9,28),FIRST=exDay(2025,10,1);
 const DOW=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],MFULL=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const key=d=>d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate();
 const rnd=n=>{let x=Math.sin(n*127.1+311.7)*43758.5453;return x-Math.floor(x)};
-const FEAT={'2026-9-3':{made:54.1,peak:9.99,at:'12:20'}};
+const BEST=exDay(2026,9,3),FEAT={[key(BEST)]:{made:54.1,peak:9.99,at:'12:20'}};
 function info(d){const k=key(d),n=d.getFullYear()*3+d.getMonth()*31+d.getDate();
  const doy=Math.round((d-new Date(d.getFullYear(),0,0))/864e5),sn=Math.cos(2*Math.PI*(doy-355)/365);
  const R=j=>rnd(n*13+j),cloud=R(1)<.143,f=FEAT[k];
@@ -84,18 +89,19 @@ function info(d){const k=key(d),n=d.getFullYear()*3+d.getMonth()*31+d.getDate();
  const area=a=>a.reduce((x,v)=>x+v,0)/12;
  let ys;
  if(f){let lo=1.5,hi=5;for(let it=0;it<30;it++){const p=(lo+hi)/2;ys=build(p,f.peak);if(area(ys)>f.made)lo=p;else hi=p}}
- else{ys=build(3,pkT);const inLast=d>=new Date(2026,8,28)&&d<=new Date(2026,9,27);if(inLast&&area(ys)>52){const c=52/area(ys);ys=ys.map(v=>v*c)}}
+ else{ys=build(3,pkT);const inLast=d>=exDay(2026,8,28)&&d<=exDay(2026,9,27);if(inLast&&area(ys)>52){const c=52/area(ys);ys=ys.map(v=>v*c)}}
  let pk=0,pi=0;ys.forEach((v,i)=>{if(v>pk){pk=v;pi=i}});
  const at=String(Math.floor(pi/12)).padStart(2,'0')+':'+String((pi%12)*5).padStart(2,'0');
  return{made:area(ys),ys,peak:pk,at}}
 const fmtD=d=>DOW[d.getDay()]+' '+d.getDate()+' '+MON[d.getMonth()];
-let sel=new Date(2026,9,3),view=new Date(2026,9,1),cur=null,raf=0;
+let sel=BEST,view=new Date(BEST.getFullYear(),BEST.getMonth(),1),cur=null,raf=0;
 const $=id=>document.getElementById('lb-'+id);
 const ok=d=>d>=FIRST&&d<=TODAY;
 const mob=()=>innerWidth<=860;
 function pick(d){sel=d;view=new Date(d.getFullYear(),d.getMonth(),1);$('cal').classList.remove('open');draw()}
-// bars: 28 Sep..27 Oct
-const days=[];for(let i=0;i<30;i++)days.push(new Date(2026,8,28+i));
+// bars: the 30 days before today
+const days=[];for(let i=0;i<30;i++)days.push(exDay(2026,8,28+i));
+const axs=$('bars').nextElementSibling.children;axs[0].textContent=exDM(days[0]);axs[1].textContent='Best: '+exWDM(BEST)+', 54.1';axs[2].textContent=exDM(days[29]);
 const mx=Math.max(...days.map(d=>info(d).made));
 days.forEach(d=>{const b=document.createElement('button'),I=info(d);b.setAttribute('aria-label',fmtD(d)+', '+I.made.toFixed(1)+' kWh');b.dataset.k=key(d);if(I.made===mx)b.classList.add('best');b.innerHTML='<i style="height:'+(I.made/mx*100)+'%"></i>';b.onclick=()=>pick(d);$('bars').append(b)});
 function chart(I){
@@ -112,7 +118,7 @@ function draw(keep){
  $('prev').disabled=!ok(new Date(sel.getFullYear(),sel.getMonth(),sel.getDate()-1));$('next').disabled=!ok(new Date(sel.getFullYear(),sel.getMonth(),sel.getDate()+1));
  document.querySelectorAll('#lb-bars button').forEach(b=>b.classList.toggle('sel',b.dataset.k===k));
  $('mname').textContent=MFULL[view.getMonth()]+' '+view.getFullYear();
- $('mprev').disabled=view<=new Date(2025,10,1);$('mnext').disabled=view>=new Date(2026,9,1);
+ $('mprev').disabled=view<=new Date(FIRST.getFullYear(),FIRST.getMonth(),1);$('mnext').disabled=view>=new Date(TODAY.getFullYear(),TODAY.getMonth(),1);
  const g=$('grid');g.innerHTML='';const lead=(new Date(view.getFullYear(),view.getMonth(),1).getDay()+6)%7;
  for(let i=0;i<lead;i++)g.append(document.createElement('span'));
  const dim=new Date(view.getFullYear(),view.getMonth()+1,0).getDate();
@@ -395,19 +401,19 @@ const delta=x=>!x?'':`<div class="ib-d"><b style="color:${x.good===undefined?'#9
 const card=c=>`<div class="ib-card"><div class="ib-l">${c.l}</div><div class="ib-v" style="color:${C[c.tone||'plain']}">${c.v}${c.u?`<small>${c.u}</small>`:''}</div>${c.sub?`<div class="ib-d">${c.sub}</div>`:''}${delta(c.delta)}</div>`;
 // The example plant's mail, worded and laid out as the app's own emails (supabase/functions/_shared/email.ts)
 const MAIL=[
- {k:'week',dot:C.solar,time:'26 Oct',at:'Mon 26 Oct, 07:00',subject:'Weekly solar report for Example plant: 19 – 25 Oct 2026',preview:'Made 341 kWh, est. saved R1 027',
-  title:'19 – 25 Oct 2026',sub:'Example plant',
+ {k:'week',dot:C.solar,time:exDM(exDay(2026,9,26)),at:exWDM(exDay(2026,9,26))+', 07:00',subject:'Weekly solar report for Example plant: '+exRange(exDay(2026,9,19),exDay(2026,9,25)),preview:'Made 341 kWh, est. saved R1 027',
+  title:exRange(exDay(2026,9,19),exDay(2026,9,25)),sub:'Example plant',
   stats:[{l:'Made',v:'341',u:'kWh',tone:'solar',delta:d(6,'last week',true)},{l:'Home',v:'367',u:'kWh',tone:'home',delta:d(-3,'last week',true)},{l:'Imported',v:'70.0',u:'kWh',tone:'grid',delta:d(-12,'last week',true)},{l:'Independence',v:'81%',tone:'cyan',delta:d(4,'last week',true)},{l:'Est. saved',v:'R1 027',tone:'batt',delta:d(5,'last week',true)}],
   bars:{title:'Solar each day',side:'Average 48.7 kWh a day',labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],vals:[46.2,51.3,38.4,49.8,48.1,55.6,51.6]},
-  facts:[{l:'Best day',v:'55.6',u:'kWh',tone:'solar',sub:'Sat 24 Oct'},{l:'Busiest day',v:'58.9',u:'kWh',tone:'home',sub:'Sun 25 Oct'}],
+  facts:[{l:'Best day',v:'55.6',u:'kWh',tone:'solar',sub:exWDM(exDay(2026,9,24))},{l:'Busiest day',v:'58.9',u:'kWh',tone:'home',sub:exWDM(exDay(2026,9,25))}],
   btn:'Open Live'},
- {k:'panels',dot:C.bad,time:'20 Oct',at:'Tue 20 Oct, 11:55',subject:'Panels stopped producing at Example plant',preview:'Inverter 1, string 3: no power since 11:42',
+ {k:'panels',dot:C.bad,time:exDM(exDay(2026,9,20)),at:exWDM(exDay(2026,9,20))+', 11:55',subject:'Panels stopped producing at Example plant',preview:'Inverter 1, string 3: no power since 11:42',
   title:'Panels stopped producing at Example plant',stack:1,stats:[{l:'Inverter 1, string 3',v:'No power',tone:'bad',sub:'since 11:42 today'},{l:'Other panels',v:'OK',tone:'ok'}],btn:'Open Equipment'},
- {k:'hot',dot:C.bad,time:'12 Oct',at:'Mon 12 Oct, 14:21',subject:'Battery hot at Example plant',preview:'Battery 41 °C at 14:20',
+ {k:'hot',dot:C.bad,time:exDM(exDay(2026,9,12)),at:exWDM(exDay(2026,9,12))+', 14:21',subject:'Battery hot at Example plant',preview:'Battery 41 °C at 14:20',
   title:'Battery hot at Example plant',stack:1,stats:[{l:'Battery',v:'41&nbsp;°C',tone:'bad',sub:'at 14:20 today'}],btn:'Open Equipment'},
- {k:'back',dot:C.grid,time:'3 Oct',at:'Sat 3 Oct, 18:45',subject:'Grid back at Example plant',preview:'Grid on since 18:45 today, outage 45m',
+ {k:'back',dot:C.grid,time:exDM(exDay(2026,9,3)),at:exWDM(exDay(2026,9,3))+', 18:45',subject:'Grid back at Example plant',preview:'Grid on since 18:45 today, outage 45m',
   title:'Grid back at Example plant',stack:1,stats:[{l:'Grid',v:'On',tone:'ok',sub:'since 18:45 today'},{l:'Outage',v:'45m'}],btn:'Open Grid'},
- {k:'down',dot:C.bad,time:'3 Oct',at:'Sat 3 Oct, 18:00',subject:'Grid down at Example plant',preview:'Grid off since 18:00 today, battery 86%',
+ {k:'down',dot:C.bad,time:exDM(exDay(2026,9,3)),at:exWDM(exDay(2026,9,3))+', 18:00',subject:'Grid down at Example plant',preview:'Grid off since 18:00 today, battery 86%',
   title:'Grid down at Example plant',stack:1,stats:[{l:'Grid',v:'Off',tone:'bad',sub:'since 18:00 today'},{l:'Battery',v:'86%',tone:'batt'}],btn:'Open Grid'}
 ];
 const rows=document.getElementById('ib-rows'),view=document.getElementById('ib-view'),box=view.parentNode,rowEls=[];
@@ -558,10 +564,13 @@ show(0);
 const svg = document.getElementById('sv-svg'), seg = document.getElementById('sv-seg');
 if (!svg) return;
 const g = id => document.getElementById('sv-' + id);
+// the example's month and year are today's (SOLAR-633)
+const t = exDay(2026, 9, 28), dim = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate(), yn = Math.max(2, t.getMonth() + 1); // a line needs two points
+const MF = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const P = {
-  week: { saved: 1027, prev: 978, ind: 81, indPrev: 77, n: 7, k1: '19-25 Oct', k2: '12-18 Oct', from: 'the week before', ax: [[0, 'Mon'], [3, 'Thu'], [6, 'Sun']] },
-  month: { saved: 4509, prev: 4208, ind: 81, indPrev: 78, n: 31, k1: 'October', k2: 'September', from: 'September', ax: [[0, '1'], [14, '15'], [30, '31']] },
-  year: { saved: 40800, prev: 36170, ind: 79, indPrev: 77, n: 10, k1: '2026', k2: '2025', from: '2025', ax: [[0, 'Jan'], [4, 'May'], [9, 'Oct']] },
+  week: { saved: 1027, prev: 978, ind: 81, indPrev: 77, n: 7, k1: exRange(exDay(2026, 9, 19), exDay(2026, 9, 25)).slice(0, -5), k2: exRange(exDay(2026, 9, 12), exDay(2026, 9, 18)).slice(0, -5), from: 'the week before', ax: [[0, 'Mon'], [3, 'Thu'], [6, 'Sun']] },
+  month: { saved: 4509, prev: 4208, ind: 81, indPrev: 78, n: dim, k1: MF[t.getMonth()], k2: MF[(t.getMonth() + 11) % 12], from: MF[(t.getMonth() + 11) % 12], ax: [[0, '1'], [14, '15'], [dim - 1, String(dim)]] },
+  year: { saved: 40800, prev: 36170, ind: 79, indPrev: 77, n: yn, k1: String(t.getFullYear()), k2: String(t.getFullYear() - 1), from: String(t.getFullYear() - 1), ax: [[0, 'Jan'], [yn >> 1, yn > 2 ? exMon[yn >> 1] : ''], [yn - 1, exMon[yn - 1]]] },
 };
 // each day's or month's share, uneven like real weather, summed so the line ends on the total
 const run = (n, total, seed) => { const v = Array.from({ length: n }, (_, i) => 1 + .32 * Math.sin(i * 1.9 + seed) + .18 * Math.sin(i * 4.3 + seed * 2)); const s = v.reduce((a, b) => a + b, 0); let c = 0; return v.map(x => c += x / s * total); };
