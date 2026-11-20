@@ -20,7 +20,11 @@
 //   (+ charging), the same identity the poller uses for derived load (0033).
 //
 // Four calls per inverter per day, six when P-pv is empty (date/edate do not span days).
-import { type Account, apiGet } from "./sunsynk.ts";
+//
+// SOLAR-612: the web host's `/inverter/{sn}/day?params=<ids>` gives the same series in
+// one call (ids from `/inverter/params`). Tried first; any failure or a missing spine
+// series falls back to the four official calls above.
+import { type Account, apiGet, webGet } from "./sunsynk.ts";
 import { num } from "./extract.ts";
 
 /** A sample at `t` seconds after local midnight. */
@@ -138,10 +142,35 @@ export type InverterDay = {
 };
 
 /**
- * One inverter-day from history: SoC, grid, load and total PV in four calls; the
- * per-string V×I pair only when P-pv came back empty. A failed endpoint is null.
+ * Web-host catalogue ids (`/inverter/params`, devType 2): 16 SOC, 23 P-grid, 24 F-grid,
+ * 21 P-load, 518 P-pv, 77 AC TEMP, 67 V-ac-1, 60 F-ac. No DC TEMP: T-inv, t_pv, t_ctrl
+ * and t_chg all read 0 on 538820 (20 Nov 2026), so DC stays with the official reads.
  */
-export async function fetchInverterDay(acc: Account, sn: string, day: string): Promise<InverterDay> {
+export const WEB_DAY_PARAMS = "16,23,24,21,518,77,67,60";
+export const webDayPath = (sn: string, day: string) =>
+  `/inverter/${sn}/day?lan=en&date=${day}&edate=${day}&params=${WEB_DAY_PARAMS}`;
+
+/** One inverter-day in one web-host call; null when it failed or any spine series is missing. */
+export async function webInverterDay(acc: Account, sn: string, day: string): Promise<InverterDay | null> {
+  const m = parseSeries(await webGet(webDayPath(sn, day), acc).catch(() => null));
+  const soc = seriesLike(m, "soc"), grid = seriesLike(m, "p-grid"), load = seriesLike(m, "p-load"), pv = seriesLike(m, "p-pv");
+  if (!soc || !grid || !load || !pv) return null;
+  return {
+    sn, failed: 0, soc, grid, load, pv,
+    acTemp: seriesLike(m, "ac temp"), dcTemp: null,
+    vac: seriesLike(m, "v-ac-1"), fac: seriesLike(m, "f-ac"), gridFac: seriesLike(m, "f-grid"),
+    labels: { web: [...m.keys()] },
+  };
+}
+
+/**
+ * One inverter-day from history: the web host's single call first (SOLAR-612), else
+ * SoC, grid, load and total PV in four official calls; the per-string V×I pair only
+ * when P-pv came back empty. A failed endpoint is null. `web = false` skips the web host.
+ */
+export async function fetchInverterDay(acc: Account, sn: string, day: string, web = true): Promise<InverterDay> {
+  const fromWeb = web ? await webInverterDay(acc, sn, day) : null;
+  if (fromWeb) return fromWeb;
   const parsed: Record<string, SeriesMap> = {};
   const labels: Record<string, string[]> = {};
   const rejected = new Set<string>();

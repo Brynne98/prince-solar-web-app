@@ -101,14 +101,14 @@ const complete = (r: SpineRow | undefined): r is SpineRow =>
   !!r && r.pv_w != null && r.grid_w != null && r.load_w != null;
 
 /** Per-inverter history for the plant's inverters, summed. Null if nothing came back. */
-async function historySpine(acc: Account, plantId: number, tz: string, day: string, bank = true) {
+async function historySpine(acc: Account, plantId: number, tz: string, day: string, bank = true, web = true) {
   const sns = (((await rpc("plant_inverters", { p_plant: plantId })) ?? []) as any[]).map((r) => String(r.sn ?? r));
   if (!sns.length) return null;
   // One inverter at a time: 4 calls in flight, not 4 × inverters, for SunSynk's sake.
   const days = [];
   const lo = dayStartEpoch(tz, day);
   for (const sn of sns) {
-    const d = await fetchInverterDay(acc, sn, day);
+    const d = await fetchInverterDay(acc, sn, day, web);
     days.push(d);
     if (bank) await bankHistory(plantId, sn, historyRows(d, lo)).catch((e) => {
       console.error(`inverter_history ${sn}:`, e);
@@ -439,9 +439,9 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
 }
 
 /** Median and p90 of |history − poller| per series over a day with poller rows. */
-async function dryRun(job: PlantJob, day: string) {
+async function dryRun(job: PlantJob, day: string, web = true) {
   const { plantId, account: acc, timezone: tz } = job;
-  const h = await historySpine(acc, plantId, tz, day, false); // dry: writes nothing, temps included
+  const h = await historySpine(acc, plantId, tz, day, false, web); // dry: writes nothing, temps included
   if (!h) return { plantId, day, error: "no history came back" };
   const lo = dayStartEpoch(tz, day);
   const { data, error } = await db.from("agg_minute")
@@ -496,7 +496,8 @@ serve("recover", async (req) => {
       const day = url.searchParams.get("day") ?? "";
       const job = jobs.find((j) => j.plantId === plantId);
       if (!job || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return json({ error: "dry run needs plant=<linked id>&day=YYYY-MM-DD" }, 400);
-      return json({ ok: true, dry: true, ...(await dryRun(job, day)), elapsedMs: Date.now() - started });
+      const web = url.searchParams.get("source") !== "official"; // ?source=official skips the web host (SOLAR-612)
+      return json({ ok: true, dry: true, ...(await dryRun(job, day, web)), elapsedMs: Date.now() - started });
     }
 
     const plants = [];

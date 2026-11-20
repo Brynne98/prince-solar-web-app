@@ -317,6 +317,48 @@ Not known yet: what each `type` means, what a record looks like, whether the lis
 per-user or per-plant. `nextToken` suggests token paging, not `page`. Still `404` on this
 host: `/plant/{id}/events`, `/plant/{id}/alarms`, `/inverter/{sn}/events|alarm|alarms|fault|faults`, `/alarms`.
 
+**Web app path list, 20 Nov 2026.** The SunSynk Connect web app bundle (`sunsynk.net/static/js/app.9be295b1.js`)
+names 594 paths; full list in `research_notes/sunsynk-web-paths.txt`. Not yet in this file and worth a probe:
+`/inverter/{sn}/pvIVRealtime`, `/inverter/eps/{sn}/realtime|day`, `/plant/{id}/power/day|month|year|total`,
+`/plant/energy/{id}/flow`, `/plant/energy/{id}/generation/use`, `/plant/{id}/info`, `/chart/param/{sn}/day`,
+`/chart/param/multiple/day`, `/inverter/params`, `/equip/{sn}/realtime`, `/battery/{sn}/realtime|day|info`,
+`/battery/{sn}/batteryWorkData`, `/event/{sn}/realtime`, `/event/oneHour`, `/workdata/event`, `/gateway/{sn}/uploadCycle`,
+`/logger/getInverterLogger/`, `/plants/queryStationState`, `/plant/{plantId}/getShareUsers`, settings read
+`/common/setting/{sn}/read` (and `/sunsynk/store/singlePhase|threePhase/{sn}/read`).
+Public clients (vincebaden-svg/Sunsynk-HomeAssistant, c-scoot/ha_sunsynk, hermitdave/IntelligentSunsynk) log in on
+`openapi.sunsynk.net` and send that token as a Bearer to `api.sunsynk.net`, including `common/setting/{sn}/read`
+and `/set`.
+
+**Tested 20 Nov 2026: our openapi token works on `api.sunsynk.net`.** Bearer only, no app-key signature. Run from
+the database with `net.http_get` (token never leaves Postgres), plant 538820, master 2508290475, ~85 GET calls, no
+rate-limit errors. Read only; nothing was written. Results:
+
+| Call | Result |
+|---|---|
+| `/inverter/{sn}/day?lan=en&date=D&edate=D&params=<ids>` | **Any value in the catalogue, full day, one call.** 32 ids → 32 series × 1,253 samples (2.5 MB). Includes P-bat, V/I/T-bat, BMS temp/voltage/current, Relay Status, V-grid-L1, Import/Export kWh. `date`≠`edate` → `max days 1`. Back to ~late Sep (21 Sep had data; 20 Aug empty). Slave: 288 samples. This is the `params` the 5 Sep note could not guess. |
+| `/inverter/params?lan=en&devType=2&sn=` | The catalogue: groups Grid, Inv, String, Battery, Load, Eps, Meter, Generator, MI with ids, labels, units. E.g. 16 SOC, 17 T-bat, 18 V-bat, 19 I-bat, 20 P-bat, 21 P-load, 23 P-grid, 44 V-grid-L1, 84 Import, 85 Export, 105 BMS Temperature, 751 Relay Status. Same as `/chart/param/equip?equipType=2`. |
+| `/workdata/dynamic?sn=&dateRange=D,D&type=1&lan=en&page=1&limit=10` | Raw register dump per upload, ~120 columns: fault codes 1–4, warning words, relay status, battery temp/volt/current/power, grid/inverter/load V and I per leg, all kWh counters, firmware. 11 rows per page, next page via `nextStartPrimaryKey`. Back to at least 21 Sep. |
+| `/common/setting/{sn}/read` | All inverter settings (~370 keys: work mode, time-of-use slots, battery caps, export limit). Master and slave. |
+| `/plant/energy/{id}/flow`, `/inverter/{sn}/flow` | Whole-plant and per-inverter flow, one call each. |
+| `/plant/{id}?lan=en`, `/plants/queryStationState?plantId=&lan=en` | Plant detail: lat/lon, timezone, kWp, installer, products. |
+| `/inverter/{sn}?lan=en` | Inverter detail: logger `gsn`, firmware, `ratePower`, `custCode` 29, `protocolIdentifier` 2, `equipType` 2. |
+| `/gateways?lan=en&status=-1&page=1&limit=10` | Loggers with `uploadCycle`, signal, firmware. `/gateway/{gsn}/uploadCycle` → 60 (master logger). A POST version sets it; not tried. |
+| `/plant/{id}/power/day|month|year|total` | 5-min PV for a day; daily/monthly kWh. |
+| `/inverter/eps/{sn}/realtime`, `/inverter/meter/{sn}/realtime`, `/inverter/meter/{sn}/day` | Backup output per phase; load + CT meter. |
+| `/plant/{id}/eventCount`, `/plant/{id}/emsDeviceCount`, `/plant/{id}/inverterCount?invType=-1` | Fault/warning/offline counts. |
+| `/plant/{id}/getShareUsers?page=1&limit=10` | Who the plant is shared with. |
+| `/events`, `/device/events`, `/plant/{id}/events` | Answer, empty here. |
+| No Permissions | `/inverter/{sn}/pvIVRealtime`, `/battery/{sn}/*`, `/sunsynk/store/*/read`, `workdata/dynamic` type 2 |
+| 500 / unsolved | `/chart/param/{sn}/day`, `/workdata/event`, `/workdata/battery/event`, `/batteries`, `/messageTd/messages`, `/equip/chart/day` (empty) |
+
+**Official host, same calls, 20 Nov 2026** (signed, production key, temporary function). Answer:
+`/plant/energy/{id}/flow` (41 keys, whole-plant flow in one call) and `/plant/{id}?lan=en` (27 keys, plant detail).
+`404 API not found` on `/inverter/{sn}/day` (with `params=`), `/inverter/params`, `/workdata/dynamic`,
+`/common/setting/{sn}/read`, `/gateways`, `/gateway/{gsn}/uploadCycle`, `/plant/{id}/power/day`,
+`/inverter/eps/{sn}/realtime`, `/plant/{id}/eventCount`, `/plants/queryStationState`. So the rich history, settings
+and raw readings are web host only. Using the web host is outside the official API SunSynk gave us.
+Path parameters for the rest are in the page chunks (`sunsynk.net/static/js/chunk-*.js`).
+
 **`/inverter/{sn}/flow`** on the official host: `404 API not found` (confirmed
 again; the 5 Sep table stands). The five realtime endpoints answered normally in
 the same second, so there is no single-call shortcut on this key.

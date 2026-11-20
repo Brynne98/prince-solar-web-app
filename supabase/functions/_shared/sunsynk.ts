@@ -358,6 +358,37 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
   return body?.data;
 }
 
+/**
+ * GET on SunSynk's own web host, which takes our openapi token as a plain Bearer, no
+ * signature (tested 2026-11-20, API.md, SOLAR-612). Unofficial: SunSynk may block it,
+ * so every caller keeps an official fallback, and failures are only tallied (kind
+ * "web:…"), not reported. Errors come back as HTTP 200 with code ≠ 0.
+ */
+const WEB_BASE = "https://api.sunsynk.net/api/v1";
+const WEB_TIMEOUT_MS = 20_000;
+export async function webGet(pathname: string, acc: Account): Promise<any> {
+  const tok = await accessTokenFor(acc);
+  if (isFake(tok)) throw new Error("web host: not for fake logins");
+  countCall(acc);
+  const kind = `web:${pathname}`;
+  const t0 = Date.now();
+  let res: Response;
+  try {
+    res = await fetch(`${WEB_BASE}${pathname}`, {
+      headers: { Accept: "application/json", Authorization: `Bearer ${tok}` },
+      signal: AbortSignal.timeout(WEB_TIMEOUT_MS),
+    });
+  } catch (e) {
+    tallyCall(tok, kind, failResult(e), Date.now() - t0);
+    throw e;
+  }
+  const body = await res.json().catch(() => ({}));
+  const ok = res.ok && body?.code === 0;
+  tallyCall(tok, kind, ok ? "ok" : res.ok ? `code_${body?.code}` : resultOf(res), Date.now() - t0);
+  if (!ok) throw new Error(`web ${pathname} -> HTTP ${res.status} code ${body?.code} ${body?.msg ?? ""}`);
+  return body.data;
+}
+
 // ---------------------------------------------------------------------------
 // Resources
 // ---------------------------------------------------------------------------
