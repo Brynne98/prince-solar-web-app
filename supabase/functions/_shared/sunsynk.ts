@@ -479,6 +479,7 @@ export async function getInvertersCached(acc: Account): Promise<InverterInfo[]> 
     commType: r.comm_type ?? undefined,
     lastReading: r.last_reading ?? null,
     carriedRun: Number(r.carried_run) || 0,
+    uploadS: r.upload_s == null ? null : Number(r.upload_s),
   }));
 }
 

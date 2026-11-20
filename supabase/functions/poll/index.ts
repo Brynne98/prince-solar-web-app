@@ -230,17 +230,33 @@ const LIVE_BATTERY = [
   "batt2_soc", "batt2_voltage_v", "batt2_current_a", "batt2_power_w", "batt2_temp_c",
 ];
 
-type Fetched = { inv: InverterInfo; raw: RawBundle; carried: boolean; fetched: Set<Endpoint>; sign: string | null };
+/** skipped: no input call at all; the row keeps the last upload's input fields too (SOLAR-612) */
+type Fetched = { inv: InverterInfo; raw: RawBundle; carried: boolean; fetched: Set<Endpoint>; sign: string | null; skipped?: boolean };
 
-function canCarry(inv: InverterInfo, inputTime: string | null): boolean {
+/** The carry rules that hold whatever input says: a known last upload, no outage, no hold, not too many carries. */
+function carryAllowed(inv: InverterInfo): boolean {
   const prev = inv.lastReading;
-  if (!prev || inputTime == null || prev.device_time == null) return false;
-  if (prev.device_time !== inputTime) return false;
+  if (!prev || prev.device_time == null) return false;
   if ((inv.carriedRun ?? 0) >= MAX_CARRIED_RUN) return false;
   // after a hold, read in full: a carry would copy the held figures forward unmarked (SOLAR-551)
   if (prev.held) return false;
   if (outageSignal(prev) !== null) return false;
   return true;
+}
+
+function canCarry(inv: InverterInfo, inputTime: string | null): boolean {
+  return carryAllowed(inv) && inputTime != null && inv.lastReading!.device_time === inputTime;
+}
+
+/**
+ * SOLAR-612: a slow logger's next upload is not due yet, so the input check would only
+ * find the last one again. A 5-minute logger is skipped for the first three minutes
+ * after an upload and checked from the fourth. Loggers under 3 minutes are never skipped.
+ */
+function uploadNotDue(inv: InverterInfo): boolean {
+  const s = inv.uploadS;
+  if (s == null || s < 180 || !carryAllowed(inv)) return false;
+  return (inv.carriedRun ?? 0) + 2 < Math.floor(s / 60);
 }
 
 /** Which of the four non-input endpoints this minute needs, given the last row. */
@@ -266,6 +282,9 @@ const inputTimeOf = (input: any): string | null =>
   (input && Array.isArray(input.pvIV) && input.pvIV[0] && input.pvIV[0].time) || null;
 
 async function fetchInverter(inv: InverterInfo, acc: Account, ts: number, sign: string | null, offGrid = false): Promise<Fetched> {
+  if (uploadNotDue(inv)) {
+    return { inv, raw: { input: null, grid: null, battery: null, load: null, output: null }, carried: true, fetched: new Set(), sign, skipped: true };
+  }
   const paths = realtimePaths(inv.sn);
   const input = await apiGet(paths.input, acc).catch(() => null);
   const inputTime = inputTimeOf(input);
@@ -296,7 +315,7 @@ function readingRow(f: Fetched, ts: number): Record<string, unknown> {
   const prev = f.inv.lastReading ?? {};
   if (f.carried) {
     const row: Record<string, unknown> = { ...prev, ts, plant_id, sn: f.inv.sn, status: fresh.status };
-    for (const k of INPUT_FIELDS) row[k] = fresh[k];
+    if (!f.skipped) for (const k of INPUT_FIELDS) row[k] = fresh[k];
     row.carried = true;
     return row;
   }
@@ -360,7 +379,7 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
     const bySn = new Map(cached.map((c) => [c.sn, c]));
     all = (await getInverters(acc)).map((inv) => {
       const c = bySn.get(inv.sn);
-      return c ? { ...inv, lastReading: c.lastReading, carriedRun: c.carriedRun } : inv;
+      return c ? { ...inv, lastReading: c.lastReading, carriedRun: c.carriedRun, uploadS: c.uploadS } : inv;
     });
   }
   if (isShareAccount(acc)) {

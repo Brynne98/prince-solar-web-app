@@ -76,6 +76,8 @@ export interface InverterInfo {
   lastReading?: Record<string, unknown> | null;
   /** how many carried rows sit on top of the last fetched one (0032) */
   carriedRun?: number;
+  /** seconds between the logger's last uploads; null until three are known (0230, SOLAR-612) */
+  uploadS?: number | null;
 }
 
 /** The 5 realtime endpoints every acquisition path reads (per inverter SN). */
