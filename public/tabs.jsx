@@ -1608,8 +1608,9 @@ function equipmentState(snap, health, now, invT = {}) {
   // an inverter offline, or quiet for 30 minutes (one here uploads every 5)
   const quiet = invs.filter(inv => inv.status === 'offline' || (inv.readAt && now - inv.readAt > 30 * 60000));
   const allQuiet = quiet.length > 0 && quiet.length === invs.length;
-  const reads = invs.map(i => i.readAt).filter(Boolean);
-  const lastAt = reads.length ? Math.max(...reads) : null;
+  // the plant's last reading is the header's, so every screen gives one time (SOLAR-600)
+  const ps = window.plantStatus(snap, now);
+  const lastAt = ps.last ? ps.last.getTime() : null;
   const since = t => t ? 'Since ' + window.readAgo(t, now) : '';
   const verdict = health && !allQuiet ? panelsVerdict(health, snap, now) : null;
   const hour = window.plantHour(tz, new Date(now));
@@ -1618,7 +1619,10 @@ function equipmentState(snap, health, now, invT = {}) {
   const issues = [];
   // The whole plant gone quiet is one problem, not one per inverter. With the grid down at
   // the last reading the router has likely lost power too, so that comes first.
-  if (allQuiet) {
+  // a stopped login is the cause, not the inverters (SOLAR-602); a fresh reconnect is waiting for its first reading (SOLAR-606)
+  if (snap.loginCut) issues.push({ title: 'Your SunSynk login stopped', since: since(lastAt), todo: 'Reconnect it to get readings again.' });
+  else if (ps.waiting) {}
+  else if (allQuiet) {
     const check = invs.length === 1 ? 'check the inverter is on and its Wi-Fi dongle shows a light.' : 'check the inverters are on and each Wi-Fi dongle shows a light.';
     issues.push({ title: 'Nothing is reporting', since: since(lastAt),
       todo: hasGrid && a.gridPresent === false
@@ -1662,7 +1666,7 @@ function equipmentState(snap, health, now, invT = {}) {
   const pvParts = oldDay ? ['—', ''] : window.fmtEnergyParts(a.pvToday);
   const pvSub = oldDay ? 'No readings today' : allQuiet ? 'today, by ' + window.fmtTime(new Date(lastAt)) : night ? 'made today' : 'so far today';
 
-  return { a, tz, hasBatt, hasGrid, invs, quiet, allQuiet, lastAt, verdict, night, issues, invT,
+  return { a, tz, hasBatt, hasGrid, invs, quiet, allQuiet, lastAt, ps, verdict, night, issues, invT,
     withBatt, battStale, battAt, battTemp, badSensor, hot, shared: feat.banks === 'shared', pvParts, pvSub };
 }
 
@@ -2054,7 +2058,10 @@ function InvertersTab({ snap, today, refreshKey }) {
   const simple = view === 'simple';
   const issues = simple ? simpleIssues(st.issues) : st.issues;
   const n = issues.length;
-  const head = n === 0 ? 'Everything is working' : n === 1 ? '1 thing needs a look' : n + ' things need a look';
+  // no problem found, but the plant isn't live: say what the header says, not that all is well (SOLAR-601)
+  const late = n === 0 && (st.ps.status === 'stale' || st.ps.status === 'offline');
+  const head = st.ps.waiting && n === 0 ? 'Reconnected' : late ? 'No new reading yet'
+    : n === 0 ? 'Everything is working' : n === 1 ? '1 thing needs a look' : n + ' things need a look';
 
   return (
     <div className="stack eq-tab">
@@ -2066,8 +2073,8 @@ function InvertersTab({ snap, today, refreshKey }) {
       {/* the one place that says whether things are OK */}
       <section className="eq-status" aria-label="Status">
         {/* red, as the problem cards under it are (SOLAR-407) */}
-        <div className={'eq-head ' + (n ? 'bad' : 'ok')}>{head}</div>
-        {n === 0 && st.lastAt && <div className="eq-head-sub">Last reading {window.fmtAgo(new Date(st.lastAt), now)}</div>}
+        <div className={'eq-head ' + (n ? 'bad' : st.ps.waiting ? 'wait' : late ? 'warn' : 'ok')}>{head}</div>
+        {n === 0 && st.lastAt && <div className="eq-head-sub">{st.ps.waiting ? 'Waiting for the first reading. ' : ''}Last reading {window.fmtAgo(new Date(st.lastAt), now)}</div>}
       </section>
       {n > 0 && (
         <div className="eq-problems">

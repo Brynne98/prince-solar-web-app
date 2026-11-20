@@ -49,16 +49,23 @@ function plantStatus(snap, now) {
   const status = loading && bad !== 'live' ? 'loading' : bad;
   // fresh readings with an inverter silent: the word names it, so the header needs no strip (SOLAR-384)
   const named = status === 'stale' && ageS <= 180 && offline > 0;
+  // the login came back and no reading has landed yet, whatever the age; after 15 min the
+  // age speaks again (SOLAR-147, SOLAR-606)
+  const waiting = status !== 'live' && !snap.loginCut && !!snap.relinkedAt && now - snap.relinkedAt < 900000;
+  // the last fetch failed: said on every status line, the header's and fullscreen's (SOLAR-603)
+  const failed = !!snap.fetchFailed && !snap.loginCut && !waiting;
   return {
-    status, last, old: status !== 'loading' && ageS > 180,
+    status, last, waiting, old: status !== 'loading' && ageS > 180,
     // every login dead (snap.loginCut, set by App): red as soon as the poller marks it, not
     // after 15 min silent (SOLAR-385). tone is the colour; status stays the age.
-    tone: snap.loginCut ? 'offline' : status,
+    tone: snap.loginCut ? 'offline' : waiting ? 'loading' : failed && status === 'live' ? 'stale' : status,
     // today's figures are not now: greyed (an old reading or a dead login), SOLAR-386
     faded: !!snap.loginCut || (status !== 'loading' && ageS > 180),
-    word: snap.loginCut ? 'Login stopped' : named ? offline + ' of ' + total + ' offline'
+    word: snap.loginCut ? 'Login stopped' : waiting ? 'Reconnected' : failed ? 'Couldn’t refresh'
+      : named ? offline + ' of ' + total + ' offline'
       : { live: 'Live', stale: 'Stale', offline: 'Offline', loading: 'Setting up' }[status],
-    named, detail: offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now),
+    // a stopped login or a reconnect is the plant's state, not its inverters' (SOLAR-602)
+    named, detail: snap.loginCut || waiting ? null : offline > 0 ? offline + ' of ' + total + ' inverters offline' : 'updated ' + fmtAgo(last, now),
   };
 }
 
@@ -72,7 +79,7 @@ function WallStatus({ snap }) {
   return (
     <window.Tip className={'wall-status below status-' + s.tone} text={'Last reading ' + window.fmtTime(s.last)}>
       {/* the word already names the silent inverter: no detail to repeat it */}
-      <StatusBits word={s.word}>{!s.named && <span className="status-detail">{s.detail}</span>}</StatusBits>
+      <StatusBits word={s.word}>{!s.named && s.detail && <span className="status-detail">{s.detail}</span>}</StatusBits>
     </window.Tip>
   );
 }
@@ -199,11 +206,11 @@ function MenuState({ st, cut, now }) {
   if (!st || st.lastTs == null) return null;
   const s = plantStatus({
     inverters: Array.from({ length: st.inverters || 0 }, (_, i) => ({ status: i < (st.online || 0) ? 'online' : 'offline' })),
-    lastReading: new Date(st.lastTs * 1000), updated: new Date(now), sync: st.sync,
+    lastReading: new Date(st.lastTs * 1000), updated: new Date(now), sync: st.sync, relinkedAt: st.relinkedAt,
   }, now);
   const p = window.syncProgress(st.sync);
   // still on its first load: Setting up, even when its readings are live
-  const status = p != null ? 'loading' : s.status, word = p != null ? 'Setting up' : s.word;
+  const status = p != null || s.waiting ? 'loading' : s.status, word = p != null ? 'Setting up' : s.word;
   return (
     <span className={'pm-state status-' + status}>
       {p != null && <span className="sync-arc" aria-hidden="true" />}{word}
@@ -219,7 +226,7 @@ function MenuState({ st, cut, now }) {
 // Grouped by SunSynk login (SOLAR-251): each login's email, then its plants. A locked
 // plant (SOLAR-537) has no readings to open; it reads Locked and opens Plants, where it is
 // added or the plan upgraded.
-function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accounts, onStopped }) {
+function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, currentRelinkedAt, accounts, onStopped }) {
   const plants = me?.plants || [];
   const current = plants.find(p => p.id === plantId);
   const name = current ? window.plantLabel(current) : (fallback || '');
@@ -263,7 +270,8 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
                   );
                 }
                 // the plant on screen takes the header's progress, so the two % always match
-                const st = states[p.id] && { ...states[p.id], sync: p.id === plantId && currentSync ? currentSync : window.firstLoadSync(states[p.id].sync, p.linkedAt) };
+                const st = states[p.id] && { ...states[p.id], sync: p.id === plantId && currentSync ? currentSync : window.firstLoadSync(states[p.id].sync, p.linkedAt),
+                  relinkedAt: p.id === plantId ? currentRelinkedAt : null };
                 return (
                   <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
                           onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
@@ -813,7 +821,7 @@ function AlertsPage({ pinned = [], onBack, onSettings, onShown, onReadAll }) {
 // says what the strips under the header used to (SOLAR-384): no connection, couldn't
 // refresh, reconnected and waiting, login stopped with Reconnect in Refresh's place, and
 // Grid off as a tag of its own.
-function HeaderStatus({ snap, onRefresh, busy, idleWord, err, relinkedAt, onReconnect }) {
+function HeaderStatus({ snap, onRefresh, busy, idleWord, err, onReconnect }) {
   const now = useNow(15000);
   if (!snap) {
     // the server isn't answering: say so plainly, not the Postgres or JWT string behind it
@@ -829,17 +837,14 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord, err, relinkedAt, onReco
   }
   const s = plantStatus(snap, now);
   const sync = window.syncProgress(snap.sync), pct = sync == null ? null : Math.round(100 * sync);
-  // the login came back and no reading has landed yet; after 15 min plain Offline is back (SOLAR-147)
-  const waiting = s.status === 'offline' && !snap.loginCut && relinkedAt && now - relinkedAt < 900000;
-  const tone = waiting ? 'loading' : err && s.tone === 'live' ? 'stale' : s.tone;
-  // a dead login outranks one failed fetch: its word stays beside Reconnect
-  const word = waiting ? 'Reconnected' : err && !snap.loginCut ? 'Couldn’t refresh' : s.word;
+  // Reconnected, Couldn't refresh and Login stopped come from plantStatus, so fullscreen and the menu say the same
+  const { tone, word, waiting } = s;
   const a = snap.aggregate || {};
   const gridOff = a.gridPresent === false && snap.features?.hasGrid !== false;
   return (
     <>
       <window.Tip as="div" className={'status below status-' + tone + (sync != null ? ' fetching' : '') + (snap.loginCut ? ' cut' : '')}
-        text={(err ? 'Showing the last good reading. ' : '') + 'Last reading ' + window.fmtTime(s.last)} role="status">
+        text={(snap.fetchFailed ? 'Showing the last good reading. ' : '') + 'Last reading ' + window.fmtTime(s.last)} role="status">
         <StatusBits word={word} />
         {/* an old reading's date shows from tablet width up; a phone keeps the room for the plant name */}
         {s.old && !waiting && (() => { const p = fmtAgo(s.last, now).replace(' ago', '').split(', ');
@@ -1554,8 +1559,13 @@ function App({ links }) {
   };
   const loginCut = !!rawSnap && plantStatus(rawSnap, Date.now()).status !== 'live' && loginsCut(plantId);
   const linkedAt = (me?.plants || []).find(p => p.id === plantId)?.linkedAt;
-  const snap = React.useMemo(() => (!rawSnap ? rawSnap : loginCut ? { ...rawSnap, sync: null, loginCut: true }
-    : { ...rawSnap, sync: window.firstLoadSync(rawSnap.sync, linkedAt) }), [rawSnap, loginCut, linkedAt]);
+  const [err, setErr] = useState(null);
+  // the login came back for this plant at: set below when a cut-off plant's login turns active
+  const [relinked, setRelinked] = useState(null);
+  const relinkedAt = relinked?.plantId === plantId ? relinked.at : null;
+  // a failed refresh and a fresh reconnect ride on the snapshot, so every status line reads them (SOLAR-603, SOLAR-606)
+  const snap = React.useMemo(() => (!rawSnap ? rawSnap : loginCut ? { ...rawSnap, sync: null, loginCut: true, fetchFailed: !!err }
+    : { ...rawSnap, sync: window.firstLoadSync(rawSnap.sync, linkedAt), fetchFailed: !!err, relinkedAt }), [rawSnap, loginCut, linkedAt, err, relinkedAt]);
   // Readings starting or stopping can mean a login came back or died: read the logins
   // again at once, so the sidebar's "Reconnect a login" turns with the header instead of
   // on the next minute's read (SOLAR-389).
@@ -1566,7 +1576,6 @@ function App({ links }) {
   // > 0 while a snapshot fetch is in flight; the Refresh icon spins on it. Held to a
   // whole number of 800 ms turns so it never stops mid-rotation.
   const [busy, setBusy] = useState(0);
-  const [err, setErr] = useState(null);
   const [flashSection, setFlashSection] = useState(null); // a Settings section to flash once on arrival
   // The day an alert opens Grid or Solar on: {date}, a new object per tap so a second tap
   // on the same day still moves the chart. A pop-up's tap brings it as ?day= (sw.js).
@@ -1840,7 +1849,6 @@ function App({ links }) {
   const plantCutOff = !!snap?.loginCut;
   // The login came back but no new reading has landed yet: until one does, the banner says
   // so instead of "No readings since …", which read as a failed reconnect (SOLAR-147).
-  const [relinked, setRelinked] = useState(null);
   const wasCutOff = useRef(null);
   useEffect(() => {
     const was = wasCutOff.current;
@@ -1900,7 +1908,7 @@ function App({ links }) {
                                  onReadAll={() => { alertsShown.current.clear(); readNotifs(null); }} />;
   const loginDead = links.accounts.some(a => a.status === 'needs_relink' && a.kind !== 'share');
   const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, onSettings: () => go('prefs'), active: isSettings(tab) };
-  const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync}
+  const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync} currentRelinkedAt={relinkedAt}
                                accounts={links.accounts} onStopped={() => openSettings('connection')} />;
   // A page's section, from Billing's Reconnect: openSettings; otherwise the page itself
   // key: the loading and loaded pages put it at different child positions; without it the
@@ -1939,8 +1947,7 @@ function App({ links }) {
   const old = dataPage && plantStatus(snap, Date.now()).old;
   return (
     <Frame tabs={TABS} tab={tab} onTab={go} account={account} steps={steps}
-      head={<>{plantMenu}<HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} err={err} onReconnect={() => openSettings('connection')}
-        relinkedAt={relinked?.plantId === plantId ? relinked.at : null} />{bell}</>}>
+      head={<>{plantMenu}<HeaderStatus snap={snap} onRefresh={refresh} busy={busy > 0} err={err} onReconnect={() => openSettings('connection')} />{bell}</>}>
       <BillCards notices={cards} tab={tab} />
       <div className={'page' + (old ? ' old' : '')}>
         {!dataPage && (tab === 'alerts' ? alertsPage : settingsPage)}
