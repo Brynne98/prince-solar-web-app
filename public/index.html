@@ -381,13 +381,25 @@
   .nl-all:hover, .nl-gear:hover, .nl-back:hover { color: var(--text); }
   .nl-gear .ico, .nl-back .ico { width: var(--icon-md); height: var(--icon-md); }
   .nl-back { display: none; }
-  .nl-day { padding: var(--sp-md) var(--sp-lg) var(--sp-2xs); font-size: var(--fs-sm); color: var(--dim); font-weight: 500; }
-  /* a row is not a link (SOLAR-327) */
-  .nl-row { display: grid; grid-template-columns: 8px 32px minmax(0, 1fr); gap: var(--sp-sm); align-items: start; width: 100%; padding: var(--sp-sm) var(--sp-lg) var(--sp-sm) var(--sp-sm);
-    color: var(--text); }
-  .nl-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: var(--sp-md); }
-  .nl-row.unread .nl-dot { background: var(--ok); }
-  .nl-glyph { width: 32px; height: 32px; border-radius: var(--r-md); display: grid; place-items: center; }
+  .nl-day { padding: var(--sp-lg) var(--sp-lg) var(--sp-sm); font-size: var(--fs-sm); color: var(--dim); font-weight: 500; }
+  /* Each alert a card laid out as a phone pop-up (SOLAR-598): the kind's icon left, what
+     happened and when, then the numbers. A tap opens its page; hover is the ink wash, no lift.
+     Unread: a dot on the icon's corner and a heavier title; read: a quieter icon. */
+  .nl-list { display: flex; flex-direction: column; gap: var(--sp-sm); padding: 0 var(--sp-md); }
+  .nl-card { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; column-gap: var(--sp-md); row-gap: var(--sp-3xs); align-items: baseline;
+    width: 100%; min-height: 44px; margin: 0; padding: var(--sp-md) var(--sp-lg) var(--sp-md) var(--sp-md);
+    background: var(--panel); border: 1px solid var(--card-edge); box-shadow: var(--card-shadow); border-radius: var(--r-xl);
+    color: var(--text); font: inherit; text-align: left; touch-action: manipulation; }
+  button.nl-card { cursor: pointer; }
+  button.nl-card:hover { background-image: linear-gradient(rgba(var(--ink-rgb),0.04), rgba(var(--ink-rgb),0.04)); }
+  .notif-panel .nl-card { border-color: var(--line); box-shadow: none; }
+  .nl-card > .nl-glyph { grid-row: 1 / span 4; align-self: start; position: relative; }
+  .nl-card:not(.unread) > .nl-glyph { opacity: .6; }
+  .nl-dot { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px var(--panel); }
+  .nl-time { grid-column: 3; font-size: var(--fs-xs); color: var(--dim); white-space: nowrap; }
+  .nl-card > .nl-body, .nl-card > .nl-act-wrap { grid-column: 2 / -1; }
+  .nl-plant { grid-column: 2 / -1; font-size: var(--fs-xs); font-weight: 500; color: var(--dim); line-height: 1.2; }
+  .nl-glyph { width: 32px; height: 32px; border-radius: var(--r-md); display: grid; place-items: center; flex: none; }
   .nl-glyph .ico { width: var(--icon-md); height: var(--icon-md); }
   .g-grid { background: rgba(var(--grid-rgb),0.12); color: var(--grid-text); }
   .g-battery { background: rgba(var(--batt-rgb),0.14); color: var(--batt-text); }
@@ -395,52 +407,21 @@
   .g-readings, .g-sunsynk { background: rgba(var(--ink-rgb),0.07); color: var(--muted); }
   .g-bad { background: rgba(var(--bad-rgb),0.14); color: var(--bad); }
   .g-warn { background: rgba(var(--warn-rgb),0.14); color: var(--warn); }
-  /* billing notices (SOLAR-212): pinned above the alerts, with a button */
+  .nl-title { grid-column: 2; font-size: var(--fs-md); font-weight: 500; line-height: 1.3; }
+  .nl-card.unread .nl-title { font-weight: 600; }
+  .nl-body { font-size: var(--fs-sm); color: var(--muted); line-height: 1.4; }
+  .nl-pin .nl-title { grid-column: 2 / -1; }
+  /* billing notices (SOLAR-212): pinned above the alerts, with a button; the card is not a link */
   .nl-pin .nl-title { font-weight: 600; }
   /* a notice's action: a green link under its text, at every width (SOLAR-353) */
   .nl-act { margin-top: var(--sp-3xs); min-height: 36px; padding: 0; background: none; border: none; color: var(--accent);
     font: 600 var(--fs-sm) var(--display); text-align: left; cursor: pointer; touch-action: manipulation; }
   .nl-act::after { content: ' \203A'; }
   .nl-act:hover { text-decoration: underline; }
-  .nl-text { display: flex; flex-direction: column; min-width: 0; }
-  .nl-title { font-size: var(--fs-md); font-weight: 500; line-height: 1.3; }
-  .nl-row.unread .nl-title { font-weight: 600; }
-  .nl-body { font-size: var(--fs-sm); color: var(--muted); margin-top: var(--sp-3xs); line-height: 1.4; }
-  .nl-where { font-size: var(--fs-xs); color: var(--dim); margin-top: var(--sp-2xs); }
-  .nl-foot { flex: none; display: block; width: 100%; min-height: 44px; padding: var(--sp-md) var(--sp-lg); background: none; border: none; border-top: 1px solid var(--line);
-    color: var(--text); font: 500 var(--fs-md) var(--display); text-align: center; touch-action: manipulation; }
-  .nl-foot:hover { background: rgba(var(--ink-rgb),0.04); }
-  /* the full page (SOLAR-327): Settings' look, a card per day under its date, full width like the data pages */
-  .alerts-page { padding-bottom: var(--sp-2xl); }
-  .alerts-head { padding: 0; gap: var(--sp-sm); }
-  .alerts-head .page-head h1 { margin: 0; }
-  .alerts-head .page-head + .nl-gear { margin-left: auto; }
-  .alerts-head .page-head + .nl-all { margin-left: auto; }
-  .alerts-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-sm) var(--sp-lg); margin: var(--sp-lg) 0 var(--sp-2xs); }
-  .alerts-row2 { display: flex; align-items: center; gap: var(--sp-lg); }
-  .alerts-kind { width: 170px; }
-  /* the same height as the time buttons beside it */
-  .alerts-kind .pick-btn { height: 34px; font-size: var(--fs-sm); }
-  .alerts-unread { display: flex; align-items: center; gap: var(--sp-sm); font-size: var(--fs-md); color: var(--muted); }
-  .alerts-page .nl-day { padding: var(--sp-lg) var(--sp-3xs) var(--sp-sm); font-size: var(--fs-sm); color: var(--muted); }
-  .card.alerts-card { padding: var(--sp-2xs) var(--sp-sm); }
-  .alerts-card .nl-row { padding: var(--sp-md) var(--sp-md) var(--sp-md) var(--sp-xs); }
-  .alerts-card .nl-row + .nl-row { margin-top: var(--sp-3xs); }
-  /* wide: the time sits on the right, level with the title */
-  @media (min-width: 900px) {
-    .alerts-card .nl-text { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--sp-3xl); }
-    .alerts-card .nl-title, .alerts-card .nl-body { grid-column: 1; }
-    .alerts-card .nl-where { grid-column: 2; grid-row: 1 / span 2; align-self: center; margin-top: 0; text-align: right; }
-    .alerts-card .nl-pin .nl-text { display: flex; }
-  }
-  .alerts-more { text-align: center; padding: var(--sp-lg) 0 var(--sp-sm); }
-  .alerts-more .ghost-btn { min-height: 40px; padding: var(--sp-sm) var(--sp-lg); }
+  .nl-scroll > .nl-list:last-child { padding-bottom: var(--sp-md); }
   .nl-empty { padding: var(--sp-4xl) var(--sp-2xl) var(--sp-2xl); text-align: center; }
   .nl-empty .nl-glyph { margin: 0 auto var(--sp-lg); width: 44px; height: 44px; border-radius: var(--r-lg); }
   .nl-empty b { display: block; font-size: var(--fs-lg); font-weight: 600; margin-bottom: var(--sp-xs); }
-  .nl-empty p { margin: 0 0 var(--sp-lg); font-size: var(--fs-md); color: var(--muted); line-height: 1.5; }
-  /* the page's one empty state, in the middle of the space under the filters */
-  .alerts-page > .nl-empty { min-height: 55vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding-top: 0; }
   @media (max-width: 599px) {
     .bell-btn { width: 36px; }
     .notif-panel { position: fixed; inset: 0; z-index: 40; width: auto; max-height: none; border: none; border-radius: 0; box-shadow: none;
@@ -448,13 +429,6 @@
     .nl-head { padding-left: var(--sp-sm); }
     .nl-back { display: grid; margin-right: var(--sp-3xs); }
     .nl-gear, .nl-back { width: 44px; height: 44px; }
-    .alerts-head { margin-left: calc(-1 * var(--sp-sm)); }
-    .card.alerts-card { padding: var(--sp-3xs) var(--sp-2xs); border-radius: var(--r-xl); }
-    .alerts-filters { flex-direction: column; align-items: stretch; }
-    .alerts-range { display: flex; } .alerts-range .seg-btn { flex: 1; }
-    .alerts-row2 { justify-content: space-between; }
-    .alerts-kind { width: auto; flex: 1; max-width: 200px; }
-    .alerts-kind .pick-btn { height: 44px; }
     /* the header is its own layer (sticky, z-index 5): lift it over the bar and the setup card while the list is open */
     .head:has(.notif-panel) { z-index: 30; }
   }
