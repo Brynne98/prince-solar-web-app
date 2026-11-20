@@ -132,6 +132,9 @@ function LiveSkeleton({ cfg }) {
   );
 }
 
+// before the first reading a figure is a dash with this under it, not 0 (SOLAR-623)
+const WAITING = 'Waiting for the first reading';
+
 function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings }) {
   const a = snap.aggregate;
   const feat = snap.features || {};
@@ -176,7 +179,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
   const cut = !!snap.loginCut;
   const silent = ps.status === 'offline' || cut;
   let battEta = null, battInfo = null;
-  if (!hasBatt || silent || ps.faded) { /* nothing to estimate */ }
+  if (!hasBatt || silent || ps.faded || ps.none) { /* nothing to estimate */ }
   else if (!cap) { battInfo = 'Add battery size to see this'; } // a link on the flow's battery node
   // Under 200 W the battery is only trickling and a time would read in days, so it gives none.
   else if (a.battState === 'discharging' && a.battPower >= 200) {
@@ -473,7 +476,7 @@ function LiveTab({ snap, today, energy, onNeedEnergy, refreshKey, onOpenSettings
               <FsEnterIcon /><span>Fullscreen</span>
             </button>
           }>POWER FLOW</SectionTitle>}
-          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} total={snap.inverters.length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} silentSince={silent ? window.readAgo(ps.last.getTime(), Date.now()) : null}
+          <window.PowerFlow agg={a} inverters={snap.inverters.filter(i => i.status === 'online').length} total={snap.inverters.length} battInfo={battInfo} onBattInfo={hasBatt && !cap && !wall ? () => onOpenSettings('battery') : undefined} typicalSoc={typicalSoc} typicalHour={typicalHour} features={feat} wall={wall} waiting={ps.none} silentSince={silent ? window.readAgo(ps.last.getTime(), Date.now()) : null}
             pausedSince={!silent && ps.faded ? window.readAgo(ps.last.getTime(), Date.now()) : null} />
         </Card>
       </div>
@@ -1187,8 +1190,8 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
-        <StatTile label="SOLAR NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.pv}
-          sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>
+        <StatTile label="SOLAR NOW" value={silent || ps.none ? '—' : nowN} unit={silent || ps.none ? '' : nowU} accent={CC.pv}
+          sub={ps.none ? WAITING : silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : kwp > 0 ? <><b>{Math.round(a.pvNow / 10 / kwp)}%</b> of your {kwp} kW of panels</>
             : <button type="button" className="mini-link" onClick={() => onOpenSettings('plant')}>Add your panels to see this</button>} />
         {tile('TODAY', a.pvToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.pv)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
@@ -1303,8 +1306,8 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
-        <StatTile label="HOME NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.load}
-          sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : solarNow != null ? <><b>{solarNow}%</b> from solar right now</> : NBSP} />
+        <StatTile label="HOME NOW" value={silent || ps.none ? '—' : nowN} unit={silent || ps.none ? '' : nowU} accent={CC.load}
+          sub={ps.none ? WAITING : silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : solarNow != null ? <><b>{solarNow}%</b> from solar right now</> : NBSP} />
         {tile('TODAY', a.loadToday, todayPeak ? <>Peak <b>{fmtPower(todayPeak.load)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}
@@ -1479,7 +1482,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   return (
     <div className="stack solar-tab">
       <div className="solar-stats">
-        <StatTile label="GRID NOW" value={silent ? '—' : nowN} unit={silent ? '' : nowU} accent={CC.grid} sub={silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : nowSub} />
+        <StatTile label="GRID NOW" value={silent || ps.none ? '—' : nowN} unit={silent || ps.none ? '' : nowU} accent={CC.grid} sub={ps.none ? WAITING : silent ? 'Last reading ' + window.readAgo(ps.last.getTime(), Date.now()) : nowSub} />
         {tile('TODAY', a.gridFromToday, sells ? <>Exported <b>{fmtKwh(a.gridToToday)}</b></> : todayPeak ? <>Peak <b>{fmtPower(todayPeak.grid)}</b> at <b>{HM(todayPeak.t)}</b></> : null)}
         {tile('THIS WEEK', tot.week, trend('week', 2, 'last week'))}
         {tile('THIS MONTH', tot.month, trend('month', 3, 'last month'))}

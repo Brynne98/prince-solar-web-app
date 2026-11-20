@@ -217,7 +217,8 @@ async function fetchSnapshot() {
   // Today's counters are the last reading's. A plant silent since before the plant's
   // midnight has none for today, not yesterday's (SOLAR-348).
   const day = (d) => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: cfg.timezone || undefined }).format(d); } catch (e) { return null; } };
-  if (api.lastTs && day(new Date(api.lastTs * 1000)) !== day(new Date()))
+  // No reading yet: no today at all, a dash and not 0.0 kWh (SOLAR-623)
+  if (!api.lastTs || day(new Date(api.lastTs * 1000)) !== day(new Date()))
     ['pvToday', 'loadToday', 'gridFromToday', 'gridToToday', 'battChgToday', 'battDischgToday'].forEach(k => { agg[k] = null; });
   return {
     updated: new Date(api.generatedAt || Date.now()),
@@ -231,7 +232,8 @@ async function fetchSnapshot() {
     // A battery not decided yet shows only once a charge reads, as detection counts one
     // (0088): a home with none read as a dead battery at 0 W (SOLAR-348).
     features: {
-      hasBattery: cfg.hasBattery === true || (cfg.hasBattery == null && agg.battSoc > 0),
+      // no reading yet: not known, so the battery box stays (SOLAR-623)
+      hasBattery: cfg.hasBattery === true || (cfg.hasBattery == null && (!api.lastTs ? null : agg.battSoc > 0)),
       // Mains live right now beats the off-grid flag, which the poller only re-decides
       // every 10 min; until then a grid switched back on would still read Off-grid (SOLAR-7).
       hasGrid: cfg.hasGrid !== false || (api.totals || {}).gridPresent === true,

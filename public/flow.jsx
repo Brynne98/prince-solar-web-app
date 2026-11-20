@@ -29,7 +29,9 @@ function flowAlpha(color, a) {
   return `color-mix(in srgb, ${color} ${Math.round(a * 100)}%, transparent)`;
 }
 
-function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince, pausedSince }) {
+function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince, pausedSince, waiting }) {
+  // no reading yet (SOLAR-623): dashes, as on a silent plant, and no sentence
+  const blank = !!silentSince || !!waiting;
   const C = window.COLORS, T = window.COLORS_TEXT;
   const mobile = useFlowMobile(wall);
   // The boxes stretch with the card (SOLAR-39); its width only decides the lane's.
@@ -53,7 +55,7 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
 
   // battInfo arrives as "3h 40m to empty" / "1h 55m to full" / "Set pack size"; no time while idle
   const battRow = (() => {
-    if (silentSince || pausedSince) return { k: '', v: '' }; // a silent plant's battery is doing nothing we know of
+    if (blank || pausedSince) return { k: '', v: '' }; // a silent plant's battery is doing nothing we know of
     const m = battInfo && /^(.*) to (empty|full)$/.exec(battInfo);
     if (m) return { k: m[2] === 'empty' ? 'Empty in' : 'Full in', v: m[1] };
     // "Set pack size" stands alone, a link to Settings (SOLAR-23)
@@ -82,7 +84,7 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
 
   // Today's figures, in a column of their own on desktop and under a rule on a phone.
   const today = (...rows) => rows.filter(r => r[1] != null);
-  const flows = silentSince ? { pv: 0, bat: 0, home: 0 } : { pv: agg.pvNow, bat: agg.battPower, home: agg.loadNow };
+  const flows = blank ? { pv: 0, bat: 0, home: 0 } : { pv: agg.pvNow, bat: agg.battPower, home: agg.loadNow };
   const nodes = {
     pv: { key: 'pv', label: 'Solar', color: C.pv, w: agg.pvNow, icon: 'sun',
       split: [['Home', C.load, sunToHome * sunScale, T.load], ['Battery', C.batt, sunToBatt * sunScale, T.batt], ['Grid', C.grid, gridExport * sunScale, T.grid]],
@@ -103,7 +105,7 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
       state: gridOff ? null : gridExport > 0 ? 'Exporting' : gridImport > 0 ? 'Importing' : gridKnown ? 'On, not in use' : 'Not known yet',
       idle: gridKnown && !gridOff && !gridExport && !gridImport,
       // a silent plant's missing counters (silent since before midnight) drop, not read as 0
-      today: today(['Imported', agg.gridFromToday ?? (silentSince ? null : 0)], ['Exported', agg.gridToToday ?? (silentSince ? null : 0)]) },
+      today: today(['Imported', agg.gridFromToday ?? (blank ? null : 0)], ['Exported', agg.gridToToday ?? (blank ? null : 0)]) },
     home: { key: 'home', label: 'Home', color: C.load, w: agg.loadNow, icon: 'home',
       split: [['Solar', C.pv, solarIn, T.pv], ['Battery', C.batt, battIn, T.batt], ['Grid', C.grid, gridIn, T.grid]],
       today: today(['Used', agg.loadToday]) },
@@ -111,7 +113,7 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
   // A silent plant: each box shows a dash, with no state, share, charge (nor the battery
   // icon's fill) or grid chip, and no line runs: none of it is known now. Today's figures
   // stay, as at the last reading (SOLAR-557; a dead login, SOLAR-386).
-  if (silentSince) Object.values(nodes).forEach(n => n && Object.assign(n, {
+  if (blank) Object.values(nodes).forEach(n => n && Object.assign(n, {
     w: 0, dash: true, state: null, split: null, charge: null, soc: null, known: false, off: false, reverse: false }));
 
   const CEIL = 8000;
@@ -256,7 +258,7 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
   function renderDesktop() {
     const narrow = !wall && wrapW < 1000;
     // A silent plant with no Today figures holds a name and a dash, so its boxes sit low rather than tall and empty (SOLAR-411)
-    const short = silentSince && !Object.values(nodes).some(n => n && n.today.length);
+    const short = blank && !Object.values(nodes).some(n => n && n.today.length);
     const LW = narrow ? 200 : 240, R = narrow ? 40 : 47, BH = short ? 104 : 176, GAP = 22, H = 2 * BH + GAP;
     const cx = LW / 2, cy = H / 2, row1 = BH / 2, row2 = BH + GAP + BH / 2;
     // a plant without a battery or grid centres the one box left on that side
@@ -341,7 +343,8 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
   let narrative;
   // A silent plant's last figures aren't happening now. The header says since when;
   // fullscreen covers the header, so only there does the card say it.
-  if (silentSince) narrative = wall ? <>No readings since {silentSince}.</> : null;
+  if (waiting) narrative = null;
+  else if (silentSince) narrative = wall ? <>No readings since {silentSince}.</> : null;
   // Stale (SOLAR-386): the last figures stay (the page greys them); the header says since when.
   else if (pausedSince) narrative = wall ? <>Last reading at {pausedSince}.</> : null;
   else if (gridOff) {
@@ -378,7 +381,7 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
   else narrative = <>Solar, battery and grid are <b>all powering the home</b>.</>;
 
   // An inverter silent while another reports: the live figures are only the reporting ones' (SOLAR-599)
-  const partial = !silentSince && total > 1 && inverters > 0 && inverters < total
+  const partial = !blank && total > 1 && inverters > 0 && inverters < total
     ? <span className="flow-partial">Live figures from {inverters} of {total} inverters.</span> : null;
 
   return (
