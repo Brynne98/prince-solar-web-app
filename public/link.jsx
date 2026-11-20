@@ -880,7 +880,9 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
       const retry = async (e) => { e.preventDefault(); setChecking(true); await refresh(); setChecking(false); };
       return (
         <div className="login-wrap">
-          <window.AuthCard title="Couldn’t check your SunSynk logins" onSubmit={retry} busy={checking}>
+          {/* the device's own connection first, else it is us: not the SunSynk logins (SOLAR-604) */}
+          <window.AuthCard title={navigator.onLine === false ? 'You’re offline' : 'Can’t reach Prince Solar Hub'}
+            sub={navigator.onLine === false ? 'Check your internet, then try again.' : 'Try again in a minute.'} onSubmit={retry} busy={checking}>
             <window.BusyButton type="submit" busy={checking} busyText="Checking…">Try again</window.BusyButton>
             {/* No server text on screen (SOLAR-163). */}
             <div className="login-links"><window.SignOutButton className="login-link quiet" /></div>

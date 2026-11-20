@@ -29,7 +29,7 @@ function flowAlpha(color, a) {
   return `color-mix(in srgb, ${color} ${Math.round(a * 100)}%, transparent)`;
 }
 
-function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince, pausedSince }) {
+function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince, pausedSince }) {
   const C = window.COLORS, T = window.COLORS_TEXT;
   const mobile = useFlowMobile(wall);
   // The boxes stretch with the card (SOLAR-39); its width only decides the lane's.
@@ -376,9 +376,13 @@ function PowerFlow({ agg, inverters, battInfo, onBattInfo, typicalSoc, typicalHo
   else if (!hasBatt) narrative = <><b style={{ color: T.pv }}>Solar</b> covers what it can; the grid covers the rest.</>;
   else narrative = <>Solar, battery and grid are <b>all powering the home</b>.</>;
 
+  // An inverter silent while another reports: the live figures are only the reporting ones' (SOLAR-599)
+  const partial = !silentSince && total > 1 && inverters > 0 && inverters < total
+    ? <span className="flow-partial">Live figures from {inverters} of {total} inverters.</span> : null;
+
   return (
     <div className="flow-wrap" ref={wrapRef}>
-      {narrative && <div className="flow-narrative">{narrative}</div>}
+      {(narrative || partial) && <div className="flow-narrative">{narrative}{partial}</div>}
       {mobile ? renderMobile() : renderDesktop()}
     </div>
   );

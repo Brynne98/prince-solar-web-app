@@ -758,6 +758,7 @@
   /* the summary sentence opens the card, above the diagram */
   .flow-narrative { font-size: var(--fs-xl); line-height: 1.35; color: var(--text); text-wrap: pretty; margin-bottom: var(--sp-lg); }
   .flow-narrative b { font-weight: 600; }
+  .flow-partial { display: block; font-size: var(--fs-md); color: var(--warn); margin-top: var(--sp-2xs); }
 
   /* ---------- mobile power-flow (vertical, card-style nodes) ---------- */
   .mflow { display: flex; flex-direction: column; }
@@ -933,7 +934,7 @@
   .eq-top { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-md); }
   .eq-label { font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.16em; color: var(--muted); text-transform: uppercase; }
   .eq-head { display: flex; align-items: center; gap: var(--sp-md); font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; }
-  .eq-head.ok { color: var(--ok); } .eq-head.bad { color: var(--bad); }   /* the word in the tone, no dot (SOLAR-556) */
+  .eq-head.ok { color: var(--ok); } .eq-head.bad { color: var(--bad); } .eq-head.warn { color: var(--warn); } .eq-head.wait { color: var(--text); }   /* the word in the tone, no dot (SOLAR-556) */
   .eq-head-sub { margin: var(--sp-xs) 0 0; font-size: var(--fs-md); color: var(--muted); }
   .eq-problems { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-md); }
   .eq-problem { border: 1px solid rgba(var(--bad-rgb),0.42); background: rgba(var(--bad-rgb),0.06); border-radius: var(--r-xl); padding: var(--sp-lg) var(--sp-lg); }
