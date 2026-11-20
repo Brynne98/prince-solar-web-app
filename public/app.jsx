@@ -295,10 +295,10 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
 
 // The person: avatar, name and plant count in the sidebar; the avatar alone in a phone's
 // header. A dead SunSynk login puts a red dot on the avatar and on Account.
-function AccountMenu({ user, plantCount, alert, onSettings, active, variant }) {
+function AccountMenu({ user, plantCount, paused, alert, onSettings, active, variant }) {
   const [open, setOpen, ref] = usePopover();
   // plantCount is null while the plants load: the row shows, its count shimmers
-  const sub = alert ? 'Reconnect a login' : plantCount == null ? '' : plantCount + (plantCount === 1 ? ' plant' : ' plants');
+  const sub = alert ? 'Reconnect a login' : plantCount == null ? '' : plantCount + (plantCount === 1 ? ' plant' : ' plants') + (paused ? ', paused' : '');
   return (
     <div className={'acct acct-' + variant} ref={ref}>
       <button type="button" className={'acct-btn' + (alert ? ' needs' : '')} aria-haspopup="menu" aria-expanded={open}
@@ -1349,7 +1349,8 @@ function Setup({ links, wall }) {
   useEffect(() => { if (wall) window.track('pay_wall_shown', { plants: wall.plants, after: wall.paid ? 'plan' : 'free_week' }); }, []);
   const dead = links.accounts.filter(a => a.status === 'needs_relink' && a.kind !== 'share');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
-  const account = { user, plantCount: 0, alert: dead.length > 0, onSettings: () => go('prefs'), active: isSettings(tab) };
+  // no plan: the plants are still yours, paused, as Settings > Plants lists them (SOLAR-631)
+  const account = { user, plantCount: wall ? wall.plants : 0, paused: !!wall, alert: dead.length > 0, onSettings: () => go('prefs'), active: isSettings(tab) };
   // Every plant on a working login locked (SOLAR-537): choosing one comes first, adding one second.
   const plantsOff = !relink && links.accounts.some(a => a.status !== 'disabled' && (a.plants || []).length > 0);
   const [flash, setFlash] = useState(null);
