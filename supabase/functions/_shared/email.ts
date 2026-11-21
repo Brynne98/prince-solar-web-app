@@ -110,7 +110,9 @@ type Part =
 // labels: one under each bar (a week); titles: the hover text per bar, where the mail app
 // shows it (desktop only). The highest bar is drawn full green, the rest dimmer.
 // A change on the previous period: the arrow and percent take the tone, the rest stays grey.
-type Delta = { n: number; prev: string; tone?: "good" | "bad" };
+// abs: the change in the tile's own unit ("3.8 kWh"), shown instead of the percent when it
+// is 200% or more, a jump off a small base (the app's rule, TrendBadge; SOLAR-615).
+type Delta = { n: number; prev: string; tone?: "good" | "bad"; abs?: string };
 type Bars = { values: (number | null)[]; from: string; to: string; labels?: string[]; titles?: string[] };
 
 type Body = { title: string; sub?: string; parts: Part[]; footer: string[] };
@@ -159,9 +161,9 @@ function drawBars(b: Bars): string {
 const deltaHtml = (d: Delta) => {
   const r = Math.round(d.n);
   const tone = d.tone === "good" ? C.ok : d.tone === "bad" ? C.bad : "#9aa5b3";
-  return `<span style="color:${tone};font-weight:600">${r > 0 ? "↑" : r < 0 ? "↓" : "→"} ${Math.abs(r)}%</span> vs ${esc(d.prev)}`;
+  return `<span style="color:${tone};font-weight:600">${r > 0 ? "↑" : r < 0 ? "↓" : "→"} ${esc(d.abs ?? Math.abs(r) + "%")}</span> vs ${esc(d.prev)}`;
 };
-const deltaText = (d: Delta) => { const r = Math.round(d.n); return `${r > 0 ? "↑" : r < 0 ? "↓" : "→"} ${Math.abs(r)}% vs ${d.prev}`; };
+const deltaText = (d: Delta) => { const r = Math.round(d.n); return `${r > 0 ? "↑" : r < 0 ? "↓" : "→"} ${d.abs ?? Math.abs(r) + "%"} vs ${d.prev}`; };
 
 function html(subject: string, b: Body): string {
   const rows = b.parts.map((x) => {
@@ -480,6 +482,7 @@ export type Report = {
   independencePct: number;
   savedRand: number | null; // null: no tariff set
   change: { made?: number; home?: number; import?: number; independence?: number; saved?: number }; // % vs prevLabel
+  was?: { made: number; home: number; import: number; independence: number; saved?: number }; // the figures in prevLabel
   bestDay?: { label: string; kwh: number };
   highestUse?: { label: string; kwh: number }; // the day the home used the most ("Busiest day")
   daily?: Bars; // solar kWh per day (per month for a year)
@@ -494,23 +497,31 @@ export type Report = {
 const kwh = (n: number): [string, string] => (n >= 1000 ? [(n / 1000).toFixed(2), "MWh"] : [n.toFixed(n < 100 ? 1 : 0), "kWh"]);
 // Colour a change by whether it's good for the owner, not by up or down: less grid
 // bought and less home use are good. Only a change that rounds to 0% stays grey.
-const trend = (n: number | undefined, prev: string, better: "up" | "down"): { delta?: Delta } => {
+// With the two figures (cur, was) and the tile's format: none when they read the same
+// (Independence 100% both weeks), and the change itself at 200% or more (SOLAR-615).
+const trend = (n: number | undefined, prev: string, better: "up" | "down",
+               cur?: number, was?: number, fmt?: (v: number) => string): { delta?: Delta } => {
   if (n == null || !isFinite(n)) return {};
+  const both = cur != null && was != null && fmt;
+  if (both && fmt(cur) === fmt(was)) return {};
+  const abs = both && Math.abs(n) >= 200 ? fmt(Math.abs(cur - was)) : undefined;
   if (Math.round(n) === 0) return { delta: { n, prev } };
-  return { delta: { n, prev, tone: (n > 0) === (better === "up") ? "good" : "bad" } };
+  return { delta: { n, prev, tone: (n > 0) === (better === "up") ? "good" : "bad", ...(abs ? { abs } : {}) } };
 };
+const kwhText = (n: number) => kwh(n).join(" ");
+const pctText = (n: number) => `${Math.round(n)}%`;
 const rand = (n: number) => "R" + Math.round(n).toLocaleString("en-US");
 const EVERY: Record<Period, string> = { week: "Weekly", month: "Monthly", year: "Yearly" };
 
 export function report(r: Report): Email {
   const [mv, mu] = kwh(r.madeKwh);
   const stats: Extract<Part, { stats: unknown }>["stats"] = [
-    { label: "Made", value: mv, unit: mu, tone: "solar", ...trend(r.change.made, r.prevLabel, "up") },
-    { label: "Home", value: kwh(r.homeKwh)[0], unit: kwh(r.homeKwh)[1], tone: "home", ...trend(r.change.home, r.prevLabel, "down") },
-    ...(r.importKwh != null ? [{ label: "Imported", value: kwh(r.importKwh)[0], unit: kwh(r.importKwh)[1], tone: "grid" as Tone, ...trend(r.change.import, r.prevLabel, "down") }] : []),
+    { label: "Made", value: mv, unit: mu, tone: "solar", ...trend(r.change.made, r.prevLabel, "up", r.madeKwh, r.was?.made, kwhText) },
+    { label: "Home", value: kwh(r.homeKwh)[0], unit: kwh(r.homeKwh)[1], tone: "home", ...trend(r.change.home, r.prevLabel, "down", r.homeKwh, r.was?.home, kwhText) },
+    ...(r.importKwh != null ? [{ label: "Imported", value: kwh(r.importKwh)[0], unit: kwh(r.importKwh)[1], tone: "grid" as Tone, ...trend(r.change.import, r.prevLabel, "down", r.importKwh, r.was?.import, kwhText) }] : []),
     ...(r.exportKwh != null ? [{ label: "Exported", value: kwh(r.exportKwh)[0], unit: kwh(r.exportKwh)[1], tone: "grid" as Tone }] : []),
-    { label: "Independence", value: `${Math.round(r.independencePct)}%`, tone: "cyan", ...trend(r.change.independence, r.prevLabel, "up") },
-    ...(r.savedRand != null ? [{ label: "Est. saved", value: rand(r.savedRand), ...trend(r.change.saved, r.prevLabel, "up") }] : []),
+    { label: "Independence", value: `${Math.round(r.independencePct)}%`, tone: "cyan", ...trend(r.change.independence, r.prevLabel, "up", r.independencePct, r.was?.independence, pctText) },
+    ...(r.savedRand != null ? [{ label: "Est. saved", value: rand(r.savedRand), ...trend(r.change.saved, r.prevLabel, "up", r.savedRand, r.was?.saved, rand) }] : []),
   ];
   const parts: Part[] = [];
   const fw = r.freeWeekEnds;
@@ -566,8 +577,8 @@ const OFFER_FOOTER = (why: string, unsub: string) => [`You get this because ${wh
 //  batt_hot_back 15 min at 43 C or below, after a batt_hot (0151)
 //  bank_drift    charge 10 points or more apart between inverters' own batteries for an hour
 //  bank_drift_back  under 8 points apart for 15 min, after a bank_drift (0151)
-//  string_dead   a string dead for 12 samples while another string on the same
-//                inverter makes over 200 W
+//  string_dead   a string dead for 12 samples while another string on the plant makes
+//                over 200 W; every used string on one inverter is one email, "Strings 1 and 2" (0231)
 //  string_back   voltage for 15 min with no dead sample, after a string_dead (0151)
 //  logger_stale  no new reading for the whole plant, or from one inverter while the others
 //                report (inverter set), for 30 min
@@ -629,12 +640,12 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
         return [`Panels stopped producing at ${plant}`, [{ box: { hero: { label: e.string, value: "No power", tone: "bad", sub: `since ${e.since} ${day}` },
           rows: [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))], ["Other strings", "Producing"]] } }]];
       case "string_back":
-        return [`Panels producing again at ${plant}`, [{ box: { hero: { label: `${e.string} was off for`, value: e.lasted, sub: span(e.since, e.at) },
+        return [`Panels producing again at ${plant}`, [{ box: { hero: { label: `${e.string} off for`, value: e.lasted, sub: span(e.since, e.at) },
           rows: [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))]] } }]];
       case "logger_stale": {
         const one = !!e.inverter;
         const list = e.inverters?.length ? e.inverters : [{ name: e.inverter ?? "Inverter", last: e.since }];
-        return [`No readings from ${plant}`, [
+        return [one ? `No readings from ${e.inverter}` : `No readings from ${plant}`, [
           { lead: one
             ? "SunSynk is working, but one inverter stopped sending it readings. Your power isn't affected. Only the app shows part of your plant."
             : "SunSynk is working, but your inverter stopped sending it readings. Your power isn't affected. Only the app stops updating." },
@@ -644,7 +655,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
         ]];
       }
       case "logger_back":
-        return [`Readings back at ${plant}`,
+        return [e.inverter ? `Readings back from ${e.inverter}` : `Readings back at ${plant}`,
           [{ box: { hero: { label: "No readings for", value: e.lasted, sub: span(e.since, e.at) },
             rows: e.inverter ? [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))]] : [] } }, { note: GAP }]];
     }
@@ -877,7 +888,7 @@ export type Change = {
   keepPlants?: string[];
   deleteOn?: string;
   next?: { amount: number }; // absent on Free
-  days?: number; // day totals the plants to delete hold between them
+  days?: number; // the most day totals one of the plants to delete holds (SOLAR-616)
   history?: { plant: string; days: number; on: string }; // cancel: the first plant's history, deleted on the end date (SOLAR-495)
 };
 
@@ -887,7 +898,7 @@ export const planChangeBooked = (c: Change) => {
   const title = cancel ? `${PLAN_NAME[c.from]} ends on ${c.on}` : switchOnly ? `${PLAN_NAME[c.from]} goes ${c.toPeriod} on ${c.on}` : `You move to ${PLAN_NAME[c.to]} on ${c.on}`;
   // Plants to delete lead, in amber, as in the later "deleted on" email (SOLAR-415).
   const hero = c.removePlants.length
-    ? lost(`Deleted on ${c.deleteOn ?? c.on}`, plantCount(c.removePlants.length), withDays(names(c.removePlants), c.days)) : undefined;
+    ? lost(`Deleted on ${c.deleteOn ?? c.on}`, plantCount(c.removePlants.length), withDays(names(c.removePlants), c.days, c.removePlants.length > 1)) : undefined;
   const kept: [string, string][] = hero && c.keepPlants?.length ? [["Plants kept", list(c.keepPlants)]] : [];
   return make(title, {
     title,
@@ -1070,7 +1081,12 @@ const keepSmall = (p: Price) => `${p.now < p.list ? `${PLAN_NAME[p.plan]} is nor
 const dayCount = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
 const plantCount = (n: number) => `${n} plant${n === 1 ? "" : "s"}`;
 const lost = (label: string, value: string, sub: string): Hero => ({ label, value, tone: "warn", sub });
-const withDays = (who: string, days?: number) => days ? `${who}, with ${dayCount(days)} of history` : who;
+// many: 2+ plants, whose history goes back as far as the longest one's (SOLAR-616)
+const withDays = (who: string, days?: number, many = false) => days ? `${who}, with ${many ? "up to " : ""}${dayCount(days)} of history` : who;
+// "Deleted on 21 Dec": "234 days of history at Farm", or "3 plants with up to 234 days of history"
+const lostHistory = (label: string, days: number, plants = 1, plant?: string): Hero => plants > 1
+  ? lost(label, plantCount(plants), `with up to ${dayCount(days)} of history`)
+  : lost(label, dayCount(days), plant ? `of history at ${plant}` : "of history");
 
 // Day 8 of a failed card: the plan has ended as a cancel's does. Nothing is read, every
 // plant stays linked, and the history is deleted 30 days later (SOLAR-564, 0212).
@@ -1094,13 +1110,13 @@ export const movedToFree = (m: MovedToFree) => {
 };
 
 // Once, when a cancelled plan ends on its date (SOLAR-328, 0144). History is deleted 30
-// days later (SOLAR-552, 0206). days: history the first plant held, counted when queued.
-export const winback = (w: { from: Plan; plant?: string; days?: number; price?: Price; deleteOn?: string; unsub: string }) =>
+// days later (SOLAR-552, 0206). days: the most any plant still reading holds; plants: how many (SOLAR-616).
+export const winback = (w: { from: Plan; plant?: string; plants?: number; days?: number; price?: Price; deleteOn?: string; unsub: string }) =>
   make(`Your ${PLAN_NAME[w.from]} plan has ended`, {
     title: `Your ${PLAN_NAME[w.from]} plan has ended`,
     parts: [
       { box: {
-        hero: w.days && w.plant ? lost(w.deleteOn ? `Deleted on ${w.deleteOn}` : "Deleted in 30 days", dayCount(w.days), `of history at ${w.plant}`) : undefined,
+        hero: w.days && w.plant ? lostHistory(w.deleteOn ? `Deleted on ${w.deleteOn}` : "Deleted in 30 days", w.days, w.plants, w.plant) : undefined,
         rows: STOPPED,
       } },
       ...(w.price ? [{ lead: keepOn(w.price, "everything") }] : []),
@@ -1112,14 +1128,14 @@ export const winback = (w: { from: Plan; plant?: string; days?: number; price?: 
 
 // Up to 3 days before a cancelled plan ends (SOLAR-495, 0188), laid out as the free week's
 // "ends soon": that day the reading stops; the history is deleted on deleteOn, 30 days
-// later. No plant names, as the cancel email. days: history the first plant holds. No
-// Keep button (SOLAR-412).
-export const cancelEndsSoon = (c: { from: Plan; on: string; days?: number; deleteOn?: string }) =>
+// later. No plant names, as the cancel email. days: the most any plant holds; plants: how
+// many lose it (SOLAR-616). No Keep button (SOLAR-412).
+export const cancelEndsSoon = (c: { from: Plan; on: string; days?: number; plants?: number; deleteOn?: string }) =>
   make(`${PLAN_NAME[c.from]} ends on ${c.on}`, {
     title: `${PLAN_NAME[c.from]} ends on ${c.on}`,
     parts: [
       { box: {
-        hero: c.days ? lost(c.deleteOn ? `Deleted on ${c.deleteOn}` : "Deleted 30 days later", dayCount(c.days), "of history") : undefined,
+        hero: c.days ? lostHistory(c.deleteOn ? `Deleted on ${c.deleteOn}` : "Deleted 30 days later", c.days, c.plants) : undefined,
         rows: [[`From ${c.on}`, "Readings stop"], ["Alerts and reports", "Stop"]],
       } },
       { lead: `To keep everything, tap Keep ${PLAN_NAME[c.from]} in Billing before ${c.on}.` },
@@ -1137,7 +1153,7 @@ export const plantsRemovalSoon = (plants: string[], on: string, plan?: Plan, pri
   return make(title, {
     title,
     parts: [
-      { box: { hero: lost(`Deleted on ${on}`, plantCount(plants.length), withDays(names(plants), days)) } },
+      { box: { hero: lost(`Deleted on ${on}`, plantCount(plants.length), withDays(names(plants), days, plants.length > 1)) } },
       { lead: `${plan && plan !== "free" ? `${PLAN_NAME[plan]} keeps ${PLAN_PLANTS[plan]}. ` : ""}${price ? keepOn(price, them) : `Choose a plan to keep ${them}.`}` },
       { button: { label: "See plans", href: PLANS } },
       ...(price ? [{ small: keepSmall(price) }] : []),

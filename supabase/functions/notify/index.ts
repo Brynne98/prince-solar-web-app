@@ -120,14 +120,18 @@ async function historyAt(user: string | null, plantId?: number | null): Promise<
   const { count } = await db.from("plant_energy").select("period", { count: "exact", head: true }).eq("plant_id", pu.plant_id).eq("bucket", "day");
   return { plant: pu.plant_name || "your plant", days: count ?? 0 };
 }
-/** Day totals held by the account's plants with these names, added up: the history a removal deletes. */
-async function historyOf(user: string | null, names: string[]): Promise<number> {
-  if (!user || !names.length) return 0;
-  const { data: pu } = await db.from("plant_users").select("plant_id").eq("user_id", user).in("plant_name", names);
-  const ids = (pu ?? []).map((x) => x.plant_id);
-  if (!ids.length) return 0;
-  const { count } = await db.from("plant_energy").select("period", { count: "exact", head: true }).in("plant_id", ids).eq("bucket", "day");
-  return count ?? 0;
+/** The account's plants with these names (none given: every plant still reading), and the
+ *  most day totals any one of them holds: how far back the history goes, never a sum (SOLAR-616). */
+async function historyOf(user: string | null, names?: string[]): Promise<{ plants: string[]; days: number }> {
+  if (!user || names?.length === 0) return { plants: [], days: 0 };
+  const q = db.from("plant_users").select("plant_id, plant_name").eq("user_id", user);
+  const { data: pu } = await (names ? q.in("plant_name", names) : q.eq("paused", false)).order("linked_at");
+  let days = 0;
+  for (const p of pu ?? []) {
+    const { count } = await db.from("plant_energy").select("period", { count: "exact", head: true }).eq("plant_id", p.plant_id).eq("bucket", "day");
+    days = Math.max(days, count ?? 0);
+  }
+  return { plants: (pu ?? []).map((p) => p.plant_name || "your plant"), days };
 }
 /** The newest earlier email of a kind for this user, to read what it said. */
 async function lastMail(user: string | null, kind: string, before: number): Promise<Record<string, any> | null> {
@@ -249,6 +253,8 @@ async function buildReport(p: Plant, period: Period, today: string, linkedOn?: s
       independence: pct(independence(home, imp), independence(pHome, pImp)),
       ...(tariff > 0 ? { saved: pct(saved(home, imp), saved(pHome, pImp)) } : {}),
     } : {},
+    ...(hasPrev ? { was: { made: pMade, home: pHome, import: pImp, independence: independence(pHome, pImp),
+                           ...(tariff > 0 ? { saved: saved(pHome, pImp) } : {}) } } : {}),
     bestDay: best(cur, "pv_kwh", dayLabel), highestUse: best(cur, "load_kwh", dayLabel), daily,
   };
 }
@@ -326,7 +332,8 @@ async function build(r: Row): Promise<Email | null> {
       const invs = await rpc<{ sn: string; last_dev: number | null }[]>("email_plant_inverters", { p_plant: p.id });
       const stale = d.inverter ? String(r.key).split(":")[2] : null; // logger_stale:<plant>:<sn>:<last_dev>
       // One stopped: the others send ("null"). The whole plant stopped: each its own last time.
-      return ev({ kind: "logger_stale", since: hhmm(d.since, tz), inverter: d.inverter ?? undefined,
+      // the one that stopped by serial, as in the list and its Readings back (SOLAR-560)
+      return ev({ kind: "logger_stale", since: hhmm(d.since, tz), inverter: stale ? `Inverter ${stale}` : undefined,
         inverters: invs.map((i) => ({ name: `Inverter ${i.sn}`,
           last: stale ? (i.sn === stale ? hhmm(d.since, tz) : null) : hhmm(i.last_dev ?? d.since, tz) })) }, d.since);
     }
@@ -404,7 +411,7 @@ async function build(r: Row): Promise<Email | null> {
       return planChangeBooked({ keepPlants: keep,
         from: d.from, to: d.to, fromPeriod: d.fromPeriod, toPeriod: d.toPeriod, on: day(d.on),
         removePlants: d.removePlants, deleteOn: d.deleteOn ? day(d.deleteOn) : undefined, next: d.to === "free" ? undefined : { amount: d.nextAmount },
-        days: await historyOf(r.user_id, d.removePlants ?? []),
+        days: (await historyOf(r.user_id, d.removePlants ?? [])).days,
         // Cancel to Free: history is deleted on the end date (SOLAR-495).
         history: d.to === "free" ? await historyAt(r.user_id).then((h) => h ? { ...h, on: day(d.on) } : undefined) : undefined,
       });
@@ -435,7 +442,7 @@ async function build(r: Row): Promise<Email | null> {
       // The next plan up keeps them: no plan to Home if 2 plants fit, else Family.
       const plan = (await billFacts(r.user_id))?.plan;
       const up = plan === "free" ? (d.plants.length + 1 <= 2 ? "home" : "family") : plan === "home" ? "family" : null;
-      return plantsRemovalSoon(d.plants, day(d.on), plan, up ? await priceOf(up, r.user_id) : undefined, await historyOf(r.user_id, d.plants));
+      return plantsRemovalSoon(d.plants, day(d.on), plan, up ? await priceOf(up, r.user_id) : undefined, (await historyOf(r.user_id, d.plants)).days);
     }
     case "bill_renewal_notice":
       return renewalNotice({ plan: d.plan, amount: d.amount, on: day(d.on), card: (await billFacts(r.user_id))?.card ?? undefined,
@@ -450,12 +457,14 @@ async function build(r: Row): Promise<Email | null> {
       return cardExpiring({ card: d.card, on: day(d.on), final: d.final === true,
         days: Math.round((Date.parse(d.on) - Date.parse(local("Africa/Johannesburg").date)) / 86400e3), next: { amount: d.nextAmount, date: day(d.nextDate) } });
     case "winback": {
-      const h = await historyAt(r.user_id, r.plant_id);
-      return winback({ from: d.from, plant: h?.plant, days: d.days ?? h?.days, price: await priceOf(d.from, r.user_id),
+      // every plant still reading loses its history, not only the first (d.days, 0206; SOLAR-616)
+      const h = await historyOf(r.user_id);
+      return winback({ from: d.from, plant: h.plants[0], plants: h.plants.length, days: h.days, price: await priceOf(d.from, r.user_id),
         deleteOn: d.deleteOn ? dayMonth(d.deleteOn) : undefined, unsub: unsubOf(r) });
     }
     case "bill_cancel_soon":
-      return cancelEndsSoon({ from: d.from, on: day(d.on), days: (await historyAt(r.user_id))?.days, deleteOn: dayMonth(addDays(d.on, 30)) });
+      return cancelEndsSoon({ from: d.from, on: day(d.on), ...await historyOf(r.user_id).then((h) => ({ days: h.days, plants: h.plants.length })),
+        deleteOn: dayMonth(addDays(d.on, 30)) });
     case "need_a_hand": return needAHand(d.choose === true);
     case "feedback":
       return feedback({ email: String(d.email ?? ""), message: String(d.message ?? ""), page: String(d.page ?? ""),

@@ -413,8 +413,11 @@ const saveEmailPref = (userId, kind, on) => saveFlag('email_prefs', 'email_pref_
 async function fetchNotifications() {
   const [n, a] = await Promise.all([must(window.sb.rpc('api_notifications')),
     must(window.sb.rpc('api_alerts', { p_from: new Date(Date.now() - 30 * 86400000).toISOString() }))]);
-  return { pinned: n.pinned, items: a.items,
-    unread: a.items.filter(it => !it.read).length + n.pinned.filter(p => !p.read).length };
+  // api_alerts sends rows newest-written first; a row shows when it happened (at), which can
+  // be earlier (a grid cut found after a gap), so the list sorts by that (SOLAR-617).
+  const items = [...a.items].sort((x, y) => (y.at - x.at) || (y.id - x.id));
+  return { pinned: n.pinned, items,
+    unread: items.filter(it => !it.read).length + n.pinned.filter(p => !p.read).length };
 }
 // ids: alert ids, and billing notices' keys (strings, 0173). null marks every one read.
 async function readNotifications(ids) {
