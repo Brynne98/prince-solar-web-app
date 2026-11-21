@@ -888,7 +888,7 @@ export type Change = {
   keepPlants?: string[];
   deleteOn?: string;
   next?: { amount: number }; // absent on Free
-  days?: number; // day totals the plants to delete hold between them
+  days?: number; // the most day totals one of the plants to delete holds (SOLAR-616)
   history?: { plant: string; days: number; on: string }; // cancel: the first plant's history, deleted on the end date (SOLAR-495)
 };
 
@@ -898,7 +898,7 @@ export const planChangeBooked = (c: Change) => {
   const title = cancel ? `${PLAN_NAME[c.from]} ends on ${c.on}` : switchOnly ? `${PLAN_NAME[c.from]} goes ${c.toPeriod} on ${c.on}` : `You move to ${PLAN_NAME[c.to]} on ${c.on}`;
   // Plants to delete lead, in amber, as in the later "deleted on" email (SOLAR-415).
   const hero = c.removePlants.length
-    ? lost(`Deleted on ${c.deleteOn ?? c.on}`, plantCount(c.removePlants.length), withDays(names(c.removePlants), c.days)) : undefined;
+    ? lost(`Deleted on ${c.deleteOn ?? c.on}`, plantCount(c.removePlants.length), withDays(names(c.removePlants), c.days, c.removePlants.length > 1)) : undefined;
   const kept: [string, string][] = hero && c.keepPlants?.length ? [["Plants kept", list(c.keepPlants)]] : [];
   return make(title, {
     title,
@@ -1081,7 +1081,12 @@ const keepSmall = (p: Price) => `${p.now < p.list ? `${PLAN_NAME[p.plan]} is nor
 const dayCount = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
 const plantCount = (n: number) => `${n} plant${n === 1 ? "" : "s"}`;
 const lost = (label: string, value: string, sub: string): Hero => ({ label, value, tone: "warn", sub });
-const withDays = (who: string, days?: number) => days ? `${who}, with ${dayCount(days)} of history` : who;
+// many: 2+ plants, whose history goes back as far as the longest one's (SOLAR-616)
+const withDays = (who: string, days?: number, many = false) => days ? `${who}, with ${many ? "up to " : ""}${dayCount(days)} of history` : who;
+// "Deleted on 21 Dec": "234 days of history at Farm", or "3 plants with up to 234 days of history"
+const lostHistory = (label: string, days: number, plants = 1, plant?: string): Hero => plants > 1
+  ? lost(label, plantCount(plants), `with up to ${dayCount(days)} of history`)
+  : lost(label, dayCount(days), plant ? `of history at ${plant}` : "of history");
 
 // Day 8 of a failed card: the plan has ended as a cancel's does. Nothing is read, every
 // plant stays linked, and the history is deleted 30 days later (SOLAR-564, 0212).
@@ -1105,13 +1110,13 @@ export const movedToFree = (m: MovedToFree) => {
 };
 
 // Once, when a cancelled plan ends on its date (SOLAR-328, 0144). History is deleted 30
-// days later (SOLAR-552, 0206). days: history the first plant held, counted when queued.
-export const winback = (w: { from: Plan; plant?: string; days?: number; price?: Price; deleteOn?: string; unsub: string }) =>
+// days later (SOLAR-552, 0206). days: the most any plant still reading holds; plants: how many (SOLAR-616).
+export const winback = (w: { from: Plan; plant?: string; plants?: number; days?: number; price?: Price; deleteOn?: string; unsub: string }) =>
   make(`Your ${PLAN_NAME[w.from]} plan has ended`, {
     title: `Your ${PLAN_NAME[w.from]} plan has ended`,
     parts: [
       { box: {
-        hero: w.days && w.plant ? lost(w.deleteOn ? `Deleted on ${w.deleteOn}` : "Deleted in 30 days", dayCount(w.days), `of history at ${w.plant}`) : undefined,
+        hero: w.days && w.plant ? lostHistory(w.deleteOn ? `Deleted on ${w.deleteOn}` : "Deleted in 30 days", w.days, w.plants, w.plant) : undefined,
         rows: STOPPED,
       } },
       ...(w.price ? [{ lead: keepOn(w.price, "everything") }] : []),
@@ -1123,14 +1128,14 @@ export const winback = (w: { from: Plan; plant?: string; days?: number; price?: 
 
 // Up to 3 days before a cancelled plan ends (SOLAR-495, 0188), laid out as the free week's
 // "ends soon": that day the reading stops; the history is deleted on deleteOn, 30 days
-// later. No plant names, as the cancel email. days: history the first plant holds. No
-// Keep button (SOLAR-412).
-export const cancelEndsSoon = (c: { from: Plan; on: string; days?: number; deleteOn?: string }) =>
+// later. No plant names, as the cancel email. days: the most any plant holds; plants: how
+// many lose it (SOLAR-616). No Keep button (SOLAR-412).
+export const cancelEndsSoon = (c: { from: Plan; on: string; days?: number; plants?: number; deleteOn?: string }) =>
   make(`${PLAN_NAME[c.from]} ends on ${c.on}`, {
     title: `${PLAN_NAME[c.from]} ends on ${c.on}`,
     parts: [
       { box: {
-        hero: c.days ? lost(c.deleteOn ? `Deleted on ${c.deleteOn}` : "Deleted 30 days later", dayCount(c.days), "of history") : undefined,
+        hero: c.days ? lostHistory(c.deleteOn ? `Deleted on ${c.deleteOn}` : "Deleted 30 days later", c.days, c.plants) : undefined,
         rows: [[`From ${c.on}`, "Readings stop"], ["Alerts and reports", "Stop"]],
       } },
       { lead: `To keep everything, tap Keep ${PLAN_NAME[c.from]} in Billing before ${c.on}.` },
@@ -1148,7 +1153,7 @@ export const plantsRemovalSoon = (plants: string[], on: string, plan?: Plan, pri
   return make(title, {
     title,
     parts: [
-      { box: { hero: lost(`Deleted on ${on}`, plantCount(plants.length), withDays(names(plants), days)) } },
+      { box: { hero: lost(`Deleted on ${on}`, plantCount(plants.length), withDays(names(plants), days, plants.length > 1)) } },
       { lead: `${plan && plan !== "free" ? `${PLAN_NAME[plan]} keeps ${PLAN_PLANTS[plan]}. ` : ""}${price ? keepOn(price, them) : `Choose a plan to keep ${them}.`}` },
       { button: { label: "See plans", href: PLANS } },
       ...(price ? [{ small: keepSmall(price) }] : []),
