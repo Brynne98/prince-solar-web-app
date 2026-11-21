@@ -126,7 +126,7 @@ begin
   -- Dead strings with voltage for 15 min: one "back" each. It goes on a minute with
   -- voltage, so one stray sample before nightfall cannot send it overnight. A string
   -- that went in another string's email comes back quietly; the one that held the
-  -- email names every string that went with it (0231).
+  -- email waits for all of them, then names every one (0231).
   for r in
     select a.plant_id, a.sn, a.no, a.dead_since, a.clear_at, a.group_no,
            (select array_agg(g.no order by g.no) from private.string_alert_state g
@@ -134,6 +134,10 @@ begin
            coalesce(nullif(m.alias, ''), 'Inverter ' || a.sn) as inverter
       from private.string_alert_state a left join private.meta m on m.sn = a.sn
      where a.plant_id = any (todo) and a.dead and p_ts - a.clear_at >= 900 and a.last_alive = p_ts
+       -- an email's holder waits until every string in it is back (0231)
+       and not exists (select 1 from private.string_alert_state g
+                        where g.plant_id = a.plant_id and g.sn = a.sn and g.group_no = a.no and g.no <> a.no and g.dead
+                          and not (p_ts - g.clear_at >= 900 and g.last_alive = p_ts))
      order by a.plant_id, m.ord nulls last, a.sn, a.no
   loop
     -- a string that went in another's email keeps group_no while that one is still
