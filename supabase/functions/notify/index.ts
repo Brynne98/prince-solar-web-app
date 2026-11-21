@@ -332,7 +332,8 @@ async function build(r: Row): Promise<Email | null> {
       const invs = await rpc<{ sn: string; last_dev: number | null }[]>("email_plant_inverters", { p_plant: p.id });
       const stale = d.inverter ? String(r.key).split(":")[2] : null; // logger_stale:<plant>:<sn>:<last_dev>
       // One stopped: the others send ("null"). The whole plant stopped: each its own last time.
-      return ev({ kind: "logger_stale", since: hhmm(d.since, tz), inverter: d.inverter ?? undefined,
+      // the one that stopped by serial, as in the list and its Readings back (SOLAR-560)
+      return ev({ kind: "logger_stale", since: hhmm(d.since, tz), inverter: stale ? `Inverter ${stale}` : undefined,
         inverters: invs.map((i) => ({ name: `Inverter ${i.sn}`,
           last: stale ? (i.sn === stale ? hhmm(d.since, tz) : null) : hhmm(i.last_dev ?? d.since, tz) })) }, d.since);
     }

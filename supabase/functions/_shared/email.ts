@@ -645,7 +645,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
       case "logger_stale": {
         const one = !!e.inverter;
         const list = e.inverters?.length ? e.inverters : [{ name: e.inverter ?? "Inverter", last: e.since }];
-        return [`No readings from ${plant}`, [
+        return [one ? `No readings from ${e.inverter}` : `No readings from ${plant}`, [
           { lead: one
             ? "SunSynk is working, but one inverter stopped sending it readings. Your power isn't affected. Only the app shows part of your plant."
             : "SunSynk is working, but your inverter stopped sending it readings. Your power isn't affected. Only the app stops updating." },
@@ -655,7 +655,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
         ]];
       }
       case "logger_back":
-        return [`Readings back at ${plant}`,
+        return [e.inverter ? `Readings back from ${e.inverter}` : `Readings back at ${plant}`,
           [{ box: { hero: { label: "No readings for", value: e.lasted, sub: span(e.since, e.at) },
             rows: e.inverter ? [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))]] : [] } }, { note: GAP }]];
     }
