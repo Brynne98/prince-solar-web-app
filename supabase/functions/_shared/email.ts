@@ -566,8 +566,8 @@ const OFFER_FOOTER = (why: string, unsub: string) => [`You get this because ${wh
 //  batt_hot_back 15 min at 43 C or below, after a batt_hot (0151)
 //  bank_drift    charge 10 points or more apart between inverters' own batteries for an hour
 //  bank_drift_back  under 8 points apart for 15 min, after a bank_drift (0151)
-//  string_dead   a string dead for 12 samples while another string on the same
-//                inverter makes over 200 W
+//  string_dead   a string dead for 12 samples while another string on the plant makes
+//                over 200 W; every used string on one inverter is one email, "Strings 1 and 2" (0231)
 //  string_back   voltage for 15 min with no dead sample, after a string_dead (0151)
 //  logger_stale  no new reading for the whole plant, or from one inverter while the others
 //                report (inverter set), for 30 min
@@ -629,7 +629,7 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
         return [`Panels stopped producing at ${plant}`, [{ box: { hero: { label: e.string, value: "No power", tone: "bad", sub: `since ${e.since} ${day}` },
           rows: [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))], ["Other strings", "Producing"]] } }]];
       case "string_back":
-        return [`Panels producing again at ${plant}`, [{ box: { hero: { label: `${e.string} was off for`, value: e.lasted, sub: span(e.since, e.at) },
+        return [`Panels producing again at ${plant}`, [{ box: { hero: { label: `${e.string} off for`, value: e.lasted, sub: span(e.since, e.at) },
           rows: [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))]] } }]];
       case "logger_stale": {
         const one = !!e.inverter;
