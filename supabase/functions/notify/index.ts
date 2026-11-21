@@ -249,6 +249,8 @@ async function buildReport(p: Plant, period: Period, today: string, linkedOn?: s
       independence: pct(independence(home, imp), independence(pHome, pImp)),
       ...(tariff > 0 ? { saved: pct(saved(home, imp), saved(pHome, pImp)) } : {}),
     } : {},
+    ...(hasPrev ? { was: { made: pMade, home: pHome, import: pImp, independence: independence(pHome, pImp),
+                           ...(tariff > 0 ? { saved: saved(pHome, pImp) } : {}) } } : {}),
     bestDay: best(cur, "pv_kwh", dayLabel), highestUse: best(cur, "load_kwh", dayLabel), daily,
   };
 }

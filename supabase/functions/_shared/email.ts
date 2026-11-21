@@ -110,7 +110,9 @@ type Part =
 // labels: one under each bar (a week); titles: the hover text per bar, where the mail app
 // shows it (desktop only). The highest bar is drawn full green, the rest dimmer.
 // A change on the previous period: the arrow and percent take the tone, the rest stays grey.
-type Delta = { n: number; prev: string; tone?: "good" | "bad" };
+// abs: the change in the tile's own unit ("3.8 kWh"), shown instead of the percent when it
+// is 200% or more, a jump off a small base (the app's rule, TrendBadge; SOLAR-615).
+type Delta = { n: number; prev: string; tone?: "good" | "bad"; abs?: string };
 type Bars = { values: (number | null)[]; from: string; to: string; labels?: string[]; titles?: string[] };
 
 type Body = { title: string; sub?: string; parts: Part[]; footer: string[] };
@@ -159,9 +161,9 @@ function drawBars(b: Bars): string {
 const deltaHtml = (d: Delta) => {
   const r = Math.round(d.n);
   const tone = d.tone === "good" ? C.ok : d.tone === "bad" ? C.bad : "#9aa5b3";
-  return `<span style="color:${tone};font-weight:600">${r > 0 ? "↑" : r < 0 ? "↓" : "→"} ${Math.abs(r)}%</span> vs ${esc(d.prev)}`;
+  return `<span style="color:${tone};font-weight:600">${r > 0 ? "↑" : r < 0 ? "↓" : "→"} ${esc(d.abs ?? Math.abs(r) + "%")}</span> vs ${esc(d.prev)}`;
 };
-const deltaText = (d: Delta) => { const r = Math.round(d.n); return `${r > 0 ? "↑" : r < 0 ? "↓" : "→"} ${Math.abs(r)}% vs ${d.prev}`; };
+const deltaText = (d: Delta) => { const r = Math.round(d.n); return `${r > 0 ? "↑" : r < 0 ? "↓" : "→"} ${d.abs ?? Math.abs(r) + "%"} vs ${d.prev}`; };
 
 function html(subject: string, b: Body): string {
   const rows = b.parts.map((x) => {
@@ -480,6 +482,7 @@ export type Report = {
   independencePct: number;
   savedRand: number | null; // null: no tariff set
   change: { made?: number; home?: number; import?: number; independence?: number; saved?: number }; // % vs prevLabel
+  was?: { made: number; home: number; import: number; independence: number; saved?: number }; // the figures in prevLabel
   bestDay?: { label: string; kwh: number };
   highestUse?: { label: string; kwh: number }; // the day the home used the most ("Busiest day")
   daily?: Bars; // solar kWh per day (per month for a year)
@@ -494,23 +497,31 @@ export type Report = {
 const kwh = (n: number): [string, string] => (n >= 1000 ? [(n / 1000).toFixed(2), "MWh"] : [n.toFixed(n < 100 ? 1 : 0), "kWh"]);
 // Colour a change by whether it's good for the owner, not by up or down: less grid
 // bought and less home use are good. Only a change that rounds to 0% stays grey.
-const trend = (n: number | undefined, prev: string, better: "up" | "down"): { delta?: Delta } => {
+// With the two figures (cur, was) and the tile's format: none when they read the same
+// (Independence 100% both weeks), and the change itself at 200% or more (SOLAR-615).
+const trend = (n: number | undefined, prev: string, better: "up" | "down",
+               cur?: number, was?: number, fmt?: (v: number) => string): { delta?: Delta } => {
   if (n == null || !isFinite(n)) return {};
+  const both = cur != null && was != null && fmt;
+  if (both && fmt(cur) === fmt(was)) return {};
+  const abs = both && Math.abs(n) >= 200 ? fmt(Math.abs(cur - was)) : undefined;
   if (Math.round(n) === 0) return { delta: { n, prev } };
-  return { delta: { n, prev, tone: (n > 0) === (better === "up") ? "good" : "bad" } };
+  return { delta: { n, prev, tone: (n > 0) === (better === "up") ? "good" : "bad", ...(abs ? { abs } : {}) } };
 };
+const kwhText = (n: number) => kwh(n).join(" ");
+const pctText = (n: number) => `${Math.round(n)}%`;
 const rand = (n: number) => "R" + Math.round(n).toLocaleString("en-US");
 const EVERY: Record<Period, string> = { week: "Weekly", month: "Monthly", year: "Yearly" };
 
 export function report(r: Report): Email {
   const [mv, mu] = kwh(r.madeKwh);
   const stats: Extract<Part, { stats: unknown }>["stats"] = [
-    { label: "Made", value: mv, unit: mu, tone: "solar", ...trend(r.change.made, r.prevLabel, "up") },
-    { label: "Home", value: kwh(r.homeKwh)[0], unit: kwh(r.homeKwh)[1], tone: "home", ...trend(r.change.home, r.prevLabel, "down") },
-    ...(r.importKwh != null ? [{ label: "Imported", value: kwh(r.importKwh)[0], unit: kwh(r.importKwh)[1], tone: "grid" as Tone, ...trend(r.change.import, r.prevLabel, "down") }] : []),
+    { label: "Made", value: mv, unit: mu, tone: "solar", ...trend(r.change.made, r.prevLabel, "up", r.madeKwh, r.was?.made, kwhText) },
+    { label: "Home", value: kwh(r.homeKwh)[0], unit: kwh(r.homeKwh)[1], tone: "home", ...trend(r.change.home, r.prevLabel, "down", r.homeKwh, r.was?.home, kwhText) },
+    ...(r.importKwh != null ? [{ label: "Imported", value: kwh(r.importKwh)[0], unit: kwh(r.importKwh)[1], tone: "grid" as Tone, ...trend(r.change.import, r.prevLabel, "down", r.importKwh, r.was?.import, kwhText) }] : []),
     ...(r.exportKwh != null ? [{ label: "Exported", value: kwh(r.exportKwh)[0], unit: kwh(r.exportKwh)[1], tone: "grid" as Tone }] : []),
-    { label: "Independence", value: `${Math.round(r.independencePct)}%`, tone: "cyan", ...trend(r.change.independence, r.prevLabel, "up") },
-    ...(r.savedRand != null ? [{ label: "Est. saved", value: rand(r.savedRand), ...trend(r.change.saved, r.prevLabel, "up") }] : []),
+    { label: "Independence", value: `${Math.round(r.independencePct)}%`, tone: "cyan", ...trend(r.change.independence, r.prevLabel, "up", r.independencePct, r.was?.independence, pctText) },
+    ...(r.savedRand != null ? [{ label: "Est. saved", value: rand(r.savedRand), ...trend(r.change.saved, r.prevLabel, "up", r.savedRand, r.was?.saved, rand) }] : []),
   ];
   const parts: Part[] = [];
   const fw = r.freeWeekEnds;
