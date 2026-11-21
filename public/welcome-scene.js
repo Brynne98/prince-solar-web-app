@@ -30,7 +30,7 @@ function sim(seed, peak, soc0, peakMin) {
 const D = sim(1, 9.6, .48, 740);
 
 const fmtP = kw => kw < 1 ? [Math.round(kw * 1000 / 10) * 10 + '', 'W'] : [kw.toFixed(2), 'kW'];
-const hm = h => { const m = Math.round(h * 60); return m >= 60 ? Math.floor(m / 60) + 'h' + (m % 60 ? ' ' + m % 60 + 'm' : '') : m + 'm'; };
+const hm = h => { const m = Math.round(h * 60); return m >= 60 ? Math.floor(m / 60) + 'h' + (m % 60 ? ' ' + m % 60 + 'm' : '') : m + ' min'; }; // as the app: 45 min, 1h 33m
 const clock = m => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
 /* ---------- chart helpers ---------- */
@@ -101,7 +101,7 @@ const mob=()=>innerWidth<=860;
 function pick(d){sel=d;view=new Date(d.getFullYear(),d.getMonth(),1);$('cal').classList.remove('open');draw()}
 // bars: the 30 days before today
 const days=[];for(let i=0;i<30;i++)days.push(exDay(2026,8,28+i));
-const axs=$('bars').nextElementSibling.children;axs[0].textContent=exDM(days[0]);axs[1].textContent='Best: '+exWDM(BEST)+', 54.1';axs[2].textContent=exDM(days[29]);
+const axs=$('bars').nextElementSibling.children;axs[0].textContent=exDM(days[0]);$('best').textContent='Best 54.1 kWh on '+exWDM(BEST);axs[2].textContent=exDM(days[29]);
 const mx=Math.max(...days.map(d=>info(d).made));
 days.forEach(d=>{const b=document.createElement('button'),I=info(d);b.setAttribute('aria-label',fmtD(d)+', '+I.made.toFixed(1)+' kWh');b.dataset.k=key(d);if(I.made===mx)b.classList.add('best');b.innerHTML='<i style="height:'+(I.made/mx*100)+'%"></i>';b.onclick=()=>pick(d);$('bars').append(b)});
 function chart(I){
@@ -395,7 +395,7 @@ qs.forEach(d => d.addEventListener('toggle', () => {
 
 /* ---------- inbox: open any of the example emails ---------- */
 (() => {
-const C={solar:'#3ddc84',home:'#f87171',grid:'#facc15',cyan:'#22d3ee',batt:'#a78bfa',plain:'#e7ecf2',ok:'#84cc16',bad:'#ef4444'};
+const C={solar:'#3ddc84',home:'#f87171',grid:'#facc15',cyan:'#22d3ee',batt:'#a78bfa',plain:'#e7ecf2',ok:'#84cc16',bad:'#ef4444',warn:'#f59e0b'};
 const d=(n,prev,good)=>({n,prev,good});
 const delta=x=>!x?'':`<div class="ib-d"><b style="color:${x.good===undefined?'#9aa5b3':x.good?C.ok:C.bad}">${x.n>0?'↑':'↓'} ${Math.abs(x.n)}%</b> vs ${x.prev}</div>`;
 const card=c=>`<div class="ib-card"><div class="ib-l">${c.l}</div><div class="ib-v" style="color:${C[c.tone||'plain']}">${c.v}${c.u?`<small>${c.u}</small>`:''}</div>${c.sub?`<div class="ib-d">${c.sub}</div>`:''}${delta(c.delta)}</div>`;
@@ -409,10 +409,12 @@ const MAIL=[
   btn:'Open Live'},
  {k:'panels',dot:C.bad,time:exDM(exDay(2026,9,20)),at:exWDM(exDay(2026,9,20))+', 11:55',subject:'Panels stopped producing at Example plant',preview:'Inverter 1, string 3: no power since 11:42',
   title:'Panels stopped producing at Example plant',stack:1,stats:[{l:'Inverter 1, string 3',v:'No power',tone:'bad',sub:'since 11:42 today'},{l:'Other panels',v:'OK',tone:'ok'}],btn:'Open Equipment'},
- {k:'hot',dot:C.bad,time:exDM(exDay(2026,9,12)),at:exWDM(exDay(2026,9,12))+', 14:21',subject:'Battery hot at Example plant',preview:'Battery 41 °C at 14:20',
-  title:'Battery hot at Example plant',stack:1,stats:[{l:'Battery',v:'41&nbsp;°C',tone:'bad',sub:'at 14:20 today'}],btn:'Open Equipment'},
- {k:'back',dot:C.grid,time:exDM(exDay(2026,9,3)),at:exWDM(exDay(2026,9,3))+', 18:45',subject:'Grid back at Example plant',preview:'Grid on since 18:45 today, outage 45m',
-  title:'Grid back at Example plant',stack:1,stats:[{l:'Grid',v:'On',tone:'ok',sub:'since 18:45 today'},{l:'Outage',v:'45m'}],btn:'Open Grid'},
+ {k:'uneven',dot:C.warn,time:exDM(exDay(2026,9,16)),at:exWDM(exDay(2026,9,16))+', 09:12',subject:'Batteries charging unevenly at Example plant',preview:'Gap 12% for over an hour',
+  title:'Batteries charging unevenly at Example plant',stack:1,stats:[{l:'Gap',v:'12%',tone:'warn',sub:'for over an hour'},{l:'Battery 1',v:'72%',tone:'batt'},{l:'Battery 2',v:'60%',tone:'batt'}],btn:'Open Equipment'},
+ {k:'hot',dot:C.bad,time:exDM(exDay(2026,9,12)),at:exWDM(exDay(2026,9,12))+', 14:21',subject:'Battery hot at Example plant',preview:'Battery 41°C at 14:20',
+  title:'Battery hot at Example plant',stack:1,stats:[{l:'Battery',v:'41°C',tone:'bad',sub:'at 14:20 today'}],btn:'Open Equipment'},
+ {k:'back',dot:C.grid,time:exDM(exDay(2026,9,3)),at:exWDM(exDay(2026,9,3))+', 18:45',subject:'Grid back at Example plant',preview:'Grid was off for 45 min',
+  title:'Grid back at Example plant',stack:1,stats:[{l:'Grid was off for',v:'45 min',tone:'ok',sub:'18:00 to 18:45 today'},{l:'Battery',v:'80%',tone:'batt'}],btn:'Open Grid'},
  {k:'down',dot:C.bad,time:exDM(exDay(2026,9,3)),at:exWDM(exDay(2026,9,3))+', 18:00',subject:'Grid down at Example plant',preview:'Grid off since 18:00 today, battery 86%',
   title:'Grid down at Example plant',stack:1,stats:[{l:'Grid',v:'Off',tone:'bad',sub:'since 18:00 today'},{l:'Battery',v:'86%',tone:'batt'}],btn:'Open Grid'}
 ];
@@ -480,7 +482,7 @@ const use = h => USE.reduce((v, [a, k]) => h >= a ? k : v, USE[0][1]);
 const pts = [];
 for (let m = 18 * 60, soc = 90; m <= 31 * 60; m += STEP) { const k = use(m / 60); pts.push({ m, soc, k }); soc -= k * STEP / 60 / CAP * 100; }
 const X = m => 10 + (m - 18 * 60) / (13 * 60) * 500, Y = s => 12 + (100 - s) * 1.1;
-const dur = h => { const t = Math.round(h * 60); return Math.floor(t / 60) + ' h ' + t % 60 + ' m'; };
+const dur = h => { const t = Math.round(h * 60); return Math.floor(t / 60) + 'h ' + t % 60 + 'm'; };
 const line = pts.map((p, i) => (i ? 'L' : 'M') + X(p.m).toFixed(1) + ' ' + Y(p.soc).toFixed(1)).join(' ');
 svg.innerHTML = `<defs><linearGradient id="bt-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa" stop-opacity=".35"/><stop offset="1" stop-color="#a78bfa" stop-opacity="0"/></linearGradient><clipPath id="bt-clip"><rect id="bt-cr" x="0" y="0" width="10" height="150"/></clipPath></defs>`
   + `<line x1="10" x2="510" y1="${Y(RES)}" y2="${Y(RES)}" stroke="#a78bfa" stroke-opacity=".55" stroke-dasharray="4 4"/><text x="510" y="${Y(RES) - 6}" text-anchor="end" class="axis">reserve ${RES}%</text>`
@@ -505,10 +507,9 @@ function glide(x, y, ms) {
 }
 function show(n, ms) {
   i = n;
-  const p = pts[n], left = (p.soc - RES) / 100 * CAP / p.k, end = p.m + left * 60;
+  const p = pts[n], left = (p.soc - RES) / 100 * CAP / p.k;
   g('clock').textContent = hm(p.m);
-  g('left').innerHTML = dur(left).replace(/ ([hm])/g, '<small>$1</small>');
-  g('at').textContent = 'Reaches the ' + RES + '% reserve ' + (end >= 30 * 60 ? 'after sunrise' : 'at ' + hm(end));
+  g('left').innerHTML = dur(left).replace(/(\d)([hm])/g, '$1<small>$2</small>');
   g('soc').textContent = Math.round(p.soc) + '%';
   g('load').textContent = p.k < 1 ? Math.round(p.k * 1000) + ' W' : p.k.toFixed(1) + ' kW';
   g('load').classList.toggle('hi', p.k >= 3);
@@ -529,11 +530,10 @@ if (!card) return;
 const ok = ['ok', 'Working'], look = ['warn', 'Needs a look'], chg = ['ok', 'Charging'];
 const T = (pv, batt, inv) => [['Solar panels', 'var(--solar)', pv[0], 'kW', pv[1]], ['Battery', 'var(--batt)', batt[0], '%', batt[1]], ['Inverters', inv[1] === ok ? 'var(--ok)' : 'var(--warn)', inv[0], '', inv[1]]];
 const S = [
-  { k: 'All working', tiles: T(['4.82', ok], ['64', chg], ['All on', ok]) },
-  { k: 'Panels stopped', title: 'Some panels made nothing today', todo: 'Check the breaker or isolator for your panels.', since: 'Since 11:42', tiles: T(['3.06', look], ['58', chg], ['All on', ok]) },
-  { k: 'Panels weak', title: 'Some panels are making less than usual', todo: 'Check for shade, dirt or a tripped breaker.', since: 'Today', tiles: T(['3.91', look], ['61', chg], ['All on', ok]) },
-  { k: 'Battery hot', title: 'The battery is hot, 46 °C', todo: 'Make sure air can move around it.', since: 'Since 13:20', tiles: T(['4.82', ok], ['64', look], ['All on', ok]) },
-  { k: 'Uneven batteries', title: 'Batteries charging unevenly', todo: 'Pack 1 is at 72%, pack 2 at 60%. The gap has grown all week.', since: 'For over an hour', tiles: T(['4.82', ok], ['66', look], ['All on', ok]) },
+  { k: 'All working', tiles: T(['4.82', ok], ['64', chg], ['Both on', ok]) },
+  { k: 'Panels stopped', title: 'Some panels made nothing today', todo: 'Check the breaker or isolator for your panels.', since: 'Since 11:42', tiles: T(['3.06', look], ['58', chg], ['Both on', ok]) },
+  { k: 'Panels weak', title: 'Some panels are making less than usual', todo: 'Check for shade, dirt or a tripped breaker.', since: 'Today', tiles: T(['3.91', look], ['61', chg], ['Both on', ok]) },
+  { k: 'Battery hot', title: 'The battery is hot, 46 °C', todo: 'Make sure air can move around it.', since: 'Since 13:20', tiles: T(['4.82', ok], ['64', look], ['Both on', ok]) },
   { k: 'Inverter quiet', title: 'Inverter 2 isn’t reporting', todo: 'Check it is on and its Wi-Fi dongle shows a light.', since: 'Last reading 40 min ago', tiles: T(['2.47', ok], ['64', chg], ['1 of 2', look]) },
 ];
 let cur = 0;
