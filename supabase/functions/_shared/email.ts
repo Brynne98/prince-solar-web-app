@@ -643,21 +643,23 @@ export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = 
         return [`Panels producing again at ${plant}`, [{ box: { hero: { label: `${e.string} off for`, value: e.lasted, sub: span(e.since, e.at) },
           rows: [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))]] } }]];
       case "logger_stale": {
+        // The title names the inverter, so its row would say it twice (SOLAR-560). The whole
+        // plant lists each inverter's last time only when there's more than one.
         const one = !!e.inverter;
-        const list = e.inverters?.length ? e.inverters : [{ name: e.inverter ?? "Inverter", last: e.since }];
+        const list = e.inverters ?? [];
         return [one ? `No readings from ${e.inverter}` : `No readings from ${plant}`, [
-          { lead: one
-            ? "SunSynk is working, but one inverter stopped sending it readings. Your power isn't affected. Only the app shows part of your plant."
-            : "SunSynk is working, but your inverter stopped sending it readings. Your power isn't affected. Only the app stops updating." },
+          { lead: one ? "This inverter stopped sending readings to SunSynk. We can't see if it's still running. The rest of your plant still updates."
+                      : "Your plant stopped sending readings to SunSynk, so Prince Solar Hub isn't updating. We can't see if it's still running." },
           { box: { hero: { label: "Last reading", value: e.since, tone: "warn", sub: day },
-            rows: list.map((i) => [esc(i.name), i.last ? esc(i.last) : "Sending"] as [string, string]) } },
-          { note: "We'll email you when readings come back, and get what we can of the gap." },
+            rows: one ? (list.length > 1 ? [["Other inverters", "Sending"]] : [])
+                      : list.length > 1 ? list.map((i) => [esc(i.name), esc(i.last ?? e.since)] as [string, string]) : [] } },
+          { note: "We'll email you when readings come back." },
         ]];
       }
       case "logger_back":
         return [e.inverter ? `Readings back from ${e.inverter}` : `Readings back at ${plant}`,
-          [{ box: { hero: { label: "No readings for", value: e.lasted, sub: span(e.since, e.at) },
-            rows: e.inverter ? [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))]] : [] } }, { note: GAP }]];
+          [{ box: { hero: { label: "No readings for", value: e.lasted, sub: span(e.since, e.at) } } },
+            { note: "Gaps in your charts fill in where SunSynk has the readings." }]];
     }
   })();
   return make(title, { title, parts: [...parts, { button: openPage(PAGE[e.kind], plantId) }], footer: ALERT_FOOTER(WHAT[e.kind], plant) });
