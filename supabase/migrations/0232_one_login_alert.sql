@@ -263,8 +263,9 @@ AS $function$
     -- every alert the user can still see: plants still linked, and readable (0204)
     select q.id, q.kind, q.key, q.plant_id, pu.plant_name, q.read_at, q.created_at, q.data, q.status,
            -- one login stopping (or coming back) writes a row per plant: one group (0232)
-           coalesce(case when q.kind in ('needs_relink', 'relinked')
-                         then q.kind || ':' || coalesce(q.data->>'account', '') || ':' || coalesce(q.data->>'since', '') end,
+           -- (rows from before 0158 have no since: each stays its own)
+           coalesce(case when q.kind in ('needs_relink', 'relinked') and q.data ? 'since'
+                         then q.kind || ':' || coalesce(q.data->>'account', '') || ':' || (q.data->>'since') end,
                     q.id::text) grp
       from public.email_queue q
       join public.plant_users pu on pu.user_id = q.user_id and pu.plant_id = q.plant_id
