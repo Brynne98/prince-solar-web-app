@@ -575,7 +575,7 @@ begin
     if old.cancel_at_period_end and old.period_end <= p_at then
       perform billing.end_sub(old.id, old.period_end, 'cancelled', p_at, 'paystack', false);
     else
-      perform billing.end_sub(old.id, old.past_due_since + make_interval(days => (select max(d) from unnest(m.retry_days) d) + 1),
+      perform billing.end_sub(old.id, coalesce(old.past_due_since + make_interval(days => (select max(d) from unnest(m.retry_days) d) + 1), p_at),
                               'unpaid', p_at, 'paystack', false);
     end if;
   end if;

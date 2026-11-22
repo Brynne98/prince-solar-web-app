@@ -18,11 +18,14 @@ export async function pool<T, R>(items: T[], parallel: number, budgetMs: number,
 export function verifyStatus(r: { action: string; status?: string } | null): string {
   if (!r) return "pending";
   if (r.action !== "again") return r.action;
-  return r.status === "success" ? "applied" : r.status === "not_applied" ? "refund" : r.status ?? "pending";
+  return r.status === "success" ? "applied"
+    : r.status === "not_applied" || r.status === "reversed" ? "refund"
+    : r.status === "failed" || r.status === "void" ? "failed" : "pending";
 }
 
-/** Paystack's id for a refund in a refund.* webhook: its id, else its refund_reference. */
-export function refundProviderId(d: Record<string, unknown>): string | null {
-  const v = d.id ?? d.refund_reference;
-  return v != null && v !== "" ? String(v) : null;
+/** A refund.* webhook's ids: Paystack's refund id, and its refund_reference. With no id the
+ *  database matches the refund on the payment's reference and keeps refund_reference. */
+export function refundIds(d: Record<string, unknown>): { provider_id: string | null; provider_ref: string | null } {
+  const str = (v: unknown) => v != null && v !== "" ? String(v) : null;
+  return { provider_id: str(d.id), provider_ref: str(d.refund_reference) };
 }

@@ -27,7 +27,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { payClosed } from "../_shared/gate.ts";
-import { pool, refundProviderId, verifyStatus } from "./helpers.ts";
+import { pool, refundIds, verifyStatus } from "./helpers.ts";
 
 const SECRET = Deno.env.get("PAYSTACK_SECRET_KEY") ?? "";
 // Local tests point this at a stand-in server.
@@ -211,7 +211,7 @@ serve("billing", async (req) => {
         // Paystack sends amount as a string ("10000", in cents) in its samples.
         const cents = Number(d.amount);
         await bill("record_refund_event", {
-          reference: ref, status, provider_id: refundProviderId(d),
+          reference: ref, status, ...refundIds(d),
           amount: Number.isSafeInteger(cents) && cents > 0 ? cents : null, reason: d.reason ?? null,
         });
       } else {

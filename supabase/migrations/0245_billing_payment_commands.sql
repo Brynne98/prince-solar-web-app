@@ -268,7 +268,8 @@ begin
   select * into inv from billing.invoices
    where account = p_account and kind = 'purchase' and status = 'open' order by created_at desc limit 1;
   if inv.id is not null then
-    if inv.price = pr.id and inv.extra_places = extras and inv.plants = want and inv.expected_version = a.version then
+    if inv.price = pr.id and inv.offer is not distinct from off and inv.extra_places = extras and inv.plants = want
+       and inv.expected_version = a.version then
       return billing.invoice_out(inv);
     end if;
     if billing.payment_in_flight(p_account) then
@@ -721,6 +722,7 @@ begin
     return jsonb_build_object('action', 'plan_ended');
   end if;
   update billing.invoices set amount_owed_minor = owed where id = p_inv.id;
+  perform billing.bump(p_inv.account);
   perform billing.log_event(p_inv.account, p_at, 'paystack', 'money_owed', null,
                             jsonb_build_object('invoice', p_inv.id, 'amount', owed), p_reason);
   return jsonb_build_object('action', 'owed', 'amount_minor', owed);
@@ -928,8 +930,10 @@ end $$;
 
 -- refund.pending / .processing / .processed / .failed from the webhook. A refund made
 -- by hand in the dashboard is recorded as 'manual' against the original try.
+-- p_provider_id: Paystack's refund id when the event has one (else null: matched on the
+-- payment's reference); p_provider_ref: its refund_reference, kept when there is no id.
 create function billing.record_refund_event(p_reference text, p_status text, p_provider_id text, p_amount int,
-                                            p_reason text, p_at timestamptz default now())
+                                            p_reason text, p_at timestamptz default now(), p_provider_ref text default null)
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
 declare
   st text := case lower(p_status) when 'processed' then 'processed' when 'failed' then 'failed'
@@ -957,7 +961,7 @@ begin
   insert into billing.refunds (attempt, reference, account, amount_minor, currency, reason, status, last_error,
                                provider_refund_id, created_at, updated_at)
   values (att.id, p_reference, acc, p_amount, att.currency, 'manual', st, case when st = 'failed' then p_reason end,
-          p_provider_id, p_at, p_at)
+          coalesce(p_provider_id, p_provider_ref), p_at, p_at)
   returning * into r;
   return to_jsonb(r);
 end $$;
@@ -1094,7 +1098,8 @@ begin
     -- unpaid window starts from the due date, so day 15 comes whatever happens to that try
     if exists (select 1 from billing.payment_attempts
                 where invoice = inv.id and channel in ('saved_card', 'none') and created_at >= s.period_end
-                  and (status in ('unknown', 'pending', 'failed') or (status = 'created' and claimed_until <= p_at))) then
+                  -- a written try with no answer gets a day of verifying before it counts
+                  and (status in ('unknown', 'pending', 'failed') or (status = 'created' and claimed_until <= p_at - interval '1 day'))) then
       update billing.subscriptions set status = 'past_due', past_due_since = s.period_end, version = version + 1 where id = s.id;
       perform billing.bump(s.account);
       perform billing.log_event(s.account, p_at, 'job', 'renewal_failed', null, jsonb_build_object('invoice', inv.id), 'not paid on its day');
@@ -1280,7 +1285,7 @@ begin
     when 'begin_attempt'    then billing.begin_attempt((p_args->>'invoice')::uuid, p_args->>'channel')
     when 'record_refund'    then billing.record_refund((p_args->>'refund')::uuid, p_args->>'error', p_args->>'provider_id')
     when 'record_refund_event' then billing.record_refund_event(p_args->>'reference', p_args->>'status', p_args->>'provider_id',
-                                   (p_args->>'amount')::int, p_args->>'reason')
+                                   (p_args->>'amount')::int, p_args->>'reason', now(), p_args->>'provider_ref')
     when 'record_dispute'   then billing.record_dispute(p_args->>'reference', p_args->>'event', p_args->>'status',
                                    (p_args->>'lost')::boolean, (p_args->>'amount')::int, now(), p_args->>'dispute_id')
     when 'event_begin'      then billing.event_begin(p_args->>'provider', p_args->>'type', p_args->>'entity', p_args->>'status', p_args->'payload')

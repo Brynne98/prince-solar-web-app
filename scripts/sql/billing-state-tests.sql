@@ -673,6 +673,10 @@ begin
   perform pg_temp.fails('P2 another checkout while the first may still take money',
     format('select billing.start_checkout(%L, ''family'', ''month'', 0, ''{990010201,990010202}'', %L)', a, pg_temp.t(0)),
     'already in progress');
+  update billing.offers set valid_until = pg_temp.t(0) - interval '1 day' where code = 'launch';
+  perform pg_temp.fails('P2 offer gone: not the old launch-price bill',
+    format('select billing.start_checkout(%L, ''home'', ''month'', 0, ''{990010201}'', %L)', a, pg_temp.t(0)), 'already in progress');
+  update billing.offers set valid_until = null where code = 'launch';
   perform pg_temp.eq('P2 the same checkout again: the same bill',
     billing.start_checkout(a, 'home', 'month', 0, '{990010201}', pg_temp.t(0))->>'invoice', i1::text);
   perform pg_temp.eq('P2 a second try on the account while one is open: busy',
@@ -1206,7 +1210,10 @@ declare a uuid := pg_temp.acct('f1a'); b uuid := pg_temp.acct('f1b'); c uuid := 
         pe timestamptz; ref text; inv uuid;
 begin
   pe := pg_temp.member(a, 'f1a', 990020101);
-  ref := pg_temp.job(a, pe, 'unknown');
+  ref := pg_temp.job(a, pe);                          -- written, no answer yet
+  perform billing.run(pe + interval '1 hour');
+  perform pg_temp.eq('F1 a written try with its lease over gets time to verify', pg_temp.st(a, pe + interval '1 hour', 'state'), 'active');
+  perform pg_temp.answer(ref, 'unknown', pe + interval '1 hour');
   perform pg_temp.eq('F1 unknown day 0: active until the job looks again', pg_temp.st(a, pe + interval '1 day', 'state'), 'active');
   perform billing.run(pe + interval '1 day');
   perform pg_temp.eq('F1 unknown day 0, lease over: the window starts', pg_temp.st(a, pe + interval '1 day', 'state'), 'past_due');
@@ -1277,7 +1284,10 @@ begin
   pe := pg_temp.member(b, 'f4b', 990020402);
   perform billing.cancel(b, pg_temp.t(1));
   ref := (select pa.reference from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice where i.account = b);
-  r := billing.record_dispute(ref, 'charge.dispute.resolve', 'lost', true, 4900, pe + interval '2 days');
+  r := jsonb_build_object('v', (select version from billing.accounts where id = b));
+  r := billing.record_dispute(ref, 'charge.dispute.resolve', 'lost', true, 4900, pe + interval '2 days')
+       || jsonb_build_object('v', (r->>'v')::bigint);
+  perform pg_temp.ok('F4 owed moves the account version', (select version from billing.accounts where id = b) > (r->>'v')::bigint);
   perform pg_temp.eq('F4 lost after the cancel date: owed', r->>'action', 'owed');
   perform pg_temp.eqt('F4 end date kept', pg_temp.st(b, pe + interval '2 days', 'access_ended_at'), pe);
 end $$;
@@ -1391,6 +1401,11 @@ begin
   perform billing.record_refund_event(ref, 'processed', 'RF_f13', 100, null, pg_temp.t(1));
   perform billing.record_refund_event(ref, 'pending', 'RF_f13', 100, null, pg_temp.t(2));
   perform pg_temp.eq('F13 late pending after processed', (select status from billing.refunds where id = rf), 'processed');
+  -- an event with no refund id is matched on the payment's reference
+  update billing.refunds set status = 'pending' where id = rf;
+  perform billing.record_refund_event(ref, 'processed', null, 100, null, pg_temp.t(3), 'RFREF_f13');
+  perform pg_temp.ok('F13 no id: matched, no second row', (select status = 'processed' from billing.refunds where id = rf)
+    and (select count(*) = 1 from billing.refunds where reference = ref));
 end $$;
 
 -- F15 a plan the clock ended shows no next plan; a card with no expiry is not "expires first"
