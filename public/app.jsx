@@ -1231,6 +1231,10 @@ function SaveToast() {
     return () => { toastShow = null; };
   }, []);
   const act = t?.action;
+  // First sentence bold on its own line, the rest below it (SOLAR-638)
+  const cut = t ? t.text.indexOf('. ') : -1;
+  const head = t && (cut < 0 ? t.text : t.text.slice(0, cut)).replace(/\.$/, '');
+  const rest = cut < 0 ? '' : t.text.slice(cut + 2);
   useEffect(() => {
     if (!t) return;
     if (t.error) window.track('error_toast_shown', { page: new URLSearchParams(location.search).get('tab') || 'home', error_id: recentErrorId() });
@@ -1254,7 +1258,7 @@ function SaveToast() {
       {t && (
         <div key={t.at} className={'toast' + (t.error ? ' error' : t.info ? ' info' : '') + (act ? ' sticky' : '')} onClick={() => setT(null)}>
           {!t.error && !t.info && <Icon id="tick" />}
-          <span>{t.text}{act && <> <button type="button" className="toast-act" onClick={() => { setT(null); act.onClick(); }}>{act.label}</button></>}</span>
+          <span><b className="toast-head">{head}</b>{rest && <span className="toast-rest">{rest}</span>}{act && <> <button type="button" className="toast-act" onClick={() => { setT(null); act.onClick(); }}>{act.label}</button></>}</span>
           {act && <button type="button" className="notice-x toast-x" aria-label="Close" onClick={() => setT(null)}><Icon id="close" /></button>}
         </div>
       )}

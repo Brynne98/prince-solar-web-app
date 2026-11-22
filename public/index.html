@@ -1373,11 +1373,12 @@
     border-radius: var(--r-lg); }
   @media (max-width: 599px) { .save-bar { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); } }
   .save-bar.dirty { border-color: rgba(var(--accent-rgb),0.4); }
-  /* what a save did (SOLAR-166): centred on the page, where the save bar was, 5 s; one with a link stays (SOLAR-479) */
-  .toast-host { position: fixed; left: var(--rail-w, 0px); right: 0; bottom: 24px; z-index: 9; display: flex; justify-content: center; padding: 0 var(--sp-lg); pointer-events: none; }
+  /* what a save did (SOLAR-166): bottom-right corner of the window, so a pop-up never puts it off-line (SOLAR-638), 5 s; one with a link stays (SOLAR-479) */
+  .toast-host { position: fixed; left: 0; right: 0; bottom: 24px; z-index: 9; display: flex; justify-content: flex-end; padding: 0 var(--sp-lg); pointer-events: none; }
   /* undo the browser's popover box: no centring, frame or fill (display above keeps it drawn) */
   .toast-host[popover] { top: auto; width: auto; height: auto; margin: 0; border: 0; background: none; color: inherit; overflow: visible; }
-  @media (max-width: 599px) { .toast-host { left: 0; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); } }
+  /* phones: centred, above the phone bar */
+  @media (max-width: 599px) { .toast-host { justify-content: center; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); } }
   /* a failed Settings save keeps its bar open: the toast sits above it */
   .frame:has(.save-bar) .toast-host { bottom: 88px; }
   @media (max-width: 599px) { .frame:has(.save-bar) .toast-host { bottom: calc(192px + env(safe-area-inset-bottom, 0px)); } }
@@ -1393,6 +1394,9 @@
   /* a failure, with at most one link */
   .toast.error { border-color: rgba(var(--bad-rgb),0.45); padding-left: var(--sp-lg); }
   .toast.info { padding-left: var(--sp-lg); }
+  /* bold first sentence, the rest on the line below (SOLAR-638) */
+  .toast-head { display: block; font-weight: 600; }
+  .toast-rest { display: block; color: var(--muted); }
   .toast-act { background: none; border: none; padding: 0; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; }
   @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
   @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
