@@ -1167,10 +1167,13 @@ $$;
 create function pg_temp.ver(p_plant bigint) returns bigint language sql as $$
   select version from billing.plants where id = p_plant
 $$;
-create function pg_temp.agg(p_plant bigint, p_at timestamptz) returns void language sql as $$
+-- stored history for a plant, as a guarded write would leave it (the clock here is not now())
+create function pg_temp.agg(p_plant bigint, p_at timestamptz, p_guarded boolean default true) returns void language sql as $$
+  select set_config('billing.guarded', case when p_guarded then 'on' else 'off' end, true);
   insert into public.agg_minute (plant_id, ts, pv_w, source)
   values (p_plant, extract(epoch from date_trunc('minute', p_at))::bigint, 100, 'poller')
-  on conflict do nothing
+  on conflict do nothing;
+  select set_config('billing.guarded', 'off', true);
 $$;
 create function pg_temp.has_agg(p_plant bigint) returns boolean language sql as $$
   select exists (select 1 from public.agg_minute where plant_id = p_plant)
@@ -1232,6 +1235,9 @@ begin
   perform pg_temp.ok('R1 status change logged', exists (select 1 from billing.account_events where account = a and kind = 'login_status'));
   update private.sunsynk_accounts set status = 'active' where id = l1;
   perform pg_temp.eq('R1 fixed: read again', pg_temp.lane_of(990030101, pg_temp.t(1)), l1::text);
+  update private.sunsynk_accounts set status = 'disabled' where id = l1;
+  perform pg_temp.eq('R1 disabled is not a broken login', (select status from billing.logins where id = l1), 'ok');
+  update private.sunsynk_accounts set status = 'active' where id = l1;
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1445,6 +1451,10 @@ begin
   perform pg_temp.ok('R6 heartbeat through the door', exists (select 1 from billing.job_heartbeats where job = 'billing-run'));
   perform pg_temp.ok('R6 history job quiet 10 min after its last run', pg_temp.alert('job_quiet', 'history', pg_temp.t(1)));
   perform pg_temp.ok('R6 alerts through the door', jsonb_typeof(public.billing_jobs('alerts')) = 'array');
+  perform pg_temp.fails('R6 unknown command refused', 'select public.billing_jobs(''alertz'')', 'unknown billing_jobs command');
+  -- a write outside the guarded functions lands only on a plant read now
+  perform pg_temp.agg(990030699, now(), false);
+  perform pg_temp.ok('R6 unguarded write to a plant nobody reads dropped', not pg_temp.has_agg(990030699));
   perform pg_temp.ok('R6 not callable by signed-in users',
     not has_function_privilege('authenticated', 'public.billing_jobs(text, jsonb)', 'execute')
     and not has_function_privilege('authenticated', 'public.poll_jobs_v2(int, int, uuid, timestamptz)', 'execute')

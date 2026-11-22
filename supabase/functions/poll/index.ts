@@ -398,9 +398,11 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
       }
     }
   } else if (plantsMinute || !cached.length) {
-    // Only chosen plants are read (0246): a plant new on the login waits to be chosen.
+    // Since the billing switch-over (0246) only chosen plants are read: a plant new on the
+    // login waits to be chosen. Before it (no versions), it is read from this minute on.
     try {
-      await syncPlants(acc);
+      const plants = await syncPlants(acc);
+      if (jobs.every((j) => j.version == null)) for (const p of plants) wanted.add(p.id);
     } catch (e) {
       console.warn(`plant refresh failed for ${acc.id}:`, e instanceof Error ? e.message : e);
       noteError("plant_refresh_failed", e, { user: acc.user_id, hourly: true });

@@ -529,6 +529,7 @@ const step = (args: Record<string, unknown>) =>
 async function runFetch(f: Fetch, started: number) {
   const acc: Account = { ...f.login };
   versions.set(f.plant, f.version);
+  refused.delete(f.plant);              // a warm isolate may remember an older refusal
   let day = f.day, days = 0, banked = 0;
   for (;;) {
     const before = throttledCounts.get(acc.id) ?? 0;
@@ -578,6 +579,7 @@ serve("recover", async (req) => {
 
     const only = Number(url.searchParams.get("plant")) || null;
     let jobs = await plantsToPoll();
+    refused.clear();
     for (const j of jobs) versions.set(j.plantId, j.version);
     if (only && url.searchParams.get("dry") !== "1") jobs = jobs.filter((j) => j.plantId === only);
     if (!jobs.length) return json({ ok: true, banked: 0, reason: only ? `plant ${only} is not linked` : "no linked plants" });

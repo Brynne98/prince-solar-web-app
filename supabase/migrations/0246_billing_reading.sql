@@ -243,9 +243,11 @@ begin
   end if;
   ok := billing.write_allowed(p_versions, p_at);
   -- the token is saved whatever happens to the readings: the fetch may have refreshed it
+  perform set_config('billing.guarded', 'on', true);
   out := public.poll_commit(p_account, p_ts, billing.only_plants(p_readings, ok), billing.only_plants(p_strings, ok),
                             billing.only_plants(p_agg, ok), billing.only_plants(p_meta, ok), p_inverters,
                             p_access, p_expires);
+  perform set_config('billing.guarded', 'off', true);
   perform billing.readings_arrived(array(select jsonb_array_elements_text(coalesce(out->'plants', '[]'))::bigint));
   return out || jsonb_build_object('refused', to_jsonb(array(
     select k::bigint from jsonb_object_keys(coalesce(p_versions, '{}')) k where k::bigint <> all (ok) order by 1)));
@@ -257,7 +259,9 @@ returns integer language plpgsql security definer set search_path = pg_temp as $
 declare n integer;
 begin
   perform billing.guard_write(p_plant, p_version, p_at);
+  perform set_config('billing.guarded', 'on', true);
   n := public.q_insert_recovered(p_plant, p_rows, p_source);
+  perform set_config('billing.guarded', 'off', true);
   if n > 0 then perform billing.readings_arrived(array[p_plant]); end if;
   return n;
 end $$;
@@ -268,18 +272,27 @@ returns integer language plpgsql security definer set search_path = pg_temp as $
 declare n integer;
 begin
   perform billing.guard_write(p_plant, p_version, p_at);
+  perform set_config('billing.guarded', 'on', true);
   n := public.q_insert_inverter_history(p_plant, p_sn, p_rows);
+  perform set_config('billing.guarded', 'off', true);
   if n > 0 then perform billing.readings_arrived(array[p_plant]); end if;
   return n;
 end $$;
 
--- 0125's plant_row_guard: since the switch-over the guarded writes above decide, and
--- plant_users.paused (the old "stopped") is no longer kept up to date.
+-- 0125's plant_row_guard. Since the switch-over plant_users.paused (the old "stopped")
+-- is no longer kept up to date: a guarded write above has checked the plant already
+-- (billing.guarded set for its transaction); any other write lands only on a plant read now.
 create or replace function private.plant_row_guard()
 returns trigger language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   if new.plant_id is null then return new; end if;
-  if billing.is_live() then return new; end if;
+  if billing.is_live() then
+    if current_setting('billing.guarded', true) = 'on' or tg_table_name in ('inverters', 'plant_config', 'meta')
+       or coalesce((billing.plant_state(new.plant_id)->>'read_now')::boolean, false) then
+      return new;
+    end if;
+    return null;
+  end if;
   if pg_try_advisory_xact_lock_shared(new.plant_id)
      and exists (select 1 from public.plant_users pu where pu.plant_id = new.plant_id
                   and (not pu.paused or tg_table_name in ('inverters', 'plant_config', 'meta'))) then
@@ -310,9 +323,11 @@ $$;
 create function billing.login_status_follow()
 returns trigger language plpgsql security definer set search_path = billing, pg_temp as $$
 declare
-  want text := case new.status when 'active' then 'ok' else 'needs_reconnect' end;
+  want text := case new.status when 'active' then 'ok' when 'needs_relink' then 'needs_reconnect' end;
   l billing.logins;
 begin
+  -- 'disabled' (disconnected in the old screens) is not a broken login: remove_login handles it
+  if want is null then return null; end if;
   update billing.logins set status = want where id = new.id and status <> want returning * into l;
   if l.id is not null then
     update billing.plants set version = version + 1
@@ -761,6 +776,12 @@ begin
   return jsonb_build_object('switched_at', (select switched_at from billing.switch_over));
 end $$;
 
+create function billing.unknown_command(p_cmd text)
+returns jsonb language plpgsql set search_path = billing, pg_temp as $$
+begin
+  raise exception 'unknown billing_jobs command %', p_cmd using errcode = '22023';
+end $$;
+
 -- ---------------------------------------------------------------------------
 -- The door for poll, recover and job-check (service role only).
 -- ---------------------------------------------------------------------------
@@ -776,6 +797,7 @@ begin
     when 'heartbeat'    then (select '{}'::jsonb from (select billing.heartbeat(p_args->>'job', now(), p_args->'result',
                                p_args->>'error')) x)
     when 'winback'      then billing.winback_return(p_args->>'reference')
+    else billing.unknown_command(p_cmd)
   end;
 end $$;
 
