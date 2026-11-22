@@ -226,16 +226,17 @@ export const extrasOf = (out: SeriesMap | undefined, grid: SeriesMap | undefined
  * the endpoints that did not, so the caller can bank the partial day and still
  * retry it.
  */
-export async function fetchInverterExtras(acc: Account, sn: string, day: string): Promise<Extras & { failed: string[] }> {
+export async function fetchInverterExtras(acc: Account, sn: string, day: string, gridOnly = false): Promise<Extras & { failed: string[] }> {
   const p = extrasPaths(sn, day);
-  const [out, grid] = await Promise.allSettled([apiGet(p.output, acc), apiGet(p.grid, acc)]);
+  // gridOnly: today's output/day is the poller's, every 10 minutes (bankTodayTemps).
+  const [out, grid] = await Promise.allSettled([gridOnly ? Promise.resolve(null) : apiGet(p.output, acc), apiGet(p.grid, acc)]);
   const failed: string[] = [];
   const val = (r: PromiseSettledResult<any>, k: string) => {
     if (r.status === "fulfilled") return parseSeries(r.value);
     failed.push(`${k}: ${String(r.reason instanceof Error ? r.reason.message : r.reason)}`);
     return undefined;
   };
-  return { ...extrasOf(val(out, "output"), val(grid, "grid")), failed };
+  return { ...extrasOf(gridOnly ? undefined : val(out, "output"), val(grid, "grid")), failed };
 }
 
 /** {ts, ac, dc, vac, fac, gfac} rows for q_insert_inverter_history, at the device's own sample times. */

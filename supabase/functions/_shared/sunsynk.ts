@@ -146,6 +146,10 @@ function signedHeaders(method: string, pathWithQuery: string, body?: string, bea
   return h;
 }
 
+// SunSynk's gateway gives up at about 10 s with a 504. A call still open at 15 s has hung,
+// and would hold its whole poll shard until pg_net's 55 s cut (Review K item 2, SOLAR-422).
+const API_TIMEOUT_MS = 15_000;
+
 // ---------------------------------------------------------------------------
 // Token endpoints
 // ---------------------------------------------------------------------------
@@ -160,6 +164,7 @@ async function postToken(payload: Record<string, string>): Promise<any> {
       method: "POST",
       headers: signedHeaders("POST", "/oauth/token", body),
       body,
+      signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });
   } catch (e) {
     tallyCall(who, "/oauth/token", failResult(e), Date.now() - t0);
@@ -219,11 +224,23 @@ async function rpc<T = any>(fn: string, args: Record<string, unknown>): Promise<
   return data as T;
 }
 
+// One sign-in renewal per login at a time: a plant's inverters are read in parallel, and
+// each used to renew on its own when the token was stale or a 401 came back (Review K item 7).
+const renewing = new Map<string, Promise<string>>();
+
 /** A valid access token for this account, refreshing if needed. Throws RelinkNeeded. */
 async function accessTokenFor(acc: Account, force = false): Promise<string> {
   if (!force && acc.access_token && acc.access_expires_at && Date.now() < Number(acc.access_expires_at)) {
     return acc.access_token;
   }
+  const live = renewing.get(acc.id);
+  if (live) return live;
+  const p = renewToken(acc).finally(() => renewing.delete(acc.id));
+  renewing.set(acc.id, p);
+  return p;
+}
+
+async function renewToken(acc: Account): Promise<string> {
   const refresh = await rpc<string | null>("account_refresh_get", { p_account: acc.id });
   if (!refresh) throw new RelinkNeeded(acc.id, "no refresh token stored");
 
@@ -322,7 +339,9 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
     countCall(acc);
     const t0 = Date.now();
     try {
-      const go = () => fetch(`${baseFor(tok)}${pathname}`, { headers: signedHeaders("GET", pathname, undefined, tok) });
+      const go = () => fetch(`${baseFor(tok)}${pathname}`, {
+        headers: signedHeaders("GET", pathname, undefined, tok), signal: AbortSignal.timeout(API_TIMEOUT_MS),
+      });
       // About a quarter of production's calls to the fake SunSynk fail in 1-2 ms and never
       // reach it (2026-11-10, SOLAR-477); one more try gets them through. Real calls don't retry here.
       const res = await go().catch((e) => (isFake(tok) ? go() : Promise.reject(e)));

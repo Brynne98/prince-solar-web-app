@@ -134,12 +134,12 @@ const plantSns = async (plantId: number) =>
  * before a failed endpoint fails the day, so a retry loses nothing and a day
  * given up after TEMP_MAX_TRIES still holds whatever it had.
  */
-async function fetchTempDay(job: PlantJob, sns: string[], day: string, started: number) {
+async function fetchTempDay(job: PlantJob, sns: string[], day: string, started: number, gridOnly = false) {
   const lo = dayStartEpoch(job.timezone, day);
   let banked = 0;
   for (const sn of sns) {
     if (Date.now() - started > TIME_BUDGET_MS) throw new BudgetReached(day);
-    const x = await fetchInverterExtras(job.account, sn, day);
+    const x = await fetchInverterExtras(job.account, sn, day, gridOnly);
     banked += await bankHistory(job.plantId, sn, historyRows(x, lo));
     if (x.failed.length) throw new Error(`${sn} ${x.failed.join("; ")}`);
   }
@@ -155,8 +155,10 @@ async function temperatureToday(job: PlantJob, started: number) {
   const sns = await plantSns(job.plantId);
   if (!sns.length) return { banked: 0, reason: "no inverter serials stored yet" };
   try {
-    return { banked: await fetchTempDay(job, sns, localDate(job.timezone), started), calls: 2 * sns.length };
+    // Grid frequency only: the poller banks today's output/day every 10 minutes (SOLAR-422).
+    return { banked: await fetchTempDay(job, sns, localDate(job.timezone), started, true), calls: sns.length };
   } catch (e) {
+    noteError("temps_today_failed", e, { plant: job.plantId, hourly: true });
     return { banked: 0, error: String(e instanceof Error ? e.message : e) };
   }
 }
@@ -407,6 +409,7 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
       if (r.historyFailed && left > 0) giveUp(day, `${left} of ${r.missing} minutes unfilled; history did not answer${r.reason ? `, ${r.reason}` : ""}`);
     } catch (e) {
       const error = String(e instanceof Error ? e.message : e);
+      noteError("recover_day_failed", e, { plant: plantId, day, hourly: true });
       results.push({ day, banked: 0, error });
       giveUp(day, error);
     }
@@ -419,7 +422,10 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
   // The walk goes last, so gap recovery keeps first call on the budget.
   let walk;
   try { walk = await temperatureWalk(job, started); }
-  catch (e) { walk = { banked: 0, error: String(e instanceof Error ? e.message : e) }; }
+  catch (e) {
+    noteError("temps_walk_failed", e, { plant: plantId, hourly: true });
+    walk = { banked: 0, error: String(e instanceof Error ? e.message : e) };
+  }
   const temps = { today: tempsToday, walk };
 
   return {
@@ -516,6 +522,8 @@ serve("recover", async (req) => {
         total += r.banked;
         plants.push(r);
       } catch (e) {
+        // A 200 reply is all call_fn checks (0181); the note is what PostHog sees.
+        noteError("recover_plant_failed", e, { plant: job.plantId, hourly: true });
         plants.push({ plantId: job.plantId, banked: 0, error: String(e instanceof Error ? e.message : e) });
       }
       done++;
