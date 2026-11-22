@@ -1778,6 +1778,27 @@
     border-radius: var(--r-lg); border: 1px solid rgba(var(--offer-rgb),0.35); background: rgba(var(--offer-rgb),0.08); font-size: var(--fs-sm); color: var(--muted); text-align: center; }
   .plan-offer b { color: var(--offer); font-weight: 600; }
   .plan-foot { margin: var(--sp-xl) 0 0; text-align: center; font-size: var(--fs-sm); color: var(--muted); }
+  /* SOLAR-640: both cards the same height, stacked too; the same rows on each, the button row at the foot */
+  .plan-grid.plan-cards { grid-auto-rows: 1fr; }
+  .plan-cards .pw-plan { overflow: hidden; }
+  .plan-band { min-height: 28px; margin: calc(-1 * var(--sp-xl)) calc(-1 * var(--sp-xl)) var(--sp-md); display: flex; align-items: center; justify-content: center;
+    font-size: var(--fs-2xs); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+  .pw-plan.plan-fit { border-color: rgba(var(--accent-rgb),0.55); background: linear-gradient(rgba(var(--accent-rgb),0.05), rgba(var(--accent-rgb),0.05)), var(--panel-2); }
+  .plan-fit .plan-band { background: var(--accent); color: var(--on-accent); }
+  .plan-cards .pw-plan .pw-name { justify-content: flex-start; gap: var(--sp-md); }
+  .plan-cards .pw-name .plan-pill { margin-left: auto; }
+  .plan-ico { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: var(--r-md); background: rgba(var(--ink-rgb),0.05); color: var(--accent); }
+  .plan-ico .ico, .plan-count .ico { width: var(--icon-md); height: var(--icon-md); }
+  .plan-for { margin: var(--sp-2xs) 0 0; font-size: var(--fs-md); color: var(--muted); }
+  .plan-bill { margin: var(--sp-2xs) 0 0; font-size: var(--fs-sm); color: var(--dim); }
+  .plan-count { display: flex; align-items: center; gap: var(--sp-sm); margin-top: var(--sp-md); padding: var(--sp-sm) var(--sp-md);
+    border-radius: var(--r-md); background: rgba(var(--ink-rgb),0.04); font-size: var(--fs-md); font-weight: 600; color: var(--text); }
+  .plan-count .ico { color: var(--accent); }
+  .plan-cards .pw-plan > .plan-feats { margin-top: var(--sp-md); }
+  .plan-cards .pw-plan > .plan-act { margin-top: auto; padding-top: var(--sp-lg); }
+  .plan-cards .plan-act > button, .plan-cards .plan-act > .plan-cur { width: 100%; min-height: 44px; margin: 0; font-size: var(--fs-md); }
+  .plan-cards .plan-act > button { padding-block: 0; }
+  .plan-cards .plan-act > * + * { margin-top: var(--sp-sm); }
   @media (max-width: 760px) {
     .plan-grid.plan-cards { margin-top: var(--sp-lg); }
     .plan-cards .pw-plan { padding: var(--sp-lg); }

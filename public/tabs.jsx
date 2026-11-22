@@ -2599,7 +2599,9 @@ function CancelSection({ billing: b, reload }) {
 // SOLAR-462: what each plan gives in one line, your plan marked by a pill, an offer's terms in
 // one band under the switch rather than on each card.
 // SOLAR-512: laid out as pricing pages are, the button under the price and a ticked list under it.
-const PLAN_FEATS = { home: ['2 plants', 'Full history', 'Reports'], family: ['5 plants', 'Everything in Home'] };
+// Both plans give the same; only the plant count differs, so every card lists the same rows (SOLAR-640)
+const PLAN_FEATS = ['Live, every minute', 'Power-cut and battery emails', 'History, for good', 'Monthly report'];
+const PLAN_FOR = { home: 'For your own house.', family: 'Your house, your parents’ and a holiday place.' };
 function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant = null }) {
   const plants = logins.flatMap(a => a.plants);
   const { useState, useEffect } = React;
@@ -2633,6 +2635,8 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
   );
   const { rand, billDay, perUnit, Was } = window.billingFmt;
   const unit = perUnit(view);
+  // the plan that holds every plant on the account, as the no-plan card names it
+  const fits = plants.length > planRoom('home') ? 'family' : 'home';
   const prices = b.prices?.[view] || {};
   const sameView = !paid || view === b.period;
   const price = (p) => p === b.plan && sameView ? b.price : prices[p];
@@ -2673,9 +2677,10 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
     }
     // a bigger plan is bought in the plan's own period
     if (!sameView && !across && PLAN_RANK[p] > PLAN_RANK[b.plan]) return <div className="plan-cur plan-wait">Available {b.period}</div>;
-    if (PLAN_RANK[p] > PLAN_RANK[b.plan]) return <button type="button" className="save-btn"
+    // not paid yet: only the plan that fits is the green button (SOLAR-640)
+    if (PLAN_RANK[p] > PLAN_RANK[b.plan]) return <button type="button" className={!paid && p !== fits ? 'ghost-btn' : 'save-btn'}
       onClick={() => (b.offer && window.track('offer_pick_done', { offer: b.offer.id, plan: p, period }),
-        !paid && cancelPlants(links, planRoom(p)).stop > 0 ? setStarting(p) : window.startUpgrade(p, period, !paid, null, forPlant ? [forPlant] : null))}>{paid ? 'Upgrade' : 'Start ' + PLAN_NAME[p]}</button>;
+        !paid && cancelPlants(links, planRoom(p)).stop > 0 ? setStarting(p) : window.startUpgrade(p, period, !paid, null, forPlant ? [forPlant] : null))}>{paid ? 'Upgrade' : 'Upgrade to ' + PLAN_NAME[p]}</button>;
     if (bookedHere(p)) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
     // a smaller plan in either period, from the billing date (SOLAR-364)
     return <button type="button" className="ghost-btn" disabled={!!busy} aria-busy={busy === 'down:' + p}
@@ -2694,15 +2699,25 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
                    options={[{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: <>Yearly <span className="plan-save">2 months free</span></> }]} />
         {offerBand}
         {/* One paywall on every screen: the cards side by side, stacked on phones (SOLAR-303, SOLAR-304) */}
+        {/* Same height, buttons in one row at the foot; not paid yet, a band marks the plan that holds their plants (SOLAR-640) */}
         <div className="plan-grid plan-cards">
-          {['home', 'family'].map(p => (
-            <div key={p} className={'pw-plan' + (p === b.plan ? ' plan-mine' : '')}>
-              <div className="pw-name">{PLAN_NAME[p]}{p === b.plan && <span className="plan-pill">Current</span>}</div>
-              <div className="pw-price"><Was list={list(p)} price={price(p) ?? 0} /><b>{rand(price(p) ?? 0, true)}</b>{' ' + unit}</div>
-              {action(p)}
-              <ul className="plan-feats">{PLAN_FEATS[p].map(f => <li key={f}><Icon id="tick" />{f}</li>)}</ul>
-            </div>
-          ))}
+          {['home', 'family'].map(p => {
+            const now = price(p) ?? 0, lowered = !!o && list(p) > now;
+            const bill = [lowered && (o.id === 'launch' ? 'Launch price' : 'Offer price'),
+              view === 'yearly' && `${lowered ? 'about' : 'About'} ${rand(Math.round(now / 12))} a month`].filter(Boolean).join(' · ');
+            return (
+              <div key={p} className={'pw-plan' + (p === b.plan ? ' plan-mine' : '') + (!paid && p === fits ? ' plan-fit' : '')}>
+                {!paid && <div className="plan-band">{p === fits && plants.length > 0 ? 'Fits your plant' + (plants.length > 1 ? 's' : '') : ''}</div>}
+                <div className="pw-name"><span className="plan-ico"><Icon id={p === 'home' ? 'home' : 'homes'} /></span>{PLAN_NAME[p]}{p === b.plan && <span className="plan-pill">Current</span>}</div>
+                <p className="plan-for">{PLAN_FOR[p]}</p>
+                <div className="pw-price"><Was list={list(p)} price={now} /><b>{rand(now, true)}</b>{' ' + unit}</div>
+                {bill && <p className={'plan-bill' + (lowered ? ' plan-offer-ln' : '')}>{bill}</p>}
+                <div className="plan-count"><Icon id="panel" />Up to {planRoom(p)} plants</div>
+                <ul className="plan-feats">{PLAN_FEATS.map(f => <li key={f}><Icon id="tick" />{f}</li>)}</ul>
+                <div className="plan-act">{action(p)}</div>
+              </div>
+            );
+          })}
         </div>
         <p className="plan-foot">More than 5 plants? <a className="mini-link" href="mailto:hello@princesolarhub.co.za" onClick={() => window.track('more_plants_email_done', { plan: b.plan, from: 'plans' })}>Email us</a>. Cancel any time.</p>
         {/* booked, it goes back to Billing, where Manage changes the pick (SOLAR-496) */}
