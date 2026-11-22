@@ -24,14 +24,21 @@ const migrations = readdirSync(dir).filter((f) => /^\d{4}_billing_/.test(f) && N
 // local database that already has the billing schema (the local preview) can run the test
 // (not the ones a file renames first and makes again: those exist before the billing files)
 const texts = migrations.map((f) => readFileSync(path.join(dir, f), 'utf8'));
-const renamed = new Set(texts.flatMap((t) => [...t.matchAll(/^alter function public\.(\w+)\(.*rename/gm)].map((m) => m[1])));
-const made = [...new Set(texts.flatMap((t) => [...t.matchAll(/^create function public\.(\w+)\(/gm)].map((m) => m[1])))]
-  .filter((n) => !renamed.has(n));
+const renamed = new Set(texts.flatMap((t) => [...t.matchAll(/^alter function (?:public|private)\.(\w+)\(.*rename/gm)].map((m) => m[1])));
+const made = [...new Set(texts.flatMap((t) => [...t.matchAll(/^create function (public|private)\.(\w+)\(/gm)].map((m) => m[1] + '.' + m[2])))]
+  .filter((n) => !renamed.has(n.split('.')[1]));
 const dropMade = made.length ? `do $d$ declare f record; begin for f in select p.oid::regprocedure s from pg_proc p
-  join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = any (array['${made.join("','")}'])
+  join pg_namespace n on n.oid = p.pronamespace where n.nspname || '.' || p.proname = any (array['${made.join("','")}'])
   loop execute 'drop function ' || f.s || ' cascade'; end loop; end $d$;` : '';
+// a function a file renames to *_old and makes again: on a database that already ran the file,
+// the new one goes and the old one gets its name back first
+const undoRenames = texts.flatMap((t) => [...t.matchAll(/^alter function (\w+)\.(\w+)\(([^)]*)\) rename to (\w+);/gm)])
+  .map(([, sch, name, args, to]) => `do $r$ begin if to_regprocedure('${sch}.${to}(${args})') is not null then
+    execute 'drop function if exists ${sch}.${name}(${args}) cascade'; execute 'alter function ${sch}.${to}(${args}) rename to ${name}';
+    end if; end $r$;`).join('\n');
 const sql = [
   'begin;',
+  undoRenames,
   'drop schema if exists billing cascade;',
   dropMade,
   ...migrations.map((f) => readFileSync(path.join(dir, f), 'utf8')),

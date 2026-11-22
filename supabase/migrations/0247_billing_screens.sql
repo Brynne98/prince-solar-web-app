@@ -473,7 +473,7 @@ begin
   return new;
 end $$;
 revoke all on function private.email_skip_unchosen() from public, anon, authenticated;
-drop trigger email_skip_paused on public.email_queue;
+drop trigger if exists email_skip_paused on public.email_queue;
 create trigger email_skip_paused before insert on public.email_queue
   for each row execute function private.email_skip_unchosen();
 

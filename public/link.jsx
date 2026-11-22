@@ -555,8 +555,10 @@ function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', pre
   // listed: every plant the account reaches (a keep pick: only the chosen ones)
   const logins = acctLogins(acct, p => (mode === 'keep' ? p.chosen : !p.purged || p.chosen));
   const all = logins.flatMap(g => g.plants.map(x => x.plant_id));
+  // choose: as chosen now, plus a new login's plants; checkout: every plant that fits, chosen
+  // ones first; keep: the chosen ones that fit
   const start = mode === 'choose' ? [...new Set([...chosen, ...prefill])].slice(0, room)
-    : chosen.length ? chosen.slice(0, room) : all.slice(0, room);
+    : mode === 'checkout' ? [...new Set([...chosen, ...all])].slice(0, room) : chosen.slice(0, room);
   const [picked, setPicked] = useState(start);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);

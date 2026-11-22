@@ -169,6 +169,8 @@ export const billing = {
   planHead: "Plan",
   cardHead: "Card",
   billsHead: "Payments",
+  cancelHead: "Cancellation",
+  cancelButton: "Cancel",
   noBills: "No payments yet.",
   noCard: "No card saved.",
   changePlan: "Change plan",

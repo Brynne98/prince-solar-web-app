@@ -2262,7 +2262,8 @@ function PlanSection({ acct, onPlans }) {
     </SettingsSection>
   );
   const running = acct.state === 'active' || acct.state === 'past_due';
-  const word = acct.state === 'past_due' ? ['bad', 'Payment failed'] : acct.cancel_at ? ['warn', 'Ending'] : null;
+  // a word beside the name for a booked end; a failed payment says so once, in its note
+  const word = acct.cancel_at ? ['warn', 'Ending'] : null;
   const booked = AT.bookedChange(acct);
   const must = AT.mustChoose(acct);
   const undo = async () => {
@@ -2411,9 +2412,9 @@ function CancelSection({ acct }) {
     setBusy(false); setAsking(false);
   };
   return (
-    <SettingsSection id="cancel" title={AT.billing.cancelPlan}>
+    <SettingsSection id="cancel" title={AT.billing.cancelHead}>
       <SettingRow label={AT.billing.cancelPlan}
-        action={<button type="button" className="danger-btn" disabled={busy || asking} onClick={() => setAsking(true)}>{AT.billing.cancelPlan}</button>} />
+        action={<button type="button" className="danger-btn" disabled={busy || asking} onClick={() => setAsking(true)}>{AT.billing.cancelButton}</button>} />
       {asking && (
         <ConfirmCard modal title={t.title} action={t.button} cancelLabel={t.keep} busy={busy} onConfirm={go} onCancel={() => setAsking(false)}>
           <div className="pay-review-box cancel-steps">{t.steps.map(([k, v]) => <div key={k}><b>{k}</b>{v}</div>)}</div>
@@ -2486,7 +2487,7 @@ function PlansDialog({ acct, onClose }) {
           return (
             <div key={row.plan} className={'pw-plan' + (c.current ? ' plan-mine' : '') + (c.fits ? ' plan-fit' : '')}>
               <div className="plan-band">{c.fits ? AT.plans.fits : ''}</div>
-              <div className="pw-name"><span className="plan-ico"><Icon id={row.places > 2 ? 'homes' : 'home'} /></span>{c.name}{c.current && <span className="plan-pill">{AT.plans.current}</span>}</div>
+              <div className="pw-name"><span className="plan-ico"><Icon id={row.places > 2 ? 'homes' : 'home'} /></span>{c.name}</div>
               <div className="pw-price">{c.was && <s className="pw-was">{c.was}</s>}<b>{c.price}</b>{' ' + c.per}</div>
               {c.offer && <p className="plan-bill plan-offer-ln">{c.offer}</p>}
               <div className="plan-count"><Icon id="panel" />{c.places}</div>
