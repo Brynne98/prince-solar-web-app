@@ -45,6 +45,11 @@ serve("claim-share", async (req) => {
     const r = await claimShared(userId, ref);
     if (r.result === "not_shared") return json({ error: "not_shared" }, 404, cors);
     if (r.result === "taken") return json({ error: "taken" }, 409, cors);
+    // The new account tables (SOLAR-641): the claim, first claim wins.
+    if (r.result !== "yours") {
+      const { error: newErr } = await db.rpc("billing_links", { p_cmd: "claim_plant", p_args: { user: userId, plant: r.plantId, name: r.plantName } });
+      if (newErr) noteError("claim_plant_failed", new Error(`claim_plant: ${newErr.message}`), { user: userId, plant: r.plantId });
+    }
     const { error: refundErr } = await db.rpc("link_succeeded", { p_user: userId });
     if (refundErr) {
       console.error(`claim-share refund failed for user ${userId}: ${refundErr.message}`);

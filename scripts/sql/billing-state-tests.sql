@@ -1940,6 +1940,19 @@ begin
   perform pg_temp.ok('O7 unclaimed: seat closed', not exists (select 1 from billing.seats where account = a and closed_at is null));
 end $$;
 
+-- O9 plant totals (sync-plant-energy) land only on a plant still read
+do $$
+declare rows jsonb := '[{"bucket":"month","period":"2026-11-01","pv_kwh":1,"load_kwh":2,"imp_kwh":0,"exp_kwh":0,"chg_kwh":0,"dischg_kwh":0,"synced_at":"2026-12-01T10:00:00Z"}]';
+begin
+  perform pg_temp.stored((select id from billing.logins where username = 'o1'));
+  perform pg_temp.fails('O9 a plant nobody reads: refused',
+    format('select public.q_upsert_plant_energy_v2(990040701, %s, %L, %L)', pg_temp.ver(990040701), rows, pg_temp.t(1)), 'not read now');
+  perform pg_temp.fails('O9 a stale version: refused',
+    format('select public.q_upsert_plant_energy_v2(990040101, %s, %L, %L)', pg_temp.ver(990040101) - 1, rows, pg_temp.t(1)), 'not read now');
+  perform pg_temp.eq('O9 read now, its version: written',
+    public.q_upsert_plant_energy_v2(990040101, pg_temp.ver(990040101), rows, pg_temp.t(1))::text, '1');
+end $$;
+
 -- O8 the sender's batch: every queued row either goes or is dropped with a reason
 do $$
 declare w jsonb;

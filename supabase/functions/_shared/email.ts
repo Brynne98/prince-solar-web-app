@@ -50,6 +50,7 @@ const addr = (email: string) => `<a href="mailto:${email}" style="color:#e7ecf2;
 const HELP = `Need help? Email <a href="mailto:hello@princesolarhub.co.za">hello@princesolarhub.co.za</a>.`;
 
 export type Email = { subject: string; html: string; text: string };
+import type { Mail as TextMail } from "./text.ts";
 
 // Same roles as the app's :root (public/index.html, SOLAR-346). The five power colours
 // mean only solar, home, grid, charge and battery; status words take ok, warn or bad;
@@ -294,6 +295,26 @@ const keep = (h: string) => h
   .replace(/>([^<]*)</g, (_m, t: string) => `>${t.replace(/\b(\d{4})(\d{5,})\b/g, "$1&#8203;$2")}<`);
 const make = (subject: string, b: Body): Email => ({ subject, html: keep(html(subject, b)), text: text(b) });
 
+
+// ---------------------------------------------------------------- billing outbox (SOLAR-641)
+
+/** An email from the text catalog (_shared/text.ts mail()): its words and numbers come from
+ *  the account's state read at send time; this only lays them out. unsub: the reminders
+ *  switch's page, for the kinds behind it. */
+export function outboxMail(m: TextMail, unsub?: string): Email {
+  const page = { billing: PLAN, plans: PLANS, pay: PAY_URL, card: PAYMENT, cancel: CANCEL } as const;
+  const parts: Part[] = m.parts.map((x): Part => {
+    if ("lead" in x) return { lead: esc(x.lead) };
+    if ("pair" in x) return { pair: [x.pair[0], esc(x.pair[1])] };
+    if ("note" in x) return { note: esc(x.note) };
+    if ("steps" in x) return { box: { steps: x.steps } };
+    if ("button" in x) return { button: { label: x.button.label, href: page[x.button.page] } };
+    return { box: { hero: x.hero,
+      rows: x.rows.map(([k, v]) => [k, k === "Reference" ? ref(v) : esc(v)] as [string, string]) } };
+  });
+  const footer = m.reminder && unsub ? OFFER_FOOTER("you have an account with us", unsub) : BILL_FOOTER;
+  return make(m.subject, { title: m.title, parts, footer });
+}
 
 // ---------------------------------------------------------------- account mail
 

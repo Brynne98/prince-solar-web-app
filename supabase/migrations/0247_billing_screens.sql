@@ -296,13 +296,16 @@ end $$;
 -- signed-in user. Before the switch these writes keep the new tables filled; after it
 -- their refusals are the rules.
 create function public.billing_links(p_cmd text, p_args jsonb)
-returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
+returns jsonb language plpgsql security definer set search_path = billing, private, pg_temp as $$
 declare acc uuid := billing.account_of((p_args->>'user')::uuid);
 begin
   return case p_cmd
-    when 'state' then billing.account_state(acc)
+    when 'state' then billing.account_state(acc) || jsonb_build_object('live', billing.is_live(),
+                        'login_known', exists (select 1 from billing.logins l where l.account = acc and l.username = p_args->>'username'))
+    -- the vault id is the stored login's own (private.sunsynk_accounts)
     when 'link_login' then billing.link_login(acc, coalesce(p_args->>'brand', 'sunsynk'), p_args->>'username',
-                             (p_args->>'secret_ref')::uuid, p_args->'plants', now(), 'owner', (p_args->>'login')::uuid)
+                             (select sa.refresh_secret_id from private.sunsynk_accounts sa where sa.id = (p_args->>'login')::uuid),
+                             p_args->'plants', now(), 'owner', (p_args->>'login')::uuid)
     when 'claim_plant' then billing.claim_plant(acc, (p_args->>'plant')::bigint, p_args->>'name')
     else billing.unknown_command(p_cmd)
   end;
@@ -407,6 +410,7 @@ returns integer language plpgsql security definer set search_path = public, pg_t
 declare n integer;
 begin
   perform billing.guard_write(p_plant, p_version, p_at);
+  perform set_config('billing.guarded', 'on', true);       -- checked above: plant_row_guard lets it through
   insert into public.plant_energy (plant_id, bucket, period, pv_kwh, load_kwh, imp_kwh, exp_kwh, chg_kwh, dischg_kwh, synced_at)
   select p_plant, r.bucket, r.period, r.pv_kwh, r.load_kwh, r.imp_kwh, r.exp_kwh, r.chg_kwh, r.dischg_kwh, r.synced_at
     from jsonb_to_recordset(p_rows) r (bucket text, period date, pv_kwh numeric, load_kwh numeric, imp_kwh numeric,
@@ -415,6 +419,7 @@ begin
      set pv_kwh = excluded.pv_kwh, load_kwh = excluded.load_kwh, imp_kwh = excluded.imp_kwh, exp_kwh = excluded.exp_kwh,
          chg_kwh = excluded.chg_kwh, dischg_kwh = excluded.dischg_kwh, synced_at = excluded.synced_at;
   get diagnostics n = row_count;
+  perform set_config('billing.guarded', 'off', true);
   return n;
 end $$;
 
@@ -572,6 +577,7 @@ declare
   kept timestamptz;
   d int;
 begin
+  if not billing.is_live() then return jsonb_build_object('live', false); end if;
   for a in select id from billing.accounts loop
     st := billing.account_status(a.id, p_at);
     if st.state = 'trialing' and st.trial_ends_at - p_at <= interval '2 days' then
@@ -695,7 +701,7 @@ begin
 end $$;
 
 -- notify: the rows due, each with what its email needs, read now. Stale ones are
--- dropped here. A row is leased for 5 minutes while it is sent.
+-- dropped here. A row is leased for 5 minutes while it is sent. Nothing before the switch.
 create function billing.outbox_take(p_limit int default 50, p_at timestamptz default now())
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
 declare
@@ -707,6 +713,8 @@ declare
   pm billing.payment_methods;
   u record;
 begin
+  -- before the switch the old emails still go; these wait and go once it is on
+  if not billing.is_live() then return '[]'::jsonb; end if;
   for o in select * from billing.outbox
             where status = 'queued' and not_before <= p_at and (claimed_until is null or claimed_until <= p_at)
             order by not_before, id limit p_limit for update skip locked loop

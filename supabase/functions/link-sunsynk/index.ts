@@ -53,9 +53,16 @@ serve("link-sunsynk", async (req) => {
   }
   if (!allowed) return json({ error: "too many attempts" }, 429, { ...cors, "Retry-After": "3600" });
 
-  // One SunSynk login for an account with no plan (0203). Asked before SunSynk is.
-  const { data: oneLogin, error: oneErr } = await db.rpc("link_login_allowed", { p_user: userId, p_username: username });
-  if (!oneErr && oneLogin === false) return json({ error: "one login" }, 409, cors);
+  // One login in the free week, none without a plan (billing.account_state may_add_login, 0247),
+  // asked before SunSynk is. Before the billing switch-over the old rule (0203) still decides.
+  // A login already on the account (a new password, a reconnect) always goes through.
+  const { data: acct } = await db.rpc("billing_links", { p_cmd: "state", p_args: { user: userId, username } });
+  if (acct?.live) {
+    if (!acct.may_add_login && !acct.login_known) return json({ error: acct.state === "ended" ? "no plan" : "one login" }, 409, cors);
+  } else {
+    const { data: oneLogin, error: oneErr } = await db.rpc("link_login_allowed", { p_user: userId, p_username: username });
+    if (!oneErr && oneLogin === false) return json({ error: "one login" }, 409, cors);
+  }
 
   try {
     const { accountId, plants, paused, reason } = await linkAccount(userId, username, password);
@@ -66,6 +73,10 @@ serve("link-sunsynk", async (req) => {
       console.error(`link-sunsynk refund failed for user ${userId}: ${refundErr.message}`);
       noteError("try_refund_failed", new Error(`link_succeeded: ${refundErr.message}`), { user: userId });
     }
+    // The new account tables (SOLAR-641): the login and its plant list, through link_login.
+    const { error: newErr } = await db.rpc("billing_links", { p_cmd: "link_login", p_args: {
+      user: userId, login: accountId, username, plants: plants.map((p) => ({ id: p.id, name: p.name })) } });
+    if (newErr) noteError("link_login_failed", new Error(`link_login: ${newErr.message}`), { user: userId });
     // SOLAR-319: a login added after the "need a hand" email went. Keyed on the email, so it counts once.
     const { data: hand } = await db.from("email_queue").select("id, sent_at")
       .eq("user_id", userId).eq("kind", "need_a_hand").eq("status", "sent").maybeSingle();

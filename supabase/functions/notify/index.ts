@@ -31,6 +31,8 @@ import {
   PAY_URL, cardChanged, cardExpiring, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
   offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, cancelEndsSoon, needAHand, feedback, unpaidReminder, unpaidLast, unpaidDeleted, APP,
 } from "../_shared/email.ts";
+import { outboxMail, FROM_BILLING, FROM_HELLO } from "../_shared/email.ts";
+import { mail as accountMail, type MailInput } from "../_shared/text.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
 const LIVE = Deno.env.get("NOTIFY_LIVE") === "1";
@@ -614,6 +616,53 @@ async function pushPass(deadline: number) {
   return count;
 }
 
+// ------------------------------------------------------------------- billing outbox (SOLAR-641)
+
+// billing.outbox (0247): billing, free-week and history emails. outbox_take hands over the rows
+// due with the account's state read now (stale ones are dropped there by each kind's guard);
+// the words come from the text catalog; a receipt reads its frozen bill.
+type OutboxRow = MailInput & { id: number; user: string; email: string; unsub_token: string | null; reminder: boolean };
+const OUTBOX_BATCH = 50;
+async function outboxPass(deadline: number) {
+  const count = { sent: 0, failed: 0, retried: 0 };
+  await rpc("billing_jobs", { p_cmd: "outbox_sweep" }).catch((e) => noteError("outbox_sweep_failed", e, { hourly: true }));
+  while (Date.now() < deadline) {
+    const rows = await rpc<OutboxRow[]>("billing_jobs", { p_cmd: "outbox_take", p_args: { limit: OUTBOX_BATCH } });
+    if (!rows.length) break;
+    const outs: { row: OutboxRow; payload: Record<string, unknown> }[] = [];
+    for (const row of rows) {
+      const m = accountMail(row);
+      if (!m) {
+        await rpc("billing_jobs", { p_cmd: "outbox_done", p_args: { id: row.id, ok: false, error: "nothing to say" } });
+        count.failed++;
+        continue;
+      }
+      const unsub = row.unsub_token ? `${APP}/unsubscribe.html?t=${row.unsub_token}&k=reminders` : undefined;
+      const e = outboxMail(m, unsub);
+      outs.push({ row, payload: { from: row.reminder ? FROM_HELLO : FROM_BILLING, reply_to: REPLY_TO, to: [row.email],
+        subject: e.subject, html: e.html, text: e.text,
+        ...(row.reminder && unsub ? { headers: { "List-Unsubscribe": `<${unsub}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" } } : {}) } });
+    }
+    if (!outs.length) continue;
+    // one key per set of rows: a retry after a lost answer sends nothing twice
+    const key = "ob-" + outs.map((o) => o.row.id).join(".");
+    const res = await paced(() => post(`${RESEND_URL}/batch`, outs.map((o) => o.payload), key));
+    for (const o of outs) {
+      const ok = !res.error;
+      // Resend refused the email itself (400, 422): given up; anything else in 5 minutes
+      const retry_s = ok || refused(res.status) ? null : 300;
+      await rpc("billing_jobs", { p_cmd: "outbox_done", p_args: { id: o.row.id, ok, error: res.error ?? null, retry_s } });
+      if (ok) {
+        count.sent++;
+        await track("account_email_sent_done", o.row.user, `outbox:${o.row.id}`, new Date().toISOString(), { kind: o.row.key }).catch(() => {});
+      } else if (retry_s) count.retried++;
+      else { count.failed++; noteError("email_failed", new Error(`outbox ${o.row.key} ${o.row.id}: ${res.error}`), { user: o.row.user, hourly: true }); }
+    }
+    if (res.error && !refused(res.status)) break;
+  }
+  return count;
+}
+
 async function run(dry: boolean, withHtml: boolean, push: boolean) {
   const started = Date.now();
   // What only the clock can tell: no readings, SunSynk, reports.
@@ -705,12 +754,16 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
       }
     }
   }
+  const outbox = dry ? null : await outboxPass(started + BUDGET_MS + 5_000).catch((e) => {
+    noteError("outbox_pass_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  });
   // The cron call times out at 55 s.
   const pushed = push ? await pushPass(started + 50_000).catch((e) => {
     noteError("push_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   }) : null;
-  return { live: !dry, swept, ...count, pushed, due: lines };
+  return { live: !dry, swept, ...count, outbox, pushed, due: lines };
 }
 
 // Every template from one plant's real numbers; event values are samples.

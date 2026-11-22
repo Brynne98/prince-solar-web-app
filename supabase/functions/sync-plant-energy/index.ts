@@ -118,9 +118,12 @@ async function syncPlant(job: PlantJob, dailyMonths: number, started: number, fu
     }
   }
 
+  // Written only while the plant is still read (SOLAR-641, the poll check): the plant's version
+  // from the job, checked under the plant's lock (q_upsert_plant_energy_v2, 0247). A plant
+  // switched out or deleted while its totals were fetched writes nothing.
   if (upserts.length) {
-    const { error } = await db.from("plant_energy")
-      .upsert(upserts, { onConflict: "plant_id,bucket,period" });
+    const { error } = await db.rpc("q_upsert_plant_energy_v2", { p_plant: plantId, p_version: job.version, p_rows: upserts });
+    if (error?.code === "55000") return { plantId, gridMul, rows: 0, years: synced.years, months: synced.months, reason: "not read now" };
     if (error) throw new Error(`plant_energy upsert: ${error.message}`);
   }
 
