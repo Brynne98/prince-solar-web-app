@@ -392,9 +392,10 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
   // while a first load runs (every 2 min); the scheduled runs see the same day.
   const lastTry = addDays(tz, today, -(windowDays - 1));
   const giveUp = (day: string, why: string) => {
-    if (day !== lastTry || day >= today || pending) return;
+    if (day !== lastTry || day >= today || pending) return false;
     console.error(`gap repair ${plantId} ${day} given up: ${why}`);
     noteError("gap_day_given_up", new Error(`gap repair ${plantId} ${day} given up: ${why}`), { plant: plantId, day });
+    return true;
   };
   for (let day = today; day >= floor; day = addDays(tz, day, -1)) {
     if (Date.now() - started > windowBudget) {
@@ -409,9 +410,8 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
       if (r.historyFailed && left > 0) giveUp(day, `${left} of ${r.missing} minutes unfilled; history did not answer${r.reason ? `, ${r.reason}` : ""}`);
     } catch (e) {
       const error = String(e instanceof Error ? e.message : e);
-      noteError("recover_day_failed", e, { plant: plantId, day, hourly: true });
       results.push({ day, banked: 0, error });
-      giveUp(day, error);
+      if (!giveUp(day, error)) noteError("recover_day_failed", e, { plant: plantId, day, hourly: true });
     }
   }
 

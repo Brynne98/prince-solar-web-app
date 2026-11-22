@@ -67,3 +67,49 @@ begin
   end loop;
 end $$;
 revoke all on function private.first_load_continue() from public, anon, authenticated;
+
+-- The link's own kick starts the first recover run, so it records its request too;
+-- otherwise first_load_continue starts a second run 2 minutes later (code review).
+-- plant_bootstrap_kick is the 0094 body; only the lines marked 0235 are new.
+create or replace function public.plant_bootstrap_kick(p_plant bigint)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  fn_base text := 'https://pmakzojwhouamawgszrc.functions.supabase.co';
+  fn text;
+  auth jsonb;
+  acc uuid;
+  rid bigint;                                                             -- 0235
+begin
+  if not exists (select 1 from pg_extension where extname = 'pg_net') then
+    raise notice 'pg_net not enabled here - not kicking bootstrap for plant %', p_plant;
+    return;
+  end if;
+  auth := jsonb_build_object(
+    'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'),
+    'Content-Type', 'application/json');
+  foreach fn in array array['sync-plant-energy', 'recover'] loop
+    rid := net.http_post(                                                 -- 0235: keep the id
+      url := fn_base || '/' || fn || '?plant=' || p_plant,
+      headers := auth,
+      body := '{}'::jsonb,
+      timeout_milliseconds := 150000);
+    if fn = 'recover' then                                                -- 0235
+      insert into private.recover_kicks (plant_id, request_id)
+        select p_plant, rid where exists (select 1 from public.plant_config where plant_id = p_plant)
+        on conflict (plant_id) do update set request_id = excluded.request_id, at = now();
+    end if;
+  end loop;
+  select account_id into acc from public.plant_users where plant_id = p_plant limit 1;
+  if acc is not null then
+    perform net.http_post(
+      url := fn_base || '/poll',
+      headers := auth,
+      body := jsonb_build_object('account', acc),
+      timeout_milliseconds := 55000);
+  end if;
+end $$;
+revoke all on function public.plant_bootstrap_kick(bigint) from public, anon, authenticated;

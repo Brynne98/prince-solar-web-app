@@ -172,7 +172,7 @@ const OUTPUT_EVERY_S = 600;
 
 // ---------------------------------------------------------------------------
 // Today's inverter temperatures (SOLAR-398). SunSynk sends no live temperature on
-// our key, only its day history (output/day). Recover fetches that every six hours;
+// our key, only its day history (output/day). Recover fetches it for past days only;
 // here each inverter fetches today's once in ten minutes, on its own minute (spread
 // by serial), so Equipment's temperature is ten minutes old at most plus the
 // logger's upload (master ~67 s, slave 5 min). One call: AC/DC temperature, AC
