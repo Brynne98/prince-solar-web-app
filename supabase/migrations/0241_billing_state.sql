@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0237 — billing redesign phase 1: account_state and plant_state (SOLAR-641).
+-- 0241 — billing redesign phase 1: account_state and plant_state (SOLAR-641).
 --
 -- The one place that works out an account's state and a plant's fate. Read-only.
 -- Every function takes `at`, so tests can move the clock. The clock wins over
@@ -11,8 +11,10 @@
 --             elsewhere: ended, so the pay screen shows.)
 --   trialing  inside the free week.
 --   active    a running plan, or a grant.
---   past_due  renewal unpaid: retries on market.retry_days, reading goes on;
---             ends on day max(retry_days) + 1.
+--   past_due  the job recorded a failed renewal try (status past_due,
+--             past_due_since = that first try): retries on market.retry_days,
+--             reading goes on; ends on day max(retry_days) + 1. A renewal due
+--             but not yet tried stays active.
 --   ended     the week or the plan is over.
 --
 -- protected = an open seat on a trialing/active/past_due account (login health
@@ -20,8 +22,8 @@
 -- read_now  = protected, the account is not over its places (must_choose), and an
 --             ok login (or a share claim) still reaches the plant.
 -- delete_at = null while protected or already purged; else the latest
---             access_ended_at + retention_days over open seats on ended accounts;
---             no open seat at all: `at`.
+--             access_ended_at + retention_days over open seats on ended accounts
+--             (null when no such end date is known); no open seat at all: `at`.
 -- ============================================================================
 
 -- Does the account still reach the plant? p_need_ok: only through an ok login or a claim.
@@ -92,15 +94,12 @@ begin
    where account = p_account and started_at <= p_at order by started_at desc limit 1;
   has_sub := found;
   if has_sub then
-    pds := s.past_due_since;
+    pds := case when s.status = 'past_due' then s.past_due_since end;
     if s.status = 'ended' then
       sub_end := s.ended_at;
     elsif s.cancel_at_period_end and s.period_end <= p_at then
       sub_end := s.period_end;
     else
-      if s.status = 'active' and s.period_end <= p_at then
-        pds := s.period_end;                     -- renewal due and not paid: day 0
-      end if;
       if pds is not null then
         r.plan_ends_at := pds + make_interval(days => (select max(d) from unnest(m.retry_days) d) + 1);
         if r.plan_ends_at <= p_at then sub_end := r.plan_ends_at; end if;
@@ -188,7 +187,7 @@ begin
   end loop;
   delete_at := case when is_protected or p.history_purged_at is not null then null
                     when seat_count = 0 then p_at
-                    else coalesce(latest, p_at) end;
+                    else latest end;
   return jsonb_build_object(
     'plant', p_plant,
     'protected', is_protected,

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SOLAR-641 state test. LOCAL database only (STATE_DB_URL to change; default the local
-// Supabase on 55322). Applies the billing migrations (0236 on, *_billing_*) and runs
+// Supabase on 55322). Applies the billing migrations (0240 on, *_billing_*) and runs
 // scripts/sql/billing-state-tests.sql in one transaction, then rolls it all back, so the
 // local database is left as it was. Exit 0: every check passed. Exit 1: a check failed
 // or the SQL broke.
@@ -18,7 +18,7 @@ if (!/@(127\.0\.0\.1|localhost)[:/]/.test(DB)) {
 const PSQL = process.env.PSQL || ['/opt/homebrew/opt/libpq/bin/psql', '/usr/local/opt/libpq/bin/psql'].find(existsSync) || 'psql';
 
 const dir = path.join(REPO, 'supabase/migrations');
-const migrations = readdirSync(dir).filter((f) => /^\d{4}_billing_/.test(f) && Number(f.slice(0, 4)) >= 236).sort();
+const migrations = readdirSync(dir).filter((f) => /^\d{4}_billing_/.test(f) && Number(f.slice(0, 4)) >= 240).sort();
 const sql = [
   'begin;',
   'drop schema if exists billing cascade;',

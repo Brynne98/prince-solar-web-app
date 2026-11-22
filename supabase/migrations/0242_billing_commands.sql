@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0238 — billing redesign phase 1: the plant and login commands (SOLAR-641).
+-- 0242 — billing redesign phase 1: the plant and login commands (SOLAR-641).
 --
 -- All writes go through commands. Each one locks the account row, then the plants
 -- it touches in id order, checks the state from billing.account_status at `at`,
@@ -7,14 +7,18 @@
 -- billing.account_state after the change.
 --
 -- set_chosen_plants(account, plants, at): the full list of chosen plants.
---   none -> trialing in one step (trial_started_at, trial_ends_at, plants marked
---   as having used their week). trialing/none: at most market.trial_places, and
---   no plant whose week was used by another account. active: at most places.
---   past_due and ended: refused. Plants must be on one of the account's logins
---   or claimed by it.
+--   none -> trialing in one step (trial_started_at, trial_ends_at).
+--   trialing/none: at most market.trial_places, and no plant whose week was used
+--   by another account. active: at most places. past_due and ended: refused.
+--   Plants must be on one of the account's logins or claimed by it.
+--   Every newly seated plant, on any state, is marked as having used its week
+--   (trial_used_at; trial_used_by when empty), so a plant once paid for cannot
+--   give a later account a free week.
 -- link_login(account, brand, username, secret_ref, plants, at): adds a login or
 --   reconnects one already there. None added while ended; one in none/trialing.
 --   Plants missing from the new list get gone_at. Never starts the week.
+--   Plants whose route changed (gone, back, or new on this login) get a
+--   version bump, so in-flight reads see the change.
 -- remove_login(account, login, at): closes a seat only when the account loses its
 --   last route to that plant. Returns the plants no account protects any more
 --   ('unprotected'); the delete job (later phase) removes their history.
@@ -41,6 +45,25 @@ create function billing.lock_plants(p_plants bigint[])
 returns void language sql set search_path = billing, pg_temp as $$
   select null from (select id from billing.plants where id = any (p_plants) order by id for update) x
 $$;
+
+-- Makes `want` the account's open seats: closes the rest, opens the new ones, marks
+-- each newly seated plant's week as used and bumps the version of every plant that
+-- changed. The caller holds the account and plant locks and has checked the rules.
+create function billing.write_seats(p_account uuid, p_want bigint[], p_at timestamptz, p_reason text default 'switched')
+returns void language plpgsql set search_path = billing, pg_temp as $$
+declare had bigint[];
+begin
+  had := array(select plant from billing.seats where account = p_account and closed_at is null order by 1);
+  update billing.seats set closed_at = p_at, close_reason = p_reason
+   where account = p_account and closed_at is null and plant <> all (p_want);
+  insert into billing.seats (account, plant, chosen_at)
+  select p_account, x, p_at from unnest(p_want) x where x <> all (had);
+  update billing.plants set trial_used_at = coalesce(trial_used_at, p_at),
+                            trial_used_by = coalesce(trial_used_by, p_account)
+   where id = any (p_want) and id <> all (had) and (trial_used_at is null or trial_used_by is null);
+  update billing.plants set version = version + 1
+   where id = any (p_want || had) and not (id = any (p_want) and id = any (had));
+end $$;
 
 -- ---------------------------------------------------------------------------
 create function billing.set_chosen_plants(p_account uuid, p_plants bigint[],
@@ -85,18 +108,11 @@ begin
       update billing.accounts set trial_started_at = p_at, trial_ends_at = p_at + make_interval(days => m.trial_days)
        where id = p_account;
     end if;
-    update billing.plants set trial_used_at = p_at, trial_used_by = p_account, version = version + 1
-     where id = any (want) and trial_used_at is null;
   elsif cardinality(want) > st.places then
     raise exception 'your plan has % places', st.places using errcode = '22023';
   end if;
 
-  update billing.seats set closed_at = p_at, close_reason = 'switched'
-   where account = p_account and closed_at is null and plant <> all (want);
-  insert into billing.seats (account, plant, chosen_at)
-  select p_account, x, p_at from unnest(want) x
-   where not exists (select 1 from billing.seats s where s.account = p_account and s.plant = x and s.closed_at is null);
-  update billing.plants set version = version + 1 where id = any (want || had) and not (id = any (want) and id = any (had));
+  perform billing.write_seats(p_account, want, p_at);
   update billing.accounts set version = version + 1 where id = p_account;
   perform billing.log_event(p_account, p_at, p_actor, 'set_chosen_plants',
                             jsonb_build_object('state', st.state, 'plants', to_jsonb(had)),
@@ -115,6 +131,8 @@ declare
   l billing.logins;
   ids bigint[];
   old_ids bigint[] := '{}';
+  old_live bigint[] := '{}';
+  changed bigint[];
   is_new boolean;
 begin
   a := billing.lock_account(p_account);
@@ -131,6 +149,7 @@ begin
     end if;
   else
     old_ids := array(select plant from billing.login_plants where login = l.id);
+    old_live := array(select plant from billing.login_plants where login = l.id and gone_at is null);
   end if;
 
   ids := array(select distinct (e->>'id')::bigint from jsonb_array_elements(coalesce(p_plants, '[]')) e order by 1);
@@ -153,6 +172,9 @@ begin
                                            last_seen_at = excluded.last_seen_at, gone_at = null;
   update billing.login_plants set gone_at = p_at
    where login = l.id and gone_at is null and plant <> all (ids);
+  changed := array(select x from unnest(ids) x where x <> all (old_live)
+                   union select x from unnest(old_live) x where x <> all (ids));
+  update billing.plants set version = version + 1 where id = any (changed);
 
   update billing.accounts set version = version + 1 where id = p_account;
   perform billing.log_event(p_account, p_at, p_actor, case when is_new then 'link_login' else 'relink_login' end,
@@ -200,6 +222,7 @@ end $$;
 revoke all on function billing.log_event(uuid, timestamptz, text, text, jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function billing.lock_account(uuid) from public, anon, authenticated;
 revoke all on function billing.lock_plants(bigint[]) from public, anon, authenticated;
+revoke all on function billing.write_seats(uuid, bigint[], timestamptz, text) from public, anon, authenticated;
 revoke all on function billing.set_chosen_plants(uuid, bigint[], timestamptz, text) from public, anon, authenticated;
 revoke all on function billing.link_login(uuid, text, text, uuid, jsonb, timestamptz, text) from public, anon, authenticated;
 revoke all on function billing.remove_login(uuid, uuid, timestamptz, text) from public, anon, authenticated;

@@ -1,8 +1,11 @@
 -- ============================================================================
--- 0239 — billing redesign phase 1: copy today's accounts into the new tables
+-- 0243 — billing redesign phase 1: copy today's accounts into the new tables
 --        (SOLAR-641).
 --
--- One function, run once here; the state test runs it again on made-up rows.
+-- One function, NOT run by this migration. Run it once at switch-over
+-- (DEPLOY.md, "Billing switch-over"): it empties the billing tables it fills and
+-- copies fresh, so a second run gives the same rows. It refuses once the new
+-- payment tables hold an invoice. The state test runs it on made-up rows.
 -- The old tables stay untouched and in use. Nothing old reads the new tables.
 --
 --   accounts       every auth user; trial from private.free_week_logins
@@ -14,7 +17,8 @@
 --                  linked account whose week began closest to it.
 --   login_plants   plant_users rows reached by a login (not via a share).
 --   plant_claims   live share claims (via_share, share_gone_at null).
---   seats          plant_picks not held, whose plant_users row is not paused.
+--   seats          plant_picks held (the tick holds a place), whose plant_users
+--                  row is not paused.
 --   subscriptions  private.billing home/family, not comped: amounts from
 --                  billing_amount (cents), dates at midnight in Johannesburg.
 --                  A plan that ended (plan 'free', ended_at set) becomes an ended
@@ -27,7 +31,23 @@ returns jsonb language plpgsql security definer set search_path = billing, publi
 declare
   tz constant text := 'Africa/Johannesburg';
   out jsonb;
+  paid boolean := false;
 begin
+  if to_regclass('billing.invoices') is not null then
+    execute 'select exists (select 1 from billing.invoices)' into paid;
+  end if;
+  if paid then
+    raise exception 'billing copy refused: the new tables already hold payments' using errcode = '55000';
+  end if;
+  delete from billing.seats;
+  delete from billing.plant_claims;
+  delete from billing.login_plants;
+  delete from billing.grants;
+  delete from billing.subscriptions;
+  delete from billing.logins;
+  delete from billing.accounts;
+  delete from billing.plants;
+
   insert into billing.accounts (user_id, market, trial_started_at, trial_ends_at, created_at)
   select u.id, 'ZA', fw.started, greatest(private.week_ends(u.id), fw.started), u.created_at
     from auth.users u
@@ -76,7 +96,7 @@ begin
     from private.plant_picks pk
     join billing.accounts a on a.user_id = pk.user_id
     join public.plant_users pu on pu.user_id = pk.user_id and pu.plant_id = pk.plant_id
-   where not pk.held and not pu.paused
+   where pk.held and not pu.paused
      and not exists (select 1 from billing.seats s where s.account = a.id and s.plant = pk.plant_id and s.closed_at is null);
 
   -- running plans
@@ -144,4 +164,3 @@ begin
 end $$;
 revoke all on function billing.copy_from_old() from public, anon, authenticated;
 
-do $$ begin raise notice 'billing copy: %', billing.copy_from_old(); end $$;

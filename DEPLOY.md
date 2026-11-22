@@ -227,6 +227,18 @@ key. To switch it off: `supabase secrets unset TESTER_USERS TESTER_EMAIL_PATTERN
 Tester events (`upgrade_done` and the rest) are in PostHog under the tester's user id;
 filter that id out of sales numbers.
 
+## Billing switch-over (SOLAR-641)
+
+The new `billing` schema (migrations 0240 on) ships empty and unused. When the new
+billing code goes live, in this order:
+
+1. Turn the old billing job off.
+2. Copy today's accounts, once: `supabase db query --linked "select billing.copy_from_old()"`.
+   It empties the billing tables it fills and copies fresh, so a rerun is safe until
+   the first payment lands in `billing.invoices`; after that it refuses.
+3. Compare `billing.account_state` for each account with today's screens, next charges
+   and poll decisions.
+
 ## Changing the domain
 
 Two places know the origin:

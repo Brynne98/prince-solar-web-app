@@ -1,13 +1,13 @@
 -- ============================================================================
--- 0236 — billing redesign phase 1: the new tables (SOLAR-641).
+-- 0240 — billing redesign phase 1: the new tables (SOLAR-641).
 --
 -- Design: reports/billing-redesign-2026-11-22.md (v2 and Round 4 win over v1).
 -- Stored facts only. State, counts, open places, read-now and delete dates are
--- worked out by billing.account_state / billing.plant_state (0237).
+-- worked out by billing.account_state / billing.plant_state (0241).
 --
 -- Own schema `billing`, not exposed to the API: private.offers already uses the
 -- name "offers", and the old tables stay in use until the switch-over. Nothing old
--- reads these tables yet. Writes go through the commands in 0238 only.
+-- reads these tables yet. Writes go through the commands in 0242 only.
 --
 -- Plant ids are today's plant ids (reading tables stay keyed by them).
 -- Money is in minor units (cents). Yearly = 10 monthly.
@@ -121,9 +121,9 @@ create table billing.offers (
   valid_until     timestamptz,
   max_members     int check (max_members > 0)
 );
--- 0145 / private.offers 'launch': opened 2026-11-17, 100 places.
+-- 0145 / private.offers 'launch': valid from 2026-11-03, 100 places.
 insert into billing.offers (code, first_time_only, valid_from, valid_until, max_members)
-values ('launch', true, '2026-11-17 00:00 Africa/Johannesburg', null, 100);
+values ('launch', true, '2026-11-03 00:00 Africa/Johannesburg', null, 100);
 
 create table billing.prices (
   id                uuid primary key default gen_random_uuid(),
@@ -148,10 +148,10 @@ insert into billing.prices (plan, market, interval, amount_minor, extra_place_mi
   ('home',   'ZA', 'year',   99000,     0, null,     '2026-11-06 00:00 Africa/Johannesburg'),
   ('family', 'ZA', 'month',  19900,  4900, null,     '2026-11-06 00:00 Africa/Johannesburg'),
   ('family', 'ZA', 'year',  199000, 58800, null,     '2026-11-06 00:00 Africa/Johannesburg'),
-  ('home',   'ZA', 'month',   4900,     0, 'launch', '2026-11-17 00:00 Africa/Johannesburg'),
-  ('home',   'ZA', 'year',   49000,     0, 'launch', '2026-11-17 00:00 Africa/Johannesburg'),
-  ('family', 'ZA', 'month',   9900,  2900, 'launch', '2026-11-17 00:00 Africa/Johannesburg'),
-  ('family', 'ZA', 'year',   99000, 29000, 'launch', '2026-11-17 00:00 Africa/Johannesburg');
+  ('home',   'ZA', 'month',   4900,     0, 'launch', '2026-11-03 00:00 Africa/Johannesburg'),
+  ('home',   'ZA', 'year',   49000,     0, 'launch', '2026-11-03 00:00 Africa/Johannesburg'),
+  ('family', 'ZA', 'month',   9900,  2900, 'launch', '2026-11-03 00:00 Africa/Johannesburg'),
+  ('family', 'ZA', 'year',   99000, 29000, 'launch', '2026-11-03 00:00 Africa/Johannesburg');
 
 -- Amounts are copied at purchase so later price changes never touch a member.
 -- The trial has no row here.
@@ -171,7 +171,7 @@ create table billing.subscriptions (
   billing_day          smallint not null check (billing_day between 1 and 31),
   period_start         timestamptz not null,
   period_end           timestamptz not null,
-  past_due_since       timestamptz,              -- the first failed try (day 0)
+  past_due_since       timestamptz,              -- the first failed try (day 0); set only while past_due
   cancel_at_period_end boolean not null default false,
   next_price           uuid references billing.prices (id),
   next_extra_places    int check (next_extra_places >= 0),
@@ -179,7 +179,7 @@ create table billing.subscriptions (
   version              bigint not null default 0,
   created_at           timestamptz not null default now(),
   check (period_end > period_start),
-  check (status <> 'past_due' or past_due_since is not null),
+  check ((status = 'past_due') = (past_due_since is not null)),
   check ((status = 'ended') = (ended_at is not null))
 );
 create unique index subscriptions_one_live on billing.subscriptions (account) where status in ('active', 'past_due');

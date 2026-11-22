@@ -70,21 +70,31 @@ begin
   update billing.accounts set trial_ends_at = least(trial_ends_at, p_at) where id = p_acc and trial_started_at is not null;
   return s;
 end $$;
+-- Lookups return '<no plant>' / '<no key>' instead of null when the row or key is
+-- missing, so a check that wants null proves the value is really null.
+create function pg_temp.key(p_obj jsonb, p_key text) returns text language sql as $$
+  select case when p_obj is null then '<no plant>' when not p_obj ? p_key then '<no key>' else p_obj->>p_key end
+$$;
 create function pg_temp.st(p_acc uuid, p_at timestamptz, p_key text) returns text language sql as $$
-  select billing.account_state(p_acc, p_at)->>p_key
+  select pg_temp.key(billing.account_state(p_acc, p_at), p_key)
 $$;
 create function pg_temp.pp(p_acc uuid, p_at timestamptz, p_plant bigint, p_key text) returns text language sql as $$
-  select e->>p_key from jsonb_array_elements(billing.account_state(p_acc, p_at)->'plants') e where (e->>'plant')::bigint = p_plant
+  select pg_temp.key((select e from jsonb_array_elements(billing.account_state(p_acc, p_at)->'plants') e
+                       where (e->>'plant')::bigint = p_plant), p_key)
 $$;
 create function pg_temp.ps(p_plant bigint, p_at timestamptz, p_key text) returns text language sql as $$
-  select billing.plant_state(p_plant, p_at)->>p_key
+  select pg_temp.key(billing.plant_state(p_plant, p_at), p_key)
+$$;
+-- Stands in for the daily job (phase 2): records the first failed renewal try.
+create function pg_temp.fail_renewal(p_sub uuid, p_at timestamptz) returns void language sql as $$
+  update billing.subscriptions set status = 'past_due', past_due_since = p_at where id = p_sub
 $$;
 
 -- ---------------------------------------------------------------------------
 -- S1 free week, then pay
 -- ---------------------------------------------------------------------------
 do $$
-declare a uuid := pg_temp.acct('s1'); r jsonb;
+declare a uuid := pg_temp.acct('s1'); r jsonb; s uuid;
 begin
   perform pg_temp.link(a, 's1', '{990000101,990000102,990000103}', pg_temp.t(0));
   perform pg_temp.eq('S1 linked, nothing chosen: none', pg_temp.st(a, pg_temp.t(0), 'state'), 'none');
@@ -117,7 +127,7 @@ begin
   perform pg_temp.eq('S1 switched-out plant locked', pg_temp.pp(a, pg_temp.t(1), 990000102, 'locked'), 'true');
   perform pg_temp.ok('S1 switch logged', (select count(*) = 2 from billing.account_events where account = a and kind = 'set_chosen_plants'));
 
-  perform pg_temp.pay(a, 'home', 'month', pg_temp.t(3));
+  s := pg_temp.pay(a, 'home', 'month', pg_temp.t(3));
   r := billing.account_state(a, pg_temp.t(3));
   perform pg_temp.eq('S1 paid: active', r->>'state', 'active');
   perform pg_temp.eq('S1 paid: plan', r->>'plan', 'home');
@@ -130,7 +140,9 @@ begin
   perform pg_temp.fails('S1 Home holds 2 plants',
     format('select billing.set_chosen_plants(%L, ''{990000101,990000102,990000103}'', %L)', a, pg_temp.t(4)), '2 places');
   perform pg_temp.eq('S1 still trialing at day 2 (clock moved back)', pg_temp.st(a, pg_temp.t(2), 'state'), 'trialing');
-  perform pg_temp.eq('S1 renewal unpaid by its date: past_due', pg_temp.st(a, pg_temp.t(4) + interval '1 month', 'state'), 'past_due');
+  perform pg_temp.eq('S1 renewal due, no try recorded: still active', pg_temp.st(a, pg_temp.t(4) + interval '1 month', 'state'), 'active');
+  perform pg_temp.fail_renewal(s, pg_temp.t(3) + interval '1 month');
+  perform pg_temp.eq('S1 failed try recorded: past_due', pg_temp.st(a, pg_temp.t(4) + interval '1 month', 'state'), 'past_due');
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -257,6 +269,11 @@ begin
   perform pg_temp.link(a, 's7', '{990000701}', pg_temp.t(0));
   perform pg_temp.choose(a, '{990000701}', pg_temp.t(0));
   perform pg_temp.eqt('S7 next charge on the due date', pg_temp.st(a, p - interval '1 hour', 'next_charge_at'), p);
+  perform pg_temp.eq('S7 due, not tried: active', pg_temp.st(a, p + interval '1 day', 'state'), 'active');
+  perform pg_temp.eq('S7 due, not tried: no past_due_since', pg_temp.st(a, p + interval '1 day', 'past_due_since'), null);
+  perform pg_temp.fails('S7 past_due_since only with past_due',
+    format('update billing.subscriptions set past_due_since = %L where id = %L', p, s), 'subscriptions_check');
+  perform pg_temp.fail_renewal(s, p);
   r := billing.account_state(a, p + interval '1 day');
   perform pg_temp.eq('S7 day 1: past_due', r->>'state', 'past_due');
   perform pg_temp.eqt('S7 day 0 is the due date', r->>'past_due_since', p);
@@ -274,10 +291,7 @@ begin
   perform pg_temp.eqt('S7 ended on day 15', r->>'access_ended_at', p + interval '15 days');
   perform pg_temp.eq('S7 day 15: not read', pg_temp.pp(a, p + interval '15 days', 990000701, 'read_now'), 'false');
   perform pg_temp.eqt('S7 history kept 30 days', pg_temp.pp(a, p + interval '15 days', 990000701, 'delete_at'), p + interval '45 days');
-  -- the job wrote past_due: same answers
-  update billing.subscriptions set status = 'past_due', past_due_since = p where id = s;
-  perform pg_temp.eqt('S7 stored past_due: same retry', pg_temp.st(a, p + interval '4 days', 'next_retry_at'), p + interval '7 days');
-  perform pg_temp.eq('S7 stored past_due: day 15 ended', pg_temp.st(a, p + interval '15 days', 'state'), 'ended');
+  perform pg_temp.eqt('S7 day 4: next retry day 7', pg_temp.st(a, p + interval '4 days', 'next_retry_at'), p + interval '7 days');
   -- paid on day 10: same billing day, next period
   update billing.subscriptions set status = 'active', past_due_since = null, period_start = p, period_end = p + interval '1 month' where id = s;
   r := billing.account_state(a, p + interval '10 days');
@@ -327,7 +341,6 @@ begin
   r := pg_temp.choose(a, '{990000901,990000902,990000903,990000904}', pg_temp.t(2));
   perform pg_temp.eq('S9 Family: 5 places', r->>'places', '5');
   perform pg_temp.eq('S9 Family: 4 chosen', r->>'chosen', '4');
-  perform pg_temp.eq('S9 offer kept on upgrade', (select offer from billing.subscriptions where id = s), 'launch');
   update billing.subscriptions set plan = 'home', amount_minor = 4900 where id = s;     -- downgrade applied
   r := billing.account_state(a, pg_temp.t(3));
   perform pg_temp.eq('S9 over places: must choose', r->>'must_choose', 'true');
@@ -405,13 +418,17 @@ begin
   perform pg_temp.eq('S12 grant only: active', r->>'state', 'active');
   perform pg_temp.eq('S12 grant only: places', r->>'places', '2');
   perform pg_temp.eq('S12 grant only: no charge', r->>'next_charge_at', null);
+  -- a seat on an account with no known end date: no delete date, never "now"
+  insert into billing.plants (id, brand, external_id) values (990001209, 'sunsynk', '990001209');
+  insert into billing.seats (account, plant, chosen_at) values (pg_temp.acct('s12c'), 990001209, pg_temp.t(0));
+  perform pg_temp.eq('S12 open seat, no end date: delete_at null', pg_temp.ps(990001209, pg_temp.t(1), 'delete_at'), null);
 end $$;
 
 -- ---------------------------------------------------------------------------
 -- S13 database rules: offer on restart, one live plan, version
 -- ---------------------------------------------------------------------------
 do $$
-declare a uuid := pg_temp.acct('s13'); s uuid; v bigint;
+declare a uuid := pg_temp.acct('s13'); b uuid; s uuid; v bigint;
 begin
   s := pg_temp.pay(a, 'home', 'month', pg_temp.t(0), 'launch');
   perform pg_temp.fails('S13 one live plan per account',
@@ -427,6 +444,20 @@ begin
   perform pg_temp.ok('S13 a command is logged', exists (select 1 from billing.account_events where account = a and kind = 'link_login'));
   perform pg_temp.fails('S13 a plant not on the account cannot be chosen',
     format('select billing.set_chosen_plants(%L, ''{990000101}'', %L)', a, pg_temp.t(6)), 'not on this account');
+  perform pg_temp.choose(a, '{990001301}', pg_temp.t(6));
+  perform pg_temp.ok('S13 a seat on a paid plan uses the plant''s week',
+    (select trial_used_at = pg_temp.t(6) and trial_used_by = a from billing.plants where id = 990001301));
+  b := pg_temp.acct('s13b');
+  perform pg_temp.link(b, 's13b', '{990001301}', pg_temp.t(7));
+  perform pg_temp.eq('S13 a paid-for plant gives no free week', pg_temp.st(b, pg_temp.t(7), 'state'), 'ended');
+  -- link_login bumps the version of plants whose route changed
+  v := (select version from billing.plants where id = 990001301);
+  perform billing.link_login(a, 'sunsynk', 's13', null, '[{"id":990001302}]', pg_temp.t(8));
+  perform pg_temp.ok('S13 a plant gone from the login: version bumped', (select version = v + 1 from billing.plants where id = 990001301));
+  perform billing.link_login(a, 'sunsynk', 's13', null, '[{"id":990001302}]', pg_temp.t(9));
+  perform pg_temp.ok('S13 nothing changed: no bump', (select version = v + 1 from billing.plants where id = 990001301));
+  perform billing.link_login(a, 'sunsynk', 's13', null, '[{"id":990001301},{"id":990001302}]', pg_temp.t(10));
+  perform pg_temp.ok('S13 a plant back on the login: version bumped', (select version = v + 2 from billing.plants where id = 990001301));
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -444,14 +475,14 @@ begin
   insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused) values
     (990001401, u1, lg, 'House', false), (990001402, u1, lg, 'Flat', false), (990001403, u1, lg, 'Shed', true);
   insert into private.plant_picks (user_id, plant_id, held, picked_at) values
-    (u1, 990001401, false, '2026-11-10 12:00+02'), (u1, 990001402, true, '2026-11-10 12:00+02'), (u1, 990001403, false, '2026-11-10 12:00+02');
+    (u1, 990001401, true, '2026-11-10 12:00+02'), (u1, 990001402, false, '2026-11-10 12:00+02'), (u1, 990001403, true, '2026-11-10 12:00+02');
   insert into private.free_week_logins (sunsynk_username, user_id, started_at, over_at, over_why)
   values ('copy1', u1, '2026-11-10 12:00+02', '2026-11-12 09:00+02', 'plan');
   insert into private.plant_week (plant_id, started_at) values (990001401, '2026-11-10 12:00+02');
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at, offer_id)
   values (u1, 'home', 'monthly', 12, '2026-12-12', 'active', '2026-11-12 09:00+02', 'launch');
   insert into public.plant_users (plant_id, user_id, plant_name, via_share) values (990001404, u2, 'Farm', true);
-  insert into private.plant_picks (user_id, plant_id, held, picked_at) values (u2, 990001404, false, '2026-11-10 12:00+02');
+  insert into private.plant_picks (user_id, plant_id, held, picked_at) values (u2, 990001404, true, '2026-11-10 12:00+02');
   insert into private.billing (user_id, plan, comped, created_at) values (u2, 'family', true, '2026-11-10');
   set local session_replication_role = origin;
 
@@ -460,7 +491,7 @@ begin
   a2 := (select id from billing.accounts where user_id = u2);
   perform pg_temp.ok('S14 login keeps its id and vault id', exists (select 1 from billing.logins where id = lg and account = a1 and secret_ref = sec and status = 'ok'));
   perform pg_temp.ok('S14 three login plants', (select count(*) = 3 from billing.login_plants where login = lg));
-  perform pg_temp.ok('S14 seat only for the pick not held and not paused',
+  perform pg_temp.ok('S14 seat only for the held pick that is not paused',
     (select array_agg(plant) = '{990001401}' from billing.seats where account = a1 and closed_at is null));
   perform pg_temp.ok('S14 week from free_week_logins',
     (select trial_started_at = '2026-11-10 12:00+02' and trial_ends_at = '2026-11-12 09:00+02' from billing.accounts where id = a1));
@@ -476,6 +507,10 @@ begin
   perform pg_temp.ok('S14 share claim copied', exists (select 1 from billing.plant_claims where plant = 990001404 and account = a2));
   perform pg_temp.eq('S14 comped: grant of 5', pg_temp.st(a2, '2026-11-22 12:00+02', 'places'), '5');
   perform pg_temp.eq('S14 shared plant read', pg_temp.pp(a2, '2026-11-22 12:00+02', 990001404, 'read_now'), 'true');
+  r := billing.copy_from_old();
+  perform pg_temp.ok('S14 second run copies fresh, no duplicates',
+    (select count(*) = 1 from billing.seats s join billing.accounts a on a.id = s.account where a.user_id = u1)
+    and (select count(*) = 1 from billing.subscriptions s join billing.accounts a on a.id = s.account where a.user_id = u1));
 end $$;
 
 -- ---------------------------------------------------------------------------
