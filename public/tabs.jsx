@@ -2635,8 +2635,11 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
   );
   const { rand, billDay, perUnit, Was } = window.billingFmt;
   const unit = perUnit(view);
-  // the plan that holds every plant on the account, as the no-plan card names it
-  const fits = plants.length > planRoom('home') ? 'family' : 'home';
+  // the plan that holds every plant on the account, as the no-plan card names it. Counted from
+  // links, paused plants too: with no plan every plant is paused, and logins leaves those out.
+  const owned = new Set((links?.accounts || []).filter(a => a.status !== 'disabled')
+    .flatMap(a => (a.plants || []).filter(p => !p.remove_on || p.drop)).map(p => p.plant_id)).size;
+  const fits = !owned ? null : owned > planRoom('home') ? 'family' : 'home';
   const prices = b.prices?.[view] || {};
   const sameView = !paid || view === b.period;
   const price = (p) => p === b.plan && sameView ? b.price : prices[p];
@@ -2678,7 +2681,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
     // a bigger plan is bought in the plan's own period
     if (!sameView && !across && PLAN_RANK[p] > PLAN_RANK[b.plan]) return <div className="plan-cur plan-wait">Available {b.period}</div>;
     // not paid yet: only the plan that fits is the green button (SOLAR-640)
-    if (PLAN_RANK[p] > PLAN_RANK[b.plan]) return <button type="button" className={!paid && p !== fits ? 'ghost-btn' : 'save-btn'}
+    if (PLAN_RANK[p] > PLAN_RANK[b.plan]) return <button type="button" className={!paid && fits && p !== fits ? 'ghost-btn' : 'save-btn'}
       onClick={() => (b.offer && window.track('offer_pick_done', { offer: b.offer.id, plan: p, period }),
         !paid && cancelPlants(links, planRoom(p)).stop > 0 ? setStarting(p) : window.startUpgrade(p, period, !paid, null, forPlant ? [forPlant] : null))}>{paid ? 'Upgrade' : 'Upgrade to ' + PLAN_NAME[p]}</button>;
     if (bookedHere(p)) return <div className="plan-cur">From {billDay(b.nextDate)}</div>;
@@ -2707,7 +2710,7 @@ function AdjustPlanPage({ billing, reload, onBack, logins = [], links, forPlant 
               view === 'yearly' && `${lowered ? 'about' : 'About'} ${rand(Math.round(now / 12))} a month`].filter(Boolean).join(' · ');
             return (
               <div key={p} className={'pw-plan' + (p === b.plan ? ' plan-mine' : '') + (!paid && p === fits ? ' plan-fit' : '')}>
-                {!paid && <div className="plan-band">{p === fits && plants.length > 0 ? 'Fits your plant' + (plants.length > 1 ? 's' : '') : ''}</div>}
+                {!paid && <div className="plan-band">{p === fits ? 'Fits your plant' + (owned > 1 ? 's' : '') : ''}</div>}
                 <div className="pw-name"><span className="plan-ico"><Icon id={p === 'home' ? 'home' : 'homes'} /></span>{PLAN_NAME[p]}{p === b.plan && <span className="plan-pill">Current</span>}</div>
                 <p className="plan-for">{PLAN_FOR[p]}</p>
                 <div className="pw-price"><Was list={list(p)} price={now} /><b>{rand(now, true)}</b>{' ' + unit}</div>
