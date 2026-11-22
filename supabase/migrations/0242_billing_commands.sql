@@ -19,7 +19,8 @@
 --   reconnects one already there. None added while ended; one in none/trialing.
 --   Plants missing from the new list get gone_at. Never starts the week.
 --   Plants whose route changed (gone, back, or new on this login) get a
---   version bump, so in-flight reads see the change.
+--   version bump, so in-flight reads see the change. p_id: the stored login's id
+--   (private.sunsynk_accounts), so the poller's routes join on it.
 -- remove_login(account, login, at): closes a seat only when the account loses its
 --   last route to that plant. Returns the plants no account protects any more
 --   ('unprotected'); the delete job (later phase) removes their history.
@@ -78,6 +79,7 @@ declare
   had bigint[];
   bad bigint;
   next_places int;
+  counted boolean;
 begin
   a := billing.lock_account(p_account);
   select * into m from billing.markets where code = a.market;
@@ -130,7 +132,14 @@ begin
     end if;
   end if;
 
-  perform billing.write_seats(p_account, want, p_at);
+  -- the first choice after a login or a claim is linked is not a switch: its fetch never
+  -- counts toward the slower history speed (0246 request_history)
+  counted := exists (select 1 from billing.account_events e
+                      where e.account = p_account and e.kind = 'set_chosen_plants'
+                        and e.at > coalesce((select max(x.at) from billing.account_events x
+                                              where x.account = p_account and x.kind in ('link_login', 'claim_plant')),
+                                            '-infinity'));
+  perform billing.write_seats(p_account, want, p_at, 'switched', counted);
   update billing.accounts set version = version + 1 where id = p_account;
   perform billing.log_event(p_account, p_at, p_actor, 'set_chosen_plants',
                             jsonb_build_object('state', st.state, 'plants', to_jsonb(had)),
@@ -141,7 +150,8 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- p_plants: [{"id": 123, "name": "Home"}, ...], the login's whole list right now.
 create function billing.link_login(p_account uuid, p_brand text, p_username text, p_secret_ref uuid,
-                                   p_plants jsonb, p_at timestamptz default now(), p_actor text default 'owner')
+                                   p_plants jsonb, p_at timestamptz default now(), p_actor text default 'owner',
+                                   p_id uuid default null)
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
 declare
   a billing.accounts;
@@ -177,8 +187,8 @@ begin
   perform billing.lock_plants(ids || old_ids);
 
   if is_new then
-    insert into billing.logins (account, brand, username, secret_ref, status, created_at)
-    values (p_account, p_brand, p_username, p_secret_ref, 'ok', p_at) returning * into l;
+    insert into billing.logins (id, account, brand, username, secret_ref, status, created_at)
+    values (coalesce(p_id, gen_random_uuid()), p_account, p_brand, p_username, p_secret_ref, 'ok', p_at) returning * into l;
   else
     update billing.logins set secret_ref = coalesce(p_secret_ref, secret_ref), status = 'ok' where id = l.id;
   end if;
@@ -242,8 +252,8 @@ revoke all on function billing.lock_account(uuid) from public, anon, authenticat
 revoke all on function billing.lock_plants(bigint[]) from public, anon, authenticated;
 revoke all on function billing.write_seats(uuid, bigint[], timestamptz, text) from public, anon, authenticated;
 revoke all on function billing.set_chosen_plants(uuid, bigint[], timestamptz, text) from public, anon, authenticated;
-revoke all on function billing.link_login(uuid, text, text, uuid, jsonb, timestamptz, text) from public, anon, authenticated;
+revoke all on function billing.link_login(uuid, text, text, uuid, jsonb, timestamptz, text, uuid) from public, anon, authenticated;
 revoke all on function billing.remove_login(uuid, uuid, timestamptz, text) from public, anon, authenticated;
 grant execute on function billing.set_chosen_plants(uuid, bigint[], timestamptz, text) to service_role;
-grant execute on function billing.link_login(uuid, text, text, uuid, jsonb, timestamptz, text) to service_role;
+grant execute on function billing.link_login(uuid, text, text, uuid, jsonb, timestamptz, text, uuid) to service_role;
 grant execute on function billing.remove_login(uuid, uuid, timestamptz, text) to service_role;

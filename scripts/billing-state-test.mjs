@@ -19,9 +19,17 @@ const PSQL = process.env.PSQL || ['/opt/homebrew/opt/libpq/bin/psql', '/usr/loca
 
 const dir = path.join(REPO, 'supabase/migrations');
 const migrations = readdirSync(dir).filter((f) => /^\d{4}_billing_/.test(f) && Number(f.slice(0, 4)) >= 240).sort();
+// public functions the billing files create (not "create or replace"): dropped first, so a
+// local database that already has the billing schema (the local preview) can run the test
+const made = [...new Set(migrations.flatMap((f) => [...readFileSync(path.join(dir, f), 'utf8')
+  .matchAll(/^create function public\.(\w+)\(/gm)].map((m) => m[1])))];
+const dropMade = made.length ? `do $d$ declare f record; begin for f in select p.oid::regprocedure s from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = any (array['${made.join("','")}'])
+  loop execute 'drop function ' || f.s || ' cascade'; end loop; end $d$;` : '';
 const sql = [
   'begin;',
   'drop schema if exists billing cascade;',
+  dropMade,
   ...migrations.map((f) => readFileSync(path.join(dir, f), 'utf8')),
   readFileSync(path.join(REPO, 'scripts/sql/billing-state-tests.sql'), 'utf8'),
   'rollback;',

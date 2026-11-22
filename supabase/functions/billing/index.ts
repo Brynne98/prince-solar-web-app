@@ -337,7 +337,7 @@ serve("billing", async (req) => {
 
   // A card check and a new card go to the card page: a new card is the point.
   const channel = inv.saved_card && body.newCard !== true && body.card !== true ? "saved_card" : "card_page";
-  type Try = Charge & { busy?: boolean; verify?: string[] };
+  type Try = Charge & { busy?: boolean; verify?: string[]; url?: string };
   let t: Try;
   try {
     t = await bill<Try>("begin_attempt", { invoice: inv.invoice, channel });
@@ -349,6 +349,8 @@ serve("billing", async (req) => {
     return refused(e);
   }
   if (t.busy || t.verify) return json({ error: "a payment is already in progress" }, 409, cors);
+  // The card page for this bill is still open: the owner goes back to the same page.
+  if (t.url) return json({ url: t.url, reference: t.reference }, 200, cors);
 
   if (channel === "saved_card") {
     const r = await charge(t);
@@ -359,6 +361,9 @@ serve("billing", async (req) => {
       email: user.email, amount: t.amount_minor, currency: t.currency, reference: t.reference,
       channels: ["card"], callback_url: `${origin}/?tab=account&section=plan`,
     });
+    // kept, so closing the page and trying again within its hour lands on the same page
+    await bill("attempt_page", { reference: t.reference, url: page.authorization_url })
+      .catch((e) => noteError("pay_page_not_saved", e, { user: user.id, ref: t.reference }));
     return json({ url: page.authorization_url, reference: t.reference }, 200, cors);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

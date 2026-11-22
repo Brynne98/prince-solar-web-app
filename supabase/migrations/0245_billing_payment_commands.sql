@@ -102,11 +102,21 @@ returns text language sql stable set search_path = billing, pg_temp as $$
    order by o.valid_from desc limit 1
 $$;
 
--- A try on any open bill of the account that may still take money.
+-- A try on any open bill of the account that may still take money. An open card page
+-- does not count: a new checkout replaces it (replace_card_pages), so closing the page and
+-- trying again never waits for its hour. Paid anyway, that payment is stale and refunded.
 create function billing.payment_in_flight(p_account uuid)
 returns boolean language sql stable set search_path = billing, pg_temp as $$
   select exists (select 1 from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
-                  where i.account = p_account and i.status = 'open' and pa.status in ('created', 'pending', 'unknown'))
+                  where i.account = p_account and i.status = 'open' and pa.status in ('created', 'pending', 'unknown')
+                    and not (pa.channel = 'card_page' and pa.status = 'pending'))
+$$;
+
+-- The open card pages on these bills are let go: a new bill or a new page replaces them.
+create function billing.replace_card_pages(p_invoices uuid[], p_at timestamptz)
+returns void language sql set search_path = billing, pg_temp as $$
+  update billing.payment_attempts set status = 'void', gateway_response = 'replaced', settled_at = p_at, claimed_until = null
+   where invoice = any (p_invoices) and channel = 'card_page' and status = 'pending'
 $$;
 
 -- The email to charge a saved card with: the one it was saved under, else the sign-in email.
@@ -275,6 +285,8 @@ begin
     if billing.payment_in_flight(p_account) then
       raise exception 'a payment is already in progress' using errcode = '22023';
     end if;
+    perform billing.replace_card_pages(array(select id from billing.invoices
+                                              where account = p_account and kind = 'purchase' and status = 'open'), p_at);
     update billing.invoices set status = 'void' where account = p_account and kind = 'purchase' and status = 'open';
   end if;
   insert into billing.invoices (account, kind, price, plan, interval, offer, extra_places, plan_amount_minor,
@@ -419,6 +431,8 @@ begin
   if billing.payment_in_flight(p_account) then
     raise exception 'a payment is already in progress' using errcode = '22023';
   end if;
+  perform billing.replace_card_pages(array(select id from billing.invoices
+                                            where subscription = s.id and kind = 'upgrade' and status = 'open'), p_at);
   update billing.invoices set status = 'void' where subscription = s.id and kind = 'upgrade' and status = 'open';
   insert into billing.invoices (account, subscription, kind, status, price, plan, interval, offer, extra_places,
                                 plan_amount_minor, extra_place_minor, amount_minor, tax_minor, currency, period_start,
@@ -608,8 +622,10 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- begin_attempt: a try with its own reference, written before the charge call.
 -- saved_card: the lease (10 min) stops a second charge. card_page: the page is
--- open for an hour. Returns {busy} while another try holds its lease, or
--- {verify: [references]} for tries to check with Paystack first.
+-- open for an hour; asked again for the same bill inside that hour, the same page
+-- comes back ({url}, stored by attempt_page), so closing it and trying again lands
+-- on it. Abandoned (Paystack) or the hour gone: a new page. Returns {busy} while
+-- another try holds its lease, or {verify: [references]} for tries to check first.
 -- ---------------------------------------------------------------------------
 create function billing.begin_attempt(p_invoice uuid, p_channel text, p_at timestamptz default now())
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
@@ -626,6 +642,17 @@ begin
   if inv.status <> 'open' then raise exception 'this bill is %', inv.status using errcode = '22023'; end if;
   if p_channel not in ('saved_card', 'card_page') then raise exception 'bad channel' using errcode = '22023'; end if;
 
+  if p_channel = 'card_page' then
+    select * into att from billing.payment_attempts
+     where invoice = p_invoice and channel = 'card_page' and status = 'pending' and pay_url is not null
+       and claimed_until > p_at
+     order by created_at desc limit 1;
+    if found then
+      return jsonb_build_object('reference', att.reference, 'invoice', inv.id, 'kind', inv.kind,
+                                'amount_minor', att.amount_minor, 'currency', att.currency, 'url', att.pay_url);
+    end if;
+  end if;
+
   -- any open bill of the account: a try there may still take money
   select jsonb_agg(pa.reference order by pa.created_at) into stale
     from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
@@ -638,6 +665,7 @@ begin
     pm := billing.active_method(inv.account);
     if pm.id is null then raise exception 'no saved card' using errcode = 'P0002'; end if;
   end if;
+  perform billing.replace_card_pages(array[p_invoice], p_at);
   insert into billing.payment_attempts (invoice, reference, provider, channel, payment_method, amount_minor, currency,
                                         status, claimed_until, created_at)
   values (p_invoice, billing.new_reference(), 'paystack', p_channel, pm.id, inv.amount_minor, inv.currency,
@@ -649,6 +677,14 @@ begin
                             'auth_ref', pm.auth_ref,
                             'auth_email', case when pm.id is not null then billing.charge_email(pm.auth_email, inv.account) end);
 end $$;
+
+-- The card page Paystack opened for a try, so the same page can be handed back.
+create function billing.attempt_page(p_reference text, p_url text)
+returns jsonb language sql security definer set search_path = billing, pg_temp as $$
+  update billing.payment_attempts set pay_url = p_url
+   where reference = p_reference and channel = 'card_page' and status = 'pending' and p_url like 'https://%'
+  returning jsonb_build_object('reference', reference)
+$$;
 
 -- Saves the card Paystack answered with; a reusable one becomes the account's active card.
 create function billing.save_method(p_account uuid, p_tx jsonb, p_at timestamptz)
@@ -1283,6 +1319,7 @@ begin
     when 'start_card_check' then billing.start_card_check(acc)
     when 'delete_account'   then case when acc is null then jsonb_build_object('deleted', false) else billing.delete_account(acc) end
     when 'begin_attempt'    then billing.begin_attempt((p_args->>'invoice')::uuid, p_args->>'channel')
+    when 'attempt_page'     then coalesce(billing.attempt_page(p_args->>'reference', p_args->>'url'), '{}'::jsonb)
     when 'record_refund'    then billing.record_refund((p_args->>'refund')::uuid, p_args->>'error', p_args->>'provider_id')
     when 'record_refund_event' then billing.record_refund_event(p_args->>'reference', p_args->>'status', p_args->>'provider_id',
                                    (p_args->>'amount')::int, p_args->>'reason', now(), p_args->>'provider_ref')

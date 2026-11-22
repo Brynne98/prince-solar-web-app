@@ -42,8 +42,10 @@
 --   (recover ?queue=1, every minute). One running fetch per inverter-cloud login
 --   (lane); on the shared service login accounts take turns. A request for a plant
 --   its account no longer reads is dropped. A 429 backs the lane off (1 min,
---   doubling, 1 h at most). Speed: the account's history_fetch events in the last
---   7 days, this one included; fetches 1-3 at normal speed; the 4th takes at least
+--   doubling, 1 h at most). Speed: the account's counted history_fetch events in the
+--   last 7 days, this one included. Only an owner's switch counts (one per confirmed
+--   switch, whatever the number of plants); the first choice after a login or claim is
+--   linked, a checkout, an upgrade and a restart never do. Fetches 1-3 at normal speed; the 4th takes at least
 --   20 min, each later one twice the one before, 24 h at most, spread evenly over
 --   its days. The start is never delayed. No reset: an event drops out after 7 days.
 --
@@ -511,21 +513,28 @@ create table billing.history_lanes (
   backoff_until timestamptz
 );
 
--- One fetch per command: plants asked for at the same `at` share its number and speed.
-create function billing.request_history(p_account uuid, p_plants bigint[], p_at timestamptz)
+-- One fetch per command: plants asked for at the same `at` share its number and speed,
+-- whatever the number of plants. p_counts false (the first choice after a login is
+-- linked, a checkout, an upgrade, a restart): normal speed, and it is not counted.
+create function billing.request_history(p_account uuid, p_plants bigint[], p_at timestamptz, p_counts boolean default false)
 returns void language plpgsql set search_path = billing, pg_temp as $$
 declare
   n int;
   target int;
+  counted boolean;
 begin
   if coalesce(cardinality(p_plants), 0) = 0 then return; end if;
-  select (after->>'fetch_no')::int into n from billing.account_events
+  select (after->>'fetch_no')::int, coalesce((after->>'counted')::boolean, true) into n, counted from billing.account_events
    where account = p_account and kind = 'history_fetch' and at = p_at order by id limit 1;
   if n is null then
-    n := 1 + (select count(*) from billing.account_events
-               where account = p_account and kind = 'history_fetch' and at > p_at - interval '7 days' and at < p_at);
+    counted := p_counts;
+    n := case when counted then
+           1 + (select count(*) from billing.account_events
+                 where account = p_account and kind = 'history_fetch' and at > p_at - interval '7 days' and at < p_at
+                   and coalesce((after->>'counted')::boolean, true))
+         else 0 end;
     perform billing.log_event(p_account, p_at, 'system', 'history_fetch', null,
-                              jsonb_build_object('fetch_no', n, 'plants', to_jsonb(p_plants)));
+                              jsonb_build_object('fetch_no', n, 'counted', counted, 'plants', to_jsonb(p_plants)));
   end if;
   target := case when n <= 3 then 0 else least(1200 * power(2, least(n - 4, 10)), 86400)::int end;
   update billing.history_fetches set status = 'dropped', drop_reason = 'replaced', finished_at = p_at, claimed_until = null
@@ -535,7 +544,10 @@ begin
 end $$;
 
 -- 0242's write_seats, plus: new seats ask for a history fetch; closed seats drop theirs.
-create or replace function billing.write_seats(p_account uuid, p_want bigint[], p_at timestamptz, p_reason text default 'switched')
+-- p_counts: the fetch counts toward the slower speed (an owner's switch only).
+drop function billing.write_seats(uuid, bigint[], timestamptz, text);
+create function billing.write_seats(p_account uuid, p_want bigint[], p_at timestamptz, p_reason text default 'switched',
+                                    p_counts boolean default false)
 returns void language plpgsql set search_path = billing, pg_temp as $$
 declare had bigint[];
 begin
@@ -551,7 +563,7 @@ begin
    where id = any (p_want || had) and not (id = any (p_want) and id = any (had));
   update billing.history_fetches set status = 'dropped', drop_reason = 'switched_out', finished_at = p_at, claimed_until = null
    where account = p_account and status in ('queued', 'running') and plant = any (had) and plant <> all (p_want);
-  perform billing.request_history(p_account, array(select x from unnest(p_want) x where x <> all (had)), p_at);
+  perform billing.request_history(p_account, array(select x from unnest(p_want) x where x <> all (had)), p_at, p_counts);
 end $$;
 
 -- 0245's apply_purchase, plus: a plan restarted after it ended fetches the kept

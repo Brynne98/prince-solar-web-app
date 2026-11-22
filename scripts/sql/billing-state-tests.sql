@@ -507,9 +507,19 @@ begin
   insert into billing.refunds (reference, reason, status, created_at, updated_at) values ('S14-REF', 'manual', 'processed', now(), now());
   perform pg_temp.fails('S14 copy refused once a refund is recorded', 'select billing.copy_from_old()', 'already hold payments');
   delete from billing.refunds where reference = 'S14-REF';
+  -- a rerun clears only what the copy wrote: the poller's and the commands' events stay
   perform billing.copy_from_old();
+  insert into billing.account_events (account, at, actor, kind)
+  select id, now(), 'copy', 'copy_needs_review' from billing.accounts where user_id = u1
+  union all select id, now(), 'poller', 'login_seen' from billing.accounts where user_id = u1;
+  a3 := (select id from billing.accounts where user_id = u1);
+  perform billing.copy_from_old();
+  perform pg_temp.ok('S14 rerun keeps the account id', a3 is not null and (select id from billing.accounts where user_id = u1) = a3);
+  perform pg_temp.ok('S14 poller and command events kept', exists (select 1 from billing.account_events
+    where account = a3 and actor = 'poller' and kind = 'login_seen'));
+  perform pg_temp.ok('S14 the copy''s own events cleared', not exists (select 1 from billing.account_events
+    where account = a3 and actor = 'copy'));
   a3 := (select id from billing.accounts where user_id = u3);
-  perform pg_temp.ok('S14 old events cleared', not exists (select 1 from billing.account_events where kind <> 'copy_needs_review'));
   perform pg_temp.ok('S14 past due copied with its failed day-0 try', exists (select 1 from billing.payment_attempts pa
     join billing.invoices i on i.id = pa.invoice where i.account = a3 and i.kind = 'renewal' and pa.channel = 'none'
      and pa.status = 'failed' and pa.created_at = '2026-11-20 00:00+02'));
@@ -661,42 +671,51 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- P2 one open purchase bill per account; no second try while one may take money;
+-- P2 one open purchase bill per account; closing the card page and trying again
+--    lands on the same page; a new checkout replaces an open page (no wait);
 --    a late success on a replaced bill; the same bill paid twice
 -- ---------------------------------------------------------------------------
 do $$
-declare a uuid := pg_temp.acct('p2'); b uuid := pg_temp.acct('p2b'); i1 uuid; i2 uuid; r1 text; r2 text; r jsonb;
+declare a uuid := pg_temp.acct('p2'); b uuid := pg_temp.acct('p2b'); c uuid := pg_temp.acct('p2c');
+        i1 uuid; i2 uuid; i3 uuid; r1 text; r1b text; r2 text; r jsonb;
 begin
   perform pg_temp.link(a, 'p2', '{990010201,990010202}', pg_temp.t(0));
   i1 := (billing.start_checkout(a, 'home', 'month', 0, '{990010201}', pg_temp.t(0))->>'invoice')::uuid;
   r1 := billing.begin_attempt(i1, 'card_page', pg_temp.t(0))->>'reference';
-  perform pg_temp.fails('P2 another checkout while the first may still take money',
-    format('select billing.start_checkout(%L, ''family'', ''month'', 0, ''{990010201,990010202}'', %L)', a, pg_temp.t(0)),
-    'already in progress');
-  update billing.offers set valid_until = pg_temp.t(0) - interval '1 day' where code = 'launch';
-  perform pg_temp.fails('P2 offer gone: not the old launch-price bill',
-    format('select billing.start_checkout(%L, ''home'', ''month'', 0, ''{990010201}'', %L)', a, pg_temp.t(0)), 'already in progress');
-  update billing.offers set valid_until = null where code = 'launch';
+  perform billing.attempt_page(r1, 'https://checkout.paystack.com/p2a');
   perform pg_temp.eq('P2 the same checkout again: the same bill',
     billing.start_checkout(a, 'home', 'month', 0, '{990010201}', pg_temp.t(0))->>'invoice', i1::text);
-  perform pg_temp.eq('P2 a second try on the account while one is open: busy',
-    billing.begin_attempt(i1, 'card_page', pg_temp.t(0))->>'busy', 'true');
-  -- the page lease runs out: verified first; Paystack says abandoned: void
+  r := billing.begin_attempt(i1, 'card_page', pg_temp.t(0) + interval '5 minutes');
+  perform pg_temp.eq('P2 page closed, tried again: the same page', r->>'url', 'https://checkout.paystack.com/p2a');
+  perform pg_temp.eq('P2 ... and the same try', r->>'reference', r1);
+  perform pg_temp.ok('P2 a page link is only stored as https', billing.attempt_page(r1, 'javascript:x') is null);
+  -- the page lease runs out: verified first; Paystack says abandoned: void, then a new page
   perform pg_temp.ok('P2 lease over: verify first', billing.begin_attempt(i1, 'card_page', pg_temp.t(0) + interval '61 minutes') ? 'verify');
   r := pg_temp.answer(r1, 'abandoned', pg_temp.t(0) + interval '62 minutes');
   perform pg_temp.eq('P2 abandoned page: void', r->>'action', 'void');
+  r1b := billing.begin_attempt(i1, 'card_page', pg_temp.t(0) + interval '62 minutes')->>'reference';
+  perform pg_temp.ok('P2 abandoned: a new page', r1b is not null and r1b <> r1);
+  -- another checkout while that page is open: no wait, the open page is let go
   i2 := (billing.start_checkout(a, 'family', 'month', 0, '{990010201,990010202}', pg_temp.t(0) + interval '63 minutes')->>'invoice')::uuid;
   perform pg_temp.ok('P2 a new checkout replaces the open bill', i2 <> i1 and (select status = 'void' from billing.invoices where id = i1));
+  perform pg_temp.eq('P2 its open page let go', (select status from billing.payment_attempts where reference = r1b), 'void');
   r2 := billing.begin_attempt(i2, 'card_page', pg_temp.t(0) + interval '63 minutes')->>'reference';
   r := pg_temp.answer(r2, 'ok', pg_temp.t(0) + interval '64 minutes');
   perform pg_temp.eq('P2 paid: applied', r->>'action', 'applied');
-  r := pg_temp.answer(r1, 'ok', pg_temp.t(0) + interval '65 minutes');
+  r := pg_temp.answer(r1b, 'ok', pg_temp.t(0) + interval '65 minutes');
   perform pg_temp.eq('P2 late success on the replaced bill: refunded', r->>'action', 'refund');
   perform pg_temp.eq('P2 replaced bill: stale', r->>'reason', 'stale');
+  -- the offer gone: a new bill at list price, not the old launch-price one
+  perform pg_temp.link(c, 'p2c', '{990010211}', pg_temp.t(0));
+  i3 := (billing.start_checkout(c, 'home', 'month', 0, '{990010211}', pg_temp.t(0))->>'invoice')::uuid;
+  update billing.offers set valid_until = pg_temp.t(0) - interval '1 day' where code = 'launch';
+  perform pg_temp.ok('P2 offer gone: not the old launch-price bill',
+    (billing.start_checkout(c, 'home', 'month', 0, '{990010211}', pg_temp.t(0))->>'invoice')::uuid <> i3);
+  update billing.offers set valid_until = null where code = 'launch';
   perform pg_temp.eq('P2 the paid choice stands', pg_temp.st(a, pg_temp.t(1), 'plan'), 'family');
   perform pg_temp.ok('P2 one plan', (select count(*) = 1 from billing.subscriptions where account = a));
   perform pg_temp.ok('P2 refund owed against the try', exists (select 1 from billing.refunds r join billing.payment_attempts pa on pa.id = r.attempt
-    where pa.reference = r1 and r.reason = 'stale' and r.status = 'due'));
+    where pa.reference = r1b and r.reason = 'stale' and r.status = 'due'));
   -- the same bill paid twice (a try let go, then paid late): the second is a duplicate
   perform pg_temp.link(b, 'p2b', '{990010203}', pg_temp.t(0));
   i1 := (billing.start_checkout(b, 'home', 'month', 0, '{990010203}', pg_temp.t(0))->>'invoice')::uuid;
@@ -1238,17 +1257,23 @@ begin
   perform pg_temp.eq('F1 a late pending on a void try: still active', pg_temp.st(d, pe + interval '3 minutes', 'state'), 'active');
 end $$;
 
--- F2 an upgrade bill with a payment on its way is not replaced
+-- F2 an upgrade bill with a saved-card charge on its way is not replaced; one with only
+--    an open card page is
 do $$
-declare a uuid := pg_temp.acct('f2'); pe timestamptz; inv uuid;
+declare a uuid := pg_temp.acct('f2'); pe timestamptz; inv uuid; inv2 uuid; ref text;
 begin
   perform pg_temp.link(a, 'f2', '{990020201,990020202,990020203}', pg_temp.t(0));
   perform pg_temp.buy(a, 'home', 'month', '{990020201}', pg_temp.t(0), 'AUTH_f2');
   inv := (billing.upgrade(a, 'family', 0, '{990020201,990020202}', pg_temp.t(5))->>'invoice')::uuid;
-  perform billing.begin_attempt(inv, 'card_page', pg_temp.t(5));
-  perform pg_temp.fails('F2 second upgrade while the first may still take money',
-    format('select billing.upgrade(%L, ''family'', 0, ''{990020201,990020202,990020203}'', %L)', a, pg_temp.t(5)), 'already in progress');
-  perform pg_temp.eq('F2 the first bill stays open', (select status from billing.invoices where id = inv), 'open');
+  ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(5))->>'reference';
+  inv2 := (billing.upgrade(a, 'family', 0, '{990020201,990020202,990020203}', pg_temp.t(5))->>'invoice')::uuid;
+  perform pg_temp.ok('F2 an open card page: the new upgrade replaces it', inv2 <> inv
+    and (select status = 'void' from billing.invoices where id = inv)
+    and (select status = 'void' from billing.payment_attempts where reference = ref));
+  perform billing.begin_attempt(inv2, 'saved_card', pg_temp.t(5));
+  perform pg_temp.fails('F2 second upgrade while a charge may still take money',
+    format('select billing.upgrade(%L, ''family'', 0, ''{990020201,990020202}'', %L)', a, pg_temp.t(5)), 'already in progress');
+  perform pg_temp.eq('F2 the charged bill stays open', (select status from billing.invoices where id = inv2), 'open');
 end $$;
 
 -- F3 a paid try later reversed: recorded against it, access for that period ends
@@ -1641,9 +1666,12 @@ begin
     perform pg_temp.choose(d, array[990030400 + i]::bigint[], pg_temp.t(i * 0.1));
     got := got || (pg_temp.fetch_row(d, 990030400 + i)).target_s || ' ';
   end loop;
-  perform pg_temp.eq('R4 targets for fetches 1-7', got, '0 0 0 1200 2400 4800 9600 ');
+  -- the first choice after the login was linked is not a switch: not counted
+  perform pg_temp.eq('R4 targets for choices 1-7', got, '0 0 0 0 1200 2400 4800 ');
+  perform pg_temp.eq('R4 first choice after the link not counted', (select (after->>'counted') from billing.account_events
+    where account = d and kind = 'history_fetch' order by id limit 1), 'false');
   perform pg_temp.eq('R4 fetch number logged', (select max((after->>'fetch_no')::int)::text from billing.account_events
-    where account = d and kind = 'history_fetch'), '7');
+    where account = d and kind = 'history_fetch'), '6');
   perform pg_temp.ok('R4 seven switches in a week: alert', pg_temp.alert('many_switches', d::text, pg_temp.t(1)));
   perform pg_temp.ok('R4 not after the week', not pg_temp.alert('many_switches', d::text, pg_temp.t(8)));
   -- 7 days after the 4th (t 0.4): fetches at 0.5, 0.6, 0.7 still count, so this is the 4th

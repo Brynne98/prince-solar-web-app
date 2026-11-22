@@ -6,6 +6,8 @@
 -- (DEPLOY.md, "Billing switch-over"): it empties the billing tables it fills and
 -- copies fresh, so a second run gives the same rows. It refuses once the new
 -- payment tables hold an invoice. The state test runs it on made-up rows.
+-- A rerun keeps each account's id and clears only the account_events rows the copy
+-- wrote itself (actor 'copy').
 -- The old tables stay untouched and in use. Nothing old reads the new tables.
 --
 --   accounts       every auth user; trial from private.free_week_logins
@@ -58,7 +60,11 @@ begin
     execute 'delete from billing.outbox';
     execute 'delete from billing.invoices';
   end if;
-  delete from billing.account_events;
+  -- only the events this copy wrote (actor 'copy'); the poller's and the commands' stay,
+  -- and the accounts keep their ids below, so those events still point at them
+  delete from billing.account_events where actor = 'copy';
+  drop table if exists pg_temp.copy_ids;
+  create temp table copy_ids as select user_id, id from billing.accounts;
   delete from billing.payment_methods;
   delete from billing.seats;
   delete from billing.plant_claims;
@@ -69,8 +75,9 @@ begin
   delete from billing.accounts;
   delete from billing.plants;
 
-  insert into billing.accounts (user_id, market, trial_started_at, trial_ends_at, created_at)
-  select u.id, 'ZA', fw.started, greatest(private.week_ends(u.id), fw.started), u.created_at
+  insert into billing.accounts (id, user_id, market, trial_started_at, trial_ends_at, created_at)
+  select coalesce((select c.id from pg_temp.copy_ids c where c.user_id = u.id), gen_random_uuid()),
+         u.id, 'ZA', fw.started, greatest(private.week_ends(u.id), fw.started), u.created_at
     from auth.users u
     left join lateral (select min(f.started_at) started from private.free_week_logins f where f.user_id = u.id) fw on true
   on conflict (user_id) do nothing;
