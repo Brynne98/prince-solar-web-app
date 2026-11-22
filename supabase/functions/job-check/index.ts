@@ -15,7 +15,13 @@ type Inputs = {
   email: { waiting: number; oldest_due: string | null };
   checks: Record<string, { failing: boolean; since: string }>;
   signin?: Record<string, number> | null;
+  /** billing.alerts() (0246); null when it could not be read */
+  billing?: BillingAlert[] | null;
 };
+type BillingAlert = { kind: string; ref: string } & Record<string, unknown>;
+// Every kind billing.alerts() can list, so each one also recovers when its list empties.
+export const BILLING_ALERTS = ["attempt_pending", "refund_failed", "outbox_backlog", "history_unprotected",
+  "many_switches", "job_quiet"];
 // A function pg_cron calls through private.call_fn (0181): its last answered call per shard.
 type Call = { fn: string; failing: boolean | null; result: string | null; error: string | null; last_call: string | null; failed_1h: number };
 type Verdict = { name: string; job: string; failing: boolean | null; detail: Record<string, unknown> };
@@ -122,9 +128,17 @@ export function judge(i: Inputs): Verdict[] {
   }
   out.push({ name: "email-queue", job: "notify", failing: i.email.waiting > 0,
              detail: { waiting: i.email.waiting, oldest_due: i.email.oldest_due } });
+  // Billing (SOLAR-641): one check per alert kind. Not read (i.billing null) keeps the state.
+  if (i.billing) {
+    for (const kind of BILLING_ALERTS) {
+      const hits = i.billing.filter((a) => a.kind === kind);
+      out.push({ name: `billing:${kind}`, job: "billing", failing: hits.length > 0,
+                 detail: { count: hits.length, first: hits.slice(0, 5) } });
+    }
+  }
   // A failing check whose shard or job is gone (fewer shards, job unscheduled) clears.
   for (const [name, c] of Object.entries(i.checks)) {
-    if (c.failing && name !== "signin-email" && !out.some((v) => v.name === name)) {
+    if (c.failing && name !== "signin-email" && !name.startsWith("billing:") && !out.some((v) => v.name === name)) {
       out.push({ name, job: name.startsWith("poll:") ? "poll" : name.replace(/^(cron|call):/, ""), failing: false, detail: { gone: true } });
     }
   }
@@ -142,6 +156,10 @@ if (import.meta.main) serve("job-check", async (req) => {
   if (denied) return denied;
   const i = await rpc("job_check_inputs") as Inputs;
   i.signin = await signinMail(Date.parse(i.now));
+  i.billing = await rpc("billing_jobs", { p_cmd: "alerts" }).catch((e) => {
+    noteError("billing_alerts", e, { hourly: true });
+    return null;
+  }) as BillingAlert[] | null;
   const verdicts = judge(i);
   const changes = verdicts.filter((v) => v.failing != null && v.failing !== (i.checks[v.name]?.failing ?? false));
   if (changes.length) await rpc("job_check_save", { p_changes: changes.map(({ name, failing, detail }) => ({ name, failing, detail })) });

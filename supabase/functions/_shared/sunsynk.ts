@@ -280,6 +280,8 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * from the cron log rather than assumed.
  */
 export const apiCallCounts = new Map<string, number>();
+/** Calls per account that stayed rate-limited after the retries: the history queue backs off on them (0246). */
+export const throttledCounts = new Map<string, number>();
 const countCall = (acc: Account) => apiCallCounts.set(acc.id, (apiCallCounts.get(acc.id) ?? 0) + 1);
 
 /**
@@ -363,6 +365,7 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
     res = await doFetch(await accessTokenFor(acc));
   }
   if (throttled(res)) {
+    throttledCounts.set(acc.id, (throttledCounts.get(acc.id) ?? 0) + 1);
     const e = new Error(`API ${pathname} -> HTTP ${res.status} (rate-limited after ${RATE_LIMIT_RETRIES} retries)`);
     sunsynkFailed(acc.sunsynk_username, pathname, resultOf(res), e);
     throw e;
@@ -561,6 +564,13 @@ export async function syncPlants(acc: Account, linked?: { plants: PlantInfo[]; i
     p_user: acc.user_id, p_account: acc.id,
     p_rows: all.slice().sort((a, b) => a.id - b.id).map((p) => ({ plant_id: p.id, plant_name: p.name })),
   });
+  // The same list into the billing tables (0246): new plants added, one missing twice is gone.
+  // Not linked there yet (before the switch-over): nothing happens.
+  try {
+    await rpc("billing_jobs", { p_cmd: "login_seen", p_args: { login: acc.id, plants: all.map((p) => ({ id: p.id, name: p.name })) } });
+  } catch (e) {
+    noteError("login_seen_failed", e, { user: acc.user_id, hourly: true });
+  }
   // Only plants this user has active go on: a paused plant gets its config row, nothing more.
   const { data: pausedRows, error: pausedErr } = await db.from("plant_users").select("plant_id")
     .eq("user_id", acc.user_id).eq("paused", true).in("plant_id", all.map((p) => p.id));
@@ -691,6 +701,8 @@ export type PlantJob = {
   tempTries: number;
   /** plant_config.has_grid (0042): false = off-grid, null = not known yet */
   hasGrid: boolean | null;
+  /** billing.plants.version (0246): writes for the plant carry it; null before the billing switch-over */
+  version: number | null;
   account: Account;
 };
 
@@ -698,13 +710,14 @@ export type PlantJob = {
 export const plantsToPoll = (): Promise<PlantJob[]> => pollJobs(0, 1);
 
 /**
- * One poll shard's jobs (0100). The database picks the plants and each plant's login
- * (the earliest-linked working login of an account that has a plan or is in its free
- * week, 0205), and the shard filter runs there, so a shard reads only its own accounts.
+ * One poll shard's jobs (0100). The database picks the plants and each plant's login,
+ * and the shard filter runs there, so a shard reads only its own accounts. Since the
+ * billing switch-over (0246): the plants billing.plant_state reads now, each through one
+ * working route (an ok login that lists it, else a share claim). Before it, 0205's rule.
  * account set = only plants read through that account, whatever the shard.
  */
 export async function pollJobs(shard: number, shards: number, account?: string): Promise<PlantJob[]> {
-  const rows = await rpc<any[]>("poll_jobs", { p_shard: shard, p_shards: shards, p_account: account ?? null });
+  const rows = await rpc<any[]>("poll_jobs_v2", { p_shard: shard, p_shards: shards, p_account: account ?? null });
   const accs = new Map<string, Account>();
   return (rows ?? []).map((r) => {
     const acc = accs.get(r.account_id) ?? {
@@ -723,6 +736,7 @@ export async function pollJobs(shard: number, shards: number, account?: string):
       tempNext: r.temp_next ?? null,
       tempTries: Number(r.temp_tries),
       hasGrid: r.has_grid ?? null,
+      version: r.plant_version == null ? null : Number(r.plant_version),
       account: acc,
     };
   });

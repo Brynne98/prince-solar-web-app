@@ -1138,6 +1138,321 @@ begin
     and not has_function_privilege('authenticated', 'billing.apply_payment(text, jsonb, timestamptz)', 'execute'));
 end $$;
 
+-- ===========================================================================
+-- Phase 3: reading, deleting and history fetches (0246). No network: the poller's
+-- and recover's writes are called directly with made-up rows; the clock moves.
+-- ===========================================================================
+-- the stored inverter-cloud login behind a billing login (same id, as copy_from_old keeps)
+create function pg_temp.stored(p_login uuid) returns uuid language sql as $$
+  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind)
+  select l.id, a.user_id, 'stored-' || l.id, 'active', 'login'
+    from billing.logins l join billing.accounts a on a.id = l.account where l.id = p_login
+  returning id
+$$;
+create function pg_temp.share_login() returns uuid language plpgsql as $$
+declare s uuid; u uuid := gen_random_uuid();
+begin
+  select id into s from private.sunsynk_accounts where kind = 'share';
+  if s is null then
+    insert into auth.users (id, email, created_at) values (u, 'share@state.test', now());
+    insert into private.sunsynk_accounts (user_id, sunsynk_username, status, kind) values (u, 'share', 'active', 'share')
+    returning id into s;
+  end if;
+  update private.sunsynk_accounts set status = 'active' where id = s and status <> 'active';
+  return s;
+end $$;
+create function pg_temp.lane_of(p_plant bigint, p_at timestamptz) returns text language sql as $$
+  select coalesce((select account_id::text from public.poll_jobs_v2(0, 1, null, p_at) where plant_id = p_plant), '<not read>')
+$$;
+create function pg_temp.ver(p_plant bigint) returns bigint language sql as $$
+  select version from billing.plants where id = p_plant
+$$;
+create function pg_temp.agg(p_plant bigint, p_at timestamptz) returns void language sql as $$
+  insert into public.agg_minute (plant_id, ts, pv_w, source)
+  values (p_plant, extract(epoch from date_trunc('minute', p_at))::bigint, 100, 'poller')
+  on conflict do nothing
+$$;
+create function pg_temp.has_agg(p_plant bigint) returns boolean language sql as $$
+  select exists (select 1 from public.agg_minute where plant_id = p_plant)
+$$;
+create function pg_temp.fetch_row(p_acc uuid, p_plant bigint) returns billing.history_fetches language sql as $$
+  select * from billing.history_fetches where account = p_acc and plant = p_plant order by id desc limit 1
+$$;
+create function pg_temp.alert(p_kind text, p_ref text, p_at timestamptz) returns boolean language sql as $$
+  select exists (select 1 from jsonb_array_elements(billing.alerts(p_at)) a where a->>'kind' = p_kind and a->>'ref' = p_ref)
+$$;
+
+do $$
+begin
+  perform billing.switch_on(pg_temp.t(0));
+  -- earlier blocks queued fetches with no stored login behind them: start clean
+  update billing.history_fetches set status = 'dropped', drop_reason = 'replaced', finished_at = pg_temp.t(0)
+   where status in ('queued', 'running');
+  perform pg_temp.ok('R0 switched on', billing.is_live());
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- R1 read_now through two logins and a share claim; a broken login
+-- ---------------------------------------------------------------------------
+do $$
+declare a uuid := pg_temp.acct('r1'); l1 uuid; l2 uuid; sh uuid := pg_temp.share_login(); n int;
+begin
+  l1 := pg_temp.link(a, 'r1a', '{990030101,990030102}', pg_temp.t(0));
+  perform pg_temp.stored(l1);
+  perform pg_temp.choose(a, '{990030101,990030102}', pg_temp.t(0));
+  perform pg_temp.pay(a, 'family', 'month', pg_temp.t(0.5));
+  l2 := pg_temp.link(a, 'r1b', '{990030102}', pg_temp.t(0.6));
+  perform pg_temp.stored(l2);
+  insert into billing.plants (id, brand, external_id) values (990030103, 'sunsynk', '990030103');
+  insert into billing.plant_claims (plant, account, claimed_at) values (990030103, a, pg_temp.t(0.6));
+  perform pg_temp.choose(a, '{990030101,990030102,990030103}', pg_temp.t(0.7));
+
+  select count(*) into n from public.poll_jobs_v2(0, 1, null, pg_temp.t(1)) where plant_id = 990030102;
+  perform pg_temp.eq('R1 plant on two logins read once', n::text, '1');
+  perform pg_temp.eq('R1 through the earlier login', pg_temp.lane_of(990030102, pg_temp.t(1)), l1::text);
+  perform pg_temp.eq('R1 share claim read through the share login', pg_temp.lane_of(990030103, pg_temp.t(1)), sh::text);
+  perform pg_temp.ok('R1 job carries the plant version', (select plant_version = pg_temp.ver(990030101)
+    from public.poll_jobs_v2(0, 1, null, pg_temp.t(1)) where plant_id = 990030101));
+  select count(*) into n from public.poll_jobs_v2(0, 2, null, pg_temp.t(1)) where plant_id = 990030101;
+  select n + count(*) into n from public.poll_jobs_v2(1, 2, null, pg_temp.t(1)) where plant_id = 990030101;
+  perform pg_temp.eq('R1 in exactly one shard', n::text, '1');
+  perform pg_temp.eq('R1 one account only', (select count(*)::text from public.poll_jobs_v2(0, 1, l2, pg_temp.t(1))), '0');
+
+  -- l1 breaks: the shared plant moves to l2, the other is not read, history kept
+  perform pg_temp.agg(990030101, pg_temp.t(1));
+  n := pg_temp.ver(990030101);
+  update private.sunsynk_accounts set status = 'needs_relink' where id = l1;
+  perform pg_temp.eq('R1 broken login copied to billing', (select status from billing.logins where id = l1), 'needs_reconnect');
+  perform pg_temp.ok('R1 its plants'' versions moved', pg_temp.ver(990030101) = n + 1);
+  perform pg_temp.eq('R1 shared plant now through the other login', pg_temp.lane_of(990030102, pg_temp.t(1)), l2::text);
+  perform pg_temp.eq('R1 broken login: not read', pg_temp.lane_of(990030101, pg_temp.t(1)), '<not read>');
+  perform pg_temp.eq('R1 broken login: protected', pg_temp.ps(990030101, pg_temp.t(1), 'protected'), 'true');
+  perform billing.delete_due(pg_temp.t(1));
+  perform pg_temp.ok('R1 broken login: history kept by the delete job', pg_temp.has_agg(990030101));
+  perform pg_temp.ok('R1 status change logged', exists (select 1 from billing.account_events where account = a and kind = 'login_status'));
+  update private.sunsynk_accounts set status = 'active' where id = l1;
+  perform pg_temp.eq('R1 fixed: read again', pg_temp.lane_of(990030101, pg_temp.t(1)), l1::text);
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- R2 a switch during a fetch writes nothing; the switched-out request is dropped
+-- ---------------------------------------------------------------------------
+do $$
+declare b uuid := pg_temp.acct('r2'); l uuid; v bigint; r jsonb;
+begin
+  l := pg_temp.link(b, 'r2', '{990030201,990030202}', pg_temp.t(0));
+  perform pg_temp.stored(l);
+  perform pg_temp.choose(b, '{990030201}', pg_temp.t(0));
+  v := pg_temp.ver(990030201);
+  perform pg_temp.eq('R2 first plant queued for history', (pg_temp.fetch_row(b, 990030201)).status, 'queued');
+  perform pg_temp.choose(b, '{990030202}', pg_temp.t(0.5));      -- switched while the minute was read
+  r := public.poll_commit_v2(jsonb_build_object('990030201', v), l, extract(epoch from pg_temp.t(0.5))::bigint,
+         '[]', '[]', jsonb_build_array(jsonb_build_object('plant_id', 990030201, 'pv_w', 5)), '[]', '[]', null, null, pg_temp.t(0.5));
+  perform pg_temp.eq('R2 poll write refused', r->>'refused', '[990030201]');
+  perform pg_temp.ok('R2 nothing written', not pg_temp.has_agg(990030201));
+  perform pg_temp.fails('R2 recover write refused',
+    format('select public.q_insert_recovered_v2(990030201, %s, %L, %L, %L)', v,
+           jsonb_build_array(jsonb_build_object('ts', extract(epoch from pg_temp.t(-3))::bigint, 'pv_w', 1)), 'invhistory', pg_temp.t(0.5)),
+    'is not read now');
+  perform pg_temp.fails('R2 a write with no version is refused',
+    format('select public.q_insert_inverter_history_v2(990030202, null, %L, %L, %L)', 'SN1', '[]', pg_temp.t(0.5)), 'is not read now');
+  perform pg_temp.eq('R2 switched-out request dropped', (pg_temp.fetch_row(b, 990030201)).drop_reason, 'switched_out');
+  perform pg_temp.eq('R2 new plant queued', (pg_temp.fetch_row(b, 990030202)).status, 'queued');
+  r := public.poll_commit_v2(jsonb_build_object('990030202', pg_temp.ver(990030202)), l, extract(epoch from pg_temp.t(0.6))::bigint,
+         '[]', '[]', jsonb_build_array(jsonb_build_object('plant_id', 990030202, 'pv_w', 5)), '[]', '[]', 'tok', 1, pg_temp.t(0.6));
+  perform pg_temp.ok('R2 the plant read now is written', r->'refused' = '[]'::jsonb and pg_temp.has_agg(990030202));
+  perform pg_temp.eq('R2 token saved', (select access_token from private.sunsynk_accounts where id = l), 'tok');
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- R3 the delete job: waits for a pending payment, then deletes; purge then new readings;
+--    a restart fetches the kept plant again; the win-back event
+-- ---------------------------------------------------------------------------
+do $$
+declare c uuid := pg_temp.acct('r3'); l uuid; inv uuid; ref text; r jsonb; v bigint; uid uuid;
+begin
+  l := pg_temp.link(c, 'r3', '{990030301}', pg_temp.t(0));
+  perform pg_temp.stored(l);
+  perform pg_temp.choose(c, '{990030301}', pg_temp.t(0));
+  perform pg_temp.agg(990030301, pg_temp.t(1));
+  perform pg_temp.eqt('R3 week over unpaid: deleted 30 days after', pg_temp.ps(990030301, pg_temp.t(8), 'delete_at'), pg_temp.t(37));
+  r := billing.delete_due(pg_temp.t(36));
+  perform pg_temp.ok('R3 not before its date', pg_temp.has_agg(990030301));
+
+  inv := (billing.start_checkout(c, 'home', 'month', 0, '{990030301}', pg_temp.t(37.5))->>'invoice')::uuid;
+  ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(37.5))->>'reference';
+  r := billing.delete_due(pg_temp.t(38));
+  perform pg_temp.eq('R3 held while a payment is pending', r->>'held', '[990030301]');
+  perform pg_temp.ok('R3 history still there', pg_temp.has_agg(990030301));
+  perform pg_temp.ok('R3 held plant is not an alert', not pg_temp.alert('history_unprotected', '990030301', pg_temp.t(38)));
+  perform pg_temp.ok('R3 try pending over an hour: alert', pg_temp.alert('attempt_pending', ref, pg_temp.t(38)));
+  perform pg_temp.ok('R3 history past its date, no hold: alert', pg_temp.alert('history_unprotected', '990030301', pg_temp.t(39)));
+  v := pg_temp.ver(990030301);
+  r := billing.delete_due(pg_temp.t(39));
+  perform pg_temp.eq('R3 deleted once the hold is over 24 hours', r->>'deleted', '[990030301]');
+  perform pg_temp.ok('R3 readings gone', not pg_temp.has_agg(990030301));
+  perform pg_temp.eqt('R3 purge recorded', (select history_purged_at::text from billing.plants where id = 990030301), pg_temp.t(39));
+  perform pg_temp.ok('R3 version moved', pg_temp.ver(990030301) = v + 1);
+  perform pg_temp.eq('R3 purged: no kept-until', pg_temp.ps(990030301, pg_temp.t(39), 'delete_at'), null);
+  perform pg_temp.ok('R3 no alert after the delete', not pg_temp.alert('history_unprotected', '990030301', pg_temp.t(39)));
+  r := billing.delete_due(pg_temp.t(40));
+  perform pg_temp.ok('R3 a purged plant is skipped', not (r->'deleted') @> '[990030301]');
+  perform pg_temp.ok('R3 heartbeat written', (select last_run_at from billing.job_heartbeats where job = 'delete') = pg_temp.t(40));
+
+  -- the late payment lands: the plan restarts, the kept plant is fetched again
+  uid := (select user_id from billing.accounts where id = c);
+  insert into public.email_queue (user_id, kind, key, due_at) values (uid, 'winback', 'winback:state-test:' || uid, pg_temp.t(37));
+  update public.email_queue set status = 'sent', sent_at = pg_temp.t(37) where key = 'winback:state-test:' || uid;
+  r := pg_temp.answer(ref, 'ok', pg_temp.t(40));
+  perform pg_temp.eq('R3 payment applied', r->>'action', 'applied');
+  perform pg_temp.ok('R3 restart: history asked for again', (select status = 'queued' and requested_at = pg_temp.t(40)
+    from billing.history_fetches where account = c and plant = 990030301 order by id desc limit 1));
+  perform pg_temp.ok('R3 win-back return found', (billing.winback_return(ref)->>'user')::uuid = uid
+    and (billing.winback_return(ref)->>'days')::int = 3);
+  r := public.billing_jobs('winback', jsonb_build_object('reference', ref));
+  perform pg_temp.ok('R3 win-back through the door', r ? 'email_id');
+
+  perform public.q_insert_recovered_v2(990030301, pg_temp.ver(990030301),
+    jsonb_build_array(jsonb_build_object('ts', extract(epoch from date_trunc('minute', pg_temp.t(39.5)))::bigint, 'pv_w', 7)),
+    'invhistory', pg_temp.t(40));
+  perform pg_temp.ok('R3 new readings written', pg_temp.has_agg(990030301));
+  perform pg_temp.eq('R3 new readings clear the purge', (select history_purged_at::text from billing.plants where id = 990030301), null);
+  perform pg_temp.eq('R3 a whole past day is missing for the history queue',
+    (select count(*)::text from public.q_missing_minutes_day(990030301, (now() at time zone 'Africa/Johannesburg')::date - 3)), '1440');
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- R4 fetch speed: fetches 1-3 normal, then twice as long each time, capped at 24 h;
+--    a fetch drops out of the count after 7 days; slowed by the wait between days
+-- ---------------------------------------------------------------------------
+do $$
+declare d uuid := pg_temp.acct('r4'); l uuid; i int; got text := ''; f billing.history_fetches; w jsonb; s jsonb;
+begin
+  l := pg_temp.link(d, 'r4', '{990030401,990030402,990030403,990030404,990030405,990030406,990030407,990030408}', pg_temp.t(0));
+  perform pg_temp.stored(l);
+  perform pg_temp.pay(d, 'home', 'month', pg_temp.t(0));
+  for i in 1..7 loop
+    perform pg_temp.choose(d, array[990030400 + i]::bigint[], pg_temp.t(i * 0.1));
+    got := got || (pg_temp.fetch_row(d, 990030400 + i)).target_s || ' ';
+  end loop;
+  perform pg_temp.eq('R4 targets for fetches 1-7', got, '0 0 0 1200 2400 4800 9600 ');
+  perform pg_temp.eq('R4 fetch number logged', (select max((after->>'fetch_no')::int)::text from billing.account_events
+    where account = d and kind = 'history_fetch'), '7');
+  perform pg_temp.ok('R4 seven switches in a week: alert', pg_temp.alert('many_switches', d::text, pg_temp.t(1)));
+  perform pg_temp.ok('R4 not after the week', not pg_temp.alert('many_switches', d::text, pg_temp.t(8)));
+  -- 7 days after the 4th (t 0.4): fetches at 0.5, 0.6, 0.7 still count, so this is the 4th
+  perform pg_temp.choose(d, '{990030408}', pg_temp.t(7.4));
+  perform pg_temp.eq('R4 older fetches dropped out of the count', (pg_temp.fetch_row(d, 990030408)).fetch_no::text, '4');
+  perform pg_temp.eq('R4 so it is 20 minutes again', (pg_temp.fetch_row(d, 990030408)).target_s::text, '1200');
+  -- the 1200 s fetch starts at once and spreads over its 60 days: 20 s a day
+  w := billing.history_take(pg_temp.t(7.4));
+  f := pg_temp.fetch_row(d, 990030408);
+  perform pg_temp.ok('R4 started at once', f.status = 'running' and f.started_at = pg_temp.t(7.4) and f.days_total = 60);
+  perform pg_temp.ok('R4 handed out with its login and version', exists (select 1 from jsonb_array_elements(w) x
+    where (x->>'id')::bigint = f.id and x->'login'->>'id' = l::text and (x->>'version')::bigint = pg_temp.ver(990030408)));
+  s := billing.history_step(f.id, f.day_next, false, false, pg_temp.t(7.4) + interval '5 seconds');
+  perform pg_temp.eqt('R4 next day waits until 20 s after the start', s->>'next_step_at', pg_temp.t(7.4) + interval '20 seconds');
+  perform pg_temp.ok('R4 go on with the day before', (s->>'go')::boolean and (s->>'day')::date = f.day_next - 1);
+  -- the cap: eleven fetches in a day
+  for i in 1..11 loop
+    perform pg_temp.choose(d, array[990030401 + (i % 2)]::bigint[], pg_temp.t(20 + i * 0.01));
+  end loop;
+  perform pg_temp.eq('R4 capped at 24 h', (select target_s::text from billing.history_fetches where account = d
+    order by id desc limit 1), '86400');
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- R5 the queue: one fetch per login at a time; turns per account on the share login;
+--    429 backs the login off; a finished walk is done
+-- ---------------------------------------------------------------------------
+do $$
+declare e1 uuid := pg_temp.acct('r5a'); e2 uuid := pg_temp.acct('r5b'); sh uuid := pg_temp.share_login();
+        w jsonb; f billing.history_fetches; s jsonb; n int;
+begin
+  -- R1's claim fetch holds the share login since R4's take: finish it
+  update billing.history_fetches set status = 'done', finished_at = pg_temp.t(0) where lane = sh and status = 'running';
+  insert into billing.plants (id, brand, external_id) values (990030501, 'sunsynk', '990030501'),
+    (990030502, 'sunsynk', '990030502'), (990030503, 'sunsynk', '990030503');
+  insert into billing.plant_claims (plant, account, claimed_at) values (990030501, e1, pg_temp.t(0)),
+    (990030502, e1, pg_temp.t(0)), (990030503, e2, pg_temp.t(0));
+  perform pg_temp.choose(e1, '{990030501,990030502}', pg_temp.t(0));
+  perform pg_temp.choose(e2, '{990030503}', pg_temp.t(0.001));
+  w := billing.history_take(pg_temp.t(0.01));
+  select count(*) into n from billing.history_fetches where lane = sh and status = 'running';
+  perform pg_temp.eq('R5 one fetch at a time on the share login', n::text, '1');
+  perform pg_temp.eq('R5 first asked, first started', (pg_temp.fetch_row(e1, 990030501)).status, 'running');
+  update billing.history_fetches set status = 'done', finished_at = pg_temp.t(0.02) where account = e1 and plant = 990030501;
+  w := billing.history_take(pg_temp.t(0.02));
+  perform pg_temp.eq('R5 the other account takes its turn', (pg_temp.fetch_row(e2, 990030503)).status, 'running');
+  perform pg_temp.eq('R5 the first account waits', (pg_temp.fetch_row(e1, 990030502)).status, 'queued');
+
+  f := pg_temp.fetch_row(e2, 990030503);
+  s := billing.history_step(f.id, f.day_next, false, true, pg_temp.t(0.03));
+  perform pg_temp.eq('R5 429: backed off a minute', s->>'backoff_s', '60');
+  w := billing.history_take(pg_temp.t(0.03) + interval '30 seconds');
+  perform pg_temp.ok('R5 nothing handed out on a backed-off login', not exists (select 1 from jsonb_array_elements(w) x
+    where (x->>'id')::bigint = f.id));
+  w := billing.history_take(pg_temp.t(0.03) + interval '61 seconds');
+  s := billing.history_step(f.id, f.day_next, false, true, pg_temp.t(0.03) + interval '62 seconds');
+  perform pg_temp.eq('R5 429 again: twice as long', s->>'backoff_s', '120');
+  -- the walk ends at its floor
+  update billing.history_fetches set day_next = day_floor, claimed_until = null where id = f.id;
+  s := billing.history_step(f.id, f.day_floor, false, false, pg_temp.t(0.1));
+  perform pg_temp.eq('R5 last day walked: done', (pg_temp.fetch_row(e2, 990030503)).status, 'done');
+  perform pg_temp.ok('R5 a good answer clears the back-off', (select backoff_s = 0 from billing.history_lanes where lane = sh));
+  w := billing.history_take(pg_temp.t(0.11));
+  perform pg_temp.eq('R5 then the first account again', (pg_temp.fetch_row(e1, 990030502)).status, 'running');
+  -- switched out while running: dropped at the next step
+  perform pg_temp.choose(e1, '{990030501}', pg_temp.t(0.12));
+  perform pg_temp.eq('R5 switched out: dropped', (pg_temp.fetch_row(e1, 990030502)).drop_reason, 'switched_out');
+  -- the share login breaks while a fetch runs: it waits, it is not dropped
+  perform pg_temp.choose(e1, '{990030501,990030502}', pg_temp.t(0.125));
+  update private.sunsynk_accounts set status = 'needs_relink' where id = sh;
+  w := billing.history_take(pg_temp.t(0.13));
+  f := pg_temp.fetch_row(e1, 990030502);
+  perform pg_temp.eq('R5 share login down: the new request waits', f.status, 'queued');
+  perform pg_temp.ok('R5 nothing handed out without a working login', not exists (select 1 from jsonb_array_elements(w) x
+    where (x->>'plant')::bigint = 990030502));
+  update private.sunsynk_accounts set status = 'active' where id = sh;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- R6 the poller's plant list; the alert list; heartbeats; the door's rights
+-- ---------------------------------------------------------------------------
+do $$
+declare g uuid := pg_temp.acct('r6'); l uuid; r jsonb; v bigint;
+begin
+  l := pg_temp.link(g, 'r6', '{990030601,990030602}', pg_temp.t(0));
+  perform pg_temp.choose(g, '{990030601,990030602}', pg_temp.t(0));
+  r := billing.login_seen(l, '[{"id":990030601},{"id":990030603,"name":"New"}]', pg_temp.t(0.5));
+  perform pg_temp.eq('R6 new plant on the login added', r->>'new', '[990030603]');
+  perform pg_temp.eq('R6 missing once: not gone yet', r->>'gone', '[]');
+  v := pg_temp.ver(990030602);
+  r := billing.login_seen(l, '[{"id":990030601},{"id":990030603}]', pg_temp.t(0.5) + interval '1 hour');
+  perform pg_temp.eq('R6 missing twice an hour apart: gone', r->>'gone', '[990030602]');
+  perform pg_temp.ok('R6 gone plant''s version moved', pg_temp.ver(990030602) = v + 1);
+  perform pg_temp.eq('R6 gone plant not read', pg_temp.pp(g, pg_temp.t(1), 990030602, 'read_now'), 'false');
+  perform pg_temp.eq('R6 new plant waits to be chosen', pg_temp.pp(g, pg_temp.t(1), 990030603, 'chosen'), 'false');
+  perform pg_temp.eq('R6 unknown login: nothing', billing.login_seen(gen_random_uuid(), '[]', pg_temp.t(1))::text, null);
+
+  insert into billing.refunds (reference, reason, status, tries, last_error, created_at, updated_at)
+  values ('R6-REF', 'stale', 'failed', 3, 'boom', pg_temp.t(1), pg_temp.t(1));
+  insert into public.email_queue (to_email, kind, key, due_at) values ('late@state.test', 'test', 'r6-late', pg_temp.t(0));
+  perform pg_temp.ok('R6 failed refund: alert', pg_temp.alert('refund_failed', 'R6-REF', pg_temp.t(2)));
+  perform pg_temp.ok('R6 email waiting over an hour: alert', pg_temp.alert('outbox_backlog', 'email_queue', pg_temp.t(2)));
+  perform pg_temp.ok('R6 billing run never seen: quiet after 26 h', pg_temp.alert('job_quiet', 'billing-run', pg_temp.t(2)));
+  perform public.billing_jobs('heartbeat', jsonb_build_object('job', 'billing-run', 'result', '{}'::jsonb));
+  perform pg_temp.ok('R6 heartbeat through the door', exists (select 1 from billing.job_heartbeats where job = 'billing-run'));
+  perform pg_temp.ok('R6 history job quiet 10 min after its last run', pg_temp.alert('job_quiet', 'history', pg_temp.t(1)));
+  perform pg_temp.ok('R6 alerts through the door', jsonb_typeof(public.billing_jobs('alerts')) = 'array');
+  perform pg_temp.ok('R6 not callable by signed-in users',
+    not has_function_privilege('authenticated', 'public.billing_jobs(text, jsonb)', 'execute')
+    and not has_function_privilege('authenticated', 'public.poll_jobs_v2(int, int, uuid, timestamptz)', 'execute')
+    and not has_function_privilege('anon', 'public.poll_commit_v2(jsonb, uuid, bigint, jsonb, jsonb, jsonb, jsonb, jsonb, text, bigint, timestamptz)', 'execute')
+    and not has_function_privilege('authenticated', 'billing.delete_due(timestamptz)', 'execute')
+    and has_function_privilege('service_role', 'public.billing_jobs(text, jsonb)', 'execute'));
+end $$;
+
 -- ---------------------------------------------------------------------------
 do $$
 declare r record; f int; n int;

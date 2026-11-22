@@ -242,6 +242,15 @@ billing code goes live, in this order:
 4. Deploy the `billing` function from this change only now: it reads and writes the new
    tables (through `public.billing_v2`) and no longer the old ones. Deployed earlier, it
    would stop today's billing.
+5. Switch reading, deleting and history fetches to the new state (0246), once:
+   `supabase db query --linked "select billing.switch_on()"`. Until then `poll_jobs_v2`
+   answers with the old `poll_jobs` and the guarded writes let everything through, so
+   `poll`, `recover`, `sync-plant-energy` and `job-check` from this change may ship before
+   it. `switch_on` turns the `unpaid-delete` and `plant-wipe` jobs off and schedules
+   `billing-delete` (every 5 minutes, `billing.delete_due()`) and `billing-history` (every
+   minute, `recover?queue=1`). From then on the "history deleted" email (`unpaid_deleted`)
+   is no longer queued: its replacement comes with the new emails. To check it:
+   `select billing.alerts()` and `select * from billing.job_heartbeats`.
 
 ## Changing the domain
 

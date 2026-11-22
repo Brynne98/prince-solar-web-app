@@ -48,7 +48,18 @@
 // the spine fetch ran for a day.
 //
 // ?plant=ID restricts a run to one plant and leaves the round-robin cursor alone.
-import { type Account, db, denyUnlessServer, markCursor, type PlantJob, plantsToPoll, rotateJobs, saveCallTally } from "../_shared/sunsynk.ts";
+//
+// Writes are guarded (0246): each carries the plant's version from its job, and the
+// database refuses it once the plant is switched out or deleted. A refused plant
+// stops for this run.
+//
+// ?queue=1 (every minute since the billing switch-over, 0246): the history fetch
+// queue. billing.history_take hands out at most one fetch per inverter-cloud login;
+// each walks its days newest first, per-inverter history only, and reports every
+// day to billing.history_step, which says when the next day may start (slowed
+// fetches wait longer between days, never at the start) and drops a fetch whose
+// plant was switched out. A 429 that outlasts apiGet's retries backs the login off.
+import { type Account, db, denyUnlessServer, markCursor, type PlantJob, plantsToPoll, rotateJobs, saveCallTally, throttledCounts } from "../_shared/sunsynk.ts";
 import { noteError, reportError, serve } from "../_shared/errors.ts";
 import {
   bucketizeAgg,
@@ -76,6 +87,20 @@ async function rpc(fn: string, args: Record<string, unknown>) {
   const { data, error } = await db.rpc(fn, args);
   if (error) throw new Error(`${fn}: ${error.message}`);
   return data;
+}
+
+// The version each plant's job started on, and the plants whose writes were refused.
+const versions = new Map<number, number | null>();
+const refused = new Set<number>();
+/** A guarded history write (0246). Refused: 0 rows, and the plant is marked to stop. */
+async function guarded(fn: "q_insert_recovered_v2" | "q_insert_inverter_history_v2", plantId: number, args: Record<string, unknown>) {
+  try {
+    return await rpc(fn, { p_plant: plantId, p_version: versions.get(plantId) ?? null, ...args });
+  } catch (e) {
+    if (!/is not read now/.test(String(e instanceof Error ? e.message : e))) throw e;
+    refused.add(plantId);
+    return 0;
+  }
 }
 
 /** Fallback scale for days with too little of our own data to calibrate against. */
@@ -122,7 +147,7 @@ async function historySpine(acc: Account, plantId: number, tz: string, day: stri
 /** Sample rows into inverter_history. Throws on a database error; callers decide. */
 async function bankHistory(plantId: number, sn: string, rows: ReturnType<typeof historyRows>): Promise<number> {
   if (!rows.length) return 0;
-  return Number(await rpc("q_insert_inverter_history", { p_plant: plantId, p_sn: sn, p_rows: rows }) ?? 0);
+  return Number(await guarded("q_insert_inverter_history_v2", plantId, { p_sn: sn, p_rows: rows }) ?? 0);
 }
 
 /** Inverter serials the poller has stored for a plant. */
@@ -192,6 +217,7 @@ async function temperatureWalk(job: PlantJob, started: number) {
   }
   for (; day < today; day = addDays(tz, day, 1)) {
     if (Date.now() - started > TIME_BUDGET_MS) { stoppedEarly = `time budget reached at ${day}; next run continues from here`; break; }
+    if (refused.has(plantId)) { stoppedEarly = "plant switched out or deleted"; break; }
     let failed: string | null = null;
     try { banked += await fetchTempDay(job, sns, day, started); }
     catch (e) {
@@ -220,13 +246,16 @@ async function temperatureWalk(job: PlantJob, started: number) {
   return { banked, walked, walkedTo: day, stoppedEarly, pruned };
 }
 
-async function recoverDay(acc: Account, plantId: number, tz: string, day: string, historyOnly = false) {
+// wholeDay: every missing minute of the day (the history queue, 0246); else from the
+// plant's first minute or its backfill floor (q_missing_minutes).
+async function recoverDay(acc: Account, plantId: number, tz: string, day: string, historyOnly = false, wholeDay = false) {
   // Paged: PostgREST caps any one response at max_rows (1000) and a day nobody
   // logged is 1440 minutes. Before 0044 that silently left the last 440 unfilled.
   let gaps: number[] = [];
+  const missingFn = wholeDay ? "q_missing_minutes_day" : "q_missing_minutes";
   for (let from = 0; ; ) {
-    const { data, error } = await db.rpc("q_missing_minutes", { p_plant: plantId, p_day: day }).range(from, from + 999);
-    if (error) throw new Error(`q_missing_minutes: ${error.message}`);
+    const { data, error } = await db.rpc(missingFn, { p_plant: plantId, p_day: day }).range(from, from + 999);
+    if (error) throw new Error(`${missingFn}: ${error.message}`);
     if (!data?.length) break;
     gaps.push(...data.map((r: any) => Number(r.ts ?? r)));
     from += data.length;
@@ -250,7 +279,7 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
         .filter((x): x is { ts: number; row: SpineRow } => complete(x.row))
         .map(({ ts, row }) => ({ ts, ...row }));
       if (rows.length) {
-        bankedHistory = Number(await rpc("q_insert_recovered", { p_plant: plantId, p_rows: rows, p_source: "invhistory" }) ?? 0);
+        bankedHistory = Number(await guarded("q_insert_recovered_v2", plantId, { p_rows: rows, p_source: "invhistory" }) ?? 0);
         const filled = new Set(rows.map((r) => r.ts));
         gaps = gaps.filter((ts) => !filled.has(ts));
       }
@@ -292,7 +321,7 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
   }
   if (!rows.length) return { day, banked: bankedHistory, bankedHistory, missing: wanted, historyFailed, reason: "feed had no matching buckets" };
 
-  const banked = await rpc("q_insert_recovered", { p_plant: plantId, p_rows: rows, p_source: "plantfeed" });
+  const banked = await guarded("q_insert_recovered_v2", plantId, { p_rows: rows, p_source: "plantfeed" });
 
   return {
     day,
@@ -331,6 +360,7 @@ async function backfillPlant(job: PlantJob, started: number) {
 
   for (; day >= floor; day = addDays(tz, day, -1)) {
     if (Date.now() - started > TIME_BUDGET_MS) { stoppedEarly = `time budget reached at ${day}; next run continues from here`; break; }
+    if (refused.has(plantId)) { stoppedEarly = "plant switched out or deleted"; break; }
     let r: { banked: number; failed?: boolean; reason?: string; error?: string; day: string };
     try {
       r = await recoverDay(account, plantId, tz, day, true);
@@ -402,6 +432,7 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
       stoppedEarly = `time budget reached at ${day}; remaining days will be picked up next run`;
       break;
     }
+    if (refused.has(plantId)) { stoppedEarly = "plant switched out or deleted"; break; }
     try {
       const r: any = await recoverDay(account, plantId, tz, day);
       total += r.banked;
@@ -482,6 +513,57 @@ async function dryRun(job: PlantJob, day: string, web = true) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// The history fetch queue (?queue=1, 0246)
+// ---------------------------------------------------------------------------
+type Fetch = {
+  id: number; plant: number; account: string; day: string; floor: string; target_s: number;
+  version: number; timezone: string; login: Account;
+};
+// Every minute from pg_cron: stop well inside the minute so runs do not pile up.
+const QUEUE_BUDGET_MS = 45_000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const step = (args: Record<string, unknown>) =>
+  rpc("billing_jobs", { p_cmd: "history_step", p_args: args }) as Promise<{ go: boolean; day?: string; next_step_at?: string; status?: string }>;
+
+async function runFetch(f: Fetch, started: number) {
+  const acc: Account = { ...f.login };
+  versions.set(f.plant, f.version);
+  let day = f.day, days = 0, banked = 0;
+  for (;;) {
+    const before = throttledCounts.get(acc.id) ?? 0;
+    let r: { banked: number; failed?: boolean };
+    try { r = await recoverDay(acc, f.plant, f.timezone, day, true, true); }
+    catch (e) { r = { banked: 0, failed: true }; noteError("history_fetch_day_failed", e, { plant: f.plant, hourly: true }); }
+    // switched or deleted mid-day: history_take drops it, or hands it out again on the new version
+    if (refused.has(f.plant)) {
+      await step({ id: f.id, day: null });
+      return { id: f.id, plant: f.plant, days, banked, stopped: "write refused" };
+    }
+    banked += r.banked; days++;
+    const throttled = (throttledCounts.get(acc.id) ?? 0) > before;
+    const s = await step({ id: f.id, day, failed: !!r.failed, throttled });
+    if (!s.go) return { id: f.id, plant: f.plant, days, banked, status: s.status ?? null, throttled };
+    const wait = Math.max(0, Date.parse(s.next_step_at!) - Date.now());
+    if (Date.now() - started + wait > QUEUE_BUDGET_MS) {
+      await step({ id: f.id, day: null });     // free for the next run when its day is due
+      return { id: f.id, plant: f.plant, days, banked, next: s.next_step_at };
+    }
+    if (wait) await sleep(wait);
+    day = s.day!;
+  }
+}
+
+async function runQueue(started: number) {
+  const fetches = (await rpc("billing_jobs", { p_cmd: "history_take", p_args: {} }) ?? []) as Fetch[];
+  // one fetch per login, so the logins run side by side
+  const done = await Promise.allSettled(fetches.map((f) => runFetch(f, started)));
+  return done.map((d, i) => d.status === "fulfilled" ? d.value : (() => {
+    noteError("history_fetch_failed", d.reason, { plant: fetches[i].plant, hourly: true });
+    return { id: fetches[i].id, plant: fetches[i].plant, error: String(d.reason instanceof Error ? d.reason.message : d.reason) };
+  })());
+}
+
 serve("recover", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
@@ -492,8 +574,11 @@ serve("recover", async (req) => {
     // ?budget_ms= lets a test shrink the time budget; production never passes it.
     const budgetMs = Math.min(TIME_BUDGET_MS, Number(url.searchParams.get("budget_ms")) || TIME_BUDGET_MS);
 
+    if (url.searchParams.get("queue") === "1") return json({ ok: true, queue: await runQueue(started) });
+
     const only = Number(url.searchParams.get("plant")) || null;
     let jobs = await plantsToPoll();
+    for (const j of jobs) versions.set(j.plantId, j.version);
     if (only && url.searchParams.get("dry") !== "1") jobs = jobs.filter((j) => j.plantId === only);
     if (!jobs.length) return json({ ok: true, banked: 0, reason: only ? `plant ${only} is not linked` : "no linked plants" });
 

@@ -67,8 +67,8 @@ async function paystack<T>(method: "GET" | "POST", path: string, body?: unknown)
 }
 
 /** One billing command (public.billing_v2, service role only). */
-async function bill<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
-  const { data, error } = await db.rpc("billing_v2", { p_cmd: cmd, p_args: args });
+async function bill<T>(cmd: string, args: Record<string, unknown> = {}, door = "billing_v2"): Promise<T> {
+  const { data, error } = await db.rpc(door, { p_cmd: cmd, p_args: args });
   if (error) throw Object.assign(new Error(`${cmd}: ${error.message}`), { code: error.code });
   return data as T;
 }
@@ -105,6 +105,10 @@ async function report(reference: string, tx: Tx): Promise<Applied> {
   if (r.user && r.action === "applied" && r.kind === "purchase") {
     await track("plan_started_done", r.user, reference, at,
       { returning: r.days_since_plan != null, days_since_plan: r.days_since_plan ?? null }).catch(() => {});
+    // A purchase after the win-back email (SOLAR-328), read from the new tables (0246).
+    const w = await bill<{ user: string; email_id: number; days: number; at: string } | null>("winback", { reference }, "billing_jobs")
+      .catch(() => null);
+    if (w) await track("winback_resubscribed_done", w.user, String(w.email_id), w.at, { days: w.days }).catch(() => {});
   }
   return r;
 }
@@ -261,6 +265,9 @@ serve("billing", async (req) => {
       await sendRefund(f.refund, f.reference).catch((e) => noteError("run_refund_failed", e, { ref: f.reference }));
       out.refunds++;
     }
+    // the daily job's heartbeat (0246): billing.alerts lists it once it goes quiet
+    await bill("heartbeat", { job: "billing-run", result: { ...out, steps: r.steps } }, "billing_jobs")
+      .catch((e) => noteError("billing_heartbeat_failed", e, { hourly: true }));
     return json({ ...out, steps: r.steps }, 200);
   }
 

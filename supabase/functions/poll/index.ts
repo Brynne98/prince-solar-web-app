@@ -6,10 +6,12 @@
 // instead of hitting SunSynk at second zero, then polls its accounts in parallel.
 // No body (local dev, manual invoke) means "every account, no delay".
 //
-// The set of plants to log comes from pollJobs() (0100), which returns only this
-// shard's plants — plant_users is the source of truth for what a user can see, so
-// it is also what gets stored. Jobs are grouped by
-// account so each account's inverter list is fetched once.
+// The set of plants to log comes from pollJobs() (0100, 0246), which returns only this
+// shard's plants: since the billing switch-over, the plants billing.plant_state reads
+// now, each through one working login. Jobs are grouped by account so each account's
+// inverter list is fetched once. The commit (poll_commit_v2) writes only plants whose
+// version is still the job's and that are still read, so a read that finishes after a
+// switch or a delete writes nothing.
 //
 // Per account: fetch every inverter's realtime endpoints, map them with the shared
 // extractReading(), and hand the whole minute (readings, per-string PV, metadata, a
@@ -87,6 +89,8 @@ type AccountResult = {
   strings: number;
   plants: number[];
   gapRecorded: number[];
+  /** plants switched or deleted while this minute was read: nothing written (0246) */
+  refused?: number[];
   /** inverters on a plant nobody has linked; fetched nothing, stored nothing */
   skipped?: string[];
   /** inverters whose datalogger had not uploaded: input only, rest carried forward */
@@ -181,12 +185,13 @@ const OUTPUT_EVERY_S = 600;
 const TEMP_EVERY_MIN = 10;
 const tempMinute = (sn: string) => [...sn].reduce((h, c) => h + c.charCodeAt(0), 0) % TEMP_EVERY_MIN;
 
-async function bankTodayTemps(inv: InverterInfo, acc: Account, tz: string): Promise<number> {
+async function bankTodayTemps(inv: InverterInfo, acc: Account, tz: string, version: number | null): Promise<number> {
   const day = localDate(tz);
   const out = await apiGet(extrasPaths(inv.sn, day).output, acc);
   const rows = historyRows(extrasOf(parseSeries(out), undefined), dayStartEpoch(tz, day));
   if (!rows.length) return 0;
-  return Number(await rpc("q_insert_inverter_history", { p_plant: inv.plantId, p_sn: inv.sn, p_rows: rows }) ?? 0);
+  return Number(await rpc("q_insert_inverter_history_v2",
+    { p_plant: inv.plantId, p_version: version, p_sn: inv.sn, p_rows: rows }) ?? 0);
 }
 
 type Endpoint = "battery" | "grid" | "load" | "output";
@@ -393,9 +398,9 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
       }
     }
   } else if (plantsMinute || !cached.length) {
+    // Only chosen plants are read (0246): a plant new on the login waits to be chosen.
     try {
-      const plants = await syncPlants(acc);
-      for (const p of plants) wanted.add(p.id);
+      await syncPlants(acc);
     } catch (e) {
       console.warn(`plant refresh failed for ${acc.id}:`, e instanceof Error ? e.message : e);
       noteError("plant_refresh_failed", e, { user: acc.user_id, hourly: true });
@@ -422,9 +427,11 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   // something new: started now, awaited at the end so the readings commit first. A
   // failure costs only this round.
   const tzOf = new Map(jobs.map((j) => [j.plantId, j.timezone]));
+  const versionOf = new Map(jobs.map((j) => [j.plantId, j.version]));
   const due = perInv.filter((f) => !f.carried && inputTimeOf(f.raw.input) != null
     && Math.floor(ts / 60) % TEMP_EVERY_MIN === tempMinute(f.inv.sn)).map((f) => f.inv);
-  const tempsDone = Promise.allSettled(due.map((inv) => bankTodayTemps(inv, acc, tzOf.get(Number(inv.plantId)) ?? "Africa/Johannesburg")));
+  const tempsDone = Promise.allSettled(due.map((inv) => bankTodayTemps(inv, acc, tzOf.get(Number(inv.plantId)) ?? "Africa/Johannesburg",
+    versionOf.get(Number(inv.plantId)) ?? null)));
   const carried = perInv.filter((f) => f.carried).map((f) => f.inv.sn);
   if (carried.length) result.carried = carried;
   // Endpoints whose value on this row came from the previous one — whether they were
@@ -488,7 +495,8 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   // last-write-wins, agg_minute first-write-wins with gap detection, meta, the
   // inverter mirror and the account's token. fetchInverter may have refreshed
   // the token, so read it off `acc` here rather than from the row we started with.
-  const committed = await rpc("poll_commit", {
+  const committed = await rpc("poll_commit_v2", {
+    p_versions: Object.fromEntries(jobs.map((j) => [String(j.plantId), j.version])),
     p_account: acc.id,
     p_ts: ts,
     p_readings: readings,
@@ -498,7 +506,8 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
     p_inverters: inverters.map((i) => ({ sn: i.sn, plant_id: i.plantId ?? null, account_id: acc.id })),
     p_access: acc.access_token,
     p_expires: acc.access_expires_at,
-  }) as { readings: number; strings: number; plants: number[]; gaps: number[] };
+  }) as { readings: number; strings: number; plants: number[]; gaps: number[]; refused?: number[] };
+  if (committed.refused?.length) result.refused = committed.refused;
   result.readings = committed.readings;
   result.strings = committed.strings;
   result.plants = committed.plants;
