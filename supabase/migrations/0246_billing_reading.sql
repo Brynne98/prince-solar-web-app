@@ -384,8 +384,9 @@ begin
   back := array(select x from unnest(ids) x where x <> all (old_live));
 
   if cardinality(gone) + cardinality(back) > 0 then
+    -- the plants' versions move (in-flight reads stop); the account's does not, so a plant
+    -- new or gone on the login never refunds a checkout in progress
     update billing.plants set version = version + 1 where id = any (gone || back);
-    update billing.accounts set version = version + 1 where id = l.account;
     perform billing.log_event(l.account, p_at, 'poller', 'login_plants_seen',
                               jsonb_build_object('login', l.id, 'plants', to_jsonb(old_live)),
                               jsonb_build_object('gone', to_jsonb(gone), 'new', to_jsonb(back)));

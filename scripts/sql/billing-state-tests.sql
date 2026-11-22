@@ -1221,9 +1221,10 @@ begin
   return (pg_temp.sub(p_acc)).period_end;
 end $$;
 
--- F1 a renewal that never gets a clear answer still ends on day 15; a card page left open
---    does not stop a retry; a bank challenge is let go after 24 h; a late "pending" on a
---    try already settled changes nothing
+-- F1 a renewal that never gets a clear answer still ends on day 15; an open card page holds
+--    the retry until Paystack calls it abandoned (phase 3 fix 1); a bank challenge Paystack
+--    still calls pending after 24 h fails, and the job never fails it unasked (fix 2); a late
+--    "pending" on a try already settled changes nothing
 do $$
 declare a uuid := pg_temp.acct('f1a'); b uuid := pg_temp.acct('f1b'); c uuid := pg_temp.acct('f1c'); d uuid := pg_temp.acct('f1d');
         pe timestamptz; ref text; inv uuid;
@@ -1244,12 +1245,18 @@ begin
   ref := pg_temp.job(b, pe, 'fail');
   inv := (billing.pay_now(b, pe + interval '3 days')->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pe + interval '3 days')->>'reference';
-  perform pg_temp.ok('F1 owner''s card page open: the day-3 retry still runs', pg_temp.job(b, pe + interval '3 days 1 minute') is not null);
+  perform pg_temp.ok('F1 owner''s card page open: no day-3 charge on top of it', pg_temp.job(b, pe + interval '3 days 1 minute') is null);
+  perform pg_temp.answer(ref, 'abandoned', pe + interval '3 days 2 hours');
+  perform pg_temp.ok('F1 page abandoned: the day-3 retry runs', pg_temp.job(b, pe + interval '3 days 3 hours') is not null);
 
   pe := pg_temp.member(c, 'f1c', 990020103);
   ref := pg_temp.job(c, pe, 'pending');
   perform billing.run(pe + interval '25 hours');
-  perform pg_temp.eq('F1 bank challenge unanswered 24 h: let go', (select status from billing.payment_attempts where reference = ref), 'failed');
+  perform pg_temp.eq('F1 the job does not fail a pending try unasked', (select status from billing.payment_attempts where reference = ref), 'pending');
+  perform pg_temp.ok('F1 ... it is verified instead', billing.run(pe + interval '26 hours')->'verify' ? ref);
+  perform pg_temp.answer(ref, 'pending', pe + interval '26 hours');
+  perform pg_temp.eq('F1 Paystack still says pending after 24 h: failed', (select status from billing.payment_attempts where reference = ref), 'failed');
+  perform pg_temp.ok('F1 ... with no lease', (select claimed_until is null from billing.payment_attempts where reference = ref));
 
   pe := pg_temp.member(d, 'f1d', 990020104);
   ref := pg_temp.job(d, pe, 'not_found');
@@ -1401,6 +1408,9 @@ end $$;
 do $$
 declare a uuid := pg_temp.acct('f12a'); b uuid := pg_temp.acct('f12b'); members int;
 begin
+  -- other tests' checkouts left open hold places until verified: let them go first
+  update billing.payment_attempts set status = 'void' where status in ('created', 'pending', 'unknown')
+     and invoice in (select id from billing.invoices where kind = 'purchase' and status = 'open');
   members := (select count(distinct account) from billing.subscriptions where offer = 'launch');
   update billing.offers set max_members = members + 1 where code = 'launch';
   perform pg_temp.link(a, 'f12a', '{990021201}', pg_temp.t(0));
@@ -1795,6 +1805,85 @@ begin
     and not has_function_privilege('anon', 'public.poll_commit_v2(jsonb, uuid, bigint, jsonb, jsonb, jsonb, jsonb, jsonb, text, bigint, timestamptz)', 'execute')
     and not has_function_privilege('authenticated', 'billing.delete_due(timestamptz)', 'execute')
     and has_function_privilege('service_role', 'public.billing_jobs(text, jsonb)', 'execute'));
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- Q phase 3 review fixes (money). Fixes 1, 2 and 7 are in F1.
+-- ---------------------------------------------------------------------------
+do $$
+declare a uuid := pg_temp.acct('q3'); b uuid := pg_temp.acct('q4'); c uuid := pg_temp.acct('q5'); d uuid := pg_temp.acct('q6');
+        e uuid := pg_temp.acct('q9'); f uuid := pg_temp.acct('q10'); g uuid := pg_temp.acct('q11');
+        pe timestamptz; ref text; inv uuid; i1 jsonb; i2 jsonb; r jsonb; l uuid;
+begin
+  -- 3: a saved-card charge called abandoned is a failed try: the window starts on its due date
+  pe := pg_temp.member(a, 'q3', 990050301);
+  ref := pg_temp.job(a, pe, 'abandoned');
+  perform pg_temp.eq('Q3 abandoned saved-card charge: a failed try', (select status from billing.payment_attempts where reference = ref), 'failed');
+  perform pg_temp.eqt('Q3 ... the unpaid window starts on the due date', pg_temp.st(a, pe + interval '1 hour', 'past_due_since'), pe);
+
+  -- 4: the owner's card page on the renewal, no clear answer: the window starts from the due date
+  pe := pg_temp.member(b, 'q4', 990050401);
+  inv := (billing.pay_now(b, pe + interval '1 minute')->>'invoice')::uuid;
+  ref := billing.begin_attempt(inv, 'card_page', pe + interval '1 minute')->>'reference';
+  perform pg_temp.answer(ref, 'unknown', pe + interval '2 minutes');
+  perform billing.run(pe + interval '1 hour');
+  perform pg_temp.eq('Q4 manual renewal unanswered: past due', pg_temp.st(b, pe + interval '1 hour', 'state'), 'past_due');
+  perform pg_temp.eqt('Q4 ... from the due date', pg_temp.st(b, pe + interval '1 hour', 'past_due_since'), pe);
+
+  -- 5: the same upgrade again gets the same bill
+  pe := pg_temp.member(c, 'q5', 990050501);
+  perform billing.link_login(c, 'sunsynk', 'q5', null, '[{"id":990050501},{"id":990050502},{"id":990050503}]', pg_temp.t(1));
+  i1 := billing.upgrade(c, 'family', 0, '{990050501,990050502,990050503}', pg_temp.t(5));
+  perform billing.begin_attempt((i1->>'invoice')::uuid, 'card_page', pg_temp.t(5));
+  i2 := billing.upgrade(c, 'family', 0, '{990050501,990050502,990050503}', pg_temp.t(5) + interval '10 minutes');
+  perform pg_temp.eq('Q5 upgrade again: the same bill', i2->>'invoice', i1->>'invoice');
+
+  -- 6: an upgrade paid before the period ended, answered after its renewal bill exists: refunded
+  pe := pg_temp.member(d, 'q6', 990050601);
+  perform billing.link_login(d, 'sunsynk', 'q6', null, '[{"id":990050601},{"id":990050602},{"id":990050603}]', pg_temp.t(1));
+  inv := (billing.upgrade(d, 'family', 0, '{990050601,990050602,990050603}', pg_temp.t(5))->>'invoice')::uuid;
+  ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(5))->>'reference';
+  perform billing.run(pe);
+  perform pg_temp.ok('Q6 the renewal bill was made', exists (select 1 from billing.invoices i join billing.subscriptions s on s.id = i.subscription
+    where s.account = d and i.kind = 'renewal'));
+  r := billing.apply_payment(ref, pg_temp.tx_ok(ref) || jsonb_build_object('paid_at', pg_temp.t(6)), pe + interval '1 hour');
+  perform pg_temp.eq('Q6 late upgrade answer: refunded', r->>'action', 'refund');
+  perform pg_temp.eq('Q6 ... as stale', r->>'reason', 'stale');
+
+  -- 8: a try locks the bill's plants and the seats (the delete job skips locked plants)
+  perform pg_temp.ok('Q8 begin_attempt locks the plants', (select prosrc ~ 'lock_plants' from pg_proc p join pg_namespace n
+    on n.oid = p.pronamespace where n.nspname = 'billing' and p.proname = 'begin_attempt'));
+
+  -- 9: a hand refund told twice with no id: one row, no key error
+  pe := pg_temp.member(e, 'q9', 990050901);
+  ref := (select pa.reference from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
+           where i.account = e and pa.status = 'success' limit 1);
+  perform billing.record_refund_event(ref, 'pending', null, 1000, null, pg_temp.t(1), 'RREF_q9');
+  begin
+    perform billing.record_refund_event(ref, 'processed', null, 1000, null, pg_temp.t(2), 'RREF_q9');
+    perform pg_temp.ok('Q9 the second event is no error', true);
+  exception when others then
+    perform pg_temp.ok('Q9 the second event is no error', false, sqlerrm);
+  end;
+  perform pg_temp.eq('Q9 one hand refund, processed', (select string_agg(status, ',') from billing.refunds where reference = ref and reason = 'manual'), 'processed');
+
+  -- 10: a second dispute (new id) on the same payment is applied
+  pe := pg_temp.member(f, 'q10', 990051001);
+  ref := (select pa.reference from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
+           where i.account = f and pa.status = 'success' limit 1);
+  perform billing.record_dispute(ref, 'charge.dispute.resolve', 'won', false, 4900, pg_temp.t(2), 'D1_q10');
+  r := billing.record_dispute(ref, 'charge.dispute.resolve', 'lost', true, 4900, pg_temp.t(3), 'D2_q10');
+  perform pg_temp.ok('Q10 a new dispute after one resolved: applied', r->>'action' <> 'again');
+  r := billing.record_dispute(ref, 'charge.dispute.resolve', 'lost', true, 4900, pg_temp.t(4), 'D2_q10');
+  perform pg_temp.eq('Q10 the same dispute again: final', r->>'action', 'again');
+
+  -- 11: a plant new on the login during a checkout does not refund it
+  l := pg_temp.link(g, 'q11', '{990051101}', pg_temp.t(0));
+  inv := (billing.start_checkout(g, 'home', 'month', 0, '{990051101}', pg_temp.t(0))->>'invoice')::uuid;
+  ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(0))->>'reference';
+  perform billing.login_seen(l, '[{"id":990051101},{"id":990051102}]', pg_temp.t(0) + interval '1 minute');
+  perform pg_temp.eq('Q11 checkout paid after the login list changed: applied',
+    pg_temp.answer(ref, 'ok', pg_temp.t(0) + interval '2 minutes')->>'action', 'applied');
 end $$;
 
 -- ---------------------------------------------------------------------------

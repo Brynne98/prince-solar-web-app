@@ -428,6 +428,12 @@ begin
   due := greatest(round((new_amt - old_amt)::numeric * days_left / greatest(days_all, 1)), 0)::int;
   want := billing.final_choice(p_account, p_plants, pl.places + extras + billing.grant_places(p_account, p_at));
 
+  -- the same upgrade again (the card page closed, tried again): the same bill
+  select * into inv from billing.invoices
+   where subscription = s.id and kind = 'upgrade' and status = 'open' and plan = p_plan and extra_places = extras
+     and plants = want and expected_version = a.version and period_start = s.period_start
+   order by created_at desc limit 1;
+  if inv.id is not null then return billing.invoice_out(inv) || jsonb_build_object('applied', false); end if;
   if billing.payment_in_flight(p_account) then
     raise exception 'a payment is already in progress' using errcode = '22023';
   end if;
@@ -641,6 +647,10 @@ begin
   select * into inv from billing.invoices where id = p_invoice for update;
   if inv.status <> 'open' then raise exception 'this bill is %', inv.status using errcode = '22023'; end if;
   if p_channel not in ('saved_card', 'card_page') then raise exception 'bad channel' using errcode = '22023'; end if;
+  -- the bill's plants and the account's seats, so the delete job cannot purge them under a
+  -- payment that is starting (it skips a plant held by a try: payment_hold)
+  perform billing.lock_plants(coalesce(inv.plants, '{}')
+                              || array(select plant from billing.seats where account = inv.account and closed_at is null));
 
   if p_channel = 'card_page' then
     select * into att from billing.payment_attempts
@@ -834,6 +844,18 @@ begin
     end if;
     return jsonb_build_object('action', 'again', 'status', att.status, 'kind', inv.kind);
   end if;
+  -- a saved-card charge Paystack calls abandoned did not pay: a failed try (not a hard
+  -- decline), so the unpaid window starts and the retry days hold. Only a card page the
+  -- owner left is void.
+  if txs = 'abandoned' and att.channel <> 'card_page' then
+    txs := 'failed';
+  end if;
+  -- still open 24 hours after the try, by Paystack's own answer: a failed try, no lease
+  if txs not in ('success', 'abandoned', 'not_found', 'failed', 'reversed', 'unknown')
+     and att.created_at <= p_at - interval '24 hours' then
+    txs := 'failed';
+    msg := 'still pending after 24 hours';
+  end if;
 
   if txs = 'success' then
     paid := billing.paid_time(p_tx, att.created_at, p_at);
@@ -856,7 +878,9 @@ begin
       when revive then null
       when inv.kind in ('upgrade', 'renewal') and (s.id is null or s.status not in ('active', 'past_due')) then 'stale'
       when inv.kind in ('upgrade', 'renewal') and (billing.account_status(a.id, paid)).sub is distinct from s.id then 'stale'
-      when inv.kind = 'upgrade' and (s.period_start <> inv.period_start or inv.period_end <= paid) then 'stale'
+      when inv.kind = 'upgrade' and (s.period_start <> inv.period_start or inv.period_end <= paid or inv.period_end <= p_at
+             or exists (select 1 from billing.invoices x where x.subscription = s.id and x.kind = 'renewal'
+                           and x.status <> 'void' and x.period_start >= inv.period_end)) then 'stale'
       when inv.kind = 'renewal' and s.period_end <> inv.period_start then 'duplicate'
     end;
     if why is not null then
@@ -981,7 +1005,7 @@ begin
   -- events arrive out of order: processed is final, and a late pending does not undo failed
   update billing.refunds
      set status = case when status = 'processed' or (st = 'pending' and status = 'failed') then status else st end,
-         provider_refund_id = coalesce(provider_refund_id, p_provider_id),
+         provider_refund_id = coalesce(provider_refund_id, p_provider_id, p_provider_ref),
          amount_minor = coalesce(amount_minor, p_amount),
          last_error = case when st = 'failed' and status <> 'processed' then p_reason else last_error end,
          next_try_at = case when status = 'processed' then null
@@ -989,6 +1013,7 @@ begin
                             when st = 'pending' and status = 'failed' then next_try_at else null end,
          updated_at = p_at
    where (p_provider_id is not null and provider_refund_id = p_provider_id)
+      or (p_provider_id is null and p_provider_ref is not null and provider_refund_id = p_provider_ref)
       or (reference = p_reference and reason <> 'manual' and (provider_refund_id is null or p_provider_id is null))
   returning * into r;
   if found then return to_jsonb(r); end if;
@@ -1021,13 +1046,16 @@ begin
   select * into inv from billing.invoices where id = att.invoice;
   if inv.account is not null then perform billing.lock_account(inv.account); end if;
   select * into att from billing.payment_attempts where id = att.id for update;
-  if att.dispute_resolved_at is not null then
+  -- final per dispute: the same dispute again changes nothing; a new dispute (another id) on
+  -- the same payment is its own
+  if att.dispute_resolved_at is not null and (p_dispute_id is null or p_dispute_id is not distinct from att.dispute_id) then
     return jsonb_build_object('action', 'again', 'status', att.dispute_status);
   end if;
   update billing.payment_attempts
      set dispute_status = coalesce(p_status, p_event), dispute_id = coalesce(p_dispute_id, dispute_id),
          dispute_open = not resolve, dispute_resolved_at = case when resolve then p_at end
-   where id = att.id;
+   where id = att.id
+  returning * into att;
   if inv.account is not null then
     perform billing.log_event(inv.account, p_at, 'paystack', 'dispute', null,
                               jsonb_build_object('reference', p_reference, 'dispute', p_dispute_id, 'event', p_event,
@@ -1132,10 +1160,14 @@ begin
     due_from := s.period_end;                    -- day 0, whenever the job gets to it
     -- day 0 was tried and did not pay (no answer, a bank challenge, an answer lost): the
     -- unpaid window starts from the due date, so day 15 comes whatever happens to that try
+    -- The owner's own try on the card page counts at once while it is verified (no answer,
+    -- or left open), so the window never waits on a page nobody finished.
     if exists (select 1 from billing.payment_attempts
-                where invoice = inv.id and channel in ('saved_card', 'none') and created_at >= s.period_end
-                  -- a written try with no answer gets a day of verifying before it counts
-                  and (status in ('unknown', 'pending', 'failed') or (status = 'created' and claimed_until <= p_at - interval '1 day'))) then
+                where invoice = inv.id and created_at >= s.period_end
+                  and ((channel in ('saved_card', 'none')
+                        -- a written try with no answer gets a day of verifying before it counts
+                        and (status in ('unknown', 'pending', 'failed') or (status = 'created' and claimed_until <= p_at - interval '1 day')))
+                    or (channel = 'card_page' and status in ('created', 'unknown', 'pending', 'failed')))) then
       update billing.subscriptions set status = 'past_due', past_due_since = s.period_end, version = version + 1 where id = s.id;
       perform billing.bump(s.account);
       perform billing.log_event(s.account, p_at, 'job', 'renewal_failed', null, jsonb_build_object('invoice', inv.id), 'not paid on its day');
@@ -1151,6 +1183,12 @@ begin
   if exists (select 1 from billing.payment_attempts
               where invoice = inv.id and status <> 'void'
                 and ((channel in ('saved_card', 'none') and created_at >= due_from) or status in ('created', 'unknown'))) then
+    return null;
+  end if;
+  -- any try on the account that may still take money (a bank challenge, an open card page,
+  -- an unanswered charge): nothing is charged again until it is settled or verified
+  if exists (select 1 from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
+              where i.account = s.account and i.status = 'open' and pa.status in ('created', 'pending', 'unknown')) then
     return null;
   end if;
 
@@ -1192,10 +1230,9 @@ declare
   refunds jsonb;
 begin
   if not pg_try_advisory_xact_lock(hashtext('billing.run')) then return jsonb_build_object('busy', true); end if;
-  -- a card page or bank challenge with no answer in 24 hours is let go (a late success still applies)
-  update billing.payment_attempts set status = 'failed', gateway_response = 'no answer in 24 hours',
-                                      settled_at = p_at, claimed_until = null
-   where status = 'pending' and created_at <= p_at - interval '24 hours';
+  -- Nothing is failed here without asking Paystack: a try with no answer is verified (below) and
+  -- apply_payment fails it only when Paystack still says pending after 24 hours. Every change to
+  -- a try goes through apply_payment under its account lock (account, then try).
   -- tries whose lease ran out: Paystack is asked before anything new is charged
   select coalesce(jsonb_agg(reference order by created_at), '[]') into verify from (
     select reference, created_at from billing.payment_attempts
