@@ -555,7 +555,8 @@ begin
 end $$;
 
 -- 0245's apply_purchase, plus: a plan restarted after it ended fetches the kept
--- plants' history again (new plants ask in write_seats, under the same fetch).
+-- plants' history again (new plants ask in write_seats, under the same fetch); a plan
+-- the clock has ended but the job has not (cancel date or day 15 passed) is ended first.
 create or replace function billing.apply_purchase(p_inv billing.invoices, p_at timestamptz)
 returns void language plpgsql set search_path = billing, pg_temp as $$
 declare
@@ -565,9 +566,19 @@ declare
   pe timestamptz;
   had bigint[];
   restart boolean;
+  old billing.subscriptions;
 begin
   select mk.* into m from billing.markets mk join billing.accounts a on a.market = mk.code where a.id = p_inv.account;
   restart := (billing.account_status(p_inv.account, p_at)).state = 'ended';
+  old := billing.live_sub(p_inv.account);
+  if old.id is not null then
+    if old.cancel_at_period_end and old.period_end <= p_at then
+      perform billing.end_sub(old.id, old.period_end, 'cancelled', p_at, 'paystack', false);
+    else
+      perform billing.end_sub(old.id, old.past_due_since + make_interval(days => (select max(d) from unnest(m.retry_days) d) + 1),
+                              'unpaid', p_at, 'paystack', false);
+    end if;
+  end if;
   day := extract(day from p_at at time zone m.default_time_zone)::int;
   pe := billing.add_period(p_at, p_inv.interval, day, m.default_time_zone);
   insert into billing.subscriptions (account, price, plan, currency, interval, amount_minor, extra_place_minor,
@@ -720,6 +731,10 @@ returns jsonb language sql stable security definer set search_path = billing, pg
       from public.email_queue q where q.status = 'queued' and q.due_at <= p_at - interval '1 hour'
     having count(*) > 0
     union all
+    select jsonb_build_object('kind', 'outbox_backlog', 'ref', 'billing_outbox', 'waiting', count(*), 'oldest_due', min(o.not_before))
+      from billing.outbox o where o.status = 'queued' and o.not_before <= p_at - interval '1 hour'
+    having count(*) > 0
+    union all
     select jsonb_build_object('kind', 'history_unprotected', 'ref', p.id::text, 'delete_at', ps->'delete_at')
       from billing.plants p cross join lateral billing.plant_state(p.id, p_at) ps
      where p.history_purged_at is null and ps->>'delete_at' is not null
@@ -759,6 +774,17 @@ returns jsonb language sql stable security definer set search_path = billing, pg
                          order by e.sent_at desc limit 1) q
    where pa.reference = p_reference and pa.status = 'success'
 $$;
+
+-- 0144's public.winback_return read the old charges; same answer, from the new tables.
+create or replace function public.winback_return(p_reference text)
+returns table (user_id uuid, email_id bigint, days int, at timestamptz)
+language sql stable security definer set search_path = public, pg_temp as $$
+  select (w->>'user')::uuid, (w->>'email_id')::bigint, (w->>'days')::int, (w->>'at')::timestamptz
+    from (select billing.winback_return(p_reference) w) x
+   where w is not null
+$$;
+revoke all on function public.winback_return(text) from public, anon, authenticated;
+grant execute on function public.winback_return(text) to service_role;
 
 -- ---------------------------------------------------------------------------
 -- The switch: run once at switch-over, after copy_from_old and the comparison.

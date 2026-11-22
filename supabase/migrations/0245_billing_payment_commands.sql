@@ -80,16 +80,55 @@ begin
   return pr;
 end $$;
 
--- The offer a new purchase gets: open, first-time rule met, places left.
+-- The offer a new purchase gets: open, first-time rule met, places left. A place is
+-- held by a member, or by another account's open checkout on the offer for an hour
+-- (longer while its payment is unanswered). start_checkout locks the offer rows first,
+-- so two checkouts cannot take the last place.
 create function billing.offer_for(p_account uuid, p_at timestamptz)
 returns text language sql stable set search_path = billing, pg_temp as $$
   select o.code from billing.offers o
    where o.valid_from <= p_at and (o.valid_until is null or o.valid_until > p_at)
      and (not o.first_time_only or not exists (select 1 from billing.subscriptions s where s.account = p_account))
      and (o.max_members is null
-          or (select count(distinct s.account) from billing.subscriptions s where s.offer = o.code) < o.max_members)
+          or (select count(*) from (
+                select s.account from billing.subscriptions s where s.offer = o.code and s.account <> p_account
+                union
+                select i.account from billing.invoices i
+                 where i.offer = o.code and i.kind = 'purchase' and i.status = 'open' and i.account <> p_account
+                   and i.created_at <= p_at
+                   and (i.created_at > p_at - interval '1 hour'
+                        or exists (select 1 from billing.payment_attempts pa where pa.invoice = i.id
+                                      and pa.status in ('created', 'pending', 'unknown')))) x) < o.max_members)
    order by o.valid_from desc limit 1
 $$;
+
+-- A try on any open bill of the account that may still take money.
+create function billing.payment_in_flight(p_account uuid)
+returns boolean language sql stable set search_path = billing, pg_temp as $$
+  select exists (select 1 from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
+                  where i.account = p_account and i.status = 'open' and pa.status in ('created', 'pending', 'unknown'))
+$$;
+
+-- The email to charge a saved card with: the one it was saved under, else the sign-in email.
+create function billing.charge_email(p_auth_email text, p_account uuid)
+returns text language sql stable set search_path = billing, pg_temp as $$
+  select coalesce(p_auth_email, (select u.email from billing.accounts a join auth.users u on u.id = a.user_id
+                                   where a.id = p_account))
+$$;
+
+-- Paystack's paid_at when it is a time between the try and now; else now.
+create function billing.paid_time(p_tx jsonb, p_created timestamptz, p_at timestamptz)
+returns timestamptz language plpgsql stable set search_path = billing, pg_temp as $$
+declare t timestamptz;
+begin
+  begin
+    t := coalesce(p_tx->>'paid_at', p_tx->>'paidAt')::timestamptz;
+  exception when others then
+    t := null;
+  end;
+  if t is null or t > p_at or t < p_created - interval '5 minutes' then return p_at; end if;
+  return t;
+end $$;
 
 create function billing.grant_places(p_account uuid, p_at timestamptz)
 returns int language sql stable set search_path = billing, pg_temp as $$
@@ -135,8 +174,10 @@ returns billing.subscriptions language sql stable set search_path = billing, pg_
   select * from billing.subscriptions where account = p_account and status in ('active', 'past_due')
 $$;
 
--- Ends a running plan: open bills voided, version bumped, logged.
-create function billing.end_sub(p_sub uuid, p_ended_at timestamptz, p_reason text, p_at timestamptz, p_actor text)
+-- Ends a running plan: open bills voided, version bumped, logged. p_bump false: the
+-- clock had ended it already (the job catching up), so a checkout made meanwhile stays good.
+create function billing.end_sub(p_sub uuid, p_ended_at timestamptz, p_reason text, p_at timestamptz, p_actor text,
+                                p_bump boolean default true)
 returns void language plpgsql set search_path = billing, pg_temp as $$
 declare s billing.subscriptions;
 begin
@@ -144,7 +185,7 @@ begin
    where id = p_sub and status in ('active', 'past_due') returning * into s;
   if not found then return; end if;
   update billing.invoices set status = 'void' where subscription = p_sub and status = 'open';
-  perform billing.bump(s.account);
+  if p_bump then perform billing.bump(s.account); end if;
   perform billing.log_event(s.account, p_at, p_actor, 'plan_ended', null,
                             jsonb_build_object('sub', p_sub, 'ended_at', p_ended_at), p_reason);
 end $$;
@@ -201,6 +242,7 @@ declare
   inv billing.invoices;
 begin
   a := billing.lock_account(p_account);
+  perform 1 from billing.offers order by code for update;      -- the last offer place goes to one checkout
   select * into m from billing.markets where code = a.market;
   st := billing.account_status(p_account, p_at);
   if st.sub is not null then raise exception 'a plan is already running' using errcode = '22023'; end if;
@@ -221,6 +263,19 @@ begin
   if pr.id is null then raise exception 'no price for % %', p_plan, p_interval using errcode = '22023'; end if;
 
   want := billing.final_choice(p_account, p_plants, pl.places + extras + billing.grant_places(p_account, p_at));
+  -- one open purchase bill per account: the same checkout again gets the same bill; another
+  -- one replaces it, unless a payment on it may still take money
+  select * into inv from billing.invoices
+   where account = p_account and kind = 'purchase' and status = 'open' order by created_at desc limit 1;
+  if inv.id is not null then
+    if inv.price = pr.id and inv.extra_places = extras and inv.plants = want and inv.expected_version = a.version then
+      return billing.invoice_out(inv);
+    end if;
+    if billing.payment_in_flight(p_account) then
+      raise exception 'a payment is already in progress' using errcode = '22023';
+    end if;
+    update billing.invoices set status = 'void' where account = p_account and kind = 'purchase' and status = 'open';
+  end if;
   insert into billing.invoices (account, kind, price, plan, interval, offer, extra_places, plan_amount_minor,
                                 extra_place_minor, amount_minor, tax_minor, currency, expected_version, plants, created_at)
   values (p_account, 'purchase', pr.id, p_plan, p_interval, off, extras, pr.amount_minor, pr.extra_place_minor,
@@ -266,7 +321,7 @@ returns void language plpgsql set search_path = billing, pg_temp as $$
 declare dropped bigint[];
 begin
   update billing.subscriptions
-     set status = 'active', past_due_since = null, price = p_inv.price, plan = p_inv.plan, interval = p_inv.interval,
+     set status = 'active', past_due_since = null, ended_at = null, price = p_inv.price, plan = p_inv.plan, interval = p_inv.interval,
          amount_minor = p_inv.plan_amount_minor, extra_place_minor = p_inv.extra_place_minor,
          extra_places = p_inv.extra_places, period_start = p_inv.period_start, period_end = p_inv.period_end,
          next_price = null, next_extra_places = null, version = version + 1
@@ -360,6 +415,9 @@ begin
   due := greatest(round((new_amt - old_amt)::numeric * days_left / greatest(days_all, 1)), 0)::int;
   want := billing.final_choice(p_account, p_plants, pl.places + extras + billing.grant_places(p_account, p_at));
 
+  if billing.payment_in_flight(p_account) then
+    raise exception 'a payment is already in progress' using errcode = '22023';
+  end if;
   update billing.invoices set status = 'void' where subscription = s.id and kind = 'upgrade' and status = 'open';
   insert into billing.invoices (account, subscription, kind, status, price, plan, interval, offer, extra_places,
                                 plan_amount_minor, extra_place_minor, amount_minor, tax_minor, currency, period_start,
@@ -528,11 +586,18 @@ begin
   return billing.invoice_out(billing.ensure_renewal(s.id, p_at));
 end $$;
 
+-- A new card. While a renewal is owed (past due, or due and not tried) the new card pays
+-- that bill instead of the R1 check: the card is saved with the payment.
 create function billing.start_card_check(p_account uuid, p_at timestamptz default now())
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
-declare a billing.accounts; m billing.markets; inv billing.invoices;
+declare a billing.accounts; m billing.markets; inv billing.invoices; st billing.status;
 begin
   a := billing.lock_account(p_account);
+  st := billing.account_status(p_account, p_at);
+  if st.sub is not null and st.state in ('active', 'past_due')
+     and (select period_end from billing.subscriptions where id = st.sub) <= p_at then
+    return billing.invoice_out(billing.ensure_renewal(st.sub, p_at));
+  end if;
   select * into m from billing.markets where code = a.market;
   insert into billing.invoices (account, kind, amount_minor, currency, created_at)
   values (p_account, 'card_check', m.min_charge_minor, m.currency, p_at) returning * into inv;
@@ -560,14 +625,13 @@ begin
   if inv.status <> 'open' then raise exception 'this bill is %', inv.status using errcode = '22023'; end if;
   if p_channel not in ('saved_card', 'card_page') then raise exception 'bad channel' using errcode = '22023'; end if;
 
-  select jsonb_agg(reference order by created_at) into stale from billing.payment_attempts
-   where invoice = p_invoice and status in ('created', 'pending', 'unknown') and claimed_until <= p_at;
+  -- any open bill of the account: a try there may still take money
+  select jsonb_agg(pa.reference order by pa.created_at) into stale
+    from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
+   where i.account = inv.account and i.status = 'open' and pa.status in ('created', 'pending', 'unknown')
+     and pa.claimed_until <= p_at;
   if stale is not null then return jsonb_build_object('verify', stale); end if;
-  if exists (select 1 from billing.payment_attempts
-              where invoice = p_invoice and claimed_until > p_at
-                and (status in ('created', 'unknown') or (status = 'pending' and p_channel = 'saved_card'))) then
-    return jsonb_build_object('busy', true);
-  end if;
+  if billing.payment_in_flight(inv.account) then return jsonb_build_object('busy', true); end if;
 
   if p_channel = 'saved_card' then
     pm := billing.active_method(inv.account);
@@ -581,7 +645,8 @@ begin
   returning * into att;
   return jsonb_build_object('reference', att.reference, 'invoice', inv.id, 'kind', inv.kind,
                             'amount_minor', att.amount_minor, 'currency', att.currency,
-                            'auth_ref', pm.auth_ref, 'auth_email', pm.auth_email);
+                            'auth_ref', pm.auth_ref,
+                            'auth_email', case when pm.id is not null then billing.charge_email(pm.auth_email, inv.account) end);
 end $$;
 
 -- Saves the card Paystack answered with; a reusable one becomes the account's active card.
@@ -632,14 +697,53 @@ returns boolean language sql immutable as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Money given back after a payment was applied (a reversal, a lost dispute).
+-- The current period of a plan that still runs by the clock: the plan ends now and
+-- that card goes off. Anything else (an old period, a plan already over): owed on that bill.
+-- ---------------------------------------------------------------------------
+create function billing.money_back(p_att billing.payment_attempts, p_inv billing.invoices, p_amount int,
+                                   p_reason text, p_at timestamptz)
+returns jsonb language plpgsql set search_path = billing, pg_temp as $$
+declare
+  s billing.subscriptions;
+  owed int := coalesce(p_amount, p_att.amount_minor);
+begin
+  if p_inv.account is null or p_inv.kind = 'card_check' then return jsonb_build_object('action', 'recorded'); end if;
+  if p_inv.subscription is not null then
+    select * into s from billing.subscriptions where id = p_inv.subscription for update;
+  end if;
+  if s.id is not null and (billing.account_status(p_inv.account, p_at)).sub = s.id
+     and p_inv.period_start = s.period_start then
+    perform billing.end_sub(s.id, p_at, p_reason, p_at, 'paystack');
+    update billing.payment_methods set active = false,
+                                       disabled_reason = case when p_reason = 'reversed' then 'reversed' else 'dispute' end
+     where id = p_att.payment_method and active;
+    return jsonb_build_object('action', 'plan_ended');
+  end if;
+  update billing.invoices set amount_owed_minor = owed where id = p_inv.id;
+  perform billing.log_event(p_inv.account, p_at, 'paystack', 'money_owed', null,
+                            jsonb_build_object('invoice', p_inv.id, 'amount', owed), p_reason);
+  return jsonb_build_object('action', 'owed', 'amount_minor', owed);
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- apply_payment: every Paystack answer about one of our references.
---   tx.status success                 -> checked, then applied or refunded
---   failed / abandoned / reversed     -> a failed try (abandoned: not a decline)
+--   tx.status success                 -> checked, then applied or refunded. Applies only
+--                                        when the answer names this exact reference.
+--                                        Dated by Paystack's paid_at (checked), so a
+--                                        payment made before day 15 whose answer comes
+--                                        after it still counts.
+--   reversed on a paid try            -> recorded against that try; the money is back
+--                                        with the owner (money_back)
+--   failed / reversed                 -> a failed try
+--   abandoned                         -> the owner left the card page: void, not a decline
 --   not_found                         -> the try never reached Paystack: void
 --   unknown                           -> no clear answer: verify before any new try
 --   anything else (pending, paused, send_otp, ongoing, open_url, ...)
 --                                     -> pending; a bank challenge keeps its pay link
--- Returns {action: applied | again | refund | failed | void | unknown | pending | ignored}.
+-- A failed or unanswered renewal starts the unpaid window from the bill's due date.
+-- Returns {action: applied | again | refund | failed | void | unknown | pending | ignored |
+--          plan_ended | owed}.
 -- ---------------------------------------------------------------------------
 create function billing.apply_payment(p_reference text, p_tx jsonb, p_at timestamptz default now())
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
@@ -653,19 +757,21 @@ declare
   rid uuid;
   pm uuid;
   hard boolean;
+  paid timestamptz;
+  revive boolean := false;
   msg text := coalesce(p_tx->>'gateway_response', p_tx->>'message', p_tx->>'status');
 begin
   select * into att from billing.payment_attempts where reference = p_reference;
   if not found then
-    if txs = 'success' and p_reference like 'psh\_%' then
+    if txs = 'success' and p_reference like 'psh\_%' and p_tx->>'reference' is not distinct from p_reference then
       -- our reference, no try we hold (the account was deleted with its rows, or never ours): money goes back
       rid := billing.refund_due(null, p_reference, null, upper(p_tx->>'currency'), 'unknown_account', p_at);
       return jsonb_build_object('action', 'refund', 'refund', rid, 'reason', 'unknown_account');
     end if;
     return jsonb_build_object('action', 'ignored');
   end if;
-  if p_tx ? 'reference' and p_tx->>'reference' <> p_reference then
-    raise exception 'answer for % does not match %', p_tx->>'reference', p_reference;
+  if (p_tx ? 'reference' or txs = 'success') and p_tx->>'reference' is distinct from p_reference then
+    raise exception 'answer for % does not match %', coalesce(p_tx->>'reference', '(none)'), p_reference;
   end if;
 
   select * into inv from billing.invoices where id = att.invoice;
@@ -676,24 +782,43 @@ begin
   select * into inv from billing.invoices where id = att.invoice for update;
   if inv.subscription is not null then select * into s from billing.subscriptions where id = inv.subscription for update; end if;
 
-  if att.status in ('success', 'not_applied') then
+  if att.status in ('success', 'not_applied', 'reversed') then
+    if txs = 'reversed' and att.status = 'success' then
+      update billing.payment_attempts set status = 'reversed', gateway_response = msg where id = att.id;
+      insert into billing.refunds (attempt, reference, account, amount_minor, currency, reason, status, created_at, updated_at)
+      values (att.id, att.reference, a.id, att.amount_minor, att.currency, 'reversed', 'processed', p_at, p_at)
+      on conflict (reference) where reason <> 'manual' do nothing;
+      if a.id is not null then
+        perform billing.log_event(a.id, p_at, 'paystack', 'payment_reversed', null,
+                                  jsonb_build_object('invoice', inv.id, 'reference', att.reference), msg);
+      end if;
+      return billing.money_back(att, inv, null, 'reversed', p_at) || jsonb_build_object('kind', inv.kind);
+    end if;
     return jsonb_build_object('action', 'again', 'status', att.status, 'kind', inv.kind);
   end if;
 
   if txs = 'success' then
+    paid := billing.paid_time(p_tx, att.created_at, p_at);
+    -- the job ended the plan on day 15 while this renewal, paid before that, was on its way
+    revive := inv.kind = 'renewal' and inv.status = 'void' and s.status = 'ended' and s.ended_at > paid
+              and exists (select 1 from billing.account_events e where e.account = a.id and e.kind = 'plan_ended'
+                             and e.reason = 'unpaid' and e.after->>'sub' = s.id::text)
+              and not exists (select 1 from billing.subscriptions x where x.account = a.id and x.started_at > s.started_at)
+              and not exists (select 1 from billing.invoices x where x.subscription = s.id and x.kind = 'renewal'
+                                 and x.status <> 'void' and x.period_start >= inv.period_start and x.id <> inv.id);
     why := case
       when (p_tx->>'amount')::bigint is distinct from att.amount_minor
            or upper(p_tx->>'currency') is distinct from att.currency then 'wrong_amount'
       when a.id is null then 'unknown_account'
       when inv.status = 'paid' then 'duplicate'
-      when inv.status <> 'open' then 'stale'
+      when inv.status <> 'open' and not revive then 'stale'
       when inv.kind in ('purchase', 'upgrade') and inv.expected_version is distinct from a.version then 'stale'
-      when inv.kind = 'purchase' and exists (select 1 from billing.subscriptions x
-                                              where x.account = a.id and x.status in ('active', 'past_due')) then 'stale'
-      when inv.kind in ('upgrade', 'renewal') and (s.id is null or s.status not in ('active', 'past_due')) then 'stale'
       -- the clock wins: a plan past its cancel date or day 15 is over even if the job has not run
-      when inv.kind in ('upgrade', 'renewal') and (billing.account_status(a.id, p_at)).sub is distinct from s.id then 'stale'
-      when inv.kind = 'upgrade' and s.period_start <> inv.period_start then 'stale'
+      when inv.kind = 'purchase' and (billing.account_status(a.id, paid)).sub is not null then 'stale'
+      when revive then null
+      when inv.kind in ('upgrade', 'renewal') and (s.id is null or s.status not in ('active', 'past_due')) then 'stale'
+      when inv.kind in ('upgrade', 'renewal') and (billing.account_status(a.id, paid)).sub is distinct from s.id then 'stale'
+      when inv.kind = 'upgrade' and (s.period_start <> inv.period_start or inv.period_end <= paid) then 'stale'
       when inv.kind = 'renewal' and s.period_end <> inv.period_start then 'duplicate'
     end;
     if why is not null then
@@ -708,24 +833,32 @@ begin
     end if;
 
     pm := billing.save_method(a.id, p_tx, p_at);
-    update billing.payment_attempts set status = 'success', settled_at = p_at, claimed_until = null,
+    update billing.payment_attempts set status = 'success', settled_at = paid, claimed_until = null,
                                         payment_method = coalesce(pm, payment_method), gateway_response = msg
      where id = att.id;
-    update billing.invoices set status = 'paid', paid_at = p_at where id = inv.id;
+    update billing.invoices set status = 'paid', paid_at = paid where id = inv.id returning * into inv;
     case inv.kind
-      when 'purchase' then perform billing.apply_purchase(inv, p_at);
-      when 'renewal' then perform billing.apply_renewal(inv, p_at);
-      when 'upgrade' then perform billing.apply_upgrade(inv, p_at);
+      when 'purchase' then perform billing.apply_purchase(inv, paid);
+      when 'renewal' then perform billing.apply_renewal(inv, paid);
+      when 'upgrade' then perform billing.apply_upgrade(inv, paid);
       else rid := billing.refund_due(att.id, att.reference, a.id, att.currency, 'card_check', p_at);
     end case;
     perform billing.bump(a.id);
     perform billing.log_event(a.id, p_at, 'paystack', 'payment_applied', null,
                               jsonb_build_object('invoice', inv.id, 'kind', inv.kind, 'amount', att.amount_minor,
-                                                 'reference', att.reference));
+                                                 'reference', att.reference, 'paid_at', paid, 'revived', revive));
     return jsonb_build_object('action', 'applied', 'kind', inv.kind, 'refund', rid);
   end if;
 
-  if txs in ('failed', 'abandoned', 'reversed') then
+  if txs in ('abandoned', 'not_found') then
+    if att.status in ('created', 'pending', 'unknown') then
+      update billing.payment_attempts set status = 'void', gateway_response = msg, settled_at = p_at, claimed_until = null
+       where id = att.id;
+    end if;
+    return jsonb_build_object('action', 'void', 'kind', inv.kind);
+  end if;
+
+  if txs in ('failed', 'reversed') then
     if att.status = 'failed' then return jsonb_build_object('action', 'again', 'status', 'failed', 'kind', inv.kind); end if;
     hard := txs = 'failed' and billing.is_hard_decline(msg);
     update billing.payment_attempts set status = 'failed', hard_decline = hard, gateway_response = msg,
@@ -735,20 +868,19 @@ begin
       update billing.payment_methods set active = false, disabled_reason = 'hard_decline'
        where id = att.payment_method and active;
     end if;
+    -- a card that will never work again on a charge the owner did not watch: ask for a new one
+    if hard and a.id is not null and att.channel = 'saved_card' then
+      insert into billing.outbox (account, key, invoice, dedupe_key, not_before, created_at)
+      values (a.id, 'card_update', inv.id, 'card_update:' || inv.id, p_at, p_at)
+      on conflict (dedupe_key) do nothing;
+    end if;
     if txs = 'failed' and inv.kind = 'renewal' and inv.status = 'open' and s.status = 'active' then
-      update billing.subscriptions set status = 'past_due', past_due_since = att.created_at, version = version + 1 where id = s.id;
+      update billing.subscriptions set status = 'past_due', past_due_since = inv.period_start, version = version + 1 where id = s.id;
       perform billing.bump(a.id);
       perform billing.log_event(a.id, p_at, 'paystack', 'renewal_failed', null,
                                 jsonb_build_object('invoice', inv.id, 'reference', att.reference, 'hard', hard), msg);
     end if;
     return jsonb_build_object('action', 'failed', 'hard', hard, 'kind', inv.kind, 'declined', txs = 'failed');
-  end if;
-
-  if txs = 'not_found' then
-    if att.status in ('created', 'pending', 'unknown') then
-      update billing.payment_attempts set status = 'void', settled_at = p_at, claimed_until = null where id = att.id;
-    end if;
-    return jsonb_build_object('action', 'void');
   end if;
 
   if txs = 'unknown' then
@@ -759,14 +891,14 @@ begin
     return jsonb_build_object('action', 'unknown');
   end if;
 
-  -- still open: card page, bank challenge, processing
+  -- still open: card page, bank challenge, processing. The daily job lets it go after 24 hours.
   update billing.payment_attempts
      set status = 'pending', gateway_response = msg, claimed_until = p_at + interval '1 hour',
          pay_url = coalesce(p_tx->>'authorization_url', p_tx->>'url', pay_url)
    where id = att.id and status in ('created', 'pending', 'unknown');
-  if inv.kind = 'renewal' and inv.status = 'open' and s.status = 'active' and att.channel = 'saved_card' then
+  if found and inv.kind = 'renewal' and inv.status = 'open' and s.status = 'active' and att.channel = 'saved_card' then
     -- the renewal was not paid on its day: the window starts, the owner has the pay link
-    update billing.subscriptions set status = 'past_due', past_due_since = att.created_at, version = version + 1 where id = s.id;
+    update billing.subscriptions set status = 'past_due', past_due_since = inv.period_start, version = version + 1 where id = s.id;
     perform billing.bump(a.id);
     perform billing.log_event(a.id, p_at, 'paystack', 'renewal_pending', null,
                               jsonb_build_object('invoice', inv.id, 'reference', att.reference), msg);
@@ -806,10 +938,16 @@ declare
   att billing.payment_attempts;
   acc uuid;
 begin
+  -- events arrive out of order: processed is final, and a late pending does not undo failed
   update billing.refunds
-     set status = st, provider_refund_id = coalesce(provider_refund_id, p_provider_id),
-         amount_minor = coalesce(amount_minor, p_amount), last_error = case when st = 'failed' then p_reason else last_error end,
-         next_try_at = case when st = 'failed' and reason <> 'manual' then p_at else null end, updated_at = p_at
+     set status = case when status = 'processed' or (st = 'pending' and status = 'failed') then status else st end,
+         provider_refund_id = coalesce(provider_refund_id, p_provider_id),
+         amount_minor = coalesce(amount_minor, p_amount),
+         last_error = case when st = 'failed' and status <> 'processed' then p_reason else last_error end,
+         next_try_at = case when status = 'processed' then null
+                            when st = 'failed' and reason <> 'manual' then p_at
+                            when st = 'pending' and status = 'failed' then next_try_at else null end,
+         updated_at = p_at
    where (p_provider_id is not null and provider_refund_id = p_provider_id)
       or (reference = p_reference and reason <> 'manual' and (provider_refund_id is null or p_provider_id is null))
   returning * into r;
@@ -825,39 +963,38 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- record_dispute: charge.dispute.create / .remind / .resolve.
--- Lost on the current period: the plan ends at once, that card is switched off.
--- Lost on an old period: the amount is owed against that bill only.
+-- record_dispute: charge.dispute.create / .remind / .resolve. A resolved dispute is
+-- final: a replay or a later remind changes nothing. The resolution and its effect land
+-- in one transaction. Lost: money_back (the current period of a plan still running by
+-- the clock ends at once and that card goes off; else the amount is owed on that bill).
 -- ---------------------------------------------------------------------------
 create function billing.record_dispute(p_reference text, p_event text, p_status text, p_lost boolean,
-                                       p_amount int, p_at timestamptz default now())
+                                       p_amount int, p_at timestamptz default now(), p_dispute_id text default null)
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
 declare
   att billing.payment_attempts;
   inv billing.invoices;
-  s billing.subscriptions;
+  resolve boolean := p_event = 'charge.dispute.resolve';
 begin
   select * into att from billing.payment_attempts where reference = p_reference;
   if not found then return jsonb_build_object('action', 'ignored'); end if;
   select * into inv from billing.invoices where id = att.invoice;
   if inv.account is not null then perform billing.lock_account(inv.account); end if;
-  update billing.payment_attempts set dispute_status = coalesce(p_status, p_event),
-                                      dispute_open = p_event <> 'charge.dispute.resolve'
+  select * into att from billing.payment_attempts where id = att.id for update;
+  if att.dispute_resolved_at is not null then
+    return jsonb_build_object('action', 'again', 'status', att.dispute_status);
+  end if;
+  update billing.payment_attempts
+     set dispute_status = coalesce(p_status, p_event), dispute_id = coalesce(p_dispute_id, dispute_id),
+         dispute_open = not resolve, dispute_resolved_at = case when resolve then p_at end
    where id = att.id;
   if inv.account is not null then
     perform billing.log_event(inv.account, p_at, 'paystack', 'dispute', null,
-                              jsonb_build_object('reference', p_reference, 'event', p_event, 'status', p_status, 'lost', p_lost));
+                              jsonb_build_object('reference', p_reference, 'dispute', p_dispute_id, 'event', p_event,
+                                                 'status', p_status, 'lost', p_lost));
   end if;
-  if not coalesce(p_lost, false) then return jsonb_build_object('action', 'recorded'); end if;
-
-  if inv.subscription is not null then select * into s from billing.subscriptions where id = inv.subscription; end if;
-  if inv.account is not null and s.status in ('active', 'past_due') and inv.period_start = s.period_start then
-    perform billing.end_sub(s.id, p_at, 'dispute_lost', p_at, 'paystack');
-    update billing.payment_methods set active = false, disabled_reason = 'dispute' where id = att.payment_method and active;
-    return jsonb_build_object('action', 'plan_ended');
-  end if;
-  update billing.invoices set amount_owed_minor = coalesce(p_amount, att.amount_minor) where id = inv.id;
-  return jsonb_build_object('action', 'owed', 'amount_minor', coalesce(p_amount, att.amount_minor));
+  if not (resolve and coalesce(p_lost, false)) then return jsonb_build_object('action', 'recorded'); end if;
+  return billing.money_back(att, inv, p_amount, 'dispute_lost', p_at);
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -938,12 +1075,13 @@ begin
   select mk.* into m from billing.markets mk join billing.accounts a on a.market = mk.code where a.id = s.account;
   last_retry := (select max(d) from unnest(m.retry_days) d);
 
+  -- the clock had ended these already: no version bump, so a restart checkout stays good
   if s.cancel_at_period_end and s.period_end <= p_at then
-    perform billing.end_sub(s.id, s.period_end, 'cancelled', p_at, 'job');
+    perform billing.end_sub(s.id, s.period_end, 'cancelled', p_at, 'job', false);
     return jsonb_build_object('step', 'ended', 'reason', 'cancelled');
   end if;
   if s.status = 'past_due' and p_at >= s.past_due_since + make_interval(days => last_retry + 1) then
-    perform billing.end_sub(s.id, s.past_due_since + make_interval(days => last_retry + 1), 'unpaid', p_at, 'job');
+    perform billing.end_sub(s.id, s.past_due_since + make_interval(days => last_retry + 1), 'unpaid', p_at, 'job', false);
     return jsonb_build_object('step', 'ended', 'reason', 'unpaid');
   end if;
   if s.period_end > p_at then return null; end if;
@@ -952,14 +1090,26 @@ begin
   if inv.status <> 'open' then return null; end if;
   if s.status = 'active' then
     due_from := s.period_end;                    -- day 0, whenever the job gets to it
+    -- day 0 was tried and did not pay (no answer, a bank challenge, an answer lost): the
+    -- unpaid window starts from the due date, so day 15 comes whatever happens to that try
+    if exists (select 1 from billing.payment_attempts
+                where invoice = inv.id and channel in ('saved_card', 'none') and created_at >= s.period_end
+                  and (status in ('unknown', 'pending', 'failed') or (status = 'created' and claimed_until <= p_at))) then
+      update billing.subscriptions set status = 'past_due', past_due_since = s.period_end, version = version + 1 where id = s.id;
+      perform billing.bump(s.account);
+      perform billing.log_event(s.account, p_at, 'job', 'renewal_failed', null, jsonb_build_object('invoice', inv.id), 'not paid on its day');
+      return jsonb_build_object('step', 'past_due');
+    end if;
   else
     due_from := s.past_due_since + make_interval(days =>
                   (select max(d) from unnest(m.retry_days) d where s.past_due_since + make_interval(days => d) <= p_at));
+    if due_from is null then return null; end if;
   end if;
-  -- this step tried already, or a try is still open (verified first)
+  -- this step tried already (only the job's own tries count: a card page the owner left
+  -- open does not stop a retry), or a charge may still be taking money (verified first)
   if exists (select 1 from billing.payment_attempts
               where invoice = inv.id and status <> 'void'
-                and (created_at >= due_from or status in ('created', 'pending', 'unknown'))) then
+                and ((channel in ('saved_card', 'none') and created_at >= due_from) or status in ('created', 'unknown'))) then
     return null;
   end if;
 
@@ -971,7 +1121,7 @@ begin
                                             gateway_response, created_at, settled_at)
       values (inv.id, billing.new_reference(), 'paystack', 'none', inv.amount_minor, inv.currency, 'failed',
               'no usable card', p_at, p_at);
-      update billing.subscriptions set status = 'past_due', past_due_since = p_at, version = version + 1 where id = s.id;
+      update billing.subscriptions set status = 'past_due', past_due_since = s.period_end, version = version + 1 where id = s.id;
       perform billing.bump(s.account);
       perform billing.log_event(s.account, p_at, 'job', 'renewal_failed', null, jsonb_build_object('invoice', inv.id), 'no usable card');
       return jsonb_build_object('step', 'no_card');
@@ -985,10 +1135,11 @@ begin
   returning * into att;
   return jsonb_build_object('step', 'charge', 'charge', jsonb_build_object(
     'reference', att.reference, 'invoice', inv.id, 'amount_minor', att.amount_minor, 'currency', att.currency,
-    'auth_ref', pm.auth_ref, 'auth_email', pm.auth_email));
+    'auth_ref', pm.auth_ref, 'auth_email', billing.charge_email(pm.auth_email, s.account)));
 end $$;
 
 -- Returns {verify: [references], charges: [...], refunds: [...], steps: {...}} or {busy: true}.
+-- Batches are capped (RUN_VERIFY, RUN_CHARGES); what is left goes to the next call.
 create function billing.run(p_at timestamptz default now())
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
 declare
@@ -1000,10 +1151,17 @@ declare
   refunds jsonb;
 begin
   if not pg_try_advisory_xact_lock(hashtext('billing.run')) then return jsonb_build_object('busy', true); end if;
+  -- a card page or bank challenge with no answer in 24 hours is let go (a late success still applies)
+  update billing.payment_attempts set status = 'failed', gateway_response = 'no answer in 24 hours',
+                                      settled_at = p_at, claimed_until = null
+   where status = 'pending' and created_at <= p_at - interval '24 hours';
   -- tries whose lease ran out: Paystack is asked before anything new is charged
-  select coalesce(jsonb_agg(reference order by created_at), '[]') into verify from billing.payment_attempts
-   where status in ('created', 'pending', 'unknown') and claimed_until <= p_at;
+  select coalesce(jsonb_agg(reference order by created_at), '[]') into verify from (
+    select reference, created_at from billing.payment_attempts
+     where status in ('created', 'pending', 'unknown') and claimed_until <= p_at
+     order by created_at limit 200) v;
   for r in select id from billing.subscriptions where status in ('active', 'past_due') order by account loop
+    exit when jsonb_array_length(charges) >= 300;
     one := billing.run_one(r.id, p_at);
     continue when one is null;
     steps := jsonb_set(steps, array[one->>'step'], to_jsonb(coalesce((steps->>(one->>'step'))::int, 0) + 1));
@@ -1032,12 +1190,15 @@ declare
   dispute boolean;
   due billing.invoices;
   url text;
+  tz text;
 begin
   pm := billing.active_method(p_account);
+  select mk.default_time_zone into tz from billing.markets mk join billing.accounts a on a.market = mk.code where a.id = p_account;
   owed := (select coalesce(sum(amount_owed_minor), 0) from billing.invoices where account = p_account);
   dispute := exists (select 1 from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
                       where i.account = p_account and pa.dispute_open);
-  s := billing.live_sub(p_account);
+  -- a row the clock has ended (the job not run yet) is no running plan
+  if p_state in ('active', 'past_due') then s := billing.live_sub(p_account); end if;
   if s.id is not null then
     if s.next_price is not null then select * into np from billing.prices where id = s.next_price; end if;
     select * into due from billing.invoices
@@ -1048,8 +1209,9 @@ begin
   return jsonb_build_object(
     'card', case when pm.id is not null then jsonb_build_object('last4', pm.last4, 'exp_month', pm.exp_month,
                                                                  'exp_year', pm.exp_year, 'card_type', pm.card_type) end,
-    'card_expires_first', pm.id is not null and s.id is not null and not s.cancel_at_period_end
-                          and make_date(pm.exp_year, pm.exp_month, 1) + interval '1 month' <= s.period_end,
+    'card_expires_first', coalesce(pm.id is not null and s.id is not null and not s.cancel_at_period_end
+                          and (make_date(pm.exp_year::int, pm.exp_month::int, 1) + interval '1 month')::timestamp
+                              at time zone tz <= s.period_end, false),
     'next_plan', case when s.id is not null and not s.cancel_at_period_end then coalesce(np.plan, s.plan) end,
     'next_interval', case when s.id is not null and not s.cancel_at_period_end then coalesce(np.interval, s.interval) end,
     'next_amount_minor', case when s.id is not null and not s.cancel_at_period_end then
@@ -1059,7 +1221,10 @@ begin
     'pay_url', url,
     'owed_minor', owed,
     'dispute_open', dispute,
-    'may_delete', p_state in ('none', 'trialing', 'ended') and owed = 0 and not dispute);
+    'may_delete', p_state in ('none', 'trialing', 'ended') and owed = 0 and not dispute)
+    -- past due with no card to charge: no retry or charge date to promise
+    || case when p_state = 'past_due' and pm.id is null
+            then jsonb_build_object('next_retry_at', null, 'next_charge_at', null) else '{}'::jsonb end;
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1117,7 +1282,7 @@ begin
     when 'record_refund_event' then billing.record_refund_event(p_args->>'reference', p_args->>'status', p_args->>'provider_id',
                                    (p_args->>'amount')::int, p_args->>'reason')
     when 'record_dispute'   then billing.record_dispute(p_args->>'reference', p_args->>'event', p_args->>'status',
-                                   (p_args->>'lost')::boolean, (p_args->>'amount')::int)
+                                   (p_args->>'lost')::boolean, (p_args->>'amount')::int, now(), p_args->>'dispute_id')
     when 'event_begin'      then billing.event_begin(p_args->>'provider', p_args->>'type', p_args->>'entity', p_args->>'status', p_args->'payload')
     when 'event_done'       then (select '{}'::jsonb from (select billing.event_done((p_args->>'id')::bigint, p_args->>'error')) x)
     when 'run'              then billing.run()

@@ -33,7 +33,7 @@ create table billing.payment_methods (
   exp_month       smallint check (exp_month between 1 and 12),
   exp_year        smallint,
   active          boolean not null default true,
-  disabled_reason text check (disabled_reason in ('replaced', 'hard_decline', 'dispute', 'not_reusable')),
+  disabled_reason text check (disabled_reason in ('replaced', 'hard_decline', 'dispute', 'reversed', 'not_reusable')),
   created_at      timestamptz not null default now(),
   unique (provider, auth_ref),
   check (active = (disabled_reason is null)),
@@ -85,14 +85,17 @@ create table billing.payment_attempts (
   currency         text not null,
   -- created: written, charge call not answered yet. pending: card page open, bank
   -- challenge, or still processing. unknown: no clear answer, verify before any new try.
-  -- void: never reached Paystack. not_applied: money taken but not applied, refunded.
-  status           text not null check (status in ('created', 'pending', 'unknown', 'success', 'failed', 'void', 'not_applied')),
+  -- void: never reached Paystack, or the owner left the card page. not_applied: money taken
+  -- but not applied, refunded. reversed: paid, then Paystack gave the money back.
+  status           text not null check (status in ('created', 'pending', 'unknown', 'success', 'failed', 'void', 'not_applied', 'reversed')),
   claimed_until    timestamptz,
   gateway_response text,
   hard_decline     boolean not null default false,
   pay_url          text,                         -- bank challenge: the owner finishes it here
   dispute_status   text,
   dispute_open     boolean not null default false,
+  dispute_id       text,                         -- Paystack's dispute id
+  dispute_resolved_at timestamptz,               -- a resolved dispute is final
   created_at       timestamptz not null,
   settled_at       timestamptz
 );
@@ -122,7 +125,7 @@ create table billing.refunds (
   account            uuid references billing.accounts (id) on delete set null,
   amount_minor       int,                        -- null: the whole payment
   currency           text,
-  reason             text not null check (reason in ('stale', 'duplicate', 'unknown_account', 'wrong_amount', 'card_check', 'manual')),
+  reason             text not null check (reason in ('stale', 'duplicate', 'unknown_account', 'wrong_amount', 'card_check', 'manual', 'reversed')),
   status             text not null check (status in ('due', 'sending', 'pending', 'processed', 'failed')),
   tries              int not null default 0,
   last_error         text,
@@ -134,6 +137,21 @@ create table billing.refunds (
 );
 create unique index refunds_one_auto on billing.refunds (reference) where reason <> 'manual';
 create index refunds_to_send on billing.refunds (next_try_at) where status in ('due', 'failed', 'sending');
+
+-- Emails to send, intent only (design: "The outbox stores intent only"). Phase 4 renders
+-- and sends them from account_state at send time; dedupe_key makes each one once.
+create table billing.outbox (
+  id          bigint generated always as identity primary key,
+  account     uuid references billing.accounts (id) on delete set null,
+  key         text not null,                     -- the message, e.g. card_update
+  invoice     uuid references billing.invoices (id),
+  dedupe_key  text not null unique,
+  not_before  timestamptz not null,
+  expires_at  timestamptz,
+  status      text not null default 'queued' check (status in ('queued', 'sent', 'dropped')),
+  sent_at     timestamptz,
+  created_at  timestamptz not null
+);
 
 revoke all on all tables in schema billing from public, anon, authenticated;
 grant select on all tables in schema billing to service_role;

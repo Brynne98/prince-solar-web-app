@@ -27,6 +27,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { payClosed } from "../_shared/gate.ts";
+import { pool, refundProviderId, verifyStatus } from "./helpers.ts";
 
 const SECRET = Deno.env.get("PAYSTACK_SECRET_KEY") ?? "";
 // Local tests point this at a stand-in server.
@@ -38,7 +39,7 @@ const TESTER_EMAILS = Deno.env.get("TESTER_EMAIL_PATTERN") ?? "";
 
 type Tx = Record<string, unknown> & { status?: string; reference?: string };
 type Charge = { reference: string; amount_minor: number; currency: string; auth_ref?: string; auth_email?: string };
-type Applied = { action: string; kind?: string; refund?: string | null; reason?: string; declined?: boolean;
+type Applied = { action: string; status?: string; kind?: string; refund?: string | null; reason?: string; declined?: boolean;
   hard?: boolean; pay_url?: string; user?: string | null; days_since_plan?: number | null };
 
 /** Paystack's HTTP status; 0 when no answer came (timeout, network). */
@@ -52,6 +53,9 @@ class PaystackError extends Error {
 const RUN_PARALLEL = 10;
 const RUN_BUDGET_MS = 40_000;
 const REFUND_BUDGET_MS = 10_000;
+// Tries to ask Paystack about, apart from the new charges: 5 at a time for 30 s.
+const VERIFY_PARALLEL = 5;
+const VERIFY_BUDGET_MS = 30_000;
 
 async function paystack<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
   const what = `paystack ${path.split("/").slice(0, 3).join("/")}`;
@@ -207,7 +211,7 @@ serve("billing", async (req) => {
         // Paystack sends amount as a string ("10000", in cents) in its samples.
         const cents = Number(d.amount);
         await bill("record_refund_event", {
-          reference: ref, status, provider_id: d.id != null ? String(d.id) : null,
+          reference: ref, status, provider_id: refundProviderId(d),
           amount: Number.isSafeInteger(cents) && cents > 0 ? cents : null, reason: d.reason ?? null,
         });
       } else {
@@ -218,6 +222,7 @@ serve("billing", async (req) => {
         noteError("dispute", new Error(`dispute ${ref}: ${event} ${status}${lost ? " (lost)" : ""}`), { ref });
         await bill("record_dispute", {
           reference: ref, event, status, lost, amount: Number.isSafeInteger(back) && back > 0 ? back : null,
+          dispute_id: d.id != null ? String(d.id) : null,
         });
       }
       await bill("event_done", { id: e.id });
@@ -237,28 +242,24 @@ serve("billing", async (req) => {
     const r = await bill<{ busy?: boolean; verify: string[]; charges: Charge[]; refunds: { refund: string; reference: string }[];
       steps: Record<string, number> }>("run");
     if (r.busy) return json({ busy: true }, 200);
-    const out = { verified: 0, charged: 0, applied: 0, failed: 0, pending: 0, unknown: 0, refund: 0, left: 0, refunds: 0 };
-    for (const ref of r.verify) {
-      await verify(ref).catch((e) => noteError("run_verify_failed", e, { ref }));
-      out.verified++;
-    }
-    const start = Date.now();
-    let next = 0;
-    const worker = async () => {
-      while (next < r.charges.length && Date.now() - start < RUN_BUDGET_MS) {
-        const c = r.charges[next++];
-        out.charged++;
-        const a = await charge(c).catch((e) => {
-          console.error(`billing run ${c.reference}: ${e instanceof Error ? e.message : e}`);
-          noteError("run_charge_failed", e, { ref: c.reference });
-          return null;
-        });
-        const k = (a?.action ?? "unknown") as keyof typeof out;
-        if (k in out) out[k]++;
-      }
-    };
-    await Promise.all(Array.from({ length: RUN_PARALLEL }, worker));
-    out.left = r.charges.length - next;
+    const out = { verified: 0, charged: 0, applied: 0, failed: 0, pending: 0, unknown: 0, refund: 0, void: 0, left: 0, refunds: 0 };
+    // Unanswered tries first, on their own budget, so a slow Paystack cannot eat the charges'.
+    const v = await pool(r.verify, VERIFY_PARALLEL, VERIFY_BUDGET_MS,
+      (ref) => verify(ref).catch((e) => noteError("run_verify_failed", e, { ref })));
+    out.verified = v.done.length;
+    const c = await pool(r.charges, RUN_PARALLEL, RUN_BUDGET_MS, async (ch) => {
+      out.charged++;
+      const a = await charge(ch).catch((e) => {
+        console.error(`billing run ${ch.reference}: ${e instanceof Error ? e.message : e}`);
+        noteError("run_charge_failed", e, { ref: ch.reference });
+        return null;
+      });
+      const k = (a?.action ?? "unknown") as keyof typeof out;
+      if (k in out) out[k]++;
+    });
+    // Charges never started never reached Paystack: void, so the next call tries again.
+    for (const ch of c.left) await report(ch.reference, { status: "not_found" }).catch(() => {});
+    out.left = c.left.length;
     const refundsStart = Date.now();
     for (const f of r.refunds) {
       if (Date.now() - refundsStart >= REFUND_BUDGET_MS) break;
@@ -293,7 +294,7 @@ serve("billing", async (req) => {
     const owner = await bill<{ user?: string } | null>("attempt_user", { reference: ref });
     if (owner?.user !== user.id) return json({ error: "unknown reference" }, 400, cors);
     const r = await verify(ref);
-    return json({ status: r?.action ?? "pending", kind: r?.kind ?? null }, 200, cors);
+    return json({ status: verifyStatus(r), kind: r?.kind ?? null }, 200, cors);
   }
 
   if (route === "change") {

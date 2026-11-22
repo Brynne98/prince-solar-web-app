@@ -239,7 +239,10 @@ billing code goes live, in this order:
    come across, so renewals keep charging them.
 3. Compare `billing.account_state` for each account with today's screens, next charges
    and poll decisions.
-4. Deploy the `billing` function from this change only now: it reads and writes the new
+4. Not before phase 4: the billing emails (receipts, failed card, card changed, refunds,
+   disputes) are queued in `billing.outbox` (a hard decline already queues `card_update`)
+   and sent by phase 4's outbox sender. Deployed earlier, no billing email goes out.
+   Then deploy the `billing` function from this change: it reads and writes the new
    tables (through `public.billing_v2`) and no longer the old ones. Deployed earlier, it
    would stop today's billing.
 5. Switch reading, deleting and history fetches to the new state (0246), once:

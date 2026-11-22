@@ -18,7 +18,10 @@
 --   login_plants   plant_users rows reached by a login (not via a share).
 --   plant_claims   live share claims (via_share, share_gone_at null).
 --   seats          plant_picks held (the tick holds a place), whose plant_users
---                  row is not paused.
+--                  row is not paused. A booked downgrade's plants_to_remove are marked
+--                  to drop; still too many for the next plan: flagged copy_needs_review.
+--   past due       each copied past_due plan gets its renewal bill and a failed day-0
+--                  try at past_due_since, so the retries keep their days.
 --   subscriptions  private.billing home/family, not comped: amounts from
 --                  billing_amount (cents), dates at midnight in Johannesburg.
 --                  A plan that ended (plan 'free', ended_at set) becomes an ended
@@ -33,15 +36,29 @@ create function billing.copy_from_old()
 returns jsonb language plpgsql security definer set search_path = billing, public, private, pg_temp as $$
 declare
   tz constant text := 'Africa/Johannesburg';
+  seed constant text := 'copied: failed before the switch-over';
   out jsonb;
   paid boolean := false;
+  r record;
+  inv record;                                    -- billing.invoices (0244 comes after this file)
+  review int := 0;
 begin
+  -- anything but this copy's own seed tries (below) means real money moved here
   if to_regclass('billing.invoices') is not null then
-    execute 'select exists (select 1 from billing.invoices)' into paid;
+    execute format($q$select exists (select 1 from billing.invoices where status <> 'open')
+                         or exists (select 1 from billing.payment_attempts where gateway_response is distinct from %L)
+                         or exists (select 1 from billing.refunds) or exists (select 1 from billing.payment_events)$q$, seed)
+      into paid;
   end if;
   if paid then
     raise exception 'billing copy refused: the new tables already hold payments' using errcode = '55000';
   end if;
+  if to_regclass('billing.invoices') is not null then
+    execute 'delete from billing.payment_attempts';
+    execute 'delete from billing.outbox';
+    execute 'delete from billing.invoices';
+  end if;
+  delete from billing.account_events;
   delete from billing.payment_methods;
   delete from billing.seats;
   delete from billing.plant_claims;
@@ -150,6 +167,30 @@ begin
    where b.plan = 'free' and b.ended_at is not null and not b.comped
      and not exists (select 1 from billing.subscriptions s where s.account = a.id);
 
+  -- a failed card copied mid-window: its day-0 try, so the retries keep their days
+  for r in select s.id, s.past_due_since from billing.subscriptions s where s.status = 'past_due' loop
+    inv := billing.ensure_renewal(r.id, r.past_due_since);
+    insert into billing.payment_attempts (invoice, reference, provider, channel, amount_minor, currency, status,
+                                          gateway_response, created_at, settled_at)
+    values (inv.id, billing.new_reference(), 'paystack', 'none', inv.amount_minor, inv.currency, 'failed', seed,
+            r.past_due_since, r.past_due_since);
+  end loop;
+  -- a booked downgrade: the plants picked to go (plants_to_remove) are marked to drop; one
+  -- whose kept plants still do not fit the next plan is flagged for support to pick
+  update billing.seats se set drop_at_period_end = true
+    from private.billing b join billing.accounts a on a.user_id = b.user_id
+   where se.account = a.id and se.closed_at is null and se.plant = any (b.plants_to_remove);
+  for r in select s.account, s.id from billing.subscriptions s
+             join billing.prices np on np.id = s.next_price
+             join billing.plans npl on npl.code = np.plan
+            where s.status in ('active', 'past_due')
+              and (select count(*) from billing.seats se where se.account = s.account and se.closed_at is null
+                      and not se.drop_at_period_end) > npl.places + coalesce(s.next_extra_places, s.extra_places) loop
+    perform billing.log_event(r.account, now(), 'copy', 'copy_needs_review', null, jsonb_build_object('sub', r.id),
+                              'booked downgrade: pick the plants to drop');
+    review := review + 1;
+  end loop;
+
   insert into billing.grants (account, places, reason, starts_at)
   select a.id, public.billing_room(b.plan, b.extra_plants), 'comped', b.created_at
     from private.billing b join billing.accounts a on a.user_id = b.user_id
@@ -157,10 +198,10 @@ begin
 
   insert into billing.payment_methods (account, provider, customer_code, auth_ref, auth_email, reusable, signature,
                                        card_type, last4, exp_month, exp_year, active, created_at)
-  select a.id, 'paystack', b.card->>'customer_code', b.card->>'authorization_code', b.card_email, true, b.card->>'signature',
+  select a.id, 'paystack', b.card->>'customer_code', b.card->>'authorization_code', coalesce(b.card_email, u.email), true, b.card->>'signature',
          b.card->>'card_type', b.card->>'last4', nullif(b.card->>'exp_month', '')::smallint,
          nullif(b.card->>'exp_year', '')::smallint, true, b.created_at
-    from private.billing b join billing.accounts a on a.user_id = b.user_id
+    from private.billing b join billing.accounts a on a.user_id = b.user_id join auth.users u on u.id = b.user_id
    where b.card->>'authorization_code' is not null and coalesce((b.card->>'reusable')::boolean, true)
   on conflict (provider, auth_ref) do nothing;
 
@@ -173,7 +214,9 @@ begin
     'plant_claims', (select count(*) from billing.plant_claims),
     'seats', (select count(*) from billing.seats),
     'subscriptions', (select count(*) from billing.subscriptions),
-    'grants', (select count(*) from billing.grants)) into out;
+    'grants', (select count(*) from billing.grants),
+    'past_due_seeded', (select count(*) from billing.payment_attempts where gateway_response = seed),
+    'needs_review', review) into out;
   return out;
 end $$;
 revoke all on function billing.copy_from_old() from public, anon, authenticated;
