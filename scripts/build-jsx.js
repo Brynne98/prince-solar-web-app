@@ -50,12 +50,27 @@ function compile(file) {
 
 const sources = () => fs.readdirSync(PUB).filter(f => f.endsWith('.jsx')).map(f => path.join(PUB, f));
 
+// The account text catalog (SOLAR-641) lives with the functions, so the emails import it
+// as it is; the browser gets the same file with its types stripped, as window.AccountText.
+const TEXT = path.join(__dirname, '..', 'supabase', 'functions', '_shared', 'text.ts');
+function compileText() {
+  const src = fs.readFileSync(TEXT, 'utf8').replace(/^export (?=(type|const|function|async)\b)/gm, '');
+  let { code, map } = Babel.transform(src, { ...options('text.ts'), presets: ['typescript', 'env'], plugins: [] });
+  code = '(function () {\n' + code + '\nwindow.AccountText = AccountText;\n})();';
+  map.sources = ['../../supabase/functions/_shared/text.ts'];
+  const out = HASHED ? 'text.' + crypto.createHash('sha256').update(code).digest('hex').slice(0, 10) : 'text';
+  fs.writeFileSync(path.join(OUT, out + '.js'), code + '\n//# sourceMappingURL=' + out + '.js.map\n');
+  fs.writeFileSync(path.join(OUT, out + '.js.map'), JSON.stringify(map));
+  built.text = out + '.js';
+}
+
 fs.mkdirSync(OUT, { recursive: true });
 const serveAt = process.argv.indexOf('--serve');
 let failed = false;
 for (const file of sources()) {
   try { compile(file); } catch (e) { failed = true; console.error(e.message); }
 }
+try { compileText(); } catch (e) { failed = true; console.error(e.message); }
 
 if (serveAt === -1) {
   if (failed) process.exit(1);
@@ -79,6 +94,7 @@ if (serveAt === -1) {
   }
   console.log('built', sources().length, 'files into public/build/');
 } else {
+  fs.watch(TEXT, () => { try { compileText(); console.log('rebuilt text.ts'); } catch (e) { console.error(e.message); } });
   fs.watch(PUB, (event, f) => {
     if (!f || !f.endsWith('.jsx') || !fs.existsSync(path.join(PUB, f))) return;
     try { compile(path.join(PUB, f)); console.log('rebuilt', f); } catch (e) { console.error(e.message); }

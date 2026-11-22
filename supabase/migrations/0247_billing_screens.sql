@@ -343,6 +343,35 @@ begin
   return jsonb_build_object('result', 'removed');
 end $$;
 
+-- The signed-in user's logins and their plants (api_link_status's shape, no old billing):
+-- paused = not chosen (no open seat). Plants choose, lock and delete in api_account_state.
+create function public.api_logins()
+returns table (account_id uuid, sunsynk_username text, status text, linked_at timestamptz, last_ok_at timestamptz,
+               plants jsonb, kind text)
+language sql stable security definer set search_path = public, private, pg_temp as $$
+  with me as (select auth.uid() u, (select id from billing.accounts where user_id = auth.uid()) acc)
+  select a.id, a.sunsynk_username, a.status,
+         case when a.kind = 'share' then (select min(x.linked_at) from public.plant_users x where x.account_id = a.id and x.user_id = me.u)
+              else a.linked_at end,
+         a.last_ok_at,
+         coalesce((select jsonb_agg(jsonb_build_object('plant_id', pu.plant_id, 'plant_name', pu.plant_name,
+                     'paused', not exists (select 1 from billing.seats se where se.account = me.acc and se.plant = pu.plant_id
+                                              and se.closed_at is null),
+                     'linked_at', pu.linked_at,
+                     'inverters', (select count(*) from private.inverters i where i.plant_id = pu.plant_id),
+                     'share_gone', pu.share_gone_at is not null,
+                     'started_at', (select s.started_at from private.plant_alert_state s where s.plant_id = pu.plant_id))
+                   order by pu.linked_at, pu.plant_id)
+                     from public.plant_users pu where pu.account_id = a.id and pu.user_id = me.u), '[]'::jsonb),
+         a.kind
+    from private.sunsynk_accounts a cross join me
+   where a.user_id = me.u
+      or (a.kind = 'share' and exists (select 1 from public.plant_users x where x.account_id = a.id and x.user_id = me.u))
+   order by 4 desc
+$$;
+revoke all on function public.api_logins() from public, anon;
+grant execute on function public.api_logins() to authenticated;
+
 -- ---------------------------------------------------------------------------
 -- Reading follows the new state once the switch is on.
 -- ---------------------------------------------------------------------------

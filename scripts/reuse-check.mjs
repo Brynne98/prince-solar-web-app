@@ -87,6 +87,10 @@ const rules = [
   [/className=["']login-card["']/, 'a hand-made sign-in card: use AuthCard (auth.jsx)', 'auth.jsx'],
   [/Promise\.race\(/, 'a hand-made timeout: use withTimeout (link.jsx)', 'link.jsx'],
   [/getItem\(['"]synsynk\.tab/, 'reading the saved tab by hand: use savedTab (app.jsx)', 'app.jsx'],
+  // SOLAR-641: account, plan, price and history lines come from the text catalog, filled from
+  // api_account_state; the old billing reads worked them out on each screen
+  [/['"]api_(billing_\w+|plant_picks?|link_status)['"]/, 'an old billing read: use useAccount and AccountText (link.jsx, _shared/text.ts)'],
+  [/\bPLAN_NAME\b|toLocaleString\(['"]en-US['"]\)/, 'a plan name or a price made on screen: use AccountText (_shared/text.ts), filled from api_account_state'],
 ];
 const icons = [...read('app.jsx').matchAll(/^\s+\w+: '(<path d="[^"]+"\/>)/gm)].map(m => m[1].match(/d="([^"]+)"/)[1]);
 for (const f of jsx) {

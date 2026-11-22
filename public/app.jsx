@@ -489,89 +489,15 @@ function notifDay(day) {
   return window.dayText(day);
 }
 
-// Billing notices (SOLAR-212): the facts api_notifications pins (0148), in the emails'
-// words (_shared/email.ts). They stay at the top of the list until their state ends.
-// A failed payment and plants about to go are a card on Live too (NoticeCard,
-// SOLAR-384, SOLAR-577); only the second can be closed. bodyShort is the card's line on a phone.
-// act: { plan, plans, undo } from App.
-// links: the logins, for the plants a booked change keeps and deletes (SOLAR-505).
-// The free week's price line, in the free-week emails' words (startPlan in _shared/email.ts,
-// SOLAR-553): "Recommended for your plant: Home, R49 a month, normally R99." short: the phone line.
-function weekLine(plan, now, list, many) {
-  const { rand } = window.billingFmt;
-  const price = `${rand(now)} a month${list > now ? `, normally ${rand(list)}` : ''}`;
-  return { long: `Recommended for your ${many ? 'plants' : 'plant'}: ${PLAN_NAME[plan]}, ${price}.`, short: `${PLAN_NAME[plan]}: ${price}.` };
-}
-// From Billing's prices: Home for up to 2 plants, Family above. n: the plants the account added
-// (api_me's plants), not every plant on its SunSynk logins.
-function weekOffer(b, n) {
-  const plan = n > 2 ? 'family' : 'home', now = b?.prices?.monthly?.[plan];
-  return now == null ? null : weekLine(plan, now, b.listPrices?.monthly?.[plan], n > 1);
-}
-// Days 1 to 4 of the free week: a card on Live with the date and the price (SOLAR-553). Days 5
-// to 7 the free_week_soon notice takes over. endsAt: api_me's freeWeekEndsAt.
-function weekCard(endsAt, b, n, plans) {
-  const o = weekOffer(b, n);
-  if (!endsAt || !o || b.plan !== 'free' || b.comped || Date.parse(endsAt) - Date.now() <= 2 * 864e5) return null;
-  const day = new Date(endsAt).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
-  return { kind: 'free_week_price', banner: true, tone: 'info', closable: 'free_week_price:' + day,
-    title: `Free week until ${window.dayText(day, { weekday: 'long', day: 'numeric', month: 'short' })}`,
-    short: `Free week until ${window.dayText(day)}`,
-    body: `${o.long} Start it and readings, history and alerts carry on.`, bodyShort: o.short,
-    button: 'See plans', act: (where) => { window.track('notice_action_done', { kind: 'free_week_price', where }); plans(); } };
-}
-
-// week: { b: api_billing_status while the free week is on, n: plants added } for its price line (SOLAR-553).
-function billNotice(n, act, links, week) {
-  const { rand, billDay } = window.billingFmt;
-  const plan = PLAN_NAME[n.plan];
-  switch (n.kind) {
-    case 'bill_failed': return { banner: true, tone: 'bad', icon: 'card', title: `Payment of ${rand(n.amount)} failed`, short: 'Payment failed',
-      body: n.nextTry ? `Next try ${billDay(n.nextTry)}. Your plan ends on ${billDay(n.freeOn)} if unpaid.`
-        : `Last try failed. Your plan ends on ${billDay(n.freeOn)} if unpaid.`,
-      bodyShort: `Your plan ends on ${billDay(n.freeOn)} if unpaid.`,
-      button: 'Pay with another card', run: () => window.settlePayment() };
-    case 'bill_removal_soon': {
-      // up to 3 names, then a count: the card stays short on a phone
-      const p = n.plants, one = p.length === 1;
-      const list = p.length > 3 ? `${p.slice(0, 3).join(', ')} and ${p.length - 3} more`
-        : p.length > 1 ? `${p.slice(0, -1).join(', ')} and ${p[p.length - 1]}` : p[0] || 'A plant';
-      const why = `Your plan covers ${n.room} plant${n.room === 1 ? '' : 's'}. ${one ? 'Its' : 'Their'} history goes too.`;
-      return { banner: true, tone: 'warn', icon: 'trash', closable: 'bill_removal_soon:' + n.on,
-        title: `${list} will be deleted on ${billDay(n.on)}`,
-        short: `Deleting ${one ? p[0] : p.length + ' plants'} on ${billDay(n.on)}`,
-        body: why,
-        bodyShort: `Your plan covers ${n.room} plant${n.room === 1 ? '' : 's'}.`,
-        // it opens Billing's plan, where the plants to keep are picked (SOLAR-384)
-        button: 'Choose plants', run: act.plan };
-    }
-    case 'bill_change': {
-      const cancel = n.nextPlan === 'free', on = billDay(n.on);
-      // what it deletes, as Billing's Plan card says it; in the last 3 days a card on Live,
-      // as the email of those days (SOLAR-505, SOLAR-577)
-      const loss = n.nextPlan ? window.billingFmt.lossLine(links, cancel) : '';
-      const soon = !!loss && Date.parse(n.on) - Date.now() <= 3 * 864e5;
-      return { banner: soon, tone: soon ? 'warn' : undefined, icon: 'calendar', title: cancel ? `${plan} ends on ${on}` : n.nextPlan ? `You move to ${PLAN_NAME[n.nextPlan]} on ${on}`
-          : n.nextPeriod ? `You switch to ${n.nextPeriod} on ${on}` : `Extra plants drop to ${n.nextExtraPlants} on ${on}`,
-        body: loss,
-        // the same undo as Billing's Plan section (bookedChange)
-        button: n.nextPlan ? `Keep ${plan}` : n.nextPeriod ? `Stay ${n.period}` : `Keep ${5 + (n.extraPlants || 0)} plants`,   // Family's 5 plus the extras held (SOLAR-367, SOLAR-371)
-        run: () => act.undo(n) };
-    }
-    case 'bill_renewal_notice': return { icon: 'calendar', title: `Your yearly ${plan} plan renews on ${billDay(n.on)}`,
-      body: `${rand(n.amount)}. To stop it, cancel before ${billDay(n.on)}.`,
-      button: 'Go to cancel plan', run: act.cancel };
-    case 'free_week_soon': {
-      const day = new Date(n.endsAt).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Africa/Johannesburg' });
-      // days 5 to 7: a card on Live, not only the bell (SOLAR-553, SOLAR-577).
-      // The plan for the plants added, at the account's offer; Home from the notice until Billing's prices load.
-      const o = (week && weekOffer(week.b, week.n)) || weekLine('home', n.perMonth, n.list, false);
-      return { banner: true, tone: 'warn', icon: 'clock', title: `Your free week ends on ${day}`, short: `Free week ends ${day}`,
-        body: `Readings, alerts and reports stop then. ${o.long}`, bodyShort: o.short,
-        button: 'See plans', run: act.plans };
-    }
-    default: return null;
-  }
+// Account notices (SOLAR-641): AccountText.notices from the account's state, the same words as
+// its emails: a failed payment, plants to choose, the free week's price and its last days, a
+// booked cancel's last days. Each leads the bell's Today and is a card on Live. act: { pay,
+// plans, choose, billing } from App. The icon is the kind's.
+const NOTICE_ICON = { past_due: 'card', must_choose: 'power', trial: 'clock', trial_ends_soon: 'clock', cancel_soon: 'calendar' };
+function acctNotices(acct, act) {
+  if (!acct) return [];
+  return AT.notices(acct).map(n => ({ ...n, id: n.kind, read: true, banner: true, icon: NOTICE_ICON[n.kind] || 'calendar',
+    act: (where) => { window.track('notice_action_done', { kind: n.kind, where }); act[n.action](); } }));
 }
 
 // A notice to act on (SOLAR-384): a card the height of an Overview card, two columns of
@@ -596,7 +522,7 @@ window.NoticeCard = NoticeCard;
 // The billing cards, at the top of Live only (SOLAR-212, SOLAR-577); the bell lists them on every
 // page. A card's close is kept on this device, for that one deletion date.
 const NOTICE_CLOSED = 'synsynk.noticeClosed';
-const WEEK_CARDS = { free_week_price: 'price', free_week_soon: 'ends_soon' };
+const WEEK_CARDS = { trial: 'price', trial_ends_soon: 'ends_soon' };
 const weekCardsSeen = new Set();
 function BillCards({ notices, tab }) {
   const [closed, setClosed] = useState(() => { try { return localStorage.getItem(NOTICE_CLOSED); } catch (e) { return null; } });
@@ -1311,10 +1237,12 @@ function useUser() {
 // what will appear there (the same card, one size, on each page). Add plant, there or
 // in the header, opens that card into the form where it stands; Cancel or Esc folds it back
 // (SOLAR-96). Once a login lists a plant the gate's refresh swaps this for App (SOLAR-93, SOLAR-94).
-// wall: api_me's wall (0204). No plan and the free week or the paid time is over: every
+// acct: the account's state. No plan and the free week or the paid time is over (ended): every
 // page is the outline with one card that opens the plans (SOLAR-552). Account and Billing work.
-function Setup({ links, wall }) {
+function Setup({ links, acct }) {
   const user = useUser();
+  // no plan: the pay screen's words, from the account's state (AccountText.payScreen)
+  const wall = acct && AT.payScreen(acct);
   // The remembered page too, so removing the last login on Account stays on Account.
   // Plant settings isn't here, so the address or memory naming it opens Live.
   const [tab, setTab] = useState(() => savedTab(t => pageOk(SETUP_TABS, t)));
@@ -1348,11 +1276,11 @@ function Setup({ links, wall }) {
     if (section && SECTION_PAGE[section] !== 'system') { setFlash(section); writeTab(SECTION_PAGE[section], null, true); setTab(SECTION_PAGE[section]); }
   }, []);
   useEffect(() => { window.track('screen_viewed', { stage: 'setup', screen: connecting ? 'connect' : tab }); }, [tab, connecting]);
-  useEffect(() => { if (wall) window.track('pay_wall_shown', { plants: wall.plants, after: wall.paid ? 'plan' : 'free_week' }); }, []);
+  useEffect(() => { if (wall) window.track('pay_wall_shown', { plants: acct.chosen, after: acct.had_plan ? 'plan' : 'free_week' }); }, []);
   const dead = links.accounts.filter(a => a.status === 'needs_relink' && a.kind !== 'share');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
   // no plan: the plants are still yours, paused, as Settings > Plants lists them (SOLAR-631)
-  const account = { user, plantCount: wall ? wall.plants : 0, paused: !!wall, alert: dead.length > 0, onSettings: () => go('prefs'), active: isSettings(tab) };
+  const account = { user, plantCount: wall ? acct.chosen : 0, paused: !!wall, alert: dead.length > 0, onSettings: () => go('prefs'), active: isSettings(tab) };
   // Every plant on a working login locked (SOLAR-537): choosing one comes first, adding one second.
   const plantsOff = !relink && links.accounts.some(a => a.status !== 'disabled' && (a.plants || []).length > 0);
   const [flash, setFlash] = useState(null);
@@ -1385,16 +1313,12 @@ function Setup({ links, wall }) {
     }
     return links.refresh();
   };
-  // Home holds 2 plants, Family 5: the plan that holds the plants this account ticked.
-  const wallKept = wall && !wall.noWeek && Date.parse(wall.deleteAt) > Date.now()
-    && window.billingFmt.billDay(new Date(wall.deleteAt).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }));
   const card = wall ? (
     <div className="setup-empty-box">
       <Icon id="card" />
-      <h2>{wall.paid ? 'Your plan has ended' : wall.noWeek ? (wall.plants > 1 ? 'These plants have had their free week' : 'This plant has had its free week') : 'Your free week has ended'}</h2>
-      <p>{wall.plants > 2 ? 'Family' : 'Home'} covers your {wall.plants > 1 ? wall.plants + ' plants' : 'plant'}. Start it to see your solar, battery, grid and home{wall.noWeek && !wall.paid ? '' : ' again'}.</p>
-      {wallKept && <p>Your history is kept until {wallKept}.</p>}
-      <button type="button" className="save-btn setup-btn" onClick={() => go('plans')}>See plans</button>
+      <h2>{wall.title}</h2>
+      <p>{wall.body}</p>
+      <button type="button" className="save-btn setup-btn" onClick={() => go('plans')}>{wall.button}</button>
     </div>
   ) : connecting ? (
     <div className="setup-form">
@@ -1426,7 +1350,7 @@ function Setup({ links, wall }) {
   // Account and Billing work; Plant settings waits for a plant.
   return (
     <Frame tabs={SETUP_TABS} tab={tab} onTab={go} account={account}
-      head={<><PlantMenu fallback={wall ? 'No plan' : plantsOff ? 'Plants locked' : 'No plant yet'} />
+      head={<><PlantMenu fallback={wall ? AT.planTitle(acct) : plantsOff ? 'Plants locked' : 'No plant yet'} />
         {!connecting && !wall && (plantsOff
           ? <span className="setup-head-btns">{turnOnBtn('setup-head-btn')}{connectBtn('setup-head-btn', () => setAdding(true))}</span>
           : connectBtn('setup-head-btn'))}</>}>
@@ -1487,10 +1411,8 @@ function App({ links }) {
     return /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? { date: d } : null;
   });
   const [notifs, setNotifs] = useState(null);
-  // While the free week is on, Billing's prices for its price line (SOLAR-553); read once.
-  const weekEndsAt = me?.freeWeekEndsAt && Date.parse(me.freeWeekEndsAt) > Date.now() ? me.freeWeekEndsAt : null;
-  const [week, setWeek] = useState(null);
-  useEffect(() => { if (weekEndsAt && !week) window.billingRpc('api_billing_status').then(({ data }) => { if (data) setWeek(data); }).catch(() => {}); }, [weekEndsAt]);
+  // The account's state: the notices on Live and in the bell come from it (SOLAR-641).
+  const acct = window.useAccount();
   // "Set your rate", "Set pack size", Reconnect: open the page that holds that section
   // (SECTION_PAGE) and flash it once; the section scrolls itself into view.
   // The address keeps it as #section, so a reload scrolls back to it (SOLAR-165).
@@ -1603,8 +1525,10 @@ function App({ links }) {
   const loadMe = useCallback(async () => {
     try {
       const m = await window.fetchMe();
-      // The free week ended with the app open: SignedIn reads the wall again and shows the pay screen.
-      if (m.wall) { location.reload(); return; }
+      // The free week or the plan ended with the app open: SignedIn reads the account again and
+      // shows the pay screen.
+      const a = await window.reloadAccount().catch(() => null);
+      if (a && a.state === 'ended') { location.reload(); return; }
       setMe(m);
       const ids = (m.plants || []).map(p => p.id);
       // The address names its plant (?plant=, from an email or a reload); one that isn't the
@@ -1769,27 +1693,15 @@ function App({ links }) {
       pinned: n.pinned.map(x => ({ ...x, read: true })) }));
     window.readNotifications(ids).then(loadNotifs).catch(() => {});
   };
-  // Billing notices (SOLAR-212). An undo re-reads the list, so the notice goes, and tells
-  // an open Billing page (ps-billing) to re-read the plan. Before tabs.js is here, Billing.
+  // Account notices (SOLAR-641): what each one's button opens.
   const noticeAct = {
-    plan: () => openSettings('plan'),
-    // "To stop it, cancel before": Billing's Cancellation, as the renewal email opens it (SOLAR-365)
-    cancel: () => openSettings('cancel'),
-    // Adjust plan: Home and Family side by side, as the emails open it (SOLAR-341)
+    pay: () => window.settlePayment(),
     plans: () => go('plans'),
-    undo: (n) => (window.undoBooked ? window.undoBooked(n, loadNotifs).then(ok => {
-      if (!ok) return;
-      window.dispatchEvent(new Event('ps-billing'));
-      window.toast('The change you booked is undone.');
-    }) : openSettings('plan')),
+    choose: () => openSettings('connection'),
+    billing: () => openSettings('plan'),
   };
-  const notices = (notifs?.pinned || []).map(n => {
-    const t = billNotice(n, noticeAct, links, { b: week, n: (me?.plants || []).length });
-    return t && { ...t, kind: n.kind, id: n.key, read: n.read, act: (where) => { window.track('notice_action_done', { kind: n.kind, where }); t.run(); } };
-  }).filter(Boolean);
-  // the free week's price card joins them on Live until the day-5 notice comes (SOLAR-553)
-  const priceCard = tab === 'live' && !notices.some(n => n.kind === 'free_week_soon') && weekCard(weekEndsAt, week, (me?.plants || []).length, noticeAct.plans);
-  const cards = priceCard ? [...notices, priceCard] : notices;
+  const notices = acctNotices(acct, noticeAct);
+  const cards = notices;
   // A tap on an alert card opens its page and plant, as its pop-up does (SOLAR-598).
   const multi = (me?.plants || []).length > 1;
   const openAlert = (it) => {
@@ -1884,22 +1796,22 @@ const loadPages = () => pagesLoad || (pagesLoad = Promise.all(
 function SignedIn() {
   const [pages, setPages] = useState('loading'); // loading | ready | failed
   useEffect(() => { loadPages().then(() => setPages('ready'), () => setPages('failed')); }, []);
-  // api_me's wall (0204), read before the first screen: undefined until it answers, null for
-  // none. Back from a card page, the payment is checked first (checkReturn), so the logins
-  // and the wall read here already have it (SOLAR-579).
+  // The account's state, read before the first screen: undefined until it answers. Back from a
+  // card page, the payment is checked first (checkReturn), so the logins and the state read
+  // here already have it (SOLAR-579).
   const [checked, setChecked] = useState(false);
-  const [wall, setWall] = useState(undefined);
+  const [acct, setAcct] = useState(undefined);
   useEffect(() => {
-    window.checkReturn().then(() => { setChecked(true); return window.fetchMe(); })
-      .then(m => setWall(m.wall || null), () => setWall(null));
+    window.checkReturn().then(() => { setChecked(true); return window.reloadAccount(); })
+      .then(a => setAcct(a || null), () => setAcct(null));
   }, []);
   if (pages === 'failed') return <div className="login-fine">The app didn’t load. Check your connection and reload.</div>;
   if (!checked) return <BootShell />;
   return (
     <window.LinkGate fallback={<BootShell />}>
-      {(links) => (pages !== 'ready' || wall === undefined ? <BootShell />
-        : wall ? <Setup links={links} wall={wall} />
-        : window.hasActivePlant(links.accounts) ? <App links={links} /> : <Setup links={links} />)}
+      {(links) => (pages !== 'ready' || acct === undefined ? <BootShell />
+        : acct && acct.state === 'ended' ? <Setup links={links} acct={acct} />
+        : window.hasActivePlant(links.accounts) ? <App links={links} /> : <Setup links={links} acct={acct} />)}
     </window.LinkGate>
   );
 }

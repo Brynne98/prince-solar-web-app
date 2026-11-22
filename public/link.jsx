@@ -51,7 +51,7 @@ window.useLinkStatus = function useLinkStatus() {
     // Ten seconds, then it counts as a failed read. Raced here rather than with an abort
     // signal: supabase-js waits on the stored session before the request even starts, and
     // a stall there never reaches the signal.
-    const attempt = () => withTimeout(window.sb.rpc('api_link_status'), 10000).catch(e => ({ data: null, error: e }));
+    const attempt = () => withTimeout(window.sb.rpc('api_logins'), 10000).catch(e => ({ data: null, error: e }));
     // One quiet second try: a phone opening the app can stall or fail the first read
     // while its network and stored session wake up, and a retry then loads (SOLAR-21).
     const read = attempt().then(r => (r.error ? attempt() : r)).then(({ data, error }) => {
@@ -120,65 +120,39 @@ const LINK_ERRORS = {
 };
 
 
-// ---- Billing (SOLAR-208) -------------------------------------------------------
-// "R1 799", the app's and emails' money format (SOLAR-348); no break inside a price
-// narrow: a narrow no-break space, for the large prices, where a full one reads as a gap (SOLAR-364)
-const rand = (n, narrow) => 'R' + Number(n).toLocaleString('en-US').replace(/,/g, narrow ? '\u202f' : '\u00a0');
-// "30 Nov"; a date in another year carries it ("31 Oct 2027"), so a yearly date doesn't read as this year's.
-// No date (a comped plan has none) gives '' (SOLAR-433).
-const billDay = (d) => !d ? '' : window.dayText(d, { day: 'numeric', month: 'short', year: d.slice(0, 4) === String(new Date().getFullYear()) ? undefined : 'numeric' });
-const perUnit = (period) => (period === 'yearly' ? 'a year' : 'a month');
-// here, not in tabs.jsx, so the billing notices in the header can name a plan before tabs loads
-const PLAN_NAME = { free: 'The free week', home: 'Home', family: 'Family' };
-// extras: the extra plants wanted on Family in all; null keeps those held (SOLAR-264).
-// A billing read or change that takes too long ends as an error, so no button or pop-up waits
-// forever (SOLAR-294). The caller says "try again"; a change may still land, so it re-reads.
-const billingRpc = (name, args) => withTimeout(window.sb.rpc(name, args), 15000);
-window.billingRpc = billingRpc;
-const quote = (plan, period, extras = null) => billingRpc('api_billing_quote', { p_plan: plan, p_period: period, p_extra: extras })
-  .then(({ data, error }) => { if (error) throw error; return data; });
+// ---- Account and billing (SOLAR-641) -------------------------------------------
+// Every line about plans, chosen plants, prices, billing, the free week and history comes
+// from the text catalog (window.AccountText, made from supabase/functions/_shared/text.ts),
+// filled from the account's state (api_account_state, 0247). Nothing here works out a count,
+// a price, a plan name or a date. AT is shared with the later files (one global scope).
+const AT = window.AccountText;
 
-// Offers (SOLAR-330). offer: its terms from the server (api_billing_status.offer, quote.offerTerms),
-// or null. The line under an offer price: how long it lasts and what comes after.
-const offerName = (o) => (o.id === 'launch' ? 'launch price' : 'offer price');
-const offerLine = (o, list, period) => !o ? null
-  : o.until ? `Until ${billDay(o.until)}. Then ${rand(list)} ${perUnit(period)}.`
-  : o.months && !o.held ? `For your first ${period === 'yearly' ? 'year' : o.months + ' months'}. Then ${rand(list)} ${perUnit(period)}.`
-  : `${o.id === 'launch' ? 'Launch price. ' : ''}Yours until your plan ends.`;
-// Who can still join: the cap, before joining.
-const offerCap = (o) => (o && !o.held && o.cap ? `${o.id === 'launch' ? 'Launch price' : 'Offer'} for the first ${o.cap} new members.` : null);
-// The list price struck out before an offer price; nothing when they're the same.
-const Was = ({ list, price }) => (list > price ? <s className="pw-was">{rand(list)}</s> : null);
-
-// "Office", "Office and Shop", "Office, Shop and Barn"
-const andList = (names) => (names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0] || '');
-// The plants a downgrade picks from, under their logins as Billing lists them: collecting
-// and not up for deletion, except those that stop on the billing date (drop), which can
-// still be picked. A plant two logins share shows under the first. Here, not in tabs.jsx,
-// so the header's notices can name them before tabs loads (SOLAR-505).
-const pickableLogins = (links) => {
-  const seen = new Set();
-  return (links?.accounts || []).filter(a => a.status !== 'disabled').map(a => ({ ...a,
-    plants: (a.plants || []).filter(p => !p.paused && (!p.remove_on || p.drop) && !seen.has(p.plant_id) && seen.add(p.plant_id)) }))
-    .filter(a => a.plants.length);
+// The account's state, read once and shared by every screen. reloadAccount() reads it again
+// and tells them (ps-account). useAccount(): null until the first read lands.
+let acctNow = null, acctLoad = null;
+window.reloadAccount = () => acctLoad || (acctLoad = window.fetchAccountState()
+  .then(a => { acctNow = a; window.dispatchEvent(new Event('ps-account')); return a; })
+  .finally(() => { acctLoad = null; }));
+window.accountNow = () => acctNow;
+window.useAccount = function useAccount() {
+  const [a, setA] = React.useState(acctNow);
+  React.useEffect(() => {
+    const on = () => setA(acctNow);
+    window.addEventListener('ps-account', on);
+    if (acctNow) setA(acctNow); else window.reloadAccount().catch(() => {});
+    return () => window.removeEventListener('ps-account', on);
+  }, []);
+  return a;
 };
-// What a booked cancel or smaller plan deletes on its date, said once in the same words on
-// Billing, in the bell and in the banner (SOLAR-505): which plants stay, which go. Up to two
-// are named; more are counted. A cancel takes all history too. '' when a smaller plan stops none.
-const lossLine = (links, cancel) => {
-  const plants = pickableLogins(links).flatMap(a => a.plants);
-  const kept = plants.filter(p => !p.drop).map(window.plantLabel), gone = plants.filter(p => p.drop).map(window.plantLabel);
-  if (!gone.length) return cancel ? 'Readings stop then. Your history is deleted 30 days later.' : '';
-  const stays = kept.length ? `${andList(kept)} ${kept.length > 1 ? 'stay' : 'stays'}. ` : '';
-  const what = gone.length > 2 ? `The other ${gone.length} plants` : andList(gone);
-  return stays + what + (cancel ? ' and all history are deleted then.' : ` and ${gone.length > 1 ? 'their' : 'its'} history are deleted then.`);
-};
+window.sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') acctNow = null; });
 
-window.billingFmt = { rand, billDay, perUnit, offerName, offerLine, offerCap, Was, andList, lossLine };
+// "Office", "Office and Shop", "Office, Shop and Barn" (also used for alert lists)
+const andList = (names) => AT.names(names);
+window.billingFmt = { andList };
 
-// Paystack (SOLAR-208, the billing function). A saved card is charged at once;
-// otherwise, or after the saved card is declined, Paystack's card page opens and
-// comes back to the Plan section with ?reference=, which billingReturn checks.
+// Paystack (the billing function). A saved card is charged at once; otherwise, or after the
+// saved card is declined, Paystack's card page opens and comes back with ?reference=, which
+// billingReturn checks.
 const billingCall = async (route, body, ms = 30000) => {
   // a payment that hasn't started in 30 s says so (SOLAR-294)
   const [res, out] = await edgePost('billing/' + route, body, AbortSignal.timeout(ms))
@@ -186,50 +160,40 @@ const billingCall = async (route, body, ms = 30000) => {
   if (!res.ok) throw new Error(out.error || 'payment failed');
   return out;
 };
-// The Plan section on Billing, on the plant the user was looking at.
+window.billingCall = billingCall;
+// Billing's Plan section, on the plant the user was looking at.
 const planUrl = (extra = '') => {
   const plant = new URLSearchParams(location.search).get('plant');
   return `${location.pathname}?tab=billing&section=plan${plant ? `&plant=${encodeURIComponent(plant)}` : ''}${extra}`;
 };
-// switched: a paid switch to yearly (SOLAR-298) is not an upgrade; its own event goes.
-const billingPaid = (plan, switched = false) => {
-  if (!switched) window.track('upgrade_done', plan ? { plan } : {});
-  location.assign(planUrl('&billing=paid'));
+const billingPaid = () => location.assign(planUrl('&billing=paid'));
+// The toast for a payment or a change that failed, in the catalog's words.
+const payFailed = (e, fallback = AT.pay.startFailed) => {
+  const t = AT.refused(e?.message || '');
+  window.toast(t === AT.refused('') ? fallback : t, /open soon/.test(e?.message || '') ? { info: true } : { error: true });
 };
-
-// The toast for a payment step that failed: paid plans not open yet, or fallback. A card
-// page that didn't open in time charged nothing, so its fallback's "try again" holds.
-const payFailed = (e, fallback) => (/open soon/.test(e.message) ? window.toast('Paid plans open soon. Nothing was charged.', { info: true })
-  : window.toast(fallback, { error: true }));
-// What to say when a failed payment refused a plan or plant change (0189, 0198); else false.
-const payFirst = (e) => /failed payment/.test(e.message) && 'Pay the failed payment first.';
-// A pick on a paid plan is final while the plan runs (SOLAR-583, 0223): the confirm step's line.
-const finalPickText = (names) => `You can’t swap ${andList(names)} for another plant while your plan runs.`;
+window.payFailed = payFailed;
 // A saved card's charge: the billing function gives Paystack 30 s to charge and 30 s more to
 // check, so the page waits past both (SOLAR-363).
 const PAY_WAIT = 70000;
-// Still no answer: the charge may land later, so read Billing every 5 s for a minute. A plan
-// that moved since the Pay tap is paid; otherwise it's still being checked.
-const billingSig = (b) => (b ? [b.plan, b.period, b.extraPlants, b.nextPlan, b.nextPeriod, b.prepaidOn].join('|') : null);
+// Still no answer: the charge may land later, so read the account every 5 s for a minute. A
+// plan that moved since the Pay tap is paid; otherwise it's still being checked.
+const acctSig = (a) => (a ? [a.state, a.plan, a.interval, a.places, a.next_plan, a.next_interval].join('|') : null);
 const payLanded = async (beforeP) => {
-  const was = billingSig(await beforeP);
+  const was = acctSig(await beforeP);
   for (let i = 0; was && i < 12; i++) {
     await new Promise(res => setTimeout(res, 5000));
-    const { data } = await billingRpc('api_billing_status').catch(() => ({}));
-    if (data && billingSig(data) !== was) return { status: 'paid' };
+    const a = await window.fetchAccountState().catch(() => null);
+    if (a && acctSig(a) !== was) return { status: 'applied' };
   }
   return { status: 'pending' };
 };
 // While a payment step runs, a small pop-up says so, so a slow one never looks frozen (SOLAR-294).
 // It has no close: every step ends, the slowest after about 2 minutes. Returns the function that closes it.
 const working = (text) => mountNode(<Dialog busy label={text}><div className="pop-wait" role="status"><span className="spin" aria-hidden="true" />{text}</div></Dialog>);
-// Paid after the plan or extra plants changed: nothing applied, refunded by hand (0127).
-const REFUND_NOTE = 'Your plan changed while you paid. The payment will be refunded.';
-// extras: the extra plants wanted on Family in all (SOLAR-264); left out, those held.
-// plants: the stopped plants the room is for; once paid they start first, else the oldest.
 // One payment at a time: a second click while one is open does nothing.
-// paidEvent: { name, props } sent once the money is taken, here or back from the card page (SOLAR-268).
 let paying = false;
+// paidEvent: { name, props } sent once the money is taken, here or back from the card page (SOLAR-268).
 const PAID_EVENT = 'ps.paidEvent';
 // The card-page payment last opened. Paystack sends the user back with ?reference= only
 // once paid; after a decline they close the page and come back without it, so
@@ -305,88 +269,70 @@ function Dialog({ label, onClose, keep = false, busy = false, size = null, child
 window.Dialog = Dialog;
 
 // The saved card is charged without Paystack's page, so the amount, the next bill and the
-// card are shown first (SOLAR-276). Centred on a desktop, from the bottom on a phone.
-// parts: the lines the bill is made of, before it, as [label, amount] (SOLAR-369).
-function PayReview({ title, note, due, parts = [], then, card, onDone }) {
+// card are shown first (SOLAR-276). r: AccountText.quoteReview's lines; card: the saved card.
+function PayReview({ r, card, onDone }) {
   return (
-    <Dialog label={title} onClose={() => onDone(false)}>
-      <h2 id="pay-review-t" className="pay-review-t">{title}</h2>
-      {note && <p className="field-note">{note}</p>}
-      <div className="pay-review-due"><span>Due today</span><b>{rand(due)}</b></div>
+    <Dialog label={r.title} onClose={() => onDone(false)}>
+      <h2 id="pay-review-t" className="pay-review-t">{r.title}</h2>
+      {r.due != null && <div className="pay-review-due"><span>{AT.pay.dueToday}</span><b>{r.due}</b></div>}
       <div className="pay-review-box">
-        {parts.map(([k, v]) => <div key={k} className="pay-review-ln"><span>{k}</span><b>{v}</b></div>)}
-        <div className={'pay-review-ln' + (parts.length ? ' pay-review-sum' : '')}><span>{then[0]}</span><b>{then[1]}</b></div>
-        <div className="pay-review-ln"><span>Card</span><b className="pay-review-card">{card}</b></div>
+        {r.lines.map(l => <div key={l} className="pay-review-ln"><span>{l}</span></div>)}
+        {card && <div className="pay-review-ln"><span>{AT.pay.card}</span><b className="pay-review-card">{card}</b></div>}
       </div>
       <div className="pay-review-acts">
-        <button type="button" className="ghost-btn" onClick={() => onDone(false)}>Cancel</button>
-        <button type="button" className="save-btn" onClick={() => onDone(true)}>Pay</button>
+        <button type="button" className="ghost-btn" onClick={() => onDone(false)}>{AT.pay.cancel}</button>
+        <button type="button" className="save-btn" onClick={() => onDone(true)}>{r.button}</button>
       </div>
     </Dialog>
   );
 }
-// true: pay. Nothing to review (no saved card: Paystack's page shows the price; nothing due;
-// a refused change, which the pay call explains) also answers true.
-const reviewPay = async (plan, period, extras) => {
-  const stop = working('Checking the price…');
-  // Nothing is charged yet, so a failed or slow read just says try again, never pays without the review.
-  const [{ data: b, error }, q] = await Promise.all([billingRpc('api_billing_status'), quote(plan, period, extras)])
-    .catch(() => { throw new Error('price check'); }).finally(stop);
-  if (error) throw new Error('price check');
-  if (!b?.card || !q?.dueNow) return true;
-  const name = plan === 'family' ? 'Family' : 'Home';
-  // Extra plants are no longer sold (SOLAR-371); those already held stay on the bill.
-  const extra = plan === 'family' ? q.extraPlants || 0 : 0;
-  // A switch to yearly (SOLAR-298) is paid now and starts on the billing date.
-  const title = q.switch ? 'Switch to yearly' : `Upgrade to ${name}`;
-  // The bill's parts (SOLAR-369): Family alone, then the extra plants held. Not on a switch,
-  // whose bill is yearly while extraPrice is the plan's monthly one.
-  // extraPrice is today's offer; a next bill at list prices (the offer over by then) takes the list one.
-  const each = q.listCharge != null && q.nextCharge === q.listCharge ? q.listExtraPrice ?? q.extraPrice : q.extraPrice;
-  const parts = extra > 0 && !q.switch && each != null
-    ? [['Family, 5 plants', rand(q.nextCharge - extra * each)], [`Extra plants, ${extra} × ${rand(each)}`, rand(extra * each)]] : [];
-  const when = q.switch ? `Your year starts ${billDay(q.startsOn)}.` : q.credit != null ? `Your year starts today, with ${rand(q.credit)} off for the rest of this month.` : null;
-  const ok = await new Promise(resolve => {
-    let close;
-    const done = (yes) => { close(); resolve(yes); };
-    close = mountNode(<PayReview title={title} note={when} due={q.dueNow} parts={parts} card={`${b.card.name} •••• ${b.card.last4}`}
-      then={[`Your bill from ${billDay(q.nextDate)}`, `${rand(q.nextCharge)} ${perUnit(q.switch ? 'yearly' : q.period || period)}`]} onDone={done} />);
-  });
-  window.track('pay_review_done', { plan, choice: ok ? 'pay' : 'cancel' });
-  return ok;
-};
+window.PayReview = PayReview;
+// Shown over the page; true: go on.
+const askReview = (r, card) => new Promise(resolve => {
+  let close;
+  const done = (yes) => { close(); resolve(yes); };
+  close = mountNode(<PayReview r={r} card={card} onDone={done} />);
+});
 
-window.startUpgrade = async function startUpgrade(plan, period, newCard = false, extras = null, plants = null, paidEvent = null) {
+// A first plan, a restart or an upgrade. plants: the final choice (the checkout asked for it
+// first). The price comes from the server's quote; with a saved card it is shown before the
+// charge. paidEvent: sent once paid.
+window.startPlan = async function startPlan(acct, plan, interval, plants, { newCard = false, paidEvent = null } = {}) {
   if (paying) return;
   paying = true;
   try {
-    if (!newCard && !await reviewPay(plan, period, extras)) return;
-    const stop = working(newCard ? 'Opening the card page…' : 'Taking payment…');
+    const stop0 = working(AT.pay.checking);
+    let q;
+    try { q = await window.fetchPlanQuote(plan, interval); } finally { stop0(); }
+    const saved = !!acct.card && !newCard;
+    if (saved) {
+      const ok = await askReview(AT.quoteReview(acct, q), AT.cardLine(acct));
+      window.track('pay_review_done', { plan, choice: ok ? 'pay' : 'cancel' });
+      if (!ok) return;
+    }
+    const stop = working(saved ? AT.pay.taking : AT.pay.opening);
+    const before = window.fetchAccountState().catch(() => null);
     let r;
-    // Billing as it was before Pay, for payLanded; read while the charge starts.
-    const before = billingRpc('api_billing_status').then(x => x.data).catch(() => null);
     try {
-      r = await billingCall('pay', { plan, period, newCard, extras, plants }, PAY_WAIT)
+      r = await billingCall('pay', { plan, period: interval, plants, newCard: !saved }, PAY_WAIT)
         .catch(e => (e.message === 'timed out' ? payLanded(before) : Promise.reject(e)));
       if (r.status === 'failed') {
-        window.toast('Your saved card was declined. Enter another card.', { error: true });
-        r = await billingCall('pay', { plan, period, newCard: true, extras, plants });
+        window.toast(AT.pay.declined, { error: true });
+        r = await billingCall('pay', { plan, period: interval, plants, newCard: true });
       }
-    } finally { if (!r?.url && r?.status !== 'paid') stop(); }   // a new page is on its way: keep it up
+    } finally { if (!r?.url && r?.status !== 'applied') stop(); }   // a new page is on its way: keep it up
     if (r.url) {
-      window.track('checkout_opened', { plan, period });
+      window.track('checkout_opened', { plan, period: interval });
       try { paidEvent ? sessionStorage.setItem(PAID_EVENT, JSON.stringify(paidEvent)) : sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
       openCardPage(r);
-    } else if (r.status === 'paid') {
+    } else if (r.status === 'applied') {
+      window.track(q.kind === 'upgrade' ? 'upgrade_done' : 'plan_start_done', { plan, period: interval });
       if (paidEvent) window.track(paidEvent.name, paidEvent.props);
-      billingPaid(plan, paidEvent?.name === 'yearly_switch_done');
-    }
-    else if (r.status === 'refund') window.toast(REFUND_NOTE, { error: true });
-    else window.toast('Your payment is still being checked. Look again in a minute.', { info: true });
+      billingPaid();
+    } else if (r.status === 'refund') window.toast(AT.pay.refund, { error: true });
+    else window.toast(AT.pay.pending, { info: true });
   } catch (e) {
-    payFailed(e, /settle the failed payment/.test(e.message) ? 'Pay the payment that didn’t go through first.'
-      : /year is paid/.test(e.message) ? 'Your year is paid. Your plan stays as it is until it starts.'
-      : 'Couldn’t start the payment. Try again.');
+    payFailed(e);
   } finally {
     paying = false;
   }
@@ -394,26 +340,40 @@ window.startUpgrade = async function startUpgrade(plan, period, newCard = false,
 
 // Pay a failed renewal with another card.
 window.settlePayment = async function settlePayment() {
-  const stop = working('Opening the card page…');
+  const stop = working(AT.pay.opening);
   try {
     const r = await billingCall('pay', { settle: true });
-    openCardPage(r);
+    if (r.url) openCardPage(r); else { stop(); if (r.status === 'applied') billingPaid(); else window.toast(AT.pay.pending, { info: true }); }
   } catch (e) {
     stop();
-    payFailed(e, 'Couldn’t start the payment. Try again.');
+    payFailed(e);
   }
 };
 
-// Change the saved card (SOLAR-238): R1 on Paystack's card page, refunded once the
-// card is saved. Comes back through billingReturn like any card-page payment.
+// Change the saved card (SOLAR-238): the market's smallest charge on Paystack's card page,
+// refunded once the card is saved. Comes back through billingReturn like any card-page payment.
 window.changeCard = async function changeCard() {
-  const stop = working('Opening the card page…');
+  const stop = working(AT.pay.opening);
   try {
     const r = await billingCall('pay', { card: true });
     openCardPage(r);
   } catch (e) {
     stop();
-    payFailed(e, 'Couldn’t open the card page. Try again.');
+    payFailed(e, AT.pay.cardFailed);
+  }
+};
+
+// A change booked for the billing date (downgrade, interval, cancel) or its undo, through the
+// billing function. Answers the new state, or null after a toast.
+window.bookChange = async function bookChange(body, event) {
+  try {
+    await billingCall('change', body);
+    if (event) window.track(event.name, event.props);
+    return await window.reloadAccount();
+  } catch (e) {
+    payFailed(e, AT.refused(''));
+    window.reloadAccount().catch(() => {});
+    return null;
   }
 };
 
@@ -430,15 +390,15 @@ window.checkReturn = () => returnCheck || (returnCheck = (async () => {
   return ref ? billingCall('verify', { reference: ref }).catch(() => ({ status: 'error' })) : null;
 })());
 const paidNow = () => {
-  window.toast('Payment received. Your plan is updated.');
-  // a bigger plan may have places open for locked plants: PickAfterPay asks which run (SOLAR-537)
+  window.toast(AT.pay.received);
+  // a bigger plan may have places open for locked plants: PickAfterPay asks which are read
   window.pickAsked = true; window.dispatchEvent(new Event('ps-pick'));
 };
 
-// Once, when Account opens: back from Paystack's card page (?reference=), after a
+// Once, when Settings opens: back from Paystack's card page (?reference=), after a
 // payment (?billing=paid), or from the "Pay with another card" email (?pay=1). Also once
 // on any other page, for a card page closed without paying (OPEN_REF).
-window.billingReturn = async function billingReturn(billingStatus) {
+window.billingReturn = async function billingReturn(acct) {
   const q = new URLSearchParams(location.search);
   const done = q.get('billing'), pay = q.get('pay');
   const check = await window.checkReturn();
@@ -446,7 +406,7 @@ window.billingReturn = async function billingReturn(billingStatus) {
   if (!check && !done && !pay) return;
   if (q.get('reference') || done || pay) history.replaceState(null, '', planUrl());
   if (pay) {
-    if (billingStatus?.state === 'past_due') await window.settlePayment();
+    if (acct?.state === 'past_due') await window.settlePayment();
     return;
   }
   if (done === 'paid') return paidNow();
@@ -457,49 +417,39 @@ window.billingReturn = async function billingReturn(billingStatus) {
     const { status, kind } = check;
     if (status === 'error') throw new Error();
     // A card change changes no plan: the caller re-reads the card ('card').
-    if (status === 'paid' && kind === 'card') {
+    if (status === 'applied' && kind === 'card_check') {
       window.track('card_change_done');
-      window.toast('Card changed. The R1 check goes back to your card.');
+      window.toast(AT.pay.cardChanged);
       return 'card';
     }
-    // Checked before this page read anything, so the new plan and resumed plants are on it.
-    if (status === 'paid') {
+    if (status === 'applied') {
       if (paidEvent) window.track(paidEvent.name, paidEvent.props);
-      if (kind !== 'switch') window.track('upgrade_done', {});
+      window.track(kind === 'upgrade' ? 'upgrade_done' : 'plan_start_done', {});
       return paidNow();
     }
-    if (status === 'refund') return window.toast(REFUND_NOTE, { error: true });
-    window.toast(status === 'failed' ? 'The payment didn’t go through. Nothing was charged.' : 'Your payment is still being checked. Look again in a minute.', status === 'failed' ? { error: true } : { info: true });
+    if (status === 'refund') return window.toast(AT.pay.refund, { error: true });
+    window.toast(status === 'failed' ? AT.pay.failed : AT.pay.pending, status === 'failed' ? { error: true } : { info: true });
   } catch {
-    window.toast('Couldn’t check the payment. Look again in a minute.', { error: true });
+    window.toast(AT.pay.checkFailed, { error: true });
   }
 };
 
-// From the website's pricing: ?plan=home&period=yearly. Sign-in drops the query, so it
-// is kept for a day, then the card page opens once the user is signed in. Always the
-// card page, never a silent charge to a saved card: it shows the price to confirm.
+// From the website's pricing: ?plan=home&period=yearly. Sign-in drops the query, so it is kept
+// for a day; once signed in with no running plan, the plans pop-up opens on that plan, which
+// asks for the plants first (the checkout needs the final choice).
 (() => {
   const q = new URLSearchParams(location.search), plan = q.get('plan');
   if (plan !== 'home' && plan !== 'family') return;
-  localStorage.setItem('ps.wantPlan', JSON.stringify({ plan, period: q.get('period') === 'yearly' ? 'yearly' : 'monthly', at: Date.now() }));
+  try { localStorage.setItem('ps.wantPlan', JSON.stringify({ plan, period: q.get('period') === 'yearly' ? 'year' : 'month', at: Date.now() })); } catch (e) {}
   q.delete('plan'); q.delete('period');
   history.replaceState(null, '', location.pathname + (q.toString() ? `?${q}` : '') + location.hash);
 })();
-window.sb.auth.onAuthStateChange((event, session) => {
-  if (!session || (event !== 'INITIAL_SESSION' && event !== 'SIGNED_IN')) return;
+// The website's plan, once: { plan, period } or null.
+window.takeWantPlan = () => {
   let want = null;
-  try { want = JSON.parse(localStorage.getItem('ps.wantPlan')); } catch {}
-  if (!want) return;
-  localStorage.removeItem('ps.wantPlan');
-  if (Date.now() - want.at > 86400000) return;
-  // Outside the callback: an awaited Supabase call inside it waits on the auth lock.
-  setTimeout(async () => {
-    const { data: b } = await window.sb.rpc('api_billing_status');
-    if (b?.plan !== 'free' || b.comped || b.state === 'past_due') return;
-    window.track('website_plan_done', { plan: want.plan, period: want.period });
-    window.startUpgrade(want.plan, want.period, true);
-  });
-});
+  try { want = JSON.parse(localStorage.getItem('ps.wantPlan')); localStorage.removeItem('ps.wantPlan'); } catch (e) {}
+  return want && Date.now() - want.at < 86400000 ? want : null;
+};
 
 // "Add your plant" in the emails: ?add=plant (SOLAR-473), kept through sign-in with the
 // rest of an email's link (auth.jsx). Setup opens its Add plant form, App its Billing Plants
@@ -518,7 +468,7 @@ const NO_PLANT_TEXT = 'has no plant shared with it yet. Your login is saved.';
 // Two uses. The plants a cancel or smaller plan keeps (SOLAR-496): links, plan, keep (the
 // label and undo of "keep the plan as it is"). The plants a login adds (SOLAR-537): logins
 // (the plants to choose from), ask and full (its two lines), min 0, verb 'Add'.
-function KeepPicker({ links, plan, room, value, onChange, keep, logins, ask, full, min = 1, verb = 'Keep', tag }) {
+function KeepPicker({ room, value, onChange, logins, ask, full, min = 1, verb = 'Keep', tag, count }) {
   const [say, setSay] = React.useState(null); // 'last' | 'full'
   const one = room === 1 && min > 0;
   const tick = (id) => {
@@ -528,11 +478,10 @@ function KeepPicker({ links, plan, room, value, onChange, keep, logins, ask, ful
     if (value.length >= room) return setSay('full');
     onChange([...value, id]);
   };
-  const left = room - value.length;
   return (
     <div className="keep-pick">
-      <div className="confirm-text keep-ask">{ask || `${PLAN_NAME[plan]} keeps ${one ? '1 plant. Which one?' : `${room} plants. Which ones?`}`}</div>
-      {(logins || pickableLogins(links)).map(acc => (
+      {ask && <div className="confirm-text keep-ask">{ask}</div>}
+      {logins.map(acc => (
         <div key={acc.account_id} className="login-grp plant-logins">
           <div className="login-line"><div className="login-who"><span className="login-email">{acc.kind === 'share' ? 'Shared plants' : acc.sunsynk_username}</span></div></div>
           {acc.plants.map(p => {
@@ -547,123 +496,130 @@ function KeepPicker({ links, plan, room, value, onChange, keep, logins, ask, ful
           })}
         </div>
       ))}
-      {say === 'last' ? <div className="field-note keep-count warn">At least one plant needs to be selected.</div>
-        : say === 'full' ? <div className="field-note keep-count warn">{full || <>{PLAN_NAME[plan]} keeps {room} plants. Untick one first{keep ? <>, or <button type="button" className="mini-link" onClick={keep.run}>{keep.label}</button></> : ''}.</>}</div>
-        : !one && <div className="field-note keep-count">{value.length} of {room} ticked.{min > 0 && left > 0 && ` Tick ${left} more.`}</div>}
+      {say === 'last' ? <div className="field-note keep-count warn">{AT.checkoutPick(null, '', 0).none}</div>
+        : say === 'full' ? <div className="field-note keep-count warn">{full}</div>
+        : !one && count && <div className="field-note keep-count">{count(value.length)}</div>}
     </div>
   );
 }
 
-// The plants of the logins given that are locked and have a place open (api_link_status
-// can_start), under their logins. only: keep just these plant ids.
-const startableLogins = (accounts, only) => {
-  const seen = new Set();
-  return (accounts || []).filter(a => a.status !== 'disabled').map(a => ({ ...a,
-    plants: (a.plants || []).filter(p => p.can_start && (!only || only.has(Number(p.plant_id))) && !seen.has(p.plant_id) && seen.add(p.plant_id)) }))
-    .filter(a => a.plants.length);
-};
-// The owner ticks which locked plants run (SOLAR-537, 0197), up to the places the plan has
-// open, after a login links. Fewer ticks is fine: the rest
-// stay locked and an open place can be filled later. On a paid plan a tick is final while
-// the plan runs (SOLAR-583), so Add asks once more before it saves. Asks the server for the
-// places (api_plant_picks) before it shows. With one plant to choose and a place for it, it
-// shows nothing and starts that plant.
-// onDone(ids): the plants now running; [] when closed with none.
-function PlantPickDialog({ logins, from, onDone }) {
-  const { useState, useEffect } = React;
-  const all = logins.flatMap(a => a.plants);
-  const [places, setPlaces] = useState(null); // { plan, open, comped }
-  const [picked, setPicked] = useState([]);
-  const [busy, setBusy] = useState(false);
-  const [sure, setSure] = useState(false); // the confirm step of a final pick
-  useEffect(() => {
-    let alive = true;
-    window.sb.rpc('api_plant_picks').then(({ data, error }) => {
-      if (!alive) return;
-      if (error || !data) { window.toast('Couldn’t load your plan. Try again.', { error: true }); return onDone([]); }
-      // a place for each: one not held, and for a plant never ticked, one more tick the plan allows
-      const open = Math.min(all.length, data.room - data.picks.filter(k => k.held).length,
-        data.room - data.picks.length + all.filter(p => p.picked).length);
-      if (open < 1) return onDone([]);
-      // one plant and a place for it: nothing to choose, so it starts with no pop-up; on a
-      // paid plan the pick is final, so only the confirm step shows (SOLAR-583)
-      if (all.length === 1 && data.plan !== 'free' && !data.comped) {
-        setPlaces({ plan: data.plan, open, comped: false });
-        setPicked([all[0].plant_id]);
-        return setSure(true);
-      }
-      if (all.length === 1) {
-        return window.sb.rpc('api_plant_pick', { p_plants: [all[0].plant_id] }).then(({ error }) => {
-          if (!error) window.track('plant_pick_done', { from, count: 1, of: 1, plan: data.plan, asked: false });
-          if (alive) onDone(error ? [] : [all[0].plant_id]);
-        });
-      }
-      setPlaces({ plan: data.plan, open, comped: data.comped });
-      // they all fit: ticked already, one tap to add
-      if (all.length <= open) setPicked(all.map(p => p.plant_id));
-    });
-    return () => { alive = false; };
-  }, []);
-  if (!places) return null;
-  const { plan, open, comped } = places;
-  // no plan: the free week, where the ticks are fixed (0203) and reset when a plan starts
-  const free = plan === 'free', upTo = open === 1 ? '1 plant' : open + ' plants';
-  const add = async () => {
-    if (!picked.length) return onDone([]);
-    if (!free && !comped && !sure) return setSure(true);
-    setBusy(true);
-    const { error } = await window.sb.rpc('api_plant_pick', { p_plants: picked });
-    setBusy(false);
-    if (error) return window.toast(payFirst(error) || (/no room/.test(error.message) ? 'Your plan has no place open for that.' : 'Couldn’t add your plants. Try again.'), { error: true });
-    window.track('plant_pick_done', { from, count: picked.length, of: all.length, plan });
-    onDone(picked);
+// The account's plants under their logins, in KeepPicker's shape. A plant two logins reach
+// goes under the first; a claimed one under "Shared plants". keep(p): which plants to list.
+const acctLogins = (a, keep = () => true) => {
+  const seen = new Set(), groups = [];
+  const put = (id, kind, name, p) => {
+    let g = groups.find(x => x.account_id === id);
+    if (!g) groups.push(g = { account_id: id, kind, sunsynk_username: name, plants: [] });
+    g.plants.push({ plant_id: p.plant, plant_name: AT.plantName(p) });
   };
-  const more = open === 1 ? '1 more plant' : open + ' more plants';
-  const adds = picked.length > 1 ? 'Add plants' : 'Add plant';
-  if (sure) return (
-    <Dialog keep label={adds} busy={busy} onClose={() => onDone([])}>
-      <div className="confirm-title">{adds}?</div>
-      <div className="confirm-text">{finalPickText(all.filter(p => picked.includes(p.plant_id)).map(window.plantLabel))}</div>
-      <div className="conn-form-actions">
-        <button type="button" className="ghost-btn" onClick={() => setSure(false)} disabled={busy}>Back</button>
-        <window.BusyButton className="save-btn" onClick={add} busy={busy}>{adds}</window.BusyButton>
-      </div>
-    </Dialog>
-  );
+  for (const p of a.plants) {
+    if (!keep(p) || seen.has(p.plant)) continue;
+    seen.add(p.plant);
+    const l = a.logins.find(x => p.logins.includes(x.id));
+    if (l) put(l.id, 'login', l.username, p); else put('share', 'share', null, p);
+  }
+  return groups;
+};
+window.acctLogins = acctLogins;
+
+// Every change of chosen plants is confirmed here when a plant goes out: it names the plant
+// and says whether its history is deleted now or kept by another account, with the one line
+// on history loading (design, "History fetch speed").
+function SwitchConfirm({ acct, going, coming, busy, onConfirm, onCancel }) {
+  const t = AT.switchConfirm(acct, going, coming);
   return (
-    <Dialog keep label="Choose plants" busy={busy} onClose={() => onDone([])}>
-      <div className="confirm-title">Choose plants</div>
-      {/* pick-steady: the line under the rows keeps two lines' height, so the pop-up does not jump (SOLAR-572) */}
-      <div className="pick-steady">
-        <KeepPicker logins={logins} room={open} value={picked} onChange={setPicked} min={0} verb="Add"
-          tag={p => free && p.week_used ? 'Free week used' : null}
-          ask={free ? `Choose up to ${upTo}.` : `${PLAN_NAME[plan]} has room for ${more}.${all.length > open ? (open === 1 ? ' Which one?' : ' Which ones?') : ''}`}
-          full={free ? `Up to ${upTo}. Untick one first.` : `${PLAN_NAME[plan]} has room for ${more}. Untick one first.`} />
-      </div>
-      {free && <div className="confirm-text keep-note">Plants can’t be changed in the free week.</div>}
+    <Dialog keep label={t.title} busy={busy} onClose={onCancel}>
+      <div className="confirm-title">{t.title}</div>
+      {t.lines.map(l => <div key={l} className="confirm-text">{l}</div>)}
       <div className="conn-form-actions">
-        <button type="button" className="ghost-btn" onClick={() => onDone([])} disabled={busy}>Not now</button>
-        <window.BusyButton className="save-btn" onClick={add} busy={busy} disabled={!picked.length}>{adds}</window.BusyButton>
+        <button type="button" className="ghost-btn" onClick={onCancel} disabled={busy}>{AT.pay.cancel}</button>
+        <window.BusyButton className={t.danger ? 'danger-btn' : 'save-btn'} onClick={onConfirm} busy={busy}>{t.button}</window.BusyButton>
       </div>
     </Dialog>
   );
 }
-window.PlantPickDialog = PlantPickDialog;
-// After a payment (billingReturn): the pick pop-up, when a locked plant has a place open.
-// With no place open there is nothing to choose, so nothing shows. onDone(r): the plants now
-// running, in link-sunsynk's shape. In Settings, where a payment comes back to.
-function PickAfterPay({ links, onDone }) {
+
+// Choosing plants: one pop-up for every pick (SOLAR-641).
+//   mode 'choose'    the plants read now (Plants page, after a link, after a payment), up to
+//                    the plan's places or the free week's. Saved through api_choose_plants; a
+//                    plant going out is confirmed first (SwitchConfirm). prefill: ids to tick.
+//   mode 'checkout'  the final choice for plan (a first plan, a restart, an upgrade), before
+//                    paying: onDone(ids).
+//   mode 'keep'      the plants a smaller plan keeps: onDone(ids).
+// onDone(ids | null): null when closed with nothing done.
+function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', prefill = [], onDone }) {
+  const { useState } = React;
+  const trial = acct.state === 'trialing' || acct.state === 'none';
+  const chosen = acct.plants.filter(p => p.chosen).map(p => p.plant);
+  const t = mode === 'checkout' ? AT.checkoutPick(acct, plan.name, plan.places)
+    : mode === 'keep' ? AT.keepPick(acct, plan.name, plan.places)
+    : acct.state === 'none' ? { ...AT.choosePlants(acct), ...AT.weekPick(acct) } : AT.choosePlants(acct);
+  const room = mode === 'choose' ? (trial ? acct.trial_places : acct.places) : plan.places;
+  // listed: every plant the account reaches (a keep pick: only the chosen ones)
+  const logins = acctLogins(acct, p => (mode === 'keep' ? p.chosen : !p.purged || p.chosen));
+  const all = logins.flatMap(g => g.plants.map(x => x.plant_id));
+  const start = mode === 'choose' ? [...new Set([...chosen, ...prefill])].slice(0, room)
+    : chosen.length ? chosen.slice(0, room) : all.slice(0, room);
+  const [picked, setPicked] = useState(start);
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const going = chosen.filter(id => !picked.includes(id)), coming = picked.filter(id => !chosen.includes(id));
+  const tag = (p) => {
+    const s = acct.plants.find(x => x.plant === p.plant_id);
+    return s && trial && mode === 'choose' && s.trial_used_elsewhere ? t.usedElsewhere : null;
+  };
+  const save = async () => {
+    setBusy(true);
+    try {
+      const a = await window.saveChosenPlants(picked);
+      window.track('plant_switch_done', { from, going: going.length, coming: coming.length, state: acct.state });
+      window.toast(AT.chosenToast(acct, coming, going));
+      onDone(picked);
+      return a;
+    } catch (e) {
+      window.toast(AT.refused(e?.message || ''), { error: true });
+      setBusy(false); setConfirm(false);
+    }
+  };
+  const next = () => {
+    if (mode !== 'choose') return picked.length ? onDone(picked) : null;
+    if (!going.length && !coming.length) return onDone(null);
+    if (going.length) return setConfirm(true);
+    save();
+  };
+  if (confirm) return <SwitchConfirm acct={acct} going={going} coming={coming} busy={busy} onConfirm={save} onCancel={() => setConfirm(false)} />;
+  return (
+    <Dialog keep label={t.title} busy={busy} onClose={() => onDone(null)}>
+      <div className="confirm-title">{t.title}</div>
+      {/* pick-steady: the line under the rows keeps two lines' height, so the pop-up does not jump (SOLAR-572) */}
+      <div className="pick-steady">
+        <KeepPicker logins={logins} room={room} value={picked} onChange={setPicked} min={mode === 'choose' ? 0 : 1}
+          verb={mode === 'keep' ? 'Keep' : 'Read'} tag={tag} ask={t.note} full={t.tooMany} />
+      </div>
+      <div className="conn-form-actions">
+        <button type="button" className="ghost-btn" onClick={() => onDone(null)} disabled={busy}>{AT.pay.cancel}</button>
+        <window.BusyButton className="save-btn" onClick={next} busy={busy} disabled={mode !== 'choose' && !picked.length}>{t.button}</window.BusyButton>
+      </div>
+    </Dialog>
+  );
+}
+window.ChooseDialog = ChooseDialog;
+
+// After a payment (billingReturn): the pick pop-up when the plan has places open and a plant
+// waits. Nothing to choose: nothing shows. onDone(ids): the plants read now.
+function PickAfterPay({ onDone }) {
+  const acct = window.useAccount();
   const [ask, setAsk] = React.useState(() => !!window.pickAsked);
   React.useEffect(() => {
-    const on = () => setAsk(true);
+    const on = () => { setAsk(true); window.reloadAccount().catch(() => {}); };
     window.addEventListener('ps-pick', on);
     return () => window.removeEventListener('ps-pick', on);
   }, []);
-  const logins = ask && !links.loading ? startableLogins(links.accounts) : [];
   const close = () => { window.pickAsked = false; setAsk(false); };
-  React.useEffect(() => { if (ask && !links.loading && !logins.length) close(); });
-  if (!logins.length) return null;
-  return <PlantPickDialog logins={logins} from="upgrade" onDone={(ids) => { close(); if (ids.length) onDone({ plants: ids.map(id => ({ id })), paused: [] }); }} />;
+  const waiting = acct && acct.may_choose && acct.open > 0 && acct.plants.some(p => !p.chosen && !p.purged);
+  React.useEffect(() => { if (ask && acct && !waiting) close(); });
+  if (!ask || !waiting) return null;
+  return <ChooseDialog acct={acct} from="upgrade" onDone={(ids) => { close(); if (ids) onDone({ plants: ids.map(id => ({ id })), paused: [] }); }} />;
 }
 window.PickAfterPay = PickAfterPay;
 
@@ -705,15 +661,16 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
   // The plants a link brought that are locked with a place open: the owner ticks which run
   // (SOLAR-537). { logins, done }: the pop-up is up; done(ids) carries on with the plants ticked.
   const [pick, setPick] = useState(null);
+  // The first choice after a login or a shared plant is linked: the new plants ticked, up to the
+  // places open. Not after Reconnect or a new password: no login was added.
   const linked = async (r) => {
-    // not after Reconnect or a new password: no login was added
-    const locked = new Set((relink ? [] : r.paused || []).map(Number));
-    const { data } = locked.size ? await window.sb.rpc('api_link_status') : {};
-    const logins = startableLogins(data, locked);
-    if (!logins.length) return onLinked(r);
-    const on = await new Promise(done => setPick({ logins, done }));
+    const fresh = relink ? [] : (r.plants || []).map(p => Number(p.id ?? p.plantId)).filter(Boolean);
+    const acct = await window.reloadAccount().catch(() => null);
+    const waiting = acct && acct.may_choose && acct.plants.filter(p => fresh.includes(p.plant) && !p.chosen).map(p => p.plant);
+    if (!waiting || !waiting.length || !(acct.state === 'none' || acct.state === 'trialing' ? acct.trial_places > acct.chosen : acct.open > 0)) return onLinked(r);
+    const on = await new Promise(done => setPick({ acct, prefill: waiting, done }));
     setPick(null);
-    return onLinked({ ...r, paused: (r.paused || []).filter(id => !on.includes(Number(id))) });
+    return onLinked({ ...r, paused: fresh.filter(id => !(on || []).includes(id)) });
   };
 
   const check = async () => {
@@ -766,7 +723,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
 
   return (
     <form className={compact ? 'conn-form link-form' : 'link-form link-card'} onSubmit={submit} noValidate aria-busy={busy}>
-      {pick && <PlantPickDialog logins={pick.logins} from="link" onDone={pick.done} />}
+      {pick && <ChooseDialog acct={pick.acct} prefill={pick.prefill} from="link" onDone={pick.done} />}
       {!compact && <h2 className="sset-title">{noPlants ? 'Connected, but no plant yet' : relink ? 'Reconnect SunSynk' : 'Add your plant'}</h2>}
       {!relink && !noPlants && (
         <window.Segmented block label="How to add it" className="link-mode" value={mode}
