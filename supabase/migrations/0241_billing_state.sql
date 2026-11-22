@@ -197,6 +197,13 @@ begin
     'open_seats', seat_count);
 end $$;
 
+-- Money facts for account_state (saved card, open bill, amount owed, may_delete).
+-- Phase 1 has no payment tables: may_delete from the state alone. 0245 replaces it.
+create function billing.money_state(p_account uuid, p_at timestamptz, p_state text)
+returns jsonb language sql stable set search_path = billing, pg_temp as $$
+  select jsonb_build_object('may_delete', p_state in ('none', 'trialing', 'ended'))
+$$;
+
 -- ---------------------------------------------------------------------------
 -- account_state: everything a screen or email needs, nothing else works it out.
 -- ---------------------------------------------------------------------------
@@ -271,15 +278,15 @@ begin
                                    else true end,
     'may_choose', st.state in ('trialing', 'active') or (st.state = 'none' and st.linked > 0),
     'may_switch', st.state in ('trialing', 'active'),
-    'may_delete', st.state in ('none', 'trialing', 'ended'),
     'fit_all_plan', fit,
-    'plants', plants);
+    'plants', plants) || billing.money_state(p_account, p_at, st.state);
 end $$;
 
 revoke all on function billing.has_route(uuid, bigint, boolean) from public, anon, authenticated;
 revoke all on function billing.linked_plants(uuid) from public, anon, authenticated;
 revoke all on function billing.account_status(uuid, timestamptz) from public, anon, authenticated;
 revoke all on function billing.plant_state(bigint, timestamptz) from public, anon, authenticated;
+revoke all on function billing.money_state(uuid, timestamptz, text) from public, anon, authenticated;
 revoke all on function billing.account_state(uuid, timestamptz) from public, anon, authenticated;
 grant execute on function billing.plant_state(bigint, timestamptz) to service_role;
 grant execute on function billing.account_state(uuid, timestamptz) to service_role;

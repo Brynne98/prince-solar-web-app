@@ -24,6 +24,9 @@
 --                  A plan that ended (plan 'free', ended_at set) becomes an ended
 --                  row from its last paid charge.
 --   grants         comped accounts: places = billing_room.
+--   payment_methods the saved card (private.billing.card, card_email), so renewals
+--                  go on charging it. The table comes in 0244; this body only runs
+--                  after every migration is in.
 -- ============================================================================
 
 create function billing.copy_from_old()
@@ -39,6 +42,7 @@ begin
   if paid then
     raise exception 'billing copy refused: the new tables already hold payments' using errcode = '55000';
   end if;
+  delete from billing.payment_methods;
   delete from billing.seats;
   delete from billing.plant_claims;
   delete from billing.login_plants;
@@ -151,8 +155,18 @@ begin
     from private.billing b join billing.accounts a on a.user_id = b.user_id
    where b.comped and not exists (select 1 from billing.grants g where g.account = a.id);
 
+  insert into billing.payment_methods (account, provider, customer_code, auth_ref, auth_email, reusable, signature,
+                                       card_type, last4, exp_month, exp_year, active, created_at)
+  select a.id, 'paystack', b.card->>'customer_code', b.card->>'authorization_code', b.card_email, true, b.card->>'signature',
+         b.card->>'card_type', b.card->>'last4', nullif(b.card->>'exp_month', '')::smallint,
+         nullif(b.card->>'exp_year', '')::smallint, true, b.created_at
+    from private.billing b join billing.accounts a on a.user_id = b.user_id
+   where b.card->>'authorization_code' is not null and coalesce((b.card->>'reusable')::boolean, true)
+  on conflict (provider, auth_ref) do nothing;
+
   select jsonb_build_object(
     'accounts', (select count(*) from billing.accounts),
+    'cards', (select count(*) from billing.payment_methods),
     'logins', (select count(*) from billing.logins),
     'plants', (select count(*) from billing.plants),
     'login_plants', (select count(*) from billing.login_plants),

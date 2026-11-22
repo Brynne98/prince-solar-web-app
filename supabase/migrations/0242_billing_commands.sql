@@ -9,7 +9,8 @@
 -- set_chosen_plants(account, plants, at): the full list of chosen plants.
 --   none -> trialing in one step (trial_started_at, trial_ends_at).
 --   trialing/none: at most market.trial_places, and no plant whose week was used
---   by another account. active: at most places. past_due and ended: refused.
+--   by another account. active: at most places, and with a downgrade booked the
+--   plants not marked to drop must fit the next plan. past_due and ended: refused.
 --   Plants must be on one of the account's logins or claimed by it.
 --   Every newly seated plant, on any state, is marked as having used its week
 --   (trial_used_at; trial_used_by when empty), so a plant once paid for cannot
@@ -76,6 +77,7 @@ declare
   want bigint[];
   had bigint[];
   bad bigint;
+  next_places int;
 begin
   a := billing.lock_account(p_account);
   select * into m from billing.markets where code = a.market;
@@ -110,6 +112,22 @@ begin
     end if;
   elsif cardinality(want) > st.places then
     raise exception 'your plan has % places', st.places using errcode = '22023';
+  else
+    -- a booked downgrade: the plants not marked to drop must fit the next plan
+    select coalesce(np.places, cp.places) + coalesce(sub.next_extra_places, sub.extra_places)
+           + (st.places - cp.places - sub.extra_places)
+      into next_places
+      from billing.subscriptions sub
+      join billing.plans cp on cp.code = sub.plan
+      left join billing.prices pr on pr.id = sub.next_price
+      left join billing.plans np on np.code = pr.plan
+     where sub.id = st.sub and (sub.next_price is not null or sub.next_extra_places is not null);
+    if next_places is not null and
+       (select count(*) from unnest(want) x
+         where not exists (select 1 from billing.seats se where se.account = p_account and se.plant = x
+                              and se.closed_at is null and se.drop_at_period_end)) > next_places then
+      raise exception 'your next plan has % places: pick the plants to drop first', next_places using errcode = '22023';
+    end if;
   end if;
 
   perform billing.write_seats(p_account, want, p_at);

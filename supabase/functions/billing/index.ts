@@ -1,24 +1,26 @@
-// `billing` — takes money through Paystack (SOLAR-208). The rules are in 0116; this
-// only talks to Paystack and reports back.
+// `billing` — takes money through Paystack (SOLAR-208, rebuilt for SOLAR-641). Every rule
+// lives in the database (migrations 0240-0245, schema `billing`, reached through
+// public.billing_v2); this only talks to Paystack and reports each answer back.
 //
-//   POST /billing/pay      the signed-in user, { plan, period?, extras?, newCard? },
-//                          { settle: true } to pay a failed renewal, or { card: true }
-//                          to change the saved card (R1 on the card page, refunded once
-//                          paid; SOLAR-238). Charges the saved
-//                          card when there is one; otherwise answers { url } for
-//                          Paystack's card page, which comes back to the app with
-//                          ?reference=.
-//   POST /billing/verify   the signed-in user, { reference }: asks Paystack whether
-//                          that card-page payment went through. Answers { status, kind }.
-//   POST /billing/webhook  Paystack's own notice of a payment, refund or dispute (HMAC-signed).
-//                          Answers non-2xx when it could not record one, so Paystack sends it again.
-//   POST /billing/run      pg_cron, every 5 minutes for 2 hours a day (0128): first refunds
-//                          Paystack refused before are asked for again (0130, REFUND_BUDGET_MS),
-//                          then renewals and retries, RUN_PARALLEL at a time, new ones started
-//                          for RUN_BUDGET_MS; the rest go back for the next call.
+//   POST /billing/pay      the signed-in user, { plan, period?, extras?, plants, newCard? }:
+//                          a first plan or a restart (start_checkout) when no plan runs, else
+//                          an upgrade. { settle: true } pays the open renewal bill now;
+//                          { card: true } checks a new card (Paystack's minimum, refunded).
+//                          Charges the saved card when there is one; otherwise answers { url }
+//                          for Paystack's card page, which comes back with ?reference=.
+//   POST /billing/change   the signed-in user, { action: downgrade | interval | cancel |
+//                          undo_cancel, plan?, extras?, drop?, period? }: booked for the next
+//                          billing date. Answers account_state.
+//   POST /billing/verify   the signed-in user, { reference }: asks Paystack about that try.
+//   POST /billing/webhook  Paystack's notice of a payment, refund or dispute (HMAC-signed).
+//                          Stored first (deduped on type, entity and status); answers non-2xx
+//                          when it could not be processed, so Paystack sends it again.
+//   POST /billing/run      pg_cron: the daily job (billing.run). Tries whose lease ran out
+//                          are verified first, then the due charges, RUN_PARALLEL at a time for
+//                          RUN_BUDGET_MS, then refunds owed or failed before.
 //
 // verify_jwt is off: Paystack has no Supabase session. Each route checks its caller.
-// Secret: PAYSTACK_SECRET_KEY (test key until the company account is live).
+// Secret: PAYSTACK_SECRET_KEY.
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { noteError, serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
@@ -34,24 +36,21 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const TEST_USERS = Deno.env.get("PAYSTACK_TEST_USERS") ?? "";
 const TESTER_EMAILS = Deno.env.get("TESTER_EMAIL_PATTERN") ?? "";
 
-type Card = Record<string, unknown>;
-type Tx = {
-  status: string; reference: string; amount: number; currency: string; gateway_response?: string; authorization?: Card;
-  customer?: { email?: string }; paid_at?: string;
-};
+type Tx = Record<string, unknown> & { status?: string; reference?: string };
+type Charge = { reference: string; amount_minor: number; currency: string; auth_ref?: string; auth_email?: string };
+type Applied = { action: string; kind?: string; refund?: string | null; reason?: string; declined?: boolean;
+  hard?: boolean; pay_url?: string; user?: string | null; days_since_plan?: number | null };
+
 /** Paystack's HTTP status; 0 when no answer came (timeout, network). */
 class PaystackError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
-// About 0.65 s a charge (test mode, 2026-10-30): 10 at a time for 40 s is ~600 a call.
-// 60 s (~800 charges) hit the edge runtime's CPU limit locally (2026-10-31, scale.mjs), and
-// a call cut off leaves its charges claimed for 10 minutes. A charge started at the
-// budget's end can take 30 s plus 30 s to verify: 100 s, and the refunds before them 10 s plus one
-// slow refund (30 s): 140 s at most, inside the 150 s a call may run.
+// About 0.65 s a charge (test mode, 2026-10-30): 10 at a time for 40 s is ~600 a call, inside
+// the 150 s a call may run with the verifies and refunds around it. A charge not started
+// keeps its try for 10 minutes; the next call verifies it (not found: void) and charges again.
 const RUN_PARALLEL = 10;
 const RUN_BUDGET_MS = 40_000;
-// Refunds asked again first, one at a time (a few a day): 10 s, then the charges' 40 s.
 const REFUND_BUDGET_MS = 10_000;
 
 async function paystack<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
@@ -67,147 +66,89 @@ async function paystack<T>(method: "GET" | "POST", path: string, body?: unknown)
   return out.data as T;
 }
 
-async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
-  const { data, error } = await db.rpc(fn, args);
-  if (error) throw new Error(`${fn}: ${error.message}`);
+/** One billing command (public.billing_v2, service role only). */
+async function bill<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
+  const { data, error } = await db.rpc("billing_v2", { p_cmd: cmd, p_args: args });
+  if (error) throw Object.assign(new Error(`${cmd}: ${error.message}`), { code: error.code });
   return data as T;
 }
 
-/** A card change's R1, or a payment that applied nothing, goes back at once (0120, 0128).
- *  A refused refund is logged on the charge; the daily run asks again (0130). */
-async function refund(reference: string) {
-  const err = await paystack("POST", "/refund", { transaction: reference }).then(() => null, (e) => e.message as string);
-  if (err) {
-    console.error(`billing refund ${reference}: ${err}`);
-    noteError("refund_refused", new Error(`refund ${reference}: ${err}`), { ref: reference });
+/** Send a refund the database says is owed, and record Paystack's answer. A second refund
+ *  of one payment is refused ("already exist"): the database counts that as sent. */
+async function sendRefund(refund: string, reference: string) {
+  let err: string | null = null;
+  let id: string | null = null;
+  try {
+    const r = await paystack<{ id?: number | string }>("POST", "/refund", { transaction: reference });
+    id = r?.id != null ? String(r.id) : null;
+  } catch (e) {
+    err = e instanceof Error ? e.message : String(e);
+    if (!/already/i.test(err)) noteError("refund_refused", e, { ref: reference });
   }
-  await rpc("billing_charge_refunded", { p_reference: reference, p_error: err });
+  await bill("record_refund", { refund, error: err, provider_id: id });
 }
 
-/** A payment with no charge to apply it to (another amount or currency, an account
- *  deleted) goes back at once. Paystack resends its events, and a second refund of one
- *  payment is refused (400 "A refund already exist"): logged, so the webhook answers 200.
- *  Any other error is thrown: the webhook answers 500 and Paystack sends the event again (0132). */
-const refundNow = (reference: string) => paystack("POST", "/refund", { transaction: reference })
-  .then(() => {}, (e) => {
-    if (!(e instanceof PaystackError) || e.status !== 400) throw e;
-    console.error(`billing refund ${reference}: ${e.message}`);
-    noteError("refund_refused", e, { ref: reference });
-  });
-
-/** Mark a charge failed (0116) and count it, by user id only (SOLAR-243). A charge
- *  already settled ("again") was counted the first time; a card page left without trying a
- *  card is not a decline (declined false, SOLAR-338). A failed count never stops the report. */
-async function chargeFailed(reference: string, error: string, renewal: boolean, declined = true) {
-  const r = await rpc<{ status?: string; kind?: string; applied?: boolean; again?: boolean }>("billing_charge_failed",
-    { p_reference: reference, p_error: error });
-  if (declined && r?.status === "failed" && !r.again) {
-    const user = await rpc<string | null>("billing_charge_user", { p_reference: reference }).catch(() => null);
-    if (user) await track("payment_failed", user, reference, new Date().toISOString(), { renewal });
+/** Hand one Paystack answer to apply_payment; send any refund it owes; count it (user id only). */
+async function report(reference: string, tx: Tx): Promise<Applied> {
+  const r = await bill<Applied>("apply_payment", { reference, tx });
+  if (r.refund && (r.action === "refund" || r.kind === "card_check")) {
+    if (r.action === "refund") {
+      console.error(`billing ${reference}: not applied (${r.reason}): refunding`);
+      noteError(`payment_${r.reason ?? "not_applied"}`, new Error(`${reference}: ${r.reason}: refunding`), { ref: reference });
+    }
+    await sendRefund(r.refund, reference);
+  }
+  const at = new Date().toISOString();
+  if (r.user && r.action === "failed" && r.declined) {
+    await track("payment_failed", r.user, reference, at, { renewal: r.kind === "renewal" }).catch(() => {});
+  }
+  if (r.user && r.action === "applied" && r.kind === "purchase") {
+    await track("plan_started_done", r.user, reference, at,
+      { returning: r.days_since_plan != null, days_since_plan: r.days_since_plan ?? null }).catch(() => {});
   }
   return r;
 }
 
-/** Report a Paystack transaction back to 0116. Paid, failed, still open (null), or "refund":
- *  paid after the account changed, so nothing applied and the money goes back (0127, 0128).
- *  `out.kind`: the paid charge's kind, for /verify. */
-async function settle(tx: Tx, out: { kind?: string } = {}, renewal = false): Promise<"paid" | "failed" | "refund" | null> {
-  if (tx.status === "success" && tx.currency !== "ZAR") {
-    console.error(`billing ${tx.reference}: paid in ${tx.currency}, not ZAR: not applied, refunding`);
-    noteError("payment_not_zar", new Error(`${tx.reference}: paid in ${tx.currency}, not ZAR: refunding`), { ref: tx.reference });
-    await refundNow(tx.reference);
-    return "refund";
-  }
-  if (tx.status === "success" && tx.currency === "ZAR") {
-    // SOLAR-584: read before the payment applies, which clears the last plan's end date.
-    const { data: facts } = await db.rpc("billing_start_facts", { p_reference: tx.reference })
-      .maybeSingle<{ user_id: string; days_since_plan: number | null }>();
-    // The email Paystack saved the card under: a renewal charges the card with it. The
-    // price is judged on the day Paystack took the money (0130).
-    const { data: r, error } = await db.rpc("billing_charge_paid", {
-      p_reference: tx.reference, p_card: tx.authorization ?? null, p_cents: tx.amount,
-      p_email: tx.customer?.email ?? null, p_paid_at: tx.paid_at ?? null,
-    }) as { data: { kind?: string; refund?: boolean; applied?: boolean; again?: boolean } | null; error: { message: string } | null };
-    if (error && /^paid \d+ cents, charge is/.test(error.message)) {
-      // Another amount than the charge: never ours to keep, so it goes back.
-      console.error(`billing ${tx.reference}: ${error.message}: refunding`);
-      noteError("payment_wrong_amount", new Error(`${tx.reference}: ${error.message}: refunding`), { ref: tx.reference });
-      await refundNow(tx.reference);
-      return "refund";
+/** Ask Paystack about one try. Not found: it never reached Paystack. No answer: left for the next call. */
+async function verify(reference: string): Promise<Applied | null> {
+  try {
+    return await report(reference, await paystack<Tx>("GET", `/transaction/verify/${encodeURIComponent(reference)}`));
+  } catch (e) {
+    if (e instanceof PaystackError && e.status === 400) return await report(reference, { status: "not_found" });
+    if (e instanceof PaystackError) {
+      console.error(`billing verify ${reference}: ${e.message}`);
+      return null;
     }
-    if (error) throw new Error(`billing_charge_paid: ${error.message}`);
-    out.kind = r?.kind;
-    if (r?.applied === false) {
-      // refund false: Paystack has the refund already (a replay, or refunded before it was reported).
-      if (r.refund !== false) {
-        console.error(`billing ${tx.reference}: paid after the account changed, not applied: refunding`);
-        noteError("payment_not_applied", new Error(`${tx.reference}: paid after the account changed: refunding`), { ref: tx.reference });
-        await refund(tx.reference);
-      }
-      return "refund";
-    }
-    if (r?.kind === "card" && r.refund) await refund(tx.reference);
-    // A first payment from Free after the "come back" email (SOLAR-328, 0144). Only a
-    // count: a failure here never stops the payment being reported.
-    if (r?.kind === "start") {
-      const { data: w } = await db.rpc("winback_return", { p_reference: tx.reference }).maybeSingle<{ user_id: string; email_id: number; days: number; at: string }>();
-      if (w) await track("winback_resubscribed_done", w.user_id, String(w.email_id), w.at, { days: w.days });
-      // SOLAR-584: a plan started; returning when the account paid before and that plan
-      // ended. Sent on the first settle only: /verify and the webhook both settle, and the
-      // second one reads the facts after ended_at was cleared.
-      if (facts && !r.again) {
-        await track("plan_started_done", facts.user_id, tx.reference, tx.paid_at ?? new Date().toISOString(),
-          { returning: facts.days_since_plan !== null, days_since_plan: facts.days_since_plan });
-      }
-    }
-    return "paid";
+    throw e;
   }
-  // Reversed: refunded. A card change's R1 goes back on purpose, often before the
-  // user's /verify (the webhook came first); 0120 answers that it was paid.
-  if (["failed", "abandoned", "reversed", "reversal-pending"].includes(tx.status)) {
-    const r = await chargeFailed(tx.reference, tx.gateway_response || tx.status, renewal, tx.status === "failed");
-    if (r?.status === "paid") { out.kind = r.kind; return r.applied === false ? "refund" : "paid"; }
-    return "failed";
-  }
-  return null; // pending, ongoing, send_otp...: the webhook settles it
 }
 
-/** Charge a saved card. A refused card is a failed charge, not an error. Safe to call
- *  again with the same reference: Paystack refuses a reused one (400 "Duplicate
- *  Transaction Reference"), and the first try's outcome is read back instead.
- *  `run`: a renewal, handed out again by the next run, so a charge with no clear answer
- *  stays open. Otherwise the user is on the page and is sent to the card page. */
-async function chargeCard(c: { reference: string; amount: number; card: string; email: string }, run = false) {
-  let err!: PaystackError;
+/** Charge a saved card for a try already written. A timeout can still have taken the money:
+ *  Paystack is asked before anything is called failed. */
+async function charge(c: Charge): Promise<Applied> {
+  let err: PaystackError;
   try {
     const tx = await paystack<Tx>("POST", "/transaction/charge_authorization", {
-      authorization_code: c.card, email: c.email, amount: c.amount * 100, currency: "ZAR", reference: c.reference,
+      authorization_code: c.auth_ref, email: c.auth_email, amount: c.amount_minor, currency: c.currency, reference: c.reference,
     });
-    return await settle(tx, {}, run);
+    return await report(c.reference, tx);
   } catch (e) {
     if (!(e instanceof PaystackError)) throw e;
     err = e;
   }
-  // A timeout can still have taken the money, and a reused reference was charged
-  // before: ask Paystack before calling it failed.
-  let tx: Tx | null = null;
   try {
-    tx = await paystack<Tx>("GET", `/transaction/verify/${encodeURIComponent(c.reference)}`);
+    return await report(c.reference, await paystack<Tx>("GET", `/transaction/verify/${encodeURIComponent(c.reference)}`));
   } catch (e) {
-    // No such transaction (400 "Transaction reference not found."): failed only when
-    // Paystack refused the charge with a 400 (a dead card, "Email does not match
-    // Authorization code"). No answer, 401 (our key), 429 or 5xx: nothing charged yet,
-    // left open; the next run hands a renewal out again.
-    const none = e instanceof PaystackError && e.status === 400;
-    if (run && (!none || err.status !== 400)) {
-      console.error(`billing charge ${c.reference}: ${err.message}; left open`);
-      noteError("charge_left_open", err, { ref: c.reference });
-      return null;
+    if (!(e instanceof PaystackError)) throw e;
+    // Not found after Paystack refused the charge with a 400 (a dead card, "Email does not
+    // match Authorization code"): a failed try. Anything else: unknown, verified before any new try.
+    if (e.status === 400 && err.status === 400) {
+      return await report(c.reference, { status: "failed", reference: c.reference, gateway_response: err.message });
     }
+    console.error(`billing charge ${c.reference}: ${err.message}; unknown`);
+    noteError("charge_unknown", err, { ref: c.reference });
+    return await report(c.reference, { status: "unknown", message: err.message });
   }
-  if (tx) return await settle(tx, {}, run); // null: still open, the webhook settles it
-  await chargeFailed(c.reference, err.message, run);
-  return "failed" as const;
 }
 
 async function signedInUser(req: Request) {
@@ -217,6 +158,9 @@ async function signedInUser(req: Request) {
   const { data, error } = await db.auth.getUser(jwt);
   return error || !data?.user ? null : data.user;
 }
+
+const interval = (v: unknown) => v === "yearly" || v === "year" ? "year" : v === "monthly" || v === "month" ? "month" : null;
+const ids = (v: unknown) => Array.isArray(v) ? v.filter(Number.isSafeInteger) : null;
 
 serve("billing", async (req) => {
   const route = new URL(req.url).pathname.split("/").pop();
@@ -234,57 +178,50 @@ serve("billing", async (req) => {
     if (got.length !== want.length || !timingSafeEqual(got, want)) return json({ error: "bad signature" }, 401);
     const ev = JSON.parse(raw);
     const event = String(ev.event ?? "");
+    const d = ev.data ?? {};
     // Only our own references; Paystack may send events for payments made elsewhere.
+    let ref = "", entity = "", status = "";
+    if (event === "charge.success") {
+      ref = entity = String(d.reference ?? ""); status = String(d.status ?? "success");
+    } else if (event.startsWith("refund.")) {
+      // data is the refund, naming the payment in transaction_reference. Dashboard refunds come this way too.
+      ref = String(d.transaction_reference ?? ""); status = event.slice("refund.".length);
+      entity = String(d.id ?? d.refund_reference ?? ref);
+    } else if (event.startsWith("charge.dispute.")) {
+      ref = String(d.transaction?.reference ?? ""); status = String(d.status ?? event.slice("charge.dispute.".length));
+      entity = String(d.id ?? ref);
+    }
+    if (!ref.startsWith("psh_")) return json({ ok: true }, 200);
+    const e = await bill<{ id: number; process: boolean }>("event_begin",
+      { provider: "paystack", type: event, entity, status, payload: ev });
+    if (!e.process) return json({ ok: true, duplicate: true }, 200);
     try {
-      const paid = String(ev.data?.reference ?? "");
-      if (event === "charge.success" && paid.startsWith("psh_")) {
-        try {
-          await settle(ev.data as Tx);
-        } catch (e) {
-          if (!/unknown reference/.test(e instanceof Error ? e.message : String(e))) throw e;
-          // Our reference with no charge row: the account was deleted. Not ours to keep.
-          console.error(`billing webhook ${paid}: paid for no charge we hold: refunding`);
-          noteError("payment_no_charge", new Error(`${paid}: paid for no charge we hold: refunding`), { ref: paid });
-          await refundNow(paid);
-        }
-      }
-      // refund.pending, .processing, .processed, .failed: data is the refund, naming the
-      // payment in transaction_reference (as GET /refund answers). Refunds made by hand in
-      // the dashboard come this way too.
-      const refunded = String(ev.data?.transaction_reference ?? "");
-      if (event.startsWith("refund.") && refunded.startsWith("psh_")) {
-        const status = event.slice("refund.".length);
-        if (status === "failed") {
-          console.error(`billing refund ${refunded} failed: ${ev.data?.reason ?? ""}`);
-          noteError("refund_failed", new Error(`refund ${refunded} failed: ${ev.data?.reason ?? ""}`), { ref: refunded });
-        }
+      if (event === "charge.success") {
+        await report(ref, d as Tx);
+      } else if (event.startsWith("refund.")) {
+        if (status === "failed") noteError("refund_failed", new Error(`refund ${ref} failed: ${d.reason ?? ""}`), { ref });
         // Paystack sends amount as a string ("10000", in cents) in its samples.
-        const cents = Number(ev.data?.amount);
-        const id = ev.data?.id ?? ev.data?.refund_reference;
-        await rpc("billing_charge_refund_event", {
-          p_reference: refunded, p_status: status, p_reason: ev.data?.reason ?? null,
-          p_cents: Number.isSafeInteger(cents) && cents > 0 ? cents : null, p_refund: id != null ? String(id) : null,
+        const cents = Number(d.amount);
+        await bill("record_refund_event", {
+          reference: ref, status, provider_id: d.id != null ? String(d.id) : null,
+          amount: Number.isSafeInteger(cents) && cents > 0 ? cents : null, reason: d.reason ?? null,
         });
-      }
-      // charge.dispute.create, .remind, .resolve. Lost: resolved with money given back to the
-      // customer (refund_amount above 0, or the merchant accepted it); 0130 treats it as an
-      // unpaid renewal. Paystack's resolve payload is not seen live yet: check the first one.
-      const disputed = String(ev.data?.transaction?.reference ?? "");
-      if (event.startsWith("charge.dispute.") && disputed.startsWith("psh_")) {
-        const status = String(ev.data?.status ?? "");
-        const back = Number(ev.data?.refund_amount);
+      } else {
+        // Lost: resolved with money given back (refund_amount above 0, or the merchant accepted it).
+        const back = Number(d.refund_amount);
         const lost = event === "charge.dispute.resolve"
-          && (status === "lost" || ev.data?.resolution === "merchant-accepted" || (Number.isFinite(back) && back > 0));
-        console.error(`billing dispute ${disputed}: ${event} ${status} ${ev.data?.resolution ?? ""}${lost ? " (lost)" : ""}`);
-        noteError("dispute", new Error(`dispute ${disputed}: ${event} ${status}${lost ? " (lost)" : ""}`), { ref: disputed });
-        await rpc("billing_charge_disputed", {
-          p_reference: disputed, p_status: status || event.slice("charge.dispute.".length), p_lost: lost,
-          p_cents: Number.isSafeInteger(back) && back > 0 ? back : null,
+          && (d.status === "lost" || d.resolution === "merchant-accepted" || (Number.isFinite(back) && back > 0));
+        noteError("dispute", new Error(`dispute ${ref}: ${event} ${status}${lost ? " (lost)" : ""}`), { ref });
+        await bill("record_dispute", {
+          reference: ref, event, status, lost, amount: Number.isSafeInteger(back) && back > 0 ? back : null,
         });
       }
-    } catch (e) {
-      console.error(`billing webhook ${event}: ${e instanceof Error ? e.message : e}`);
-      noteError("webhook_failed", e);
+      await bill("event_done", { id: e.id });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`billing webhook ${event}: ${msg}`);
+      noteError("webhook_failed", err);
+      await bill("event_done", { id: e.id, error: msg }).catch(() => {});
       return json({ error: "not recorded" }, 500);
     }
     return json({ ok: true }, 200);
@@ -293,38 +230,38 @@ serve("billing", async (req) => {
   if (route === "run") {
     const deny = denyUnlessServer(req);
     if (deny) return deny;
-    // Refunds Paystack refused, or never asked for: once more, first and on a budget of
-    // their own, so a busy renewal day does not leave them waiting (0132).
-    const refundsStart = Date.now();
-    let refunds = 0;
-    for (const ref of await rpc<string[]>("billing_refunds_due", {})) {
-      if (Date.now() - refundsStart >= REFUND_BUDGET_MS) break;
-      await refund(ref);
-      refunds++;
+    const r = await bill<{ busy?: boolean; verify: string[]; charges: Charge[]; refunds: { refund: string; reference: string }[];
+      steps: Record<string, number> }>("run");
+    if (r.busy) return json({ busy: true }, 200);
+    const out = { verified: 0, charged: 0, applied: 0, failed: 0, pending: 0, unknown: 0, refund: 0, left: 0, refunds: 0 };
+    for (const ref of r.verify) {
+      await verify(ref).catch((e) => noteError("run_verify_failed", e, { ref }));
+      out.verified++;
     }
     const start = Date.now();
-    const due = await rpc<{ reference: string; amount: number; card: string; email: string }[]>("billing_run", {});
-    const out = { due: due.length, charged: 0, paid: 0, failed: 0, refund: 0, open: 0, left: 0 };
     let next = 0;
-    // Each worker takes the next charge until none are left or the budget is spent. A
-    // charge left open (no answer, or a database error) stays claimed for 10 minutes.
     const worker = async () => {
-      while (next < due.length && Date.now() - start < RUN_BUDGET_MS) {
-        const c = due[next++];
+      while (next < r.charges.length && Date.now() - start < RUN_BUDGET_MS) {
+        const c = r.charges[next++];
         out.charged++;
-        const r = await chargeCard(c, true).catch((e) => {
+        const a = await charge(c).catch((e) => {
           console.error(`billing run ${c.reference}: ${e instanceof Error ? e.message : e}`);
           noteError("run_charge_failed", e, { ref: c.reference });
           return null;
         });
-        out[r ?? "open"]++;
+        const k = (a?.action ?? "unknown") as keyof typeof out;
+        if (k in out) out[k]++;
       }
     };
     await Promise.all(Array.from({ length: RUN_PARALLEL }, worker));
-    const left = due.slice(next).map((c) => c.reference);
-    if (left.length) await rpc("billing_run_release", { p_refs: left });
-    out.left = left.length;
-    return json({ ...out, refunds }, 200);
+    out.left = r.charges.length - next;
+    const refundsStart = Date.now();
+    for (const f of r.refunds) {
+      if (Date.now() - refundsStart >= REFUND_BUDGET_MS) break;
+      await sendRefund(f.refund, f.reference).catch((e) => noteError("run_refund_failed", e, { ref: f.reference }));
+      out.refunds++;
+    }
+    return json({ ...out, steps: r.steps }, 200);
   }
 
   const user = await signedInUser(req);
@@ -335,16 +272,37 @@ serve("billing", async (req) => {
   } catch {
     return json({ error: "body must be JSON" }, 400, cors);
   }
+  // 22023: a refused command ("pay the failed payment first", ...): say why.
+  const refused = (e: unknown) => {
+    const code = (e as { code?: string })?.code;
+    const msg = e instanceof Error ? e.message.replace(/^\w+: /, "") : String(e);
+    return json({ error: msg }, code === "22023" || code === "P0002" ? 409 : 500, cors);
+  };
 
   if (route === "verify") {
     const ref = String(body.reference ?? "");
     if (!ref.startsWith("psh_")) return json({ error: "unknown reference" }, 400, cors);
-    // Only the user who opened the charge hears about it.
-    if (await rpc<string | null>("billing_charge_user", { p_reference: ref }) !== user.id) return json({ error: "unknown reference" }, 400, cors);
-    const tx = await paystack<Tx>("GET", `/transaction/verify/${encodeURIComponent(ref)}`);
-    const paid: { kind?: string } = {};
-    const status = await settle(tx, paid);
-    return json({ status: status ?? "pending", kind: paid.kind ?? null }, 200, cors);
+    // Only the user who opened the try hears about it.
+    const owner = await bill<{ user?: string } | null>("attempt_user", { reference: ref });
+    if (owner?.user !== user.id) return json({ error: "unknown reference" }, 400, cors);
+    const r = await verify(ref);
+    return json({ status: r?.action ?? "pending", kind: r?.kind ?? null }, 200, cors);
+  }
+
+  if (route === "change") {
+    const action = String(body.action ?? "");
+    try {
+      const state = action === "downgrade"
+        ? await bill("downgrade", { user: user.id, plan: body.plan, extras: body.extras ?? 0, drop: ids(body.drop) ?? [] })
+        : action === "interval" ? await bill("switch_interval", { user: user.id, interval: interval(body.period) })
+        : action === "cancel" ? await bill("cancel", { user: user.id })
+        : action === "undo_cancel" ? await bill("undo_cancel", { user: user.id })
+        : null;
+      if (!state) return json({ error: "unknown change" }, 400, cors);
+      return json(state, 200, cors);
+    } catch (e) {
+      return refused(e);
+    }
   }
 
   if (route !== "pay") return json({ error: "not found" }, 404, cors);
@@ -353,40 +311,52 @@ serve("billing", async (req) => {
   // The card page sends the user back here; only an allowed app origin.
   if (!origin || !cors["Access-Control-Allow-Origin"]) return json({ error: "origin not allowed" }, 403, cors);
 
-  // Settle and card change always go to the card page: a new card is the point.
-  const fresh = body.settle === true || body.card === true;
-  const { data: open, error } = body.settle === true
-    ? await db.rpc("billing_settle_open", { p_user: user.id })
-    : body.card === true
-    ? await db.rpc("billing_card_open", { p_user: user.id })
-    : await db.rpc("billing_charge_open", {
-      p_user: user.id, p_plan: String(body.plan ?? ""),
-      p_period: body.period ? String(body.period) : null,
-      // extras: the extra plants wanted on Family in all (SOLAR-264); left out, those held
-      p_extra: Number.isSafeInteger(body.extras) ? body.extras : null,
-      // plants: the stopped plants the room is for; they start first once paid (0130)
-      p_plants: Array.isArray(body.plants) ? body.plants.filter(Number.isSafeInteger) : null,
-    });
-  // 22023: a refused change ("settle the failed payment first", ...): say why.
-  if (error) return json({ error: error.message }, error.code === "22023" ? 409 : 500, cors);
-  const o = open as { reference: string; amount: number; email?: string; card?: string | null; cardEmail?: string };
-  if (o.amount === 0) return json({ status: "paid", reference: o.reference }, 200, cors);
+  let inv: { invoice: string; kind: string; status: string; amount_minor: number; currency: string; saved_card: boolean };
+  try {
+    if (body.settle === true) inv = await bill("pay_now", { user: user.id });
+    else if (body.card === true) inv = await bill("start_card_check", { user: user.id });
+    else {
+      const st = await bill<{ state: string; plan: string | null }>("account_state", { user: user.id });
+      const args = { user: user.id, plan: String(body.plan ?? ""), extras: Number.isSafeInteger(body.extras) ? body.extras : 0, plants: ids(body.plants) };
+      inv = st.plan && (st.state === "active" || st.state === "past_due")
+        ? await bill("upgrade", args)
+        : await bill("start_checkout", { ...args, interval: interval(body.period) ?? "month" });
+    }
+  } catch (e) {
+    return refused(e);
+  }
+  if (inv.status === "waived") return json({ status: "applied", waived: true }, 200, cors);
 
-  if (o.card && body.newCard !== true && !fresh) {
-    const r = await chargeCard({ reference: o.reference, amount: o.amount, card: o.card, email: o.cardEmail ?? o.email ?? user.email ?? "" });
-    return json({ status: r ?? "pending", reference: o.reference }, 200, cors);
+  // A card check and a new card go to the card page: a new card is the point.
+  const channel = inv.saved_card && body.newCard !== true && body.card !== true ? "saved_card" : "card_page";
+  type Try = Charge & { busy?: boolean; verify?: string[] };
+  let t: Try;
+  try {
+    t = await bill<Try>("begin_attempt", { invoice: inv.invoice, channel });
+    if (t.verify) {
+      for (const ref of t.verify) await verify(ref);
+      t = await bill<Try>("begin_attempt", { invoice: inv.invoice, channel });
+    }
+  } catch (e) {
+    return refused(e);
+  }
+  if (t.busy || t.verify) return json({ error: "a payment is already in progress" }, 409, cors);
+
+  if (channel === "saved_card") {
+    const r = await charge(t);
+    return json({ status: r.action, reference: t.reference, url: r.pay_url ?? null }, 200, cors);
   }
   try {
     const page = await paystack<{ authorization_url: string }>("POST", "/transaction/initialize", {
-      email: o.email ?? user.email, amount: o.amount * 100, currency: "ZAR", reference: o.reference,
+      email: user.email, amount: t.amount_minor, currency: t.currency, reference: t.reference,
       channels: ["card"], callback_url: `${origin}/?tab=account&section=plan`,
     });
-    return json({ url: page.authorization_url, reference: o.reference }, 200, cors);
+    return json({ url: page.authorization_url, reference: t.reference }, 200, cors);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error(`billing pay ${o.reference}: ${msg}`);
-    noteError("pay_failed", e, { user: user.id, ref: o.reference });
-    await rpc("billing_charge_failed", { p_reference: o.reference, p_error: msg });
+    console.error(`billing pay ${t.reference}: ${msg}`);
+    noteError("pay_failed", e, { user: user.id, ref: t.reference });
+    await report(t.reference, { status: "not_found" }).catch(() => {});
     return json({ error: "could not reach Paystack" }, 502, cors);
   }
 });
