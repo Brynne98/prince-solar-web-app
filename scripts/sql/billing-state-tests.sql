@@ -1953,6 +1953,20 @@ begin
     public.q_upsert_plant_energy_v2(990040101, pg_temp.ver(990040101), rows, pg_temp.t(1))::text, '1');
 end $$;
 
+-- O10 the old rules that still run follow the new state once live
+do $$
+declare a uuid := pg_temp.acct('o10'); u uuid;
+begin
+  u := (select user_id from billing.accounts where id = a);
+  perform pg_temp.link(a, 'o10', '{990041001}', pg_temp.t(0));
+  perform pg_temp.ok('O10 nothing chosen: the need-a-hand choose email waits', private.pick_waiting(u));
+  perform pg_temp.ok('O10 a second login in none: refused', not public.link_login_allowed(u, 'o10-other'));
+  perform pg_temp.ok('O10 the same login again: allowed', public.link_login_allowed(u, 'O10'));
+  perform pg_temp.ok('O10 the old halves are not callable from the app',
+    not has_function_privilege('authenticated', 'public.api_account_delete_old()', 'execute')
+    and not has_function_privilege('authenticated', 'public.link_login_allowed_old(uuid, text)', 'execute'));
+end $$;
+
 -- O8 the sender's batch: every queued row either goes or is dropped with a reason
 do $$
 declare w jsonb;

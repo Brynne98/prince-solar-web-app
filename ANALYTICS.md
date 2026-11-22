@@ -53,10 +53,14 @@ Web (`public/*.jsx`):
 | `plant_linked` | SunSynk login linked, or a shared plant taken |
 | `share_check_done`, `link_mode_picked`, `share_taken_email_done` | Linking steps |
 | `plant_switched` | Another plant picked |
-| `plant_pick_done` | Locked plants ticked to run (`from`: link, plants or upgrade, `count`, `of`: how many could be ticked, `plan`, `asked`: false when one plant started with no pop-up) |
-| `plant_change_refused_done` | The owner tried to untick a running plant; picks are final while a plan runs, fixed in the free week (`plan`) (SOLAR-583) |
-| `plant_swap_email_done` | "Email us" tapped under that refusal, to swap a plant by hand (`plan`) |
-| `plant_kept_done` | Plant kept from deletion |
+| `plant_pick_done` | Locked plants ticked to run (`from`: link, plants or upgrade, `count`, `of`: how many could be ticked, `plan`, `asked`: false when one plant started with no pop-up). Not sent since SOLAR-641 |
+| `plant_change_refused_done` | The owner tried to untick a running plant; picks are final while a plan runs, fixed in the free week (`plan`) (SOLAR-583). Not sent since SOLAR-641 |
+| `plant_swap_email_done` | "Email us" tapped under that refusal, to swap a plant by hand (`plan`). Not sent since SOLAR-641 |
+| `plant_kept_done` | Plant kept from deletion. Not sent since SOLAR-641 |
+| `plant_switch_done` | Chosen plants saved in the one plant pick, after its confirm when a plant goes out (`from`: plants, link, billing, upgrade; `going`, `coming`: how many; `state`) (SOLAR-641) |
+| `checkout_pick_done` | The final plant choice made before a first plan, a restart or an upgrade is paid (`plan`, `count`) (SOLAR-641) |
+| `plan_start_done` | A first plan or a restart paid (`plan`, `period`) (SOLAR-641; an upgrade stays `upgrade_done`) |
+| `plan_cancel_done` | Cancel plan booked (`plan`) (SOLAR-641) |
 | `login_remove_done` | SunSynk login removed |
 | `plant_settings_save_done` | Plant settings saved (field names only) |
 | `setup_turn_on_done` | Setup card |
@@ -68,12 +72,12 @@ Web (`public/*.jsx`):
 | `theme_changed` | Theme picked |
 | `data_download_done` | CSV downloaded |
 | `plan_page_shown`, `offer_pick_done`, `checkout_opened`, `pay_review_done`, `upgrade_done` | Choosing and paying for a plan |
-| `downgrade_done`, `plan_change_undone`, `extra_plants_done`, `yearly_switch_done` | Plan changes |
-| `start_keep_done` | The plants to keep ticked before a first plan with fewer places is paid (`plan`, `kept`; SOLAR-552) |
-| `pay_first_shown` | Cancel or downgrade asked for while a payment has failed: the pay-first pop-up (`plan`, `want`: cancel or downgrade) |
-| `keep_pick_done` | Keep pick saved in Billing's Choose plant(s) pop-up while a cancel or smaller plan is booked (`plan`, `room`) |
+| `downgrade_done`, `plan_change_undone`, `extra_plants_done`, `yearly_switch_done` | Plan changes (`downgrade_done`: `plan`, `drop`; `yearly_switch_done`: `plan`, `interval`; `extra_plants_done` not sent since SOLAR-641) |
+| `start_keep_done` | The plants to keep ticked before a first plan with fewer places is paid (`plan`, `kept`; SOLAR-552). Not sent since SOLAR-641 |
+| `pay_first_shown` | Cancel or downgrade asked for while a payment has failed: the pay-first pop-up (`plan`, `want`: cancel or downgrade). Not sent since SOLAR-641 |
+| `keep_pick_done` | Keep pick saved in Billing's Choose plant(s) pop-up while a cancel or smaller plan is booked (`plan`, `room`). Not sent since SOLAR-641 |
 | `card_change_done`, `website_plan_done`, `more_plants_email_done` | Billing |
-| `notice_closed`, `notice_action_done` | Billing cards (`notice_opened` until SOLAR-384: the phone banner's tap) |
+| `notice_closed`, `notice_action_done` | Account cards on Live and in the bell (`kind` since SOLAR-641: `past_due`, `must_choose`, `trial`, `trial_ends_soon`, `cancel_soon`; `notice_opened` until SOLAR-384: the phone banner's tap) |
 | `free_week_card_shown` | A free-week card shown, once a session each (`stage`: `price` on Live days 1 to 4, `ends_soon` on every page days 5 to 7; SOLAR-553). Its taps and closes are `notice_action_done` and `notice_closed` with `kind` `free_week_price` or `free_week_soon` |
 | `notification_opened` | An alert is tapped (`source`: `push` for a pop-up, `bell` for the bell list, SOLAR-598). `alerts_page_opened`, `alerts_filter_done`, `alerts_read_all_done` went with the full Notifications page in SOLAR-598 |
 | `email_pref_change_done`, `push_pref_change_done`, `push_enabled_done`, `push_disabled_done` | Notification settings |
@@ -88,7 +92,7 @@ Showcase (`public/welcome-track.js`, princesolarhub.co.za, SOLAR-472), no person
 | `website_button_tapped` | `button`: `try_free`, `sign_in`, `see_pricing`, `get_home`, `get_family`; `section` it sits in, or `header` |
 
 Functions (`track()` in `_shared/errors.ts`): `payment_failed`, `plan_cancelled`,
-`plants_linked_done` (SOLAR-584: a login or shared plant linked; `via`: login or share, `count`,
+`account_email_sent_done` (SOLAR-641: a billing, free-week or history email from `billing.outbox` went out; `kind`: its outbox key, e.g. `receipt`, `payment_failed`, `trial_ended`, `history_deleted`. Since the switch-over it replaces `free_week_ended_email_sent_done`, `unpaid_*_email_sent_done`, `winback_email_sent_done` and the email side of `plan_cancelled`), `plants_linked_done` (SOLAR-584: a login or shared plant linked; `via`: login or share, `count`,
 `seen_before`: plants that had their free week before this account was made and no other account
 holds, the sign of an account deleted and made again), `plan_started_done` (SOLAR-584: a first
 payment applied; `returning`: the account paid before and that plan ended, `days_since_plan`), `winback_resubscribed_done`, `winback_email_sent_done`, `need_a_hand_login_linked_done`,

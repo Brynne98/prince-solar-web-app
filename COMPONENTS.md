@@ -55,6 +55,22 @@ Formatting and dates (also `components.jsx`):
 | `COLORS` | The series colours as `var(--…)`, so charts follow the theme: solar, home, grid, battery, charge. |
 | `COLORS_TEXT` | The same colours for small text (a darker shade in light, SOLAR-427). |
 
+## Account text and state (`supabase/functions/_shared/text.ts`, `link.jsx`)
+
+Every line about accounts, logins, chosen plants, plans, prices, billing, the free week and
+history kept or deleted, on a screen or in an email, comes from the text catalog, filled only
+from the account's state. No count, price, plan name or date is worked out in JSX or email
+code (SOLAR-641; `npm test` refuses the old billing reads, `PLAN_NAME` and hand-made prices).
+
+| Name | Use it for |
+|---|---|
+| `AccountText` (`AT`) | The catalog: `_shared/text.ts`, typed, with zero/one/many forms. `npm run build` makes `public/build/text.js` (`window.AccountText`); notify imports the file itself. `money`, `day`, `forms`, `names` are its only formatters. A new line goes here. |
+| `useAccount()`, `reloadAccount()` | The signed-in account's state (`api_account_state`, 0247), read once and shared; `reloadAccount` reads it again and tells every screen. |
+| `ChooseDialog` | The one plant pick (link.jsx): `mode` `choose` (Plants, after a link, after a payment), `checkout` (the final choice before paying), `keep` (a smaller plan's plants). A plant going out is confirmed in `SwitchConfirm`. |
+| `acctLogins(acct, keep)` | The account's plants under their logins, in `KeepPicker`'s shape. |
+| `startPlan`, `bookChange`, `settlePayment`, `changeCard` | Pay for a plan or an upgrade (quote, review, card page), book or undo a change for the billing date, pay a failed renewal, change the card. |
+| `outboxMail(m, unsub)` | An outbox email (`AccountText.mail`) laid out in `_shared/email.ts`'s look. |
+
 ## Forms and sign-in (`auth.jsx`)
 
 | Name | Use it for |
@@ -77,15 +93,11 @@ Formatting and dates (also `components.jsx`):
 | `Dialog` | Any modal. `label`, `onClose`, `keep` (no outside-click close), `busy` (dims, blocks closing), `size`. With `onClose` it draws its own X (`.pop-x`) top right (SOLAR-516); never add a second close button. No `onClose` (the working spinner): no X. A phone shows the same centred box, and the page behind an open pop-up does not scroll (SOLAR-521). |
 | `LinkForm` | The SunSynk sign-in form, inline (`compact`) or as a card. |
 | `LinkDialog` | `LinkForm` in a `Dialog` with a `title` and `note`: add a plant, re-link, change login. |
-| `PayReview` | The price, next bill and card before a saved card is charged. `parts`: the lines the bill is made of. Its `.pay-review-box` is also Billing's darker box. |
-| `PLAN_NAME` | A plan id as its name: "Home". |
-| `billingFmt.rand(n, narrow)` | A price in rand: "R1 799". `narrow` for the large prices on the plan cards, where a full space reads as a gap (SOLAR-364). |
-| `billingFmt.offerLine`, `offerCap`, `Was` | An offer price (SOLAR-330): its terms under the price, the members cap, the list price struck out. |
+| `PayReview` | The review before a saved card is charged: `r` is `AccountText.quoteReview`'s title, due and lines, `card` the saved card. Its `.pay-review-box` is also Billing's darker box. |
 | `withTimeout(call, ms)` | A Supabase call that must give up: after `ms` it resolves as `{ data: null, error: { message: 'timed out' } }`. |
 | `edgePost(path, body, signal)` | A POST to one of our edge functions as the signed-in user; returns `[response, json]`. |
 | `mountNode(node)` | Render something into its own root outside the app (dialogs opened from plain code). |
-| `payFailed(e, fallback)` | The toast for a payment call that failed. |
-| `payFirst(e)` | "Pay the failed payment first." when a failed payment refused a plan or plant change; else false. |
+| `payFailed(e, fallback)` | The toast for a payment or a booked change that failed, in `AccountText.refused`'s words. |
 
 ## Data (`data.jsx`)
 
@@ -119,8 +131,7 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `PageBoundary` | Wraps each page in `Frame`: a crash shows a card with Reload, not a blank screen, and goes to PostHog. |
 | `openFeedback(report)` | The feedback box; `report` = { text, id } makes it "Report a problem" with the error attached. |
 | `NotifRows` | Alert cards under day headings in the bell list, laid out as the phone pop-up: kind icon, the plant's name on its own top line (2+ plants), title and time, then the numbers; a tap opens the alert's page (SOLAR-598). Billing notices (`NoticeRows`) lead the Today group, same card with a button (SOLAR-353). The full Notifications page went in SOLAR-598. |
-| `billNotice`, `BillCards` | A billing notice from `api_notifications`' pinned facts, in the emails' words; the cards at the top of Live only (SOLAR-212, SOLAR-577). On a phone each card shows `short` and `bodyShort` (SOLAR-384). |
-| `weekLine`, `weekOffer`, `weekCard` | The free week's price line in the emails' words ("Recommended for your plant: Home, R49 a month, normally R99."); Live's day 1 to 4 card built from it (app.jsx, SOLAR-553). |
+| `acctNotices`, `BillCards` | The account's notices (`AccountText.notices`: failed payment, plants to choose, the free week, a cancel's last days) with their actions; the cards at the top of Live only, and the bell's Today (SOLAR-641). On a phone each card shows `short` and `bodyShort` (SOLAR-384). |
 | `NoticeCard` | A notice to act on: Overview-card height, 2 columns of the Overview grid, tone bad/warn/info, one quiet button, optional ×. Billing and the grid-off prompt. Wrap in `.notice-cards`. Plant problems go in `HeaderStatus` instead (SOLAR-384). |
 
 ## Charts (`chart.jsx`)
@@ -144,13 +155,8 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `DaysPanel` | The per-day bars with retry and the free-week lock. |
 | `TabSkeleton` | A whole tab while it loads. |
 | `ConfirmCard` | Any "are you sure". Inline or `modal`; `danger`, `busy`. Use instead of `confirm()`. |
-| `KeepPicker` | A pick of plants, grouped by login: circles for exactly 1, else tick boxes; too-many and last-tick lines (link.jsx). The plants a cancel or smaller plan keeps (SOLAR-496), in the cancel and downgrade pop-ups and `KeepDialog`; and, with `logins`, `ask`, `full`, `min={0}`, the plants a login adds (`PlantPickDialog`). `tag(p)`: a word on a plant's row (`Free week used`, SOLAR-572). |
-| `PlantPickDialog` | "Choose plants": the owner ticks which locked plants run, up to the places the plan has open (api_plant_pick). After a login links, and after a payment when a place is open (`PickAfterPay`, in Settings) (link.jsx, SOLAR-537). `startableLogins(accounts, only)`: the locked plants with a place open, by login. |
-| `ChoosePlantsDialog` | "Choose plants", from Plants: every plant with a tick box. A tick into an open place is free (api_plant_pick); a running plant can't be unticked, and the refusal offers an email to swap by hand (SOLAR-583). On a plan, Save asks once more. `finalPickText(names)` (link.jsx): the confirm step's line, also in `PlantPickDialog`. |
-| `billingFmt.lossLine(links, cancel)` | What a booked cancel or smaller plan deletes, in one line: which plants stay, which go, and for a cancel all history. Billing's Plan card, the bell and the banner all use it (link.jsx, SOLAR-505). `billingFmt.andList(names)`: "A, B and C". `pickableLogins(links)`: the plants such a change can keep. |
-| `PayFirstDialog` | In place of the cancel and downgrade pop-ups while a payment has failed: "Pay the failed payment first", with Pay with another card (SOLAR-497). |
-| `KeepDialog` | Billing's Choose plant(s) pop-up: changes a booked cancel's or smaller plan's pick (api_billing_keep_set) (SOLAR-496). |
-| `PlanCard`, `PlanNote`, `BookedNotice` | A card in Billing's Plan section (name and price top left, control top right); a tinted note in it with its buttons right (failed payment, kept plants); a change booked for the billing date with its undo, as a `PlanNote` (SOLAR-512). |
+| `KeepPicker` | A pick of plants, grouped by login (`acctLogins`): circles for exactly 1, else tick boxes; `ask` above, `full` when past `room`; `min={0}` lets the last tick go (link.jsx). Inside `ChooseDialog`. `tag(p)`: a word on a plant's row (`Free week used`, SOLAR-572). |
+| `PlanCard`, `PlanNote` | A card in Billing's Plan section (name and price top left, control top right); a tinted note in it with its buttons right (failed payment, plants to choose, a booked change and its undo) (SOLAR-512). |
 | `SettingsSection` | A Settings card with title, note and an `action`. `head`: the section is the whole page, its title the page's. |
 | `SettingRow` | One row in a Settings card: `label`, `note`, `action`, `lead`. |
 | `AppearanceSection` | Account's Theme switch: Device, Light, Dark. Calls `window.setTheme` from `theme.js` (SOLAR-318). |

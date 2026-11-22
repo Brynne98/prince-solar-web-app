@@ -147,10 +147,6 @@ window.useAccount = function useAccount() {
 };
 window.sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') acctNow = null; });
 
-// "Office", "Office and Shop", "Office, Shop and Barn" (also used for alert lists)
-const andList = (names) => AT.names(names);
-window.billingFmt = { andList };
-
 // Paystack (the billing function). A saved card is charged at once; otherwise, or after the
 // saved card is declined, Paystack's card page opens and comes back with ?reference=, which
 // billingReturn checks.

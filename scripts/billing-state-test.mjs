@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // SOLAR-641 state test. LOCAL database only (STATE_DB_URL to change; default the local
-// Supabase on 55322). Applies the billing migrations (0240 on, *_billing_*) and runs
-// scripts/sql/billing-state-tests.sql in one transaction, then rolls it all back, so the
+// Supabase on 55322). Applies the billing migrations (0240 on, *_billing_*), runs
+// scripts/sql/billing-state-tests.sql, then the drop of the old billing
+// (supabase/after-switch-over) in one transaction, then rolls it all back, so the
 // local database is left as it was. Exit 0: every check passed. Exit 1: a check failed
 // or the SQL broke.
 import { spawnSync } from 'node:child_process';
@@ -21,8 +22,11 @@ const dir = path.join(REPO, 'supabase/migrations');
 const migrations = readdirSync(dir).filter((f) => /^\d{4}_billing_/.test(f) && Number(f.slice(0, 4)) >= 240).sort();
 // public functions the billing files create (not "create or replace"): dropped first, so a
 // local database that already has the billing schema (the local preview) can run the test
-const made = [...new Set(migrations.flatMap((f) => [...readFileSync(path.join(dir, f), 'utf8')
-  .matchAll(/^create function public\.(\w+)\(/gm)].map((m) => m[1])))];
+// (not the ones a file renames first and makes again: those exist before the billing files)
+const texts = migrations.map((f) => readFileSync(path.join(dir, f), 'utf8'));
+const renamed = new Set(texts.flatMap((t) => [...t.matchAll(/^alter function public\.(\w+)\(.*rename/gm)].map((m) => m[1])));
+const made = [...new Set(texts.flatMap((t) => [...t.matchAll(/^create function public\.(\w+)\(/gm)].map((m) => m[1])))]
+  .filter((n) => !renamed.has(n));
 const dropMade = made.length ? `do $d$ declare f record; begin for f in select p.oid::regprocedure s from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = any (array['${made.join("','")}'])
   loop execute 'drop function ' || f.s || ' cascade'; end loop; end $d$;` : '';
@@ -32,11 +36,14 @@ const sql = [
   dropMade,
   ...migrations.map((f) => readFileSync(path.join(dir, f), 'utf8')),
   readFileSync(path.join(REPO, 'scripts/sql/billing-state-tests.sql'), 'utf8'),
+  // then the drop of the old billing (DEPLOY.md step 8) on top of it: it must run clean
+  readFileSync(path.join(REPO, 'supabase/after-switch-over/0260_billing_drop_old.sql'), 'utf8'),
+  "do $d$ begin raise notice 'drop of the old billing: ok'; end $d$;",
   'rollback;',
 ].join('\n');
 
 const r = spawnSync(PSQL, ['-X', '-q', '-v', 'ON_ERROR_STOP=1', DB], { input: sql, encoding: 'utf8' });
-const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed|CONTEXT|LINE|line /.test(l));
+const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed|CONTEXT|LINE|line |old billing: ok/.test(l));
 console.log(`migrations: ${migrations.join(' ')}`);
 console.log(lines.join('\n') || (r.error ? String(r.error) : '(no output)'));
 process.exit(r.status === 0 ? 0 : 1);

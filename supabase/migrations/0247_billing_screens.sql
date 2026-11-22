@@ -404,6 +404,116 @@ returns setof bigint language sql stable security definer set search_path = publ
   select distinct r.plant from billing.reading_routes(now()) r where billing.is_live()
 $$;
 
+-- The old rules that still run after the switch read the frozen old tables. Each one keeps
+-- its old body under a new name for before the switch and follows the new state after it.
+-- The drop migration (supabase/after-switch-over) removes the old halves.
+alter function private.plant_live(uuid, bigint) rename to plant_live_old;
+create function private.plant_live(p_user uuid, p_plant bigint)
+returns boolean language sql stable set search_path = public, private, pg_temp as $$
+  select case when billing.is_live()
+              then coalesce(billing.reads_plant((select id from billing.accounts where user_id = p_user), p_plant, now()), false)
+              else private.plant_live_old(p_user, p_plant) end
+$$;
+
+alter function private.pick_waiting(uuid) rename to pick_waiting_old;
+create function private.pick_waiting(p_user uuid)
+returns boolean language sql stable set search_path = public, private, pg_temp as $$
+  select case when billing.is_live()
+              then coalesce((select st.state = 'none' and st.linked > 0 and st.chosen = 0
+                               from billing.accounts a cross join lateral billing.account_status(a.id, now()) st
+                              where a.user_id = p_user), false)
+              else private.pick_waiting_old(p_user) end
+$$;
+
+alter function public.link_login_allowed(uuid, text) rename to link_login_allowed_old;
+create function public.link_login_allowed(p_user uuid, p_username text)
+returns boolean language sql stable security definer set search_path = public, private, pg_temp as $$
+  select case when billing.is_live()
+              then coalesce((select (billing.account_state(a.id)->>'may_add_login')::boolean
+                                    or exists (select 1 from billing.logins l where l.account = a.id and lower(l.username) = lower(p_username))
+                               from billing.accounts a where a.user_id = p_user), true)
+              else public.link_login_allowed_old(p_user, p_username) end
+$$;
+revoke all on function public.link_login_allowed_old(uuid, text) from public, anon, authenticated;
+
+-- Emails for a plant the account does not choose, and reports with no plan, are not queued.
+create function private.email_skip_unchosen()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare st billing.status; acc uuid;
+begin
+  if not billing.is_live() then
+    -- before the switch: 0222's rule, as it was
+    if new.plant_id is not null and exists (select 1 from public.plant_users pu
+         where pu.user_id = new.user_id and pu.plant_id = new.plant_id and pu.paused) then
+      return null;
+    end if;
+    if new.kind like 'report\_%' and not coalesce((new.data->>'freeWeekEnds')::boolean, false)
+       and coalesce((select b.plan from private.billing b where b.user_id = new.user_id), 'free') = 'free' then
+      return null;
+    end if;
+    if new.plant_id is not null and new.user_id is not null
+       and (private.is_alert(new.kind) or new.kind in ('share_down', 'share_back'))
+       and not private.plant_live(new.user_id, new.plant_id) then
+      return null;
+    end if;
+    return new;
+  end if;
+  if new.user_id is null then return new; end if;
+  select id into acc from billing.accounts where user_id = new.user_id;
+  if new.plant_id is not null and not exists (select 1 from billing.seats s where s.account = acc and s.plant = new.plant_id
+                                                 and s.closed_at is null) then
+    return null;
+  end if;
+  st := billing.account_status(acc, now());
+  if new.kind like 'report\_%' and coalesce(st.state, 'none') not in ('trialing', 'active', 'past_due') then return null; end if;
+  if new.plant_id is not null and (private.is_alert(new.kind) or new.kind in ('share_down', 'share_back'))
+     and not private.plant_live(new.user_id, new.plant_id) then
+    return null;
+  end if;
+  return new;
+end $$;
+revoke all on function private.email_skip_unchosen() from public, anon, authenticated;
+drop trigger email_skip_paused on public.email_queue;
+create trigger email_skip_paused before insert on public.email_queue
+  for each row execute function private.email_skip_unchosen();
+
+-- Account delete after the switch: the new rules decide (billing.delete_account: nothing
+-- running, nothing owed, no open dispute), then the logins, links and person go as before.
+-- Plants no account protects any more are deleted.
+alter function public.api_account_delete() rename to api_account_delete_old;
+revoke all on function public.api_account_delete_old() from public, anon, authenticated;
+create function public.api_account_delete()
+returns jsonb language plpgsql security definer set search_path = public, private, vault, pg_temp as $$
+declare
+  uid uuid := auth.uid();
+  acc record;
+  gone jsonb;
+  orphans bigint[];
+begin
+  if not billing.is_live() then return public.api_account_delete_old(); end if;
+  if uid is null then raise exception 'not signed in' using errcode = '42501'; end if;
+  gone := case when exists (select 1 from billing.accounts where user_id = uid)
+               then billing.delete_account((select id from billing.accounts where user_id = uid))
+               else jsonb_build_object('unprotected', '[]'::jsonb) end;
+  orphans := array(select (x)::bigint from jsonb_array_elements_text(gone->'unprotected') x);
+  for acc in select id, refresh_secret_id from private.sunsynk_accounts where user_id = uid order by id loop
+    perform pg_advisory_xact_lock(1, hashtext(acc.id::text));
+    if acc.refresh_secret_id is not null then delete from vault.secrets where id = acc.refresh_secret_id; end if;
+    update private.inverters set account_id = null where account_id = acc.id;
+  end loop;
+  delete from private.sunsynk_accounts where user_id = uid;
+  delete from public.plant_users where user_id = uid;
+  perform private.plants_tombstone(orphans);
+  insert into public.email_queue (to_email, kind, key, priority)
+  select email, 'account_deleted', 'account_deleted:' || uid, 1 from auth.users where id = uid and email is not null
+  on conflict do nothing;
+  delete from public.profiles where user_id = uid;
+  delete from auth.users where id = uid;
+  return jsonb_build_object('deleted', true, 'plantsRemoved', coalesce(cardinality(orphans), 0));
+end $$;
+revoke all on function public.api_account_delete() from public, anon;
+grant execute on function public.api_account_delete() to authenticated;
+
 -- plant_energy for one plant, written only while it is still read (the poll check).
 create function public.q_upsert_plant_energy_v2(p_plant bigint, p_version bigint, p_rows jsonb, p_at timestamptz default now())
 returns integer language plpgsql security definer set search_path = public, pg_temp as $$

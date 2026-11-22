@@ -229,31 +229,47 @@ filter that id out of sales numbers.
 
 ## Billing switch-over (SOLAR-641)
 
-The new `billing` schema (migrations 0240 on) ships empty and unused. When the new
-billing code goes live, in this order:
+The new `billing` schema (migrations 0240 on) ships empty and unused. Backend first,
+frontend second, in this order:
 
-1. Turn the old billing job off. Settle or refund any open old references first.
-2. Copy today's accounts, once: `supabase db query --linked "select billing.copy_from_old()"`.
-   It empties the billing tables it fills and copies fresh, so a rerun is safe until
-   the first payment lands in `billing.invoices`; after that it refuses. Saved cards
+1. Push the migrations (0240 to 0247): `supabase db push`. Nothing changes what runs
+   today: the new tables stay empty, the old RPCs answer as before, and every new rule
+   waits for `billing.switch_on()`.
+2. Deploy the functions that read the new state but fall back to the old rules until the
+   switch: `supabase functions deploy poll recover sync-plant-energy job-check link-sunsynk claim-share notify`.
+   link-sunsynk and claim-share also write each new login and claim into the new tables;
+   notify sends `billing.outbox` only after the switch.
+3. Turn the old billing job off. Settle or refund any open old references first.
+4. Copy today's accounts, once: `supabase db query --linked "select billing.copy_from_old()"`.
+   A rerun keeps each account's id and clears only the events the copy wrote, so it is safe
+   until the first payment lands in `billing.invoices`; after that it refuses. Saved cards
    come across, so renewals keep charging them.
-3. Compare `billing.account_state` for each account with today's screens, next charges
-   and poll decisions.
-4. Not before phase 4: the billing emails (receipts, failed card, card changed, refunds,
-   disputes) are queued in `billing.outbox` (a hard decline already queues `card_update`)
-   and sent by phase 4's outbox sender. Deployed earlier, no billing email goes out.
-   Then deploy the `billing` function from this change: it reads and writes the new
-   tables (through `public.billing_v2`) and no longer the old ones. Deployed earlier, it
-   would stop today's billing.
-5. Switch reading, deleting and history fetches to the new state (0246), once:
-   `supabase db query --linked "select billing.switch_on()"`. Until then `poll_jobs_v2`
-   answers with the old `poll_jobs` and the guarded writes let everything through, so
-   `poll`, `recover`, `sync-plant-energy` and `job-check` from this change may ship before
-   it. `switch_on` turns the `unpaid-delete` and `plant-wipe` jobs off and schedules
-   `billing-delete` (every 5 minutes, `billing.delete_due()`) and `billing-history` (every
-   minute, `recover?queue=1`). From then on the "history deleted" email (`unpaid_deleted`)
-   is no longer queued: its replacement comes with the new emails. To check it:
-   `select billing.alerts()` and `select * from billing.job_heartbeats`.
+5. Compare `billing.account_state` for each account with today's screens, next charges and
+   poll decisions.
+6. In one go, so no billing email is sent twice or lost:
+   `supabase functions deploy billing`, then
+   `supabase db query --linked "select billing.switch_on()"`.
+   The billing function reads and writes the new tables (through `public.billing_v2`).
+   `switch_on` turns reading, deleting and history fetches over to the new state, turns the
+   `unpaid-delete` and `plant-wipe` jobs off, and schedules `billing-delete` (every 5 minutes,
+   `billing.delete_due()`) and `billing-history` (every minute, `recover?queue=1`). From then
+   on the old billing, free-week and history emails are not queued (0247
+   `email_queue_old_billing`); notify sends their replacements from `billing.outbox`, each
+   checked against the account's state when it goes. To check it:
+   `select billing.alerts()`, `select * from billing.job_heartbeats` and
+   `select key, status, drop_reason, count(*) from billing.outbox group by 1, 2, 3`.
+7. Frontend: push `main` (Cloudflare builds it). Every account, plan, plant-choice and
+   billing screen reads `api_account_state` and the text catalog
+   (`supabase/functions/_shared/text.ts`, built into `public/build/text.js`). It must not
+   ship before step 6: before the switch the new tables are not the record.
+8. After the new frontend is live and a day of polls, payments and emails looks right:
+   move `supabase/after-switch-over/0260_billing_drop_old.sql` into `supabase/migrations/`
+   under the next free number and `supabase db push`. It refuses to run before
+   `billing.switch_on()`. It drops `plant_picks`, the `held` flag, `plant_users.paused`, the
+   old billing tables (`private.billing`, `billing_charges`, `free_week_logins`,
+   `offer_members`, `offers`, `plant_week`), every function they feed, the old billing cron
+   jobs and the one-off copy, and skips old billing emails still queued. It checks that
+   nothing left reads or calls them, or it stops.
 
 ## Changing the domain
 

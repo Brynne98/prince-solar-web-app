@@ -3055,7 +3055,8 @@ function DownloadSection({ plants, plantId, ready }) {
 const DELETE_REFUSED = [
   [/owed/, 'Pay the failed payment on Billing first.'],
   [/payment is open/, 'A payment is still going through. Try again tomorrow.'],
-  [/cancel your plan/, 'Cancel your plan first.', 'cancel'],
+  [/cancel your plan|plan is running/, 'Cancel your plan first.', 'cancel'],
+  [/dispute is open/, 'A payment is still going through. Try again tomorrow.'],
 ];
 function DeleteAccountRow({ email, acct, onBilling }) {
   const { useState } = React;
