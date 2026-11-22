@@ -36,7 +36,7 @@ const sql = [
 ].join('\n');
 
 const r = spawnSync(PSQL, ['-X', '-q', '-v', 'ON_ERROR_STOP=1', DB], { input: sql, encoding: 'utf8' });
-const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed/.test(l));
+const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed|CONTEXT|LINE|line /.test(l));
 console.log(`migrations: ${migrations.join(' ')}`);
 console.log(lines.join('\n') || (r.error ? String(r.error) : '(no output)'));
 process.exit(r.status === 0 ? 0 : 1);

@@ -1389,12 +1389,12 @@ end $$;
 
 -- F11 a hard decline asks for a new card, once per bill
 do $$
-declare a uuid := pg_temp.acct('f11'); pe timestamptz; ref text;
+declare a uuid := pg_temp.acct('f11'); pe timestamptz; r text;
 begin
   pe := pg_temp.member(a, 'f11', 990021101);
-  ref := pg_temp.job(a, pe, 'hard');
+  r := pg_temp.job(a, pe, 'hard');
   perform pg_temp.ok('F11 update-card email queued for that bill', (select count(*) = 1 from billing.outbox o
-    join billing.payment_attempts pa on pa.invoice = o.invoice where pa.reference = ref and o.key = 'card_update'));
+    join billing.payment_attempts pa on pa.invoice = o.invoice where pa.reference = r and o.key = 'card_update'));
 end $$;
 
 -- F12 the last launch place goes to one checkout; a place is freed when a checkout lapses
@@ -1630,7 +1630,13 @@ begin
 
   -- the late payment lands: the plan restarts, the kept plant is fetched again
   uid := (select user_id from billing.accounts where id = c);
+  insert into public.email_queue (user_id, kind, key, due_at) values (uid, 'winback', 'winback:state-test-late:' || uid, pg_temp.t(37));
+  perform pg_temp.ok('O0 after the switch an old billing email is not queued',
+    not exists (select 1 from public.email_queue where key = 'winback:state-test-late:' || uid));
+  -- one sent before the switch
+  set local session_replication_role = replica;
   insert into public.email_queue (user_id, kind, key, due_at) values (uid, 'winback', 'winback:state-test:' || uid, pg_temp.t(37));
+  set local session_replication_role = origin;
   update public.email_queue set status = 'sent', sent_at = pg_temp.t(37) where key = 'winback:state-test:' || uid;
   r := pg_temp.answer(ref, 'ok', pg_temp.t(40));
   perform pg_temp.eq('R3 payment applied', r->>'action', 'applied');
@@ -1789,6 +1795,165 @@ begin
     and not has_function_privilege('anon', 'public.poll_commit_v2(jsonb, uuid, bigint, jsonb, jsonb, jsonb, jsonb, jsonb, text, bigint, timestamptz)', 'execute')
     and not has_function_privilege('authenticated', 'billing.delete_due(timestamptz)', 'execute')
     and has_function_privilege('service_role', 'public.billing_jobs(text, jsonb)', 'execute'));
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- O emails (0247): each kind is queued by its cause and checked again when sent
+-- ---------------------------------------------------------------------------
+create function pg_temp.ob(p_acc uuid, p_key text) returns billing.outbox language sql as $$
+  select * from billing.outbox where account = p_acc and key = p_key order by id desc limit 1
+$$;
+create function pg_temp.guard(p_acc uuid, p_key text, p_at timestamptz) returns text language sql as $$
+  select coalesce(billing.outbox_guard(pg_temp.ob(p_acc, p_key), p_at), 'send')
+$$;
+
+-- O1 receipt: queued when the bill is paid, reads the frozen bill
+do $$
+declare a uuid := pg_temp.acct('o1'); o billing.outbox; w jsonb; b jsonb;
+begin
+  perform pg_temp.link(a, 'o1', '{990040101}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', '{990040101}', pg_temp.t(0));
+  o := pg_temp.ob(a, 'receipt');
+  perform pg_temp.ok('O1 receipt queued for the paid bill', o.id is not null and o.invoice is not null);
+  perform pg_temp.eq('O1 receipt sends', pg_temp.guard(a, 'receipt', pg_temp.t(0.01)), 'send');
+  update billing.prices set amount_minor = 12345 where plan = 'home' and interval = 'month' and offer = 'launch';
+  w := billing.outbox_take(500, pg_temp.t(0.01));
+  select x into b from jsonb_array_elements(w) x where (x->>'id')::bigint = o.id;
+  perform pg_temp.eq('O1 receipt amount from the frozen bill', b->'bill'->>'amount_minor', '4900');
+  perform pg_temp.eq('O1 receipt names the plan', b->'bill'->>'plan_name', 'Home');
+  perform pg_temp.ok('O1 receipt carries the reference and card', b->'bill'->>'reference' like 'psh\_%' and b->'bill'->>'last4' = 'main');
+  perform pg_temp.eq('O1 state read at send time', b->'state'->>'state', 'active');
+  update billing.prices set amount_minor = 4900 where plan = 'home' and interval = 'month' and offer = 'launch';
+  perform billing.outbox_done(o.id, true, null, null, pg_temp.t(0.02));
+  perform pg_temp.eq('O1 sent once', (select status from billing.outbox where id = o.id), 'sent');
+  perform pg_temp.ok('O1 not handed out again', not exists (select 1 from jsonb_array_elements(billing.outbox_take(500, pg_temp.t(0.03))) x
+    where (x->>'id')::bigint = o.id));
+end $$;
+
+-- O2 failed card: queued on the failed renewal try; dropped once that bill is paid
+do $$
+declare a uuid := pg_temp.acct('o2'); pe timestamptz; ref text;
+begin
+  pe := pg_temp.member(a, 'o2', 990040201);
+  perform pg_temp.job(a, pe, 'fail');
+  perform pg_temp.eq('O2 failed-card email queued, sends while unpaid', pg_temp.guard(a, 'payment_failed', pe + interval '1 hour'), 'send');
+  ref := pg_temp.job(a, pe + interval '3 days', 'ok');
+  perform pg_temp.eq('O2 paid before it went: dropped', pg_temp.guard(a, 'payment_failed', pe + interval '3 days 1 hour'), 'bill settled');
+end $$;
+
+-- O3 a cancel then its undo inside 2 minutes: only the undo goes
+do $$
+declare a uuid := pg_temp.acct('o3'); pe timestamptz;
+begin
+  pe := pg_temp.member(a, 'o3', 990040301);
+  perform billing.cancel(a, pg_temp.t(2));
+  perform pg_temp.eq('O3 cancel email waits 2 minutes', (pg_temp.ob(a, 'change_booked')).not_before::text,
+    (pg_temp.t(2) + interval '2 minutes')::text);
+  perform billing.undo_cancel(a, pg_temp.t(2) + interval '1 minute');
+  perform pg_temp.eq('O3 the cancel email dropped', coalesce(billing.outbox_guard(pg_temp.ob(a, 'change_booked'), pg_temp.t(2.01)), 'send'), 'changed again');
+  perform pg_temp.eq('O3 the undo email goes', pg_temp.guard(a, 'change_undone', pg_temp.t(2.01)), 'send');
+  perform billing.downgrade(a, 'home', 0, '{}', pg_temp.t(3));
+  perform pg_temp.eq('O3 same plan again is an undo',
+    (select count(*)::text from billing.outbox where account = a and key = 'change_undone'), '2');
+end $$;
+
+-- O4 the free week: ends-soon queued 2 days before, dropped when paid; ended queued after
+do $$
+declare a uuid := pg_temp.acct('o4'); b uuid := pg_temp.acct('o4b');
+begin
+  perform pg_temp.link(a, 'o4', '{990040401}', pg_temp.t(0));
+  perform pg_temp.choose(a, '{990040401}', pg_temp.t(0));
+  perform billing.outbox_sweep(pg_temp.t(4));
+  perform pg_temp.ok('O4 not before day 5', pg_temp.ob(a, 'trial_ends_soon') is null or (pg_temp.ob(a, 'trial_ends_soon')).id is null);
+  perform billing.outbox_sweep(pg_temp.t(5.1));
+  perform pg_temp.eq('O4 ends-soon queued on day 5', pg_temp.guard(a, 'trial_ends_soon', pg_temp.t(5.1)), 'send');
+  perform billing.outbox_sweep(pg_temp.t(5.2));
+  perform pg_temp.eq('O4 queued once', (select count(*)::text from billing.outbox where account = a and key = 'trial_ends_soon'), '1');
+  perform pg_temp.buy(a, 'home', 'month', '{990040401}', pg_temp.t(5.3));
+  perform pg_temp.eq('O4 paid: ends-soon dropped', pg_temp.guard(a, 'trial_ends_soon', pg_temp.t(5.4)), 'week over or paid');
+  -- b: the week runs out unpaid
+  perform pg_temp.link(b, 'o4b', '{990040402}', pg_temp.t(0));
+  perform pg_temp.choose(b, '{990040402}', pg_temp.t(0));
+  perform billing.outbox_sweep(pg_temp.t(7.1));
+  perform pg_temp.eq('O4 week over: ended email', pg_temp.guard(b, 'trial_ended', pg_temp.t(7.1)), 'send');
+  -- reminders switched off: dropped
+  insert into public.email_prefs (user_id, reminders) select user_id, false from billing.accounts where id = b
+  on conflict (user_id) do update set reminders = false;
+  perform pg_temp.eq('O4 reminders off: dropped', pg_temp.guard(b, 'trial_ended', pg_temp.t(7.1)), 'reminders off');
+end $$;
+
+-- O5 history: delete-soon on day 14 after the end, dropped on a restart; deleted email
+do $$
+declare a uuid := pg_temp.acct('o5'); pe timestamptz;
+begin
+  pe := pg_temp.member(a, 'o5', 990040501);
+  perform billing.cancel(a, pg_temp.t(1));
+  perform billing.run(pe + interval '1 hour');
+  perform pg_temp.eq('O5 plan ended email', pg_temp.guard(a, 'plan_ended', pe + interval '2 hours'), 'send');
+  perform billing.outbox_sweep(pe + interval '14 days 1 hour');
+  perform pg_temp.eq('O5 delete-soon on day 14', pg_temp.guard(a, 'history_delete_soon', pe + interval '14 days 2 hours'), 'send');
+  perform pg_temp.eqt('O5 it names the delete date', to_timestamp((pg_temp.ob(a, 'history_delete_soon')).ref::bigint)::text,
+    pe + interval '30 days');
+  perform billing.switch_on(pg_temp.t(0));
+  update billing.plants set history_purged_at = pe + interval '30 days 1 hour' where id = 990040501;
+  perform pg_temp.eq('O5 history deleted email', pg_temp.guard(a, 'history_deleted', pe + interval '30 days 2 hours'), 'send');
+  perform pg_temp.buy(a, 'home', 'month', '{990040501}', pe + interval '30 days 3 hours');
+  perform pg_temp.eq('O5 restarted: delete-soon dropped', pg_temp.guard(a, 'history_delete_soon', pe + interval '30 days 4 hours'), 'expired');
+  perform pg_temp.eq('O5 restarted: deleted email dropped', pg_temp.guard(a, 'history_deleted', pe + interval '30 days 4 hours'), 'plan running again');
+end $$;
+
+-- O6 screen state: names, prices, what letting a plant go does; the quote matches the upgrade bill
+do $$
+declare a uuid := pg_temp.acct('o6'); b uuid := pg_temp.acct('o6b'); s jsonb; q jsonb; inv jsonb;
+begin
+  perform pg_temp.link(a, 'o6', '{990040601,990040602,990040603}', pg_temp.t(0));
+  perform pg_temp.link(b, 'o6b', '{990040601}', pg_temp.t(0));
+  perform pg_temp.buy(b, 'home', 'month', '{990040601}', pg_temp.t(0), 'AUTH_o6b');
+  perform pg_temp.buy(a, 'home', 'month', '{990040601,990040602}', pg_temp.t(0), 'AUTH_o6a');
+  s := billing.screen_state(a, pg_temp.t(1));
+  perform pg_temp.eq('O6 plan name', s->>'plan_name', 'Home');
+  perform pg_temp.eq('O6 fits all three: Family', s->>'fit_all_name', 'Family');
+  perform pg_temp.eq('O6 four prices', jsonb_array_length(s->'prices')::text, '4');
+  perform pg_temp.eq('O6 the launch price kept', (select x->>'amount_minor' from jsonb_array_elements(s->'prices') x
+    where x->>'plan' = 'family' and x->>'interval' = 'month'), '9900');
+  perform pg_temp.eq('O6 shared plant kept by the other account', (select x->>'kept_elsewhere' from jsonb_array_elements(s->'plants') x
+    where (x->>'plant')::bigint = 990040601), 'true');
+  perform pg_temp.eq('O6 own plant not kept elsewhere', (select x->>'kept_elsewhere' from jsonb_array_elements(s->'plants') x
+    where (x->>'plant')::bigint = 990040602), 'false');
+  perform pg_temp.eqt('O6 history after a cancel', s->>'if_cancelled_delete_at', (pg_temp.sub(a)).period_end + interval '30 days');
+  q := billing.quote(a, 'family', 'month', pg_temp.t(5));
+  inv := billing.upgrade(a, 'family', 0, '{990040601,990040602,990040603}', pg_temp.t(5));
+  perform pg_temp.eq('O6 quote is the upgrade bill', q->>'due_minor', inv->>'amount_minor');
+  perform pg_temp.eq('O6 quote is an upgrade', q->>'kind', 'upgrade');
+  perform pg_temp.eq('O6 downgrade quote: nothing to drop while the bill is unpaid', billing.quote(a, 'home', 'month', pg_temp.t(5))->>'drop', '0');
+end $$;
+
+-- O7 claims: first claim wins; the first choice after a claim is not counted
+do $$
+declare a uuid := pg_temp.acct('o7'); b uuid := pg_temp.acct('o7b');
+begin
+  perform billing.claim_plant(a, 990040701, 'Shared', 'sunsynk', pg_temp.t(0));
+  perform pg_temp.fails('O7 second claim refused', format('select billing.claim_plant(%L, 990040701, ''x'', ''sunsynk'', %L)', b, pg_temp.t(0)), 'taken');
+  perform pg_temp.choose(a, '{990040701}', pg_temp.t(0));
+  perform pg_temp.eq('O7 a claim is a route', pg_temp.pp(a, pg_temp.t(0.1), 990040701, 'chosen'), 'true');
+  perform billing.unclaim(a, '{990040701}', pg_temp.t(1));
+  perform pg_temp.ok('O7 unclaimed: seat closed', not exists (select 1 from billing.seats where account = a and closed_at is null));
+end $$;
+
+-- O8 the sender's batch: every queued row either goes or is dropped with a reason
+do $$
+declare w jsonb;
+begin
+  w := billing.outbox_take(1000, pg_temp.t(60));
+  perform pg_temp.ok('O8 a batch is handed out', jsonb_typeof(w) = 'array');
+  perform pg_temp.ok('O8 dropped rows carry a reason', not exists (select 1 from billing.outbox where status = 'dropped' and drop_reason is null));
+  perform pg_temp.ok('O8 every handed-out row has an email and state', not exists (select 1 from jsonb_array_elements(w) x
+    where x->>'email' is null or x->'state' is null));
+  perform pg_temp.ok('O8 not callable by signed-in users',
+    not has_function_privilege('authenticated', 'billing.outbox_take(int, timestamptz)', 'execute')
+    and has_function_privilege('authenticated', 'public.api_account_state()', 'execute')
+    and not has_function_privilege('anon', 'public.api_account_state()', 'execute')
+    and not has_function_privilege('authenticated', 'public.billing_links(text, jsonb)', 'execute'));
 end $$;
 
 -- ---------------------------------------------------------------------------
