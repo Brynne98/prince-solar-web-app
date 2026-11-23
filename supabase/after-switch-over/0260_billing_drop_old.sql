@@ -314,6 +314,15 @@ begin
   return jsonb_build_object('deleted', true, 'plantsRemoved', coalesce(cardinality(orphans), 0));
 end $$;
 
+-- the win-back return, from the new tables only
+create or replace function public.winback_return(p_reference text)
+returns table (user_id uuid, email_id bigint, days int, at timestamptz)
+language sql stable security definer set search_path = public, pg_temp as $$
+  select (w->>'user')::uuid, (w->>'email_id')::bigint, (w->>'days')::int, (w->>'at')::timestamptz
+    from (select billing.winback_return(p_reference) w) x
+   where w is not null
+$$;
+
 -- ---------------------------------------------------------------------------
 -- Old billing emails still queued: never sent (the outbox has their replacements)
 -- ---------------------------------------------------------------------------

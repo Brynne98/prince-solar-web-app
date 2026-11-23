@@ -184,13 +184,17 @@ begin
   end loop;
   -- a booked downgrade: the plants picked to go (plants_to_remove) are marked to drop; one
   -- whose kept plants still do not fit the next plan is flagged for support to pick
+  -- only where the copied plan has a smaller one booked (a plan or fewer extra places): an old
+  -- removal list on an account with nothing booked is not a drop
   update billing.seats se set drop_at_period_end = true
     from private.billing b join billing.accounts a on a.user_id = b.user_id
-   where se.account = a.id and se.closed_at is null and se.plant = any (b.plants_to_remove);
+    join billing.subscriptions s on s.account = a.id and s.status in ('active', 'past_due')
+   where se.account = a.id and se.closed_at is null and se.plant = any (b.plants_to_remove)
+     and (s.next_price is not null or s.next_extra_places is not null);
   for r in select s.account, s.id from billing.subscriptions s
-             join billing.prices np on np.id = s.next_price
-             join billing.plans npl on npl.code = np.plan
-            where s.status in ('active', 'past_due')
+             left join billing.prices np on np.id = s.next_price
+             join billing.plans npl on npl.code = coalesce(np.plan, s.plan)
+            where s.status in ('active', 'past_due') and (s.next_price is not null or s.next_extra_places is not null)
               and (select count(*) from billing.seats se where se.account = s.account and se.closed_at is null
                       and not se.drop_at_period_end) > npl.places + coalesce(s.next_extra_places, s.extra_places) loop
     perform billing.log_event(r.account, now(), 'copy', 'copy_needs_review', null, jsonb_build_object('sub', r.id),

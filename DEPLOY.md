@@ -239,7 +239,8 @@ frontend second, in this order:
    switch: `supabase functions deploy poll recover sync-plant-energy job-check link-sunsynk claim-share notify`.
    link-sunsynk and claim-share also write each new login and claim into the new tables;
    notify sends `billing.outbox` only after the switch.
-3. Turn the old billing job off. Settle or refund any open old references first.
+3. Turn the old billing job off (`select cron.unschedule('billing-run')`). Settle or refund any
+   open old references first. Step 6 turns it back on for the new billing function.
 4. Copy today's accounts, once: `supabase db query --linked "select billing.copy_from_old()"`.
    A rerun keeps each account's id and clears only the events the copy wrote, so it is safe
    until the first payment lands in `billing.invoices`; after that it refuses. Saved cards
@@ -250,9 +251,11 @@ frontend second, in this order:
    `supabase functions deploy billing`, then
    `supabase db query --linked "select billing.switch_on()"`.
    The billing function reads and writes the new tables (through `public.billing_v2`).
-   `switch_on` turns reading, deleting and history fetches over to the new state, turns the
-   `unpaid-delete` and `plant-wipe` jobs off, and schedules `billing-delete` (every 5 minutes,
-   `billing.delete_due()`) and `billing-history` (every minute, `recover?queue=1`). From then
+   `switch_on` refuses while `billing.accounts` is empty (step 4 not run). It turns reading,
+   deleting and history fetches over to the new state, turns the `unpaid-delete` and
+   `plant-wipe` jobs off, schedules `billing-delete` (every 5 minutes, `billing.delete_due()`)
+   and `billing-history` (every minute, `recover?queue=1`), and turns `billing-run` back on
+   (stopped in step 3), now calling the new billing function. From then
    on the old billing, free-week and history emails are not queued (0247
    `email_queue_old_billing`); notify sends their replacements from `billing.outbox`, each
    checked against the account's state when it goes. To check it:

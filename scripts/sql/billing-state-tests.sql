@@ -472,6 +472,7 @@ do $$
 declare
   u1 uuid := gen_random_uuid(); u2 uuid := gen_random_uuid(); lg uuid := gen_random_uuid(); sec uuid := gen_random_uuid();
   u3 uuid := gen_random_uuid(); lg3 uuid := gen_random_uuid();
+  u4 uuid := gen_random_uuid(); lg4 uuid := gen_random_uuid(); u5 uuid := gen_random_uuid(); lg5 uuid := gen_random_uuid();
   a1 uuid; a2 uuid; a3 uuid; r jsonb;
 begin
   set local session_replication_role = replica;   -- old tables' triggers off while making rows
@@ -502,6 +503,22 @@ begin
                                plants_to_remove, created_at, card)
   values (u3, 'family', 'monthly', 20, '2026-11-20', 'past_due', '2026-11-20', 'home', '{990001413}', '2026-10-01',
           '{"authorization_code":"AUTH_copy3","last4":"0003","exp_month":"12","exp_year":"2030","reusable":true}');
+  -- phase 3 fix 28: u4 an old removal list with nothing booked; u5 fewer extra places booked, too many plants
+  insert into auth.users (id, email, created_at) values (u4, 'copy4@state.test', '2026-10-01'), (u5, 'copy5@state.test', '2026-10-01');
+  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values
+    (lg4, u4, 'copy4', 'active', 'login'), (lg5, u5, 'copy5', 'active', 'login');
+  insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused) values
+    (990001421, u4, lg4, 'A', false), (990001422, u4, lg4, 'B', false);
+  insert into private.plant_picks (user_id, plant_id, held, picked_at) values
+    (u4, 990001421, true, '2026-10-01'), (u4, 990001422, true, '2026-10-01');
+  insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, plants_to_remove, created_at)
+  values (u4, 'home', 'monthly', 20, '2026-12-20', 'active', '{990001422}', '2026-10-01');
+  insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused)
+  select 990001430 + x, u5, lg5, 'P' || x, false from generate_series(1, 6) x;
+  insert into private.plant_picks (user_id, plant_id, held, picked_at)
+  select u5, 990001430 + x, true, '2026-10-01' from generate_series(1, 6) x;
+  insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, extra_plants, next_extra_plants, created_at)
+  values (u5, 'family', 'monthly', 20, '2026-12-20', 'active', 1, 0, '2026-10-01');
   set local session_replication_role = origin;
 
   insert into billing.refunds (reference, reason, status, created_at, updated_at) values ('S14-REF', 'manual', 'processed', now(), now());
@@ -530,6 +547,10 @@ begin
   perform pg_temp.ok('S14 the plant picked to go is marked to drop', (select array_agg(plant) = '{990001413}' from billing.seats
     where account = a3 and drop_at_period_end));
   perform pg_temp.ok('S14 kept plants fit Home: no review', not exists (select 1 from billing.account_events where account = a3));
+  perform pg_temp.ok('S14 removal list with nothing booked: no plant marked to drop', not exists (select 1 from billing.seats se
+    join billing.accounts a on a.id = se.account where a.user_id = u4 and se.drop_at_period_end));
+  perform pg_temp.ok('S14 fewer extra places booked, too many plants: flagged for review', exists (select 1 from billing.account_events e
+    join billing.accounts a on a.id = e.account where a.user_id = u5 and e.kind = 'copy_needs_review'));
   delete from billing.payment_attempts where gateway_response is distinct from 'copied: failed before the switch-over';
   update private.billing set plants_to_remove = '{}' where user_id = u3;
   a1 := (select id from billing.accounts where user_id = u1);
@@ -555,7 +576,7 @@ begin
   perform pg_temp.eq('S14 comped: grant of 5', pg_temp.st(a2, '2026-11-22 12:00+02', 'places'), '5');
   perform pg_temp.eq('S14 shared plant read', pg_temp.pp(a2, '2026-11-22 12:00+02', 990001404, 'read_now'), 'true');
   r := billing.copy_from_old();
-  perform pg_temp.eq('S14 rerun with the seed tries is allowed; downgrade with nothing to drop flagged', r->>'needs_review', '1');
+  perform pg_temp.eq('S14 rerun with the seed tries is allowed; the two over their next places flagged', r->>'needs_review', '2');
   perform pg_temp.ok('S14 second run copies fresh, no duplicates',
     (select count(*) = 1 from billing.seats s join billing.accounts a on a.id = s.account where a.user_id = u1)
     and (select count(*) = 1 from billing.subscriptions s join billing.accounts a on a.id = s.account where a.user_id = u1));
@@ -1663,7 +1684,7 @@ begin
     jsonb_build_array(jsonb_build_object('ts', extract(epoch from date_trunc('minute', pg_temp.t(39.5)))::bigint, 'pv_w', 7)),
     'invhistory', pg_temp.t(40));
   perform pg_temp.ok('R3 new readings written', pg_temp.has_agg(990030301));
-  perform pg_temp.eq('R3 new readings clear the purge', (select history_purged_at::text from billing.plants where id = 990030301), null);
+  perform pg_temp.eq('R3 the restart cleared the purge (phase 3 fix 20: not the readings)', (select history_purged_at::text from billing.plants where id = 990030301), null);
   perform pg_temp.eq('R3 a whole past day is missing for the history queue',
     (select count(*)::text from public.q_missing_minutes_day(990030301, (now() at time zone 'Africa/Johannesburg')::date - 3)), '1440');
 end $$;
@@ -1700,9 +1721,16 @@ begin
   perform pg_temp.ok('R4 started at once', f.status = 'running' and f.started_at = pg_temp.t(7.4) and f.days_total = 60);
   perform pg_temp.ok('R4 handed out with its login and version', exists (select 1 from jsonb_array_elements(w) x
     where (x->>'id')::bigint = f.id and x->'login'->>'id' = l::text and (x->>'version')::bigint = pg_temp.ver(990030408)));
-  s := billing.history_step(f.id, f.day_next, false, false, pg_temp.t(7.4) + interval '5 seconds');
-  perform pg_temp.eqt('R4 next day waits until 20 s after the start', s->>'next_step_at', pg_temp.t(7.4) + interval '20 seconds');
+  s := billing.history_step(f.id, f.day_next, false, false, pg_temp.t(7.4) + interval '5 seconds', f.claim);
+  -- 60 starts on 59 gaps: 1200 s / 59 after the start (phase 3 fix 17)
+  perform pg_temp.eqt('R4 next day waits a 59th of the target', s->>'next_step_at', pg_temp.t(7.4) + make_interval(secs => 1200.0 / 59));
   perform pg_temp.ok('R4 go on with the day before', (s->>'go')::boolean and (s->>'day')::date = f.day_next - 1);
+  -- the earliest finish: the last day starts no earlier than the target after the start
+  update billing.history_fetches set day_next = day_floor + 1, claimed_until = pg_temp.t(7.5), claim = gen_random_uuid()
+   where id = f.id returning * into f;
+  s := billing.history_step(f.id, f.day_next, false, false, pg_temp.t(7.4) + interval '30 seconds', f.claim);
+  perform pg_temp.ok('R4 the last day starts at the target or later (fix 17)',
+    (s->>'next_step_at')::timestamptz >= f.started_at + make_interval(secs => f.target_s));
   -- the cap: eleven fetches in a day
   for i in 1..11 loop
     perform pg_temp.choose(d, array[990030401 + (i % 2)]::bigint[], pg_temp.t(20 + i * 0.01));
@@ -1737,17 +1765,19 @@ begin
   perform pg_temp.eq('R5 the first account waits', (pg_temp.fetch_row(e1, 990030502)).status, 'queued');
 
   f := pg_temp.fetch_row(e2, 990030503);
-  s := billing.history_step(f.id, f.day_next, false, true, pg_temp.t(0.03));
+  s := billing.history_step(f.id, f.day_next, false, true, pg_temp.t(0.03), f.claim);
   perform pg_temp.eq('R5 429: backed off a minute', s->>'backoff_s', '60');
   w := billing.history_take(pg_temp.t(0.03) + interval '30 seconds');
   perform pg_temp.ok('R5 nothing handed out on a backed-off login', not exists (select 1 from jsonb_array_elements(w) x
     where (x->>'id')::bigint = f.id));
   w := billing.history_take(pg_temp.t(0.03) + interval '61 seconds');
-  s := billing.history_step(f.id, f.day_next, false, true, pg_temp.t(0.03) + interval '62 seconds');
+  f := pg_temp.fetch_row(e2, 990030503);
+  s := billing.history_step(f.id, f.day_next, false, true, pg_temp.t(0.03) + interval '62 seconds', f.claim);
   perform pg_temp.eq('R5 429 again: twice as long', s->>'backoff_s', '120');
   -- the walk ends at its floor
-  update billing.history_fetches set day_next = day_floor, claimed_until = null where id = f.id;
-  s := billing.history_step(f.id, f.day_floor, false, false, pg_temp.t(0.1));
+  update billing.history_fetches set day_next = day_floor, claimed_until = null, claim = gen_random_uuid() where id = f.id
+  returning * into f;
+  s := billing.history_step(f.id, f.day_floor, false, false, pg_temp.t(0.1), f.claim);
   perform pg_temp.eq('R5 last day walked: done', (pg_temp.fetch_row(e2, 990030503)).status, 'done');
   perform pg_temp.ok('R5 a good answer clears the back-off', (select backoff_s = 0 from billing.history_lanes where lane = sh));
   w := billing.history_take(pg_temp.t(0.11));
@@ -1805,6 +1835,125 @@ begin
     and not has_function_privilege('anon', 'public.poll_commit_v2(jsonb, uuid, bigint, jsonb, jsonb, jsonb, jsonb, jsonb, text, bigint, timestamptz)', 'execute')
     and not has_function_privilege('authenticated', 'billing.delete_due(timestamptz)', 'execute')
     and has_function_privilege('service_role', 'public.billing_jobs(text, jsonb)', 'execute'));
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- RQ phase 3 review fixes (history queue, deleting). Fix 17 is in R4.
+-- ---------------------------------------------------------------------------
+do $$
+declare a uuid := pg_temp.acct('rq14'); b uuid := pg_temp.acct('rq15'); c1 uuid := pg_temp.acct('rq16a');
+        c2 uuid := pg_temp.acct('rq16b'); d uuid := pg_temp.acct('rq21'); e uuid := pg_temp.acct('rq22');
+        g uuid := pg_temp.acct('rq23'); h uuid := pg_temp.acct('rq24');
+        sh uuid := pg_temp.share_login(); l uuid; w jsonb; f billing.history_fetches; s jsonb; old uuid; n int;
+begin
+  -- 14: only the run holding the claim moves the fetch; a run whose claim ran out is told so
+  l := pg_temp.link(a, 'rq14', '{990061401}', pg_temp.t(30)); perform pg_temp.stored(l);
+  perform pg_temp.pay(a, 'home', 'month', pg_temp.t(30));
+  perform pg_temp.choose(a, '{990061401}', pg_temp.t(30));
+  w := billing.history_take(pg_temp.t(30.01));
+  f := pg_temp.fetch_row(a, 990061401);
+  perform pg_temp.ok('RQ14 handed out with its claim', exists (select 1 from jsonb_array_elements(w) x
+    where (x->>'id')::bigint = f.id and (x->>'claim')::uuid = f.claim));
+  perform pg_temp.eq('RQ14 a step with another claim is refused',
+    billing.history_step(f.id, f.day_next, false, false, pg_temp.t(30.01), gen_random_uuid())->>'status', 'not_yours');
+  perform pg_temp.ok('RQ14 the holder renews its claim', billing.history_renew(f.id, f.claim, pg_temp.t(30.01) + interval '60 seconds'));
+  old := f.claim;
+  w := billing.history_take(pg_temp.t(30.01) + interval '200 seconds');   -- the claim ran out: handed out again
+  f := pg_temp.fetch_row(a, 990061401);
+  perform pg_temp.ok('RQ14 a new claim after it ran out', f.claim is not null and f.claim <> old);
+  perform pg_temp.eq('RQ14 the old run cannot release it',
+    billing.history_step(f.id, null, false, false, pg_temp.t(30.01) + interval '201 seconds', old)->>'status', 'not_yours');
+  perform pg_temp.ok('RQ14 ... nor renew it', billing.history_renew(f.id, old, pg_temp.t(30.01) + interval '202 seconds') is null);
+
+  -- 15: the share login breaks while a claimed plant's fetch runs: back to the queue, days kept
+  update billing.history_fetches set status = 'done', finished_at = pg_temp.t(31) where lane = sh and status = 'running';
+  insert into billing.plants (id, brand, external_id) values (990061501, 'sunsynk', '990061501');
+  insert into billing.plant_claims (plant, account, claimed_at) values (990061501, b, pg_temp.t(31));
+  perform pg_temp.pay(b, 'home', 'month', pg_temp.t(31));
+  perform pg_temp.choose(b, '{990061501}', pg_temp.t(31));
+  w := billing.history_take(pg_temp.t(31.01));
+  f := pg_temp.fetch_row(b, 990061501);
+  perform pg_temp.eq('RQ15 running on the share login', f.status || ':' || (f.lane = sh)::text, 'running:true');
+  update billing.history_fetches set day_next = day_next - 5 where id = f.id;
+  update private.sunsynk_accounts set status = 'needs_relink' where id = sh;
+  w := billing.history_take(pg_temp.t(31.02));
+  perform pg_temp.eq('RQ15 login broke mid-fetch: back to the queue', (pg_temp.fetch_row(b, 990061501)).status, 'queued');
+  perform pg_temp.ok('RQ15 ... its days kept', (pg_temp.fetch_row(b, 990061501)).day_next = f.day_next - 5);
+  update private.sunsynk_accounts set status = 'active' where id = sh;
+  w := billing.history_take(pg_temp.t(31.03));
+  perform pg_temp.ok('RQ15 login back: carries on from where it was', (pg_temp.fetch_row(b, 990061501)).status = 'running'
+    and (pg_temp.fetch_row(b, 990061501)).day_next = f.day_next - 5);
+  update billing.history_fetches set status = 'done', finished_at = pg_temp.t(31.04) where account = b and status = 'running';
+
+  -- 16: a slowed fetch waiting between days does not hold the shared login
+  insert into billing.plants (id, brand, external_id) values (990061601, 'sunsynk', '990061601'), (990061602, 'sunsynk', '990061602');
+  insert into billing.plant_claims (plant, account, claimed_at) values (990061601, c1, pg_temp.t(32)), (990061602, c2, pg_temp.t(32));
+  perform pg_temp.pay(c1, 'home', 'month', pg_temp.t(32));
+  perform pg_temp.pay(c2, 'home', 'month', pg_temp.t(32));
+  perform pg_temp.choose(c1, '{990061601}', pg_temp.t(32));
+  w := billing.history_take(pg_temp.t(32.01));
+  f := pg_temp.fetch_row(c1, 990061601);
+  update billing.history_fetches set target_s = 86400 where id = f.id;       -- A's 10th switch: a day long
+  s := billing.history_step(f.id, f.day_next, false, false, pg_temp.t(32.01) + interval '10 seconds', f.claim);
+  perform pg_temp.ok('RQ16 the slowed fetch waits for its next day', (s->>'next_step_at')::timestamptz > pg_temp.t(32.02));
+  perform pg_temp.choose(c2, '{990061602}', pg_temp.t(32.02));
+  w := billing.history_take(pg_temp.t(32.02) + interval '1 second');
+  perform pg_temp.ok('RQ16 another account''s first fetch starts on the same login at once',
+    exists (select 1 from jsonb_array_elements(w) x where (x->>'plant')::bigint = 990061602));
+
+  -- 18: the plants the queue is fetching, for the old recovery schedule to leave alone
+  perform pg_temp.ok('RQ18 fetching lists a queued or running plant', public.billing_jobs('fetching') @> '[990061602]');
+
+  -- 20: readings never clear a delete; only a seat opening does
+  perform pg_temp.ok('RQ20 no write path touches the plant row', to_regprocedure('billing.readings_arrived(bigint[])') is null);
+
+  -- 21: the full delete clears five-minute history too
+  l := pg_temp.link(d, 'rq21', '{990062101}', pg_temp.t(33));
+  insert into public.readings_5m (plant_id, sn, ts) values (990062101, 'SN_rq21', extract(epoch from pg_temp.t(33))::bigint);
+  perform billing.delete_due(pg_temp.t(33.1));
+  perform pg_temp.ok('RQ21 a plant with only 5-minute rows: deleted', not exists (select 1 from public.readings_5m where plant_id = 990062101));
+  perform pg_temp.ok('RQ21 ... and marked', (select history_purged_at is not null from billing.plants where id = 990062101));
+
+  -- 22: a seat chosen after the job started keeps the plant
+  l := pg_temp.link(e, 'rq22', '{990062201}', pg_temp.t(34)); perform pg_temp.stored(l);
+  perform pg_temp.pay(e, 'home', 'month', pg_temp.t(34));
+  perform pg_temp.agg(990062201, pg_temp.t(34));
+  insert into billing.seats (account, plant, chosen_at) values (e, 990062201, pg_temp.t(34.5));   -- chosen after the job's start
+  perform billing.delete_due(pg_temp.t(34.2));
+  perform pg_temp.ok('RQ22 chosen after the job started: kept', pg_temp.has_agg(990062201));
+
+  -- 23: a switch deletes at once, so switching straight back finds it gone
+  l := pg_temp.link(g, 'rq23', '{990062301,990062302}', pg_temp.t(35)); perform pg_temp.stored(l);
+  perform pg_temp.pay(g, 'home', 'month', pg_temp.t(35));
+  perform pg_temp.choose(g, '{990062301}', pg_temp.t(35));
+  perform pg_temp.agg(990062301, pg_temp.t(35));
+  perform pg_temp.choose(g, '{990062302}', pg_temp.t(35.1));
+  perform pg_temp.ok('RQ23 switched out: deleted in the same step', not pg_temp.has_agg(990062301));
+  perform pg_temp.choose(g, '{990062301}', pg_temp.t(35.2));
+  perform pg_temp.ok('RQ23 switched straight back: still gone', not pg_temp.has_agg(990062301)
+    and (select history_purged_at is null from billing.plants where id = 990062301));
+
+  -- 24: history with no open seat for over an hour: alert
+  l := pg_temp.link(h, 'rq24', '{990062401}', pg_temp.t(36));
+  perform pg_temp.pay(h, 'home', 'month', pg_temp.t(36));
+  perform pg_temp.choose(h, '{990062401}', pg_temp.t(36));
+  perform pg_temp.agg(990062401, pg_temp.t(36));
+  perform billing.remove_login(h, l, pg_temp.t(36.1));
+  perform pg_temp.ok('RQ24 not within the hour', not pg_temp.alert('history_unprotected', '990062401', pg_temp.t(36.1) + interval '30 minutes'));
+  perform pg_temp.ok('RQ24 history with no seat for over an hour: alert',
+    pg_temp.alert('history_unprotected', '990062401', pg_temp.t(36.1) + interval '2 hours'));
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- SW phase 3 review fixes (switch-over)
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  perform pg_temp.fails('SW27 switch_on refuses an empty copy', 'delete from billing.accounts; select billing.switch_on()', 'run billing.copy_from_old');
+  perform pg_temp.ok('SW25 switch_on schedules the daily billing run', (select prosrc ~ 'billing-run.*billing/run' from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'billing' and p.proname = 'switch_on'));
+  perform pg_temp.ok('SW26 the old lookup stays until the switch', (select prosrc ~ 'billing_charges' and prosrc ~ 'is_live'
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'winback_return'));
 end $$;
 
 -- ---------------------------------------------------------------------------

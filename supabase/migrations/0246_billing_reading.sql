@@ -209,13 +209,6 @@ begin
   end if;
 end $$;
 
--- New readings: the plant has history again.
-create function billing.readings_arrived(p_plants bigint[])
-returns void language sql set search_path = billing, pg_temp as $$
-  update billing.plants set history_purged_at = null
-   where id = any (p_plants) and history_purged_at is not null
-$$;
-
 create function billing.only_plants(p_rows jsonb, p_plants bigint[])
 returns jsonb language sql immutable set search_path = pg_temp as $$
   select coalesce(jsonb_agg(e), '[]'::jsonb) from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) e
@@ -250,7 +243,6 @@ begin
                             billing.only_plants(p_agg, ok), billing.only_plants(p_meta, ok), p_inverters,
                             p_access, p_expires);
   perform set_config('billing.guarded', 'off', true);
-  perform billing.readings_arrived(array(select jsonb_array_elements_text(coalesce(out->'plants', '[]'))::bigint));
   return out || jsonb_build_object('refused', to_jsonb(array(
     select k::bigint from jsonb_object_keys(coalesce(p_versions, '{}')) k where k::bigint <> all (ok) order by 1)));
 end $$;
@@ -264,7 +256,6 @@ begin
   perform set_config('billing.guarded', 'on', true);
   n := public.q_insert_recovered(p_plant, p_rows, p_source);
   perform set_config('billing.guarded', 'off', true);
-  if n > 0 then perform billing.readings_arrived(array[p_plant]); end if;
   return n;
 end $$;
 
@@ -277,7 +268,6 @@ begin
   perform set_config('billing.guarded', 'on', true);
   n := public.q_insert_inverter_history(p_plant, p_sn, p_rows);
   perform set_config('billing.guarded', 'off', true);
-  if n > 0 then perform billing.readings_arrived(array[p_plant]); end if;
   return n;
 end $$;
 
@@ -440,6 +430,27 @@ returns boolean language sql stable set search_path = billing, pg_temp as $$
                           and s.closed_at is null)))
 $$;
 
+-- Deletes one plant's stored history now if no account keeps it (no protection, no running
+-- retention, no payment on its way) and records the delete. The caller holds the plant lock.
+-- Every table is cleared whatever it holds; the counts say what went.
+create function billing.purge_now(p_plant bigint, p_at timestamptz)
+returns jsonb language plpgsql set search_path = billing, pg_temp as $$
+declare ps jsonb; n jsonb;
+begin
+  if not billing.is_live() then return null; end if;
+  ps := billing.plant_state(p_plant, p_at);
+  if ps->>'delete_at' is null or (ps->>'delete_at')::timestamptz > p_at or billing.payment_hold(p_plant, p_at) then
+    return null;
+  end if;
+  n := private.plant_readings_delete(p_plant);
+  update public.plant_config set backfill_next = null, backfill_until = null, backfill_tries = 0, temp_next = null
+   where plant_id = p_plant;
+  update billing.plants set history_purged_at = p_at, version = version + 1 where id = p_plant;
+  update billing.history_fetches set status = 'dropped', drop_reason = 'deleted', finished_at = p_at, claimed_until = null
+   where plant = p_plant and status in ('queued', 'running');
+  return n;
+end $$;
+
 create function billing.delete_due(p_at timestamptz default now())
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
 declare
@@ -449,6 +460,7 @@ declare
   emptied bigint[] := '{}';
   held bigint[] := '{}';
   busy bigint[] := '{}';
+  counts jsonb;
   out jsonb;
 begin
   if not billing.is_live() then return jsonb_build_object('live', false); end if;
@@ -459,20 +471,17 @@ begin
     -- a plant being written now is left for the next run
     perform 1 from billing.plants where id = p.id for update skip locked;
     if not found then busy := busy || p.id; continue; end if;
-    ps := billing.plant_state(p.id, p_at);
-    continue when ps->>'delete_at' is null or (ps->>'delete_at')::timestamptz > p_at;
+    -- the clock moved while the job ran: checked again now, and a seat opened since the job
+    -- started keeps the plant
+    ps := billing.plant_state(p.id, greatest(p_at, clock_timestamp()));
+    continue when ps->>'delete_at' is null;
+    continue when exists (select 1 from billing.seats s where s.plant = p.id and s.closed_at is null and s.chosen_at > p_at);
     if billing.payment_hold(p.id, p_at) then held := held || p.id; continue; end if;
-    if billing.has_history(p.id) then
-      perform private.plant_readings_delete(p.id);
-      update public.plant_config set backfill_next = null, backfill_until = null, backfill_tries = 0, temp_next = null
-       where plant_id = p.id;
-      deleted := deleted || p.id;
-    else
-      emptied := emptied || p.id;              -- nothing stored: marked, so later sweeps skip it
-    end if;
-    update billing.plants set history_purged_at = p_at, version = version + 1 where id = p.id;
-    update billing.history_fetches set status = 'dropped', drop_reason = 'deleted', finished_at = p_at, claimed_until = null
-     where plant = p.id and status in ('queued', 'running');
+    -- the full routine every time; what went is read from its counts
+    counts := billing.purge_now(p.id, p_at);
+    continue when counts is null;
+    if exists (select 1 from jsonb_each_text(counts) c where c.value::bigint > 0) then deleted := deleted || p.id;
+    else emptied := emptied || p.id; end if;
   end loop;
   out := jsonb_build_object('deleted', to_jsonb(deleted), 'empty', cardinality(emptied),
                             'held', to_jsonb(held), 'busy', to_jsonb(busy));
@@ -501,11 +510,14 @@ create table billing.history_fetches (
   started_at    timestamptz,
   next_step_at  timestamptz,
   claimed_until timestamptz,
+  claim         uuid,                            -- the run holding it: every step and release names it
   finished_at   timestamptz,
   check ((status = 'dropped') = (drop_reason is not null))
 );
 create unique index history_fetches_one_open on billing.history_fetches (account, plant) where status in ('queued', 'running');
-create unique index history_fetches_one_per_lane on billing.history_fetches (lane) where status = 'running';
+-- More than one fetch may be running on a login (a slowed fetch waits between days without
+-- holding it); history_take hands out at most one step per login at a time.
+create index history_fetches_lane on billing.history_fetches (lane) where status = 'running';
 create index history_fetches_open on billing.history_fetches (status) where status in ('queued', 'running');
 
 create table billing.history_lanes (
@@ -564,6 +576,13 @@ begin
    where id = any (p_want || had) and not (id = any (p_want) and id = any (had));
   update billing.history_fetches set status = 'dropped', drop_reason = 'switched_out', finished_at = p_at, claimed_until = null
    where account = p_account and status in ('queued', 'running') and plant = any (had) and plant <> all (p_want);
+  -- a seat opening (or a plan restarting) on a deleted plant: it gathers history again. The
+  -- caller holds the plant locks, so no write path has to touch the row.
+  update billing.plants set history_purged_at = null
+   where id = any (p_want) and history_purged_at is not null;
+  -- a plant switched out that no account keeps is deleted now, under its lock, so the
+  -- pop-up's "deleted now" holds even if the owner switches straight back
+  perform billing.purge_now(x, p_at) from unnest(had) x where x <> all (p_want);
   perform billing.request_history(p_account, array(select x from unnest(p_want) x where x <> all (had)), p_at, p_counts);
 end $$;
 
@@ -623,40 +642,57 @@ declare
 begin
   if not billing.is_live() then return '[]'::jsonb; end if;
   if not pg_try_advisory_xact_lock(hashtext('billing.history_take')) then return '[]'::jsonb; end if;
-  update billing.history_fetches h set status = 'dropped', drop_reason = 'switched_out', finished_at = p_at, claimed_until = null
+  update billing.history_fetches h set status = 'dropped', drop_reason = 'switched_out', finished_at = p_at, claimed_until = null, claim = null
    where h.status in ('queued', 'running') and h.requested_at <= p_at and not billing.holds_plant(h.account, h.plant, p_at);
+  -- a running fetch whose route changed (its login broke or no longer sees the plant, a claim
+  -- went) or that is not read now (over the places): back to the queue, its days kept
+  update billing.history_fetches h set status = 'queued', lane = null, claimed_until = null, claim = null
+   where h.status = 'running' and h.requested_at <= p_at
+     and (billing.fetch_lane(h.account, h.plant) is distinct from h.lane or not billing.reads_plant(h.account, h.plant, p_at));
 
-  -- a free lane starts its next request; on a shared lane the account whose last
+  -- a login starts its next request when nothing on it has a step due or under way (a slowed
+  -- fetch waiting for its next day does not hold it); on a shared login the account whose last
   -- fetch there started longest ago (or never) goes first
   for q in
     select h.id, h.plant, x.lane from billing.history_fetches h
      cross join lateral (select billing.fetch_lane(h.account, h.plant) lane) x
      where h.status = 'queued' and h.requested_at <= p_at and x.lane is not null
+       and billing.reads_plant(h.account, h.plant, p_at)
      order by x.lane,
               (select max(o.started_at) from billing.history_fetches o where o.lane = x.lane and o.account = h.account) nulls first,
               h.requested_at, h.id
   loop
-    continue when exists (select 1 from billing.history_fetches r where r.lane = q.lane and r.status = 'running')
+    continue when exists (select 1 from billing.history_fetches r where r.lane = q.lane and r.status = 'running'
+                             and (r.next_step_at <= p_at or r.claimed_until > p_at))
                or exists (select 1 from billing.history_lanes hl where hl.lane = q.lane and hl.backoff_until > p_at);
     tz := coalesce((select c.timezone from public.plant_config c where c.plant_id = q.plant), 'Africa/Johannesburg');
     today := (p_at at time zone tz)::date;
+    -- a fetch put back keeps its walk: started_at, floor and the next day stay
     update billing.history_fetches
-       set status = 'running', lane = q.lane, started_at = p_at, next_step_at = p_at,
-           day_floor = today - 60, day_next = today - 1, days_total = 60, tries = 0
+       set status = 'running', lane = q.lane, started_at = coalesce(started_at, p_at), next_step_at = p_at,
+           day_floor = coalesce(day_floor, today - 60), day_next = coalesce(day_next, today - 1),
+           days_total = coalesce(days_total, 60), tries = 0
      where id = q.id;
   end loop;
 
-  with w as (
-    update billing.history_fetches h
-       set claimed_until = p_at + interval '90 seconds',
-           version = (select bp.version from billing.plants bp where bp.id = h.plant)
+  -- one step per login at a time: its earliest due fetch
+  with due as (
+    select distinct on (h.lane) h.id from billing.history_fetches h
      where h.status = 'running' and h.next_step_at <= p_at and (h.claimed_until is null or h.claimed_until <= p_at)
+       and not exists (select 1 from billing.history_fetches o where o.lane = h.lane and o.status = 'running'
+                          and o.id <> h.id and o.claimed_until > p_at)
        and not exists (select 1 from billing.history_lanes hl where hl.lane = h.lane and hl.backoff_until > p_at)
        and billing.reads_plant(h.account, h.plant, p_at)
        and exists (select 1 from private.sunsynk_accounts sa where sa.id = h.lane and sa.status = 'active')
+     order by h.lane, h.next_step_at, h.id),
+  w as (
+    update billing.history_fetches h
+       set claimed_until = p_at + interval '90 seconds', claim = gen_random_uuid(),
+           version = (select bp.version from billing.plants bp where bp.id = h.plant)
+     where h.id in (select id from due)
     returning h.*)
   select coalesce(jsonb_agg(jsonb_build_object(
-           'id', w.id, 'plant', w.plant, 'account', w.account, 'day', w.day_next, 'floor', w.day_floor,
+           'id', w.id, 'claim', w.claim, 'plant', w.plant, 'account', w.account, 'day', w.day_next, 'floor', w.day_floor,
            'target_s', w.target_s, 'version', w.version,
            'timezone', coalesce(c.timezone, 'Africa/Johannesburg'),
            'login', jsonb_build_object('id', sa.id, 'user_id', sa.user_id, 'sunsynk_username', sa.sunsynk_username,
@@ -669,12 +705,22 @@ begin
   return out;
 end $$;
 
+-- A run still on its fetch's day: the claim lasts 90 seconds more. False when the claim is
+-- not this run's any more (it ran out and the fetch went to another run, or was dropped).
+create function billing.history_renew(p_id bigint, p_claim uuid, p_at timestamptz default now())
+returns boolean language sql security definer set search_path = billing, pg_temp as $$
+  update billing.history_fetches set claimed_until = p_at + interval '90 seconds'
+   where id = p_id and status = 'running' and claim = p_claim
+  returning true
+$$;
+
 -- After each day of a running fetch. p_day: the day just walked (null: the run
 -- stops early, the fetch is free for the next run). p_failed: the day did not
 -- answer (tried 3 times, then left). p_throttled: the cloud answered 429.
 -- Returns {go, day, next_step_at}: go = this run may walk `day` at next_step_at.
 create function billing.history_step(p_id bigint, p_day date, p_failed boolean default false,
-                                     p_throttled boolean default false, p_at timestamptz default now())
+                                     p_throttled boolean default false, p_at timestamptz default now(),
+                                     p_claim uuid default null)
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
 declare
   h billing.history_fetches;
@@ -686,30 +732,36 @@ begin
   if not found or h.status <> 'running' then
     return jsonb_build_object('go', false, 'status', h.status);
   end if;
+  -- only the run that holds the claim moves or releases the fetch
+  if h.claim is distinct from p_claim then
+    return jsonb_build_object('go', false, 'status', 'not_yours');
+  end if;
   if not billing.holds_plant(h.account, h.plant, p_at) then
     update billing.history_fetches set status = 'dropped', drop_reason = 'switched_out', finished_at = p_at, claimed_until = null
      where id = p_id;
     return jsonb_build_object('go', false, 'status', 'dropped');
   end if;
-  if not billing.reads_plant(h.account, h.plant, p_at) then   -- broken login: waits for the fix
-    update billing.history_fetches set claimed_until = null where id = p_id;
-    return jsonb_build_object('go', false, 'status', 'waiting');
+  -- not read now, or its route changed (the login broke or lost the plant): back to the
+  -- queue with its days kept; history_take starts it again on a working route
+  if not billing.reads_plant(h.account, h.plant, p_at) or billing.fetch_lane(h.account, h.plant) is distinct from h.lane then
+    update billing.history_fetches set status = 'queued', lane = null, claimed_until = null, claim = null where id = p_id;
+    return jsonb_build_object('go', false, 'status', 'requeued');
   end if;
   if p_throttled then
     insert into billing.history_lanes as hl (lane, backoff_s, backoff_until) values (h.lane, 60, p_at + interval '60 seconds')
     on conflict (lane) do update set backoff_s = least(greatest(hl.backoff_s * 2, 60), 3600),
                                      backoff_until = p_at + make_interval(secs => least(greatest(hl.backoff_s * 2, 60), 3600))
     returning backoff_s into wait_s;
-    update billing.history_fetches set claimed_until = null, next_step_at = p_at + make_interval(secs => wait_s) where id = p_id;
+    update billing.history_fetches set claimed_until = null, claim = null, next_step_at = p_at + make_interval(secs => wait_s) where id = p_id;
     return jsonb_build_object('go', false, 'backoff_s', wait_s);
   end if;
   if p_day is null or p_day is distinct from h.day_next then
-    update billing.history_fetches set claimed_until = null where id = p_id;
+    update billing.history_fetches set claimed_until = null, claim = null where id = p_id;
     return jsonb_build_object('go', false);
   end if;
   update billing.history_lanes set backoff_s = 0, backoff_until = null where lane = h.lane and backoff_s > 0;
   if p_failed and h.tries + 1 < 3 then
-    update billing.history_fetches set tries = tries + 1, claimed_until = null, next_step_at = p_at + interval '1 minute'
+    update billing.history_fetches set tries = tries + 1, claimed_until = null, claim = null, next_step_at = p_at + interval '1 minute'
      where id = p_id;
     return jsonb_build_object('go', false, 'retry', h.tries + 1);
   end if;
@@ -718,11 +770,15 @@ begin
      where id = p_id;
     return jsonb_build_object('go', false, 'status', 'done');
   end if;
-  -- spread evenly: after `done` of days_total days, at least target_s * done / days_total since the start
+  -- spread evenly: the days_total starts sit on days_total - 1 gaps, so the last day starts no
+  -- earlier than target_s after the first (the earliest finish meets the target)
   done := h.days_total - (p_day - h.day_floor);
-  nxt := greatest(p_at, h.started_at + make_interval(secs => h.target_s::numeric * done / greatest(h.days_total, 1)));
+  nxt := greatest(p_at, h.started_at + make_interval(secs => h.target_s::numeric * done / greatest(h.days_total - 1, 1)));
   update billing.history_fetches
-     set day_next = p_day - 1, tries = 0, next_step_at = nxt, claimed_until = nxt + interval '90 seconds'
+     set day_next = p_day - 1, tries = 0, next_step_at = nxt,
+         -- a slowed fetch lets its login go between days; one at once keeps its claim
+         claimed_until = case when nxt <= p_at + interval '5 seconds' then nxt + interval '90 seconds' end,
+         claim = case when nxt <= p_at + interval '5 seconds' then claim end
    where id = p_id;
   return jsonb_build_object('go', true, 'day', p_day - 1, 'next_step_at', nxt);
 end $$;
@@ -752,6 +808,15 @@ returns jsonb language sql stable security definer set search_path = billing, pg
       from billing.plants p cross join lateral billing.plant_state(p.id, p_at) ps
      where p.history_purged_at is null and ps->>'delete_at' is not null
        and (ps->>'delete_at')::timestamptz <= p_at - interval '1 hour'
+       and not billing.payment_hold(p.id, p_at) and billing.has_history(p.id)
+    union all
+    -- history no seat holds, the last seat closed over an hour ago: the delete job missed it
+    select jsonb_build_object('kind', 'history_unprotected', 'ref', p.id::text, 'closed_at', max(se.closed_at))
+      from billing.plants p join billing.seats se on se.plant = p.id
+     where p.history_purged_at is null
+       and not exists (select 1 from billing.seats o where o.plant = p.id and o.closed_at is null)
+     group by p.id
+    having max(se.closed_at) <= p_at - interval '1 hour'
        and not billing.payment_hold(p.id, p_at) and billing.has_history(p.id)
     union all
     select jsonb_build_object('kind', 'many_switches', 'ref', e.account::text, 'switches', count(*))
@@ -788,13 +853,21 @@ returns jsonb language sql stable security definer set search_path = billing, pg
    where pa.reference = p_reference and pa.status = 'success'
 $$;
 
--- 0144's public.winback_return read the old charges; same answer, from the new tables.
+-- 0144's public.winback_return read the old charges: it still does until the switch (the old
+-- billing function calls it), then the same answer comes from the new tables.
 create or replace function public.winback_return(p_reference text)
 returns table (user_id uuid, email_id bigint, days int, at timestamptz)
-language sql stable security definer set search_path = public, pg_temp as $$
+language sql stable security definer set search_path = public, private, pg_temp as $$
   select (w->>'user')::uuid, (w->>'email_id')::bigint, (w->>'days')::int, (w->>'at')::timestamptz
     from (select billing.winback_return(p_reference) w) x
-   where w is not null
+   where w is not null and billing.is_live()
+  union all
+  select q.user_id, q.id, (c.settled_at::date - q.sent_at::date), c.settled_at
+    from private.billing_charges c
+    join lateral (select * from public.email_queue q
+                   where q.user_id = c.user_id and q.kind = 'winback' and q.status = 'sent' and q.sent_at < c.created_at
+                   order by q.sent_at desc limit 1) q on true
+   where not billing.is_live() and c.reference = p_reference and c.kind = 'start' and c.status = 'paid'
 $$;
 revoke all on function public.winback_return(text) from public, anon, authenticated;
 grant execute on function public.winback_return(text) to service_role;
@@ -805,12 +878,18 @@ grant execute on function public.winback_return(text) to service_role;
 create function billing.switch_on(p_at timestamptz default now())
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
 begin
+  -- an empty copy would switch every reader to "nothing is read"
+  if not exists (select 1 from billing.accounts) then
+    raise exception 'billing.accounts is empty: run billing.copy_from_old first' using errcode = '55000';
+  end if;
   insert into billing.switch_over (switched_at) values (p_at) on conflict (id) do nothing;
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
     perform cron.unschedule(jobname) from cron.job
-     where jobname in ('unpaid-delete', 'plant-wipe', 'billing-delete', 'billing-history');
+     where jobname in ('unpaid-delete', 'plant-wipe', 'billing-delete', 'billing-history', 'billing-run');
     perform cron.schedule('billing-delete', '*/5 * * * *', 'select billing.delete_due()');
     perform cron.schedule('billing-history', '* * * * *', $c$select private.call_fn('recover?queue=1', '{}', 60000)$c$);
+    -- the daily job, off since the old billing was stopped, now runs the new billing function
+    perform cron.schedule('billing-run', '*/5 4-5 * * *', $c$select private.call_fn('billing/run', '{}', 120000)$c$);
   end if;
   return jsonb_build_object('switched_at', (select switched_at from billing.switch_over));
 end $$;
@@ -830,7 +909,12 @@ begin
   return case p_cmd
     when 'history_take' then billing.history_take()
     when 'history_step' then billing.history_step((p_args->>'id')::bigint, (p_args->>'day')::date,
-                               coalesce((p_args->>'failed')::boolean, false), coalesce((p_args->>'throttled')::boolean, false))
+                               coalesce((p_args->>'failed')::boolean, false), coalesce((p_args->>'throttled')::boolean, false),
+                               now(), (p_args->>'claim')::uuid)
+    when 'history_renew' then to_jsonb(coalesce(billing.history_renew((p_args->>'id')::bigint, (p_args->>'claim')::uuid), false))
+    -- plants with a history fetch queued or running: the old recovery schedule leaves them to the queue
+    when 'fetching'     then coalesce((select jsonb_agg(distinct plant) from billing.history_fetches
+                                        where status in ('queued', 'running')), '[]'::jsonb)
     when 'login_seen'   then billing.login_seen((p_args->>'login')::uuid, p_args->'plants')
     when 'alerts'       then billing.alerts()
     when 'heartbeat'    then (select '{}'::jsonb from (select billing.heartbeat(p_args->>'job', now(), p_args->'result',

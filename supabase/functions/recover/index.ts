@@ -89,19 +89,12 @@ async function rpc(fn: string, args: Record<string, unknown>) {
   return data;
 }
 
-// The version each plant's job started on, and the plants whose writes were refused.
-const versions = new Map<number, number | null>();
-const refused = new Set<number>();
-/** A guarded history write (0246). Refused: 0 rows, and the plant is marked to stop. */
-async function guarded(fn: "q_insert_recovered_v2" | "q_insert_inverter_history_v2", plantId: number, args: Record<string, unknown>) {
-  try {
-    return await rpc(fn, { p_plant: plantId, p_version: versions.get(plantId) ?? null, ...args });
-  } catch (e) {
-    if (!/is not read now/.test(String(e instanceof Error ? e.message : e))) throw e;
-    refused.add(plantId);
-    return 0;
-  }
-}
+// Each job and each queued fetch carries its own guard: the version its plant had when the
+// work was handed out, and whether a write was refused since. Nothing is shared between
+// requests, so a warm isolate running two at once never mixes them up.
+import { type Guard, guardedWrite, newGuard, spineFailed } from "./guard.ts";
+const guarded = (fn: "q_insert_recovered_v2" | "q_insert_inverter_history_v2", plantId: number, g: Guard, args: Record<string, unknown>) =>
+  guardedWrite(rpc, fn, plantId, g, args);
 
 /** Fallback scale for days with too little of our own data to calibrate against. */
 const scaleCache = new Map<number, FeedScale>();
@@ -126,7 +119,8 @@ const complete = (r: SpineRow | undefined): r is SpineRow =>
   !!r && r.pv_w != null && r.grid_w != null && r.load_w != null;
 
 /** Per-inverter history for the plant's inverters, summed. Null if nothing came back. */
-async function historySpine(acc: Account, plantId: number, tz: string, day: string, bank = true, web = true) {
+async function historySpine(acc: Account, plantId: number, tz: string, day: string, g: Guard | null, web = true) {
+  const bank = g != null;
   const sns = (((await rpc("plant_inverters", { p_plant: plantId })) ?? []) as any[]).map((r) => String(r.sn ?? r));
   if (!sns.length) return null;
   // One inverter at a time: 4 calls in flight, not 4 × inverters, for SunSynk's sake.
@@ -135,7 +129,7 @@ async function historySpine(acc: Account, plantId: number, tz: string, day: stri
   for (const sn of sns) {
     const d = await fetchInverterDay(acc, sn, day, web);
     days.push(d);
-    if (bank) await bankHistory(plantId, sn, historyRows(d, lo)).catch((e) => {
+    if (bank) await bankHistory(plantId, sn, historyRows(d, lo), g!).catch((e) => {
       console.error(`inverter_history ${sn}:`, e);
       noteError("inverter_history_failed", e, { plant: plantId, hourly: true });
     });
@@ -145,9 +139,9 @@ async function historySpine(acc: Account, plantId: number, tz: string, day: stri
 }
 
 /** Sample rows into inverter_history. Throws on a database error; callers decide. */
-async function bankHistory(plantId: number, sn: string, rows: ReturnType<typeof historyRows>): Promise<number> {
+async function bankHistory(plantId: number, sn: string, rows: ReturnType<typeof historyRows>, g: Guard): Promise<number> {
   if (!rows.length) return 0;
-  return Number(await guarded("q_insert_inverter_history_v2", plantId, { p_sn: sn, p_rows: rows }) ?? 0);
+  return Number(await guarded("q_insert_inverter_history_v2", plantId, g, { p_sn: sn, p_rows: rows }) ?? 0);
 }
 
 /** Inverter serials the poller has stored for a plant. */
@@ -159,13 +153,13 @@ const plantSns = async (plantId: number) =>
  * before a failed endpoint fails the day, so a retry loses nothing and a day
  * given up after TEMP_MAX_TRIES still holds whatever it had.
  */
-async function fetchTempDay(job: PlantJob, sns: string[], day: string, started: number, gridOnly = false) {
+async function fetchTempDay(job: PlantJob, g: Guard, sns: string[], day: string, started: number, gridOnly = false) {
   const lo = dayStartEpoch(job.timezone, day);
   let banked = 0;
   for (const sn of sns) {
     if (Date.now() - started > TIME_BUDGET_MS) throw new BudgetReached(day);
     const x = await fetchInverterExtras(job.account, sn, day, gridOnly);
-    banked += await bankHistory(job.plantId, sn, historyRows(x, lo));
+    banked += await bankHistory(job.plantId, sn, historyRows(x, lo), g);
     if (x.failed.length) throw new Error(`${sn} ${x.failed.join("; ")}`);
   }
   return banked;
@@ -176,12 +170,12 @@ class BudgetReached extends Error { constructor(day: string) { super(`time budge
  * Today's temperatures, first thing in a plant's run: a handful of calls that must
  * not wait behind a long gap recovery, since the panel has no other source.
  */
-async function temperatureToday(job: PlantJob, started: number) {
+async function temperatureToday(job: PlantJob, g: Guard, started: number) {
   const sns = await plantSns(job.plantId);
   if (!sns.length) return { banked: 0, reason: "no inverter serials stored yet" };
   try {
     // Grid frequency only: the poller banks today's output/day every 10 minutes (SOLAR-422).
-    return { banked: await fetchTempDay(job, sns, localDate(job.timezone), started, true), calls: sns.length };
+    return { banked: await fetchTempDay(job, g, sns, localDate(job.timezone), started, true), calls: sns.length };
   } catch (e) {
     noteError("temps_today_failed", e, { plant: job.plantId, hourly: true });
     return { banked: 0, error: String(e instanceof Error ? e.message : e) };
@@ -198,7 +192,7 @@ const TEMP_MAX_TRIES = 3;
  * Compare-and-set on the day, like the backfill bookmark: an overlapping run stops
  * rather than rewinding the other's bookmark.
  */
-async function temperatureWalk(job: PlantJob, started: number) {
+async function temperatureWalk(job: PlantJob, g: Guard, started: number) {
   const { plantId, timezone: tz } = job;
   const sns = await plantSns(plantId);
   if (!sns.length) return { banked: 0, reason: "no inverter serials stored yet" };
@@ -217,9 +211,9 @@ async function temperatureWalk(job: PlantJob, started: number) {
   }
   for (; day < today; day = addDays(tz, day, 1)) {
     if (Date.now() - started > TIME_BUDGET_MS) { stoppedEarly = `time budget reached at ${day}; next run continues from here`; break; }
-    if (refused.has(plantId)) { stoppedEarly = "plant switched out or deleted"; break; }
+    if (g.refused) { stoppedEarly = "plant switched out or deleted"; break; }
     let failed: string | null = null;
-    try { banked += await fetchTempDay(job, sns, day, started); }
+    try { banked += await fetchTempDay(job, g, sns, day, started); }
     catch (e) {
       if (e instanceof BudgetReached) { stoppedEarly = `${e.message}; next run continues from here`; break; }
       failed = String(e instanceof Error ? e.message : e);
@@ -248,7 +242,7 @@ async function temperatureWalk(job: PlantJob, started: number) {
 
 // wholeDay: every missing minute of the day (the history queue, 0246); else from the
 // plant's first minute or its backfill floor (q_missing_minutes).
-async function recoverDay(acc: Account, plantId: number, tz: string, day: string, historyOnly = false, wholeDay = false) {
+async function recoverDay(acc: Account, plantId: number, tz: string, day: string, g: Guard, historyOnly = false, wholeDay = false) {
   // Paged: PostgREST caps any one response at max_rows (1000) and a day nobody
   // logged is 1440 minutes. Before 0044 that silently left the last 440 unfilled.
   let gaps: number[] = [];
@@ -268,7 +262,7 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
   let bankedHistory = 0;
   let historyFailed = false;
   try {
-    const h = await historySpine(acc, plantId, tz, day);
+    const h = await historySpine(acc, plantId, tz, day, g);
     const failed = h?.days.reduce((n, d) => n + d.failed, 0) ?? 0;
     historyFailed = !h || failed > 0;
     if (historyOnly && (!h || failed > 0)) {
@@ -279,7 +273,7 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
         .filter((x): x is { ts: number; row: SpineRow } => complete(x.row))
         .map(({ ts, row }) => ({ ts, ...row }));
       if (rows.length) {
-        bankedHistory = Number(await guarded("q_insert_recovered_v2", plantId, { p_rows: rows, p_source: "invhistory" }) ?? 0);
+        bankedHistory = Number(await guarded("q_insert_recovered_v2", plantId, g, { p_rows: rows, p_source: "invhistory" }) ?? 0);
         const filled = new Set(rows.map((r) => r.ts));
         gaps = gaps.filter((ts) => !filled.has(ts));
       }
@@ -288,6 +282,8 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
     historyFailed = true;
     console.warn(`invhistory ${plantId} ${day}:`, e instanceof Error ? e.message : e);
     noteError("invhistory_failed", e, { plant: plantId, hourly: true });
+    // history only (the backfill walk, the queue): a day whose history write threw is retried
+    if (historyOnly) return spineFailed(day, wanted, e);
   }
   if (!gaps.length) return { day, banked: bankedHistory, bankedHistory, missing: wanted };
   if (historyOnly) return { day, banked: bankedHistory, bankedHistory, missing: wanted, reason: "plant feed skipped (day older than the feed keeps)" };
@@ -321,7 +317,7 @@ async function recoverDay(acc: Account, plantId: number, tz: string, day: string
   }
   if (!rows.length) return { day, banked: bankedHistory, bankedHistory, missing: wanted, historyFailed, reason: "feed had no matching buckets" };
 
-  const banked = await guarded("q_insert_recovered_v2", plantId, { p_rows: rows, p_source: "plantfeed" });
+  const banked = await guarded("q_insert_recovered_v2", plantId, g, { p_rows: rows, p_source: "plantfeed" });
 
   return {
     day,
@@ -345,7 +341,7 @@ const BACKFILL_MAX_TRIES = 3;
  * it passes the start, a day fails, or the budget runs out. backfill_until is the
  * cursor; backfill_next stays put as the floor q_missing_minutes counts from.
  */
-async function backfillPlant(job: PlantJob, started: number) {
+async function backfillPlant(job: PlantJob, g: Guard, started: number) {
   const { plantId, account, timezone: tz } = job;
   const floor = job.backfillNext!;
   let day = job.backfillUntil ?? floor;
@@ -360,10 +356,10 @@ async function backfillPlant(job: PlantJob, started: number) {
 
   for (; day >= floor; day = addDays(tz, day, -1)) {
     if (Date.now() - started > TIME_BUDGET_MS) { stoppedEarly = `time budget reached at ${day}; next run continues from here`; break; }
-    if (refused.has(plantId)) { stoppedEarly = "plant switched out or deleted"; break; }
+    if (g.refused) { stoppedEarly = "plant switched out or deleted"; break; }
     let r: { banked: number; failed?: boolean; reason?: string; error?: string; day: string };
     try {
-      r = await recoverDay(account, plantId, tz, day, true);
+      r = await recoverDay(account, plantId, tz, day, g, true);
     } catch (e) {
       r = { day, banked: 0, failed: true, error: String(e instanceof Error ? e.message : e) };
     }
@@ -395,7 +391,8 @@ async function backfillPlant(job: PlantJob, started: number) {
 
 async function recoverPlant(job: PlantJob, windowDays: number, started: number) {
   const { plantId, account, timezone: tz } = job;
-  const tempsToday = await temperatureToday(job, started);
+  const g = newGuard(job.version);
+  const tempsToday = await temperatureToday(job, g, started);
   const pending = !!job.backfillNext;
   const stats = await rpc("q_stats", { p_plant: plantId });
   const row = Array.isArray(stats) ? stats[0] : stats;
@@ -432,9 +429,9 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
       stoppedEarly = `time budget reached at ${day}; remaining days will be picked up next run`;
       break;
     }
-    if (refused.has(plantId)) { stoppedEarly = "plant switched out or deleted"; break; }
+    if (g.refused) { stoppedEarly = "plant switched out or deleted"; break; }
     try {
-      const r: any = await recoverDay(account, plantId, tz, day);
+      const r: any = await recoverDay(account, plantId, tz, day, g);
       total += r.banked;
       if (r.banked > 0 || r.reason) results.push(r);
       const left = (r.missing ?? 0) - r.banked;
@@ -448,11 +445,11 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
 
   // The first load's older days come after the window, newest first. A Free plant
   // past its week keeps 24 hours (0111): no first load, no walk over old days.
-  const backfill = pending ? await backfillPlant(job, started) : null;
+  const backfill = pending ? await backfillPlant(job, g, started) : null;
 
   // The walk goes last, so gap recovery keeps first call on the budget.
   let walk;
-  try { walk = await temperatureWalk(job, started); }
+  try { walk = await temperatureWalk(job, g, started); }
   catch (e) {
     noteError("temps_walk_failed", e, { plant: plantId, hourly: true });
     walk = { banked: 0, error: String(e instanceof Error ? e.message : e) };
@@ -478,7 +475,7 @@ async function recoverPlant(job: PlantJob, windowDays: number, started: number) 
 /** Median and p90 of |history − poller| per series over a day with poller rows. */
 async function dryRun(job: PlantJob, day: string, web = true) {
   const { plantId, account: acc, timezone: tz } = job;
-  const h = await historySpine(acc, plantId, tz, day, false, web); // dry: writes nothing, temps included
+  const h = await historySpine(acc, plantId, tz, day, null, web); // dry: writes nothing, temps included
   if (!h) return { plantId, day, error: "no history came back" };
   const lo = dayStartEpoch(tz, day);
   const { data, error } = await db.from("agg_minute")
@@ -517,7 +514,7 @@ async function dryRun(job: PlantJob, day: string, web = true) {
 // The history fetch queue (?queue=1, 0246)
 // ---------------------------------------------------------------------------
 type Fetch = {
-  id: number; plant: number; account: string; day: string; floor: string; target_s: number;
+  id: number; claim: string; plant: number; account: string; day: string; floor: string; target_s: number;
   version: number; timezone: string; login: Account;
 };
 // Every minute from pg_cron: stop well inside the minute so runs do not pile up.
@@ -526,32 +523,44 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const step = (args: Record<string, unknown>) =>
   rpc("billing_jobs", { p_cmd: "history_step", p_args: args }) as Promise<{ go: boolean; day?: string; next_step_at?: string; status?: string }>;
 
+// The claim lasts 90 s; a slow day (four inverters, retries) renews it every 30 s. Lost (it ran
+// out and another run took the fetch): this run stops writing for it.
+const RENEW_MS = 30_000;
 async function runFetch(f: Fetch, started: number) {
   const acc: Account = { ...f.login };
-  versions.set(f.plant, f.version);
-  refused.delete(f.plant);              // a warm isolate may remember an older refusal
-  let day = f.day, days = 0, banked = 0;
-  for (;;) {
-    const before = throttledCounts.get(acc.id) ?? 0;
-    let r: { banked: number; failed?: boolean };
-    try { r = await recoverDay(acc, f.plant, f.timezone, day, true, true); }
-    catch (e) { r = { banked: 0, failed: true }; noteError("history_fetch_day_failed", e, { plant: f.plant, hourly: true }); }
-    // switched or deleted mid-day: history_take drops it, or hands it out again on the new version
-    if (refused.has(f.plant)) {
-      await step({ id: f.id, day: null });
-      return { id: f.id, plant: f.plant, days, banked, stopped: "write refused" };
+  const g = newGuard(f.version);
+  const claim = { id: f.id, claim: f.claim };
+  let day = f.day, days = 0, banked = 0, lost = false;
+  const renew = setInterval(() => {
+    rpc("billing_jobs", { p_cmd: "history_renew", p_args: claim }).then((ok) => { if (ok !== true) { lost = true; g.refused = true; } })
+      .catch(() => {});
+  }, RENEW_MS);
+  try {
+    for (;;) {
+      const before = throttledCounts.get(acc.id) ?? 0;
+      let r: { banked: number; failed?: boolean };
+      try { r = await recoverDay(acc, f.plant, f.timezone, day, g, true, true); }
+      catch (e) { r = { banked: 0, failed: true }; noteError("history_fetch_day_failed", e, { plant: f.plant, hourly: true }); }
+      if (lost) return { id: f.id, plant: f.plant, days, banked, stopped: "claim lost" };
+      // switched or deleted mid-day: history_take drops it, or hands it out again on the new version
+      if (g.refused) {
+        await step({ ...claim, day: null });
+        return { id: f.id, plant: f.plant, days, banked, stopped: "write refused" };
+      }
+      banked += r.banked; days++;
+      const throttled = (throttledCounts.get(acc.id) ?? 0) > before;
+      const s = await step({ ...claim, day, failed: !!r.failed, throttled });
+      if (!s.go) return { id: f.id, plant: f.plant, days, banked, status: s.status ?? null, throttled };
+      const wait = Math.max(0, Date.parse(s.next_step_at!) - Date.now());
+      if (Date.now() - started + wait > QUEUE_BUDGET_MS) {
+        await step({ ...claim, day: null });     // free for the next run when its day is due
+        return { id: f.id, plant: f.plant, days, banked, next: s.next_step_at };
+      }
+      if (wait) await sleep(wait);
+      day = s.day!;
     }
-    banked += r.banked; days++;
-    const throttled = (throttledCounts.get(acc.id) ?? 0) > before;
-    const s = await step({ id: f.id, day, failed: !!r.failed, throttled });
-    if (!s.go) return { id: f.id, plant: f.plant, days, banked, status: s.status ?? null, throttled };
-    const wait = Math.max(0, Date.parse(s.next_step_at!) - Date.now());
-    if (Date.now() - started + wait > QUEUE_BUDGET_MS) {
-      await step({ id: f.id, day: null });     // free for the next run when its day is due
-      return { id: f.id, plant: f.plant, days, banked, next: s.next_step_at };
-    }
-    if (wait) await sleep(wait);
-    day = s.day!;
+  } finally {
+    clearInterval(renew);
   }
 }
 
@@ -579,8 +588,9 @@ serve("recover", async (req) => {
 
     const only = Number(url.searchParams.get("plant")) || null;
     let jobs = await plantsToPoll();
-    refused.clear();
-    for (const j of jobs) versions.set(j.plantId, j.version);
+    // plants the history queue is fetching are left to it (0246 fix 18)
+    const fetching = new Set(((await rpc("billing_jobs", { p_cmd: "fetching", p_args: {} }).catch(() => [])) ?? []) as number[]);
+    jobs = jobs.filter((j) => !fetching.has(j.plantId));
     if (only && url.searchParams.get("dry") !== "1") jobs = jobs.filter((j) => j.plantId === only);
     if (!jobs.length) return json({ ok: true, banked: 0, reason: only ? `plant ${only} is not linked` : "no linked plants" });
 
