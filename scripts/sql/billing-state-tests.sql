@@ -3990,6 +3990,12 @@ begin
   values ('paystack', 'refund.processed', 'z10-refund', 'processed', (select switched_at from billing.switch_over) + interval '1 second');
   perform pg_temp.fails('Z10 a Paystack notice since the switch: refused', 'select billing.switch_off()', 'fix forward');
   delete from billing.payment_events where entity_id = 'z10-refund';
+  -- a refund the daily run handed out since the switch (marked sending in the same transaction,
+  -- under the pause lock): refused, even before Paystack answers (go-live confirm, Astra)
+  insert into billing.refunds (reference, reason, status, created_at, updated_at)
+  values ('psh_z10refund', 'stale', 'sending', now() - interval '200 years', (select switched_at from billing.switch_over) + interval '1 second');
+  perform pg_temp.fails('Z10 a refund handed out since the switch: refused', 'select billing.switch_off()', 'fix forward');
+  delete from billing.refunds where reference = 'psh_z10refund';
   -- none since: allowed
   update billing.switch_over set switched_at = now() + interval '100 years';
   insert into billing.old_jobs (jobname, schedule, command) values ('plant-wipe', '*/7 * * * *', 'select 1')
