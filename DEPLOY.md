@@ -293,7 +293,9 @@ frontend second, in this order:
    3. `supabase functions deploy billing`. The billing function reads and writes the new tables
       (through `public.billing_v2`).
    4. Resume: `supabase db query --linked "select billing.resume_old()"`. The old tables are no
-      longer the record; old paths that still write them (linking) work again.
+      longer the record; old paths that still write them (linking) work again. The old screens'
+      plan and plant changes stay refused (`switch_on` revoked them): an app tab opened before
+      the switch errors there until it is reloaded.
 
    `switch_on` refuses while `billing.accounts` is empty (step 4 not run). It turns reading,
    deleting and history fetches over to the new state, turns the old jobs off (`unpaid-delete`,
