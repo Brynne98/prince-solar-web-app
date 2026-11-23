@@ -329,10 +329,15 @@ frontend second, in this order:
 
    If the switch has to be undone (before step 7 and before any payment in the new tables):
    1. Stop new payments, on its own: `supabase db query --linked "select billing.pause_payments()"`.
-      From here no new try starts and the daily run charges nothing.
-   2. `supabase db query --linked "select billing.switch_off()"`. It refuses when a payment has
-      landed since the switch ("fix forward"), or when a try since the switch is still open
-      ("verify it first": wait until it settles or Paystack says it failed, then decide). It
+      From here no new try starts, the daily run charges nothing, and Paystack's notices and
+      card-page returns are refused (Paystack sends a notice again later, to whichever billing
+      is live then).
+   2. `supabase db query --linked "select billing.switch_off()"`. It refuses when a payment,
+      refund or Paystack notice has landed in the new tables since the switch ("fix forward"),
+      or when a try since the switch is still open ("verify it first": the pause also stops it
+      being settled, so run `billing.resume_payments()`, wait until it settles or Paystack says
+      it failed, then decide again from step 1). Fix forward means: stay switched and start
+      payments again, `supabase db query --linked "select billing.resume_payments()"`. Otherwise it
       puts the old jobs back as they were, stops `billing-history` and `billing-run`, lets the
       old screens' plan and plant calls work again, and answers: how many plants were deleted
       since the switch (only by an owner's own stop or login removal: the delete job has not

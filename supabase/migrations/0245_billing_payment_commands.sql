@@ -867,6 +867,12 @@ declare
   revive boolean := false;
   msg text := coalesce(p_tx->>'gateway_response', p_tx->>'message', p_tx->>'status');
 begin
+  -- on hold for the way back (billing.pause_payments): nothing is applied; the caller answers
+  -- an error, so Paystack sends its notice again and the card page's return checks again later
+  lock table billing.payments_pause in share mode;
+  if exists (select 1 from billing.payments_pause) then
+    raise exception 'payments are on hold for an update' using errcode = '55000';
+  end if;
   select * into att from billing.payment_attempts where reference = p_reference;
   if not found then
     -- an old charge the old billing settled (copy_from_old keeps every reference): paid there,
@@ -1165,6 +1171,12 @@ create function billing.event_begin(p_provider text, p_type text, p_entity text,
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
 declare e billing.payment_events;
 begin
+  -- on hold for the way back: refused, so the billing function answers 500 and Paystack sends
+  -- the notice again later (to whichever billing is live then)
+  lock table billing.payments_pause in share mode;
+  if exists (select 1 from billing.payments_pause) then
+    raise exception 'payments are on hold for an update' using errcode = '55000';
+  end if;
   insert into billing.payment_events (provider, event_type, entity_id, status, payload, received_at)
   values (p_provider, p_type, p_entity, coalesce(p_status, ''), p_payload, p_at)
   on conflict (provider, event_type, entity_id, status) do update set tries = payment_events.tries + 1

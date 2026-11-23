@@ -3966,6 +3966,13 @@ begin
   perform pg_temp.eq('Z10 paused: the daily run charges nothing', billing.run()->>'busy', 'true');
   perform pg_temp.fails('Z10 paused: no new try starts', $q$select billing.begin_attempt(
     (select id from billing.invoices where status = 'open' limit 1), 'card_page')$q$, 'on hold');
+  -- paused: a Paystack notice and a card page's return are refused, so they come again later
+  perform pg_temp.fails('Z10 paused: a Paystack notice is refused', $q$select billing.event_begin('paystack', 'charge.success', 'psh_z10', 'success', '{}')$q$, 'on hold');
+  perform pg_temp.fails('Z10 paused: a payment is not applied', $q$select billing.apply_payment('psh_z10', '{"status": "success"}')$q$, 'on hold');
+  -- given up (fix forward): payments start again
+  perform billing.resume_payments();
+  perform pg_temp.ok('Z10 resume_payments lifts the pause', not exists (select 1 from billing.payments_pause));
+  perform billing.pause_payments();
   -- every earlier test's payment is after this switch time: refused
   update billing.switch_over set switched_at = now() - interval '100 years';
   perform pg_temp.fails('Z10 a payment since the switch: refused', 'select billing.switch_off()', 'fix forward');
@@ -3978,6 +3985,11 @@ begin
     from billing.invoices where status = 'open' limit 1;
   perform pg_temp.fails('Z10 a try since the switch still open: refused', 'select billing.switch_off()', 'still open');
   delete from billing.payment_attempts where reference = 'psh_z10open';
+  -- a Paystack notice received since the switch: refused (go-live review, Neon)
+  insert into billing.payment_events (provider, event_type, entity_id, status, received_at)
+  values ('paystack', 'refund.processed', 'z10-refund', 'processed', (select switched_at from billing.switch_over) + interval '1 second');
+  perform pg_temp.fails('Z10 a Paystack notice since the switch: refused', 'select billing.switch_off()', 'fix forward');
+  delete from billing.payment_events where entity_id = 'z10-refund';
   -- none since: allowed
   update billing.switch_over set switched_at = now() + interval '100 years';
   insert into billing.old_jobs (jobname, schedule, command) values ('plant-wipe', '*/7 * * * *', 'select 1')

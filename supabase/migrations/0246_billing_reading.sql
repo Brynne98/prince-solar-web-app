@@ -982,6 +982,12 @@ returns jsonb language sql security definer set search_path = billing, pg_temp a
   returning jsonb_build_object('paused_since', since)
 $$;
 
+-- Going back given up (switch_off refused: fix forward): payments start again.
+create function billing.resume_payments()
+returns jsonb language sql security definer set search_path = billing, pg_temp as $$
+  with d as (delete from billing.payments_pause returning 1) select jsonb_build_object('resumed', exists (select 1 from d))
+$$;
+
 -- Step 2: only before the new frontend ships (step 7), after pause_payments, and while no
 -- payment since the switch has landed or could still land. Otherwise it refuses: fix forward
 -- (a try still open: verify it, or wait until it settles, then decide). The old tables were frozen, then took only links, so they are as they were;
@@ -1000,6 +1006,14 @@ begin
   if exists (select 1 from billing.payment_attempts
               where status = 'success' and coalesce(settled_at, created_at) > sw
                 and coalesce(gateway_response, '') not like 'copied: %') then
+    raise exception 'payments landed since the switch: fix forward, do not switch off' using errcode = '55000';
+  end if;
+  -- anything Paystack told the new tables since the switch (a payment, refund or dispute
+  -- notice), a payment applied or reversed there (also by a card page's return), or a refund
+  -- sent from there: the old tables do not know it (go-live review, Neon)
+  if exists (select 1 from billing.payment_events where received_at >= sw)
+     or exists (select 1 from billing.account_events where actor = 'paystack' and at >= sw)
+     or exists (select 1 from billing.refunds where updated_at >= sw and status <> 'due') then
     raise exception 'payments landed since the switch: fix forward, do not switch off' using errcode = '55000';
   end if;
   -- a try made since the switch that Paystack may still take: the old run would charge again

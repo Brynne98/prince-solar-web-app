@@ -447,7 +447,7 @@ begin
               'billing_refunds_due', 'billing_renew', 'billing_room', 'billing_run', 'billing_run_release',
               'billing_set_comped', 'billing_settle_open', 'billing_start_facts', 'billing_upgrade_quote',
               'link_login_allowed_old', 'api_account_delete_old', 'poll_jobs'))
-        or (n.nspname = 'billing' and p.proname in ('copy_from_old', 'pause_old', 'resume_old', 'switch_off', 'pause_payments'))
+        or (n.nspname = 'billing' and p.proname in ('copy_from_old', 'pause_old', 'resume_old', 'switch_off', 'pause_payments', 'resume_payments'))
   loop
     execute format('drop routine %s cascade', f.sig);
   end loop;
