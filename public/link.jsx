@@ -339,7 +339,8 @@ window.startPlan = async function startPlan(acct, plan, interval, plants, { newC
 window.settlePayment = async function settlePayment() {
   const stop = working(AT.pay.opening);
   try {
-    const r = await billingCall('pay', { settle: true });
+    // another card: the saved one is not charged again (it just failed)
+    const r = await billingCall('pay', { settle: true, newCard: true });
     if (r.url) openCardPage(r); else { stop(); if (r.status === 'applied') billingPaid(); else window.toast(AT.pay.pending, { info: true }); }
   } catch (e) {
     stop();

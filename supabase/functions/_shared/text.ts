@@ -39,6 +39,8 @@ export type AccountState = {
   time_zone: string; locale: string; last_plan: string | null; last_plan_name: string | null; had_plan: boolean;
   retention_days: number; trial_places: number; trial_ends_soon: boolean; cancel_soon: boolean;
   if_cancelled_delete_at: Iso | null; history_kept_until: Iso | null; history_purged: boolean;
+  /** When the state was read. */
+  at?: Iso;
   plants: PlantState[]; prices: PriceRow[]; logins: Login[]; bills: Bill[];
 };
 export type Quote = {
@@ -398,8 +400,7 @@ export function payScreen(s: AccountState) {
   if (!title) return null;
   return {
     title,
-    body: [s.access_ended_at ? "Readings have stopped." : "Choose a plan to start reading.",
-      s.history_kept_until ? `History is kept until ${day(s, s.history_kept_until)}.` : s.history_purged ? "History has been deleted." : null]
+    body: [s.access_ended_at ? "Readings have stopped." : "Choose a plan to start reading.", keptLine(s)]
       .filter(Boolean).join(" "),
     button: "See plans",
   };
@@ -463,10 +464,12 @@ export type MailInput = {
   plant?: { id: number; name: string | null } | null;
 };
 
-/** The chosen plants waiting to be deleted, grouped by their delete date, earliest first. */
+/** The chosen plants waiting to be deleted, grouped by their delete date, earliest first. A date
+ *  already passed is left out: that history is going now. */
 function keptGroups(s: AccountState): { day: string; names: string[] }[] {
   const by = new Map<string, string[]>();
-  for (const p of s.plants.filter((p) => p.chosen && p.delete_at && !p.purged)
+  const now = s.at ? Date.parse(s.at) : Date.now();
+  for (const p of s.plants.filter((p) => p.chosen && p.delete_at && !p.purged && Date.parse(p.delete_at) > now)
     .sort((a, b) => Date.parse(a.delete_at!) - Date.parse(b.delete_at!))) {
     const d = day(s, p.delete_at);
     by.set(d, [...(by.get(d) ?? []), plantName(p)]);
@@ -475,6 +478,11 @@ function keptGroups(s: AccountState): { day: string; names: string[] }[] {
 }
 /** Plants with different delete dates: each date with its plants, never one date for all. */
 const keptEach = (g: { day: string; names: string[] }[]) => g.map((x) => `${names(x.names)}: history kept until ${x.day}.`).join(" ");
+/** The pay screen's history line: each date with its plants, as in the emails. */
+function keptLine(s: AccountState): string | null {
+  const g = keptGroups(s);
+  return g.length > 1 ? keptEach(g) : g.length ? `History is kept until ${g[0].day}.` : s.history_purged ? "History has been deleted." : null;
+}
 
 /** The email for one outbox row, from the state read at send time (and the frozen bill for a receipt). */
 export function mail(m: MailInput): Mail | null {

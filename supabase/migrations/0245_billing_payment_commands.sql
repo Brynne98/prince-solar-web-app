@@ -359,6 +359,8 @@ declare
   a billing.accounts;
   np billing.prices;
   had bigint[];
+  m billing.markets;
+  day int;
 begin
   select * into s from billing.subscriptions where id = p_inv.subscription;
   select * into a from billing.accounts where id = p_inv.account;
@@ -376,6 +378,20 @@ begin
          extra_place_minor = p_inv.extra_place_minor, extra_places = p_inv.extra_places,
          next_price = np.id, next_extra_places = null, version = version + 1
    where id = s.id;
+  -- an old monthly-to-yearly charge (copy_from_old): the same plan is paid a year past its
+  -- billing date; a bigger plan runs yearly from the payment, on a new billing day
+  if p_inv.interval is distinct from s.interval then
+    select mk.* into m from billing.markets mk where mk.code = a.market;
+    day := extract(day from p_at at time zone m.default_time_zone)::int;
+    update billing.subscriptions
+       set interval = p_inv.interval, next_price = null,
+           billing_day = case when p_inv.plan = s.plan then s.billing_day else day end,
+           period_start = case when p_inv.plan = s.plan then s.period_start else p_at end,
+           period_end = case when p_inv.plan = s.plan
+                             then billing.add_period(s.period_end, p_inv.interval, s.billing_day, m.default_time_zone)
+                             else billing.add_period(p_at, p_inv.interval, day, m.default_time_zone) end
+     where id = s.id;
+  end if;
   update billing.seats set drop_at_period_end = false where account = p_inv.account and closed_at is null and drop_at_period_end;
   had := array(select plant from billing.seats where account = p_inv.account and closed_at is null);
   perform billing.lock_plants(p_inv.plants || had);
@@ -862,9 +878,11 @@ begin
   if txs = 'abandoned' and att.channel <> 'card_page' then
     txs := 'failed';
   end if;
-  -- still open 24 hours after the try, by Paystack's own answer: a failed try, no lease
+  -- still open 24 hours after the try, by Paystack's own answer: a failed try, no lease. Not a
+  -- card page: the owner may still pay on it, so it stays pending (verified, and blocking a
+  -- saved-card charge) until Paystack gives a final answer
   if txs not in ('success', 'abandoned', 'not_found', 'failed', 'reversed', 'unknown')
-     and att.created_at <= p_at - interval '24 hours' then
+     and att.channel <> 'card_page' and att.created_at <= p_at - interval '24 hours' then
     txs := 'failed';
     msg := 'still pending after 24 hours';
   end if;
@@ -1126,6 +1144,9 @@ begin
   held := array(select plant from billing.seats where account = p_account and closed_at is null order by plant);
   perform billing.lock_plants(held);
   update billing.invoices set status = 'void' where account = p_account and status = 'open';
+  -- the bills' plan link first: in one delete, the account's set-null on a bill can fire after
+  -- its plan row is gone and fail that bill's plan check (depends on the constraints' order)
+  update billing.invoices set subscription = null where account = p_account and subscription is not null;
   delete from billing.accounts where id = p_account;
   update billing.plants set version = version + 1 where id = any (held);
   unprotected := array(select x from unnest(held) x where not (billing.plant_state(x, p_at)->>'protected')::boolean);

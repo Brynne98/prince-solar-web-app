@@ -106,7 +106,7 @@ test('checkout confirm: nothing changes until the payment goes through (final fi
   eq(ctx.AccountText.switchConfirm(a, [1], [], false).lines, ['Plant 1 stops and its history is deleted now.']);
 });
 test('delete reminder, plants on different dates: never one date for all (final fix 10)', () => {
-  const s = { ...acct(), ...tz, access_ended_at: '2026-12-01T08:00:00Z', history_kept_until: '2026-12-31T08:00:00Z',
+  const s = { ...acct(), ...tz, at: '2026-12-10T08:00:00Z', access_ended_at: '2026-12-01T08:00:00Z', history_kept_until: '2026-12-31T08:00:00Z',
     plants: [plant(1, { chosen: true, delete_at: '2026-12-31T08:00:00Z' }), plant(2, { chosen: true, delete_at: '2027-01-20T08:00:00Z' })] };
   const m = ctx.AccountText.mail({ key: 'history_delete_soon', state: s });
   eq(m.subject, 'History of Plant 1 is deleted on 31 Dec 2026');
@@ -144,6 +144,30 @@ test('signed in: the account read again on every ps-account (final fix 14)', () 
   c.accountNow = () => ended;
   (on['ps-account'] || []).forEach(f => f());
   eq(sets.includes(ended), true);
+});
+
+// ---- verify review fixes -------------------------------------------------------------------
+test('pay with another card while past due: the card page, never the saved card (verify fix 2)', async () => {
+  const sent = [];
+  const c = { ...ctx, AbortSignal, fetch: async (url, o) => { sent.push(JSON.parse(o.body)); return { ok: true, json: async () => ({ status: 'pending' }) }; } };
+  c.window = c;
+  createContext(c);
+  for (const f of ['config.js', 'build/text.js', 'build/link.js']) runInContext(readFileSync(new URL('public/' + f, root), 'utf8'), c, { filename: f });
+  c.sb = { auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }) } };
+  c.toast = () => {};
+  await c.settlePayment();
+  eq(sent, [{ settle: true, newCard: true }]);
+});
+test('pay screen: each plant with its own date, a date passed left out (verify fix 14)', () => {
+  const s = { ...acct(), ...tz, state: 'ended', plan: null, had_plan: true, last_plan_name: 'Home', at: '2026-12-10T08:00:00Z',
+    access_ended_at: '2026-12-01T08:00:00Z', history_kept_until: '2026-12-31T08:00:00Z', history_purged: false,
+    plants: [plant(1, { chosen: true, delete_at: '2026-12-31T08:00:00Z' }), plant(2, { chosen: true, delete_at: '2027-01-20T08:00:00Z' }),
+      plant(3, { chosen: true, delete_at: '2026-12-09T08:00:00Z' })] };
+  eq(ctx.AccountText.payScreen(s).body,
+    'Readings have stopped. Plant 1: history kept until 31 Dec 2026. Plant 2: history kept until 20 Jan 2027.');
+  eq(ctx.AccountText.payScreen({ ...s, plants: [s.plants[0], s.plants[2]] }).body, 'Readings have stopped. History is kept until 31 Dec 2026.');
+  const m = ctx.AccountText.mail({ key: 'history_delete_soon', state: { ...s, history_kept_until: '2027-01-20T08:00:00Z', plants: [s.plants[2], s.plants[1]] } });
+  eq(m.subject, 'Your history is deleted on 20 Jan 2027');
 });
 
 let failed = 0;

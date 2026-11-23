@@ -108,6 +108,16 @@ begin
   execute d;
 end $$;
 
+-- share_claim_live keeps account_upsert's lock order, which loses the old user lock below
+do $$
+declare d text := pg_get_functiondef('public.share_claim_live(uuid, uuid, bigint, text)'::regprocedure);
+begin
+  if position('perform private.billing_lock(p_user);' in d) = 0 then
+    raise exception 'share_claim_live changed since 0247: edit it by hand';
+  end if;
+  execute replace(d, 'perform private.billing_lock(p_user);', '');
+end $$;
+
 create or replace function public.account_upsert(p_user uuid, p_username text, p_access text, p_expires bigint)
 returns uuid language plpgsql security definer set search_path = private, pg_temp as $$
 declare acc uuid;

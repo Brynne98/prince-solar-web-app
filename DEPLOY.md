@@ -251,7 +251,12 @@ frontend second, in this order:
    come across, so renewals keep charging them. Old charges still open, or settled in the
    last 120 days, come across with their Paystack reference: a webhook or a return from the
    card page after the switch is applied under the new rules (or refunded if stale there),
-   not refunded as unknown. An old one still open after step 3 is fine.
+   not refunded as unknown. An old one still open after step 3 is fine. At any age, the copy
+   also brings across what is still unresolved: a refund not done (asked: pending; owed:
+   retried by the new job; 7 tries made or hello@ told: left for a hand refund), an open
+   dispute (blocks deleting the account) and a lost dispute not yet charged (owed on its
+   bill). The copy does not refuse for any of them. Its answer counts them (`refunds`,
+   `refunds_to_send`, `disputes_open`, `owed`).
 5. Compare `billing.account_state` for each account with today's screens, next charges and
    poll decisions.
 6. The switch, in this order, so no billing email is sent twice or lost, and no change made

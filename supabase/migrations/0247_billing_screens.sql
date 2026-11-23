@@ -89,20 +89,30 @@ end $$;
 
 -- Until when other accounts would keep this plant's history on what is booked now: a plan
 -- that renews (or is unpaid but still running) keeps it with no end; a booked cancel, the
--- free week or an ended plan keeps it for the retention days after its end. Null: no other
--- account holds it.
+-- free week, a grant that ends or an ended plan keeps it for the retention days after its
+-- end. A booked downgrade that drops the plant keeps it to the billing date only (the drop
+-- deletes it then). Null: no other account holds it.
 create function billing.kept_by_others_until(p_account uuid, p_plant bigint, p_at timestamptz)
 returns timestamptz language plpgsql stable set search_path = billing, pg_temp as $$
 declare se record; st billing.status; latest timestamptz; ends timestamptz;
 begin
-  for se in select s.account from billing.seats s
+  for se in select s.account, s.drop_at_period_end from billing.seats s
              where s.plant = p_plant and s.account <> p_account and s.closed_at is null loop
     st := billing.account_status(se.account, p_at);
-    ends := case when st.state = 'past_due' or (st.state = 'active' and st.cancel_at is null) then 'infinity'
+    ends := case when st.state = 'active' and st.sub is null then
+                   -- grants only: the latest end (none: no end)
+                   (select case when bool_or(g.ends_at is null) then 'infinity'::timestamptz else max(g.ends_at) end
+                      from billing.grants g where g.account = se.account and g.starts_at <= p_at
+                       and (g.ends_at is null or g.ends_at > p_at))
+                 when st.state = 'past_due' or (st.state = 'active' and st.cancel_at is null) then 'infinity'
                  when st.state = 'active' then st.cancel_at
                  when st.state = 'trialing' then st.trial_ends_at
                  when st.state = 'ended' then st.access_ended_at end;
-    if ends is not null and ends <> 'infinity' then ends := ends + make_interval(days => st.retention_days); end if;
+    if se.drop_at_period_end and st.state in ('active', 'past_due') and st.sub is not null then
+      ends := st.period_end;                     -- dropped then, no retention
+    elsif ends is not null and ends <> 'infinity' then
+      ends := ends + make_interval(days => st.retention_days);
+    end if;
     latest := greatest(latest, ends);
   end loop;
   return latest;
@@ -159,6 +169,7 @@ begin
 
   return s || jsonb_build_object(
     'plants', plants,
+    'at', p_at,                                  -- when this was read: dates before it have passed
     'time_zone', coalesce(a.time_zone, m.default_time_zone),
     'locale', a.locale,
     'plan_name', (select name from billing.plans where code = s->>'plan'),
@@ -178,7 +189,7 @@ begin
     -- plant's history longer on what is booked now. Null: no such plant.
     'if_cancelled_delete_at', case when sub.id is not null
                                     and exists (select 1 from jsonb_array_elements(plants) p
-                                                 where (p->>'chosen')::boolean
+                                                 where (p->>'chosen')::boolean and not (p->>'purged')::boolean
                                                    and coalesce(billing.kept_by_others_until(p_account, (p->>'plant')::bigint, p_at),
                                                                 '-infinity') <= sub.period_end + make_interval(days => m.retention_days))
                                    then sub.period_end + make_interval(days => m.retention_days) end,
@@ -414,14 +425,17 @@ begin
   if not exists (select 1 from private.sunsynk_accounts where id = p_account and kind = 'share' and status <> 'disabled') then
     raise exception 'share_claim: % is not the share login', p_account;
   end if;
-  -- plant_users_upsert's order: account, plant; billing's rows after
+  -- account_upsert's order (link_login_live): the run, the user; then plant_users_upsert's:
+  -- account, plant; billing's rows after
   perform pg_advisory_xact_lock_shared(3, 0);
+  perform private.billing_lock(p_user);
   perform pg_advisory_xact_lock(1, hashtext(p_account::text));
   perform pg_advisory_xact_lock(p_plant);
-  perform public.billing_links('claim_plant', jsonb_build_object('user', p_user, 'plant', p_plant, 'name', p_plant_name));
-
+  -- read already (own login, or a live claim): no claim row without a share route
   select * into mine from public.plant_users where plant_id = p_plant and user_id = p_user;
   if found and (not mine.via_share or mine.share_gone_at is null) then return 'yours'; end if;
+  perform public.billing_links('claim_plant', jsonb_build_object('user', p_user, 'plant', p_plant, 'name', p_plant_name));
+
   if exists (select 1 from public.plant_users o
               where o.plant_id = p_plant and o.user_id <> p_user and o.via_share and o.share_gone_at is null) then
     raise exception 'share_claim: plant % is claimed in plant_users by another user', p_plant;
@@ -443,6 +457,8 @@ grant execute on function public.share_claim_live(uuid, uuid, bigint, text) to s
 
 -- 0172's share_sync, plus: a share removed in the inverter cloud (share_gone_at set) lets
 -- go of the billing claim too, so the plant stops being read and someone else can claim it.
+-- The seat stays and nothing is deleted: the history is kept while the plan runs ("your
+-- history is safe"). Only a login or claim the owner removes deletes at once.
 create or replace function public.share_sync(p_account uuid, p_plants bigint[])
 returns jsonb language plpgsql security definer set search_path = public, private, pg_temp as $$
 declare
@@ -480,7 +496,13 @@ begin
     gone := gone + 1;
     acc := billing.account_of(g.user_id, false);
     if acc is not null and exists (select 1 from billing.plant_claims c where c.account = acc and c.plant = g.plant_id) then
-      perform billing.unclaim(acc, array[g.plant_id], now(), 'share_gone');
+      perform billing.lock_account(acc);
+      perform billing.lock_plants(array[g.plant_id]);
+      delete from billing.plant_claims where account = acc and plant = g.plant_id;
+      update billing.plants set version = version + 1 where id = g.plant_id;
+      update billing.accounts set version = version + 1 where id = acc;
+      perform billing.log_event(acc, now(), 'share_gone', 'unclaim', null,
+                                jsonb_build_object('plants', jsonb_build_array(g.plant_id), 'closed', '[]'::jsonb));
     end if;
   end loop;
 
@@ -933,6 +955,7 @@ declare
   ev billing.account_events;
   ms jsonb;
   u uuid;
+  pm billing.payment_methods;
 begin
   if o.account is null then return 'no account'; end if;
   if o.expires_at is not null and o.expires_at <= p_at then return 'expired'; end if;
@@ -983,7 +1006,13 @@ begin
         return 'interval changed';
       end if;
     when 'card_changed' then
-      if (billing.active_method(o.account)).id is distinct from o.ref::uuid then return 'card replaced'; end if;
+      -- the same card, made active at the time this row was queued for (dedupe_key's last part):
+      -- switching back and forth sends one email per real change
+      pm := billing.active_method(o.account);
+      if pm.id is distinct from o.ref::uuid
+         or extract(epoch from coalesce(pm.activated_at, pm.created_at))::bigint::text is distinct from split_part(o.dedupe_key, ':', 3) then
+        return 'card replaced';
+      end if;
     when 'renewal_soon' then
       if st.state <> 'active' or st.cancel_at is not null or st.sub is distinct from o.ref::uuid then return 'not renewing'; end if;
     when 'card_expiring' then
@@ -1158,16 +1187,23 @@ revoke all on function private.email_queue_old_billing() from public, anon, auth
 -- write to any old billing table, so the last copy and switch_on see a still picture. Old
 -- write paths fail with "billing is paused for an update" (the old billing function answers
 -- an error; Paystack sends a refused webhook again later). resume_old ends it.
+-- Every old write takes a shared advisory lock (7, 641) for the rest of its transaction;
+-- pause_old takes it exclusive, so it waits for the writes already under way to commit and
+-- the ones after it read the pause. The final copy then misses nothing.
 -- ---------------------------------------------------------------------------
 create table billing.old_pause (
   id    boolean primary key default true check (id),
   level text not null check (level in ('new_payments', 'all')),
   since timestamptz not null default now()
 );
+revoke all on table billing.old_pause from public, anon, authenticated;
+-- security definer: the writer (service_role, an old RPC) needs no right on billing.old_pause
 create function private.old_billing_paused()
-returns trigger language plpgsql set search_path = '' as $$
-declare lvl text := (select p.level from billing.old_pause p);
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare lvl text;
 begin
+  perform pg_catalog.pg_advisory_xact_lock_shared(7, 641);
+  lvl := (select p.level from billing.old_pause p);
   if lvl = 'all' or (lvl = 'new_payments' and tg_table_name = 'billing_charges' and tg_op = 'INSERT') then
     raise exception 'billing is paused for an update' using errcode = '55000';
   end if;
@@ -1183,6 +1219,7 @@ begin
 end $$;
 create function billing.pause_old(p_level text)
 returns jsonb language sql security definer set search_path = billing, pg_temp as $$
+  select pg_advisory_xact_lock(7, 641);   -- waits for old writes under way (see above)
   insert into billing.old_pause (level) values (p_level)
   on conflict (id) do update set level = excluded.level, since = now()
   returning jsonb_build_object('paused', level, 'since', since)
