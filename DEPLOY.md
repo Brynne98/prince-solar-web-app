@@ -269,6 +269,17 @@ frontend second, in this order:
    poll decisions. By hand: the old refunds that failed and now wait for a hand refund,
    `select * from billing.refunds where reason = 'manual' and status = 'failed'`. Each one is
    paid back from the Paystack dashboard; the copy never sends them.
+
+   Before step 6 (go-live review, 2026-11-23):
+   - Backup, kept outside the repo: `supabase db dump --linked --data-only --schema private,billing,public -f ~/backups/solar-pre-switch-<date>.sql`.
+     Note the time. Supabase's daily backup is the second copy.
+   - Alerts reach admin@: in PostHog (the admin@ Chrome), the alert on `job_check_failed` is on
+     and emails admin@, and the error-tracking destination (`error-alert`) is on. A repeated
+     `billing_command_failed`, `run_charge_failed` or `webhook_failed` then arrives as an email.
+   - One person watches from step 6 until the first billing run after it (04:00 to 06:00 the
+     next morning) has a heartbeat: `select * from billing.job_heartbeats where job = 'billing-run'`.
+   - Agreed: going back (below) is allowed until step 7 or the first new payment, whichever
+     comes first. After that, fix forward.
 6. The switch, in this order, so no billing email is sent twice or lost, and no change made
    since step 4 is lost (logins, plant choices and payments made since the first copy are in
    the old tables only):
@@ -309,17 +320,39 @@ frontend second, in this order:
    checked against the account's state when it goes. To check it:
    `select billing.alerts()`, `select * from billing.job_heartbeats` and
    `select key, status, drop_reason, count(*) from billing.outbox group by 1, 2, 3`.
+
+   Right after step 6, before step 7, for each of today's accounts: `billing.account_state`
+   shows the plan, interval, next charge date and amount, and chosen plants noted in step 5;
+   `select billing.alerts()` is `[]`; `billing.job_heartbeats` has `delete` and `history` from
+   the last 10 minutes; the health check (`/functions/v1/health`) answers 200; each chosen
+   plant has a reading under 5 minutes old. Any of these wrong: go back (below), then find out why.
+
+   If the switch has to be undone (before step 7 and before any payment in the new tables):
+   1. `supabase db query --linked "select billing.switch_off()"`. It refuses once a payment has
+      landed since the switch ("fix forward"). It puts the old jobs back as they were, stops
+      `billing-delete` and `billing-history`, lets the old screens' plan and plant calls work
+      again, and answers how many plants the new delete job deleted since the switch (those
+      stay deleted; restore from the backup only if one should not have gone).
+   2. Deploy the old billing function from `main` before the merge: `git worktree add /tmp/solar-old <old main sha>`,
+      then `supabase functions deploy billing` from that folder. `billing-run` stays on and
+      calls it.
+   3. `supabase db query --linked "select billing.resume_old()"` if the old tables are still paused.
+   The old tables were frozen at step 6.1 and took only links after it, so they hold every
+   account as it was. Plant choices made in the new tables since the switch are not carried
+   back. Tried on the local database (state test Z10).
 7. Frontend: push `main` (Cloudflare builds it). Every account, plan, plant-choice and
    billing screen reads `api_account_state` and the text catalog
    (`supabase/functions/_shared/text.ts`, built into `public/build/text.js`). It must not
    ship before step 6: before the switch the new tables are not the record.
-8. After the new frontend is live and a day of polls, payments and emails looks right:
+8. After the new frontend is live and 24 to 48 hours of polls, payments and emails look right
+   (`billing.alerts()` empty, no new `billing_command_failed` in PostHog):
    move `supabase/after-switch-over/0260_billing_drop_old.sql` into `supabase/migrations/`
    under the next free number and `supabase db push`. It refuses to run before
    `billing.switch_on()`. It drops `plant_picks`, the `held` flag, `plant_users.paused`, the
    old billing tables (`private.billing`, `billing_charges`, `free_week_logins`,
    `offer_members`, `offers`, `plant_week`), every function they feed, the old billing cron
-   jobs, the one-off copy and the switch-over pause, and skips old billing emails still queued.
+   jobs, the one-off copy, the switch-over pause and the way back (`switch_off`), and skips old
+   billing emails still queued.
    It keeps `api_offer`, now read from the billing tables, so the website keeps its prices. It
    checks that nothing left reads or calls them, or it stops.
 

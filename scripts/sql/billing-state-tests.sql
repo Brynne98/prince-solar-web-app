@@ -3941,6 +3941,37 @@ begin
 exception when others then perform pg_temp.ok('Z9 runs', false, sqlerrm);
 end $$;
 
+-- Z10 the way back (DEPLOY.md, go-live review): switch_off refuses once a payment has landed
+-- since the switch; before that it puts the old jobs and the old screens' calls back, stops the
+-- new jobs and turns the switch off. Then on again, for the drop of the old billing after.
+do $$
+begin
+  execute 'create extension if not exists pg_cron';
+  perform cron.schedule('free-trim', '0 3 * * *', 'select 2');
+  perform billing.switch_on(now());
+  perform pg_temp.ok('Z10 switch_on keeps the old job it stops', exists (select 1 from billing.old_jobs
+    where jobname = 'free-trim' and schedule = '0 3 * * *' and command = 'select 2')
+    and not exists (select 1 from cron.job where jobname = 'free-trim'));
+  -- every earlier test's payment is after this switch time: refused
+  update billing.switch_over set switched_at = now() - interval '100 years';
+  perform pg_temp.fails('Z10 a payment since the switch: refused', 'select billing.switch_off()', 'fix forward');
+  -- none since: allowed
+  update billing.switch_over set switched_at = now() + interval '100 years';
+  insert into billing.old_jobs (jobname, schedule, command) values ('plant-wipe', '*/7 * * * *', 'select 1')
+  on conflict (jobname) do update set schedule = excluded.schedule, command = excluded.command;
+  perform billing.switch_off();
+  perform pg_temp.ok('Z10 switched off', not billing.is_live());
+  perform pg_temp.ok('Z10 the old job is back as it was', exists (select 1 from cron.job where jobname = 'plant-wipe'
+    and schedule = '*/7 * * * *' and command = 'select 1'));
+  perform pg_temp.ok('Z10 the new delete and history jobs stopped', not exists (select 1 from cron.job
+    where jobname in ('billing-delete', 'billing-history')));
+  perform pg_temp.ok('Z10 the old screens may call their billing changes again',
+    has_function_privilege('authenticated', 'public.api_billing_change(text,text,bigint[])', 'execute')
+    and has_function_privilege('authenticated', 'public.api_plant_pick(bigint[])', 'execute'));
+  perform billing.switch_on(now());   -- on again for the drop of the old billing below
+exception when others then perform pg_temp.ok('Z10 runs', false, sqlerrm);
+end $$;
+
 -- ---------------------------------------------------------------------------
 do $$
 declare r record; f int; n int;

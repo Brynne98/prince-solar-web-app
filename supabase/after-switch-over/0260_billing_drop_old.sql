@@ -447,7 +447,7 @@ begin
               'billing_refunds_due', 'billing_renew', 'billing_room', 'billing_run', 'billing_run_release',
               'billing_set_comped', 'billing_settle_open', 'billing_start_facts', 'billing_upgrade_quote',
               'link_login_allowed_old', 'api_account_delete_old', 'poll_jobs'))
-        or (n.nspname = 'billing' and p.proname in ('copy_from_old', 'pause_old', 'resume_old'))
+        or (n.nspname = 'billing' and p.proname in ('copy_from_old', 'pause_old', 'resume_old', 'switch_off'))
   loop
     execute format('drop routine %s cascade', f.sig);
   end loop;
@@ -457,6 +457,7 @@ end $$;
 -- Old tables and columns
 -- ---------------------------------------------------------------------------
 drop table billing.old_pause;
+drop table billing.old_jobs;
 drop table private.billing_charges cascade;
 drop table private.billing cascade;
 drop table private.offer_members cascade;

@@ -911,6 +911,12 @@ grant execute on function public.winback_return(text) to service_role;
 -- ---------------------------------------------------------------------------
 -- The switch: run once at switch-over, after copy_from_old and the comparison.
 -- ---------------------------------------------------------------------------
+-- The old jobs switch_on stops, as they were, so switch_off can put them back.
+create table billing.old_jobs (
+  jobname  text primary key,
+  schedule text not null,
+  command  text not null
+);
 create function billing.switch_on(p_at timestamptz default now())
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
 begin
@@ -933,6 +939,11 @@ begin
     end loop;
   end;
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    insert into billing.old_jobs (jobname, schedule, command)
+    select jobname, schedule, command from cron.job
+     where jobname in ('unpaid-delete', 'plant-wipe', 'plant-purge', 'free-trim', 'free-week-mail', 'offer-end-mail',
+                       'card-expiry-mail')
+    on conflict (jobname) do update set schedule = excluded.schedule, command = excluded.command;
     perform cron.unschedule(jobname) from cron.job
      where jobname in ('unpaid-delete', 'plant-wipe', 'plant-purge', 'free-trim', 'free-week-mail', 'offer-end-mail',
                        'card-expiry-mail', 'billing-delete', 'billing-history', 'billing-run');
@@ -942,6 +953,38 @@ begin
     perform cron.schedule('billing-run', '*/5 4-5 * * *', $c$select private.call_fn('billing/run', '{}', 120000)$c$);
   end if;
   return jsonb_build_object('switched_at', (select switched_at from billing.switch_over));
+end $$;
+
+-- The way back (DEPLOY.md, "If the switch has to be undone"): only before the new frontend
+-- ships (step 7) and before any payment lands in the new tables. After a payment, it refuses:
+-- fix forward. The old tables were frozen, then took only links, so they are as they were;
+-- plant choices made in the new tables since the switch are not carried back. Returns how many
+-- plants the new delete job has deleted since the switch (they stay deleted).
+create function billing.switch_off()
+returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
+declare sw timestamptz := (select switched_at from billing.switch_over); f text; purged int;
+begin
+  if sw is null then raise exception 'not switched on' using errcode = '55000'; end if;
+  if exists (select 1 from billing.payment_attempts
+              where status = 'success' and coalesce(settled_at, created_at) > sw
+                and coalesce(gateway_response, '') not like 'copied: %') then
+    raise exception 'payments landed since the switch: fix forward, do not switch off' using errcode = '55000';
+  end if;
+  purged := (select count(*) from billing.plants where history_purged_at > sw);
+  delete from billing.switch_over;
+  foreach f in array array['public.api_billing_change(text,text,bigint[])', 'public.api_billing_extras(integer,bigint[])',
+                           'public.api_billing_keep(bigint)', 'public.api_billing_keep_set(bigint[])',
+                           'public.api_billing_start_keep(bigint[])', 'public.api_plant_pick(bigint[])'] loop
+    if to_regprocedure(f) is not null then
+      execute format('grant execute on function %s to authenticated', f);
+    end if;
+  end loop;
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobname) from cron.job where jobname in ('billing-delete', 'billing-history');
+    -- billing-run stays: it calls billing/run, which the old billing function answers again
+    perform cron.schedule(o.jobname, o.schedule, o.command) from billing.old_jobs o;
+  end if;
+  return jsonb_build_object('switched_off', now(), 'purged_since_switch', purged);
 end $$;
 
 create function billing.unknown_command(p_cmd text)
