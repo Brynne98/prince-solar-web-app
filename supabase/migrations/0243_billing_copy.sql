@@ -104,6 +104,10 @@ declare
   ocur boolean;
   oreason text;
 begin
+  -- the billing-run lock, first: the poller's share update and the link and claim writes take
+  -- it shared, so none of them runs half across the copy (a share removed while it copies
+  -- would otherwise leave its new claim behind)
+  perform pg_advisory_xact_lock(3, 0);
   -- anything but this copy's own seed tries (below) means real money moved here
   if to_regclass('billing.invoices') is not null then
     -- the copy's own tries say 'copied: ...'; any answer since replaces that text
@@ -499,4 +503,3 @@ begin
   return out;
 end $$;
 revoke all on function billing.copy_from_old() from public, anon, authenticated;
-

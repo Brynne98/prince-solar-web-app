@@ -542,6 +542,10 @@ begin
   delete from billing.refunds where reference = 'S14-REF';
   -- a rerun clears only what the copy wrote: the poller's and the commands' events stay
   perform billing.copy_from_old();
+  -- the copy holds the billing-run lock the poller's share update and the link and claim writes
+  -- wait on: a share removed while it copies cannot leave its claim behind (final review, Sol)
+  perform pg_temp.ok('S14 the copy holds the billing-run lock', exists (select 1 from pg_locks where locktype = 'advisory'
+    and classid = 3 and objid = 0 and objsubid = 2 and mode = 'ExclusiveLock' and pid = pg_backend_pid() and granted));
   insert into billing.account_events (account, at, actor, kind)
   select id, now(), 'copy', 'copy_needs_review' from billing.accounts where user_id = u1
   union all select id, now(), 'poller', 'login_seen' from billing.accounts where user_id = u1;
