@@ -873,10 +873,14 @@ begin
   perform pg_advisory_xact_lock_shared(3, 0);
   if not billing.is_live() then return public.api_account_delete_old(); end if;
   if uid is null then raise exception 'not signed in' using errcode = '42501'; end if;
-  -- the order the other writers use, before the account: each login's lock (a reconnect holds
-  -- it while it waits for the account), then the link rows (the poller's share update holds
-  -- them while it waits for the account). Taken the other way round, either one deadlocks.
-  for acc in select id from private.sunsynk_accounts where user_id = uid order by id loop
+  -- the order the other writers use, before the account: the lock of each login its links hang
+  -- on, the share login too (a reconnect holds its login's, a claim of a lapsed share holds the
+  -- share login's, while each waits for the account or the plant), then the link rows (the
+  -- poller's share update holds them while it waits for the account). Taken the other way
+  -- round, any of them deadlocks.
+  for acc in select x.id from (select id from private.sunsynk_accounts where user_id = uid
+                               union select account_id from public.plant_users where user_id = uid and account_id is not null) x
+              order by x.id loop
     perform pg_advisory_xact_lock(1, hashtext(acc.id::text));
   end loop;
   perform 1 from public.plant_users where user_id = uid order by plant_id for update;
