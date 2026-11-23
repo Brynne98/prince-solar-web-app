@@ -333,7 +333,8 @@ frontend second, in this order:
       card-page returns are refused (Paystack sends a notice again later, to whichever billing
       is live then).
    2. `supabase db query --linked "select billing.switch_off()"`. It refuses when a payment,
-      refund or Paystack notice has landed in the new tables since the switch ("fix forward"),
+      refund or Paystack notice has landed in the new tables since the switch, or a cancel,
+      downgrade, interval switch or account delete was booked there ("fix forward"),
       or when a try since the switch is still open ("verify it first": the pause also stops it
       being settled, so run `billing.resume_payments()`, wait until it settles or Paystack says
       it failed, then decide again from step 1). Fix forward means: stay switched and start
@@ -341,9 +342,9 @@ frontend second, in this order:
       puts the old jobs back as they were, stops `billing-history` and `billing-run`, lets the
       old screens' plan and plant calls work again, and answers: how many plants were deleted
       since the switch (only by an owner's own stop or login removal: the delete job has not
-      started), and `since_switch`, the logins and share claims made since the switch. Those
-      went to the new tables only: for each, ask the owner to link the login or claim the
-      plant again once the old billing is back.
+      started), and `since_switch`, the logins, share claims and plant choices made since the
+      switch. Those went to the new tables only: for each, ask the owner to link the login,
+      claim the plant or choose the plants again once the old billing is back.
    3. Deploy the old billing function from `main` before the merge: `git worktree add /tmp/solar-old <old main sha>`,
       then `supabase functions deploy billing` from that folder.
    4. Only then the daily run again:

@@ -1013,6 +1013,10 @@ begin
   -- sent from there: the old tables do not know it (go-live review, Neon)
   if exists (select 1 from billing.payment_events where received_at >= sw)
      or exists (select 1 from billing.account_events where actor = 'paystack' and at >= sw)
+     -- a change booked in the new tables since the switch (a cancel, a downgrade, an interval
+     -- switch, its undo, an account deleted): the old run would not know it (go-live confirm, Sol)
+     or exists (select 1 from billing.account_events where at >= sw
+                  and kind in ('cancel', 'undo_cancel', 'downgrade', 'switch_interval', 'delete_account'))
      -- not the copy's own refunds: copied and switched in one transaction, they carry the switch time
      or exists (select 1 from billing.refunds where updated_at >= sw and status <> 'due'
                   and (coalesce(last_error, '') not like 'copied: %' or updated_at <> created_at)) then
@@ -1031,7 +1035,10 @@ begin
     'logins', (select coalesce(jsonb_agg(jsonb_build_object('user', a.user_id, 'login', l.username)), '[]')
                  from billing.logins l join billing.accounts a on a.id = l.account where l.created_at > sw),
     'claims', (select coalesce(jsonb_agg(jsonb_build_object('user', a.user_id, 'plant', c.plant)), '[]')
-                 from billing.plant_claims c join billing.accounts a on a.id = c.account where c.claimed_at > sw));
+                 from billing.plant_claims c join billing.accounts a on a.id = c.account where c.claimed_at > sw),
+    'plant_choices', (select coalesce(jsonb_agg(distinct a.user_id), '[]')
+                 from billing.account_events e join billing.accounts a on a.id = e.account
+                where e.kind = 'set_chosen_plants' and e.at > sw));
   delete from billing.switch_over;
   foreach f in array array['public.api_billing_change(text,text,bigint[])', 'public.api_billing_extras(integer,bigint[])',
                            'public.api_billing_keep(bigint)', 'public.api_billing_keep_set(bigint[])',

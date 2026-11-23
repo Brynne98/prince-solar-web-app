@@ -3990,6 +3990,11 @@ begin
   values ('paystack', 'refund.processed', 'z10-refund', 'processed', (select switched_at from billing.switch_over) + interval '1 second');
   perform pg_temp.fails('Z10 a Paystack notice since the switch: refused', 'select billing.switch_off()', 'fix forward');
   delete from billing.payment_events where entity_id = 'z10-refund';
+  -- a cancel (or another booked change) since the switch: the old run would charge anyway (go-live confirm, Sol)
+  insert into billing.account_events (account, at, actor, kind)
+  select id, (select switched_at from billing.switch_over) + interval '1 second', 'owner', 'cancel' from billing.accounts limit 1;
+  perform pg_temp.fails('Z10 a cancel booked since the switch: refused', 'select billing.switch_off()', 'fix forward');
+  delete from billing.account_events where kind = 'cancel' and at = (select switched_at from billing.switch_over) + interval '1 second';
   -- a refund the daily run handed out since the switch (marked sending in the same transaction,
   -- under the pause lock): refused, even before Paystack answers (go-live confirm, Astra)
   insert into billing.refunds (reference, reason, status, created_at, updated_at)
