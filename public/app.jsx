@@ -1805,6 +1805,13 @@ function SignedIn() {
     window.checkReturn().then(() => { setChecked(true); return window.reloadAccount(); })
       .then(a => setAcct(a || null), () => setAcct(null));
   }, []);
+  // Read again whenever the account is (a login linked, a plan ended): a login whose plants
+  // already had their week turns the account ended, and the pay screen shows.
+  useEffect(() => {
+    const on = () => setAcct(window.accountNow());
+    window.addEventListener('ps-account', on);
+    return () => window.removeEventListener('ps-account', on);
+  }, []);
   if (pages === 'failed') return <div className="login-fine">The app didn’t load. Check your connection and reload.</div>;
   if (!checked) return <BootShell />;
   return (

@@ -46,6 +46,18 @@ const sql = [
   // then the drop of the old billing (DEPLOY.md step 8) on top of it: it must run clean
   readFileSync(path.join(REPO, 'supabase/after-switch-over/0260_billing_drop_old.sql'), 'utf8'),
   "do $d$ begin raise notice 'drop of the old billing: ok'; end $d$;",
+  // the website's prices survive the drop, read from the billing tables (final fix 13)
+  `do $d$ declare o jsonb; begin
+     update billing.offers set max_members = null where code = 'launch';
+     o := public.api_offer();
+     if not has_function_privilege('anon', 'public.api_offer()', 'execute')
+        or o->'offer'->>'id' is distinct from 'launch'
+        or (o->'prices'->'monthly'->>'home')::numeric <> 49 or (o->'listPrices'->'monthly'->>'home')::numeric <> 99
+        or (o->'prices'->'yearly'->>'family')::numeric <> 990 or (o->'listPrices'->'yearly'->>'family')::numeric <> 1990 then
+       raise exception 'FAIL  api_offer after the drop: %', o;
+     end if;
+     raise notice 'api_offer after the drop: ok';
+   end $d$;`,
   'rollback;',
 ].join('\n');
 
@@ -63,7 +75,7 @@ if (stale.length) {
 }
 
 const r = spawnSync(PSQL, ['-X', '-q', '-v', 'ON_ERROR_STOP=1', DB], { input: sql, encoding: 'utf8' });
-const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed|CONTEXT|LINE|line |old billing: ok/.test(l));
+const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed|CONTEXT|LINE|line |old billing: ok|api_offer/.test(l));
 console.log(`migrations: ${migrations.join(' ')}`);
 console.log(lines.join('\n') || (r.error ? String(r.error) : '(no output)'));
 process.exit(r.status === 0 ? 0 : 1);

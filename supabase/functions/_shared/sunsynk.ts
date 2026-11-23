@@ -522,22 +522,27 @@ export async function getInvertersCached(acc: Account): Promise<InverterInfo[]> 
  * plants and which are paused. `reason` is from before the pick; nothing reads it.
  */
 export async function linkAccount(userId: string, username: string, password: string,
-  saved?: (accountId: string, plants: PlantInfo[]) => Promise<void>) {
+  store?: (token: { access: string; expires: number; refresh: string }, plants: PlantInfo[]) => Promise<string>) {
   const t = await tokenLogin(username, password);
+  const expires = expiresAt(t.expires_in);
   const acc: Account = {
     id: "", user_id: userId, sunsynk_username: username,
-    access_token: t.access_token, access_expires_at: expiresAt(t.expires_in),
+    access_token: t.access_token, access_expires_at: expires,
   };
   const plants = await getPlants(acc);
   const invs = await getInverters(acc);
 
-  acc.id = await rpc<string>("account_upsert", {
-    p_user: userId, p_username: username, p_access: t.access_token, p_expires: acc.access_expires_at,
-  });
-  await rpc("account_refresh_set", { p_account: acc.id, p_refresh: t.refresh_token });
-  // saved: the billing tables' half (link-sunsynk once they are live). It throws to stop the
-  // link before any plant is linked; a retry finds the same stored login (account_upsert).
-  if (saved) await saved(acc.id, plants);
+  // store: the billing tables decide (link-sunsynk once they are live): the login, its token
+  // and billing's half in one transaction, so a refusal throws before any plant is linked
+  // and leaves no login behind.
+  if (store) {
+    acc.id = await store({ access: t.access_token, expires, refresh: t.refresh_token }, plants);
+  } else {
+    acc.id = await rpc<string>("account_upsert", {
+      p_user: userId, p_username: username, p_access: t.access_token, p_expires: acc.access_expires_at,
+    });
+    await rpc("account_refresh_set", { p_account: acc.id, p_refresh: t.refresh_token });
+  }
   const active = new Set((await syncPlants(acc, { plants, invs })).map((p) => p.id));
   const paused = plants.filter((p) => !active.has(p.id)).map((p) => p.id);
   return { accountId: acc.id, plants, paused, reason: paused.length ? "upgrade_needed" : null };
@@ -840,7 +845,7 @@ export type ClaimResult =
  * serials. Checked live against what SunSynk shows the share login.
  */
 export async function claimShared(userId: string, ref: string,
-  before?: (plant: PlantInfo) => Promise<void>): Promise<ClaimResult> {
+  claim?: (account: string, plant: PlantInfo) => Promise<"yours" | "claimed">): Promise<ClaimResult> {
   const acc = await shareAccount();
   if (!acc) throw new Error("share login not set up");
   const plants = await getPlants(acc);
@@ -855,9 +860,9 @@ export async function claimShared(userId: string, ref: string,
     plant = inv?.plantId != null ? plants.find((p) => p.id === Number(inv.plantId)) : undefined;
   }
   if (!plant) return { result: "not_shared" };
-  // before: the billing tables' claim (claim-share once they are live). It throws to refuse.
-  if (before) await before(plant);
-  const result = await rpc<"taken" | "yours" | "claimed" | "claimed_paused">("share_claim", {
+  // claim: billing decides and the link row is written in one transaction (claim-share once
+  // the billing tables are live). It throws to refuse.
+  const result = claim ? await claim(acc.id, plant) : await rpc<"taken" | "yours" | "claimed" | "claimed_paused">("share_claim", {
     p_user: userId, p_account: acc.id, p_plant: plant.id, p_plant_name: plant.name,
   });
   if (result === "claimed" || result === "claimed_paused") {

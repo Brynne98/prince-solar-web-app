@@ -241,6 +241,9 @@ begin
 
   unprotected := array(select x from unnest(closed) x
                         where not (billing.plant_state(x, p_at)->>'protected')::boolean);
+  -- a closed plant nothing keeps is deleted now, under its lock (purge_now, 0246), so the
+  -- pop-up's "history deleted now" is true
+  perform billing.purge_now(x, p_at) from unnest(closed) x;
   update billing.accounts set version = version + 1 where id = p_account;
   perform billing.log_event(p_account, p_at, p_actor, 'remove_login',
                             jsonb_build_object('state', st.state, 'login', p_login, 'plants', to_jsonb(reached)),

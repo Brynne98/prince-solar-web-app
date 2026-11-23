@@ -97,6 +97,55 @@ test('refund email: the refunded payment\'s card, not the saved one (fix 9)', ()
   eq(hero.sub, 'back to Mastercard •••• 1111');
 });
 
+// ---- final review fixes -------------------------------------------------------------------
+const tz = { time_zone: 'Africa/Johannesburg', locale: 'en-ZA', currency: 'ZAR' };
+test('checkout confirm: nothing changes until the payment goes through (final fix 8)', () => {
+  const a = acct({ ...tz, plants: [plant(1, { chosen: true }), plant(2)] });
+  eq(ctx.AccountText.switchConfirm(a, [1], [2], true).lines,
+    ['When the payment goes through:', 'Plant 1 stops and its history is deleted.', 'Plant 2 starts.', 'Switching often slows history loading.']);
+  eq(ctx.AccountText.switchConfirm(a, [1], [], false).lines, ['Plant 1 stops and its history is deleted now.']);
+});
+test('delete reminder, plants on different dates: never one date for all (final fix 10)', () => {
+  const s = { ...acct(), ...tz, access_ended_at: '2026-12-01T08:00:00Z', history_kept_until: '2026-12-31T08:00:00Z',
+    plants: [plant(1, { chosen: true, delete_at: '2026-12-31T08:00:00Z' }), plant(2, { chosen: true, delete_at: '2027-01-20T08:00:00Z' })] };
+  const m = ctx.AccountText.mail({ key: 'history_delete_soon', state: s });
+  eq(m.subject, 'History of Plant 1 is deleted on 31 Dec 2026');
+  eq(m.parts[0].lead, 'Readings stopped on 1 Dec 2026. Plant 2: history kept until 20 Jan 2027. A plan before 31 Dec 2026 keeps it all.');
+  const one = ctx.AccountText.mail({ key: 'history_delete_soon', state: { ...s, plants: [s.plants[0]] } });
+  eq(one.subject, 'Your history is deleted on 31 Dec 2026');
+});
+test('delete account: each reason its own words, no link to a section not shown (final fix 15)', () => {
+  const d = (o) => ctx.AccountText.deleteBlocked({ ...acct(), ...tz, may_delete: false, owed_minor: 0, dispute_open: false, plan_name: 'Home', cancel_at: null, ...o });
+  eq(d({ may_delete: true }), null);
+  eq([d({ cancel_at: '2027-01-03T08:00:00Z' }).title, d({ cancel_at: '2027-01-03T08:00:00Z' }).to], ['Home ends on 3 Jan 2027', null]);
+  eq([d({ dispute_open: true }).title, d({ dispute_open: true }).to], ['A payment is in dispute', null]);
+  eq(d({ state: 'past_due' }).to, 'billing');
+  eq([d({ state: 'ended', plan_name: null, owed_minor: 4900 }).title, d({ state: 'ended', plan_name: null, owed_minor: 4900 }).to], ['R49 is owed', 'mail']);
+  eq(d({}).to, 'cancel');
+  eq([d({ plan_name: null }).to, /null/.test(d({ plan_name: null }).text)], ['mail', false]);
+});
+test('a running plan with no saved card: Add card (final fix 16)', () => {
+  eq(ctx.cardAction(acct({ card: null })), 'Add card');
+  eq(ctx.cardAction(acct({ card: { last4: '4242' } })), 'Change card');
+  eq(ctx.cardAction(acct({ state: 'ended', plan: null, card: null })), null);
+});
+test('signed in: the account read again on every ps-account (final fix 14)', () => {
+  // the app files again, with hooks that run: useEffect at once, setState recorded
+  const on = {}, sets = [];
+  const R = new Proxy({ useState: (v) => [v, (x) => sets.push(x)], useEffect: (f) => { f(); } }, { get: (t, k) => t[k] ?? stub() });
+  const c = { ...ctx, React: R, addEventListener: (k, f) => (on[k] ??= []).push(f), removeEventListener() {} };
+  c.window = c;
+  createContext(c);
+  for (const f of ['config.js', 'build/text.js', 'build/link.js', 'build/data.js', 'build/components.js', 'build/app.js'])
+    runInContext(readFileSync(new URL('public/' + f, root), 'utf8'), c, { filename: f });
+  c.checkReturn = c.loadPages = () => new Promise(() => {});
+  c.SignedIn();
+  const ended = { state: 'ended' };
+  c.accountNow = () => ended;
+  (on['ps-account'] || []).forEach(f => f());
+  eq(sets.includes(ended), true);
+});
+
 let failed = 0;
 for (const c of cases) {
   try { await c.fn(); console.log('ok    ' + c.name); }

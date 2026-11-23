@@ -1,6 +1,6 @@
 // deno test -A --node-modules-dir=none _shared/links_test.ts (SOLAR-641 phase 4 fixes 5, 6, 10)
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { Refused, type Rpc, saveLogin, savePlantClaim } from "./links.ts";
+import { claimLive, loginName, Refused, type Rpc, saveLogin, saveLoginLive, savePlantClaim } from "./links.ts";
 import { outboxKey, sendOutboxOne } from "./outbox.ts";
 
 const failing = (message: string): { rpc: Rpc; calls: string[] } => {
@@ -50,7 +50,30 @@ Deno.test("outbox: the key is the row's own, so a retry in another batch keeps i
   await sendOutboxOne(post, "u", { id: 7, payload: { changed: true } });
   assertEquals(keys, [outboxKey(7), outboxKey(8), outboxKey(7)]);
 });
-Deno.test("outbox: 409 (the key already sent it) counts as sent (fix 10)", async () => {
-  const post = () => Promise.resolve({ status: 409, error: "resend 409: idempotency key used" });
+Deno.test("outbox: 409, the key already sent it with other words: sent (final fix 12)", async () => {
+  const post = () => Promise.resolve({ status: 409, error: 'resend 409: {"statusCode":409,"name":"invalid_idempotent_request"}' });
   assertEquals(await sendOutboxOne(post, "u", { id: 7, payload: {} }), { status: 200 });
+});
+Deno.test("outbox: 409 while the first call is in progress, or unnamed: retried, not sent (final fix 12)", async () => {
+  for (const error of ['resend 409: {"name":"concurrent_idempotent_requests"}', "resend 409: conflict"]) {
+    const post = () => Promise.resolve({ status: 409, error });
+    assertEquals((await sendOutboxOne(post, "u", { id: 7, payload: {} })).status, 409);
+  }
+});
+
+// final fixes 3, 4, 5: one case for a login; live linking and claiming in one transaction
+Deno.test("a login's email in one case, trimmed (final fix 3)", () => {
+  assertEquals(loginName("  Me@Mail.TEST "), "me@mail.test");
+});
+Deno.test("live link: one call, a refusal is the answer (final fix 4)", async () => {
+  const { rpc, calls } = failing("one login");
+  const e = await assertRejects(() => saveLoginLive(rpc, "u", "me@x", { access: "a", expires: 1, refresh: "r" }, []), Refused);
+  assertEquals(e.answer, "one login");
+  assertEquals(calls, ["link_login_live:undefined"]);
+});
+Deno.test("live claim: one call, taken is the answer (final fix 5)", async () => {
+  const { rpc, calls } = failing("taken");
+  const e = await assertRejects(() => claimLive(rpc, "u", "share", { id: 1, name: "A" }), Refused);
+  assertEquals(e.answer, "taken");
+  assertEquals(calls, ["share_claim_live:undefined"]);
 });

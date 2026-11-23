@@ -5,8 +5,11 @@ export type Post = (url: string, body: unknown, key: string) => Promise<{ status
 
 export const outboxKey = (id: number) => `ob-${id}`;
 
-/** 409: this key already sent the row (its words read again since differ): it went. */
+/** A 409 counts as sent only when Resend's body says this key already sent the row and its
+ *  words read again since differ (invalid_idempotent_request). The first call still in
+ *  progress (concurrent_idempotent_requests), or any other 409, is retried: the retry under
+ *  the same key is answered from the first send, so nothing goes twice and nothing is lost. */
 export async function sendOutboxOne(post: Post, url: string, o: { id: number; payload: unknown }) {
   const res = await post(url, o.payload, outboxKey(o.id));
-  return res.status === 409 ? { status: 200 } : res;
+  return res.status === 409 && /invalid_idempotent_request/.test(res.error ?? "") ? { status: 200 } : res;
 }

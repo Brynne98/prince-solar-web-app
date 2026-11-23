@@ -117,21 +117,65 @@ begin
   if not public.link_login_allowed(p_user, p_username) then
     raise exception 'one login' using errcode = '22023';
   end if;
+  -- the same login whatever the case of its email (SunSynk ignores it): the row already
+  -- stored is updated in place; a new one only when there is none
+  select id into acc from private.sunsynk_accounts
+   where user_id = p_user and kind = 'login' and lower(sunsynk_username) = lower(p_username)
+   order by sunsynk_username = p_username desc, id limit 1;
+  -- Before the update below wipes status and last_error. A first link has no row.
   insert into private.sunsynk_login_events (account_id, event, reason, last_ok_at, access_expires_at)
   select id, 'relinked', status || coalesce(': ' || last_error, ''), last_ok_at, access_expires_at
-    from private.sunsynk_accounts
-   where user_id = p_user and sunsynk_username = p_username;
-  insert into private.sunsynk_accounts (user_id, sunsynk_username, access_token, access_expires_at, status, last_ok_at, last_error)
-  values (p_user, p_username, p_access, p_expires, 'active', now(), null)
-  on conflict (user_id, sunsynk_username) do update
-    set access_token = excluded.access_token, access_expires_at = excluded.access_expires_at,
-        status = 'active', last_ok_at = now(), last_error = null
-  returning id into acc;
+    from private.sunsynk_accounts where id = acc;
+  if acc is null then
+    insert into private.sunsynk_accounts (user_id, sunsynk_username, access_token, access_expires_at, status, last_ok_at, last_error)
+    values (p_user, p_username, p_access, p_expires, 'active', now(), null)
+    returning id into acc;
+  else
+    update private.sunsynk_accounts
+       set access_token = p_access, access_expires_at = p_expires, status = 'active', last_ok_at = now(), last_error = null
+     where id = acc;
+  end if;
+  -- A fresh sign-in replaces whatever the other copies held. The refresh token
+  -- follows in account_refresh_set, which link-sunsynk calls next.
   update private.sunsynk_accounts
      set access_token = p_access, access_expires_at = p_expires, status = 'active', last_error = null
    where id in (select private.login_copies(acc));
   return acc;
 end $$;
+
+-- The website's prices (welcome-scene.js) and notify's preview, read from the billing tables:
+-- the offer a new account would get now and list prices, in rand, in 0145's shape.
+create or replace function public.api_offer()
+returns jsonb language plpgsql stable security definer set search_path = billing, pg_temp as $$
+declare
+  m billing.markets := (select mk from billing.markets mk order by code limit 1);
+  -- an account nobody has: what a new account is offered
+  off text := billing.offer_for('00000000-0000-0000-0000-000000000000', now());
+  o billing.offers := (select x from billing.offers x where x.code = off);
+  list jsonb := '{}';
+  at jsonb := '{}';
+  iv text;
+  r numeric;
+begin
+  for iv in select unnest(array['month', 'year']) loop
+    list := list || jsonb_build_object(case iv when 'month' then 'monthly' else 'yearly' end, jsonb_build_object(
+      'home', trim_scale((billing.price_for('home', m.code, iv, null, now())).amount_minor::numeric / 100),
+      'family', trim_scale((billing.price_for('family', m.code, iv, null, now())).amount_minor::numeric / 100),
+      'extra', trim_scale((billing.price_for('family', m.code, iv, null, now())).extra_place_minor::numeric / 100)));
+    at := at || jsonb_build_object(case iv when 'month' then 'monthly' else 'yearly' end, jsonb_build_object(
+      'home', trim_scale(coalesce((billing.price_for('home', m.code, iv, off, now())).amount_minor,
+                                  (billing.price_for('home', m.code, iv, null, now())).amount_minor)::numeric / 100),
+      'family', trim_scale(coalesce((billing.price_for('family', m.code, iv, off, now())).amount_minor,
+                                    (billing.price_for('family', m.code, iv, null, now())).amount_minor)::numeric / 100),
+      'extra', trim_scale(coalesce((billing.price_for('family', m.code, iv, off, now())).extra_place_minor,
+                                   (billing.price_for('family', m.code, iv, null, now())).extra_place_minor)::numeric / 100)));
+  end loop;
+  return jsonb_build_object('prices', at, 'listPrices', list,
+    'offer', case when off is not null then jsonb_build_object('id', o.code, 'months', null, 'cap', o.max_members,
+               'joinsUntil', (o.valid_until at time zone m.default_time_zone)::date, 'held', false, 'until', null) end);
+end $$;
+revoke all on function public.api_offer() from public;
+grant execute on function public.api_offer() to anon, authenticated;
 
 -- The links (plant_users) only; which plants are chosen is billing.seats' (link_login,
 -- set_chosen_plants), and the free week is billing.accounts'.
@@ -369,18 +413,19 @@ begin
               'email_skip_paused', 'free_week_mail', 'had_plan', 'no_week', 'offer_end_mail', 'plant_in_week',
               'plant_pick_add', 'plant_run', 'plant_swap', 'plant_users_drop_pick', 'plant_users_plan_limit',
               'plant_wipe_readings', 'plant_wipes', 'unpaid_delete', 'unpaid_since', 'week_ends', 'week_start',
-              'billing_price_list', 'billing_lock', 'billing_today', 'billing_end_day', 'plant_live_old', 'pick_waiting_old'))
+              'billing_price_list', 'billing_lock', 'billing_today', 'billing_end_day', 'plant_live_old', 'pick_waiting_old',
+              'old_billing_paused'))
         or (n.nspname = 'public' and p.proname in (
               'api_billing_change', 'api_billing_extras', 'api_billing_keep', 'api_billing_keep_set', 'api_billing_quote',
               'api_billing_start_keep', 'api_billing_status', 'api_link_status', 'api_plant_pick', 'api_plant_picks',
-              'api_offer', 'email_prices', 'email_billing_facts', 'email_reversed_reference',
+              'email_prices', 'email_billing_facts', 'email_reversed_reference',
               'billing_amount', 'billing_amount_due', 'billing_book_change', 'billing_book_removal', 'billing_card_open',
               'billing_charge_disputed', 'billing_charge_failed', 'billing_charge_open', 'billing_charge_paid',
               'billing_charge_refund_event', 'billing_charge_refunded', 'billing_charge_user', 'billing_may_link',
               'billing_refunds_due', 'billing_renew', 'billing_room', 'billing_run', 'billing_run_release',
               'billing_set_comped', 'billing_settle_open', 'billing_start_facts', 'billing_upgrade_quote',
               'link_login_allowed_old', 'api_account_delete_old', 'poll_jobs'))
-        or (n.nspname = 'billing' and p.proname = 'copy_from_old')
+        or (n.nspname = 'billing' and p.proname in ('copy_from_old', 'pause_old', 'resume_old'))
   loop
     execute format('drop routine %s cascade', f.sig);
   end loop;
@@ -389,6 +434,7 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- Old tables and columns
 -- ---------------------------------------------------------------------------
+drop table billing.old_pause;
 drop table private.billing_charges cascade;
 drop table private.billing cascade;
 drop table private.offer_members cascade;
@@ -416,7 +462,7 @@ begin
                             'week_start', 'plant_in_week', 'plant_pick_add', 'plant_run', 'billing_notices', 'billing_offer_json',
                             'billing_offer_open', 'billing_offer_now', 'unpaid_since', 'had_plan', 'no_week', 'plant_wipe_readings',
                             'api_billing_status', 'api_link_status', 'poll_jobs', 'billing_drops', 'billing_price_list',
-                            'email_prices', 'api_offer', 'email_billing_facts', 'copy_from_old']) d (x)
+                            'email_prices', 'email_billing_facts', 'copy_from_old']) d (x)
    where n.nspname in ('public', 'private', 'billing') and p.prosrc ~ ('\m' || d.x || '\s*\(')
      and not (p.proname = 'poll_jobs_v2' and d.x = 'poll_jobs');    -- its branch for before the switch, never taken now
   if bad is not null then raise exception 'still calling the old billing: %', bad; end if;

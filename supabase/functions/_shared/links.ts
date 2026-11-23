@@ -37,12 +37,40 @@ async function write(rpc: Rpc, live: boolean, note: Note, what: string, args: Re
   throw new Error(`${what}: ${error.message}`);
 }
 
-/** The login and its whole plant list into the billing tables. Live: the locked link_login decides. */
+/** A SunSynk login's email as it is stored and sent: one case, so a reconnect typed in
+ *  another case is the same login (SunSynk ignores the case). */
+export const loginName = (s: unknown) => String(s ?? "").trim().toLowerCase();
+
+/** Before the switch: the login and its whole plant list copied into the billing tables. */
 export const saveLogin = (rpc: Rpc, live: boolean, note: Note, user: string, login: string, username: string,
   plants: { id: number; name: string }[]) =>
   write(rpc, live, note, "link_login", { user, login, username, plants: plants.map((p) => ({ id: p.id, name: p.name })) });
 
-/** The claim into the billing tables. Live: claim_plant decides (first claim wins), also on a
+/** Live: the stored login, its refresh token and billing's link_login in one transaction
+ *  (link_login_live). A refusal or failure leaves no login behind. Returns the login's id. */
+export async function saveLoginLive(rpc: Rpc, user: string, username: string,
+  token: { access: string; expires: number; refresh: string }, plants: { id: number; name: string }[]): Promise<string> {
+  const { data, error } = await rpc("link_login_live", {
+    p_user: user, p_username: username, p_access: token.access, p_expires: token.expires, p_refresh: token.refresh,
+    p_plants: plants.map((p) => ({ id: p.id, name: p.name })),
+  });
+  if (!error) return String(data);
+  const answer = refusal(error);
+  if (answer) throw new Refused(answer);
+  throw new Error(`link_login_live: ${error.message}`);
+}
+
+/** Live: billing's claim_plant and the link row in one transaction (share_claim_live).
+ *  A refusal comes back as Refused; nothing is written then. */
+export async function claimLive(rpc: Rpc, user: string, account: string, plant: { id: number; name: string }) {
+  const { data, error } = await rpc("share_claim_live", { p_user: user, p_account: account, p_plant: plant.id, p_plant_name: plant.name });
+  if (!error) return data as "yours" | "claimed";
+  const answer = refusal(error);
+  if (answer) throw new Refused(answer);
+  throw new Error(`share_claim_live: ${error.message}`);
+}
+
+/** Before the switch: the claim copied into the billing tables. Live: claim_plant decides (first claim wins), also on a
  *  plant already ours, so a retry repairs a claim that is missing. */
 export const savePlantClaim = (rpc: Rpc, live: boolean, note: Note, user: string, plant: { id: number; name: string }) =>
   write(rpc, live, note, "claim_plant", { user, plant: plant.id, name: plant.name });

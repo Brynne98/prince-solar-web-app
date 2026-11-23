@@ -137,7 +137,7 @@ export function bookedChange(s: AccountState): { text: string; button: string } 
   return null;
 }
 const keptAfterCancel = (s: AccountState) =>
-  s.plants.some((p) => p.chosen && !p.kept_elsewhere) && s.cancel_at
+  s.if_cancelled_delete_at && s.cancel_at
     ? `Readings stop then; history is kept ${forms(s.retention_days, { one: "1 day", many: "{n} days" })}.` : "Readings stop then.";
 /** The plants a booked downgrade lets go, and what happens to each one's history. */
 function dropLine(s: AccountState, going: PlantState[]): string {
@@ -195,6 +195,18 @@ export const cancelDialog = (s: AccountState) => ({
   button: "Cancel plan",
   keep: `Keep ${s.plan_name}`,
 });
+
+/** Delete account refused (may_delete false): why, and where to go. to: where the button
+ *  leads, never a section the page does not show; null: Close only. */
+export function deleteBlocked(s: AccountState): { title: string; text: string; action: string | null; to: "billing" | "cancel" | "mail" | null } | null {
+  if (s.may_delete) return null;
+  if (s.dispute_open) return { title: "A payment is in dispute", text: "You can delete your account once it's settled.", action: null, to: null };
+  if (s.state === "past_due") return { title: "Pay the failed payment first", text: "Pay it in Billing, then you can delete your account.", action: "Go to Billing", to: "billing" };
+  if (s.owed_minor > 0) return { title: `${money(s.owed_minor, s.currency, s.locale)} is owed`, text: "Email us to settle it, then you can delete your account.", action: "Email us", to: "mail" };
+  if (s.cancel_at) return { title: `${s.plan_name} ends on ${day(s, s.cancel_at)}`, text: "You can delete your account after that.", action: null, to: null };
+  if (s.plan_name) return { title: "Cancel your plan first", text: `Your ${s.plan_name} plan is still running. Cancel it in Billing, then you can delete your account.`, action: "Go to cancel plan", to: "cancel" };
+  return { title: "Your plan from us is still running", text: "Email us to end it, then you can delete your account.", action: "Email us", to: "mail" };
+}
 
 // ------------------------------------------------------------------ Plans pop-up
 
@@ -290,18 +302,21 @@ export const choosePlants = (s: AccountState) => ({
   more: "Need more plants? See plans.",
 });
 
-/** Every change of chosen plants is confirmed here (design: no one-tap toggle). */
-export function switchConfirm(s: AccountState, goingIds: number[], comingIds: number[]) {
+/** Every change of chosen plants is confirmed here (design: no one-tap toggle). atPayment:
+ *  the checkout pick, where nothing changes until the payment goes through (said once, first). */
+export function switchConfirm(s: AccountState, goingIds: number[], comingIds: number[], atPayment = false) {
   const byId = (id: number) => s.plants.find((p) => p.plant === id);
   const going = goingIds.map(byId).filter(Boolean) as PlantState[];
   const coming = comingIds.map(byId).filter(Boolean) as PlantState[];
   const inNames = names(coming.map(plantName));
   const title = going.length && coming.length ? `Switch to ${inNames}?`
     : coming.length ? `Read ${inNames}?` : `Stop reading ${names(going.map(plantName))}?`;
-  const lines = going.map((p) => p.kept_elsewhere
+  const now = atPayment ? "" : " now";
+  const lines = atPayment ? ["When the payment goes through:"] : [];
+  lines.push(...going.map((p) => p.kept_elsewhere
     ? `${plantName(p)} stops. Another account keeps its history; you lose access to it.`
-    : `${plantName(p)} stops and its history is deleted now.`);
-  if (coming.length) lines.push(`${inNames} ${forms(coming.length, { one: "starts", many: "start" })} now.`);
+    : `${plantName(p)} stops and its history is deleted${now}.`));
+  if (coming.length) lines.push(`${inNames} ${forms(coming.length, { one: "starts", many: "start" })}${now}.`);
   if (going.length && coming.length) lines.push("Switching often slows history loading.");
   return { title, lines, button: going.length && coming.length ? "Switch" : coming.length ? "Read" : "Stop reading", danger: going.some((p) => !p.kept_elsewhere) };
 }
@@ -448,12 +463,27 @@ export type MailInput = {
   plant?: { id: number; name: string | null } | null;
 };
 
+/** The chosen plants waiting to be deleted, grouped by their delete date, earliest first. */
+function keptGroups(s: AccountState): { day: string; names: string[] }[] {
+  const by = new Map<string, string[]>();
+  for (const p of s.plants.filter((p) => p.chosen && p.delete_at && !p.purged)
+    .sort((a, b) => Date.parse(a.delete_at!) - Date.parse(b.delete_at!))) {
+    const d = day(s, p.delete_at);
+    by.set(d, [...(by.get(d) ?? []), plantName(p)]);
+  }
+  return [...by].map(([d, n]) => ({ day: d, names: n }));
+}
+/** Plants with different delete dates: each date with its plants, never one date for all. */
+const keptEach = (g: { day: string; names: string[] }[]) => g.map((x) => `${names(x.names)}: history kept until ${x.day}.`).join(" ");
+
 /** The email for one outbox row, from the state read at send time (and the frozen bill for a receipt). */
 export function mail(m: MailInput): Mail | null {
   const s = m.state;
   const $ = (n: number | null | undefined, cur = s.currency) => money(n, cur, s.locale);
   const card = (t: string | null | undefined, l: string | null | undefined) => l ? `${(t || "Card").replace(/^\w/, (c) => c.toUpperCase())} •••• ${l}` : null;
-  const kept = s.history_kept_until ? `History is kept until ${day(s, s.history_kept_until)}, then deleted.` : null;
+  const groups = keptGroups(s);
+  const kept = groups.length > 1 ? keptEach(groups)
+    : s.history_kept_until ? `History is kept until ${day(s, s.history_kept_until)}, then deleted.` : null;
   const fit = fitLine(s);
   switch (m.key) {
     case "receipt": {
@@ -529,10 +559,19 @@ export function mail(m: MailInput): Mail | null {
       return { reminder: true, subject: "Your free week has ended", title: "Your free week has ended",
         parts: [{ lead: ["Readings have stopped.", kept, fit ? `For your plants: ${fit}.` : null].filter(Boolean).join(" ") },
           { button: { label: billing.seePlans, page: "plans" } }] };
-    case "history_delete_soon":
-      return { reminder: true, subject: `Your history is deleted on ${day(s, s.history_kept_until)}`, title: `Your history is deleted on ${day(s, s.history_kept_until)}`,
-        parts: [{ lead: `Readings stopped on ${day(s, s.access_ended_at)}. A plan before ${day(s, s.history_kept_until)} keeps it.` },
+    case "history_delete_soon": {
+      const first = day(s, s.history_kept_until);
+      if (groups.length > 1) {
+        // only the plants due on the first date are named in the subject; the rest keep their own dates
+        const head = `History of ${names(groups[0].names)} is deleted on ${first}`;
+        return { reminder: true, subject: head, title: head,
+          parts: [{ lead: `Readings stopped on ${day(s, s.access_ended_at)}. ${keptEach(groups.slice(1))} A plan before ${first} keeps it all.` },
+            { button: { label: billing.seePlans, page: "plans" } }] };
+      }
+      return { reminder: true, subject: `Your history is deleted on ${first}`, title: `Your history is deleted on ${first}`,
+        parts: [{ lead: `Readings stopped on ${day(s, s.access_ended_at)}. A plan before ${first} keeps it.` },
           { button: { label: billing.seePlans, page: "plans" } }] };
+    }
     case "history_deleted":
       return { reminder: true, subject: `History deleted: ${m.plant?.name || "your plant"}`, title: "Your history has been deleted",
         parts: [{ lead: `${m.plant?.name || "Your plant"}'s readings and history are deleted. A plan brings readings back from today.` },
@@ -543,6 +582,6 @@ export function mail(m: MailInput): Mail | null {
 
 export const AccountText = {
   money, day, weekday, forms, names, plantName, planTitle, planPrice, planStatus, placesLine, mustChoose, bookedChange,
-  cardLine, cardSub, billRow, billing, cancelDialog, plans, planCard, quoteReview, checkoutPick, keepPick, weekPick, chosenToast, refused, pay,
+  cardLine, cardSub, billRow, billing, cancelDialog, deleteBlocked, plans, planCard, quoteReview, checkoutPick, keepPick, weekPick, chosenToast, refused, pay,
   choosePlants, switchConfirm, plantTag, plantKept, logins, removeLogin, payScreen, fitLine, notices, mail,
 };

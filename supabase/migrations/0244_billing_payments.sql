@@ -35,6 +35,7 @@ create table billing.payment_methods (
   active          boolean not null default true,
   disabled_reason text check (disabled_reason in ('replaced', 'hard_decline', 'dispute', 'reversed', 'not_reusable')),
   created_at      timestamptz not null default now(),
+  activated_at    timestamptz,                   -- the last time it became the active card
   unique (provider, auth_ref),
   check (active = (disabled_reason is null)),
   check (not active or reusable)
@@ -103,6 +104,9 @@ create table billing.payment_attempts (
   gateway_response text,
   hard_decline     boolean not null default false,
   pay_url          text,                         -- bank challenge: the owner finishes it here
+  -- a newer page or bill replaced this card page: never handed back again, but it stays
+  -- pending (Paystack could still settle it) until a verify says it cannot
+  replaced_at      timestamptz,
   dispute_status   text,
   dispute_open     boolean not null default false,
   dispute_id       text,                         -- Paystack's dispute id

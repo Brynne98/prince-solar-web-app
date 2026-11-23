@@ -534,8 +534,8 @@ window.pickWaiting = pickWaiting;
 // Every change of chosen plants is confirmed here (pickNext): it names the plants that go and
 // says whether each one's history is deleted now or kept by another account, the plants that
 // start, and the one line on history loading (design, "History fetch speed").
-function SwitchConfirm({ acct, going, coming, busy, onConfirm, onCancel }) {
-  const t = AT.switchConfirm(acct, going, coming);
+function SwitchConfirm({ acct, going, coming, atPayment = false, busy, onConfirm, onCancel }) {
+  const t = AT.switchConfirm(acct, going, coming, atPayment);
   return (
     <Dialog keep label={t.title} busy={busy} onClose={onCancel}>
       <div className="confirm-title">{t.title}</div>
@@ -598,7 +598,7 @@ function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', pre
     if (n === 'confirm') return setConfirm(true);
     onDone(picked);
   };
-  if (confirm) return <SwitchConfirm acct={acct} going={going} coming={coming} busy={busy} onCancel={() => setConfirm(false)}
+  if (confirm) return <SwitchConfirm acct={acct} going={going} coming={coming} atPayment={mode === 'checkout'} busy={busy} onCancel={() => setConfirm(false)}
     onConfirm={mode === 'choose' ? save : () => onDone(picked)} />;
   return (
     <Dialog keep label={t.title} busy={busy} onClose={() => onDone(null)}>

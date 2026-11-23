@@ -239,20 +239,33 @@ frontend second, in this order:
    switch: `supabase functions deploy poll recover sync-plant-energy job-check link-sunsynk claim-share notify`.
    link-sunsynk and claim-share also write each new login and claim into the new tables;
    notify sends `billing.outbox` only after the switch.
-3. Turn the old billing job off (`select cron.unschedule('billing-run')`). Settle or refund any
-   open old references first. Step 6 turns it back on for the new billing function.
+3. Turn the old billing job off (`select cron.unschedule('billing-run')`) and stop new old
+   payments: `supabase db query --linked "select billing.pause_old('new_payments')"`. Pay and
+   plan changes on the old screens now answer an error; links and readings carry on. Settle or
+   refund the old payments still open, until
+   `select count(*) from private.billing_charges where status = 'pending'` is 0. Step 6 turns
+   the job back on for the new billing function.
 4. Copy today's accounts, once: `supabase db query --linked "select billing.copy_from_old()"`.
    A rerun keeps each account's id and clears only the events the copy wrote, so it is safe
    until the first payment lands in `billing.invoices`; after that it refuses. Saved cards
    come across, so renewals keep charging them.
 5. Compare `billing.account_state` for each account with today's screens, next charges and
    poll decisions.
-6. In one go, so no billing email is sent twice or lost, and no change made since step 4
-   is lost: copy again (`supabase db query --linked "select billing.copy_from_old()"`; logins,
-   plant choices and payments made since the first copy are in the old tables only), then
-   `supabase functions deploy billing`, then
-   `supabase db query --linked "select billing.switch_on()"`.
-   The billing function reads and writes the new tables (through `public.billing_v2`).
+6. The switch, in this order, so no billing email is sent twice or lost, and no change made
+   since step 4 is lost (logins, plant choices and payments made since the first copy are in
+   the old tables only):
+   1. Freeze the old billing tables: `supabase db query --linked "select billing.pause_old('all')"`.
+      From here every write to them fails ("billing is paused for an update"): linking a login
+      and the old billing function answer an error, and Paystack sends a refused webhook again
+      later. Keep this window to a few minutes.
+   2. Copy again and switch in one transaction:
+      `supabase db query --linked "begin; select billing.copy_from_old(); select billing.switch_on(); commit;"`.
+      If either fails, nothing is switched: `select billing.resume_old()` and start step 6 again.
+   3. `supabase functions deploy billing`. The billing function reads and writes the new tables
+      (through `public.billing_v2`).
+   4. Resume: `supabase db query --linked "select billing.resume_old()"`. The old tables are no
+      longer the record; old paths that still write them (linking) work again.
+
    `switch_on` refuses while `billing.accounts` is empty (step 4 not run). It turns reading,
    deleting and history fetches over to the new state, turns the `unpaid-delete` and
    `plant-wipe` jobs off, schedules `billing-delete` (every 5 minutes, `billing.delete_due()`)
@@ -273,8 +286,9 @@ frontend second, in this order:
    `billing.switch_on()`. It drops `plant_picks`, the `held` flag, `plant_users.paused`, the
    old billing tables (`private.billing`, `billing_charges`, `free_week_logins`,
    `offer_members`, `offers`, `plant_week`), every function they feed, the old billing cron
-   jobs and the one-off copy, and skips old billing emails still queued. It checks that
-   nothing left reads or calls them, or it stops.
+   jobs, the one-off copy and the switch-over pause, and skips old billing emails still queued.
+   It keeps `api_offer`, now read from the billing tables, so the website keeps its prices. It
+   checks that nothing left reads or calls them, or it stops.
 
 ## Changing the domain
 

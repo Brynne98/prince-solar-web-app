@@ -12,7 +12,7 @@ import { db, linkAccount, LoginRejected, saveCallTally } from "../_shared/sunsyn
 import { noteError, serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { mockClosed } from "../_shared/gate.ts";
-import { billingState, Refused, type Rpc, saveLogin } from "../_shared/links.ts";
+import { billingState, loginName, Refused, type Rpc, saveLogin, saveLoginLive } from "../_shared/links.ts";
 
 serve("link-sunsynk", async (req) => {
   const cors = corsHeaders(req.headers.get("origin"));
@@ -31,7 +31,7 @@ serve("link-sunsynk", async (req) => {
   let password = "";
   try {
     const body = await req.json();
-    username = String(body?.username ?? "").trim();
+    username = loginName(body?.username);
     password = String(body?.password ?? "");
   } catch {
     return json({ error: "body must be JSON" }, 400, cors);
@@ -74,10 +74,10 @@ serve("link-sunsynk", async (req) => {
   }
 
   try {
-    // Live: the locked link_login decides before any plant is linked; a failure is an error,
-    // and a retry finds the same stored login.
+    // Live: one transaction stores the login and lets the locked link_login decide before any
+    // plant is linked; a refusal or failure leaves no login behind.
     const { accountId, plants, paused, reason } = await linkAccount(userId, username, password,
-      live ? (id, ps) => saveLogin(call, true, noteError, userId, id, username, ps) : undefined);
+      live ? (token, ps) => saveLoginLive(call, userId, username, token, ps) : undefined);
     password = ""; // done with it
     // A good link gives its try back, so only failed tries count (0135).
     const { error: refundErr } = await db.rpc("link_succeeded", { p_user: userId });

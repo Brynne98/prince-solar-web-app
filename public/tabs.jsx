@@ -2331,19 +2331,24 @@ function PlanNote({ tone, acts, children }) {
 }
 // The saved card. Change card opens Paystack's card page for the market's smallest charge,
 // which goes back once the card is saved. Past due: Pay with another card in Plan does both.
+// Its button: Change card on a running plan with a card, Add card on one with none (a card
+// switched off after a decline), nothing otherwise.
+const cardAction = (a) => a.state !== 'active' || !a.plan ? null : a.card ? AT.billing.changeCard : AT.billing.addCard;
+window.cardAction = cardAction;
 function CardSection({ acct }) {
   const [busy, setBusy] = React.useState(false);
   if (!acct || (!acct.card && !acct.had_plan)) return null;
   const c = acct.card;
+  const label = cardAction(acct);
+  const action = label && (
+    <window.BusyButton className="ghost-btn" busy={busy} busyText={AT.pay.opening}
+            onClick={async () => { setBusy(true); await window.changeCard(); setBusy(false); }}>{label}</window.BusyButton>
+  );
   return (
     <SettingsSection id="payments" title={AT.billing.cardHead}>
-      {c ? (
-        <SettingRow lead={<CardLogo brand={c.card_type} />} label={AT.cardLine(acct)} note={AT.cardSub(acct)}
-          action={acct.state === 'active' && (
-            <window.BusyButton className="ghost-btn" busy={busy} busyText={AT.pay.opening}
-                    onClick={async () => { setBusy(true); await window.changeCard(); setBusy(false); }}>{AT.billing.changeCard}</window.BusyButton>
-          )} />
-      ) : <div className="field-note">{AT.billing.noCard}</div>}
+      {c ? <SettingRow lead={<CardLogo brand={c.card_type} />} label={AT.cardLine(acct)} note={AT.cardSub(acct)} action={action} />
+        : action ? <SettingRow label={AT.billing.noCard} action={action} />
+        : <div className="field-note">{AT.billing.noCard}</div>}
     </SettingsSection>
   );
 }
@@ -3079,9 +3084,10 @@ const DELETE_REFUSED = [
 ];
 function DeleteAccountRow({ email, acct, onBilling }) {
   const { useState } = React;
-  // the server says when an account may go (account_state may_delete): nothing running, nothing owed
-  const owed = !!acct && (acct.state === 'past_due' || acct.owed_minor > 0);
-  const blocked = !!acct && !acct.may_delete;
+  // the server says when an account may go (account_state may_delete): nothing running, nothing owed;
+  // why not, and where to go, from the catalog
+  const why = acct ? AT.deleteBlocked(acct) : null;
+  const blocked = !!why;
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   // The word to type before the red button deletes (SOLAR-517). Focus starts in its field:
@@ -3119,12 +3125,11 @@ function DeleteAccountRow({ email, acct, onBilling }) {
       {/* Tapping Delete on a blocked account shows why, in place of the confirm (SOLAR-274) */}
       {/* a plan to cancel or a payment to settle first: said in a pop-up when Delete is pressed (SOLAR-292) */}
       {blocked && confirming && (
-        <ConfirmCard modal danger={false} label={owed ? 'Pay the failed payment first' : 'Cancel your plan first'}
-          title={owed ? 'Pay the failed payment first' : 'Cancel your plan first'}
-          text={owed ? 'Pay it in Billing, then you can delete your account.'
-            : <>Your <b>{acct.plan_name}</b> plan is still running. Cancel it in Billing, then you can delete your account.</>}
-          cancelLabel="Close" action={owed ? 'Go to Billing' : 'Go to cancel plan'}
-          onConfirm={() => onBilling(owed ? undefined : 'cancel')} onCancel={() => setConfirming(false)} />
+        <ConfirmCard modal danger={false} label={why.title} title={why.title} text={why.text}
+          cancelLabel="Close" action={why.action}
+          onConfirm={() => why.to === 'mail' ? (location.href = 'mailto:hello@princesolarhub.co.za?subject=' + encodeURIComponent('Delete my account'))
+            : onBilling(why.to === 'cancel' ? 'cancel' : undefined)}
+          onCancel={() => setConfirming(false)} />
       )}
       {!blocked && confirming && (
         <ConfirmCard modal title={<>Delete <b>{email || 'this account'}</b>?</>} text="Your plants’ history goes too, unless another account shares them. It cannot be undone."

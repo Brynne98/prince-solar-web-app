@@ -716,10 +716,12 @@ begin
   perform pg_temp.eq('P2 abandoned page: void', r->>'action', 'void');
   r1b := billing.begin_attempt(i1, 'card_page', pg_temp.t(0) + interval '62 minutes')->>'reference';
   perform pg_temp.ok('P2 abandoned: a new page', r1b is not null and r1b <> r1);
-  -- another checkout while that page is open: no wait, the open page is let go
+  -- another checkout while that page is open: no wait; the open page is replaced, never
+  -- handed back, but stays pending until Paystack says it cannot pay (final fix 1)
   i2 := (billing.start_checkout(a, 'family', 'month', 0, '{990010201,990010202}', pg_temp.t(0) + interval '63 minutes')->>'invoice')::uuid;
   perform pg_temp.ok('P2 a new checkout replaces the open bill', i2 <> i1 and (select status = 'void' from billing.invoices where id = i1));
-  perform pg_temp.eq('P2 its open page let go', (select status from billing.payment_attempts where reference = r1b), 'void');
+  perform pg_temp.ok('P2 its open page replaced, still pending', (select status = 'pending' and replaced_at is not null
+    from billing.payment_attempts where reference = r1b));
   r2 := billing.begin_attempt(i2, 'card_page', pg_temp.t(0) + interval '63 minutes')->>'reference';
   r := pg_temp.answer(r2, 'ok', pg_temp.t(0) + interval '64 minutes');
   perform pg_temp.eq('P2 paid: applied', r->>'action', 'applied');
@@ -1297,7 +1299,8 @@ begin
   inv2 := (billing.upgrade(a, 'family', 0, '{990020201,990020202,990020203}', pg_temp.t(5))->>'invoice')::uuid;
   perform pg_temp.ok('F2 an open card page: the new upgrade replaces it', inv2 <> inv
     and (select status = 'void' from billing.invoices where id = inv)
-    and (select status = 'void' from billing.payment_attempts where reference = ref));
+    and (select status = 'pending' and replaced_at is not null from billing.payment_attempts where reference = ref));
+  perform pg_temp.answer(ref, 'abandoned', pg_temp.t(5));                -- the replaced page verified: it cannot pay
   perform billing.begin_attempt(inv2, 'saved_card', pg_temp.t(5));
   perform pg_temp.fails('F2 second upgrade while a charge may still take money',
     format('select billing.upgrade(%L, ''family'', 0, ''{990020201,990020202}'', %L)', a, pg_temp.t(5)), 'already in progress');
@@ -1942,6 +1945,9 @@ begin
   perform pg_temp.choose(h, '{990062401}', pg_temp.t(36));
   perform pg_temp.agg(990062401, pg_temp.t(36));
   perform billing.remove_login(h, l, pg_temp.t(36.1));
+  -- remove_login deletes it now (final fix 7); here the delete is undone, as if it were missed
+  update billing.plants set history_purged_at = null where id = 990062401;
+  perform pg_temp.agg(990062401, pg_temp.t(36.1));
   perform pg_temp.ok('RQ24 not within the hour', not pg_temp.alert('history_unprotected', '990062401', pg_temp.t(36.1) + interval '30 minutes'));
   perform pg_temp.ok('RQ24 history with no seat for over an hour: alert',
     pg_temp.alert('history_unprotected', '990062401', pg_temp.t(36.1) + interval '2 hours'));
@@ -2445,6 +2451,198 @@ begin
     and has_function_privilege('service_role', 'public.link_login_allowed(uuid, text)', 'execute'));
 exception when others then perform pg_temp.ok('P4-20 runs', false, sqlerrm);
 end $$;
+-- ===========================================================================
+-- Final review fixes (FR). Each block fails on ddd6e1c.
+-- ===========================================================================
+-- FR1 a replaced card page Paystack could still settle blocks a saved-card charge
+do $$
+declare a uuid := pg_temp.acct('fr1'); b uuid := pg_temp.acct('fr1b'); pe timestamptz; inv uuid; inv2 uuid; ref text; r jsonb;
+begin
+  perform pg_temp.member(a, 'fr1', 990090101);
+  perform billing.link_login(a, 'sunsynk', 'fr1', null, '[{"id":990090101},{"id":990090102},{"id":990090103}]', pg_temp.t(1));
+  inv := (billing.upgrade(a, 'family', 0, '{990090101,990090102}', pg_temp.t(5))->>'invoice')::uuid;
+  ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(5))->>'reference';
+  inv2 := (billing.upgrade(a, 'family', 0, '{990090101,990090102,990090103}', pg_temp.t(5) + interval '1 minute')->>'invoice')::uuid;
+  perform pg_temp.ok('FR1 the old page is never handed back', inv2 <> inv
+    and (select replaced_at is not null and status = 'pending' from billing.payment_attempts where reference = ref));
+  r := billing.begin_attempt(inv2, 'saved_card', pg_temp.t(5) + interval '2 minutes');
+  perform pg_temp.ok('FR1 a replaced page still payable: asked about first, nothing charged',
+    r->'verify' @> to_jsonb(ref) and not r ? 'reference');
+  perform pg_temp.answer(ref, 'pending', pg_temp.t(5) + interval '3 minutes');
+  r := billing.begin_attempt(inv2, 'saved_card', pg_temp.t(5) + interval '3 minutes');
+  perform pg_temp.ok('FR1 ... still payable after the verify: still waits', r ? 'verify' and not r ? 'reference');
+  perform pg_temp.answer(ref, 'abandoned', pg_temp.t(5) + interval '4 minutes');
+  r := billing.begin_attempt(inv2, 'saved_card', pg_temp.t(5) + interval '4 minutes');
+  perform pg_temp.ok('FR1 Paystack says it cannot pay: the saved card is charged', r ? 'reference');
+
+  -- the renewal job waits too
+  pe := pg_temp.member(b, 'fr1b', 990090111);
+  perform billing.link_login(b, 'sunsynk', 'fr1b', null, '[{"id":990090111},{"id":990090112},{"id":990090113}]', pg_temp.t(1));
+  inv := (billing.upgrade(b, 'family', 0, '{990090111,990090112}', pe - interval '2 days')->>'invoice')::uuid;
+  ref := billing.begin_attempt(inv, 'card_page', pe - interval '2 days')->>'reference';
+  perform billing.upgrade(b, 'family', 0, '{990090111,990090112,990090113}', pe - interval '2 days' + interval '1 minute');
+  perform pg_temp.ok('FR1 renewal: a replaced page still payable holds the charge', pg_temp.job(b, pe) is null);
+  perform pg_temp.answer(ref, 'abandoned', pe + interval '1 hour');
+  perform pg_temp.ok('FR1 renewal: charged once Paystack says it cannot pay', pg_temp.job(b, pe + interval '1 hour') is not null);
+exception when others then perform pg_temp.ok('FR1 runs', false, sqlerrm);
+end $$;
+
+-- FR2 a cancelled plan has no next billing date to switch
+do $$
+declare a uuid := pg_temp.acct('fr2');
+begin
+  perform pg_temp.member(a, 'fr2', 990090201);
+  perform billing.cancel(a, pg_temp.t(2));
+  perform pg_temp.fails('FR2 switch_interval refuses a cancelled plan',
+    format('select billing.switch_interval(%L, ''year'', %L)', a, pg_temp.t(3)), 'cancelled');
+exception when others then perform pg_temp.ok('FR2 runs', false, sqlerrm);
+end $$;
+
+-- FR3 the same login typed in another case updates the stored row
+do $$
+declare a uuid := pg_temp.acct('fr3'); u uuid; l1 uuid; l2 uuid;
+begin
+  u := (select user_id from billing.accounts where id = a);
+  l1 := public.account_upsert(u, 'FR3@Mail.test', 'tok1', 1);
+  l2 := public.account_upsert(u, 'fr3@mail.TEST', 'tok2', 2);
+  perform pg_temp.ok('FR3 another case: the same stored login, updated in place', l1 = l2
+    and (select count(*) = 1 from private.sunsynk_accounts where user_id = u)
+    and (select access_token = 'tok2' from private.sunsynk_accounts where id = l1));
+exception when others then perform pg_temp.ok('FR3 runs', false, sqlerrm);
+end $$;
+
+-- FR4 live linking is one transaction: a refused login leaves no row and no secret
+do $$
+declare a uuid := pg_temp.acct('fr4'); u uuid; l uuid; secrets bigint;
+begin
+  u := (select user_id from billing.accounts where id = a);
+  l := public.link_login_live(u, 'fr4@mail.test', 'tok', 1, 'refresh-fr4', '[{"id":990090401,"name":"A"}]');
+  perform pg_temp.ok('FR4 a new login: stored, its secret kept, in billing under the same id',
+    exists (select 1 from billing.logins where id = l and account = a)
+    and (select refresh_secret_id is not null from private.sunsynk_accounts where id = l));
+  perform pg_temp.choose(a, '{990090401}', now());                       -- the week starts: one login only
+  secrets := (select count(*) from vault.secrets);
+  perform pg_temp.fails('FR4 a second login in the week: refused',
+    format('select public.link_login_live(%L, ''fr4-other@mail.test'', ''tok'', 1, ''refresh-x'', ''[{"id":990090402}]'')', u), 'one login');
+  perform pg_temp.ok('FR4 ... no login row and no secret left behind',
+    not exists (select 1 from private.sunsynk_accounts where user_id = u and sunsynk_username = 'fr4-other@mail.test')
+    and (select count(*) from vault.secrets) = secrets);
+exception when others then perform pg_temp.ok('FR4 runs', false, sqlerrm);
+end $$;
+
+-- FR5 a share claim: billing decides and the link row is written with it
+-- FR6 the share removed in the inverter cloud releases the claim
+do $$
+declare a uuid := pg_temp.acct('fr5a'); b uuid := pg_temp.acct('fr5b'); c uuid := pg_temp.acct('fr5c');
+        ua uuid; ub uuid; uc uuid; l uuid; sh uuid;
+begin
+  select user_id into ua from billing.accounts where id = a;
+  select user_id into ub from billing.accounts where id = b;
+  select user_id into uc from billing.accounts where id = c;
+  sh := pg_temp.share_login();
+  -- A reads plant 990090501 through A's own login
+  l := pg_temp.link(a, 'fr5a', '{990090501}', pg_temp.t(0)); perform pg_temp.stored(l);
+  insert into public.plant_users (plant_id, user_id, account_id, plant_name) values (990090501, ua, l, 'Mine');
+  perform pg_temp.eq('FR5 another user''s own-login row does not block the claim',
+    public.share_claim_live(ub, sh, 990090501, 'Shared'), 'claimed');
+  perform pg_temp.ok('FR5 ... billing and the link row agree',
+    (select account = b from billing.plant_claims where plant = 990090501)
+    and exists (select 1 from public.plant_users where plant_id = 990090501 and user_id = ub and via_share));
+  perform pg_temp.fails('FR5 a second claimant: taken',
+    format('select public.share_claim_live(%L, %L, 990090501, ''x'')', uc, sh), 'taken');
+  perform pg_temp.ok('FR5 ... and no link row for it', not exists (select 1 from public.plant_users where plant_id = 990090501 and user_id = uc));
+  -- B's week over unpaid: ended. A claim B holds is repaired; a new plant is refused.
+  update billing.accounts set trial_started_at = now() - interval '10 days', trial_ends_at = now() - interval '3 days' where id = b;
+  delete from public.plant_users where plant_id = 990090501 and user_id = ub;
+  perform pg_temp.eq('FR5 ended: the claim it holds is repaired', public.share_claim_live(ub, sh, 990090501, 'Shared'), 'claimed');
+  perform pg_temp.fails('FR5 ended: a new plant is refused',
+    format('select public.share_claim_live(%L, %L, 990090502, ''x'')', ub, sh), 'without a plan');
+
+  -- FR6: gone from the share login's list for over 50 minutes
+  update public.plant_users set share_missing_at = now() - interval '1 hour' where plant_id = 990090501 and user_id = ub;
+  perform public.share_sync(sh, '{}');
+  perform pg_temp.ok('FR6 the share removed: the billing claim goes', not exists (select 1 from billing.plant_claims where plant = 990090501));
+  perform pg_temp.eq('FR6 ... and someone else may claim it', public.share_claim_live(uc, sh, 990090501, 'Shared'), 'claimed');
+exception when others then perform pg_temp.ok('FR5 runs', false, sqlerrm);
+end $$;
+
+-- FR7 removing a login or a claim deletes the history nothing keeps, at once
+do $$
+declare a uuid := pg_temp.acct('fr7'); b uuid := pg_temp.acct('fr7b'); l uuid;
+begin
+  l := pg_temp.link(a, 'fr7', '{990090701}', pg_temp.t(0));
+  perform pg_temp.pay(a, 'home', 'month', pg_temp.t(0));
+  perform pg_temp.choose(a, '{990090701}', pg_temp.t(0));
+  perform pg_temp.agg(990090701, pg_temp.t(0));
+  perform billing.remove_login(a, l, pg_temp.t(1));
+  perform pg_temp.ok('FR7 remove_login: history deleted now', not pg_temp.has_agg(990090701)
+    and (select history_purged_at is not null from billing.plants where id = 990090701));
+  perform billing.claim_plant(b, 990090702, 'Shared', 'sunsynk', pg_temp.t(0));
+  perform pg_temp.pay(b, 'home', 'month', pg_temp.t(0));
+  perform pg_temp.choose(b, '{990090702}', pg_temp.t(0));
+  perform pg_temp.agg(990090702, pg_temp.t(0));
+  perform billing.unclaim(b, '{990090702}', pg_temp.t(1));
+  perform pg_temp.ok('FR7 unclaim: history deleted now', not pg_temp.has_agg(990090702)
+    and (select history_purged_at is not null from billing.plants where id = 990090702));
+exception when others then perform pg_temp.ok('FR7 runs', false, sqlerrm);
+end $$;
+
+-- FR9 the cancel date compares the deadlines after the cancel, not who keeps the plant today
+do $$
+declare a uuid := pg_temp.acct('fr9a'); b uuid := pg_temp.acct('fr9b');
+begin
+  perform pg_temp.link(b, 'fr9b', '{990090901}', pg_temp.t(0));
+  perform pg_temp.choose(b, '{990090901}', pg_temp.t(0));                 -- b's free week, to day 7
+  perform pg_temp.link(a, 'fr9a', '{990090901}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', '{990090901}', pg_temp.t(0), 'AUTH_fr9a');
+  perform pg_temp.eqt('FR9 kept by a free week that ends first: this plan''s date decides',
+    billing.screen_state(a, pg_temp.t(1))->>'if_cancelled_delete_at', (pg_temp.sub(a)).period_end + interval '30 days');
+exception when others then perform pg_temp.ok('FR9 runs', false, sqlerrm);
+end $$;
+
+-- FR11 a card made active again gets its own card-changed email, timed by the activation
+do $$
+declare a uuid := pg_temp.acct('fr11'); c1 text; c2 text;
+begin
+  perform pg_temp.member(a, 'fr11', 990091101);                          -- card AUTH_fr11 on day 0
+  perform billing.save_method(a, pg_temp.tx_ok('x', 'AUTH_fr11b'), pg_temp.t(3));
+  perform billing.save_method(a, pg_temp.tx_ok('x', 'AUTH_fr11'), pg_temp.t(10));
+  perform billing.save_method(a, pg_temp.tx_ok('x', 'AUTH_fr11b'), pg_temp.t(20));
+  select id::text into c1 from billing.payment_methods where auth_ref = 'AUTH_fr11';
+  select id::text into c2 from billing.payment_methods where auth_ref = 'AUTH_fr11b';
+  perform pg_temp.ok('FR11 the old card again: emailed from its activation',
+    exists (select 1 from billing.outbox where account = a and key = 'card_changed' and ref = c1
+               and not_before = pg_temp.t(10) and expires_at = pg_temp.t(12)));
+  perform pg_temp.eq('FR11 one email per activation', (select count(*)::text from billing.outbox
+    where account = a and key = 'card_changed' and ref = c2), '2');
+exception when others then perform pg_temp.ok('FR11 runs', false, sqlerrm);
+end $$;
+
+-- FR17 the switch-over pause: first no new old payment, then no old billing write at all
+do $$
+declare ok boolean := true;
+begin
+  perform billing.pause_old('new_payments');
+  perform pg_temp.fails('FR17 new_payments: no old payment starts',
+    'insert into private.billing_charges (reference) values (''psh_paused'')', 'paused for an update');
+  begin
+    update private.billing_charges set status = status where false;      -- settling open ones goes on
+  exception when others then ok := false;
+  end;
+  perform pg_temp.ok('FR17 new_payments: open payments can still be settled', ok);
+  perform billing.pause_old('all');
+  perform pg_temp.fails('FR17 all: no old billing write', 'update private.billing set plan = plan where false', 'paused for an update');
+  perform pg_temp.fails('FR17 all: no old plant pick', 'delete from private.plant_picks where false', 'paused for an update');
+  perform billing.resume_old();
+  ok := true;
+  begin
+    update private.billing set plan = plan where false;
+  exception when others then ok := false;
+  end;
+  perform pg_temp.ok('FR17 resumed: old writes go through', ok);
+exception when others then perform pg_temp.ok('FR17 runs', false, sqlerrm);
+end $$;
+
 -- ---------------------------------------------------------------------------
 do $$
 declare r record; f int; n int;

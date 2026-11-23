@@ -112,11 +112,13 @@ returns boolean language sql stable set search_path = billing, pg_temp as $$
                     and not (pa.channel = 'card_page' and pa.status = 'pending'))
 $$;
 
--- The open card pages on these bills are let go: a new bill or a new page replaces them.
+-- The open card pages on these bills are replaced: never handed back again. They are not
+-- let go here: the owner may still pay on one, so each stays pending, its lease over so the
+-- next verify asks Paystack, and blocks a saved-card charge until Paystack says it cannot pay.
 create function billing.replace_card_pages(p_invoices uuid[], p_at timestamptz)
 returns void language sql set search_path = billing, pg_temp as $$
-  update billing.payment_attempts set status = 'void', gateway_response = 'replaced', settled_at = p_at, claimed_until = null
-   where invoice = any (p_invoices) and channel = 'card_page' and status = 'pending'
+  update billing.payment_attempts set replaced_at = p_at, claimed_until = least(claimed_until, p_at)
+   where invoice = any (p_invoices) and channel = 'card_page' and status = 'pending' and replaced_at is null
 $$;
 
 -- The email to charge a saved card with: the one it was saved under, else the sign-in email.
@@ -547,6 +549,8 @@ begin
     raise exception 'monthly or yearly' using errcode = '22023';
   end if;
   select * into s from billing.subscriptions where id = st.sub for update;
+  -- a cancelled plan has no next billing date to switch
+  if s.cancel_at_period_end then raise exception 'the plan is cancelled' using errcode = '22023'; end if;
   if s.period_end <= p_at then raise exception 'the renewal is due: pay it first' using errcode = '22023'; end if;
   if s.next_price is not null then select * into np from billing.prices where id = s.next_price; end if;
   plan := coalesce(np.plan, s.plan);
@@ -655,7 +659,7 @@ begin
   if p_channel = 'card_page' then
     select * into att from billing.payment_attempts
      where invoice = p_invoice and channel = 'card_page' and status = 'pending' and pay_url is not null
-       and claimed_until > p_at
+       and claimed_until > p_at and replaced_at is null
      order by created_at desc limit 1;
     if found then
       return jsonb_build_object('reference', att.reference, 'invoice', inv.id, 'kind', inv.kind,
@@ -674,11 +678,12 @@ begin
   if p_channel = 'saved_card' then
     pm := billing.active_method(inv.account);
     if pm.id is null then raise exception 'no saved card' using errcode = 'P0002'; end if;
-    -- an open card page can still take money: Paystack is asked first, and while it may still
-    -- settle nothing is charged (the caller gets {verify} again and says a payment is under way)
+    -- an open card page can still take money, on any bill (a replaced bill's page too):
+    -- Paystack is asked first, and while it may still settle nothing is charged (the caller
+    -- gets {verify} again and says a payment is under way)
     select jsonb_agg(pa.reference order by pa.created_at) into stale
       from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
-     where i.account = inv.account and i.status = 'open' and pa.channel = 'card_page' and pa.status = 'pending';
+     where i.account = inv.account and pa.channel = 'card_page' and pa.status = 'pending';
     if stale is not null then return jsonb_build_object('verify', stale); end if;
   end if;
   perform billing.replace_card_pages(array[p_invoice], p_at);
@@ -723,7 +728,8 @@ begin
   if reusable then
     update billing.payment_methods set active = false, disabled_reason = 'replaced'
      where account = p_account and active and payment_methods.id <> pm_id;
-    update billing.payment_methods set active = true, disabled_reason = null, account = p_account
+    update billing.payment_methods set active = true, disabled_reason = null, account = p_account,
+                                       activated_at = case when active then activated_at else p_at end
      where payment_methods.id = pm_id;
   end if;
   return pm_id;
@@ -1192,9 +1198,12 @@ begin
     return null;
   end if;
   -- any try on the account that may still take money (a bank challenge, an open card page,
-  -- an unanswered charge): nothing is charged again until it is settled or verified
+  -- an unanswered charge, a card page on a replaced bill): nothing is charged again until it
+  -- is settled or verified
   if exists (select 1 from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
-              where i.account = s.account and i.status = 'open' and pa.status in ('created', 'pending', 'unknown')) then
+              where i.account = s.account
+                and ((i.status = 'open' and pa.status in ('created', 'pending', 'unknown'))
+                     or (pa.channel = 'card_page' and pa.status = 'pending'))) then
     return null;
   end if;
 
@@ -1288,7 +1297,8 @@ begin
     select * into due from billing.invoices
      where subscription = s.id and kind = 'renewal' and status = 'open' order by created_at desc limit 1;
     select pay_url into url from billing.payment_attempts
-     where invoice = due.id and status = 'pending' and pay_url is not null order by created_at desc limit 1;
+     where invoice = due.id and status = 'pending' and pay_url is not null and replaced_at is null
+     order by created_at desc limit 1;
   end if;
   return jsonb_build_object(
     'card', case when pm.id is not null then jsonb_build_object('last4', pm.last4, 'exp_month', pm.exp_month,
