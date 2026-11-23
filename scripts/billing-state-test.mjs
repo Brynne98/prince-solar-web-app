@@ -46,6 +46,8 @@ const sql = [
   // then the drop of the old billing (DEPLOY.md step 8) on top of it: it must run clean
   readFileSync(path.join(REPO, 'supabase/after-switch-over/0260_billing_drop_old.sql'), 'utf8'),
   "do $d$ begin raise notice 'drop of the old billing: ok'; end $d$;",
+  // verify 3 fix 3 after the drop: no report on a plant the account no longer reaches
+  "do $d$ declare e text := pg_temp.x3('-after-drop'); begin if e is not null then raise exception 'FAIL  X3 after the drop: %', e; end if; raise notice 'X3 after the drop: ok'; end $d$;",
   // the website's prices survive the drop, read from the billing tables (final fix 13)
   `do $d$ declare o jsonb; begin
      update billing.offers set max_members = null where code = 'launch';
@@ -75,7 +77,7 @@ if (stale.length) {
 }
 
 const r = spawnSync(PSQL, ['-X', '-q', '-v', 'ON_ERROR_STOP=1', DB], { input: sql, encoding: 'utf8' });
-const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed|CONTEXT|LINE|line |old billing: ok|api_offer/.test(l));
+const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed|CONTEXT|LINE|line |old billing: ok|X3 after|api_offer/.test(l));
 console.log(`migrations: ${migrations.join(' ')}`);
 console.log(lines.join('\n') || (r.error ? String(r.error) : '(no output)'));
 process.exit(r.status === 0 ? 0 : 1);

@@ -3463,6 +3463,32 @@ begin
 exception when others then perform pg_temp.ok('X2 jobs runs', false, sqlerrm);
 end $$;
 
+-- X3 a report on a plant the account no longer reaches (share removed) is not queued; one it
+--    reaches is (verify 3 fix 3). pg_temp.x3 runs again after the drop of the old billing.
+create function pg_temp.x3(p_tag text) returns text language plpgsql as $$
+declare b uuid := pg_temp.acct('x3' || p_tag); ub uuid; sh uuid; p bigint := 990120300 + length(p_tag); out text := '';
+begin
+  select user_id into ub from billing.accounts where id = b;
+  sh := pg_temp.share_login();
+  perform public.share_claim_live(ub, sh, p, 'Gran');
+  perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
+  perform pg_temp.choose(b, array[p], now() - interval '1 day');
+  insert into public.email_queue (user_id, plant_id, kind, key) values (ub, p, 'report_week', 'report_week:x3a' || p_tag);
+  if not exists (select 1 from public.email_queue where key = 'report_week:x3a' || p_tag) then out := out || 'reachable plant: no report; '; end if;
+  update public.plant_users set share_missing_at = now() - interval '1 hour' where plant_id = p and user_id = ub;
+  perform public.share_sync(sh, '{}');
+  insert into public.email_queue (user_id, plant_id, kind, key) values (ub, p, 'report_week', 'report_week:x3b' || p_tag);
+  if exists (select 1 from public.email_queue where key = 'report_week:x3b' || p_tag) then out := out || 'share removed: report queued; '; end if;
+  return nullif(out, '');
+end $$;
+do $$
+declare e text;
+begin
+  e := pg_temp.x3('');
+  perform pg_temp.ok('X3 report only on a plant the account reaches', e is null, e);
+exception when others then perform pg_temp.ok('X3 runs', false, sqlerrm);
+end $$;
+
 -- ---------------------------------------------------------------------------
 do $$
 declare r record; f int; n int;
