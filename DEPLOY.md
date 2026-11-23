@@ -328,15 +328,20 @@ frontend second, in this order:
    plant has a reading under 5 minutes old. Any of these wrong: go back (below), then find out why.
 
    If the switch has to be undone (before step 7 and before any payment in the new tables):
-   1. `supabase db query --linked "select billing.switch_off()"`. It refuses once a payment has
-      landed since the switch ("fix forward"). It puts the old jobs back as they were, stops
-      `billing-delete` and `billing-history`, lets the old screens' plan and plant calls work
-      again, and answers how many plants the new delete job deleted since the switch (those
-      stay deleted; restore from the backup only if one should not have gone).
-   2. Deploy the old billing function from `main` before the merge: `git worktree add /tmp/solar-old <old main sha>`,
-      then `supabase functions deploy billing` from that folder. `billing-run` stays on and
-      calls it.
-   3. `supabase db query --linked "select billing.resume_old()"` if the old tables are still paused.
+   1. Stop new payments, on its own: `supabase db query --linked "select billing.pause_payments()"`.
+      From here no new try starts and the daily run charges nothing.
+   2. `supabase db query --linked "select billing.switch_off()"`. It refuses when a payment has
+      landed since the switch ("fix forward"), or when a try since the switch is still open
+      ("verify it first": wait until it settles or Paystack says it failed, then decide). It
+      puts the old jobs back as they were, stops `billing-delete`, `billing-history` and
+      `billing-run`, lets the old screens' plan and plant calls work again, and answers how many
+      plants the new delete job deleted since the switch (those stay deleted; restore from the
+      backup only if one should not have gone).
+   3. Deploy the old billing function from `main` before the merge: `git worktree add /tmp/solar-old <old main sha>`,
+      then `supabase functions deploy billing` from that folder.
+   4. Only then the daily run again:
+      `supabase db query --linked "select cron.schedule('billing-run', '*/5 4-5 * * *', \$\$select private.call_fn('billing/run', '{}', 120000)\$\$)"`.
+   5. `supabase db query --linked "select billing.resume_old()"` if the old tables are still paused.
    The old tables were frozen at step 6.1 and took only links after it, so they hold every
    account as it was. Plant choices made in the new tables since the switch are not carried
    back. Tried on the local database (state test Z10).

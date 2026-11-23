@@ -925,6 +925,7 @@ begin
     raise exception 'billing.accounts is empty: run billing.copy_from_old first' using errcode = '55000';
   end if;
   insert into billing.switch_over (switched_at) values (p_at) on conflict (id) do nothing;
+  delete from billing.payments_pause;   -- switched on again after a way back
   -- an app tab opened before the switch still calls the old billing changes: they would write
   -- tables nothing reads now (a cancel there, and the card charged anyway). Refused from here;
   -- the tab errors and a reload brings the new screens. 0260 drops them.
@@ -955,9 +956,18 @@ begin
   return jsonb_build_object('switched_at', (select switched_at from billing.switch_over));
 end $$;
 
--- The way back (DEPLOY.md, "If the switch has to be undone"): only before the new frontend
--- ships (step 7) and before any payment lands in the new tables. After a payment, it refuses:
--- fix forward. The old tables were frozen, then took only links, so they are as they were;
+-- The way back (DEPLOY.md, "If the switch has to be undone"), step 1: no new try starts and
+-- the daily run does nothing from here (begin_attempt and run check it). Committed on its own,
+-- before switch_off, so a try that started before it is written by the time switch_off looks.
+create function billing.pause_payments()
+returns jsonb language sql security definer set search_path = billing, pg_temp as $$
+  insert into billing.payments_pause (since) values (now()) on conflict (id) do nothing
+  returning jsonb_build_object('paused_since', since)
+$$;
+
+-- Step 2: only before the new frontend ships (step 7), after pause_payments, and while no
+-- payment since the switch has landed or could still land. Otherwise it refuses: fix forward
+-- (a try still open: verify it, or wait until it settles, then decide). The old tables were frozen, then took only links, so they are as they were;
 -- plant choices made in the new tables since the switch are not carried back. Returns how many
 -- plants the new delete job has deleted since the switch (they stay deleted).
 create function billing.switch_off()
@@ -965,10 +975,21 @@ returns jsonb language plpgsql security definer set search_path = billing, pg_te
 declare sw timestamptz := (select switched_at from billing.switch_over); f text; purged int;
 begin
   if sw is null then raise exception 'not switched on' using errcode = '55000'; end if;
+  if not exists (select 1 from billing.payments_pause) then
+    raise exception 'run billing.pause_payments() first, on its own' using errcode = '55000';
+  end if;
+  -- waits for any try still being written, so none is missed below
+  lock table billing.payment_attempts in share mode;
   if exists (select 1 from billing.payment_attempts
               where status = 'success' and coalesce(settled_at, created_at) > sw
                 and coalesce(gateway_response, '') not like 'copied: %') then
     raise exception 'payments landed since the switch: fix forward, do not switch off' using errcode = '55000';
+  end if;
+  -- a try made since the switch that Paystack may still take: the old run would charge again
+  if exists (select 1 from billing.payment_attempts
+              where status in ('created', 'pending', 'unknown') and created_at > sw
+                and coalesce(gateway_response, '') not like 'copied: %') then
+    raise exception 'a payment since the switch is still open: verify it first' using errcode = '55000';
   end if;
   purged := (select count(*) from billing.plants where history_purged_at > sw);
   delete from billing.switch_over;
@@ -980,8 +1001,8 @@ begin
     end if;
   end loop;
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
-    perform cron.unschedule(jobname) from cron.job where jobname in ('billing-delete', 'billing-history');
-    -- billing-run stays: it calls billing/run, which the old billing function answers again
+    -- billing-run too: it is scheduled again once the old billing function is deployed
+    perform cron.unschedule(jobname) from cron.job where jobname in ('billing-delete', 'billing-history', 'billing-run');
     perform cron.schedule(o.jobname, o.schedule, o.command) from billing.old_jobs o;
   end if;
   return jsonb_build_object('switched_off', now(), 'purged_since_switch', purged);

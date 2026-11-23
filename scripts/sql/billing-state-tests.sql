@@ -3952,9 +3952,23 @@ begin
   perform pg_temp.ok('Z10 switch_on keeps the old job it stops', exists (select 1 from billing.old_jobs
     where jobname = 'free-trim' and schedule = '0 3 * * *' and command = 'select 2')
     and not exists (select 1 from cron.job where jobname = 'free-trim'));
+  perform pg_temp.fails('Z10 not before pause_payments', 'select billing.switch_off()', 'pause_payments');
+  perform billing.pause_payments();
+  perform pg_temp.eq('Z10 paused: the daily run charges nothing', billing.run()->>'busy', 'true');
+  perform pg_temp.fails('Z10 paused: no new try starts', $q$select billing.begin_attempt(
+    (select id from billing.invoices where status = 'open' limit 1), 'card_page')$q$, 'on hold');
   -- every earlier test's payment is after this switch time: refused
   update billing.switch_over set switched_at = now() - interval '100 years';
   perform pg_temp.fails('Z10 a payment since the switch: refused', 'select billing.switch_off()', 'fix forward');
+  -- a try since the switch still open, nothing paid since: refused (go-live review, Astra)
+  update billing.switch_over set switched_at = (select max(coalesce(settled_at, created_at)) from billing.payment_attempts
+                                                 where status = 'success') + interval '1 second';
+  insert into billing.payment_attempts (invoice, reference, provider, channel, amount_minor, currency, status, created_at)
+  select id, 'psh_z10open', 'paystack', 'saved_card', amount_minor, currency, 'pending',
+         (select switched_at from billing.switch_over) + interval '1 second'
+    from billing.invoices where status = 'open' limit 1;
+  perform pg_temp.fails('Z10 a try since the switch still open: refused', 'select billing.switch_off()', 'still open');
+  delete from billing.payment_attempts where reference = 'psh_z10open';
   -- none since: allowed
   update billing.switch_over set switched_at = now() + interval '100 years';
   insert into billing.old_jobs (jobname, schedule, command) values ('plant-wipe', '*/7 * * * *', 'select 1')
@@ -3963,12 +3977,13 @@ begin
   perform pg_temp.ok('Z10 switched off', not billing.is_live());
   perform pg_temp.ok('Z10 the old job is back as it was', exists (select 1 from cron.job where jobname = 'plant-wipe'
     and schedule = '*/7 * * * *' and command = 'select 1'));
-  perform pg_temp.ok('Z10 the new delete and history jobs stopped', not exists (select 1 from cron.job
-    where jobname in ('billing-delete', 'billing-history')));
+  perform pg_temp.ok('Z10 the new delete and history jobs and the daily run stopped', not exists (select 1 from cron.job
+    where jobname in ('billing-delete', 'billing-history', 'billing-run')));
   perform pg_temp.ok('Z10 the old screens may call their billing changes again',
     has_function_privilege('authenticated', 'public.api_billing_change(text,text,bigint[])', 'execute')
     and has_function_privilege('authenticated', 'public.api_plant_pick(bigint[])', 'execute'));
   perform billing.switch_on(now());   -- on again for the drop of the old billing below
+  perform pg_temp.ok('Z10 switched on again: payments no longer paused', not exists (select 1 from billing.payments_pause));
 exception when others then perform pg_temp.ok('Z10 runs', false, sqlerrm);
 end $$;
 

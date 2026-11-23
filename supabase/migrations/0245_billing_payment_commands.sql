@@ -669,6 +669,13 @@ end $$;
 -- on it. Abandoned (Paystack) or the hour gone: a new page. Returns {busy} while
 -- another try holds its lease, or {verify: [references]} for tries to check first.
 -- ---------------------------------------------------------------------------
+-- Set only on the way back from the switch (billing.pause_payments, DEPLOY.md): no new try
+-- starts and the daily run does nothing, so switch_off can see every payment.
+create table billing.payments_pause (
+  id    boolean primary key default true check (id),
+  since timestamptz not null default now()
+);
+
 create function billing.begin_attempt(p_invoice uuid, p_channel text, p_at timestamptz default now())
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
 declare
@@ -677,6 +684,9 @@ declare
   att billing.payment_attempts;
   stale jsonb;
 begin
+  if exists (select 1 from billing.payments_pause) then
+    raise exception 'payments are on hold for an update' using errcode = '55000';
+  end if;
   select * into inv from billing.invoices where id = p_invoice;
   if not found or inv.account is null then raise exception 'no such bill' using errcode = 'P0002'; end if;
   perform billing.lock_account(inv.account);
@@ -1313,6 +1323,8 @@ declare
   refunds jsonb;
 begin
   if not pg_try_advisory_xact_lock(hashtext('billing.run')) then return jsonb_build_object('busy', true); end if;
+  -- the way back from the switch is under way (billing.pause_payments): nothing is charged
+  if exists (select 1 from billing.payments_pause) then return jsonb_build_object('busy', true); end if;
   -- Nothing is failed here without asking Paystack: a try with no answer is verified (below) and
   -- apply_payment fails it only when Paystack still says pending after 24 hours. Every change to
   -- a try goes through apply_payment under its account lock (account, then try).
