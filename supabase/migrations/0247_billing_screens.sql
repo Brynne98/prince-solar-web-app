@@ -353,8 +353,12 @@ end $$;
 -- their refusals are the rules.
 create function public.billing_links(p_cmd text, p_args jsonb)
 returns jsonb language plpgsql security definer set search_path = billing, private, pg_temp as $$
-declare acc uuid := billing.account_of((p_args->>'user')::uuid);
+declare acc uuid;
 begin
+  -- waits for a billing run, before any other lock (SOLAR-438): the copy holds it exclusive,
+  -- so no account, login or claim is written halfway across it (final re-score, Sol)
+  perform pg_advisory_xact_lock_shared(3, 0);
+  acc := billing.account_of((p_args->>'user')::uuid);
   return case p_cmd
     when 'state' then billing.account_state(acc) || jsonb_build_object('live', billing.is_live(),
                         'login_known', exists (select 1 from billing.logins l where l.account = acc
@@ -469,6 +473,33 @@ begin
 end $$;
 revoke all on function public.share_claim_live(uuid, uuid, bigint, text) from public, anon, authenticated;
 grant execute on function public.share_claim_live(uuid, uuid, bigint, text) to service_role;
+
+-- claim-share's one call (final re-score, Sol): the switch is read under the billing-run lock,
+-- so a claim never takes the old path once the copy and switch are in. Live: share_claim_live.
+-- Before the switch: the old claim and its copy into the billing tables in one transaction,
+-- so the poller's share update (share_sync, under the same lock) cannot run between them and
+-- have its release undone. A failed copy is only reported (copy_error), never the claim's undoing.
+create function public.share_claim_any(p_user uuid, p_account uuid, p_plant bigint, p_plant_name text)
+returns jsonb language plpgsql security definer set search_path = public, private, pg_temp as $$
+declare res text; err text;
+begin
+  perform pg_advisory_xact_lock_shared(3, 0);
+  if billing.is_live() then
+    return jsonb_build_object('result', public.share_claim_live(p_user, p_account, p_plant, p_plant_name));
+  end if;
+  res := public.share_claim(p_user, p_account, p_plant, p_plant_name);
+  -- on every result but taken, so a retry repairs a missing copy
+  if res <> 'taken' then
+    begin
+      perform public.billing_links('claim_plant', jsonb_build_object('user', p_user, 'plant', p_plant, 'name', p_plant_name));
+    exception when others then
+      err := sqlerrm;
+    end;
+  end if;
+  return jsonb_build_object('result', res, 'copy_error', err);
+end $$;
+revoke all on function public.share_claim_any(uuid, uuid, bigint, text) from public, anon, authenticated;
+grant execute on function public.share_claim_any(uuid, uuid, bigint, text) to service_role;
 
 -- 0172's share_sync, plus: a share removed in the inverter cloud (share_gone_at set) lets
 -- go of the billing claim too, so the plant stops being read and someone else can claim it.
@@ -837,6 +868,9 @@ declare
   gone jsonb;
   orphans bigint[];
 begin
+  -- waits for a billing run, before any other lock (SOLAR-438), the old delete too: the copy
+  -- holds it exclusive, so no login, link or share row goes halfway across it (final re-score, Sol)
+  perform pg_advisory_xact_lock_shared(3, 0);
   if not billing.is_live() then return public.api_account_delete_old(); end if;
   if uid is null then raise exception 'not signed in' using errcode = '42501'; end if;
   gone := case when exists (select 1 from billing.accounts where user_id = uid)

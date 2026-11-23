@@ -1,6 +1,6 @@
 // deno test -A --node-modules-dir=none _shared/links_test.ts (SOLAR-641 phase 4 fixes 5, 6, 10)
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { claimLive, loginName, Refused, type Rpc, saveLogin, saveLoginLive, savePlantClaim } from "./links.ts";
+import { claimAny, loginName, Refused, type Rpc, saveLogin, saveLoginLive } from "./links.ts";
 import { outboxKey, sendOutboxOne } from "./outbox.ts";
 
 const failing = (message: string): { rpc: Rpc; calls: string[] } => {
@@ -10,24 +10,36 @@ const failing = (message: string): { rpc: Rpc; calls: string[] } => {
 const notes: string[] = [];
 const note = (what: string) => { notes.push(what); };
 
+const answering = (data: unknown): { rpc: Rpc; calls: string[] } => {
+  const calls: string[] = [];
+  return { calls, rpc: (fn) => { calls.push(fn); return Promise.resolve({ data, error: null }); } };
+};
+const plant = { id: 1, name: "A" };
 Deno.test("live: claim_plant's refusal is the answer (fix 5)", async () => {
   const { rpc } = failing("taken");
-  const e = await assertRejects(() => savePlantClaim(rpc, true, note, "u", { id: 1, name: "A" }), Refused);
+  const e = await assertRejects(() => claimAny(rpc, note, "u", "sh", plant), Refused);
   assertEquals(e.answer, "taken");
 });
 Deno.test("live: an ended account's claim is refused as no plan (fix 5)", async () => {
   const { rpc } = failing("no plant can be added without a plan");
-  const e = await assertRejects(() => savePlantClaim(rpc, true, note, "u", { id: 1, name: "A" }), Refused);
+  const e = await assertRejects(() => claimAny(rpc, note, "u", "sh", plant), Refused);
   assertEquals(e.answer, "no plan");
 });
 Deno.test("live: any other claim failure is an error, never a success (fix 5)", async () => {
   const { rpc } = failing("connection reset");
-  await assertRejects(() => savePlantClaim(rpc, true, note, "u", { id: 1, name: "A" }), Error, "claim_plant");
+  await assertRejects(() => claimAny(rpc, note, "u", "sh", plant), Error, "share_claim_any");
+});
+Deno.test("a claim is one call, the switch read inside it (final re-score, Sol)", async () => {
+  const { rpc, calls } = answering({ result: "claimed", copy_error: null });
+  notes.length = 0;
+  assertEquals(await claimAny(rpc, note, "u", "sh", plant), "claimed");
+  assertEquals(calls, ["share_claim_any"]);
+  assertEquals(notes, []);
 });
 Deno.test("before the switch: a failed copy is only noted", async () => {
-  const { rpc } = failing("whatever");
+  const { rpc } = answering({ result: "yours", copy_error: "whatever" });
   notes.length = 0;
-  await savePlantClaim(rpc, false, note, "u", { id: 1, name: "A" });
+  assertEquals(await claimAny(rpc, note, "u", "sh", plant), "yours");
   assertEquals(notes, ["claim_plant_failed"]);
 });
 Deno.test("live: link_login's refusal stops the link (fix 6)", async () => {
@@ -73,7 +85,7 @@ Deno.test("live link: one call, a refusal is the answer (final fix 4)", async ()
 });
 Deno.test("live claim: one call, taken is the answer (final fix 5)", async () => {
   const { rpc, calls } = failing("taken");
-  const e = await assertRejects(() => claimLive(rpc, "u", "share", { id: 1, name: "A" }), Refused);
+  const e = await assertRejects(() => claimAny(rpc, note, "u", "share", { id: 1, name: "A" }), Refused);
   assertEquals(e.answer, "taken");
-  assertEquals(calls, ["share_claim_live:undefined"]);
+  assertEquals(calls, ["share_claim_any:undefined"]);
 });

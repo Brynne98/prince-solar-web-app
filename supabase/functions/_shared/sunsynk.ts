@@ -845,7 +845,7 @@ export type ClaimResult =
  * serials. Checked live against what SunSynk shows the share login.
  */
 export async function claimShared(userId: string, ref: string,
-  claim?: (account: string, plant: PlantInfo) => Promise<"yours" | "claimed">): Promise<ClaimResult> {
+  claim?: (account: string, plant: PlantInfo) => Promise<"taken" | "yours" | "claimed" | "claimed_paused">): Promise<ClaimResult> {
   const acc = await shareAccount();
   if (!acc) throw new Error("share login not set up");
   const plants = await getPlants(acc);
@@ -860,8 +860,8 @@ export async function claimShared(userId: string, ref: string,
     plant = inv?.plantId != null ? plants.find((p) => p.id === Number(inv.plantId)) : undefined;
   }
   if (!plant) return { result: "not_shared" };
-  // claim: billing decides and the link row is written in one transaction (claim-share once
-  // the billing tables are live). It throws to refuse.
+  // claim: claim-share's one transaction (share_claim_any), the old claim before the switch and
+  // billing's after it. It throws to refuse.
   const result = claim ? await claim(acc.id, plant) : await rpc<"taken" | "yours" | "claimed" | "claimed_paused">("share_claim", {
     p_user: userId, p_account: acc.id, p_plant: plant.id, p_plant_name: plant.name,
   });

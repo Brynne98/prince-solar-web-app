@@ -10,7 +10,7 @@
 import { claimShared, db, saveCallTally } from "../_shared/sunsynk.ts";
 import { noteError, serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
-import { billingState, claimLive, Refused, type Rpc, savePlantClaim } from "../_shared/links.ts";
+import { claimAny, Refused, type Rpc } from "../_shared/links.ts";
 
 serve("claim-share", async (req) => {
   const cors = corsHeaders(req.headers.get("origin"));
@@ -32,16 +32,7 @@ serve("claim-share", async (req) => {
   }
   if (!/^[A-Za-z0-9]{4,32}$/.test(ref)) return json({ error: "ref required" }, 400, cors);
 
-  // Once the billing tables are live they decide (SOLAR-641): claim_plant refuses a plant an
-  // ended account does not hold already, so an ended account can still repair its own claim.
   const call: Rpc = (fn, args) => db.rpc(fn, args);
-  let live = false;
-  try {
-    live = !!(await billingState(call, userId))?.live;
-  } catch (e) {
-    noteError("claim_state_failed", e, { user: userId });
-    return json({ error: "could not reach SunSynk" }, 502, cors);
-  }
 
   // The same 5 failed tries an hour as a password link (0107, 0135), so nobody can
   // walk plant ids or serials to find shared plants. A claim gives its try back.
@@ -54,13 +45,12 @@ serve("claim-share", async (req) => {
   if (!allowed) return json({ error: "too many attempts" }, 429, { ...cors, "Retry-After": "3600" });
 
   try {
-    // Live: billing's claim_plant decides (first claim wins) and the link row is written in
-    // the same transaction; success only when both agree.
-    const r = await claimShared(userId, ref, live ? (acc, p) => claimLive(call, userId, acc, p) : undefined);
+    // One transaction that reads the switch under the billing-run lock (SOLAR-641). Live:
+    // billing's claim_plant decides (first claim wins; an ended account may repair a claim it
+    // holds) with the link row. Before it: the old claim and its billing copy together.
+    const r = await claimShared(userId, ref, (acc, p) => claimAny(call, noteError, userId, acc, p));
     if (r.result === "not_shared") return json({ error: "not_shared" }, 404, cors);
     if (r.result === "taken") return json({ error: "taken" }, 409, cors);
-    // Before the switch: the claim copied, on every result, so a retry repairs a missing one.
-    if (!live) await savePlantClaim(call, false, noteError, userId, { id: r.plantId, name: r.plantName });
     const { error: refundErr } = await db.rpc("link_succeeded", { p_user: userId });
     if (refundErr) {
       console.error(`claim-share refund failed for user ${userId}: ${refundErr.message}`);

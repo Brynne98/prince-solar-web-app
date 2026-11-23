@@ -95,6 +95,78 @@ create function pg_temp.fail_renewal(p_sub uuid, p_at timestamptz) returns void 
 $$;
 
 -- ---------------------------------------------------------------------------
+-- L1 (final re-score, Sol) the link and claim writes and the account delete wait for a
+--    billing run, which the copy holds exclusive, so none of them runs across the copy.
+--    A share claim before the switch writes the old row and its billing claim in one
+--    transaction, and reads the switch under that lock. First in the file, while this
+--    transaction holds no billing-run lock yet: each call runs in a block that is rolled
+--    back, which lets go of the locks it took.
+-- ---------------------------------------------------------------------------
+create function pg_temp.run_lock_held() returns text language sql as $$
+  select string_agg(mode, ',' order by mode) from pg_locks where locktype = 'advisory'
+     and classid = 3 and objid = 0 and objsubid = 2 and pid = pg_backend_pid() and granted
+$$;
+-- runs p_sql in a block that is rolled back: the billing-run lock it held ('none'), or its error
+create function pg_temp.run_lock_of(p_sql text) returns text language plpgsql as $$
+declare held text;
+begin
+  begin
+    execute p_sql;
+    held := coalesce(pg_temp.run_lock_held(), 'none');
+    raise exception 'run_lock_of: undo';
+  exception when others then
+    if sqlerrm <> 'run_lock_of: undo' then held := 'error: ' || sqlerrm; end if;
+  end;
+  return held;
+end $$;
+
+do $$
+declare a uuid := pg_temp.acct('l1'); u uuid; sh uuid; su uuid := gen_random_uuid(); r jsonb;
+        pre text; pre_both boolean; pre_err text; live text; live_ok boolean; err text;
+begin
+  select user_id into u from billing.accounts where id = a;
+  perform pg_temp.pay(a, 'home', 'month', now());
+  perform pg_temp.ok('L1 starts with no billing-run lock held', pg_temp.run_lock_held() is null, pg_temp.run_lock_held());
+  perform pg_temp.eq('L1 a link or claim write waits for a billing run',
+    pg_temp.run_lock_of(format('select public.billing_links(%L, %L)', 'claim_plant',
+                               jsonb_build_object('user', u, 'plant', 990150001, 'name', 'L1'))), 'ShareLock');
+  perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('L1 the account delete (old or new) waits for a billing run',
+    pg_temp.run_lock_of('select public.api_account_delete()'), 'ShareLock');
+  perform set_config('request.jwt.claims', '', true);
+
+  begin
+    -- the one share login, made here when there is none (pg_temp.share_login comes later in the file)
+    select id into sh from private.sunsynk_accounts where kind = 'share';
+    if sh is null then
+      insert into auth.users (id, email, created_at) values (su, 'l1share@state.test', now());
+      insert into private.sunsynk_accounts (user_id, sunsynk_username, status, kind) values (su, 'l1share', 'active', 'share')
+      returning id into sh;
+    end if;
+    update private.sunsynk_accounts set status = 'active' where id = sh;
+    r := public.share_claim_any(u, sh, 990150002, 'L1 shared');
+    pre := r->>'result'; pre_err := r->>'copy_error';
+    pre_both := exists (select 1 from public.plant_users where plant_id = 990150002 and user_id = u and via_share)
+            and exists (select 1 from billing.plant_claims where plant = 990150002 and account = a);
+    -- switched: billing decides with the link row (share_claim_live), no old tick is written
+    insert into billing.switch_over (switched_at) values (now());
+    r := public.share_claim_any(u, sh, 990150003, 'L1 live');
+    live := r->>'result';
+    live_ok := exists (select 1 from billing.plant_claims where plant = 990150003 and account = a)
+           and not exists (select 1 from private.plant_picks where user_id = u and plant_id = 990150003);
+    raise exception 'L1: undo';
+  exception when others then
+    if sqlerrm <> 'L1: undo' then err := sqlerrm; end if;
+  end;
+  perform pg_temp.ok('L1 share claims run', err is null, err);
+  perform pg_temp.ok('L1 before the switch: claimed', pre in ('claimed', 'claimed_paused'), pre);
+  perform pg_temp.ok('L1 ... the old row and the billing claim in the same call', pre_both, pre_err);
+  perform pg_temp.eq('L1 switched: claimed by the live rules', live, 'claimed');
+  perform pg_temp.ok('L1 ... billing claim written, no old tick', live_ok);
+exception when others then perform set_config('request.jwt.claims', '', true); perform pg_temp.ok('L1 runs', false, sqlerrm);
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- S1 free week, then pay
 -- ---------------------------------------------------------------------------
 do $$

@@ -60,17 +60,22 @@ export async function saveLoginLive(rpc: Rpc, user: string, username: string,
   throw new Error(`link_login_live: ${error.message}`);
 }
 
-/** Live: billing's claim_plant and the link row in one transaction (share_claim_live).
- *  A refusal comes back as Refused; nothing is written then. */
-export async function claimLive(rpc: Rpc, user: string, account: string, plant: { id: number; name: string }) {
-  const { data, error } = await rpc("share_claim_live", { p_user: user, p_account: account, p_plant: plant.id, p_plant_name: plant.name });
-  if (!error) return data as "yours" | "claimed";
-  const answer = refusal(error);
-  if (answer) throw new Refused(answer);
-  throw new Error(`share_claim_live: ${error.message}`);
-}
+export type ClaimAnswer = "taken" | "yours" | "claimed" | "claimed_paused";
 
-/** Before the switch: the claim copied into the billing tables. Live: claim_plant decides (first claim wins), also on a
- *  plant already ours, so a retry repairs a claim that is missing. */
-export const savePlantClaim = (rpc: Rpc, live: boolean, note: Note, user: string, plant: { id: number; name: string }) =>
-  write(rpc, live, note, "claim_plant", { user, plant: plant.id, name: plant.name });
+/** A plant shared to our login, in one transaction (share_claim_any) that reads the switch under the
+ *  billing-run lock. Live: billing's claim_plant decides and the link row is written with it; a
+ *  refusal comes back as Refused and nothing is written. Before the switch: the old claim and its
+ *  copy into the billing tables together, on every answer but taken, so a retry repairs a missing
+ *  copy; a failed copy is only noted. */
+export async function claimAny(rpc: Rpc, note: Note, user: string, account: string,
+  plant: { id: number; name: string }): Promise<ClaimAnswer> {
+  const { data, error } = await rpc("share_claim_any", { p_user: user, p_account: account, p_plant: plant.id, p_plant_name: plant.name });
+  if (error) {
+    const answer = refusal(error);
+    if (answer) throw new Refused(answer);
+    throw new Error(`share_claim_any: ${error.message}`);
+  }
+  const r = data as { result: ClaimAnswer; copy_error?: string | null };
+  if (r.copy_error) note("claim_plant_failed", new Error(`claim_plant: ${r.copy_error}`), { user });
+  return r.result;
+}
