@@ -81,6 +81,7 @@ declare
   ostatus text;
   odone boolean;
   oopen boolean;
+  oyear boolean;
   oreason text;
 begin
   -- anything but this copy's own seed tries (below) means real money moved here
@@ -211,7 +212,9 @@ begin
     cross join lateral (select case d.per when 'yearly' then 'year' else 'month' end iv,
                                (case when d.prepaid then public.billing_step(d.ped, 'yearly', d.bday, 1) else d.ped end
                                  ::timestamp at time zone tz) pe,
-                               (public.billing_step(d.ped, b.period, d.bday, -1)::timestamp at time zone tz) ps) v
+                               -- a paid year starts on the billing date it was paid for
+                               ((case when d.prepaid then d.ped else public.billing_step(d.ped, b.period, d.bday, -1) end)
+                                 ::timestamp at time zone tz) ps) v
    where b.plan in ('home', 'family') and not b.comped
      and not exists (select 1 from billing.subscriptions s where s.account = a.id);
 
@@ -362,15 +365,20 @@ begin
                     else 'success' end;
     if oinv is null then
       -- a settled charge, or an open one nothing under the new rules applies (refunded as stale if paid).
-      -- A paid renewal or start keeps its plan and period, so a reversal ends that period.
+      -- A paid renewal or start keeps its plan and period, so a reversal ends that period. So
+      -- does the paid switch to the yearly plan copied as a paid year: its bill is that year.
+      oyear := ostatus = 'success' and r.kind = 'switch' and r.period = 'yearly' and osub.interval = 'year'
+               and r.billing_date is not null and osub.period_start = r.billing_date::timestamp at time zone tz;
       insert into billing.invoices (account, subscription, kind, status, plan, interval, offer, extra_places, amount_minor,
                                     currency, period_start, period_end, plants, created_at, paid_at)
-      values (r.account, case when ostatus = 'success' and r.kind in ('renewal', 'settle', 'start') then osub.id end, okind,
+      values (r.account, case when (ostatus = 'success' and r.kind in ('renewal', 'settle', 'start')) or oyear then osub.id end, okind,
               case when r.status = 'pending' then 'open' when ostatus = 'success' then 'paid' else 'void' end,
               r.plan, oiv, r.offer_id, coalesce(r.extra_plants, 0), r.amount * 100, 'ZAR',
-              case when ostatus = 'success' and osub.id is not null and r.kind in ('renewal', 'settle', 'start') then
+              case when oyear then osub.period_start
+                   when ostatus = 'success' and osub.id is not null and r.kind in ('renewal', 'settle', 'start') then
                 coalesce(case when r.kind = 'start' then r.created_on end, r.due_on)::timestamp at time zone tz end,
-              case when ostatus = 'success' and osub.id is not null and r.kind in ('renewal', 'settle', 'start') then
+              case when oyear then osub.period_end
+                   when ostatus = 'success' and osub.id is not null and r.kind in ('renewal', 'settle', 'start') then
                 public.billing_step(coalesce(case when r.kind = 'start' then r.created_on end, r.due_on), r.period,
                   case when r.kind = 'start' then extract(day from r.created_on)::int else osub.billing_day end, 1)
                 ::timestamp at time zone tz end,
@@ -404,7 +412,7 @@ begin
       oreason := case when r.refund_tries >= 7 or r.refund_alerted then 'manual'
                       -- a failed refund on a payment never confirmed: by hand, not sent blind
                       when r.status = 'pending' then case when r.refund_status = 'failed' then 'manual' else 'stale' end
-                      when not (r.kind = 'card' or r.error like 'refund%') then 'manual'
+                      when not (r.kind = 'card' or coalesce(r.error, '') like 'refund%') then 'manual'
                       when r.kind = 'card' then 'card_check' else 'stale' end;
       insert into billing.refunds (attempt, reference, account, amount_minor, currency, reason, status, tries,
                                    last_error, created_at, updated_at)
@@ -417,8 +425,13 @@ begin
   -- every settled old reference, at any age: a success Paystack sends again for an old paid
   -- one is answered as already applied (apply_payment), never refunded as unknown
   delete from billing.old_references;
-  insert into billing.old_references (reference, account, status, settled_at)
-  select c.reference, a.id, c.status, coalesce(c.settled_at, c.created_at)
+  insert into billing.old_references (reference, account, status, settled_at, kind, plan, interval, amount_minor, channel)
+  select c.reference, a.id, c.status, coalesce(c.settled_at, c.created_at),
+         case c.kind when 'start' then 'purchase' when 'card' then 'card_check'
+                     when 'upgrade' then 'upgrade' when 'switch' then 'upgrade' else 'renewal' end,
+         case when c.kind <> 'card' and c.plan in ('home', 'family') then c.plan end,
+         case c.period when 'yearly' then 'year' else 'month' end, c.amount * 100,
+         case when c.kind = 'renewal' then 'saved_card' else 'card_page' end
     from private.billing_charges c left join billing.accounts a on a.user_id = c.user_id
    where c.status <> 'pending';
 

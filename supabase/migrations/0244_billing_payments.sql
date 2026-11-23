@@ -170,12 +170,19 @@ create table billing.outbox (
 
 -- Every settled old charge's reference (private.billing_charges), at any age, filled by
 -- copy_from_old. A success Paystack sends for one with no try here is checked against it
--- before it is refunded as unknown: an old paid one was applied by the old billing.
+-- before it is refunded as unknown: an old paid one was applied by the old billing. A first
+-- dispute on an old paid one with no try here restores its bill and try from these
+-- (record_dispute), so the dispute blocks a delete while open and is owed if lost.
 create table billing.old_references (
-  reference  text primary key,
-  account    uuid references billing.accounts (id) on delete set null,
-  status     text not null,                      -- the old charge's: paid, failed, ...
-  settled_at timestamptz
+  reference    text primary key,
+  account      uuid references billing.accounts (id) on delete set null,
+  status       text not null,                    -- the old charge's: paid, failed, ...
+  settled_at   timestamptz,
+  kind         text,                             -- the bill kind it copies as (purchase, renewal, upgrade, card_check)
+  plan         text references billing.plans (code),
+  interval     text,
+  amount_minor int,
+  channel      text
 );
 
 revoke all on all tables in schema billing from public, anon, authenticated;

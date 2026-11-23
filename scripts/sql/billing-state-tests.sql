@@ -979,6 +979,8 @@ begin
     res := res || jsonb_build_object('l', 'S17 ... the success that follows is not applied, and no second refund',
       'p', r->>'action' = 'refund' and r->>'reason' = 'stale' and not exists (select 1 from billing.subscriptions where account = a)
            and (select count(*) = 1 from billing.refunds where reference = 'psh_s17w7'), 'd', r::text);
+    -- verify 3 fix 2: the refund already on record is not handed back, so nothing is sent again
+    res := res || jsonb_build_object('l', 'S17 ... and no refund id back to send', 'p', r ? 'refund' and r->'refund' = 'null', 'd', r::text);
     -- fix 8
     r := billing.apply_payment('psh_s17w8', jsonb_build_object('status', 'success', 'reference', 'psh_s17w8',
            'amount', 9900, 'currency', 'ZAR', 'gateway_response', 'Approved'), now());
@@ -1007,6 +1009,94 @@ begin
     raise exception 's17 undo';
   exception when others then
     if sqlerrm <> 's17 undo' then res := res || jsonb_build_object('l', 'S17 runs', 'p', false, 'd', sqlerrm); end if;
+  end;
+  for x in select * from jsonb_array_elements(res) loop
+    perform pg_temp.ok(x->>'l', (x->>'p')::boolean, x->>'d');
+  end loop;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- S18 copy: verify 3 fixes 4-6. Rolled back like S15.
+--   y4  a failed refund with no error text on a paid start: by hand, never sent automatically (fix 4)
+--   y5  a paid switch to yearly: the year starts on its billing date; an upgrade now charges
+--       that year's difference, no more (fix 5)
+--   y6  the same, its switch payment disputed and lost after the switch: the paid year ends (fix 6)
+--   y6b a renewal paid 200 days ago (kept only as a reference) disputed after the switch: the
+--       open dispute blocks the delete, a lost one is owed (fix 6)
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  tz constant text := 'Africa/Johannesburg';
+  y4 uuid := gen_random_uuid(); y5 uuid := gen_random_uuid(); y6 uuid := gen_random_uuid(); y6b uuid := gen_random_uuid();
+  a uuid; s billing.subscriptions; bi billing.invoices; r jsonb; res jsonb := '[]'; x jsonb; hy int; fy int;
+  nb date := current_date + 10; bd int := extract(day from current_date + 10)::int;
+  old timestamptz := now() - interval '300 days';
+begin
+  begin
+    set local session_replication_role = replica;
+    insert into auth.users (id, email, created_at)
+    select u, 'copy-s18-' || n || '@state.test', old from unnest(array[y4, y5, y6, y6b]) with ordinality t (u, n);
+    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at,
+                                         refund_status, refund_tries) values
+      ('psh_s18y4', y4, 'start', 'home', 'monthly', 99, 'paid', current_date - 5, current_date - 5, now() - interval '5 days',
+       now() - interval '5 days', 'failed', 1);
+    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, next_period, prepaid_on, state, created_at) values
+      (y5, 'home', 'monthly', bd, nb, 'yearly', nb, 'active', old), (y6, 'home', 'monthly', bd, nb, 'yearly', nb, 'active', old);
+    insert into private.billing_charges (reference, user_id, kind, plan, period, added, extra_plants, amount, status, due_on, created_on, created_at, settled_at, billing_date) values
+      ('psh_s18y5sw', y5, 'switch', 'home', 'yearly', 0, 0, 990, 'paid', current_date - 5, current_date - 5, now() - interval '5 days', now() - interval '5 days', nb),
+      ('psh_s18y6sw', y6, 'switch', 'home', 'yearly', 0, 0, 990, 'paid', current_date - 5, current_date - 5, now() - interval '5 days', now() - interval '5 days', nb);
+    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at) values
+      ('psh_s18y6b', y6b, 'renewal', 'home', 'monthly', 99, 'paid', (now() - interval '200 days')::date, (now() - interval '200 days')::date,
+       now() - interval '200 days', now() - interval '200 days');
+    set local session_replication_role = origin;
+
+    perform billing.copy_from_old();
+    insert into billing.switch_over (switched_at) values (now()) on conflict do nothing;
+
+    -- fix 4
+    res := res || jsonb_build_object('l', 'S18 a failed refund with no error text: by hand, not sent',
+      'p', (select reason = 'manual' and status = 'failed' from billing.refunds where reference = 'psh_s18y4'),
+      'd', (select reason || ' ' || status from billing.refunds where reference = 'psh_s18y4'));
+    -- fix 5
+    a := (select id from billing.accounts where user_id = y5);
+    s := pg_temp.sub(a);
+    res := res || jsonb_build_object('l', 'S18 a paid year starts on its billing date and ends a year later',
+      'p', s.period_start = nb::timestamp at time zone tz
+           and s.period_end = public.billing_step(nb, 'yearly', bd, 1)::timestamp at time zone tz,
+      'd', s.period_start || ' to ' || s.period_end);
+    hy := (select amount_minor from billing.prices where id = s.price);
+    fy := (billing.price_keeping_offer('family', 'ZA', 'year', s.offer, now())).amount_minor;
+    r := billing.upgrade(a, 'family', 0, '{}', now());
+    res := res || jsonb_build_object('l', 'S18 ... an upgrade before it starts charges that year''s difference, no more',
+      'p', (r->>'amount_minor')::int = fy - hy, 'd', r::text || ' want ' || (fy - hy));
+    -- fix 6
+    a := (select id from billing.accounts where user_id = y6);
+    select i.* into bi from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s18y6sw';
+    res := res || jsonb_build_object('l', 'S18 the paid switch''s bill is the paid year',
+      'p', bi.subscription = (pg_temp.sub(a)).id and bi.period_start = (pg_temp.sub(a)).period_start
+           and bi.period_end = (pg_temp.sub(a)).period_end, 'd', coalesce(bi.period_start::text, 'no period'));
+    r := billing.record_dispute('psh_s18y6sw', 'charge.dispute.resolve', 'resolved', true, 99000, now(), 'D_s18y6');
+    res := res || jsonb_build_object('l', 'S18 ... lost after the switch: the paid year ends',
+      'p', r->>'action' = 'plan_ended' and (pg_temp.sub(a)).status = 'ended', 'd', r::text);
+    a := (select id from billing.accounts where user_id = y6b);
+    r := billing.record_dispute('psh_s18y6b', 'charge.dispute.create', 'awaiting-merchant-feedback', false, null, now(), 'D_s18y6b');
+    res := res || jsonb_build_object('l', 'S18 an old paid reference disputed: its bill and try come back',
+      'p', r->>'action' = 'recorded' and exists (select 1 from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
+             where pa.reference = 'psh_s18y6b' and pa.dispute_open and i.account = a and i.status = 'paid' and i.amount_minor = 9900),
+      'd', r::text);
+    begin
+      perform billing.delete_account(a, now());
+      res := res || jsonb_build_object('l', 'S18 ... the open dispute blocks the delete', 'p', false, 'd', 'deleted');
+    exception when others then
+      res := res || jsonb_build_object('l', 'S18 ... the open dispute blocks the delete', 'p', sqlerrm like '%dispute is open%', 'd', sqlerrm);
+    end;
+    r := billing.record_dispute('psh_s18y6b', 'charge.dispute.resolve', 'resolved', true, 9900, now(), 'D_s18y6b');
+    res := res || jsonb_build_object('l', 'S18 ... lost: the amount is owed',
+      'p', r->>'action' = 'owed' and (select i.amount_owed_minor = 9900 from billing.invoices i join billing.payment_attempts pa
+             on pa.invoice = i.id where pa.reference = 'psh_s18y6b'), 'd', r::text);
+    raise exception 's18 undo';
+  exception when others then
+    if sqlerrm <> 's18 undo' then res := res || jsonb_build_object('l', 'S18 runs', 'p', false, 'd', sqlerrm); end if;
   end;
   for x in select * from jsonb_array_elements(res) loop
     perform pg_temp.ok(x->>'l', (x->>'p')::boolean, x->>'d');

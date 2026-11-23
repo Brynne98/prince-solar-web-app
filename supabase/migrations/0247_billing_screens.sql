@@ -248,8 +248,9 @@ begin
   cur_places := (select places from billing.plans where code = s.plan) + s.extra_places;
   if pl.places > cur_places then
     pr := billing.price_keeping_offer(p_plan, a.market, s.interval, s.offer, p_at);
-    days_left := (s.period_end at time zone m.default_time_zone)::date - (p_at at time zone m.default_time_zone)::date;
     days_all := (s.period_end at time zone m.default_time_zone)::date - (s.period_start at time zone m.default_time_zone)::date;
+    -- a paid year copied from the old billing starts on its billing date, maybe still ahead
+    days_left := least((s.period_end at time zone m.default_time_zone)::date - (p_at at time zone m.default_time_zone)::date, days_all);
     due := greatest(round(((pr.amount_minor) - (s.amount_minor + s.extra_places * s.extra_place_minor))::numeric
                           * days_left / greatest(days_all, 1)), 0)::int;
     return jsonb_build_object('kind', 'upgrade', 'plan', p_plan, 'plan_name', pl.name, 'places', pl.places,

@@ -449,8 +449,10 @@ begin
   pr := billing.price_keeping_offer(p_plan, a.market, s.interval, s.offer, p_at);
   old_amt := s.amount_minor + s.extra_places * s.extra_place_minor;
   new_amt := pr.amount_minor + extras * pr.extra_place_minor;
-  days_left := (s.period_end at time zone m.default_time_zone)::date - (p_at at time zone m.default_time_zone)::date;
   days_all := (s.period_end at time zone m.default_time_zone)::date - (s.period_start at time zone m.default_time_zone)::date;
+  -- a paid year copied from the old billing starts on its billing date, maybe still ahead:
+  -- the days left are that year's
+  days_left := least((s.period_end at time zone m.default_time_zone)::date - (p_at at time zone m.default_time_zone)::date, days_all);
   due := greatest(round((new_amt - old_amt)::numeric * days_left / greatest(days_all, 1)), 0)::int;
   want := billing.final_choice(p_account, p_plants, pl.places + extras + billing.grant_places(p_account, p_at));
 
@@ -931,9 +933,10 @@ begin
     if why is not null then
       update billing.payment_attempts set status = 'not_applied', settled_at = p_at, claimed_until = null,
                                           gateway_response = msg where id = att.id;
-      -- a refund already on record for this try is the one: never a second
-      rid := coalesce((select rf.id from billing.refunds rf where rf.attempt = att.id order by rf.created_at limit 1),
-                      billing.refund_due(att.id, att.reference, a.id, att.currency, why, p_at));
+      -- a refund already on record for this try is the one: never a second, and no refund id
+      -- back, so the caller sends nothing (one still owed goes with the daily job's refunds)
+      rid := case when not exists (select 1 from billing.refunds rf where rf.attempt = att.id)
+                  then billing.refund_due(att.id, att.reference, a.id, att.currency, why, p_at) end;
       if a.id is not null then
         perform billing.log_event(a.id, p_at, 'paystack', 'payment_refunded', null,
                                   jsonb_build_object('invoice', inv.id, 'reference', att.reference), why);
@@ -1086,10 +1089,30 @@ returns jsonb language plpgsql security definer set search_path = billing, pg_te
 declare
   att billing.payment_attempts;
   inv billing.invoices;
+  o billing.old_references;
   resolve boolean := p_event = 'charge.dispute.resolve';
 begin
   select * into att from billing.payment_attempts where reference = p_reference;
-  if not found then return jsonb_build_object('action', 'ignored'); end if;
+  if not found then
+    -- an old paid charge kept only as a reference (copy_from_old, past 120 days): its bill and
+    -- try come back from the copied record, so an open dispute blocks a delete and a lost one
+    -- is owed. No plan link: the period it paid for is long over.
+    select * into o from billing.old_references where reference = p_reference and status = 'paid' and account is not null
+       and kind is not null and amount_minor is not null and (kind = 'card_check' or plan is not null);
+    if not found then return jsonb_build_object('action', 'ignored'); end if;
+    perform billing.lock_account(o.account);
+    select * into att from billing.payment_attempts where reference = p_reference;
+    if not found then
+      insert into billing.invoices (account, kind, status, plan, interval, amount_minor, currency, created_at, paid_at)
+      values (o.account, o.kind, 'paid', o.plan, o.interval, o.amount_minor, 'ZAR', o.settled_at, o.settled_at)
+      returning id into inv.id;
+      insert into billing.payment_attempts (invoice, reference, provider, channel, amount_minor, currency, status,
+                                            gateway_response, created_at, settled_at)
+      values (inv.id, p_reference, 'paystack', coalesce(o.channel, 'card_page'), o.amount_minor, 'ZAR', 'success',
+              'copied: paid before the switch-over (restored for a dispute)', o.settled_at, o.settled_at)
+      returning * into att;
+    end if;
+  end if;
   select * into inv from billing.invoices where id = att.invoice;
   if inv.account is not null then perform billing.lock_account(inv.account); end if;
   select * into att from billing.payment_attempts where id = att.id for update;
