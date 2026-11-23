@@ -1013,7 +1013,9 @@ begin
   -- sent from there: the old tables do not know it (go-live review, Neon)
   if exists (select 1 from billing.payment_events where received_at >= sw)
      or exists (select 1 from billing.account_events where actor = 'paystack' and at >= sw)
-     or exists (select 1 from billing.refunds where updated_at >= sw and status <> 'due') then
+     -- not the copy's own refunds: copied and switched in one transaction, they carry the switch time
+     or exists (select 1 from billing.refunds where updated_at >= sw and status <> 'due'
+                  and (coalesce(last_error, '') not like 'copied: %' or updated_at <> created_at)) then
     raise exception 'payments landed since the switch: fix forward, do not switch off' using errcode = '55000';
   end if;
   -- a try made since the switch that Paystack may still take: the old run would charge again

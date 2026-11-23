@@ -4003,6 +4003,10 @@ begin
   insert into billing.logins (account, brand, username, status, created_at)
   select id, 'sunsynk', 'z10-after-switch', 'ok', now() + interval '101 years' from billing.accounts limit 1;
   update billing.switch_over set switched_at = now() + interval '100 years';
+  -- DEPLOY step 6.2 copies and switches in one transaction: the copy's own refunds carry the
+  -- switch time and do not count (go-live confirm, Neon)
+  insert into billing.refunds (reference, reason, status, last_error, created_at, updated_at)
+  select 'psh_z10copied', 'manual', 'processed', 'copied: done before the switch-over', switched_at, switched_at from billing.switch_over;
   perform pg_temp.ok('Z10 lists a login made since the switch', billing.switch_off()->'since_switch'->'logins' @> '[{"login": "z10-after-switch"}]');
   perform pg_temp.ok('Z10 switched off', not billing.is_live());
   perform pg_temp.ok('Z10 the old job is back as it was', exists (select 1 from cron.job where jobname = 'plant-wipe'
