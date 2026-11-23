@@ -894,6 +894,19 @@ begin
     raise exception 'billing.accounts is empty: run billing.copy_from_old first' using errcode = '55000';
   end if;
   insert into billing.switch_over (switched_at) values (p_at) on conflict (id) do nothing;
+  -- an app tab opened before the switch still calls the old billing changes: they would write
+  -- tables nothing reads now (a cancel there, and the card charged anyway). Refused from here;
+  -- the tab errors and a reload brings the new screens. 0260 drops them.
+  declare f text;
+  begin
+    foreach f in array array['public.api_billing_change(text,text,bigint[])', 'public.api_billing_extras(integer,bigint[])',
+                             'public.api_billing_keep(bigint)', 'public.api_billing_keep_set(bigint[])',
+                             'public.api_billing_start_keep(bigint[])', 'public.api_plant_pick(bigint[])'] loop
+      if to_regprocedure(f) is not null then
+        execute format('revoke execute on function %s from public, anon, authenticated', f);
+      end if;
+    end loop;
+  end;
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
     perform cron.unschedule(jobname) from cron.job
      where jobname in ('unpaid-delete', 'plant-wipe', 'plant-purge', 'free-trim', 'free-week-mail', 'offer-end-mail',

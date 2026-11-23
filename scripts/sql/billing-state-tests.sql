@@ -477,6 +477,7 @@ declare
   u1 uuid := gen_random_uuid(); u2 uuid := gen_random_uuid(); lg uuid := gen_random_uuid(); sec uuid := gen_random_uuid();
   u3 uuid := gen_random_uuid(); lg3 uuid := gen_random_uuid();
   u4 uuid := gen_random_uuid(); lg4 uuid := gen_random_uuid(); u5 uuid := gen_random_uuid(); lg5 uuid := gen_random_uuid();
+  u6 uuid := gen_random_uuid(); lg6 uuid := gen_random_uuid();
   a1 uuid; a2 uuid; a3 uuid; r jsonb;
 begin
   set local session_replication_role = replica;   -- old tables' triggers off while making rows
@@ -524,6 +525,16 @@ begin
   select u5, 990001430 + x, true, '2026-10-01' from generate_series(1, 6) x;
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, extra_plants, next_extra_plants, created_at)
   values (u5, 'family', 'monthly', 20, '2026-12-20', 'active', 1, 0, '2026-10-01');
+  -- final review (Neon): a downgrade booked on the old screens keeps its list of plants to
+  -- keep (next_keep) and leaves plants_to_remove empty; the third plant is the one that stops
+  insert into auth.users (id, email, created_at) values (u6, 'copy6b@state.test', '2026-10-01');
+  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values (lg6, u6, 'copy6b', 'active', 'login');
+  insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused, linked_at) values
+    (990001441, u6, lg6, 'A', false, '2026-10-01'), (990001442, u6, lg6, 'B', false, '2026-10-01'), (990001443, u6, lg6, 'C', false, '2026-10-01');
+  insert into private.plant_picks (user_id, plant_id, held, picked_at) values
+    (u6, 990001441, true, '2026-10-01'), (u6, 990001442, true, '2026-10-01'), (u6, 990001443, true, '2026-10-01');
+  insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, next_plan, next_keep, plants_to_remove, created_at)
+  values (u6, 'family', 'monthly', 20, '2026-12-20', 'active', 'home', '{990001443,990001441}', '{}', '2026-10-01');
   set local session_replication_role = origin;
 
   insert into billing.refunds (reference, reason, status, created_at, updated_at) values ('S14-REF', 'manual', 'processed', now(), now());
@@ -554,8 +565,16 @@ begin
   perform pg_temp.ok('S14 kept plants fit Home: no review', not exists (select 1 from billing.account_events where account = a3));
   perform pg_temp.ok('S14 removal list with nothing booked: no plant marked to drop', not exists (select 1 from billing.seats se
     join billing.accounts a on a.id = se.account where a.user_id = u4 and se.drop_at_period_end));
-  perform pg_temp.ok('S14 fewer extra places booked, too many plants: flagged for review', exists (select 1 from billing.account_events e
-    join billing.accounts a on a.id = e.account where a.user_id = u5 and e.kind = 'copy_needs_review'));
+  perform pg_temp.ok('S14 downgrade booked with a keep list: the plant not kept is marked to drop',
+    (select array_agg(se.plant order by se.plant) = '{990001442}' from billing.seats se join billing.accounts a on a.id = se.account
+      where a.user_id = u6 and se.drop_at_period_end));
+  perform pg_temp.ok('S14 ... so it is not flagged for review', not exists (select 1 from billing.account_events e
+    join billing.accounts a on a.id = e.account where a.user_id = u6 and e.kind = 'copy_needs_review'));
+  -- the old run would drop the plant over the next places itself (private.billing_drops): marked to drop, no review
+  perform pg_temp.ok('S14 fewer extra places booked, too many plants: the one over marked to drop', (select count(*) = 1
+    from billing.seats se join billing.accounts a on a.id = se.account where a.user_id = u5 and se.drop_at_period_end)
+    and not exists (select 1 from billing.account_events e join billing.accounts a on a.id = e.account
+                     where a.user_id = u5 and e.kind = 'copy_needs_review'));
   perform pg_temp.ok('S14 past due: the unpaid period is 20 Oct to 20 Nov', (select period_start = '2026-10-20 00:00+02'
     and period_end = '2026-11-20 00:00+02' from billing.subscriptions where account = a3));
   -- this test's accounts only: a local database may hold other old billing rows, copied too
@@ -594,7 +613,7 @@ begin
   perform pg_temp.eq('S14 comped: grant of 5', pg_temp.st(a2, '2026-11-22 12:00+02', 'places'), '5');
   perform pg_temp.eq('S14 shared plant read', pg_temp.pp(a2, '2026-11-22 12:00+02', 990001404, 'read_now'), 'true');
   r := billing.copy_from_old();
-  perform pg_temp.eq('S14 rerun with the seed tries is allowed; the two over their next places flagged', r->>'needs_review', '2');
+  perform pg_temp.eq('S14 rerun with the seed tries is allowed; plants over the next places marked, none left for review', r->>'needs_review', '0');
   perform pg_temp.ok('S14 the open old retry is a try on the 20 Nov renewal bill', exists (select 1 from billing.payment_attempts pa
     join billing.invoices i on i.id = pa.invoice join billing.subscriptions s on s.id = i.subscription
     where pa.reference = 'psh_s14retry' and pa.status = 'unknown' and i.kind = 'renewal' and i.period_start = '2026-11-20 00:00+02'
@@ -2623,6 +2642,15 @@ begin
     exists (select 1 from cron.job where jobname = 'billing-run' and command like '%billing/run%'));
   perform pg_temp.ok('SW25 ... and the delete and history jobs',
     (select count(*) = 2 from cron.job where jobname in ('billing-delete', 'billing-history')));
+  -- an app tab opened before the switch: its old billing writes would land in tables nothing
+  -- reads (a cancel there, then charged anyway): refused once switched (final review, Neon)
+  perform pg_temp.ok('SW25 old billing writes closed to signed-in users',
+    not has_function_privilege('authenticated', 'public.api_billing_change(text,text,bigint[])', 'execute')
+    and not has_function_privilege('authenticated', 'public.api_billing_extras(integer,bigint[])', 'execute')
+    and not has_function_privilege('authenticated', 'public.api_billing_keep(bigint)', 'execute')
+    and not has_function_privilege('authenticated', 'public.api_billing_keep_set(bigint[])', 'execute')
+    and not has_function_privilege('authenticated', 'public.api_billing_start_keep(bigint[])', 'execute')
+    and not has_function_privilege('authenticated', 'public.api_plant_pick(bigint[])', 'execute'));
 exception when others then perform pg_temp.ok('SW25 runs', false, sqlerrm);
 end $$;
 -- 26: the win-back lookup reads the old charges before the switch and the new tables after it
@@ -3790,6 +3818,51 @@ begin
   pm := billing.save_method(a, '{"customer":{"email":"z7@state.test"},"authorization":{"authorization_code":"AUTH_z7","reusable":true,"card_type":"visa ","last4":"4081","exp_month":"12","exp_year":"2030"}}'::jsonb, now());
   perform pg_temp.eq('Z7 saved card brand trimmed', (select card_type from billing.payment_methods where id = pm), 'visa');
 exception when others then perform pg_temp.ok('Z7 runs', false, sqlerrm);
+end $$;
+
+-- Z8 an ended account still holding a seat on a plant another account pays for: it no
+-- longer sees that plant (its seat never closes, so it would see the payer's readings and
+-- edit its settings for good); its own plant stays visible for its 30 days (final review, Neon)
+do $$
+declare a uuid := pg_temp.acct('z8a'); b uuid := pg_temp.acct('z8b'); ua uuid; ub uuid;
+begin
+  select user_id into ua from billing.accounts where id = a;
+  select user_id into ub from billing.accounts where id = b;
+  perform pg_temp.link(b, 'z8b', '{990140001,990140002}', now() - interval '50 days');
+  perform pg_temp.pay(b, 'home', 'month', now() - interval '41 days');
+  perform pg_temp.choose(b, '{990140001,990140002}', now() - interval '41 days');
+  -- cancelled: the job ends the plan at its date, 10 days ago
+  update billing.subscriptions set cancel_at_period_end = true where account = b;
+  perform billing.run_one((select id from billing.subscriptions where account = b), now());
+  perform pg_temp.link(a, 'z8a', '{990140001}', now() - interval '2 days');
+  perform pg_temp.pay(a, 'home', 'month', now() - interval '1 day');
+  perform pg_temp.choose(a, '{990140001}', now() - interval '1 day');
+  perform pg_temp.eq('Z8 b has ended', pg_temp.st(b, now(), 'state'), 'ended');
+  perform set_config('request.jwt.claims', json_build_object('sub', ub, 'role', 'authenticated')::text, true);
+  perform pg_temp.ok('Z8 ended: the plant another account pays for is not seen',
+    not exists (select 1 from public.my_plant_ids() x where x = 990140001));
+  perform pg_temp.ok('Z8 ended: its own plant is seen while its history is kept',
+    exists (select 1 from public.my_plant_ids() x where x = 990140002));
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  perform pg_temp.ok('Z8 the payer sees it', exists (select 1 from public.my_plant_ids() x where x = 990140001));
+  perform set_config('request.jwt.claims', '', true);
+exception when others then perform set_config('request.jwt.claims', '', true); perform pg_temp.ok('Z8 runs', false, sqlerrm);
+end $$;
+
+-- Z9 a reminder for a user with no email settings row yet: it carries an unsubscribe token,
+-- so the email has its unsubscribe link and header (final review, Neon)
+do $$
+declare a uuid := pg_temp.acct('z9'); x jsonb;
+begin
+  perform pg_temp.link(a, 'z9', '{990140101}', pg_temp.t(0));
+  perform pg_temp.choose(a, '{990140101}', pg_temp.t(0));
+  delete from public.email_prefs where user_id = (select user_id from billing.accounts where id = a);
+  perform billing.outbox_sweep(pg_temp.t(7.1));
+  select e into x from jsonb_array_elements(billing.outbox_take(5000, pg_temp.t(7.1))) e
+   where e->>'key' = 'trial_ended' and e->>'user' = (select user_id::text from billing.accounts where id = a);
+  perform pg_temp.ok('Z9 reminder handed out', x is not null, 'none');
+  perform pg_temp.ok('Z9 ... with an unsubscribe token', x->>'unsub_token' is not null, coalesce(x::text, 'none'));
+exception when others then perform pg_temp.ok('Z9 runs', false, sqlerrm);
 end $$;
 
 -- ---------------------------------------------------------------------------

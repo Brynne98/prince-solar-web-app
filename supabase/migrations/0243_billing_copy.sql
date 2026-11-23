@@ -262,14 +262,16 @@ begin
     values (inv.id, billing.new_reference(), 'paystack', 'none', inv.amount_minor, inv.currency, 'failed', seed,
             r.past_due_since, r.past_due_since);
   end loop;
-  -- a booked downgrade: the plants picked to go (plants_to_remove) are marked to drop; one
+  -- a booked downgrade: the plants picked to go (plants_to_remove, and the ones its keep list
+  -- next_keep leaves out, as the old run worked them out: private.billing_drops) are marked to drop; one
   -- whose kept plants still do not fit the next plan is flagged for support to pick
   -- only where the copied plan has a smaller one booked (a plan or fewer extra places): an old
   -- removal list on an account with nothing booked is not a drop
   update billing.seats se set drop_at_period_end = true
     from private.billing b join billing.accounts a on a.user_id = b.user_id
     join billing.subscriptions s on s.account = a.id and s.status in ('active', 'past_due')
-   where se.account = a.id and se.closed_at is null and se.plant = any (b.plants_to_remove)
+   where se.account = a.id and se.closed_at is null
+     and se.plant = any (coalesce(b.plants_to_remove, '{}') || private.billing_drops(b))
      and (s.next_price is not null or s.next_extra_places is not null);
   for r in select s.account, s.id from billing.subscriptions s
              left join billing.prices np on np.id = s.next_price

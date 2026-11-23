@@ -622,6 +622,11 @@ returns setof bigint language sql stable security definer set search_path = publ
    where billing.is_live() and a.user_id = auth.uid() and se.closed_at is null and p.history_purged_at is null
      -- a share removed or a plant gone from the login: hidden; its history stays and shows again
      and billing.has_route(a.id, se.plant, false)
+     -- not paying (ended, or over its places): its own history only, never a plant another
+     -- account keeps, whose seat here never closes (it would see that payer's readings for good)
+     and ((select st.state in ('trialing', 'active', 'past_due') and not st.must_choose
+             from billing.account_status(a.id, now()) st)
+          or not billing.kept_elsewhere(a.id, se.plant, now()))
 $$;
 
 create or replace function public.live_plants()
@@ -1369,7 +1374,10 @@ begin
     end if;
     update billing.outbox set claimed_until = p_at + interval '5 minutes', tries = tries + 1 where id = o.id;
     out := out || jsonb_build_array(jsonb_build_object(
-      'id', o.id, 'key', o.key, 'user', u.id, 'email', u.email, 'unsub_token', u.unsub_token,
+      'id', o.id, 'key', o.key, 'user', u.id, 'email', u.email,
+      -- a reminder always carries its unsubscribe link: the settings row is made if missing
+      'unsub_token', case when (select reminder from billing.outbox_kinds where key = o.key)
+                          then public.email_unsub_token(u.id) else u.unsub_token end,
       'reminder', (select reminder from billing.outbox_kinds where key = o.key),
       'state', billing.screen_state(o.account, p_at),
       -- the frozen bill a receipt reads
