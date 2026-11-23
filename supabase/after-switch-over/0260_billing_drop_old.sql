@@ -358,7 +358,18 @@ declare
   gone jsonb;
   orphans bigint[];
 begin
+  -- 0247's lock order, kept: the billing-run lock, then the lock of each login its links hang on
+  -- (its own and the share login), then the link rows, then the account (billing.delete_account).
+  -- A reconnect, a claim of a lapsed share and the poller's share update take them in this order;
+  -- the other way round deadlocks (scripts/billing-lock-test.mjs)
+  perform pg_advisory_xact_lock_shared(3, 0);
   if uid is null then raise exception 'not signed in' using errcode = '42501'; end if;
+  for acc in select x.id from (select id from private.sunsynk_accounts where user_id = uid
+                               union select account_id from public.plant_users where user_id = uid and account_id is not null) x
+              order by x.id loop
+    perform pg_advisory_xact_lock(1, hashtext(acc.id::text));
+  end loop;
+  perform 1 from public.plant_users where user_id = uid order by plant_id for update;
   gone := case when exists (select 1 from billing.accounts where user_id = uid)
                then billing.delete_account((select id from billing.accounts where user_id = uid))
                else jsonb_build_object('unprotected', '[]'::jsonb) end;

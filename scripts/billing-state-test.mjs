@@ -91,6 +91,20 @@ if (!step62.includes('select count(*) from private.plant_purge')) {
   process.exit(1);
 }
 
+// The drop (0260) makes api_account_delete again: it keeps 0247's lock order before the account
+// (billing-lock-test.mjs races 0247's; final review, Astra). Each lock, in order, before delete_account.
+const delBody = (t) => { const i = t.indexOf('function public.api_account_delete()'); return t.slice(i, t.indexOf('end $$;', i)); };
+const locks = ['pg_advisory_xact_lock_shared(3, 0)', 'union select account_id from public.plant_users',
+  'pg_advisory_xact_lock(1, hashtext(acc.id::text))', 'where user_id = uid order by plant_id for update', 'billing.delete_account('];
+for (const [name, body] of [['0247', delBody(texts.find((t) => t.includes('0247 —') || t.includes('api_account_delete_old')) ?? '')],
+  ['0260', delBody(readFileSync(path.join(REPO, 'supabase/after-switch-over/0260_billing_drop_old.sql'), 'utf8'))]]) {
+  const at = locks.map((l) => body.indexOf(l));
+  if (at.some((x) => x < 0) || at.some((x, i) => i && x < at[i - 1])) {
+    console.log(`FAIL  ${name} api_account_delete does not take the writers' locks before the account (${locks.filter((l, i) => at[i] < 0).join('; ') || 'out of order'})`);
+    process.exit(1);
+  }
+}
+
 const r = spawnSync(PSQL, ['-X', '-q', '-v', 'ON_ERROR_STOP=1', DB], { input: sql, encoding: 'utf8' });
 const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed|CONTEXT|LINE|line |old billing: ok|X3 after|api_offer/.test(l));
 console.log(`migrations: ${migrations.join(' ')}`);
