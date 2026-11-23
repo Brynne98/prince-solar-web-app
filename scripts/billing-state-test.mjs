@@ -76,6 +76,15 @@ if (stale.length) {
   process.exit(1);
 }
 
+// DEPLOY.md step 6.1: the old wipe queue is emptied after the freeze, before the copy (verify 4
+// fix 5); once switched its jobs stand down and its plants would stay forever
+const deploy = readFileSync(path.join(REPO, 'DEPLOY.md'), 'utf8');
+const step61 = deploy.slice(deploy.indexOf("pause_old('all')"), deploy.indexOf('2. Copy again'));
+if (!step61.includes('call private.purge_plants()') || !step61.includes('select count(*) from private.plant_purge')) {
+  console.log('FAIL  DEPLOY.md step 6.1 does not empty private.plant_purge before the copy');
+  process.exit(1);
+}
+
 const r = spawnSync(PSQL, ['-X', '-q', '-v', 'ON_ERROR_STOP=1', DB], { input: sql, encoding: 'utf8' });
 const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed|CONTEXT|LINE|line |old billing: ok|X3 after|api_offer/.test(l));
 console.log(`migrations: ${migrations.join(' ')}`);

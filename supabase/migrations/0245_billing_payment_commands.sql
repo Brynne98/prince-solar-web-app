@@ -490,7 +490,8 @@ end $$;
 
 -- ---------------------------------------------------------------------------
 -- downgrade: fewer places from the next billing date. p_drop: the plants that go.
--- The same plan and places as now: the booking is undone.
+-- The same plan and places as now: the booking is undone. p_extra_places null: the extra
+-- places it has now on the same plan (so an undo keeps them), none on another plan.
 -- ---------------------------------------------------------------------------
 create function billing.downgrade(p_account uuid, p_plan text, p_extra_places int, p_drop bigint[],
                                   p_at timestamptz default now(), p_actor text default 'owner')
@@ -502,7 +503,7 @@ declare
   pl billing.plans;
   pr billing.prices;
   np billing.prices;
-  extras int := coalesce(p_extra_places, 0);
+  extras int;
   cur_places int;
   new_places int;
   drop_ids bigint[];
@@ -517,6 +518,7 @@ begin
   if s.period_end <= p_at then raise exception 'the renewal is due: pay it first' using errcode = '22023'; end if;
   select * into pl from billing.plans where code = p_plan;
   if not found then raise exception 'no such plan' using errcode = '22023'; end if;
+  extras := coalesce(p_extra_places, case when p_plan = s.plan then s.extra_places else 0 end);
   if extras < 0 or (extras > 0 and not pl.allows_extra) then
     raise exception 'extra places are not sold on %', pl.name using errcode = '22023';
   end if;
@@ -585,6 +587,9 @@ begin
   else
     nid := (billing.price_keeping_offer(plan, a.market, p_interval, s.offer, p_at)).id;
   end if;
+  -- nothing changes (a repeat click): no write, no version bump, no event, as cancel does, so an
+  -- open checkout stays good and the first change's email still goes
+  if nid is not distinct from s.next_price then return billing.account_state(p_account, p_at); end if;
   update billing.subscriptions set next_price = nid, version = version + 1 where id = s.id;
   perform billing.bump(p_account);
   perform billing.log_event(p_account, p_at, p_actor, 'switch_interval',

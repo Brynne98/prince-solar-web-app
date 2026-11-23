@@ -301,7 +301,7 @@ serve("billing", async (req) => {
     const action = String(body.action ?? "");
     try {
       const state = action === "downgrade"
-        ? await bill("downgrade", { user: user.id, plan: body.plan, extras: body.extras ?? 0, drop: ids(body.drop) ?? [] })
+        ? await bill("downgrade", { user: user.id, plan: body.plan, extras: body.extras ?? null, drop: ids(body.drop) ?? [] })
         : action === "interval" ? await bill("switch_interval", { user: user.id, interval: interval(body.period) })
         : action === "cancel" ? await bill("cancel", { user: user.id })
         : action === "undo_cancel" ? await bill("undo_cancel", { user: user.id })

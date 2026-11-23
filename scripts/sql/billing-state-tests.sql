@@ -1103,6 +1103,70 @@ begin
   end loop;
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- S19 copy: verify 4 fix 1. Rolled back like S15.
+--   z1  a yearly plan whose renewal was paid 200 days ago: copied, on that plan and year;
+--       lost in a dispute after the switch, the year ends
+--   z2  a yearly Family plan upgraded 150 days ago: the upgrade is on that year; reversed, it ends
+--   z3  a refund asked 200 days ago on a renewal, no error text: copied, still asked
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  tz constant text := 'Africa/Johannesburg';
+  z1 uuid := gen_random_uuid(); z2 uuid := gen_random_uuid(); z3 uuid := gen_random_uuid();
+  a uuid; bi billing.invoices; r jsonb; res jsonb := '[]'; x jsonb;
+  nb date := current_date + 165; bd int := extract(day from current_date + 165)::int;
+  ys date := public.billing_step(current_date + 165, 'yearly', extract(day from current_date + 165)::int, -1);
+  old timestamptz := now() - interval '400 days';
+begin
+  begin
+    set local session_replication_role = replica;
+    insert into auth.users (id, email, created_at)
+    select u, 'copy-s19-' || n || '@state.test', old from unnest(array[z1, z2, z3]) with ordinality t (u, n);
+    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at) values
+      (z1, 'home', 'yearly', bd, nb, 'active', old), (z2, 'family', 'yearly', bd, nb, 'active', old);
+    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at) values
+      ('psh_s19z1', z1, 'renewal', 'home', 'yearly', 990, 'paid', ys, ys, ys::timestamp at time zone tz + interval '1 hour',
+       ys::timestamp at time zone tz + interval '1 hour'),
+      ('psh_s19z2', z2, 'upgrade', 'family', 'yearly', 500, 'paid', current_date - 150, current_date - 150,
+       now() - interval '150 days', now() - interval '150 days');
+    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at,
+                                         refund_status) values
+      ('psh_s19z3', z3, 'renewal', 'home', 'monthly', 99, 'paid', (now() - interval '200 days')::date, (now() - interval '200 days')::date,
+       now() - interval '200 days', now() - interval '200 days', 'asked');
+    set local session_replication_role = origin;
+
+    perform billing.copy_from_old();
+    insert into billing.switch_over (switched_at) values (now()) on conflict do nothing;
+
+    a := (select id from billing.accounts where user_id = z1);
+    select i.* into bi from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s19z1';
+    res := res || jsonb_build_object('l', 'S19 a yearly renewal paid 200 days ago: on that plan and year',
+      'p', bi.subscription = (pg_temp.sub(a)).id and bi.period_start = (pg_temp.sub(a)).period_start
+           and bi.period_end = (pg_temp.sub(a)).period_end, 'd', coalesce(bi.period_start::text, 'not copied'));
+    r := billing.record_dispute('psh_s19z1', 'charge.dispute.resolve', 'resolved', true, 99000, now(), 'D_s19z1');
+    res := res || jsonb_build_object('l', 'S19 ... lost in a dispute: the year ends',
+      'p', r->>'action' = 'plan_ended' and (pg_temp.sub(a)).status = 'ended', 'd', r::text);
+    a := (select id from billing.accounts where user_id = z2);
+    select i.* into bi from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s19z2';
+    res := res || jsonb_build_object('l', 'S19 an upgrade paid 150 days into a yearly plan: on that year',
+      'p', bi.subscription = (pg_temp.sub(a)).id and bi.period_start = (pg_temp.sub(a)).period_start,
+      'd', coalesce(bi.period_start::text, 'not copied'));
+    r := billing.apply_payment('psh_s19z2', jsonb_build_object('status', 'reversed', 'reference', 'psh_s19z2'), now());
+    res := res || jsonb_build_object('l', 'S19 ... reversed: the year ends',
+      'p', r->>'action' = 'plan_ended' and (pg_temp.sub(a)).status = 'ended', 'd', r::text);
+    res := res || jsonb_build_object('l', 'S19 a refund asked 200 days ago, no error text: copied, still asked',
+      'p', (select status = 'pending' from billing.refunds where reference = 'psh_s19z3'),
+      'd', coalesce((select reason || ' ' || status from billing.refunds where reference = 'psh_s19z3'), 'not copied'));
+    raise exception 's19 undo';
+  exception when others then
+    if sqlerrm <> 's19 undo' then res := res || jsonb_build_object('l', 'S19 runs', 'p', false, 'd', sqlerrm); end if;
+  end;
+  for x in select * from jsonb_array_elements(res) loop
+    perform pg_temp.ok(x->>'l', (x->>'p')::boolean, x->>'d');
+  end loop;
+end $$;
+
 -- ===========================================================================
 -- Phase 2: money paths, through the real commands. No network: Paystack's answers
 -- are made here (pg_temp.tx_ok and pg_temp.answer) and handed to apply_payment.
@@ -3489,15 +3553,31 @@ begin
 exception when others then perform pg_temp.ok('X3 runs', false, sqlerrm);
 end $$;
 
--- X8 the interval it already has, nothing booked: no email; the event keeps the old next price (verify 3 fix 8)
+-- X8 the interval it already has, nothing booked: no write, no event, no email (verify 3 fix 8);
+--    a repeat click on a booked switch: no version bump, no new event, the first email stays (verify 4 fix 4)
 do $$
-declare a uuid := pg_temp.acct('x8'); e bigint;
+declare a uuid := pg_temp.acct('x8'); v bigint; sv bigint; n int;
 begin
   perform pg_temp.member(a, 'x8', 990120801);
+  select version into v from billing.accounts where id = a;
   perform billing.switch_interval(a, 'month', pg_temp.t(2));
-  select id into e from billing.account_events where account = a and kind = 'switch_interval' order by at desc, id desc limit 1;
-  perform pg_temp.ok('X8 the event logs the old next price', (select before ? 'next_price' from billing.account_events where id = e));
-  perform pg_temp.eq('X8 nothing changed: no email', (select string_agg(key, ',') from billing.outbox where account = a and ref = e::text), null);
+  perform pg_temp.ok('X8 nothing changed: no event, no version bump',
+    not exists (select 1 from billing.account_events where account = a and kind = 'switch_interval')
+    and (select version from billing.accounts where id = a) = v);
+  perform pg_temp.eq('X8 nothing changed: no email', (select string_agg(key, ',') from billing.outbox where account = a
+    and key like 'change%'), null);
+  perform billing.switch_interval(a, 'year', pg_temp.t(2));
+  select a2.version, (pg_temp.sub(a)).version, (select count(*) from billing.outbox o where o.account = a)
+    into v, sv, n from billing.accounts a2 where a2.id = a;
+  perform billing.switch_interval(a, 'year', pg_temp.t(2) + interval '1 minute');
+  perform pg_temp.ok('X8 repeat click: no version bump, one event',
+    (select version from billing.accounts where id = a) = v and (pg_temp.sub(a)).version = sv
+    and (select count(*) from billing.account_events where account = a and kind = 'switch_interval') = 1,
+    format('versions %s/%s', (select version from billing.accounts where id = a), v));
+  perform pg_temp.ok('X8 repeat click: the first email stays',
+    (select count(*) from billing.outbox o where o.account = a) = n and n > 0
+    and exists (select 1 from billing.outbox o where o.account = a and o.key = 'change_booked' and o.status = 'queued'),
+    (select string_agg(key, ',') from billing.outbox where account = a));
 exception when others then perform pg_temp.ok('X8 runs', false, sqlerrm);
 end $$;
 
@@ -3514,13 +3594,84 @@ begin
   perform pg_temp.choose(b, '{990120901,990120902,990120903}', now() - interval '1 day');
   update billing.login_plants set gone_at = now() - interval '1 hour' where login = l and plant = 990120902;
   ss := billing.screen_state(b, now());
-  perform pg_temp.eq('X9 gone from L1: shown under L1', (select e->>'logins' from jsonb_array_elements(ss->'plants') e
+  perform pg_temp.eq('X9 gone from L1: shown under L1', (select e->>'gone_logins' from jsonb_array_elements(ss->'plants') e
     where (e->>'plant')::bigint = 990120902), jsonb_build_array(l)::text);
   perform pg_temp.eq('X9 claimed plant: shared', pg_temp.pp(b, now(), 990120903, 'name') || ' ' || (select e->>'shared'
     from jsonb_array_elements(ss->'plants') e where (e->>'plant')::bigint = 990120903), 'Gran true');
   perform pg_temp.eq('X9 a login''s plant: not shared', (select e->>'shared' from jsonb_array_elements(ss->'plants') e
     where (e->>'plant')::bigint = 990120901), 'false');
 exception when others then perform pg_temp.ok('X9 runs', false, sqlerrm);
+end $$;
+
+-- Y2 a queued report is checked again when sent: a plant let go, a plant gone from its
+--    login, then the plan ended: those reports are dropped, the rest go (verify 4 fix 2)
+do $$
+declare b uuid := pg_temp.acct('y2'); ub uuid; l uuid; got text;
+begin
+  select user_id into ub from billing.accounts where id = b;
+  l := pg_temp.link(b, 'y2', '{990130201,990130202,990130203}', now() - interval '2 days');
+  perform pg_temp.pay(b, 'family', 'month', now() - interval '1 day');
+  perform pg_temp.choose(b, '{990130201,990130202,990130203}', now() - interval '1 day');
+  insert into public.plant_users (plant_id, user_id, plant_name)
+  select x, ub, 'Plant ' || x from unnest('{990130201,990130202,990130203}'::bigint[]) x on conflict do nothing;
+  insert into public.email_queue (user_id, plant_id, kind, key) values
+    (ub, 990130201, 'report_week', 'report_week:y2a'), (ub, 990130202, 'report_week', 'report_week:y2b'),
+    (ub, 990130203, 'report_week', 'report_week:y2c'), (ub, null, 'report_month', 'report_month:y2');
+  update billing.seats set closed_at = now(), close_reason = 'switched' where account = b and plant = 990130202;
+  update billing.login_plants set gone_at = now() where login = l and plant = 990130203;
+  select string_agg(c.key, ',' order by c.key) into got from public.email_claim(100000, true) c where c.user_id = ub;
+  perform pg_temp.eq('Y2 let go and gone from its login: dropped when sent', got, 'report_month:y2,report_week:y2a');
+  perform billing.end_sub((pg_temp.sub(b)).id, now(), 'test', now(), 'test');
+  select string_agg(c.key, ',' order by c.key) into got from public.email_claim(100000, true) c where c.user_id = ub;
+  perform pg_temp.eq('Y2 plan ended: no report sent', got, null);
+exception when others then perform pg_temp.ok('Y2 runs', false, sqlerrm);
+end $$;
+
+-- Y3 screen_state: logins lists only the logins that list the plant now, gone_logins the
+--    ones it went from; a plant gone from two logins, and one gone from a login then
+--    claimed through the share; remove_login closes what the pop-up names (verify 4 fix 3)
+do $$
+declare b uuid := pg_temp.acct('y3'); ub uuid; sh uuid; l1 uuid; l2 uuid; ss jsonb; r jsonb;
+begin
+  select user_id into ub from billing.accounts where id = b;
+  sh := pg_temp.share_login();
+  perform pg_temp.pay(b, 'family', 'month', now() - interval '2 days');
+  l1 := pg_temp.link(b, 'y3a', '{990130301,990130302}', now() - interval '2 days');
+  l2 := pg_temp.link(b, 'y3b', '{990130301}', now() - interval '2 days');
+  perform pg_temp.choose(b, '{990130301,990130302}', now() - interval '1 day');
+  update billing.login_plants set gone_at = now() - interval '1 hour' where plant in (990130301, 990130302);
+  perform public.share_claim_live(ub, sh, 990130302, 'Gran');
+  ss := billing.screen_state(b, now());
+  perform pg_temp.eq('Y3 gone from two logins: no live login, both gone',
+    (select (e->'logins')::text || ' ' || (e->'gone_logins')::text from jsonb_array_elements(ss->'plants') e
+      where (e->>'plant')::bigint = 990130301), '[] ' || jsonb_build_array(l1, l2)::text);
+  perform pg_temp.eq('Y3 gone from a login, then claimed: no live login, claimed',
+    (select (e->'logins')::text || ' ' || (e->'gone_logins')::text || ' ' || (e->>'claimed') from jsonb_array_elements(ss->'plants') e
+      where (e->>'plant')::bigint = 990130302), '[] ' || jsonb_build_array(l1)::text || ' true');
+  begin
+    r := billing.remove_login(b, l1, now());
+    perform pg_temp.eq('Y3 removing L1 closes the plant gone from both, not the claimed one',
+      (select string_agg(plant::text, ',' order by plant) from billing.seats where account = b and close_reason = 'login_removed'), '990130301');
+    raise exception 'y3 undo';
+  exception when others then if sqlerrm <> 'y3 undo' then raise; end if;
+  end;
+exception when others then perform pg_temp.ok('Y3 runs', false, sqlerrm);
+end $$;
+
+-- Y8 undoing a booked downgrade on Family with extra places keeps them (no extras sent: the
+--    ones it has) (verify 4 fix 8)
+do $$
+declare a uuid := pg_temp.acct('y8');
+begin
+  perform pg_temp.member(a, 'y8', 990130801, 'family');
+  update billing.subscriptions set extra_places = 2 where id = (pg_temp.sub(a)).id;
+  perform billing.downgrade(a, 'home', null, '{}', pg_temp.t(2));
+  perform pg_temp.ok('Y8 Home booked', (pg_temp.sub(a)).next_extra_places = 0 and (pg_temp.sub(a)).next_price is not null);
+  perform billing.downgrade(a, 'family', null, '{}', pg_temp.t(3));
+  perform pg_temp.ok('Y8 undo keeps the extra places',
+    (pg_temp.sub(a)).extra_places = 2 and (pg_temp.sub(a)).next_extra_places is null and (pg_temp.sub(a)).next_price is null,
+    format('extra %s, next extra %s, next price %s', (pg_temp.sub(a)).extra_places, (pg_temp.sub(a)).next_extra_places, (pg_temp.sub(a)).next_price));
+exception when others then perform pg_temp.ok('Y8 runs', false, sqlerrm);
 end $$;
 
 -- ---------------------------------------------------------------------------

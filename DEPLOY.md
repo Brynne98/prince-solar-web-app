@@ -276,6 +276,10 @@ frontend second, in this order:
       From here every write to them fails ("billing is paused for an update"): linking a login
       and the old billing function answer an error, and Paystack sends a refused webhook again
       later. Keep this window to a few minutes.
+      Then empty the old wipe queue, which stands down once switched and would otherwise keep
+      its plants forever: `supabase db query --linked "call private.purge_plants()"`, and check
+      `select count(*) from private.plant_purge` is 0. Not 0: run the call again; still not 0,
+      `select billing.resume_old()` and find out why before step 2.
    2. Copy again and switch in one transaction:
       `supabase db query --linked "begin; select billing.copy_from_old(); select billing.switch_on(); commit;"`.
       If either fails, nothing is switched: `select billing.resume_old()` and start step 6 again.

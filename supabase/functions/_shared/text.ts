@@ -13,7 +13,7 @@ export type Iso = string;
 export type PlantState = {
   plant: number; name: string | null; chosen: boolean; locked: boolean; read_now: boolean;
   needs_reconnect: boolean; trial_used_elsewhere: boolean; delete_at: Iso | null; purged: boolean;
-  kept_elsewhere: boolean; drop_at_period_end: boolean; logins: string[]; claimed: boolean; shared: boolean;
+  kept_elsewhere: boolean; drop_at_period_end: boolean; logins: string[]; gone_logins: string[]; claimed: boolean; shared: boolean;
 };
 export type PriceRow = {
   plan: string; name: string; places: number; interval: "month" | "year";
@@ -381,12 +381,15 @@ export const logins = {
   reconnect: "Reconnect",
   removeTitle: (username: string) => `Remove ${username}?`,
 };
-/** Removing a login: which plants go and what happens to each one's history. shared: the
- *  "Shared plants" group: the plants no login of the account reaches that came through the
- *  share (claimed, or a share removed that keeps its place); only those go with it. */
+/** Removing a login: which plants go and what happens to each one's history. A plant goes
+ *  when nothing reaches it after the removal, as billing.remove_login and billing.unclaim
+ *  decide: a login: the plants it lists or went from, with no other login listing them now
+ *  and no claim. shared: the "Shared plants" group: the plants that came through the share
+ *  that no login lists now (claimed, or a share removed that keeps its place). */
 export function removeLogin(s: AccountState, loginId: string, shared = false) {
-  const only = shared ? s.plants.filter((p) => !p.logins.length && p.shared)
-    : s.plants.filter((p) => p.logins.length === 1 && p.logins[0] === loginId && !p.claimed);
+  const only = shared ? s.plants.filter((p) => p.shared && !p.logins.length)
+    : s.plants.filter((p) => (p.logins.includes(loginId) || (p.gone_logins || []).includes(loginId))
+      && !p.claimed && p.logins.every((l) => l === loginId));
   const chosen = only.filter((p) => p.chosen);
   const gone = chosen.filter((p) => !p.kept_elsewhere).map(plantName);
   const kept = chosen.filter((p) => p.kept_elsewhere).map(plantName);
@@ -484,13 +487,10 @@ function keptGroups(s: AccountState): { day: string; names: string[] }[] {
 }
 /** Plants with different delete dates: each date with its plants, never one date for all. */
 const keptEach = (g: { day: string; names: string[] }[]) => g.map((x) => `${names(x.names)}: history kept until ${x.day}.`).join(" ");
-/** One date that covers only some of the chosen plants still holding history (another account
- *  keeps the rest): name them too. A date already passed does not count. */
-const someOnly = (s: AccountState, g: { names: string[] }[]) => {
-  const now = s.at ? Date.parse(s.at) : Date.now();
-  return g.length === 1 && g[0].names.length <
-    s.plants.filter((p) => p.chosen && !p.purged && !(p.delete_at && Date.parse(p.delete_at) <= now)).length;
-};
+/** One date that covers fewer than all the chosen plants (another account keeps the rest, or
+ *  their history is already deleted): name them too. */
+const someOnly = (s: AccountState, g: { names: string[] }[]) =>
+  g.length === 1 && g[0].names.length < s.plants.filter((p) => p.chosen).length;
 /** The pay screen's history line: each date with its plants, as in the emails. */
 function keptLine(s: AccountState): string | null {
   const g = keptGroups(s);

@@ -81,7 +81,7 @@ $$;
 
 create or replace function private.email_skip_unchosen()
 returns trigger language plpgsql security definer set search_path = '' as $$
-declare st billing.status; acc uuid;
+declare acc uuid;
 begin
   if new.user_id is null then return new; end if;
   select id into acc from billing.accounts where user_id = new.user_id;
@@ -89,10 +89,7 @@ begin
                                                  and s.closed_at is null) then
     return null;
   end if;
-  st := billing.account_status(acc, now());
-  if new.kind like 'report\_%' and coalesce(st.state, 'none') not in ('trialing', 'active', 'past_due') then return null; end if;
-  -- a plant gone from its login or a share removed: no report on it (its history stays)
-  if new.kind like 'report\_%' and new.plant_id is not null and not billing.has_route(acc, new.plant_id, false) then return null; end if;
+  if new.kind like 'report\_%' and not billing.report_wanted(acc, new.plant_id) then return null; end if;
   if new.plant_id is not null and (private.is_alert(new.kind) or new.kind in ('share_down', 'share_back'))
      and not private.plant_live(new.user_id, new.plant_id) then
     return null;

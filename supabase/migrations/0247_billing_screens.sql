@@ -160,13 +160,13 @@ begin
            'drop_at_period_end', coalesce((select se.drop_at_period_end from billing.seats se
                                              where se.account = p_account and se.plant = (p->>'plant')::bigint
                                                and se.closed_at is null), false),
-           -- the logins that list it now; else the ones it went from (removing such a login deletes it)
+           -- the logins that list it now, and the ones it went from (removing the last route deletes it)
            'logins', coalesce((select jsonb_agg(l.id order by l.created_at) from billing.logins l
                                  join billing.login_plants lp on lp.login = l.id
-                                where l.account = p_account and lp.plant = (p->>'plant')::bigint and lp.gone_at is null),
-                              (select jsonb_agg(l.id order by l.created_at) from billing.logins l
-                                 join billing.login_plants lp on lp.login = l.id
-                                where l.account = p_account and lp.plant = (p->>'plant')::bigint), '[]'::jsonb),
+                                where l.account = p_account and lp.plant = (p->>'plant')::bigint and lp.gone_at is null), '[]'::jsonb),
+           'gone_logins', coalesce((select jsonb_agg(l.id order by l.created_at) from billing.logins l
+                                      join billing.login_plants lp on lp.login = l.id
+                                     where l.account = p_account and lp.plant = (p->>'plant')::bigint and lp.gone_at is not null), '[]'::jsonb),
            'claimed', exists (select 1 from billing.plant_claims c where c.account = p_account and c.plant = (p->>'plant')::bigint),
            -- it came through the share: removing the shared group lets it go (api_link_remove)
            'shared', exists (select 1 from public.plant_users pu join private.sunsynk_accounts sa on sa.id = pu.account_id
@@ -665,10 +665,22 @@ revoke all on function public.link_login_allowed_old(uuid, text) from public, an
 revoke all on function public.link_login_allowed(uuid, text) from public, anon, authenticated;
 grant execute on function public.link_login_allowed(uuid, text) to service_role;
 
+-- A report still goes: a plan or the week running, and its plant (if any) chosen and still
+-- reached (not gone from its login, share not removed; its history stays). Asked when the
+-- report is queued (email_skip_unchosen) and again when it is sent (email_claim).
+create function billing.report_wanted(p_account uuid, p_plant bigint)
+returns boolean language sql stable security definer set search_path = billing, pg_temp as $$
+  select coalesce((billing.account_status(p_account, now())).state, 'none') in ('trialing', 'active', 'past_due')
+     and (p_plant is null
+          or (exists (select 1 from billing.seats s where s.account = p_account and s.plant = p_plant and s.closed_at is null)
+              and billing.has_route(p_account, p_plant, false)))
+$$;
+revoke all on function billing.report_wanted(uuid, bigint) from public, anon, authenticated;
+
 -- Emails for a plant the account does not choose, and reports with no plan, are not queued.
 create function private.email_skip_unchosen()
 returns trigger language plpgsql security definer set search_path = '' as $$
-declare st billing.status; acc uuid;
+declare acc uuid;
 begin
   if not billing.is_live() then
     -- before the switch: 0222's rule, as it was
@@ -693,10 +705,7 @@ begin
                                                  and s.closed_at is null) then
     return null;
   end if;
-  st := billing.account_status(acc, now());
-  if new.kind like 'report\_%' and coalesce(st.state, 'none') not in ('trialing', 'active', 'past_due') then return null; end if;
-  -- a plant gone from its login or a share removed: no report on it (its history stays)
-  if new.kind like 'report\_%' and new.plant_id is not null and not billing.has_route(acc, new.plant_id, false) then return null; end if;
+  if new.kind like 'report\_%' and not billing.report_wanted(acc, new.plant_id) then return null; end if;
   if new.plant_id is not null and (private.is_alert(new.kind) or new.kind in ('share_down', 'share_back'))
      and not private.plant_live(new.user_id, new.plant_id) then
     return null;
@@ -707,6 +716,89 @@ revoke all on function private.email_skip_unchosen() from public, anon, authenti
 drop trigger if exists email_skip_paused on public.email_queue;
 create trigger email_skip_paused before insert on public.email_queue
   for each row execute function private.email_skip_unchosen();
+
+-- The sender's batch (email_claim): 0217's body, and after the switch a queued report is
+-- checked again (billing.report_wanted): the plan may have ended, the plant been let go or
+-- its share removed since it was queued.
+create or replace function public.email_claim(p_limit int, p_peek boolean default false)
+returns table (id bigint, user_id uuid, to_email text, plant_id bigint, plant_name text, tz text,
+               kind text, key text, data jsonb, tries int, switch text, unsub_token uuid, batch_key text)
+language plpgsql
+security definer
+set search_path = public, private, pg_temp
+as $$
+begin
+  if not p_peek then
+    -- A sender that died mid-batch: its claims go back on the queue.
+    update public.email_queue q set status = 'queued', claimed_at = null
+     where q.status = 'sending' and q.claimed_at < now() - interval '10 minutes';
+  end if;
+
+  create temp table if not exists _claim (id bigint primary key, skip text, sw text) on commit drop;
+  truncate _claim;
+  insert into _claim (id, skip, sw)
+  select q.id,
+         case
+           when sw is not null and q.user_id is not null and not public.email_wanted(q.user_id, sw) then 'switched off'
+           when q.plant_id is not null and q.user_id is not null and q.kind <> 'needs_relink'
+                and not exists (select 1 from public.plant_users pu where pu.user_id = q.user_id and pu.plant_id = q.plant_id)
+             then 'plant removed'
+           when q.kind = 'history' and q.user_id is not null and q.plant_id is not null
+                and not private.plant_live(q.user_id, q.plant_id)
+             then 'not read'
+           -- after the switch a report is asked again when sent: plan, chosen plant, still reached
+           when q.kind like 'report\_%' and q.user_id is not null and billing.is_live()
+                and not billing.report_wanted((select ba.id from billing.accounts ba where ba.user_id = q.user_id), q.plant_id)
+             then 'report not wanted'
+           when q.kind = 'welcome' and exists (select 1 from public.plant_users pu where pu.user_id = q.user_id)
+             then 'plant linked'
+           when q.kind = 'need_a_hand' and exists (select 1 from private.sunsynk_accounts a where a.user_id = q.user_id)
+                and not private.pick_waiting(q.user_id)
+             then 'login added'
+           when q.pair_key is not null and not exists (
+                  select 1 from public.email_queue d where d.user_id is not distinct from q.user_id and d.key = q.pair_key
+                     and d.status in ('sent', 'sending', 'queued'))
+             then 'down not sent'
+         end,
+         sw
+    from (select q0.*, private.email_switch_of(q0.kind, q0.data) as sw
+            from public.email_queue q0
+           where q0.status = 'queued' and q0.due_at <= now()
+             -- a "back" waits while its "down" is still on its way
+             and not exists (select 1 from public.email_queue d
+                              where q0.pair_key is not null and d.user_id is not distinct from q0.user_id and d.key = q0.pair_key
+                                and (d.status = 'sending' or (d.status = 'queued' and d.due_at > now())))
+           order by q0.priority, q0.due_at, q0.id
+           limit p_limit
+           for update skip locked) q;
+
+  if not p_peek then
+    update public.email_queue q set status = 'skipped', last_error = c.skip
+      from _claim c where c.id = q.id and c.skip is not null;
+    update public.email_queue q set status = 'sending', claimed_at = now(), tries = q.tries + 1
+      from _claim c where c.id = q.id and c.skip is null;
+  end if;
+
+  return query
+  select q.id, q.user_id, coalesce(q.to_email, u.email::text), q.plant_id,
+         coalesce(pu.plant_name, (select pu2.plant_name from public.plant_users pu2
+                                   where pu2.user_id = q.user_id order by pu2.linked_at limit 1)),
+         case when q.plant_id is not null then public.plant_tz(q.plant_id) else 'Africa/Johannesburg' end,
+         q.kind, q.key,
+         case when q.kind = 'need_a_hand' and exists (select 1 from private.sunsynk_accounts a where a.user_id = q.user_id)
+                then coalesce(q.data, '{}'::jsonb) || '{"choose": true}'::jsonb
+              else q.data end,
+         q.tries, c.sw,
+         case when c.sw is not null and q.user_id is not null and not p_peek
+              then public.email_unsub_token(q.user_id) end,
+         q.batch_key
+    from _claim c
+    join public.email_queue q on q.id = c.id
+    left join auth.users u on u.id = q.user_id
+    left join public.plant_users pu on pu.user_id = q.user_id and pu.plant_id = q.plant_id
+   where c.skip is null
+   order by q.priority, q.due_at, q.id;
+end $$;
 
 -- Account delete after the switch: the new rules decide (billing.delete_account: nothing
 -- running, nothing owed, no open dispute), then the logins, links and person go as before.
@@ -1038,11 +1130,8 @@ create trigger payment_methods_outbox after insert or update of active on billin
 create function billing.outbox_on_event()
 returns trigger language plpgsql set search_path = billing, pg_temp as $$
 begin
-  if new.actor = 'owner' and new.kind in ('cancel', 'undo_cancel', 'downgrade', 'switch_interval')
-     -- an interval switch that changed nothing booked (the interval it has, nothing booked
-     -- before): no email
-     and not (new.kind = 'switch_interval' and new.after ? 'next_price' and new.before ? 'next_price'
-              and new.after->>'next_price' is not distinct from new.before->>'next_price') then
+  -- (an interval switch that changes nothing logs no event: switch_interval returns first)
+  if new.actor = 'owner' and new.kind in ('cancel', 'undo_cancel', 'downgrade', 'switch_interval') then
     perform billing.outbox_put(new.account,
       case when new.kind = 'undo_cancel'
              or (new.kind = 'downgrade' and new.after->>'plan' = new.before->>'plan'

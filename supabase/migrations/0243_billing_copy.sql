@@ -55,8 +55,25 @@
 --                  row (asked: pending; else due and retried; 7 tries or hello@ told:
 --                  failed, by hand). An open dispute -> dispute_open on the try; a lost
 --                  dispute still owed -> amount_owed_minor on its bill.
+--                  At any age: the paid charge that bought the running plan's current period
+--                  (a yearly plan's renewal, start, switch or upgrade), linked to that plan and
+--                  period, and any charge with a refund not done.
 --                  Their tries say 'copied: ...', so a rerun is still allowed.
 -- ============================================================================
+
+-- An old paid charge that bought this plan's current period: a renewal or settle due on its
+-- start, the start made on it, a switch whose year starts on it, an upgrade paid inside it.
+create function billing.copy_funds_period(p_kind text, p_due date, p_created date, p_billing_date date,
+                                          p_paid timestamptz, s billing.subscriptions)
+returns boolean language sql stable as $$
+  select coalesce(case p_kind
+    when 'renewal' then p_due::timestamp at time zone 'Africa/Johannesburg' = s.period_start
+    when 'settle' then p_due::timestamp at time zone 'Africa/Johannesburg' = s.period_start
+    when 'start' then p_created::timestamp at time zone 'Africa/Johannesburg' = s.period_start
+    when 'switch' then p_billing_date::timestamp at time zone 'Africa/Johannesburg' = s.period_start
+    when 'upgrade' then p_paid >= s.period_start and p_paid < s.period_end end, false)
+$$;
+revoke all on function billing.copy_funds_period(text, date, date, date, timestamptz, billing.subscriptions) from public, anon, authenticated;
 
 create function billing.copy_from_old()
 returns jsonb language plpgsql security definer set search_path = billing, public, private, pg_temp as $$
@@ -82,6 +99,7 @@ declare
   odone boolean;
   oopen boolean;
   oyear boolean;
+  ocur boolean;
   oreason text;
 begin
   -- anything but this copy's own seed tries (below) means real money moved here
@@ -281,6 +299,11 @@ begin
             where c.status = 'pending' or coalesce(c.settled_at, c.created_at) > now() - interval '120 days'
                -- at any age: a refund not done, a dispute not resolved, a lost dispute still owed
                or (c.status = 'paid' and (c.kind = 'card' or c.error like 'refund%') and coalesce(c.refund_status, 'failed') <> 'done')
+               or coalesce(c.refund_status, 'done') <> 'done'
+               -- at any age: the paid charge that bought the running plan's current period (a
+               -- yearly plan's can be a year old), so a reversal after the switch ends that period
+               or (c.status = 'paid' and exists (select 1 from billing.subscriptions x where x.account = a.id
+                     and x.status in ('active', 'past_due') and billing.copy_funds_period(c.kind, c.due_on, c.created_on, c.billing_date, coalesce(c.settled_at, c.created_at), x)))
                or (c.dispute is not null and not c.dispute_lost and c.dispute !~* '^(resolved?|won|lost|archived|closed)$')
                or c.dispute_owed
             order by c.created_at, c.reference loop
@@ -363,12 +386,14 @@ begin
                     -- paid but not applied (refund%), or refunded before it was reported: refunded
                     when r.kind <> 'card' and r.error like 'refund%' then 'not_applied'
                     else 'success' end;
+    -- the paid charge that bought the running plan's current period: that plan and period
+    ocur := ostatus = 'success' and osub.status in ('active', 'past_due') and billing.copy_funds_period(r.kind, r.due_on, r.created_on, r.billing_date, coalesce(r.settled_at, r.created_at), osub);
     if oinv is null then
       -- a settled charge, or an open one nothing under the new rules applies (refunded as stale if paid).
       -- A paid renewal or start keeps its plan and period, so a reversal ends that period. So
       -- does the paid switch to the yearly plan copied as a paid year: its bill is that year.
-      oyear := ostatus = 'success' and r.kind = 'switch' and r.period = 'yearly' and osub.interval = 'year'
-               and r.billing_date is not null and osub.period_start = r.billing_date::timestamp at time zone tz;
+      oyear := ocur or (ostatus = 'success' and r.kind = 'switch' and r.period = 'yearly' and osub.interval = 'year'
+               and r.billing_date is not null and osub.period_start = r.billing_date::timestamp at time zone tz);
       insert into billing.invoices (account, subscription, kind, status, plan, interval, offer, extra_places, amount_minor,
                                     currency, period_start, period_end, plants, created_at, paid_at)
       values (r.account, case when (ostatus = 'success' and r.kind in ('renewal', 'settle', 'start')) or oyear then osub.id end, okind,

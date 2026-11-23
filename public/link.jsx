@@ -513,7 +513,8 @@ const acctLogins = (a, keep = () => true) => {
   for (const p of a.plants) {
     if (!keep(p) || seen.has(p.plant)) continue;
     seen.add(p.plant);
-    const l = a.logins.find(x => p.logins.includes(x.id));
+    // a login that lists it; else, unless the share reaches it, the login it went from
+    const l = a.logins.find(x => p.logins.includes(x.id)) || (!p.claimed && a.logins.find(x => (p.gone_logins || []).includes(x.id)));
     if (l) put(l.id, 'login', l.username, p); else put('share', 'share', null, p);
   }
   return groups;

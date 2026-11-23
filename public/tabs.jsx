@@ -3084,6 +3084,15 @@ const DELETE_REFUSED = [
   [/cancel your plan|plan is running/, 'Cancel your plan first.', 'cancel'],
   [/dispute is open/, 'A payment is still going through. Try again tomorrow.'],
 ];
+// A refused delete: what we showed was stale, so read the account again. Still blocked: the
+// fresh reason (the pop-up shows it, deleteBlocked); else the refusal's own words.
+const deleteRefusal = async (msg) => {
+  const fresh = await window.reloadAccount().catch(() => null);
+  if (fresh && AT.deleteBlocked(fresh)) return { blocked: true };
+  const why = DELETE_REFUSED.find(([re]) => re.test(msg || ''));
+  return { text: why ? why[1] : 'Couldn’t delete the account. Try again.', cancel: why?.[2] === 'cancel' };
+};
+window.deleteRefusal = deleteRefusal;
 function DeleteAccountRow({ email, acct, onBilling }) {
   const { useState } = React;
   // the server says when an account may go (account_state may_delete): nothing running, nothing owed;
@@ -3112,13 +3121,13 @@ function DeleteAccountRow({ email, acct, onBilling }) {
     // No reload after it: that blanked the page and drew sign-in again (SOLAR-98).
     try { await window.deleteAccount(); await window.signOutHere(); window.toast('Account deleted.'); }
     catch (e) {
-      const why = DELETE_REFUSED.find(([re]) => re.test(e?.message || ''));
-      // Refused on billing: what we showed was stale, so reload it (Cancellation only draws
-      // for a paid plan), and link a running plan to where it is cancelled (SOLAR-361).
-      if (why) window.dispatchEvent(new Event('ps-billing'));
-      const toCancel = why?.[2] === 'cancel' && { label: 'Go to cancel plan', onClick: () => onBilling('cancel') };
-      window.toast(why ? why[1] : 'Couldn’t delete the account. Try again.', { error: true, ...(toCancel && { action: toCancel }) });
+      const r = await deleteRefusal(e?.message);
       setBusy(false);
+      // still blocked on the fresh state: the pop-up says why and where to go
+      if (r.blocked) return setConfirming(true);
+      // a running plan links to where it is cancelled (SOLAR-361)
+      const toCancel = r.cancel && { label: 'Go to cancel plan', onClick: () => onBilling('cancel') };
+      window.toast(r.text, { error: true, ...(toCancel && { action: toCancel }) });
     }
   };
   return (
