@@ -157,6 +157,8 @@ begin
   -- each plant: what letting it go would do, and a booked drop
   select coalesce(jsonb_agg(p || jsonb_build_object(
            'kept_elsewhere', billing.kept_elsewhere(p_account, (p->>'plant')::bigint, p_at),
+           -- a payment on its way: letting it go now keeps its history until that payment is answered
+           'payment_hold', billing.payment_hold((p->>'plant')::bigint, p_at),
            'drop_at_period_end', coalesce((select se.drop_at_period_end from billing.seats se
                                              where se.account = p_account and se.plant = (p->>'plant')::bigint
                                                and se.closed_at is null), false),
@@ -443,9 +445,10 @@ begin
   perform private.billing_lock(p_user);
   perform pg_advisory_xact_lock(1, hashtext(p_account::text));
   perform pg_advisory_xact_lock(p_plant);
-  -- read already (own login, or a live claim): no claim row without a share route
+  -- read already (own login, or a live claim): no claim row without a share route. A plant
+  -- gone from the user's own login (share_gone_at set) is not read: it may be claimed
   select * into mine from public.plant_users where plant_id = p_plant and user_id = p_user;
-  if found and (not mine.via_share or mine.share_gone_at is null) then return 'yours'; end if;
+  if found and mine.share_gone_at is null then return 'yours'; end if;
   perform public.billing_links('claim_plant', jsonb_build_object('user', p_user, 'plant', p_plant, 'name', p_plant_name));
 
   if exists (select 1 from public.plant_users o
@@ -717,9 +720,21 @@ drop trigger if exists email_skip_paused on public.email_queue;
 create trigger email_skip_paused before insert on public.email_queue
   for each row execute function private.email_skip_unchosen();
 
+-- The old billing email kinds: not queued after the switch (email_queue_old_billing), and
+-- one queued before it is skipped when the sender claims it (email_claim).
+create function billing.old_billing_email(p_kind text)
+returns boolean language sql immutable as $$
+  select p_kind in ('free_week_soon', 'unpaid_reminder', 'unpaid_last', 'unpaid_deleted', 'bill_paid', 'bill_upgraded',
+                    'bill_switched', 'bill_change', 'bill_kept', 'bill_failed', 'bill_refund', 'bill_free',
+                    'bill_removal_soon', 'bill_renewal_notice', 'bill_offer_ends', 'bill_card_changed',
+                    'bill_card_expiring', 'winback', 'bill_cancel_soon')
+$$;
+revoke all on function billing.old_billing_email(text) from public, anon, authenticated;
+
 -- The sender's batch (email_claim): 0217's body, and after the switch a queued report is
 -- checked again (billing.report_wanted): the plan may have ended, the plant been let go or
--- its share removed since it was queued.
+-- its share removed since it was queued. An old billing email queued before the switch is
+-- skipped, and a report queued before it loses its free-week line.
 create or replace function public.email_claim(p_limit int, p_peek boolean default false)
 returns table (id bigint, user_id uuid, to_email text, plant_id bigint, plant_name text, tz text,
                kind text, key text, data jsonb, tries int, switch text, unsub_token uuid, batch_key text)
@@ -746,6 +761,8 @@ begin
            when q.kind = 'history' and q.user_id is not null and q.plant_id is not null
                 and not private.plant_live(q.user_id, q.plant_id)
              then 'not read'
+           -- after the switch an old billing email queued before it never goes (verify 5 fix 2)
+           when billing.is_live() and billing.old_billing_email(q.kind) then 'old billing email (SOLAR-641)'
            -- after the switch a report is asked again when sent: plan, chosen plant, still reached
            when q.kind like 'report\_%' and q.user_id is not null and billing.is_live()
                 and not billing.report_wanted((select ba.id from billing.accounts ba where ba.user_id = q.user_id), q.plant_id)
@@ -787,6 +804,8 @@ begin
          q.kind, q.key,
          case when q.kind = 'need_a_hand' and exists (select 1 from private.sunsynk_accounts a where a.user_id = q.user_id)
                 then coalesce(q.data, '{}'::jsonb) || '{"choose": true}'::jsonb
+              -- a report queued before the switch: no free-week wording after it
+              when q.kind like 'report\_%' and billing.is_live() then q.data - 'freeWeekEnds'
               else q.data end,
          q.tries, c.sw,
          case when c.sw is not null and q.user_id is not null and not p_peek
@@ -1397,10 +1416,7 @@ create or replace function private.email_queue_old_billing()
 returns trigger language plpgsql set search_path = private, public, pg_temp as $$
 begin
   if not billing.is_live() then return new; end if;
-  if new.kind in ('free_week_soon', 'unpaid_reminder', 'unpaid_last', 'unpaid_deleted', 'bill_paid', 'bill_upgraded',
-                  'bill_switched', 'bill_change', 'bill_kept', 'bill_failed', 'bill_refund', 'bill_free',
-                  'bill_removal_soon', 'bill_renewal_notice', 'bill_offer_ends', 'bill_card_changed',
-                  'bill_card_expiring', 'winback', 'bill_cancel_soon') then
+  if billing.old_billing_email(new.kind) then
     return null;
   end if;
   if new.kind like 'report\_%' and new.data ? 'freeWeekEnds' then new.data := new.data - 'freeWeekEnds'; end if;

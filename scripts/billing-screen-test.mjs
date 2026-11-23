@@ -232,6 +232,27 @@ test('a change on a cancelled plan is refused with Keep first (verify 2 fix 5)',
   eq(ctx.AccountText.refused('the plan is cancelled'), 'Keep your plan first.');
 });
 
+test('remove login with a payment pending: history kept while it is pending (verify 5 fix 6)', () => {
+  const a = acct({ plants: [plant(1, { chosen: true, payment_hold: true }), plant(2, { chosen: true })] });
+  eq(ctx.AccountText.removeLogin(a, 'L1'), ['Plant 2: history deleted now.', 'Plant 1: history kept while a payment is pending.']);
+});
+test('delete refused while a read is on its way: waits for it, then reads again (verify 5 fix 7)', async () => {
+  const stale = acct({ may_delete: true }), fresh = acct({ may_delete: false, plan_name: 'Home' });
+  const was = [ctx.reloadAccount, ctx.accountLoading];
+  let landed = false;
+  const pending = new Promise((r) => setTimeout(() => { landed = true; r(stale); }, 5));
+  ctx.accountLoading = () => (landed ? null : pending);
+  ctx.reloadAccount = () => (landed ? Promise.resolve(fresh) : pending);
+  eq(await ctx.deleteRefusal('cancel your plan first'), { blocked: true });
+  [ctx.reloadAccount, ctx.accountLoading] = was;
+});
+test('an interval switch booked with a plan change names the next plan (verify 5 fix 8)', () => {
+  const s = { ...acct(), ...tz, plan_name: 'Family', next_plan_name: 'Home', next_interval: 'year', period_end: '2026-12-31T08:00:00Z',
+    next_amount_minor: 49000 };
+  eq(ctx.AccountText.mail({ key: 'change_booked', state: s, event: { kind: 'interval', before: null, after: null } }).subject,
+    'Home is paid yearly from 31 Dec 2026');
+});
+
 let failed = 0;
 for (const c of cases) {
   try { await c.fn(); console.log('ok    ' + c.name); }

@@ -84,6 +84,12 @@ if (!step61.includes('call private.purge_plants()') || !step61.includes('select 
   console.log('FAIL  DEPLOY.md step 6.1 does not empty private.plant_purge before the copy');
   process.exit(1);
 }
+// ... and checked again after the copy and switch (verify 5 fix 4): a plant queued in between stays
+const step62 = deploy.slice(deploy.indexOf('2. Copy again'), deploy.indexOf('3. `supabase functions deploy billing`'));
+if (!step62.includes('select count(*) from private.plant_purge')) {
+  console.log('FAIL  DEPLOY.md step 6.2 does not check private.plant_purge again after the switch');
+  process.exit(1);
+}
 
 const r = spawnSync(PSQL, ['-X', '-q', '-v', 'ON_ERROR_STOP=1', DB], { input: sql, encoding: 'utf8' });
 const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed|CONTEXT|LINE|line |old billing: ok|X3 after|api_offer/.test(l));

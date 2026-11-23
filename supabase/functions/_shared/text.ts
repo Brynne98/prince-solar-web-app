@@ -13,7 +13,7 @@ export type Iso = string;
 export type PlantState = {
   plant: number; name: string | null; chosen: boolean; locked: boolean; read_now: boolean;
   needs_reconnect: boolean; trial_used_elsewhere: boolean; delete_at: Iso | null; purged: boolean;
-  kept_elsewhere: boolean; drop_at_period_end: boolean; logins: string[]; gone_logins: string[]; claimed: boolean; shared: boolean;
+  kept_elsewhere: boolean; payment_hold: boolean; drop_at_period_end: boolean; logins: string[]; gone_logins: string[]; claimed: boolean; shared: boolean;
 };
 export type PriceRow = {
   plan: string; name: string; places: number; interval: "month" | "year";
@@ -391,10 +391,13 @@ export function removeLogin(s: AccountState, loginId: string, shared = false) {
     : s.plants.filter((p) => (p.logins.includes(loginId) || (p.gone_logins || []).includes(loginId))
       && !p.claimed && p.logins.every((l) => l === loginId));
   const chosen = only.filter((p) => p.chosen);
-  const gone = chosen.filter((p) => !p.kept_elsewhere).map(plantName);
+  const gone = chosen.filter((p) => !p.kept_elsewhere && !p.payment_hold).map(plantName);
   const kept = chosen.filter((p) => p.kept_elsewhere).map(plantName);
+  // a payment on its way may bring the plant back: its history waits (billing.payment_hold)
+  const held = chosen.filter((p) => !p.kept_elsewhere && p.payment_hold).map(plantName);
   return [gone.length ? `${names(gone)}: history deleted now.` : null,
     kept.length ? `${names(kept)}: another account keeps the history.` : null,
+    held.length ? `${names(held)}: history kept while a payment is pending.` : null,
     !chosen.length ? "No chosen plant goes with it." : null].filter(Boolean) as string[];
 }
 
@@ -553,7 +556,7 @@ export function mail(m: MailInput): Mail | null {
             { rows: [["Next payment", `${$(s.next_amount_minor)} on ${day(s, s.period_end)}`]] as [string, string][] },
             { button: { label: "See your plan", page: "billing" } }] };
       }
-      return { subject: `${s.plan_name} is paid ${s.next_interval === "year" ? "yearly" : "monthly"} from ${day(s, s.period_end)}`,
+      return { subject: `${s.next_plan_name ?? s.plan_name} is paid ${s.next_interval === "year" ? "yearly" : "monthly"} from ${day(s, s.period_end)}`,
         title: `Paid ${s.next_interval === "year" ? "yearly" : "monthly"} from ${day(s, s.period_end)}`,
         parts: [{ rows: [["Next payment", `${$(s.next_amount_minor)} on ${day(s, s.period_end)}`]] }, { button: { label: "See your plan", page: "billing" } }] };
     }

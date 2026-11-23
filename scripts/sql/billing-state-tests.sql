@@ -1167,6 +1167,73 @@ begin
   end loop;
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- S20 copy: verify 5 fixes 1, 3, 5. Rolled back like S15.
+--   v1  a yearly start paid 200 days ago, its card page opened at 23:58 and paid at 00:02:
+--       the year starts the day it was paid; copied, on that plan and year (fix 1)
+--   v3  a yearly renewal pending at the freeze: the renewal paid a year before it is copied (fix 3)
+--   v5  a monthly-to-yearly switch paid 200 days ago, on its billing date: copied, on that year (fix 5)
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  tz constant text := 'Africa/Johannesburg';
+  v1 uuid := gen_random_uuid(); v3 uuid := gen_random_uuid(); v5 uuid := gen_random_uuid();
+  a uuid; bi billing.invoices; res jsonb := '[]'; x jsonb;
+  paid_day date := current_date - 200;                       -- the day after the page opened
+  nb1 date := public.billing_step(current_date - 200, 'yearly', extract(day from current_date - 200)::int, 1);
+  due3 date := current_date - 2;                             -- the pending renewal
+  ys5 date := current_date - 200; nb5 date := public.billing_step(current_date - 200, 'yearly', extract(day from current_date - 200)::int, 1);
+  old timestamptz := now() - interval '500 days';
+begin
+  begin
+    set local session_replication_role = replica;
+    insert into auth.users (id, email, created_at)
+    select u, 'copy-s20-' || n || '@state.test', old from unnest(array[v1, v3, v5]) with ordinality t (u, n);
+    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at) values
+      (v1, 'home', 'yearly', extract(day from paid_day)::int, nb1, 'active', old),
+      (v3, 'home', 'yearly', extract(day from due3)::int,
+       public.billing_step(due3, 'yearly', extract(day from due3)::int, 1), 'active', old),
+      (v5, 'home', 'yearly', extract(day from ys5)::int, nb5, 'active', old);
+    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at, billing_date) values
+      ('psh_s20v1', v1, 'start', 'home', 'yearly', 990, 'paid', paid_day - 1, paid_day - 1,
+       (paid_day - 1)::timestamp at time zone tz + interval '23 hours 58 minutes',
+       paid_day::timestamp at time zone tz + interval '2 minutes', null),
+      ('psh_s20v3old', v3, 'renewal', 'home', 'yearly', 990, 'paid', (due3 - interval '1 year')::date, (due3 - interval '1 year')::date,
+       (due3 - interval '1 year')::timestamp at time zone tz + interval '1 hour',
+       (due3 - interval '1 year')::timestamp at time zone tz + interval '1 hour', null),
+      ('psh_s20v5', v5, 'switch', 'home', 'yearly', 990, 'paid', ys5 - 10, ys5 - 10,
+       (ys5 - 10)::timestamp at time zone tz + interval '9 hours', (ys5 - 10)::timestamp at time zone tz + interval '9 hours', ys5);
+    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at) values
+      ('psh_s20v3', v3, 'renewal', 'home', 'yearly', 990, 'pending', due3, due3, due3::timestamp at time zone tz + interval '1 hour');
+    set local session_replication_role = origin;
+
+    perform billing.copy_from_old();
+    insert into billing.switch_over (switched_at) values (now()) on conflict do nothing;
+
+    a := (select id from billing.accounts where user_id = v1);
+    select i.* into bi from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s20v1';
+    res := res || jsonb_build_object('l', 'S20 a yearly start paid across midnight 200 days ago: on that plan and year',
+      'p', bi.subscription = (pg_temp.sub(a)).id and bi.period_start = (pg_temp.sub(a)).period_start
+           and bi.period_start = paid_day::timestamp at time zone tz and bi.period_end = (pg_temp.sub(a)).period_end,
+      'd', coalesce(bi.period_start::text || ' to ' || bi.period_end::text, 'not copied'));
+    res := res || jsonb_build_object('l', 'S20 a yearly renewal pending at the freeze: the one paid a year before is copied',
+      'p', exists (select 1 from billing.payment_attempts where reference = 'psh_s20v3old' and status = 'success'),
+      'd', coalesce((select status from billing.payment_attempts where reference = 'psh_s20v3old'), 'not copied'));
+    a := (select id from billing.accounts where user_id = v5);
+    select i.* into bi from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s20v5';
+    res := res || jsonb_build_object('l', 'S20 a switch to yearly paid 200 days ago: on that plan and year',
+      'p', bi.subscription = (pg_temp.sub(a)).id and bi.period_start = (pg_temp.sub(a)).period_start
+           and bi.period_end = (pg_temp.sub(a)).period_end,
+      'd', coalesce(bi.period_start::text, 'not copied'));
+    raise exception 's20 undo';
+  exception when others then
+    if sqlerrm <> 's20 undo' then res := res || jsonb_build_object('l', 'S20 runs', 'p', false, 'd', sqlerrm); end if;
+  end;
+  for x in select * from jsonb_array_elements(res) loop
+    perform pg_temp.ok(x->>'l', (x->>'p')::boolean, x->>'d');
+  end loop;
+end $$;
+
 -- ===========================================================================
 -- Phase 2: money paths, through the real commands. No network: Paystack's answers
 -- are made here (pg_temp.tx_ok and pg_temp.answer) and handed to apply_payment.
@@ -3640,7 +3707,11 @@ begin
   l2 := pg_temp.link(b, 'y3b', '{990130301}', now() - interval '2 days');
   perform pg_temp.choose(b, '{990130301,990130302}', now() - interval '1 day');
   update billing.login_plants set gone_at = now() - interval '1 hour' where plant in (990130301, 990130302);
-  perform public.share_claim_live(ub, sh, 990130302, 'Gran');
+  -- the old link row a plant gone from the user's own login keeps (share_gone_at set, 0203) (verify 5 fix 9)
+  insert into public.plant_users (plant_id, user_id, plant_name, share_gone_at)
+  values (990130302, ub, 'Gran', now() - interval '1 hour')
+  on conflict (plant_id, user_id) do update set via_share = false, share_gone_at = excluded.share_gone_at;
+  perform pg_temp.eq('Y3 a plant gone from the own login can be claimed', public.share_claim_live(ub, sh, 990130302, 'Gran'), 'claimed');
   ss := billing.screen_state(b, now());
   perform pg_temp.eq('Y3 gone from two logins: no live login, both gone',
     (select (e->'logins')::text || ' ' || (e->'gone_logins')::text from jsonb_array_elements(ss->'plants') e
@@ -3672,6 +3743,38 @@ begin
     (pg_temp.sub(a)).extra_places = 2 and (pg_temp.sub(a)).next_extra_places is null and (pg_temp.sub(a)).next_price is null,
     format('extra %s, next extra %s, next price %s', (pg_temp.sub(a)).extra_places, (pg_temp.sub(a)).next_extra_places, (pg_temp.sub(a)).next_price));
 exception when others then perform pg_temp.ok('Y8 runs', false, sqlerrm);
+end $$;
+
+-- Z2 an old billing email queued before the switch never goes after it; a report queued
+--    before it goes without its free-week line (verify 5 fix 2)
+do $$
+declare b uuid := pg_temp.acct('z2'); ub uuid; sw timestamptz; got text; d jsonb;
+begin
+  select user_id into ub from billing.accounts where id = b;
+  perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
+  select switched_at into sw from billing.switch_over;
+  delete from billing.switch_over;                                         -- before the switch
+  insert into public.email_queue (user_id, kind, key, data) values
+    (ub, 'bill_failed', 'bill_failed:z2', '{}'), (ub, 'report_month', 'report_month:z2', '{"freeWeekEnds": true}');
+  insert into billing.switch_over (switched_at) values (sw);               -- after it
+  select string_agg(c.key, ',' order by c.key) into got from public.email_claim(100000, true) c where c.user_id = ub;
+  perform pg_temp.eq('Z2 a failed-card email queued before the switch: skipped when sent', got, 'report_month:z2');
+  select c.data into d from public.email_claim(100000, true) c where c.user_id = ub and c.key = 'report_month:z2';
+  perform pg_temp.ok('Z2 a report queued before the switch: no free-week line', not (d ? 'freeWeekEnds'), coalesce(d::text, 'none'));
+exception when others then perform pg_temp.ok('Z2 runs', false, sqlerrm);
+end $$;
+
+-- Z6 the screen state carries a payment on its way per plant (verify 5 fix 6)
+do $$
+declare a uuid := pg_temp.acct('z6'); inv uuid; ss jsonb;
+begin
+  perform pg_temp.link(a, 'z6', '{990130601}', now() - interval '1 hour');
+  inv := (billing.start_checkout(a, 'home', 'month', 0, '{990130601}', now())->>'invoice')::uuid;
+  perform billing.begin_attempt(inv, 'card_page', now());
+  ss := billing.screen_state(a, now());
+  perform pg_temp.eq('Z6 a plant with a payment on its way: payment_hold',
+    (select e->>'payment_hold' from jsonb_array_elements(ss->'plants') e where (e->>'plant')::bigint = 990130601), 'true');
+exception when others then perform pg_temp.ok('Z6 runs', false, sqlerrm);
 end $$;
 
 -- ---------------------------------------------------------------------------

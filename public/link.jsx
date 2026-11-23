@@ -135,6 +135,8 @@ window.reloadAccount = () => acctLoad || (acctLoad = window.fetchAccountState()
   .then(a => { acctNow = a; window.dispatchEvent(new Event('ps-account')); return a; })
   .finally(() => { acctLoad = null; }));
 window.accountNow = () => acctNow;
+// the read on its way, if any (it may have started before a change the caller knows about)
+window.accountLoading = () => acctLoad;
 window.useAccount = function useAccount() {
   const [a, setA] = React.useState(acctNow);
   React.useEffect(() => {

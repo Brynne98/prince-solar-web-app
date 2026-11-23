@@ -277,12 +277,19 @@ frontend second, in this order:
       and the old billing function answer an error, and Paystack sends a refused webhook again
       later. Keep this window to a few minutes.
       Then empty the old wipe queue, which stands down once switched and would otherwise keep
-      its plants forever: `supabase db query --linked "call private.purge_plants()"`, and check
-      `select count(*) from private.plant_purge` is 0. Not 0: run the call again; still not 0,
-      `select billing.resume_old()` and find out why before step 2.
+      its plants forever. Run the call on its own, not inside `begin; ... commit;`: it commits
+      after each plant.
+      `supabase db query --linked "call private.purge_plants()"` (answers `CALL`), then
+      `supabase db query --linked "select count(*) from private.plant_purge"` must say 0.
+      Not 0: run the call again; still not 0, `select billing.resume_old()` and find out why
+      before step 2. (Tried 2026-11-23 on the local database with `--local` and one queued
+      plant: `CALL`, then 0.)
    2. Copy again and switch in one transaction:
       `supabase db query --linked "begin; select billing.copy_from_old(); select billing.switch_on(); commit;"`.
       If either fails, nothing is switched: `select billing.resume_old()` and start step 6 again.
+      Then `supabase db query --linked "select count(*) from private.plant_purge"` again: still 0.
+      Not 0: a plant was queued between the call and the switch, and the old wipe no longer
+      runs for it. Note its id on SOLAR-641 and look at that plant before step 3.
    3. `supabase functions deploy billing`. The billing function reads and writes the new tables
       (through `public.billing_v2`).
    4. Resume: `supabase db query --linked "select billing.resume_old()"`. The old tables are no

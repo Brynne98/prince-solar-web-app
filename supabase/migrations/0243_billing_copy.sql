@@ -69,7 +69,9 @@ returns boolean language sql stable as $$
   select coalesce(case p_kind
     when 'renewal' then p_due::timestamp at time zone 'Africa/Johannesburg' = s.period_start
     when 'settle' then p_due::timestamp at time zone 'Africa/Johannesburg' = s.period_start
-    when 'start' then p_created::timestamp at time zone 'Africa/Johannesburg' = s.period_start
+    -- the old run started the year on the day it settled the payment in Johannesburg (0212),
+    -- not the day the card page opened: a page opened at 23:58 and paid at 00:02 starts the next day
+    when 'start' then (p_paid at time zone 'Africa/Johannesburg')::date::timestamp at time zone 'Africa/Johannesburg' = s.period_start
     when 'switch' then p_billing_date::timestamp at time zone 'Africa/Johannesburg' = s.period_start
     when 'upgrade' then p_paid >= s.period_start and p_paid < s.period_end end, false)
 $$;
@@ -304,6 +306,12 @@ begin
                -- yearly plan's can be a year old), so a reversal after the switch ends that period
                or (c.status = 'paid' and exists (select 1 from billing.subscriptions x where x.account = a.id
                      and x.status in ('active', 'past_due') and billing.copy_funds_period(c.kind, c.due_on, c.created_on, c.billing_date, coalesce(c.settled_at, c.created_at), x)))
+               -- a yearly renewal pending at the freeze: the paid renewal a year before it funds the
+               -- year running now if the pending one fails (the old run had moved the date on)
+               or (c.status = 'paid' and c.kind in ('renewal', 'settle') and c.period = 'yearly'
+                   and exists (select 1 from private.billing_charges p where p.user_id = c.user_id and p.status = 'pending'
+                                  and p.kind in ('renewal', 'settle') and p.period = 'yearly'
+                                  and c.due_on between (p.due_on - interval '1 year')::date and (p.due_on - interval '1 year')::date + 1))
                or (c.dispute is not null and not c.dispute_lost and c.dispute !~* '^(resolved?|won|lost|archived|closed)$')
                or c.dispute_owed
             order by c.created_at, c.reference loop
@@ -401,11 +409,11 @@ begin
               r.plan, oiv, r.offer_id, coalesce(r.extra_plants, 0), r.amount * 100, 'ZAR',
               case when oyear then osub.period_start
                    when ostatus = 'success' and osub.id is not null and r.kind in ('renewal', 'settle', 'start') then
-                coalesce(case when r.kind = 'start' then r.created_on end, r.due_on)::timestamp at time zone tz end,
+                coalesce(case when r.kind = 'start' then (coalesce(r.settled_at, r.created_at) at time zone tz)::date end, r.due_on)::timestamp at time zone tz end,
               case when oyear then osub.period_end
                    when ostatus = 'success' and osub.id is not null and r.kind in ('renewal', 'settle', 'start') then
-                public.billing_step(coalesce(case when r.kind = 'start' then r.created_on end, r.due_on), r.period,
-                  case when r.kind = 'start' then extract(day from r.created_on)::int else osub.billing_day end, 1)
+                public.billing_step(coalesce(case when r.kind = 'start' then (coalesce(r.settled_at, r.created_at) at time zone tz)::date end, r.due_on), r.period,
+                  case when r.kind = 'start' then extract(day from coalesce(r.settled_at, r.created_at) at time zone tz)::int else osub.billing_day end, 1)
                 ::timestamp at time zone tz end,
               oplants, r.created_at,
               case when ostatus = 'success' then coalesce(r.settled_at, r.created_at) end)

@@ -252,7 +252,7 @@ begin
   perform pg_advisory_xact_lock(1, hashtext(p_account::text));
   perform pg_advisory_xact_lock(p_plant);
   select * into mine from public.plant_users where plant_id = p_plant and user_id = p_user;
-  if found and (not mine.via_share or mine.share_gone_at is null) then return 'yours'; end if;
+  if found and mine.share_gone_at is null then return 'yours'; end if;
   if exists (select 1 from public.plant_users o
               where o.plant_id = p_plant and o.user_id <> p_user and (not o.via_share or o.share_gone_at is null)) then
     return 'taken';
@@ -386,10 +386,7 @@ $$;
 -- Old billing emails still queued: never sent (the outbox has their replacements)
 -- ---------------------------------------------------------------------------
 update public.email_queue set status = 'skipped', last_error = 'old billing email (SOLAR-641)'
- where status = 'queued' and kind in ('free_week_soon', 'unpaid_reminder', 'unpaid_last', 'unpaid_deleted', 'bill_paid',
-   'bill_upgraded', 'bill_switched', 'bill_change', 'bill_kept', 'bill_failed', 'bill_refund', 'bill_free',
-   'bill_removal_soon', 'bill_renewal_notice', 'bill_offer_ends', 'bill_card_changed', 'bill_card_expiring',
-   'winback', 'bill_cancel_soon');
+ where status = 'queued' and billing.old_billing_email(kind);
 
 -- ---------------------------------------------------------------------------
 -- Old cron jobs

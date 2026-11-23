@@ -3087,6 +3087,9 @@ const DELETE_REFUSED = [
 // A refused delete: what we showed was stale, so read the account again. Still blocked: the
 // fresh reason (the pop-up shows it, deleteBlocked); else the refusal's own words.
 const deleteRefusal = async (msg) => {
+  // a read already on its way may have started before the refusal: let it land, then read again
+  const pending = window.accountLoading();
+  if (pending) await pending.catch(() => null);
   const fresh = await window.reloadAccount().catch(() => null);
   if (fresh && AT.deleteBlocked(fresh)) return { blocked: true };
   const why = DELETE_REFUSED.find(([re]) => re.test(msg || ''));
