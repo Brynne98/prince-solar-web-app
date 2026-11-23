@@ -1,0 +1,58 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
+<!-- Estate newsletter poster (SOLAR-636). Drawn at 1200x1600 (3:4, like the other posters); printed or shown about 400px wide, so smallest text is 30px. -->
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1200px;height:1600px;overflow:hidden;background:#0a0d12}
+body{font-family:"Space Grotesk",system-ui,sans-serif;color:#eef2f6;position:relative}
+.sun{position:absolute;width:540px;height:540px;border-radius:50%;right:-210px;top:-150px;
+  background:radial-gradient(circle at 42% 58%,#ffe08a 0%,#ffc24d 28%,#f4a93a 52%,#e07a1f 100%);
+  box-shadow:0 40px 160px rgba(244,169,58,.35)}
+.haze{position:absolute;inset:0;background:radial-gradient(900px 700px at 85% 0%,rgba(244,169,58,.18),transparent 70%)}
+.wrap{position:absolute;left:72px;right:72px;top:72px}
+.brand{display:flex;align-items:center;gap:16px;font-weight:600;font-size:34px;color:#c3ccd6}
+.dot{width:34px;height:34px;border-radius:50%;background:radial-gradient(circle at 40% 40%,#ffe08a,#f4a93a 60%,#e07a1f)}
+h1{font-size:164px;line-height:.95;font-weight:700;letter-spacing:-.045em;margin-top:96px}
+h1 b{color:#ffc24d;font-weight:700}
+.sub{font-size:46px;line-height:1.2;color:#c3ccd6;margin-top:34px;max-width:900px;text-wrap:balance}
+.sub strong{color:#eef2f6;font-weight:600}
+.shot{position:absolute;left:72px;top:730px;width:1056px;height:400px;border-radius:22px;overflow:hidden;
+  border:2px solid rgba(255,255,255,.10);box-shadow:0 30px 80px rgba(0,0,0,.55)}
+.shot img{position:absolute;width:1360px;left:-272px;top:-287px}
+.shot:after{content:"";position:absolute;left:0;right:0;bottom:0;height:120px;background:linear-gradient(transparent,#0a0d12)}
+.alert{position:absolute;right:40px;top:860px;width:470px;height:276px;border-radius:20px;overflow:hidden;
+  border:2px solid rgba(255,255,255,.14);box-shadow:0 24px 60px rgba(0,0,0,.6),0 8px 20px rgba(0,0,0,.4)}
+.alert img{position:absolute;width:562px;left:-48px;top:-55px}
+.foot{position:absolute;left:72px;right:72px;bottom:72px;display:flex;justify-content:space-between;align-items:flex-end;gap:48px}
+.offer{font-size:76px;font-weight:700;letter-spacing:-.03em;color:#ffc24d;line-height:1}
+.then{font-size:40px;color:#eef2f6;margin-top:14px}
+.ask{font-size:31px;line-height:1.35;color:#a9b4c0;margin-top:40px;max-width:640px}
+.ask span{color:#eef2f6;font-weight:600}
+.qr{width:300px;text-align:center;flex:none}
+.qr div{background:#fff;border-radius:20px;padding:20px}
+.qr img{width:100%;display:block}
+.qr p{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:30px;margin-top:18px;white-space:nowrap;margin-left:-60px;margin-right:-60px;color:#eef2f6}
+</style></head>
+<body>
+<div class="haze"></div>
+<div class="sun"></div>
+
+<div class="wrap">
+  <div class="brand"><span class="dot"></span>Prince Solar Hub</div>
+  <h1>Got<br><b>SunSynk?</b></h1>
+  <p class="sub"><strong>Know the moment the grid drops.</strong> See where your power went today.</p>
+</div>
+
+<div class="shot"><img src="../../public/img/live-desktop.jpg" alt="Live power flow"></div>
+<div class="alert"><img src="../../public/img/email-grid-back.jpg" alt="Grid back alert"></div>
+
+<div class="foot">
+  <div>
+    <p class="offer">7 days free</p>
+    <p class="then">then from R49 a month</p>
+    <p class="ask">Made by a resident. Have SunSynk? I'd value 15 minutes of your thoughts: <span>hello@princesolarhub.co.za</span></p>
+  </div>
+  <div class="qr"><div><img src="qr-estate.svg" alt=""></div><p>princesolarhub.co.za</p></div>
+</div>
+</body></html>

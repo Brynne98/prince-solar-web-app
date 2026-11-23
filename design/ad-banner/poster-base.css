@@ -1,0 +1,14 @@
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1200px;height:1600px;overflow:hidden}
+body{font-family:"Space Grotesk",system-ui,sans-serif;position:relative}
+.brand{display:flex;align-items:center;gap:16px;font-weight:600;font-size:34px}
+.dot{width:36px;height:36px;border-radius:50%;background:radial-gradient(circle at 40% 40%,#ffe08a,#f4a93a 60%,#e07a1f)}
+.qr{width:280px;text-align:center;flex:none}
+.qr div{background:#fff;border-radius:18px;padding:18px}
+.qr img{width:100%;display:block}
+.qr p{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:28px;margin-top:16px;white-space:nowrap;margin-left:-70px;margin-right:-70px}
+.offer{font-size:72px;font-weight:700;letter-spacing:-.03em;line-height:1}
+.then{font-size:38px;margin-top:12px}
+.ask{font-size:30px;line-height:1.35;margin-top:34px;max-width:620px}
+.ask b{font-weight:600}
+.foot{position:absolute;left:72px;right:72px;bottom:72px;display:flex;justify-content:space-between;align-items:flex-end;gap:48px}
