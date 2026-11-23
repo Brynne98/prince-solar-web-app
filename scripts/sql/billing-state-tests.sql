@@ -2716,8 +2716,11 @@ begin
   perform billing.switch_on(pg_temp.t(0));
   perform pg_temp.ok('SW25 switch_on schedules the daily billing run',
     exists (select 1 from cron.job where jobname = 'billing-run' and command like '%billing/run%'));
-  perform pg_temp.ok('SW25 ... and the delete and history jobs',
-    (select count(*) = 2 from cron.job where jobname in ('billing-delete', 'billing-history')));
+  perform pg_temp.ok('SW25 ... and the history job', exists (select 1 from cron.job where jobname = 'billing-history'));
+  -- the delete job waits for step 7, when the switch can no longer be undone (go-live review, Sol)
+  perform pg_temp.ok('SW25 no delete job until start_delete_job', not exists (select 1 from cron.job where jobname = 'billing-delete'));
+  perform billing.start_delete_job();
+  perform pg_temp.ok('SW25 start_delete_job schedules it', exists (select 1 from cron.job where jobname = 'billing-delete'));
   -- an app tab opened before the switch: its old billing writes would land in tables nothing
   -- reads (a cancel there, then charged anyway): refused once switched (final review, Neon)
   perform pg_temp.ok('SW25 old billing writes closed to signed-in users',
@@ -3953,6 +3956,12 @@ begin
     where jobname = 'free-trim' and schedule = '0 3 * * *' and command = 'select 2')
     and not exists (select 1 from cron.job where jobname = 'free-trim'));
   perform pg_temp.fails('Z10 not before pause_payments', 'select billing.switch_off()', 'pause_payments');
+  -- a try under way holds the pause's share lock from before its check, so pause_payments waits
+  -- for it and switch_off then sees it (go-live review, Astra)
+  perform pg_temp.ok('Z10 begin_attempt and run lock the pause before reading it', (
+    select bool_and(strpos(prosrc, 'lock table billing.payments_pause in share mode') between 1
+                    and strpos(prosrc, 'exists (select 1 from billing.payments_pause)'))
+      from pg_proc where oid in ('billing.begin_attempt(uuid,text,timestamptz)'::regprocedure, 'billing.run(timestamptz)'::regprocedure)));
   perform billing.pause_payments();
   perform pg_temp.eq('Z10 paused: the daily run charges nothing', billing.run()->>'busy', 'true');
   perform pg_temp.fails('Z10 paused: no new try starts', $q$select billing.begin_attempt(
@@ -3973,7 +3982,10 @@ begin
   update billing.switch_over set switched_at = now() + interval '100 years';
   insert into billing.old_jobs (jobname, schedule, command) values ('plant-wipe', '*/7 * * * *', 'select 1')
   on conflict (jobname) do update set schedule = excluded.schedule, command = excluded.command;
-  perform billing.switch_off();
+  insert into billing.logins (account, brand, username, status, created_at)
+  select id, 'sunsynk', 'z10-after-switch', 'ok', now() + interval '101 years' from billing.accounts limit 1;
+  update billing.switch_over set switched_at = now() + interval '100 years';
+  perform pg_temp.ok('Z10 lists a login made since the switch', billing.switch_off()->'since_switch'->'logins' @> '[{"login": "z10-after-switch"}]');
   perform pg_temp.ok('Z10 switched off', not billing.is_live());
   perform pg_temp.ok('Z10 the old job is back as it was', exists (select 1 from cron.job where jobname = 'plant-wipe'
     and schedule = '*/7 * * * *' and command = 'select 1'));

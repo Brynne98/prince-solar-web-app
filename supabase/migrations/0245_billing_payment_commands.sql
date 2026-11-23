@@ -684,6 +684,9 @@ declare
   att billing.payment_attempts;
   stale jsonb;
 begin
+  -- share lock first: pause_payments' insert then waits for every try already under way, so
+  -- none is written after switch_off has looked (go-live review, Astra)
+  lock table billing.payments_pause in share mode;
   if exists (select 1 from billing.payments_pause) then
     raise exception 'payments are on hold for an update' using errcode = '55000';
   end if;
@@ -1324,6 +1327,7 @@ declare
 begin
   if not pg_try_advisory_xact_lock(hashtext('billing.run')) then return jsonb_build_object('busy', true); end if;
   -- the way back from the switch is under way (billing.pause_payments): nothing is charged
+  lock table billing.payments_pause in share mode;
   if exists (select 1 from billing.payments_pause) then return jsonb_build_object('busy', true); end if;
   -- Nothing is failed here without asking Paystack: a try with no answer is verified (below) and
   -- apply_payment fails it only when Paystack still says pending after 24 hours. Every change to

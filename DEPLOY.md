@@ -312,8 +312,8 @@ frontend second, in this order:
    deleting and history fetches over to the new state, turns the old jobs off (`unpaid-delete`,
    `plant-wipe`, `plant-purge`, `free-trim`, `free-week-mail`, `offer-end-mail`,
    `card-expiry-mail`; the old plant wipe, stop wipe, unpaid delete and the old run's drop also
-   do nothing once switched, whoever calls them), schedules `billing-delete` (every 5 minutes, `billing.delete_due()`)
-   and `billing-history` (every minute, `recover?queue=1`), and turns `billing-run` back on
+   do nothing once switched, whoever calls them), schedules `billing-history` (every minute,
+   `recover?queue=1`; the new delete job waits for step 7), and turns `billing-run` back on
    (stopped in step 3), now calling the new billing function. From then
    on the old billing, free-week and history emails are not queued (0247
    `email_queue_old_billing`); notify sends their replacements from `billing.outbox`, each
@@ -323,8 +323,8 @@ frontend second, in this order:
 
    Right after step 6, before step 7, for each of today's accounts: `billing.account_state`
    shows the plan, interval, next charge date and amount, and chosen plants noted in step 5;
-   `select billing.alerts()` is `[]`; `billing.job_heartbeats` has `delete` and `history` from
-   the last 10 minutes; the health check (`/functions/v1/health`) answers 200; each chosen
+   `select billing.alerts()` is `[]`; `billing.job_heartbeats` has `history` from the last 10
+   minutes; the health check (`/functions/v1/health`) answers 200; each chosen
    plant has a reading under 5 minutes old. Any of these wrong: go back (below), then find out why.
 
    If the switch has to be undone (before step 7 and before any payment in the new tables):
@@ -333,10 +333,12 @@ frontend second, in this order:
    2. `supabase db query --linked "select billing.switch_off()"`. It refuses when a payment has
       landed since the switch ("fix forward"), or when a try since the switch is still open
       ("verify it first": wait until it settles or Paystack says it failed, then decide). It
-      puts the old jobs back as they were, stops `billing-delete`, `billing-history` and
-      `billing-run`, lets the old screens' plan and plant calls work again, and answers how many
-      plants the new delete job deleted since the switch (those stay deleted; restore from the
-      backup only if one should not have gone).
+      puts the old jobs back as they were, stops `billing-history` and `billing-run`, lets the
+      old screens' plan and plant calls work again, and answers: how many plants were deleted
+      since the switch (only by an owner's own stop or login removal: the delete job has not
+      started), and `since_switch`, the logins and share claims made since the switch. Those
+      went to the new tables only: for each, ask the owner to link the login or claim the
+      plant again once the old billing is back.
    3. Deploy the old billing function from `main` before the merge: `git worktree add /tmp/solar-old <old main sha>`,
       then `supabase functions deploy billing` from that folder.
    4. Only then the daily run again:
@@ -349,6 +351,9 @@ frontend second, in this order:
    billing screen reads `api_account_state` and the text catalog
    (`supabase/functions/_shared/text.ts`, built into `public/build/text.js`). It must not
    ship before step 6: before the switch the new tables are not the record.
+   From here the switch is not undone. Start the new delete job:
+   `supabase db query --linked "select billing.start_delete_job()"` (schedules `billing-delete`,
+   every 5 minutes, `billing.delete_due()`). Until now nothing was deleted on a schedule.
 8. After the new frontend is live and 24 to 48 hours of polls, payments and emails look right
    (`billing.alerts()` empty, no new `billing_command_failed` in PostHog):
    move `supabase/after-switch-over/0260_billing_drop_old.sql` into `supabase/migrations/`

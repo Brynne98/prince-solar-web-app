@@ -866,7 +866,9 @@ returns jsonb language sql stable security definer set search_path = billing, pg
      cross join (values ('delete', interval '30 minutes'), ('history', interval '10 minutes'),
                         ('billing-run', interval '26 hours')) j (job, quiet)
       left join billing.job_heartbeats h on h.job = j.job
-     where coalesce(h.last_run_at, so.switched_at) <= p_at - j.quiet
+     -- the delete job counts only once started (billing.start_delete_job, DEPLOY.md step 7)
+     where (j.job <> 'delete' or h.job is not null)
+       and coalesce(h.last_run_at, so.switched_at) <= p_at - j.quiet
   ) x
 $$;
 
@@ -948,12 +950,27 @@ begin
     perform cron.unschedule(jobname) from cron.job
      where jobname in ('unpaid-delete', 'plant-wipe', 'plant-purge', 'free-trim', 'free-week-mail', 'offer-end-mail',
                        'card-expiry-mail', 'billing-delete', 'billing-history', 'billing-run');
-    perform cron.schedule('billing-delete', '*/5 * * * *', 'select billing.delete_due()');
+    -- billing-delete waits for billing.start_delete_job (DEPLOY.md step 7): nothing is deleted
+    -- on a schedule while the switch can still be undone
     perform cron.schedule('billing-history', '* * * * *', $c$select private.call_fn('recover?queue=1', '{}', 60000)$c$);
     -- the daily job, off since the old billing was stopped, now runs the new billing function
     perform cron.schedule('billing-run', '*/5 4-5 * * *', $c$select private.call_fn('billing/run', '{}', 120000)$c$);
   end if;
   return jsonb_build_object('switched_at', (select switched_at from billing.switch_over));
+end $$;
+
+-- DEPLOY.md step 7, once the switch cannot be undone: the new delete job starts. Its quiet
+-- alert counts from here (billing.alerts reads the heartbeat this writes).
+create function billing.start_delete_job()
+returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
+begin
+  if not billing.is_live() then raise exception 'run billing.switch_on() first' using errcode = '55000'; end if;
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.unschedule(jobname) from cron.job where jobname = 'billing-delete';
+    perform cron.schedule('billing-delete', '*/5 * * * *', 'select billing.delete_due()');
+  end if;
+  perform billing.heartbeat('delete', now(), jsonb_build_object('started', true));
+  return jsonb_build_object('delete_job', 'on');
 end $$;
 
 -- The way back (DEPLOY.md, "If the switch has to be undone"), step 1: no new try starts and
@@ -972,7 +989,7 @@ $$;
 -- plants the new delete job has deleted since the switch (they stay deleted).
 create function billing.switch_off()
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
-declare sw timestamptz := (select switched_at from billing.switch_over); f text; purged int;
+declare sw timestamptz := (select switched_at from billing.switch_over); f text; purged int; lost jsonb;
 begin
   if sw is null then raise exception 'not switched on' using errcode = '55000'; end if;
   if not exists (select 1 from billing.payments_pause) then
@@ -992,6 +1009,13 @@ begin
     raise exception 'a payment since the switch is still open: verify it first' using errcode = '55000';
   end if;
   purged := (select count(*) from billing.plants where history_purged_at > sw);
+  -- logins and claims made since the switch went to the new tables only: the old screens do not
+  -- know their free week or picks. Listed, to put right by hand (DEPLOY.md)
+  lost := jsonb_build_object(
+    'logins', (select coalesce(jsonb_agg(jsonb_build_object('user', a.user_id, 'login', l.username)), '[]')
+                 from billing.logins l join billing.accounts a on a.id = l.account where l.created_at > sw),
+    'claims', (select coalesce(jsonb_agg(jsonb_build_object('user', a.user_id, 'plant', c.plant)), '[]')
+                 from billing.plant_claims c join billing.accounts a on a.id = c.account where c.claimed_at > sw));
   delete from billing.switch_over;
   foreach f in array array['public.api_billing_change(text,text,bigint[])', 'public.api_billing_extras(integer,bigint[])',
                            'public.api_billing_keep(bigint)', 'public.api_billing_keep_set(bigint[])',
@@ -1005,7 +1029,7 @@ begin
     perform cron.unschedule(jobname) from cron.job where jobname in ('billing-delete', 'billing-history', 'billing-run');
     perform cron.schedule(o.jobname, o.schedule, o.command) from billing.old_jobs o;
   end if;
-  return jsonb_build_object('switched_off', now(), 'purged_since_switch', purged);
+  return jsonb_build_object('switched_off', now(), 'purged_since_switch', purged, 'since_switch', lost);
 end $$;
 
 create function billing.unknown_command(p_cmd text)
