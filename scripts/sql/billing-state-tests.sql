@@ -3303,6 +3303,76 @@ begin
 exception when others then perform pg_temp.ok('W13 runs', false, sqlerrm);
 end $$;
 
+-- X1 after the switch the old plant wipe does nothing: a plant another account holds, or one
+--    with a payment on its way, keeps its history through a share release and a relink (verify 3 fix 1)
+do $$
+declare a uuid := pg_temp.acct('x1a'); b uuid := pg_temp.acct('x1b'); c uuid := pg_temp.acct('x1c');
+        ua uuid; uc uuid; sh uuid; lb uuid; inv uuid;
+begin
+  select user_id into ua from billing.accounts where id = a;
+  select user_id into uc from billing.accounts where id = c;
+  sh := pg_temp.share_login();
+  -- 990120101: shared to A; B holds it through its own login and plan (no plant_users row of B's)
+  perform public.share_claim_live(ua, sh, 990120101, 'Gran');
+  lb := pg_temp.link(b, 'x1b', '{990120101}', now() - interval '2 days');
+  perform pg_temp.stored(lb);
+  perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
+  perform pg_temp.choose(b, '{990120101}', now() - interval '1 day');
+  perform pg_temp.agg(990120101, now() - interval '1 hour');
+  -- 990120102: shared to C, who is paying for it now (card page open)
+  perform public.share_claim_live(uc, sh, 990120102, 'Aunt');
+  perform pg_temp.agg(990120102, now() - interval '1 hour');
+  inv := (billing.start_checkout(c, 'home', 'month', 0, '{990120102}', now())->>'invoice')::uuid;
+  perform billing.begin_attempt(inv, 'card_page', now());
+  perform pg_temp.ok('X1 protected by B', (billing.plant_state(990120101, now())->>'protected')::boolean);
+
+  perform private.share_release(sh, ua);
+  perform private.share_release(sh, uc);
+  perform pg_temp.ok('X1 share release queues no old wipe',
+    not exists (select 1 from private.plant_purge where plant_id in (990120101, 990120102)));
+  -- a tombstone left from before the switch is not acted on either
+  insert into private.plant_purge (plant_id) values (990120101), (990120102) on conflict do nothing;
+  perform public.plant_users_upsert((select user_id from billing.accounts where id = b), lb,
+    '[{"plant_id": 990120101, "plant_name": "Gran"}, {"plant_id": 990120102, "plant_name": "Aunt"}]');
+  perform pg_temp.ok('X1 relink: B''s plant keeps its history', pg_temp.has_agg(990120101));
+  perform pg_temp.ok('X1 relink: the plant being paid for keeps its history', pg_temp.has_agg(990120102));
+  perform pg_temp.ok('X1 the old purge does nothing', private.purge_plant(990120102) is null and pg_temp.has_agg(990120102));
+exception when others then perform pg_temp.ok('X1 runs', false, sqlerrm);
+end $$;
+
+-- X2 the other old delete paths stand down after the switch (sweep): the stop wipe, the
+--    day-37 unpaid delete, the old run's drop; switch_on turns their jobs off
+do $$
+declare a uuid := pg_temp.acct('x2'); ua uuid; l uuid; r jsonb;
+begin
+  select user_id into ua from billing.accounts where id = a;
+  l := pg_temp.link(a, 'x2', '{990120201}', now() - interval '2 days');
+  perform pg_temp.stored(l);
+  insert into public.plant_users (plant_id, user_id, account_id, plant_name) values (990120201, ua, l, 'X2');
+  perform pg_temp.agg(990120201, now() - interval '1 hour');
+  update public.plant_users set paused = true where plant_id = 990120201;
+  perform pg_temp.ok('X2 stop wipe does nothing', private.plant_wipe_readings(990120201) = 0 and pg_temp.has_agg(990120201));
+  r := private.unpaid_delete();
+  perform pg_temp.ok('X2 unpaid delete does nothing', r = '{"live": true}' and pg_temp.has_agg(990120201), r::text);
+  perform private.billing_drop_plant(ua, 990120201);
+  perform pg_temp.ok('X2 old drop keeps the link and the login',
+    exists (select 1 from public.plant_users where plant_id = 990120201 and user_id = ua)
+    and exists (select 1 from private.sunsynk_accounts where id = l));
+exception when others then perform pg_temp.ok('X2 runs', false, sqlerrm);
+end $$;
+do $$
+declare j text;
+begin
+  execute 'create extension if not exists pg_cron';
+  foreach j in array array['plant-purge', 'plant-wipe', 'unpaid-delete', 'free-trim', 'free-week-mail', 'offer-end-mail', 'card-expiry-mail'] loop
+    perform cron.schedule(j, '0 3 * * *', 'select 1');
+  end loop;
+  perform billing.switch_on(pg_temp.t(0));
+  perform pg_temp.eq('X2 switch_on turns the old jobs off', (select string_agg(jobname, ',') from cron.job
+    where jobname in ('plant-purge', 'plant-wipe', 'unpaid-delete', 'free-trim', 'free-week-mail', 'offer-end-mail', 'card-expiry-mail')), null);
+exception when others then perform pg_temp.ok('X2 jobs runs', false, sqlerrm);
+end $$;
+
 -- ---------------------------------------------------------------------------
 do $$
 declare r record; f int; n int;

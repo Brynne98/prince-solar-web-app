@@ -734,6 +734,168 @@ end $$;
 revoke all on function public.api_account_delete() from public, anon;
 grant execute on function public.api_account_delete() to authenticated;
 
+-- The old plant wipe (0050, 0150) stands down after the switch: it wipes a plant once no
+-- plant_users row is left, which knows nothing of another account's seat, retention or a
+-- pending payment. switch_on stops its cron job ('plant-purge'); share release, unlink,
+-- account delete and a relink still call these, so they do nothing once live. Every
+-- delete after the switch is billing.purge_now / billing.delete_due.
+create or replace function private.plants_tombstone(p_plants bigint[])
+returns void language plpgsql set search_path = public, private, pg_temp as $$
+begin
+  if billing.is_live() then return; end if;
+  insert into private.plant_purge (plant_id)
+  select distinct p from unnest(p_plants) p
+  on conflict (plant_id) do nothing;
+  delete from public.app_config
+   where key = 'CALIBRATION_PLANT' and value = any (p_plants::double precision[]);
+end $$;
+
+-- 0150's body, with the switch check first.
+create or replace function private.purge_plant(p_plant bigint, p_wait boolean default true)
+returns jsonb language plpgsql set search_path = public, private, pg_temp as $$
+declare
+  out jsonb;
+  n bigint;
+begin
+  if billing.is_live() then return null; end if;
+  if p_wait then
+    perform pg_advisory_xact_lock(p_plant);
+  elsif not pg_try_advisory_xact_lock(p_plant) then
+    return null;
+  end if;
+  if not exists (select 1 from private.plant_purge where plant_id = p_plant) then
+    return null;
+  end if;
+  if exists (select 1 from public.plant_users where plant_id = p_plant) then
+    delete from private.plant_purge where plant_id = p_plant;
+    return jsonb_build_object('skipped', 'linked again');
+  end if;
+
+  out := private.plant_readings_delete(p_plant);
+  delete from public.plant_config          where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('plant_config', n);
+  delete from public.config_changes        where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('config_changes', n);
+  delete from private.meta                 where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('meta', n);
+  delete from private.inverters            where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('inverters', n);
+  delete from private.plant_alert_state    where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('plant_alert_state', n);
+  delete from private.inverter_alert_state where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('inverter_alert_state', n);
+  delete from private.string_alert_state   where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('string_alert_state', n);
+  delete from private.plant_wipe           where plant_id = p_plant;
+  delete from private.plant_purge          where plant_id = p_plant;
+  return out;
+end $$;
+
+-- The other old jobs that delete or change readings, plants or links stand down after the
+-- switch too (their cron jobs are off from switch_on; anything still calling them gets
+-- nothing done). 0260 drops them.
+--   plant_wipe_readings (0150)  a stop's wipe (plant-wipe job, a restart or swap queues it)
+--   unpaid_delete (0217)        day-37 delete of an unpaid plant (unpaid-delete job)
+--   billing_drop_plant (0116)   the old run's downgrade and cancel drops: unlinks the plant
+--                               and removes a login left with no plant
+create or replace function private.plant_wipe_readings(p_plant bigint)
+returns bigint
+language plpgsql
+set search_path = public, private, pg_temp
+as $$
+declare total bigint;
+begin
+  if billing.is_live() then return 0; end if;
+  perform pg_advisory_xact_lock(p_plant);
+  -- Started again while it waited: keep everything.
+  if exists (select 1 from public.plant_users where plant_id = p_plant and not paused) then
+    delete from private.plant_wipe where plant_id = p_plant;
+    return 0;
+  end if;
+  select coalesce(sum(v::bigint), 0) into total from jsonb_each_text(private.plant_readings_delete(p_plant)) as t(k, v);
+  update public.plant_config
+     set backfill_next = null, backfill_until = null, backfill_tries = 0, temp_next = null
+   where plant_id = p_plant;
+  delete from private.plant_wipe where plant_id = p_plant;
+  return total;
+end $$;
+
+-- 0217's body, with the switch check first.
+create or replace function private.unpaid_delete()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $$
+declare
+  p bigint;
+  plants int := 0;
+  total bigint := 0;
+begin
+  if billing.is_live() then return jsonb_build_object('live', true); end if;
+  for p in
+    select pu.plant_id
+      from public.plant_users pu
+      left join private.billing b on b.user_id = pu.user_id
+     where not pu.paused
+     group by pu.plant_id
+    having bool_and(not private.plant_live(pu.user_id, pu.plant_id)
+                    and private.unpaid_since(pu.user_id) + interval '30 days' <= now()
+                    and (b.keep_until is null or b.keep_until < private.billing_today()))
+     order by pu.plant_id
+  loop
+    perform pg_advisory_xact_lock(p);
+    -- a payment or a link that landed while this run waited for the lock
+    continue when exists (select 1 from public.plant_users pu
+                           where pu.plant_id = p and not pu.paused
+                             and (private.plant_live(pu.user_id, p)
+                                  or private.unpaid_since(pu.user_id) + interval '30 days' > now()));
+    continue when not (exists (select 1 from public.agg_minute where plant_id = p)
+                    or exists (select 1 from public.agg_5m where plant_id = p)
+                    or exists (select 1 from public.readings where plant_id = p)
+                    or exists (select 1 from public.plant_energy where plant_id = p)
+                    or exists (select 1 from public.grid_off where plant_id = p));
+    plants := plants + 1;
+    total := total + (select coalesce(sum(v::bigint), 0) from jsonb_each_text(private.plant_readings_delete(p)) as t(k, v));
+    update public.plant_config
+       set backfill_next = null, backfill_until = null, backfill_tries = 0, temp_next = null
+     where plant_id = p;
+    -- the day-37 email, to each account with no plan that runs the plant: once per lapse
+    insert into public.email_queue (user_id, kind, key, data, priority)
+    select pu.user_id, 'unpaid_deleted', 'unpaid_deleted:' || pu.user_id || ':' || private.unpaid_since(pu.user_id)::date,
+           jsonb_build_object('plants', (select count(*) from private.plant_picks k where k.user_id = pu.user_id),
+             'paid', private.had_plan(pu.user_id)), 1
+      from public.plant_users pu
+     where pu.plant_id = p and not pu.paused and private.unpaid_since(pu.user_id) is not null
+       and not private.no_week(pu.user_id)
+       -- only after its 'deleted in 3 days' email was queued: none comes without the warning
+       and exists (select 1 from public.email_queue e
+                    where e.user_id = pu.user_id and e.kind = 'unpaid_last'
+                      and e.created_at >= private.unpaid_since(pu.user_id))
+    on conflict do nothing;
+  end loop;
+  return jsonb_build_object('plants', plants, 'rows', total);
+end $$;
+
+-- 0116's body, with the switch check first.
+create or replace function private.billing_drop_plant(p_user uuid, p_plant bigint)
+ RETURNS void
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'private', 'vault', 'pg_temp'
+AS $$
+declare acc uuid; sid uuid;
+begin
+  if billing.is_live() then return; end if;
+  select account_id into acc from public.plant_users where user_id = p_user and plant_id = p_plant;
+  if acc is not null then perform pg_advisory_xact_lock(1, hashtext(acc::text)); end if;
+  perform pg_advisory_xact_lock(p_plant);
+  delete from public.plant_users where user_id = p_user and plant_id = p_plant;
+  delete from public.email_queue where user_id = p_user and plant_id = p_plant and kind not like 'sunsynk_%';
+  if not exists (select 1 from public.plant_users where plant_id = p_plant) then
+    perform private.plants_tombstone(array[p_plant]);
+  end if;
+  if acc is not null and not exists (select 1 from public.plant_users where account_id = acc) then
+    delete from public.email_queue where user_id = p_user and key like 'needs_relink:' || acc || ':%';
+    select refresh_secret_id into sid from private.sunsynk_accounts where id = acc;
+    if sid is not null then delete from vault.secrets where id = sid; end if;
+    update private.inverters set account_id = null where account_id = acc;
+    delete from private.sunsynk_accounts where id = acc;
+  end if;
+end $$;
+
 -- plant_energy for one plant, written only while it is still read (the poll check).
 create function public.q_upsert_plant_energy_v2(p_plant bigint, p_version bigint, p_rows jsonb, p_at timestamptz default now())
 returns integer language plpgsql security definer set search_path = public, pg_temp as $$

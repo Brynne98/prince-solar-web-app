@@ -9,7 +9,8 @@
 -- (DEPLOY.md, "Billing switch-over"). Before it, poll_jobs_v2 answers with the old
 -- poll_jobs and the guarded writes let everything through, so the new poll and
 -- recover can ship before the switch without stopping the logger. switch_on()
--- records the switch, turns the old unpaid-delete and plant-wipe jobs off and the
+-- records the switch, turns the old billing and delete jobs off (unpaid-delete, plant-wipe,
+-- plant-purge, free-trim, free-week-mail, offer-end-mail, card-expiry-mail) and the
 -- delete job and the history queue on.
 --
 -- Reading
@@ -895,7 +896,8 @@ begin
   insert into billing.switch_over (switched_at) values (p_at) on conflict (id) do nothing;
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
     perform cron.unschedule(jobname) from cron.job
-     where jobname in ('unpaid-delete', 'plant-wipe', 'billing-delete', 'billing-history', 'billing-run');
+     where jobname in ('unpaid-delete', 'plant-wipe', 'plant-purge', 'free-trim', 'free-week-mail', 'offer-end-mail',
+                       'card-expiry-mail', 'billing-delete', 'billing-history', 'billing-run');
     perform cron.schedule('billing-delete', '*/5 * * * *', 'select billing.delete_due()');
     perform cron.schedule('billing-history', '* * * * *', $c$select private.call_fn('recover?queue=1', '{}', 60000)$c$);
     -- the daily job, off since the old billing was stopped, now runs the new billing function

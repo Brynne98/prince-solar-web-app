@@ -209,9 +209,6 @@ begin
   if not found then
     raise exception 'plant_users_upsert: account % is removed or disabled', p_account;
   end if;
-  for p in select g.plant_id from private.plant_purge g where g.plant_id = any (ids) order by g.plant_id loop
-    raise notice 'plant % relinked while waiting to be purged: wiping first (%)', p, private.purge_plant(p);
-  end loop;
   insert into public.plant_users (plant_id, user_id, account_id, plant_name)
   select (r->>'plant_id')::bigint, p_user, p_account, r->>'plant_name'
     from jsonb_array_elements(p_rows) r
@@ -369,7 +366,6 @@ begin
   end loop;
   delete from private.sunsynk_accounts where user_id = uid;
   delete from public.plant_users where user_id = uid;
-  perform private.plants_tombstone(orphans);
   insert into public.email_queue (to_email, kind, key, priority)
   select email, 'account_deleted', 'account_deleted:' || uid, 1 from auth.users where id = uid and email is not null
   on conflict do nothing;
@@ -403,7 +399,8 @@ do $$
 begin
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
     perform cron.unschedule(jobname) from cron.job
-     where jobname in ('free-week-mail', 'card-expiry-mail', 'offer-end-mail', 'unpaid-delete', 'plant-wipe', 'free-trim');
+     where jobname in ('free-week-mail', 'card-expiry-mail', 'offer-end-mail', 'unpaid-delete', 'plant-wipe', 'free-trim',
+                       'plant-purge');
   end if;
 end $$;
 
