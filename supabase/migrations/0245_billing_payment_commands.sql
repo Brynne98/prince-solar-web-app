@@ -674,6 +674,12 @@ begin
   if p_channel = 'saved_card' then
     pm := billing.active_method(inv.account);
     if pm.id is null then raise exception 'no saved card' using errcode = 'P0002'; end if;
+    -- an open card page can still take money: Paystack is asked first, and while it may still
+    -- settle nothing is charged (the caller gets {verify} again and says a payment is under way)
+    select jsonb_agg(pa.reference order by pa.created_at) into stale
+      from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
+     where i.account = inv.account and i.status = 'open' and pa.channel = 'card_page' and pa.status = 'pending';
+    if stale is not null then return jsonb_build_object('verify', stale); end if;
   end if;
   perform billing.replace_card_pages(array[p_invoice], p_at);
   insert into billing.payment_attempts (invoice, reference, provider, channel, payment_method, amount_minor, currency,
@@ -931,7 +937,7 @@ begin
        where id = att.payment_method and active;
     end if;
     -- a card that will never work again on a charge the owner did not watch: ask for a new one
-    if hard and a.id is not null and att.channel = 'saved_card' then
+    if hard and a.id is not null and att.channel = 'saved_card' and inv.kind = 'renewal' then
       insert into billing.outbox (account, key, invoice, dedupe_key, not_before, created_at)
       values (a.id, 'card_update', inv.id, 'card_update:' || inv.id, p_at, p_at)
       on conflict (dedupe_key) do nothing;

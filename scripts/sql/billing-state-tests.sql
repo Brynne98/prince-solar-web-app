@@ -1724,7 +1724,10 @@ begin
   s := billing.history_step(f.id, f.day_next, false, false, pg_temp.t(7.4) + interval '5 seconds', f.claim);
   -- 60 starts on 59 gaps: 1200 s / 59 after the start (phase 3 fix 17)
   perform pg_temp.eqt('R4 next day waits a 59th of the target', s->>'next_step_at', pg_temp.t(7.4) + make_interval(secs => 1200.0 / 59));
-  perform pg_temp.ok('R4 go on with the day before', (s->>'go')::boolean and (s->>'day')::date = f.day_next - 1);
+  -- 20 s away: the claim is let go and history_take hands the day out when it is due, so two
+  -- runs never walk it (phase 4 fix 18); go only while the next day is due within 5 s
+  perform pg_temp.ok('R4 a slowed day: no go, the claim let go', not (s->>'go')::boolean and (s->>'day')::date = f.day_next - 1
+    and (select claim is null and claimed_until is null from billing.history_fetches where id = f.id));
   -- the earliest finish: the last day starts no earlier than the target after the start
   update billing.history_fetches set day_next = day_floor + 1, claimed_until = pg_temp.t(7.5), claim = gen_random_uuid()
    where id = f.id returning * into f;
@@ -1950,10 +1953,40 @@ end $$;
 do $$
 begin
   perform pg_temp.fails('SW27 switch_on refuses an empty copy', 'delete from billing.accounts; select billing.switch_on()', 'run billing.copy_from_old');
-  perform pg_temp.ok('SW25 switch_on schedules the daily billing run', (select prosrc ~ 'billing-run.*billing/run' from pg_proc p
-    join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'billing' and p.proname = 'switch_on'));
-  perform pg_temp.ok('SW26 the old lookup stays until the switch', (select prosrc ~ 'billing_charges' and prosrc ~ 'is_live'
-    from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'winback_return'));
+end $$;
+-- 25 (phase 4 fix 22: behaviour, not the function's text): pg_cron is made inside the rolled-back test
+do $$
+begin
+  execute 'create extension if not exists pg_cron';
+  perform billing.switch_on(pg_temp.t(0));
+  perform pg_temp.ok('SW25 switch_on schedules the daily billing run',
+    exists (select 1 from cron.job where jobname = 'billing-run' and command like '%billing/run%'));
+  perform pg_temp.ok('SW25 ... and the delete and history jobs',
+    (select count(*) = 2 from cron.job where jobname in ('billing-delete', 'billing-history')));
+exception when others then perform pg_temp.ok('SW25 runs', false, sqlerrm);
+end $$;
+-- 26: the win-back lookup reads the old charges before the switch and the new tables after it
+do $$
+declare a uuid := pg_temp.acct('sw26'); u uuid; sw timestamptz; ref text; r record; mail bigint;
+begin
+  u := (select user_id from billing.accounts where id = a);
+  select switched_at into sw from billing.switch_over;
+  delete from billing.switch_over;                                         -- before the switch
+  insert into public.email_queue (user_id, to_email, kind, key, status, sent_at)
+  values (u, 'sw26@state.test', 'winback', 'winback:sw26', 'sent', pg_temp.t(1)) returning id into mail;
+  insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at)
+  values ('old_sw26', u, 'start', 'home', 'monthly', 4900, 'paid', pg_temp.t(2)::date, pg_temp.t(2)::date, pg_temp.t(2), pg_temp.t(2));
+  select * into r from public.winback_return('old_sw26');
+  perform pg_temp.eq('SW26 before the switch: from the old charges', r.email_id::text, mail::text);
+  insert into billing.switch_over (switched_at) values (sw);               -- after it
+  perform pg_temp.ok('SW26 after the switch: the old charges are not read', not exists (select 1 from public.winback_return('old_sw26')));
+  perform pg_temp.link(a, 'sw26', '{990072601}', pg_temp.t(3));
+  perform pg_temp.buy(a, 'home', 'month', '{990072601}', pg_temp.t(3));
+  ref := (select pa.reference from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
+           where i.account = a and pa.status = 'success' limit 1);
+  select * into r from public.winback_return(ref);
+  perform pg_temp.eq('SW26 after the switch: from the new tables', r.email_id::text, mail::text);
+exception when others then perform pg_temp.ok('SW26 runs', false, sqlerrm);
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1999,7 +2032,9 @@ begin
   perform pg_temp.eq('Q6 late upgrade answer: refunded', r->>'action', 'refund');
   perform pg_temp.eq('Q6 ... as stale', r->>'reason', 'stale');
 
-  -- 8: a try locks the bill's plants and the seats (the delete job skips locked plants)
+  -- 8: a try locks the bill's plants and the seats (the delete job skips locked plants).
+  -- Left a text check: a lock shows only from a second session, and a second session cannot
+  -- see this test's rows, which are never committed.
   perform pg_temp.ok('Q8 begin_attempt locks the plants', (select prosrc ~ 'lock_plants' from pg_proc p join pg_namespace n
     on n.oid = p.pronamespace where n.nspname = 'billing' and p.proname = 'begin_attempt'));
 
@@ -2221,6 +2256,195 @@ begin
     and not has_function_privilege('authenticated', 'public.billing_links(text, jsonb)', 'execute'));
 end $$;
 
+
+-- ---------------------------------------------------------------------------
+-- P4 phase 4 review fixes. Each block records its own failure (also an error), so a run
+-- against the code before the fixes lists every one of them.
+-- ---------------------------------------------------------------------------
+-- 2: the edge functions read the chosen plants from the database (0260 drops plant_users.paused)
+do $$
+declare a uuid := pg_temp.acct('p402'); u uuid;
+begin
+  u := (select user_id from billing.accounts where id = a);
+  perform pg_temp.link(a, 'p402', '{990070201,990070202}', pg_temp.t(0));
+  perform pg_temp.pay(a, 'home', 'month', pg_temp.t(0));
+  perform pg_temp.choose(a, '{990070201}', pg_temp.t(0));
+  perform pg_temp.eq('P4-2 chosen plants once live: the open seats', public.chosen_plant_ids(u)::text, '{990070201}');
+  perform pg_temp.ok('P4-2 ... for the service role only', not has_function_privilege('authenticated', 'public.chosen_plant_ids(uuid)', 'execute')
+    and has_function_privilege('service_role', 'public.chosen_plant_ids(uuid)', 'execute'));
+exception when others then perform pg_temp.ok('P4-2 runs', false, sqlerrm);
+end $$;
+
+-- 4: a new card on the card page turns active after it is saved: card-changed email
+do $$
+declare a uuid := pg_temp.acct('p404'); inv uuid; ref text;
+begin
+  perform pg_temp.member(a, 'p404', 990070401);
+  inv := (billing.start_card_check(a, pg_temp.t(2))->>'invoice')::uuid;
+  ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(2))->>'reference';
+  perform pg_temp.answer(ref, 'ok', pg_temp.t(2), 'AUTH_new4');
+  perform pg_temp.eq('P4-4 a new card: card-changed email queued for it', (pg_temp.ob(a, 'card_changed')).ref,
+    (billing.active_method(a)).id::text);
+  perform pg_temp.eq('P4-4 ... and it sends', pg_temp.guard(a, 'card_changed', pg_temp.t(2.01)), 'send');
+exception when others then perform pg_temp.ok('P4-4 runs', false, sqlerrm);
+end $$;
+
+-- 6: a login's email in another case is the same login
+do $$
+declare a uuid := pg_temp.acct('p406'); u uuid;
+begin
+  u := (select user_id from billing.accounts where id = a);
+  perform billing.link_login(a, 'sunsynk', 'P406@Mail.test', null, '[{"id":990070601}]', pg_temp.t(0));
+  perform billing.link_login(a, 'sunsynk', 'p406@mail.TEST', null, '[{"id":990070601},{"id":990070602}]', pg_temp.t(0.1));
+  perform pg_temp.eq('P4-6 the same login in another case: still one login', (select count(*)::text from billing.logins where account = a), '1');
+  perform pg_temp.ok('P4-6 ... and the state knows it', (public.billing_links('state',
+    jsonb_build_object('user', u, 'username', 'P406@MAIL.TEST'))->>'login_known')::boolean);
+exception when others then perform pg_temp.ok('P4-6 runs', false, sqlerrm);
+end $$;
+
+-- 7: an open card page can still take money: verified before a saved card is charged
+do $$
+declare a uuid := pg_temp.acct('p407'); pe timestamptz; inv uuid; ref text; r jsonb;
+begin
+  pe := pg_temp.member(a, 'p407', 990070701);
+  inv := (billing.pay_now(a, pe + interval '1 minute')->>'invoice')::uuid;
+  ref := billing.begin_attempt(inv, 'card_page', pe + interval '1 minute')->>'reference';
+  r := billing.begin_attempt(inv, 'saved_card', pe + interval '2 minutes');
+  perform pg_temp.ok('P4-7 an open card page: asked about first', r->'verify' @> to_jsonb(ref) and not r ? 'reference');
+  perform pg_temp.eq('P4-7 ... the page is not let go', (select status from billing.payment_attempts where reference = ref), 'pending');
+  perform pg_temp.answer(ref, 'abandoned', pe + interval '3 minutes');
+  r := billing.begin_attempt(inv, 'saved_card', pe + interval '3 minutes');
+  perform pg_temp.ok('P4-7 the page abandoned: the saved card is charged', r ? 'reference' and r->>'auth_ref' is not null);
+exception when others then perform pg_temp.ok('P4-7 runs', false, sqlerrm);
+end $$;
+
+-- 8: a hard decline on an upgrade asks for no new card; the card email only while past due
+do $$
+declare a uuid := pg_temp.acct('p408'); inv uuid; ref text;
+begin
+  perform pg_temp.member(a, 'p408', 990070801);
+  perform billing.link_login(a, 'sunsynk', 'p408', null, '[{"id":990070801},{"id":990070802},{"id":990070803}]', pg_temp.t(1));
+  inv := (billing.upgrade(a, 'family', 0, '{990070801,990070802,990070803}', pg_temp.t(5))->>'invoice')::uuid;
+  ref := billing.begin_attempt(inv, 'saved_card', pg_temp.t(5))->>'reference';
+  perform pg_temp.answer(ref, 'hard', pg_temp.t(5));
+  perform pg_temp.ok('P4-8 a hard decline on an upgrade: no card email', not exists (select 1 from billing.outbox where account = a and key = 'card_update'));
+  insert into billing.outbox (account, key, invoice, dedupe_key, not_before, created_at)
+  values (a, 'card_update', inv, 'card_update:p408', pg_temp.t(5), pg_temp.t(5));
+  perform pg_temp.eq('P4-8 the card email waits for an unpaid renewal', pg_temp.guard(a, 'card_update', pg_temp.t(5.01)), 'not past due');
+exception when others then perform pg_temp.ok('P4-8 runs', false, sqlerrm);
+end $$;
+
+-- 9: a refund written as processed is emailed, naming the card the payment came from
+do $$
+declare a uuid := pg_temp.acct('p409'); inv uuid; ref text; att uuid; rid uuid; o billing.outbox; b jsonb;
+begin
+  perform pg_temp.member(a, 'p409', 990070901);
+  att := (select pa.id from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
+           where i.account = a and i.kind = 'purchase' and pa.status = 'success');
+  inv := (billing.start_card_check(a, pg_temp.t(2))->>'invoice')::uuid;
+  ref := billing.begin_attempt(inv, 'card_page', pg_temp.t(2))->>'reference';
+  perform pg_temp.answer(ref, 'ok', pg_temp.t(2), 'AUTH_new9');
+  insert into billing.refunds (attempt, reference, account, amount_minor, currency, reason, status, created_at, updated_at)
+  values (att, 'RREF_p409', a, 1000, 'ZAR', 'manual', 'processed', pg_temp.t(3), pg_temp.t(3)) returning id into rid;
+  o := pg_temp.ob(a, 'refund');
+  perform pg_temp.eq('P4-9 a refund written processed: emailed', o.ref, rid::text);
+  select x into b from jsonb_array_elements(billing.outbox_take(500, pg_temp.t(3.01))) x where (x->>'id')::bigint = o.id;
+  perform pg_temp.eq('P4-9 ... naming the paid card, not the new one', b->'refund'->>'last4', 'p409');
+exception when others then perform pg_temp.ok('P4-9 runs', false, sqlerrm);
+end $$;
+
+-- 11: a bill keeps the plan's name it was made with
+do $$
+declare a uuid := pg_temp.acct('p411'); o billing.outbox; b jsonb;
+begin
+  perform pg_temp.link(a, 'p411', '{990071101}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', '{990071101}', pg_temp.t(0));
+  update billing.plans set name = 'Home Plus' where code = 'home';
+  perform pg_temp.eq('P4-11 Payments: the name the bill was made with', billing.screen_state(a, pg_temp.t(1))->'bills'->0->>'plan_name', 'Home');
+  o := pg_temp.ob(a, 'receipt');
+  select x into b from jsonb_array_elements(billing.outbox_take(500, pg_temp.t(0.01))) x where (x->>'id')::bigint = o.id;
+  perform pg_temp.eq('P4-11 the receipt too', b->'bill'->>'plan_name', 'Home');
+  update billing.plans set name = 'Home' where code = 'home';
+exception when others then perform pg_temp.ok('P4-11 runs', false, sqlerrm);
+end $$;
+
+-- 14: the cancel date only when a chosen plant's history goes with it; still there once booked
+do $$
+declare a uuid := pg_temp.acct('p414a'); b uuid := pg_temp.acct('p414b'); c uuid := pg_temp.acct('p414c'); pe timestamptz;
+begin
+  perform pg_temp.link(a, 'p414a', '{990071401}', pg_temp.t(0));
+  perform pg_temp.link(b, 'p414b', '{990071401}', pg_temp.t(0));
+  perform pg_temp.buy(b, 'home', 'month', '{990071401}', pg_temp.t(0), 'AUTH_p414b');
+  perform pg_temp.buy(a, 'home', 'month', '{990071401}', pg_temp.t(0), 'AUTH_p414a');
+  perform pg_temp.eq('P4-14 every chosen plant kept by another account: no delete date',
+    billing.screen_state(a, pg_temp.t(1))->>'if_cancelled_delete_at', null);
+  pe := pg_temp.member(c, 'p414c', 990071402);
+  perform billing.cancel(c, pg_temp.t(2));
+  perform pg_temp.eqt('P4-14 cancel booked: the delete date stays for the email',
+    billing.screen_state(c, pg_temp.t(2.01))->>'if_cancelled_delete_at', pe + interval '30 days');
+exception when others then perform pg_temp.ok('P4-14 runs', false, sqlerrm);
+end $$;
+
+-- 15: kept-until and the reminder read the chosen plants only, the earliest date
+do $$
+declare a uuid := pg_temp.acct('p415a'); b uuid := pg_temp.acct('p415b');
+begin
+  perform pg_temp.link(a, 'p415a', '{990071501,990071502}', pg_temp.t(0));
+  perform pg_temp.choose(a, '{990071501}', pg_temp.t(0));                -- week ends day 7
+  perform pg_temp.link(b, 'p415b', '{990071502}', pg_temp.t(3));
+  perform pg_temp.choose(b, '{990071502}', pg_temp.t(3));                -- week ends day 10: kept later
+  perform pg_temp.eqt('P4-15 kept until: the chosen plant''s date', billing.screen_state(a, pg_temp.t(11))->>'history_kept_until',
+    pg_temp.t(37));
+  perform billing.outbox_sweep(pg_temp.t(21) + interval '1 hour');
+  perform pg_temp.eqt('P4-15 the reminder names it', to_timestamp((pg_temp.ob(a, 'history_delete_soon')).ref::bigint)::text, pg_temp.t(37));
+exception when others then perform pg_temp.ok('P4-15 runs', false, sqlerrm);
+end $$;
+
+-- 16: a week that ended long before the first sweep (the switch-over) gets no week-ended email
+do $$
+declare a uuid := pg_temp.acct('p416');
+begin
+  perform pg_temp.link(a, 'p416', '{990071601}', pg_temp.t(0));
+  perform pg_temp.choose(a, '{990071601}', pg_temp.t(0));
+  perform billing.outbox_sweep(pg_temp.t(20));
+  perform pg_temp.ok('P4-16 week over 13 days ago: no week-ended email', (pg_temp.ob(a, 'trial_ended')).id is null);
+exception when others then perform pg_temp.ok('P4-16 runs', false, sqlerrm);
+end $$;
+
+-- 17: a claimed plant keeps its name (no login lists it)
+do $$
+declare a uuid := pg_temp.acct('p417');
+begin
+  perform billing.claim_plant(a, 990071701, 'Gran''s house', 'sunsynk', pg_temp.t(0));
+  perform pg_temp.eq('P4-17 a claimed plant is named', pg_temp.pp(a, pg_temp.t(0.1), 990071701, 'name'), 'Gran''s house');
+exception when others then perform pg_temp.ok('P4-17 runs', false, sqlerrm);
+end $$;
+
+-- 19: the delete job checks with one clock after its lock: a payment started after the job's
+-- start holds the plant. Real time here (clock_timestamp), not the test's December clock.
+do $$
+declare a uuid := pg_temp.acct('p419'); t0 timestamptz := now() - interval '60 days'; inv uuid;
+begin
+  perform pg_temp.link(a, 'p419', '{990071901}', t0);
+  perform pg_temp.choose(a, '{990071901}', t0);                          -- kept until 23 days ago
+  perform pg_temp.agg(990071901, t0 + interval '1 day');
+  inv := (billing.start_checkout(a, 'home', 'month', 0, '{990071901}', clock_timestamp())->>'invoice')::uuid;
+  perform billing.begin_attempt(inv, 'card_page', clock_timestamp());
+  perform billing.delete_due(now() - interval '1 hour');
+  perform pg_temp.ok('P4-19 a payment after the job''s start: the history waits', pg_temp.has_agg(990071901)
+    and (select history_purged_at is null from billing.plants where id = 990071901));
+exception when others then perform pg_temp.ok('P4-19 runs', false, sqlerrm);
+end $$;
+
+-- 20: the login-check wrapper is not callable from the app
+do $$
+begin
+  perform pg_temp.ok('P4-20 link_login_allowed: service role only',
+    not has_function_privilege('authenticated', 'public.link_login_allowed(uuid, text)', 'execute')
+    and not has_function_privilege('anon', 'public.link_login_allowed(uuid, text)', 'execute')
+    and has_function_privilege('service_role', 'public.link_login_allowed(uuid, text)', 'execute'));
+exception when others then perform pg_temp.ok('P4-20 runs', false, sqlerrm);
+end $$;
 -- ---------------------------------------------------------------------------
 do $$
 declare r record; f int; n int;

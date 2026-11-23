@@ -49,6 +49,7 @@ create table billing.invoices (
   status            text not null default 'open' check (status in ('open', 'paid', 'void', 'waived')),
   price             uuid references billing.prices (id),
   plan              text references billing.plans (code),
+  plan_name         text,                        -- the plan's name when the bill was made (receipts, Payments)
   interval          text check (interval in ('month', 'year')),
   offer             text references billing.offers (code),
   extra_places      int not null default 0 check (extra_places >= 0),
@@ -72,6 +73,16 @@ create table billing.invoices (
 create unique index invoices_one_per_period on billing.invoices (subscription, period_key, kind)
   where period_key is not null and status <> 'void';
 create index invoices_account on billing.invoices (account, created_at desc);
+
+-- Every bill keeps the plan's name as it was when the bill was made, whichever command made it.
+create function billing.invoice_plan_name()
+returns trigger language plpgsql set search_path = billing, pg_temp as $$
+begin
+  new.plan_name := coalesce(new.plan_name, (select name from billing.plans where code = new.plan));
+  return new;
+end $$;
+create trigger invoices_plan_name before insert on billing.invoices
+  for each row execute function billing.invoice_plan_name();
 create index invoices_open on billing.invoices (subscription) where status = 'open';
 
 create table billing.payment_attempts (

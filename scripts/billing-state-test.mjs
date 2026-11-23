@@ -49,6 +49,19 @@ const sql = [
   'rollback;',
 ].join('\n');
 
+// No edge function may name a column the drop removes (plant_users.paused) in a query: linking
+// and emails would break the moment 0260 runs. Before the switch they read 0247's
+// chosen_plant_ids, which keeps the old rule inside the database.
+const fnDir = path.join(REPO, 'supabase/functions');
+const stale = readdirSync(fnDir, { recursive: true }).filter((f) => String(f).endsWith('.ts')).flatMap((f) =>
+  readFileSync(path.join(fnDir, String(f)), 'utf8').split('\n').map((l, i) => [f, i + 1, l])
+    .filter(([, , l]) => /\.(eq|neq|is|in|not|or|order|select|filter|match|update|upsert)\(\s*["'`][^"'`]*\bpaused\b/.test(l))
+    .map(([f, n]) => `${f}:${n}`));
+if (stale.length) {
+  console.log(`FAIL  edge functions read plant_users.paused, which 0260 drops: ${stale.join(', ')}`);
+  process.exit(1);
+}
+
 const r = spawnSync(PSQL, ['-X', '-q', '-v', 'ON_ERROR_STOP=1', DB], { input: sql, encoding: 'utf8' });
 const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed|CONTEXT|LINE|line |old billing: ok/.test(l));
 console.log(`migrations: ${migrations.join(' ')}`);

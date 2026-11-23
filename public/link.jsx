@@ -518,10 +518,22 @@ const acctLogins = (a, keep = () => true) => {
   return groups;
 };
 window.acctLogins = acctLogins;
+// The plants a pick lists: every plant the account reaches, a deleted one too (it starts again
+// with no history); a keep pick, only the chosen ones.
+const pickLogins = (a, mode) => acctLogins(a, p => mode !== 'keep' || p.chosen);
+window.pickLogins = pickLogins;
+// The pick's button: 'close' (nothing changed), 'confirm' (SwitchConfirm first: any change of
+// the plants read now, or a chosen plant going in the checkout pick), else 'done'.
+const pickNext = (mode, going, coming) => mode === 'choose' ? (going.length || coming.length ? 'confirm' : 'close')
+  : mode === 'checkout' && going.length ? 'confirm' : 'done';
+window.pickNext = pickNext;
+// After a payment: a place open and a plant not read yet.
+const pickWaiting = (a) => !!a && a.may_choose && a.open > 0 && a.plants.some(p => !p.chosen);
+window.pickWaiting = pickWaiting;
 
-// Every change of chosen plants is confirmed here when a plant goes out: it names the plant
-// and says whether its history is deleted now or kept by another account, with the one line
-// on history loading (design, "History fetch speed").
+// Every change of chosen plants is confirmed here (pickNext): it names the plants that go and
+// says whether each one's history is deleted now or kept by another account, the plants that
+// start, and the one line on history loading (design, "History fetch speed").
 function SwitchConfirm({ acct, going, coming, busy, onConfirm, onCancel }) {
   const t = AT.switchConfirm(acct, going, coming);
   return (
@@ -538,10 +550,10 @@ function SwitchConfirm({ acct, going, coming, busy, onConfirm, onCancel }) {
 
 // Choosing plants: one pop-up for every pick (SOLAR-641).
 //   mode 'choose'    the plants read now (Plants page, after a link, after a payment), up to
-//                    the plan's places or the free week's. Saved through api_choose_plants; a
-//                    plant going out is confirmed first (SwitchConfirm). prefill: ids to tick.
+//                    the plan's places or the free week's. Saved through api_choose_plants; any
+//                    change is confirmed first (SwitchConfirm). prefill: ids to tick.
 //   mode 'checkout'  the final choice for plan (a first plan, a restart, an upgrade), before
-//                    paying: onDone(ids).
+//                    paying: onDone(ids); a chosen plant going is confirmed first.
 //   mode 'keep'      the plants a smaller plan keeps: onDone(ids).
 // onDone(ids | null): null when closed with nothing done.
 function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', prefill = [], onDone }) {
@@ -552,8 +564,7 @@ function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', pre
     : mode === 'keep' ? AT.keepPick(acct, plan.name, plan.places)
     : acct.state === 'none' ? { ...AT.choosePlants(acct), ...AT.weekPick(acct) } : AT.choosePlants(acct);
   const room = mode === 'choose' ? (trial ? acct.trial_places : acct.places) : plan.places;
-  // listed: every plant the account reaches (a keep pick: only the chosen ones)
-  const logins = acctLogins(acct, p => (mode === 'keep' ? p.chosen : !p.purged || p.chosen));
+  const logins = pickLogins(acct, mode);
   const all = logins.flatMap(g => g.plants.map(x => x.plant_id));
   // choose: as chosen now, plus a new login's plants; checkout: every plant that fits, chosen
   // ones first; keep: the chosen ones that fit
@@ -581,12 +592,14 @@ function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', pre
     }
   };
   const next = () => {
-    if (mode !== 'choose') return picked.length ? onDone(picked) : null;
-    if (!going.length && !coming.length) return onDone(null);
-    if (going.length) return setConfirm(true);
-    save();
+    if (mode !== 'choose' && !picked.length) return;
+    const n = pickNext(mode, going, coming);
+    if (n === 'close') return onDone(null);
+    if (n === 'confirm') return setConfirm(true);
+    onDone(picked);
   };
-  if (confirm) return <SwitchConfirm acct={acct} going={going} coming={coming} busy={busy} onConfirm={save} onCancel={() => setConfirm(false)} />;
+  if (confirm) return <SwitchConfirm acct={acct} going={going} coming={coming} busy={busy} onCancel={() => setConfirm(false)}
+    onConfirm={mode === 'choose' ? save : () => onDone(picked)} />;
   return (
     <Dialog keep label={t.title} busy={busy} onClose={() => onDone(null)}>
       <div className="confirm-title">{t.title}</div>
@@ -615,7 +628,7 @@ function PickAfterPay({ onDone }) {
     return () => window.removeEventListener('ps-pick', on);
   }, []);
   const close = () => { window.pickAsked = false; setAsk(false); };
-  const waiting = acct && acct.may_choose && acct.open > 0 && acct.plants.some(p => !p.chosen && !p.purged);
+  const waiting = pickWaiting(acct);
   React.useEffect(() => { if (ask && acct && !waiting) close(); });
   if (!ask || !waiting) return null;
   return <ChooseDialog acct={acct} from="upgrade" onDone={(ids) => { close(); if (ids) onDone({ plants: ids.map(id => ({ id })), paused: [] }); }} />;

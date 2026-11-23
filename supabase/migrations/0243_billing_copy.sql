@@ -113,8 +113,8 @@ begin
    where not pu.via_share
   on conflict do nothing;
 
-  insert into billing.plant_claims (plant, account, claimed_at)
-  select pu.plant_id, a.id, pu.linked_at
+  insert into billing.plant_claims (plant, account, claimed_at, plant_name)
+  select pu.plant_id, a.id, pu.linked_at, pu.plant_name
     from public.plant_users pu join billing.accounts a on a.user_id = pu.user_id
    where pu.via_share and pu.share_gone_at is null
   on conflict do nothing;

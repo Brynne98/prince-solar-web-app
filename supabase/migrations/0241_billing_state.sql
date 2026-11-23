@@ -233,8 +233,9 @@ begin
 
   select coalesce(jsonb_agg(jsonb_build_object(
            'plant', x.plant,
-           'name', (select lp.plant_name from billing.login_plants lp join billing.logins l on l.id = lp.login
-                     where l.account = p_account and lp.plant = x.plant and lp.plant_name is not null limit 1),
+           'name', coalesce((select lp.plant_name from billing.login_plants lp join billing.logins l on l.id = lp.login
+                              where l.account = p_account and lp.plant = x.plant and lp.plant_name is not null limit 1),
+                            (select c.plant_name from billing.plant_claims c where c.account = p_account and c.plant = x.plant)),
            'chosen', x.chosen,
            'locked', not x.chosen,
            'read_now', x.chosen and live and not st.must_choose and billing.has_route(p_account, x.plant, true),

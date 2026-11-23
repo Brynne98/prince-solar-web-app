@@ -85,7 +85,8 @@ create index login_plants_plant on billing.login_plants (plant);
 create table billing.plant_claims (
   plant      bigint primary key references billing.plants (id),
   account    uuid not null references billing.accounts (id) on delete cascade,
-  claimed_at timestamptz not null default now()
+  claimed_at timestamptz not null default now(),
+  plant_name text                       -- the share login's name for it, at the claim
 );
 create index plant_claims_account on billing.plant_claims (account);
 

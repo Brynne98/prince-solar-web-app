@@ -165,7 +165,8 @@ declare
 begin
   a := billing.lock_account(p_account);
   st := billing.account_status(p_account, p_at);
-  select * into l from billing.logins where account = p_account and brand = p_brand and username = p_username;
+  -- the same login whatever the case of its email (SunSynk ignores it)
+  select * into l from billing.logins where account = p_account and brand = p_brand and lower(username) = lower(p_username);
   is_new := l.id is null;
 
   if is_new then

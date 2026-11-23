@@ -152,20 +152,23 @@ begin
     -- the free week's last two days; a booked cancel's last three
     'trial_ends_soon', s->>'state' = 'trialing' and (s->>'trial_ends_at')::timestamptz - p_at <= interval '2 days',
     'cancel_soon', (s->>'cancel_at')::timestamptz - p_at <= interval '3 days',
-    -- what a cancel booked now would mean: the history goes this long after the plan ends
-    'if_cancelled_delete_at', case when sub.id is not null and not sub.cancel_at_period_end
+    -- what a cancel (booked now, or already booked) means: the history of a chosen plant no
+    -- other account keeps goes this long after the plan ends. Null: no such plant.
+    'if_cancelled_delete_at', case when sub.id is not null
+                                    and exists (select 1 from jsonb_array_elements(plants) p
+                                                 where (p->>'chosen')::boolean and not (p->>'kept_elsewhere')::boolean)
                                    then sub.period_end + make_interval(days => m.retention_days) end,
-    -- the latest "kept until" among the account's plants (null: nothing waits to be deleted)
-    'history_kept_until', (select max((p->>'delete_at')::timestamptz) from jsonb_array_elements(plants) p
-                            where p->>'delete_at' is not null and (p->>'delete_at')::timestamptz > p_at),
-    'history_purged', exists (select 1 from jsonb_array_elements(plants) p where (p->>'purged')::boolean),
+    -- the earliest "kept until" among the chosen plants (null: nothing waits to be deleted)
+    'history_kept_until', (select min((p->>'delete_at')::timestamptz) from jsonb_array_elements(plants) p
+                            where (p->>'chosen')::boolean and (p->>'delete_at')::timestamptz > p_at),
+    'history_purged', exists (select 1 from jsonb_array_elements(plants) p where (p->>'chosen')::boolean and (p->>'purged')::boolean),
     'prices', prices,
     'logins', coalesce((select jsonb_agg(jsonb_build_object('id', l.id, 'brand', l.brand, 'username', l.username,
                           'status', l.status) order by l.created_at)
                           from billing.logins l where l.account = p_account), '[]'::jsonb),
     'bills', coalesce((select jsonb_agg(b order by b->>'paid_at' desc) from (
                 select jsonb_build_object('id', i.id, 'kind', i.kind, 'plan', i.plan,
-                         'plan_name', (select name from billing.plans where code = i.plan), 'interval', i.interval,
+                         'plan_name', i.plan_name, 'interval', i.interval,
                          'amount_minor', i.amount_minor, 'currency', i.currency, 'paid_at', i.paid_at,
                          'period_start', i.period_start, 'period_end', i.period_end,
                          'refunded', exists (select 1 from billing.payment_attempts pa join billing.refunds r on r.attempt = pa.id
@@ -258,11 +261,13 @@ begin
   perform billing.lock_plants(array[p_plant]);
   select account into holder from billing.plant_claims where plant = p_plant;
   if holder is not null and holder <> p_account then raise exception 'taken' using errcode = '22023'; end if;
-  if holder is null then
+  if holder is not null then
+    update billing.plant_claims set plant_name = coalesce(p_name, plant_name) where plant = p_plant;
+  else
     if st.state = 'ended' and not billing.has_route(p_account, p_plant, false) then
       raise exception 'no plant can be added without a plan' using errcode = '22023';
     end if;
-    insert into billing.plant_claims (plant, account, claimed_at) values (p_plant, p_account, p_at);
+    insert into billing.plant_claims (plant, account, claimed_at, plant_name) values (p_plant, p_account, p_at, p_name);
     update billing.plants set version = version + 1 where id = p_plant;
     update billing.accounts set version = version + 1 where id = p_account;
     perform billing.log_event(p_account, p_at, p_actor, 'claim_plant', jsonb_build_object('state', st.state),
@@ -301,7 +306,8 @@ declare acc uuid := billing.account_of((p_args->>'user')::uuid);
 begin
   return case p_cmd
     when 'state' then billing.account_state(acc) || jsonb_build_object('live', billing.is_live(),
-                        'login_known', exists (select 1 from billing.logins l where l.account = acc and l.username = p_args->>'username'))
+                        'login_known', exists (select 1 from billing.logins l where l.account = acc
+                                                  and lower(l.username) = lower(p_args->>'username')))
     -- the vault id is the stored login's own (private.sunsynk_accounts)
     when 'link_login' then billing.link_login(acc, coalesce(p_args->>'brand', 'sunsynk'), p_args->>'username',
                              (select sa.refresh_secret_id from private.sunsynk_accounts sa where sa.id = (p_args->>'login')::uuid),
@@ -375,6 +381,20 @@ $$;
 revoke all on function public.api_logins() from public, anon;
 grant execute on function public.api_logins() to authenticated;
 
+-- The plants a user's account reads (chosen), for the edge functions (syncPlants, notify):
+-- open seats once the switch is on, before it the old rule (not paused). The drop migration
+-- keeps the first half only, so no function outside the database reads plant_users.paused.
+create function public.chosen_plant_ids(p_user uuid)
+returns bigint[] language sql stable security definer set search_path = public, private, pg_temp as $$
+  select case when billing.is_live()
+    then array(select se.plant from billing.seats se join billing.accounts a on a.id = se.account
+                where a.user_id = p_user and se.closed_at is null order by se.plant)
+    else array(select pu.plant_id from public.plant_users pu where pu.user_id = p_user and not pu.paused
+                order by pu.plant_id) end
+$$;
+revoke all on function public.chosen_plant_ids(uuid) from public, anon, authenticated;
+grant execute on function public.chosen_plant_ids(uuid) to service_role;
+
 -- ---------------------------------------------------------------------------
 -- Reading follows the new state once the switch is on.
 -- ---------------------------------------------------------------------------
@@ -435,6 +455,8 @@ returns boolean language sql stable security definer set search_path = public, p
               else public.link_login_allowed_old(p_user, p_username) end
 $$;
 revoke all on function public.link_login_allowed_old(uuid, text) from public, anon, authenticated;
+revoke all on function public.link_login_allowed(uuid, text) from public, anon, authenticated;
+grant execute on function public.link_login_allowed(uuid, text) to service_role;
 
 -- Emails for a plant the account does not choose, and reports with no plan, are not queued.
 create function private.email_skip_unchosen()
@@ -602,13 +624,13 @@ create trigger payment_attempts_outbox after insert or update of status on billi
 create function billing.outbox_on_refund()
 returns trigger language plpgsql set search_path = billing, pg_temp as $$
 begin
-  if new.status = 'processed' and old.status is distinct from 'processed'
+  if new.status = 'processed' and (tg_op = 'INSERT' or old.status is distinct from 'processed')
      and new.reason not in ('card_check', 'reversed', 'unknown_account') then
     perform billing.outbox_put(new.account, 'refund', null, new.id::text, 'refund:' || new.id, new.updated_at, null, new.updated_at);
   end if;
   return null;
 end $$;
-create trigger refunds_outbox after update of status on billing.refunds
+create trigger refunds_outbox after insert or update of status on billing.refunds
   for each row execute function billing.outbox_on_refund();
 
 create function billing.outbox_on_sub()
@@ -627,14 +649,14 @@ create trigger subscriptions_outbox after update of status on billing.subscripti
 create function billing.outbox_on_card()
 returns trigger language plpgsql set search_path = billing, pg_temp as $$
 begin
-  if new.active and new.account is not null
+  if new.active and (tg_op = 'INSERT' or not old.active) and new.account is not null
      and exists (select 1 from billing.payment_methods pm where pm.account = new.account and pm.id <> new.id) then
     perform billing.outbox_put(new.account, 'card_changed', null, new.id::text, 'card_changed:' || new.id,
                                new.created_at, new.created_at + interval '2 days', new.created_at);
   end if;
   return null;
 end $$;
-create trigger payment_methods_outbox after insert on billing.payment_methods
+create trigger payment_methods_outbox after insert or update of active on billing.payment_methods
   for each row execute function billing.outbox_on_card();
 
 -- An owner's booked change or its undo. Sent 2 minutes later, so a quick change of mind
@@ -694,15 +716,16 @@ begin
       perform billing.outbox_put(a.id, 'trial_ends_soon', null, extract(epoch from st.trial_ends_at)::bigint::text,
         'trial_ends_soon:' || a.id || ':' || extract(epoch from st.trial_ends_at)::bigint, p_at, st.trial_ends_at, p_at);
     elsif st.state = 'ended' and st.access_ended_at is not null then
-      if st.access_ended_at = st.trial_ends_at and not exists (select 1 from billing.subscriptions x where x.account = a.id) then
+      if st.access_ended_at = st.trial_ends_at and p_at < st.trial_ends_at + interval '2 days'
+         and not exists (select 1 from billing.subscriptions x where x.account = a.id) then
         perform billing.outbox_put(a.id, 'trial_ended', null, extract(epoch from st.trial_ends_at)::bigint::text,
           'trial_ended:' || a.id || ':' || extract(epoch from st.trial_ends_at)::bigint, p_at, p_at + interval '2 days', p_at);
       end if;
       foreach d in array array[14, 27] loop
         if p_at >= st.access_ended_at + make_interval(days => d) and p_at < st.access_ended_at + make_interval(days => d + 2) then
           s := billing.account_state(a.id, p_at);
-          kept := (select max((p->>'delete_at')::timestamptz) from jsonb_array_elements(s->'plants') p
-                    where (p->>'delete_at')::timestamptz > p_at);
+          kept := (select min((p->>'delete_at')::timestamptz) from jsonb_array_elements(s->'plants') p
+                    where (p->>'chosen')::boolean and (p->>'delete_at')::timestamptz > p_at);
           if kept is not null then
             perform billing.outbox_put(a.id, 'history_delete_soon', null, extract(epoch from kept)::bigint::text,
               'history_delete_soon:' || d || ':' || a.id || ':' || extract(epoch from st.access_ended_at)::bigint,
@@ -761,7 +784,7 @@ begin
     when 'card_update' then
       if inv.status is distinct from 'open' then return 'bill settled'; end if;
       if (billing.active_method(o.account)).id is not null then return 'card replaced'; end if;
-      if st.state not in ('active', 'past_due') then return 'plan over'; end if;
+      if st.state <> 'past_due' then return 'not past due'; end if;
     when 'refund' then
       if not exists (select 1 from billing.refunds r where r.id = o.ref::uuid and r.status = 'processed') then
         return 'refund not processed';
@@ -800,7 +823,7 @@ begin
     when 'history_delete_soon' then
       if st.state <> 'ended' then return 'plan running again'; end if;
       if not exists (select 1 from jsonb_array_elements(billing.account_state(o.account, p_at)->'plants') p
-                      where (p->>'delete_at')::timestamptz > p_at) then return 'nothing kept'; end if;
+                      where (p->>'chosen')::boolean and (p->>'delete_at')::timestamptz > p_at) then return 'nothing kept'; end if;
     when 'history_deleted' then
       if st.state <> 'ended' then return 'plan running again'; end if;
       if not exists (select 1 from billing.plants p where p.id = o.ref::bigint and p.history_purged_at is not null) then
@@ -854,15 +877,18 @@ begin
       'state', billing.screen_state(o.account, p_at),
       -- the frozen bill a receipt reads
       'bill', case when inv.id is not null then jsonb_build_object(
-                'kind', inv.kind, 'plan', inv.plan, 'plan_name', (select name from billing.plans where code = inv.plan),
+                'kind', inv.kind, 'plan', inv.plan, 'plan_name', inv.plan_name,
                 'interval', inv.interval, 'amount_minor', inv.amount_minor, 'currency', inv.currency,
                 'next_amount_minor', inv.plan_amount_minor + inv.extra_places * inv.extra_place_minor,
                 'period_start', inv.period_start, 'period_end', inv.period_end, 'paid_at', inv.paid_at,
                 'reference', att.reference, 'card_type', pm.card_type, 'last4', pm.last4) end,
       'refund', (select jsonb_build_object('amount_minor', coalesce(r.amount_minor, pa.amount_minor), 'currency',
                          coalesce(r.currency, pa.currency), 'reference', r.reference, 'reason', r.reason,
-                         'paid_at', pa.settled_at, 'paid_minor', pa.amount_minor)
+                         'paid_at', pa.settled_at, 'paid_minor', pa.amount_minor,
+                         -- the card the refunded payment came from, not the one saved now
+                         'card_type', rpm.card_type, 'last4', rpm.last4)
                    from billing.refunds r left join billing.payment_attempts pa on pa.id = r.attempt
+                   left join billing.payment_methods rpm on rpm.id = pa.payment_method
                   where o.key = 'refund' and r.id = o.ref::uuid),
       'event', (select jsonb_build_object('kind', e.kind, 'before', e.before, 'after', e.after)
                   from billing.account_events e where o.key in ('change_booked', 'change_undone') and e.id = o.ref::bigint),

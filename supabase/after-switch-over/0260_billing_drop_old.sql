@@ -27,6 +27,13 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- The functions that still run, without the old tables
 -- ---------------------------------------------------------------------------
+-- The plants a user's account reads, for the edge functions: open seats only.
+create or replace function public.chosen_plant_ids(p_user uuid)
+returns bigint[] language sql stable security definer set search_path = public, private, pg_temp as $$
+  select array(select se.plant from billing.seats se join billing.accounts a on a.id = se.account
+                where a.user_id = p_user and se.closed_at is null order by se.plant)
+$$;
+
 create or replace function public.my_plant_ids()
 returns setof bigint language sql stable security definer set search_path = public, private, pg_temp as $$
   select se.plant from billing.seats se join billing.accounts a on a.id = se.account
@@ -391,14 +398,16 @@ drop table private.plant_week cascade;
 drop table private.free_week_logins cascade;
 alter table public.plant_users drop column paused;
 
--- Nothing left may read what went.
+-- Nothing left may read what went. "paused" under any alias counts; not a quoted answer key
+-- ('paused' in api_logins) and not plant_config_seed, whose paused is a field of its own rows.
 do $$
 declare bad text;
 begin
   select string_agg(n.nspname || '.' || p.proname, ', ') into bad
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname in ('public', 'private', 'billing')
-     and p.prosrc ~ '(private\.billing\M|billing_charges|free_week_logins|offer_members|private\.offers|plant_picks|plant_week|pu\.paused)';
+     and (p.prosrc ~ '(private\.billing\M|billing_charges|free_week_logins|offer_members|private\.offers|plant_picks|plant_week)'
+          or (replace(p.prosrc, '''paused''', '') ~ '\mpaused\M' and p.proname <> 'plant_config_seed'));
   if bad is not null then raise exception 'still reading the old billing: %', bad; end if;
   -- nor call a function that went
   select string_agg(distinct n.nspname || '.' || p.proname || ' calls ' || d.x, ', ') into bad

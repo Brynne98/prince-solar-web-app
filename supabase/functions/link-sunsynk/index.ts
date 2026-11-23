@@ -12,6 +12,7 @@ import { db, linkAccount, LoginRejected, saveCallTally } from "../_shared/sunsyn
 import { noteError, serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { mockClosed } from "../_shared/gate.ts";
+import { billingState, Refused, type Rpc, saveLogin } from "../_shared/links.ts";
 
 serve("link-sunsynk", async (req) => {
   const cors = corsHeaders(req.headers.get("origin"));
@@ -56,8 +57,16 @@ serve("link-sunsynk", async (req) => {
   // One login in the free week, none without a plan (billing.account_state may_add_login, 0247),
   // asked before SunSynk is. Before the billing switch-over the old rule (0203) still decides.
   // A login already on the account (a new password, a reconnect) always goes through.
-  const { data: acct } = await db.rpc("billing_links", { p_cmd: "state", p_args: { user: userId, username } });
-  if (acct?.live) {
+  const call: Rpc = (fn, args) => db.rpc(fn, args);
+  let acct;
+  try {
+    acct = await billingState(call, userId, username);
+  } catch (e) {
+    noteError("link_state_failed", e, { user: userId });
+    return json({ error: "could not reach SunSynk" }, 502, cors);
+  }
+  const live = !!acct?.live;
+  if (live) {
     if (!acct.may_add_login && !acct.login_known) return json({ error: acct.state === "ended" ? "no plan" : "one login" }, 409, cors);
   } else {
     const { data: oneLogin, error: oneErr } = await db.rpc("link_login_allowed", { p_user: userId, p_username: username });
@@ -65,7 +74,10 @@ serve("link-sunsynk", async (req) => {
   }
 
   try {
-    const { accountId, plants, paused, reason } = await linkAccount(userId, username, password);
+    // Live: the locked link_login decides before any plant is linked; a failure is an error,
+    // and a retry finds the same stored login.
+    const { accountId, plants, paused, reason } = await linkAccount(userId, username, password,
+      live ? (id, ps) => saveLogin(call, true, noteError, userId, id, username, ps) : undefined);
     password = ""; // done with it
     // A good link gives its try back, so only failed tries count (0135).
     const { error: refundErr } = await db.rpc("link_succeeded", { p_user: userId });
@@ -73,10 +85,8 @@ serve("link-sunsynk", async (req) => {
       console.error(`link-sunsynk refund failed for user ${userId}: ${refundErr.message}`);
       noteError("try_refund_failed", new Error(`link_succeeded: ${refundErr.message}`), { user: userId });
     }
-    // The new account tables (SOLAR-641): the login and its plant list, through link_login.
-    const { error: newErr } = await db.rpc("billing_links", { p_cmd: "link_login", p_args: {
-      user: userId, login: accountId, username, plants: plants.map((p) => ({ id: p.id, name: p.name })) } });
-    if (newErr) noteError("link_login_failed", new Error(`link_login: ${newErr.message}`), { user: userId });
+    // Before the switch: the login and its plant list copied into the new tables (SOLAR-641).
+    if (!live) await saveLogin(call, false, noteError, userId, accountId, username, plants);
     // SOLAR-319: a login added after the "need a hand" email went. Keyed on the email, so it counts once.
     const { data: hand } = await db.from("email_queue").select("id, sent_at")
       .eq("user_id", userId).eq("kind", "need_a_hand").eq("status", "sent").maybeSingle();
@@ -100,6 +110,7 @@ serve("link-sunsynk", async (req) => {
     return json({ ok: true, accountId, plants, paused, reason }, 200, cors);
   } catch (e) {
     password = "";
+    if (e instanceof Refused) return json({ error: e.answer }, 409, cors);
     const msg = e instanceof Error ? e.message : String(e);
     // LoginRejected comes from tokenLogin and contains only SunSynk's msg.
     const status = e instanceof LoginRejected ? 401 : 502;

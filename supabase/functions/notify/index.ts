@@ -32,6 +32,7 @@ import {
   offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, cancelEndsSoon, needAHand, feedback, unpaidReminder, unpaidLast, unpaidDeleted, APP,
 } from "../_shared/email.ts";
 import { outboxMail, FROM_BILLING, FROM_HELLO } from "../_shared/email.ts";
+import { sendOutboxOne } from "../_shared/outbox.ts";
 import { mail as accountMail, type MailInput } from "../_shared/text.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -127,7 +128,7 @@ async function historyAt(user: string | null, plantId?: number | null): Promise<
 async function historyOf(user: string | null, names?: string[]): Promise<{ plants: string[]; days: number }> {
   if (!user || names?.length === 0) return { plants: [], days: 0 };
   const q = db.from("plant_users").select("plant_id, plant_name").eq("user_id", user);
-  const { data: pu } = await (names ? q.in("plant_name", names) : q.eq("paused", false)).order("linked_at");
+  const { data: pu } = await (names ? q.in("plant_name", names) : q.in("plant_id", await chosenPlants(user))).order("linked_at");
   let days = 0;
   for (const p of pu ?? []) {
     const { count } = await db.from("plant_energy").select("period", { count: "exact", head: true }).eq("plant_id", p.plant_id).eq("bucket", "day");
@@ -135,6 +136,8 @@ async function historyOf(user: string | null, names?: string[]): Promise<{ plant
   }
   return { plants: (pu ?? []).map((p) => p.plant_name || "your plant"), days };
 }
+/** The plants the user's account reads (0247 chosen_plant_ids: the billing tables once live). */
+const chosenPlants = async (user: string | null) => ((await rpc<number[] | null>("chosen_plant_ids", { p_user: user })) ?? []).map(Number);
 /** The newest earlier email of a kind for this user, to read what it said. */
 async function lastMail(user: string | null, kind: string, before: number): Promise<Record<string, any> | null> {
   if (!user) return null;
@@ -408,7 +411,8 @@ async function build(r: Row): Promise<Email | null> {
       });
     case "bill_change": {
       // The plants that stay: the user's others still collecting (SOLAR-415); stopped ones are not kept (SOLAR-488).
-      const { data: pus } = await db.from("plant_users").select("plant_name").eq("user_id", r.user_id).eq("paused", false).order("linked_at");
+      const { data: pus } = await db.from("plant_users").select("plant_name").eq("user_id", r.user_id)
+        .in("plant_id", await chosenPlants(r.user_id)).order("linked_at");
       const keep = (pus ?? []).map((x) => x.plant_name ?? "").filter((n) => n && !(d.removePlants ?? []).includes(n));
       return planChangeBooked({ keepPlants: keep,
         from: d.from, to: d.to, fromPeriod: d.fromPeriod, toPeriod: d.toPeriod, on: day(d.on),
@@ -643,11 +647,12 @@ async function outboxPass(deadline: number) {
         subject: e.subject, html: e.html, text: e.text,
         ...(row.reminder && unsub ? { headers: { "List-Unsubscribe": `<${unsub}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" } } : {}) } });
     }
-    if (!outs.length) continue;
-    // one key per set of rows: a retry after a lost answer sends nothing twice
-    const key = "ob-" + outs.map((o) => o.row.id).join(".");
-    const res = await paced(() => post(`${RESEND_URL}/batch`, outs.map((o) => o.payload), key));
+    // One call per email under its row's own key: a retry after a lost answer, whatever else
+    // is due then, is answered from the first send and sends nothing twice.
+    let stop = false;
     for (const o of outs) {
+      if (stop || Date.now() > deadline) break;   // left leased: sent on a later pass
+      const res = await paced(() => sendOutboxOne(post, RESEND_URL, { id: o.row.id, payload: o.payload }));
       const ok = !res.error;
       // Resend refused the email itself (400, 422): given up; anything else in 5 minutes
       const retry_s = ok || refused(res.status) ? null : 300;
@@ -657,8 +662,9 @@ async function outboxPass(deadline: number) {
         await track("account_email_sent_done", o.row.user, `outbox:${o.row.id}`, new Date().toISOString(), { kind: o.row.key }).catch(() => {});
       } else if (retry_s) count.retried++;
       else { count.failed++; noteError("email_failed", new Error(`outbox ${o.row.key} ${o.row.id}: ${res.error}`), { user: o.row.user, hourly: true }); }
+      if (res.error && !refused(res.status)) stop = true;
     }
-    if (res.error && !refused(res.status)) break;
+    if (stop) break;
   }
   return count;
 }

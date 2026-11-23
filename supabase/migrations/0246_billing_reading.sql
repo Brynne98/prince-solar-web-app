@@ -462,6 +462,7 @@ declare
   busy bigint[] := '{}';
   counts jsonb;
   out jsonb;
+  now_at timestamptz;
 begin
   if not billing.is_live() then return jsonb_build_object('live', false); end if;
   if not pg_try_advisory_xact_lock(hashtext('billing.delete_due')) then return jsonb_build_object('busy', true); end if;
@@ -471,14 +472,15 @@ begin
     -- a plant being written now is left for the next run
     perform 1 from billing.plants where id = p.id for update skip locked;
     if not found then busy := busy || p.id; continue; end if;
-    -- the clock moved while the job ran: checked again now, and a seat opened since the job
-    -- started keeps the plant
-    ps := billing.plant_state(p.id, greatest(p_at, clock_timestamp()));
-    continue when ps->>'delete_at' is null;
+    -- the clock moved while the job ran: one time from here on, after the lock, for every
+    -- check and the delete itself; a seat opened since the job started keeps the plant
+    now_at := greatest(p_at, clock_timestamp());
+    ps := billing.plant_state(p.id, now_at);
+    continue when ps->>'delete_at' is null or (ps->>'delete_at')::timestamptz > now_at;
     continue when exists (select 1 from billing.seats s where s.plant = p.id and s.closed_at is null and s.chosen_at > p_at);
-    if billing.payment_hold(p.id, p_at) then held := held || p.id; continue; end if;
+    if billing.payment_hold(p.id, now_at) then held := held || p.id; continue; end if;
     -- the full routine every time; what went is read from its counts
-    counts := billing.purge_now(p.id, p_at);
+    counts := billing.purge_now(p.id, now_at);
     continue when counts is null;
     if exists (select 1 from jsonb_each_text(counts) c where c.value::bigint > 0) then deleted := deleted || p.id;
     else emptied := emptied || p.id; end if;
@@ -717,7 +719,8 @@ $$;
 -- After each day of a running fetch. p_day: the day just walked (null: the run
 -- stops early, the fetch is free for the next run). p_failed: the day did not
 -- answer (tried 3 times, then left). p_throttled: the cloud answered 429.
--- Returns {go, day, next_step_at}: go = this run may walk `day` at next_step_at.
+-- Returns {go, day, next_step_at}: go = this run may walk `day` at next_step_at (due within
+-- 5 s, the claim kept); go false with a next_step_at: the claim is let go until then.
 create function billing.history_step(p_id bigint, p_day date, p_failed boolean default false,
                                      p_throttled boolean default false, p_at timestamptz default now(),
                                      p_claim uuid default null)
@@ -780,7 +783,8 @@ begin
          claimed_until = case when nxt <= p_at + interval '5 seconds' then nxt + interval '90 seconds' end,
          claim = case when nxt <= p_at + interval '5 seconds' then claim end
    where id = p_id;
-  return jsonb_build_object('go', true, 'day', p_day - 1, 'next_step_at', nxt);
+  -- go only while this run keeps the claim: a slowed fetch is handed out again by history_take
+  return jsonb_build_object('go', nxt <= p_at + interval '5 seconds', 'day', p_day - 1, 'next_step_at', nxt);
 end $$;
 
 -- ---------------------------------------------------------------------------

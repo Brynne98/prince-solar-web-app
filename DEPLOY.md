@@ -247,7 +247,9 @@ frontend second, in this order:
    come across, so renewals keep charging them.
 5. Compare `billing.account_state` for each account with today's screens, next charges and
    poll decisions.
-6. In one go, so no billing email is sent twice or lost:
+6. In one go, so no billing email is sent twice or lost, and no change made since step 4
+   is lost: copy again (`supabase db query --linked "select billing.copy_from_old()"`; logins,
+   plant choices and payments made since the first copy are in the old tables only), then
    `supabase functions deploy billing`, then
    `supabase db query --linked "select billing.switch_on()"`.
    The billing function reads and writes the new tables (through `public.billing_v2`).

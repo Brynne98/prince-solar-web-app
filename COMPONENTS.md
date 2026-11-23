@@ -66,8 +66,10 @@ code (SOLAR-641; `npm test` refuses the old billing reads, `PLAN_NAME` and hand-
 |---|---|
 | `AccountText` (`AT`) | The catalog: `_shared/text.ts`, typed, with zero/one/many forms. `npm run build` makes `public/build/text.js` (`window.AccountText`); notify imports the file itself. `money`, `day`, `forms`, `names` are its only formatters. A new line goes here. |
 | `useAccount()`, `reloadAccount()` | The signed-in account's state (`api_account_state`, 0247), read once and shared; `reloadAccount` reads it again and tells every screen. |
-| `ChooseDialog` | The one plant pick (link.jsx): `mode` `choose` (Plants, after a link, after a payment), `checkout` (the final choice before paying), `keep` (a smaller plan's plants). A plant going out is confirmed in `SwitchConfirm`. |
+| `ChooseDialog` | The one plant pick (link.jsx): `mode` `choose` (Plants, after a link, after a payment), `checkout` (the final choice before paying), `keep` (a smaller plan's plants). Which changes are confirmed in `SwitchConfirm`: `pickNext`. |
 | `acctLogins(acct, keep)` | The account's plants under their logins, in `KeepPicker`'s shape. |
+| `pickLogins(acct, mode)`, `pickNext(mode, going, coming)`, `pickWaiting(acct)` | What a pick lists (every plant, deleted ones too; `keep`: the chosen), when its button confirms first, and whether the pick after a payment opens (link.jsx). Tested in `scripts/billing-screen-test.mjs`. |
+| `planRows(acct, view)`, `planStep(acct, row)` | The plans pop-up's rows for the monthly/yearly switch (a running plan changes plan at its own interval) and what a plan's button does first (`interval`, `keep`, `checkout`; `pick: false` goes on with no plants) (tabs.jsx). |
 | `startPlan`, `bookChange`, `settlePayment`, `changeCard` | Pay for a plan or an upgrade (quote, review, card page), book or undo a change for the billing date, pay a failed renewal, change the card. |
 | `outboxMail(m, unsub)` | An outbox email (`AccountText.mail`) laid out in `_shared/email.ts`'s look. |
 

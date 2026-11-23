@@ -360,9 +360,11 @@ export const logins = {
   reconnect: "Reconnect",
   removeTitle: (username: string) => `Remove ${username}?`,
 };
-/** Removing a login: which plants go and what happens to each one's history. */
-export function removeLogin(s: AccountState, loginId: string) {
-  const only = s.plants.filter((p) => p.logins.length === 1 && p.logins[0] === loginId && !p.claimed);
+/** Removing a login: which plants go and what happens to each one's history. shared: the
+ *  "Shared plants" group, whose plants go unless a login of the account also reaches them. */
+export function removeLogin(s: AccountState, loginId: string, shared = false) {
+  const only = shared ? s.plants.filter((p) => p.claimed && !p.logins.length)
+    : s.plants.filter((p) => p.logins.length === 1 && p.logins[0] === loginId && !p.claimed);
   const chosen = only.filter((p) => p.chosen);
   const gone = chosen.filter((p) => !p.kept_elsewhere).map(plantName);
   const kept = chosen.filter((p) => p.kept_elsewhere).map(plantName);
@@ -440,7 +442,8 @@ export type MailInput = {
   bill?: { kind: string; plan: string; plan_name: string; interval: "month" | "year"; amount_minor: number; currency: string;
     next_amount_minor: number; period_start: Iso | null; period_end: Iso | null; paid_at: Iso | null; reference: string | null;
     card_type: string | null; last4: string | null } | null;
-  refund?: { amount_minor: number; currency: string; reference: string; reason: string; paid_at: Iso | null; paid_minor: number } | null;
+  refund?: { amount_minor: number; currency: string; reference: string; reason: string; paid_at: Iso | null; paid_minor: number;
+    card_type: string | null; last4: string | null } | null;
   event?: { kind: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null } | null;
   plant?: { id: number; name: string | null } | null;
 };
@@ -481,7 +484,7 @@ export function mail(m: MailInput): Mail | null {
         parts: [{ lead: r.reason === "manual" ? `We refunded ${r.amount_minor < r.paid_minor ? "part of " : ""}your payment. Your plan stays as it is.`
             : r.reason === "wrong_amount" ? "The amount didn't match your bill, so we sent it back."
             : "Your plan changed while you paid, so we sent it back." },
-          { hero: { label: "Refund", value: $(r.amount_minor, r.currency), sub: s.card ? `back to ${cardLine(s)}` : "back to your card" }, rows },
+          { hero: { label: "Refund", value: $(r.amount_minor, r.currency), sub: r.last4 ? `back to ${card(r.card_type, r.last4)}` : "back to your card" }, rows },
           { note: "Paystack, who handles our payments, emails you about it too." }] };
     }
     case "plan_ended":

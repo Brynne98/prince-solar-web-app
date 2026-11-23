@@ -2424,13 +2424,31 @@ function CancelSection({ acct }) {
   );
 }
 
+// The plans the pop-up shows for the monthly/yearly switch. A running plan: its own plan at the
+// switch (the interval change), every other plan at the plan's own interval, since an upgrade
+// or a downgrade keeps the interval.
+const planRunning = (a) => !!a && (a.state === 'active' || a.state === 'past_due') && !!a.plan;
+const planRows = (a, view) => a.prices.filter(p => p.interval === (planRunning(a) && p.plan !== a.plan ? a.interval : view));
+window.planRows = planRows;
+// What a plan's button does first: 'interval' (the same plan, the other interval), 'keep' (a
+// smaller plan: which plants stay) or 'checkout' (the final pick, then pay). pick false: the
+// pick would list no plant (an ended account with no login), so it goes on with none.
+const planStep = (a, row) => {
+  const running = planRunning(a);
+  if (running && row.plan === a.plan) return { mode: 'interval', pick: false };
+  const cur = running ? a.prices.find(p => p.plan === a.plan)?.places ?? a.places : 0;
+  const mode = running && row.places < cur ? 'keep' : 'checkout';
+  return { mode, pick: window.pickLogins(a, mode).length > 0 };
+};
+window.planStep = planStep;
+
 // The plans pop-up: Home and Family side by side with a monthly/yearly switch, priced for this
 // account (a running plan keeps its launch price). "Fits your plants" counts every linked plant.
 // A first plan, a restart and an upgrade ask for the final plant choice, then pay. A smaller
 // plan asks which plants it keeps, then is booked for the billing date.
 function PlansDialog({ acct, onClose }) {
   const { useState, useEffect } = React;
-  const running = !!acct && (acct.state === 'active' || acct.state === 'past_due') && !!acct.plan;
+  const running = planRunning(acct);
   const [view, setView] = useState(() => (running ? acct.interval : 'year'));
   const [pick, setPick] = useState(null);   // { row, mode: 'checkout' | 'keep' }
   const [busy, setBusy] = useState(false);
@@ -2440,7 +2458,7 @@ function PlansDialog({ acct, onClose }) {
     if (!acct || running) return;
     const want = window.takeWantPlan();
     const row = want && acct.prices.find(p => p.plan === want.plan && p.interval === want.period);
-    if (row) { setView(row.interval); window.track('website_plan_done', { plan: row.plan, period: row.interval }); setPick({ row, mode: 'checkout' }); }
+    if (row) { setView(row.interval); window.track('website_plan_done', { plan: row.plan, period: row.interval }); choose(row); }
   }, [!!acct]);
   const pop = (body) => <window.Dialog size="wide" label={AT.plans.title} busy={busy} onClose={() => !busy && onClose()}>{body}</window.Dialog>;
   if (!acct) return pop(
@@ -2449,20 +2467,20 @@ function PlansDialog({ acct, onClose }) {
       <div className="plan-grid plan-cards" aria-hidden="true">{[0, 1].map(i => <window.Skeleton key={i} h={180} r={14} />)}</div>
     </div>
   );
-  const rows = acct.prices.filter(p => p.interval === view);
-  const curPlaces = running ? acct.prices.find(p => p.plan === acct.plan)?.places ?? acct.places : 0;
-  const choose = (row) => {
+  const rows = planRows(acct, view);
+  function choose(row) {
     if (acct.state === 'past_due') return window.toast(AT.refused('past_due'), { error: true });
-    if (running && row.plan === acct.plan) {
+    const { mode, pick: ask } = planStep(acct, row);
+    if (mode === 'interval') {
       // the same plan, the other interval: from the billing date
       return window.bookChange({ action: 'interval', period: row.interval }, { name: 'yearly_switch_done', props: { plan: row.plan, interval: row.interval } })
         .then(a => { if (a) { window.toast(AT.pay.booked); onClose(); } });
     }
-    if (running && row.places < curPlaces) return setPick({ row, mode: 'keep' });
-    setPick({ row, mode: 'checkout' });
-  };
-  const picked = async (ids) => {
-    const { row, mode } = pick;
+    if (ask) return setPick({ row, mode });
+    picked([], { row, mode });
+  }
+  async function picked(ids, now = pick) {
+    const { row, mode } = now;
     setPick(null);
     if (!ids) return;
     if (mode === 'keep') {
@@ -2475,7 +2493,7 @@ function PlansDialog({ acct, onClose }) {
     }
     window.track('checkout_pick_done', { plan: row.plan, count: ids.length });
     window.startPlan(acct, row.plan, row.interval, ids, { newCard: !running });
-  };
+  }
   return pop(
     <div className="settings-page plan-pop">
       <div className="page-head"><h1>{AT.plans.title}</h1></div>
@@ -2579,7 +2597,7 @@ function SunSynkConnectionSection({ onChanged, links, acct, head }) {
   const [leaving, setLeaving] = useState(null); // account_id folding away after a remove
   // Remove login: which chosen plants go with it and whether each one's history is deleted
   // now or kept by another account (the catalog, from the account's state).
-  const removeText = (acc) => (acct ? AT.removeLogin(acct, acc.account_id) : []).map(l => <div key={l} className="confirm-text">{l}</div>);
+  const removeText = (acc) => (acct ? AT.removeLogin(acct, acc.account_id, acc.kind === 'share') : []).map(l => <div key={l} className="confirm-text">{l}</div>);
   // The plants that go, in the pay pop-up's darker box, a panel before each (SOLAR-368).
   const removeList = (acc) => !!acc.plants?.length && (
     <div className="remove-plants">
