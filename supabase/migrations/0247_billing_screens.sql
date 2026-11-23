@@ -160,10 +160,18 @@ begin
            'drop_at_period_end', coalesce((select se.drop_at_period_end from billing.seats se
                                              where se.account = p_account and se.plant = (p->>'plant')::bigint
                                                and se.closed_at is null), false),
+           -- the logins that list it now; else the ones it went from (removing such a login deletes it)
            'logins', coalesce((select jsonb_agg(l.id order by l.created_at) from billing.logins l
                                  join billing.login_plants lp on lp.login = l.id
-                                where l.account = p_account and lp.plant = (p->>'plant')::bigint and lp.gone_at is null), '[]'::jsonb),
-           'claimed', exists (select 1 from billing.plant_claims c where c.account = p_account and c.plant = (p->>'plant')::bigint))
+                                where l.account = p_account and lp.plant = (p->>'plant')::bigint and lp.gone_at is null),
+                              (select jsonb_agg(l.id order by l.created_at) from billing.logins l
+                                 join billing.login_plants lp on lp.login = l.id
+                                where l.account = p_account and lp.plant = (p->>'plant')::bigint), '[]'::jsonb),
+           'claimed', exists (select 1 from billing.plant_claims c where c.account = p_account and c.plant = (p->>'plant')::bigint),
+           -- it came through the share: removing the shared group lets it go (api_link_remove)
+           'shared', exists (select 1 from public.plant_users pu join private.sunsynk_accounts sa on sa.id = pu.account_id
+                              where sa.kind = 'share' and pu.plant_id = (p->>'plant')::bigint
+                                and pu.user_id = a.user_id))
          order by (p->>'plant')::bigint), '[]'::jsonb)
     into plants from jsonb_array_elements(s->'plants') p;
 

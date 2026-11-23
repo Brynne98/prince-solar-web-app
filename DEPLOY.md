@@ -258,13 +258,17 @@ frontend second, in this order:
    bill). The copy does not refuse for any of them. Its answer counts them (`refunds`,
    `refunds_to_send`, `disputes_open`, `owed`). Every settled old reference, at any age, is
    kept in `billing.old_references` (`old_references`): Paystack sending an old paid one
-   again is answered as already applied, never refunded. A switch to yearly already paid
-   (`prepaid_on` on the billing date) copies as the yearly plan to a year after that date,
-   with nothing charged on it. Before step 4, count them:
+   again is answered as already applied, never refunded; a first dispute on one brings its
+   bill and try back, so it blocks a delete while open and is owed if lost. A switch to yearly
+   already paid (`prepaid_on` on the billing date) copies as the yearly plan from that date to
+   a year after it, with nothing charged on it; the paid switch's bill is that year, so a lost
+   dispute ends it. Before step 4, count them:
    `select count(*) from private.billing where prepaid_on is not null`; in step 5 check each
-   one is yearly with that end date.
+   one is yearly with that start and end date.
 5. Compare `billing.account_state` for each account with today's screens, next charges and
-   poll decisions.
+   poll decisions. By hand: the old refunds that failed and now wait for a hand refund,
+   `select * from billing.refunds where reason = 'manual' and status = 'failed'`. Each one is
+   paid back from the Paystack dashboard; the copy never sends them.
 6. The switch, in this order, so no billing email is sent twice or lost, and no change made
    since step 4 is lost (logins, plant choices and payments made since the first copy are in
    the old tables only):
@@ -281,8 +285,10 @@ frontend second, in this order:
       longer the record; old paths that still write them (linking) work again.
 
    `switch_on` refuses while `billing.accounts` is empty (step 4 not run). It turns reading,
-   deleting and history fetches over to the new state, turns the `unpaid-delete` and
-   `plant-wipe` jobs off, schedules `billing-delete` (every 5 minutes, `billing.delete_due()`)
+   deleting and history fetches over to the new state, turns the old jobs off (`unpaid-delete`,
+   `plant-wipe`, `plant-purge`, `free-trim`, `free-week-mail`, `offer-end-mail`,
+   `card-expiry-mail`; the old plant wipe, stop wipe, unpaid delete and the old run's drop also
+   do nothing once switched, whoever calls them), schedules `billing-delete` (every 5 minutes, `billing.delete_due()`)
    and `billing-history` (every minute, `recover?queue=1`), and turns `billing-run` back on
    (stopped in step 3), now calling the new billing function. From then
    on the old billing, free-week and history emails are not queued (0247

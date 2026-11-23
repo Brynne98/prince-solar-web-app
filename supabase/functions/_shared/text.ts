@@ -13,7 +13,7 @@ export type Iso = string;
 export type PlantState = {
   plant: number; name: string | null; chosen: boolean; locked: boolean; read_now: boolean;
   needs_reconnect: boolean; trial_used_elsewhere: boolean; delete_at: Iso | null; purged: boolean;
-  kept_elsewhere: boolean; drop_at_period_end: boolean; logins: string[]; claimed: boolean;
+  kept_elsewhere: boolean; drop_at_period_end: boolean; logins: string[]; claimed: boolean; shared: boolean;
 };
 export type PriceRow = {
   plan: string; name: string; places: number; interval: "month" | "year";
@@ -382,10 +382,10 @@ export const logins = {
   removeTitle: (username: string) => `Remove ${username}?`,
 };
 /** Removing a login: which plants go and what happens to each one's history. shared: the
- *  "Shared plants" group: every plant no login of the account reaches (claimed, or a share
- *  removed that keeps its place). */
+ *  "Shared plants" group: the plants no login of the account reaches that came through the
+ *  share (claimed, or a share removed that keeps its place); only those go with it. */
 export function removeLogin(s: AccountState, loginId: string, shared = false) {
-  const only = shared ? s.plants.filter((p) => !p.logins.length)
+  const only = shared ? s.plants.filter((p) => !p.logins.length && p.shared)
     : s.plants.filter((p) => p.logins.length === 1 && p.logins[0] === loginId && !p.claimed);
   const chosen = only.filter((p) => p.chosen);
   const gone = chosen.filter((p) => !p.kept_elsewhere).map(plantName);
@@ -484,10 +484,17 @@ function keptGroups(s: AccountState): { day: string; names: string[] }[] {
 }
 /** Plants with different delete dates: each date with its plants, never one date for all. */
 const keptEach = (g: { day: string; names: string[] }[]) => g.map((x) => `${names(x.names)}: history kept until ${x.day}.`).join(" ");
+/** One date that covers only some of the chosen plants still holding history (another account
+ *  keeps the rest): name them too. A date already passed does not count. */
+const someOnly = (s: AccountState, g: { names: string[] }[]) => {
+  const now = s.at ? Date.parse(s.at) : Date.now();
+  return g.length === 1 && g[0].names.length <
+    s.plants.filter((p) => p.chosen && !p.purged && !(p.delete_at && Date.parse(p.delete_at) <= now)).length;
+};
 /** The pay screen's history line: each date with its plants, as in the emails. */
 function keptLine(s: AccountState): string | null {
   const g = keptGroups(s);
-  return g.length > 1 ? keptEach(g) : g.length ? `History is kept until ${g[0].day}.` : s.history_purged ? "History has been deleted." : null;
+  return g.length > 1 || someOnly(s, g) ? keptEach(g) : g.length ? `History is kept until ${g[0].day}.` : s.history_purged ? "History has been deleted." : null;
 }
 
 /** The email for one outbox row, from the state read at send time (and the frozen bill for a receipt). */
@@ -496,7 +503,7 @@ export function mail(m: MailInput): Mail | null {
   const $ = (n: number | null | undefined, cur = s.currency) => money(n, cur, s.locale);
   const card = (t: string | null | undefined, l: string | null | undefined) => l ? `${(t || "Card").replace(/^\w/, (c) => c.toUpperCase())} •••• ${l}` : null;
   const groups = keptGroups(s);
-  const kept = groups.length > 1 ? keptEach(groups)
+  const kept = groups.length > 1 || someOnly(s, groups) ? keptEach(groups)
     : s.history_kept_until ? `History is kept until ${day(s, s.history_kept_until)}, then deleted.` : null;
   const fit = fitLine(s);
   switch (m.key) {
@@ -575,11 +582,12 @@ export function mail(m: MailInput): Mail | null {
           { button: { label: billing.seePlans, page: "plans" } }] };
     case "history_delete_soon": {
       const first = day(s, s.history_kept_until);
-      if (groups.length > 1) {
+      if (groups.length > 1 || someOnly(s, groups)) {
         // only the plants due on the first date are named in the subject; the rest keep their own dates
         const head = `History of ${names(groups[0].names)} is deleted on ${first}`;
         return { reminder: true, subject: head, title: head,
-          parts: [{ lead: `Readings stopped on ${day(s, s.access_ended_at)}. ${keptEach(groups.slice(1))} A plan before ${first} keeps it all.` },
+          parts: [{ lead: [`Readings stopped on ${day(s, s.access_ended_at)}.`, keptEach(groups.slice(1)) || null,
+            `A plan before ${first} keeps it${groups.length > 1 ? " all" : ""}.`].filter(Boolean).join(" ") },
             { button: { label: billing.seePlans, page: "plans" } }] };
       }
       return { reminder: true, subject: `Your history is deleted on ${first}`, title: `Your history is deleted on ${first}`,

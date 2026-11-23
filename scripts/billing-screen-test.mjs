@@ -83,7 +83,7 @@ test('no plan running: the view decides every row', () => {
 
 // ---- 17: removing the shared group names its plants --------------------------------------
 test('remove the shared group: its claimed plants go (fix 17)', () => {
-  const a = acct({ plants: [plant(7, { name: 'Gran', logins: [], claimed: true, chosen: true }), plant(1, { chosen: true })] });
+  const a = acct({ plants: [plant(7, { name: 'Gran', logins: [], claimed: true, shared: true, chosen: true }), plant(1, { chosen: true })] });
   eq(ctx.AccountText.removeLogin(a, 'share-login-id', true), ['Gran: history deleted now.']);
   eq(ctx.AccountText.removeLogin(a, 'L1'), ['Plant 1: history deleted now.']);
 });
@@ -171,8 +171,23 @@ test('pay screen: each plant with its own date, a date passed left out (verify f
 });
 
 test('remove the shared group: a plant whose share was removed is named too (verify 2 fix 4)', () => {
-  const a = acct({ plants: [plant(7, { name: 'Gran', logins: [], claimed: false, chosen: true }), plant(1, { chosen: true })] });
+  const a = acct({ plants: [plant(7, { name: 'Gran', logins: [], claimed: false, shared: true, chosen: true }), plant(1, { chosen: true })] });
   eq(ctx.AccountText.removeLogin(a, 'share-login-id', true), ['Gran: history deleted now.']);
+});
+test('remove the shared group: a plant that did not come through the share is not named (verify 3 fix 9)', () => {
+  const a = acct({ plants: [plant(7, { name: 'Gran', logins: [], claimed: true, shared: true, chosen: true }),
+    plant(8, { name: 'Other', logins: [], shared: false, chosen: true })] });
+  eq(ctx.AccountText.removeLogin(a, 'share-login-id', true), ['Gran: history deleted now.']);
+});
+test('one delete date for only some plants names them (verify 3 fix 7)', () => {
+  const s = { ...acct(), ...tz, state: 'ended', plan: null, had_plan: true, last_plan_name: 'Home', at: '2026-12-10T08:00:00Z',
+    access_ended_at: '2026-12-01T08:00:00Z', history_kept_until: '2026-12-31T08:00:00Z', history_purged: false,
+    plants: [plant(1, { chosen: true, delete_at: '2026-12-31T08:00:00Z' }), plant(2, { chosen: true, kept_elsewhere: true, delete_at: null })] };
+  eq(ctx.AccountText.payScreen(s).body, 'Readings have stopped. Plant 1: history kept until 31 Dec 2026.');
+  eq(ctx.AccountText.mail({ key: 'trial_ended', state: s }).parts[0].lead.includes('Plant 1: history kept until 31 Dec 2026.'), true);
+  const m = ctx.AccountText.mail({ key: 'history_delete_soon', state: s });
+  eq([m.subject, m.parts[0].lead], ['History of Plant 1 is deleted on 31 Dec 2026',
+    'Readings stopped on 1 Dec 2026. A plan before 31 Dec 2026 keeps it.']);
 });
 test('a delete date already passed shows no "kept until" (verify 2 fix 10)', () => {
   const s = { ...acct(), ...tz, at: '2026-12-10T08:00:00Z' };

@@ -3501,6 +3501,28 @@ begin
 exception when others then perform pg_temp.ok('X8 runs', false, sqlerrm);
 end $$;
 
+-- X9 a plant gone from login L1 shows under L1 (its Remove deletes it); a plant that came
+--    through the share is marked shared, one from a login is not (verify 3 fix 9)
+do $$
+declare b uuid := pg_temp.acct('x9'); ub uuid; sh uuid; l uuid; ss jsonb;
+begin
+  select user_id into ub from billing.accounts where id = b;
+  sh := pg_temp.share_login();
+  l := pg_temp.link(b, 'x9', '{990120901,990120902}', now() - interval '2 days');
+  perform public.share_claim_live(ub, sh, 990120903, 'Gran');
+  perform pg_temp.pay(b, 'family', 'month', now() - interval '1 day');
+  perform pg_temp.choose(b, '{990120901,990120902,990120903}', now() - interval '1 day');
+  update billing.login_plants set gone_at = now() - interval '1 hour' where login = l and plant = 990120902;
+  ss := billing.screen_state(b, now());
+  perform pg_temp.eq('X9 gone from L1: shown under L1', (select e->>'logins' from jsonb_array_elements(ss->'plants') e
+    where (e->>'plant')::bigint = 990120902), jsonb_build_array(l)::text);
+  perform pg_temp.eq('X9 claimed plant: shared', pg_temp.pp(b, now(), 990120903, 'name') || ' ' || (select e->>'shared'
+    from jsonb_array_elements(ss->'plants') e where (e->>'plant')::bigint = 990120903), 'Gran true');
+  perform pg_temp.eq('X9 a login''s plant: not shared', (select e->>'shared' from jsonb_array_elements(ss->'plants') e
+    where (e->>'plant')::bigint = 990120901), 'false');
+exception when others then perform pg_temp.ok('X9 runs', false, sqlerrm);
+end $$;
+
 -- ---------------------------------------------------------------------------
 do $$
 declare r record; f int; n int;
