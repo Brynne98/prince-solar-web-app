@@ -873,6 +873,13 @@ begin
   perform pg_advisory_xact_lock_shared(3, 0);
   if not billing.is_live() then return public.api_account_delete_old(); end if;
   if uid is null then raise exception 'not signed in' using errcode = '42501'; end if;
+  -- the order the other writers use, before the account: each login's lock (a reconnect holds
+  -- it while it waits for the account), then the link rows (the poller's share update holds
+  -- them while it waits for the account). Taken the other way round, either one deadlocks.
+  for acc in select id from private.sunsynk_accounts where user_id = uid order by id loop
+    perform pg_advisory_xact_lock(1, hashtext(acc.id::text));
+  end loop;
+  perform 1 from public.plant_users where user_id = uid order by plant_id for update;
   gone := case when exists (select 1 from billing.accounts where user_id = uid)
                then billing.delete_account((select id from billing.accounts where user_id = uid))
                else jsonb_build_object('unprotected', '[]'::jsonb) end;
