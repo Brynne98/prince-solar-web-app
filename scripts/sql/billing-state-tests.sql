@@ -3489,6 +3489,18 @@ begin
 exception when others then perform pg_temp.ok('X3 runs', false, sqlerrm);
 end $$;
 
+-- X8 the interval it already has, nothing booked: no email; the event keeps the old next price (verify 3 fix 8)
+do $$
+declare a uuid := pg_temp.acct('x8'); e bigint;
+begin
+  perform pg_temp.member(a, 'x8', 990120801);
+  perform billing.switch_interval(a, 'month', pg_temp.t(2));
+  select id into e from billing.account_events where account = a and kind = 'switch_interval' order by at desc, id desc limit 1;
+  perform pg_temp.ok('X8 the event logs the old next price', (select before ? 'next_price' from billing.account_events where id = e));
+  perform pg_temp.eq('X8 nothing changed: no email', (select string_agg(key, ',') from billing.outbox where account = a and ref = e::text), null);
+exception when others then perform pg_temp.ok('X8 runs', false, sqlerrm);
+end $$;
+
 -- ---------------------------------------------------------------------------
 do $$
 declare r record; f int; n int;

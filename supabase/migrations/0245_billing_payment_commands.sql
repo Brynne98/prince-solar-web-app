@@ -588,7 +588,8 @@ begin
   update billing.subscriptions set next_price = nid, version = version + 1 where id = s.id;
   perform billing.bump(p_account);
   perform billing.log_event(p_account, p_at, p_actor, 'switch_interval',
-                            jsonb_build_object('interval', s.interval), jsonb_build_object('interval', p_interval, 'next_price', nid));
+                            jsonb_build_object('interval', s.interval, 'next_price', s.next_price),
+                            jsonb_build_object('interval', p_interval, 'next_price', nid));
   return billing.account_state(p_account, p_at);
 end $$;
 

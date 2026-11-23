@@ -1030,14 +1030,19 @@ create trigger payment_methods_outbox after insert or update of active on billin
 create function billing.outbox_on_event()
 returns trigger language plpgsql set search_path = billing, pg_temp as $$
 begin
-  if new.actor = 'owner' and new.kind in ('cancel', 'undo_cancel', 'downgrade', 'switch_interval') then
+  if new.actor = 'owner' and new.kind in ('cancel', 'undo_cancel', 'downgrade', 'switch_interval')
+     -- an interval switch that changed nothing booked (the interval it has, nothing booked
+     -- before): no email
+     and not (new.kind = 'switch_interval' and new.after ? 'next_price' and new.before ? 'next_price'
+              and new.after->>'next_price' is not distinct from new.before->>'next_price') then
     perform billing.outbox_put(new.account,
       case when new.kind = 'undo_cancel'
              or (new.kind = 'downgrade' and new.after->>'plan' = new.before->>'plan'
                  and new.after->>'extras' = new.before->>'extras')
-             -- back to the interval it has, nothing else booked: the switch is undone
+             -- back to the interval it has, a switch booked before: the switch is undone
              or (new.kind = 'switch_interval' and new.after->>'interval' = new.before->>'interval'
-                 and new.after ? 'next_price' and new.after->>'next_price' is null) then 'change_undone' else 'change_booked' end,
+                 and new.after ? 'next_price' and new.after->>'next_price' is null
+                 and new.before->>'next_price' is not null) then 'change_undone' else 'change_booked' end,
       null, new.id::text, 'event:' || new.id, new.at + interval '2 minutes', new.at + interval '2 days', new.at);
   end if;
   return null;
