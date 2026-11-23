@@ -29,3 +29,14 @@ export function refundIds(d: Record<string, unknown>): { provider_id: string | n
   const str = (v: unknown) => v != null && v !== "" ? String(v) : null;
   return { provider_id: str(d.id), provider_ref: str(d.refund_reference) };
 }
+
+/** A failed billing command's answer. 22023 and P0002: a refusal the owner reads ("pay the
+ *  failed payment first"), 409, not reported. Anything else (a lock clash, 40P01, or another
+ *  database fault): 500, and reported, so a repeated one shows in error tracking. */
+export function commandFailed(e: unknown, note: (kind: string, e: unknown) => void): { status: number; error: string } {
+  const code = (e as { code?: string })?.code;
+  const error = e instanceof Error ? e.message.replace(/^\w+: /, "") : String(e);
+  if (code === "22023" || code === "P0002") return { status: 409, error };
+  note("billing_command_failed", e);
+  return { status: 500, error };
+}

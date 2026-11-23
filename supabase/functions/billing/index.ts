@@ -27,7 +27,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { payClosed } from "../_shared/gate.ts";
-import { pool, refundIds, verifyStatus } from "./helpers.ts";
+import { commandFailed, pool, refundIds, verifyStatus } from "./helpers.ts";
 
 const SECRET = Deno.env.get("PAYSTACK_SECRET_KEY") ?? "";
 // Local tests point this at a stand-in server.
@@ -282,9 +282,8 @@ serve("billing", async (req) => {
   }
   // 22023: a refused command ("pay the failed payment first", ...): say why.
   const refused = (e: unknown) => {
-    const code = (e as { code?: string })?.code;
-    const msg = e instanceof Error ? e.message.replace(/^\w+: /, "") : String(e);
-    return json({ error: msg }, code === "22023" || code === "P0002" ? 409 : 500, cors);
+    const r = commandFailed(e, (kind, err) => noteError(kind, err, { user: user.id }));
+    return json({ error: r.error }, r.status, cors);
   };
 
   if (route === "verify") {
