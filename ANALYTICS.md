@@ -116,6 +116,8 @@ timeout. The cron jobs call through `private.call_fn` (0181), which keeps each p
 request id in `private.fn_calls`, joined to `net._http_response`. `signin-email`
 (SOLAR-469): a sign-in email sent in the last hour was UNDELIVERABLE, REJECTED or EXPIRED
 in Infobip's email logs (`INFOBIP_API_KEY`, `INFOBIP_BASE_URL`); recovers after a clean hour.
+`partitions:readings` / `partitions:strings` (0249, as `edge:ensure-partitions`): the table has
+day partitions for fewer than 6 UTC days from today (made 7 ahead), with `days_covered`.
 `job_check_ran` once a run as `edge:job-check`, with the checks still failing. PostHog
 alerts: "Timed job failed or recovered" (hourly) and "Job check stopped running" (no run
 in 15 min).

@@ -35,7 +35,7 @@ runbook, including pre-flight checks and the version bump, is in `DEPLOY.md`.
 - **Ship the backend, only what changed:**
 
   ```bash
-  supabase db push
+  supabase db push --linked
   supabase functions deploy poll
   ```
 

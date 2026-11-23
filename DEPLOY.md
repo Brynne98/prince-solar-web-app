@@ -20,10 +20,13 @@ is not true.
 
 ## 1. Pre-flight
 
+Supabase CLI v3 (Homebrew): database commands aim at the local stack unless given `--linked`.
+Function deploys use the linked project on their own.
+
 ```bash
 git status --short                  # must be clean at the end, not the start
 git log --oneline origin/main..HEAD # anything unpushed?
-supabase migration list             # Local and Remote columns must match
+supabase migration list --linked    # Local and Remote columns must match
 grep -rn "TEMPORARY\|console.log\|debugger" public/ supabase/functions/
 ```
 
@@ -85,7 +88,7 @@ would drag a Pages rebuild along for nothing.
 > ```
 
 ```bash
-supabase db push                                  # pending migrations
+supabase db push --linked                         # pending migrations
 supabase functions deploy poll                    # only what changed
 supabase functions deploy alerts-due recover sync-plant-energy
 ```
@@ -232,7 +235,7 @@ filter that id out of sales numbers.
 The new `billing` schema (migrations 0240 on) ships empty and unused. Backend first,
 frontend second, in this order:
 
-1. Push the migrations (0240 to 0247): `supabase db push`. Nothing changes what runs
+1. Push the migrations (0240 to 0247): `supabase db push --linked`. Nothing changes what runs
    today: the new tables stay empty, the old RPCs answer as before, and every new rule
    waits for `billing.switch_on()`.
 2. Deploy the functions that read the new state but fall back to the old rules until the
@@ -363,7 +366,7 @@ frontend second, in this order:
 8. After the new frontend is live and 24 to 48 hours of polls, payments and emails look right
    (`billing.alerts()` empty, no new `billing_command_failed` in PostHog):
    move `supabase/after-switch-over/0260_billing_drop_old.sql` into `supabase/migrations/`
-   under the next free number and `supabase db push`. It refuses to run before
+   under the next free number and `supabase db push --linked`. It refuses to run before
    `billing.switch_on()`. It drops `plant_picks`, the `held` flag, `plant_users.paused`, the
    old billing tables (`private.billing`, `billing_charges`, `free_week_logins`,
    `offer_members`, `offers`, `plant_week`), every function they feed, the old billing cron

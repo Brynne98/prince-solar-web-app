@@ -17,6 +17,8 @@ type Inputs = {
   signin?: Record<string, number> | null;
   /** billing.alerts() (0246); null when it could not be read */
   billing?: BillingAlert[] | null;
+  /** job_check_partitions() (0249): whole UTC days from today each table covers; null when not read */
+  partitions?: { table: string; days: number }[] | null;
 };
 type BillingAlert = { kind: string; ref: string } & Record<string, unknown>;
 // Every kind billing.alerts() can list, so each one also recovers when its list empties.
@@ -28,6 +30,9 @@ type Verdict = { name: string; job: string; failing: boolean | null; detail: Rec
 
 const SHARD_SILENT_MS = 5 * 60_000;
 const CRON_GRACE_MS = 3 * 60_000;   // a run may start this late before it counts as missed
+// readings/strings partitions are made 7 days ahead (0249): fewer than today + 5 days means
+// at least two nightly runs made nothing, whatever pg_cron says about them.
+export const PARTITION_MIN_DAYS = 6;
 
 // One cron field ("*", "*/5", "4-5", "10,40", "1-30/2") as the set of values it allows,
 // or null when pg_cron syntax we don't read ("$", "30 seconds").
@@ -136,9 +141,14 @@ export function judge(i: Inputs): Verdict[] {
                  detail: { count: hits.length, first: hits.slice(0, 5) } });
     }
   }
+  // Day partitions (0249): writes to a day with none fail. Not read (null) keeps the state.
+  for (const p of i.partitions ?? []) {
+    out.push({ name: `partitions:${p.table}`, job: "ensure-partitions", failing: p.days < PARTITION_MIN_DAYS,
+               detail: { days_covered: p.days, needed: PARTITION_MIN_DAYS } });
+  }
   // A failing check whose shard or job is gone (fewer shards, job unscheduled) clears.
   for (const [name, c] of Object.entries(i.checks)) {
-    if (c.failing && name !== "signin-email" && !name.startsWith("billing:") && !out.some((v) => v.name === name)) {
+    if (c.failing && name !== "signin-email" && !name.startsWith("billing:") && !name.startsWith("partitions:") && !out.some((v) => v.name === name)) {
       out.push({ name, job: name.startsWith("poll:") ? "poll" : name.replace(/^(cron|call):/, ""), failing: false, detail: { gone: true } });
     }
   }
@@ -160,6 +170,10 @@ if (import.meta.main) serve("job-check", async (req) => {
     noteError("billing_alerts", e, { hourly: true });
     return null;
   }) as BillingAlert[] | null;
+  i.partitions = await rpc("job_check_partitions").catch((e) => {
+    noteError("job_check_partitions", e, { hourly: true });
+    return null;
+  }) as Inputs["partitions"];
   const verdicts = judge(i);
   const changes = verdicts.filter((v) => v.failing != null && v.failing !== (i.checks[v.name]?.failing ?? false));
   if (changes.length) await rpc("job_check_save", { p_changes: changes.map(({ name, failing, detail }) => ({ name, failing, detail })) });

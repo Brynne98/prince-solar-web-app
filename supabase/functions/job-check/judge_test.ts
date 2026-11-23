@@ -1,4 +1,4 @@
-// deno test -A --node-modules-dir=none job-check/judge_test.ts (SOLAR-469, SOLAR-472)
+// deno test -A --node-modules-dir=none job-check/judge_test.ts (SOLAR-469, SOLAR-472, 0249)
 import { judge } from "./index.ts";
 
 const base = { now: "2026-11-10T21:00:00Z", shards: [], jobs: [], sunsynk: { calls: 0, failed: 0, since: null },
@@ -27,4 +27,13 @@ Deno.test("sign-in mail: a bounce fails, a clean hour recovers, Infobip silent k
   eq(pick(judge({ ...base, signin: {} }), "signin-email")?.failing, false, "quiet");
   const kept = judge({ ...base, signin: null, checks: { "signin-email": { failing: true, since: base.now } } });
   eq(pick(kept, "signin-email"), undefined, "kept");
+});
+
+Deno.test("partitions: under 6 days covered fails, 6 passes, not read keeps the state", () => {
+  const v = judge({ ...base, partitions: [{ table: "readings", days: 5 }, { table: "strings", days: 6 }] });
+  eq(pick(v, "partitions:readings")?.failing, true, "readings");
+  eq(pick(v, "partitions:readings")?.job, "ensure-partitions", "job");
+  eq(pick(v, "partitions:strings")?.failing, false, "strings");
+  const kept = judge({ ...base, partitions: null, checks: { "partitions:readings": { failing: true, since: base.now } } });
+  eq(pick(kept, "partitions:readings"), undefined, "kept");
 });
