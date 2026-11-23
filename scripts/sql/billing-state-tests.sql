@@ -492,7 +492,7 @@ begin
   insert into private.plant_week (plant_id, started_at) values (990001401, '2026-11-10 12:00+02');
   insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at, offer_id, card, card_email)
   values (u1, 'home', 'monthly', 12, '2026-12-12', 'active', '2026-11-12 09:00+02', 'launch',
-          '{"authorization_code":"AUTH_copy1","last4":"4081","exp_month":"12","exp_year":"2030","reusable":true,"card_type":"visa"}', 'copy1@state.test');
+          '{"authorization_code":"AUTH_copy1","last4":"4081","exp_month":"12","exp_year":"2030","reusable":true,"card_type":"visa "}', 'copy1@state.test');
   insert into public.plant_users (plant_id, user_id, plant_name, via_share) values (990001404, u2, 'Farm', true);
   insert into private.plant_picks (user_id, plant_id, held, picked_at) values (u2, 990001404, true, '2026-11-10 12:00+02');
   insert into private.billing (user_id, plan, comped, created_at) values (u2, 'family', true, '2026-11-10');
@@ -558,7 +558,10 @@ begin
     join billing.accounts a on a.id = e.account where a.user_id = u5 and e.kind = 'copy_needs_review'));
   perform pg_temp.ok('S14 past due: the unpaid period is 20 Oct to 20 Nov', (select period_start = '2026-10-20 00:00+02'
     and period_end = '2026-11-20 00:00+02' from billing.subscriptions where account = a3));
-  delete from billing.payment_attempts where gateway_response is distinct from 'copied: past due at the switch-over';
+  -- this test's accounts only: a local database may hold other old billing rows, copied too
+  delete from billing.payment_attempts where gateway_response is distinct from 'copied: past due at the switch-over'
+     and invoice in (select i.id from billing.invoices i join billing.accounts a on a.id = i.account
+                      where a.user_id in (u1, u2, u3, u4, u5));
   update private.billing set plants_to_remove = '{}' where user_id = u3;
   -- the old day-1 retry of the 20 Nov renewal, sent and not answered
   set local session_replication_role = replica;
@@ -585,6 +588,8 @@ begin
   perform pg_temp.eqt('S14 next charge', r->>'next_charge_at', '2026-12-12 00:00+02');
   perform pg_temp.ok('S14 saved card copied', exists (select 1 from billing.payment_methods
     where account = a1 and auth_ref = 'AUTH_copy1' and auth_email = 'copy1@state.test' and active and last4 = '4081'));
+  -- Paystack sends the brand with a space ("visa ", seen 2026-11-23): stored without it
+  perform pg_temp.eq('S14 copied card brand trimmed', (select card_type from billing.payment_methods where account = a1 and auth_ref = 'AUTH_copy1'), 'visa');
   perform pg_temp.ok('S14 share claim copied', exists (select 1 from billing.plant_claims where plant = 990001404 and account = a2));
   perform pg_temp.eq('S14 comped: grant of 5', pg_temp.st(a2, '2026-11-22 12:00+02', 'places'), '5');
   perform pg_temp.eq('S14 shared plant read', pg_temp.pp(a2, '2026-11-22 12:00+02', 990001404, 'read_now'), 'true');
@@ -3775,6 +3780,16 @@ begin
   perform pg_temp.eq('Z6 a plant with a payment on its way: payment_hold',
     (select e->>'payment_hold' from jsonb_array_elements(ss->'plants') e where (e->>'plant')::bigint = 990130601), 'true');
 exception when others then perform pg_temp.ok('Z6 runs', false, sqlerrm);
+end $$;
+
+-- Z7 a card saved from Paystack's answer: the brand without Paystack's trailing space, so
+-- "Visa •••• 4081" has one space and the Visa logo shows (seen in a test-key payment, 2026-11-23)
+do $$
+declare a uuid := pg_temp.acct('z7'); pm uuid;
+begin
+  pm := billing.save_method(a, '{"customer":{"email":"z7@state.test"},"authorization":{"authorization_code":"AUTH_z7","reusable":true,"card_type":"visa ","last4":"4081","exp_month":"12","exp_year":"2030"}}'::jsonb, now());
+  perform pg_temp.eq('Z7 saved card brand trimmed', (select card_type from billing.payment_methods where id = pm), 'visa');
+exception when others then perform pg_temp.ok('Z7 runs', false, sqlerrm);
 end $$;
 
 -- ---------------------------------------------------------------------------

@@ -290,7 +290,7 @@ begin
   insert into billing.payment_methods (account, provider, customer_code, auth_ref, auth_email, reusable, signature,
                                        card_type, last4, exp_month, exp_year, active, created_at)
   select a.id, 'paystack', b.card->>'customer_code', b.card->>'authorization_code', coalesce(b.card_email, u.email), true, b.card->>'signature',
-         b.card->>'card_type', b.card->>'last4', nullif(b.card->>'exp_month', '')::smallint,
+         btrim(b.card->>'card_type'), b.card->>'last4', nullif(b.card->>'exp_month', '')::smallint,
          nullif(b.card->>'exp_year', '')::smallint, true, b.created_at
     from private.billing b join billing.accounts a on a.user_id = b.user_id join auth.users u on u.id = b.user_id
    where b.card->>'authorization_code' is not null and coalesce((b.card->>'reusable')::boolean, true)

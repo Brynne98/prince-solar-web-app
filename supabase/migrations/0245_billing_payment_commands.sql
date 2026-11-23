@@ -740,6 +740,7 @@ returns jsonb language sql security definer set search_path = billing, pg_temp a
 $$;
 
 -- Saves the card Paystack answered with; a reusable one becomes the account's active card.
+-- The brand is trimmed: Paystack sends "visa " (test key, 2026-11-23).
 create function billing.save_method(p_account uuid, p_tx jsonb, p_at timestamptz)
 returns uuid language plpgsql set search_path = billing, pg_temp as $$
 declare
@@ -751,7 +752,7 @@ begin
   insert into billing.payment_methods (account, provider, customer_code, auth_ref, auth_email, reusable, signature,
                                        card_type, last4, exp_month, exp_year, active, disabled_reason, created_at)
   values (p_account, 'paystack', p_tx->'customer'->>'customer_code', au->>'authorization_code', p_tx->'customer'->>'email',
-          reusable, au->>'signature', au->>'card_type', au->>'last4', nullif(au->>'exp_month', '')::smallint,
+          reusable, au->>'signature', btrim(au->>'card_type'), au->>'last4', nullif(au->>'exp_month', '')::smallint,
           nullif(au->>'exp_year', '')::smallint, false, case when reusable then 'replaced' else 'not_reusable' end, p_at)
   on conflict (provider, auth_ref) do update
      set auth_email = coalesce(excluded.auth_email, payment_methods.auth_email),
