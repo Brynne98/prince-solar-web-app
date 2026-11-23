@@ -582,6 +582,81 @@ begin
     and (select count(*) = 1 from billing.subscriptions s join billing.accounts a on a.id = s.account where a.user_id = u1));
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- S15 old charges copied: a Paystack answer after the switch finds its reference.
+-- Runs in a block that is rolled back, so phase 2 starts as S14 left it.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  u6 uuid := gen_random_uuid(); lg6 uuid := gen_random_uuid(); u7 uuid := gen_random_uuid(); lg7 uuid := gen_random_uuid();
+  a6 uuid; a7 uuid; r jsonb; res jsonb := '[]'; x jsonb;
+  d0 date := current_date - 2; nb date;
+begin
+  begin
+    nb := public.billing_step(d0, 'monthly', extract(day from d0)::int, 1);
+    set local session_replication_role = replica;
+    insert into auth.users (id, email, created_at) values (u6, 'copy6@state.test', now() - interval '3 days'),
+                                                          (u7, 'copy7@state.test', now() - interval '90 days');
+    insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values
+      (lg6, u6, 'copy6', 'active', 'login'), (lg7, u7, 'copy7', 'active', 'login');
+    insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused) values
+      (990001501, u6, lg6, 'A', false), (990001511, u7, lg7, 'B', false);
+    insert into private.plant_picks (user_id, plant_id, held, picked_at) values
+      (u6, 990001501, true, now() - interval '3 days'), (u7, 990001511, true, now() - interval '90 days');
+    insert into private.free_week_logins (sunsynk_username, user_id, started_at) values ('copy6', u6, now() - interval '3 days');
+    -- u6: on the card page for Home when the old payments stopped
+    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, plants)
+    values ('psh_s15start', u6, 'start', 'home', 'monthly', 99, 'pending', current_date, current_date, now() - interval '10 minutes', '{990001501}');
+    -- u7: Home monthly; the old run moved the billing date on and the renewal charge is open;
+    -- last month's renewal was paid
+    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at, card)
+    values (u7, 'home', 'monthly', extract(day from d0)::int, nb, 'active', now() - interval '90 days',
+            '{"authorization_code":"AUTH_copy7","last4":"0007","exp_month":"12","exp_year":"2030","reusable":true}');
+    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at) values
+      ('psh_s15renew', u7, 'renewal', 'home', 'monthly', 99, 'pending', d0, d0, now() - interval '1 hour', null),
+      ('psh_s15paid', u7, 'renewal', 'home', 'monthly', 99, 'paid', public.billing_step(d0, 'monthly', extract(day from d0)::int, -1),
+       d0 - 30, now() - interval '30 days', now() - interval '30 days');
+    set local session_replication_role = origin;
+
+    perform billing.copy_from_old();
+    perform billing.copy_from_old();                     -- step 6 copies again: the old charges allow it
+    insert into billing.switch_over (switched_at) values (now());
+    a6 := (select id from billing.accounts where user_id = u6);
+    a7 := (select id from billing.accounts where user_id = u7);
+
+    r := billing.apply_payment('psh_s15start', jsonb_build_object('status', 'success', 'reference', 'psh_s15start',
+           'amount', 9900, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now(),
+           'authorization', jsonb_build_object('authorization_code', 'AUTH_copy6', 'reusable', true, 'last4', '0006',
+                                               'exp_month', '12', 'exp_year', '2030', 'card_type', 'visa', 'signature', 'SIG_copy6'),
+           'customer', jsonb_build_object('email', 'copy6@state.test', 'customer_code', 'CUS_copy6')), now());
+    res := res || jsonb_build_object('l', 'S15 an old open start, paid after the switch: applied, not refunded',
+                                     'p', r->>'action' = 'applied' and r->>'kind' = 'purchase', 'd', r::text);
+    res := res || jsonb_build_object('l', 'S15 ... and the plan runs with its plant',
+      'p', exists (select 1 from billing.subscriptions where account = a6 and plan = 'home' and status = 'active')
+           and exists (select 1 from billing.seats where account = a6 and plant = 990001501 and closed_at is null));
+
+    r := billing.apply_payment('psh_s15renew', jsonb_build_object('status', 'success', 'reference', 'psh_s15renew',
+           'amount', 9900, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
+    res := res || jsonb_build_object('l', 'S15 an old open renewal, paid after the switch: applied to its own period',
+      'p', r->>'action' = 'applied' and r->>'kind' = 'renewal'
+           and exists (select 1 from billing.subscriptions where account = a7 and status = 'active'
+                          and period_start = d0::timestamp at time zone 'Africa/Johannesburg'
+                          and period_end = nb::timestamp at time zone 'Africa/Johannesburg'), 'd', r::text);
+
+    r := billing.apply_payment('psh_s15paid', jsonb_build_object('status', 'success', 'reference', 'psh_s15paid',
+           'amount', 9900, 'currency', 'ZAR', 'gateway_response', 'Approved'), now());
+    res := res || jsonb_build_object('l', 'S15 an old paid charge answered again: nothing refunded', 'p', r->>'action' = 'again', 'd', r::text);
+    res := res || jsonb_build_object('l', 'S15 no refund for any old reference',
+      'p', not exists (select 1 from billing.refunds where reference like 'psh_s15%'));
+    raise exception 's15 undo';
+  exception when others then
+    if sqlerrm <> 's15 undo' then res := res || jsonb_build_object('l', 'S15 runs', 'p', false, 'd', sqlerrm); end if;
+  end;
+  for x in select * from jsonb_array_elements(res) loop
+    perform pg_temp.ok(x->>'l', (x->>'p')::boolean, x->>'d');
+  end loop;
+end $$;
+
 -- ===========================================================================
 -- Phase 2: money paths, through the real commands. No network: Paystack's answers
 -- are made here (pg_temp.tx_ok and pg_temp.answer) and handed to apply_payment.

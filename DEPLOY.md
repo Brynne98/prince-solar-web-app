@@ -248,7 +248,10 @@ frontend second, in this order:
 4. Copy today's accounts, once: `supabase db query --linked "select billing.copy_from_old()"`.
    A rerun keeps each account's id and clears only the events the copy wrote, so it is safe
    until the first payment lands in `billing.invoices`; after that it refuses. Saved cards
-   come across, so renewals keep charging them.
+   come across, so renewals keep charging them. Old charges still open, or settled in the
+   last 120 days, come across with their Paystack reference: a webhook or a return from the
+   card page after the switch is applied under the new rules (or refunded if stale there),
+   not refunded as unknown. An old one still open after step 3 is fine.
 5. Compare `billing.account_state` for each account with today's screens, next charges and
    poll decisions.
 6. The switch, in this order, so no billing email is sent twice or lost, and no change made

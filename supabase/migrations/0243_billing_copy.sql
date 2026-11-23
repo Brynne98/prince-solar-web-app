@@ -32,6 +32,15 @@
 --   payment_methods the saved card (private.billing.card, card_email), so renewals
 --                  go on charging it. The table comes in 0244; this body only runs
 --                  after every migration is in.
+--   old charges    private.billing_charges still open, or settled in the last 120 days
+--                  (a dispute's window): each becomes a bill and a try with the same
+--                  reference, so a Paystack answer or a /verify after the switch finds it.
+--                  Open: start -> purchase, upgrade -> upgrade on the running plan,
+--                  renewal/settle -> the plan's renewal bill, card -> card_check; applied
+--                  under the new rules, or refunded if stale there. A yearly switch, or an
+--                  open charge with no plan to put it on, is a bill nothing applies (stale).
+--                  Settled: a paid, refunded (not_applied) or failed try, answered 'again'.
+--                  Their tries say 'copied: ...', so a rerun is still allowed.
 -- ============================================================================
 
 create function billing.copy_from_old()
@@ -44,12 +53,23 @@ declare
   r record;
   inv record;                                    -- billing.invoices (0244 comes after this file)
   review int := 0;
+  osub record;                                   -- old charges: o* names, clear of the queries' aliases
+  opr record;
+  okind text;
+  oiv text;
+  och text;
+  odue timestamptz;
+  oinv uuid;
+  oplants bigint[];
 begin
   -- anything but this copy's own seed tries (below) means real money moved here
   if to_regclass('billing.invoices') is not null then
-    execute format($q$select exists (select 1 from billing.invoices where status <> 'open')
-                         or exists (select 1 from billing.payment_attempts where gateway_response is distinct from %L)
-                         or exists (select 1 from billing.refunds) or exists (select 1 from billing.payment_events)$q$, seed)
+    -- the copy's own tries say 'copied: ...'; any answer since replaces that text
+    execute $q$select exists (select 1 from billing.invoices i where i.status <> 'open'
+                                 and not exists (select 1 from billing.payment_attempts pa where pa.invoice = i.id
+                                                    and pa.gateway_response like 'copied: %'))
+                 or exists (select 1 from billing.payment_attempts where coalesce(gateway_response, '') not like 'copied: %')
+                 or exists (select 1 from billing.refunds) or exists (select 1 from billing.payment_events)$q$
       into paid;
   end if;
   if paid then
@@ -216,8 +236,81 @@ begin
    where b.card->>'authorization_code' is not null and coalesce((b.card->>'reusable')::boolean, true)
   on conflict (provider, auth_ref) do nothing;
 
+  -- old charges (see the header): the same reference on the new tables
+  for r in select c.*, a.id account from private.billing_charges c join billing.accounts a on a.user_id = c.user_id
+            where c.status = 'pending' or coalesce(c.settled_at, c.created_at) > now() - interval '120 days'
+            order by c.created_at, c.reference loop
+    okind := case r.kind when 'start' then 'purchase' when 'card' then 'card_check'
+                     when 'upgrade' then 'upgrade' when 'switch' then 'upgrade' else 'renewal' end;
+    och := case when r.kind = 'renewal' then 'saved_card' else 'card_page' end;
+    oiv := case r.period when 'yearly' then 'year' else 'month' end;
+    oinv := null;
+    oplants := coalesce(r.plants, array(select se.plant from billing.seats se
+                                      where se.account = r.account and se.closed_at is null order by se.plant));
+    if r.status = 'pending' then
+      select * into osub from billing.subscriptions x where x.account = r.account and x.status in ('active', 'past_due');
+      if okind = 'renewal' and osub.id is not null then
+        odue := r.due_on::timestamp at time zone tz;
+        if osub.status = 'active' and osub.period_start = odue then
+          -- the old run moved the billing date on before charging: that period is not paid yet
+          update billing.subscriptions
+             set period_end = odue,
+                 period_start = public.billing_step(r.due_on, r.period, osub.billing_day, -1)::timestamp at time zone tz
+           where id = osub.id returning * into osub;
+        end if;
+        if osub.period_end = odue then oinv := (billing.ensure_renewal(osub.id, r.created_at)).id; end if;
+      elsif okind = 'purchase' then
+        opr := billing.price_for(r.plan, 'ZA', oiv, r.offer_id, r.created_at);
+        if opr.id is null then opr := billing.price_for(r.plan, 'ZA', oiv, null, r.created_at); end if;
+        if opr.id is not null then
+          insert into billing.invoices (account, kind, price, plan, interval, offer, extra_places, plan_amount_minor,
+                                        extra_place_minor, amount_minor, tax_minor, currency, plants, created_at)
+          values (r.account, 'purchase', opr.id, r.plan, oiv, opr.offer, coalesce(r.extra_plants, 0), opr.amount_minor,
+                  opr.extra_place_minor, r.amount * 100, opr.tax_minor, 'ZAR', oplants, r.created_at)
+          returning id into oinv;
+        end if;
+      elsif r.kind = 'upgrade' and osub.status = 'active' then
+        opr := billing.price_keeping_offer(r.plan, 'ZA', osub.interval, osub.offer, r.created_at);
+        if opr.id is not null then
+          insert into billing.invoices (account, subscription, kind, price, plan, interval, offer, extra_places,
+                                        plan_amount_minor, extra_place_minor, amount_minor, tax_minor, currency,
+                                        period_start, period_end, period_key, plants, created_at)
+          values (r.account, osub.id, 'upgrade', opr.id, r.plan, osub.interval, osub.offer, coalesce(r.extra_plants, osub.extra_places),
+                  opr.amount_minor, opr.extra_place_minor, r.amount * 100, opr.tax_minor, osub.currency, osub.period_start,
+                  osub.period_end, extract(epoch from osub.period_start)::bigint || ':' || r.plan || '+' || coalesce(r.extra_plants, osub.extra_places),
+                  oplants, r.created_at)
+          returning id into oinv;
+        end if;
+      end if;
+    end if;
+    if oinv is null then
+      -- a settled charge, or an open one nothing under the new rules applies (refunded as stale if paid)
+      insert into billing.invoices (account, kind, status, plan, interval, offer, extra_places, amount_minor, currency,
+                                    plants, created_at, paid_at)
+      values (r.account, okind,
+              case when r.status = 'pending' then 'open' when r.status = 'paid' and r.refunded_at is null then 'paid' else 'void' end,
+              r.plan, oiv, r.offer_id, coalesce(r.extra_plants, 0), r.amount * 100, 'ZAR', oplants, r.created_at,
+              case when r.status = 'paid' and r.refunded_at is null then coalesce(r.settled_at, r.created_at) end)
+      returning id into oinv;
+    end if;
+    -- an open try: no lease, so the next billing run asks Paystack about it
+    insert into billing.payment_attempts (invoice, reference, provider, channel, amount_minor, currency, status,
+                                          claimed_until, gateway_response, created_at, settled_at)
+    values (oinv, r.reference, 'paystack', och, r.amount * 100, 'ZAR',
+            case when r.status = 'pending' then case och when 'saved_card' then 'unknown' else 'pending' end
+                 when r.status = 'failed' then 'failed' when r.refunded_at is null then 'success' else 'not_applied' end,
+            case when r.status = 'pending' then now() end,
+            'copied: ' || r.status || ' before the switch-over', r.created_at,
+            case when r.status <> 'pending' then coalesce(r.settled_at, r.created_at) end);
+  end loop;
+  -- an open purchase or upgrade applies only to the account as copied
+  update billing.invoices i set expected_version = a.version from billing.accounts a
+   where a.id = i.account and i.status = 'open' and i.kind in ('purchase', 'upgrade');
+
   select jsonb_build_object(
     'accounts', (select count(*) from billing.accounts),
+    'old_charges', (select count(*) from billing.payment_attempts where gateway_response like 'copied: %'
+                                                               and gateway_response <> seed),
     'cards', (select count(*) from billing.payment_methods),
     'logins', (select count(*) from billing.logins),
     'plants', (select count(*) from billing.plants),

@@ -770,14 +770,14 @@ end $$;
 create trigger invoices_outbox after update of status on billing.invoices
   for each row execute function billing.outbox_on_invoice();
 
--- A renewal try failed (not the copy's seed tries): the failed-card email. A hard decline
+-- A renewal try failed (not the copy's tries, 'copied: ...'): the failed-card email. A hard decline
 -- has its card_update email instead (queued by apply_payment).
 create function billing.outbox_on_attempt()
 returns trigger language plpgsql set search_path = billing, pg_temp as $$
 declare inv billing.invoices;
 begin
   if new.status = 'failed' and (tg_op = 'INSERT' or old.status is distinct from 'failed')
-     and new.gateway_response is distinct from 'copied: failed before the switch-over' and not new.hard_decline then
+     and coalesce(new.gateway_response, '') not like 'copied: %' and not new.hard_decline then
     select * into inv from billing.invoices where id = new.invoice;
     if inv.kind = 'renewal' then
       perform billing.outbox_put(inv.account, 'payment_failed', inv.id, new.id::text, 'payment_failed:' || new.id,
