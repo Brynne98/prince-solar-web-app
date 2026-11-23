@@ -340,6 +340,31 @@ end $$;
 create trigger sunsynk_accounts_billing_status after update of status on private.sunsynk_accounts
   for each row when (old.status is distinct from new.status) execute function billing.login_status_follow();
 
+-- poll's account_mark (0083), with the login locks first: its status update locks the login row
+-- and then, through the trigger above, the login's plants. An account delete takes the login
+-- locks, then the plants, then deletes the login row; without them here the two deadlock
+-- (scripts/billing-lock-test.mjs). The login and every copy it updates, in id order.
+create or replace function public.account_mark(p_account uuid, p_status text, p_error text)
+returns void language plpgsql security definer set search_path = private, pg_temp as $$
+declare x uuid;
+begin
+  for x in select id from (select p_account as id union select private.login_copies(p_account)) l order by id loop
+    perform pg_advisory_xact_lock(1, hashtext(x::text));
+  end loop;
+  -- One row for the account poll was working on; its copies die with it below.
+  insert into private.sunsynk_login_events (account_id, event, reason, last_ok_at, access_expires_at)
+  select id, 'died', p_error, last_ok_at, access_expires_at
+    from private.sunsynk_accounts
+   where id = p_account and p_status = 'needs_relink';
+  update private.sunsynk_accounts set status = p_status, last_error = p_error where id = p_account;
+  -- A dead sign-in is dead for every copy holding that same refresh token. A copy
+  -- with a different (newer) token, or a row with none, keeps its own status, and
+  -- other errors stay with the row.
+  update private.sunsynk_accounts set status = p_status, last_error = p_error
+   where p_status = 'needs_relink' and id in (select private.login_copies(p_account))
+     and public.account_refresh_get(id) = public.account_refresh_get(p_account);
+end $$;
+
 -- ---------------------------------------------------------------------------
 -- login_seen: the login's whole plant list from the poller's hourly refresh.
 -- p_plants: [{"id": 123, "name": "Home"}, ...]. A plant missing from two lists

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // SOLAR-641 lock-order test (final re-score, Sol). LOCAL database only. Two connections race an
 // account delete against the writers that take their locks in another order: the
-// poller's share update (a link row, then the account), a reconnect (the login's lock, then
+// poller's share update (a link row, then the account), the poller marking a login (its row,
+// then its plants), a reconnect (the login's lock, then
 // the account) and a claim of a plant whose share lapsed (the share login's lock, the plant,
 // then the lapsed link row). The delete must take the same order, or Postgres finds a deadlock
 // and cancels one of them. Each race runs in transactions that roll back; the account it races on is made
@@ -61,6 +62,13 @@ const races = {
     select billing.lock_plants(array[${plant}]::bigint[]);
     select pg_sleep(1.5);
     delete from public.plant_users where plant_id = ${plant} and user_id = '${u}' and share_gone_at is not null;
+  rollback;`,
+  // the poller marking the login (account_mark): its row, then, through the status trigger
+  // (billing.login_status_follow), the login's plants
+  'login marked by the poller vs account delete': `begin;
+    select public.account_mark('${login}', 'active', null);
+    select pg_sleep(1.5);
+    select billing.lock_plants(array[${plant}]::bigint[]);
   rollback;`,
   // a reconnect's order: the login's lock, then the account
   'reconnect vs account delete': `begin;
