@@ -104,8 +104,8 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
       // since the grid may be off (SOLAR-417)
       state: gridOff ? null : gridExport > 0 ? 'Exporting' : gridImport > 0 ? 'Importing' : gridKnown ? 'On, not in use' : 'Not known yet',
       idle: gridKnown && !gridOff && !gridExport && !gridImport,
-      // a silent plant's missing counters (silent since before midnight) drop, not read as 0
-      today: today(['Imported', agg.gridFromToday ?? (blank ? null : 0)], ['Exported', agg.gridToToday ?? (blank ? null : 0)]) },
+      // today's counters not known (none since midnight) drop, as the other boxes' do (SOLAR-648)
+      today: today(['Imported', agg.gridFromToday], ['Exported', agg.gridToToday]) },
     home: { key: 'home', label: 'Home', color: C.load, w: agg.loadNow, icon: 'home',
       split: [['Solar', C.pv, solarIn, T.pv], ['Battery', C.batt, battIn, T.batt], ['Grid', C.grid, gridIn, T.grid]],
       today: today(['Used', agg.loadToday]) },

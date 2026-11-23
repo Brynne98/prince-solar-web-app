@@ -29,6 +29,7 @@
 // Deliberately NOT ported: the gzipped `raw` payload table. It was 46 MB of the
 // 96 MB SQLite file, has no dashboard consumer, and may embed account identifiers.
 import { flushErrors, noteError, reportError, serve, track } from "../_shared/errors.ts";
+import { clearYesterday, dayTurned, fromPrev, TODAY_COUNTERS } from "./newday.mts";
 import { dayStartEpoch, extrasOf, extrasPaths, historyRows, localDate, parseSeries } from "../_shared/invhistory.ts";
 import {
   aggregate,
@@ -314,14 +315,18 @@ async function fetchInverter(inv: InverterInfo, acc: Account, ts: number, sign: 
  * Otherwise: fresh values for the endpoints fetched, the last row's for the rest,
  * load_w derived from the balance when load was not read.
  */
-function readingRow(f: Fetched, ts: number): Record<string, unknown> {
+function readingRow(f: Fetched, ts: number, tz: string): Record<string, unknown> {
   const fresh = extractReading(f.inv, f.raw, { battPositiveMeans: f.sign });
   const plant_id = f.inv.plantId ?? null;
   const prev = f.inv.lastReading ?? {};
+  // the plant's midnight passed since the last row: its today counters stay behind (SOLAR-648)
+  const turned = dayTurned(tz, ts, prev);
   if (f.carried) {
     const row: Record<string, unknown> = { ...prev, ts, plant_id, sn: f.inv.sn, status: fresh.status };
+    for (const k of TODAY_COUNTERS) row[k] = fromPrev(k, prev[k], turned);
     if (!f.skipped) for (const k of INPUT_FIELDS) row[k] = fresh[k];
     row.carried = true;
+    clearYesterday(row, tz);
     return row;
   }
   // `fetched` says which endpoints were ASKED for, not which answered: fetchInto
@@ -338,7 +343,7 @@ function readingRow(f: Fetched, ts: number): Record<string, unknown> {
     for (const col of ENDPOINT_FIELDS[ep]) {
       row[col] = ok ? (fresh[col] ?? null)
                : NEVER_CARRY.has(col) ? null
-               : (prev[col] ?? null);
+               : fromPrev(col, prev[col], turned);
     }
   }
   // A battery answer can arrive whole but empty: 0 V, 0 A, 0 % and 0 °C beside real
@@ -357,6 +362,7 @@ function readingRow(f: Fetched, ts: number): Record<string, unknown> {
     // grid + = import, batt + = charging (DATA_PIPELINE §9A); counters stay carried
     row.load_w = Math.max(0, Math.round(num(row.pv_w) + num(row.grid_w) - num(row.batt_w)));
   }
+  clearYesterday(row, tz);
   return row;
 }
 
@@ -467,7 +473,7 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
 
   // A row that mixes two uploads keeps the last balanced row's power figures (SOLAR-551).
   const readings = usable.map((f) => {
-    const row = readingRow(f, ts);
+    const row = readingRow(f, ts, tzOf.get(Number(f.inv.plantId)) ?? "Africa/Johannesburg");
     holdLastGood(row, f.inv.lastReading);
     return row;
   });

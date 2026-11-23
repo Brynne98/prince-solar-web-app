@@ -217,9 +217,14 @@ async function fetchSnapshot() {
   // Today's counters are the last reading's. A plant silent since before the plant's
   // midnight has none for today, not yesterday's (SOLAR-348).
   const day = (d) => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: cfg.timezone || undefined }).format(d); } catch (e) { return null; } };
+  // the newest reading's plant date, for the date bar's list of days (SOLAR-648)
+  window.LAST_READ_DAY = api.lastTs ? day(new Date(api.lastTs * 1000)) : null;
   // No reading yet: no today at all, a dash and not 0.0 kWh (SOLAR-623)
-  if (!api.lastTs || day(new Date(api.lastTs * 1000)) !== day(new Date()))
+  // Each inverter's too: Equipment showed yesterday's per inverter (SOLAR-648).
+  if (!api.lastTs || day(new Date(api.lastTs * 1000)) !== day(new Date())) {
     ['pvToday', 'loadToday', 'gridFromToday', 'gridToToday', 'battChgToday', 'battDischgToday'].forEach(k => { agg[k] = null; });
+    inverters.forEach(inv => ['pvToday', 'loadToday', 'gridFromToday', 'gridToToday', 'chgToday', 'dischgToday'].forEach(k => { inv[k] = null; }));
+  }
   return {
     updated: new Date(api.generatedAt || Date.now()),
     lastReading: api.lastTs ? new Date(api.lastTs * 1000) : null,
@@ -280,6 +285,7 @@ async function fetchDay(date) {
     return { t, pv, load, batt, grid, soc, est };
   });
   return {
+    date: api.date || null, // the day the server answered for: today's turns at the plant's midnight
     points,
     approx: !!api.approx, // pre-logging day: the whole day is SunSynk's feed (calibrated scale)
     recoveredMinutes: api.recoveredMinutes || 0, // minutes recovered from SunSynk's cloud
@@ -289,6 +295,12 @@ async function fetchDay(date) {
     },
   };
 }
+
+// A day series only when it is the day asked for: just past midnight the series on hand can
+// still be yesterday's (SOLAR-648). null otherwise.
+const dayFor = (day, date) => (day && (!day.date || day.date === date) ? day : null);
+// How many buckets of a day series hold a reading; a line needs two.
+const realPoints = (day) => ((day && day.points) || []).filter(p => p.pv != null).length;
 
 // Earliest date with data (≈ commission date). Bounds the day picker; null if
 // unknown (treated as "no lower limit" by the UI).
@@ -302,6 +314,13 @@ function fetchDataDays(fresh) {
   if (window.CURRENT_PLANT == null) return Promise.resolve(null);
   const k = window.CURRENT_PLANT, c = dataDaysCache[k], s = window.SYNC;
   const old = c && s && (s.pending || s.spinePending) && Date.now() - c.at > 60000;
+  // A reading came in on a day the list lacks (the day turned since it was asked): that day
+  // has data, so it joins the list here rather than every page asking again at midnight (SOLAR-648)
+  const day = window.LAST_READ_DAY, had = dataDaysGood[k];
+  if (c && !fresh && !old && day && had && !had.has(day)) {
+    dataDaysGood[k] = new Set([...had, day]);
+    dataDaysCache[k] = { p: Promise.resolve(dataDaysGood[k]), at: c.at };
+  }
   if (!c || fresh || old) {
     const p = getJSON('/api/data/days')
       .then(d => (dataDaysGood[k] = new Set(Array.isArray(d) ? d : [])))
@@ -361,9 +380,10 @@ async function fetchTrendDaily(days, rk) {
   const api = await sharedAsk('daily:' + days, MIN5, rk, () => getJSON('/api/trends/daily?days=' + days));
   return api.rows || [];
 }
-// period-over-period totals for the Overview trend arrows ({today,week,month}:{cur,prev})
-async function fetchCompare(rk) {
-  return sharedAsk('compare', MIN5, rk, () => getJSON('/api/trends/compare')).catch(() => ({}));
+// period-over-period totals for the Overview trend arrows ({today,week,month}:{cur,prev}).
+// day: the plant's date and whether today has a reading (useCompare); a new one asks again.
+async function fetchCompare(rk, day) {
+  return sharedAsk('compare:' + (day || ''), MIN5, rk, () => getJSON('/api/trends/compare')).catch(() => ({}));
 }
 // each used string's kWh today and its usual share by this time of day (0076, SOLAR-51)
 async function fetchStringHealth() {
@@ -541,7 +561,7 @@ function emptyText(days, fallback) {
 }
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth, fetchGridToday,
+  fetchSnapshot, fetchDay, dayFor, realPoints, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth, fetchGridToday,
   fetchMe, fetchAccountState, saveChosenPlants, fetchPlanQuote, savePrefs, sendFeedback, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount,
   fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, EMAIL_KINDS, PUSH_KINDS, pushSupport, pushState, pushTurnOn, pushTurnOff, pushResync, emptyText, syncProgress, firstLoadSync, BATT_MAX_KW, TYPICAL_DAYS,
 });

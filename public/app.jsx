@@ -1468,6 +1468,7 @@ function App({ links }) {
   // is retried in 10 s (three times) rather than waiting for the next minute's tick.
   const liveFails = useRef(0);
   const liveRetry = useRef(null);
+  const dayRetries = useRef(0);
   const loadLive = useCallback(async (spin = true) => {
     const t0 = Date.now();
     if (spin) setBusy(b => b + 1);
@@ -1475,6 +1476,18 @@ function App({ links }) {
     try {
       const s = await window.fetchSnapshot();
       setSnap(s); setErr(null); liveFails.current = 0;
+      // Just past the plant's midnight the minute's reading can land after this ask, which then
+      // has none for today: ask again shortly, a few times, while the plant is still sending.
+      // A plant quiet since yesterday keeps its dash (SOLAR-348, SOLAR-648).
+      // by the server's clock: a device running fast would ask again at 23:59 for nothing
+      const tz = s.config?.timezone, last = s.lastReading, at = s.updated;
+      const behind = !!last && at - last < READ_FRESH_MS
+        && window.plantDateStr(tz, last) !== window.plantDateStr(tz, at);
+      if (!behind) dayRetries.current = 0;
+      else if (dayRetries.current < 3) {
+        dayRetries.current += 1;
+        liveRetry.current = setTimeout(() => { if (document.visibilityState === 'visible') loadLive(false); }, 8000);
+      }
       // for the offline page (offline.js, SOLAR-592)
       if (s.lastReading) try { localStorage.setItem('ps.lastReading', JSON.stringify({ t: s.lastReading.getTime(), tz: window.PLANT_TZ || null })); } catch (e) {}
     }
@@ -1488,9 +1501,13 @@ function App({ links }) {
   const loadToday = useCallback(async () => {
     try { setToday(await window.fetchDay()); } catch (e) { /* chart shows its own placeholder */ }
   }, []);
-  // today has no series yet, or the plant is still on its first load (SOLAR-181)
+  // today has no line yet (under two readings, or the day just turned), or the plant is still
+  // on its first load (SOLAR-181, SOLAR-648)
   const todayThin = useRef(true);
-  todayThin.current = !today?.points?.length || !!today.approx || window.syncProgress(snap?.sync) != null;
+  // A quiet plant adds nothing to ask for each minute: its chart waits for the 5th minute.
+  const sending = !!snap?.lastReading && Date.now() - snap.lastReading.getTime() < READ_FRESH_MS;
+  todayThin.current = (sending && (window.realPoints(today) < 2 || !!today.approx
+    || !window.dayFor(today, window.plantDateStr(snap?.config?.timezone)))) || window.syncProgress(snap?.sync) != null;
   // Week to Lifetime are finished days plus today, and the pages add today from the live
   // reading, so the rows change only when the plant's date turns and when the 04:15 sync
   // swaps the finished day in (0058). Asked again then, or on a manual refresh (SOLAR-140).
@@ -1625,8 +1642,10 @@ function App({ links }) {
   // auto refresh: live every minute (matches SunSynk's cadence), today and energy every
   // 5th minute. On the clock, not from page load, so devices side by side show the same
   // numbers (SOLAR-33). The second past the minute is the plant's own, 12–42 s, so every
-  // device on one plant still asks together, after the reading has landed (by ~:06), while
-  // different plants ask at different moments instead of all in one second (SOLAR-70).
+  // device on one plant still asks together, while different plants ask at different
+  // moments instead of all in one second (SOLAR-70). Readings land 12–27 s past the minute
+  // (Nov 2026), so an early second often shows the minute before; at midnight that minute is
+  // yesterday's and loadLive asks again (SOLAR-648).
   useEffect(() => {
     if (!auto) return;
     let a;

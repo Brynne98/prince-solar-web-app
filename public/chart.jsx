@@ -156,12 +156,15 @@ function DateBar({ pick, earliest, locked, children }) {
   const close = React.useCallback(() => setOpen(false), []);
   const [days, setDays] = React.useState(null);
   const plant = window.CURRENT_PLANT;
-  React.useEffect(() => { let alive = true; window.fetchDataDays(open).then(d => { if (alive) setDays(d); }); return () => { alive = false; }; }, [open, plant, date]);
+  // the newest reading's day: when it turns, the list is asked again for the new day (SOLAR-648)
+  const readDay = window.LAST_READ_DAY;
+  React.useEffect(() => { let alive = true; window.fetchDataDays(open).then(d => { if (alive) setDays(d); }); return () => { alive = false; }; }, [open, plant, date, readDay]);
   const list = React.useMemo(() => days ? [...days].filter(k => k <= todayStr && (!earliest || k >= earliest)).sort() : [], [days, todayStr, earliest]);
   // locked: the app is still loading, so the picker shows today and goes nowhere
   const prevDay = locked ? null : list.filter(k => k < date).pop(), nextDay = locked ? null : list.find(k => k > date);
-  // Today is always shown and goes to the newest day with data; greyed when already there (SOLAR-178)
-  const latest = locked ? null : list[list.length - 1], toLatest = latest && latest !== date;
+  // Today is always shown and goes to the newest day with data; greyed when already there
+  // (SOLAR-178), and never a step back: just past midnight the newest is yesterday (SOLAR-648)
+  const latest = locked ? null : list[list.length - 1], toLatest = !!latest && latest > date;
   return (
     <div className="hv-datebar">
       <button className="hv-daynav" disabled={!prevDay} aria-label="Previous day"
@@ -612,7 +615,7 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
   const innerW = Math.max(40, width - m.l - m.r);
   const innerH = height - m.t - m.b;
 
-  const dayData = isToday ? today : pastDay;
+  const dayData = isToday ? window.dayFor(today, todayStr) : pastDay;
   const raw = (dayData && dayData.points) || [];
   // The battery series is + = the house is using it, − = charging; idle reads 0. Gaps stay null.
   const pts = React.useMemo(() => raw.map(p => (p.batt == null ? p : { ...p, batt: window.battShown(p.batt) })),
@@ -836,7 +839,7 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
     : 'No readings for this day.';
   const emptyMsg = loading ? 'Loading…'
     : isToday && silent ? 'No readings today.'
-    : isToday && dayData?.approx ? 'Collecting today’s first readings.'
+    : isToday && (dayData?.approx || real.length === 1) ? 'Collecting today’s first readings.'
     : isToday ? window.emptyText(window.PLANT_DAYS, 'Loading today’s data…') : pastMsg;
 
   return (
