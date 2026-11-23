@@ -31,7 +31,8 @@ end $$;
 create or replace function public.chosen_plant_ids(p_user uuid)
 returns bigint[] language sql stable security definer set search_path = public, private, pg_temp as $$
   select array(select se.plant from billing.seats se join billing.accounts a on a.id = se.account
-                where a.user_id = p_user and se.closed_at is null order by se.plant)
+                where a.user_id = p_user and se.closed_at is null
+                  and billing.has_route(a.id, se.plant, false) order by se.plant)
 $$;
 
 create or replace function public.my_plant_ids()
@@ -39,6 +40,8 @@ returns setof bigint language sql stable security definer set search_path = publ
   select se.plant from billing.seats se join billing.accounts a on a.id = se.account
     join billing.plants p on p.id = se.plant
    where a.user_id = auth.uid() and se.closed_at is null and p.history_purged_at is null
+     -- a share removed or a plant gone from the login: hidden; its history stays and shows again
+     and billing.has_route(a.id, se.plant, false)
 $$;
 
 create or replace function public.live_plants()

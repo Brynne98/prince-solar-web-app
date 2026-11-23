@@ -256,7 +256,13 @@ frontend second, in this order:
    retried by the new job; 7 tries made or hello@ told: left for a hand refund), an open
    dispute (blocks deleting the account) and a lost dispute not yet charged (owed on its
    bill). The copy does not refuse for any of them. Its answer counts them (`refunds`,
-   `refunds_to_send`, `disputes_open`, `owed`).
+   `refunds_to_send`, `disputes_open`, `owed`). Every settled old reference, at any age, is
+   kept in `billing.old_references` (`old_references`): Paystack sending an old paid one
+   again is answered as already applied, never refunded. A switch to yearly already paid
+   (`prepaid_on` on the billing date) copies as the yearly plan to a year after that date,
+   with nothing charged on it. Before step 4, count them:
+   `select count(*) from private.billing where prepaid_on is not null`; in step 5 check each
+   one is yearly with that end date.
 5. Compare `billing.account_state` for each account with today's screens, next charges and
    poll decisions.
 6. The switch, in this order, so no billing email is sent twice or lost, and no change made

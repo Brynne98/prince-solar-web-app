@@ -37,6 +37,8 @@ export type AccountState = {
   next_amount_minor: number | null; next_places: number | null; amount_due_minor: number | null; pay_url: string | null;
   owed_minor: number; dispute_open: boolean;
   time_zone: string; locale: string; last_plan: string | null; last_plan_name: string | null; had_plan: boolean;
+  /** Ended on a plan from us (a grant ended last). */
+  grant_ended?: boolean;
   retention_days: number; trial_places: number; trial_ends_soon: boolean; cancel_soon: boolean;
   if_cancelled_delete_at: Iso | null; history_kept_until: Iso | null; history_purged: boolean;
   /** When the state was read. */
@@ -102,7 +104,7 @@ export function planStatus(s: AccountState): string | null {
         s.next_retry_at ? `Next try ${day(s, s.next_retry_at)}.` : null,
         `Ends on ${day(s, s.plan_ends_at)} if unpaid.`].filter(Boolean).join(" ");
     case "ended":
-      return s.access_ended_at ? `${s.had_plan ? `${s.last_plan_name} ended` : "Free week ended"} on ${day(s, s.access_ended_at)}` : null;
+      return s.access_ended_at ? `${s.grant_ended ? "Plan from us ended" : s.had_plan ? `${s.last_plan_name} ended` : "Free week ended"} on ${day(s, s.access_ended_at)}` : null;
     default: return null;
   }
 }
@@ -329,7 +331,8 @@ export const plantTag = (s: AccountState, p: PlantState): string | null =>
     : p.trial_used_elsewhere && (s.state === "trialing" || s.state === "none") ? "Free week used" : "Locked";
 /** A plant's "kept until", only when it has a delete date. */
 export const plantKept = (s: AccountState, p: PlantState) =>
-  p.delete_at && !p.purged && p.chosen ? `History kept until ${day(s, p.delete_at)}` : p.purged && p.chosen ? "History deleted" : null;
+  p.delete_at && !p.purged && p.chosen && new Date(p.delete_at) > new Date(s.at ?? Date.now()) ? `History kept until ${day(s, p.delete_at)}`
+    : p.purged && p.chosen ? "History deleted" : null;
 
 /** After a save: what changed, by name. */
 export function chosenToast(s: AccountState, coming: number[], going: number[]): string {
@@ -345,6 +348,7 @@ export function refused(msg: string): string {
   if (/pick the plants to drop|more plants to drop/.test(msg)) return "Choose the plants to keep first.";
   if (/while the account is ended|without a plan/.test(msg)) return "Pay first, then choose plants.";
   if (/open soon/.test(msg)) return "Paid plans open soon. Nothing was charged.";
+  if (/plan is cancelled/.test(msg)) return "Keep your plan first.";
   return "Couldn't save. Try again.";
 }
 
@@ -378,9 +382,10 @@ export const logins = {
   removeTitle: (username: string) => `Remove ${username}?`,
 };
 /** Removing a login: which plants go and what happens to each one's history. shared: the
- *  "Shared plants" group, whose plants go unless a login of the account also reaches them. */
+ *  "Shared plants" group: every plant no login of the account reaches (claimed, or a share
+ *  removed that keeps its place). */
 export function removeLogin(s: AccountState, loginId: string, shared = false) {
-  const only = shared ? s.plants.filter((p) => p.claimed && !p.logins.length)
+  const only = shared ? s.plants.filter((p) => !p.logins.length)
     : s.plants.filter((p) => p.logins.length === 1 && p.logins[0] === loginId && !p.claimed);
   const chosen = only.filter((p) => p.chosen);
   const gone = chosen.filter((p) => !p.kept_elsewhere).map(plantName);
@@ -395,6 +400,7 @@ export function removeLogin(s: AccountState, loginId: string, shared = false) {
 export function payScreen(s: AccountState) {
   const ended = s.state === "ended";
   const title = !ended ? null
+    : s.grant_ended ? "Your plan from us has ended"
     : s.had_plan ? `Your ${s.last_plan_name} plan has ended`
     : s.access_ended_at ? "Your free week has ended" : "Your plants had their free week";
   if (!title) return null;

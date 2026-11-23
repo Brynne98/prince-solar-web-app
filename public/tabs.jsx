@@ -2475,6 +2475,8 @@ function PlansDialog({ acct, onClose }) {
   const rows = planRows(acct, view);
   function choose(row) {
     if (acct.state === 'past_due') return window.toast(AT.refused('past_due'), { error: true });
+    // a cancelled plan changes nothing until the cancel is undone (Keep on Billing)
+    if (acct.cancel_at) return window.toast(AT.refused('the plan is cancelled'), { error: true });
     const { mode, pick: ask } = planStep(acct, row);
     if (mode === 'interval') {
       // the same plan, the other interval: from the billing date

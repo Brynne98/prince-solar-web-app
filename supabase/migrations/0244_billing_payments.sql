@@ -168,5 +168,15 @@ create table billing.outbox (
   created_at  timestamptz not null
 );
 
+-- Every settled old charge's reference (private.billing_charges), at any age, filled by
+-- copy_from_old. A success Paystack sends for one with no try here is checked against it
+-- before it is refunded as unknown: an old paid one was applied by the old billing.
+create table billing.old_references (
+  reference  text primary key,
+  account    uuid references billing.accounts (id) on delete set null,
+  status     text not null,                      -- the old charge's: paid, failed, ...
+  settled_at timestamptz
+);
+
 revoke all on all tables in schema billing from public, anon, authenticated;
 grant select on all tables in schema billing to service_role;

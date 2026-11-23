@@ -148,14 +148,17 @@ returns int language sql stable set search_path = billing, pg_temp as $$
    where account = p_account and starts_at <= p_at and (ends_at is null or ends_at > p_at)
 $$;
 
--- The final plant choice for a bill: required, each reachable, fits the places.
+-- The final plant choice for a bill: required, each reachable or already chosen (a share
+-- removed keeps its seat: kept, not read), fits the places.
 create function billing.final_choice(p_account uuid, p_plants bigint[], p_places int)
 returns bigint[] language plpgsql stable set search_path = billing, pg_temp as $$
 declare want bigint[]; bad bigint;
 begin
   if p_plants is null then raise exception 'choose the plants first' using errcode = '22023'; end if;
   want := array(select distinct x from unnest(p_plants) x order by 1);
-  select x into bad from unnest(want) x where not billing.has_route(p_account, x, false) limit 1;
+  select x into bad from unnest(want) x where not billing.has_route(p_account, x, false)
+     and not exists (select 1 from billing.seats se where se.account = p_account and se.plant = x and se.closed_at is null)
+   limit 1;
   if found then raise exception 'plant % is not on this account''s logins', bad using errcode = '22023'; end if;
   if cardinality(want) > p_places then
     raise exception 'that plan has % places', p_places using errcode = '22023';
@@ -390,7 +393,10 @@ begin
            period_end = case when p_inv.plan = s.plan
                              then billing.add_period(s.period_end, p_inv.interval, s.billing_day, m.default_time_zone)
                              else billing.add_period(p_at, p_inv.interval, day, m.default_time_zone) end
-     where id = s.id;
+     where id = s.id
+    returning * into s;
+    -- the bill names the period it bought, for the receipt and a later reversal
+    update billing.invoices set period_start = s.period_start, period_end = s.period_end where id = p_inv.id;
   end if;
   update billing.seats set drop_at_period_end = false where account = p_inv.account and closed_at is null and drop_at_period_end;
   had := array(select plant from billing.seats where account = p_inv.account and closed_at is null);
@@ -427,6 +433,8 @@ begin
   if st.state = 'past_due' then raise exception 'pay the failed payment first' using errcode = '22023'; end if;
   if st.state <> 'active' or st.sub is null then raise exception 'no running plan' using errcode = '22023'; end if;
   select * into s from billing.subscriptions where id = st.sub for update;
+  -- a cancelled plan buys nothing more: the screen offers Keep first
+  if s.cancel_at_period_end then raise exception 'the plan is cancelled' using errcode = '22023'; end if;
   if s.period_end <= p_at then raise exception 'the renewal is due: pay it first' using errcode = '22023'; end if;
   select * into pl from billing.plans where code = p_plan;
   if not found then raise exception 'no such plan' using errcode = '22023'; end if;
@@ -578,7 +586,7 @@ begin
   update billing.subscriptions set next_price = nid, version = version + 1 where id = s.id;
   perform billing.bump(p_account);
   perform billing.log_event(p_account, p_at, p_actor, 'switch_interval',
-                            jsonb_build_object('interval', s.interval), jsonb_build_object('interval', p_interval));
+                            jsonb_build_object('interval', s.interval), jsonb_build_object('interval', p_interval, 'next_price', nid));
   return billing.account_state(p_account, p_at);
 end $$;
 
@@ -839,6 +847,11 @@ declare
 begin
   select * into att from billing.payment_attempts where reference = p_reference;
   if not found then
+    -- an old charge the old billing settled (copy_from_old keeps every reference): paid there,
+    -- so a success sent again is not money to give back
+    if txs = 'success' and exists (select 1 from billing.old_references o where o.reference = p_reference and o.status = 'paid') then
+      return jsonb_build_object('action', 'again', 'status', 'success', 'old', true);
+    end if;
     if txs = 'success' and p_reference like 'psh\_%' and p_tx->>'reference' is not distinct from p_reference then
       -- our reference, no try we hold (the account was deleted with its rows, or never ours): money goes back
       rid := billing.refund_due(null, p_reference, null, upper(p_tx->>'currency'), 'unknown_account', p_at);
@@ -900,6 +913,8 @@ begin
       when (p_tx->>'amount')::bigint is distinct from att.amount_minor
            or upper(p_tx->>'currency') is distinct from att.currency then 'wrong_amount'
       when a.id is null then 'unknown_account'
+      -- refunded before the success came (an old charge Paystack refunded while pending): never applied
+      when exists (select 1 from billing.refunds rf where rf.attempt = att.id) then 'stale'
       when inv.status = 'paid' then 'duplicate'
       when inv.status <> 'open' and not revive then 'stale'
       when inv.kind in ('purchase', 'upgrade') and inv.expected_version is distinct from a.version then 'stale'
@@ -916,7 +931,9 @@ begin
     if why is not null then
       update billing.payment_attempts set status = 'not_applied', settled_at = p_at, claimed_until = null,
                                           gateway_response = msg where id = att.id;
-      rid := billing.refund_due(att.id, att.reference, a.id, att.currency, why, p_at);
+      -- a refund already on record for this try is the one: never a second
+      rid := coalesce((select rf.id from billing.refunds rf where rf.attempt = att.id order by rf.created_at limit 1),
+                      billing.refund_due(att.id, att.reference, a.id, att.currency, why, p_at));
       if a.id is not null then
         perform billing.log_event(a.id, p_at, 'paystack', 'payment_refunded', null,
                                   jsonb_build_object('invoice', inv.id, 'reference', att.reference), why);

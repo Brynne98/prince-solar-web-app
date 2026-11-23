@@ -91,7 +91,8 @@ begin
   if st.state not in ('none', 'trialing', 'active') then
     raise exception 'plants cannot be chosen while the account is %', st.state using errcode = '22023';
   end if;
-  select x into bad from unnest(want) x where not billing.has_route(p_account, x, false) limit 1;
+  -- a plant already chosen may stay chosen with no route (a share removed: kept, not read)
+  select x into bad from unnest(want) x where not billing.has_route(p_account, x, false) and x <> all (had) limit 1;
   if found then
     raise exception 'plant % is not on this account''s logins', bad using errcode = '22023';
   end if;

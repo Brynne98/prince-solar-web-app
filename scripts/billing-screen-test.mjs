@@ -170,6 +170,25 @@ test('pay screen: each plant with its own date, a date passed left out (verify f
   eq(m.subject, 'Your history is deleted on 20 Jan 2027');
 });
 
+test('remove the shared group: a plant whose share was removed is named too (verify 2 fix 4)', () => {
+  const a = acct({ plants: [plant(7, { name: 'Gran', logins: [], claimed: false, chosen: true }), plant(1, { chosen: true })] });
+  eq(ctx.AccountText.removeLogin(a, 'share-login-id', true), ['Gran: history deleted now.']);
+});
+test('a delete date already passed shows no "kept until" (verify 2 fix 10)', () => {
+  const s = { ...acct(), ...tz, at: '2026-12-10T08:00:00Z' };
+  eq(ctx.AccountText.plantKept(s, plant(1, { chosen: true, delete_at: '2026-12-09T08:00:00Z' })), null);
+  eq(ctx.AccountText.plantKept(s, plant(1, { chosen: true, delete_at: '2026-12-31T08:00:00Z' })), 'History kept until 31 Dec 2026');
+});
+test('a plan from us ended: pay screen and Billing say so, not the free week (verify 2 fix 13)', () => {
+  const s = { ...acct(), ...tz, state: 'ended', plan: null, plan_name: null, had_plan: false, grant_ended: true,
+    access_ended_at: '2026-12-01T08:00:00Z', plants: [] };
+  eq(ctx.AccountText.payScreen(s).title, 'Your plan from us has ended');
+  eq(ctx.AccountText.planStatus(s), 'Plan from us ended on 1 Dec 2026');
+});
+test('a change on a cancelled plan is refused with Keep first (verify 2 fix 5)', () => {
+  eq(ctx.AccountText.refused('the plan is cancelled'), 'Keep your plan first.');
+});
+
 let failed = 0;
 for (const c of cases) {
   try { await c.fn(); console.log('ok    ' + c.name); }

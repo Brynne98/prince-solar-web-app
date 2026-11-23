@@ -62,13 +62,14 @@ create function billing.copy_from_old()
 returns jsonb language plpgsql security definer set search_path = billing, public, private, pg_temp as $$
 declare
   tz constant text := 'Africa/Johannesburg';
-  seed constant text := 'copied: failed before the switch-over';
+  -- not the text of a failed old charge ('copied: failed before ...'), so the counts below stay apart
+  seed constant text := 'copied: past due at the switch-over';
   out jsonb;
   paid boolean := false;
   r record;
   inv record;                                    -- billing.invoices (0244 comes after this file)
   review int := 0;
-  osub record;                                   -- old charges: o* names, clear of the queries' aliases
+  osub billing.subscriptions;                    -- old charges: o* names, clear of the queries' aliases
   opr record;
   okind text;
   oiv text;
@@ -178,28 +179,38 @@ begin
          (select p.id from billing.prices p where p.plan = b.plan and p.market = 'ZA' and p.interval = iv
              and p.offer is not distinct from b.offer_id and p.active_until is null),
          b.plan, 'ZAR', iv,
-         public.billing_amount(b.plan, b.period, 0, b.offer_id) * 100,
-         (public.billing_amount(b.plan, b.period, 1, b.offer_id) - public.billing_amount(b.plan, b.period, 0, b.offer_id)) * 100,
-         b.extra_plants, b.offer_id, b.state,
+         public.billing_amount(b.plan, d.per, 0, b.offer_id) * 100,
+         (public.billing_amount(b.plan, d.per, 1, b.offer_id) - public.billing_amount(b.plan, d.per, 0, b.offer_id)) * 100,
+         case when d.prepaid then case when b.plan = 'family' then coalesce(b.next_extra_plants, b.extra_plants) else 0 end
+              else b.extra_plants end,
+         b.offer_id, b.state,
          least(coalesce((select min(c.created_at) from private.billing_charges c
                           where c.user_id = b.user_id and c.status = 'paid'), b.created_at), ps),
          bday, ps, pe,
          (b.past_due_since::timestamp at time zone tz),
          coalesce(b.next_plan = 'free', false),
-         case when b.next_plan in ('home', 'family') or b.next_period is not null then
+         -- a paid year: its switch is done; only a plan change booked on top would be next
+         case when b.next_plan in ('home', 'family') or (b.next_period is not null and not d.prepaid) then
            (select p.id from billing.prices p
              where p.plan = coalesce(nullif(b.next_plan, 'free'), b.plan) and p.market = 'ZA'
                and p.interval = case coalesce(b.next_period, b.period) when 'yearly' then 'year' else 'month' end
                and p.offer is not distinct from b.offer_id and p.active_until is null) end,
-         b.next_extra_plants, null
+         case when not d.prepaid then b.next_extra_plants end, null
     from private.billing b
     join billing.accounts a on a.user_id = b.user_id
     -- past due: the unpaid period ends at past_due_since (next_billing_date is a period on)
+    -- a switch to yearly already paid (0138, prepaid_on = next_billing_date): the year from the
+    -- billing date is paid, so the plan copies on yearly terms to a year after it (the month
+    -- running now is its first part) and nothing is charged on the billing date
     cross join lateral (select coalesce(b.billing_day, extract(day from b.next_billing_date)::smallint) bday,
                                case when b.state = 'past_due' then coalesce(b.past_due_since, b.next_billing_date)
-                                    else b.next_billing_date end ped) d
-    cross join lateral (select case b.period when 'yearly' then 'year' else 'month' end iv,
-                               (d.ped::timestamp at time zone tz) pe,
+                                    else b.next_billing_date end ped,
+                               coalesce(b.prepaid_on = b.next_billing_date and b.state = 'active', false) prepaid,
+                               case when b.prepaid_on = b.next_billing_date and b.state = 'active' then 'yearly'
+                                    else b.period end per) d
+    cross join lateral (select case d.per when 'yearly' then 'year' else 'month' end iv,
+                               (case when d.prepaid then public.billing_step(d.ped, 'yearly', d.bday, 1) else d.ped end
+                                 ::timestamp at time zone tz) pe,
                                (public.billing_step(d.ped, b.period, d.bday, -1)::timestamp at time zone tz) ps) v
    where b.plan in ('home', 'family') and not b.comped
      and not exists (select 1 from billing.subscriptions s where s.account = a.id);
@@ -319,11 +330,18 @@ begin
                                   + coalesce(r.extra_plants, osub.extra_places)) y
                           order by y.p);
         if opr.id is not null then
+          -- the same upgrade again (same plan, places, plants and amount): the same bill. Any
+          -- other open upgrade is replaced, as billing.upgrade does: its bill is void, so a
+          -- payment on its page is refunded (stale) and only the newest page applies
           select i.id into oinv from billing.invoices i
-           where i.subscription = osub.id and i.kind = 'upgrade' and i.status <> 'void'
+           where i.subscription = osub.id and i.kind = 'upgrade' and i.status = 'open'
+             and i.amount_minor = r.amount * 100 and i.plants = oplants
              and i.period_key = extract(epoch from osub.period_start)::bigint || ':' || r.plan || '+'
                                 || coalesce(r.extra_plants, osub.extra_places) || case when oiv <> osub.interval then ':' || oiv else '' end;
           if oinv is null then
+            perform billing.replace_card_pages(array(select i.id from billing.invoices i
+                                                      where i.subscription = osub.id and i.kind = 'upgrade' and i.status = 'open'), r.created_at);
+            update billing.invoices set status = 'void' where subscription = osub.id and kind = 'upgrade' and status = 'open';
             insert into billing.invoices (account, subscription, kind, price, plan, interval, offer, extra_places,
                                           plan_amount_minor, extra_place_minor, amount_minor, tax_minor, currency,
                                           period_start, period_end, period_key, plants, created_at)
@@ -375,12 +393,18 @@ begin
     if r.dispute_owed then
       update billing.invoices set amount_owed_minor = coalesce(r.refunded_cents, r.amount * 100) where id = oinv;
     end if;
-    -- a refund asked or owed: retried under the new rules; one done stays on record
-    if r.status = 'paid' and not r.dispute_lost
-       and (r.kind = 'card' or r.error like 'refund%' or r.refund_status is not null) then
+    -- a refund asked or owed: retried under the new rules; one done stays on record. A refund
+    -- Paystack reported while the charge was still pending (0197): the payment never applies,
+    -- so a success on that reference later finds this refund and is not applied (stale)
+    if (r.status = 'paid' and not r.dispute_lost
+        and (r.kind = 'card' or r.error like 'refund%' or r.refund_status is not null))
+       or (r.status = 'pending' and r.refund_status is not null) then
       odone := r.refund_status = 'done';
       -- 7 tries made or hello@ told, or a hand refund: by hand (manual), never sent automatically
-      oreason := case when r.refund_tries >= 7 or r.refund_alerted or not (r.kind = 'card' or r.error like 'refund%') then 'manual'
+      oreason := case when r.refund_tries >= 7 or r.refund_alerted then 'manual'
+                      -- a failed refund on a payment never confirmed: by hand, not sent blind
+                      when r.status = 'pending' then case when r.refund_status = 'failed' then 'manual' else 'stale' end
+                      when not (r.kind = 'card' or r.error like 'refund%') then 'manual'
                       when r.kind = 'card' then 'card_check' else 'stale' end;
       insert into billing.refunds (attempt, reference, account, amount_minor, currency, reason, status, tries,
                                    last_error, created_at, updated_at)
@@ -390,6 +414,14 @@ begin
               r.refund_tries, 'copied: ' || coalesce(r.refund_status, 'owed') || ' before the switch-over', now(), now());
     end if;
   end loop;
+  -- every settled old reference, at any age: a success Paystack sends again for an old paid
+  -- one is answered as already applied (apply_payment), never refunded as unknown
+  delete from billing.old_references;
+  insert into billing.old_references (reference, account, status, settled_at)
+  select c.reference, a.id, c.status, coalesce(c.settled_at, c.created_at)
+    from private.billing_charges c left join billing.accounts a on a.user_id = c.user_id
+   where c.status <> 'pending';
+
   -- an open purchase or upgrade applies only to the account as copied
   update billing.invoices i set expected_version = a.version from billing.accounts a
    where a.id = i.account and i.status = 'open' and i.kind in ('purchase', 'upgrade');
@@ -403,6 +435,7 @@ begin
     'refunds_to_send', (select count(*) from billing.refunds where status = 'due'),
     'disputes_open', (select count(*) from billing.payment_attempts where dispute_open),
     'owed', (select count(*) from billing.invoices where amount_owed_minor > 0),
+    'old_references', (select count(*) from billing.old_references),
     'old_charges', (select count(*) from billing.payment_attempts where gateway_response like 'copied: %'
                                                                and gateway_response <> seed),
     'cards', (select count(*) from billing.payment_methods),

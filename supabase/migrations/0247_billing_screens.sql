@@ -179,6 +179,9 @@ begin
     'last_plan', last_sub.plan,
     'last_plan_name', (select name from billing.plans where code = last_sub.plan),
     'had_plan', last_sub.id is not null,
+    -- ended on a plan from us (a grant ended last), not on a paid plan or the free week
+    'grant_ended', s->>'state' = 'ended' and exists (select 1 from billing.grants g where g.account = p_account
+                      and g.ends_at = (s->>'access_ended_at')::timestamptz),
     'retention_days', m.retention_days,
     'trial_places', m.trial_places,
     -- the free week's last two days; a booked cancel's last three
@@ -580,7 +583,8 @@ create function public.chosen_plant_ids(p_user uuid)
 returns bigint[] language sql stable security definer set search_path = public, private, pg_temp as $$
   select case when billing.is_live()
     then array(select se.plant from billing.seats se join billing.accounts a on a.id = se.account
-                where a.user_id = p_user and se.closed_at is null order by se.plant)
+                where a.user_id = p_user and se.closed_at is null
+                  and billing.has_route(a.id, se.plant, false) order by se.plant)
     else array(select pu.plant_id from public.plant_users pu where pu.user_id = p_user and not pu.paused
                 order by pu.plant_id) end
 $$;
@@ -604,6 +608,8 @@ returns setof bigint language sql stable security definer set search_path = publ
   select se.plant from billing.seats se join billing.accounts a on a.id = se.account
     join billing.plants p on p.id = se.plant
    where billing.is_live() and a.user_id = auth.uid() and se.closed_at is null and p.history_purged_at is null
+     -- a share removed or a plant gone from the login: hidden; its history stays and shows again
+     and billing.has_route(a.id, se.plant, false)
 $$;
 
 create or replace function public.live_plants()
@@ -863,7 +869,10 @@ begin
     perform billing.outbox_put(new.account,
       case when new.kind = 'undo_cancel'
              or (new.kind = 'downgrade' and new.after->>'plan' = new.before->>'plan'
-                 and new.after->>'extras' = new.before->>'extras') then 'change_undone' else 'change_booked' end,
+                 and new.after->>'extras' = new.before->>'extras')
+             -- back to the interval it has, nothing else booked: the switch is undone
+             or (new.kind = 'switch_interval' and new.after->>'interval' = new.before->>'interval'
+                 and new.after ? 'next_price' and new.after->>'next_price' is null) then 'change_undone' else 'change_booked' end,
       null, new.id::text, 'event:' || new.id, new.at + interval '2 minutes', new.at + interval '2 days', new.at);
   end if;
   return null;
