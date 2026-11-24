@@ -132,7 +132,8 @@ function due(s: AccountState) {
 const duePayment = (d: ReturnType<typeof due>) => `${d.amount} payment${d.plan !== d.ends ? ` for ${d.plan}` : ""}`;
 const nothingToDo = "You don't need to do anything.";
 export function pastDueNote(s: AccountState): { text: string; button: string | null } {
-  const d = due(s), yours = `Your ${duePayment(d)}`, end = `Pay by ${d.by} or ${d.ends} ends and readings stop.`;
+  // what is lost, framed as what is kept; only the plan being paid is named (a booked downgrade: Home)
+  const d = due(s), yours = `Your ${duePayment(d)}`, end = `Pay by ${d.by} to keep your readings.`;
   const text = (t: string) => ({ text: t, button: billing.payOther });
   switch (s.past_due_reason) {
     case "checking": return { text: `We're still checking your ${duePayment(d)}. ${nothingToDo}`, button: null };
@@ -493,7 +494,7 @@ export function notices(s: AccountState): Notice[] {
   const fit = fitLine(s);
   if (s.state === "past_due" && s.past_due_reason !== "checking") {
     const d = due(s), word = !s.past_due_reason ? "overdue" : s.past_due_reason === "no_card" ? "due" : "failed";
-    const body = `Pay ${d.amount} by ${d.by} or ${d.plan !== d.ends ? `${d.ends} ends and ` : ""}readings stop.`;
+    const body = `Pay ${d.amount} by ${d.by} to keep your readings.`;
     const title = `${d.plan} payment ${word}`;
     out.push({ kind: "past_due", tone: "bad", title, short: title,
       body, bodyShort: body, button: billing.payOther, action: "pay" });
@@ -590,17 +591,15 @@ export function mail(m: MailInput): Mail | null {
       // what is paid: the bill the row is about (a booked downgrade bills the smaller plan); what ends: the running plan
       const b = m.bill, plan = b?.plan_name ?? due(s).plan, ends = due(s).ends;
       const amount = b ? $(b.amount_minor, b.currency) : due(s).amount;
-      const title = `Pay ${amount}${plan !== ends ? ` for ${plan}` : ""} by ${day(s, s.plan_ends_at)}`;
-      // straight under the title; "the payment", not "you": a retry of ours may still pay it
-      const sub = `If the payment hasn't gone through by then, ${ends} ends and readings stop.`;
+      const title = `Pay ${amount}${plan !== ends ? ` for ${plan}` : ""} by ${day(s, s.plan_ends_at)} to keep your readings`;
       const saved = card(b?.card_type, b?.last4) ?? "saved card";
       // the button, and a way to pay without trusting an email link
       const pay: MailPart[] = [{ button: { label: billing.payOther, page: "pay", bill: s.due_bill?.id } }, { note: "Or open Billing in the app." }];
-      if (m.key === "payment_failed") return { subject: `Your ${plan} payment didn't go through`, title, sub,
+      if (m.key === "payment_failed") return { subject: `Your ${plan} payment didn't go through`, title,
         parts: [{ lead: `We couldn't charge your ${saved}. ${s.next_try_on ? `We'll try again on ${dateOnly(s.next_try_on)}.` : "We won't try again."}` }, ...pay] };
-      if (m.key === "card_update") return { subject: `Your ${plan} payment didn't go through`, title, sub,
+      if (m.key === "card_update") return { subject: `Your ${plan} payment didn't go through`, title,
         parts: [{ lead: `We couldn't charge your ${saved}, so we removed it from your account.` }, ...pay] };
-      return { subject: `Your ${plan} payment is due`, title, sub,
+      return { subject: `Your ${plan} payment is due`, title,
         parts: [{ lead: "There's no card saved, so nothing was charged." }, ...pay] };
     }
     case "refund": {
