@@ -258,21 +258,27 @@ const T = () => ctx.AccountText;
 const unpaid = (o = {}) => ({ ...acct(), time_zone: 'Africa/Johannesburg', locale: 'en-ZA', currency: 'ZAR', state: 'past_due', plan: 'family',
   plan_name: 'Family', amount_due_minor: 9900, plan_ends_at: '2026-12-08T21:59:59.999Z', at: '2026-11-24T08:00:00Z',
   due_bill: { id: '11111111-2222-3333-4444-555555555555', plan: 'family', plan_name: 'Family', interval: 'month', amount_minor: 9900, currency: 'ZAR' }, ...o });
-test('Billing note: each reason its own words, the cutoff as a date (SOLAR-644 §2)', () => {
+test('Billing note: each reason its own words, the plan named once (SOLAR-644 §2, council)', () => {
   const end = 'Pay by 8 Dec 2026 or Family ends and readings stop.';
-  eq(T().pastDueNote(unpaid({ past_due_reason: 'refused' })).text, `R99 for Family didn't go through and your card was removed. ${end}`);
-  eq(T().pastDueNote(unpaid({ past_due_reason: 'no_card' })).text, `R99 for Family is due. ${end}`);
+  eq(T().pastDueNote(unpaid({ past_due_reason: 'refused' })).text, `Your R99 payment didn't go through. We removed your saved card. ${end}`);
+  eq(T().pastDueNote(unpaid({ past_due_reason: 'no_card' })).text, `Your R99 payment is due. ${end}`);
   eq(T().pastDueNote(unpaid({ past_due_reason: 'retrying', next_try_on: '2026-11-27' })).text,
-    `R99 for Family didn't go through. We'll try your card again on 27 Nov 2026. ${end}`);
-  eq(T().pastDueNote(unpaid({ past_due_reason: 'last_try_failed' })).text, `R99 for Family didn't go through. We won't try your card again. ${end}`);
-  eq(T().pastDueNote(unpaid({ past_due_reason: 'checking' })), { text: "We're still checking your R99 payment for Family with your bank.", button: null });
-  eq(T().pastDueNote(unpaid()).text, `Your R99 payment for Family is overdue. ${end}`);
+    `Your R99 payment didn't go through. We'll try your card again on 27 Nov 2026. ${end}`);
+  eq(T().pastDueNote(unpaid({ past_due_reason: 'last_try_failed' })).text, `Your R99 payment didn't go through. We won't try your card again. ${end}`);
+  eq(T().pastDueNote(unpaid({ past_due_reason: 'checking' })), { text: "We're still checking your R99 payment. You don't need to do anything.", button: null });
+  eq(T().pastDueNote(unpaid()).text, `Your R99 payment is overdue. ${end}`);
   eq(T().pastDueNote(unpaid()).button, 'Pay with another card');
 });
 test('a booked downgrade: the smaller plan is paid, the running plan ends (SOLAR-644 §1e)', () => {
   const s = unpaid({ past_due_reason: 'no_card', due_bill: { id: 'x', plan: 'home', plan_name: 'Home', interval: 'month', amount_minor: 4900, currency: 'ZAR' } });
-  eq(T().pastDueNote(s).text, 'R49 for Home is due. Pay by 8 Dec 2026 or Family ends and readings stop.');
+  eq(T().pastDueNote(s).text, 'Your R49 payment for Home is due. Pay by 8 Dec 2026 or Family ends and readings stop.');
   eq(T().notices(s)[0].title, 'Home payment due');
+  eq(T().notices(s)[0].body, 'Pay R49 by 8 Dec 2026 or Family ends and readings stop.');
+  eq(T().pastDueNote({ ...s, past_due_reason: 'checking' }).text, "We're still checking your R49 payment for Home. You don't need to do anything.");
+});
+test('delete account while the bank answers: nothing to pay, try again after (council)', () => {
+  eq(T().deleteBlocked(unpaid({ past_due_reason: 'checking' })), { title: "We're checking a payment", text: 'Try again once the check is done.', action: null, to: null });
+  eq(T().deleteBlocked(unpaid({ past_due_reason: 'refused' })).title, 'Pay the overdue payment first');
 });
 test('Live card and bell: built from state, none while the bank answers (SOLAR-644 §5)', () => {
   const n = T().notices(unpaid({ past_due_reason: 'refused', interval: 'year', amount_due_minor: 199000,
@@ -291,33 +297,33 @@ test('account menu: payment, login, both; nothing while the bank answers (SOLAR-
 });
 test('ended while a renewal payment is checked: paused, no plans (SOLAR-644 §2)', () => {
   const s = unpaid({ state: 'ended', plan: null, plan_name: null, last_plan_name: 'Family', had_plan: true, renewal_in_flight: true });
-  eq(T().payScreen(s), { title: 'Family', body: 'Readings are paused while we check your Family payment.', button: null });
+  eq(T().payScreen(s), { title: 'Family', body: "Readings are paused while we check your R99 payment. You don't need to do anything.", button: null });
   eq(T().planTitle(s), 'Family');
-  eq(T().planStatus(s), 'Readings are paused while we check your Family payment.');
+  eq(T().planStatus(s), "Readings are paused while we check your R99 payment. You don't need to do anything.");
 });
-test('emails: soft, refused, no card; the pay button names the bill (SOLAR-644 §1)', () => {
+test('emails: soft, refused, no card; the pay-by line under the title; the button names the bill (SOLAR-644 §1, council)', () => {
   const bill = { kind: 'renewal', plan: 'family', plan_name: 'Family', interval: 'month', amount_minor: 9900, currency: 'ZAR', card_type: 'visa', last4: '4081' };
+  const sub = "If the payment hasn't gone through by then, Family ends and readings stop.";
   const soft = T().mail({ key: 'payment_failed', state: unpaid({ past_due_reason: 'retrying', next_try_on: '2026-11-27' }), bill });
-  eq([soft.subject, soft.title, soft.sub, soft.parts[0].lead], ["Your Family payment didn't go through", 'Pay R99 by 8 Dec 2026',
-    "If it isn't paid by then, Family ends and readings stop.", "We couldn't charge your card for Family. We'll try it again on 27 Nov 2026."]);
+  eq([soft.subject, soft.title, soft.sub, soft.parts[0].lead], ["Your Family payment didn't go through", 'Pay R99 by 8 Dec 2026', sub,
+    "We couldn't charge your Visa •••• 4081. We'll try again on 27 Nov 2026."]);
   eq(soft.parts[1].button, { label: 'Pay with another card', page: 'pay', bill: '11111111-2222-3333-4444-555555555555' });
-  eq(T().mail({ key: 'payment_failed', state: unpaid({ past_due_reason: 'last_try_failed' }), bill }).parts[0].lead,
-    "We couldn't charge your card for Family. We won't try it again.");
+  eq(soft.parts[2].note, 'Or open Billing in the app.');
+  eq(T().mail({ key: 'payment_failed', state: unpaid({ past_due_reason: 'last_try_failed' }), bill: { ...bill, last4: null } }).parts[0].lead,
+    "We couldn't charge your saved card. We won't try again.");
   const hard = T().mail({ key: 'card_update', state: unpaid({ past_due_reason: 'refused' }), bill });
-  eq(hard.parts.map(p => p.lead ?? p.note), ["We couldn't charge your Visa •••• 4081 for Family, so we've removed it from your account. We won't try it again.",
-    "If it isn't paid by then, Family ends and readings stop.", undefined]);
-  eq(T().mail({ key: 'card_update', state: unpaid(), bill: { ...bill, last4: null } }).parts[0].lead.slice(0, 40), "We couldn't charge your saved card for F");
+  eq([hard.sub, hard.parts[0].lead], [sub, "We couldn't charge your Visa •••• 4081, so we removed it from your account."]);
   const none = T().mail({ key: 'payment_due', state: unpaid({ past_due_reason: 'no_card' }), bill });
-  eq([none.subject, none.title, none.parts[0].lead], ['Your Family payment is due', 'Pay R99 by 8 Dec 2026', "There's no card saved to pay for Family."]);
+  eq([none.subject, none.title, none.sub, none.parts[0].lead], ['Your Family payment is due', 'Pay R99 by 8 Dec 2026', sub, "There's no card saved, so nothing was charged."]);
   const down = T().mail({ key: 'payment_due', state: unpaid(), bill: { ...bill, plan_name: 'Home', amount_minor: 4900 } });
-  eq([down.title, down.parts[1].note], ['Pay R49 for Home by 8 Dec 2026', "If it isn't paid by then, Family ends and readings stop."]);
+  eq([down.title, down.sub], ['Pay R49 for Home by 8 Dec 2026', sub]);
 });
 test('plan ended: unpaid says so, unless a payment is still unanswered (SOLAR-644 §1d)', () => {
   const s = unpaid({ state: 'ended', plan_name: null, last_plan_name: 'Family', history_kept_until: null, plants: [] });
   const m = (ended) => T().mail({ key: 'plan_ended', state: s, ended });
   eq([m({ ended_at: '2026-12-08T21:59:59.999Z', reason: 'unpaid', paid_unknown: false }).title,
     m({ ended_at: '2026-12-08T21:59:59.999Z', reason: 'unpaid', paid_unknown: false }).parts[0].lead],
-    ['Family ended on 8 Dec 2026', "It wasn't paid, so readings have stopped."]);
+    ['Family ended on 8 Dec 2026', "We didn't receive the renewal payment, so readings have stopped."]);
   eq(m({ ended_at: '2026-12-08T21:59:59.999Z', reason: 'unpaid', paid_unknown: true }).parts[0].lead, 'Readings have stopped.');
   eq(m({ ended_at: '2026-12-08T21:59:59.999Z', reason: 'cancelled', paid_unknown: false }).parts[0].lead, 'Readings have stopped.');
 });

@@ -127,20 +127,24 @@ function due(s: AccountState) {
 }
 /** Billing's red note on an unpaid renewal, by why it is unpaid. button: null while the bank
  *  is still answering (paying again could pay twice). */
+/** "R99 payment", or "R49 payment for Home" when a booked downgrade bills another plan. The
+ *  plan that ends is named once, where it ends. */
+const duePayment = (d: ReturnType<typeof due>) => `${d.amount} payment${d.plan !== d.ends ? ` for ${d.plan}` : ""}`;
+const nothingToDo = "You don't need to do anything.";
 export function pastDueNote(s: AccountState): { text: string; button: string | null } {
-  const d = due(s), what = `${d.amount} for ${d.plan}`, end = `Pay by ${d.by} or ${d.ends} ends and readings stop.`;
+  const d = due(s), yours = `Your ${duePayment(d)}`, end = `Pay by ${d.by} or ${d.ends} ends and readings stop.`;
   const text = (t: string) => ({ text: t, button: billing.payOther });
   switch (s.past_due_reason) {
-    case "checking": return { text: `We're still checking your ${d.amount} payment for ${d.plan} with your bank.`, button: null };
-    case "refused": return text(`${what} didn't go through and your card was removed. ${end}`);
-    case "no_card": return text(`${what} is due. ${end}`);
-    case "retrying": return text(`${what} didn't go through. We'll try your card again on ${dateOnly(s.next_try_on)}. ${end}`);
-    case "last_try_failed": return text(`${what} didn't go through. We won't try your card again. ${end}`);
-    default: return text(`Your ${d.amount} payment for ${d.plan} is overdue. ${end}`);
+    case "checking": return { text: `We're still checking your ${duePayment(d)}. ${nothingToDo}`, button: null };
+    case "refused": return text(`${yours} didn't go through. We removed your saved card. ${end}`);
+    case "no_card": return text(`${yours} is due. ${end}`);
+    case "retrying": return text(`${yours} didn't go through. We'll try your card again on ${dateOnly(s.next_try_on)}. ${end}`);
+    case "last_try_failed": return text(`${yours} didn't go through. We won't try your card again. ${end}`);
+    default: return text(`${yours} is overdue. ${end}`);
   }
 }
 /** Ended while a renewal payment made before the cutoff is still being checked. */
-export const pausedLine = (s: AccountState) => `Readings are paused while we check your ${due(s).plan} payment.`;
+export const pausedLine = (s: AccountState) => `Readings are paused while we check your ${duePayment(due(s))}. ${nothingToDo}`;
 /** The account menu's word under the name, and its dot's label: a payment to make, a login to
  *  reconnect, or both. A payment the bank is still answering needs nothing. */
 export function accountAlert(s: AccountState | null, reconnect: boolean): string | null {
@@ -246,6 +250,8 @@ export const cancelDialog = (s: AccountState) => ({
 export function deleteBlocked(s: AccountState): { title: string; text: string; action: string | null; to: "billing" | "cancel" | "mail" | null } | null {
   if (s.may_delete) return null;
   if (s.dispute_open) return { title: "A payment is in dispute", text: "You can delete your account once it's settled.", action: null, to: null };
+  // the bank is still answering a renewal: nothing to pay, and a paid one may leave a running plan
+  if (s.state === "past_due" && s.past_due_reason === "checking") return { title: "We're checking a payment", text: "Try again once the check is done.", action: null, to: null };
   if (s.state === "past_due") return { title: "Pay the overdue payment first", text: "Pay it in Billing, then you can delete your account.", action: "Go to Billing", to: "billing" };
   if (s.owed_minor > 0) return { title: `${money(s.owed_minor, s.currency, s.locale)} is owed`, text: "Email us to settle it, then you can delete your account.", action: "Email us", to: "mail" };
   if (s.cancel_at) return { title: `${s.plan_name} ends on ${day(s, s.cancel_at)}`, text: "You can delete your account after that.", action: null, to: null };
@@ -407,7 +413,7 @@ export const pay = {
   received: "Payment received.",
   declined: "Your saved card was declined. Enter another card.",
   refund: "Your plan changed while you paid. The payment will be refunded.",
-  pending: "We're still checking your payment.",
+  pending: "We're still checking your payment. Don't pay again yet.",
   failed: "The payment didn't go through.",
   void: "Payment not completed.",
   checkFailed: "Couldn't check your payment.",
@@ -487,7 +493,7 @@ export function notices(s: AccountState): Notice[] {
   const fit = fitLine(s);
   if (s.state === "past_due" && s.past_due_reason !== "checking") {
     const d = due(s), word = !s.past_due_reason ? "overdue" : s.past_due_reason === "no_card" ? "due" : "failed";
-    const body = `Pay ${d.amount} by ${d.by} or readings stop.`;
+    const body = `Pay ${d.amount} by ${d.by} or ${d.plan !== d.ends ? `${d.ends} ends and ` : ""}readings stop.`;
     const title = `${d.plan} payment ${word}`;
     out.push({ kind: "past_due", tone: "bad", title, short: title,
       body, bodyShort: body, button: billing.payOther, action: "pay" });
@@ -585,15 +591,17 @@ export function mail(m: MailInput): Mail | null {
       const b = m.bill, plan = b?.plan_name ?? due(s).plan, ends = due(s).ends;
       const amount = b ? $(b.amount_minor, b.currency) : due(s).amount;
       const title = `Pay ${amount}${plan !== ends ? ` for ${plan}` : ""} by ${day(s, s.plan_ends_at)}`;
-      const then = `If it isn't paid by then, ${ends} ends and readings stop.`;
-      const button: MailPart = { button: { label: billing.payOther, page: "pay", bill: s.due_bill?.id } };
-      if (m.key === "payment_failed") return { subject: `Your ${plan} payment didn't go through`, title, sub: then,
-        parts: [{ lead: `We couldn't charge your card for ${plan}. ${s.next_try_on ? `We'll try it again on ${dateOnly(s.next_try_on)}.` : "We won't try it again."}` }, button] };
-      if (m.key === "card_update") return { subject: `Your ${plan} payment didn't go through`, title,
-        parts: [{ lead: `We couldn't charge your ${card(b?.card_type, b?.last4) ?? "saved card"} for ${plan}, so we've removed it from your account. We won't try it again.` },
-          { note: then }, button] };
-      return { subject: `Your ${plan} payment is due`, title,
-        parts: [{ lead: `There's no card saved to pay for ${plan}.` }, { note: then }, button] };
+      // straight under the title; "the payment", not "you": a retry of ours may still pay it
+      const sub = `If the payment hasn't gone through by then, ${ends} ends and readings stop.`;
+      const saved = card(b?.card_type, b?.last4) ?? "saved card";
+      // the button, and a way to pay without trusting an email link
+      const pay: MailPart[] = [{ button: { label: billing.payOther, page: "pay", bill: s.due_bill?.id } }, { note: "Or open Billing in the app." }];
+      if (m.key === "payment_failed") return { subject: `Your ${plan} payment didn't go through`, title, sub,
+        parts: [{ lead: `We couldn't charge your ${saved}. ${s.next_try_on ? `We'll try again on ${dateOnly(s.next_try_on)}.` : "We won't try again."}` }, ...pay] };
+      if (m.key === "card_update") return { subject: `Your ${plan} payment didn't go through`, title, sub,
+        parts: [{ lead: `We couldn't charge your ${saved}, so we removed it from your account.` }, ...pay] };
+      return { subject: `Your ${plan} payment is due`, title, sub,
+        parts: [{ lead: "There's no card saved, so nothing was charged." }, ...pay] };
     }
     case "refund": {
       const r = m.refund; if (!r) return null;
@@ -612,7 +620,7 @@ export function mail(m: MailInput): Mail | null {
       const unpaid = e?.reason === "unpaid" && !e.paid_unknown;
       return { subject: `Your ${s.last_plan_name} plan has ended`,
         title: at ? `${s.last_plan_name} ended on ${day(s, at)}` : `Your ${s.last_plan_name} plan has ended`,
-        parts: [{ lead: [unpaid ? "It wasn't paid, so readings have stopped." : "Readings have stopped.", kept].filter(Boolean).join(" ") },
+        parts: [{ lead: [unpaid ? "We didn't receive the renewal payment, so readings have stopped." : "Readings have stopped.", kept].filter(Boolean).join(" ") },
           { button: { label: billing.seePlans, page: "plans" } }] };
     }
     case "change_booked": {

@@ -2300,7 +2300,7 @@ function PlanSection({ acct, onPlans }) {
         {acct.state !== 'none' && acct.state !== 'ended' && <div className="plan-meta">{AT.placesLine(acct)}</div>}
         {acct.state === 'ended' && !held && acct.history_kept_until && <div className="plan-meta">{AT.payScreen(acct)?.body}</div>}
         {note && (
-          <PlanNote tone="bad" acts={note.button && <button type="button" className="save-btn" onClick={() => window.settlePayment(acct.due_bill?.id)}>{note.button}</button>}>
+          <PlanNote tone={acct.past_due_reason === 'checking' ? 'warn' : 'bad'} acts={note.button && <button type="button" className="save-btn" onClick={() => window.settlePayment(acct.due_bill?.id)}>{note.button}</button>}>
             {note.text}
           </PlanNote>
         )}
@@ -3095,7 +3095,7 @@ function DownloadSection({ plants, plantId, ready }) {
 // Delete account is off while a paid plan runs or a payment failed: cancel or pay on Billing
 // first (SOLAR-250; the server refuses too, 0130). A plan already cancelled doesn't block it.
 const DELETE_REFUSED = [
-  [/owed/, 'Pay the failed payment on Billing first.'],
+  [/owed/, 'Pay the overdue payment in Billing first.'],
   [/payment is open/, 'A payment is still going through. Try again tomorrow.'],
   [/cancel your plan|plan is running/, 'Cancel your plan first.', 'cancel'],
   [/dispute is open/, 'A payment is still going through. Try again tomorrow.'],
@@ -3361,7 +3361,7 @@ function NotificationsSection({ userId, head }) {
 // Account's Delete needs it.
 // the note shows on the phone's list only, so the rows read as what each holds (SOLAR-411)
 const SETTINGS_NAV = [['account', 'Account', 'Password, theme, your data'], ['notifications', 'Notifications', 'Emails and pop-ups'],
-  ['plants', 'Plants', 'SunSynk logins, plants on or off'], ['billing', 'Billing', 'Plan, card, invoices']];
+  ['plants', 'Plants', 'SunSynk logins, plants on or off'], ['billing', 'Billing', 'Plan, card, payment history']];
 function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, flash, onFlashed }) {
   const { useState, useEffect } = React;
   const [user, setUser] = useState(null);
@@ -3393,7 +3393,7 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
           <div className="set-nav-list">{SETTINGS_NAV.map(([id, label, note]) => (
             <button key={id} type="button" aria-current={shown === id ? 'page' : undefined} onClick={() => onPage(id)}>
               <span className="set-nav-text"><span>{label}</span><small className="set-nav-note">{note}</small></span>
-              {dot[id] && <span className="dot" aria-label={id === 'billing' ? 'Needs you' : 'A login needs reconnecting'} />}
+              {dot[id] && <span className="dot" aria-label={id === 'billing' ? AT.accountAlert(acct, false) || 'Choose plants' : 'Reconnect a login'} />}
               <Icon id="next" className="set-chev" />
             </button>
           ))}</div>
