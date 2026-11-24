@@ -6,6 +6,10 @@
 // instead of hitting SunSynk at second zero, then polls its accounts in parallel.
 // No body (local dev, manual invoke) means "every account, no delay".
 //
+// SOLAR-650 Part B (0253): with private.poll_mode 'live', a 5-second tick posts each shard
+// of the minute plan at its slot instead, with {minute, shard, shards, slot_ms} and no delay.
+// The shard then reads its planned rows (poll_plan_jobs) for that minute.
+//
 // The set of plants to log comes from pollJobs() (0100, 0246), which returns only this
 // shard's plants: since the billing switch-over, the plants billing.plant_state reads
 // now, each through one working login. Jobs are grouped by account so each account's
@@ -29,6 +33,7 @@
 // Deliberately NOT ported: the gzipped `raw` payload table. It was 46 MB of the
 // 96 MB SQLite file, has no dashboard consumer, and may embed account identifiers.
 import { flushErrors, noteError, reportError, serve, track } from "../_shared/errors.ts";
+import { clearYesterday, dayTurned, fromPrev, TODAY_COUNTERS } from "./newday.mts";
 import { dayStartEpoch, extrasOf, extrasPaths, historyRows, localDate, parseSeries } from "../_shared/invhistory.ts";
 import {
   aggregate,
@@ -54,6 +59,7 @@ import {
   type PlantJob,
   plantsToPoll,
   pollJobs,
+  pollPlanJobs,
   RelinkNeeded,
   SignInFailed,
   shareAccount,
@@ -62,13 +68,11 @@ import {
   saveCallTally,
 } from "../_shared/sunsynk.ts";
 import { holdLastGood } from "./hold.mts";
-
-// The inverter and plant lists change rarely, so they are re-read from SunSynk only
-// on minutes divisible by these and served from private.inverters/meta (0031)
-// otherwise. The inverter list every 10 minutes (fleet composition, the online
-// badge); the plant list hourly (a plant added at SunSynk after linking).
-const REFRESH_EVERY_MIN = 10;
-const PLANTS_EVERY_MIN = 60;
+// The inverter and plant lists change rarely, so they are re-read from SunSynk only on
+// the login's own minutes (SOLAR-650) and served from private.inverters/meta (0031)
+// otherwise. The inverter list every 10 minutes (fleet composition, the online badge);
+// the plant list hourly (a plant added at SunSynk after linking).
+import { isListMinute, isPlantsMinute } from "./minutes.mts";
 
 /** epoch seconds for the current minute — the dedup key for a sample */
 const nowMinuteEpoch = () => Math.floor(Date.now() / 60000) * 60;
@@ -107,6 +111,8 @@ type AccountResult = {
   listCalls: number;
   /** SunSynk requests this account cost this minute, retries included */
   apiCalls: number;
+  /** ms after the minute that poll_commit_v2 answered: when the readings became visible */
+  commitMs?: number;
   error?: string;
   needsRelink?: boolean;
   signInFailed?: boolean;
@@ -314,14 +320,18 @@ async function fetchInverter(inv: InverterInfo, acc: Account, ts: number, sign: 
  * Otherwise: fresh values for the endpoints fetched, the last row's for the rest,
  * load_w derived from the balance when load was not read.
  */
-function readingRow(f: Fetched, ts: number): Record<string, unknown> {
+function readingRow(f: Fetched, ts: number, tz: string): Record<string, unknown> {
   const fresh = extractReading(f.inv, f.raw, { battPositiveMeans: f.sign });
   const plant_id = f.inv.plantId ?? null;
   const prev = f.inv.lastReading ?? {};
+  // the plant's midnight passed since the last row: its today counters stay behind (SOLAR-648)
+  const turned = dayTurned(tz, ts, prev);
   if (f.carried) {
     const row: Record<string, unknown> = { ...prev, ts, plant_id, sn: f.inv.sn, status: fresh.status };
+    for (const k of TODAY_COUNTERS) row[k] = fromPrev(k, prev[k], turned);
     if (!f.skipped) for (const k of INPUT_FIELDS) row[k] = fresh[k];
     row.carried = true;
+    clearYesterday(row, tz);
     return row;
   }
   // `fetched` says which endpoints were ASKED for, not which answered: fetchInto
@@ -338,7 +348,7 @@ function readingRow(f: Fetched, ts: number): Record<string, unknown> {
     for (const col of ENDPOINT_FIELDS[ep]) {
       row[col] = ok ? (fresh[col] ?? null)
                : NEVER_CARRY.has(col) ? null
-               : (prev[col] ?? null);
+               : fromPrev(col, prev[col], turned);
     }
   }
   // A battery answer can arrive whole but empty: 0 V, 0 A, 0 % and 0 °C beside real
@@ -357,6 +367,7 @@ function readingRow(f: Fetched, ts: number): Record<string, unknown> {
     // grid + = import, batt + = charging (DATA_PIPELINE §9A); counters stay carried
     row.load_w = Math.max(0, Math.round(num(row.pv_w) + num(row.grid_w) - num(row.batt_w)));
   }
+  clearYesterday(row, tz);
   return row;
 }
 
@@ -374,8 +385,8 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   // also takes the live list: meta is written only on a fresh minute, and a slave
   // that uploads off the refresh minute would otherwise read status 0 for good
   // (SOLAR-168).
-  const refreshMinute = (ts / 60) % REFRESH_EVERY_MIN === 0;
-  const plantsMinute = (ts / 60) % PLANTS_EVERY_MIN === 0;
+  const refreshMinute = isListMinute(acc.id, ts);
+  const plantsMinute = isPlantsMinute(acc.id, ts);
   const cached = await getInvertersCached(acc);
   const noStatus = cached.some((c) => c.status == null && wanted.has(Number(c.plantId)));
   let all = cached;
@@ -467,7 +478,7 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
 
   // A row that mixes two uploads keeps the last balanced row's power figures (SOLAR-551).
   const readings = usable.map((f) => {
-    const row = readingRow(f, ts);
+    const row = readingRow(f, ts, tzOf.get(Number(f.inv.plantId)) ?? "Africa/Johannesburg");
     holdLastGood(row, f.inv.lastReading);
     return row;
   });
@@ -509,6 +520,7 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
     p_access: acc.access_token,
     p_expires: acc.access_expires_at,
   }) as { readings: number; strings: number; plants: number[]; gaps: number[]; refused?: number[] };
+  result.commitMs = Date.now() - ts * 1000;
   if (committed.refused?.length) result.refused = committed.refused;
   result.readings = committed.readings;
   result.strings = committed.strings;
@@ -560,7 +572,9 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
 // ---------------------------------------------------------------------------
 // account: poll only this account, now. Linking a plant sends it (plant_bootstrap_kick,
 // 0094) so the first live reading lands at once instead of at the next minute.
-type ShardSpec = { shard: number; shards: number; delayMs: number; account?: string };
+// minute + slotMs: a shard of the minute plan (0253), posted at its slot; its jobs come from
+// poll_plan_jobs for that minute.
+type ShardSpec = { shard: number; shards: number; delayMs: number; account?: string; minute?: number; slotMs: number };
 
 const MAX_DELAY_MS = 30_000; // never eat more of the minute than the cron job planned for
 
@@ -570,7 +584,10 @@ async function shardSpec(req: Request): Promise<ShardSpec> {
   const shard = Math.min(shards - 1, Math.max(0, Math.floor(Number(body.shard) || 0)));
   const delayMs = Math.min(MAX_DELAY_MS, Math.max(0, Math.floor(Number(body.delay_ms) || 0)));
   const account = typeof body.account === "string" ? body.account : undefined;
-  return { shard, shards, delayMs, account };
+  const minute = Number.isInteger(body.minute) && (body.minute as number) > 0 ? body.minute as number : undefined;
+  const slotMs = Math.max(0, Math.floor(Number(body.slot_ms) || 0));
+  if (minute != null) return { shard, shards, delayMs: 0, minute, slotMs };
+  return { shard, shards, delayMs, account, slotMs: 0 };
 }
 
 // SOLAR-468: this run's SunSynk calls into the daily tally, one write. A shard run also
@@ -589,6 +606,29 @@ async function tallyCalls(spec: ShardSpec, runMs: number, plants: number, ts: nu
   } catch (e) {
     console.warn("sunsynk_calls_report:", e instanceof Error ? e.message : e);
     noteError("calls_report_failed", e, { hourly: true });
+  }
+}
+
+// SOLAR-650: one run-log row per shard run (0251). Never fails the poll.
+type RunTimes = { scheduled: number; started: number; jobsRead?: number; plants: number };
+async function logRun(spec: ShardSpec, ts: number, t: RunTimes, results: AccountResult[], error?: string): Promise<void> {
+  if (spec.account) return;
+  const failed = results.filter((r) => r.error).length;
+  try {
+    await rpc("poll_run_log", { p: {
+      ts, shard: spec.shard, shards: spec.shards,
+      scheduled_ms: t.scheduled, started_ms: t.started, jobs_read_ms: t.jobsRead ?? null,
+      finished_ms: Date.now(), plants: t.plants,
+      inverters: results.reduce((n, r) => n + r.inverters, 0),
+      logins: results.map((r) => ({
+        account: r.account, commit_ms: r.commitMs ?? null, plants: r.plants.length,
+        inverters: r.inverters, error: r.error?.slice(0, 300) ?? null,
+      })),
+      error: error ?? (failed ? `${failed} of ${results.length} logins failed` : null),
+    } });
+  } catch (e) {
+    console.warn("poll_run_log:", e instanceof Error ? e.message : e);
+    noteError("run_log_failed", e, { hourly: true });
   }
 }
 
@@ -622,11 +662,15 @@ async function retryShareLogin() {
 serve("poll", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
+  let spec: ShardSpec | undefined;
+  let ts = 0;
+  let times: RunTimes | undefined;
+  let logged = false;
   try {
-    const spec = await shardSpec(req);
+    spec = await shardSpec(req);
     // The minute this invocation is logging — fixed before the stagger delay so
     // a shard that waits 20 s still stamps the minute the cron tick was for.
-    const ts = nowMinuteEpoch();
+    ts = spec.minute ?? nowMinuteEpoch();
 
     // Only this shard's plants; the shard hash (first 8 hex digits of the account
     // uuid, mod shards) runs in SQL.
@@ -636,9 +680,17 @@ serve("poll", async (req) => {
     // poll, not before it.
     if (spec.shard === 0 && !spec.account) background(retryShareLogin());
 
-    let jobs = await pollJobs(spec.shard, spec.shards, spec.account);
+    // Wait first, then read the jobs, so tokens and plant versions are as they are when
+    // the shard starts, not 20 s old (SOLAR-650).
+    times = { scheduled: ts * 1000 + spec.delayMs + spec.slotMs, started: 0, plants: 0 };
+    if (spec.delayMs > 0) await sleep(spec.delayMs);
+    times.started = Date.now();
+    // A plan call that arrives this late would land in the next minute's: skip it.
+    if (spec.minute != null && times.started > ts * 1000 + 55_000) throw new Error(`poll: plan call for ${ts} arrived ${times.started - ts * 1000} ms after the minute`);
+
+    let jobs = spec.minute != null ? await pollPlanJobs(spec.minute, spec.shard) : await pollJobs(spec.shard, spec.shards, spec.account);
     if (!jobs.length) {
-      if (!spec.account && !(await plantsToPoll()).length) {
+      if (spec.minute == null && !spec.account && !(await plantsToPoll()).length) {
         // Nothing to poll anywhere: a fresh deploy. Link the env-credential account
         // so logging starts without anyone signing in. Only an empty shard pays for
         // the full read; on a running deployment the bootstrap never executes.
@@ -649,7 +701,9 @@ serve("poll", async (req) => {
         }
       }
       if (!jobs.length) {
-        await tallyCalls(spec, 0, 0, ts);
+        times.jobsRead = Date.now();
+        logged = true;
+        await Promise.all([tallyCalls(spec, 0, 0, ts), logRun(spec, ts, times, [])]);
         return json({ ok: true, ts, ...spec, accounts: 0, note: "no accounts in this shard" });
       }
     }
@@ -662,8 +716,8 @@ serve("poll", async (req) => {
       byAccount.set(j.account.id, entry);
     }
     const mine = [...byAccount.values()];
-
-    if (spec.delayMs > 0) await sleep(spec.delayMs);
+    times.jobsRead = Date.now();
+    times.plants = jobs.length;
     const runStart = Date.now();
 
     // Accounts are independent; one dying must not stop the others.
@@ -697,11 +751,13 @@ serve("poll", async (req) => {
       outcome: r.error ? (/^[a-z_]+: /.test(r.error) ? "ours" : "sunsynk")
              : r.inverters > 0 && r.readings === 0 ? "sunsynk" : "ok",
     }));
+    logged = true;
     const [stepped] = await Promise.all([
       rpc("email_poll_step", {
         p_ts: ts, p_outcomes: outcomes, p_plants: [...new Set(results.flatMap((r) => r.plants))],
       }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),
       tallyCalls(spec, Date.now() - runStart, jobs.length, ts),
+      logRun(spec, ts, times, results),
     ]);
     if ((stepped as any)?.error || (stepped as any)?.failed?.length) {
       console.warn("email_poll_step:", JSON.stringify(stepped));
@@ -722,6 +778,7 @@ serve("poll", async (req) => {
     }, ok.length > 0 ? 200 : 502);
   } catch (e) {
     await reportError("poll", e);
+    if (spec && times && !logged) await logRun(spec, ts, times, [], String(e instanceof Error ? e.message : e));
     console.error("poll failed:", e);
     return json({ error: String(e instanceof Error ? e.message : e) }, 500);
   }

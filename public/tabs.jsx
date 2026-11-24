@@ -674,10 +674,14 @@ function DaysPanel({ daily, onRetry, rows, ...bars }) {
 const HIST_LOADING = 'Still loading history';
 const histLoading = () => window.syncProgress(window.SYNC) != null;
 const PAST_TODAY = ['THIS WEEK', 'THIS MONTH', 'THIS YEAR', 'LIFETIME'];
-// none: no reading yet, so a missing figure is a dash, not a load that never ends (SOLAR-623)
+// none: no reading yet, so a missing figure is a dash, not a load that never ends (SOLAR-623).
+// TODAY with no figure has no reading today yet: a dash too, not a shimmer all day (SOLAR-648).
+// The other periods are null only while their days load.
 const totalTile = (accent) => (label, v, sub, none) => {
   const [n, u] = window.fmtEnergyParts(v);
-  return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null && !none} sub={none && v == null ? WAITING : PAST_TODAY.includes(label) && histLoading() ? HIST_LOADING : sub || NBSP} />;
+  const noToday = v == null && label === 'TODAY';
+  return <StatTile label={label} value={n} unit={u} accent={accent} loading={v == null && !none && !noToday}
+    sub={none && v == null ? WAITING : noToday ? 'No readings today' : PAST_TODAY.includes(label) && histLoading() ? HIST_LOADING : sub || NBSP} />;
 };
 
 // ---------------------------------------------------------------- PANELS
@@ -1005,7 +1009,8 @@ function useShownDay(pick, today, refreshKey) {
     return () => { alive = false; };
   }, [pick.date, pick.isToday, refreshKey]);
   const shownRef = React.useRef(null);
-  const ready = pick.isToday ? { isToday: true, date: pick.date, data: today }
+  // today's series from before the plant's midnight is yesterday's: none yet, as on first load
+  const ready = pick.isToday ? { isToday: true, date: pick.date, data: window.dayFor(today, pick.date) }
     : loaded && loaded.date === pick.date ? { isToday: false, date: pick.date, data: loaded.data } : null;
   if (ready) shownRef.current = ready;
   const view = ready || shownRef.current || { isToday: pick.isToday, date: pick.date, data: null };
@@ -1021,7 +1026,8 @@ function useShownDay(pick, today, refreshKey) {
 function dayProblem(view, day, points, silent) {
   if (!day) return null;
   if (day.failed) return 'Couldn’t load this day.';
-  if (day.approx || !points.length) return view.isToday && !silent ? 'Collecting today’s first readings.' : view.isToday ? 'No readings today.' : 'No readings for this day.';
+  // today's line needs two readings; one alone draws nothing (SOLAR-648)
+  if (day.approx || !points.length || (view.isToday && window.realPoints(day) < 2)) return view.isToday && !silent ? 'Collecting today’s first readings.' : view.isToday ? 'No readings today.' : 'No readings for this day.';
   return null;
 }
 
@@ -1052,8 +1058,20 @@ function toDayTotal(parts, total) {
 // 5-minute cache keeps that to one request per 5 minutes (SOLAR-148).
 function useCompare(refreshKey, snap) {
   const [cmp, setCmp] = React.useState(null);
-  React.useEffect(() => { window.fetchCompare(refreshKey).then(setCmp).catch(() => {}); }, [refreshKey, snap]);
-  return cmp;
+  // An answer belongs to the plant's day and to whether today had a reading yet: one asked at
+  // 23:58, or at 00:00 before the first new-day reading, is not used after (SOLAR-648)
+  const tz = snap?.config?.timezone, today = plantDateStr(tz), last = snap?.lastReading;
+  const day = today + (last && plantDateStr(tz, last) === today ? '' : ':none');
+  // just past midnight with the plant still sending, today's first reading is seconds away:
+  // ask once it is in, not twice (SOLAR-648)
+  const due = day.endsWith(':none') && !!last && Date.now() - last.getTime() < READ_FRESH_MS;
+  React.useEffect(() => {
+    if (due) return;
+    let alive = true;
+    window.fetchCompare(refreshKey, day).then(c => { if (alive) setCmp({ day, c }); }).catch(() => {});
+    return () => { alive = false; };
+  }, [refreshKey, snap, day, due]);
+  return cmp && cmp.day === day ? cmp.c : null;
 }
 
 // The last 30 days of plant totals, for a tab's bars: null loading, false failed.
@@ -1170,7 +1188,7 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const peak = peakOf(points);
   // the Today tile always shows today's peak, whichever day the chart is on, so the tiles
   // keep their height and a scroll to the chart lands where it aimed
-  const todayPeak = peakOf(today && !today.approx ? today.points : null);
+  const todayPeak = peakOf(window.dayFor(today, plantToday) && !today.approx ? today.points : null);
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
   // A destination is shown only once it holds something: a 0.0 kWh column would be a
   // zero-width segment under a full-width label, and "the battery got none of it" is said
@@ -1288,7 +1306,7 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
     (pts || []).forEach(p => { if (p.load != null && (!pk || p.load > pk.load)) pk = p; });
     return pk && pk.load > 20 ? pk : null;
   };
-  const todayPeak = peakOf(today && !today.approx ? today.points : null);
+  const todayPeak = peakOf(window.dayFor(today, plantToday) && !today.approx ? today.points : null);
 
   // ---- the day on the chart ----
   const [daily, loadDaily] = useDaily(refreshKey);
@@ -1428,7 +1446,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
     (pts || []).forEach(p => { if (p.grid != null && p.grid > 50 && (!pk || p.grid > pk.grid)) pk = p; });
     return pk;
   };
-  const todayPeak = importPeak(today && !today.approx ? today.points : null);
+  const todayPeak = importPeak(window.dayFor(today, plantToday) && !today.approx ? today.points : null);
   // A silent plant's last figures aren't now: a dash and when they were read.
   const ps = window.plantStatus(snap, Date.now());
   const silent = ps.status === 'offline' || !!snap.loginCut; // a dead login: dashes now (SOLAR-386)

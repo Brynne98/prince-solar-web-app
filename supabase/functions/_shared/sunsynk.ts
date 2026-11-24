@@ -24,6 +24,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { createHash, createHmac } from "node:crypto";
 import { type InverterInfo, num, pick } from "./extract.ts";
 import { noteError } from "./errors.ts";
+import { slot } from "./limit.mts";
 import { fakeSunsynk } from "./gate.ts";
 
 const API_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? "https://openapi.sunsynk.net";
@@ -309,9 +310,11 @@ function addTally(n: CallTally) {
   callTally.set(`${n.kind}|${n.result}`, t);
 }
 const failResult = (e: unknown) => (e instanceof DOMException && e.name === "TimeoutError" ? "timeout" : "network");
-// Fake SunSynk calls (SOLAR-477) are left out: `who` is the login or token used.
-const tallyCall = (who: string, pathname: string, result: string, ms: number) =>
-  isFake(who) || addTally({ kind: kindOf(pathname), result, calls: 1, ms, ms_max: ms });
+// Fake SunSynk calls (SOLAR-477) are left out: `who` is the login or token used. Calls on
+// the company login are kept apart ("share:…"): its rate limit is shared by every plant on
+// it, so its 429s must show on their own (SOLAR-649).
+const tallyCall = (who: string, pathname: string, result: string, ms: number, share = false) =>
+  isFake(who) || addTally({ kind: (share ? "share:" : "") + kindOf(pathname), result, calls: 1, ms, ms_max: ms });
 // A SunSynk call that failed for good (after the retries), as one PostHog issue per data
 // type and result, sent at most once an hour (SOLAR-336). The full counts are in the tally.
 const sunsynkFailed = (who: string, pathname: string, result: string, e: unknown) =>
@@ -335,34 +338,51 @@ export async function saveCallTally(run?: { shard: number; ms: number; plants: n
   }
 }
 
+// At most this many SunSynk requests in flight per login in one isolate: a login's
+// inverters were all read at once, so a company login with many plants hit its rate limit
+// in one burst (SOLAR-649).
+// A call that waited this long for a place gives up, so a shard still saves what it read
+// before pg_net's 55 s cut ends it. The limit counts requests started; a reply's body is
+// read after its place is freed.
+const MAX_IN_FLIGHT = 10;
+const MAX_WAIT_MS = 15_000;
+
 /** GET a resource for one account and return body.data. */
 export async function apiGet(pathname: string, acc: Account): Promise<any> {
-  const doFetch = async (tok: string) => {
-    countCall(acc);
-    const t0 = Date.now();
+  const share = isShareAccount(acc);
+  // the token is read once the call has its place: one renewed while it waited is used
+  const doFetch = async (force = false) => {
+    const done = await slot(acc.id, MAX_IN_FLIGHT, MAX_WAIT_MS);
     try {
-      const go = () => fetch(`${baseFor(tok)}${pathname}`, {
-        headers: signedHeaders("GET", pathname, undefined, tok), signal: AbortSignal.timeout(API_TIMEOUT_MS),
-      });
-      // About a quarter of production's calls to the fake SunSynk fail in 1-2 ms and never
-      // reach it (2026-11-10, SOLAR-477); one more try gets them through. Real calls don't retry here.
-      const res = await go().catch((e) => (isFake(tok) ? go() : Promise.reject(e)));
-      tallyCall(tok, pathname, resultOf(res), Date.now() - t0);
-      return res;
-    } catch (e) {
-      tallyCall(tok, pathname, failResult(e), Date.now() - t0);
-      sunsynkFailed(tok, pathname, failResult(e), e);
-      throw e;
+      const tok = await accessTokenFor(acc, force);
+      countCall(acc);
+      const t0 = Date.now();
+      try {
+        const go = () => fetch(`${baseFor(tok)}${pathname}`, {
+          headers: signedHeaders("GET", pathname, undefined, tok), signal: AbortSignal.timeout(API_TIMEOUT_MS),
+        });
+        // About a quarter of production's calls to the fake SunSynk fail in 1-2 ms and never
+        // reach it (2026-11-10, SOLAR-477); one more try gets them through. Real calls don't retry here.
+        const res = await go().catch((e) => (isFake(tok) ? go() : Promise.reject(e)));
+        tallyCall(tok, pathname, resultOf(res), Date.now() - t0, share);
+        return res;
+      } catch (e) {
+        tallyCall(tok, pathname, failResult(e), Date.now() - t0, share);
+        sunsynkFailed(tok, pathname, failResult(e), e);
+        throw e;
+      }
+    } finally {
+      done();
     }
   };
 
-  let res = await doFetch(await accessTokenFor(acc));
-  if (res.status === 401) res = await doFetch(await accessTokenFor(acc, true));
+  let res = await doFetch();
+  if (res.status === 401) res = await doFetch(true);
 
   for (let attempt = 1; throttled(res) && attempt <= RATE_LIMIT_RETRIES; attempt++) {
     await res.body?.cancel();
     await wait(RATE_LIMIT_BACKOFF_MS * attempt);
-    res = await doFetch(await accessTokenFor(acc));
+    res = await doFetch();
   }
   if (throttled(res)) {
     throttledCounts.set(acc.id, (throttledCounts.get(acc.id) ?? 0) + 1);
@@ -392,7 +412,9 @@ export async function webGet(pathname: string, acc: Account): Promise<any> {
   const tok = await accessTokenFor(acc);
   if (isFake(tok)) throw new Error("web host: not for fake logins");
   countCall(acc);
+  const share = isShareAccount(acc);
   const kind = `web:${pathname}`;
+  const done = await slot(acc.id, MAX_IN_FLIGHT, MAX_WAIT_MS);
   const t0 = Date.now();
   let res: Response;
   try {
@@ -401,12 +423,14 @@ export async function webGet(pathname: string, acc: Account): Promise<any> {
       signal: AbortSignal.timeout(WEB_TIMEOUT_MS),
     });
   } catch (e) {
-    tallyCall(tok, kind, failResult(e), Date.now() - t0);
+    tallyCall(tok, kind, failResult(e), Date.now() - t0, share);
     throw e;
+  } finally {
+    done();
   }
   const body = await res.json().catch(() => ({}));
   const ok = res.ok && body?.code === 0;
-  tallyCall(tok, kind, ok ? "ok" : res.ok ? `code_${body?.code}` : resultOf(res), Date.now() - t0);
+  tallyCall(tok, kind, ok ? "ok" : res.ok ? `code_${body?.code}` : resultOf(res), Date.now() - t0, share);
   if (!ok) throw new Error(`web ${pathname} -> HTTP ${res.status} code ${body?.code} ${body?.msg ?? ""}`);
   return body.data;
 }
@@ -725,7 +749,19 @@ export const plantsToPoll = (): Promise<PlantJob[]> => pollJobs(0, 1);
  * account set = only plants read through that account, whatever the shard.
  */
 export async function pollJobs(shard: number, shards: number, account?: string): Promise<PlantJob[]> {
-  const rows = await rpc<any[]>("poll_jobs_v2", { p_shard: shard, p_shards: shards, p_account: account ?? null });
+  return toJobs(await rpc<any[]>("poll_jobs_v2", { p_shard: shard, p_shards: shards, p_account: account ?? null }));
+}
+
+/**
+ * One shard's jobs from the minute plan (0253, SOLAR-650): the rows planned for it, each
+ * checked again against today's state, with today's token and plant version. Throws when
+ * the minute has no plan.
+ */
+export async function pollPlanJobs(minute: number, shard: number): Promise<PlantJob[]> {
+  return toJobs(await rpc<any[]>("poll_plan_jobs", { p_minute: minute, p_shard: shard }));
+}
+
+function toJobs(rows: any[] | null): PlantJob[] {
   const accs = new Map<string, Account>();
   return (rows ?? []).map((r) => {
     const acc = accs.get(r.account_id) ?? {
