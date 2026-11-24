@@ -53,3 +53,11 @@ Deno.test("a failed outbox bulk pass is reported, not thrown", async () => {
   const out = await drain(p, 0, false);
   assertEquals((out.bulkOutbox as { error: string }).error, "down");
 });
+
+Deno.test("a failed old pass stops nothing after it", async () => {
+  const { calls, p } = record();
+  p.email = (lane) => { calls.push(lane); return Promise.reject(new Error("down")); };
+  const out = await drain(p, 0, false);
+  assertEquals(calls.map((c) => c.split(":")[0]), ["sweep", "urgent", "alerts", "billing", "bulk", "bulkOutbox"]);
+  assertEquals([(out.urgent as { error: string }).error, (out.bulk as { error: string }).error], ["down", "down"]);
+});

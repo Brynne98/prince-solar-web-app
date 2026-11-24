@@ -199,6 +199,16 @@ begin
   update billing.logins set status = 'needs_reconnect' where account = pg_temp.acc(u);
   n := pg_temp.btake();
   perform pg_temp.ok('G7 history on a plant not read: dropped', (pg_temp.ob(h)).drop_reason = 'plant not live', (pg_temp.ob(h)).drop_reason);
+  perform pg_temp.ok('G7 ... its event row marked skipped "not read", as email_claim did',
+    (select status || '/' || last_error from public.email_queue where id = h) = 'skipped/not read');
+  -- read again, history finishes again: email_on_history's two steps (0217)
+  update billing.logins set status = 'ok' where account = pg_temp.acc(u);
+  delete from public.email_queue q where q.plant_id = 990068031 and q.kind = 'history' and q.status = 'skipped' and q.last_error = 'not read';
+  perform private.email_enqueue_plant(990068031, 'history', 'history:990068031', '{}'::jsonb, null, 1::smallint);
+  perform pg_temp.ok('G7 ... queued again through the outbox once the plant is read',
+    exists (select 1 from public.email_queue q join msg.outbox o on o.dedupe_key = q.id || ':email'
+             where q.user_id = u and q.key = 'history:990068031' and q.status = 'outbox' and o.status = 'queued'));
+  update billing.logins set status = 'needs_reconnect' where account = pg_temp.acc(u);
   perform pg_temp.ok('G8 need a hand once a login is added: dropped', (pg_temp.ob(n1)).drop_reason = 'login added', (pg_temp.ob(n1)).drop_reason);
   perform pg_temp.ok('G8 ... plants waiting to be chosen: goes, choose plants', pg_temp.taken(n2)
     and ((select data from t_take where event_id = n2)->>'choose')::boolean is true, (pg_temp.ob(n2)).drop_reason);

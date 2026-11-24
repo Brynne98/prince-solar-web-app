@@ -10,7 +10,7 @@
 // ?dry=1, nothing is written and the answer lists what each lane would send next.
 import { denyUnlessServer } from "../_shared/sunsynk.ts";
 import { noteError, reportError, serve } from "../_shared/errors.ts";
-import { emailPass, json, LIVE, msgEmailPass, outboxPass, RESEND_KEY, sweep } from "../notify/index.ts";
+import { emailPass, json, LIVE, msgBulkPass, msgEmailPass, outboxPass, RESEND_KEY, sweep } from "../notify/index.ts";
 
 // The cron call times out at 55 s. Claims stop at these marks from the start; whatever
 // is claimed and not sent by DEADLINE_MS goes back untouched.
@@ -29,7 +29,11 @@ export type Passes = {
  *  run skips what writes; the outbox has no peek. */
 export async function drain(p: Passes, started: number, dry: boolean) {
   const swept = dry ? null : await p.sweep();
-  const urgent = await p.email("urgent", started + URGENT_MS, started + DEADLINE_MS);
+  // a failing old pass stops nothing after it: the outbox lanes carry most of the mail now
+  const urgent = await p.email("urgent", started + URGENT_MS, started + DEADLINE_MS).catch((e) => {
+    noteError("email_pass_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  });
   const alerts = dry ? null : await p.alerts(started + URGENT_MS, started + DEADLINE_MS).catch((e) => {
     noteError("msg_email_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
@@ -38,7 +42,10 @@ export async function drain(p: Passes, started: number, dry: boolean) {
     noteError("outbox_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   });
-  const bulk = await p.email("bulk", started + BULK_MS, started + DEADLINE_MS);
+  const bulk = await p.email("bulk", started + BULK_MS, started + DEADLINE_MS).catch((e) => {
+    noteError("email_pass_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  });
   const bulkOutbox = dry ? null : await p.bulkOutbox(started + BULK_MS, started + DEADLINE_MS).catch((e) => {
     noteError("msg_email_bulk_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
@@ -55,7 +62,7 @@ if (import.meta.main) serve("notify-email", async (req) => {
       sweep,
       email: (lane, until, deadline) => emailPass(lane, until, deadline, dry),
       alerts: (until, deadline) => msgEmailPass(until, deadline),
-      bulkOutbox: (until, deadline) => msgEmailPass(until, deadline, undefined, undefined, undefined, undefined, "bulk"),
+      bulkOutbox: msgBulkPass,
       billing: outboxPass,
     }, Date.now(), dry));
   } catch (e) {

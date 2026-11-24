@@ -886,9 +886,9 @@ async function sendGroup(ctx: Ctx, g: MsgEmail[], key: string | null): Promise<M
   return [...res, ...answer(ctx, ids, out, true, `batch ${k}`)];
 }
 
+const newBatchKey = () => `mb-${crypto.randomUUID()}`;
 export async function msgEmailPass(until: number, deadline = until, call: Rpc = rpc, postFn: Post = post,
-                                   make: (r: Row) => Promise<Email | null> = build,
-                                   newKey = () => `mb-${crypto.randomUUID()}`,
+                                   make: (r: Row) => Promise<Email | null> = build, newKey = newBatchKey,
                                    lane: "urgent" | "bulk" = "urgent", hold: Hold = bulkHold) {
   const count = { sent: 0, again: 0, failed: 0, dropped: 0, held: 0 };
   const ctx: Ctx = { stop: false, deadline, call, postFn, make, newKey, hold };
@@ -926,6 +926,10 @@ export async function msgEmailPass(until: number, deadline = until, call: Rpc = 
   }
   return count;
 }
+
+/** The bulk lane (0263): welcome, reports, history, feedback, ... */
+export const msgBulkPass = (until: number, deadline = until) =>
+  msgEmailPass(until, deadline, rpc, post, build, newBatchKey, "bulk", bulkHold);
 
 /** SOLAR-328: counted once an email has gone, by user id only, keyed on its event row. Both
  *  paths (old queue, message outbox) call it. */
@@ -1038,8 +1042,7 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
     return { error: String(e?.message ?? e) };
   });
   // the rest routed to the outbox (0263)
-  const bulk = dry ? null : await msgEmailPass(started + BUDGET_MS + 5_000, started + BUDGET_MS + 5_000, rpc, post, build,
-    undefined, "bulk").catch((e) => {
+  const bulk = dry ? null : await msgBulkPass(started + BUDGET_MS + 5_000).catch((e) => {
     noteError("msg_email_bulk_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   });

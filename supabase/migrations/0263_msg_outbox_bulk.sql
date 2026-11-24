@@ -29,10 +29,15 @@
 --   settled (trigger): sent copies sent_at to the event row (link-sunsynk's need-a-hand count
 --     reads it); feedback's message and screenshot are scrubbed from the event row once done
 --     (0179); account_deleted's event row, address and all, is deleted once done (email_done).
+--     History dropped because its plant isn't read is marked 'skipped' / 'not read' on the
+--     event row, as email_claim did, so email_on_history (0217) queues it again later.
 --   email_history_open: a 60-days email still on its way, on either path (notify's report hold).
 -- job-check: job_check_msg lists every channel and lane in msg.kinds routed to the outbox, so
 -- email / bulk shows up from the flip.
 --
+-- Ship notify and notify-email before this: the bulk lane's sender and the report hold that
+-- reads email_history_open (it falls back to the old queue until this is in). This first, and
+-- bulk rows wait for the deploy and a report could pass an outbox history email.
 -- Flip: rows queued before it finish on email_claim. Back:
 -- update msg.kinds set route = 'old' where channel = 'email' and lane = 'bulk';   (new rows only)
 -- ============================================================================
@@ -253,6 +258,11 @@ language plpgsql security definer set search_path = '' as $$
 begin
   if new.status = 'sent' then
     update public.email_queue q set sent_at = now() where q.id = new.event_id;
+  end if;
+  -- history not sent because the plant isn't read: marked as email_claim did, so
+  -- email_on_history (0217) clears it and queues it again when the history finishes again
+  if new.kind = 'history' and new.status = 'dropped' and new.drop_reason in ('plant not live', 'plant not chosen') then
+    update public.email_queue q set status = 'skipped', last_error = 'not read' where q.id = new.event_id;
   end if;
   if new.kind = 'feedback' then
     -- the message stays in private.feedback; its copy and the screenshot go (0179)
