@@ -30,6 +30,7 @@ import { directDb } from "../_shared/pgdb.ts";
 import {
   type Account,
   denyUnlessServer,
+  getInverters,
   type PlantJob,
   saveCallTally,
   setFleetCap,
@@ -50,6 +51,8 @@ const START_LATE_MS = 20_000;
 const HARD_DEADLINE_MS = 50_000;
 const ROUTES_EVERY_MS = 10_000;
 const SAVE_EVERY_MS = 1_000;
+/** a minute not saved by then is left to recover: keeps a lane well inside the 400 s wall limit */
+const SAVE_UNTIL_MS = 120_000;
 /** a lane call that arrives this late reads nothing: the next minute's lanes are on their way */
 const TOO_LATE_MS = 30_000;
 
@@ -103,7 +106,7 @@ type Route = {
 };
 type Done = { acc: Account; second: number; result: AccountResult; row: CommitRow | null; finish: (c: Committed) => Promise<AccountResult> };
 type Stats = {
-  reads: number; plants: number; lostLate: number; lostDeadline: number; lostEnded: number; failed: number;
+  reads: number; plants: number; lostLate: number; lostDeadline: number; lostEnded: number; lostSave: number; failed: number;
   saved: number; refused: number; batches: number; splits: number; deadlocks: number; saveMs: number[]; maxCap: number;
 };
 
@@ -111,7 +114,7 @@ async function runLane(lane: number, lanes: number, ts: number): Promise<void> {
   const t0 = ts * 1000;
   const started = Date.now();
   const seconds = Array.from({ length: 60 }, (_, s) => s).filter((s) => s % lanes === lane);
-  const st: Stats = { reads: 0, plants: 0, lostLate: 0, lostDeadline: 0, lostEnded: 0, failed: 0, saved: 0, refused: 0,
+  const st: Stats = { reads: 0, plants: 0, lostLate: 0, lostDeadline: 0, lostEnded: 0, lostSave: 0, failed: 0, saved: 0, refused: 0,
     batches: 0, splits: 0, deadlocks: 0, saveMs: [], maxCap: cap };
   const accounts = new Map<string, Account>();
   const refused = new Set<number>();
@@ -153,73 +156,105 @@ async function runLane(lane: number, lanes: number, ts: number): Promise<void> {
   });
 
   // --- one second's reads ---
+  const begun = new Set<number>();   // a plant moved to a later second by a newer list is not read twice
+  const lists = new Map<string, Promise<InverterInfo[]>>();   // one live inverter list per login and run
+  const ended = (r: Route) => r.ends_at != null && Date.parse(r.ends_at) <= Date.now();
+  const dueAt = (s: number) => routes.filter((r) => r.read_second === s && !refused.has(Number(r.plant_id)) && !begun.has(Number(r.plant_id)));
+
   async function startSecond(s: number) {
-    const due = routes.filter((r) => r.read_second === s && !refused.has(Number(r.plant_id)));
-    if (!due.length) return;
-    const groups = new Map<string, Route[]>();
-    for (const r of due) groups.set(r.account_id, [...(groups.get(r.account_id) ?? []), r]);
     const at = t0 + s * 1000;
+    let due = dueAt(s);
+    if (!due.length) return;
+    if (Date.now() > at + START_LATE_MS) { st.lostLate += due.length; return; }
+    // past its end by the list: the list may be 10 s old and ends_at early, so ask once more
+    if (due.some(ended)) { await loadRoutes(); due = dueAt(s); }
+    const live = due.filter((r) => !ended(r));
+    st.lostEnded += due.length - live.length;
+    if (!live.length) return;
+    for (const r of live) begun.add(Number(r.plant_id));
+    // one read per login and end time, so a seat that closes stops its own plant only
+    const groups = new Map<string, Route[]>();
+    for (const r of live) groups.set(`${r.account_id} ${r.ends_at}`, [...(groups.get(`${r.account_id} ${r.ends_at}`) ?? []), r]);
     let cached = new Map<string, InverterInfo[]>();
     try {
-      cached = await cachedInverters([...groups.keys()], due.map((r) => Number(r.plant_id)));
+      cached = await cachedInverters([...new Set(live.map((r) => r.account_id))], live.map((r) => Number(r.plant_id)));
     } catch (e) {
       console.warn("inverters_cached_many:", e instanceof Error ? e.message : e);   // each read reads its own
     }
-    if (Date.now() > at + START_LATE_MS) {
-      st.lostLate += due.length;
-      return;
-    }
+    if (Date.now() > at + START_LATE_MS) { st.lostLate += live.length; return; }
     for (const rs of groups.values()) {
-      const acc = accountOf(rs[0]);
-      const jobs = rs.map((r) => jobOf(r, acc));
-      const endsAt = Math.min(...rs.map((r) => (r.ends_at ? Date.parse(r.ends_at) : Infinity)));
-      if (endsAt <= Date.now()) { st.lostEnded += rs.length; continue; }
+      const endsAt = rs[0].ends_at ? Date.parse(rs[0].ends_at) : Infinity;
       st.reads++;
       st.plants += rs.length;
-      reads.push(readOne(acc, jobs, s, Math.min(at + HARD_DEADLINE_MS, endsAt), endsAt, cached.get(acc.id), rs.some((r) => r.lead)));
+      reads.push(readOne(rs, s, Math.min(at + HARD_DEADLINE_MS, endsAt), endsAt,
+        cached.get(rs[0].account_id)?.filter((c) => rs.some((r) => Number(r.plant_id) === c.plantId))));
     }
   }
 
-  async function readOne(acc: Account, jobs: PlantJob[], second: number, stopAt: number, endsAt: number,
-                         cached: InverterInfo[] | undefined, lead: boolean) {
+  async function readOne(rs: Route[], second: number, stopAt: number, endsAt: number, cached: InverterInfo[] | undefined) {
+    const shared = accountOf(rs[0]);
+    // this read's view of the login: its own stop signal, the token shared with the login's other reads
+    const ctl = new AbortController();
+    const acc: Account = Object.create(shared, {
+      signal: { value: ctl.signal },
+      access_token: { get: () => shared.access_token, set: (v) => { shared.access_token = v; } },
+      access_expires_at: { get: () => shared.access_expires_at, set: (v) => { shared.access_expires_at = v; } },
+    });
+    const jobs = rs.map((r) => jobOf(r, acc));
+    const liveList = () => {
+      let p = lists.get(shared.id);
+      if (!p) {
+        p = getInverters(shared);
+        p.catch(() => lists.delete(shared.id));
+        lists.set(shared.id, p);
+      }
+      return p;
+    };
     let timer: number | undefined;
     const stop = new Promise<"stop">((go) => { timer = setTimeout(() => go("stop"), Math.max(0, stopAt - Date.now())); });
+    const reading = readAccount(acc, jobs, ts, { cached, lead: rs.some((r) => r.lead), liveList });
+    reading.catch(() => {});   // a dropped read's late failure is nobody's
     try {
-      const got = await Promise.race([readAccount(acc, jobs, ts, { cached, lead }), stop]);
+      const got = await Promise.race([reading, stop]);
       if (got === "stop") {
+        ctl.abort();
         if (stopAt >= endsAt) st.lostEnded += jobs.length; else st.lostDeadline += jobs.length;
         return;
       }
       if (!got.row) results.push({ r: got.result, second });
-      queue.push({ acc, second, ...got });
+      queue.push({ acc: shared, second, ...got });
     } catch (e) {
       st.failed++;
-      const r = await accountFailed(acc, jobs, e);
+      const r = await accountFailed(shared, jobs, e);
       results.push({ r, second });
-      queue.push({ acc, second, result: r, row: null, finish: async () => r });
+      queue.push({ acc: shared, second, result: r, row: null, finish: async () => r });
     } finally {
       clearTimeout(timer);
     }
   }
 
   // --- saves, once a second ---
+  // A timeout or a lost connection is the database's, not one login's: the batch is tried once
+  // more, not split. Anything else splits it, so a bad row costs its own login only.
+  const dbDown = (e: any) => e?.code === "57014" || e?.code == null || String(e.code).startsWith("08") || /CONNECT/.test(String(e.code));
   async function saveRows(items: Done[]): Promise<(Committed | Error)[]> {
     const call = () => rpc<{ i: number; account: string; result: Committed }[]>("poll_commit_batch",
       { p_ts: ts, p_rows: items.map((d) => d.row) });
     let out: { i: number; result: Committed }[] | null = null;
-    let err: unknown;
+    let err: any;
     try { out = await call(); } catch (e) { err = e; }
-    if (!out && (err as any)?.code === "40P01") {
-      st.deadlocks++;
+    if (!out && (err?.code === "40P01" || dbDown(err)) && Date.now() < t0 + SAVE_UNTIL_MS) {
+      if (err?.code === "40P01") st.deadlocks++;
       try { out = await call(); } catch (e) { err = e; }
     }
     if (out) {
       const byI = new Map(out.map((o) => [Number(o.i), o.result]));
       return items.map((_, k) => byI.get(k + 1) ?? new Error("poll_commit_batch: no answer for this login"));
     }
-    if (items.length === 1) return [err instanceof Error ? err : new Error(String(err))];
+    const failed = err instanceof Error ? err : new Error(String(err));
+    if (items.length === 1 || dbDown(err) || err?.code === "40P01") return items.map(() => failed);
     st.splits++;
-    console.warn(`poll_commit_batch: ${items.length} logins saved one by one:`, err instanceof Error ? err.message : err);
+    console.warn(`poll_commit_batch: ${items.length} logins saved one by one:`, failed.message);
     const each: (Committed | Error)[] = [];
     for (const d of items) each.push(...await saveRows([d]));
     return each;
@@ -228,7 +263,10 @@ async function runLane(lane: number, lanes: number, ts: number): Promise<void> {
   async function flush() {
     const items = queue.splice(0);
     if (!items.length) return;
-    const rows = items.filter((d) => d.row);
+    // a minute saved this late is left to recover (and keeps the lane inside its time)
+    const tooLate = Date.now() > t0 + SAVE_UNTIL_MS;
+    const rows = items.filter((d) => d.row && !tooLate);
+    if (tooLate) st.lostSave += items.filter((d) => d.row).reduce((n, d) => n + Object.keys(d.row!.versions).length, 0);
     const answers = rows.length ? await saveRows(rows) : [];
     const now = Date.now();
     const written = new Set<number>();
@@ -249,9 +287,15 @@ async function runLane(lane: number, lanes: number, ts: number): Promise<void> {
       finishing.push(d.finish(a).then((r) => results.push({ r, second: d.second })).catch(() => {}));
     }
     if (rows.length) st.batches++;
-    const outcomes = items.map((d) => emailOutcome(d.result)).filter((o) => o !== null);
+    // one outcome per login: a login read plant by plant counts as read when any plant was
+    const rank = { ok: 3, sunsynk: 2, ours: 1 } as Record<string, number>;
+    const byLogin = new Map<string, { account: string; outcome: string }>();
+    for (const o of items.filter((d) => !(d.row && tooLate)).map((d) => emailOutcome(d.result))) {
+      if (o && (rank[o.outcome] ?? 0) > (rank[byLogin.get(o.account)?.outcome ?? ""] ?? 0)) byLogin.set(o.account, o);
+    }
+    const step = () => rpc("email_poll_step", { p_ts: ts, p_outcomes: [...byLogin.values()], p_plants: [...written] });
     try {
-      const stepped = await rpc("email_poll_step", { p_ts: ts, p_outcomes: outcomes, p_plants: [...written] }) as any;
+      const stepped = await step().catch((e) => (e?.code === "40P01" ? step() : Promise.reject(e))) as any;
       if (stepped?.failed?.length) throw new Error(`email_poll_step: ${stepped.failed.length} failed`);
     } catch (e) {
       console.warn("email_poll_step:", e instanceof Error ? e.message : e);
@@ -259,16 +303,17 @@ async function runLane(lane: number, lanes: number, ts: number): Promise<void> {
     }
   }
 
+  let finishedReading = false;
+  let saving: Promise<void> = Promise.resolve();
   try {
     directHandle();
     await loadRoutes();
-    let finishedReading = false;
-    const saving = (async () => {
+    saving = (async () => {
       // saves until every read is done and nothing waits
       for (let open = true; open;) {
         const tick = Date.now();
         open = !finishedReading || queue.length > 0;
-        await flush();
+        await flush().catch((e) => console.warn("flush:", e instanceof Error ? e.message : e));
         resizeCap(Date.now());
         st.maxCap = Math.max(st.maxCap, cap);
         if (open) await sleep(SAVE_EVERY_MS - (Date.now() - tick));
@@ -280,19 +325,20 @@ async function runLane(lane: number, lanes: number, ts: number): Promise<void> {
       await startSecond(s);
     }
     await Promise.all(reads);
-    finishedReading = true;
-    await saving;
-    await Promise.all(finishing);
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
     await reportError("poll-lane", e);
+  } finally {
+    finishedReading = true;
+    await saving;
+    await Promise.all(finishing);
   }
 
   const ms = st.saveMs.sort((a, b) => a - b);
   const q = (p: number) => (ms.length ? ms[Math.min(ms.length - 1, Math.floor(ms.length * p))] : null);
   const summary = {
     lane, lanes, ts, reads: st.reads, plants: st.plants, saved: st.saved, refused: st.refused, failed: st.failed,
-    lost: { late: st.lostLate, deadline: st.lostDeadline, ended: st.lostEnded },
+    lost: { late: st.lostLate, deadline: st.lostDeadline, ended: st.lostEnded, save: st.lostSave },
     batches: st.batches, splits: st.splits, deadlocks: st.deadlocks, cap, max_cap: st.maxCap,
     save_ms: { p50: q(0.5), p95: q(0.95), max: ms.at(-1) ?? null }, wall_ms: Date.now() - started,
   };

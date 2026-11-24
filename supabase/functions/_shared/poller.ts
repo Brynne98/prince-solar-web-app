@@ -382,10 +382,12 @@ export type ReadOptions = {
   /** the login's cached inverters, read beforehand for many logins at once (inverters_cached_many) */
   cached?: InverterInfo[];
   /**
-   * false: another read of the same login this minute does the list refresh and plant sync
-   * (a login read plant by plant on several seconds, 0258's read_second). Default true.
+   * false: another read of the same login this minute does the plant sync (a login read
+   * plant by plant on several seconds, 0258's read_second). Default true.
    */
   lead?: boolean;
+  /** the login's live inverter list, shared by its reads this minute (default getInverters) */
+  liveList?: () => Promise<InverterInfo[]>;
 };
 
 /** Read one login's plants for one minute and save it with poll_commit_v2. */
@@ -425,10 +427,10 @@ export async function readAccount(acc: Account, jobs: PlantJob[], ts: number, op
   const cached = opts.cached ?? await getInvertersCached(acc);
   const noStatus = cached.some((c) => c.status == null && wanted.has(Number(c.plantId)));
   let all = cached;
-  if ((lead && refreshMinute) || noStatus || !cached.length) {
+  if (refreshMinute || noStatus || !cached.length) {
     result.listRefreshed = true;
     const bySn = new Map(cached.map((c) => [c.sn, c]));
-    all = (await getInverters(acc)).map((inv) => {
+    all = (await (opts.liveList ?? (() => getInverters(acc)))()).map((inv) => {
       const c = bySn.get(inv.sn);
       return c ? { ...inv, lastReading: c.lastReading, carriedRun: c.carriedRun, uploadS: c.uploadS } : inv;
     });

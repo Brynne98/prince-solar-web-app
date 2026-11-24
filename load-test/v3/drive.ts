@@ -44,15 +44,21 @@ await mock("/__stats?reset=1");
 let cpu0 = await cpuUsec(), calls0 = 0;
 for (let m = 0; m < o.minutes; m++) {
   const ts = first + m * 60;
+  // a minute's steps run just before its boundary (a stall holds its lock before the lanes go)
+  await sleep(ts * 1000 - 300 - Date.now());
   for (const s of (o.steps ?? []).filter((s: any) => s.minute === m)) {
     if (s.knobs) await mock("/__knobs", s.knobs);
     if (s.mode) await sql`update private.poll_mode set mode = ${s.mode}`;
     if (s.sql) await sql.unsafe(s.sql);
     if (s.stall_s) {
+      let held!: () => void;
+      const locked = new Promise<void>((r) => { held = r; });
       posts.push(sql.begin(async (tx) => {
         await tx`lock table public.agg_minute, public.readings in access exclusive mode`;
+        held();
         await sleep(s.stall_s * 1000);
       }));
+      await locked;
     }
   }
   await sleep(ts * 1000 - Date.now());

@@ -76,6 +76,8 @@ export type Account = {
   sunsynk_username: string;
   access_token: string | null;
   access_expires_at: number | null;
+  /** aborted: the read this login is in was dropped (poll lanes): no more calls start for it */
+  signal?: AbortSignal;
 };
 
 export type TokenSet = { access_token: string; refresh_token: string; expires_in: number };
@@ -357,20 +359,30 @@ const backoffUntil = new Map<string, number>();
 export async function apiGet(pathname: string, acc: Account): Promise<any> {
   const share = isShareAccount(acc);
   // the token is read once the call has its place: one renewed while it waited is used
-  const doFetch = async (force = false) => {
-    const until = backoffUntil.get(acc.id) ?? 0;
-    if (until > Date.now()) await wait(until - Date.now());
+  const doFetch = async (force = false): Promise<Response> => {
+    for (let until; (until = backoffUntil.get(acc.id) ?? 0) > Date.now();) await wait(until - Date.now());
+    acc.signal?.throwIfAborted();
     const done = await slot(acc.id, MAX_IN_FLIGHT, MAX_WAIT_MS);
     const fleetDone = Number.isFinite(fleetCap)
-      ? await slot("*fleet", fleetCap, MAX_WAIT_MS).catch((e) => { done(); throw e; })
+      ? await slot("*fleet", fleetCap, MAX_WAIT_MS).catch((e) => {
+        done();
+        throw new Error(`fleet_cap: ${e instanceof Error ? e.message : e}`);   // ours, not SunSynk's
+      })
       : () => {};
+    // a 429 on this login while the call waited for its place, or the read was dropped
+    if ((backoffUntil.get(acc.id) ?? 0) > Date.now() || acc.signal?.aborted) {
+      fleetDone();
+      done();
+      return doFetch(force);
+    }
     try {
       const tok = await accessTokenFor(acc, force);
       countCall(acc);
       const t0 = Date.now();
       try {
         const go = () => fetch(`${baseFor(tok)}${pathname}`, {
-          headers: signedHeaders("GET", pathname, undefined, tok), signal: AbortSignal.timeout(API_TIMEOUT_MS),
+          headers: signedHeaders("GET", pathname, undefined, tok),
+          signal: acc.signal ? AbortSignal.any([AbortSignal.timeout(API_TIMEOUT_MS), acc.signal]) : AbortSignal.timeout(API_TIMEOUT_MS),
         });
         // About a quarter of production's calls to the fake SunSynk fail in 1-2 ms and never
         // reach it (2026-11-10, SOLAR-477); one more try gets them through. Real calls don't retry here.
@@ -379,6 +391,7 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
         onCall?.(Date.now() - t0, resultOf(res));
         return res;
       } catch (e) {
+        if (acc.signal?.aborted) throw e;   // dropped by us: not SunSynk's failure
         tallyCall(tok, pathname, failResult(e), Date.now() - t0, share);
         onCall?.(Date.now() - t0, failResult(e));
         sunsynkFailed(tok, pathname, failResult(e), e);

@@ -5,8 +5,8 @@
 --   private.poll_mode           which path reads each minute: 'edge' (today's poll shards)
 --                               or 'lanes' (K poll-lane calls, each reading its seconds all
 --                               minute). One row; a missing row reads as 'edge'.
---   cron sunsynk-poll           today's command, only while the mode is 'edge'.
---   cron poll-lanes             posts K lanes while the mode is 'lanes'. Plain SQL.
+--   cron sunsynk-poll           reads the mode once a minute: today's shards ('edge') or K
+--                               poll-lane calls ('lanes'). Plain SQL, calls nothing new.
 --   cron poll-share-retry,      the chores shard 0 of `poll` did (share login retry, the
 --   poll-calls-report,          daily SunSynk call report to PostHog, poll_runs pruning), now
 --   poll-runs-prune             their own jobs, so they run whichever path reads.
@@ -20,7 +20,7 @@
 --   job_check_inputs            0234 with 'shards' = the lanes while the mode is 'lanes'.
 --
 -- Switching: update private.poll_mode set mode = 'lanes' (or 'edge'). It takes effect at
--- the next minute: both cron jobs read it when they fire.
+-- the next minute: the cron job reads it when it fires.
 -- ============================================================================
 
 create table private.poll_mode (
@@ -216,8 +216,11 @@ grant execute on function public.inverters_cached_many(uuid[], bigint[]) to serv
 grant execute on function public.poll_lane_routes(int[], timestamptz) to service_role;
 
 -- ---------------------------------------------------------------------------
--- Cron. sunsynk-poll keeps 0181's command, read only while the mode is 'edge'. poll-lanes
--- posts the lanes in one pg_net batch while it is 'lanes'. The chores call poll-lane.
+-- Cron. sunsynk-poll reads the mode once per minute, in one statement, and posts either
+-- 0181's shards ('edge') or the lanes ('lanes'): a switch can never send both or neither.
+-- Each lane and chore carries its own `shard` so job-check judges each call on its own
+-- (fn_call_states groups by fn and shard): lanes 0.., share retry -1, calls report -2.
+-- Ship poll-lane before this migration (DEPLOY.md): the chore jobs call it from the start.
 -- ---------------------------------------------------------------------------
 do $$
 begin
@@ -227,15 +230,16 @@ begin
     return;
   end if;
   perform cron.alter_job(job_id := (select jobid from cron.job where jobname = 'sunsynk-poll'),
-    command := $c$select private.call_fn('poll', jsonb_build_object('shard', s.shard, 'shards', s.shards, 'delay_ms', s.delay_ms), 55000) from private.poll_shards() s where coalesce((select mode from private.poll_mode), 'edge') = 'edge'$c$)
+    command := $c$with m as (select coalesce((select mode from private.poll_mode), 'edge') as mode, coalesce((select lanes from private.poll_mode), 1) as lanes)
+select private.call_fn('poll', jsonb_build_object('shard', s.shard, 'shards', s.shards, 'delay_ms', s.delay_ms), 55000) from m, private.poll_shards() s where m.mode = 'edge'
+union all
+select private.call_fn('poll-lane', jsonb_build_object('shard', l, 'lane', l, 'lanes', m.lanes, 'ts', extract(epoch from date_trunc('minute', now()))::bigint), 55000) from m, generate_series(0, m.lanes - 1) l where m.mode = 'lanes'$c$)
    where exists (select 1 from cron.job where jobname = 'sunsynk-poll');
-  perform cron.schedule('poll-lanes', '* * * * *',
-    $c$select private.call_fn('poll-lane', jsonb_build_object('lane', l, 'lanes', m.lanes, 'ts', extract(epoch from date_trunc('minute', now()))::bigint), 55000) from private.poll_mode m, generate_series(0, m.lanes - 1) l where m.mode = 'lanes'$c$);
   perform cron.schedule('poll-share-retry', '* * * * *',
-    $c$select private.call_fn('poll-lane', '{"chore": "share_retry"}', 55000)$c$);
+    $c$select private.call_fn('poll-lane', '{"chore": "share_retry", "shard": -1}', 55000)$c$);
   -- 00:05, 00:10 and 00:15 SA time: yesterday's SunSynk calls to PostHog (repeats cover a failed send)
   perform cron.schedule('poll-calls-report', '5,10,15 22 * * *',
-    $c$select private.call_fn('poll-lane', '{"chore": "calls_report"}', 55000)$c$);
+    $c$select private.call_fn('poll-lane', '{"chore": "calls_report", "shard": -2}', 55000)$c$);
   perform cron.schedule('poll-runs-prune', '3 * * * *',
     $c$delete from private.poll_runs where minute < now() - interval '7 days'$c$);
 end $$;

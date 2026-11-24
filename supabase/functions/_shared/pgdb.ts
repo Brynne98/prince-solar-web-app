@@ -41,7 +41,8 @@ export function directDb(url: string, { timeoutMs = 25_000 } = {}): DirectDb {
 
   async function run<T>(label: string, text: string, params: unknown[] = []): Promise<T> {
     const q = sql.unsafe(text, params as any[]);
-    const timer = setTimeout(() => q.cancel(), timeoutMs);
+    // queued behind another statement counts too: one connection, statements in turn
+    const timer = setTimeout(() => { Promise.resolve(q.cancel()).catch(() => {}); }, timeoutMs);
     try {
       return await q as unknown as T;
     } catch (e: any) {
