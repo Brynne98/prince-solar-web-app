@@ -353,7 +353,7 @@ begin
                                      'api_alerts_due', 'api_alerts_due_raw')));
 end $$;
 
--- 0266: a "down" pushed on the old path still pairs; one never handled no longer makes a "back" wait
+-- 0267: a "down" pushed on the old path still pairs; one never handled no longer makes a "back" wait
 do $$
 declare u uuid := pg_temp.owner('x3', '{990065935}'); b1 bigint; b2 bigint; n int;
 begin

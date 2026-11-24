@@ -2,7 +2,7 @@
 # verify.sh <verify.sql>  -- after the window: run the SQL. Exit code decides.
 # The SQL file is a `do $$` block that raises on any failed criterion, followed by a
 # `select report from _verify_report`. The before/after alerts hash went with
-# api_alerts_due (0266, SOLAR-660).
+# api_alerts_due (0267, SOLAR-660).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SQL="${1:?usage: $0 <verify.sql>}"
