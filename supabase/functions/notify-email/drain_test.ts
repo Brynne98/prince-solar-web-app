@@ -7,7 +7,7 @@ const record = () => {
   const p: Passes = {
     sweep: () => { calls.push("sweep"); return Promise.resolve({}); },
     email: (lane, until, deadline) => { calls.push(`${lane}:${until}:${deadline}`); return Promise.resolve({}); },
-    billing: (deadline) => { calls.push(`billing:${deadline}`); return Promise.resolve({}); },
+    billing: (until, deadline) => { calls.push(`billing:${until}:${deadline}`); return Promise.resolve({}); },
   };
   return { calls, p };
 };
@@ -15,7 +15,7 @@ const record = () => {
 Deno.test("order: sweep, alert emails, billing, the rest", async () => {
   const { calls, p } = record();
   await drain(p, 0, false);
-  assertEquals(calls, ["sweep", `urgent:${URGENT_MS}:${DEADLINE_MS}`, `billing:${BILLING_MS}`, `bulk:${BULK_MS}:${DEADLINE_MS}`]);
+  assertEquals(calls, ["sweep", `urgent:${URGENT_MS}:${DEADLINE_MS}`, `billing:${BILLING_MS}:${DEADLINE_MS}`, `bulk:${BULK_MS}:${DEADLINE_MS}`]);
 });
 
 Deno.test("each lane stops claiming before the cron call's 55 s", () => {

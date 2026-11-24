@@ -635,10 +635,11 @@ export async function pushPass(deadline: number) {
 // the words come from the text catalog; a receipt reads its frozen bill.
 type OutboxRow = MailInput & { id: number; user: string; email: string; unsub_token: string | null; reminder: boolean };
 const OUTBOX_BATCH = 50;
-export async function outboxPass(deadline: number) {
+/** Takes due rows while before `until`; sends until `deadline`. */
+export async function outboxPass(until: number, deadline = until) {
   const count = { sent: 0, failed: 0, retried: 0 };
   await rpc("billing_jobs", { p_cmd: "outbox_sweep" }).catch((e) => noteError("outbox_sweep_failed", e, { hourly: true }));
-  while (Date.now() < deadline) {
+  while (Date.now() < until) {
     const rows = await rpc<OutboxRow[]>("billing_jobs", { p_cmd: "outbox_take", p_args: { limit: OUTBOX_BATCH } });
     if (!rows.length) break;
     const outs: { row: OutboxRow; payload: Record<string, unknown> }[] = [];
@@ -659,14 +660,17 @@ export async function outboxPass(deadline: number) {
     // is due then, is answered from the first send and sends nothing twice.
     let stop = false;
     for (const o of outs) {
-      // left leased: sent on a later pass
-      if (stop || !await pacer.slot(deadline)) break;
+      // left leased: sent on a later pass. No slot (a 429 held past the deadline): take no more.
+      if (stop) break;
+      if (!await pacer.slot(deadline)) { stop = true; break; }
       const res = await sendOutboxOne(post, RESEND_URL, { id: o.row.id, payload: o.payload });
-      if (res.status === 429) pacer.hold(res.retryAfter);
+      const limited = res.status === 429;
+      if (limited) pacer.hold(res.retryAfter);
       const ok = !res.error;
-      // Resend refused the email itself (400, 422): given up; anything else in 5 minutes
-      const retry_s = ok || refused(res.status) ? null : 300;
-      await rpc("billing_jobs", { p_cmd: "outbox_done", p_args: { id: o.row.id, ok, error: res.error ?? null, retry_s } });
+      // Resend refused the email itself (400, 422): given up; a 429 after its Retry-After, not
+      // counted as a try (0257); anything else in 5 minutes
+      const retry_s = ok || refused(res.status) ? null : limited ? Math.ceil(retryAfterMs(res.retryAfter, Date.now()) / 1000) : 300;
+      await rpc("billing_jobs", { p_cmd: "outbox_done", p_args: { id: o.row.id, ok, error: res.error ?? null, retry_s, refund: limited } });
       if (ok) {
         count.sent++;
         await track("account_email_sent_done", o.row.user, `outbox:${o.row.id}`, new Date().toISOString(), { kind: o.row.key }).catch(() => {});
@@ -770,6 +774,9 @@ export async function emailPass(lane: "urgent" | "bulk" | null, until: number, d
         await track("need_a_hand_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), { choose: row.data?.choose === true });
       }
     }
+    // Rows handed back unsent (out of time, or a 429 held past the deadline): claiming
+    // again would only build the same rows again.
+    if (done.some((x) => x.error === "run out of time")) break;
   }
   return { ...count, due: lines };
 }

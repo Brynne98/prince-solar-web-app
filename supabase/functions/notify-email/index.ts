@@ -17,14 +17,14 @@ export const URGENT_MS = 35_000, BILLING_MS = 42_000, BULK_MS = 45_000, DEADLINE
 export type Passes = {
   sweep: () => Promise<unknown>;
   email: (lane: "urgent" | "bulk", until: number, deadline: number) => Promise<unknown>;
-  billing: (deadline: number) => Promise<unknown>;
+  billing: (until: number, deadline: number) => Promise<unknown>;
 };
 
 /** One run, in order: sweep, alert emails, billing, the rest. A dry run skips what writes. */
 export async function drain(p: Passes, started: number, dry: boolean) {
   const swept = dry ? null : await p.sweep();
   const urgent = await p.email("urgent", started + URGENT_MS, started + DEADLINE_MS);
-  const billing = dry ? null : await p.billing(started + BILLING_MS).catch((e) => {
+  const billing = dry ? null : await p.billing(started + BILLING_MS, started + DEADLINE_MS).catch((e) => {
     noteError("outbox_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   });

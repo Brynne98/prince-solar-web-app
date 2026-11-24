@@ -11,7 +11,11 @@
 -- 1. email_claim takes a lane: 'urgent' = priority 0, 'bulk' = the rest, null = all
 --    (the old notify still calls it without one). Body 0247, patched in place.
 -- 2. job_check_push(): pop-ups due more than 5 minutes and not sent, for job-check.
--- 3. Cron: email-notify off, notify-email and notify-push on. The two functions must
+-- 3. billing.outbox_done takes p_refund: a 429 sent nothing, so its try is given back
+--    (billing_jobs passes "refund"). Without it, five 429s failed a receipt for good.
+-- 4. push_claim's "not an alert" update skips locked rows. The two workers now run at
+--    the same time; it waited on rows email_claim held, which could deadlock.
+-- 5. Cron: email-notify off, notify-email and notify-push on. The two functions must
 --    be deployed before this runs. Back: unschedule both, schedule email-notify again
 --    (0181's command).
 -- ============================================================================
@@ -53,7 +57,49 @@ revoke all on function public.job_check_push() from public, anon, authenticated;
 grant execute on function public.job_check_push() to service_role;
 
 -- ---------------------------------------------------------------------------
--- 3. Cron
+-- 3. billing.outbox_done(..., p_refund). Body 0247, with the refund.
+-- ---------------------------------------------------------------------------
+drop function billing.outbox_done(bigint, boolean, text, int, timestamptz);
+create function billing.outbox_done(p_id bigint, p_ok boolean, p_error text default null, p_retry_s int default null,
+                                    p_at timestamptz default now(), p_refund boolean default false)
+returns void language sql security definer set search_path = billing, pg_temp as $$
+  update billing.outbox
+     set status = case when p_ok then 'sent' when p_retry_s is null or (tries >= 5 and not p_refund) then 'failed' else 'queued' end,
+         sent_at = case when p_ok then p_at end,
+         not_before = case when not p_ok and p_retry_s is not null then p_at + make_interval(secs => p_retry_s) else not_before end,
+         tries = tries - case when p_refund and tries > 0 then 1 else 0 end,                -- 0257
+         last_error = p_error, claimed_until = null
+   where id = p_id
+$$;
+revoke all on function billing.outbox_done(bigint, boolean, text, int, timestamptz, boolean) from public, anon, authenticated;
+
+do $$
+declare
+  d text := pg_get_functiondef('public.billing_jobs(text, jsonb)'::regprocedure);
+  old text := $o$(p_args->>'ok')::boolean, p_args->>'error', (p_args->>'retry_s')::int)$o$;
+begin
+  if position(old in d) = 0 then raise exception 'billing_jobs changed since 0247: edit it by hand'; end if;
+  execute replace(d, old, $n$(p_args->>'ok')::boolean, p_args->>'error', (p_args->>'retry_s')::int,
+                               now(), coalesce((p_args->>'refund')::boolean, false))$n$);
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 4. push_claim: the "not an alert" update never waits. Rows locked now are marked
+--    on the next run. Body 0232 (0256's patch kept).
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  d text := pg_get_functiondef('public.push_claim(int)'::regprocedure);
+  old text := $o$   where q.pushed_at is null and not private.is_alert(q.kind);$o$;
+begin
+  if position(old in d) = 0 then raise exception 'push_claim changed since 0256: edit it by hand'; end if;
+  execute replace(d, old, $n$   where q.id in (select n.id from public.email_queue n                            -- 0257
+                   where n.pushed_at is null and not private.is_alert(n.kind)
+                   for update skip locked);$n$);
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 5. Cron
 -- ---------------------------------------------------------------------------
 do $$
 begin
