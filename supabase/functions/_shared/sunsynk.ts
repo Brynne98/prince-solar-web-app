@@ -341,12 +341,29 @@ export async function saveCallTally(run?: { shard: number; ms: number; plants: n
 const MAX_IN_FLIGHT = 10;
 const MAX_WAIT_MS = 15_000;
 
+// Poller v3 (SOLAR-656): a cap on calls in flight across every login in this isolate, set by
+// the host that reads many logins at once (a lane sizes it from calls/s x p99 latency).
+// Infinity = no cap (today's poller). `onCall` hears every call's time and result.
+let fleetCap = Infinity;
+export const setFleetCap = (n: number) => { fleetCap = Math.max(1, n); };
+let onCall: ((ms: number, result: string) => void) | null = null;
+export const watchCalls = (f: typeof onCall) => { onCall = f; };
+
+// A 429 makes every call of that login wait out the backoff, not only the one that got it:
+// the rate limit is per login (2026-11-10).
+const backoffUntil = new Map<string, number>();
+
 /** GET a resource for one account and return body.data. */
 export async function apiGet(pathname: string, acc: Account): Promise<any> {
   const share = isShareAccount(acc);
   // the token is read once the call has its place: one renewed while it waited is used
   const doFetch = async (force = false) => {
+    const until = backoffUntil.get(acc.id) ?? 0;
+    if (until > Date.now()) await wait(until - Date.now());
     const done = await slot(acc.id, MAX_IN_FLIGHT, MAX_WAIT_MS);
+    const fleetDone = Number.isFinite(fleetCap)
+      ? await slot("*fleet", fleetCap, MAX_WAIT_MS).catch((e) => { done(); throw e; })
+      : () => {};
     try {
       const tok = await accessTokenFor(acc, force);
       countCall(acc);
@@ -359,13 +376,16 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
         // reach it (2026-11-10, SOLAR-477); one more try gets them through. Real calls don't retry here.
         const res = await go().catch((e) => (isFake(tok) ? go() : Promise.reject(e)));
         tallyCall(tok, pathname, resultOf(res), Date.now() - t0, share);
+        onCall?.(Date.now() - t0, resultOf(res));
         return res;
       } catch (e) {
         tallyCall(tok, pathname, failResult(e), Date.now() - t0, share);
+        onCall?.(Date.now() - t0, failResult(e));
         sunsynkFailed(tok, pathname, failResult(e), e);
         throw e;
       }
     } finally {
+      fleetDone();
       done();
     }
   };
@@ -375,6 +395,7 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
 
   for (let attempt = 1; throttled(res) && attempt <= RATE_LIMIT_RETRIES; attempt++) {
     await res.body?.cancel();
+    backoffUntil.set(acc.id, Math.max(backoffUntil.get(acc.id) ?? 0, Date.now() + RATE_LIMIT_BACKOFF_MS * attempt));
     await wait(RATE_LIMIT_BACKOFF_MS * attempt);
     res = await doFetch();
   }

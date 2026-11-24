@@ -28,22 +28,18 @@
 //
 // Deliberately NOT ported: the gzipped `raw` payload table. It was 46 MB of the
 // 96 MB SQLite file, has no dashboard consumer, and may embed account identifiers.
-import { flushErrors, noteError, reportError, serve, track } from "../_shared/errors.ts";
+import { noteError, reportError, serve } from "../_shared/errors.ts";
 import { rpc } from "../_shared/db.ts";
 import {
   type Account,
-  db,
   denyUnlessServer,
   ensureBootstrapAccount,
   type PlantJob,
   plantsToPoll,
   pollJobs,
-  RelinkNeeded,
-  SignInFailed,
-  shareAccount,
   saveCallTally,
 } from "../_shared/sunsynk.ts";
-import { type AccountResult, emptyResult, pollAccount } from "../_shared/poller.ts";
+import { accountFailed, type AccountResult, emailOutcome, pollAccount } from "../_shared/poller.ts";
 
 /** epoch seconds for the current minute — the dedup key for a sample */
 const nowMinuteEpoch = () => Math.floor(Date.now() / 60000) * 60;
@@ -76,21 +72,10 @@ async function shardSpec(req: Request): Promise<ShardSpec> {
 
 // SOLAR-468: this run's SunSynk calls into the daily tally, one write. A shard run also
 // logs itself as a poll_run row (an empty shard too); a one-account run (Check) saves the
-// calls only. At 00:05, 00:10 and 00:15 SA time shard 0 also sends yesterday's totals to
-// PostHog. Every send of a day has the same uuid and time, so PostHog keeps one; the
-// repeats cover a send that failed.
-async function tallyCalls(spec: ShardSpec, runMs: number, plants: number, ts: number): Promise<void> {
+// calls only. The daily report to PostHog is poll-lane's chore since 0259.
+async function tallyCalls(spec: ShardSpec, runMs: number, plants: number): Promise<void> {
   if (spec.account) return saveCallTally();
   await saveCallTally({ shard: spec.shard, ms: runMs, plants });
-  const saMinute = Math.floor((ts + 2 * 3600) / 60) % 1440;
-  if (spec.shard !== 0 || ![5, 10, 15].includes(saMinute)) return;
-  try {
-    const day = (await rpc("sunsynk_calls_report", {})) as Record<string, unknown> | null;
-    if (day) await track("sunsynk_calls_counted", "edge:poll", String(day.day), `${day.day}T23:59:00+02:00`, { ...day, $process_person_profile: false });
-  } catch (e) {
-    console.warn("sunsynk_calls_report:", e instanceof Error ? e.message : e);
-    noteError("calls_report_failed", e, { hourly: true });
-  }
 }
 
 // SOLAR-650: one run-log row per shard run (0251). Never fails the poll.
@@ -116,33 +101,6 @@ async function logRun(spec: ShardSpec, ts: number, t: RunTimes, results: Account
   }
 }
 
-// Work that may finish after the response; the runtime keeps the isolate for it.
-const background = (p: Promise<unknown>) => (globalThis as any).EdgeRuntime?.waitUntil?.(p);
-
-async function retryShareLogin() {
-  try {
-    const { data: id, error } = await db.rpc("share_retry_due");   // 0177
-    if (error) throw new Error(error.message);
-    if (!id) return;
-    try {
-      if (await shareAccount()) console.log("share login: signed in again");
-    } catch (e) {
-      // Logged as another stop, which the next try is timed from. Already stopped, so no email.
-      const msg = e instanceof Error ? e.message : String(e);
-      await db.rpc("account_mark", { p_account: id, p_status: "needs_relink", p_error: msg });
-      console.warn("share login retry failed:", msg);
-      noteError("share_login_retry_failed", e, { hourly: true });
-    }
-  } catch (e) {
-    console.warn("share login retry skipped:", e instanceof Error ? e.message : e);
-    noteError("share_login_retry_skipped", e, { hourly: true });
-  } finally {
-    await saveCallTally();
-    // Runs past the response, so serve() may have sent its notes already.
-    await flushErrors();
-  }
-}
-
 serve("poll", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
@@ -157,12 +115,8 @@ serve("poll", async (req) => {
     ts = nowMinuteEpoch();
 
     // Only this shard's plants; the shard hash (first 8 hex digits of the account
-    // uuid, mod shards) runs in SQL.
-    // SunSynk refused the share login: try the secret again an hour after the last try, so
-    // shared plants restart without an owner pressing Check (SOLAR-451). Checked every
-    // minute on one shard, so a missed minute only delays it a minute. Runs beside the
-    // poll, not before it.
-    if (spec.shard === 0 && !spec.account) background(retryShareLogin());
+    // uuid, mod shards) runs in SQL. The share login retry that ran on shard 0 is
+    // poll-lane's chore since 0259.
 
     // Wait first, then read the jobs, so tokens and plant versions are as they are when
     // the shard starts, not 20 s old (SOLAR-650).
@@ -185,7 +139,7 @@ serve("poll", async (req) => {
       if (!jobs.length) {
         times.jobsRead = Date.now();
         logged = true;
-        await Promise.all([tallyCalls(spec, 0, 0, ts), logRun(spec, ts, times, [])]);
+        await Promise.all([tallyCalls(spec, 0, 0), logRun(spec, ts, times, [])]);
         return json({ ok: true, ts, ...spec, accounts: 0, note: "no accounts in this shard" });
       }
     }
@@ -203,42 +157,17 @@ serve("poll", async (req) => {
     const runStart = Date.now();
 
     // Accounts are independent; one dying must not stop the others.
-    const results = await Promise.all(mine.map(async ({ acc, jobs }): Promise<AccountResult> => {
-      try {
-        return await pollAccount(acc, jobs, ts);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const needsRelink = e instanceof RelinkNeeded;
-        await rpc("account_mark", {
-          p_account: acc.id, p_status: needsRelink ? "needs_relink" : "active", p_error: msg,
-        }).catch(() => {});
-        console.error(`poll: account ${acc.id} failed:`, msg);
-        // A dead login is the owner's to fix and is mailed to them; the rest are ours or SunSynk's.
-        if (!needsRelink) {
-          const kind = e instanceof SignInFailed ? "sign_in" : /^[a-z_]+: /.test(msg) ? "ours" : "sunsynk";
-          for (const j of jobs) noteError(`account_failed_${kind}`, e, { user: acc.user_id, plant: j.plantId, hourly: true });
-        }
-        return { ...emptyResult(acc), error: msg, ...(needsRelink ? { needsRelink } : {}),
-          ...(e instanceof SignInFailed ? { signInFailed: true } : {}) };
-      }
-    }));
+    const results = await Promise.all(mine.map(({ acc, jobs }) =>
+      pollAccount(acc, jobs, ts).catch((e) => accountFailed(acc, jobs, e))));
 
     // Email state (0102): how each login went, then step the plants just written.
-    // SunSynk's fault and ours are told apart so our own outage is never mailed as
-    // SunSynk's: our errors are rpc failures ("fn: message"); a dead login is left out,
-    // and so is one we could not sign in (SOLAR-451): no read was made, so it says
-    // nothing about the inverter.
-    const outcomes = results.filter((r) => !r.needsRelink && !r.signInFailed).map((r) => ({
-      account: r.account,
-      outcome: r.error ? (/^[a-z_]+: /.test(r.error) ? "ours" : "sunsynk")
-             : r.inverters > 0 && r.readings === 0 ? "sunsynk" : "ok",
-    }));
+    const outcomes = results.map(emailOutcome).filter((o) => o !== null);
     logged = true;
     const [stepped] = await Promise.all([
       rpc("email_poll_step", {
         p_ts: ts, p_outcomes: outcomes, p_plants: [...new Set(results.flatMap((r) => r.plants))],
       }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),
-      tallyCalls(spec, Date.now() - runStart, jobs.length, ts),
+      tallyCalls(spec, Date.now() - runStart, jobs.length),
       logRun(spec, ts, times, results),
     ]);
     if ((stepped as any)?.error || (stepped as any)?.failed?.length) {

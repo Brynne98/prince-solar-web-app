@@ -80,7 +80,11 @@ The per-minute reading of a login, for any host that runs the poller (SOLAR-656)
 | Name | Use it for |
 |---|---|
 | `pollAccount(acc, jobs, ts)` | Read every inverter of a login's plants for one minute and save it (`poll_commit_v2`). `fetchInverter`, `readingRow`, `carryAllowed`, `canCarry`, `uploadNotDue`, `wantEndpoints`, `fetchInto`, `bankTodayTemps` are its steps. |
+| `readAccount(acc, jobs, ts, opts)` | The read half of `pollAccount`: the row to save (`CommitRow`, `poll_commit_batch`'s shape) and `finish(committed)` for what follows the save. `opts.cached` takes inverters read for many logins at once; `opts.lead: false` leaves the list refresh and plant sync to another read of the login. |
+| `accountFailed(acc, jobs, e)`, `emailOutcome(result)` | A login whose read or save threw (marked, noted), and how a login's minute counts for `email_poll_step`. |
 | `rpc(fn, args)`, `dbHandle()`, `useDb(handle)` | The database the SunSynk and reading code use: PostgREST (`postgrest`) unless a host gives its own `Db` once at start. `db` (supabase-js) stays for the callers outside the reading path. |
+| `directDb(url)` (`_shared/pgdb.ts`) | A `Db` over one direct Postgres connection, answering as PostgREST does. The poll lanes use it. |
+| `setFleetCap(n)`, `watchCalls(f)` (`_shared/sunsynk.ts`) | A cap on SunSynk calls in flight across logins, and a listener on every call's time and result. |
 
 ## Forms and sign-in (`auth.jsx`)
 
