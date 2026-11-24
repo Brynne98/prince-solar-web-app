@@ -1,6 +1,7 @@
 // `notify-email` (SOLAR-645 step 2, cron every minute from 0257): the one Resend sender.
 // Each run: the sweeps (email_sweep; the billing sweep runs inside the billing pass), then
-// alert emails, then the billing outbox, then the rest (welcome, reports, history, ...).
+// alert emails (the old queue, then the message outbox, SOLAR-645 step 4), then the billing
+// outbox, then the rest (welcome, reports, history, ...).
 // All three share one Resend pace, and a 429 holds all of them until its Retry-After.
 // Pop-ups are notify-push. The building and sending is notify's (../notify/index.ts).
 //
@@ -8,7 +9,7 @@
 // ?dry=1, nothing is written and the answer lists what each lane would send next.
 import { denyUnlessServer } from "../_shared/sunsynk.ts";
 import { noteError, reportError, serve } from "../_shared/errors.ts";
-import { emailPass, json, LIVE, outboxPass, RESEND_KEY, sweep } from "../notify/index.ts";
+import { emailPass, json, LIVE, msgEmailPass, outboxPass, RESEND_KEY, sweep } from "../notify/index.ts";
 
 // The cron call times out at 55 s. Claims stop at these marks from the start; whatever
 // is claimed and not sent by DEADLINE_MS goes back untouched.
@@ -17,19 +18,25 @@ export const URGENT_MS = 35_000, BILLING_MS = 42_000, BULK_MS = 45_000, DEADLINE
 export type Passes = {
   sweep: () => Promise<unknown>;
   email: (lane: "urgent" | "bulk", until: number, deadline: number) => Promise<unknown>;
+  alerts: (until: number, deadline: number) => Promise<unknown>;
   billing: (until: number, deadline: number) => Promise<unknown>;
 };
 
-/** One run, in order: sweep, alert emails, billing, the rest. A dry run skips what writes. */
+/** One run, in order: sweep, alert emails (old queue, then outbox), billing, the rest. A dry
+ *  run skips what writes; the outbox has no peek. */
 export async function drain(p: Passes, started: number, dry: boolean) {
   const swept = dry ? null : await p.sweep();
   const urgent = await p.email("urgent", started + URGENT_MS, started + DEADLINE_MS);
+  const alerts = dry ? null : await p.alerts(started + URGENT_MS, started + DEADLINE_MS).catch((e) => {
+    noteError("msg_email_pass_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  });
   const billing = dry ? null : await p.billing(started + BILLING_MS, started + DEADLINE_MS).catch((e) => {
     noteError("outbox_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   });
   const bulk = await p.email("bulk", started + BULK_MS, started + DEADLINE_MS);
-  return { live: !dry, swept, urgent, billing, bulk };
+  return { live: !dry, swept, urgent, alerts, billing, bulk };
 }
 
 if (import.meta.main) serve("notify-email", async (req) => {
@@ -40,6 +47,7 @@ if (import.meta.main) serve("notify-email", async (req) => {
     return json(await drain({
       sweep,
       email: (lane, until, deadline) => emailPass(lane, until, deadline, dry),
+      alerts: (until, deadline) => msgEmailPass(until, deadline),
       billing: outboxPass,
     }, Date.now(), dry));
   } catch (e) {

@@ -35,7 +35,7 @@ import {
   offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, cancelEndsSoon, needAHand, feedback, unpaidReminder, unpaidLast, unpaidDeleted, APP,
 } from "../_shared/email.ts";
 import { outboxMail, FROM_BILLING, FROM_HELLO } from "../_shared/email.ts";
-import { sendOutboxOne } from "../_shared/outbox.ts";
+import { msgKey, type Post, sendOutboxOne } from "../_shared/outbox.ts";
 import { mail as accountMail, type MailInput } from "../_shared/text.ts";
 import { Pacer, retryAfterMs } from "../_shared/pace.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
@@ -743,6 +743,77 @@ export async function outboxPass(until: number, deadline = until) {
   return count;
 }
 
+// ------------------------------------------------------------------- alert emails, outbox (SOLAR-645 step 4)
+
+// msg_email_take (0262) leases due rows under one claim, after the guard at send time, with
+// the event row's fields; the email is built by build(), as on the old path. One Resend call
+// per row under its own key (ms-<id>), so a retry after a lost answer sends nothing twice.
+// msg_email_done takes each Resend status back; the database decides from it.
+export type MsgEmail = {
+  id: number; claim: string; tries: number; event_id: number; user_id: string | null; to_email: string;
+  plant_id: number | null; plant_name: string | null; tz: string; kind: string; key: string; data: Record<string, any>;
+};
+export type MsgResult = { id: number; code?: number; retry_s?: number; error?: string; untried?: boolean; skip?: string };
+const MSG_BATCH = 50;
+let msgMissingNoted = false;
+/** The RPC isn't there yet: the functions went out before the migration. */
+export const missingRpc = (e: unknown) => /Could not find the function|PGRST202/.test(String((e as Error)?.message ?? e));
+
+export async function msgEmailPass(until: number, deadline = until, call: Rpc = rpc, postFn: Post = post,
+                                   make: (r: Row) => Promise<Email | null> = build) {
+  const count = { sent: 0, again: 0, failed: 0, dropped: 0 };
+  while (Date.now() < until) {
+    let rows: MsgEmail[];
+    try {
+      rows = await call<MsgEmail[]>("msg_email_take", { p_limit: MSG_BATCH, p_lane: "urgent" });
+    } catch (e) {
+      if (!missingRpc(e)) throw e;
+      if (!msgMissingNoted) noteError("msg_email_take_missing", e, { hourly: true });
+      msgMissingNoted = true;
+      return { ...count, missing: true };
+    }
+    if (!rows.length) break;
+    const res: MsgResult[] = [];
+    let stop = false;
+    for (const m of rows) {
+      // left unsent: handed back at once, the try given back
+      if (stop || Date.now() > deadline) { res.push({ id: m.id, untried: true }); continue; }
+      const row: Row = { id: m.event_id, user_id: m.user_id, to_email: m.to_email, plant_id: m.plant_id, plant_name: m.plant_name,
+                         tz: m.tz, kind: m.kind, key: m.key, data: m.data ?? {}, tries: m.tries, switch: null, unsub_token: null, batch_key: null };
+      let mail: Email | null;
+      try {
+        mail = await make(row);
+      } catch (e) {
+        noteError("email_build_failed", e, { user: m.user_id, hourly: true });
+        res.push({ id: m.id, code: 0, error: `build: ${e instanceof Error ? e.message : e}`.slice(0, 200) });
+        continue;
+      }
+      if (!mail) { res.push({ id: m.id, skip: "nothing to say" }); continue; }
+      // no slot before the deadline (a 429 held past it): this row and the rest go back
+      if (!await pacer.slot(deadline)) { stop = true; res.push({ id: m.id, untried: true }); continue; }
+      const out = await sendOutboxOne(postFn, RESEND_URL, { id: m.id, payload: payload({ row, mail }) }, msgKey(m.id));
+      if (!out.error) { res.push({ id: m.id, code: out.status }); continue; }
+      const limited = out.status === 429;
+      if (limited) {
+        pacer.hold(out.retryAfter);
+        noteError("resend_429", new Error(out.error), { hourly: true });
+      } else if (!refused(out.status)) noteError(`resend_${out.status || "network"}`, new Error(out.error), { hourly: true });
+      else noteError("email_failed", new Error(`${m.kind} outbox ${m.id}: ${out.error}`), { user: m.user_id, hourly: true });
+      res.push({ id: m.id, code: out.status, error: out.error,
+                 ...(out.retryAfter ? { retry_s: Math.ceil(retryAfterMs(out.retryAfter, Date.now()) / 1000) } : {}) });
+      // Resend in trouble (not one email refused): the rest wait for the next run
+      if (!refused(out.status)) stop = true;
+    }
+    await call("msg_email_done", { p_claim: rows[0].claim, p_results: res });
+    for (const r of res) {
+      const c = r.code ?? 0;
+      count[r.untried ? "again" : r.skip ? "dropped" : c >= 200 && c < 300 ? "sent" : refused(c) ? "failed" : "again"]++;
+    }
+    if (stop) break;
+  }
+  return count;
+}
+
 /** What only the clock can tell: no readings, SunSynk, reports. */
 export const sweep = () => rpc<Record<string, unknown>>("email_sweep").catch((e) => {
   noteError("email_sweep_failed", e, { hourly: true });
@@ -846,6 +917,11 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
   const started = Date.now();
   const swept = dry ? null : await sweep();
   const { due, ...count } = await emailPass(null, started + BUDGET_MS, started + BUDGET_MS + 5_000, dry, withHtml);
+  // alert emails routed to the outbox (0262), so going back to this run sends them too
+  const alerts = dry ? null : await msgEmailPass(started + BUDGET_MS, started + BUDGET_MS + 5_000).catch((e) => {
+    noteError("msg_email_pass_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  });
   const outbox = dry ? null : await outboxPass(started + BUDGET_MS + 5_000).catch((e) => {
     noteError("outbox_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
@@ -860,7 +936,7 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
     noteError("push_outbox_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   }) : null;
-  return { live: !dry, swept, ...count, outbox, pushed, pushedOutbox, due };
+  return { live: !dry, swept, ...count, alerts, outbox, pushed, pushedOutbox, due };
 }
 
 // Every template from one plant's real numbers; event values are samples.

@@ -176,7 +176,7 @@ and the sign-in screens already call it; it drops refusals and offline).
 | Name | Use it for |
 |---|---|
 | `Pacer`, `retryAfterMs` (`pace.ts`) | The one Resend pace in a run: `slot(deadline)` before each call, `hold(retryAfter)` on a 429. notify-email's three lanes share one (SOLAR-645). |
-| `sendOutboxOne` (`outbox.ts`) | One outbox email under its row's own key (`ob-<id>`). |
+| `sendOutboxOne` (`outbox.ts`) | One outbox email under its row's own key (`ob-<id>`; `msgKey` gives `ms-<id>` for `msg.outbox` emails). |
 
 ## CSS
 

@@ -67,3 +67,12 @@ Deno.test("message outbox (0261): a lane stuck over 5 min or with expired rows f
   eq(pick(gone, "msg:push:urgent")?.failing, false, "lane no longer used clears");
   eq(pick(gone, "msg:push:urgent")?.job, "notify-push", "cleared under its worker");
 });
+
+Deno.test("message outbox, email lane (0262): its own check under notify-email, 429s shown", () => {
+  const lane = { channel: "email", lane: "urgent", queued: 1, oldest: "2026-11-10T20:54:00Z", expired: 0, n429: 3 };
+  const v = judge({ ...base, msg: [lane, { ...lane, channel: "push", oldest: null, n429: 0 }] });
+  eq(pick(v, "msg:email:urgent")?.job, "notify-email", "job");
+  eq(pick(v, "msg:email:urgent")?.failing, true, "stuck");
+  eq(pick(v, "msg:email:urgent")?.detail.refused_429_last_hour, 3, "429s");
+  eq(pick(v, "msg:push:urgent")?.failing, false, "the push lane apart");
+});

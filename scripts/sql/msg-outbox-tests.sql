@@ -6,6 +6,10 @@
 
 begin;
 set client_min_messages = notice;
+-- the routes as migrated, for S3; these checks drive the pop-ups, so alert emails (on the
+-- outbox since 0262) go back on the old path for this rolled-back transaction
+create temp table t_routes as select kind, channel, route from msg.kinds;
+update msg.kinds set route = 'old' where channel = 'email';
 
 create temp table t_results (n serial, label text, pass boolean, detail text);
 create function pg_temp.ok(p_label text, p_cond boolean, p_detail text default null)
@@ -481,9 +485,9 @@ begin
     and not has_function_privilege('authenticated', 'public.job_check_msg()', 'execute'));
   perform pg_temp.ok('S2 msg schema closed to the API roles',
     not has_schema_privilege('anon', 'msg', 'usage') and not has_schema_privilege('authenticated', 'msg', 'usage'));
-  perform pg_temp.ok('S3 every alert kind routes pop-ups to the outbox, emails stay old',
-    (select count(*) from msg.kinds where channel = 'push' and route = 'outbox') = 14
-    and (select count(*) from msg.kinds where channel = 'email' and route = 'old') = 14);
+  perform pg_temp.ok('S3 every alert kind routes pop-ups and emails (0262) to the outbox',
+    (select count(*) from t_routes where channel = 'push' and route = 'outbox') = 14
+    and (select count(*) from t_routes where channel = 'email' and route = 'outbox') = 14);
 end $$;
 
 -- ---------------------------------------------------------------------------
