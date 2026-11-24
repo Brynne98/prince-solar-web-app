@@ -335,6 +335,21 @@ begin
 end $$;
 
 -- ── 5. the nightly job ──────────────────────────────────────────────────────
+-- The partition a progress row was made for is still there under that name, with
+-- those bounds (a day partition dropped and made again gets a new oid).
+create or replace function private.rollup_part_ok(p_oid oid, p_name text, p_parent text, p_lo bigint, p_hi bigint)
+returns boolean
+language sql stable
+set search_path = pg_temp
+as $$
+  select coalesce(to_regclass(format('public.%I', p_name)) = p_oid, false)
+     and exists (select 1 from pg_inherits i join pg_class ch on ch.oid = i.inhrelid
+                  where ch.oid = p_oid and i.inhparent = format('public.%I', p_parent)::regclass
+                    and private.partbound_epoch(pg_get_expr(ch.relpartbound, ch.oid), 'FROM') = p_lo
+                    and private.partbound_epoch(pg_get_expr(ch.relpartbound, ch.oid), 'TO')   = p_hi)
+$$;
+revoke all on function private.rollup_part_ok(oid, text, text, bigint, bigint) from public, anon, authenticated;
+
 drop procedure if exists private.rollup_old_days(integer);
 drop procedure if exists private.rollup_old_days(integer, interval, integer);
 create procedure private.rollup_old_days(p_days integer default 31,
@@ -351,16 +366,14 @@ declare
   est double precision; w integer; t_to bigint; n_in bigint; n_out bigint;
   p bigint; live boolean; got boolean;
 begin
+  if p_days is null or p_days < 1 then
+    raise exception 'rollup_old_days: p_days must be 1 or more, got %', p_days;
+  end if;
   select query_start into my_qs from pg_stat_activity where pid = my_pid;
 
   -- register partitions past the line; forget rows whose partition is gone or changed
   delete from private.rollup_progress g
-   where not exists (
-     select 1 from pg_inherits i join pg_class ch on ch.oid = i.inhrelid
-      where ch.oid = g.part_oid and ch.relname = g.part_name
-        and i.inhparent = ('public.' || g.parent)::regclass
-        and private.partbound_epoch(pg_get_expr(ch.relpartbound, ch.oid), 'FROM') = g.lo
-        and private.partbound_epoch(pg_get_expr(ch.relpartbound, ch.oid), 'TO')   = g.hi);
+   where not private.rollup_part_ok(g.part_oid, g.part_name, g.parent, g.lo, g.hi);
   for c in
     select p.relname as parent, ch.oid, ch.relname as name, ch.reltuples, pg_relation_size(ch.oid) as bytes,
            private.partbound_epoch(pg_get_expr(ch.relpartbound, ch.oid), 'FROM') as lo,
@@ -372,7 +385,8 @@ begin
      order by 6, 1
   loop
     continue when c.hi > cutoff;
-    if c.hi - c.lo <> 86400 or c.lo % 300 <> 0 then
+    -- a monthly, default or open-ended partition: not this job's
+    if c.lo is null or c.hi is null or c.hi - c.lo <> 86400 or c.lo % 300 <> 0 then
       raise notice 'rollup_old_days: % is not a day partition, skipped', c.name;
       continue;
     end if;
@@ -389,21 +403,37 @@ begin
   loop
     exit when clock_timestamp() - started > p_cap;
     select * into pr from private.rollup_progress
-     where part_oid <> all (skip) order by lo, parent limit 1;
+     where hi <= cutoff and part_oid <> all (skip) order by lo, parent limit 1;
     exit when not found;
+
+    if pr.next_ts < pr.hi or cardinality(pr.redo) > 0 then
+      -- ── a slice or a redo: the key, then the partition as registered ──
+      if not pg_try_advisory_xact_lock(8, 651) then exit work; end if;
+      select * into pr from private.rollup_progress where part_oid = pr.part_oid;
+      if not found then commit; continue; end if;
+      begin
+        execute format('lock table public.%I in access share mode', pr.part_name);
+      exception when undefined_table then
+        null;
+      end;
+      if not private.rollup_part_ok(pr.part_oid, pr.part_name, pr.parent, pr.lo, pr.hi) then
+        -- dropped or replaced under the same name: forget it; a new one registers next run
+        raise notice 'rollup_old_days: % changed since it was registered, progress dropped', pr.part_name;
+        delete from private.rollup_progress where part_oid = pr.part_oid;
+        commit;
+        continue;
+      end if;
+    end if;
 
     if pr.next_ts < pr.hi then
       -- ── a slice: mark it, then do it ──
-      if not pg_try_advisory_xact_lock(8, 651) then exit work; end if;
-      select * into pr from private.rollup_progress where part_oid = pr.part_oid;
-      continue when not found or pr.next_ts >= pr.hi;
       w := pr.width;
       if pr.attempt_pid is not null then
         perform pg_stat_clear_snapshot();
         select exists (select 1 from pg_stat_activity
                         where pid = pr.attempt_pid and pid <> my_pid
                           and state = 'active' and query_start = pr.attempt_qstart) into live;
-        if live then exit work; end if;
+        if live then commit; exit work; end if;
         -- the last slice died: half as wide for the rest of this partition
         w := greatest(300, (pr.attempt_width / 2 / 300) * 300);
         raise notice 'rollup_old_days: % slice of % s died, now % s', pr.part_name, pr.attempt_width, w;
@@ -421,7 +451,17 @@ begin
         exit work;
       end if;
       select * into pr from private.rollup_progress where part_oid = pr.part_oid;
-      continue when not found or pr.attempt_pid is distinct from my_pid or pr.attempt_qstart is distinct from my_qs;
+      if not found or pr.attempt_pid is distinct from my_pid or pr.attempt_qstart is distinct from my_qs then
+        commit; continue;
+      end if;
+      begin
+        execute format('lock table public.%I in access share mode', pr.part_name);
+      exception when undefined_table then
+        null;
+      end;
+      if not private.rollup_part_ok(pr.part_oid, pr.part_name, pr.parent, pr.lo, pr.hi) then
+        commit; continue;   -- the check at the top of the next turn forgets it
+      end if;
       t_to := least(pr.next_ts + pr.width, pr.hi);
       execute format('select count(*) from public.%I where ts >= %s and ts < %s', pr.part_name, pr.next_ts, t_to)
         into n_in;
@@ -434,16 +474,15 @@ begin
       commit;
 
     elsif cardinality(pr.redo) > 0 then
-      -- ── one plant again, from raw rows its sign check flipped ──
-      if not pg_try_advisory_xact_lock(8, 651) then exit work; end if;
-      select * into pr from private.rollup_progress where part_oid = pr.part_oid;
-      continue when not found or cardinality(pr.redo) = 0;
+      -- ── one plant again, from raw rows its sign check flipped (readings only) ──
       p := pr.redo[1];
-      delete from public.readings_5m where plant_id = p and ts >= pr.lo and ts < pr.hi;
-      n_out := private.rollup_partition(pr.parent, pr.part_name, pr.lo, pr.hi, p);
+      if pr.parent = 'readings' then
+        delete from public.readings_5m where plant_id = p and ts >= pr.lo and ts < pr.hi;
+        n_out := private.rollup_partition(pr.parent, pr.part_name, pr.lo, pr.hi, p);
+        raise notice 'rollup_old_days: % redone for plant %, % buckets', pr.part_name, p, n_out;
+      end if;
       update private.rollup_progress set redo = array_remove(redo, p), updated_at = now()
        where part_oid = pr.part_oid;
-      raise notice 'rollup_old_days: % redone for plant %, % buckets', pr.part_name, p, n_out;
       commit;
 
     else
@@ -455,12 +494,13 @@ begin
           if not pg_try_advisory_xact_lock(8, 651) then
             raise exception 'rollup key busy' using errcode = 'lock_not_available';
           end if;
-          execute format('lock table public.%I in access exclusive mode nowait', pr.part_name);
           select * into pr from private.rollup_progress where part_oid = pr.part_oid;
-          if found and pr.next_ts >= pr.hi and cardinality(pr.redo) = 0 and exists (
-               select 1 from pg_inherits i join pg_class ch on ch.oid = i.inhrelid
-                where ch.oid = pr.part_oid and ch.relname = pr.part_name
-                  and i.inhparent = ('public.' || pr.parent)::regclass) then
+          if not found then
+            null;   -- another run dropped it
+          elsif not private.rollup_part_ok(pr.part_oid, pr.part_name, pr.parent, pr.lo, pr.hi) then
+            delete from private.rollup_progress where part_oid = pr.part_oid;
+          elsif pr.next_ts >= pr.hi and cardinality(pr.redo) = 0 then
+            execute format('lock table public.%I in access exclusive mode nowait', pr.part_name);
             execute format('drop table public.%I', pr.part_name);
             insert into private.partitions_dropped (partition_name, upper_bound, rows_dropped)
             values (pr.part_name, to_timestamp(pr.hi), pr.rows_in)
