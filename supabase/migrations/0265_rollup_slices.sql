@@ -391,7 +391,7 @@ declare
   c record; pr record;
   est double precision; w integer; t_to bigint; n_in bigint; n_out bigint;
   p bigint; live boolean; got boolean;
-  t_key timestamptz; slow_ms integer := 0; slow_part text; busy boolean;
+  t_key timestamptz; slow_ms integer := 0; slow_part text; busy boolean; have boolean;
 begin
   if p_days is null or p_days < 1 then
     raise exception 'rollup_old_days: p_days must be 1 or more, got %', p_days;
@@ -564,7 +564,16 @@ begin
             raise exception 'rollup key busy' using errcode = 'lock_not_available';
           end if;
           select * into pr from private.rollup_progress where part_oid = pr.part_oid;
-          if not found then
+          have := found;
+          if have then
+            -- the child too, before reading its bounds (that locks it), all without waiting
+            begin
+              execute format('lock table public.%I in access exclusive mode nowait', pr.part_name);
+            exception when undefined_table then
+              null;
+            end;
+          end if;
+          if not have then
             null;   -- another run dropped it
           elsif not private.rollup_part_ok(pr.part_oid, pr.part_name, pr.parent, pr.lo, pr.hi) then
             if to_regclass(format('public.%I', pr.part_name)) is not null then
@@ -573,7 +582,6 @@ begin
             end if;
             delete from private.rollup_progress where part_oid = pr.part_oid;
           elsif pr.next_ts >= pr.hi and cardinality(pr.redo) = 0 then
-            execute format('lock table public.%I in access exclusive mode nowait', pr.part_name);
             execute format('drop table public.%I', pr.part_name);
             insert into private.partitions_dropped (partition_name, upper_bound, rows_dropped)
             values (pr.part_name, to_timestamp(pr.hi), pr.rows_in)
