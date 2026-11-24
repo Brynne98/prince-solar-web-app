@@ -8,7 +8,7 @@
     "start": "node server.js",
     "check": "node scripts/integrity-check.js",
     "build": "node scripts/build-jsx.js",
-    "test": "node scripts/build-jsx.js && node scripts/warning-tests.mjs && node scripts/report-scrub-test.mjs && node scripts/power-hold-test.mjs && node scripts/newday-test.mjs && node scripts/billing-screen-test.mjs && node scripts/reuse-check.mjs",
+    "test": "node scripts/build-jsx.js && node scripts/warning-tests.mjs && node scripts/report-scrub-test.mjs && node scripts/power-hold-test.mjs && node scripts/newday-test.mjs && node scripts/limit-test.mjs && node scripts/billing-screen-test.mjs && node scripts/reuse-check.mjs",
     "test:state": "node scripts/billing-state-test.mjs && node scripts/billing-lock-test.mjs"
   },
   "engines": {
