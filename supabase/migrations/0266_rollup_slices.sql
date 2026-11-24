@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0265 — the nightly minute rollup works in short slices (SOLAR-651).
+-- 0266 — the nightly minute rollup works in short slices (SOLAR-651).
 --
 -- Before: private.rollup_old_days rolled a whole day of minute rows for every plant
 -- into 5-minute rows in one statement, then dropped the day. Measured 24 Nov 2026 on
