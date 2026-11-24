@@ -17,7 +17,11 @@
 do $$
 begin
   if not billing.is_live() then
-    raise exception 'run billing.switch_on() first (DEPLOY.md, Billing switch-over)' using errcode = '55000';
+    -- a new database (local, or a branch) has no one to copy: switch it on here
+    if exists (select 1 from auth.users) then
+      raise exception 'run billing.switch_on() first (DEPLOY.md, Billing switch-over)' using errcode = '55000';
+    end if;
+    insert into billing.switch_over (switched_at) values (now());
   end if;
 end $$;
 
