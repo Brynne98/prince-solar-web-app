@@ -628,6 +628,66 @@ export async function pushPass(deadline: number) {
   return count;
 }
 
+// Pop-ups through the outbox (SOLAR-645 step 3, 0261): msg_push_take hands over one send per
+// device under a claim; msg_push_done takes each push service status back. The database
+// decides from it: 2xx sent, 404/410 device removed, 429/5xx/0 tried again inside the hour.
+export type PushSend = {
+  id: number; claim: string; event_id: number; kind: string; plant_id: number; title: string; body: string;
+  tab: string; day: string | null; endpoint: string; p256dh: string; auth: string;
+};
+export type PushResult = { id: number; code: number; retry_s?: number; error?: string };
+type Deliver = (s: PushSend, msg: string) => Promise<unknown>;
+
+const deliver: Deliver = async (s, msg) =>
+  (await server()).subscribe({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } })
+    .pushTextMessage(msg, { ttl: 3600, urgency: webpush.Urgency.High });
+
+/** One send: the push service's status (0 = no answer), and its Retry-After in seconds. */
+export async function pushSend(s: PushSend, send: Deliver = deliver): Promise<PushResult> {
+  if (!PUSH_HOST.test(s.endpoint)) return { id: s.id, code: 410, error: "bad address" };
+  const msg = JSON.stringify({
+    title: s.title, body: s.body, tag: `${s.plant_id}:${s.kind === "relinked" ? "needs" : s.kind.split("_")[0]}`,
+    data: { id: s.event_id, tab: s.tab, plant: s.plant_id, day: s.day, section: s.tab === "account" ? "logins" : undefined },
+  });
+  try {
+    await send(s, msg);
+    return { id: s.id, code: 201 };
+  } catch (e) {
+    if (!(e instanceof webpush.PushMessageError)) {
+      noteError("push_failed", e, { plant: s.plant_id, hourly: true });
+      return { id: s.id, code: 0, error: String(e instanceof Error ? e.message : e).slice(0, 200) };
+    }
+    const code = e.response.status;
+    if (code !== 404 && code !== 410) {
+      noteError("push_failed", new Error(`push service ${code}`), { plant: s.plant_id, hourly: true });
+    }
+    const after = e.response.headers.get("retry-after");
+    return { id: s.id, code, error: `push service ${code}`,
+             ...(after ? { retry_s: Math.ceil(retryAfterMs(after, Date.now()) / 1000) } : {}) };
+  }
+}
+
+type Rpc = <T>(fn: string, args?: Record<string, unknown>) => Promise<T>;
+export async function outboxPushPass(deadline: number, call: Rpc = rpc, send: Deliver = deliver) {
+  const count = { ok: 0, gone: 0, again: 0, failed: 0 };
+  if (send === deliver) await server();   // bad keys stop here, before anything is leased
+  while (Date.now() < deadline) {
+    const rows = await call<PushSend[]>("msg_push_take", { p_limit: 200 });
+    if (!rows.length) break;
+    const res: PushResult[] = [];
+    for (let i = 0; i < rows.length; i += PUSH_AT_ONCE) {
+      res.push(...await Promise.all(rows.slice(i, i + PUSH_AT_ONCE).map((s) => pushSend(s, send))));
+    }
+    for (const r of res) {
+      const k = r.code >= 200 && r.code < 300 ? "ok" : r.code === 404 || r.code === 410 ? "gone"
+        : r.code === 0 || r.code === 429 || r.code >= 500 ? "again" : "failed";
+      count[k]++;
+    }
+    await call("msg_push_done", { p_claim: rows[0].claim, p_results: res });
+  }
+  return count;
+}
+
 // ------------------------------------------------------------------- billing outbox (SOLAR-641)
 
 // billing.outbox (0247): billing, free-week and history emails. outbox_take hands over the rows
