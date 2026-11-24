@@ -568,6 +568,120 @@ select pg_temp.eq('tally: same key twice summed',
 select pg_temp.eq('tally: poll_run row', (select (calls, ms_total, plants)::text from private.sunsynk_calls
                                            where kind = 'poll_run' and result = 's9' and day = (now() at time zone 'Africa/Johannesburg')::date), '(1,100,4)');
 
+-- ---------------------------------------------------------------------------
+-- g. 0259: lane routes, cached inverters for many logins, job-check's lanes, run log
+-- ---------------------------------------------------------------------------
+create temp table lr as select * from public.poll_lane_routes(array(select generate_series(0, 59)), now());
+select pg_temp.eq('poll_lane_routes = poll_routes, same rows',
+  (select count(*) from (select plant_id, account_id, plant_version, timezone, batt_positive_means, has_grid, ends_at, read_second from lr
+                         except select * from public.poll_routes(array(select generate_series(0, 59)), now())) x)
+  + (select count(*) from (select * from public.poll_routes(array(select generate_series(0, 59)), now())
+                           except select plant_id, account_id, plant_version, timezone, batt_positive_means, has_grid, ends_at, read_second from lr) x),
+  0::bigint);
+select pg_temp.ok('poll_lane_routes: the login of each route',
+  not exists (select 1 from lr join private.sunsynk_accounts sa on sa.id = lr.account_id
+               where (lr.user_id, lr.sunsynk_username, lr.access_token, lr.access_expires_at)
+                     is distinct from (sa.user_id, sa.sunsynk_username, sa.access_token, sa.access_expires_at)));
+select pg_temp.ok('poll_lane_routes: one lead per login, its lowest plant',
+  not exists (select 1 from lr group by account_id
+               having count(*) filter (where lead) <> 1 or min(plant_id) <> min(plant_id) filter (where lead)));
+select pg_temp.eq('poll_lane_routes by seconds: each route once, lead kept',
+  (select count(*) from generate_series(0, 59) s cross join lateral public.poll_lane_routes(array[s], now()) x
+     join lr on lr.plant_id = x.plant_id and lr.lead = x.lead and lr.read_second = s),
+  (select count(*) from lr));
+
+-- give the random fleet's inverters a login and some readings (carried runs, upload gaps)
+update private.inverters i set account_id = lp.login
+  from (select distinct on (plant) plant, login from billing.login_plants order by plant, login) lp
+ where lp.plant = i.plant_id and i.account_id is null and i.sn like 'RV%';
+insert into public.readings (ts, sn, plant_id, device_time, carried)
+select (extract(epoch from now())::bigint / 60 - m) * 60, i.sn, i.plant_id,
+       to_char(now() - (m / 2) * interval '2 minutes', 'YYYY-MM-DD HH24:MI:SS'), m % 2 = 1
+  from private.inverters i, generate_series(1, 6) m
+ where i.sn like 'RV%' and i.plant_id % 4 = 0
+on conflict do nothing;
+-- inverters_cached as 0230 had it, to compare with
+create function pg_temp.ic_old(p_account uuid)
+returns table(sn text, plant_id bigint, alias text, model text, soft_ver text, hmi_ver text, gsn text, comm_type text, plant_name text, ord integer, status integer, last_reading jsonb, carried_run integer, upload_s integer)
+language plpgsql
+set search_path = private, pg_temp
+as $$
+#variable_conflict use_column
+declare
+  -- a variable, not now() in the query, so the planner opens 2 partitions, not all
+  v_floor bigint := extract(epoch from now())::bigint - 86400;
+begin
+  return query
+  select i.sn, i.plant_id, m.alias, m.model, m.soft_ver, m.hmi_ver,
+         m.gsn, m.comm_type, m.plant_name, m.ord, m.status,
+         lr.row as last_reading,
+         coalesce(cr.n, 0)::integer as carried_run,
+         ug.s as upload_s
+    from private.inverters i
+    left join private.meta m on m.sn = i.sn
+    left join lateral (
+      select to_jsonb(r) as row
+        from public.readings r
+       where r.sn = i.sn and r.ts > v_floor
+       order by r.ts desc
+       limit 1) lr on true
+    left join lateral (
+      select count(*) as n
+        from public.readings r
+       where r.sn = i.sn and r.ts > v_floor
+         and r.ts > coalesce((select max(r2.ts) from public.readings r2
+                               where r2.sn = i.sn and r2.ts > v_floor and not r2.carried), 0)) cr on true
+    left join lateral (
+      select min(g.gap)::integer as s
+        from (select extract(epoch from (d.dt - lead(d.dt) over (order by d.dt desc))) as gap
+                from (select distinct t.device_time::timestamp as dt
+                        from (select r.device_time
+                                from public.readings r
+                               where r.sn = i.sn and r.ts > v_floor
+                               order by r.ts desc
+                               limit 20) t
+                       where t.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+                       order by 1 desc
+                       limit 3) d) g
+       where g.gap is not null
+      having count(*) = 2) ug on true
+   where i.account_id = p_account
+      or i.plant_id in (select pu.plant_id from public.plant_users pu where pu.account_id = p_account)
+   order by coalesce(m.ord, 9999), i.sn;
+end $$;
+create temp table ic_one as
+  select a.id as account_id, c.* from private.sunsynk_accounts a cross join lateral pg_temp.ic_old(a.id) c;
+create temp table ic_many as
+  select * from public.inverters_cached_many(array(select id from private.sunsynk_accounts));
+select pg_temp.ok('the fleet has cached inverters to compare', (select count(*) > 50 from ic_one));
+select pg_temp.eq('inverters_cached (0259) = 0230''s, per login',
+  (select count(*) from (select a.id, c.* from private.sunsynk_accounts a cross join lateral public.inverters_cached(a.id) c
+                         except select * from ic_one) x), 0::bigint);
+select pg_temp.eq('inverters_cached_many = 0230''s inverters_cached per login',
+  (select count(*) from (select * from ic_one except select * from ic_many) x)
+  + (select count(*) from (select * from ic_many except select * from ic_one) x), 0::bigint);
+select pg_temp.eq('inverters_cached_many: only the plants asked',
+  (select count(*) from public.inverters_cached_many(array(select id from private.sunsynk_accounts), array[971000001, 971000002]::bigint[])),
+  (select count(*) from ic_one where plant_id in (971000001, 971000002)));
+
+update private.poll_mode set mode = 'lanes', lanes = 3;
+select pg_temp.eq('job-check: lanes mode lists the lanes',
+  (select jsonb_agg(x->'shard' order by (x->>'shard')::int) from jsonb_array_elements(public.job_check_inputs()->'shards') x),
+  '[0, 1, 2]'::jsonb);
+update private.poll_mode set mode = 'edge';
+select pg_temp.eq('job-check: edge mode lists the shards',
+  (select count(*) from jsonb_array_elements(public.job_check_inputs()->'shards')), (select count(*) from private.poll_shards()));
+delete from private.poll_mode;
+select pg_temp.eq('job-check: no mode row reads as edge',
+  (select count(*) from jsonb_array_elements(public.job_check_inputs()->'shards')), (select count(*) from private.poll_shards()));
+
+insert into private.poll_runs (minute, shard, shards, scheduled_at, started_at, finished_at)
+values (date_trunc('hour', now()) - interval '9 days', 0, 1, now(), now(), now());
+select public.poll_run_log(jsonb_build_object('ts', extract(epoch from date_trunc('hour', now()))::bigint, 'shard', 0, 'shards', 1,
+  'scheduled_ms', 0, 'started_ms', 0, 'finished_ms', 0));
+select pg_temp.ok('poll_run_log on the hour keeps old rows (pruned by its own job)',
+  exists (select 1 from private.poll_runs where minute = date_trunc('hour', now()) - interval '9 days'));
+
 rollback;
 \o
 \echo poller-v3-tests: all passed
