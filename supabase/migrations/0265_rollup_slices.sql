@@ -413,7 +413,7 @@ begin
   delete from private.rollup_progress g
    where not private.rollup_part_ok(g.part_oid, g.part_name, g.parent, g.lo, g.hi);
   for c in
-    select p.relname as parent, ch.oid, ch.relname as name, ch.reltuples, pg_relation_size(ch.oid) as bytes,
+    select p.relname as parent, ch.oid, ch.relname as name, ch.reltuples,
            private.partbound_epoch(pg_get_expr(ch.relpartbound, ch.oid), 'FROM') as lo,
            private.partbound_epoch(pg_get_expr(ch.relpartbound, ch.oid), 'TO')   as hi
       from pg_inherits i
@@ -428,8 +428,10 @@ begin
       raise notice 'rollup_old_days: % is not a day partition, skipped', c.name;
       continue;
     end if;
+    continue when exists (select 1 from private.rollup_progress where part_oid = c.oid);
     -- rows a day: the planner's count, or the size on disk when it has none yet
-    est := greatest(c.reltuples, c.bytes / case when c.parent = 'readings' then 200 else 80 end, 1);
+    -- (pg_relation_size locks the table, so only for one not registered yet)
+    est := greatest(c.reltuples, pg_relation_size(c.oid) / case when c.parent = 'readings' then 200 else 80 end, 1);
     w := least(86400, greatest(300, floor(p_target_rows * 86400.0 / est / 300) * 300))::integer;
     insert into private.rollup_progress (part_oid, part_name, parent, lo, hi, next_ts, width)
     values (c.oid, c.name, c.parent, c.lo, c.hi, c.lo, w)
