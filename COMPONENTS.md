@@ -72,6 +72,7 @@ code (SOLAR-641; `npm test` refuses the old billing reads, `PLAN_NAME` and hand-
 | `planRows(acct, view)`, `planStep(acct, row)` | The plans pop-up's rows for the monthly/yearly switch (a running plan changes plan at its own interval) and what a plan's button does first (`interval`, `keep`, `checkout`; `pick: false` goes on with no plants) (tabs.jsx). |
 | `startPlan`, `bookChange`, `settlePayment`, `changeCard` | Pay for a plan or an upgrade (quote, review, card page), book or undo a change for the billing date, pay a failed renewal, change the card. |
 | `outboxMail(m, unsub)` | An outbox email (`AccountText.mail`) laid out in `_shared/email.ts`'s look. |
+| `alertLine(row)`, `alertPush(kind, line, plant, plants)`, `alertMail(event, plant, on)` | Every alert's words (SOLAR-645): the bell list's title, body, time and page from an `api_alerts` item's facts (`data`, `created`, `tz`), the pop-up's title and body, and the alert and login emails' parts. The database sends facts only (0264). `alertEmail(m, plantId)` in `_shared/email.ts` lays an email out; `popup(r)` in `notify/index.ts` builds a pop-up. Tested in `_shared/alerts_test.ts`. |
 
 ## Forms and sign-in (`auth.jsx`)
 

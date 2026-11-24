@@ -50,7 +50,7 @@ const addr = (email: string) => `<a href="mailto:${email}" style="color:#e7ecf2;
 const HELP = `Need help? Email <a href="mailto:hello@princesolarhub.co.za">hello@princesolarhub.co.za</a>.`;
 
 export type Email = { subject: string; html: string; text: string };
-import type { Mail as TextMail } from "./text.ts";
+import { type AlertMail, alertMail, type LoginEvent, type Mail as TextMail, pageNames, type PlantEvent } from "./text.ts";
 
 // Same roles as the app's :root (public/index.html, SOLAR-346). The five power colours
 // mean only solar, home, grid, charge and battery; status words take ok, warn or bad;
@@ -380,7 +380,7 @@ export function renderAuthTemplates(): Record<string, Email> {
 // notification settings.
 // Each button opens the page and plant the email is about. app.jsx reads ?tab=; without
 // it the app reopens the page last used. ?plant= needs SOLAR-156. Labels name the page.
-const PAGES = { live: "Live", solar: "Solar", grid: "Grid", inverters: "Equipment" } as const;
+const PAGES = pageNames;
 const openPage = (tab: keyof typeof PAGES, plantId: number) => ({ label: `Open ${PAGES[tab]}`, href: `${APP}/?tab=${tab}&plant=${plantId}` });
 
 const SETTINGS_FOOTER = (line: string) => [line.replace("notification settings", `<a href="${PREFS}">notification settings</a>`), HELP];
@@ -466,27 +466,11 @@ export const historySynced = (h: History) => {
   });
 };
 
-// SunSynk's own service is down: every plant is affected, not one inverter.
+// SunSynk's own service is down (words: text.ts alertMail).
 export const sunsynkDown = (plant: string, plantId: number, since: string, day = "today") =>
-  make("SunSynk is down", {
-    title: "SunSynk is down",
-    parts: [
-      { lead: "SunSynk isn't answering for anyone, so no readings come in." },
-      { box: { hero: { label: "Down since", value: since, tone: "bad", sub: day } } },
-      { button: openPage("live", plantId) },
-    ],
-    footer: ALERT_FOOTER("SunSynk", plant),
-  });
-
+  alertEmail(alertMail({ kind: "sunsynk_down", since }, plant, day), plantId);
 export const sunsynkBack = (plant: string, plantId: number, since: string, at: string, lasted: string, day = "today") =>
-  make("SunSynk is back", {
-    title: "SunSynk is back",
-    parts: [
-      { box: { hero: { label: "SunSynk was down for", value: lasted, sub: `${since} to ${at} ${day}` } } },
-      { button: openPage("live", plantId) },
-    ],
-    footer: ALERT_FOOTER("SunSynk", plant),
-  });
+  alertEmail(alertMail({ kind: "sunsynk_back", since, at, lasted }, plant, day), plantId);
 
 // --------------------------------------------------------------------- reports
 
@@ -606,172 +590,27 @@ const OFFER_FOOTER = (why: string, unsub: string) => [`You get this because ${wh
 //  logger_stale  no new reading for the whole plant, or from one inverter while the others
 //                report (inverter set), for 30 min
 //  logger_back   readings fresh again, after a logger_stale went out
-export type PlantEvent =
-  // from: set when the grid went off inside a gap in readings and the refill can't say
-  // when (SOLAR-416): it went off between from and at
-  | { kind: "grid_down"; at: string; from?: string; chargePct?: number }
-  | { kind: "grid_back"; since: string; at: string; lasted?: string; chargePct?: number }
-  | { kind: "batt_hot"; at: string; tempC: number; hotDays?: number } // hotDays: days over 45 C in the last 30, today included; counted from readings at send time
-  | { kind: "bank_drift"; banks: { name: string; chargePct: number }[] } // name: the inverter's name in SunSynk
-  | { kind: "string_dead"; string: string; inverter: string; since: string }
-  | { kind: "string_back"; string: string; inverter: string; since: string; at: string; lasted: string }
-  // inverters: every inverter on the plant with its last reading time ("08:15"), or null
-  // while it still sends; listed so the owner sees which one stopped (SOLAR-415)
-  | { kind: "logger_stale"; since: string; inverter?: string; inverters?: { name: string; last: string | null }[] }
-  | { kind: "logger_back"; since: string; at: string; lasted: string; inverter?: string };
-// batt_hot_back and bank_drift_back stay in the app's bell but send no email (SOLAR-415).
+// The words are in text.ts (alertMail, SOLAR-645), shared with the app's alert list and the
+// pop-ups; this lays them out. Times come formatted; day: "today", or the date when the alert
+// reaches the owner on a later day ("Tue 21 Oct"), so a time is never read against the wrong day.
+export type { LoginEvent, PlantEvent } from "./text.ts";
 
-// day: "today", or the date when the alert reaches the owner on a later day
-// ("Tue 21 Oct"), so a time is never read against the wrong day.
-//
-// Each alert shows its facts in the one box (SOLAR-415): the big number is what's wrong
-// now (red or amber), or how long it lasted (white) once it's back. Rows only for other
-// numbers. A sentence only where the box can't say it. Never a guessed cause, and never a
-// promise to fill missed readings: we get what we can.
-const PAGE: Record<PlantEvent["kind"], keyof typeof PAGES> = {
-  grid_down: "grid", grid_back: "grid", batt_hot: "inverters", bank_drift: "inverters",
-  string_dead: "inverters", string_back: "inverters", logger_stale: "live", logger_back: "live",
-};
-const WHAT: Record<PlantEvent["kind"], string> = {
-  grid_down: "grid", grid_back: "grid", batt_hot: "battery", bank_drift: "battery",
-  string_dead: "panel", string_back: "panel", logger_stale: "reading", logger_back: "reading",
-};
-// "Inverter 2508290475, string 2", as the app names it (SOLAR-348)
-const ALERT_FOOTER = (what: string, plant: string) => SETTINGS_FOOTER(`You get ${what} alerts for ${esc(plant)}. Turn them off in notification settings.`);
-const batt = (pct: number) => `<span style="color:${C.batt}">${pct}%</span>`;
-const GAP = "We're getting what we can of the missed readings.";
-export function plantEvent(plant: string, plantId: number, e: PlantEvent, day = "today"): Email {
-  const span = (from: string, to: string) => `${from} to ${to} ${day}`;
-  const [title, parts]: [string, Part[]] = (() => {
-    switch (e.kind) {
-      case "grid_down":
-        return [`Grid down at ${plant}`, [{ box: { hero: { label: "Grid", value: "Off", tone: "bad", sub: e.from ? `went off between ${e.from} and ${e.at} ${day}` : `since ${e.at} ${day}` },
-          rows: e.chargePct != null ? [["Battery", batt(e.chargePct)]] : [] } }]];
-      case "grid_back":
-        return [`Grid back at ${plant}`, [{ box: { hero: { label: "Grid was off for", value: e.lasted ?? "a while", sub: span(e.since, e.at) },
-          rows: e.chargePct != null ? [["Battery", batt(e.chargePct)]] : [] } }]];
-      case "batt_hot":
-        return [`Battery hot at ${plant}`, [{ box: { hero: { label: "Battery", value: `${e.tempC}°C`, tone: "bad", sub: `at ${e.at} ${day}` },
-          rows: (e.hotDays ?? 1) > 1 ? [["Over 45°C", `${e.hotDays} of the last 30 days`]] : [] } }]];
-      case "bank_drift": {
-        const pcts = e.banks.map((b) => b.chargePct);
-        return [`Batteries charging unevenly at ${plant}`, [{ box: {
-          hero: { label: "Gap", value: `${Math.max(...pcts) - Math.min(...pcts)}%`, tone: "warn", sub: "for over an hour" },
-          rows: e.banks.map((b) => [b.name, batt(b.chargePct)] as [string, string]) } }]];
-      }
-      case "string_dead":
-        return [`Panels stopped producing at ${plant}`, [{ box: { hero: { label: e.string, value: "No power", tone: "bad", sub: `since ${e.since} ${day}` },
-          rows: [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))], ["Other strings", "Producing"]] } }]];
-      case "string_back":
-        return [`Panels producing again at ${plant}`, [{ box: { hero: { label: `${e.string} off for`, value: e.lasted, sub: span(e.since, e.at) },
-          rows: [["Inverter", esc(e.inverter.replace(/^Inverter /, ""))]] } }]];
-      case "logger_stale": {
-        // The title names the inverter, so its row would say it twice (SOLAR-560). The whole
-        // plant lists each inverter's last time only when there's more than one.
-        const one = !!e.inverter;
-        const list = e.inverters ?? [];
-        return [one ? `No readings from ${e.inverter}` : `No readings from ${plant}`, [
-          { lead: one ? "This inverter stopped sending readings to SunSynk. We can't see if it's still running. The rest of your plant still updates."
-                      : "Your plant stopped sending readings to SunSynk, so Prince Solar Hub isn't updating. We can't see if it's still running." },
-          { box: { hero: { label: "Last reading", value: e.since, tone: "warn", sub: day },
-            rows: one ? (list.length > 1 ? [["Other inverters", "Sending"]] : [])
-                      : list.length > 1 ? list.map((i) => [esc(i.name), esc(i.last ?? e.since)] as [string, string]) : [] } },
-          { note: "We'll email you when readings come back." },
-        ]];
-      }
-      case "logger_back":
-        return [e.inverter ? `Readings back from ${e.inverter}` : `Readings back at ${plant}`,
-          [{ box: { hero: { label: "No readings for", value: e.lasted, sub: span(e.since, e.at) } } },
-            { note: "Gaps in your charts fill in where SunSynk has the readings." }]];
-    }
-  })();
-  return make(title, { title, parts: [...parts, { button: openPage(PAGE[e.kind], plantId) }], footer: ALERT_FOOTER(WHAT[e.kind], plant) });
-}
-
-// A SunSynk login stopped working (needs_relink) or works again (relinked), SOLAR-380.
-// One email per login: it names every plant on it (0158).
-//  at      when it stopped / came back, HH:MM; since: when it stopped (relinked)
-export type LoginEvent =
-  | { kind: "needs_relink"; plants: string[]; at?: string }
-  | { kind: "relinked"; plants: string[]; since?: string; at: string; lasted: string }
-  // the owner removed the plant's share to our login (SOLAR-310, 0172)
-  | { kind: "share_removed"; plants: string[] }
-  // SunSynk no longer lists the plant on its password login (SOLAR-537, 0197): shown, not read
-  | { kind: "plant_off_login"; plants: string[]; login?: string }
-  // the share login stopped / works again (SOLAR-451, 0177): owners can't act, so no sign-in
-  | { kind: "share_down"; plants: string[]; at?: string }
-  | { kind: "share_back"; plants: string[]; since?: string; at: string; lasted: string };
-// up to 3 names, then a count, as the app's billing banner
-const andList = (a: string[]) => names(a.length > 3 ? [...a.slice(0, 3), `${a.length - 3} more`] : a);
-export function loginEvent(e: LoginEvent, plantId: number, day = "today"): Email {
-  const plants = andList(e.plants.length ? e.plants : ["your plant"]);
-  // A calm note, no red (SOLAR-383). No switch for these, so no "turn them off" line.
-  if (e.kind === "needs_relink")
-    return make(`Sign in to SunSynk again for ${plants}`, {
-      title: "Sign in to SunSynk again",
-      parts: [
-        { lead: "SunSynk asked for your login again." },
-        { box: { hero: e.at ? { label: "No readings since", value: e.at, sub: day } : undefined, rows: [["Plants", esc(plants)]] } },
-        { lead: "After you sign in, we get what we can of the missed readings." },
-        { button: { label: "Sign in to SunSynk", href: LOGINS } },
-      ],
-      footer: [HELP],
-    });
-  if (e.kind === "share_removed")
-    return make(`Sharing stopped for ${plants}`, {
-      title: "Sharing stopped",
-      parts: [
-        { lead: "Your plant is no longer shared with admin@princesolarhub.co.za in SunSynk, so we stopped reading it. Your history is safe." },
-        { box: { rows: [["Plants", esc(plants)]] } },
-        { lead: "To start again, share it as Visitor, then add it in the app with Share plant." },
-        { button: { label: "Open Prince Solar Hub", href: LOGINS } },
-      ],
-      footer: [HELP],
-    });
-  // The error, what it means, then what the owner can do (Brynne 2026-11-13). We can't
-  // tell why SunSynk's list dropped the plant, so each fix names the case it is for.
-  if (e.kind === "plant_off_login")
-    return make(`We can't find ${plants} on your SunSynk login`, {
-      title: "Plant not found on your login",
-      parts: [
-        { lead: `We can't find ${esc(plants)} on your SunSynk login.` },
-        { box: { rows: [["Plant", esc(plants)], ...(e.login ? [["Login", esc(e.login)] as [string, string]] : [])] } },
-        { heading: "What it means" },
-        { lead: "We can't read this plant. You still see its history, with no new readings." },
-        { heading: "How to fix it" },
-        { box: { steps: [
-          ["If someone shared it with you", "Ask them to share it with this login again in SunSynk."],
-          ["If it is on another SunSynk login", "Add that login in Plants with Add plant."],
-          ["If you deleted it in SunSynk", "There is nothing to do."],
-        ] } },
-        { note: "Once it is back on this login, readings start again on their own." },
-        { button: { label: "Open Plants", href: LOGINS } },
-      ],
-      footer: [HELP],
-    });
-  if (e.kind === "share_down")
-    return make(`No readings from ${plants}`, {
-      title: "No readings",
-      parts: [
-        { lead: "We can't read your plants from SunSynk right now. Your power isn't affected. Readings start again on their own." },
-        { box: { hero: e.at ? { label: "Last reading", value: e.at, tone: "warn", sub: day } : undefined, rows: [["Plants", esc(plants)]] } },
-        { note: "We'll email you when readings come back, and get what we can of the gap." },
-        { button: openPage("live", plantId) },
-      ],
-      footer: [HELP],
-    });
-  const back = e.kind === "share_back" ? ["Readings back at", "Readings back"] : ["SunSynk reconnected for", "SunSynk reconnected"];
-  return make(`${back[0]} ${plants}`, {
-    title: back[1],
-    parts: [
-      { box: { hero: { label: "No readings for", value: e.lasted, sub: e.since ? `${e.since} to ${e.at} ${day}` : `until ${e.at} ${day}` },
-        rows: [["Plants", esc(plants)]] } },
-      { note: GAP },
-      { button: openPage("live", plantId) },
-    ],
-    footer: [HELP],
+/** An alert email from text.ts's parts. plantId: the plant its button opens. */
+export function alertEmail(m: AlertMail, plantId: number): Email {
+  const parts = m.parts.map((x): Part => {
+    if ("lead" in x) return { lead: esc(x.lead) };
+    if ("note" in x) return { note: esc(x.note) };
+    if ("heading" in x) return x;
+    if ("button" in x) return { button: { label: x.button.label,
+      href: x.button.page === "logins" ? LOGINS : `${APP}/?tab=${x.button.page}&plant=${plantId}` } };
+    return { box: { hero: x.box.hero, steps: x.box.steps,
+      rows: x.box.rows?.map(([l, v, t]): [string, string] => [l, t === "batt" ? `<span style="color:${C.batt}">${esc(v)}</span>` : esc(v)]) } };
   });
+  return make(m.subject, { title: m.title, parts, footer: m.footer ? SETTINGS_FOOTER(esc(m.footer)) : [HELP] });
 }
+export const plantEvent = (plant: string, plantId: number, e: PlantEvent, day = "today") => alertEmail(alertMail(e, plant, day), plantId);
+// One email per login: it names every plant on it (0158).
+export const loginEvent = (e: LoginEvent, plantId: number, day = "today") => alertEmail(alertMail(e, "", day), plantId);
 
 // --------------------------------------------------------------------- billing
 

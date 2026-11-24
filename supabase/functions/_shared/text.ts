@@ -680,8 +680,278 @@ export function mail(m: MailInput): Mail | null {
   return null;
 }
 
+// ------------------------------------------------------------------ alerts (SOLAR-645)
+
+// The words of every alert: the app's alert list, the pop-up and the email all come from
+// here (SOLAR-645 decision A). The database keeps the facts (email_queue.data) and no words
+// since 0264. The list and pop-up lines are private.alert_text (0233) and private.push_text
+// (0229) word for word; the emails are email.ts's plantEvent and loginEvent as they were.
+// Where the list and the email say a thing differently, they still do.
+
+/** An alert as the database keeps it. data's since, at and from are epoch seconds.
+ *  created: the row's created_at in epoch seconds; tz: the plant's time zone. */
+export type AlertRow = { kind: string; data: Record<string, any> | null; created: number; tz: string };
+/** One alert in the list. at: when it happened (epoch s); day ("2026-11-24") and time
+ *  ("08:15") are local; tab: the page it opens. */
+export type AlertLine = { title: string | null; body: string | null; at: number; tab: string; day: string; time: string };
+
+/** "08:15" in a time zone. */
+export const clock = (epoch: number, tz: string) =>
+  new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(epoch * 1000));
+const isoDay = (epoch: number, tz: string) => {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(new Date(epoch * 1000)).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
+};
+/** How long something lasted, as the app writes it: 45 min, 1h 33m, 2h. */
+export function lasted(from: number, to: number): string {
+  const m = Math.max(1, Math.round((to - from) / 60));
+  return m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`;
+}
+/** A data value as text, as SQL's ->> read it. */
+const jtext = (v: unknown): string | null => v == null ? null : typeof v === "string" ? v : typeof v === "object" ? JSON.stringify(v) : String(v);
+/** Joins as SQL's || did: a missing part leaves the whole line missing. */
+const cat = (...p: (string | null | undefined)[]): string | null => p.some((x) => x == null) ? null : p.join("");
+
+/** The alert list's title, body, time and page for one alert. Null for a kind with no words. */
+export function alertLine(r: AlertRow): AlertLine | null {
+  const d = r.data ?? {}, tz = r.tz;
+  const num = (k: string) => d[k] == null ? null : Number(d[k]);
+  const made = Math.round(r.created);
+  // a time more than 12 hours before the row is not trusted: the row's own time instead
+  let ev = num("at") ?? num("since") ?? made;
+  if (ev < r.created - 43200) ev = made;
+  const hm = clock(num("since") ?? ev, tz);
+  const took = "at" in d && "since" in d
+    ? (num("at") == null || num("since") == null ? "1 min" : lasted(num("since")!, num("at")!)) : null;
+  const inv = jtext(d.inverter) || null;
+  const invName = inv && /^[0-9]+$/.test(inv) ? `Inverter ${inv}` : inv;
+  const banks = Array.isArray(d.banks)
+    ? d.banks.map((b: any) => cat(jtext(b?.name), " ", jtext(b?.chargePct), "%")).filter((x: string | null) => x != null) : [];
+  const bankList = banks.length ? banks.join(", ") : null;
+  const plants: string[] = Array.isArray(d.plants) ? d.plants.map((x: unknown) => jtext(x) ?? "") : [];
+  let title: string | null, body: string | null;
+  switch (r.kind) {
+    case "grid_down":
+      title = "Grid down";
+      body = cat("from" in d ? cat("Between ", num("from") == null ? null : clock(num("from")!, tz), " and ", hm, ".") : cat("Since ", hm, "."),
+        d.chargePct == null ? "" : ` Battery ${jtext(d.chargePct)}%.`);
+      break;
+    case "grid_back": title = "Grid back"; body = cat("Down for ", took, "."); break;
+    case "batt_hot": title = "Battery hot"; body = cat(jtext(d.tempC), " °C since ", hm, "."); break;
+    case "batt_hot_back": title = "Battery cooled"; body = cat(jtext(d.tempC), " °C. Hot for ", took, "."); break;
+    case "bank_drift": title = "Battery charge uneven"; body = cat(bankList, "."); break;
+    case "bank_drift_back": title = "Battery charge even again"; body = cat(bankList, ". Uneven for ", took, "."); break;
+    case "string_dead":
+      title = "Some panels stopped producing";
+      body = cat(jtext(d.inverter), ", ", jtext(d.string)?.toLowerCase(), ", since ", hm, ".");
+      break;
+    case "string_back":
+      title = "Panels producing again";
+      body = cat(jtext(d.inverter), ", ", jtext(d.string)?.toLowerCase(), ". Stopped for ", took, ".");
+      break;
+    case "logger_stale": title = inv == null ? "No readings" : `No readings from ${invName}`; body = `Since ${hm}.`; break;
+    case "logger_back": title = inv == null ? "Readings back" : `Readings back from ${invName}`; body = cat("No readings for ", took, "."); break;
+    case "sunsynk_down": title = "SunSynk is down"; body = `No new readings since ${hm}.`; break;
+    case "sunsynk_back": title = "SunSynk is back"; body = cat("Down for ", took, "."); break;
+    case "needs_relink":
+      title = "Sign in to SunSynk again";
+      body = plants.length >= 2 ? cat("Login for ", names(plants), " stopped working at ", hm, ".") : `Login stopped working at ${hm}.`;
+      break;
+    case "relinked":
+      title = "SunSynk reconnected";
+      body = plants.length >= 2 ? cat(names(plants), " were signed out for ", took, ".") : cat("Signed out for ", took, ".");
+      break;
+    default: return null;
+  }
+  const tab = r.kind.startsWith("grid_") ? "grid"
+    : /^(string|batt|bank)_/.test(r.kind) ? "inverters"
+    : r.kind === "needs_relink" || r.kind === "relinked" ? "account" : "live";
+  return { title, body, at: ev, tab, day: isoDay(ev, tz), time: clock(ev, tz) };
+}
+
+/** A pop-up's title and body. One plant: the list's words. More: the plant's name on top
+ *  ("SunSynk" for login and SunSynk alerts), the list's title and body under it. */
+export function alertPush(kind: string, t: AlertLine, plantName: string | null, plants: number): { title: string | null; body: string | null } {
+  if (plants < 2) return { title: t.title, body: t.body };
+  const title = kind.startsWith("sunsynk") || kind === "needs_relink" || kind === "relinked" ? "SunSynk" : plantName ?? "Your plant";
+  // "Grid down" + "Since 01:28." reads as one sentence
+  const body = t.body != null && /^(Since|Between) /.test(t.body)
+    ? cat(t.title, " ", t.body.slice(0, 1).toLowerCase(), t.body.slice(1))
+    : cat(t.title, ". ", t.body);
+  return { title, body };
+}
+
+// An alert's email. Times come formatted ("08:15"); on: "today", or the day it happened
+// ("Tue 21 Oct") when the email reaches the owner on a later day.
+//  grid_down     from: set when the grid went off inside a gap in readings and the refill can't
+//                say when (SOLAR-416): it went off between from and at
+//  batt_hot      hotDays: days over 45 C in the last 30, today included, counted at send time
+//  bank_drift    name: the inverter's name in SunSynk
+//  logger_stale  inverters: every inverter with its last reading time, or null while it
+//                still sends, so the owner sees which one stopped (SOLAR-415)
+//  batt_hot_back and bank_drift_back stay in the list but send no email (SOLAR-415).
+export type PlantEvent =
+  | { kind: "grid_down"; at: string; from?: string; chargePct?: number }
+  | { kind: "grid_back"; since: string; at: string; lasted?: string; chargePct?: number }
+  | { kind: "batt_hot"; at: string; tempC: number; hotDays?: number }
+  | { kind: "bank_drift"; banks: { name: string; chargePct: number }[] }
+  | { kind: "string_dead"; string: string; inverter: string; since: string }
+  | { kind: "string_back"; string: string; inverter: string; since: string; at: string; lasted: string }
+  | { kind: "logger_stale"; since: string; inverter?: string; inverters?: { name: string; last: string | null }[] }
+  | { kind: "logger_back"; since: string; at: string; lasted: string; inverter?: string };
+// A SunSynk login stopped working (needs_relink) or works again (relinked), SOLAR-380: one
+// email per login, naming every plant on it (0158). at: when it stopped / came back; since:
+// when it stopped (relinked).
+export type LoginEvent =
+  | { kind: "needs_relink"; plants: string[]; at?: string }
+  | { kind: "relinked"; plants: string[]; since?: string; at: string; lasted: string }
+  // the owner removed the plant's share to our login (SOLAR-310, 0172)
+  | { kind: "share_removed"; plants: string[] }
+  // SunSynk no longer lists the plant on its password login (SOLAR-537, 0197): shown, not read
+  | { kind: "plant_off_login"; plants: string[]; login?: string }
+  // the share login stopped / works again (SOLAR-451, 0177): owners can't act, so no sign-in
+  | { kind: "share_down"; plants: string[]; at?: string }
+  | { kind: "share_back"; plants: string[]; since?: string; at: string; lasted: string };
+// SunSynk's own service is down: every plant is affected, not one inverter.
+export type SunsynkEvent =
+  | { kind: "sunsynk_down"; since: string }
+  | { kind: "sunsynk_back"; since: string; at: string; lasted: string };
+export type AlertEvent = PlantEvent | LoginEvent | SunsynkEvent;
+
+/** The app's page names, as buttons say them: "Open Grid". */
+export const pageNames = { live: "Live", solar: "Solar", grid: "Grid", inverters: "Equipment" } as const;
+/** An alert email's parts, in plain text: email.ts lays them out. A row's third field "batt"
+ *  paints its value in the battery colour. A button opens a page for the alert's plant, or
+ *  the SunSynk logins. footer: the line about the alert's switch; null: none. */
+export type AlertPart =
+  | { lead: string } | { note: string } | { heading: string }
+  | { box: { hero?: { label: string; value: string; tone?: "bad" | "warn"; sub?: string };
+      rows?: [label: string, value: string, tone?: "batt"][]; steps?: [when: string, what: string][] } }
+  | { button: { label: string; page: keyof typeof pageNames | "logins" } };
+export type AlertMail = { subject: string; title: string; parts: AlertPart[]; footer: string | null };
+
+const openPage = (page: "live" | "grid" | "inverters"): AlertPart => ({ button: { label: `Open ${pageNames[page]}`, page } });
+const GAP = "We're getting what we can of the missed readings.";
+// up to 3 names, then a count, as the app's billing banner
+const andList = (a: string[]) => names(a.length > 3 ? [...a.slice(0, 3), `${a.length - 3} more`] : a);
+
+// Each alert shows its facts in the one box (SOLAR-415): the big number is what's wrong now
+// (red or amber), or how long it lasted (white) once it's back. Rows only for other numbers.
+// A sentence only where the box can't say it. Never a guessed cause, and never a promise to
+// fill missed readings: we get what we can.
+/** The email for one alert or login event. plant: the plant's name. */
+export function alertMail(e: AlertEvent, plant: string, on = "today"): AlertMail {
+  const span = (from: string, to: string) => `${from} to ${to} ${on}`;
+  const footer = (what: string) => `You get ${what} alerts for ${plant}. Turn them off in notification settings.`;
+  const alert = (title: string, page: "live" | "grid" | "inverters", what: string, parts: AlertPart[]): AlertMail =>
+    ({ subject: title, title, parts: [...parts, openPage(page)], footer: footer(what) });
+  switch (e.kind) {
+    case "grid_down":
+      return alert(`Grid down at ${plant}`, "grid", "grid", [{ box: {
+        hero: { label: "Grid", value: "Off", tone: "bad", sub: e.from ? `went off between ${e.from} and ${e.at} ${on}` : `since ${e.at} ${on}` },
+        rows: e.chargePct != null ? [["Battery", `${e.chargePct}%`, "batt"]] : [] } }]);
+    case "grid_back":
+      return alert(`Grid back at ${plant}`, "grid", "grid", [{ box: {
+        hero: { label: "Grid was off for", value: e.lasted ?? "a while", sub: span(e.since, e.at) },
+        rows: e.chargePct != null ? [["Battery", `${e.chargePct}%`, "batt"]] : [] } }]);
+    case "batt_hot":
+      return alert(`Battery hot at ${plant}`, "inverters", "battery", [{ box: {
+        hero: { label: "Battery", value: `${e.tempC}°C`, tone: "bad", sub: `at ${e.at} ${on}` },
+        rows: (e.hotDays ?? 1) > 1 ? [["Over 45°C", `${e.hotDays} of the last 30 days`]] : [] } }]);
+    case "bank_drift": {
+      const pcts = e.banks.map((b) => b.chargePct);
+      return alert(`Batteries charging unevenly at ${plant}`, "inverters", "battery", [{ box: {
+        hero: { label: "Gap", value: `${Math.max(...pcts) - Math.min(...pcts)}%`, tone: "warn", sub: "for over an hour" },
+        rows: e.banks.map((b) => [b.name, `${b.chargePct}%`, "batt"] as [string, string, "batt"]) } }]);
+    }
+    // "Inverter 2508290475, string 2", as the app names it (SOLAR-348)
+    case "string_dead":
+      return alert(`Panels stopped producing at ${plant}`, "inverters", "panel", [{ box: {
+        hero: { label: e.string, value: "No power", tone: "bad", sub: `since ${e.since} ${on}` },
+        rows: [["Inverter", e.inverter.replace(/^Inverter /, "")], ["Other strings", "Producing"]] } }]);
+    case "string_back":
+      return alert(`Panels producing again at ${plant}`, "inverters", "panel", [{ box: {
+        hero: { label: `${e.string} off for`, value: e.lasted, sub: span(e.since, e.at) },
+        rows: [["Inverter", e.inverter.replace(/^Inverter /, "")]] } }]);
+    case "logger_stale": {
+      // The title names the inverter, so its row would say it twice (SOLAR-560). The whole
+      // plant lists each inverter's last time only when there's more than one.
+      const one = !!e.inverter;
+      const list = e.inverters ?? [];
+      return alert(one ? `No readings from ${e.inverter}` : `No readings from ${plant}`, "live", "reading", [
+        { lead: one ? "This inverter stopped sending readings to SunSynk. We can't see if it's still running. The rest of your plant still updates."
+                    : "Your plant stopped sending readings to SunSynk, so Prince Solar Hub isn't updating. We can't see if it's still running." },
+        { box: { hero: { label: "Last reading", value: e.since, tone: "warn", sub: on },
+          rows: one ? (list.length > 1 ? [["Other inverters", "Sending"]] : [])
+                    : list.length > 1 ? list.map((i) => [i.name, i.last ?? e.since] as [string, string]) : [] } },
+        { note: "We'll email you when readings come back." },
+      ]);
+    }
+    case "logger_back":
+      return alert(e.inverter ? `Readings back from ${e.inverter}` : `Readings back at ${plant}`, "live", "reading", [
+        { box: { hero: { label: "No readings for", value: e.lasted, sub: span(e.since, e.at) } } },
+        { note: "Gaps in your charts fill in where SunSynk has the readings." }]);
+    case "sunsynk_down":
+      return { subject: "SunSynk is down", title: "SunSynk is down", footer: footer("SunSynk"), parts: [
+        { lead: "SunSynk isn't answering for anyone, so no readings come in." },
+        { box: { hero: { label: "Down since", value: e.since, tone: "bad", sub: on } } },
+        openPage("live")] };
+    case "sunsynk_back":
+      return { subject: "SunSynk is back", title: "SunSynk is back", footer: footer("SunSynk"), parts: [
+        { box: { hero: { label: "SunSynk was down for", value: e.lasted, sub: `${e.since} to ${e.at} ${on}` } } },
+        openPage("live")] };
+  }
+  // Login emails: a calm note, no red (SOLAR-383). No switch for these, so no "turn them off" line.
+  const plants = andList(e.plants.length ? e.plants : ["your plant"]);
+  const note = (subject: string, title: string, parts: AlertPart[]): AlertMail => ({ subject, title, parts, footer: null });
+  switch (e.kind) {
+    case "needs_relink":
+      return note(`Sign in to SunSynk again for ${plants}`, "Sign in to SunSynk again", [
+        { lead: "SunSynk asked for your login again." },
+        { box: { hero: e.at ? { label: "No readings since", value: e.at, sub: on } : undefined, rows: [["Plants", plants]] } },
+        { lead: "After you sign in, we get what we can of the missed readings." },
+        { button: { label: "Sign in to SunSynk", page: "logins" } }]);
+    case "share_removed":
+      return note(`Sharing stopped for ${plants}`, "Sharing stopped", [
+        { lead: "Your plant is no longer shared with admin@princesolarhub.co.za in SunSynk, so we stopped reading it. Your history is safe." },
+        { box: { rows: [["Plants", plants]] } },
+        { lead: "To start again, share it as Visitor, then add it in the app with Share plant." },
+        { button: { label: "Open Prince Solar Hub", page: "logins" } }]);
+    // The error, what it means, then what the owner can do (Brynne 2026-11-13). We can't
+    // tell why SunSynk's list dropped the plant, so each fix names the case it is for.
+    case "plant_off_login":
+      return note(`We can't find ${plants} on your SunSynk login`, "Plant not found on your login", [
+        { lead: `We can't find ${plants} on your SunSynk login.` },
+        { box: { rows: [["Plant", plants], ...(e.login ? [["Login", e.login] as [string, string]] : [])] } },
+        { heading: "What it means" },
+        { lead: "We can't read this plant. You still see its history, with no new readings." },
+        { heading: "How to fix it" },
+        { box: { steps: [
+          ["If someone shared it with you", "Ask them to share it with this login again in SunSynk."],
+          ["If it is on another SunSynk login", "Add that login in Plants with Add plant."],
+          ["If you deleted it in SunSynk", "There is nothing to do."],
+        ] } },
+        { note: "Once it is back on this login, readings start again on their own." },
+        { button: { label: "Open Plants", page: "logins" } }]);
+    case "share_down":
+      return note(`No readings from ${plants}`, "No readings", [
+        { lead: "We can't read your plants from SunSynk right now. Your power isn't affected. Readings start again on their own." },
+        { box: { hero: e.at ? { label: "Last reading", value: e.at, tone: "warn", sub: on } : undefined, rows: [["Plants", plants]] } },
+        { note: "We'll email you when readings come back, and get what we can of the gap." },
+        openPage("live")]);
+  }
+  const back = e.kind === "share_back" ? ["Readings back at", "Readings back"] : ["SunSynk reconnected for", "SunSynk reconnected"];
+  return note(`${back[0]} ${plants}`, back[1], [
+    { box: { hero: { label: "No readings for", value: e.lasted, sub: e.since ? `${e.since} to ${e.at} ${on}` : `until ${e.at} ${on}` },
+      rows: [["Plants", plants]] } },
+    { note: GAP },
+    openPage("live")]);
+}
+
 export const AccountText = {
   money, day, weekday, forms, names, plantName, planTitle, planPrice, planStatus, placesLine, mustChoose, bookedChange,
   cardLine, cardSub, billRow, billing, pastDueNote, accountAlert, paidText, cancelDialog, deleteBlocked, plans, planCard, quoteReview, checkoutPick, keepPick, weekPick, chosenToast, refused, pay,
   choosePlants, switchConfirm, plantTag, plantKept, logins, removeLogin, payScreen, fitLine, notices, mail,
+  alertLine, alertPush,
 };

@@ -36,7 +36,7 @@ import {
 } from "../_shared/email.ts";
 import { outboxMail, FROM_BILLING, FROM_HELLO } from "../_shared/email.ts";
 import { msgKey, type Post, sendOutboxOne } from "../_shared/outbox.ts";
-import { mail as accountMail, type MailInput } from "../_shared/text.ts";
+import { alertLine, alertPush, lasted, mail as accountMail, type MailInput } from "../_shared/text.ts";
 import { Pacer, retryAfterMs } from "../_shared/pace.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -150,11 +150,6 @@ async function lastMail(user: string | null, kind: string, before: number): Prom
   return data?.data ?? null;
 }
 
-function lasted(fromEpoch: number, toEpoch: number): string {
-  const m = Math.max(1, Math.round((toEpoch - fromEpoch) / 60));
-  // the app's format (fmtDuration) and the pop-ups' (0153): 45 min, 1h 33m, 2h
-  return m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`;
-}
 
 // ------------------------------------------------------------------- energy
 
@@ -577,10 +572,23 @@ export async function sendBatch(outs: Out[], deadline: number, reuse?: string): 
 
 // ------------------------------------------------------------------- pop-ups
 
-type PushRow = {
-  id: number; kind: string; plant_id: number; title: string; body: string; tab: string; day: string | null;
-  subs: { endpoint: string; p256dh: string; auth: string }[];
+// From 0264 the database sends an alert's facts and the words come from text.ts (SOLAR-645):
+// data, created (epoch s), tz, the plant's name and how many plants the user has. A row
+// from before 0264 brings its own title, body, tab and day.
+export type PopupFacts = {
+  kind: string; data?: Record<string, any> | null; created?: number; tz?: string; plant_name?: string | null; plants?: number;
+  title?: string | null; body?: string | null; tab?: string; day?: string | null;
 };
+/** A pop-up's title, body, and the page and day a tap opens. */
+export function popup(r: PopupFacts): { title: string | null; body: string | null; tab: string; day: string | null } {
+  if (r.data === undefined) return { title: r.title ?? null, body: r.body ?? null, tab: r.tab ?? "live", day: r.day ?? null };
+  const t = alertLine({ kind: r.kind, data: r.data, created: Number(r.created), tz: r.tz! });
+  if (!t) return { title: null, body: null, tab: "live", day: null };
+  return { ...alertPush(r.kind, t, r.plant_name ?? null, Number(r.plants ?? 1)), tab: t.tab,
+           day: t.tab === "grid" || t.tab === "solar" ? t.day : null };
+}
+
+type PushRow = PopupFacts & { id: number; plant_id: number; subs: { endpoint: string; p256dh: string; auth: string }[] };
 
 let pushServer: Promise<webpush.ApplicationServer> | null = null;
 // A key that fails to load is tried again next run, not kept as a failure.
@@ -598,10 +606,11 @@ async function pushOne(r: PushRow, s: PushRow["subs"][number]): Promise<"ok" | "
   if (!PUSH_HOST.test(s.endpoint)) return "gone";
   // data is fields, not a link, so the phone apps can map them to their own screens.
   // tag: a Grid back replaces its Grid down on screen, per plant.
+  const w = popup(r);
   const msg = JSON.stringify({
-    title: r.title, body: r.body, tag: `${r.plant_id}:${r.kind === "relinked" ? "needs" : r.kind.split("_")[0]}`,
+    title: w.title, body: w.body, tag: `${r.plant_id}:${r.kind === "relinked" ? "needs" : r.kind.split("_")[0]}`,
     // a login's pop-up opens Account on the logins, where Reconnect is (SOLAR-380)
-    data: { id: r.id, tab: r.tab, plant: r.plant_id, day: r.day, section: r.tab === "account" ? "logins" : undefined },
+    data: { id: r.id, tab: w.tab, plant: r.plant_id, day: w.day, section: w.tab === "account" ? "logins" : undefined },
   });
   try {
     // An alert an hour late is no longer news: the push service drops it after that.
@@ -643,9 +652,8 @@ export async function pushPass(deadline: number) {
 // Pop-ups through the outbox (SOLAR-645 step 3, 0261): msg_push_take hands over one send per
 // device under a claim; msg_push_done takes each push service status back. The database
 // decides from it: 2xx sent, 404/410 device removed, 429/5xx/0 tried again inside the hour.
-export type PushSend = {
-  id: number; claim: string; event_id: number; kind: string; plant_id: number; title: string; body: string;
-  tab: string; day: string | null; endpoint: string; p256dh: string; auth: string;
+export type PushSend = PopupFacts & {
+  id: number; claim: string; event_id: number; plant_id: number; endpoint: string; p256dh: string; auth: string;
 };
 export type PushResult = { id: number; code: number; retry_s?: number; error?: string };
 type Deliver = (s: PushSend, msg: string) => Promise<unknown>;
@@ -657,9 +665,10 @@ const deliver: Deliver = async (s, msg) =>
 /** One send: the push service's status (0 = no answer), and its Retry-After in seconds. */
 export async function pushSend(s: PushSend, send: Deliver = deliver): Promise<PushResult> {
   if (!PUSH_HOST.test(s.endpoint)) return { id: s.id, code: 410, error: "bad address" };
+  const w = popup(s);
   const msg = JSON.stringify({
-    title: s.title, body: s.body, tag: `${s.plant_id}:${s.kind === "relinked" ? "needs" : s.kind.split("_")[0]}`,
-    data: { id: s.event_id, tab: s.tab, plant: s.plant_id, day: s.day, section: s.tab === "account" ? "logins" : undefined },
+    title: w.title, body: w.body, tag: `${s.plant_id}:${s.kind === "relinked" ? "needs" : s.kind.split("_")[0]}`,
+    data: { id: s.event_id, tab: w.tab, plant: s.plant_id, day: w.day, section: w.tab === "account" ? "logins" : undefined },
   });
   try {
     await send(s, msg);

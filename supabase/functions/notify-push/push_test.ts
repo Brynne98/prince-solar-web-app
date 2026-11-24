@@ -20,6 +20,16 @@ Deno.test("2xx: code 201", async () => {
   assertEquals([m.tag, m.data.id, m.data.tab], ["7:grid", 101, "grid"]);
 });
 
+// 0264: msg_push_take sends the facts; the words come from text.ts (SOLAR-645 step 6)
+Deno.test("facts in, the pop-up's words out", async () => {
+  let sent = "";
+  const facts = row(9, { title: undefined, body: undefined, tab: undefined, day: undefined, kind: "grid_down",
+    data: { since: 1764000000, chargePct: 62 }, created: 1764000060, tz: "Africa/Johannesburg", plant_name: "Prince Home", plants: 2 });
+  await pushSend(facts, (_s, msg) => { sent = msg; return Promise.resolve(); });
+  const m = JSON.parse(sent);
+  assertEquals([m.title, m.body, m.data.tab, m.data.day], ["Prince Home", "Grid down since 18:00. Battery 62%.", "grid", "2025-11-24"]);
+});
+
 Deno.test("429 with Retry-After: code and seconds", async () => {
   assertEquals(await pushSend(row(2), refuse(429, { "retry-after": "7" })),
                { id: 2, code: 429, error: "push service 429", retry_s: 7 });

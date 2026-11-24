@@ -127,7 +127,7 @@ begin
   n := pg_temp.take();
   perform pg_temp.ok('T1 take: one send per device, with words and a claim',
     pg_temp.taken(q) = array[d1, d2]
-    and (select bool_and(title is not null and body is not null and claim is not null and endpoint like 'https://fcm%') from t_take where event_id = q),
+    and (select bool_and(data is not null and tz is not null and claim is not null and endpoint like 'https://fcm%') from t_take where event_id = q),
     pg_temp.taken(q)::text);
   o := pg_temp.ob(q);
   perform pg_temp.ok('T1 ... outbox row leased to its expiry', o.status = 'queued' and o.claimed_until = o.expires_at);
