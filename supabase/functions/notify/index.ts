@@ -801,8 +801,8 @@ export async function msgEmailPass(until: number, deadline = until, call: Rpc = 
       else noteError("email_failed", new Error(`${m.kind} outbox ${m.id}: ${out.error}`), { user: m.user_id, hourly: true });
       res.push({ id: m.id, code: out.status, error: out.error,
                  ...(out.retryAfter ? { retry_s: Math.ceil(retryAfterMs(out.retryAfter, Date.now()) / 1000) } : {}) });
-      // Resend in trouble (not one email refused): the rest wait for the next run
-      if (!refused(out.status)) stop = true;
+      // Resend in trouble (not one email refused, nor one still in flight): the rest wait for the next run
+      if (!refused(out.status) && out.status !== 409) stop = true;
     }
     await call("msg_email_done", { p_claim: rows[0].claim, p_results: res });
     for (const r of res) {

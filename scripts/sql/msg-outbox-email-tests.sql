@@ -244,6 +244,24 @@ begin
   perform pg_temp.ok('G9 ... reconnect on that plant still goes', pg_temp.taken(r), (pg_temp.ob(r)).drop_reason);
 end $$;
 
+-- review fixes: reconnect on a plant switched out still goes; dropped rows don't fill the take
+do $$
+declare u uuid := pg_temp.owner('g10', '{990066915,990066916}'); v uuid := pg_temp.owner('g11', '{990066917}');
+        r bigint; d1 bigint; d2 bigint; d3 bigint; ok bigint; n int;
+begin
+  r := pg_temp.ev(u, 990066916, 'needs_relink', 'g10:relink');
+  perform billing.set_chosen_plants(pg_temp.acc(u), '{990066915}', now());
+  insert into public.email_prefs (user_id, grid) values (v, false);
+  d1 := pg_temp.ev(v, 990066917, 'grid_down', 'g11:a', null, now() - interval '3 minutes');
+  d2 := pg_temp.ev(v, 990066917, 'grid_down', 'g11:b', null, now() - interval '3 minutes');
+  d3 := pg_temp.ev(v, 990066917, 'grid_down', 'g11:c', null, now() - interval '3 minutes');
+  ok := pg_temp.ev(u, 990066915, 'grid_down', 'g10:down', null, now() - interval '2 minutes');
+  n := pg_temp.take(2);
+  perform pg_temp.ok('G10 reconnect on a plant no longer chosen: still goes', pg_temp.taken(r), (pg_temp.ob(r)).drop_reason);
+  perform pg_temp.ok('G11 three dropped rows ahead: the take keeps going to the sendable one',
+    pg_temp.taken(ok) and (pg_temp.ob(d3)).drop_reason = 'switched off', format('%s rows', n));
+end $$;
+
 -- ---------------------------------------------------------------------------
 -- P: down/back pairs, both on the outbox
 -- ---------------------------------------------------------------------------

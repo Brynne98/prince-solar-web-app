@@ -55,13 +55,14 @@ Deno.test("5xx: tried again by the database; the rest wait, untried", loose, asy
   assertEquals(c.again, 2);
 });
 
-Deno.test("409: same key already sent with other words counts as sent; one still in progress is tried again", loose, async () => {
-  const f = fake([row(7), row(8)], {
+Deno.test("409: same key already sent with other words counts as sent; one still in progress is tried again, the rest go on", loose, async () => {
+  const f = fake([row(7), row(8), row(15)], {
     7: { status: 409, error: 'resend 409: {"name":"invalid_idempotent_request"}' },
     8: { status: 409, error: 'resend 409: {"name":"concurrent_idempotent_requests"}' },
   });
   await f.run();
-  assertEquals(f.done[0], [{ id: 7, code: 200 }, { id: 8, code: 409, error: 'resend 409: {"name":"concurrent_idempotent_requests"}' }]);
+  assertEquals(f.done[0], [{ id: 7, code: 200 }, { id: 8, code: 409, error: 'resend 409: {"name":"concurrent_idempotent_requests"}' },
+                           { id: 15, code: 200 }]);
 });
 
 Deno.test("nothing to say: dropped; a build error: tried again, nothing sent", loose, async () => {

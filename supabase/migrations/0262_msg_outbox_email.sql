@@ -9,8 +9,8 @@
 --         row's fields so the email is built by the same code as the old path.
 --         Guard, at send time: expired; event gone; battery-hot and bank-drift "back" (no
 --         email, as notify's build); switch off (email_wanted, not for kinds with no switch);
---         plant removed (not for needs_relink, as email_claim); plant not chosen; plant
---         not live (not for needs_relink / relinked: see 0261); no address. A "back" waits
+--         plant removed (not for needs_relink, as email_claim); plant not chosen and plant
+--         not live (neither for needs_relink / relinked: see 0261); no address. A "back" waits
 --         while its "down" email is queued or leased, on either path; it is dropped only
 --         if its "down" was dropped, skipped or failed.
 --   done  per row, only under the claim that leased it: 2xx sent; 400, 422 failed (Resend
@@ -68,7 +68,8 @@ returns text language sql stable security definer set search_path = '' as $$
            when q.plant_id is not null and q.user_id is not null and q.kind <> 'needs_relink'
                 and not exists (select 1 from public.plant_users pu where pu.user_id = q.user_id and pu.plant_id = q.plant_id)
              then 'plant removed'
-           when q.plant_id is not null and q.user_id is not null and not exists (
+           -- reconnect: the login may hold other chosen plants; email_claim never asked (review)
+           when q.plant_id is not null and q.user_id is not null and q.kind not in ('needs_relink', 'relinked') and not exists (
                   select 1 from billing.seats se join billing.accounts ba on ba.id = se.account
                    where ba.user_id = q.user_id and se.plant = q.plant_id and se.closed_at is null)
              then 'plant not chosen'
@@ -96,25 +97,34 @@ declare
   v_claim uuid := gen_random_uuid();
   r msg.outbox;
   v_why text;
+  v_leased int := 0;
+  v_moved int;
 begin
-  for r in
-    select o.* from msg.outbox o
-     where o.channel = 'email' and o.lane = p_lane and o.status = 'queued' and o.not_before <= now()
-       and (o.claimed_until is null or o.claimed_until < now())  -- a lease that ran out: the reply was lost
-       and msg.email_guard(o) is distinct from 'wait'            -- waiting rows never fill the take
-     order by o.not_before, o.id
-     limit p_limit
-     for update skip locked
+  -- dropped rows don't count: take again until p_limit are leased or nothing moves (review)
   loop
-    v_why := msg.email_guard(r);
-    if v_why = 'wait' then continue; end if;                     -- its "down" moved on since the select
-    if v_why is not null then
-      update msg.outbox o set status = 'dropped', drop_reason = v_why, claim = null, claimed_until = null, done_at = now()
+    v_moved := 0;
+    for r in
+      select o.* from msg.outbox o
+       where o.channel = 'email' and o.lane = p_lane and o.status = 'queued' and o.not_before <= now()
+         and (o.claimed_until is null or o.claimed_until < now())  -- a lease that ran out: the reply was lost
+         and msg.email_guard(o) is distinct from 'wait'            -- waiting rows never fill the take
+       order by o.not_before, o.id
+       limit p_limit - v_leased
+       for update skip locked
+    loop
+      v_why := msg.email_guard(r);
+      if v_why = 'wait' then continue; end if;                     -- its "down" moved on since the select
+      v_moved := v_moved + 1;
+      if v_why is not null then
+        update msg.outbox o set status = 'dropped', drop_reason = v_why, claim = null, claimed_until = null, done_at = now()
+         where o.id = r.id;
+        continue;
+      end if;
+      update msg.outbox o set claim = v_claim, claimed_until = now() + interval '2 minutes', tries = o.tries + 1
        where o.id = r.id;
-      continue;
-    end if;
-    update msg.outbox o set claim = v_claim, claimed_until = now() + interval '2 minutes', tries = o.tries + 1
-     where o.id = r.id;
+      v_leased := v_leased + 1;
+    end loop;
+    exit when v_moved = 0 or v_leased >= p_limit;
   end loop;
 
   -- the old email_claim's fields, so notify builds the same email
