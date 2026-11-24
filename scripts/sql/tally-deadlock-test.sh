@@ -1,5 +1,5 @@
 #!/bin/sh
-# SOLAR-656 (0257): concurrent sunsynk_tally calls must not deadlock. LOCAL database only.
+# SOLAR-656 (0258): concurrent sunsynk_tally calls must not deadlock. LOCAL database only.
 #   sh scripts/sql/tally-deadlock-test.sh "postgresql://postgres:postgres@127.0.0.1:<db port>/postgres" [function]
 # 8 clients x 400 calls (TALLY_TX), half sending the rows in one order and half in reverse, the same
 # six keys. pgbench exits non-zero when a call fails (a deadlock aborts the client).

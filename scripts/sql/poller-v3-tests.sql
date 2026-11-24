@@ -1,4 +1,4 @@
--- SOLAR-656 (0257): poller v3 database half. LOCAL database only; everything is rolled back.
+-- SOLAR-656 (0258): poller v3 database half. LOCAL database only; everything is rolled back.
 --   /opt/homebrew/opt/libpq/bin/psql "postgresql://postgres:postgres@127.0.0.1:<db port>/postgres" -f scripts/sql/poller-v3-tests.sql
 -- Exit code decides: any wrong case raises.
 --   a. accounts_live = account_status on random accounts over 50 days; ends_at never late.

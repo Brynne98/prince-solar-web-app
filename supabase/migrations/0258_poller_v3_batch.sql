@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0257 — poller v3, database half (SOLAR-656; design reports/poller-v3-design.md, sections 3-4).
+-- 0258 — poller v3, database half (SOLAR-656; design reports/poller-v3-design.md, sections 3-4).
 --
 -- Nothing calls the new functions yet: today's poller (poll_jobs_v2, poll_commit_v2,
 -- write_allowed) is unchanged. The edge lanes (part 3) will call them.
