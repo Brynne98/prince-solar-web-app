@@ -99,7 +99,7 @@ poll / sweep / triggers ──> email_queue as the event log  (one row per owner
 | 3 | `msg.kinds` (route per kind and channel), `msg.outbox`, `msg.push_sends`, guard, take/done; flip **push** for all alert kinds | 1 | yes | M |
 | 4 | flip alert **email** kinds (urgent lane) | aim | after 3 | S |
 | 5 | flip bulk kinds; port their hooks first: history holds and resync, need-a-hand analytics (two events, plus `link-sunsynk:91`), feedback scrub, account-deleted address | aim | after 3 | M |
-| 6 | words: alert email + push from `text.ts`; list text per §5 A | 5 | after 4 | S–M |
+| 6 | words: one shared JS file for alert list, push and email; SQL `alert_text`, `push_text` removed | 5 | after 4 | M |
 | 7 | remove old paths: `email_claim`, `push_claim`, old email loop, dead `bill_*` code, `alerts-due` | | after a week clean | S |
 
 Push goes first in the outbox because it is the send that is lost today (ticket point 1) and has no hooks to port. A cheap retry on `email_queue` is skipped: it would be thrown away at step 3.
@@ -135,7 +135,7 @@ Push goes first in the outbox because it is the send that is lost today (ticket 
 | Reconnect blocked by a switch | guard too strict | per-kind guard; no-switch list kept |
 | Alert list breaks | event rows change | rows, `read_at`, `pair_key` kept; `api_alerts` unchanged until step 6 |
 | Migration numbers clash | SOLAR-650 also adds migrations | build after SOLAR-650 merges, or take numbers then |
-| Quiet hours | none exist | not in scope; `not_before` makes them a guard rule later (§5 C) |
+| Quiet hours | none exist | decided: none; owners use device settings |
 
 ## 4. Follow-ons that fit (not built here)
 
@@ -143,10 +143,11 @@ Push goes first in the outbox because it is the send that is lost today (ticket 
 - **SOLAR-311, battery level alerts:** new urgent kinds `batt_low` / `batt_low_back` per level; per-plant level state like `plant_alert_state`. Telegram = a new `channel` value, its own worker and a `telegram_links` table; the outbox itself needs no change. After step 4.
 - **SOLAR-315, loadshedding warning:** event with `not_before = slot − lead`, `expires_at = slot start`; battery % read at send time, so it is current. After step 4, and after the EskomSePush terms check.
 
-## 5. Decisions for Brynne
+## 5. Decisions (Brynne, 2026-11-24)
 
-- **A. Alert list words.** (1) Keep `alert_text` in SQL for the list and test that it matches `text.ts`. (2) Move the list text into the browser from one shared JS file. 1 is less work; 2 is the real single source.
-- **B. Quiet hours.** (1) Leave out. (2) Add later as a guard rule: hold push 22:00–06:00 local, except grid and reconnect.
+- Plan approved, all steps 1–7.
+- **A. One set of words everywhere.** Alert list, push and email come from one shared JS file, read by both the edge functions and the web app. `alert_text` and `push_text` in SQL go. Reason: wording drifts when it lives in more than one place.
+- **B. Quiet hours: none.** Owners set notification settings on their own devices.
 
 ## 6. Council (Neon, Sol), 2026-11-24
 
