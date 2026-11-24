@@ -20,12 +20,12 @@
 //     HTTP 200, msg "Success", empty data. Check data.access_token, never msg.
 //   * the access token (stateless JWT) keeps working until its own expiry
 //   * there is no read-only scope; every token is scope=all
-import { createClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { createHash, createHmac } from "node:crypto";
 import { type InverterInfo, num, pick } from "./extract.ts";
 import { noteError } from "./errors.ts";
 import { slot } from "./limit.mts";
 import { fakeSunsynk } from "./gate.ts";
+import { db, dbHandle, rpc } from "./db.ts";
 
 const API_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? "https://openapi.sunsynk.net";
 // Fake logins (name@mock, SOLAR-270) go to the mock: locally the mock server is API_BASE
@@ -44,10 +44,9 @@ if (!APP_KEY || !APP_SECRET) {
   console.warn("SUNSYNK_APP_KEY / SUNSYNK_APP_SECRET not set — every request will fail");
 }
 
-export const db = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-);
+// PostgREST, for the callers that use it directly. The reading path goes through the
+// handle in db.ts (SOLAR-656).
+export { db };
 
 // The gateway's verify_jwt lets through the publishable key and any user's
 // session, so poll / recover / sync-plant-energy check the caller themselves.
@@ -219,12 +218,6 @@ const expiresAt = (expiresIn: number) => Date.now() + Math.max(60, expiresIn - E
 // Per-account token management
 // ---------------------------------------------------------------------------
 
-async function rpc<T = any>(fn: string, args: Record<string, unknown>): Promise<T> {
-  const { data, error } = await db.rpc(fn, args);
-  if (error) throw new Error(`${fn}: ${error.message}`);
-  return data as T;
-}
-
 // One sign-in renewal per login at a time: a plant's inverters are read in parallel, and
 // each used to renew on its own when the token was stale or a 401 came back (Review K item 7).
 const renewing = new Map<string, Promise<string>>();
@@ -329,12 +322,13 @@ export async function saveCallTally(run?: { shard: number; ms: number; plants: n
   const rows = [...callTally.values()];
   callTally.clear();
   if (!rows.length && !run) return;
-  const { error } = await db.rpc("sunsynk_tally", {
-    p_rows: rows, p_shard: run?.shard ?? null, p_run_ms: run?.ms ?? 0, p_plants: run?.plants ?? 0,
-  });
-  if (error) {
+  try {
+    await rpc("sunsynk_tally", {
+      p_rows: rows, p_shard: run?.shard ?? null, p_run_ms: run?.ms ?? 0, p_plants: run?.plants ?? 0,
+    });
+  } catch (e) {
     rows.forEach(addTally);
-    console.warn("sunsynk_tally:", error.message);
+    console.warn(e instanceof Error ? e.message : e);
   }
 }
 
@@ -634,10 +628,7 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
       }
     }
   }
-  const { data: seeded, error } = await db.from("plant_config").select("plant_id")
-    .in("plant_id", all.map((p) => p.id));
-  if (error) throw new Error(`plant_config: ${error.message}`);
-  const have = new Set((seeded ?? []).map((r: any) => Number(r.plant_id)));
+  const have = new Set(await dbHandle().configuredPlants(all.map((p) => p.id)));
   const missing = all.filter((p) => !have.has(p.id));
   const details = await Promise.allSettled(missing.map((p) => getPlantDetail(acc, p.id)));
   const rows = details
@@ -654,10 +645,11 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
     const live = await livePlants();
     const cut = activeRows.map((r) => r.plant_id).filter((id) => !live.has(id));
     if (cut.length) {
-      const { error } = await db.from("plant_config").update({ backfill_next: null, backfill_until: null, temp_next: null }).in("plant_id", cut);
-      if (error) {
-        console.warn(`free bookmarks ${cut.join(",")}: ${error.message}`);
-        noteError("free_bookmarks_failed", new Error(`free bookmarks ${cut.join(",")}: ${error.message}`), { hourly: true });
+      try { await dbHandle().clearBookmarks(cut); }
+      catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`free bookmarks ${cut.join(",")}: ${msg}`);
+        noteError("free_bookmarks_failed", new Error(`free bookmarks ${cut.join(",")}: ${msg}`), { hourly: true });
       }
     }
   }

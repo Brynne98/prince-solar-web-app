@@ -73,6 +73,15 @@ code (SOLAR-641; `npm test` refuses the old billing reads, `PLAN_NAME` and hand-
 | `startPlan`, `bookChange`, `settlePayment`, `changeCard` | Pay for a plan or an upgrade (quote, review, card page), book or undo a change for the billing date, pay a failed renewal, change the card. |
 | `outboxMail(m, unsub)` | An outbox email (`AccountText.mail`) laid out in `_shared/email.ts`'s look. |
 
+## Reading inverters (`supabase/functions/_shared/poller.ts`, `_shared/db.ts`)
+
+The per-minute reading of a login, for any host that runs the poller (SOLAR-656).
+
+| Name | Use it for |
+|---|---|
+| `pollAccount(acc, jobs, ts)` | Read every inverter of a login's plants for one minute and save it (`poll_commit_v2`). `fetchInverter`, `readingRow`, `carryAllowed`, `canCarry`, `uploadNotDue`, `wantEndpoints`, `fetchInto`, `bankTodayTemps` are its steps. |
+| `rpc(fn, args)`, `dbHandle()`, `useDb(handle)` | The database the SunSynk and reading code use: PostgREST (`postgrest`) unless a host gives its own `Db` once at start. `db` (supabase-js) stays for the callers outside the reading path. |
+
 ## Forms and sign-in (`auth.jsx`)
 
 | Name | Use it for |
