@@ -1589,7 +1589,8 @@ begin
   perform pg_temp.ok('P5 day 7: retry', pg_temp.job(a, pe + interval '7 days', 'fail') is not null);
   ref := pg_temp.job(a, pe + interval '14 days');
   perform pg_temp.ok('P5 day 14: retry', ref is not null);
-  perform pg_temp.eq('P5 day-14 try paid after the cutoff, job not run yet: refunded',
+  perform pg_temp.answer(ref, 'fail', pe + interval '14 days');
+  perform pg_temp.eq('P5 day-14 try failed, a success after the cutoff, job not run yet: refunded',
     billing.apply_payment(ref, pg_temp.tx_ok(ref), pg_temp.cut(pe) + interval '1 hour')->>'reason', 'stale');
   perform pg_temp.eq('P5 four tries', (select count(*) from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
     where i.account = a and i.kind = 'renewal')::text, '4');
@@ -2019,7 +2020,9 @@ begin
   perform pg_temp.eq('F1 unknown day 0, lease over: the window starts', pg_temp.st(a, pe + interval '1 day', 'state'), 'past_due');
   perform pg_temp.eqt('F1 from the due date', pg_temp.st(a, pe + interval '1 day', 'past_due_since'), pe);
   perform billing.run(pg_temp.cut(pe) + interval '6 hours');
-  perform pg_temp.eq('F1 never answered: ended at the end of day 15', (pg_temp.sub(a)).status, 'ended');
+  perform pg_temp.eq('F1 never answered: runs on a day past the cutoff (0248)', (pg_temp.sub(a)).status, 'past_due');
+  perform billing.run(pg_temp.cut(pe) + interval '25 hours');
+  perform pg_temp.ok('F1 ... then ended on the end of day 15', (pg_temp.sub(a)).status = 'ended' and (pg_temp.sub(a)).ended_at = pg_temp.cut(pe));
 
   pe := pg_temp.member(b, 'f1b', 990020102);
   ref := pg_temp.job(b, pe, 'fail');
@@ -2137,11 +2140,13 @@ begin
   inv := (billing.pay_now(a, pe + interval '14 days')->>'invoice')::uuid;
   ref := billing.begin_attempt(inv, 'card_page', pe + interval '14 days')->>'reference';
   perform billing.run(pg_temp.cut(pe) + interval '6 hours');
-  perform pg_temp.eq('F7 the job ended it at the end of day 15', (pg_temp.sub(a)).status, 'ended');
+  perform pg_temp.eq('F7 the job waits for the page''s answer (0248)', (pg_temp.sub(a)).status, 'past_due');
+  perform billing.run(pg_temp.cut(pe) + interval '25 hours');
+  perform pg_temp.eq('F7 none a day on: the job ended it at the end of day 15', (pg_temp.sub(a)).status, 'ended');
   tx := pg_temp.tx_ok(ref, 'AUTH_f7') || jsonb_build_object('paid_at', pe + interval '14 days 5 minutes');
-  r := billing.apply_payment(ref, tx, pe + interval '16 days');
+  r := billing.apply_payment(ref, tx, pe + interval '17 days');
   perform pg_temp.eq('F7 paid before day 15: applied', r->>'action', 'applied');
-  perform pg_temp.eq('F7 active again', pg_temp.st(a, pe + interval '16 days', 'state'), 'active');
+  perform pg_temp.eq('F7 active again', pg_temp.st(a, pe + interval '17 days', 'state'), 'active');
   perform pg_temp.ok('F7 same plan row, next period', (pg_temp.sub(a)).period_start = pe and (select count(*) = 1 from billing.subscriptions where account = a));
 
   pe := pg_temp.member(b, 'f7b', 990020702);
@@ -3109,6 +3114,11 @@ begin
   r := billing.account_state(c, pe + interval '1 hour');
   perform pg_temp.eq('U2 hard decline: refused', r->>'past_due_reason', 'refused');
   perform pg_temp.eq('U2 refused: no next try', r->>'next_try_on', null);
+  perform pg_temp.ok('U2 refused: no card to charge', r->'card' is null or jsonb_typeof(r->'card') = 'null');
+  perform pg_temp.eq('U2 refused: the card is still shown', r->'refused_card'->>'last4', (select last4 from billing.payment_methods where auth_ref = 'AUTH_u2c'));
+  perform pg_temp.ok('U2 refused: never charged again', pg_temp.job(c, billing.next_run_at(pe + interval '3 days')) is null
+    and pg_temp.job(c, billing.next_run_at(pe + interval '7 days')) is null and pg_temp.tries(c) = 2);
+  perform pg_temp.eq('U2 a soft decline shows no refused card', pg_temp.st(a, pe + interval '1 hour', 'refused_card'), null);
   perform pg_temp.eq('U2 the card email names the refused try', (pg_temp.ob(c, 'card_update')).ref,
     (select id::text from billing.payment_attempts where reference = ref));
   perform pg_temp.ok('U2 refused: no failed-card email', pg_temp.ob(c, 'payment_failed') is null);
@@ -3141,9 +3151,10 @@ begin
 exception when others then perform pg_temp.ok('U3 runs', false, sqlerrm);
 end $$;
 
--- U4 a card page paid just before the cutoff, answered after it: held, then the plan comes back
+-- U4 a card page paid just before the cutoff, answered the next day: the plan runs on (readings
+--    with no gap), the job leaves it, then the payment lands and the plan carries on
 do $$
-declare a uuid := pg_temp.acct('u4a'); pe timestamptz; c timestamptz; ref text; r jsonb; o billing.outbox;
+declare a uuid := pg_temp.acct('u4a'); pe timestamptz; c timestamptz; ref text; r jsonb;
 begin
   pe := pg_temp.member(a, 'u4a', 990160401);
   c := pg_temp.cut(pe);
@@ -3155,29 +3166,28 @@ begin
   r := billing.account_state(a, c - interval '10 seconds');
   perform pg_temp.eq('U4 before the cutoff: in flight', r->>'renewal_in_flight', 'true');
   perform pg_temp.eq('U4 before the cutoff: nothing to re-check yet', r->>'held_reference', null);
+  r := billing.account_state(a, c + interval '1 minute');
+  perform pg_temp.eq('U4 past the cutoff: still running, checking', r->>'state' || '/' || (r->>'past_due_reason'), 'past_due/checking');
+  perform pg_temp.eq('U4 ... the page to re-check', r->>'held_reference', ref);
+  perform pg_temp.eq('U4 ... the plant is still read', pg_temp.ps(990160401, c + interval '1 minute', 'read_now'), 'true');
+  perform pg_temp.fails('U4 ... the bill is not paid twice',
+    format('select billing.begin_attempt(%L, ''card_page'', %L, %L)', pg_temp.due(a), c + interval '1 minute', a), 'already in progress');
   perform pg_temp.job(a, c + interval '6 hours');
-  perform pg_temp.eq('U4 the job ended it', (pg_temp.sub(a)).status, 'ended');
-  o := pg_temp.ob(a, 'plan_ended');
-  perform pg_temp.ok('U4 the email row is stamped with this ending', o.ended_at = c
-    and o.dedupe_key = 'plan_ended:' || o.ref || ':' || (extract(epoch from c) * 1000)::bigint);
-  perform pg_temp.ok('U4 the email is held', billing.plan_ended_held(a, o.ref, c + interval '7 hours'));
-  perform pg_temp.ok('U4 ... and not handed out', not (o.id = any (pg_temp.taken(c + interval '7 hours'))));
-  r := billing.account_state(a, c + interval '7 hours');
-  perform pg_temp.eq('U4 ended, in flight', r->>'state' || '/' || (r->>'renewal_in_flight'), 'ended/true');
-  perform pg_temp.eq('U4 the page to re-check', r->>'held_reference', ref);
-  perform pg_temp.eq('U4 the bill it was paying', r->'due_bill'->>'plan', 'home');
+  perform pg_temp.eq('U4 the job leaves it running', (pg_temp.sub(a)).status, 'past_due');
+  perform pg_temp.ok('U4 no ended email', pg_temp.ob(a, 'plan_ended') is null);
   perform pg_temp.fails('U4 no restart while it may land',
-    format('select billing.start_checkout(%L, ''home'', ''month'', 0, ''{990160401}'', %L)', a, c + interval '7 hours'), 'already in progress');
-  perform pg_temp.eq('U4 the page lists for the restart check', billing.renewal_pages(a, c + interval '7 hours')->>0, ref);
+    format('select billing.start_checkout(%L, ''home'', ''month'', 0, ''{990160401}'', %L)', a, c + interval '7 hours'), 'already running');
   r := billing.apply_payment(ref, pg_temp.tx_ok(ref, 'AUTH_u4a') || jsonb_build_object('paid_at', c - interval '10 seconds'), c + interval '8 hours');
-  perform pg_temp.eq('U4 paid at 23:59:59: applied', r->>'action', 'applied');
-  perform pg_temp.eq('U4 the plan is back', pg_temp.st(a, c + interval '8 hours', 'state'), 'active');
-  perform pg_temp.eq('U4 the ended email drops', billing.outbox_guard(pg_temp.ob(a, 'plan_ended'), c + interval '8 hours'), 'plan running again');
+  perform pg_temp.eq('U4 paid at 23:59:59, answered 8 hours on: applied', r->>'action', 'applied');
+  perform pg_temp.eq('U4 the plan carries on', pg_temp.st(a, c + interval '8 hours', 'state'), 'active');
+  perform pg_temp.eq('U4 ... still read', pg_temp.ps(990160401, c + interval '8 hours', 'read_now'), 'true');
+  perform pg_temp.ok('U4 ... never ended', not exists (select 1 from billing.account_events e where e.account = a and e.kind = 'plan_ended'));
   perform pg_temp.ok('U4 settled: verified cleared', not (select verified_processing from billing.payment_attempts where reference = ref));
 exception when others then perform pg_temp.ok('U4 runs', false, sqlerrm);
 end $$;
 
--- U5 an abandoned card page at the cutoff: held until the job's verify, then "It wasn't paid"
+-- U5 an abandoned card page at the cutoff: readings stop at the cutoff (not in flight), the job
+--    waits for the page's verify, then ends the plan on the cutoff and says it wasn't paid
 do $$
 declare a uuid := pg_temp.acct('u5a'); pe timestamptz; c timestamptz; ref text; o billing.outbox;
 begin
@@ -3185,21 +3195,24 @@ begin
   c := pg_temp.cut(pe);
   perform pg_temp.job(a, pe, 'fail');
   ref := billing.begin_attempt(pg_temp.due(a), 'card_page', c - interval '1 hour', a)->>'reference';
+  perform pg_temp.eq('U5 not in flight (never answered as processing): ended', pg_temp.st(a, c + interval '1 minute', 'state'), 'ended');
+  perform pg_temp.eq('U5 ... not read', pg_temp.ps(990160501, c + interval '1 minute', 'read_now'), 'false');
   perform pg_temp.job(a, c + interval '6 hours');
-  o := pg_temp.ob(a, 'plan_ended');
-  perform pg_temp.eq('U5 not in flight (never answered as processing)', pg_temp.st(a, c + interval '6 hours', 'renewal_in_flight'), 'false');
-  perform pg_temp.ok('U5 the email waits for the page''s verify', billing.plan_ended_held(a, o.ref, c + interval '6 hours'));
+  perform pg_temp.eq('U5 the job waits for the page''s verify', (pg_temp.sub(a)).status, 'past_due');
   perform pg_temp.ok('U5 a restart is not held', billing.start_checkout(a, 'home', 'month', 0, '{990160501}', c + interval '6 hours') ? 'invoice');
   perform pg_temp.answer(ref, 'abandoned', c + interval '6 hours 1 minute');
-  perform pg_temp.ok('U5 answered: sent', not billing.plan_ended_held(a, o.ref, c + interval '6 hours 2 minutes'));
-  perform pg_temp.ok('U5 ... and handed out', o.id = any (pg_temp.taken(c + interval '6 hours 2 minutes')));
+  perform pg_temp.job(a, c + interval '6 hours 2 minutes');
+  perform pg_temp.eq('U5 answered: the next run ends it on the cutoff', (pg_temp.sub(a)).status || '/' || ((pg_temp.sub(a)).ended_at = c)::text, 'ended/true');
+  o := pg_temp.ob(a, 'plan_ended');
+  perform pg_temp.ok('U5 ... and the email is handed out', o.id = any (pg_temp.taken(c + interval '6 hours 3 minutes')));
   perform pg_temp.eq('U5 it says why: unpaid', billing.plan_ended_facts(o)->>'reason', 'unpaid');
   perform pg_temp.eq('U5 ... and the payment is known not made', billing.plan_ended_facts(o)->>'paid_unknown', 'false');
 exception when others then perform pg_temp.ok('U5 runs', false, sqlerrm);
 end $$;
 
--- U6 no answer from Paystack at the cutoff: held and refused, then at cutoff + 24 h the page
---    fails, a restart goes ahead and the email leaves out "It wasn't paid"
+-- U6 no answer from Paystack after the cutoff: the plan runs on and a restart is refused; at
+--    cutoff + 24 hours readings stop, the page fails, the plan ends on the cutoff, and the email
+--    leaves out "It wasn't paid"
 do $$
 declare a uuid := pg_temp.acct('u6a'); pe timestamptz; c timestamptz; pref text; r jsonb; o billing.outbox;
 begin
@@ -3213,20 +3226,46 @@ begin
   perform pg_temp.fails('U6 paused: nothing recorded', format('select billing.verify_unanswered(%L, %L)', pref, c + interval '6 hours'), 'on hold');
   delete from billing.payments_pause;
   r := billing.account_state(a, c + interval '6 hours');
-  perform pg_temp.eq('U6 the reloaded screen holds', r->>'renewal_in_flight', 'true');
+  perform pg_temp.eq('U6 running on, checking', r->>'state' || '/' || (r->>'past_due_reason'), 'past_due/checking');
   perform pg_temp.eq('U6 ... with the page to re-check', r->>'held_reference', pref);
+  perform pg_temp.eq('U6 ... read', pg_temp.ps(990160601, c + interval '6 hours', 'read_now'), 'true');
   perform pg_temp.fails('U6 restart refused, as the screen says',
-    format('select billing.start_checkout(%L, ''home'', ''month'', 0, ''{990160601}'', %L)', a, c + interval '6 hours'), 'already in progress');
-  perform pg_temp.eq('U6 a day on: the hold is over', pg_temp.st(a, c + interval '24 hours 1 minute', 'renewal_in_flight'), 'false');
+    format('select billing.start_checkout(%L, ''home'', ''month'', 0, ''{990160601}'', %L)', a, c + interval '6 hours'), 'already running');
+  r := billing.account_state(a, c + interval '24 hours 1 minute');
+  perform pg_temp.eq('U6 a day on: ended', r->>'state' || '/' || (r->>'renewal_in_flight'), 'ended/false');
+  perform pg_temp.eqt('U6 ... on the cutoff', r->>'access_ended_at', c);
+  perform pg_temp.eq('U6 ... not read', pg_temp.ps(990160601, c + interval '24 hours 1 minute', 'read_now'), 'false');
   perform pg_temp.eq('U6 still no answer after 24 hours: the page fails', billing.verify_unanswered(pref, c + interval '25 hours')->>'action', 'failed');
   perform pg_temp.ok('U6 ... marked as a timeout', (select status = 'failed' and gateway_response like 'timeout: %' and not hard_decline
     from billing.payment_attempts where reference = pref));
   perform pg_temp.ok('U6 ... with no email', not exists (select 1 from billing.outbox o2 join billing.payment_attempts pa on pa.id::text = o2.ref
     where pa.reference = pref));
+  perform pg_temp.job(a, c + interval '25 hours');
+  perform pg_temp.eq('U6 the job ends it on the cutoff', (pg_temp.sub(a)).status || '/' || ((pg_temp.sub(a)).ended_at = c)::text, 'ended/true');
   o := pg_temp.ob(a, 'plan_ended');
   perform pg_temp.eq('U6 the ended email does not say it wasn''t paid', billing.plan_ended_facts(o)->>'paid_unknown', 'true');
   perform pg_temp.ok('U6 a restart goes ahead', billing.start_checkout(a, 'home', 'month', 0, '{990160601}', c + interval '25 hours') ? 'invoice');
 exception when others then perform pg_temp.ok('U6 runs', false, sqlerrm);
+end $$;
+
+-- U9 the day-14 saved-card try answered after the cutoff: the plan runs on meanwhile, then carries on
+do $$
+declare a uuid := pg_temp.acct('u9a'); pe timestamptz; c timestamptz; ref text;
+begin
+  pe := pg_temp.member(a, 'u9a', 990160901);
+  c := pg_temp.cut(pe);
+  perform pg_temp.job(a, pe, 'fail');
+  perform pg_temp.job(a, billing.next_run_at(pe + interval '3 days'), 'fail');
+  perform pg_temp.job(a, billing.next_run_at(pe + interval '7 days'), 'fail');
+  ref := pg_temp.job(a, billing.next_run_at(pe + interval '14 days'));
+  perform pg_temp.eq('U9 past the cutoff, no answer yet: running, checking',
+    pg_temp.st(a, c + interval '2 hours', 'state') || '/' || pg_temp.st(a, c + interval '2 hours', 'past_due_reason'), 'past_due/checking');
+  perform pg_temp.eq('U9 ... read', pg_temp.ps(990160901, c + interval '2 hours', 'read_now'), 'true');
+  perform pg_temp.job(a, c + interval '6 hours');
+  perform pg_temp.eq('U9 the job leaves it', (pg_temp.sub(a)).status, 'past_due');
+  perform pg_temp.eq('U9 paid: applied', pg_temp.answer(ref, 'ok', c + interval '7 hours', 'AUTH_u9a')->>'action', 'applied');
+  perform pg_temp.eq('U9 the plan carries on', pg_temp.st(a, c + interval '7 hours', 'state'), 'active');
+exception when others then perform pg_temp.ok('U9 runs', false, sqlerrm);
 end $$;
 
 -- U7 Paystack still says processing 24 hours after the cutoff: apply_payment fails the page too

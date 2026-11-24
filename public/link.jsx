@@ -156,18 +156,18 @@ const freshAccount = async () => { await acctLoad?.catch(() => {}); return windo
 // screens can change without the owner doing anything. A hidden tab asks nothing and reads
 // again on coming back; a failed read is tried again on the next tick.
 //   - a renewal payment may still land (renewal_in_flight, or Billing's checking note): every 15 s;
-//   - after the cutoff, a card page Paystack hasn't answered (held_reference): asked once a
-//     minute, and the account read at once when it settles;
+//   - after the cutoff, a card page Paystack hasn't answered (held_reference; the plan runs on
+//     for up to a day meanwhile): asked once a minute, and the account read at once when it settles;
 //   - past due: when the plan's end passes (from the server's clock), then every 60 s until a
 //     read says it ended, so no page keeps a pay button after readings stop.
 const inFlight = (a) => !!a && (a.renewal_in_flight || (a.state === 'past_due' && a.past_due_reason === 'checking'));
 // Billing shows a "still checking" note instead of a pay button: the bank is answering a
-// saved-card try, or the plan ended with a renewal payment that may still land. (Before the
-// cutoff a card page still being answered changes no screen: Pay reopens it.)
-const heldNote = (a) => !!a && ((a.state === 'past_due' && a.past_due_reason === 'checking') || (a.state === 'ended' && a.renewal_in_flight));
+// saved-card try, or a payment made before the cutoff is still being checked past it. (Before
+// the cutoff a card page still being answered changes no screen: Pay reopens it.)
+const heldNote = (a) => !!a && a.state === 'past_due' && a.past_due_reason === 'checking';
 const readNow = () => { if (!document.hidden) freshAccount().catch(() => {}); };
 window.useAccountWatch = function useAccountWatch(acct) {
-  const fast = inFlight(acct), held = acct?.state === 'ended' && acct.renewal_in_flight ? acct.held_reference : null;
+  const fast = inFlight(acct), held = acct?.held_reference || null;
   const pastDue = acct?.state === 'past_due' && !!acct.plan_ends_at;
   React.useEffect(() => {
     if (!fast && !held && !pastDue) return;

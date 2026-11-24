@@ -44,11 +44,13 @@ export type AccountState = {
   /** When the state was read. */
   at?: Iso;
   /** An unpaid renewal (0248): why it is unpaid, the next try's day (a plain date), when an open
-   *  screen reads again, the bill to pay, and whether a renewal payment may still land. */
+   *  screen reads again, the bill to pay, whether a renewal payment may still land, and the last
+   *  saved card when it was refused for good (shown, never charged). */
   past_due_reason?: "refused" | "no_card" | "retrying" | "last_try_failed" | "checking" | null;
   next_try_on?: string | null; retry_window_ends_at?: Iso | null;
   due_bill?: { id: string; plan: string; plan_name: string; interval: string; amount_minor: number; currency: string } | null;
   renewal_in_flight?: boolean; held_reference?: string | null;
+  refused_card?: AccountState["card"];
   plants: PlantState[]; prices: PriceRow[]; logins: Login[]; bills: Bill[];
 };
 export type Quote = {
@@ -93,7 +95,6 @@ const plantsWord = (n: number) => forms(n, { one: "1 plant", many: "{n} plants" 
 /** The plan's name, or what the account has instead. */
 export function planTitle(s: AccountState): string {
   if (s.plan_name) return s.plan_name;
-  if (s.state === "ended" && s.renewal_in_flight && s.last_plan_name) return s.last_plan_name;
   if (s.state === "trialing") return "Free week";
   if (s.state === "active") return "Plan from us";          // a grant: places with no billing
   return "No plan";
@@ -111,7 +112,6 @@ export function planStatus(s: AccountState): string | null {
     case "past_due":
       return pastDueNote(s).text;
     case "ended":
-      if (s.renewal_in_flight) return pausedLine(s);
       return s.access_ended_at ? `${s.grant_ended ? "Plan from us ended" : s.had_plan ? `${s.last_plan_name} ended` : "Free week ended"} on ${day(s, s.access_ended_at)}` : null;
     default: return null;
   }
@@ -137,15 +137,13 @@ export function pastDueNote(s: AccountState): { text: string; button: string | n
   const text = (t: string) => ({ text: t, button: billing.payOther });
   switch (s.past_due_reason) {
     case "checking": return { text: `We're still checking your ${duePayment(d)}. ${nothingToDo}`, button: null };
-    case "refused": return text(`${yours} didn't go through. We removed your saved card. ${end}`);
+    case "refused": return text(`${yours} didn't go through. We won't try your saved card again. ${end}`);
     case "no_card": return text(`${yours} is due. ${end}`);
     case "retrying": return text(`${yours} didn't go through. We'll try your card again on ${dateOnly(s.next_try_on)}. ${end}`);
     case "last_try_failed": return text(`${yours} didn't go through. We won't try your card again. ${end}`);
     default: return text(`${yours} is overdue. ${end}`);
   }
 }
-/** Ended while a renewal payment made before the cutoff is still being checked. */
-export const pausedLine = (s: AccountState) => `Readings are paused while we check your ${duePayment(due(s))}. ${nothingToDo}`;
 /** The account menu's word under the name, and its dot's label: a payment to make, a login to
  *  reconnect, or both. A payment the bank is still answering needs nothing. */
 export function accountAlert(s: AccountState | null, reconnect: boolean): string | null {
@@ -196,11 +194,12 @@ function dropLine(s: AccountState, going: PlantState[]): string {
     kept.length ? `${names(kept)} ${forms(kept.length, { one: "stops", many: "stop" })}; another account keeps the history.` : null].filter(Boolean).join(" ");
 }
 
-/** The saved card. */
-export const cardLine = (s: AccountState) => s.card
-  ? `${(s.card.card_type || "Card").replace(/^\w/, (c) => c.toUpperCase())} •••• ${s.card.last4 ?? ""}`.trim()
+/** The saved card (or c: Billing passes the refused card, shown but never charged). */
+export const cardLine = (s: AccountState, c = s.card) => c
+  ? `${(c.card_type || "Card").replace(/^\w/, (x) => x.toUpperCase())} •••• ${c.last4 ?? ""}`.trim()
   : null;
-export const cardSub = (s: AccountState) => s.card && s.card.exp_month
+export const cardSub = (s: AccountState) => !s.card && s.refused_card ? "Can't be charged"
+  : s.card && s.card.exp_month
   ? (s.card_expires_first ? "Expires before your next payment" : `Expires ${String(s.card.exp_month).padStart(2, "0")}/${String(s.card.exp_year).slice(-2)}`)
   : null;
 
@@ -463,8 +462,6 @@ export function removeLogin(s: AccountState, loginId: string, shared = false) {
 
 export function payScreen(s: AccountState) {
   const ended = s.state === "ended";
-  // a renewal paid before the cutoff may still land: no ended words, no plans
-  if (ended && s.renewal_in_flight) return { title: planTitle(s), body: pausedLine(s), button: null };
   const title = !ended ? null
     : s.grant_ended ? "Your plan from us has ended"
     : s.had_plan ? `Your ${s.last_plan_name} plan has ended`
@@ -598,7 +595,7 @@ export function mail(m: MailInput): Mail | null {
       if (m.key === "payment_failed") return { subject: `Your ${plan} payment didn't go through`, title,
         parts: [{ lead: `We couldn't charge your ${saved}. ${s.next_try_on ? `We'll try again on ${dateOnly(s.next_try_on)}.` : "We won't try again."}` }, ...pay] };
       if (m.key === "card_update") return { subject: `Your ${plan} payment didn't go through`, title,
-        parts: [{ lead: `We couldn't charge your ${saved}, so we removed it from your account.` }, ...pay] };
+        parts: [{ lead: `We couldn't charge your ${saved}. We won't try this card again.` }, ...pay] };
       return { subject: `Your ${plan} payment is due`, title,
         parts: [{ lead: "There's no card saved, so nothing was charged." }, ...pay] };
     }
@@ -685,6 +682,6 @@ export function mail(m: MailInput): Mail | null {
 
 export const AccountText = {
   money, day, weekday, forms, names, plantName, planTitle, planPrice, planStatus, placesLine, mustChoose, bookedChange,
-  cardLine, cardSub, billRow, billing, pastDueNote, pausedLine, accountAlert, paidText, cancelDialog, deleteBlocked, plans, planCard, quoteReview, checkoutPick, keepPick, weekPick, chosenToast, refused, pay,
+  cardLine, cardSub, billRow, billing, pastDueNote, accountAlert, paidText, cancelDialog, deleteBlocked, plans, planCard, quoteReview, checkoutPick, keepPick, weekPick, chosenToast, refused, pay,
   choosePlants, switchConfirm, plantTag, plantKept, logins, removeLogin, payScreen, fitLine, notices, mail,
 };

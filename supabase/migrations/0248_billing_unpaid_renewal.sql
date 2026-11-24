@@ -9,12 +9,14 @@
 --              account_status, the daily job (run_one) and a restart (apply_purchase).
 --   State      account_state carries past_due_reason (refused, no_card, retrying,
 --              last_try_failed, checking), next_try_on, retry_window_ends_at, due_bill,
---              renewal_in_flight and held_reference (billing.renewal_state).
+--              renewal_in_flight, held_reference and refused_card (billing.renewal_state).
 --   In flight  a renewal paid before the cutoff may be answered after it: a saved-card
 --              try with no final answer, or a card page Paystack said is still processing
 --              (verified_processing) or did not answer (verify_unanswered_at), for 24 hours
---              from the cutoff (billing.renewal_hold). While it holds: no new plan, and the
---              plan_ended email waits. At cutoff + 24 hours such a card page is failed.
+--              from the cutoff (billing.renewal_hold). While it holds the plan runs on past
+--              its cutoff (readings go on, the screens say "checking"), no new plan, and the
+--              daily job does not end it. At cutoff + 24 hours such a card page is failed, and
+--              the plan ends with ended_at = the cutoff.
 --   Payable    begin_attempt takes the owner's account and pays a renewal only while its
 --              plan runs (active on its due day, or past due).
 --   Emails     a failed card page sends nothing; no card on the due date sends the new
@@ -101,15 +103,20 @@ declare
   next_on date;
   win_end timestamptz;
   reason text;
+  refused billing.payment_methods;
 begin
+  -- the last saved card, when it was refused for good and nothing replaced it: still shown, never charged
+  if (billing.active_method(p_account)).id is null then
+    select * into refused from billing.payment_methods where account = p_account
+     order by coalesce(activated_at, created_at) desc limit 1;
+    if refused.disabled_reason is distinct from 'hard_decline' then refused := null; end if;
+  end if;
   select coalesce(a.time_zone, m.default_time_zone) into tz
     from billing.accounts a join billing.markets m on m.code = a.market where a.id = p_account;
   select * into h from billing.renewal_hold(p_account, p_at);
   if st.state = 'past_due' then
     select * into inv from billing.invoices where subscription = st.sub and kind = 'renewal' and status = 'open'
      order by created_at desc limit 1;
-  elsif st.state = 'ended' and h.in_flight then
-    select * into inv from billing.invoices where id = h.bill;
   end if;
 
   if st.state = 'past_due' and inv.id is not null then
@@ -137,7 +144,8 @@ begin
     select * into last_saved from billing.payment_attempts where invoice = inv.id and channel = 'saved_card' and status <> 'void'
      order by created_at desc limit 1;
     reason := case
-      when exists (select 1 from billing.payment_attempts pa where pa.invoice = inv.id and pa.channel = 'saved_card'
+      when h.held_reference is not null
+        or exists (select 1 from billing.payment_attempts pa where pa.invoice = inv.id and pa.channel = 'saved_card'
                       and pa.status in ('created', 'pending', 'unknown')) then 'checking'
       when pm.id is null then case when last_saved.status = 'failed' and last_saved.hard_decline then 'refused' else 'no_card' end
       when exists (select 1 from billing.payment_attempts pa where pa.invoice = inv.id and pa.channel = 'saved_card'
@@ -151,6 +159,9 @@ begin
     'retry_window_ends_at', win_end,
     'renewal_in_flight', coalesce(h.in_flight, false),
     'held_reference', h.held_reference,
+    'refused_card', case when refused.id is not null then jsonb_build_object(
+                      'last4', refused.last4, 'exp_month', refused.exp_month, 'exp_year', refused.exp_year,
+                      'card_type', refused.card_type) end,
     'due_bill', case when inv.id is not null then jsonb_build_object(
                   'id', inv.id, 'plan', inv.plan, 'plan_name', inv.plan_name, 'interval', inv.interval,
                   'amount_minor', inv.amount_minor, 'currency', inv.currency) end);
@@ -271,7 +282,10 @@ begin
     else
       if pds is not null then
         r.plan_ends_at := billing.past_due_cutoff(pds, m.retry_days, coalesce(a.time_zone, m.default_time_zone));
-        if r.plan_ends_at <= p_at then sub_end := r.plan_ends_at; end if;
+        -- a payment made before the cutoff and not answered yet keeps it running, at most a day
+        if r.plan_ends_at <= p_at and not (select h.in_flight from billing.renewal_hold(p_account, p_at) h) then
+          sub_end := r.plan_ends_at;
+        end if;
       end if;
     end if;
     eff := case when sub_end is not null and sub_end <= p_at then 'ended'
@@ -545,6 +559,8 @@ begin
     if st.state not in ('active', 'past_due') or st.sub is distinct from inv.subscription then
       raise exception 'this payment is no longer due' using errcode = '22023';
     end if;
+    -- past the cutoff and still running: a payment on it is being checked
+    if st.plan_ends_at <= p_at then raise exception 'a payment is already in progress' using errcode = '22023'; end if;
   end if;
   -- a new plan waits for a renewal paid before its plan ended (before the cached page below)
   if inv.kind = 'purchase' and (select h.in_flight from billing.renewal_hold(inv.account, p_at) h) then
@@ -835,6 +851,9 @@ begin
     return jsonb_build_object('step', 'ended', 'reason', 'cancelled');
   end if;
   if s.status = 'past_due' and p_at >= cut then
+    -- a payment made before the cutoff may still land (or its page is not verified yet: this
+    -- run's verify comes after): the next run looks again, at most a day after the cutoff
+    if billing.plan_ended_held(s.account, s.id::text, p_at) then return null; end if;
     perform billing.end_sub(s.id, cut, 'unpaid', p_at, 'job', false);
     return jsonb_build_object('step', 'ended', 'reason', 'unpaid');
   end if;

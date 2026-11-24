@@ -2274,8 +2274,6 @@ function PlanSection({ acct, onPlans }) {
     </SettingsSection>
   );
   const running = acct.state === 'active' || acct.state === 'past_due';
-  // ended while a renewal paid before the cutoff is checked: no ended words, no plans
-  const held = acct.state === 'ended' && acct.renewal_in_flight;
   const note = acct.state === 'past_due' ? AT.pastDueNote(acct) : null;
   // a word beside the name for a booked end; a failed payment says so once, in its note
   const word = acct.cancel_at ? ['warn', 'Ending'] : null;
@@ -2293,12 +2291,12 @@ function PlanSection({ acct, onPlans }) {
     <SettingsSection id="plan" title={AT.billing.planHead} bare>
       <PlanCard title={<>{AT.planTitle(acct)}{word && <span className={'conn-status ' + word[0]}>{word[1]}</span>}</>}
         sub={AT.planPrice(acct)}
-        action={acct.state === 'past_due' || held ? null   // every plan change is refused while unpaid
+        action={acct.state === 'past_due' ? null   // every plan change is refused while unpaid
           : running ? <button type="button" className="ghost-btn" onClick={onPlans}>{AT.billing.changePlan}</button>
           : acct.state !== 'active' && <button type="button" className="save-btn" onClick={onPlans}>{AT.billing.seePlans}</button>}>
         {acct.state !== 'past_due' && AT.planStatus(acct) && !booked && <div className="plan-meta plan-when">{AT.planStatus(acct)}</div>}
         {acct.state !== 'none' && acct.state !== 'ended' && <div className="plan-meta">{AT.placesLine(acct)}</div>}
-        {acct.state === 'ended' && !held && acct.history_kept_until && <div className="plan-meta">{AT.payScreen(acct)?.body}</div>}
+        {acct.state === 'ended' && acct.history_kept_until && <div className="plan-meta">{AT.payScreen(acct)?.body}</div>}
         {note && (
           <PlanNote tone={acct.past_due_reason === 'checking' ? 'warn' : 'bad'} acts={note.button && <button type="button" className="save-btn" onClick={() => window.settlePayment(acct.due_bill?.id)}>{note.button}</button>}>
             {note.text}
@@ -2354,7 +2352,8 @@ window.cardAction = cardAction;
 function CardSection({ acct }) {
   const [busy, setBusy] = React.useState(false);
   if (!acct || (!acct.card && !acct.had_plan)) return null;
-  const c = acct.card;
+  // a card refused for good stays on show, marked as one we can't charge
+  const c = acct.card || acct.refused_card;
   const label = cardAction(acct);
   const action = label && (
     <window.BusyButton className="ghost-btn" busy={busy} busyText={AT.pay.opening}
@@ -2362,7 +2361,7 @@ function CardSection({ acct }) {
   );
   return (
     <SettingsSection id="payments" title={AT.billing.cardHead}>
-      {c ? <SettingRow lead={<CardLogo brand={c.card_type} />} label={AT.cardLine(acct)} note={AT.cardSub(acct)} action={action} />
+      {c ? <SettingRow lead={<CardLogo brand={c.card_type} />} label={AT.cardLine(acct, c)} note={AT.cardSub(acct)} action={action} />
         : action ? <SettingRow label={AT.billing.noCard} action={action} />
         : <div className="field-note">{AT.billing.noCard}</div>}
     </SettingsSection>
