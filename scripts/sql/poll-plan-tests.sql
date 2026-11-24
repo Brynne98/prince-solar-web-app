@@ -119,6 +119,16 @@ select pg_temp.eq('built once: a second call keeps the first',
   (private.poll_plan_build((select m from m0))).built_at,
   (select built_at from private.poll_plan_minutes where minute = (select m from m0)));
 
+-- a crash empties the unlogged plan tables but keeps the minute's row: the next call rebuilds
+create temp table m9 as select date_trunc('minute', now()) - interval '3 hours' as m;
+select private.poll_plan_build((select m from m9));
+delete from private.poll_plan_shards where minute = (select m from m9);
+delete from private.poll_plan where minute = (select m from m9);
+select private.poll_plan_build((select m from m9));
+select pg_temp.ok('after a crash the plan is built again',
+  exists (select 1 from private.poll_plan_shards where minute = (select m from m9))
+  and pg_temp.diff((select m from m9)) = 0);
+
 -- ---------------------------------------------------------------------------
 -- b. poll_plan_jobs: rows as planned, re-checked against today's state
 -- ---------------------------------------------------------------------------

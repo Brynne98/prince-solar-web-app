@@ -39,9 +39,12 @@
 --
 -- Also:
 --   poll_shards()    in a live minute, the plan's shards (job-check expects a run from each).
---   fn_call_states() a poll shard's last call counts only for 10 minutes, so a shard number
+--                    Only this minute's plan counts: the old job's statement cannot see the
+--                    plan it has just built, so it must not fall back on the minute before.
+--   fn_call_states() a poll shard's last call counts only for 10 minutes (one-login calls as before), so a shard number
 --                    the plan no longer uses does not stay failing for 5 hours.
---   purge-cron-log   the tick's run rows are kept 1 hour, not 7 days (12 runs a minute).
+--   cron log         the tick's run rows are kept 1 hour, not 7 days (12 runs a minute):
+--                    the plan build deletes them on the hour.
 --   billing.seats (account): account_status counts seats with "closed_at is null or later",
 --                    which the partial seat indexes cannot serve.
 --
@@ -136,10 +139,13 @@ declare
   i    int;
 begin
   select * into h from private.poll_plan_minutes where minute = p_minute;
-  if found then return h; end if;
+  if found and exists (select 1 from private.poll_plan_shards where minute = p_minute) then return h; end if;
   perform pg_advisory_xact_lock(hashtext('private.poll_plan_build'));
   select * into h from private.poll_plan_minutes where minute = p_minute;
-  if found then return h; end if;
+  if found and exists (select 1 from private.poll_plan_shards where minute = p_minute) then return h; end if;
+  -- a crash empties the unlogged plan tables but keeps the minute's row: build again
+  delete from private.poll_plan_minutes where minute = p_minute;
+  delete from private.poll_plan where minute = p_minute;
 
   -- poll_jobs_v2's pick (0246), once for the fleet
   insert into private.poll_plan (minute, plant, account, lane, via_share, shard)
@@ -197,6 +203,12 @@ begin
   if extract(minute from p_minute) = 0 then
     delete from private.poll_plan_minutes where minute < p_minute - interval '7 days';
     delete from private.poll_plan_diffs where minute < p_minute - interval '7 days';
+    -- the tick's own cron rows (12 a minute), kept 1 hour; purge-cron-log keeps the rest 7 days
+    if to_regclass('cron.job_run_details') is not null then
+      execute $q$delete from cron.job_run_details
+                  where jobid = (select jobid from cron.job where jobname = 'poll-tick')
+                    and end_time < now() - interval '1 hour'$q$;
+    end if;
   end if;
   return h;
 end $$;
@@ -343,7 +355,7 @@ stable
 set search_path = pg_temp
 as $$
   with h as (
-    select minute, mode, shards from private.poll_plan_minutes order by minute desc limit 1
+    select minute, mode, shards from private.poll_plan_minutes where minute = date_trunc('minute', now())
   ), n as (
     select greatest(1, ceil(count(*)::numeric / greatest(p_per_shard, 1)))::int as shards
       from private.sunsynk_accounts
@@ -383,7 +395,7 @@ begin
     select distinct on (fn, shard) *
       from c
      where (answered or at < now() - timeout_ms * interval '1 millisecond' - interval '2 minutes')
-       and (fn <> 'poll' or at > now() - interval '10 minutes')                -- 0253
+       and (fn <> 'poll' or shard is null or at > now() - interval '10 minutes')  -- 0253
      order by fn, shard, at desc
   )
   select coalesce(jsonb_agg(jsonb_build_object(
@@ -400,8 +412,8 @@ end $$;
 revoke all on function private.fn_call_states() from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
--- Cron: the tick every 5 s; sunsynk-poll posts only in a shadow minute; purge-cron-log
--- keeps the tick's rows 1 hour. Production only (no pg_cron/pg_net locally).
+-- Cron: the tick every 5 s; sunsynk-poll posts only in a shadow minute. Production only
+-- (no pg_cron/pg_net locally).
 -- ---------------------------------------------------------------------------
 do $$
 begin
@@ -419,8 +431,4 @@ begin
 select private.call_fn('poll', jsonb_build_object('shard', s.shard, 'shards', s.shards, 'delay_ms', s.delay_ms), 55000)
   from m, private.poll_shards() s where m.mode = 'shadow'$c$)
    where exists (select 1 from cron.job where jobname = 'sunsynk-poll');
-  perform cron.alter_job(job_id := (select jobid from cron.job where jobname = 'purge-cron-log'),
-    command := $c$delete from cron.job_run_details where end_time < now() - make_interval(days => 7)
-   or (jobid = (select jobid from cron.job where jobname = 'poll-tick') and end_time < now() - interval '1 hour')$c$)
-   where exists (select 1 from cron.job where jobname = 'purge-cron-log');
 end $$;
