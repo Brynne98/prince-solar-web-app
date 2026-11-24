@@ -107,7 +107,7 @@ declare
 begin
   -- the last saved card, when it was refused for good and nothing replaced it: still shown, never charged
   if (billing.active_method(p_account)).id is null then
-    select * into refused from billing.payment_methods where account = p_account
+    select * into refused from billing.payment_methods where account = p_account and reusable
      order by coalesce(activated_at, created_at) desc limit 1;
     if refused.disabled_reason is distinct from 'hard_decline' then refused := null; end if;
   end if;
@@ -721,6 +721,8 @@ begin
       -- the clock wins: a plan past its cancel date or day 15 is over even if the job has not run
       when inv.kind = 'purchase' and (billing.account_status(a.id, paid)).sub is not null then 'stale'
       when revive then null
+      -- paid after the pay-by date, on a page held open past it: too late, as on any other day
+      when inv.kind = 'renewal' and s.status = 'past_due' and paid > billing.sub_cutoff(s.id) then 'stale'
       when inv.kind in ('upgrade', 'renewal') and (s.id is null or s.status not in ('active', 'past_due')) then 'stale'
       when inv.kind in ('upgrade', 'renewal') and (billing.account_status(a.id, paid)).sub is distinct from s.id then 'stale'
       when inv.kind = 'upgrade' and (s.period_start <> inv.period_start or inv.period_end <= paid or inv.period_end <= p_at
@@ -987,6 +989,7 @@ begin
     when 'payment_failed' then
       if inv.status is distinct from 'open' then return 'bill settled'; end if;
       if st.state <> 'past_due' then return 'not past due'; end if;
+      if st.plan_ends_at <= p_at then return 'past the pay-by date'; end if;
       -- a later try on the same bill has its own email
       if exists (select 1 from billing.payment_attempts pa where pa.invoice = inv.id and pa.status = 'failed'
                     and pa.channel in ('saved_card', 'none')
@@ -997,6 +1000,7 @@ begin
       if inv.status is distinct from 'open' then return 'bill settled'; end if;
       if (billing.active_method(o.account)).id is not null then return 'card replaced'; end if;
       if st.state <> 'past_due' then return 'not past due'; end if;
+      if st.plan_ends_at <= p_at then return 'past the pay-by date'; end if;
     when 'refund' then
       if not exists (select 1 from billing.refunds r where r.id = o.ref::uuid and r.status = 'processed') then
         return 'refund not processed';

@@ -3263,9 +3263,26 @@ begin
   perform pg_temp.eq('U9 ... read', pg_temp.ps(990160901, c + interval '2 hours', 'read_now'), 'true');
   perform pg_temp.job(a, c + interval '6 hours');
   perform pg_temp.eq('U9 the job leaves it', (pg_temp.sub(a)).status, 'past_due');
-  perform pg_temp.eq('U9 paid: applied', pg_temp.answer(ref, 'ok', c + interval '7 hours', 'AUTH_u9a')->>'action', 'applied');
+  perform pg_temp.eq('U9 ... no pay email past the pay-by date', pg_temp.guard(a, 'payment_failed', c + interval '6 hours'), 'past the pay-by date');
+  perform pg_temp.eq('U9 paid before the cutoff, answered 7 hours on: applied', billing.apply_payment(ref, pg_temp.tx_ok(ref, 'AUTH_u9a')
+    || jsonb_build_object('paid_at', billing.next_run_at(pe + interval '14 days') + interval '1 minute'), c + interval '7 hours')->>'action', 'applied');
   perform pg_temp.eq('U9 the plan carries on', pg_temp.st(a, c + interval '7 hours', 'state'), 'active');
 exception when others then perform pg_temp.ok('U9 runs', false, sqlerrm);
+end $$;
+
+-- U10 a page held open past the cutoff and paid on it after the cutoff: too late, refunded
+do $$
+declare a uuid := pg_temp.acct('u10a'); pe timestamptz; c timestamptz; ref text; r jsonb;
+begin
+  pe := pg_temp.member(a, 'u10a', 990161001);
+  c := pg_temp.cut(pe);
+  perform pg_temp.job(a, pe, 'fail');
+  ref := billing.begin_attempt(pg_temp.due(a), 'card_page', c - interval '1 hour', a)->>'reference';
+  perform pg_temp.answer(ref, 'pending', c - interval '50 minutes');
+  r := billing.apply_payment(ref, pg_temp.tx_ok(ref, 'AUTH_u10a') || jsonb_build_object('paid_at', c + interval '2 hours'), c + interval '2 hours');
+  perform pg_temp.eq('U10 paid 2 hours after the cutoff: refunded', r->>'action' || '/' || (r->>'reason'), 'refund/stale');
+  perform pg_temp.eq('U10 ... and the plan ends', pg_temp.st(a, c + interval '2 hours', 'state'), 'ended');
+exception when others then perform pg_temp.ok('U10 runs', false, sqlerrm);
 end $$;
 
 -- U7 Paystack still says processing 24 hours after the cutoff: apply_payment fails the page too
