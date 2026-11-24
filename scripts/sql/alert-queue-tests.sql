@@ -22,7 +22,8 @@ declare u uuid := gen_random_uuid(); a uuid; l uuid := gen_random_uuid(); i int;
 begin
   insert into auth.users (id, email, created_at) values (u, p_name || '@alerts.test', p_at);
   insert into billing.accounts (user_id, market, created_at) values (u, 'ZA', p_at) returning id into a;
-  insert into public.plant_config (plant_id, timezone) select x, 'Africa/Johannesburg' from unnest(p_plants) x;
+  insert into public.plant_config (plant_id, timezone) select x, 'Africa/Johannesburg' from unnest(p_plants) x
+  on conflict (plant_id) do nothing;
   insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, linked_at, last_ok_at, last_try, last_try_at)
   values (l, u, p_name, 'active', p_at, now(), 'ok', now());
   perform billing.link_login(a, 'sunsynk', p_name, null,
@@ -80,7 +81,7 @@ do $$
 declare a uuid := pg_temp.owner('f3', '{990064601}', pg_temp.ago('20 days'));
         g uuid := pg_temp.owner('f3g', '{990064611}', pg_temp.ago('20 days'));
         c uuid := pg_temp.owner('f3c', '{990064621,990064622}', pg_temp.ago('20 days'));
-        inv uuid; ref text; r jsonb;
+        s uuid; inv uuid; ref text; r jsonb;
 begin
   -- free week 20 days ago, over 13 days ago: nothing read since; the seat stays open
   perform billing.set_chosen_plants(a, '{990064601}', pg_temp.ago('20 days'));
@@ -124,6 +125,15 @@ begin
   perform pg_temp.ok('F3 seat chosen: the new plant counts from now', pg_temp.started(990064622) = pg_temp.ep(now()));
   perform pg_temp.ok('F3 seat chosen: the plant already read keeps its start',
     pg_temp.started(990064621) = pg_temp.ep(pg_temp.ago('1 day')));
+
+  -- a second owner chooses a plant another owner already reads: its start stays
+  perform billing.set_chosen_plants(c, '{990064621,990064622}', now());
+  s := pg_temp.owner('f3s', '{990064621}', pg_temp.ago('1 day'));
+  insert into billing.grants (account, places, reason, starts_at) values (s, 1, 'test', now());
+  update private.plant_alert_state set started_at = pg_temp.ep(pg_temp.ago('1 day')) where plant_id = 990064621;
+  perform billing.set_chosen_plants(s, '{990064621}', now());
+  perform pg_temp.ok('F3 shared plant: a second owner choosing it keeps its start',
+    pg_temp.started(990064621) = pg_temp.ep(pg_temp.ago('1 day')), pg_temp.started(990064621)::text);
 end $$;
 
 -- ---------------------------------------------------------------------------

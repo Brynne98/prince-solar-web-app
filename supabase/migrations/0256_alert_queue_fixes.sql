@@ -53,15 +53,19 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- 3. "No readings" counts 30 min from when a plant's reading starts again.
 -- ---------------------------------------------------------------------------
--- The plants' reading starts at p_at: "No readings" waits 30 min from here.
-create function billing.readings_start(p_plants bigint[], p_at timestamptz)
+-- The account starts reading these plants at p_at: "No readings" waits 30 min from here.
+-- A plant another account already reads (a shared plant) keeps its start.
+create function billing.readings_start(p_account uuid, p_plants bigint[], p_at timestamptz)
 returns void language sql security definer set search_path = '' as $$
   insert into private.plant_alert_state (plant_id, started_at)
-  select c.plant_id, extract(epoch from p_at)::bigint from public.plant_config c where c.plant_id = any (p_plants)
+  select c.plant_id, extract(epoch from p_at)::bigint from public.plant_config c
+   where c.plant_id = any (p_plants)
+     and not exists (select 1 from billing.seats s where s.plant = c.plant_id and s.account <> p_account
+                        and s.closed_at is null and billing.reads_plant(s.account, c.plant_id, p_at))
   on conflict (plant_id) do update
     set started_at = greatest(coalesce(private.plant_alert_state.started_at, 0), excluded.started_at)
 $$;
-revoke all on function billing.readings_start(bigint[], timestamptz) from public, anon, authenticated;
+revoke all on function billing.readings_start(uuid, bigint[], timestamptz) from public, anon, authenticated;
 
 -- Is the account reading none of its plants at p_at: no plan or week running, or more
 -- plants chosen than places (billing.reads_plant's account half).
@@ -75,7 +79,7 @@ revoke all on function billing.reading_held(uuid, timestamptz) from public, anon
 -- An account whose reading was held reads again: every open seat starts now.
 create function billing.readings_resume(p_account uuid, p_at timestamptz)
 returns void language sql set search_path = billing, pg_temp as $$
-  select billing.readings_start(array(select plant from billing.seats where account = p_account and closed_at is null), p_at)
+  select billing.readings_start(p_account, array(select plant from billing.seats where account = p_account and closed_at is null), p_at)
 $$;
 revoke all on function billing.readings_resume(uuid, timestamptz) from public, anon, authenticated;
 
@@ -107,7 +111,7 @@ begin
   -- pop-up's "deleted now" holds even if the owner switches straight back
   perform billing.purge_now(x, p_at) from unnest(had) x where x <> all (p_want);
   perform billing.request_history(p_account, array(select x from unnest(p_want) x where x <> all (had)), p_at, p_counts);
-  perform billing.readings_start(case when held then p_want                       -- 0256
+  perform billing.readings_start(p_account, case when held then p_want                       -- 0256
                                       else array(select x from unnest(p_want) x where x <> all (had)) end, p_at);
 end $$;
 
