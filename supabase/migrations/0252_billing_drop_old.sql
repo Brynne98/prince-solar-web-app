@@ -1,11 +1,8 @@
 -- ============================================================================
--- 0260 — billing redesign: drop the old billing (SOLAR-641).
+-- 0252 — billing redesign: drop the old billing (SOLAR-641, SOLAR-655).
 --
--- NOT a migration yet: it lives outside supabase/migrations so `supabase db push` does not
--- run it. Run it only after the switch-over (DEPLOY.md, "Billing switch-over", step 8):
--- copy_from_old done and compared, billing.switch_on() run, the new frontend live. Then
--- move it to supabase/migrations/ under the next free number and push it. It refuses to run
--- before billing.switch_on().
+-- Written as 0260 in supabase/after-switch-over; moved here after the switch-over
+-- (DEPLOY.md, "Billing switch-over", step 8). It refuses to run before billing.switch_on().
 --
 -- Drops: private.billing, billing_charges, free_week_logins, offer_members, offers,
 -- plant_picks (and its held flag), plant_week, plant_users.paused, every function they

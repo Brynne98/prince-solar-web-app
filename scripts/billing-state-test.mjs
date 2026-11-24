@@ -2,7 +2,7 @@
 // SOLAR-641 state test. LOCAL database only (STATE_DB_URL to change; default the local
 // Supabase on 55322). Applies the billing migrations (0240 on, *_billing_*), runs
 // scripts/sql/billing-state-tests.sql, then the drop of the old billing
-// (supabase/after-switch-over) in one transaction, then rolls it all back, so the
+// (0252_billing_drop_old) in one transaction, then rolls it all back, so the
 // local database is left as it was. Exit 0: every check passed. Exit 1: a check failed
 // or the SQL broke.
 import { spawnSync } from 'node:child_process';
@@ -19,7 +19,9 @@ if (!/@(127\.0\.0\.1|localhost)[:/]/.test(DB)) {
 const PSQL = process.env.PSQL || ['/opt/homebrew/opt/libpq/bin/psql', '/usr/local/opt/libpq/bin/psql'].find(existsSync) || 'psql';
 
 const dir = path.join(REPO, 'supabase/migrations');
-const migrations = readdirSync(dir).filter((f) => /^\d{4}_billing_/.test(f) && Number(f.slice(0, 4)) >= 240).sort();
+// the drop of the old billing runs last, after the checks (it is a billing file too)
+const DROP = '0252_billing_drop_old.sql';
+const migrations = readdirSync(dir).filter((f) => /^\d{4}_billing_/.test(f) && Number(f.slice(0, 4)) >= 240 && f !== DROP).sort();
 // public functions the billing files create (not "create or replace"): dropped first, so a
 // local database that already has the billing schema (the local preview) can run the test
 // (not the ones a file renames first and makes again: those exist before the billing files)
@@ -44,7 +46,7 @@ const sql = [
   ...migrations.map((f) => readFileSync(path.join(dir, f), 'utf8')),
   readFileSync(path.join(REPO, 'scripts/sql/billing-state-tests.sql'), 'utf8'),
   // then the drop of the old billing (DEPLOY.md step 8) on top of it: it must run clean
-  readFileSync(path.join(REPO, 'supabase/after-switch-over/0260_billing_drop_old.sql'), 'utf8'),
+  readFileSync(path.join(dir, DROP), 'utf8'),
   "do $d$ begin raise notice 'drop of the old billing: ok'; end $d$;",
   // verify 3 fix 3 after the drop: no report on a plant the account no longer reaches
   "do $d$ declare e text := pg_temp.x3('-after-drop'); begin if e is not null then raise exception 'FAIL  X3 after the drop: %', e; end if; raise notice 'X3 after the drop: ok'; end $d$;",
@@ -97,7 +99,7 @@ const delBody = (t) => { const i = t.indexOf('function public.api_account_delete
 const locks = ['pg_advisory_xact_lock_shared(3, 0)', 'union select account_id from public.plant_users',
   'pg_advisory_xact_lock(1, hashtext(acc.id::text))', 'where user_id = uid order by plant_id for update', 'billing.delete_account('];
 for (const [name, body] of [['0247', delBody(texts.find((t) => t.includes('0247 —') || t.includes('api_account_delete_old')) ?? '')],
-  ['0260', delBody(readFileSync(path.join(REPO, 'supabase/after-switch-over/0260_billing_drop_old.sql'), 'utf8'))]]) {
+  ['0260', delBody(readFileSync(path.join(dir, DROP), 'utf8'))]]) {
   const at = locks.map((l) => body.indexOf(l));
   if (at.some((x) => x < 0) || at.some((x, i) => i && x < at[i - 1])) {
     console.log(`FAIL  ${name} api_account_delete does not take the writers' locks before the account (${locks.filter((l, i) => at[i] < 0).join('; ') || 'out of order'})`);

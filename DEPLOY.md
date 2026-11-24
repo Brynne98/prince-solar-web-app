@@ -365,8 +365,8 @@ frontend second, in this order:
    every 5 minutes, `billing.delete_due()`). Until now nothing was deleted on a schedule.
 8. After the new frontend is live and 24 to 48 hours of polls, payments and emails look right
    (`billing.alerts()` empty, no new `billing_command_failed` in PostHog):
-   move `supabase/after-switch-over/0260_billing_drop_old.sql` into `supabase/migrations/`
-   under the next free number and `supabase db push --linked`. It refuses to run before
+   `supabase db push --linked` for `0252_billing_drop_old.sql` (written as 0260 in
+   `supabase/after-switch-over`; pushed 2026-11-24, SOLAR-655). It refuses to run before
    `billing.switch_on()`. It drops `plant_picks`, the `held` flag, `plant_users.paused`, the
    old billing tables (`private.billing`, `billing_charges`, `free_week_logins`,
    `offer_members`, `offers`, `plant_week`), every function they feed, the old billing cron
