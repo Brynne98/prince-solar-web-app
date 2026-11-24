@@ -60,8 +60,6 @@ for (const [email, plants] of Object.entries(EXPECT)) {
   const agg = await rest(jwt, "agg_minute?select=plant_id&limit=1000");
   const aggIds = [...new Set((agg.body || []).map((r) => Number(r.plant_id)))].sort();
   check(aggIds.every((id) => plants.includes(id)), `agg_minute plants = ${aggIds.join(",")}`);
-  const alerts = await rpc(jwt, "api_alerts_due", { p_plant: plants[0] });
-  check(alerts.status >= 400, `api_alerts_due not callable by a user (${alerts.status})`);
   const link = await rpc(jwt, "api_link_status");
   const accs = (link.body || []).map((a) => a.sunsynk_username);
   check(link.status === 200 && accs.length > 0, `api_link_status -> ${accs.join(",")}`);

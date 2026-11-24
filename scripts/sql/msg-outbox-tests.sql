@@ -349,7 +349,25 @@ begin
   perform pg_temp.ok('X2 the old path functions are gone',
     not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                  where n.nspname in ('public', 'private', 'billing')
-                   and p.proname in ('email_claim', 'email_done', 'push_claim', 'push_done', 'alert_text', 'old_billing_email')));
+                   and p.proname in ('email_claim', 'email_done', 'push_claim', 'push_done', 'alert_text', 'old_billing_email',
+                                     'api_alerts_due', 'api_alerts_due_raw')));
+end $$;
+
+-- 0266: a "down" pushed on the old path still pairs; one never handled no longer makes a "back" wait
+do $$
+declare u uuid := pg_temp.owner('x3', '{990065935}'); b1 bigint; b2 bigint; n int;
+begin
+  perform pg_temp.dev(u, 'x3a');
+  insert into public.email_queue (user_id, plant_id, kind, key, data, priority, status, pushed_at)
+  values (u, 990065935, 'grid_down', 'x3:old', '{}', 0, 'sent', now() - interval '2 hours'),
+         (u, 990065935, 'batt_hot', 'x3:never', '{}', 0, 'sent', null);
+  update public.email_queue set pushed_at = null, push_skip = null where user_id = u and key = 'x3:never';
+  b1 := pg_temp.ev(u, 990065935, 'grid_back', 'x3:b1', 'x3:old');
+  b2 := pg_temp.ev(u, 990065935, 'batt_hot_back', 'x3:b2', 'x3:never');
+  n := pg_temp.take();
+  perform pg_temp.ok('X3 "back" whose "down" was pushed on the old path: goes', cardinality(pg_temp.taken(b1)) = 1);
+  perform pg_temp.ok('X3 ... whose "down" was never handled: dropped, not left waiting',
+    (pg_temp.ob(b2)).drop_reason = 'down had no pop-up', (pg_temp.ob(b2)).drop_reason);
 end $$;
 
 -- ---------------------------------------------------------------------------

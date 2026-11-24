@@ -325,8 +325,8 @@ grid 2 W, SoC 0.
   `api_health()->>'stale' = 'false'`.
 - Verification pattern: `scripts/sql/verify-00NN.sql`, a single `do $$` block that
   `raise exception`s on any failed criterion, run with `supabase db query --linked -f`.
-  `scripts/verify.sh <sql> snapshot|check <file>` wraps it and adds the before/after
-  `api_alerts_due()` hash comparison.
+  `scripts/verify.sh <sql>` wraps it (its before/after `api_alerts_due()` hash went with
+  that function in 0266).
 - App key/secret exist only as Supabase secrets. To probe the official API, deploy a
   throwaway gated function and delete it afterwards; never print or commit the key.
 
@@ -367,8 +367,8 @@ ride the minute poll the way the grid and battery alerts do.
   (`soc_low:2026-08-18T19:40`); a repeat is a duplicate-key no-op.
 - `api_alerts_due()` returns `(kind, event_key, severity, title, body, value)`; execute
   granted to `service_role` only. The `alerts-due` function served it over HTTP behind a
-  shared bearer token until SOLAR-645 step 7 removed it (no caller); alerts go out through
-  `msg.outbox` (notify-email, notify-push).
+  shared bearer token until SOLAR-645 step 7 removed it (no caller); `api_alerts_due()` itself
+  went in 0266 (SOLAR-660). Alerts go out through `msg.outbox` (notify-email, notify-push).
 - Kinds: `logger_stale`, `bank_drift`, `batt_hot`, `soc_overnight`, `string_dead`,
   `grid_down` / `grid_back`. Migrations `0016`–`0019`, `0021`, `0029`. Debounce and
   hysteresis (fire below 20% SoC, re-arm above 30%) are in SQL.
