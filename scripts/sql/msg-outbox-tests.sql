@@ -6,10 +6,8 @@
 
 begin;
 set client_min_messages = notice;
--- the routes as migrated, for S3; these checks drive the pop-ups, so alert emails (on the
--- outbox since 0262) go back on the old path for this rolled-back transaction
+-- the routes as migrated, for S3
 create temp table t_routes as select kind, channel, route, lane from msg.kinds;
-update msg.kinds set route = 'old' where channel = 'email';
 
 create temp table t_results (n serial, label text, pass boolean, detail text);
 create function pg_temp.ok(p_label text, p_cond boolean, p_detail text default null)
@@ -84,15 +82,14 @@ declare u uuid := pg_temp.owner('r1', '{990065901}'); q bigint; s bigint; w bigi
 begin
   q := pg_temp.ev(u, 990065901, 'grid_down', 'r1:down');
   o := pg_temp.ob(q);
-  perform pg_temp.ok('R1 alert: pop-up marked for the outbox, email left on the old path',
-    (select (push_skip, status) = ('outbox', 'queued') and pushed_at is not null from public.email_queue where id = q),
+  perform pg_temp.ok('R1 alert: pop-up and email marked for the outbox',
+    (select (push_skip, status) = ('outbox', 'outbox') and pushed_at is not null from public.email_queue where id = q),
     (select format('%s %s', push_skip, status) from public.email_queue where id = q));
-  perform pg_temp.ok('R1 ... one outbox row, push, urgent, 1 h expiry, address captured',
+  perform pg_temp.ok('R1 ... a push row, urgent, 1 h expiry, address captured; and an email row',
     o.channel = 'push' and o.lane = 'urgent' and o.status = 'queued' and o.expires_at = o.not_before + interval '1 hour'
-    and o.to_email = 'r1@msg.test' and (select count(*) from msg.outbox where event_id = q) = 1, row_to_json(o)::text);
-  got := array(select id from public.push_claim(200) where user_id = u);
-  perform pg_temp.ok('R1 ... push_claim never takes it', not (q = any (got)), got::text);
-  perform pg_temp.ok('R1 ... email_claim still does', q in (select id from public.email_claim(100, true, 'urgent')));
+    and o.to_email = 'r1@msg.test'
+    and exists (select 1 from msg.outbox where dedupe_key = q || ':email' and lane = 'urgent')
+    and (select count(*) from msg.outbox where event_id = q) = 2, row_to_json(o)::text);
 
   insert into public.email_queue (user_id, plant_id, kind, key, priority, status, last_error)
   values (u, 990065901, 'needs_relink', 'r1:copy', 0, 'skipped', 'one email per login') returning id into s;
@@ -100,16 +97,9 @@ begin
     pg_temp.ob(s) is null and (select push_skip from public.email_queue where id = s) = 'one per login');
 
   insert into public.email_queue (user_id, kind, key, priority) values (u, 'welcome', 'r1:welcome', 1) returning id into w;
-  perform pg_temp.ok('R3 not an alert: no outbox row, left for push_claim to mark',
-    not exists (select 1 from msg.outbox where event_id = w) and (select pushed_at from public.email_queue where id = w) is null);
-
-  update msg.kinds set route = 'outbox' where kind = 'grid_down' and channel = 'email';
-  q := pg_temp.ev(u, 990065901, 'grid_down', 'r1:down-email');
-  perform pg_temp.ok('R4 email routed: status "outbox", an email row, email_claim never takes it',
-    (select status from public.email_queue where id = q) = 'outbox'
-    and exists (select 1 from msg.outbox where dedupe_key = q || ':email' and lane = 'urgent')
-    and q not in (select id from public.email_claim(100, true)));
-  update msg.kinds set route = 'old' where kind = 'grid_down' and channel = 'email';
+  perform pg_temp.ok('R3 not an alert: no pop-up row, an email row',
+    pg_temp.ob(w) is null and (select pushed_at from public.email_queue where id = w) is null
+    and exists (select 1 from msg.outbox where dedupe_key = w || ':email'));
 
   -- a row the seat trigger drops is never routed
   q := pg_temp.ev(u, 990065999, 'grid_down', 'r1:other-plant');
@@ -207,7 +197,7 @@ begin
     s.status = 'failed' and s.last_error = 'too old' and (pg_temp.ob(q)).status = 'failed'
     and (pg_temp.ob(q)).last_error = 'too old', row_to_json(s)::text);
   perform pg_temp.ok('M2 job_check_msg counts it as expired',
-    ((select x from jsonb_array_elements(public.job_check_msg()) x where x->>'lane' = 'urgent')->>'expired')::int >= 1);
+    ((select x from jsonb_array_elements(public.job_check_msg()) x where x->>'lane' = 'urgent' and x->>'channel' = 'push')->>'expired')::int >= 1);
 end $$;
 
 -- lost reply: the lease runs out, the send goes again under a new claim; the old claim's late
@@ -346,63 +336,20 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- X: a flip with rows in flight, a pair across the paths, a flip back
+-- X: no old path (0265)
 -- ---------------------------------------------------------------------------
 do $$
-declare u uuid := pg_temp.owner('x1', '{990065931}'); d1 bigint; x bigint; y bigint; back bigint; n int; got bigint[];
+declare refused boolean := false;
 begin
-  d1 := pg_temp.dev(u, 'x1a');
-  update msg.kinds set route = 'old' where channel = 'push';
-  x := pg_temp.ev(u, 990065931, 'grid_down', 'x1:down');               -- queued before the flip
-  update msg.kinds set route = 'outbox' where channel = 'push';
-  y := pg_temp.ev(u, 990065931, 'batt_hot', 'x1:hot');                  -- after it
-  back := pg_temp.ev(u, 990065931, 'grid_back', 'x1:back', 'x1:down');  -- its "down" is on the old path
-  n := pg_temp.take();
-  perform pg_temp.ok('X1 flip in flight: the old row stays on the old path, no outbox row',
-    pg_temp.ob(x) is null and (select pushed_at from public.email_queue where id = x) is null);
-  perform pg_temp.ok('X1 ... the new row goes through the outbox', pg_temp.taken(y) = array[d1]);
-  perform pg_temp.ok('X2 cross-path: outbox "back" waits for the old "down"', pg_temp.taken(back) = '{}'
-    and (pg_temp.ob(back)).status = 'queued' and (pg_temp.ob(back)).claimed_until is null);
-  got := array(select id from public.push_claim(200) where user_id = u);
-  perform pg_temp.ok('X1 ... push_claim sends only the old row (no double)', got = array[x], got::text);
-  n := pg_temp.take();
-  perform pg_temp.ok('X2 ... once the old "down" went, the "back" goes', pg_temp.taken(back) = array[d1]);
-end $$;
-
-do $$
-declare u uuid := pg_temp.owner('x3', '{990065932}'); d1 bigint; down bigint; back bigint; n int; got bigint[];
-begin
-  d1 := pg_temp.dev(u, 'x3a');
-  down := pg_temp.ev(u, 990065932, 'grid_down', 'x3:down');            -- on the outbox
-  update msg.kinds set route = 'old' where channel = 'push';            -- flip back
-  back := pg_temp.ev(u, 990065932, 'grid_back', 'x3:back', 'x3:down');
-  perform pg_temp.ok('X3 flip back: new rows go to the old path', pg_temp.ob(back) is null
-    and (select pushed_at from public.email_queue where id = back) is null);
-  got := array(select id from public.push_claim(200) where user_id = u);
-  perform pg_temp.ok('X3 ... old "back" waits while its outbox "down" is queued',
-    got = '{}' and (select pushed_at from public.email_queue where id = back) is null, got::text);
-  n := pg_temp.take();
-  perform pg_temp.ok('X3 ... outbox rows made before the flip back still go', pg_temp.taken(down) = array[d1]);
-  perform pg_temp.done(down, 201);
-  got := array(select id from public.push_claim(200) where user_id = u);
-  perform pg_temp.ok('X3 ... after the "down" went, push_claim sends the "back"', got = array[back], got::text);
-  update msg.kinds set route = 'outbox' where channel = 'push';
-end $$;
-
-do $$
-declare u uuid := pg_temp.owner('x4', '{990065933}'); down bigint; back bigint; n int;
-begin
-  perform pg_temp.dev(u, 'x4a');
-  down := pg_temp.ev(u, 990065933, 'grid_down', 'x4:down');
-  n := pg_temp.take();
-  perform pg_temp.done(down, 400);
-  update msg.kinds set route = 'old' where channel = 'push';
-  back := pg_temp.ev(u, 990065933, 'grid_back', 'x4:back', 'x4:down');
-  perform public.push_claim(200);
-  perform pg_temp.ok('X4 old "back" after an outbox "down" that failed: skipped',
-    (select push_skip from public.email_queue where id = back) = 'down had no pop-up',
-    (select push_skip from public.email_queue where id = back));
-  update msg.kinds set route = 'outbox' where channel = 'push';
+  begin
+    update msg.kinds set route = 'old' where kind = 'grid_down' and channel = 'push';
+  exception when check_violation then refused := true;
+  end;
+  perform pg_temp.ok('X1 a kind can no longer go back to the old path', refused);
+  perform pg_temp.ok('X2 the old path functions are gone',
+    not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                 where n.nspname in ('public', 'private', 'billing')
+                   and p.proname in ('email_claim', 'email_done', 'push_claim', 'push_done', 'alert_text', 'old_billing_email')));
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -419,11 +366,11 @@ begin
   perform pg_temp.done(q, 429, 0);
   perform pg_temp.ok('V1 Retry-After 0: waits 5 s, not a loop', (pg_temp.send(q, d1)).not_before = now() + interval '5 seconds',
     (pg_temp.send(q, d1)).not_before::text);
-  j := (select x from jsonb_array_elements(public.job_check_msg()) x where x->>'lane' = 'urgent');
+  j := (select x from jsonb_array_elements(public.job_check_msg()) x where x->>'lane' = 'urgent' and x->>'channel' = 'push');
   perform pg_temp.ok('V2 job_check_msg: a 20-min-old row retrying a device is not the oldest due',
     j->>'oldest' is null or (j->>'oldest')::timestamptz > now() - interval '20 minutes', j::text);
   update msg.push_sends set not_before = now() - interval '10 minutes' where id = (pg_temp.send(q, d1)).id;
-  j := (select x from jsonb_array_elements(public.job_check_msg()) x where x->>'lane' = 'urgent');
+  j := (select x from jsonb_array_elements(public.job_check_msg()) x where x->>'lane' = 'urgent' and x->>'channel' = 'push');
   perform pg_temp.ok('V2 ... but a device send due 10 min and not taken is',
     (j->>'oldest')::timestamptz <= now() - interval '10 minutes', j::text);
   update msg.push_sends set status = 'failed' where id = (pg_temp.send(q, d1)).id;
@@ -485,9 +432,10 @@ begin
     and not has_function_privilege('authenticated', 'public.job_check_msg()', 'execute'));
   perform pg_temp.ok('S2 msg schema closed to the API roles',
     not has_schema_privilege('anon', 'msg', 'usage') and not has_schema_privilege('authenticated', 'msg', 'usage'));
-  perform pg_temp.ok('S3 every alert kind routes pop-ups and emails (0262) to the outbox',
+  perform pg_temp.ok('S3 every alert kind routes pop-ups and emails (0262) to the outbox; share_down/back emails too (0265)',
     (select count(*) from t_routes where channel = 'push' and route = 'outbox') = 14
-    and (select count(*) from t_routes where channel = 'email' and route = 'outbox' and lane = 'urgent') = 14);
+    and (select count(*) from t_routes where channel = 'email' and route = 'outbox' and lane = 'urgent') = 16
+    and (select count(*) from t_routes where route <> 'outbox') = 0);
 end $$;
 
 -- ---------------------------------------------------------------------------

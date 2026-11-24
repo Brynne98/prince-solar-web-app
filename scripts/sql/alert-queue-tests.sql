@@ -5,10 +5,7 @@
 -- The sweep and plant_live read now(), so the clock here is now() (fixed in a transaction).
 
 begin;
--- These checks drive push_claim and email_claim (the old paths). Since 0261 pop-ups and since
--- 0262 alert emails go through the outbox; put them back on the old paths for this
--- rolled-back transaction.
-update msg.kinds set route = 'old';
+-- F1 ran on push_claim until 0265 removed the old path; it now runs on the outbox's take.
 set client_min_messages = notice;
 
 create temp table t_results (n serial, label text, pass boolean, detail text);
@@ -42,7 +39,7 @@ create function pg_temp.uid(p_acc uuid) returns uuid language sql as $$ select u
 create function pg_temp.login(p_acc uuid) returns uuid language sql as $$ select id from billing.logins where account = p_acc $$;
 
 -- ---------------------------------------------------------------------------
--- F1 push_claim: a plant switched out after its alert was queued gets no pop-up.
+-- F1 a plant switched out after its alert was queued gets no pop-up.
 -- ---------------------------------------------------------------------------
 do $$
 declare a uuid := pg_temp.owner('f1', '{990064501,990064502}', pg_temp.ago('2 days')); u uuid; got bigint[]; q1 bigint; q2 bigint;
@@ -56,11 +53,11 @@ begin
   perform billing.set_chosen_plants(a, '{990064502}', now());
   insert into public.email_queue (user_id, plant_id, kind, key, data, priority)
   values (u, 990064502, 'grid_down', 'grid_down:f1:2', jsonb_build_object('since', pg_temp.ep(now())), 0) returning id into q2;
-  got := array(select id from public.push_claim(200) where user_id = u);
+  got := array(select t.event_id from public.msg_push_take(200) t where t.event_id in (q1, q2));
   perform pg_temp.ok('F1 unchosen plant: no pop-up', not (q1 = any (got)), got::text);
-  perform pg_temp.ok('F1 ... marked "plant not chosen"',
-    (select push_skip from public.email_queue where id = q1) = 'plant not chosen',
-    (select push_skip from public.email_queue where id = q1));
+  perform pg_temp.ok('F1 ... dropped "plant not chosen"',
+    (select drop_reason from msg.outbox where dedupe_key = q1 || ':push') = 'plant not chosen',
+    (select drop_reason from msg.outbox where dedupe_key = q1 || ':push'));
   perform pg_temp.ok('F1 chosen plant: pop-up goes', q2 = any (got), got::text);
 end $$;
 
