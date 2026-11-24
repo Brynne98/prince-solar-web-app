@@ -1,4 +1,4 @@
-// deno test -A --node-modules-dir=none job-check/judge_test.ts (SOLAR-469, SOLAR-472, 0249, 0253)
+// deno test -A --node-modules-dir=none job-check/judge_test.ts (SOLAR-469, SOLAR-472, 0249)
 import { judge } from "./index.ts";
 
 const base = { now: "2026-11-10T21:00:00Z", shards: [], jobs: [], sunsynk: { calls: 0, failed: 0, since: null },
@@ -36,11 +36,4 @@ Deno.test("partitions: under 6 days covered fails, 6 passes, not read keeps the 
   eq(pick(v, "partitions:strings")?.failing, false, "strings");
   const kept = judge({ ...base, partitions: null, checks: { "partitions:readings": { failing: true, since: base.now } } });
   eq(pick(kept, "partitions:readings"), undefined, "kept");
-});
-
-Deno.test("a 5-second job (poll-tick, 0253): running passes, quiet over the grace fails", () => {
-  const job = (ago: number) => ({ job: "poll-tick", schedule: "5 seconds", active: true, last_status: "succeeded",
-    last_start: new Date(Date.parse(base.now) - ago).toISOString(), last_end: null, message: "" });
-  eq(pick(judge({ ...base, jobs: [job(4_000)] }), "cron:poll-tick")?.failing, false, "ran 4 s ago");
-  eq(pick(judge({ ...base, jobs: [job(4 * 60_000)] }), "cron:poll-tick")?.failing, true, "quiet 4 min");
 });

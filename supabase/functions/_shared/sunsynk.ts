@@ -749,19 +749,7 @@ export const plantsToPoll = (): Promise<PlantJob[]> => pollJobs(0, 1);
  * account set = only plants read through that account, whatever the shard.
  */
 export async function pollJobs(shard: number, shards: number, account?: string): Promise<PlantJob[]> {
-  return toJobs(await rpc<any[]>("poll_jobs_v2", { p_shard: shard, p_shards: shards, p_account: account ?? null }));
-}
-
-/**
- * One shard's jobs from the minute plan (0253, SOLAR-650): the rows planned for it, each
- * checked again against today's state, with today's token and plant version. Throws when
- * the minute has no plan.
- */
-export async function pollPlanJobs(minute: number, shard: number): Promise<PlantJob[]> {
-  return toJobs(await rpc<any[]>("poll_plan_jobs", { p_minute: minute, p_shard: shard }));
-}
-
-function toJobs(rows: any[] | null): PlantJob[] {
+  const rows = await rpc<any[]>("poll_jobs_v2", { p_shard: shard, p_shards: shards, p_account: account ?? null });
   const accs = new Map<string, Account>();
   return (rows ?? []).map((r) => {
     const acc = accs.get(r.account_id) ?? {
