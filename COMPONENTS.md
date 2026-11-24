@@ -171,6 +171,13 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `EqMore` | Rows folded under "More detail" (a native `details`); rows with no value are left out. |
 | `scaleParts`, `totalTile`, `changePct`, `PERIODS` | Shared maths and pieces behind the Solar, Home and Grid tabs. |
 
+## Edge function sending (`supabase/functions/_shared`)
+
+| Name | Use it for |
+|---|---|
+| `Pacer`, `retryAfterMs` (`pace.ts`) | The one Resend pace in a run: `slot(deadline)` before each call, `hold(retryAfter)` on a 429. notify-email's three lanes share one (SOLAR-645). |
+| `sendOutboxOne` (`outbox.ts`) | One outbox email under its row's own key (`ob-<id>`). |
+
 ## CSS
 
 Website pages outside the app (Terms, Privacy, PAIA, the help and feature pages of SOLAR-216 and SOLAR-490)

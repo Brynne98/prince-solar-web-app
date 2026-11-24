@@ -1,4 +1,4 @@
--- SOLAR-645 step 1 (0256): the three fixes on the old alert queue.
+-- SOLAR-645 step 1 (0256): the three fixes on the old alert queue; F4 is 0258.
 -- LOCAL database only, with every migration applied. One transaction, rolled back:
 --   psql "$DB" -v ON_ERROR_STOP=1 -f scripts/sql/alert-queue-tests.sql
 -- Exit 0: every check passed. A failed check raises, so psql exits 3.
@@ -134,6 +134,23 @@ begin
   perform billing.set_chosen_plants(s, '{990064621}', now());
   perform pg_temp.ok('F3 shared plant: a second owner choosing it keeps its start',
     pg_temp.started(990064621) = pg_temp.ep(pg_temp.ago('1 day')), pg_temp.started(990064621)::text);
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- F4 (0258) a grant that starts later does not silence "No readings" today.
+-- ---------------------------------------------------------------------------
+do $$
+declare a uuid := pg_temp.owner('f4', '{990064801}', pg_temp.ago('20 days'));
+begin
+  perform billing.set_chosen_plants(a, '{990064801}', pg_temp.ago('20 days'));
+  insert into billing.grants (account, places, reason, starts_at, ends_at) values (a, 1, 'now', pg_temp.ago('1 day'), now() + interval '7 days');
+  perform pg_temp.quiet(990064801, pg_temp.ago('1 day'));
+  -- the next grant starts after this one ends: held then, so 0256 writes its start
+  insert into billing.grants (account, places, reason, starts_at) values (a, 1, 'later', now() + interval '14 days');
+  perform pg_temp.ok('F4 set-up: start written in the future', pg_temp.started(990064801) > pg_temp.ep(now()),
+    pg_temp.started(990064801)::text);
+  perform public.email_sweep();
+  perform pg_temp.ok('F4 plant read today still alerts', pg_temp.stale_sent(990064801));
 end $$;
 
 -- ---------------------------------------------------------------------------

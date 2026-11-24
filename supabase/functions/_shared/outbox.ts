@@ -1,7 +1,7 @@
 // Sending one billing outbox email (SOLAR-641, notify). Each row goes in its own call under a
 // key tied to the row alone, so a retry after a lost answer is answered from the first send,
 // whatever other rows are due by then. Resend keeps a key for 24 hours.
-export type Post = (url: string, body: unknown, key: string) => Promise<{ status: number; error?: string }>;
+export type Post = (url: string, body: unknown, key: string) => Promise<{ status: number; error?: string; retryAfter?: string | null }>;
 
 export const outboxKey = (id: number) => `ob-${id}`;
 

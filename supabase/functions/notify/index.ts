@@ -1,6 +1,9 @@
 // `notify` — sends the emails Supabase Auth doesn't (SOLAR-157, SOLAR-183), and the
 // billing emails (SOLAR-208, 0116).
 //
+// Since 0257 (SOLAR-645) cron calls notify-email and notify-push, which use the passes
+// exported here. This function's own run (all of it in one call) stays for going back.
+//
 // pg_cron fires this every minute (migration 0092). The emails are already queued
 // when their cause happens (0102): poll steps each plant's state and queues grid,
 // battery, string and readings emails; triggers queue welcome, history, Reconnect
@@ -34,26 +37,27 @@ import {
 import { outboxMail, FROM_BILLING, FROM_HELLO } from "../_shared/email.ts";
 import { sendOutboxOne } from "../_shared/outbox.ts";
 import { mail as accountMail, type MailInput } from "../_shared/text.ts";
+import { Pacer, retryAfterMs } from "../_shared/pace.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
-const LIVE = Deno.env.get("NOTIFY_LIVE") === "1";
-const RESEND_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
+export const LIVE = Deno.env.get("NOTIFY_LIVE") === "1";
+export const RESEND_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 // Local tests point this at a stand-in server.
 const RESEND_URL = Deno.env.get("RESEND_URL") ?? "https://api.resend.com/emails";
 // Resend's batch call takes up to 100 emails.
 const BATCH = 100;
 // The cron call times out at 55 s; stop claiming before that, the rest goes next minute.
-const BUDGET_MS = 40_000;
+export const BUDGET_MS = 40_000;
 // Resend's default limit is 2 calls a second.
 const PACE_MS = 550;
 // exportVapidKeys() JSON: {publicKey, privateKey} as JWKs. The public half is VAPID_PUBLIC in public/config.js.
-const VAPID_KEYS = Deno.env.get("VAPID_KEYS") ?? "";
+export const VAPID_KEYS = Deno.env.get("VAPID_KEYS") ?? "";
 // Pop-ups sent at once; a stage change can queue thousands in one minute.
 const PUSH_AT_ONCE = 50;
 
 type Plant = { id: number; name: string; tz: string };
 
-const json = (b: unknown, status = 200) =>
+export const json = (b: unknown, status = 200) =>
   new Response(JSON.stringify(b, null, 1), { status, headers: { "Content-Type": "application/json" } });
 
 async function rpc<T>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -305,7 +309,7 @@ const resync = (plant: number) => background(
 
 // ------------------------------------------------------------------- building
 
-type Row = {
+export type Row = {
   id: number; user_id: string | null; to_email: string; plant_id: number | null; plant_name: string | null; tz: string;
   kind: string; key: string; data: Record<string, any>; tries: number; switch: string | null; unsub_token: string | null;
   batch_key: string | null;
@@ -481,7 +485,7 @@ async function build(r: Row): Promise<Email | null> {
 
 // ------------------------------------------------------------------- sending
 
-type Out = { row: Row; mail: Email };
+export type Out = { row: Row; mail: Email };
 type Done = {
   id: number; status: "sent" | "queued" | "failed" | "skipped"; error?: string; retry_s?: number;
   batch_key?: string; refund?: boolean;
@@ -507,7 +511,7 @@ const payload = (o: Out) => {
            ...(fb(o) && o.row.data.image ? { attachments: [{ filename: "screenshot.jpg", content: o.row.data.image }] } : {}) };
 };
 
-async function post(url: string, body: unknown, key: string): Promise<{ status: number; error?: string }> {
+async function post(url: string, body: unknown, key: string): Promise<{ status: number; error?: string; retryAfter?: string | null }> {
   // A network failure comes back as a status too, so the rows are retried.
   try {
     const res = await fetch(url, {
@@ -515,24 +519,20 @@ async function post(url: string, body: unknown, key: string): Promise<{ status: 
       headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json", "Idempotency-Key": key },
       body: JSON.stringify(body),
     });
-    return res.ok ? { status: res.status } : { status: res.status, error: `resend ${res.status}: ${(await res.text()).slice(0, 200)}` };
+    return res.ok ? { status: res.status } : { status: res.status, error: `resend ${res.status}: ${(await res.text()).slice(0, 200)}`,
+                                               retryAfter: res.headers.get("Retry-After") };
   } catch (e) {
     return { status: 0, error: `resend: ${e instanceof Error ? e.message : e}` };
   }
 }
 
-// Resend allows a few calls a second; batches of up to 100 keep a burst inside it.
-let lastCall = 0;
-async function paced<T>(f: () => Promise<T>): Promise<T> {
-  const wait = lastCall + PACE_MS - Date.now();
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastCall = Date.now();
-  return await f();
-}
+// Resend allows a few calls a second; batches of up to 100 keep a burst inside it. One pace
+// for every Resend call in a run; a 429 holds them all until its Retry-After (SOLAR-645).
+const pacer = new Pacer(PACE_MS);
 
 /** One batch call. When Resend refuses it, each half again, down to the one email
  *  it refuses, so a bad address fails only itself and costs ~14 calls, not 100. */
-async function sendBatch(outs: Out[], deadline: number, reuse?: string): Promise<Done[]> {
+export async function sendBatch(outs: Out[], deadline: number, reuse?: string): Promise<Done[]> {
   if (!outs.length) return [];
   if (Date.now() > deadline) return outs.map((o) => later(o.row));
   // A retry goes under the key its batch had: if Resend took that batch before the
@@ -541,8 +541,16 @@ async function sendBatch(outs: Out[], deadline: number, reuse?: string): Promise
   const key = reuse ?? "q-" + [...new Uint8Array(await crypto.subtle.digest("SHA-256", ids))].map((b) => b.toString(16).padStart(2, "0")).join("");
   // Resend's batch call takes no attachments, so feedback goes on its own (one per group, see run).
   const one = outs.length === 1 && fb(outs[0]);
-  const res = await paced(() => one ? post(RESEND_URL, payload(outs[0]), key) : post(`${RESEND_URL}/batch`, outs.map(payload), key));
+  if (!await pacer.slot(deadline)) return outs.map((o) => later(o.row));
+  const res = await (one ? post(RESEND_URL, payload(outs[0]), key) : post(`${RESEND_URL}/batch`, outs.map(payload), key));
   if (!res.error) return outs.map((o) => ({ id: o.row.id, status: "sent" }));
+  // Too many calls: nothing was sent. Back after Retry-After, under the same key, not counted as a try.
+  if (res.status === 429) {
+    pacer.hold(res.retryAfter);
+    noteError("resend_429", new Error(res.error), { hourly: true });
+    const retry_s = Math.ceil(retryAfterMs(res.retryAfter, Date.now()) / 1000);
+    return outs.map((o) => ({ id: o.row.id, status: "queued", error: res.error, retry_s, batch_key: key, refund: true }));
+  }
   // 409: the old key was used with a different body (the batch changed since); a fresh one.
   if (res.status === 409 && reuse) return await sendBatch(outs, deadline);
   // A refusal ends as a failed row, which run() reports as email_failed: one report, not two (SOLAR-471).
@@ -598,7 +606,7 @@ async function pushOne(r: PushRow, s: PushRow["subs"][number]): Promise<"ok" | "
   }
 }
 
-async function pushPass(deadline: number) {
+export async function pushPass(deadline: number) {
   const count = { ok: 0, gone: 0, failed: 0 };
   // Bad keys stop here, before push_claim marks anything done.
   await server();
@@ -627,10 +635,11 @@ async function pushPass(deadline: number) {
 // the words come from the text catalog; a receipt reads its frozen bill.
 type OutboxRow = MailInput & { id: number; user: string; email: string; unsub_token: string | null; reminder: boolean };
 const OUTBOX_BATCH = 50;
-async function outboxPass(deadline: number) {
+/** Takes due rows while before `until`; sends until `deadline`. */
+export async function outboxPass(until: number, deadline = until) {
   const count = { sent: 0, failed: 0, retried: 0 };
   await rpc("billing_jobs", { p_cmd: "outbox_sweep" }).catch((e) => noteError("outbox_sweep_failed", e, { hourly: true }));
-  while (Date.now() < deadline) {
+  while (Date.now() < until) {
     const rows = await rpc<OutboxRow[]>("billing_jobs", { p_cmd: "outbox_take", p_args: { limit: OUTBOX_BATCH } });
     if (!rows.length) break;
     const outs: { row: OutboxRow; payload: Record<string, unknown> }[] = [];
@@ -651,12 +660,17 @@ async function outboxPass(deadline: number) {
     // is due then, is answered from the first send and sends nothing twice.
     let stop = false;
     for (const o of outs) {
-      if (stop || Date.now() > deadline) break;   // left leased: sent on a later pass
-      const res = await paced(() => sendOutboxOne(post, RESEND_URL, { id: o.row.id, payload: o.payload }));
+      // left leased: sent on a later pass. No slot (a 429 held past the deadline): take no more.
+      if (stop) break;
+      if (!await pacer.slot(deadline)) { stop = true; break; }
+      const res = await sendOutboxOne(post, RESEND_URL, { id: o.row.id, payload: o.payload });
+      const limited = res.status === 429;
+      if (limited) pacer.hold(res.retryAfter);
       const ok = !res.error;
-      // Resend refused the email itself (400, 422): given up; anything else in 5 minutes
-      const retry_s = ok || refused(res.status) ? null : 300;
-      await rpc("billing_jobs", { p_cmd: "outbox_done", p_args: { id: o.row.id, ok, error: res.error ?? null, retry_s } });
+      // Resend refused the email itself (400, 422): given up; a 429 after its Retry-After, not
+      // counted as a try (0257); anything else in 5 minutes
+      const retry_s = ok || refused(res.status) ? null : limited ? Math.ceil(retryAfterMs(res.retryAfter, Date.now()) / 1000) : 300;
+      await rpc("billing_jobs", { p_cmd: "outbox_done", p_args: { id: o.row.id, ok, error: res.error ?? null, retry_s, refund: limited } });
       if (ok) {
         count.sent++;
         await track("account_email_sent_done", o.row.user, `outbox:${o.row.id}`, new Date().toISOString(), { kind: o.row.key }).catch(() => {});
@@ -669,19 +683,20 @@ async function outboxPass(deadline: number) {
   return count;
 }
 
-async function run(dry: boolean, withHtml: boolean, push: boolean) {
-  const started = Date.now();
-  // What only the clock can tell: no readings, SunSynk, reports.
-  const swept = dry ? null : await rpc<Record<string, unknown>>("email_sweep").catch((e) => {
-    noteError("email_sweep_failed", e, { hourly: true });
-    return { error: String(e?.message ?? e) };
-  });
+/** What only the clock can tell: no readings, SunSynk, reports. */
+export const sweep = () => rpc<Record<string, unknown>>("email_sweep").catch((e) => {
+  noteError("email_sweep_failed", e, { hourly: true });
+  return { error: String(e?.message ?? e) };
+});
+
+/** Sends email_queue rows of one lane (0257: "urgent" = alerts, "bulk" = the rest, null =
+ *  all) while claiming before `until`; what isn't sent by `deadline` goes back untouched. */
+export async function emailPass(lane: "urgent" | "bulk" | null, until: number, deadline: number, dry: boolean, withHtml = false) {
   const lines: Record<string, unknown>[] = [];
   const count = { sent: 0, queued: 0, failed: 0, skipped: 0 };
-
-  const deadline = started + BUDGET_MS + 5_000;
-  while (Date.now() - started < BUDGET_MS) {
-    const rows = await rpc<Row[]>("email_claim", { p_limit: BATCH, p_peek: dry });
+  while (Date.now() < until) {
+    // no lane: the old two-argument call, so the old notify works before and after 0257
+    const rows = await rpc<Row[]>("email_claim", { p_limit: BATCH, p_peek: dry, ...(lane ? { p_lane: lane } : {}) });
     if (!rows.length) break;
     const outs: Out[] = [], done: Done[] = [];
     for (const row of rows) {
@@ -759,7 +774,18 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
         await track("need_a_hand_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), { choose: row.data?.choose === true });
       }
     }
+    // Rows handed back unsent (out of time, or a 429 held past the deadline): claiming
+    // again would only build the same rows again.
+    if (done.some((x) => x.error === "run out of time")) break;
   }
+  return { ...count, due: lines };
+}
+
+// The old single run (cron email-notify until 0257): kept so the switch can go back.
+async function run(dry: boolean, withHtml: boolean, push: boolean) {
+  const started = Date.now();
+  const swept = dry ? null : await sweep();
+  const { due, ...count } = await emailPass(null, started + BUDGET_MS, started + BUDGET_MS + 5_000, dry, withHtml);
   const outbox = dry ? null : await outboxPass(started + BUDGET_MS + 5_000).catch((e) => {
     noteError("outbox_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
@@ -769,7 +795,7 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
     noteError("push_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   }) : null;
-  return { live: !dry, swept, ...count, outbox, pushed, due: lines };
+  return { live: !dry, swept, ...count, outbox, pushed, due };
 }
 
 // Every template from one plant's real numbers; event values are samples.
