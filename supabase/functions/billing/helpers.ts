@@ -15,15 +15,13 @@ export async function pool<T, R>(items: T[], parallel: number, budgetMs: number,
 }
 
 /** What /verify tells the app. "again" means the webhook settled the try first: say how it ended.
- *  No answer from Paystack: "error" (the app says it couldn't check, not that it is still checking).
- *  A card page closed without paying: "void", also on a repeat check (SOLAR-644). */
+ *  No answer from Paystack: "error" (the app says it couldn't check, not that it is still checking). */
 export function verifyStatus(r: { action: string; status?: string } | null): string {
   if (!r) return "error";
   if (r.action !== "again") return r.action;
   return r.status === "success" ? "applied"
     : r.status === "not_applied" || r.status === "reversed" ? "refund"
-    : r.status === "failed" ? "failed"
-    : r.status === "void" ? "void" : "pending";
+    : r.status === "failed" || r.status === "void" ? "failed" : "pending";
 }
 
 /** A refund.* webhook's ids: Paystack's refund id, and its refund_reference. With no id the

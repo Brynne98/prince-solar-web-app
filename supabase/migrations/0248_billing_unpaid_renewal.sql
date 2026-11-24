@@ -56,7 +56,8 @@ $$;
 
 -- A renewal payment that may still land, on the latest plan's latest renewal bill (open or
 -- void): (a) a saved-card try with no final answer, or (b) a card page made before the
--- cutoff that Paystack said is still processing or did not answer, until cutoff + 24 hours.
+-- cutoff that Paystack said is still processing or did not answer. Either until cutoff + 24
+-- hours, so a try Paystack never answers cannot hold a restart for ever.
 -- held_reference: the oldest (b) page, once the cutoff has passed (the app re-checks it).
 create function billing.renewal_hold(p_account uuid, p_at timestamptz,
                                      out in_flight boolean, out held_reference text, out bill uuid, out cutoff timestamptz)
@@ -77,8 +78,9 @@ begin
      and (cutoff is null or (pa.created_at < cutoff and p_at < cutoff + interval '24 hours'))
    order by pa.created_at limit 1;
   in_flight := held_reference is not null
-               or exists (select 1 from billing.payment_attempts pa where pa.invoice = inv.id and pa.channel = 'saved_card'
-                             and pa.status in ('created', 'pending', 'unknown'));
+               or (exists (select 1 from billing.payment_attempts pa where pa.invoice = inv.id and pa.channel = 'saved_card'
+                              and pa.status in ('created', 'pending', 'unknown'))
+                   and (cutoff is null or p_at < cutoff + interval '24 hours'));
   if cutoff is null or p_at < cutoff then held_reference := null; end if;
 end $$;
 
@@ -196,6 +198,11 @@ create function billing.verify_unanswered(p_reference text, p_at timestamptz def
 returns jsonb language plpgsql security definer set search_path = billing, pg_temp as $$
 declare att billing.payment_attempts; inv billing.invoices;
 begin
+  -- on hold for the way back (billing.pause_payments): no try changes, as in apply_payment
+  lock table billing.payments_pause in share mode;
+  if exists (select 1 from billing.payments_pause) then
+    raise exception 'payments are on hold for an update' using errcode = '55000';
+  end if;
   select * into att from billing.payment_attempts where reference = p_reference;
   if not found then return jsonb_build_object('action', 'ignored'); end if;
   select * into inv from billing.invoices where id = att.invoice;

@@ -331,7 +331,7 @@ serve("billing", async (req) => {
 
   let inv: { invoice: string; kind: string; status: string; amount_minor: number; currency: string; saved_card: boolean };
   // an email's link names its bill: that bill is paid, or the owner hears why not (begin_attempt)
-  const billId = typeof body.bill === "string" && /^[0-9a-f-]{36}$/i.test(body.bill) ? body.bill : null;
+  const billId = typeof body.bill === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.bill) ? body.bill : null;
   try {
     if (body.settle === true && billId) inv = { invoice: billId, kind: "renewal", status: "open", amount_minor: 0, currency: "", saved_card: false };
     else if (body.settle === true) inv = await bill("pay_now", { user: user.id });

@@ -3101,6 +3101,7 @@ begin
   ref := pg_temp.job(b, billing.next_run_at(pe + interval '3 days'));
   perform pg_temp.eq('U2 a try with no answer yet: checking', pg_temp.st(b, billing.next_run_at(pe + interval '3 days') + interval '1 minute', 'past_due_reason'), 'checking');
   perform pg_temp.eq('U2 ... in flight', pg_temp.st(b, billing.next_run_at(pe + interval '3 days') + interval '1 minute', 'renewal_in_flight'), 'true');
+  perform pg_temp.eq('U2 never answered: no hold a day after the cutoff', pg_temp.st(b, pg_temp.cut(pe) + interval '24 hours', 'renewal_in_flight'), 'false');
 
   -- a hard decline: refused, the card email names that try
   pe := pg_temp.member(c, 'u2c', 990160203);
@@ -3208,6 +3209,9 @@ begin
   pref := billing.begin_attempt(pg_temp.due(a), 'card_page', c - interval '1 hour', a)->>'reference';
   perform pg_temp.job(a, c + interval '6 hours');
   perform pg_temp.eq('U6 no answer: recorded', billing.verify_unanswered(pref, c + interval '6 hours')->>'action', 'unanswered');
+  insert into billing.payments_pause default values;
+  perform pg_temp.fails('U6 paused: nothing recorded', format('select billing.verify_unanswered(%L, %L)', pref, c + interval '6 hours'), 'on hold');
+  delete from billing.payments_pause;
   r := billing.account_state(a, c + interval '6 hours');
   perform pg_temp.eq('U6 the reloaded screen holds', r->>'renewal_in_flight', 'true');
   perform pg_temp.eq('U6 ... with the page to re-check', r->>'held_reference', pref);
