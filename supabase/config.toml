@@ -400,10 +400,6 @@ inspector_port = 8083
 # The Deno major version to use.
 deno_version = 2
 
-[functions.alerts-due]
-# Shared bearer token, not a JWT.
-verify_jwt = false
-
 [functions.unsubscribe]
 # One-click unsubscribe from mail clients: no sign-in, a per-user token in the URL.
 verify_jwt = false

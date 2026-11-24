@@ -6,7 +6,8 @@ import { outboxPushPass, type PushSend, pushSend } from "../notify/index.ts";
 import { run } from "./index.ts";
 
 const row = (id: number, over: Partial<PushSend> = {}): PushSend => ({
-  id, claim: "c-1", event_id: 100 + id, kind: "grid_down", plant_id: 7, title: "t", body: "b", tab: "grid", day: null,
+  id, claim: "c-1", event_id: 100 + id, kind: "grid_down", plant_id: 7,
+  data: { since: 1764000000 }, created: 1764000060, tz: "Africa/Johannesburg",
   endpoint: `https://fcm.googleapis.com/fcm/send/dev-${id}`, p256dh: "k", auth: "a", ...over,
 });
 const refuse = (status: number, headers: Record<string, string> = {}) => () =>
@@ -23,8 +24,7 @@ Deno.test("2xx: code 201", async () => {
 // 0264: msg_push_take sends the facts; the words come from text.ts (SOLAR-645 step 6)
 Deno.test("facts in, the pop-up's words out", async () => {
   let sent = "";
-  const facts = row(9, { title: undefined, body: undefined, tab: undefined, day: undefined, kind: "grid_down",
-    data: { since: 1764000000, chargePct: 62 }, created: 1764000060, tz: "Africa/Johannesburg", plant_name: "Prince Home", plants: 2 });
+  const facts = row(9, { kind: "grid_down", data: { since: 1764000000, chargePct: 62 }, created: 1764000060, tz: "Africa/Johannesburg", plant_name: "Prince Home", plants: 2 });
   await pushSend(facts, (_s, msg) => { sent = msg; return Promise.resolve(); });
   const m = JSON.parse(sent);
   assertEquals([m.title, m.body, m.data.tab, m.data.day], ["Prince Home", "Grid down since 18:00. Battery 62%.", "grid", "2025-11-24"]);
@@ -74,20 +74,13 @@ Deno.test("pass: take, send each device, done under the take's claim, until a ta
   assertEquals(count, { ok: 1, gone: 0, again: 1, failed: 0 });
 });
 
-Deno.test("notify-push: old path first, a failed outbox pass is noted, not fatal", async () => {
-  const order: string[] = [];
-  const out = await run({
-    old: (d) => { order.push(`old:${d}`); return Promise.resolve({ ok: 1 }); },
-    outbox: (d) => { order.push(`outbox:${d}`); return Promise.reject(new Error("msg_push_take: not found")); },
-  }, 0);
-  assertEquals(order, ["old:10000", "outbox:50000"]);
-  assertEquals(out, { pushed: { ok: 1 }, outbox: { error: "msg_push_take: not found" } });
+Deno.test("notify-push: a failed outbox pass is noted, not fatal", async () => {
+  let at = 0;
+  const out = await run((d) => { at = d; return Promise.reject(new Error("msg_push_take: not found")); }, 0);
+  assertEquals(at, 50_000);
+  assertEquals(out, { outbox: { error: "msg_push_take: not found" } });
 });
 
-Deno.test("notify-push: a failed old pass never stops the outbox pass", async () => {
-  const out = await run({
-    old: () => Promise.reject(new Error("push_claim: lock timeout")),
-    outbox: () => Promise.resolve({ ok: 2 }),
-  }, 0);
-  assertEquals(out, { pushed: { error: "push_claim: lock timeout" }, outbox: { ok: 2 } });
+Deno.test("notify-push: the outbox pass's count comes back", async () => {
+  assertEquals(await run(() => Promise.resolve({ ok: 2 }), 0), { outbox: { ok: 2 } });
 });

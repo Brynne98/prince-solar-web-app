@@ -1,38 +1,22 @@
-// `notify` — sends the emails Supabase Auth doesn't (SOLAR-157, SOLAR-183), and the
-// billing emails (SOLAR-208, 0116).
+// `notify`: builds and sends the emails Supabase Auth doesn't (SOLAR-157, SOLAR-183) and the
+// pop-ups (SOLAR-244), from the message outbox (SOLAR-645).
 //
-// Since 0257 (SOLAR-645) cron calls notify-email and notify-push, which use the passes
-// exported here. This function's own run (all of it in one call) stays for going back.
+// Cron calls notify-email and notify-push (0257), which use the passes exported here. This
+// function's own run does all of it in one call: the sweep, alert emails, the billing outbox,
+// the rest, then the pop-ups.
 //
-// pg_cron fires this every minute (migration 0092). The emails are already queued
-// when their cause happens (0102): poll steps each plant's state and queues grid,
-// battery, string and readings emails; triggers queue welcome, history, Reconnect
-// and account deleted. Each run here first calls email_sweep() for what only the
-// clock can tell (no readings for 30 min, SunSynk down/back,
-// reports due today), then sends the queue: claim up to BATCH rows (skip locked,
-// so runs can overlap), build each email, send them in one Resend batch call,
-// and mark each row sent, skipped, failed, or queued again with a growing wait.
-// It keeps going until the queue is empty or BUDGET_MS is spent.
+// Events are written to email_queue when their cause happens (poll, triggers, email_sweep);
+// msg.outbox holds one row per event and channel (0261-0263), checked again at send time
+// (msg.email_guard, msg.push_guard). The old queue path (email_claim, push_claim) is gone (0265).
 //
-// email_claim skips rows whose switch is off (email_wanted, 0091), whose plant the
-// user no longer has, and "back" emails whose "down" never went. needs_relink, relinked,
-// share_down, share_back, plant_off_login, welcome, history and account deleted have no switch.
-//
-// After the emails, the pop-ups (SOLAR-244, 0124): push_claim hands over the alerts
-// due one, with their words and the user's browsers, each tried once. A browser the
-// push service says is gone (404, 410) is deleted. Off when VAPID_KEYS is unset, NOTIFY_LIVE
-// isn't "1", or ?dry=1. Each pop-up is tried once: the email is the channel that retries.
-//
-// Nothing is sent unless the NOTIFY_LIVE secret is "1". Otherwise, and with ?dry=1,
-// the run writes nothing (no sweep, no claim) and returns the next BATCH it would
-// send. ?render=all&plant=<id> returns every template built from that plant's data,
+// Nothing is sent unless the NOTIFY_LIVE secret is "1". Otherwise, and with ?dry=1, the run
+// writes nothing. ?render=all&plant=<id> returns every template built from that plant's data,
 // for checking by eye.
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { noteError, reportError, serve, track } from "../_shared/errors.ts";
 import {
-  accountDeleted, type Email, type Price, type History, freeWeekEnded, freeWeekEndsSoon, freeWeekSetup, historySynced, movedToFree,
-  PAY_URL, cardChanged, cardExpiring, paymentFailed, paymentReceived, paymentRefunded, billMailFailed, type Period, planChangeBooked, planKept, plantEvent, type PlantEvent, loginEvent, plantsRemovalSoon,
-  offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, cancelEndsSoon, needAHand, feedback, unpaidReminder, unpaidLast, unpaidDeleted, APP,
+  accountDeleted, type Email, type History, historySynced, type Period, plantEvent, type PlantEvent, loginEvent,
+  REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, needAHand, feedback, APP,
 } from "../_shared/email.ts";
 import { outboxMail, FROM_BILLING, FROM_HELLO } from "../_shared/email.ts";
 import { msgKey, type Post, sendOutboxOne } from "../_shared/outbox.ts";
@@ -44,9 +28,7 @@ export const LIVE = Deno.env.get("NOTIFY_LIVE") === "1";
 export const RESEND_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 // Local tests point this at a stand-in server.
 const RESEND_URL = Deno.env.get("RESEND_URL") ?? "https://api.resend.com/emails";
-// Resend's batch call takes up to 100 emails.
-const BATCH = 100;
-// The cron call times out at 55 s; stop claiming before that, the rest goes next minute.
+// The cron call times out at 55 s; stop taking before that, the rest goes next minute.
 export const BUDGET_MS = 40_000;
 // Resend's default limit is 2 calls a second.
 const PACE_MS = 550;
@@ -80,19 +62,10 @@ const addDays = (d: string, n: number) => new Date(Date.parse(d + "T00:00:00Z") 
 // "September" stays whole.
 const fmtDay = (d: string, o: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...o }).format(new Date(d + "T00:00:00Z")).replace(/\bSept\b/, "Sep");
-/** "1 Nov 2026", as the billing emails write a date. */
-const day = (d: string) => fmtDay(d, { day: "numeric", month: "short", year: "numeric" });
-const dayMonth = (d: string) => fmtDay(d, { day: "numeric", month: "short" });
 /** "today", or the event's date when it was on another local day ("Tue 21 Oct"). */
 function dayOf(epoch: number, tz: string): string {
   const d = local(tz, new Date(epoch * 1000)).date;
   return d === local(tz).date ? "today" : fmtDay(d, { weekday: "short", day: "numeric", month: "short" });
-}
-/** The days a payment covers, "2026-11-01".."2026-11-30" as "1 to 30 Nov" (SOLAR-415). */
-function covers(from: string, to: string): string {
-  const [fy, fm] = [from.slice(0, 4), from.slice(5, 7)], [ty, tm] = [to.slice(0, 4), to.slice(5, 7)];
-  if (fy === ty && fm === tm) return `${Number(from.slice(8))} to ${fmtDay(to, { day: "numeric", month: "short" })}`;
-  return fy === ty ? `${fmtDay(from, { day: "numeric", month: "short" })} to ${fmtDay(to, { day: "numeric", month: "short" })}` : `${day(from)} to ${day(to)}`;
 }
 /** Battery % at an instant: the newest reading in the 10 minutes before it, as grid_down's
  *  chargePct (0151). Null when none. */
@@ -101,53 +74,6 @@ async function socAt(plant: number, at: number): Promise<number | null> {
     .not("soc", "is", null).order("ts", { ascending: false }).limit(1).maybeSingle();
   return data?.soc == null ? null : Math.round(data.soc);
 }
-/** The saved card and the plan, for billing emails that name them (0162). */
-const billFacts = (user: string | null) =>
-  user ? rpc<{ card: string | null; plan: "free" | "home" | "family" } | null>("email_billing_facts", { p_user: user }) : Promise.resolve(null);
-/** A plan's monthly price and its usual price (SOLAR-415). With a user, the price that user
- *  pays today: an offer they already left is not quoted again (SOLAR-443, 0169). */
-type Prices = { prices: { monthly: Record<string, number> }; listPrices: { monthly: Record<string, number> }; offer?: Price["offer"] };
-let offerNow: Prices | null = null;
-async function priceOf(plan: "home" | "family", user: string | null): Promise<Price> {
-  const o = user ? await rpc<Prices>("email_prices", { p_user: user }) : (offerNow ??= await rpc<Prices>("api_offer"));
-  return { plan, now: o.prices.monthly[plan], list: o.listPrices.monthly[plan], offer: o.offer && { ...o.offer, until: o.offer.until && dayMonth(o.offer.until) } };
-}
-/** The plan that holds the plants the account ticked: Home for 1 or 2, Family for 3 to 5. */
-const pickedPlan = async (plants: number | undefined, user: string | null): Promise<Price> =>
-  ({ ...await priceOf((plants ?? 1) > 2 ? "family" : "home", user), plants: plants ?? 1 });
-/** The account's first plant (or the one given), its name and how many day totals it holds. */
-async function historyAt(user: string | null, plantId?: number | null): Promise<{ plant: string; days: number } | null> {
-  if (!user) return null;
-  let q = db.from("plant_users").select("plant_id, plant_name").eq("user_id", user);
-  if (plantId) q = q.eq("plant_id", plantId);
-  const { data: pu } = await q.order("linked_at").limit(1).maybeSingle();
-  if (!pu) return null;
-  const { count } = await db.from("plant_energy").select("period", { count: "exact", head: true }).eq("plant_id", pu.plant_id).eq("bucket", "day");
-  return { plant: pu.plant_name || "your plant", days: count ?? 0 };
-}
-/** The account's plants with these names (none given: every plant still reading), and the
- *  most day totals any one of them holds: how far back the history goes, never a sum (SOLAR-616). */
-async function historyOf(user: string | null, names?: string[]): Promise<{ plants: string[]; days: number }> {
-  if (!user || names?.length === 0) return { plants: [], days: 0 };
-  const q = db.from("plant_users").select("plant_id, plant_name").eq("user_id", user);
-  const { data: pu } = await (names ? q.in("plant_name", names) : q.in("plant_id", await chosenPlants(user))).order("linked_at");
-  let days = 0;
-  for (const p of pu ?? []) {
-    const { count } = await db.from("plant_energy").select("period", { count: "exact", head: true }).eq("plant_id", p.plant_id).eq("bucket", "day");
-    days = Math.max(days, count ?? 0);
-  }
-  return { plants: (pu ?? []).map((p) => p.plant_name || "your plant"), days };
-}
-/** The plants the user's account reads (0247 chosen_plant_ids: the billing tables once live). */
-const chosenPlants = async (user: string | null) => ((await rpc<number[] | null>("chosen_plant_ids", { p_user: user })) ?? []).map(Number);
-/** The newest earlier email of a kind for this user, to read what it said. */
-async function lastMail(user: string | null, kind: string, before: number): Promise<Record<string, any> | null> {
-  if (!user) return null;
-  const { data } = await db.from("email_queue").select("data").eq("user_id", user).eq("kind", kind).lt("id", before)
-    .order("id", { ascending: false }).limit(1).maybeSingle();
-  return data?.data ?? null;
-}
-
 
 // ------------------------------------------------------------------- energy
 
@@ -200,12 +126,11 @@ async function buildHistory(p: Plant): Promise<History | null> {
 }
 
 /** The finished week, month or year before `today`, against the one before it. Null when it has no readings. */
-// freeFrom: the free week's first day; the day-7 report covers that week (SOLAR-475, 0182).
-async function buildReport(p: Plant, period: Period, today: string, linkedOn?: string, freeFrom?: string): Promise<Report | null> {
+async function buildReport(p: Plant, period: Period, today: string, linkedOn?: string): Promise<Report | null> {
   let from: string, to: string, pFrom: string, pTo: string, label: string, prevLabel: string;
   const [y, m] = today.split("-").map(Number);
   if (period === "week") {
-    to = freeFrom ? addDays(freeFrom, 6) : addDays(today, -((new Date(today + "T00:00:00Z").getUTCDay() + 6) % 7 + 1)); from = addDays(to, -6);
+    to = addDays(today, -((new Date(today + "T00:00:00Z").getUTCDay() + 6) % 7 + 1)); from = addDays(to, -6);
     pTo = addDays(from, -1); pFrom = addDays(pTo, -6);
     label = `${fmtDay(from, { day: "numeric", ...(from.slice(5, 7) !== to.slice(5, 7) ? { month: "short" } : {}) })} – ${fmtDay(to, { day: "numeric", month: "short", year: "numeric" })}`;
     prevLabel = "last week";
@@ -275,18 +200,8 @@ async function historyPending(row: Row): Promise<boolean> {
   return (link != null && Date.now() - Date.parse(link.linked_at) < 600e3) || cfg?.backfill_next != null || open;
 }
 
-/** The plant's 60-days email is still on its way, on either path (0263). Before 0263 is in,
- *  the old queue only. */
-async function historyOpen(user: string, plant: number): Promise<boolean> {
-  try {
-    return await rpc<boolean>("email_history_open", { p_user: user, p_plant: plant });
-  } catch (e) {
-    if (!missingRpc(e)) throw e;
-    const { count } = await db.from("email_queue").select("id", { count: "exact", head: true }).eq("user_id", user)
-      .eq("plant_id", plant).eq("kind", "history").in("status", ["queued", "sending"]);
-    return (count ?? 0) > 0;
-  }
-}
+/** The plant's 60-days email is still on its way (0263). */
+const historyOpen = (user: string, plant: number) => rpc<boolean>("email_history_open", { p_user: user, p_plant: plant });
 
 /** The 60-days email waits for the plant's day totals (plant_energy). Without them
  *  it counts only the 15 days agg_minute covers (SOLAR-522). Two hours after it was
@@ -319,9 +234,6 @@ export type Row = {
   kind: string; key: string; data: Record<string, any>; tries: number; switch: string | null; unsub_token: string | null;
   batch_key: string | null;
 };
-
-// The page that turns offers and reminders off, by email_claim's token (SOLAR-569).
-const unsubOf = (r: Row) => `${APP}/unsubscribe.html?t=${r.unsub_token ?? ""}&k=reminders`;
 
 /** The email for one queued row; null = nothing to say (an empty report), skip it. */
 async function build(r: Row): Promise<Email | null> {
@@ -373,113 +285,10 @@ async function build(r: Row): Promise<Email | null> {
     case "report_week": case "report_month": case "report_year": {
       const { data: pu } = await db.from("plant_users").select("linked_at").eq("user_id", r.user_id).eq("plant_id", r.plant_id).maybeSingle();
       const linkedOn = pu?.linked_at ? new Date(pu.linked_at).toLocaleDateString("en-CA", { timeZone: tz }) : undefined;
-      const free = d.freeWeekEnds === true;
-      const rep = await buildReport(p, r.kind.slice(7) as Period, d.today, linkedOn, free ? d.from : undefined);
-      // The free week's day-7 report (0114) says the week has ended (SOLAR-475).
-      if (!free) return rep && report(rep);
-      const fw = await pickedPlan(d.plants, r.user_id);
-      // No readings in the free week: the notice still goes, without the report. It sits
-      // behind Offers and reminders (0214), so the plan and the link always go in.
-      const end = { price: fw, unsub: unsubOf(r) };
-      return rep ? report({ ...rep, freeWeekEnds: end }) : freeWeekEnded(end);
+      const rep = await buildReport(p, r.kind.slice(7) as Period, d.today, linkedOn);
+      return rep && report(rep);
     }
-    case "free_week_soon":
-      return freeWeekEndsSoon(new Date(d.endsAt * 1000).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: tz }).replace(/\bSept\b/, "Sep"),
-        await pickedPlan(d.plants, r.user_id), unsubOf(r));
-    case "unpaid_reminder": case "unpaid_last": case "unpaid_deleted": {
-      const u = { price: await pickedPlan(d.plants, r.user_id), paid: d.paid === true,
-        unsub: unsubOf(r) };
-      if (r.kind === "unpaid_deleted") return unpaidDeleted(u);
-      const k = { ...u, since: dayMonth(local(tz, new Date(d.since * 1000)).date), deleteOn: dayMonth(local(tz, new Date(d.deleteAt * 1000)).date) };
-      return r.kind === "unpaid_reminder" ? unpaidReminder(k) : unpaidLast(k);
-    }
-    case "free_week_setup": return d.steps?.length ? freeWeekSetup(d.steps, r.plant_id ?? undefined, d.battery !== false) : null;
     case "account_deleted": return accountDeleted(r.to_email);
-    // Billing (0116): amounts in whole rand, dates as "2026-11-01".
-    case "bill_paid":
-      return paymentReceived({
-        plan: d.plan, period: d.period, amount: d.amount, date: day(d.date), card: d.card, reference: d.reference,
-        covers: covers(d.date, addDays(d.nextDate, -1)),
-        extraPlants: d.extra > 0 ? { n: d.extra, each: d.extraEach } : undefined,
-        next: { amount: d.nextAmount, date: day(d.nextDate) },
-      });
-    case "bill_upgraded":
-      // Extra plants left pricing (SOLAR-371): an old extra-plants row sends nothing.
-      if (d.from === d.to) return null;
-      return planUpgraded({
-        from: d.from, to: d.to, period: d.period, addedPlants: d.from === d.to ? d.added : undefined,
-        paidNow: d.amount, daysLeft: d.daysLeft, credit: d.credit ?? undefined, next: { amount: d.nextAmount, date: day(d.nextDate) },
-        card: (await billFacts(r.user_id))?.card ?? undefined, reference: d.reference,
-      });
-    case "bill_switched":
-      return planSwitched({
-        plan: d.plan, period: "yearly", amount: d.amount, date: day(d.date), card: d.card, reference: d.reference,
-        extraPlants: d.extra > 0 ? { n: d.extra, each: d.extraEach } : undefined,
-        startsOn: day(d.startsOn), next: { amount: d.nextAmount, date: day(d.nextDate) },
-        covers: covers(d.startsOn, addDays(d.nextDate, -1)),
-      });
-    case "bill_change": {
-      // The plants that stay: the user's others still collecting (SOLAR-415); stopped ones are not kept (SOLAR-488).
-      const { data: pus } = await db.from("plant_users").select("plant_name").eq("user_id", r.user_id)
-        .in("plant_id", await chosenPlants(r.user_id)).order("linked_at");
-      const keep = (pus ?? []).map((x) => x.plant_name ?? "").filter((n) => n && !(d.removePlants ?? []).includes(n));
-      return planChangeBooked({ keepPlants: keep,
-        from: d.from, to: d.to, fromPeriod: d.fromPeriod, toPeriod: d.toPeriod, on: day(d.on),
-        removePlants: d.removePlants, deleteOn: d.deleteOn ? day(d.deleteOn) : undefined, next: d.to === "free" ? undefined : { amount: d.nextAmount },
-        days: (await historyOf(r.user_id, d.removePlants ?? [])).days,
-        // Cancel to Free: history is deleted on the end date (SOLAR-495).
-        history: d.to === "free" ? await historyAt(r.user_id).then((h) => h ? { ...h, on: day(d.on) } : undefined) : undefined,
-      });
-    }
-    case "bill_kept": {
-      // What was undone: the change booked last, from its own email (SOLAR-415).
-      const booked = await lastMail(r.user_id, "bill_change", r.id);
-      return planKept({ plan: d.plan, period: d.period, next: { amount: d.nextAmount, date: day(d.on) },
-        undone: booked ? { to: booked.to, toPeriod: booked.toPeriod } : undefined });
-    }
-    case "bill_failed":
-      return paymentFailed({
-        plan: d.plan, period: d.period, amount: d.amount,
-        nextTry: d.nextTry ? day(d.nextTry) : undefined, freeOn: day(d.freeOn), payUrl: PAY_URL,
-        disputed: d.disputed ? day(d.disputed) : undefined,
-      });
-    case "bill_refund":
-      return paymentRefunded({ amount: Number(d.amount), date: day(d.date), reference: d.reference,
-        why: d.why === "price" || d.why === "hand" ? d.why : "changed", paid: d.paid ?? undefined,
-        card: (await billFacts(r.user_id))?.card ?? undefined });
-    case "bill_mail_failed":
-      return billMailFailed({ kind: String(d.kind), key: String(d.key), user: String(d.user ?? ""), error: String(d.error ?? "") });
-    case "bill_free":
-      return movedToFree({ from: d.from, deleteOn: day(d.deleteOn),
-        amount: (await lastMail(r.user_id, "bill_failed", r.id))?.amount ?? undefined,
-        price: { ...await priceOf(d.from, r.user_id), plants: d.plants } });
-    case "bill_removal_soon": {
-      // The next plan up keeps them: no plan to Home if 2 plants fit, else Family.
-      const plan = (await billFacts(r.user_id))?.plan;
-      const up = plan === "free" ? (d.plants.length + 1 <= 2 ? "home" : "family") : plan === "home" ? "family" : null;
-      return plantsRemovalSoon(d.plants, day(d.on), plan, up ? await priceOf(up, r.user_id) : undefined, (await historyOf(r.user_id, d.plants)).days);
-    }
-    case "bill_renewal_notice":
-      return renewalNotice({ plan: d.plan, amount: d.amount, on: day(d.on), card: (await billFacts(r.user_id))?.card ?? undefined,
-        change: d.changed ? "Your plan changes on that date, as you booked." : undefined });
-    case "bill_offer_ends":
-      return offerEnds({ plan: d.plan, period: d.period, was: d.was, amount: d.amount, on: day(d.on), card: d.card ?? undefined });
-    // SOLAR-406 (0161)
-    case "bill_card_changed":
-      return cardChanged({ card: d.card, was: d.was ?? undefined, at: d.at ? `${dayOf(d.at, tz) === "today" ? "Today" : dayOf(d.at, tz)} at ${hhmm(d.at, tz)}` : undefined,
-        next: d.nextDate ? { amount: d.nextAmount, date: day(d.nextDate) } : undefined });
-    case "bill_card_expiring":
-      return cardExpiring({ card: d.card, on: day(d.on), final: d.final === true,
-        days: Math.round((Date.parse(d.on) - Date.parse(local("Africa/Johannesburg").date)) / 86400e3), next: { amount: d.nextAmount, date: day(d.nextDate) } });
-    case "winback": {
-      // every plant still reading loses its history, not only the first (d.days, 0206; SOLAR-616)
-      const h = await historyOf(r.user_id);
-      return winback({ from: d.from, plant: h.plants[0], plants: h.plants.length, days: h.days, price: await priceOf(d.from, r.user_id),
-        deleteOn: d.deleteOn ? dayMonth(d.deleteOn) : undefined, unsub: unsubOf(r) });
-    }
-    case "bill_cancel_soon":
-      return cancelEndsSoon({ from: d.from, on: day(d.on), ...await historyOf(r.user_id).then((h) => ({ days: h.days, plants: h.plants.length })),
-        deleteOn: dayMonth(addDays(d.on, 30)) });
     case "need_a_hand": return needAHand(d.choose === true);
     case "feedback":
       return feedback({ email: String(d.email ?? ""), message: String(d.message ?? ""), page: String(d.page ?? ""),
@@ -490,25 +299,13 @@ async function build(r: Row): Promise<Email | null> {
 
 // ------------------------------------------------------------------- sending
 
-export type Out = { row: Row; mail: Email };
-type Done = {
-  id: number; status: "sent" | "queued" | "failed" | "skipped"; error?: string; retry_s?: number;
-  batch_key?: string; refund?: boolean;
-};
-
-// Temporary failures wait 1, 2, 4 ... 60 minutes; after MAX_TRIES the row fails.
-const MAX_TRIES = 8;
-const retry = (row: Row, error: string, batch_key?: string): Done =>
-  row.tries >= MAX_TRIES ? { id: row.id, status: "failed", error }
-    : { id: row.id, status: "queued", error, retry_s: Math.min(3600, 60 * 2 ** (row.tries - 1)), batch_key };
-// Not tried at all (the run ran out of time): back at once, not counted as a try.
-const later = (row: Row): Done => ({ id: row.id, status: "queued", error: "run out of time", retry_s: 0, refund: true });
 // Resend: 400 and 422 are the email itself (bad address, bad field), so it will
 // never pass. Anything else (429, 5xx, a network failure, and our own 401/403/404
-// from a bad key or address) is retried, and fails only after MAX_TRIES.
+// from a bad key or address) is tried again.
 const refused = (status: number) => status === 400 || status === 422;
 
 // Feedback (SOLAR-428): a reply goes to the user who sent it, with their screenshot attached.
+type Out = { row: Row; mail: Email };
 const fb = (o: Out) => o.row.kind === "feedback";
 const payload = (o: Out) => {
   return { from: senderFor(o.row.kind), reply_to: fb(o) && o.row.data.email ? o.row.data.email : REPLY_TO, to: [o.row.to_email],
@@ -535,58 +332,20 @@ async function post(url: string, body: unknown, key: string): Promise<{ status: 
 // for every Resend call in a run; a 429 holds them all until its Retry-After (SOLAR-645).
 const pacer = new Pacer(PACE_MS);
 
-/** One batch call. When Resend refuses it, each half again, down to the one email
- *  it refuses, so a bad address fails only itself and costs ~14 calls, not 100. */
-export async function sendBatch(outs: Out[], deadline: number, reuse?: string): Promise<Done[]> {
-  if (!outs.length) return [];
-  if (Date.now() > deadline) return outs.map((o) => later(o.row));
-  // A retry goes under the key its batch had: if Resend took that batch before the
-  // answer was lost, it answers from that and sends nothing twice.
-  const ids = new TextEncoder().encode(outs.map((o) => o.row.id).join("."));
-  const key = reuse ?? "q-" + [...new Uint8Array(await crypto.subtle.digest("SHA-256", ids))].map((b) => b.toString(16).padStart(2, "0")).join("");
-  // Resend's batch call takes no attachments, so feedback goes on its own (one per group, see run).
-  const one = outs.length === 1 && fb(outs[0]);
-  if (!await pacer.slot(deadline)) return outs.map((o) => later(o.row));
-  const res = await (one ? post(RESEND_URL, payload(outs[0]), key) : post(`${RESEND_URL}/batch`, outs.map(payload), key));
-  if (!res.error) return outs.map((o) => ({ id: o.row.id, status: "sent" }));
-  // Too many calls: nothing was sent. Back after Retry-After, under the same key, not counted as a try.
-  if (res.status === 429) {
-    pacer.hold(res.retryAfter);
-    noteError("resend_429", new Error(res.error), { hourly: true });
-    const retry_s = Math.ceil(retryAfterMs(res.retryAfter, Date.now()) / 1000);
-    return outs.map((o) => ({ id: o.row.id, status: "queued", error: res.error, retry_s, batch_key: key, refund: true }));
-  }
-  // 409: the old key was used with a different body (the batch changed since); a fresh one.
-  if (res.status === 409 && reuse) return await sendBatch(outs, deadline);
-  // A refusal ends as a failed row, which run() reports as email_failed: one report, not two (SOLAR-471).
-  if (!refused(res.status)) {
-    noteError(`resend_${res.status || "network"}`, new Error(res.error), { hourly: true });
-    return outs.map((o) => retry(o.row, res.error!, key));
-  }
-  if (outs.length === 1) return [{ id: outs[0].row.id, status: "failed", error: res.error }];
-  const half = Math.ceil(outs.length / 2);
-  return [...await sendBatch(outs.slice(0, half), deadline), ...await sendBatch(outs.slice(half), deadline)];
-}
-
 // ------------------------------------------------------------------- pop-ups
 
-// From 0264 the database sends an alert's facts and the words come from text.ts (SOLAR-645):
-// data, created (epoch s), tz, the plant's name and how many plants the user has. A row
-// from before 0264 brings its own title, body, tab and day.
+// The database sends an alert's facts and the words come from text.ts (SOLAR-645, 0264):
+// data, created (epoch s), tz, the plant's name and how many plants the user has.
 export type PopupFacts = {
-  kind: string; data?: Record<string, any> | null; created?: number; tz?: string; plant_name?: string | null; plants?: number;
-  title?: string | null; body?: string | null; tab?: string; day?: string | null;
+  kind: string; data: Record<string, any> | null; created: number; tz: string; plant_name?: string | null; plants?: number;
 };
 /** A pop-up's title, body, and the page and day a tap opens. */
 export function popup(r: PopupFacts): { title: string | null; body: string | null; tab: string; day: string | null } {
-  if (r.data === undefined) return { title: r.title ?? null, body: r.body ?? null, tab: r.tab ?? "live", day: r.day ?? null };
-  const t = alertLine({ kind: r.kind, data: r.data, created: Number(r.created), tz: r.tz! });
+  const t = alertLine({ kind: r.kind, data: r.data, created: Number(r.created), tz: r.tz });
   if (!t) return { title: null, body: null, tab: "live", day: null };
   return { ...alertPush(r.kind, t, r.plant_name ?? null, Number(r.plants ?? 1)), tab: t.tab,
            day: t.tab === "grid" || t.tab === "solar" ? t.day : null };
 }
-
-type PushRow = PopupFacts & { id: number; plant_id: number; subs: { endpoint: string; p256dh: string; auth: string }[] };
 
 let pushServer: Promise<webpush.ApplicationServer> | null = null;
 // A key that fails to load is tried again next run, not kept as a failure.
@@ -598,56 +357,7 @@ const server = () => pushServer ??= webpush.importVapidKeys(JSON.parse(VAPID_KEY
 const PUSH_HOST =
   /^https:\/\/(fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com|[a-z0-9-]+\.push\.apple\.com|[a-z0-9.-]+\.notify\.windows\.com)\/\S+$/;
 
-/** One pop-up to one browser: "ok", "gone" (delete it), or "failed" (left as is). */
-async function pushOne(r: PushRow, s: PushRow["subs"][number]): Promise<"ok" | "gone" | "failed"> {
-  // A row saved before 0194 can hold any address: never call it, and remove it.
-  if (!PUSH_HOST.test(s.endpoint)) return "gone";
-  // data is fields, not a link, so the phone apps can map them to their own screens.
-  // tag: a Grid back replaces its Grid down on screen, per plant.
-  const w = popup(r);
-  const msg = JSON.stringify({
-    title: w.title, body: w.body, tag: `${r.plant_id}:${r.kind === "relinked" ? "needs" : r.kind.split("_")[0]}`,
-    // a login's pop-up opens Account on the logins, where Reconnect is (SOLAR-380)
-    data: { id: r.id, tab: w.tab, plant: r.plant_id, day: w.day, section: w.tab === "account" ? "logins" : undefined },
-  });
-  try {
-    // An alert an hour late is no longer news: the push service drops it after that.
-    await (await server()).subscribe({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } })
-      .pushTextMessage(msg, { ttl: 3600, urgency: webpush.Urgency.High });
-    return "ok";
-  } catch (e) {
-    if (e instanceof webpush.PushMessageError && [404, 410].includes(e.response.status)) return "gone";
-    console.error("push failed:", e instanceof webpush.PushMessageError ? e.toString() : e);
-    // Status only: the push service's answer names the browser's endpoint.
-    noteError("push_failed", e instanceof webpush.PushMessageError ? new Error(`push service ${e.response.status}`) : e,
-      { plant: r.plant_id, hourly: true });
-    return "failed";
-  }
-}
-
-export async function pushPass(deadline: number) {
-  const count = { ok: 0, gone: 0, failed: 0 };
-  // Bad keys stop here, before push_claim marks anything done.
-  await server();
-  while (Date.now() < deadline) {
-    const rows = await rpc<PushRow[]>("push_claim", { p_limit: 200 });
-    if (!rows.length) break;
-    const jobs = rows.flatMap((r) => r.subs.map((s) => [r, s] as const));
-    const ok: string[] = [], gone: string[] = [];
-    for (let i = 0; i < jobs.length; i += PUSH_AT_ONCE) {
-      const res = await Promise.all(jobs.slice(i, i + PUSH_AT_ONCE).map(([r, s]) => pushOne(r, s)));
-      res.forEach((x, j) => {
-        count[x]++;
-        if (x === "ok") ok.push(jobs[i + j][1].endpoint);
-        if (x === "gone") gone.push(jobs[i + j][1].endpoint);
-      });
-    }
-    await rpc("push_done", { p_ok: ok, p_gone: gone });
-  }
-  return count;
-}
-
-// Pop-ups through the outbox (SOLAR-645 step 3, 0261): msg_push_take hands over one send per
+// Pop-ups (SOLAR-645 step 3, 0261): msg_push_take hands over one send per
 // device under a claim; msg_push_done takes each push service status back. The database
 // decides from it: 2xx sent, 404/410 device removed, 429/5xx/0 tried again inside the hour.
 export type PushSend = PopupFacts & {
@@ -765,13 +475,13 @@ export async function outboxPass(until: number, deadline = until) {
 // ------------------------------------------------------------------- emails, outbox (SOLAR-645 steps 4, 5)
 
 // msg_email_take (0262) leases due rows of one lane under one claim, after the guard at send
-// time, with the event row's fields; the email is built by build(), as on the old path. Up to
+// time, with the event row's fields; the email is built by build(). Up to
 // 100 go in one Resend batch call, its key saved on the rows first (msg_email_bind): a retry
 // after a lost answer, or after this worker died, sends the same rows under the same key, and
 // Resend answers from the first send. A row alone goes in its own call under ms-<id>; feedback
 // always goes alone (Resend's batch call takes no attachment). msg_email_done takes each answer
 // back; the database decides from it.
-// Bulk (SOLAR-645 step 5, 0263): the old path's holds come first (bulkHold): a hold hands the
+// Bulk (SOLAR-645 step 5, 0263): the holds come first (bulkHold): a hold hands the
 // row back for a while, the try given back, without building it.
 export type MsgEmail = {
   id: number; claim: string; tries: number; batch_key: string | null; event_id: number; user_id: string | null;
@@ -799,11 +509,10 @@ const rowOf = (m: MsgEmail): Row => ({ id: m.event_id, user_id: m.user_id, to_em
   plant_name: m.plant_name, tz: m.tz, kind: m.kind, key: m.key, data: m.data ?? {}, tries: m.tries, switch: null,
   unsub_token: m.unsub_token ?? null, batch_key: null });
 
-/** The old path's holds (emailPass): a report waits for its plant's history (SOLAR-273); the
+/** The holds: a report waits for its plant's history (SOLAR-273); the
  *  60-days email waits for the day totals, and each check runs the day sync again (SOLAR-522). */
 export const bulkHold: Hold = async (row) => {
-  // The free week's report doesn't wait: it goes on the day the week ends (0182).
-  if (row.kind.startsWith("report_") && row.data.freeWeekEnds !== true && await historyPending(row)) {
+  if (row.kind.startsWith("report_") && await historyPending(row)) {
     return { hold_s: 600, error: "waits for history" };
   }
   if (row.kind === "history" && row.plant_id && await historyWaits(row)) {
@@ -938,8 +647,7 @@ export async function msgEmailPass(until: number, deadline = until, call: Rpc = 
 export const msgBulkPass = (until: number, deadline = until) =>
   msgEmailPass(until, deadline, rpc, post, build, newBatchKey, "bulk", bulkHold);
 
-/** SOLAR-328: counted once an email has gone, by user id only, keyed on its event row. Both
- *  paths (old queue, message outbox) call it. */
+/** SOLAR-328: counted once an email has gone, by user id only, keyed on its event row. */
 export async function trackSent(row: Row, send = track) {
   if (!row.user_id) return;
   const id = String(row.id), at = new Date().toISOString();
@@ -963,107 +671,29 @@ export const sweep = () => rpc<Record<string, unknown>>("email_sweep").catch((e)
   return { error: String(e?.message ?? e) };
 });
 
-/** Sends email_queue rows of one lane (0257: "urgent" = alerts, "bulk" = the rest, null =
- *  all) while claiming before `until`; what isn't sent by `deadline` goes back untouched. */
-export async function emailPass(lane: "urgent" | "bulk" | null, until: number, deadline: number, dry: boolean, withHtml = false) {
-  const lines: Record<string, unknown>[] = [];
-  const count = { sent: 0, queued: 0, failed: 0, skipped: 0 };
-  while (Date.now() < until) {
-    // no lane: the old two-argument call, so the old notify works before and after 0257
-    const rows = await rpc<Row[]>("email_claim", { p_limit: BATCH, p_peek: dry, ...(lane ? { p_lane: lane } : {}) });
-    if (!rows.length) break;
-    const outs: Out[] = [], done: Done[] = [];
-    for (const row of rows) {
-      // Reports cost two reads each; what isn't built in time goes back untouched.
-      if (Date.now() > deadline) { done.push(later(row)); continue; }
-      try {
-        // The free week's report doesn't wait: it goes on the day the week ends (0182).
-        if (row.kind.startsWith("report_") && row.data.freeWeekEnds !== true && !dry && await historyPending(row)) {
-          done.push({ id: row.id, status: "queued", error: "waits for history", retry_s: 600, refund: true });
-          continue;
-        }
-        // Checked every 10 minutes; each check runs the day sync again (SOLAR-522).
-        if (row.kind === "history" && row.plant_id && await historyWaits(row)) {
-          if (dry) lines.push({ kind: row.kind, key: row.key, held: "waits for day totals" });
-          else {
-            resync(row.plant_id);
-            done.push({ id: row.id, status: "queued", error: "waits for day totals", retry_s: 600, refund: true });
-          }
-          continue;
-        }
-        const mail = await build(row);
-        if (!mail) {
-          // History waits for the day sync (plant_energy) to land: try again hourly.
-          // An empty report is final.
-          done.push(row.kind === "history" && row.tries < MAX_TRIES
-            ? { id: row.id, status: "queued", error: "nothing to say yet", retry_s: 3600 }
-            : { id: row.id, status: "skipped", error: "nothing to say" });
-          continue;
-        }
-        outs.push({ row, mail });
-        lines.push({ kind: row.kind, key: row.key, to: row.to_email, subject: mail.subject, ...(withHtml ? { html: mail.html } : {}) });
-      } catch (e) {
-        // One email that can't be built stops nothing else.
-        done.push(retry(row, `build: ${e instanceof Error ? e.message : e}`));
-        noteError("email_build_failed", e, { user: row.user_id, hourly: true });
-      }
-    }
-    if (dry) break;  // a peek claims nothing, so the next read would be the same rows
-    // Retries go in the batch they went in before, under its key; new rows in fresh batches.
-    const groups = new Map<string, Out[]>();
-    for (const o of outs) {
-      const g = o.row.batch_key ?? (fb(o) ? `fb-${o.row.id}` : "");
-      groups.set(g, [...(groups.get(g) ?? []), o]);
-    }
-    for (const [key, group] of groups) done.push(...await sendBatch(group, deadline, key || undefined));
-    for (const x of done) count[x.status]++;
-    // Given up for good: Resend refused it, or it failed MAX_TRIES times.
-    for (const x of done.filter((d) => d.status === "failed")) {
-      const row = rows.find((r) => r.id === x.id);
-      noteError("email_failed", new Error(`${row?.kind ?? "email"} ${x.id}: ${x.error ?? ""}`), { user: row?.user_id ?? null, hourly: true });
-    }
-    await rpc("email_done", { p_results: done });
-    for (const x of done) {
-      const row = x.status === "sent" ? rows.find((r) => r.id === x.id) : undefined;
-      if (row) await trackSent(row);
-    }
-    // Rows handed back unsent (out of time, or a 429 held past the deadline): claiming
-    // again would only build the same rows again.
-    if (done.some((x) => x.error === "run out of time")) break;
-  }
-  return { ...count, due: lines };
-}
-
-// The old single run (cron email-notify until 0257): kept so the switch can go back.
-async function run(dry: boolean, withHtml: boolean, push: boolean) {
+// All of notify-email and notify-push in one call (the cron job until 0257).
+async function run(dry: boolean, push: boolean) {
   const started = Date.now();
-  const swept = dry ? null : await sweep();
-  const { due, ...count } = await emailPass(null, started + BUDGET_MS, started + BUDGET_MS + 5_000, dry, withHtml);
-  // alert emails routed to the outbox (0262), so going back to this run sends them too
-  const alerts = dry ? null : await msgEmailPass(started + BUDGET_MS, started + BUDGET_MS + 5_000).catch((e) => {
+  if (dry) return { live: false };
+  const swept = await sweep();
+  const alerts = await msgEmailPass(started + BUDGET_MS, started + BUDGET_MS + 5_000).catch((e) => {
     noteError("msg_email_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   });
-  const outbox = dry ? null : await outboxPass(started + BUDGET_MS + 5_000).catch((e) => {
+  const outbox = await outboxPass(started + BUDGET_MS + 5_000).catch((e) => {
     noteError("outbox_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   });
-  // the rest routed to the outbox (0263)
-  const bulk = dry ? null : await msgBulkPass(started + BUDGET_MS + 5_000).catch((e) => {
+  const bulk = await msgBulkPass(started + BUDGET_MS + 5_000).catch((e) => {
     noteError("msg_email_bulk_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   });
   // The cron call times out at 55 s.
-  const pushed = push ? await pushPass(started + 47_000).catch((e) => {
-    noteError("push_pass_failed", e, { hourly: true });
-    return { error: String(e?.message ?? e) };
-  }) : null;
-  // pop-ups routed to the outbox (0261), so going back to this run sends them too
-  const pushedOutbox = push ? await outboxPushPass(started + 50_000).catch((e) => {
+  const pushed = push ? await outboxPushPass(started + 50_000).catch((e) => {
     noteError("push_outbox_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   }) : null;
-  return { live: !dry, swept, ...count, alerts, outbox, bulk, pushed, pushedOutbox, due };
+  return { live: true, swept, alerts, outbox, bulk, pushed };
 }
 
 // Every template from one plant's real numbers; event values are samples.
@@ -1102,9 +732,6 @@ async function renderAll(plantId: number, today?: string) {
   out["plant-off-login"] = loginEvent({ kind: "plant_off_login", plants: [p.name], login: "you@example.com" }, p.id);
   out["share-no-readings"] = loginEvent({ kind: "share_down", plants: [p.name], at: hhmm(now - 1500, p.tz) }, p.id);
   out["share-readings-back"] = loginEvent({ kind: "share_back", plants: [p.name], since: hhmm(now - 7500, p.tz), at: hhmm(now, p.tz), lasted: lasted(now - 7500, now) }, p.id);
-  // The free week's two emails (0122); steps are a sample.
-  out["free-week-setup"] = freeWeekSetup(["size", "reserve", "panels"]);
-  out["free-week-ends-soon"] = freeWeekEndsSoon("Monday 10 Nov", await priceOf("home", null), `${APP}/unsubscribe.html?t=&k=reminders`);
   return out;
 }
 
@@ -1116,7 +743,7 @@ if (import.meta.main) serve("notify", async (req) => {
     if (url.searchParams.get("render") === "all") return json(await renderAll(Number(url.searchParams.get("plant")), url.searchParams.get("today") ?? undefined));
     const dryParam = url.searchParams.get("dry") === "1";
     const dry = !LIVE || !RESEND_KEY || dryParam;
-    return json(await run(dry, url.searchParams.get("html") === "1", !!VAPID_KEYS && LIVE && !dryParam));
+    return json(await run(dry, !!VAPID_KEYS && LIVE && !dryParam));
   } catch (e) {
     await reportError("notify", e);
     console.error("notify failed:", e);
