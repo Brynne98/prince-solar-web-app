@@ -192,8 +192,10 @@ window.useAccountWatch = function useAccountWatch(acct) {
   React.useEffect(() => {
     if (!pastDue) return;
     const left = Date.parse(acct.plan_ends_at) - Date.parse(acct.at || new Date().toISOString()) - (Date.now() - (acct._got || Date.now()));
-    const c = setTimeout(readNow, left > 0 ? left + 1000 : 60000);
-    return () => clearTimeout(c);
+    // then every minute, so a failed read (acct unchanged, no new effect) is tried again
+    let i = null;
+    const c = setTimeout(() => { readNow(); i = setInterval(readNow, 60000); }, left > 0 ? left + 1000 : 60000);
+    return () => { clearTimeout(c); clearInterval(i); };
   }, [pastDue, acct]);
 };
 
@@ -515,13 +517,15 @@ window.billingReturn = async function billingReturn(acct) {
   if (done === 'paid') return paidNow();
   // The event a card-page payment was opened with: sent only if it was paid.
   let paidEvent = null;
-  try { paidEvent = JSON.parse(sessionStorage.getItem(PAID_EVENT)); sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
+  // kept while the result is unknown, so a reload during the check still sends it
+  try { paidEvent = JSON.parse(sessionStorage.getItem(PAID_EVENT)); if (SETTLED.includes(check.status)) sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
   return payResult(check, paidEvent);
 };
 // What a checked card-page payment says. Still being checked: asked again every 5 s for a
 // minute, then a Check again button; no answer from Paystack: Check again too.
 async function payResult(v, paidEvent = null, polled = false) {
   const { status, kind } = v;
+  if (SETTLED.includes(status)) try { sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
   const again = () => { window.toast(AT.pay.pending, { info: true, sticky: true }); checkRef(v.reference).then(r => payResult(r, paidEvent, true)); };
   // A card change changes no plan: the caller re-reads the card ('card').
   if (status === 'unknown') return;
