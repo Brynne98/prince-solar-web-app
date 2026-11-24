@@ -804,16 +804,6 @@ export async function markCursor(key: string, plantId: number): Promise<void> {
   }
 }
 
-/**
- * The plant the single-site features (alerts) are bound
- * to: pinned in app_config.CALIBRATION_PLANT by the first link (migration 0041).
- * Same rule as public.calibration_plant().
- */
-export async function bootstrapPlantId(): Promise<number | null> {
-  const v = await rpc<number | null>("calibration_plant", {});
-  return v == null ? null : Number(v);
-}
-
 // ---------------------------------------------------------------------------
 // Shared plants (SOLAR-310, 0172)
 // ---------------------------------------------------------------------------

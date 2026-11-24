@@ -71,7 +71,7 @@ would drag a Pages rebuild along for nothing.
 > ```bash
 > supabase secrets set SUNSYNK_APP_KEY=… SUNSYNK_APP_SECRET=… BOOTSTRAP_USER_EMAIL=brynneprince98@gmail.com
 > supabase db push
-> supabase functions deploy poll link-sunsynk recover sync-plant-energy alerts-due
+> supabase functions deploy poll link-sunsynk recover sync-plant-energy
 > ```
 
 > **Releasing the sharded poller (migration 0030):** push the migration **before**
@@ -90,7 +90,7 @@ would drag a Pages rebuild along for nothing.
 ```bash
 supabase db push --linked                         # pending migrations
 supabase functions deploy poll                    # only what changed
-supabase functions deploy alerts-due recover sync-plant-energy
+supabase functions deploy recover sync-plant-energy
 ```
 
 **New tables, sequences and functions get no access by default** (0108, SOLAR-145).
@@ -131,7 +131,7 @@ Function"), so over-deploying costs nothing. It also means `UPDATED_AT` in
 uncommitted working tree can land before the commit.
 
 ```bash
-supabase functions deploy poll recover alerts-due link-sunsynk sync-plant-energy
+supabase functions deploy poll recover link-sunsynk sync-plant-energy
 ```
 
 After deploying `poll`, confirm the logger survived:
@@ -406,7 +406,7 @@ does not change with the site's domain.
 | `public/` | the whole frontend, published as-is |
 | `public/config.js` | version + per-environment Supabase URL/key |
 | `supabase/migrations/` | schema and RPCs |
-| `supabase/functions/` | `poll`, `recover`, `sync-plant-energy`, `alerts-due`, `link-sunsynk` |
+| `supabase/functions/` | `poll`, `recover`, `sync-plant-energy`, `link-sunsynk` |
 | `supabase/functions/_shared/` | code bundled into every function that imports it; a change here needs those functions redeployed |
 | `.github/workflows/secrets-guard.yml` + `.gitleaks.toml` | fails if a secret is anywhere in the repo or its history |
 | `.github/workflows/health.yml` | half-hourly logger check, emails on failure |

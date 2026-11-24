@@ -64,15 +64,6 @@ create function pg_temp.done(p_event bigint, p_res jsonb) returns void language 
   select public.msg_email_done(t.claim, jsonb_build_array(jsonb_build_object('id', t.id) || p_res))
     from t_take t where t.event_id = p_event
 $$;
--- the old path, as notify: claim (urgent lane) and mark each claimed row sent
-create function pg_temp.old_send(p_user uuid) returns bigint[] language plpgsql as $$
-declare got bigint[];
-begin
-  got := array(select id from public.email_claim(100, false, 'urgent') where user_id = p_user order by id);
-  perform public.email_done((select jsonb_agg(jsonb_build_object('id', x, 'status', 'sent')) from unnest(got) x));
-  return got;
-end $$;
-
 -- ---------------------------------------------------------------------------
 -- R: route at insert
 -- ---------------------------------------------------------------------------
@@ -85,11 +76,12 @@ begin
     (select status from public.email_queue where id = q) = 'outbox'
     and o.channel = 'email' and o.lane = 'urgent' and o.status = 'queued' and o.expires_at = now() + interval '1 hour'
     and o.to_email = 'r1@msge.test', row_to_json(o)::text);
-  perform pg_temp.ok('R1 ... email_claim never takes it', q not in (select id from public.email_claim(100, true)));
-  -- welcome went to the outbox in 0263: a kind with no msg.kinds row stands in
-  insert into public.email_queue (user_id, kind, key, priority) values (u, 'free_week_setup', 'r1:fws', 1) returning id into w;
-  perform pg_temp.ok('R2 a kind not in msg.kinds: stays on the old path',
-    (select status from public.email_queue where id = w) = 'queued' and pg_temp.ob(w) is null);
+  -- 0265: the shared plant's login emails, the last kinds on the old path
+  w := pg_temp.ev(u, 990066901, 'share_down', 'r1:share');
+  perform pg_temp.ok('R2 share_down: event "outbox", one email row, urgent, 1 h expiry, no pop-up',
+    (select status = 'outbox' and pushed_at is null from public.email_queue where id = w)
+    and (pg_temp.ob(w)).lane = 'urgent' and (pg_temp.ob(w)).expires_at = now() + interval '1 hour'
+    and (select count(*) from msg.outbox where event_id = w) = 1);
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -332,81 +324,50 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- X: a flip with rows in flight, a pair across the paths both ways, a flip back
+-- X: "down" rows sent or skipped on the old path before 0265 still pair; no way back
 -- ---------------------------------------------------------------------------
 do $$
-declare u uuid := pg_temp.owner('x1', '{990066931}'); x bigint; y bigint; back bigint; n int; got bigint[];
+declare u uuid := pg_temp.owner('x1', '{990066931}'); down bigint; back bigint; n int;
 begin
-  update msg.kinds set route = 'old' where channel = 'email';
-  x := pg_temp.ev(u, 990066931, 'grid_down', 'x1:down');               -- queued before the flip
-  update msg.kinds set route = 'outbox' where channel = 'email';
-  y := pg_temp.ev(u, 990066931, 'batt_hot', 'x1:hot');                  -- after it
-  back := pg_temp.ev(u, 990066931, 'grid_back', 'x1:back', 'x1:down');  -- its "down" is on the old path
+  insert into public.email_queue (user_id, plant_id, kind, key, data, priority, status, sent_at)
+  values (u, 990066931, 'grid_down', 'x1:down', '{}', 0, 'sent', now()) returning id into down;
+  back := pg_temp.ev(u, 990066931, 'grid_back', 'x1:back', 'x1:down');
   n := pg_temp.take();
-  perform pg_temp.ok('X1 flip in flight: the old row stays on the old path, no outbox row',
-    pg_temp.ob(x) is null and (select status from public.email_queue where id = x) = 'queued');
-  perform pg_temp.ok('X1 ... the new row goes through the outbox', pg_temp.taken(y));
-  perform pg_temp.ok('X2 old "down" -> outbox "back": waits while the old "down" is queued',
-    not pg_temp.taken(back) and (pg_temp.ob(back)).status = 'queued');
-  got := array(select id from public.email_claim(100, false, 'urgent') where user_id = u);
-  perform pg_temp.ok('X1 ... email_claim sends only the old row (no double)', got = array[x], got::text);
-  n := pg_temp.take();
-  perform pg_temp.ok('X2 ... and while it is sending', not pg_temp.taken(back));
-  perform public.email_done(jsonb_build_array(jsonb_build_object('id', x, 'status', 'sent')));
-  n := pg_temp.take();
-  perform pg_temp.ok('X2 ... once the old "down" went, the "back" goes', pg_temp.taken(back));
+  perform pg_temp.ok('X1 "back" whose "down" went on the old path: goes', pg_temp.taken(back));
 end $$;
 
 do $$
-declare u uuid := pg_temp.owner('x3', '{990066932}'); down bigint; back bigint; n int; got bigint[];
+declare u uuid := pg_temp.owner('x2', '{990066932}'); down bigint; back bigint; n int;
 begin
-  down := pg_temp.ev(u, 990066932, 'grid_down', 'x3:down');            -- on the outbox
-  update msg.kinds set route = 'old' where channel = 'email';           -- flip back
-  back := pg_temp.ev(u, 990066932, 'grid_back', 'x3:back', 'x3:down');
-  perform pg_temp.ok('X3 flip back: new rows go to the old path',
-    pg_temp.ob(back) is null and (select status from public.email_queue where id = back) = 'queued');
-  got := array(select id from public.email_claim(100, true, 'urgent') where user_id = u);
-  perform pg_temp.ok('X3 outbox "down" -> old "back": email_claim waits while the "down" is queued', got = '{}', got::text);
+  insert into public.email_queue (user_id, plant_id, kind, key, data, priority, status, last_error)
+  values (u, 990066932, 'grid_down', 'x2:down', '{}', 0, 'skipped', 'switched off') returning id into down;
+  back := pg_temp.ev(u, 990066932, 'grid_back', 'x2:back', 'x2:down');
   n := pg_temp.take();
-  perform pg_temp.ok('X3 ... outbox rows made before the flip back still go', pg_temp.taken(down));
-  got := array(select id from public.email_claim(100, true, 'urgent') where user_id = u);
-  perform pg_temp.ok('X3 ... and while it is leased', got = '{}', got::text);
+  perform pg_temp.ok('X2 "back" whose old "down" was skipped: dropped "down not sent"',
+    (pg_temp.ob(back)).drop_reason = 'down not sent', (pg_temp.ob(back)).drop_reason);
+end $$;
+
+do $$
+declare u uuid := pg_temp.owner('x3', '{990066933}'); down bigint; back bigint; n int;
+begin
+  down := pg_temp.ev(u, 990066933, 'share_down', 'x3:down');
+  back := pg_temp.ev(u, 990066933, 'share_back', 'x3:back', 'x3:down');
+  n := pg_temp.take();
+  perform pg_temp.ok('X3 share pair: the "back" waits while its "down" is leased',
+    pg_temp.taken(down) and not pg_temp.taken(back) and (pg_temp.ob(back)).status = 'queued');
   perform pg_temp.done(down, '{"code": 200}');
-  got := pg_temp.old_send(u);
-  perform pg_temp.ok('X3 ... after the "down" went, email_claim sends the "back"', got = array[back], got::text);
-  update msg.kinds set route = 'outbox' where channel = 'email';
+  n := pg_temp.take();
+  perform pg_temp.ok('X3 ... once the "down" went, the "back" goes', pg_temp.taken(back));
 end $$;
 
 do $$
-declare u uuid := pg_temp.owner('x4', '{990066933}'); down bigint; back bigint; n int;
+declare refused boolean := false;
 begin
-  down := pg_temp.ev(u, 990066933, 'grid_down', 'x4:down');
-  n := pg_temp.take();
-  perform pg_temp.done(down, '{"code": 400}');
-  update msg.kinds set route = 'old' where channel = 'email';
-  back := pg_temp.ev(u, 990066933, 'grid_back', 'x4:back', 'x4:down');
-  perform pg_temp.old_send(u);
-  perform pg_temp.ok('X4 old "back" after an outbox "down" that failed: skipped "down not sent"',
-    (select (status, last_error) = ('skipped', 'down not sent') from public.email_queue where id = back),
-    (select status || ' ' || last_error from public.email_queue where id = back));
-  update msg.kinds set route = 'outbox' where channel = 'email';
-end $$;
-
--- old "down" skipped (switch off), outbox "back": dropped
-do $$
-declare u uuid := pg_temp.owner('x5', '{990066934}'); down bigint; back bigint; n int;
-begin
-  insert into public.email_prefs (user_id, grid) values (u, false) on conflict (user_id) do update set grid = false;
-  update msg.kinds set route = 'old' where channel = 'email';
-  down := pg_temp.ev(u, 990066934, 'grid_down', 'x5:down');
-  perform pg_temp.old_send(u);
-  update msg.kinds set route = 'outbox' where channel = 'email';
-  update public.email_prefs set grid = true where user_id = u;
-  back := pg_temp.ev(u, 990066934, 'grid_back', 'x5:back', 'x5:down');
-  n := pg_temp.take();
-  perform pg_temp.ok('X5 old "down" skipped: outbox "back" dropped "down not sent"',
-    (select status from public.email_queue where id = down) = 'skipped' and (pg_temp.ob(back)).drop_reason = 'down not sent',
-    (pg_temp.ob(back)).drop_reason);
+  begin
+    update msg.kinds set route = 'old' where kind = 'grid_down' and channel = 'email';
+  exception when check_violation then refused := true;
+  end;
+  perform pg_temp.ok('X4 an email kind can no longer go back to the old path', refused);
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -501,8 +462,8 @@ begin
     and has_function_privilege('service_role', 'public.msg_email_done(uuid, jsonb)', 'execute')
     and not has_function_privilege('anon', 'public.msg_email_take(int, text)', 'execute')
     and not has_function_privilege('authenticated', 'public.msg_email_done(uuid, jsonb)', 'execute'));
-  perform pg_temp.ok('S2 every alert kind routes email to the outbox, urgent lane',
-    (select count(*) from msg.kinds where channel = 'email' and route = 'outbox' and lane = 'urgent') = 14);
+  perform pg_temp.ok('S2 every alert kind, share_down and share_back (0265) route email to the outbox, urgent lane',
+    (select count(*) from msg.kinds where channel = 'email' and route = 'outbox' and lane = 'urgent') = 16);
 end $$;
 
 -- ---------------------------------------------------------------------------

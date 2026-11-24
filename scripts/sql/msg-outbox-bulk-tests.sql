@@ -93,15 +93,6 @@ begin
     (select jsonb_agg(jsonb_build_object('id', x, 'name', 'Plant ' || x)) from unnest(p_plants) x), now(), 'owner', l);
   return u;
 end $$;
--- the old path, as notify: claim (urgent lane) and mark each claimed row sent
-create function pg_temp.old_send(p_user uuid) returns bigint[] language plpgsql as $$
-declare got bigint[];
-begin
-  got := array(select id from public.email_claim(100, false, 'urgent') where user_id = p_user order by id);
-  perform public.email_done((select jsonb_agg(jsonb_build_object('id', x, 'status', 'sent')) from unnest(got) x));
-  return got;
-end $$;
-
 -- ---------------------------------------------------------------------------
 -- R: route at insert
 -- ---------------------------------------------------------------------------
@@ -114,7 +105,6 @@ begin
     (select status from public.email_queue where id = q) = 'outbox'
     and o.lane = 'bulk' and o.status = 'queued' and o.expires_at = now() + interval '3 days' and o.to_email = 'r1@msgb.test',
     row_to_json(o)::text);
-  perform pg_temp.ok('R1 ... email_claim never takes it', q not in (select id from public.email_claim(100, true)));
   perform pg_temp.ok('R2 bulk rows stay out of the urgent take', pg_temp.take() >= 0 and not pg_temp.taken(q));
   f := pg_temp.bev(u, null, 'feedback', 'r1:fb', '{"message": "hi"}', now(), 'hello@princesolarhub.co.za');
   perform pg_temp.ok('R3 feedback: to hello@, 7 days', (pg_temp.ob(f)).to_email = 'hello@princesolarhub.co.za'
@@ -219,7 +209,7 @@ end $$;
 -- H: holds
 -- ---------------------------------------------------------------------------
 do $$
-declare u uuid := pg_temp.owner('h1', '{990068041}'); q bigint; o msg.outbox; n int; hist bigint; hist2 bigint;
+declare u uuid := pg_temp.owner('h1', '{990068041}'); q bigint; o msg.outbox; n int; hist bigint;
 begin
   q := pg_temp.bev(u, 990068041, 'report_week', 'h1:rep', jsonb_build_object('today', current_date));
   n := pg_temp.btake();
@@ -246,11 +236,6 @@ begin
   perform pg_temp.ok('H3 ... while leased: open', public.email_history_open(u, 990068041));
   perform pg_temp.done(hist, '{"code": 200}');
   perform pg_temp.ok('H3 ... once sent: not open', not public.email_history_open(u, 990068041));
-  update msg.kinds set route = 'old' where kind = 'history' and channel = 'email';
-  hist2 := pg_temp.bev(u, 990068041, 'history', 'h1:hist2');
-  perform pg_temp.ok('H4 history on the old path, queued: open', public.email_history_open(u, 990068041)
-    and (select status from public.email_queue where id = hist2) = 'queued');
-  update msg.kinds set route = 'outbox' where kind = 'history' and channel = 'email';
   perform pg_temp.ok('H5 service role only',
     has_function_privilege('service_role', 'public.email_history_open(uuid, bigint)', 'execute')
     and not has_function_privilege('authenticated', 'public.email_history_open(uuid, bigint)', 'execute'));
@@ -352,29 +337,16 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- X: a flip with rows in flight, a flip back
+-- X: no way back (0265)
 -- ---------------------------------------------------------------------------
 do $$
-declare u uuid := pg_temp.owner('x1', '{990068071}'); x bigint; y bigint; z bigint; n int; got bigint[];
+declare refused boolean := false;
 begin
-  update msg.kinds set route = 'old' where channel = 'email' and lane = 'bulk';
-  x := pg_temp.bev(u, 990068071, 'report_week', 'x1:rep', jsonb_build_object('today', current_date));  -- before the flip
-  update msg.kinds set route = 'outbox' where channel = 'email' and lane = 'bulk';
-  y := pg_temp.bev(u, 990068071, 'report_month', 'x1:rep2', jsonb_build_object('today', current_date)); -- after it
-  n := pg_temp.btake();
-  perform pg_temp.ok('X1 flip in flight: the old row stays on the old path, no outbox row',
-    pg_temp.ob(x) is null and (select status from public.email_queue where id = x) = 'queued');
-  perform pg_temp.ok('X1 ... the new row goes through the outbox', pg_temp.taken(y));
-  got := array(select id from public.email_claim(100, false, 'bulk') where user_id = u);
-  perform pg_temp.ok('X1 ... email_claim sends only the old row (no double)', got = array[x], got::text);
-  update msg.kinds set route = 'old' where channel = 'email' and lane = 'bulk';  -- flip back
-  z := pg_temp.bev(u, 990068071, 'report_year', 'x1:rep3', jsonb_build_object('today', current_date));
-  perform pg_temp.ok('X2 flip back: new rows go to the old path; alerts stay on the outbox',
-    pg_temp.ob(z) is null and (select status from public.email_queue where id = z) = 'queued'
-    and (select count(*) from msg.kinds where channel = 'email' and lane = 'urgent' and route = 'outbox') = 14);
-  perform pg_temp.done(y, '{"code": 200}');
-  perform pg_temp.ok('X2 ... outbox rows made before the flip back still close', (pg_temp.ob(y)).status = 'sent');
-  update msg.kinds set route = 'outbox' where channel = 'email' and lane = 'bulk';
+  begin
+    update msg.kinds set route = 'old' where channel = 'email' and lane = 'bulk';
+  exception when check_violation then refused := true;
+  end;
+  perform pg_temp.ok('X1 a bulk kind can no longer go back to the old path', refused);
 end $$;
 
 -- ---------------------------------------------------------------------------

@@ -35,10 +35,8 @@ export const REPLY_TO = "hello@princesolarhub.co.za";
 // The sender for a mail_queue kind. Account mail Supabase Auth sends itself uses noreply@ too.
 export const senderFor = (kind: string) =>
   kind === "account_deleted" ? FROM_ACCOUNT
-    : kind.startsWith("bill_") || kind === "free_week_soon" ? FROM_BILLING
     : kind.startsWith("report_") ? FROM_REPORTS
-    : kind === "welcome" || kind === "history" || kind === "free_week_setup" || kind === "winback" || kind === "need_a_hand"
-      || kind.startsWith("unpaid_") ? FROM_HELLO
+    : kind === "welcome" || kind === "history" || kind === "need_a_hand" ? FROM_HELLO
     : FROM_ALERTS;
 // Supabase's link lifetime (Auth -> mailer OTP expiry): 24 hours since SOLAR-196.
 const LINK_LIFE = "The link works once, for 24 hours.";
@@ -298,6 +296,28 @@ const make = (subject: string, b: Body): Email => ({ subject, html: keep(html(su
 
 // ---------------------------------------------------------------- billing outbox (SOLAR-641)
 
+// SOLAR-208. Billing runs on our side (Paystack charge_authorization), so receipts and
+// plan changes come from us; Paystack's own receipts are off. Prices are final: the
+// company isn't VAT-registered, so no VAT line.
+const PLAN = `${APP}/?tab=account&section=plan`;
+// "Pay with another card": the Plan section opens Paystack's card page for the failed payment.
+const PAY_URL = `${PLAN}&pay=1`;
+// Buttons that ask them to pick a plan open Adjust plan (SOLAR-341).
+const PLANS = `${APP}/?tab=plans`;
+// Billing's Payment section: the saved card and its Update button (SOLAR-473).
+const PAYMENT = `${APP}/?tab=account&section=payments`;
+// Billing's Cancellation section (SOLAR-361).
+const CANCEL = `${APP}/?tab=account&section=cancel`;
+// Who is selling: on every billing email (SOLAR-415).
+const SELLER = "Prince Solar Hub is run by Theron and Prince Solutions (Pty) Ltd, reg. no. 2026/182827/07, Kempton Park, Gauteng. No VAT is charged.";
+const BILL_FOOTER = [HELP, SELLER];
+// A psh_ reference is 36 characters with no break: it wraps anywhere, or it pushes the
+// box past a phone's width (SOLAR-484).
+const ref = (r: string) => `<span style="word-break:break-all">${esc(r)}</span>`;
+// Every email that offers a plan says why it came and links the page that turns the
+// 'reminders' switch off ("Offers and reminders" in the app, SOLAR-569; POPIA s69(4)).
+const OFFER_FOOTER = (why: string, unsub: string) => [`You get this because ${why}. <a href="${unsub}">Unsubscribe</a>.`, HELP];
+
 /** An email from the text catalog (_shared/text.ts mail()): its words and numbers come from
  *  the account's state read at send time; this only lays them out. unsub: the reminders
  *  switch's page, for the kinds behind it. */
@@ -493,10 +513,6 @@ export type Report = {
   bestDay?: { label: string; kwh: number };
   highestUse?: { label: string; kwh: number }; // the day the home used the most ("Busiest day")
   daily?: Bars; // solar kWh per day (per month for a year)
-  // The report sent when the free week ends (SOLAR-208): the plan that holds the
-  // account's plants, at its price (SOLAR-559).
-  // unsub: the page that turns offers and reminders off (SOLAR-569).
-  freeWeekEnds?: FreeWeekEnd;
   partialFrom?: string; // first day counted, when after the period starts: "20 Oct" (SOLAR-273)
   partialWhy?: "added" | "history"; // the plant was added then (SOLAR-305), or its history starts then
 };
@@ -531,13 +547,6 @@ export function report(r: Report): Email {
     ...(r.savedRand != null ? [{ label: "Est. saved", value: rand(r.savedRand), ...trend(r.change.saved, r.prevLabel, "up", r.savedRand, r.was?.saved, rand) }] : []),
   ];
   const parts: Part[] = [];
-  const fw = r.freeWeekEnds;
-  // The free week's end comes first, then its report (SOLAR-475).
-  if (fw) parts.push(...freeWeekEndedParts(fw),
-    { heading: "Your free week" },
-    { note: `What ${esc(r.plant)} made and used, ${r.label.replace(/ /g, "&nbsp;").replace("–", "–⁠")}.` },
-  );
-  // The free week's day-7 report is the last without a plan, so it promises no next one.
   if (r.partialFrom) parts.push({ note: `From ${r.partialFrom}, when ${r.partialWhy === "added" ? "you added this plant" : "your history starts"}.` +
     "" });
   parts.push({ stats });
@@ -549,7 +558,6 @@ export function report(r: Report): Email {
     const avg = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 0;
     parts.push({ chart: { title: r.period === "year" ? "Solar each month" : "Solar each day", side: `Average ${kwh(avg).join(" ")} a ${r.period === "year" ? "month" : "day"}`, bars: r.daily, facts } });
   } else if (facts.length) parts.push({ facts: facts.map((f) => ({ label: f.label, value: `${f.sub ? esc(f.sub) + " · " : ""}${f.value}${f.unit ? " " + f.unit : ""}` })) });
-  if (fw) return freeWeekMail(parts, fw.unsub);
   parts.push({ button: openPage("live", r.plantId) });
   return make(`${EVERY[r.period]} solar report for ${r.plant}: ${r.label}`, {
     title: r.label,
@@ -558,22 +566,6 @@ export function report(r: Report): Email {
     footer: SETTINGS_FOOTER(`Sent every ${r.period}. Turn it off in notification settings.`),
   });
 }
-
-// When the free week ends (SOLAR-475, SOLAR-559): what stopped and the plan that carries
-// on. Sent on top of the week's report, or alone when the week has no readings.
-const STOPPED: [string, string][] = [["Readings", "Stopped"], ["Alerts and reports", "Stopped"]];
-export type FreeWeekEnd = { price: Price; unsub: string };
-const freeWeekEndedParts = (e: FreeWeekEnd): Part[] => [
-  { pair: ["Readings stopped today", "The app stopped with them: live view, history, alerts and reports."] },
-  { pair: [`Upgrade to ${PLAN_NAME[e.price.plan]}`, "Readings carry on."] },
-  ...startPlan(e.price),
-];
-const freeWeekMail = (parts: Part[], unsub: string) => make("Your free week has ended",
-  { title: "Your free week has ended", parts, footer: OFFER_FOOTER("your free week ended", unsub) });
-export const freeWeekEnded = (e: FreeWeekEnd) => freeWeekMail(freeWeekEndedParts(e), e.unsub);
-// Every email that offers a plan says why it came and links the page that turns the
-// 'reminders' switch off ("Offers and reminders" in the app, SOLAR-569; POPIA s69(4)).
-const OFFER_FOOTER = (why: string, unsub: string) => [`You get this because ${why}. <a href="${unsub}">Unsubscribe</a>.`, HELP];
 
 // ---------------------------------------------------------------- plant events
 
@@ -612,301 +604,6 @@ export const plantEvent = (plant: string, plantId: number, e: PlantEvent, day = 
 // One email per login: it names every plant on it (0158).
 export const loginEvent = (e: LoginEvent, plantId: number, day = "today") => alertEmail(alertMail(e, "", day), plantId);
 
-// --------------------------------------------------------------------- billing
-
-// SOLAR-208. Billing runs on our side (Paystack charge_authorization), so receipts and
-// plan changes come from us; Paystack's own receipts are off. Prices are final: the
-// company isn't VAT-registered, so no VAT line. No unsubscribe: these are about money.
-const PLAN = `${APP}/?tab=account&section=plan`;
-// "Pay with another card": the Plan section opens Paystack's card page for the failed payment.
-export const PAY_URL = `${PLAN}&pay=1`;
-// Buttons that ask them to pick a plan open Adjust plan: Free, Home and Family side by
-// side (SOLAR-341).
-const PLANS = `${APP}/?tab=plans`;
-// Billing's Payment section: the saved card and its Update button (SOLAR-473).
-const PAYMENT = `${APP}/?tab=account&section=payments`;
-// "To stop it, cancel before": Billing's Cancellation section (SOLAR-361).
-const CANCEL = `${APP}/?tab=account&section=cancel`;
-// Day-2 "Finish setup": Plant settings' Your system, where rate, battery and panels are set (SOLAR-361).
-const SYSTEM = `${APP}/?tab=account&section=system`;
-const PLAN_NAME = { free: "Free", home: "Home", family: "Family" } as const;
-// How many plants each plan keeps (SOLAR-371): said when plants are deleted.
-const PLAN_PLANTS = { home: "2 plants", family: "5 plants" } as const;
-// Who is selling: on every billing email (SOLAR-415).
-const SELLER = "Prince Solar Hub is run by Theron and Prince Solutions (Pty) Ltd, reg. no. 2026/182827/07, Kempton Park, Gauteng. No VAT is charged.";
-const BILL_FOOTER = [HELP, SELLER];
-export type Plan = keyof typeof PLAN_NAME;
-export type BillPeriod = "monthly" | "yearly";
-const names = (list: string[]) => list.length < 2 ? list.join("") : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
-const list = (a: string[]) => esc(a.join(", "));
-const SEE_PLAN = { button: { label: "See your plan", href: PLAN } };
-const CANCEL_BUTTON = { button: { label: "Cancel plan", href: CANCEL } };
-const PAY_BUTTON = (url: string) => ({ button: { label: "Pay with another card", href: url } });
-// A psh_ reference is 36 characters with no break: it wraps anywhere, or it pushes the
-// box past a phone's width (SOLAR-484).
-const ref = (r: string) => `<span style="word-break:break-all">${esc(r)}</span>`;
-
-// Billing wording (SOLAR-415): short, names the plan, date and amount, and never explains
-// what the owner just did themselves. Amounts sit in the box, not in the title, except
-// in a subject, where the inbox shows them.
-export type Receipt = {
-  plan: Plan; period: BillPeriod; amount: number; date: string; // "1 Nov 2026"
-  card: string; // "Visa •••• 4081"
-  reference: string; // Paystack reference
-  covers?: string; // the days this payment pays for: "1 to 30 Nov"
-  extraPlants?: { n: number; each: number }; // old plans only; extra plants left pricing (SOLAR-371)
-  next: { amount: number; date: string };
-};
-
-export const paymentReceived = (r: Receipt) =>
-  make(`Payment received: ${rand(r.amount)}`, {
-    title: "Payment received",
-    parts: [
-      { box: { hero: { label: "Paid", value: rand(r.amount), sub: r.date },
-        rows: [["For", esc(`${PLAN_NAME[r.plan]}${r.covers ? `, ${r.covers}` : `, ${r.period}`}`)], ["Card", esc(r.card)],
-          ["Reference", ref(r.reference)], ["Next payment", `${rand(r.next.amount)} on ${r.next.date}`]] } },
-      SEE_PLAN,
-    ],
-    footer: BILL_FOOTER,
-  });
-
-// Yearly plans: notice 40 to 80 business days before the renewal (Consumer Protection
-// Act s14, if a yearly plan counts as fixed-term; to confirm on SOLAR-104).
-export type Renewal = { plan: Plan; amount: number; on: string; card?: string; change?: string };
-
-export const renewalNotice = (r: Renewal) =>
-  make(`Your yearly ${PLAN_NAME[r.plan]} plan renews on ${r.on}`, {
-    title: `Your ${PLAN_NAME[r.plan]} plan renews on ${r.on}`,
-    parts: [
-      ...(r.change ? [{ lead: esc(r.change) }] : []),
-      { box: { hero: { label: "We charge", value: rand(r.amount), sub: `on ${r.on}` }, rows: r.card ? [["Card", esc(r.card)]] : [] } },
-      { note: `To stop it, cancel before ${r.on}.` },
-      CANCEL_BUTTON,
-    ],
-    footer: BILL_FOOTER,
-  });
-
-// An offer price that lasts some months ends: sent up to 30 days before the first charge
-// at the usual price (SOLAR-330).
-export type OfferEnds = { plan: Plan; period: BillPeriod; was: number; amount: number; on: string; card?: string };
-export const offerEnds = (o: OfferEnds) => {
-  const per = o.period === "yearly" ? "a year" : "a month";
-  return make(`${PLAN_NAME[o.plan]} goes to ${rand(o.amount)} ${per} on ${o.on}`, {
-    title: `Your offer price ends on ${o.on}`,
-    parts: [
-      { box: { hero: { label: `From ${o.on}`, value: rand(o.amount), sub: `${per}, was ${rand(o.was)}` }, rows: o.card ? [["Card", esc(o.card)]] : [] } },
-      { note: `To stop it, cancel before ${o.on}.` },
-      CANCEL_BUTTON,
-    ],
-    footer: BILL_FOOTER,
-  });
-};
-
-// An upgrade starts at once: the difference for the days left is charged now, the
-// billing date stays (SOLAR-208).
-export type Upgrade = {
-  from: Plan; to: Plan; period: BillPeriod;
-  addedPlants?: number; // extra plants on Family: no email since SOLAR-371 (notify skips it)
-  paidNow: number; daysLeft: number;
-  card?: string;
-  reference?: string; // Paystack's receipt shows the same one (SOLAR-484)
-  credit?: number; // Home monthly to Family yearly (SOLAR-364): what the rest of the month came to
-  next: { amount: number; date: string };
-};
-
-export const planUpgraded = (u: Upgrade) =>
-  make(`You're on ${PLAN_NAME[u.to]}`, {
-    title: `You're on ${PLAN_NAME[u.to]}`,
-    parts: [
-      { box: { hero: { label: "Paid today", value: rand(u.paidNow),
-          sub: u.credit != null ? `${rand(u.credit)} off for the rest of your month` : `for the rest of this ${u.period === "yearly" ? "year" : "month"}` },
-        rows: [...(u.card ? [["Card", esc(u.card)] as [string, string]] : []),
-          ...(u.reference ? [["Reference", ref(u.reference)] as [string, string]] : []), ["Next payment", `${rand(u.next.amount)} on ${u.next.date}`]] } },
-      u.to === "family" ? { button: { label: "Add a plant", href: ADD_PLANT } } : SEE_PLAN,
-    ],
-    footer: BILL_FOOTER,
-  });
-
-// Monthly to yearly on the same plan is paid now (SOLAR-298). The month paid runs out;
-// the year starts on the billing date, so the next payment is a year after it.
-export type Switched = Receipt & { startsOn: string };
-
-export const planSwitched = (s: Switched) =>
-  make(`Your yearly plan starts on ${s.startsOn}`, {
-    title: "You're on yearly",
-    parts: [
-      { box: { hero: { label: "Paid today", value: rand(s.amount), sub: s.date },
-        rows: [["For", esc(`${PLAN_NAME[s.plan]}, ${s.covers ?? `from ${s.startsOn}`}`)], ["Card", esc(s.card)], ["Reference", ref(s.reference)]] } },
-      SEE_PLAN,
-    ],
-    footer: BILL_FOOTER,
-  });
-
-// Downgrade, cancel (to Free) and a monthly/yearly switch all wait for the billing
-// date. Sent when booked; the plants named are deleted on deleteOn (SOLAR-295), or on
-// that date when no deleteOn is given.
-export type Change = {
-  from: Plan; to: Plan; fromPeriod: BillPeriod; toPeriod?: BillPeriod;
-  on: string; // the billing date
-  removePlants: string[];
-  keepPlants?: string[];
-  deleteOn?: string;
-  next?: { amount: number }; // absent on Free
-  days?: number; // the most day totals one of the plants to delete holds (SOLAR-616)
-  history?: { plant: string; days: number; on: string }; // cancel: the first plant's history, deleted on the end date (SOLAR-495)
-};
-
-export const planChangeBooked = (c: Change) => {
-  const cancel = c.to === "free", stop = c.removePlants.length, gone = c.history?.on ?? c.deleteOn;
-  const switchOnly = c.from === c.to;
-  const title = cancel ? `${PLAN_NAME[c.from]} ends on ${c.on}` : switchOnly ? `${PLAN_NAME[c.from]} goes ${c.toPeriod} on ${c.on}` : `You move to ${PLAN_NAME[c.to]} on ${c.on}`;
-  // Plants to delete lead, in amber, as in the later "deleted on" email (SOLAR-415).
-  const hero = c.removePlants.length
-    ? lost(`Deleted on ${c.deleteOn ?? c.on}`, plantCount(c.removePlants.length), withDays(names(c.removePlants), c.days, c.removePlants.length > 1)) : undefined;
-  const kept: [string, string][] = hero && c.keepPlants?.length ? [["Plants kept", list(c.keepPlants)]] : [];
-  return make(title, {
-    title,
-    // No Keep buttons in emails (SOLAR-412): an undo is made in Billing, a cancel's too (SOLAR-467).
-    parts: cancel
-      // What happens when, as in the Cancel window (SOLAR-488). Nothing changes until the plan
-      // ends; the history goes 30 days after (SOLAR-552).
-      ? [{ lead: `You cancelled ${PLAN_NAME[c.from]}. Nothing more is charged.` },
-         { box: { steps: [[`Until ${c.on}`, "Nothing changes."],
-           // Nothing to delete (no plant linked): no history line.
-           [`On ${c.on}`, `Your plan ends. Readings, alerts and reports stop.${gone ? " Your history is deleted 30 days later." : ""}`]] } },
-         // the pick is under Choose plant in Billing's Plan card (SOLAR-496)
-         ...(stop ? [{ note: `<b style="color:#e7ecf2">Choose the plant to keep in Billing.${c.keepPlants?.[0] ? ` If you don't, we keep ${esc(c.keepPlants[0])}.` : ""}</b>` },
-                     { button: { label: "Choose plant", href: PLAN } }] : [SEE_PLAN])]
-      // A monthly/yearly switch reads like the plan-kept email: what carries on, then the price.
-      : switchOnly ? [{ lead: "Your plants, history and reports carry on as before." },
-          { box: { rows: [["Next payment", `${c.next ? rand(c.next.amount) : "R0"} on ${c.on}`]] } },
-          SEE_PLAN]
-      : [{ box: { hero, rows: [["Next payment", `${c.next ? rand(c.next.amount) : "R0"} on ${c.on}`], ...kept] } },
-         SEE_PLAN],
-    footer: BILL_FOOTER,
-  });
-};
-
-// Keep: a booked change undone, so the plan carries on as it is (SOLAR-271). undone: the
-// change that was booked, read from its bill_change email; the title names it.
-export type Kept = { plan: Plan; period: BillPeriod; next: { amount: number; date: string }; undone?: { to: Plan; toPeriod?: BillPeriod } };
-
-export const planKept = (k: Kept) => {
-  // Warm, not loud (SOLAR-415): a cancel or downgrade undone says what carries on. Undoing
-  // a monthly/yearly switch changes nothing they'd notice, so it just says so.
-  const u = k.undone;
-  const periodOnly = !!u && u.to === k.plan;
-  const title = periodOnly ? `${PLAN_NAME[k.plan]} stays ${k.period}` : `Good to have you on ${PLAN_NAME[k.plan]}`;
-  const lead = periodOnly ? null : u && u.to !== "free" ? "Your plants, history and reports carry on as before." : "Your history and reports carry on as before.";
-  return make(title, {
-    title,
-    parts: [...(lead ? [{ lead }] : []), { box: { rows: [["Next payment", `${rand(k.next.amount)} on ${k.next.date}`]] } }, SEE_PLAN],
-    footer: BILL_FOOTER,
-  });
-};
-
-// A failed charge is retried on day 1, 3 and 7 after the billing date. The first email
-// goes as soon as the billing-day charge fails; each retry that fails sends another.
-export type Failed = {
-  plan: Plan; period: BillPeriod; amount: number;
-  nextTry?: string; // absent after the last try
-  freeOn: string; // the day the plan ends if it stays unpaid
-  payUrl: string;
-  disputed?: string; // the bank took a payment back (a lost dispute, 0130): the day it was paid
-};
-
-// Fact pairs, as the free week's emails (SOLAR-564): what failed and the next try, then
-// the day to pay by and what happens if it stays unpaid.
-export const paymentFailed = (f: Failed) => {
-  const plan = PLAN_NAME[f.plan];
-  return make(f.disputed ? "Your bank reversed a payment" : `Your payment of ${rand(f.amount)} didn't go through`, {
-    title: f.disputed ? "Your bank reversed a payment" : "Your payment didn't go through",
-    parts: [
-      f.disputed
-        ? { pair: [`Your bank took back ${rand(f.amount)} for your ${plan} plan`, `It was paid on ${white(f.disputed)}.`] }
-        : { pair: [`We couldn't take ${rand(f.amount)} for your ${plan} plan`,
-            f.nextTry ? `We'll try your card again on ${white(f.nextTry)}.` : "That was our last try."] },
-      { pair: [`Pay by ${f.freeOn}`, `If it isn't paid by then, your ${plan} plan ends and the app stops.`] },
-      PAY_BUTTON(f.payUrl),
-    ],
-    footer: BILL_FOOTER,
-  });
-};
-
-// A payment we refund (0130): it applied nothing, because the plan or the price changed
-// while the user paid. Or one refunded by hand in Paystack (why "hand", SOLAR-444, 0171),
-// all or part of it: the plan stays. Not sent for the R1 card check.
-// card: the card on file, which the refund goes back to. 3 to 10 working days is
-// Paystack's own figure for card refunds in South Africa; Paystack emails them too.
-// paid: what the payment was, for a hand refund; a part refund shows it.
-export type Refund = { amount: number; date: string; reference: string; why: "price" | "changed" | "hand"; paid?: number; card?: string };
-
-// A hand refund can be part of a rand: R40.50 stays R40.50.
-const refundRand = (n: number) => Number.isInteger(n) ? rand(n) : "R" + n.toFixed(2);
-export const paymentRefunded = (r: Refund) => {
-  const part = r.why === "hand" && r.paid != null && r.amount < r.paid;
-  return make(`${refundRand(r.amount)} is on its way back to your card`, {
-    title: "Your refund is on its way",
-    parts: [
-      { lead: r.why === "price" ? "The price changed while you paid, so we sent it back."
-        : r.why === "hand" ? `We refunded ${part ? "part of " : ""}your payment. Your plan stays as it is.`
-        : "Your plan changed while you paid, so we sent it back." },
-      { box: { hero: { label: "Refund", value: refundRand(r.amount), sub: r.card ? `back to ${r.card}` : "back to your card" },
-        rows: [...(part ? [["Payment", rand(r.paid!)] as [string, string]] : []),
-          ["Paid on", r.date], ["Arrives in", "3 to 10 working days"], ["Reference", ref(r.reference)]] } },
-      SEE_PLAN,
-      { small: "Paystack, who handles our payments, emails you about it too." },
-    ],
-    footer: BILL_FOOTER,
-  });
-};
-
-// After a card change (the R1 card check, SOLAR-406, 0161): the new card, the one it
-// replaced (left out when the same card is saved again), when, and the next payment (left
-// out once a cancel is booked); then the password-reset line, so a change they didn't
-// make shows up. No switch turns it off.
-export type CardChange = { card: string; was?: string; at?: string; next?: { amount: number; date: string } };
-export const cardChanged = (c: CardChange) =>
-  make("Your card was changed", {
-    title: "Your card was changed",
-    parts: [
-      { box: { rows: [["New card", esc(c.card)], ...(c.was ? [["Replaces", esc(c.was)] as [string, string]] : []),
-        ...(c.at ? [["Changed", esc(c.at)] as [string, string]] : []),
-        ...(c.next ? [["Next payment", `${rand(c.next.amount)} on ${c.next.date}`] as [string, string]] : [])] } },
-      { lead: "The R1 card check is paid back. Wasn't you? Reset your password." },
-      RESET,
-    ],
-    footer: BILL_FOOTER,
-  });
-
-// The saved card's last day (end of its expiry month) falls before the next payment
-// (SOLAR-406, 0161): 30 days before, then a last reminder 7 days before. A card first
-// seen 7 days or less before gets one email, not called a last reminder. The last one
-// counts the days left (0 to 7) in its title and moves the date into the box.
-export type CardExpiry = { card: string; on: string; final?: boolean; days?: number; next: { amount: number; date: string } };
-export const cardExpiring = (c: CardExpiry) => {
-  const left = c.days === 0 ? "today" : c.days === 1 ? "tomorrow" : `in ${c.days} days`;
-  const title = c.final ? `Your card expires ${left}` : `Your card expires on ${c.on}`;
-  return make(c.final ? title : `Your ${c.card} expires on ${c.on}`, {
-    title,
-    parts: [
-      { box: { rows: [["Card", esc(c.card)], ...(c.final ? [["Expires", c.on] as [string, string]] : []),
-        ["Next payment", `${rand(c.next.amount)} on ${c.next.date}`]] } },
-      { lead: "Update it before your next payment." },
-      { button: { label: "Update card", href: PAYMENT } },
-    ],
-    footer: BILL_FOOTER,
-  });
-};
-
-// To hello@ (Brynne): a bill email failed after its last try, so the user never heard.
-export const billMailFailed = (m: { kind: string; key: string; user: string; error: string }) =>
-  make(`Bill email not sent: ${m.kind}`, {
-    title: "A bill email was not sent",
-    parts: [{ box: { rows: [["Email", esc(m.kind)], ["Key", esc(m.key)], ["User", esc(m.user)], ["Error", esc(m.error)]] } }],
-    footer: [],
-  });
-
 // To admin@: a PostHog error tracking alert (SOLAR-336). PostHog calls error-alert with
 // the issue; this says what happened and links to it.
 export const errorAlert = (a: { trigger: "created" | "reopened"; name: string; description: string; fn: string; url: string }) =>
@@ -931,186 +628,3 @@ export const feedback = (f: { email: string; message: string; page: string; vers
     ],
     footer: [],
   });
-
-// Emails where the owner loses something: a big amber number for what goes and when,
-// then the plan that keeps it at today's price (SOLAR-415).
-// Price: the live offer's monthly price, and the usual price when the offer is lower.
-// offer: the terms of the offer behind `now`, as the server gives them (billing_offer_json).
-export type Offer = { id: string; months?: number | null; cap?: number | null; until?: string | null; held?: boolean };
-// plants: how many the account ticked, for the emails to an account with no plan.
-export type Price = { plan: Plan; now: number; list: number; offer?: Offer | null; plants?: number };
-const keepOn = (p: Price, what: string) =>
-  `Keep ${what} on ${PLAN_NAME[p.plan]} for ${rand(p.now)} a month${p.now < p.list ? ", the launch price" : ""}.`;
-const keepSmall = (p: Price) => `${p.now < p.list ? `${PLAN_NAME[p.plan]} is normally ${rand(p.list)} a month. ` : ""}Cancel any time.`;
-const dayCount = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
-const plantCount = (n: number) => `${n} plant${n === 1 ? "" : "s"}`;
-const lost = (label: string, value: string, sub: string): Hero => ({ label, value, tone: "warn", sub });
-// many: 2+ plants, whose history goes back as far as the longest one's (SOLAR-616)
-const withDays = (who: string, days?: number, many = false) => days ? `${who}, with ${many ? "up to " : ""}${dayCount(days)} of history` : who;
-// "Deleted on 21 Dec": "234 days of history at Farm", or "3 plants with up to 234 days of history"
-const lostHistory = (label: string, days: number, plants = 1, plant?: string): Hero => plants > 1
-  ? lost(label, plantCount(plants), `with up to ${dayCount(days)} of history`)
-  : lost(label, dayCount(days), plant ? `of history at ${plant}` : "of history");
-
-// Day 8 of a failed card: the plan has ended as a cancel's does. Nothing is read, every
-// plant stays linked, and the history is deleted 30 days later (SOLAR-564, 0212).
-// price: the plan they were on, at the price they would pay now (with plants: those ticked).
-export type MovedToFree = { from: Plan; deleteOn: string; amount?: number; price: Price };
-
-export const movedToFree = (m: MovedToFree) => {
-  const plan = PLAN_NAME[m.from], pay = PLAN_NAME[m.price.plan];
-  return make(`Your ${plan} plan has ended`, {
-    title: `Your ${plan} plan has ended`,
-    parts: [
-      { pair: ["The app has stopped",
-        `We couldn't take ${m.amount != null ? white(rand(m.amount)) : "the payment"} for your ${plan} plan, so readings and alerts stopped today.`] },
-      { pair: [`Your history is kept until ${m.deleteOn}`, (m.price.plants ?? 1) > 1 ? `After that, we delete it for all ${white(plantCount(m.price.plants!))}.` : "After that, we delete it."] },
-      { pair: [`Pay for ${pay} to carry on`, "Readings start again, with the days you missed filled in."] },
-      { lead: `${pay} is ${white(`${rand(m.price.now)} a month`)}. Cancel any time.` },
-      { button: { label: `Pay for ${pay}`, href: PLANS } },
-    ],
-    footer: BILL_FOOTER,
-  });
-};
-
-// Once, when a cancelled plan ends on its date (SOLAR-328, 0144). History is deleted 30
-// days later (SOLAR-552, 0206). days: the most any plant still reading holds; plants: how many (SOLAR-616).
-export const winback = (w: { from: Plan; plant?: string; plants?: number; days?: number; price?: Price; deleteOn?: string; unsub: string }) =>
-  make(`Your ${PLAN_NAME[w.from]} plan has ended`, {
-    title: `Your ${PLAN_NAME[w.from]} plan has ended`,
-    parts: [
-      { box: {
-        hero: w.days && w.plant ? lostHistory(w.deleteOn ? `Deleted on ${w.deleteOn}` : "Deleted in 30 days", w.days, w.plants, w.plant) : undefined,
-        rows: STOPPED,
-      } },
-      ...(w.price ? [{ lead: keepOn(w.price, "everything") }] : []),
-      { button: { label: "See plans", href: PLANS } },
-      ...(w.price ? [{ small: keepSmall(w.price) }] : []),
-    ],
-    footer: OFFER_FOOTER("your plan ended", w.unsub),
-  });
-
-// Up to 3 days before a cancelled plan ends (SOLAR-495, 0188), laid out as the free week's
-// "ends soon": that day the reading stops; the history is deleted on deleteOn, 30 days
-// later. No plant names, as the cancel email. days: the most any plant holds; plants: how
-// many lose it (SOLAR-616). No Keep button (SOLAR-412).
-export const cancelEndsSoon = (c: { from: Plan; on: string; days?: number; plants?: number; deleteOn?: string }) =>
-  make(`${PLAN_NAME[c.from]} ends on ${c.on}`, {
-    title: `${PLAN_NAME[c.from]} ends on ${c.on}`,
-    parts: [
-      { box: {
-        hero: c.days ? lostHistory(c.deleteOn ? `Deleted on ${c.deleteOn}` : "Deleted 30 days later", c.days, c.plants) : undefined,
-        rows: [[`From ${c.on}`, "Readings stop"], ["Alerts and reports", "Stop"]],
-      } },
-      { lead: `To keep everything, tap Keep ${PLAN_NAME[c.from]} in Billing before ${c.on}.` },
-      SEE_PLAN,
-    ],
-    footer: BILL_FOOTER,
-  });
-
-// 3 days before plants are deleted (after a downgrade, cancel or failed payment). plan:
-// the plan the account is on now, to say how many plants it keeps. price: the next plan
-// up, which keeps them. days: day totals the plants hold between them.
-export const plantsRemovalSoon = (plants: string[], on: string, plan?: Plan, price?: Price, days?: number) => {
-  const title = `${plants.length > 2 ? `${plants.length} plants` : names(plants)} ${plants.length === 1 ? "is" : "are"} deleted on ${on}`;
-  const them = plants.length === 1 ? "it" : "them";
-  return make(title, {
-    title,
-    parts: [
-      { box: { hero: lost(`Deleted on ${on}`, plantCount(plants.length), withDays(names(plants), days, plants.length > 1)) } },
-      { lead: `${plan && plan !== "free" ? `${PLAN_NAME[plan]} keeps ${PLAN_PLANTS[plan]}. ` : ""}${price ? keepOn(price, them) : `Choose a plan to keep ${them}.`}` },
-      { button: { label: "See plans", href: PLANS } },
-      ...(price ? [{ small: keepSmall(price) }] : []),
-    ],
-    footer: BILL_FOOTER,
-  });
-};
-
-// The emails to an account with no plan, and to one about to have none (SOLAR-559): facts
-// as pairs, then the price in one sentence with only the price in white, then one button.
-// The offer's terms are worded as the plans page words them (tabs.jsx offerBand).
-const white = (t: string) => `<span class="t" style="font-weight:600;color:#e7ecf2">${t}</span>`;
-const startPlan = (p: Price): Part[] => {
-  const o = p.now < p.list ? p.offer : null, name = PLAN_NAME[p.plan];
-  const terms = !o ? "" : ` ${o.id === "launch" ? "Launch price" : "Offer price"}${!o.held && o.cap ? ` for the first ${o.cap} new members` : ""}, ` +
-    `${o.until ? `until ${o.until}` : o.months && !o.held ? `for your first ${o.months} months` : "yours until your plan ends"}.`;
-  const rec = `Recommended for your ${(p.plants ?? 1) > 1 ? "plants" : "plant"}: `;
-  return [
-    { lead: rec + (p.now < p.list ? `${name} is ${white(`${rand(p.now)} a month`)}, normally ${rand(p.list)}.${terms} Cancel any time.`
-      : `${name} is ${white(`${rand(p.list)} a month`)}. Cancel any time.`) },
-    { button: { label: "See plans", href: PLANS } },
-  ];
-};
-
-// Two days before the free week ends (SOLAR-242): when it stops. The delete is not
-// named here. endsOn: "Monday 10 Nov".
-export const freeWeekEndsSoon = (endsOn: string, price: Price, unsub: string) => {
-  const wd = endsOn.split(" ")[0], title = `Your free week ends on ${wd}`;
-  return make(title, {
-    title,
-    parts: [
-      { pair: [endsOn, "Readings stop, and the app with them: live view, history, alerts and reports."] },
-      { pair: [`Upgrade to ${PLAN_NAME[price.plan]}`, `Do it before ${wd} and nothing stops.`] },
-      ...startPlan(price),
-    ],
-    footer: OFFER_FOOTER("your free week ends soon", unsub),
-  });
-};
-
-// An account with no plan (SOLAR-552, SOLAR-559): 14 days after its free week or its paid
-// time ended (0206), 3 days before the history is deleted, and once after the delete ran
-// (0207). since: the day the reading stopped. price: the plan that holds the plants it
-// ticked. paid: it had a plan. unsub: the page that turns offers and reminders off.
-export type Unpaid = { price: Price; paid?: boolean; unsub: string };
-export type UnpaidKept = Unpaid & { since: string; deleteOn: string };
-const unpaidMail = (title: string, u: Unpaid, pairs: [string, string][]) => make(title, {
-  title,
-  parts: [...pairs.map((pair) => ({ pair })), ...startPlan(u.price)],
-  footer: OFFER_FOOTER(`your ${u.paid ? "plan" : "free week"} ended`, u.unsub),
-});
-const start = (u: Unpaid) => `Upgrade to ${PLAN_NAME[u.price.plan]}`;
-export const unpaidReminder = (u: UnpaidKept) => unpaidMail("Your solar data is still here", u, [
-  ["Your history is still here", `Readings stopped on ${u.since}, and the app with them.`],
-  [start(u), "Readings start again, with the days you missed filled in."],
-]);
-export const unpaidLast = (u: UnpaidKept) => unpaidMail("Your history is deleted in 3 days", u, [
-  [u.deleteOn, `We delete the history stored for your ${(u.price.plants ?? 1) > 1 ? "plants" : "plant"}.`],
-  [start(u), `Do it before ${u.deleteOn} and your history stays, and readings start again.`],
-]);
-export const unpaidDeleted = (u: Unpaid) => unpaidMail("Your history has been deleted", u, [
-  ["You can still come back", `${start(u)} and readings start again. Your history builds from there.`],
-]);
-
-// Two days after the account's first plant, once, while a number is still empty (0163):
-// a checklist. Sign up and Add plant are done by then; each number is ticked when set.
-// A plant without a battery isn't asked for battery size or reserve, so those go.
-export type SetupStep = "rate" | "size" | "reserve" | "panels";
-// Same names as the app's setup card (app.jsx STEPS, STEPS_DONE): what each number shows
-// in the app, then where to find it.
-const SETUP_WHERE: Record<SetupStep, [string, string, string]> = {
-  rate: ["Electricity rate", "Shows what solar saved you, in rand.", "Use the price per unit on your bill, with VAT."],
-  size: ["Battery size", "Shows how long your battery will last.", "Add up all your batteries, from their labels."],
-  reserve: ["Battery reserve", "Shows how long until the battery stops powering your home.", "Use the number set on your inverter."],
-  panels: ["Solar panels", "Shows how much your panels make against what they can.", "Add up their watts, from your installer's invoice."],
-};
-const BATTERY_STEPS: SetupStep[] = ["size", "reserve"];
-const COUNT = ["", "One number is", "Two numbers are", "Three numbers are", "Four numbers are"];
-export const freeWeekSetup = (steps: SetupStep[], plantId?: number, battery = true) => {
-  const all = (Object.keys(SETUP_WHERE) as SetupStep[]).filter((s) => battery || !BATTERY_STEPS.includes(s));
-  const left = steps.filter((s) => all.includes(s));
-  const checks = [
-    { name: "Sign up", done: true }, { name: "Add plant", done: true },
-    ...all.map((s) => left.includes(s)
-      ? { name: SETUP_WHERE[s][0], text: SETUP_WHERE[s][1], sub: SETUP_WHERE[s][2] }
-      : { name: SETUP_WHERE[s][0], done: true }),
-  ];
-  return make("Finish your setup", {
-    title: "Finish your setup",
-    parts: [
-      { lead: `${COUNT[left.length] ?? `${left.length} numbers are`} still empty. Each one turns on part of the app.` },
-      { box: { checks } },
-      { button: { label: "Finish setup", href: plantId ? `${SYSTEM}&plant=${plantId}` : SYSTEM } },
-    ],
-    footer: [HELP],
-  });
-};

@@ -157,7 +157,7 @@ node scripts/etl-sqlite-to-postgres.js --url='postgresql://...'   # -> remote
 supabase link --project-ref <ref>
 supabase db push                                   # migrations
 supabase secrets set --env-file supabase/.env.local     # incl. SUNSYNK_APP_KEY/SECRET, BOOTSTRAP_USER_EMAIL
-supabase functions deploy poll recover sync-plant-energy alerts-due link-sunsynk
+supabase functions deploy poll recover sync-plant-energy link-sunsynk
 ```
 
 Then, once, in the dashboard:
