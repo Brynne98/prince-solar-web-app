@@ -172,7 +172,8 @@ returns text language sql stable security definer set search_path = '' as $$
   select case
            when p_o.expires_at <= now() then 'too old'
            when q.id is null then 'event gone'
-           when not exists (select 1 from public.plant_users pu where pu.user_id = q.user_id and pu.plant_id = q.plant_id)
+           when q.plant_id is not null
+                and not exists (select 1 from public.plant_users pu where pu.user_id = q.user_id and pu.plant_id = q.plant_id)
              then 'plant removed'
            when q.plant_id is not null and not exists (
                   select 1 from billing.seats se join billing.accounts ba on ba.id = se.account
@@ -199,7 +200,8 @@ returns void language sql security definer set search_path = '' as $$
                        then 'sent' else 'failed' end,
          last_error = case when exists (select 1 from msg.push_sends s where s.outbox_id = o.id and s.status = 'sent') then null
                            else coalesce((select s.last_error from msg.push_sends s where s.outbox_id = o.id
-                                           order by s.updated_at desc, s.id desc limit 1), 'no device') end,
+                                           order by s.last_error = 'too old' desc, s.updated_at desc, s.id desc limit 1),
+                                         'no device') end,
          claimed_until = null, done_at = now()
    where o.id = any (p_ids) and o.channel = 'push' and o.status = 'queued' and o.claimed_until is not null
      and not exists (select 1 from msg.push_sends s where s.outbox_id = o.id and s.status in ('queued', 'sending'))
@@ -239,12 +241,13 @@ begin
   for r in
     select o.* from msg.outbox o
      where o.channel = 'push' and o.status = 'queued' and o.claimed_until is null and o.not_before <= now()
+       and msg.push_guard(o) is distinct from 'wait'           -- waiting rows never fill the take
      order by o.lane = 'urgent' desc, o.not_before, o.id
      limit p_limit
      for update skip locked
   loop
     v_why := msg.push_guard(r);
-    if v_why = 'wait' then continue; end if;
+    if v_why = 'wait' then continue; end if;                  -- its "down" moved on since the select
     if v_why is not null then
       update msg.outbox o set status = 'dropped', drop_reason = v_why, done_at = now() where o.id = r.id;
       continue;
@@ -313,7 +316,8 @@ begin
   plan as (
     select s.id, r.code, r.err,
            r.code = 0 or r.code = 429 or r.code >= 500 as again,
-           now() + make_interval(secs => coalesce(r.retry_s, least(30 * 2 ^ greatest(s.tries - 1, 0), 600))) as next_at,
+           -- Retry-After 0 or past: still 5 s, or one pass would call the device in a loop
+           now() + make_interval(secs => greatest(coalesce(r.retry_s, least(30 * 2 ^ greatest(s.tries - 1, 0), 600)), 5)) as next_at,
            o.expires_at
       from res r
       join msg.push_sends s on s.id = r.id and s.claim = p_claim and s.status = 'sending'
@@ -383,7 +387,14 @@ returns jsonb language sql stable security definer set search_path = '' as $$
   select coalesce(jsonb_agg(jsonb_build_object(
            'channel', l.channel, 'lane', l.lane,
            'queued', (select count(*) from msg.outbox o where o.channel = l.channel and o.lane = l.lane and o.status = 'queued'),
-           'oldest', (select min(o.not_before) from msg.outbox o where o.channel = l.channel and o.lane = l.lane and o.status = 'queued'),
+           -- oldest due and not handled: an unleased row not waiting on its "down", or a device send due
+           'oldest', least(
+              (select min(o.not_before) from msg.outbox o
+                where o.channel = l.channel and o.lane = l.lane and o.status = 'queued' and o.claimed_until is null
+                  and o.not_before <= now() and (l.channel <> 'push' or msg.push_guard(o) is distinct from 'wait')),
+              (select min(s.not_before) from msg.push_sends s join msg.outbox o on o.id = s.outbox_id
+                where l.channel = 'push' and o.lane = l.lane and s.status in ('queued', 'sending') and s.not_before <= now()
+                  and (s.status = 'queued' or s.claimed_until < now()))),
            'expired', (select count(*) from msg.outbox o where o.channel = l.channel and o.lane = l.lane
                          and o.done_at > now() - interval '1 hour'
                          and (o.drop_reason = 'too old' or o.last_error = 'too old')),

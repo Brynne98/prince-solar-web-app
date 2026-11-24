@@ -851,11 +851,16 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
     return { error: String(e?.message ?? e) };
   });
   // The cron call times out at 55 s.
-  const pushed = push ? await pushPass(started + 50_000).catch((e) => {
+  const pushed = push ? await pushPass(started + 47_000).catch((e) => {
     noteError("push_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   }) : null;
-  return { live: !dry, swept, ...count, outbox, pushed, due };
+  // pop-ups routed to the outbox (0261), so going back to this run sends them too
+  const pushedOutbox = push ? await outboxPushPass(started + 50_000).catch((e) => {
+    noteError("push_outbox_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  }) : null;
+  return { live: !dry, swept, ...count, outbox, pushed, pushedOutbox, due };
 }
 
 // Every template from one plant's real numbers; event values are samples.

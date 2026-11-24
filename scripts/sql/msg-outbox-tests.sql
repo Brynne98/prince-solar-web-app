@@ -150,8 +150,9 @@ begin
     s.status = 'queued' and s.not_before = now() + interval '7 seconds' and s.n429 = 1 and s.last_code = 429, row_to_json(s)::text);
   perform pg_temp.ok('D2 ... outbox row still open while a device is', (pg_temp.ob(q)).status = 'queued');
   j := (select x from jsonb_array_elements(public.job_check_msg()) x where x->>'channel' = 'push' and x->>'lane' = 'urgent');
-  perform pg_temp.ok('M1 job_check_msg: push lane, 429 counted, queued and oldest', (j->>'n429')::int >= 1
-    and (j->>'queued')::int >= 1 and j->>'oldest' is not null, j::text);
+  perform pg_temp.ok('M1 job_check_msg: push lane, 429 counted, row queued; a send waiting on Retry-After is not due',
+    (j->>'n429')::int >= 1 and (j->>'queued')::int >= 1
+    and (j->>'oldest' is null or (j->>'oldest')::timestamptz > now() - interval '1 minute'), j::text);
   n := pg_temp.take();
   perform pg_temp.ok('D2 ... not taken before Retry-After', pg_temp.taken(q) = '{}');
   update msg.push_sends set not_before = now() where id = s.id;
@@ -398,6 +399,72 @@ begin
     (select push_skip from public.email_queue where id = back) = 'down had no pop-up',
     (select push_skip from public.email_queue where id = back));
   update msg.kinds set route = 'outbox' where channel = 'push';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- V: review fixes
+-- ---------------------------------------------------------------------------
+-- Retry-After 0 still waits 5 s; a leased row retrying is not "stuck" for job-check
+do $$
+declare u uuid := pg_temp.owner('v1', '{990065941}'); d1 bigint; q bigint; n int; j jsonb;
+begin
+  d1 := pg_temp.dev(u, 'v1a');
+  q := pg_temp.ev(u, 990065941, 'grid_down', 'v1:down', null, now() - interval '20 minutes');
+  update msg.outbox set not_before = now() - interval '20 minutes' where dedupe_key = q || ':push';
+  n := pg_temp.take();
+  perform pg_temp.done(q, 429, 0);
+  perform pg_temp.ok('V1 Retry-After 0: waits 5 s, not a loop', (pg_temp.send(q, d1)).not_before = now() + interval '5 seconds',
+    (pg_temp.send(q, d1)).not_before::text);
+  j := (select x from jsonb_array_elements(public.job_check_msg()) x where x->>'lane' = 'urgent');
+  perform pg_temp.ok('V2 job_check_msg: a 20-min-old row retrying a device is not the oldest due',
+    j->>'oldest' is null or (j->>'oldest')::timestamptz > now() - interval '20 minutes', j::text);
+  update msg.push_sends set not_before = now() - interval '10 minutes' where id = (pg_temp.send(q, d1)).id;
+  j := (select x from jsonb_array_elements(public.job_check_msg()) x where x->>'lane' = 'urgent');
+  perform pg_temp.ok('V2 ... but a device send due 10 min and not taken is',
+    (j->>'oldest')::timestamptz <= now() - interval '10 minutes', j::text);
+  update msg.push_sends set status = 'failed' where id = (pg_temp.send(q, d1)).id;
+  perform msg.push_settle(array[(pg_temp.ob(q)).id]);
+end $$;
+
+-- waiting "back" rows never fill the take: with room for one row, the new "down" still goes
+do $$
+declare u uuid := pg_temp.owner('v3', '{990065942,990065943}'); down bigint; back bigint; other bigint; n int;
+begin
+  perform pg_temp.dev(u, 'v3a');
+  down := pg_temp.ev(u, 990065942, 'grid_down', 'v3:down');
+  n := pg_temp.take();                                                    -- down leased, its device send open
+  back := pg_temp.ev(u, 990065942, 'grid_back', 'v3:back', 'v3:down');   -- waits
+  other := pg_temp.ev(u, 990065943, 'grid_down', 'v3:other');
+  update msg.outbox set not_before = now() - interval '1 minute' where dedupe_key = back || ':push';
+  perform count(*) from public.msg_push_take(1);
+  perform pg_temp.ok('V3 a waiting "back" first in line does not block the next row',
+    (pg_temp.ob(other)).claimed_until is not null and (pg_temp.ob(back)).claimed_until is null,
+    format('other %s back %s', (pg_temp.ob(other)).claimed_until, (pg_temp.ob(back)).claimed_until));
+end $$;
+
+-- reconnect for a login with no plant: no plant to test, it goes
+do $$
+declare u uuid := pg_temp.owner('v4', '{990065944}'); q bigint; n int;
+begin
+  perform pg_temp.dev(u, 'v4a');
+  q := pg_temp.ev(u, null, 'needs_relink', 'v4:relink');
+  n := pg_temp.take();
+  perform pg_temp.ok('V4 reconnect with no plant: sent, not "plant removed"', pg_temp.taken(q) <> '{}',
+    (pg_temp.ob(q)).drop_reason);
+end $$;
+
+-- a failed row says "too old" when any device ran out of time, so it counts as expired
+do $$
+declare u uuid := pg_temp.owner('v5', '{990065945}'); d1 bigint; d2 bigint; q bigint; n int;
+begin
+  d1 := pg_temp.dev(u, 'v5a'); d2 := pg_temp.dev(u, 'v5b');
+  q := pg_temp.ev(u, 990065945, 'grid_down', 'v5:down', null, now() - interval '59 minutes');
+  n := pg_temp.take();
+  perform public.msg_push_done((select claim from t_take where event_id = q limit 1), jsonb_build_array(
+    jsonb_build_object('id', (pg_temp.send(q, d1)).id, 'code', 503, 'retry_s', 120),
+    jsonb_build_object('id', (pg_temp.send(q, d2)).id, 'code', 410)));
+  perform pg_temp.ok('V5 one device "too old", one removed: row failed "too old"',
+    (pg_temp.ob(q)).status = 'failed' and (pg_temp.ob(q)).last_error = 'too old', (pg_temp.ob(q)).last_error);
 end $$;
 
 -- ---------------------------------------------------------------------------

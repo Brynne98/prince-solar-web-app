@@ -73,3 +73,11 @@ Deno.test("notify-push: old path first, a failed outbox pass is noted, not fatal
   assertEquals(order, ["old:10000", "outbox:50000"]);
   assertEquals(out, { pushed: { ok: 1 }, outbox: { error: "msg_push_take: not found" } });
 });
+
+Deno.test("notify-push: a failed old pass never stops the outbox pass", async () => {
+  const out = await run({
+    old: () => Promise.reject(new Error("push_claim: lock timeout")),
+    outbox: () => Promise.resolve({ ok: 2 }),
+  }, 0);
+  assertEquals(out, { pushed: { error: "push_claim: lock timeout" }, outbox: { ok: 2 } });
+});

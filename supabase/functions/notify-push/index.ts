@@ -17,9 +17,12 @@ const OLD_MS = 10_000;
 
 export type Passes = { old: (deadline: number) => Promise<unknown>; outbox: (deadline: number) => Promise<unknown> };
 
-/** Old path first, then the outbox; a failed outbox pass leaves the old one's result. */
+/** Old path first, then the outbox. A failed pass is noted and never stops the other. */
 export async function run(p: Passes, started: number) {
-  const pushed = await p.old(started + OLD_MS);
+  const pushed = await p.old(started + OLD_MS).catch((e) => {
+    noteError("push_pass_failed", e, { hourly: true });
+    return { error: String(e instanceof Error ? e.message : e) };
+  });
   const outbox = await p.outbox(started + DEADLINE_MS).catch((e) => {
     noteError("push_outbox_failed", e, { hourly: true });
     return { error: String(e instanceof Error ? e.message : e) };

@@ -65,4 +65,5 @@ Deno.test("message outbox (0261): a lane stuck over 5 min or with expired rows f
   eq(pick(kept, "msg:push:urgent"), undefined, "kept");
   const gone = judge({ ...base, msg: [], checks: { "msg:push:urgent": { failing: true, since: base.now } } });
   eq(pick(gone, "msg:push:urgent")?.failing, false, "lane no longer used clears");
+  eq(pick(gone, "msg:push:urgent")?.job, "notify-push", "cleared under its worker");
 });

@@ -168,7 +168,9 @@ export function judge(i: Inputs): Verdict[] {
   // A failing check whose shard or job is gone (fewer shards, job unscheduled) clears.
   for (const [name, c] of Object.entries(i.checks)) {
     if (c.failing && name !== "signin-email" && name !== "push-queue" && !(name.startsWith("msg:") && !i.msg) && !name.startsWith("billing:") && !name.startsWith("partitions:") && !out.some((v) => v.name === name)) {
-      out.push({ name, job: name.startsWith("poll:") ? "poll" : name.replace(/^(cron|call):/, ""), failing: false, detail: { gone: true } });
+      const job = name.startsWith("poll:") ? "poll" : name.startsWith("msg:push:") ? "notify-push"
+        : name.startsWith("msg:") ? "notify-email" : name.replace(/^(cron|call):/, "");
+      out.push({ name, job, failing: false, detail: { gone: true } });
     }
   }
   return out;
