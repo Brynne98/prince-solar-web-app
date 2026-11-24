@@ -13,7 +13,12 @@ export const db = createClient(
 );
 
 export type Db = {
-  /** A database function by name, named arguments. Throws `fn: message` on failure. */
+  /**
+   * A database function by name, named arguments. Throws `fn: message` on failure. Answers
+   * as PostgREST does: a set-returning function as an array (one row too), a scalar as the
+   * value, json/jsonb as parsed. JS arrays go to jsonb or array parameters by the
+   * function's declared type, so a direct handle reads pg_proc (proretset, argument types).
+   */
   rpc<T = any>(fn: string, args: Record<string, unknown>): Promise<T>;
   /** Which of these plants already have a plant_config row. Throws `plant_config: message`. */
   configuredPlants(ids: number[]): Promise<number[]>;

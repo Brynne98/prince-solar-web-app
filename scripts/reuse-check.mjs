@@ -283,9 +283,9 @@ for (const f of jsx) {
   const shared = fnRead('_shared/poller.ts');
   const poll = fnRead('poll/index.ts');
   for (const m of shared.matchAll(/^export (?:async )?(?:function|const|type) ([A-Za-z_$][\w$]*)/gm))
-    if (new RegExp(`^(?:async )?(?:function|const|type) ${m[1]}\\b`, 'm').test(poll)) problems.push(`poll/index.ts declares ${m[1]} again: import it from _shared/poller.ts`);
+    if (new RegExp(`^(?:export )?(?:async )?(?:function|const|let|type) ${m[1]}\\b`, 'm').test(poll)) problems.push(`poll/index.ts declares ${m[1]} again: import it from _shared/poller.ts`);
   for (const f of ['_shared/poller.ts', '_shared/sunsynk.ts'])
-    if (/\bdb\s*\.\s*rpc\s*\(|\bdb\s*\.\s*from\s*\(\s*["'`]plant_config["'`]/.test(fnRead(f))) problems.push(`${f}: a database call around the handle: use rpc() or dbHandle() from _shared/db.ts`);
+    if (/\bdb\s*\.\s*rpc\s*(?:<[^>]*>)?\s*\(|\bdb\s*\.\s*from\s*\(\s*["'`]plant_config["'`]/.test(fnRead(f))) problems.push(`${f}: a database call around the handle: use rpc() or dbHandle() from _shared/db.ts`);
 }
 
 // ---- 3. one global scope ----
