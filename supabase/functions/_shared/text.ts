@@ -488,7 +488,8 @@ export function notices(s: AccountState): Notice[] {
   if (s.state === "past_due" && s.past_due_reason !== "checking") {
     const d = due(s), word = !s.past_due_reason ? "overdue" : s.past_due_reason === "no_card" ? "due" : "failed";
     const body = `Pay ${d.amount} by ${d.by} or readings stop.`;
-    out.push({ kind: "past_due", tone: "bad", title: `${d.plan} payment ${word}`, short: `Payment ${word === "failed" ? "failed" : "due"}`,
+    const title = `${d.plan} payment ${word}`;
+    out.push({ kind: "past_due", tone: "bad", title, short: title,
       body, bodyShort: body, button: billing.payOther, action: "pay" });
   }
   const mc = mustChoose(s);
