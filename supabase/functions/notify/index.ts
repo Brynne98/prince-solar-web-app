@@ -36,7 +36,7 @@ import {
 } from "../_shared/email.ts";
 import { outboxMail, FROM_BILLING, FROM_HELLO } from "../_shared/email.ts";
 import { msgKey, type Post, sendOutboxOne } from "../_shared/outbox.ts";
-import { alertLine, alertPush, lasted, mail as accountMail, type MailInput } from "../_shared/text.ts";
+import { alertLine, alertPush, clock as hhmm, lasted, mail as accountMail, type MailInput } from "../_shared/text.ts";
 import { Pacer, retryAfterMs } from "../_shared/pace.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -83,8 +83,6 @@ const fmtDay = (d: string, o: Intl.DateTimeFormatOptions) =>
 /** "1 Nov 2026", as the billing emails write a date. */
 const day = (d: string) => fmtDay(d, { day: "numeric", month: "short", year: "numeric" });
 const dayMonth = (d: string) => fmtDay(d, { day: "numeric", month: "short" });
-const hhmm = (epoch: number, tz: string) =>
-  new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(epoch * 1000));
 /** "today", or the event's date when it was on another local day ("Tue 21 Oct"). */
 function dayOf(epoch: number, tz: string): string {
   const d = local(tz, new Date(epoch * 1000)).date;

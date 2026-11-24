@@ -683,9 +683,10 @@ export function mail(m: MailInput): Mail | null {
 // ------------------------------------------------------------------ alerts (SOLAR-645)
 
 // The words of every alert: the app's alert list, the pop-up and the email all come from
-// here (SOLAR-645 decision A). The database keeps the facts (email_queue.data) and no words
-// since 0264. The list and pop-up lines are private.alert_text (0233) and private.push_text
-// (0229) word for word; the emails are email.ts's plantEvent and loginEvent as they were.
+// here (SOLAR-645 decision A). The database sends the facts (email_queue.data) since 0264. The
+// list and pop-up lines are private.alert_text (0233) and private.push_text (0229) word for
+// word (a number reads as JSON writes it: the alerts store whole degrees and percents); the
+// emails are email.ts's plantEvent and loginEvent as they were.
 // Where the list and the email say a thing differently, they still do.
 
 /** An alert as the database keeps it. data's since, at and from are epoch seconds.

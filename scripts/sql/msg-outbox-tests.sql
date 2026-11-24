@@ -125,7 +125,7 @@ begin
   d1 := pg_temp.dev(u, 't1a'); d2 := pg_temp.dev(u, 't1b');
   q := pg_temp.ev(u, 990065902, 'grid_down', 't1:down');
   n := pg_temp.take();
-  perform pg_temp.ok('T1 take: one send per device, with words and a claim',
+  perform pg_temp.ok('T1 take: one send per device, with the facts (words: alerts_test, push_test) and a claim',
     pg_temp.taken(q) = array[d1, d2]
     and (select bool_and(data is not null and tz is not null and claim is not null and endpoint like 'https://fcm%') from t_take where event_id = q),
     pg_temp.taken(q)::text);

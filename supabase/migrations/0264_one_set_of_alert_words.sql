@@ -4,12 +4,15 @@
 -- The alert list, the pop-up and the email now take their words from one file,
 -- supabase/functions/_shared/text.ts (alertLine, alertPush, alertMail), read by the edge
 -- functions and by the app (public/build/text.js). The database sends the facts only:
---   api_alerts         each item: kind, data (grid_notice_data, 0167), created (epoch s), tz,
---                      switch; no title, body, at, tab, day, time (the app works them out)
+--   api_alerts         each item also gets data (grid_notice_data, 0167), created (epoch s)
+--                      and tz; the app works out title, body, at, tab, day and time from them
 --   api_notifications  the same facts; the app reads only pinned from it
 --   msg_push_take      data, created, tz, plant_name, plants in place of title, body, tab, day
 --   push_claim         the same (old path, still there for a flip back until step 7)
--- private.alert_text (0233) and private.push_text (0229) are dropped.
+-- private.push_text (0229) is dropped. private.alert_text (0233) stays until step 7, only so
+-- api_alerts and api_notifications still send the old words to an app tab opened before the
+-- release (the app has no reload on a new version); the app built from this change ignores
+-- them. Step 7 drops alert_text and those keys.
 --
 -- Bodies: msg_push_take 0261, api_alerts 0232, api_notifications 0252, push_claim 0232 with
 -- the 0256, 0257 and 0261 patches; only the lines marked 0264 change. No rows are written.
@@ -198,11 +201,14 @@ AS $function$
                 and coalesce(s.created_at >= (select f.at from firsts f where f.kind = private.alert_back_kind(s.kind)), false)
                 and not exists (select 1 from public.email_queue l where l.user_id = auth.uid() and l.plant_id = s.plant_id
                                   and l.kind = s.kind and l.created_at > s.created_at))
-        -- 0264: the facts; the app writes the words (text.ts alertLine)
-        || jsonb_build_object('switch', private.alert_group(s.kind),
+        -- 0264: the facts; the app writes the words (text.ts alertLine). t: the old words, for
+        -- app tabs opened before the release only, dropped in step 7
+        || t || jsonb_build_object('switch', private.alert_group(s.kind),
              'data', private.grid_notice_data(s.plant_id, s.kind, s.data),                                -- 0167
              'created', extract(epoch from s.created_at), 'tz', public.plant_tz(s.plant_id))
-        order by s.created_at desc, s.id desc) from shown s),
+        order by s.created_at desc, s.id desc) from shown s
+        cross join lateral (select private.alert_text(s.kind, private.grid_notice_data(s.plant_id, s.kind, s.data),   -- 0167
+                                                      s.created_at, public.plant_tz(s.plant_id)) t) x),
       '[]'::jsonb));
 $function$;
 
@@ -212,7 +218,8 @@ $function$;
 create or replace function public.api_notifications()
 returns jsonb language sql stable security definer set search_path = '' as $$
   with n as (
-    select q.id, q.kind, q.plant_id, pu.plant_name, q.read_at, q.created_at, q.data
+    select q.id, q.kind, q.plant_id, pu.plant_name, q.read_at, q.created_at, q.data,
+           private.alert_text(q.kind, q.data, q.created_at, public.plant_tz(q.plant_id)) t   -- old words, until step 7
       from public.email_queue q
       join public.plant_users pu on pu.user_id = q.user_id and pu.plant_id = q.plant_id
      where q.user_id = auth.uid()
@@ -225,14 +232,13 @@ returns jsonb language sql stable security definer set search_path = '' as $$
     'pinned', '[]'::jsonb,
     'unread', (select count(*) from n where read_at is null),
     'items', coalesce((select jsonb_agg(jsonb_build_object(
-        'id', id, 'kind', kind, 'plant', plant_id, 'plantName', plant_name, 'read', read_at is not null,
+        'id', id, 'kind', kind, 'plant', plant_id, 'plantName', plant_name, 'read', read_at is not null) || t || jsonb_build_object(
         'data', data, 'created', extract(epoch from created_at), 'tz', public.plant_tz(plant_id),        -- 0264
         'switch', private.alert_group(kind))
         order by created_at desc, id desc) from n), '[]'::jsonb));
 $$;
 
 -- ---------------------------------------------------------------------------
--- 5. the SQL words go
+-- 5. the pop-up's SQL words go (alert_text: step 7)
 -- ---------------------------------------------------------------------------
 drop function private.push_text(text, jsonb, text, int);
-drop function private.alert_text(text, jsonb, timestamptz, text);
