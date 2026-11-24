@@ -1,7 +1,8 @@
 // `notify-email` (SOLAR-645 step 2, cron every minute from 0257): the one Resend sender.
 // Each run: the sweeps (email_sweep; the billing sweep runs inside the billing pass), then
 // alert emails (the old queue, then the message outbox, SOLAR-645 step 4), then the billing
-// outbox, then the rest (welcome, reports, history, ...).
+// outbox, then the rest (welcome, reports, history, ...: the old queue, then the message
+// outbox, step 5).
 // All three share one Resend pace, and a 429 holds all of them until its Retry-After.
 // Pop-ups are notify-push. The building and sending is notify's (../notify/index.ts).
 //
@@ -19,10 +20,12 @@ export type Passes = {
   sweep: () => Promise<unknown>;
   email: (lane: "urgent" | "bulk", until: number, deadline: number) => Promise<unknown>;
   alerts: (until: number, deadline: number) => Promise<unknown>;
+  bulkOutbox: (until: number, deadline: number) => Promise<unknown>;
   billing: (until: number, deadline: number) => Promise<unknown>;
 };
 
-/** One run, in order: sweep, alert emails (old queue, then outbox), billing, the rest. A dry
+/** One run, in order: sweep, alert emails (old queue, then outbox), billing, the rest (old
+ *  queue, then outbox). A dry
  *  run skips what writes; the outbox has no peek. */
 export async function drain(p: Passes, started: number, dry: boolean) {
   const swept = dry ? null : await p.sweep();
@@ -36,7 +39,11 @@ export async function drain(p: Passes, started: number, dry: boolean) {
     return { error: String(e?.message ?? e) };
   });
   const bulk = await p.email("bulk", started + BULK_MS, started + DEADLINE_MS);
-  return { live: !dry, swept, urgent, alerts, billing, bulk };
+  const bulkOutbox = dry ? null : await p.bulkOutbox(started + BULK_MS, started + DEADLINE_MS).catch((e) => {
+    noteError("msg_email_bulk_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  });
+  return { live: !dry, swept, urgent, alerts, billing, bulk, bulkOutbox };
 }
 
 if (import.meta.main) serve("notify-email", async (req) => {
@@ -48,6 +55,7 @@ if (import.meta.main) serve("notify-email", async (req) => {
       sweep,
       email: (lane, until, deadline) => emailPass(lane, until, deadline, dry),
       alerts: (until, deadline) => msgEmailPass(until, deadline),
+      bulkOutbox: (until, deadline) => msgEmailPass(until, deadline, undefined, undefined, undefined, undefined, "bulk"),
       billing: outboxPass,
     }, Date.now(), dry));
   } catch (e) {

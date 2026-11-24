@@ -86,8 +86,9 @@ begin
     and o.channel = 'email' and o.lane = 'urgent' and o.status = 'queued' and o.expires_at = now() + interval '1 hour'
     and o.to_email = 'r1@msge.test', row_to_json(o)::text);
   perform pg_temp.ok('R1 ... email_claim never takes it', q not in (select id from public.email_claim(100, true)));
-  insert into public.email_queue (user_id, kind, key, priority) values (u, 'welcome', 'r1:welcome', 1) returning id into w;
-  perform pg_temp.ok('R2 not an alert: stays on the old path',
+  -- welcome went to the outbox in 0263: a kind with no msg.kinds row stands in
+  insert into public.email_queue (user_id, kind, key, priority) values (u, 'free_week_setup', 'r1:fws', 1) returning id into w;
+  perform pg_temp.ok('R2 a kind not in msg.kinds: stays on the old path',
     (select status from public.email_queue where id = w) = 'queued' and pg_temp.ob(w) is null);
 end $$;
 
@@ -170,7 +171,7 @@ begin
   perform pg_temp.ok('D7 a retry that would land past the hour: failed "too old"',
     o.status = 'failed' and o.last_error = 'too old' and o.done_at is not null, row_to_json(o)::text);
   perform pg_temp.ok('M2 job_check_msg counts it as expired',
-    ((select x from jsonb_array_elements(public.job_check_msg()) x where x->>'channel' = 'email')->>'expired')::int >= 1);
+    ((select x from jsonb_array_elements(public.job_check_msg()) x where x->>'channel' = 'email' and x->>'lane' = 'urgent')->>'expired')::int >= 1);
   perform pg_temp.done(q2, '{"skip": "nothing to say"}');
   o := pg_temp.ob(q2);
   perform pg_temp.ok('D8 skip: dropped with the reason given', o.status = 'dropped' and o.drop_reason = 'nothing to say'
@@ -216,7 +217,7 @@ begin
   -- after queueing: plant removed, plant switched out, battery switch off
   delete from public.plant_users where user_id = u and plant_id = 990066912;
   perform billing.set_chosen_plants(a, '{990066911,990066912}', now());
-  insert into public.email_prefs (user_id, battery) values (u, false);
+  insert into public.email_prefs (user_id, battery) values (u, false) on conflict (user_id) do update set battery = false;
   n := pg_temp.take();
   perform pg_temp.ok('G1 over an hour old: dropped "too old"', (pg_temp.ob(q1)).drop_reason = 'too old', (pg_temp.ob(q1)).drop_reason);
   perform pg_temp.ok('G2 plant removed', (pg_temp.ob(q2)).drop_reason = 'plant removed', (pg_temp.ob(q2)).drop_reason);
@@ -251,7 +252,7 @@ declare u uuid := pg_temp.owner('g10', '{990066915,990066916}'); v uuid := pg_te
 begin
   r := pg_temp.ev(u, 990066916, 'needs_relink', 'g10:relink');
   perform billing.set_chosen_plants(pg_temp.acc(u), '{990066915}', now());
-  insert into public.email_prefs (user_id, grid) values (v, false);
+  insert into public.email_prefs (user_id, grid) values (v, false) on conflict (user_id) do update set grid = false;
   d1 := pg_temp.ev(v, 990066917, 'grid_down', 'g11:a', null, now() - interval '3 minutes');
   d2 := pg_temp.ev(v, 990066917, 'grid_down', 'g11:b', null, now() - interval '3 minutes');
   d3 := pg_temp.ev(v, 990066917, 'grid_down', 'g11:c', null, now() - interval '3 minutes');
@@ -286,7 +287,7 @@ end $$;
 do $$
 declare u uuid := pg_temp.owner('p3', '{990066922}'); down bigint; back bigint; n int;
 begin
-  insert into public.email_prefs (user_id, grid) values (u, false);
+  insert into public.email_prefs (user_id, grid) values (u, false) on conflict (user_id) do update set grid = false;
   down := pg_temp.ev(u, 990066922, 'grid_down', 'p3:down');
   n := pg_temp.take();
   update public.email_prefs set grid = true where user_id = u;
@@ -320,13 +321,13 @@ begin
   n := pg_temp.take(1);
   perform pg_temp.ok('P5 a waiting "back" first in line does not block the next row', pg_temp.taken(other) and not pg_temp.taken(back));
   perform pg_temp.ok('M3 job_check_msg: a waiting "back" is not the oldest due',
-    ((select x from jsonb_array_elements(public.job_check_msg()) x where x->>'channel' = 'email')->>'oldest') is null
-    or ((select x from jsonb_array_elements(public.job_check_msg()) x where x->>'channel' = 'email')->>'oldest')::timestamptz
+    ((select x from jsonb_array_elements(public.job_check_msg()) x where x->>'channel' = 'email' and x->>'lane' = 'urgent')->>'oldest') is null
+    or ((select x from jsonb_array_elements(public.job_check_msg()) x where x->>'channel' = 'email' and x->>'lane' = 'urgent')->>'oldest')::timestamptz
        > now() - interval '1 minute');
   update msg.outbox set claimed_until = now() - interval '1 second', not_before = now() - interval '10 minutes'
    where id = (pg_temp.ob(other)).id;
   perform pg_temp.ok('M4 ... a row whose lease ran out is',
-    ((select x from jsonb_array_elements(public.job_check_msg()) x where x->>'channel' = 'email')->>'oldest')::timestamptz
+    ((select x from jsonb_array_elements(public.job_check_msg()) x where x->>'channel' = 'email' and x->>'lane' = 'urgent')->>'oldest')::timestamptz
        <= now() - interval '10 minutes');
 end $$;
 
@@ -395,7 +396,7 @@ end $$;
 do $$
 declare u uuid := pg_temp.owner('x5', '{990066934}'); down bigint; back bigint; n int;
 begin
-  insert into public.email_prefs (user_id, grid) values (u, false);
+  insert into public.email_prefs (user_id, grid) values (u, false) on conflict (user_id) do update set grid = false;
   update msg.kinds set route = 'old' where channel = 'email';
   down := pg_temp.ev(u, 990066934, 'grid_down', 'x5:down');
   perform pg_temp.old_send(u);
@@ -481,7 +482,7 @@ begin
   perform pg_temp.ok('B7 bound, handed back untried: key kept, try given back',
     (pg_temp.ob(a)).batch_key = 'mb-test-7' and (pg_temp.ob(a)).tries = 0 and (pg_temp.ob(a)).status = 'queued');
   update msg.outbox set expires_at = now() where id = (pg_temp.ob(a)).id;
-  insert into public.email_prefs (user_id, panels) values (u, false);
+  insert into public.email_prefs (user_id, panels) values (u, false) on conflict (user_id) do update set panels = false;
   n := pg_temp.take();
   perform pg_temp.ok('B8 bound rows each pass the guard and their own expiry; the rest go under the key',
     (pg_temp.ob(a)).drop_reason = 'too old' and (pg_temp.ob(b)).drop_reason = 'switched off'

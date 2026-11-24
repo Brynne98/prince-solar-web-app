@@ -273,14 +273,26 @@ async function buildReport(p: Plant, period: Period, today: string, linkedOn?: s
  *  goes anyway: a plant whose history never finishes still gets its reports. */
 async function historyPending(row: Row): Promise<boolean> {
   if (!row.user_id || !row.plant_id || local(row.tz).date > addDays(row.data.today, 2)) return false;
-  const [{ data: link }, { data: cfg }, { count }] = await Promise.all([
+  const [{ data: link }, { data: cfg }, open] = await Promise.all([
     db.from("plant_users").select("linked_at").eq("user_id", row.user_id).eq("plant_id", row.plant_id).maybeSingle(),
     db.from("plant_config").select("backfill_next").eq("plant_id", row.plant_id).maybeSingle(),
-    db.from("email_queue").select("id", { count: "exact", head: true }).eq("user_id", row.user_id).eq("plant_id", row.plant_id)
-      .eq("kind", "history").in("status", ["queued", "sending"]),
+    historyOpen(row.user_id, row.plant_id),
   ]);
   // Right after a link the import bookmark isn't set yet and reads as done.
-  return (link != null && Date.now() - Date.parse(link.linked_at) < 600e3) || cfg?.backfill_next != null || (count ?? 0) > 0;
+  return (link != null && Date.now() - Date.parse(link.linked_at) < 600e3) || cfg?.backfill_next != null || open;
+}
+
+/** The plant's 60-days email is still on its way, on either path (0263). Before 0263 is in,
+ *  the old queue only. */
+async function historyOpen(user: string, plant: number): Promise<boolean> {
+  try {
+    return await rpc<boolean>("email_history_open", { p_user: user, p_plant: plant });
+  } catch (e) {
+    if (!missingRpc(e)) throw e;
+    const { count } = await db.from("email_queue").select("id", { count: "exact", head: true }).eq("user_id", user)
+      .eq("plant_id", plant).eq("kind", "history").in("status", ["queued", "sending"]);
+    return (count ?? 0) > 0;
+  }
 }
 
 /** The 60-days email waits for the plant's day totals (plant_energy). Without them
@@ -743,33 +755,56 @@ export async function outboxPass(until: number, deadline = until) {
   return count;
 }
 
-// ------------------------------------------------------------------- alert emails, outbox (SOLAR-645 step 4)
+// ------------------------------------------------------------------- emails, outbox (SOLAR-645 steps 4, 5)
 
-// msg_email_take (0262) leases due rows under one claim, after the guard at send time, with
-// the event row's fields; the email is built by build(), as on the old path. Up to 100 go in
-// one Resend batch call, its key saved on the rows first (msg_email_bind): a retry after a lost
-// answer, or after this worker died, sends the same rows under the same key, and Resend answers
-// from the first send. A row alone goes in its own call under ms-<id>. msg_email_done takes
-// each answer back; the database decides from it.
+// msg_email_take (0262) leases due rows of one lane under one claim, after the guard at send
+// time, with the event row's fields; the email is built by build(), as on the old path. Up to
+// 100 go in one Resend batch call, its key saved on the rows first (msg_email_bind): a retry
+// after a lost answer, or after this worker died, sends the same rows under the same key, and
+// Resend answers from the first send. A row alone goes in its own call under ms-<id>; feedback
+// always goes alone (Resend's batch call takes no attachment). msg_email_done takes each answer
+// back; the database decides from it.
+// Bulk (SOLAR-645 step 5, 0263): the old path's holds come first (bulkHold): a hold hands the
+// row back for a while, the try given back, without building it.
 export type MsgEmail = {
   id: number; claim: string; tries: number; batch_key: string | null; event_id: number; user_id: string | null;
   to_email: string; plant_id: number | null; plant_name: string | null; tz: string; kind: string; key: string;
-  data: Record<string, any>;
+  data: Record<string, any>; unsub_token?: string | null;
 };
 export type MsgResult = {
   id: number; code?: number; retry_s?: number; error?: string; untried?: boolean; skip?: string; keep?: boolean;
+  hold_s?: number;
 };
+/** Why an email waits before it is built: back in hold_s seconds. null: build it now. */
+export type Hold = (row: Row) => Promise<{ hold_s: number; error: string } | null>;
 const MSG_BATCH = 100;
 let msgMissingNoted = false;
 /** The RPC isn't there yet: the functions went out before the migration. */
 export const missingRpc = (e: unknown) => /Could not find the function|PGRST202/.test(String((e as Error)?.message ?? e));
 
 type Built = { m: MsgEmail; row: Row; mail: Email };
-type Ctx = { stop: boolean; deadline: number; call: Rpc; postFn: Post; make: (r: Row) => Promise<Email | null>; newKey: () => string };
+type Ctx = {
+  stop: boolean; deadline: number; call: Rpc; postFn: Post; make: (r: Row) => Promise<Email | null>; newKey: () => string;
+  hold: Hold;
+};
 
 const rowOf = (m: MsgEmail): Row => ({ id: m.event_id, user_id: m.user_id, to_email: m.to_email, plant_id: m.plant_id,
   plant_name: m.plant_name, tz: m.tz, kind: m.kind, key: m.key, data: m.data ?? {}, tries: m.tries, switch: null,
-  unsub_token: null, batch_key: null });
+  unsub_token: m.unsub_token ?? null, batch_key: null });
+
+/** The old path's holds (emailPass): a report waits for its plant's history (SOLAR-273); the
+ *  60-days email waits for the day totals, and each check runs the day sync again (SOLAR-522). */
+export const bulkHold: Hold = async (row) => {
+  // The free week's report doesn't wait: it goes on the day the week ends (0182).
+  if (row.kind.startsWith("report_") && row.data.freeWeekEnds !== true && await historyPending(row)) {
+    return { hold_s: 600, error: "waits for history" };
+  }
+  if (row.kind === "history" && row.plant_id && await historyWaits(row)) {
+    resync(row.plant_id);
+    return { hold_s: 600, error: "waits for day totals" };
+  }
+  return null;
+};
 
 /** One Resend answer for the rows of one call. A 429 holds the pace; Resend in trouble (not a
  *  refusal, nor a 409 still in progress) stops the pass. keep: the call may have gone. */
@@ -797,16 +832,21 @@ async function sendAlone(ctx: Ctx, b: Built): Promise<MsgResult> {
 /** One group: new rows (key null), or rows bound to `key` by an earlier call. A bound row
  *  only ever goes under its key, alone or with what is left of its group: Resend answers from
  *  the first send if it reached it (a smaller body gets 409 invalid_idempotent_request,
- *  counted as sent), else it is a first send. */
+ *  counted as sent), else it is a first send. Holds are for new rows only: a bound row's call
+ *  may have gone. */
 async function sendGroup(ctx: Ctx, g: MsgEmail[], key: string | null): Promise<MsgResult[]> {
   const bound = key !== null;
   const back = (ms: MsgEmail[]) => ms.map((m) => ({ id: m.id, untried: true, ...(bound ? { keep: true } : {}) }));
   if (ctx.stop || Date.now() > ctx.deadline) return back(g);
   const res: MsgResult[] = [], built: Built[] = [];
   for (const m of g) {
+    // reports cost several reads each: a new row not built in time goes back untouched
+    if (!bound && Date.now() > ctx.deadline) { res.push(...back([m])); continue; }
     const row = rowOf(m);
     let mail: Email | null;
     try {
+      const held = bound ? null : await ctx.hold(row);
+      if (held) { res.push({ id: m.id, ...held }); continue; }
       mail = await ctx.make(row);
     } catch (e) {
       noteError("email_build_failed", e, { user: m.user_id, hourly: true });
@@ -815,6 +855,9 @@ async function sendGroup(ctx: Ctx, g: MsgEmail[], key: string | null): Promise<M
       res.push({ id: m.id, code: 0, error, ...(bound ? { keep: true } : {}) });
       continue;
     }
+    // History waits for the day sync to land: again in an hour, until its expiry. Anything
+    // else with nothing to say (an empty report) is final.
+    if (!mail && m.kind === "history" && !bound) { res.push({ id: m.id, hold_s: 3600, error: "nothing to say yet" }); continue; }
     if (!mail) { res.push({ id: m.id, skip: "nothing to say" }); continue; }
     built.push({ m, row, mail });
   }
@@ -845,13 +888,14 @@ async function sendGroup(ctx: Ctx, g: MsgEmail[], key: string | null): Promise<M
 
 export async function msgEmailPass(until: number, deadline = until, call: Rpc = rpc, postFn: Post = post,
                                    make: (r: Row) => Promise<Email | null> = build,
-                                   newKey = () => `mb-${crypto.randomUUID()}`) {
-  const count = { sent: 0, again: 0, failed: 0, dropped: 0 };
-  const ctx: Ctx = { stop: false, deadline, call, postFn, make, newKey };
+                                   newKey = () => `mb-${crypto.randomUUID()}`,
+                                   lane: "urgent" | "bulk" = "urgent", hold: Hold = bulkHold) {
+  const count = { sent: 0, again: 0, failed: 0, dropped: 0, held: 0 };
+  const ctx: Ctx = { stop: false, deadline, call, postFn, make, newKey, hold };
   while (Date.now() < until) {
     let rows: MsgEmail[];
     try {
-      rows = await call<MsgEmail[]>("msg_email_take", { p_limit: MSG_BATCH, p_lane: "urgent" });
+      rows = await call<MsgEmail[]>("msg_email_take", { p_limit: MSG_BATCH, p_lane: lane });
     } catch (e) {
       if (!missingRpc(e)) throw e;
       if (!msgMissingNoted) noteError("msg_email_take_missing", e, { hourly: true });
@@ -859,20 +903,47 @@ export async function msgEmailPass(until: number, deadline = until, call: Rpc = 
       return { ...count, missing: true };
     }
     if (!rows.length) break;
-    // rows bound to a key go again together; new rows in calls of up to 100
-    const groups = new Map<string, MsgEmail[]>(), fresh: MsgEmail[] = [];
-    for (const m of rows) m.batch_key ? groups.set(m.batch_key, [...(groups.get(m.batch_key) ?? []), m]) : fresh.push(m);
+    // rows bound to a key go again together; feedback alone; new rows in calls of up to 100
+    const groups = new Map<string, MsgEmail[]>(), fresh: MsgEmail[] = [], alone: MsgEmail[] = [];
+    for (const m of rows) {
+      if (m.batch_key) groups.set(m.batch_key, [...(groups.get(m.batch_key) ?? []), m]);
+      else (m.kind === "feedback" ? alone : fresh).push(m);
+    }
     const res: MsgResult[] = [];
     for (const [key, g] of groups) res.push(...await sendGroup(ctx, g, key));
+    for (const m of alone) res.push(...await sendGroup(ctx, [m], null));
     for (let i = 0; i < fresh.length; i += MSG_BATCH) res.push(...await sendGroup(ctx, fresh.slice(i, i + MSG_BATCH), null));
     await call("msg_email_done", { p_claim: rows[0].claim, p_results: res });
     for (const r of res) {
       const c = r.code ?? 0;
-      count[r.untried ? "again" : r.skip ? "dropped" : c >= 200 && c < 300 ? "sent" : refused(c) ? "failed" : "again"]++;
+      const k = r.untried ? "again" : r.hold_s ? "held" : r.skip ? "dropped" : c >= 200 && c < 300 ? "sent" : refused(c) ? "failed" : "again";
+      count[k]++;
+      // after the answer is saved: a lost event costs a count, never a second email
+      const m = k === "sent" ? rows.find((x) => x.id === r.id) : undefined;
+      if (m) await trackSent(rowOf(m)).catch(() => {});
     }
     if (ctx.stop) break;
   }
   return count;
+}
+
+/** SOLAR-328: counted once an email has gone, by user id only, keyed on its event row. Both
+ *  paths (old queue, message outbox) call it. */
+export async function trackSent(row: Row, send = track) {
+  if (!row.user_id) return;
+  const id = String(row.id), at = new Date().toISOString();
+  if (row.kind === "winback") await send("winback_email_sent_done", row.user_id, id, at, { plan: row.data.from });
+  // SOLAR-243: a paid plan ended. Each email goes once per end: a cancel that ran
+  // out (winback, 0144) or a failed payment that ended it (bill_free).
+  if (row.kind === "winback" || row.kind === "bill_free") {
+    await send("plan_cancelled", row.user_id, id, at, { plan: row.data.from, reason: row.kind === "winback" ? "cancelled" : "unpaid" });
+  }
+  // SOLAR-475
+  if (row.kind === "report_week" && row.data.freeWeekEnds === true) await send("free_week_ended_email_sent_done", row.user_id, id, at, {});
+  // SOLAR-552, SOLAR-559
+  if (row.kind.startsWith("unpaid_")) await send(`${row.kind}_email_sent_done`, row.user_id, id, at, {});
+  // SOLAR-319
+  if (row.kind === "need_a_hand") await send("need_a_hand_email_sent_done", row.user_id, id, at, { choose: row.data?.choose === true });
 }
 
 /** What only the clock can tell: no readings, SunSynk, reports. */
@@ -941,30 +1012,9 @@ export async function emailPass(lane: "urgent" | "bulk" | null, until: number, d
       noteError("email_failed", new Error(`${row?.kind ?? "email"} ${x.id}: ${x.error ?? ""}`), { user: row?.user_id ?? null, hourly: true });
     }
     await rpc("email_done", { p_results: done });
-    // SOLAR-328: counted once it has gone, by user id only.
     for (const x of done) {
       const row = x.status === "sent" ? rows.find((r) => r.id === x.id) : undefined;
-      if (row?.kind === "winback" && row.user_id) {
-        await track("winback_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), { plan: row.data.from });
-      }
-      // SOLAR-243: a paid plan ended. Each email goes once per end: a cancel that ran
-      // out (winback, 0144) or a failed payment that ended it (bill_free).
-      if ((row?.kind === "winback" || row?.kind === "bill_free") && row.user_id) {
-        await track("plan_cancelled", row.user_id, String(row.id), new Date().toISOString(),
-          { plan: row.data.from, reason: row.kind === "winback" ? "cancelled" : "unpaid" });
-      }
-      // SOLAR-475
-      if (row?.kind === "report_week" && row.data.freeWeekEnds === true && row.user_id) {
-        await track("free_week_ended_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), {});
-      }
-      // SOLAR-552, SOLAR-559
-      if (row?.kind.startsWith("unpaid_") && row.user_id) {
-        await track(`${row.kind}_email_sent_done`, row.user_id, String(row.id), new Date().toISOString(), {});
-      }
-      // SOLAR-319
-      if (row?.kind === "need_a_hand" && row.user_id) {
-        await track("need_a_hand_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), { choose: row.data?.choose === true });
-      }
+      if (row) await trackSent(row);
     }
     // Rows handed back unsent (out of time, or a 429 held past the deadline): claiming
     // again would only build the same rows again.
@@ -987,6 +1037,12 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
     noteError("outbox_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   });
+  // the rest routed to the outbox (0263)
+  const bulk = dry ? null : await msgEmailPass(started + BUDGET_MS + 5_000, started + BUDGET_MS + 5_000, rpc, post, build,
+    undefined, "bulk").catch((e) => {
+    noteError("msg_email_bulk_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  });
   // The cron call times out at 55 s.
   const pushed = push ? await pushPass(started + 47_000).catch((e) => {
     noteError("push_pass_failed", e, { hourly: true });
@@ -997,7 +1053,7 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
     noteError("push_outbox_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   }) : null;
-  return { live: !dry, swept, ...count, alerts, outbox, pushed, pushedOutbox, due };
+  return { live: !dry, swept, ...count, alerts, outbox, bulk, pushed, pushedOutbox, due };
 }
 
 // Every template from one plant's real numbers; event values are samples.

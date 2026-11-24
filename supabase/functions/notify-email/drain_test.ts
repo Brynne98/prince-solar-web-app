@@ -9,14 +9,16 @@ const record = () => {
     email: (lane, until, deadline) => { calls.push(`${lane}:${until}:${deadline}`); return Promise.resolve({}); },
     alerts: (until, deadline) => { calls.push(`alerts:${until}:${deadline}`); return Promise.resolve({}); },
     billing: (until, deadline) => { calls.push(`billing:${until}:${deadline}`); return Promise.resolve({}); },
+    bulkOutbox: (until, deadline) => { calls.push(`bulkOutbox:${until}:${deadline}`); return Promise.resolve({}); },
   };
   return { calls, p };
 };
 
-Deno.test("order: sweep, alert emails (old, then outbox), billing, the rest", async () => {
+Deno.test("order: sweep, alert emails (old, then outbox), billing, the rest (old, then outbox)", async () => {
   const { calls, p } = record();
   await drain(p, 0, false);
-  assertEquals(calls, ["sweep", `urgent:${URGENT_MS}:${DEADLINE_MS}`, `alerts:${URGENT_MS}:${DEADLINE_MS}`, `billing:${BILLING_MS}:${DEADLINE_MS}`, `bulk:${BULK_MS}:${DEADLINE_MS}`]);
+  assertEquals(calls, ["sweep", `urgent:${URGENT_MS}:${DEADLINE_MS}`, `alerts:${URGENT_MS}:${DEADLINE_MS}`, `billing:${BILLING_MS}:${DEADLINE_MS}`,
+                       `bulk:${BULK_MS}:${DEADLINE_MS}`, `bulkOutbox:${BULK_MS}:${DEADLINE_MS}`]);
 });
 
 Deno.test("each lane stops claiming before the cron call's 55 s", () => {
@@ -33,7 +35,7 @@ Deno.test("a failed billing pass stops neither lane after it", async () => {
   const { calls, p } = record();
   p.billing = () => Promise.reject(new Error("down"));
   const out = await drain(p, 0, false);
-  assertEquals(calls.at(-1)?.startsWith("bulk"), true);
+  assertEquals(calls.slice(-2).map((c) => c.split(":")[0]), ["bulk", "bulkOutbox"]);
   assertEquals((out.billing as { error: string }).error, "down");
 });
 
@@ -41,6 +43,13 @@ Deno.test("a failed outbox alert pass stops nothing after it", async () => {
   const { calls, p } = record();
   p.alerts = () => Promise.reject(new Error("down"));
   const out = await drain(p, 0, false);
-  assertEquals(calls.map((c) => c.split(":")[0]), ["sweep", "urgent", "billing", "bulk"]);
+  assertEquals(calls.map((c) => c.split(":")[0]), ["sweep", "urgent", "billing", "bulk", "bulkOutbox"]);
   assertEquals((out.alerts as { error: string }).error, "down");
+});
+
+Deno.test("a failed outbox bulk pass is reported, not thrown", async () => {
+  const { p } = record();
+  p.bulkOutbox = () => Promise.reject(new Error("down"));
+  const out = await drain(p, 0, false);
+  assertEquals((out.bulkOutbox as { error: string }).error, "down");
 });
