@@ -1,4 +1,4 @@
--- SOLAR-645 step 3 (0259): the message outbox, pop-ups first.
+-- SOLAR-645 step 3 (0261): the message outbox, pop-ups first.
 -- LOCAL database only, with every migration applied. One transaction, rolled back:
 --   psql "$DB" -v ON_ERROR_STOP=1 -f scripts/sql/msg-outbox-tests.sql
 -- Exit 0: every check passed. A failed check raises, so psql exits 3.

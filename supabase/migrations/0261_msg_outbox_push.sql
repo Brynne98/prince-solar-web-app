@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0259 — message outbox, pop-ups first (SOLAR-645 step 3).
+-- 0261 — message outbox, pop-ups first (SOLAR-645 step 3).
 --
 -- email_queue stays the event log (the alert list reads it). Each kind and channel now
 -- has a route: 'old' (email_claim / push_claim, as before) or 'outbox'. The route is read
@@ -366,10 +366,10 @@ begin
     raise exception 'push_claim changed since 0257: edit it by hand';
   end if;
   d := replace(d, skip_old, $n$                   where d.user_id = q.user_id and d.key = q.pair_key
-                     and (d.push_skip is null or (d.push_skip = 'outbox'                              -- 0259
+                     and (d.push_skip is null or (d.push_skip = 'outbox'                              -- 0261
                           and exists (select 1 from msg.outbox o where o.dedupe_key = d.id || ':push' and o.status = 'sent'))))$n$);
   d := replace(d, wait_old, $n$                      where q.pair_key is not null and d.user_id = q.user_id and d.key = q.pair_key
-                        and (d.pushed_at is null or (d.push_skip = 'outbox'                           -- 0259
+                        and (d.pushed_at is null or (d.push_skip = 'outbox'                           -- 0261
                              and exists (select 1 from msg.outbox o where o.dedupe_key = d.id || ':push' and o.status = 'queued'))))$n$);
   execute d;
 end $$;

@@ -5,7 +5,7 @@
 -- The sweep and plant_live read now(), so the clock here is now() (fixed in a transaction).
 
 begin;
--- These checks drive push_claim (the old pop-up path). Since 0259 pop-ups go through the
+-- These checks drive push_claim (the old pop-up path). Since 0261 pop-ups go through the
 -- outbox; put them back on the old path for this rolled-back transaction.
 update msg.kinds set route = 'old' where channel = 'push';
 set client_min_messages = notice;
