@@ -21,9 +21,10 @@ Deno.test("verify reports how a try already settled by the webhook ended", () =>
   assertEquals(verifyStatus({ action: "again", status: "not_applied" }), "refund");
   assertEquals(verifyStatus({ action: "again", status: "failed" }), "failed");
   assertEquals(verifyStatus({ action: "again", status: "reversed" }), "refund");
-  assertEquals(verifyStatus({ action: "again", status: "void" }), "failed");
+  assertEquals(verifyStatus({ action: "again", status: "void" }), "void");
+  assertEquals(verifyStatus({ action: "void" }), "void");
   assertEquals(verifyStatus({ action: "applied" }), "applied");
-  assertEquals(verifyStatus(null), "pending");
+  assertEquals(verifyStatus(null), "error");
 });
 
 Deno.test("refund ids: id and refund_reference apart", () => {

@@ -4,14 +4,18 @@
 //
 //   POST /billing/pay      the signed-in user, { plan, period?, extras?, plants, newCard? }:
 //                          a first plan or a restart (start_checkout) when no plan runs, else
-//                          an upgrade. { settle: true } pays the open renewal bill now;
+//                          an upgrade. A restart first asks Paystack about card pages on the last
+//                          renewal: one paid before the plan ended brings it back instead (SOLAR-644).
+//                          { settle: true } pays the open renewal bill now ({ bill } from an
+//                          email link: that bill, if it is still the owner's to pay);
 //                          { card: true } checks a new card (Paystack's minimum, refunded).
 //                          Charges the saved card when there is one; otherwise answers { url }
 //                          for Paystack's card page, which comes back with ?reference=.
 //   POST /billing/change   the signed-in user, { action: downgrade | interval | cancel |
 //                          undo_cancel, plan?, extras?, drop?, period? }: booked for the next
 //                          billing date. Answers account_state.
-//   POST /billing/verify   the signed-in user, { reference }: asks Paystack about that try.
+//   POST /billing/verify   the signed-in user, { reference }: asks Paystack about that try;
+//                          answers its status and the bill's kind, plan and period.
 //   POST /billing/webhook  Paystack's notice of a payment, refund or dispute (HMAC-signed).
 //                          Stored first (deduped on type, entity and status); answers non-2xx
 //                          when it could not be processed, so Paystack sends it again.
@@ -117,7 +121,9 @@ async function report(reference: string, tx: Tx): Promise<Applied> {
   return r;
 }
 
-/** Ask Paystack about one try. Not found: it never reached Paystack. No answer: left for the next call. */
+/** Ask Paystack about one try. Not found: it never reached Paystack. No answer: left for the next
+ *  call, and recorded on a renewal card page (a payment that may still land holds a restart; at 24
+ *  hours after the plan ended the database fails the page instead, answered here as failed). */
 async function verify(reference: string): Promise<Applied | null> {
   try {
     return await report(reference, await paystack<Tx>("GET", `/transaction/verify/${encodeURIComponent(reference)}`));
@@ -125,7 +131,9 @@ async function verify(reference: string): Promise<Applied | null> {
     if (e instanceof PaystackError && e.status === 400) return await report(reference, { status: "not_found" });
     if (e instanceof PaystackError) {
       console.error(`billing verify ${reference}: ${e.message}`);
-      return null;
+      const u = await bill<Applied>("verify_unanswered", { reference })
+        .catch((err) => { noteError("verify_unanswered_failed", err, { ref: reference }); return null; });
+      return u?.action === "failed" ? u : null;
     }
     throw e;
   }
@@ -290,10 +298,13 @@ serve("billing", async (req) => {
     const ref = String(body.reference ?? "");
     if (!ref.startsWith("psh_")) return json({ error: "unknown reference" }, 400, cors);
     // Only the user who opened the try hears about it.
-    const owner = await bill<{ user?: string } | null>("attempt_user", { reference: ref });
+    const owner = await bill<{ user?: string; kind?: string; plan?: string | null; plan_name?: string | null;
+      interval?: string | null; changed?: boolean } | null>("attempt_user", { reference: ref });
     if (owner?.user !== user.id) return json({ error: "unknown reference" }, 400, cors);
     const r = await verify(ref);
-    return json({ status: verifyStatus(r), kind: r?.kind ?? null }, 200, cors);
+    // the bill's own facts, so the paid message is right even when the webhook settled it first
+    return json({ status: verifyStatus(r), kind: r?.kind ?? owner.kind ?? null, plan: owner.plan ?? null,
+      plan_name: owner.plan_name ?? null, period: owner.interval ?? null, changed: owner.changed ?? false }, 200, cors);
   }
 
   if (route === "change") {
@@ -319,15 +330,26 @@ serve("billing", async (req) => {
   if (!origin || !cors["Access-Control-Allow-Origin"]) return json({ error: "origin not allowed" }, 403, cors);
 
   let inv: { invoice: string; kind: string; status: string; amount_minor: number; currency: string; saved_card: boolean };
+  // an email's link names its bill: that bill is paid, or the owner hears why not (begin_attempt)
+  const billId = typeof body.bill === "string" && /^[0-9a-f-]{36}$/i.test(body.bill) ? body.bill : null;
   try {
-    if (body.settle === true) inv = await bill("pay_now", { user: user.id });
+    if (body.settle === true && billId) inv = { invoice: billId, kind: "renewal", status: "open", amount_minor: 0, currency: "", saved_card: false };
+    else if (body.settle === true) inv = await bill("pay_now", { user: user.id });
     else if (body.card === true) inv = await bill("start_card_check", { user: user.id });
     else {
       const st = await bill<{ state: string; plan: string | null }>("account_state", { user: user.id });
       const args = { user: user.id, plan: String(body.plan ?? ""), extras: Number.isSafeInteger(body.extras) ? body.extras : 0, plants: ids(body.plants) };
-      inv = st.plan && (st.state === "active" || st.state === "past_due")
-        ? await bill("upgrade", args)
-        : await bill("start_checkout", { ...args, interval: interval(body.period) ?? "month" });
+      if (st.plan && (st.state === "active" || st.state === "past_due")) inv = await bill("upgrade", args);
+      else {
+        // A renewal card page paid just before the plan ended may only now be answered: asked
+        // first, lease or not. Paid: the plan is back, no restart. Still processing or no answer:
+        // start_checkout refuses (a payment is already in progress).
+        for (const ref of await bill<string[]>("renewal_pages", { user: user.id })) {
+          const r = await verify(ref);
+          if (r?.action === "applied") return json({ status: "applied", renewal: true, reference: ref }, 200, cors);
+        }
+        inv = await bill("start_checkout", { ...args, interval: interval(body.period) ?? "month" });
+      }
     }
   } catch (e) {
     return refused(e);
@@ -339,10 +361,10 @@ serve("billing", async (req) => {
   type Try = Charge & { busy?: boolean; verify?: string[]; url?: string };
   let t: Try;
   try {
-    t = await bill<Try>("begin_attempt", { invoice: inv.invoice, channel });
+    t = await bill<Try>("begin_attempt", { user: user.id, invoice: inv.invoice, channel });
     if (t.verify) {
       for (const ref of t.verify) await verify(ref);
-      t = await bill<Try>("begin_attempt", { invoice: inv.invoice, channel });
+      t = await bill<Try>("begin_attempt", { user: user.id, invoice: inv.invoice, channel });
     }
   } catch (e) {
     return refused(e);
@@ -353,7 +375,7 @@ serve("billing", async (req) => {
 
   if (channel === "saved_card") {
     const r = await charge(t);
-    return json({ status: r.action, reference: t.reference, url: r.pay_url ?? null }, 200, cors);
+    return json({ status: r.action, kind: inv.kind, reference: t.reference, url: r.pay_url ?? null }, 200, cors);
   }
   try {
     const page = await paystack<{ authorization_url: string }>("POST", "/transaction/initialize", {
