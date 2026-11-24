@@ -37,3 +37,18 @@ Deno.test("partitions: under 6 days covered fails, 6 passes, not read keeps the 
   const kept = judge({ ...base, partitions: null, checks: { "partitions:readings": { failing: true, since: base.now } } });
   eq(pick(kept, "partitions:readings"), undefined, "kept");
 });
+
+Deno.test("notify workers (0257): both calls watched; push backlog fails, clears, not read keeps", () => {
+  const v = judge({ ...base, calls: [
+    { fn: "notify-email", failing: false, result: null, error: null, last_call: base.now, failed_1h: 0 },
+    { fn: "notify-push", failing: true, result: "timeout", error: null, last_call: base.now, failed_1h: 1 },
+  ], push: { waiting: 3, oldest: base.now } });
+  eq(pick(v, "call:notify-email")?.failing, false, "email call");
+  eq(pick(v, "call:notify-push")?.failing, true, "push call");
+  eq(pick(v, "push-queue")?.failing, true, "push backlog");
+  eq(pick(v, "push-queue")?.job, "notify-push", "push job");
+  eq(pick(v, "email-queue")?.job, "notify-email", "email job");
+  eq(pick(judge({ ...base, push: { waiting: 0, oldest: null } }), "push-queue")?.failing, false, "clear");
+  const kept = judge({ ...base, push: null, checks: { "push-queue": { failing: true, since: base.now } } });
+  eq(pick(kept, "push-queue"), undefined, "kept");
+});
