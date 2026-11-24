@@ -34,7 +34,7 @@ export const postgrest: Db = {
   },
   async clearBookmarks(ids) {
     const { error } = await db.from("plant_config").update({ backfill_next: null, backfill_until: null, temp_next: null }).in("plant_id", ids);
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(String(error.message));
   },
 };
 
