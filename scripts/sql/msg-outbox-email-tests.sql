@@ -409,12 +409,94 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- B: batch key saved before the call; the group is fixed from then on
+-- ---------------------------------------------------------------------------
+do $$
+declare u uuid := pg_temp.owner('b1', '{990066941}'); a bigint; b bigint; o1 msg.outbox; c uuid; n int; failed boolean;
+begin
+  a := pg_temp.ev(u, 990066941, 'grid_down', 'b1:a');
+  b := pg_temp.ev(u, 990066941, 'string_dead', 'b1:b');
+  n := pg_temp.take();
+  c := (select claim from t_take where event_id = a);
+  perform public.msg_email_bind(c, 'mb-test-1', array[(pg_temp.ob(a)).id, (pg_temp.ob(b)).id]);
+  perform pg_temp.ok('B1 bind: both rows carry the key',
+    (pg_temp.ob(a)).batch_key = 'mb-test-1' and (pg_temp.ob(b)).batch_key = 'mb-test-1');
+  begin
+    perform public.msg_email_bind(gen_random_uuid(), 'mb-test-2', array[(pg_temp.ob(a)).id]);
+    failed := false;
+  exception when others then failed := true;
+  end;
+  perform pg_temp.ok('B1 ... under another claim, or already bound: refused, nothing changed',
+    failed and (pg_temp.ob(a)).batch_key = 'mb-test-1');
+  perform pg_temp.ok('B1 ... and their lease renewed', (pg_temp.ob(a)).claimed_until = now() + interval '2 minutes');
+  -- the worker died after the call: lease runs out
+  update msg.outbox set claimed_until = now() - interval '1 second' where batch_key = 'mb-test-1';
+  n := pg_temp.take(1);
+  perform pg_temp.ok('B2 lost reply: the group comes back together (even past the limit), key kept',
+    pg_temp.taken(a) and pg_temp.taken(b) and (select bool_and(batch_key = 'mb-test-1') from t_take)
+    and (pg_temp.ob(a)).tries = 2 and (pg_temp.ob(a)).status = 'queued', format('%s rows', n));
+  perform public.msg_email_done((select claim from t_take limit 1), (select jsonb_agg(jsonb_build_object(
+    'id', id, 'code', 503, 'keep', true)) from t_take));
+  o1 := pg_temp.ob(a);
+  perform pg_temp.ok('B3 5xx with keep: queued again, key kept', o1.status = 'queued' and o1.batch_key = 'mb-test-1'
+    and o1.not_before > now(), row_to_json(o1)::text);
+  update msg.outbox set not_before = now() where batch_key = 'mb-test-1';
+  n := pg_temp.take();
+  perform public.msg_email_done((select claim from t_take limit 1), (select jsonb_agg(jsonb_build_object(
+    'id', id, 'code', 429, 'retry_s', 5, 'keep', true)) from t_take));
+  perform pg_temp.ok('B4 429 on a bound group: key kept (its first call may have gone)',
+    (pg_temp.ob(a)).batch_key = 'mb-test-1' and (pg_temp.ob(a)).n429 = 1);
+  update msg.outbox set not_before = now() where batch_key = 'mb-test-1';
+  n := pg_temp.take();
+  perform public.msg_email_done((select claim from t_take limit 1), (select jsonb_agg(jsonb_build_object(
+    'id', id, 'code', 200)) from t_take));
+  perform pg_temp.ok('B5 sent: both sent, key cleared',
+    (pg_temp.ob(a)).status = 'sent' and (pg_temp.ob(b)).status = 'sent' and (pg_temp.ob(a)).batch_key is null);
+end $$;
+
+do $$
+declare u uuid := pg_temp.owner('b6', '{990066942}'); a bigint; b bigint; n int; c uuid;
+begin
+  a := pg_temp.ev(u, 990066942, 'grid_down', 'b6:a');
+  b := pg_temp.ev(u, 990066942, 'string_dead', 'b6:b');
+  n := pg_temp.take();
+  c := (select claim from t_take limit 1);
+  perform public.msg_email_bind(c, 'mb-test-6', array[(pg_temp.ob(a)).id, (pg_temp.ob(b)).id]);
+  perform public.msg_email_done(c, jsonb_build_array(jsonb_build_object('id', (pg_temp.ob(a)).id, 'code', 422),
+                                                     jsonb_build_object('id', (pg_temp.ob(b)).id, 'code', 200)));
+  perform pg_temp.ok('B6 refused then each alone (no keep): keys cleared',
+    (pg_temp.ob(a)).status = 'failed' and (pg_temp.ob(a)).batch_key is null and (pg_temp.ob(b)).batch_key is null);
+end $$;
+
+do $$
+declare u uuid := pg_temp.owner('b7', '{990066943}'); a bigint; b bigint; c bigint; n int; cl uuid;
+begin
+  a := pg_temp.ev(u, 990066943, 'grid_down', 'b7:a', null, now() - interval '50 minutes');
+  b := pg_temp.ev(u, 990066943, 'string_dead', 'b7:b');
+  c := pg_temp.ev(u, 990066943, 'batt_hot', 'b7:c');
+  n := pg_temp.take();
+  cl := (select claim from t_take limit 1);
+  perform public.msg_email_bind(cl, 'mb-test-7', array[(pg_temp.ob(a)).id, (pg_temp.ob(b)).id, (pg_temp.ob(c)).id]);
+  perform public.msg_email_done(cl, (select jsonb_agg(jsonb_build_object('id', id, 'untried', true, 'keep', true)) from t_take));
+  perform pg_temp.ok('B7 bound, handed back untried: key kept, try given back',
+    (pg_temp.ob(a)).batch_key = 'mb-test-7' and (pg_temp.ob(a)).tries = 0 and (pg_temp.ob(a)).status = 'queued');
+  update msg.outbox set expires_at = now() where id = (pg_temp.ob(a)).id;
+  insert into public.email_prefs (user_id, panels) values (u, false);
+  n := pg_temp.take();
+  perform pg_temp.ok('B8 bound rows each pass the guard and their own expiry; the rest go under the key',
+    (pg_temp.ob(a)).drop_reason = 'too old' and (pg_temp.ob(b)).drop_reason = 'switched off'
+    and pg_temp.taken(c) and (select batch_key from t_take where event_id = c) = 'mb-test-7', format('%s rows', n));
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- S: who may call it; the flip
 -- ---------------------------------------------------------------------------
 do $$
 begin
-  perform pg_temp.ok('S1 take, done: service role only',
+  perform pg_temp.ok('S1 take, bind, done: service role only',
     has_function_privilege('service_role', 'public.msg_email_take(int, text)', 'execute')
+    and has_function_privilege('service_role', 'public.msg_email_bind(uuid, text, bigint[])', 'execute')
+    and not has_function_privilege('authenticated', 'public.msg_email_bind(uuid, text, bigint[])', 'execute')
     and has_function_privilege('service_role', 'public.msg_email_done(uuid, jsonb)', 'execute')
     and not has_function_privilege('anon', 'public.msg_email_take(int, text)', 'execute')
     and not has_function_privilege('authenticated', 'public.msg_email_done(uuid, jsonb)', 'execute'));

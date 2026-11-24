@@ -18,9 +18,18 @@
 --         anything else (0 = no answer, 5xx, 401, 403, 404, 409) again after Retry-After or
 --         60 s doubling to 10 min; past the expiry it fails 'too old'. 'untried' hands a row
 --         back at once, try given back; 'skip' drops it with that reason.
--- Resend key per row: ms-<outbox id>. A retry after a lost reply is answered from the
--- first send. A lease that runs out after the expiry drops the row 'too old' even if the
--- lost send went; accepted.
+--   bind  rows going out together in one Resend batch call (up to 100) get its key saved
+--         BEFORE the call (msg_email_bind), which also renews their lease. A saved row only
+--         ever goes again under that key: after a lost reply, a 5xx or a dead worker, the
+--         rows still due come back under it (each through the guard and its own expiry) and
+--         go in one call under it. If the first call reached Resend, Resend answers from it
+--         (the same rows) or with 409 invalid_idempotent_request (fewer rows), both counted
+--         as sent; if it didn't, the call is a first send. Nothing goes twice. A refusal
+--         (400, 422) means nothing went under the key: it is cleared, each row goes alone.
+-- A row alone goes in its own call under ms-<outbox id>, no key saved. A lease that runs out
+-- after the expiry drops the row 'too old' even if the lost send went; accepted.
+-- Batching (2026-11-24, Brynne agreed): one call per email capped alerts at ~60 a minute; a
+-- load-shedding wave queues hundreds at once.
 --
 -- email_claim learns the outbox for a "down": its "back" on the old path waits while the
 -- outbox email is queued and is skipped unless it was sent.
@@ -30,12 +39,14 @@
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
--- 1. Lease token and 429 count on the outbox row (email; push keeps them per device)
+-- 1. Lease token, 429 count and batch key on the outbox row (email; push keeps its per device)
 -- ---------------------------------------------------------------------------
 alter table msg.outbox add column claim uuid,
                        add column n429 int not null default 0,
-                       add column last_429_at timestamptz;
+                       add column last_429_at timestamptz,
+                       add column batch_key text;            -- Resend batch key, saved before the call
 create index msg_outbox_429_idx on msg.outbox (last_429_at) where n429 > 0;
+create index msg_outbox_batch_idx on msg.outbox (batch_key) where batch_key is not null;
 
 -- ---------------------------------------------------------------------------
 -- 2. A "back"'s "down" email, on either path: 'wait', 'ok', 'dropped'.
@@ -90,8 +101,8 @@ $$;
 -- 3. Take
 -- ---------------------------------------------------------------------------
 create function public.msg_email_take(p_limit int default 50, p_lane text default 'urgent')
-returns table (id bigint, claim uuid, tries int, event_id bigint, user_id uuid, to_email text, plant_id bigint,
-               plant_name text, tz text, kind text, key text, data jsonb)
+returns table (id bigint, claim uuid, tries int, batch_key text, event_id bigint, user_id uuid, to_email text,
+               plant_id bigint, plant_name text, tz text, kind text, key text, data jsonb)
 language plpgsql security definer set search_path = '' as $$
 declare
   v_claim uuid := gen_random_uuid();
@@ -99,7 +110,38 @@ declare
   v_why text;
   v_leased int := 0;
   v_moved int;
+  k text;
 begin
+  -- rows already bound to a batch key: their call may have gone. Each passes the guard; what
+  -- is left of a group is leased together and goes again under its key (notify).
+  for k in
+    select o.batch_key from msg.outbox o
+     where o.channel = 'email' and o.lane = p_lane and o.status = 'queued' and o.batch_key is not null
+       and o.not_before <= now() and (o.claimed_until is null or o.claimed_until < now())
+     group by o.batch_key order by min(o.not_before), o.batch_key
+  loop
+    exit when v_leased >= p_limit;
+    -- a worker taking the same group at once waits here, then finds it leased
+    for r in
+      select o.* from msg.outbox o
+       where o.batch_key = k and o.status = 'queued' and o.not_before <= now()
+         and (o.claimed_until is null or o.claimed_until < now())
+       order by o.id
+       for update
+    loop
+      v_why := msg.email_guard(r);
+      if v_why = 'wait' then continue; end if;
+      if v_why is not null then
+        update msg.outbox o set status = 'dropped', drop_reason = v_why, claim = null, claimed_until = null, done_at = now()
+         where o.id = r.id;
+        continue;
+      end if;
+      update msg.outbox o set claim = v_claim, claimed_until = now() + interval '2 minutes', tries = o.tries + 1
+       where o.id = r.id;
+      v_leased := v_leased + 1;
+    end loop;
+  end loop;
+
   -- dropped rows don't count: take again until p_limit are leased or nothing moves (review)
   loop
     v_moved := 0;
@@ -107,9 +149,10 @@ begin
       select o.* from msg.outbox o
        where o.channel = 'email' and o.lane = p_lane and o.status = 'queued' and o.not_before <= now()
          and (o.claimed_until is null or o.claimed_until < now())  -- a lease that ran out: the reply was lost
+         and o.batch_key is null
          and msg.email_guard(o) is distinct from 'wait'            -- waiting rows never fill the take
        order by o.not_before, o.id
-       limit p_limit - v_leased
+       limit greatest(p_limit - v_leased, 0)
        for update skip locked
     loop
       v_why := msg.email_guard(r);
@@ -129,7 +172,7 @@ begin
 
   -- the old email_claim's fields, so notify builds the same email
   return query
-  select o.id, v_claim, o.tries, q.id, q.user_id,
+  select o.id, v_claim, o.tries, o.batch_key, q.id, q.user_id,
          coalesce(q.to_email, u.email::text, o.to_email), q.plant_id,
          coalesce(pu.plant_name, (select pu2.plant_name from public.plant_users pu2
                                    where pu2.user_id = q.user_id order by pu2.linked_at limit 1)),
@@ -140,21 +183,44 @@ begin
     left join auth.users u on u.id = q.user_id
     left join public.plant_users pu on pu.user_id = q.user_id and pu.plant_id = q.plant_id
    where o.claim = v_claim and o.status = 'queued'
-   order by o.not_before, o.id;
+   order by o.batch_key nulls last, o.id;
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 4. Done: [{id, code?, retry_s?, error?, untried?, skip?}]. code is Resend's HTTP status,
---    0 = no answer. Only the claim that leased a row can close it.
+-- 3b. Bind: the rows of one Resend batch call get its key before the call, and their lease is
+--     renewed (the build and the pace may have used it). All or none: it raises, binding
+--     nothing, when any row is no longer leased under this claim or is already bound.
+-- ---------------------------------------------------------------------------
+create function public.msg_email_bind(p_claim uuid, p_key text, p_ids bigint[])
+returns boolean language plpgsql security definer set search_path = '' as $$
+declare v_n int;
+begin
+  update msg.outbox o set batch_key = p_key, claimed_until = now() + interval '2 minutes'
+   where o.id = any (p_ids) and o.claim = p_claim and o.status = 'queued' and o.batch_key is null
+     and o.channel = 'email';
+  get diagnostics v_n = row_count;
+  if v_n <> cardinality(p_ids) then
+    raise exception 'msg_email_bind: % of % rows', v_n, cardinality(p_ids);
+  end if;
+  return true;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 4. Done: [{id, code?, retry_s?, error?, untried?, skip?, keep?}]. code is Resend's HTTP
+--    status, 0 = no answer. Only the claim that leased a row can close it. keep: the row's
+--    batch call may have gone (no answer, 5xx, a 409 still in progress, or any answer short
+--    of sent or refused to rows retaken under their key): the key stays while the row stays
+--    queued. Otherwise it is cleared.
 -- ---------------------------------------------------------------------------
 create function public.msg_email_done(p_claim uuid, p_results jsonb)
 returns void language sql security definer set search_path = '' as $$
   with res as (
     select (e->>'id')::bigint id, coalesce((e->>'code')::int, 0) code, (e->>'retry_s')::int retry_s, e->>'error' err,
-           coalesce((e->>'untried')::boolean, false) untried, e->>'skip' skip
+           coalesce((e->>'untried')::boolean, false) untried, e->>'skip' skip,
+           coalesce((e->>'keep')::boolean, false) keep
       from jsonb_array_elements(coalesce(p_results, '[]')) e),
   plan as (
-    select o.id, r.code, r.err, r.untried, r.skip,
+    select o.id, r.code, r.err, r.untried, r.skip, r.keep,
            r.code between 200 and 299 as ok,
            r.code in (400, 422) as refused,
            -- Retry-After 0 or past: still 5 s, or one pass would call Resend in a loop
@@ -180,6 +246,9 @@ returns void language sql security definer set search_path = '' as $$
                            else left(coalesce(p.err, 'resend ' || p.code), 200) end,
          done_at = case when p.untried then null
                         when p.skip is not null or p.ok or p.refused or p.next_at >= p.expires_at then now() end,
+         batch_key = case when p.keep and (p.untried or (p.skip is null and not p.ok and not p.refused
+                                                          and p.next_at < p.expires_at))
+                          then o.batch_key end,
          claim = null, claimed_until = null
     from plan p
    where o.id = p.id
@@ -187,6 +256,8 @@ $$;
 
 revoke all on function public.msg_email_take(int, text) from public, anon, authenticated;
 revoke all on function public.msg_email_done(uuid, jsonb) from public, anon, authenticated;
+revoke all on function public.msg_email_bind(uuid, text, bigint[]) from public, anon, authenticated;
+grant execute on function public.msg_email_bind(uuid, text, bigint[]) to service_role;
 grant execute on function public.msg_email_take(int, text) to service_role;
 grant execute on function public.msg_email_done(uuid, jsonb) to service_role;
 revoke all on all functions in schema msg from public, anon, authenticated;

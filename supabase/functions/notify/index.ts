@@ -746,22 +746,108 @@ export async function outboxPass(until: number, deadline = until) {
 // ------------------------------------------------------------------- alert emails, outbox (SOLAR-645 step 4)
 
 // msg_email_take (0262) leases due rows under one claim, after the guard at send time, with
-// the event row's fields; the email is built by build(), as on the old path. One Resend call
-// per row under its own key (ms-<id>), so a retry after a lost answer sends nothing twice.
-// msg_email_done takes each Resend status back; the database decides from it.
+// the event row's fields; the email is built by build(), as on the old path. Up to 100 go in
+// one Resend batch call, its key saved on the rows first (msg_email_bind): a retry after a lost
+// answer, or after this worker died, sends the same rows under the same key, and Resend answers
+// from the first send. A row alone goes in its own call under ms-<id>. msg_email_done takes
+// each answer back; the database decides from it.
 export type MsgEmail = {
-  id: number; claim: string; tries: number; event_id: number; user_id: string | null; to_email: string;
-  plant_id: number | null; plant_name: string | null; tz: string; kind: string; key: string; data: Record<string, any>;
+  id: number; claim: string; tries: number; batch_key: string | null; event_id: number; user_id: string | null;
+  to_email: string; plant_id: number | null; plant_name: string | null; tz: string; kind: string; key: string;
+  data: Record<string, any>;
 };
-export type MsgResult = { id: number; code?: number; retry_s?: number; error?: string; untried?: boolean; skip?: string };
-const MSG_BATCH = 50;
+export type MsgResult = {
+  id: number; code?: number; retry_s?: number; error?: string; untried?: boolean; skip?: string; keep?: boolean;
+};
+const MSG_BATCH = 100;
 let msgMissingNoted = false;
 /** The RPC isn't there yet: the functions went out before the migration. */
 export const missingRpc = (e: unknown) => /Could not find the function|PGRST202/.test(String((e as Error)?.message ?? e));
 
+type Built = { m: MsgEmail; row: Row; mail: Email };
+type Ctx = { stop: boolean; deadline: number; call: Rpc; postFn: Post; make: (r: Row) => Promise<Email | null>; newKey: () => string };
+
+const rowOf = (m: MsgEmail): Row => ({ id: m.event_id, user_id: m.user_id, to_email: m.to_email, plant_id: m.plant_id,
+  plant_name: m.plant_name, tz: m.tz, kind: m.kind, key: m.key, data: m.data ?? {}, tries: m.tries, switch: null,
+  unsub_token: null, batch_key: null });
+
+/** One Resend answer for the rows of one call. A 429 holds the pace; Resend in trouble (not a
+ *  refusal, nor a 409 still in progress) stops the pass. keep: the call may have gone. */
+function answer(ctx: Ctx, ids: number[], out: Awaited<ReturnType<Post>>, keep: boolean, what: string,
+                user: string | null = null): MsgResult[] {
+  if (!out.error) return ids.map((id) => ({ id, code: out.status }));
+  if (out.status === 429) {
+    pacer.hold(out.retryAfter);
+    noteError("resend_429", new Error(out.error), { hourly: true });
+  } else if (refused(out.status)) noteError("email_failed", new Error(`${what}: ${out.error}`), { user, hourly: true });
+  else noteError(`resend_${out.status || "network"}`, new Error(out.error), { hourly: true });
+  if (!refused(out.status) && out.status !== 409) ctx.stop = true;
+  const retry_s = out.retryAfter ? Math.ceil(retryAfterMs(out.retryAfter, Date.now()) / 1000) : undefined;
+  return ids.map((id) => ({ id, code: out.status, error: out.error, ...(retry_s !== undefined ? { retry_s } : {}),
+                            ...(keep ? { keep: true } : {}) }));
+}
+
+/** A row alone, under ms-<id>. */
+async function sendAlone(ctx: Ctx, b: Built): Promise<MsgResult> {
+  if (ctx.stop || !await pacer.slot(ctx.deadline)) { ctx.stop = true; return { id: b.m.id, untried: true }; }
+  const out = await sendOutboxOne(ctx.postFn, RESEND_URL, { id: b.m.id, payload: payload(b) }, msgKey(b.m.id));
+  return answer(ctx, [b.m.id], out, false, `${b.m.kind} outbox ${b.m.id}`, b.m.user_id)[0];
+}
+
+/** One group: new rows (key null), or rows bound to `key` by an earlier call. A bound row
+ *  only ever goes under its key, alone or with what is left of its group: Resend answers from
+ *  the first send if it reached it (a smaller body gets 409 invalid_idempotent_request,
+ *  counted as sent), else it is a first send. */
+async function sendGroup(ctx: Ctx, g: MsgEmail[], key: string | null): Promise<MsgResult[]> {
+  const bound = key !== null;
+  const back = (ms: MsgEmail[]) => ms.map((m) => ({ id: m.id, untried: true, ...(bound ? { keep: true } : {}) }));
+  if (ctx.stop || Date.now() > ctx.deadline) return back(g);
+  const res: MsgResult[] = [], built: Built[] = [];
+  for (const m of g) {
+    const row = rowOf(m);
+    let mail: Email | null;
+    try {
+      mail = await ctx.make(row);
+    } catch (e) {
+      noteError("email_build_failed", e, { user: m.user_id, hourly: true });
+      const error = `build: ${e instanceof Error ? e.message : e}`.slice(0, 200);
+      // tried again later; a bound row keeps its key and goes under it then
+      res.push({ id: m.id, code: 0, error, ...(bound ? { keep: true } : {}) });
+      continue;
+    }
+    if (!mail) { res.push({ id: m.id, skip: "nothing to say" }); continue; }
+    built.push({ m, row, mail });
+  }
+  if (!built.length) return res;
+  if (Date.now() > ctx.deadline) return [...res, ...back(built.map((b) => b.m))];
+  // a bound row alone still goes in a batch call under its key, never under ms-<id>
+  if (!bound && built.length === 1) return [...res, await sendAlone(ctx, built[0])];
+  if (!await pacer.slot(ctx.deadline)) { ctx.stop = true; return [...res, ...back(built.map((b) => b.m))]; }
+  const ids = built.map((b) => b.m.id);
+  const k = key ?? ctx.newKey();
+  if (!bound) {
+    try {
+      await ctx.call("msg_email_bind", { p_claim: g[0].claim, p_key: k, p_ids: ids });
+    } catch (e) {
+      noteError("msg_email_bind_failed", e, { hourly: true });
+      return [...res, ...back(built.map((b) => b.m))];
+    }
+  }
+  const out = await sendOutboxOne(ctx.postFn, `${RESEND_URL}/batch`, { id: ids[0], payload: built.map(payload) }, k);
+  // Refused: Resend sent none of them. Each alone, so a bad address fails only itself.
+  if (refused(out.status)) {
+    const one: MsgResult[] = [];
+    for (const b of built) one.push(await sendAlone(ctx, b));
+    return [...res, ...one];
+  }
+  return [...res, ...answer(ctx, ids, out, true, `batch ${k}`)];
+}
+
 export async function msgEmailPass(until: number, deadline = until, call: Rpc = rpc, postFn: Post = post,
-                                   make: (r: Row) => Promise<Email | null> = build) {
+                                   make: (r: Row) => Promise<Email | null> = build,
+                                   newKey = () => `mb-${crypto.randomUUID()}`) {
   const count = { sent: 0, again: 0, failed: 0, dropped: 0 };
+  const ctx: Ctx = { stop: false, deadline, call, postFn, make, newKey };
   while (Date.now() < until) {
     let rows: MsgEmail[];
     try {
@@ -773,43 +859,18 @@ export async function msgEmailPass(until: number, deadline = until, call: Rpc = 
       return { ...count, missing: true };
     }
     if (!rows.length) break;
+    // rows bound to a key go again together; new rows in calls of up to 100
+    const groups = new Map<string, MsgEmail[]>(), fresh: MsgEmail[] = [];
+    for (const m of rows) m.batch_key ? groups.set(m.batch_key, [...(groups.get(m.batch_key) ?? []), m]) : fresh.push(m);
     const res: MsgResult[] = [];
-    let stop = false;
-    for (const m of rows) {
-      // left unsent: handed back at once, the try given back
-      if (stop || Date.now() > deadline) { res.push({ id: m.id, untried: true }); continue; }
-      const row: Row = { id: m.event_id, user_id: m.user_id, to_email: m.to_email, plant_id: m.plant_id, plant_name: m.plant_name,
-                         tz: m.tz, kind: m.kind, key: m.key, data: m.data ?? {}, tries: m.tries, switch: null, unsub_token: null, batch_key: null };
-      let mail: Email | null;
-      try {
-        mail = await make(row);
-      } catch (e) {
-        noteError("email_build_failed", e, { user: m.user_id, hourly: true });
-        res.push({ id: m.id, code: 0, error: `build: ${e instanceof Error ? e.message : e}`.slice(0, 200) });
-        continue;
-      }
-      if (!mail) { res.push({ id: m.id, skip: "nothing to say" }); continue; }
-      // no slot before the deadline (a 429 held past it): this row and the rest go back
-      if (!await pacer.slot(deadline)) { stop = true; res.push({ id: m.id, untried: true }); continue; }
-      const out = await sendOutboxOne(postFn, RESEND_URL, { id: m.id, payload: payload({ row, mail }) }, msgKey(m.id));
-      if (!out.error) { res.push({ id: m.id, code: out.status }); continue; }
-      const limited = out.status === 429;
-      if (limited) {
-        pacer.hold(out.retryAfter);
-        noteError("resend_429", new Error(out.error), { hourly: true });
-      } else if (!refused(out.status)) noteError(`resend_${out.status || "network"}`, new Error(out.error), { hourly: true });
-      else noteError("email_failed", new Error(`${m.kind} outbox ${m.id}: ${out.error}`), { user: m.user_id, hourly: true });
-      res.push({ id: m.id, code: out.status, error: out.error,
-                 ...(out.retryAfter ? { retry_s: Math.ceil(retryAfterMs(out.retryAfter, Date.now()) / 1000) } : {}) });
-      // Resend in trouble (not one email refused, nor one still in flight): the rest wait for the next run
-      if (!refused(out.status) && out.status !== 409) stop = true;
-    }
+    for (const [key, g] of groups) res.push(...await sendGroup(ctx, g, key));
+    for (let i = 0; i < fresh.length; i += MSG_BATCH) res.push(...await sendGroup(ctx, fresh.slice(i, i + MSG_BATCH), null));
     await call("msg_email_done", { p_claim: rows[0].claim, p_results: res });
     for (const r of res) {
       const c = r.code ?? 0;
       count[r.untried ? "again" : r.skip ? "dropped" : c >= 200 && c < 300 ? "sent" : refused(c) ? "failed" : "again"]++;
     }
-    if (stop) break;
+    if (ctx.stop) break;
   }
   return count;
 }
