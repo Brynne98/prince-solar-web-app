@@ -35,8 +35,8 @@ import {
   offerEnds, planSwitched, planUpgraded, renewalNotice, REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, winback, cancelEndsSoon, needAHand, feedback, unpaidReminder, unpaidLast, unpaidDeleted, APP,
 } from "../_shared/email.ts";
 import { outboxMail, FROM_BILLING, FROM_HELLO } from "../_shared/email.ts";
-import { sendOutboxOne } from "../_shared/outbox.ts";
-import { mail as accountMail, type MailInput } from "../_shared/text.ts";
+import { msgKey, type Post, sendOutboxOne } from "../_shared/outbox.ts";
+import { alertLine, alertPush, clock as hhmm, lasted, mail as accountMail, type MailInput } from "../_shared/text.ts";
 import { Pacer, retryAfterMs } from "../_shared/pace.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
@@ -83,8 +83,6 @@ const fmtDay = (d: string, o: Intl.DateTimeFormatOptions) =>
 /** "1 Nov 2026", as the billing emails write a date. */
 const day = (d: string) => fmtDay(d, { day: "numeric", month: "short", year: "numeric" });
 const dayMonth = (d: string) => fmtDay(d, { day: "numeric", month: "short" });
-const hhmm = (epoch: number, tz: string) =>
-  new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(epoch * 1000));
 /** "today", or the event's date when it was on another local day ("Tue 21 Oct"). */
 function dayOf(epoch: number, tz: string): string {
   const d = local(tz, new Date(epoch * 1000)).date;
@@ -150,11 +148,6 @@ async function lastMail(user: string | null, kind: string, before: number): Prom
   return data?.data ?? null;
 }
 
-function lasted(fromEpoch: number, toEpoch: number): string {
-  const m = Math.max(1, Math.round((toEpoch - fromEpoch) / 60));
-  // the app's format (fmtDuration) and the pop-ups' (0153): 45 min, 1h 33m, 2h
-  return m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${Math.floor(m / 60)}h`;
-}
 
 // ------------------------------------------------------------------- energy
 
@@ -273,14 +266,26 @@ async function buildReport(p: Plant, period: Period, today: string, linkedOn?: s
  *  goes anyway: a plant whose history never finishes still gets its reports. */
 async function historyPending(row: Row): Promise<boolean> {
   if (!row.user_id || !row.plant_id || local(row.tz).date > addDays(row.data.today, 2)) return false;
-  const [{ data: link }, { data: cfg }, { count }] = await Promise.all([
+  const [{ data: link }, { data: cfg }, open] = await Promise.all([
     db.from("plant_users").select("linked_at").eq("user_id", row.user_id).eq("plant_id", row.plant_id).maybeSingle(),
     db.from("plant_config").select("backfill_next").eq("plant_id", row.plant_id).maybeSingle(),
-    db.from("email_queue").select("id", { count: "exact", head: true }).eq("user_id", row.user_id).eq("plant_id", row.plant_id)
-      .eq("kind", "history").in("status", ["queued", "sending"]),
+    historyOpen(row.user_id, row.plant_id),
   ]);
   // Right after a link the import bookmark isn't set yet and reads as done.
-  return (link != null && Date.now() - Date.parse(link.linked_at) < 600e3) || cfg?.backfill_next != null || (count ?? 0) > 0;
+  return (link != null && Date.now() - Date.parse(link.linked_at) < 600e3) || cfg?.backfill_next != null || open;
+}
+
+/** The plant's 60-days email is still on its way, on either path (0263). Before 0263 is in,
+ *  the old queue only. */
+async function historyOpen(user: string, plant: number): Promise<boolean> {
+  try {
+    return await rpc<boolean>("email_history_open", { p_user: user, p_plant: plant });
+  } catch (e) {
+    if (!missingRpc(e)) throw e;
+    const { count } = await db.from("email_queue").select("id", { count: "exact", head: true }).eq("user_id", user)
+      .eq("plant_id", plant).eq("kind", "history").in("status", ["queued", "sending"]);
+    return (count ?? 0) > 0;
+  }
 }
 
 /** The 60-days email waits for the plant's day totals (plant_energy). Without them
@@ -565,10 +570,23 @@ export async function sendBatch(outs: Out[], deadline: number, reuse?: string): 
 
 // ------------------------------------------------------------------- pop-ups
 
-type PushRow = {
-  id: number; kind: string; plant_id: number; title: string; body: string; tab: string; day: string | null;
-  subs: { endpoint: string; p256dh: string; auth: string }[];
+// From 0264 the database sends an alert's facts and the words come from text.ts (SOLAR-645):
+// data, created (epoch s), tz, the plant's name and how many plants the user has. A row
+// from before 0264 brings its own title, body, tab and day.
+export type PopupFacts = {
+  kind: string; data?: Record<string, any> | null; created?: number; tz?: string; plant_name?: string | null; plants?: number;
+  title?: string | null; body?: string | null; tab?: string; day?: string | null;
 };
+/** A pop-up's title, body, and the page and day a tap opens. */
+export function popup(r: PopupFacts): { title: string | null; body: string | null; tab: string; day: string | null } {
+  if (r.data === undefined) return { title: r.title ?? null, body: r.body ?? null, tab: r.tab ?? "live", day: r.day ?? null };
+  const t = alertLine({ kind: r.kind, data: r.data, created: Number(r.created), tz: r.tz! });
+  if (!t) return { title: null, body: null, tab: "live", day: null };
+  return { ...alertPush(r.kind, t, r.plant_name ?? null, Number(r.plants ?? 1)), tab: t.tab,
+           day: t.tab === "grid" || t.tab === "solar" ? t.day : null };
+}
+
+type PushRow = PopupFacts & { id: number; plant_id: number; subs: { endpoint: string; p256dh: string; auth: string }[] };
 
 let pushServer: Promise<webpush.ApplicationServer> | null = null;
 // A key that fails to load is tried again next run, not kept as a failure.
@@ -586,10 +604,11 @@ async function pushOne(r: PushRow, s: PushRow["subs"][number]): Promise<"ok" | "
   if (!PUSH_HOST.test(s.endpoint)) return "gone";
   // data is fields, not a link, so the phone apps can map them to their own screens.
   // tag: a Grid back replaces its Grid down on screen, per plant.
+  const w = popup(r);
   const msg = JSON.stringify({
-    title: r.title, body: r.body, tag: `${r.plant_id}:${r.kind === "relinked" ? "needs" : r.kind.split("_")[0]}`,
+    title: w.title, body: w.body, tag: `${r.plant_id}:${r.kind === "relinked" ? "needs" : r.kind.split("_")[0]}`,
     // a login's pop-up opens Account on the logins, where Reconnect is (SOLAR-380)
-    data: { id: r.id, tab: r.tab, plant: r.plant_id, day: r.day, section: r.tab === "account" ? "logins" : undefined },
+    data: { id: r.id, tab: w.tab, plant: r.plant_id, day: w.day, section: w.tab === "account" ? "logins" : undefined },
   });
   try {
     // An alert an hour late is no longer news: the push service drops it after that.
@@ -624,6 +643,66 @@ export async function pushPass(deadline: number) {
       });
     }
     await rpc("push_done", { p_ok: ok, p_gone: gone });
+  }
+  return count;
+}
+
+// Pop-ups through the outbox (SOLAR-645 step 3, 0261): msg_push_take hands over one send per
+// device under a claim; msg_push_done takes each push service status back. The database
+// decides from it: 2xx sent, 404/410 device removed, 429/5xx/0 tried again inside the hour.
+export type PushSend = PopupFacts & {
+  id: number; claim: string; event_id: number; plant_id: number; endpoint: string; p256dh: string; auth: string;
+};
+export type PushResult = { id: number; code: number; retry_s?: number; error?: string };
+type Deliver = (s: PushSend, msg: string) => Promise<unknown>;
+
+const deliver: Deliver = async (s, msg) =>
+  (await server()).subscribe({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } })
+    .pushTextMessage(msg, { ttl: 3600, urgency: webpush.Urgency.High });
+
+/** One send: the push service's status (0 = no answer), and its Retry-After in seconds. */
+export async function pushSend(s: PushSend, send: Deliver = deliver): Promise<PushResult> {
+  if (!PUSH_HOST.test(s.endpoint)) return { id: s.id, code: 410, error: "bad address" };
+  const w = popup(s);
+  const msg = JSON.stringify({
+    title: w.title, body: w.body, tag: `${s.plant_id}:${s.kind === "relinked" ? "needs" : s.kind.split("_")[0]}`,
+    data: { id: s.event_id, tab: w.tab, plant: s.plant_id, day: w.day, section: w.tab === "account" ? "logins" : undefined },
+  });
+  try {
+    await send(s, msg);
+    return { id: s.id, code: 201 };
+  } catch (e) {
+    if (!(e instanceof webpush.PushMessageError)) {
+      noteError("push_failed", e, { plant: s.plant_id, hourly: true });
+      return { id: s.id, code: 0, error: String(e instanceof Error ? e.message : e).slice(0, 200) };
+    }
+    const code = e.response.status;
+    if (code !== 404 && code !== 410) {
+      noteError("push_failed", new Error(`push service ${code}`), { plant: s.plant_id, hourly: true });
+    }
+    const after = e.response.headers.get("retry-after");
+    return { id: s.id, code, error: `push service ${code}`,
+             ...(after ? { retry_s: Math.ceil(retryAfterMs(after, Date.now()) / 1000) } : {}) };
+  }
+}
+
+type Rpc = <T>(fn: string, args?: Record<string, unknown>) => Promise<T>;
+export async function outboxPushPass(deadline: number, call: Rpc = rpc, send: Deliver = deliver) {
+  const count = { ok: 0, gone: 0, again: 0, failed: 0 };
+  if (send === deliver) await server();   // bad keys stop here, before anything is leased
+  while (Date.now() < deadline) {
+    const rows = await call<PushSend[]>("msg_push_take", { p_limit: 200 });
+    if (!rows.length) break;
+    const res: PushResult[] = [];
+    for (let i = 0; i < rows.length; i += PUSH_AT_ONCE) {
+      res.push(...await Promise.all(rows.slice(i, i + PUSH_AT_ONCE).map((s) => pushSend(s, send))));
+    }
+    for (const r of res) {
+      const k = r.code >= 200 && r.code < 300 ? "ok" : r.code === 404 || r.code === 410 ? "gone"
+        : r.code === 0 || r.code === 429 || r.code >= 500 ? "again" : "failed";
+      count[k]++;
+    }
+    await call("msg_push_done", { p_claim: rows[0].claim, p_results: res });
   }
   return count;
 }
@@ -681,6 +760,201 @@ export async function outboxPass(until: number, deadline = until) {
     if (stop) break;
   }
   return count;
+}
+
+// ------------------------------------------------------------------- emails, outbox (SOLAR-645 steps 4, 5)
+
+// msg_email_take (0262) leases due rows of one lane under one claim, after the guard at send
+// time, with the event row's fields; the email is built by build(), as on the old path. Up to
+// 100 go in one Resend batch call, its key saved on the rows first (msg_email_bind): a retry
+// after a lost answer, or after this worker died, sends the same rows under the same key, and
+// Resend answers from the first send. A row alone goes in its own call under ms-<id>; feedback
+// always goes alone (Resend's batch call takes no attachment). msg_email_done takes each answer
+// back; the database decides from it.
+// Bulk (SOLAR-645 step 5, 0263): the old path's holds come first (bulkHold): a hold hands the
+// row back for a while, the try given back, without building it.
+export type MsgEmail = {
+  id: number; claim: string; tries: number; batch_key: string | null; event_id: number; user_id: string | null;
+  to_email: string; plant_id: number | null; plant_name: string | null; tz: string; kind: string; key: string;
+  data: Record<string, any>; unsub_token?: string | null;
+};
+export type MsgResult = {
+  id: number; code?: number; retry_s?: number; error?: string; untried?: boolean; skip?: string; keep?: boolean;
+  hold_s?: number;
+};
+/** Why an email waits before it is built: back in hold_s seconds. null: build it now. */
+export type Hold = (row: Row) => Promise<{ hold_s: number; error: string } | null>;
+const MSG_BATCH = 100;
+let msgMissingNoted = false;
+/** The RPC isn't there yet: the functions went out before the migration. */
+export const missingRpc = (e: unknown) => /Could not find the function|PGRST202/.test(String((e as Error)?.message ?? e));
+
+type Built = { m: MsgEmail; row: Row; mail: Email };
+type Ctx = {
+  stop: boolean; deadline: number; call: Rpc; postFn: Post; make: (r: Row) => Promise<Email | null>; newKey: () => string;
+  hold: Hold;
+};
+
+const rowOf = (m: MsgEmail): Row => ({ id: m.event_id, user_id: m.user_id, to_email: m.to_email, plant_id: m.plant_id,
+  plant_name: m.plant_name, tz: m.tz, kind: m.kind, key: m.key, data: m.data ?? {}, tries: m.tries, switch: null,
+  unsub_token: m.unsub_token ?? null, batch_key: null });
+
+/** The old path's holds (emailPass): a report waits for its plant's history (SOLAR-273); the
+ *  60-days email waits for the day totals, and each check runs the day sync again (SOLAR-522). */
+export const bulkHold: Hold = async (row) => {
+  // The free week's report doesn't wait: it goes on the day the week ends (0182).
+  if (row.kind.startsWith("report_") && row.data.freeWeekEnds !== true && await historyPending(row)) {
+    return { hold_s: 600, error: "waits for history" };
+  }
+  if (row.kind === "history" && row.plant_id && await historyWaits(row)) {
+    resync(row.plant_id);
+    return { hold_s: 600, error: "waits for day totals" };
+  }
+  return null;
+};
+
+/** One Resend answer for the rows of one call. A 429 holds the pace; Resend in trouble (not a
+ *  refusal, nor a 409 still in progress) stops the pass. keep: the call may have gone. */
+function answer(ctx: Ctx, ids: number[], out: Awaited<ReturnType<Post>>, keep: boolean, what: string,
+                user: string | null = null): MsgResult[] {
+  if (!out.error) return ids.map((id) => ({ id, code: out.status }));
+  if (out.status === 429) {
+    pacer.hold(out.retryAfter);
+    noteError("resend_429", new Error(out.error), { hourly: true });
+  } else if (refused(out.status)) noteError("email_failed", new Error(`${what}: ${out.error}`), { user, hourly: true });
+  else noteError(`resend_${out.status || "network"}`, new Error(out.error), { hourly: true });
+  if (!refused(out.status) && out.status !== 409) ctx.stop = true;
+  const retry_s = out.retryAfter ? Math.ceil(retryAfterMs(out.retryAfter, Date.now()) / 1000) : undefined;
+  return ids.map((id) => ({ id, code: out.status, error: out.error, ...(retry_s !== undefined ? { retry_s } : {}),
+                            ...(keep ? { keep: true } : {}) }));
+}
+
+/** A row alone, under ms-<id>. */
+async function sendAlone(ctx: Ctx, b: Built): Promise<MsgResult> {
+  if (ctx.stop || !await pacer.slot(ctx.deadline)) { ctx.stop = true; return { id: b.m.id, untried: true }; }
+  const out = await sendOutboxOne(ctx.postFn, RESEND_URL, { id: b.m.id, payload: payload(b) }, msgKey(b.m.id));
+  return answer(ctx, [b.m.id], out, false, `${b.m.kind} outbox ${b.m.id}`, b.m.user_id)[0];
+}
+
+/** One group: new rows (key null), or rows bound to `key` by an earlier call. A bound row
+ *  only ever goes under its key, alone or with what is left of its group: Resend answers from
+ *  the first send if it reached it (a smaller body gets 409 invalid_idempotent_request,
+ *  counted as sent), else it is a first send. Holds are for new rows only: a bound row's call
+ *  may have gone. */
+async function sendGroup(ctx: Ctx, g: MsgEmail[], key: string | null): Promise<MsgResult[]> {
+  const bound = key !== null;
+  const back = (ms: MsgEmail[]) => ms.map((m) => ({ id: m.id, untried: true, ...(bound ? { keep: true } : {}) }));
+  if (ctx.stop || Date.now() > ctx.deadline) return back(g);
+  const res: MsgResult[] = [], built: Built[] = [];
+  for (const m of g) {
+    // reports cost several reads each: a new row not built in time goes back untouched
+    if (!bound && Date.now() > ctx.deadline) { res.push(...back([m])); continue; }
+    const row = rowOf(m);
+    let mail: Email | null;
+    try {
+      const held = bound ? null : await ctx.hold(row);
+      if (held) { res.push({ id: m.id, ...held }); continue; }
+      mail = await ctx.make(row);
+    } catch (e) {
+      noteError("email_build_failed", e, { user: m.user_id, hourly: true });
+      const error = `build: ${e instanceof Error ? e.message : e}`.slice(0, 200);
+      // tried again later; a bound row keeps its key and goes under it then
+      res.push({ id: m.id, code: 0, error, ...(bound ? { keep: true } : {}) });
+      continue;
+    }
+    // History waits for the day sync to land: again in an hour, until its expiry. Anything
+    // else with nothing to say (an empty report) is final.
+    if (!mail && m.kind === "history" && !bound) { res.push({ id: m.id, hold_s: 3600, error: "nothing to say yet" }); continue; }
+    if (!mail) { res.push({ id: m.id, skip: "nothing to say" }); continue; }
+    built.push({ m, row, mail });
+  }
+  if (!built.length) return res;
+  if (Date.now() > ctx.deadline) return [...res, ...back(built.map((b) => b.m))];
+  // a bound row alone still goes in a batch call under its key, never under ms-<id>
+  if (!bound && built.length === 1) return [...res, await sendAlone(ctx, built[0])];
+  if (!await pacer.slot(ctx.deadline)) { ctx.stop = true; return [...res, ...back(built.map((b) => b.m))]; }
+  const ids = built.map((b) => b.m.id);
+  const k = key ?? ctx.newKey();
+  if (!bound) {
+    try {
+      await ctx.call("msg_email_bind", { p_claim: g[0].claim, p_key: k, p_ids: ids });
+    } catch (e) {
+      noteError("msg_email_bind_failed", e, { hourly: true });
+      return [...res, ...back(built.map((b) => b.m))];
+    }
+  }
+  const out = await sendOutboxOne(ctx.postFn, `${RESEND_URL}/batch`, { id: ids[0], payload: built.map(payload) }, k);
+  // Refused: Resend sent none of them. Each alone, so a bad address fails only itself.
+  if (refused(out.status)) {
+    const one: MsgResult[] = [];
+    for (const b of built) one.push(await sendAlone(ctx, b));
+    return [...res, ...one];
+  }
+  return [...res, ...answer(ctx, ids, out, true, `batch ${k}`)];
+}
+
+const newBatchKey = () => `mb-${crypto.randomUUID()}`;
+export async function msgEmailPass(until: number, deadline = until, call: Rpc = rpc, postFn: Post = post,
+                                   make: (r: Row) => Promise<Email | null> = build, newKey = newBatchKey,
+                                   lane: "urgent" | "bulk" = "urgent", hold: Hold = bulkHold) {
+  const count = { sent: 0, again: 0, failed: 0, dropped: 0, held: 0 };
+  const ctx: Ctx = { stop: false, deadline, call, postFn, make, newKey, hold };
+  while (Date.now() < until) {
+    let rows: MsgEmail[];
+    try {
+      rows = await call<MsgEmail[]>("msg_email_take", { p_limit: MSG_BATCH, p_lane: lane });
+    } catch (e) {
+      if (!missingRpc(e)) throw e;
+      if (!msgMissingNoted) noteError("msg_email_take_missing", e, { hourly: true });
+      msgMissingNoted = true;
+      return { ...count, missing: true };
+    }
+    if (!rows.length) break;
+    // rows bound to a key go again together; feedback alone; new rows in calls of up to 100
+    const groups = new Map<string, MsgEmail[]>(), fresh: MsgEmail[] = [], alone: MsgEmail[] = [];
+    for (const m of rows) {
+      if (m.batch_key) groups.set(m.batch_key, [...(groups.get(m.batch_key) ?? []), m]);
+      else (m.kind === "feedback" ? alone : fresh).push(m);
+    }
+    const res: MsgResult[] = [];
+    for (const [key, g] of groups) res.push(...await sendGroup(ctx, g, key));
+    for (const m of alone) res.push(...await sendGroup(ctx, [m], null));
+    for (let i = 0; i < fresh.length; i += MSG_BATCH) res.push(...await sendGroup(ctx, fresh.slice(i, i + MSG_BATCH), null));
+    await call("msg_email_done", { p_claim: rows[0].claim, p_results: res });
+    for (const r of res) {
+      const c = r.code ?? 0;
+      const k = r.untried ? "again" : r.hold_s ? "held" : r.skip ? "dropped" : c >= 200 && c < 300 ? "sent" : refused(c) ? "failed" : "again";
+      count[k]++;
+      // after the answer is saved: a lost event costs a count, never a second email
+      const m = k === "sent" ? rows.find((x) => x.id === r.id) : undefined;
+      if (m) await trackSent(rowOf(m)).catch(() => {});
+    }
+    if (ctx.stop) break;
+  }
+  return count;
+}
+
+/** The bulk lane (0263): welcome, reports, history, feedback, ... */
+export const msgBulkPass = (until: number, deadline = until) =>
+  msgEmailPass(until, deadline, rpc, post, build, newBatchKey, "bulk", bulkHold);
+
+/** SOLAR-328: counted once an email has gone, by user id only, keyed on its event row. Both
+ *  paths (old queue, message outbox) call it. */
+export async function trackSent(row: Row, send = track) {
+  if (!row.user_id) return;
+  const id = String(row.id), at = new Date().toISOString();
+  if (row.kind === "winback") await send("winback_email_sent_done", row.user_id, id, at, { plan: row.data.from });
+  // SOLAR-243: a paid plan ended. Each email goes once per end: a cancel that ran
+  // out (winback, 0144) or a failed payment that ended it (bill_free).
+  if (row.kind === "winback" || row.kind === "bill_free") {
+    await send("plan_cancelled", row.user_id, id, at, { plan: row.data.from, reason: row.kind === "winback" ? "cancelled" : "unpaid" });
+  }
+  // SOLAR-475
+  if (row.kind === "report_week" && row.data.freeWeekEnds === true) await send("free_week_ended_email_sent_done", row.user_id, id, at, {});
+  // SOLAR-552, SOLAR-559
+  if (row.kind.startsWith("unpaid_")) await send(`${row.kind}_email_sent_done`, row.user_id, id, at, {});
+  // SOLAR-319
+  if (row.kind === "need_a_hand") await send("need_a_hand_email_sent_done", row.user_id, id, at, { choose: row.data?.choose === true });
 }
 
 /** What only the clock can tell: no readings, SunSynk, reports. */
@@ -749,30 +1023,9 @@ export async function emailPass(lane: "urgent" | "bulk" | null, until: number, d
       noteError("email_failed", new Error(`${row?.kind ?? "email"} ${x.id}: ${x.error ?? ""}`), { user: row?.user_id ?? null, hourly: true });
     }
     await rpc("email_done", { p_results: done });
-    // SOLAR-328: counted once it has gone, by user id only.
     for (const x of done) {
       const row = x.status === "sent" ? rows.find((r) => r.id === x.id) : undefined;
-      if (row?.kind === "winback" && row.user_id) {
-        await track("winback_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), { plan: row.data.from });
-      }
-      // SOLAR-243: a paid plan ended. Each email goes once per end: a cancel that ran
-      // out (winback, 0144) or a failed payment that ended it (bill_free).
-      if ((row?.kind === "winback" || row?.kind === "bill_free") && row.user_id) {
-        await track("plan_cancelled", row.user_id, String(row.id), new Date().toISOString(),
-          { plan: row.data.from, reason: row.kind === "winback" ? "cancelled" : "unpaid" });
-      }
-      // SOLAR-475
-      if (row?.kind === "report_week" && row.data.freeWeekEnds === true && row.user_id) {
-        await track("free_week_ended_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), {});
-      }
-      // SOLAR-552, SOLAR-559
-      if (row?.kind.startsWith("unpaid_") && row.user_id) {
-        await track(`${row.kind}_email_sent_done`, row.user_id, String(row.id), new Date().toISOString(), {});
-      }
-      // SOLAR-319
-      if (row?.kind === "need_a_hand" && row.user_id) {
-        await track("need_a_hand_email_sent_done", row.user_id, String(row.id), new Date().toISOString(), { choose: row.data?.choose === true });
-      }
+      if (row) await trackSent(row);
     }
     // Rows handed back unsent (out of time, or a 429 held past the deadline): claiming
     // again would only build the same rows again.
@@ -786,16 +1039,31 @@ async function run(dry: boolean, withHtml: boolean, push: boolean) {
   const started = Date.now();
   const swept = dry ? null : await sweep();
   const { due, ...count } = await emailPass(null, started + BUDGET_MS, started + BUDGET_MS + 5_000, dry, withHtml);
+  // alert emails routed to the outbox (0262), so going back to this run sends them too
+  const alerts = dry ? null : await msgEmailPass(started + BUDGET_MS, started + BUDGET_MS + 5_000).catch((e) => {
+    noteError("msg_email_pass_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  });
   const outbox = dry ? null : await outboxPass(started + BUDGET_MS + 5_000).catch((e) => {
     noteError("outbox_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   });
+  // the rest routed to the outbox (0263)
+  const bulk = dry ? null : await msgBulkPass(started + BUDGET_MS + 5_000).catch((e) => {
+    noteError("msg_email_bulk_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  });
   // The cron call times out at 55 s.
-  const pushed = push ? await pushPass(started + 50_000).catch((e) => {
+  const pushed = push ? await pushPass(started + 47_000).catch((e) => {
     noteError("push_pass_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   }) : null;
-  return { live: !dry, swept, ...count, outbox, pushed, due };
+  // pop-ups routed to the outbox (0261), so going back to this run sends them too
+  const pushedOutbox = push ? await outboxPushPass(started + 50_000).catch((e) => {
+    noteError("push_outbox_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  }) : null;
+  return { live: !dry, swept, ...count, alerts, outbox, bulk, pushed, pushedOutbox, due };
 }
 
 // Every template from one plant's real numbers; event values are samples.

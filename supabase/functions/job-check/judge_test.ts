@@ -52,3 +52,27 @@ Deno.test("notify workers (0257): both calls watched; push backlog fails, clears
   const kept = judge({ ...base, push: null, checks: { "push-queue": { failing: true, since: base.now } } });
   eq(pick(kept, "push-queue"), undefined, "kept");
 });
+
+Deno.test("message outbox (0261): a lane stuck over 5 min or with expired rows fails; not read keeps", () => {
+  const lane = { channel: "push", lane: "urgent", queued: 2, oldest: "2026-11-10T20:54:00Z", expired: 0, n429: 4 };
+  const v = judge({ ...base, msg: [lane] });
+  eq(pick(v, "msg:push:urgent")?.failing, true, "stuck");
+  eq(pick(v, "msg:push:urgent")?.job, "notify-push", "job");
+  eq(pick(v, "msg:push:urgent")?.detail.refused_429_last_hour, 4, "429s");
+  eq(pick(judge({ ...base, msg: [{ ...lane, oldest: "2026-11-10T20:58:00Z" }] }), "msg:push:urgent")?.failing, false, "fresh");
+  eq(pick(judge({ ...base, msg: [{ ...lane, queued: 0, oldest: null, expired: 1 }] }), "msg:push:urgent")?.failing, true, "expired");
+  const kept = judge({ ...base, msg: null, checks: { "msg:push:urgent": { failing: true, since: base.now } } });
+  eq(pick(kept, "msg:push:urgent"), undefined, "kept");
+  const gone = judge({ ...base, msg: [], checks: { "msg:push:urgent": { failing: true, since: base.now } } });
+  eq(pick(gone, "msg:push:urgent")?.failing, false, "lane no longer used clears");
+  eq(pick(gone, "msg:push:urgent")?.job, "notify-push", "cleared under its worker");
+});
+
+Deno.test("message outbox, email lane (0262): its own check under notify-email, 429s shown", () => {
+  const lane = { channel: "email", lane: "urgent", queued: 1, oldest: "2026-11-10T20:54:00Z", expired: 0, n429: 3 };
+  const v = judge({ ...base, msg: [lane, { ...lane, channel: "push", oldest: null, n429: 0 }] });
+  eq(pick(v, "msg:email:urgent")?.job, "notify-email", "job");
+  eq(pick(v, "msg:email:urgent")?.failing, true, "stuck");
+  eq(pick(v, "msg:email:urgent")?.detail.refused_429_last_hour, 3, "429s");
+  eq(pick(v, "msg:push:urgent")?.failing, false, "the push lane apart");
+});

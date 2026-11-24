@@ -88,8 +88,9 @@ serve("link-sunsynk", async (req) => {
     // Before the switch: the login and its plant list copied into the new tables (SOLAR-641).
     if (!live) await saveLogin(call, false, noteError, userId, accountId, username, plants);
     // SOLAR-319: a login added after the "need a hand" email went. Keyed on the email, so it counts once.
+    // sent_at, not status: an email sent through the message outbox keeps status 'outbox' (0263).
     const { data: hand } = await db.from("email_queue").select("id, sent_at")
-      .eq("user_id", userId).eq("kind", "need_a_hand").eq("status", "sent").maybeSingle();
+      .eq("user_id", userId).eq("kind", "need_a_hand").not("sent_at", "is", null).maybeSingle();
     if (hand) {
       await track("need_a_hand_login_linked_done", userId, String(hand.id), new Date().toISOString(),
         { hours: Math.round((Date.now() - Date.parse(hand.sent_at)) / 3_600_000) });

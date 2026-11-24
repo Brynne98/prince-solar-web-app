@@ -5,6 +5,10 @@
 -- Exit 0: every check passed. A failed check raises, so psql exits 3.
 
 begin;
+-- These checks drive push_claim and email_claim (the old paths). Since 0261 pop-ups and since
+-- 0262 alert emails go through the outbox; put them back on the old paths for this
+-- rolled-back transaction.
+update msg.kinds set route = 'old';
 set client_min_messages = notice;
 
 create temp table t_results (n serial, label text, pass boolean, detail text);

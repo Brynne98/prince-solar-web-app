@@ -72,6 +72,7 @@ code (SOLAR-641; `npm test` refuses the old billing reads, `PLAN_NAME` and hand-
 | `planRows(acct, view)`, `planStep(acct, row)` | The plans pop-up's rows for the monthly/yearly switch (a running plan changes plan at its own interval) and what a plan's button does first (`interval`, `keep`, `checkout`; `pick: false` goes on with no plants) (tabs.jsx). |
 | `startPlan`, `bookChange`, `settlePayment`, `changeCard` | Pay for a plan or an upgrade (quote, review, card page), book or undo a change for the billing date, pay a failed renewal, change the card. |
 | `outboxMail(m, unsub)` | An outbox email (`AccountText.mail`) laid out in `_shared/email.ts`'s look. |
+| `alertLine(row)`, `alertPush(kind, line, plant, plants)`, `alertMail(event, plant, on)` | Every alert's words (SOLAR-645): the bell list's title, body, time and page from an `api_alerts` item's facts (`data`, `created`, `tz`), the pop-up's title and body, and the alert and login emails' parts. The database sends facts only (0264). `alertEmail(m, plantId)` in `_shared/email.ts` lays an email out; `popup(r)` in `notify/index.ts` builds a pop-up. Tested in `_shared/alerts_test.ts`. |
 
 ## Forms and sign-in (`auth.jsx`)
 
@@ -176,7 +177,7 @@ and the sign-in screens already call it; it drops refusals and offline).
 | Name | Use it for |
 |---|---|
 | `Pacer`, `retryAfterMs` (`pace.ts`) | The one Resend pace in a run: `slot(deadline)` before each call, `hold(retryAfter)` on a 429. notify-email's three lanes share one (SOLAR-645). |
-| `sendOutboxOne` (`outbox.ts`) | One outbox email under its row's own key (`ob-<id>`). |
+| `sendOutboxOne` (`outbox.ts`) | One outbox email under its row's own key (`ob-<id>`; `msgKey` gives `ms-<id>` for `msg.outbox` emails). |
 
 ## CSS
 

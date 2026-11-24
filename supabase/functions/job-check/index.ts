@@ -21,7 +21,12 @@ type Inputs = {
   partitions?: { table: string; days: number }[] | null;
   /** job_check_push() (0257): pop-ups due over 5 minutes and not sent; null when not read */
   push?: { waiting: number; oldest: string | null } | null;
+  /** job_check_msg() (0261): per outbox channel and lane in use; null when not read */
+  msg?: MsgLane[] | null;
 };
+type MsgLane = { channel: string; lane: string; queued: number; oldest: string | null; expired: number; n429: number };
+// An outbox row queued longer than this, or any that expired in the last hour, fails its lane.
+export const MSG_STUCK_MS = 5 * 60_000;
 type BillingAlert = { kind: string; ref: string } & Record<string, unknown>;
 // Every kind billing.alerts() can list, so each one also recovers when its list empties.
 export const BILLING_ALERTS = ["attempt_pending", "refund_failed", "outbox_backlog", "history_unprotected",
@@ -140,6 +145,13 @@ export function judge(i: Inputs): Verdict[] {
     out.push({ name: "push-queue", job: "notify-push", failing: i.push.waiting > 0,
                detail: { waiting: i.push.waiting, oldest: i.push.oldest } });
   }
+  // Message outbox (SOLAR-645): one check per channel and lane. Not read (null) keeps the state.
+  for (const m of i.msg ?? []) {
+    const stuck = m.oldest != null && Date.parse(i.now) - Date.parse(m.oldest) > MSG_STUCK_MS;
+    out.push({ name: `msg:${m.channel}:${m.lane}`, job: m.channel === "push" ? "notify-push" : "notify-email",
+               failing: stuck || m.expired > 0,
+               detail: { queued: m.queued, oldest: m.oldest, expired_last_hour: m.expired, refused_429_last_hour: m.n429 } });
+  }
   // Billing (SOLAR-641): one check per alert kind. Not read (i.billing null) keeps the state.
   if (i.billing) {
     for (const kind of BILLING_ALERTS) {
@@ -155,8 +167,10 @@ export function judge(i: Inputs): Verdict[] {
   }
   // A failing check whose shard or job is gone (fewer shards, job unscheduled) clears.
   for (const [name, c] of Object.entries(i.checks)) {
-    if (c.failing && name !== "signin-email" && name !== "push-queue" && !name.startsWith("billing:") && !name.startsWith("partitions:") && !out.some((v) => v.name === name)) {
-      out.push({ name, job: name.startsWith("poll:") ? "poll" : name.replace(/^(cron|call):/, ""), failing: false, detail: { gone: true } });
+    if (c.failing && name !== "signin-email" && name !== "push-queue" && !(name.startsWith("msg:") && !i.msg) && !name.startsWith("billing:") && !name.startsWith("partitions:") && !out.some((v) => v.name === name)) {
+      const job = name.startsWith("poll:") ? "poll" : name.startsWith("msg:push:") ? "notify-push"
+        : name.startsWith("msg:") ? "notify-email" : name.replace(/^(cron|call):/, "");
+      out.push({ name, job, failing: false, detail: { gone: true } });
     }
   }
   return out;
@@ -185,6 +199,10 @@ if (import.meta.main) serve("job-check", async (req) => {
     noteError("job_check_push", e, { hourly: true });
     return null;
   }) as Inputs["push"];
+  i.msg = await rpc("job_check_msg").catch((e) => {
+    noteError("job_check_msg", e, { hourly: true });
+    return null;
+  }) as Inputs["msg"];
   const verdicts = judge(i);
   const changes = verdicts.filter((v) => v.failing != null && v.failing !== (i.checks[v.name]?.failing ?? false));
   if (changes.length) await rpc("job_check_save", { p_changes: changes.map(({ name, failing, detail }) => ({ name, failing, detail })) });

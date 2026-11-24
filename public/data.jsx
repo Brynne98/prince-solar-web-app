@@ -455,9 +455,13 @@ const saveEmailPref = (userId, kind, on) => saveFlag('email_prefs', 'email_pref_
 async function fetchNotifications() {
   const [n, a] = await Promise.all([must(window.sb.rpc('api_notifications')),
     must(window.sb.rpc('api_alerts', { p_from: new Date(Date.now() - 30 * 86400000).toISOString() }))]);
+  // api_alerts sends each alert's facts; the words come from the text catalog, as the pop-up's
+  // and the email's do (SOLAR-645, 0264). A row from before 0264 brings its own words.
+  const worded = a.items.map(it => it.data === undefined ? it
+    : { ...it, ...window.AccountText.alertLine({ kind: it.kind, data: it.data, created: it.created, tz: it.tz }) });
   // api_alerts sends rows newest-written first; a row shows when it happened (at), which can
   // be earlier (a grid cut found after a gap), so the list sorts by that (SOLAR-617).
-  const items = [...a.items].sort((x, y) => (y.at - x.at) || (y.id - x.id));
+  const items = worded.sort((x, y) => (y.at - x.at) || (y.id - x.id));
   return { pinned: n.pinned, items,
     unread: items.filter(it => !it.read).length + n.pinned.filter(p => !p.read).length };
 }
