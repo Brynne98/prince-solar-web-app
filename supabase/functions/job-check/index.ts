@@ -35,7 +35,7 @@ const CRON_GRACE_MS = 3 * 60_000;   // a run may start this late before it count
 export const PARTITION_MIN_DAYS = 6;
 
 // One cron field ("*", "*/5", "4-5", "10,40", "1-30/2") as the set of values it allows,
-// or null when pg_cron syntax we don't read ("$", "30 seconds").
+// or null when pg_cron syntax we don't read ("$"; "N seconds" is read in lastFire).
 function field(spec: string, lo: number, hi: number): Set<number> | null {
   const out = new Set<number>();
   for (const part of spec.split(",")) {
@@ -53,6 +53,9 @@ function field(spec: string, lo: number, hi: number): Set<number> | null {
 // The last minute at or before `t` the schedule fires (pg_cron runs in GMT), looking back 8
 // days. Day of month and day of week both restricted: either may match, as in cron.
 export function lastFire(schedule: string, t: number): number | null {
+  // pg_cron's "N seconds" (poll-tick, 0253): it fires every N seconds.
+  const sec = schedule.trim().match(/^(\d+) seconds?$/);
+  if (sec && Number(sec[1]) > 0) return Math.floor(t / (Number(sec[1]) * 1000)) * Number(sec[1]) * 1000;
   const p = schedule.trim().split(/\s+/);
   if (p.length !== 5) return null;
   const [mi, ho, dm, mo, dw] = [field(p[0], 0, 59), field(p[1], 0, 23), field(p[2], 1, 31), field(p[3], 1, 12), field(p[4], 0, 7)];

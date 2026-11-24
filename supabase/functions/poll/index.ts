@@ -6,6 +6,10 @@
 // instead of hitting SunSynk at second zero, then polls its accounts in parallel.
 // No body (local dev, manual invoke) means "every account, no delay".
 //
+// SOLAR-650 Part B (0253): with private.poll_mode 'live', a 5-second tick posts each shard
+// of the minute plan at its slot instead, with {minute, shard, shards, slot_ms} and no delay.
+// The shard then reads its planned rows (poll_plan_jobs) for that minute.
+//
 // The set of plants to log comes from pollJobs() (0100, 0246), which returns only this
 // shard's plants: since the billing switch-over, the plants billing.plant_state reads
 // now, each through one working login. Jobs are grouped by account so each account's
@@ -55,6 +59,7 @@ import {
   type PlantJob,
   plantsToPoll,
   pollJobs,
+  pollPlanJobs,
   RelinkNeeded,
   SignInFailed,
   shareAccount,
@@ -567,7 +572,9 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
 // ---------------------------------------------------------------------------
 // account: poll only this account, now. Linking a plant sends it (plant_bootstrap_kick,
 // 0094) so the first live reading lands at once instead of at the next minute.
-type ShardSpec = { shard: number; shards: number; delayMs: number; account?: string };
+// minute + slotMs: a shard of the minute plan (0253), posted at its slot; its jobs come from
+// poll_plan_jobs for that minute.
+type ShardSpec = { shard: number; shards: number; delayMs: number; account?: string; minute?: number; slotMs: number };
 
 const MAX_DELAY_MS = 30_000; // never eat more of the minute than the cron job planned for
 
@@ -577,7 +584,10 @@ async function shardSpec(req: Request): Promise<ShardSpec> {
   const shard = Math.min(shards - 1, Math.max(0, Math.floor(Number(body.shard) || 0)));
   const delayMs = Math.min(MAX_DELAY_MS, Math.max(0, Math.floor(Number(body.delay_ms) || 0)));
   const account = typeof body.account === "string" ? body.account : undefined;
-  return { shard, shards, delayMs, account };
+  const minute = Number.isInteger(body.minute) && (body.minute as number) > 0 ? body.minute as number : undefined;
+  const slotMs = Math.max(0, Math.floor(Number(body.slot_ms) || 0));
+  if (minute != null) return { shard, shards, delayMs: 0, minute, slotMs };
+  return { shard, shards, delayMs, account, slotMs: 0 };
 }
 
 // SOLAR-468: this run's SunSynk calls into the daily tally, one write. A shard run also
@@ -660,7 +670,7 @@ serve("poll", async (req) => {
     spec = await shardSpec(req);
     // The minute this invocation is logging — fixed before the stagger delay so
     // a shard that waits 20 s still stamps the minute the cron tick was for.
-    ts = nowMinuteEpoch();
+    ts = spec.minute ?? nowMinuteEpoch();
 
     // Only this shard's plants; the shard hash (first 8 hex digits of the account
     // uuid, mod shards) runs in SQL.
@@ -672,13 +682,15 @@ serve("poll", async (req) => {
 
     // Wait first, then read the jobs, so tokens and plant versions are as they are when
     // the shard starts, not 20 s old (SOLAR-650).
-    times = { scheduled: ts * 1000 + spec.delayMs, started: 0, plants: 0 };
+    times = { scheduled: ts * 1000 + spec.delayMs + spec.slotMs, started: 0, plants: 0 };
     if (spec.delayMs > 0) await sleep(spec.delayMs);
     times.started = Date.now();
+    // A plan call that arrives this late would land in the next minute's: skip it.
+    if (spec.minute != null && times.started > ts * 1000 + 55_000) throw new Error(`poll: plan call for ${ts} arrived ${times.started - ts * 1000} ms after the minute`);
 
-    let jobs = await pollJobs(spec.shard, spec.shards, spec.account);
+    let jobs = spec.minute != null ? await pollPlanJobs(spec.minute, spec.shard) : await pollJobs(spec.shard, spec.shards, spec.account);
     if (!jobs.length) {
-      if (!spec.account && !(await plantsToPoll()).length) {
+      if (spec.minute == null && !spec.account && !(await plantsToPoll()).length) {
         // Nothing to poll anywhere: a fresh deploy. Link the env-credential account
         // so logging starts without anyone signing in. Only an empty shard pays for
         // the full read; on a running deployment the bootstrap never executes.
