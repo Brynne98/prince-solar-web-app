@@ -86,7 +86,8 @@ export function directDb(url: string, { timeoutMs = 25_000 } = {}): DirectDb {
         const type = pick.args.find((a) => a.name === k)!.type;
         if (args[k] === null) return `${ident(k)} => null::${type}`;
         params.push(JSON.stringify(args[k]));
-        return `${ident(k)} => ${cast(`$${params.length}::jsonb`, type)}`;
+        // text, then jsonb: typed jsonb, the driver would encode the JSON text a second time
+        return `${ident(k)} => ${cast(`$${params.length}::text::jsonb`, type)}`;
       }).join(", ");
       const call = `public.${ident(fn)}(${named})`;
       const text = pick.void ? `select ${call}, null::text as j`
@@ -97,14 +98,14 @@ export function directDb(url: string, { timeoutMs = 25_000 } = {}): DirectDb {
     },
     async configuredPlants(ids) {
       const rows = await run<{ plant_id: string }[]>("plant_config",
-        `select plant_id::text from public.plant_config where plant_id = any(array(select jsonb_array_elements_text($1::jsonb))::bigint[])`,
+        `select plant_id::text from public.plant_config where plant_id = any(array(select jsonb_array_elements_text($1::text::jsonb))::bigint[])`,
         [JSON.stringify(ids)]);
       return rows.map((r) => Number(r.plant_id));
     },
     async clearBookmarks(ids) {
       await run("plant_config",
         `update public.plant_config set backfill_next = null, backfill_until = null, temp_next = null
-          where plant_id = any(array(select jsonb_array_elements_text($1::jsonb))::bigint[])`, [JSON.stringify(ids)]);
+          where plant_id = any(array(select jsonb_array_elements_text($1::text::jsonb))::bigint[])`, [JSON.stringify(ids)]);
     },
     end: () => sql.end({ timeout: 5 }),
   };
