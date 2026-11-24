@@ -1079,7 +1079,7 @@ function useDaily(refreshKey) {
   const [daily, setDaily] = React.useState(null);
   const load = React.useCallback(() => {
     setDaily(null);
-    window.fetchTrendDaily(30, refreshKey).then(setDaily).catch(() => setDaily(false));
+    window.fetchTrendDaily(30, refreshKey).then(setDaily).catch((e) => window.isStale(e) || setDaily(false));
   }, [refreshKey]);
   React.useEffect(load, [refreshKey]);
   return [daily, load];
@@ -2077,7 +2077,7 @@ function InvertersTab({ snap, today, refreshKey }) {
   // open, on refresh and every 10 minutes; the shares move slowly.
   const [health, setHealth] = React.useState(null);
   React.useEffect(() => {
-    const load = () => window.fetchStringHealth().then(setHealth).catch(() => setHealth(false));
+    const load = () => window.fetchStringHealth().then(setHealth).catch((e) => window.isStale(e) || setHealth(false));
     load();
     const t = setInterval(() => { if (document.visibilityState === 'visible') load(); }, 600000);
     // off screen it skips; back on screen it catches up

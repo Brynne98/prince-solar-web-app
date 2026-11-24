@@ -1501,6 +1501,7 @@ function App({ links }) {
       if (s.lastReading) try { localStorage.setItem('ps.lastReading', JSON.stringify({ t: s.lastReading.getTime(), tz: window.PLANT_TZ || null })); } catch (e) {}
     }
     catch (e) {
+      if (window.isStale(e)) return;
       liveFails.current += 1;
       if (spin || liveFails.current >= 2) setErr(e.message);
       if (liveFails.current <= 3) liveRetry.current = setTimeout(() => { if (document.visibilityState === 'visible') loadLive(false); }, 10000);
@@ -1530,11 +1531,13 @@ function App({ links }) {
   const onNeedEnergy = useCallback((period) => {
     if (energyRef.current[period] || inflight.current[period]) return;
     if (energyStampRef.current == null) energyStampRef.current = energyStamp();
-    inflight.current[period] = true;
+    // a switch clears the flags; a reply for the last plant must not clear the new plant's
+    const mine = {};
+    inflight.current[period] = mine;
     window.fetchEnergy(period)
       .then(rows => setEnergy(e => ({ ...e, [period]: rows })))
       .catch(() => {})
-      .finally(() => { inflight.current[period] = false; });
+      .finally(() => { if (inflight.current[period] === mine) delete inflight.current[period]; });
   }, []);
   // Refetch every already-loaded period together so their totals stay current AND
   // mutually consistent (e.g. Year and Lifetime share today's growing total rather
@@ -1596,7 +1599,7 @@ function App({ links }) {
   }, [notice, snap, err]);
   // Off with the last plant's readings, before the next plant's load.
   const clearPlant = () => {
-    setEnergy({}); energyRef.current = {}; setSnap(null); setToday(null);
+    setEnergy({}); energyRef.current = {}; inflight.current = {}; setSnap(null); setToday(null);
     window.PLANT_DAYS = null; window.SYNC = null; syncDaysRef.current = null;
   };
   const switchPlant = (id) => {

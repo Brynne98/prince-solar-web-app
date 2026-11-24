@@ -26,8 +26,13 @@ window.CURRENT_PLANT = window.CURRENT_PLANT ?? null;
 window.PLANT_CURRENCY = window.PLANT_CURRENCY || 'ZAR';
 // The plant's timezone: every clock time on screen is the plant's, as alerts and emails are (SOLAR-445).
 window.PLANT_TZ = window.PLANT_TZ || null;
+// plantTurn counts plant changes. An answer asked for in an earlier turn is refused, even when
+// the plant is the same again (A, B, A): a late reply would overwrite the newer one (SOLAR-646).
+let plantTurn = 0;
 window.setCurrentPlant = (id, currency, tz) => {
-  window.CURRENT_PLANT = id == null ? null : Number(id);
+  const next = id == null ? null : Number(id);
+  if (next !== window.CURRENT_PLANT) plantTurn += 1;
+  window.CURRENT_PLANT = next;
   if (currency) window.PLANT_CURRENCY = currency;
   window.PLANT_TZ = tz || null;
 };
@@ -56,8 +61,16 @@ async function getJSON(url) {
   if (!route) throw new Error('No RPC mapped for ' + path);
 
   const [fn, params] = route(q);
-  return must(window.sb.rpc(fn, { ...params, p_plant: window.CURRENT_PLANT }), {}, 'RPC ' + fn + ' failed');
+  const turn = plantTurn;
+  const stale = () => { const e = new Error('plant changed'); e.stale = true; return e; };
+  try {
+    const data = await must(window.sb.rpc(fn, { ...params, p_plant: window.CURRENT_PLANT }), {}, 'RPC ' + fn + ' failed');
+    if (turn !== plantTurn) throw stale();
+    return data;
+  } catch (e) { throw turn !== plantTurn ? stale() : e; }
 }
+// An answer for a plant no longer on screen: drop it without a word.
+window.isStale = (e) => !!e?.stale;
 // A Supabase call's data, or its error thrown. fallback stands in for no data.
 // A server or database error also goes to PostHog with the RPC or table name and code,
 // since many callers fall back to empty data without a word (SOLAR-243, SOLAR-472).
@@ -79,7 +92,7 @@ async function must(call, fallback, failed = 'failed') {
 // switch bumps it, and a caller holding a newer one asks afresh. A failure is not kept.
 const shared = {};
 function sharedAsk(name, ms, rk, ask) {
-  const k = name + ':' + window.CURRENT_PLANT;
+  const k = name + ':' + window.CURRENT_PLANT + ':' + plantTurn;
   const m = shared[k];
   if (m && m.rk >= (rk || 0) && Date.now() - m.at < ms) return m.p;
   const p = ask().catch((e) => { if (shared[k] && shared[k].p === p) delete shared[k]; throw e; });
@@ -90,7 +103,7 @@ function sharedAsk(name, ms, rk, ask) {
 // user's first loads asked for the last user's plant and got 403s (SOLAR-442).
 window.sb.auth.onAuthStateChange((event) => {
   if (event !== 'SIGNED_OUT') return;
-  window.CURRENT_PLANT = null; window.PLANT_CURRENCY = 'ZAR'; window.PLANT_TZ = null;
+  window.CURRENT_PLANT = null; window.PLANT_CURRENCY = 'ZAR'; window.PLANT_TZ = null; plantTurn += 1;
   for (const k in shared) delete shared[k];
 });
 const MIN5 = 5 * 60000;
