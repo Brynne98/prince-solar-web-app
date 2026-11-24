@@ -366,8 +366,9 @@ ride the minute poll the way the grid and battery alerts do.
 - **Dedup is `event_key`.** A sender keeps a unique index on it. An `event_key` encodes which occurrence fired
   (`soc_low:2026-08-18T19:40`); a repeat is a duplicate-key no-op.
 - `api_alerts_due()` returns `(kind, event_key, severity, title, body, value)`; execute
-  granted to `service_role` only. The `alerts-due` function serves it over HTTP behind a
-  shared bearer token (legacy JWT keys are disabled since 2026-08-05).
+  granted to `service_role` only. The `alerts-due` function served it over HTTP behind a
+  shared bearer token until SOLAR-645 step 7 removed it (no caller); alerts go out through
+  `msg.outbox` (notify-email, notify-push).
 - Kinds: `logger_stale`, `bank_drift`, `batt_hot`, `soc_overnight`, `string_dead`,
   `grid_down` / `grid_back`. Migrations `0016`–`0019`, `0021`, `0029`. Debounce and
   hysteresis (fire below 20% SoC, re-arm above 30%) are in SQL.

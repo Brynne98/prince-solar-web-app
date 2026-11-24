@@ -674,7 +674,13 @@ export const sweep = () => rpc<Record<string, unknown>>("email_sweep").catch((e)
 // All of notify-email and notify-push in one call (the cron job until 0257).
 async function run(dry: boolean, push: boolean) {
   const started = Date.now();
-  if (dry) return { live: false };
+  // The cron call times out at 55 s.
+  const pushes = () => push ? outboxPushPass(started + 50_000).catch((e) => {
+    noteError("push_outbox_failed", e, { hourly: true });
+    return { error: String(e?.message ?? e) };
+  }) : null;
+  // pop-ups don't need Resend: they go in an email dry run too, as notify-push's do
+  if (dry) return { live: false, pushed: await pushes() };
   const swept = await sweep();
   const alerts = await msgEmailPass(started + BUDGET_MS, started + BUDGET_MS + 5_000).catch((e) => {
     noteError("msg_email_pass_failed", e, { hourly: true });
@@ -688,12 +694,7 @@ async function run(dry: boolean, push: boolean) {
     noteError("msg_email_bulk_failed", e, { hourly: true });
     return { error: String(e?.message ?? e) };
   });
-  // The cron call times out at 55 s.
-  const pushed = push ? await outboxPushPass(started + 50_000).catch((e) => {
-    noteError("push_outbox_failed", e, { hourly: true });
-    return { error: String(e?.message ?? e) };
-  }) : null;
-  return { live: true, swept, alerts, outbox, bulk, pushed };
+  return { live: true, swept, alerts, outbox, bulk, pushed: await pushes() };
 }
 
 // Every template from one plant's real numbers; event values are samples.
