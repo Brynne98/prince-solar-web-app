@@ -2253,6 +2253,18 @@ function PlantLine({ name, off, children }) {
 function PlanSection({ acct, onPlans }) {
   const [busy, setBusy] = React.useState(false);
   const [choosing, setChoosing] = React.useState(false);
+  // Past due (SOLAR-644): read again every minute while on screen, and when the morning's try
+  // window closes, so a try that didn't run or a charge that landed shows without a reload.
+  // Coming back to the tab, and the 15 s read while the bank answers, are the shell's (useAccountWatch).
+  const due = acct?.state === 'past_due', win = due ? acct.retry_window_ends_at : null;
+  React.useEffect(() => {
+    if (!due) return;
+    const on = () => { if (!document.hidden) window.reloadAccount().catch(() => {}); };
+    const t = setInterval(on, 60000);
+    const left = win ? Date.parse(win) - Date.parse(acct.at || new Date().toISOString()) - (Date.now() - (acct._got || Date.now())) : -1;
+    const w = left > 0 && setTimeout(on, left + 1000);
+    return () => { clearInterval(t); clearTimeout(w); };
+  }, [due, win]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!acct) return (
     <SettingsSection id="plan" title={AT.billing.planHead} bare>
       <PlanCard title={<window.Skeleton w={110} h={20} r={6} />} sub={<window.Skeleton w={150} h={22} r={6} />} hidden
@@ -2262,6 +2274,9 @@ function PlanSection({ acct, onPlans }) {
     </SettingsSection>
   );
   const running = acct.state === 'active' || acct.state === 'past_due';
+  // ended while a renewal paid before the cutoff is checked: no ended words, no plans
+  const held = acct.state === 'ended' && acct.renewal_in_flight;
+  const note = acct.state === 'past_due' ? AT.pastDueNote(acct) : null;
   // a word beside the name for a booked end; a failed payment says so once, in its note
   const word = acct.cancel_at ? ['warn', 'Ending'] : null;
   const booked = AT.bookedChange(acct);
@@ -2278,14 +2293,15 @@ function PlanSection({ acct, onPlans }) {
     <SettingsSection id="plan" title={AT.billing.planHead} bare>
       <PlanCard title={<>{AT.planTitle(acct)}{word && <span className={'conn-status ' + word[0]}>{word[1]}</span>}</>}
         sub={AT.planPrice(acct)}
-        action={running ? <button type="button" className="ghost-btn" onClick={onPlans}>{AT.billing.changePlan}</button>
+        action={acct.state === 'past_due' || held ? null   // every plan change is refused while unpaid
+          : running ? <button type="button" className="ghost-btn" onClick={onPlans}>{AT.billing.changePlan}</button>
           : acct.state !== 'active' && <button type="button" className="save-btn" onClick={onPlans}>{AT.billing.seePlans}</button>}>
         {acct.state !== 'past_due' && AT.planStatus(acct) && !booked && <div className="plan-meta plan-when">{AT.planStatus(acct)}</div>}
         {acct.state !== 'none' && acct.state !== 'ended' && <div className="plan-meta">{AT.placesLine(acct)}</div>}
-        {acct.state === 'ended' && acct.history_kept_until && <div className="plan-meta">{AT.payScreen(acct)?.body}</div>}
-        {acct.state === 'past_due' && (
-          <PlanNote tone="bad" acts={<button type="button" className="save-btn" onClick={() => window.settlePayment()}>{AT.billing.payOther}</button>}>
-            {AT.planStatus(acct)}
+        {acct.state === 'ended' && !held && acct.history_kept_until && <div className="plan-meta">{AT.payScreen(acct)?.body}</div>}
+        {note && (
+          <PlanNote tone="bad" acts={note.button && <button type="button" className="save-btn" onClick={() => window.settlePayment(acct.due_bill?.id)}>{note.button}</button>}>
+            {note.text}
           </PlanNote>
         )}
         {must && (
@@ -3364,7 +3380,8 @@ function SettingsArea({ page, onPage, me, plantId, onPlantConfigSaved, links, fl
   const onPlants = acct?.state === 'ended' ? [] : plants.filter(p => !p.paused).map(p => ({ id: Number(p.plant_id), name: p.plant_name }));
   // A dead login marks Plants, as a failed payment marks Billing.
   const relink = live.some(a => a.status === 'needs_relink' && a.kind !== 'share');
-  const dot = { billing: acct?.state === 'past_due' || !!acct?.must_choose, plants: relink };
+  // a payment the bank is still answering needs nothing from the owner: no dot
+  const dot = { billing: (acct?.state === 'past_due' && acct.past_due_reason !== 'checking') || !!acct?.must_choose, plants: relink };
   const shown = page === 'prefs' ? 'account' : page === 'plans' ? planFrom : page;
   const plans = (from) => { setPlanFrom(from); onPage('plans'); };
   return (

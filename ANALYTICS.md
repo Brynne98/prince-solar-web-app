@@ -60,6 +60,7 @@ Web (`public/*.jsx`):
 | `plant_switch_done` | Chosen plants saved in the one plant pick, after its confirm when a plant goes out (`from`: plants, link, billing, upgrade; `going`, `coming`: how many; `state`) (SOLAR-641) |
 | `checkout_pick_done` | The final plant choice made before a first plan, a restart or an upgrade is paid (`plan`, `count`) (SOLAR-641) |
 | `plan_start_done` | A first plan or a restart paid (`plan`, `period`) (SOLAR-641; an upgrade stays `upgrade_done`) |
+| `renewal_paid_done` | An unpaid renewal paid by the owner, on Paystack's page (`plan`, `period`); once per payment, also when the webhook settled it first (SOLAR-644) |
 | `plan_cancel_done` | Cancel plan booked (`plan`) (SOLAR-641) |
 | `login_remove_done` | SunSynk login removed |
 | `plant_settings_save_done` | Plant settings saved (field names only) |

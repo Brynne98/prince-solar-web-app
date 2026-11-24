@@ -298,16 +298,17 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
 }
 
 // The person: avatar, name and plant count in the sidebar; the avatar alone in a phone's
-// header. A dead SunSynk login puts a red dot on the avatar and on Account.
+// header. A dead SunSynk login or a payment to make puts a red dot on the avatar and on
+// Settings. alert: what needs doing, in words (AccountText.accountAlert), or null.
 function AccountMenu({ user, plantCount, paused, alert, onSettings, active, variant }) {
   const [open, setOpen, ref] = usePopover();
   // plantCount is null while the plants load: the row shows, its count shimmers
-  const sub = alert ? 'Reconnect a login' : plantCount == null ? '' : plantCount + (plantCount === 1 ? ' plant' : ' plants') + (paused ? ', paused' : '');
+  const sub = alert ? alert : plantCount == null ? '' : plantCount + (plantCount === 1 ? ' plant' : ' plants') + (paused ? ', paused' : '');
   return (
     <div className={'acct acct-' + variant} ref={ref}>
       <button type="button" className={'acct-btn' + (alert ? ' needs' : '')} aria-haspopup="menu" aria-expanded={open}
               aria-current={active ? 'page' : undefined} onClick={() => setOpen(o => !o)}
-              aria-label={'Account menu' + (alert ? '. A SunSynk login needs reconnecting' : '')}>
+              aria-label={'Account menu' + (alert ? '. ' + alert : '')}>
         <span className="avatar" aria-hidden="true">{user.initials}</span>
         {variant === 'rail' && <span className="who" aria-hidden="true"><b>{user.name}</b><span className={alert ? 'bad' : ''} style={sub ? undefined : { position: 'relative' }}>{sub || <>{'\u00a0'}<window.Skeleton as="span" w={52} h={11} r={6} style={{ position: 'absolute', left: 0, top: 2 }} /></>}</span></span>}
       </button>
@@ -318,7 +319,7 @@ function AccountMenu({ user, plantCount, paused, alert, onSettings, active, vari
               one Settings area since SOLAR-250 */}
           <button type="button" onClick={() => { setOpen(false); onSettings(); }}>
             <Icon id="settings" />Settings
-            {alert && <span className="dot" aria-label="A login needs reconnecting" />}
+            {alert && <span className="dot" aria-label={alert} />}
           </button>
           <button type="button" onClick={() => { setOpen(false); openFeedback(); }}>
             <Icon id="feedback" />Send feedback
@@ -1158,6 +1159,8 @@ function SaveToast() {
     return () => { toastShow = null; };
   }, []);
   const act = t?.action;
+  // sticky: a message that stays until closed or replaced, as one with a button does
+  const stay = !!act || !!t?.sticky;
   // First sentence bold on its own line, the rest below it (SOLAR-638)
   const cut = t ? t.text.indexOf('. ') : -1;
   const head = t && (cut < 0 ? t.text : t.text.slice(0, cut)).replace(/\.$/, '');
@@ -1177,16 +1180,16 @@ function SaveToast() {
       setT(null);
     };
     document.addEventListener('keydown', onKey);
-    const id = !act && setTimeout(() => setT(null), 5000);
+    const id = !stay && setTimeout(() => setT(null), 5000);
     return () => { clearTimeout(id); document.removeEventListener('keydown', onKey); };
   }, [t]);
   return (
     <div ref={host} popover="manual" className="toast-host" role={t?.error ? 'alert' : 'status'} aria-live={t?.error ? 'assertive' : 'polite'}>
       {t && (
-        <div key={t.at} className={'toast' + (t.error ? ' error' : t.info ? ' info' : '') + (act ? ' sticky' : '')} onClick={() => setT(null)}>
+        <div key={t.at} className={'toast' + (t.error ? ' error' : t.info ? ' info' : '') + (stay ? ' sticky' : '')} onClick={() => setT(null)}>
           {!t.error && !t.info && <Icon id="tick" />}
           <span><b className="toast-head">{head}</b>{rest && <span className="toast-rest">{rest}</span>}{act && <> <button type="button" className="toast-act" onClick={() => { setT(null); act.onClick(); }}>{act.label}</button></>}</span>
-          {act && <button type="button" className="notice-x toast-x" aria-label="Close" onClick={() => setT(null)}><Icon id="close" /></button>}
+          {stay && <button type="button" className="notice-x toast-x" aria-label="Close" onClick={() => setT(null)}><Icon id="close" /></button>}
         </div>
       )}
     </div>
@@ -1276,11 +1279,17 @@ function Setup({ links, acct }) {
     if (section && SECTION_PAGE[section] !== 'system') { setFlash(section); writeTab(SECTION_PAGE[section], null, true); setTab(SECTION_PAGE[section]); }
   }, []);
   useEffect(() => { window.track('screen_viewed', { stage: 'setup', screen: connecting ? 'connect' : tab }); }, [tab, connecting]);
-  useEffect(() => { if (wall) window.track('pay_wall_shown', { plants: acct.chosen, after: acct.had_plan ? 'plan' : 'free_week' }); }, []);
+  // once, when See plans shows: not while a renewal payment is still being checked (SOLAR-644)
+  const wallShown = useRef(false);
+  useEffect(() => {
+    if (!wall?.button || wallShown.current) return;
+    wallShown.current = true;
+    window.track('pay_wall_shown', { plants: acct.chosen, after: acct.had_plan ? 'plan' : 'free_week' });
+  }, [!!wall?.button]); // eslint-disable-line react-hooks/exhaustive-deps
   const dead = links.accounts.filter(a => a.status === 'needs_relink' && a.kind !== 'share');
   const relink = dead.length > 0 && !links.accounts.some(a => a.status === 'active');
   // no plan: the plants are still yours, paused, as Settings > Plants lists them (SOLAR-631)
-  const account = { user, plantCount: wall ? acct.chosen : 0, paused: !!wall, alert: dead.length > 0, onSettings: () => go('prefs'), active: isSettings(tab) };
+  const account = { user, plantCount: wall ? acct.chosen : 0, paused: !!wall, alert: AT.accountAlert(acct, dead.length > 0), onSettings: () => go('prefs'), active: isSettings(tab) };
   // Every plant on a working login locked (SOLAR-537): choosing one comes first, adding one second.
   const plantsOff = !relink && links.accounts.some(a => a.status !== 'disabled' && (a.plants || []).length > 0);
   const [flash, setFlash] = useState(null);
@@ -1317,8 +1326,8 @@ function Setup({ links, acct }) {
     <div className="setup-empty-box">
       <Icon id="card" />
       <h2>{wall.title}</h2>
-      <p>{wall.body}</p>
-      <button type="button" className="save-btn setup-btn" onClick={() => go('plans')}>{wall.button}</button>
+      {wall.body && <p>{wall.body}</p>}
+      {wall.button && <button type="button" className="save-btn setup-btn" onClick={() => go('plans')}>{wall.button}</button>}
     </div>
   ) : connecting ? (
     <div className="setup-form">
@@ -1695,7 +1704,7 @@ function App({ links }) {
   };
   // Account notices (SOLAR-641): what each one's button opens.
   const noticeAct = {
-    pay: () => window.settlePayment(),
+    pay: () => window.settlePayment(acct?.due_bill?.id),
     plans: () => go('plans'),
     choose: () => openSettings('connection'),
     billing: () => openSettings('plan'),
@@ -1713,7 +1722,7 @@ function App({ links }) {
   const bell = <NotifBell data={notifs} pinned={notices} multi={multi} onOpenAlert={openAlert} onOpen={loadNotifs} onSeen={readNotifs} onReadAll={() => readNotifs(null)}
                          onSettings={() => openSettings('notifications')} />;
   const loginDead = links.accounts.some(a => a.status === 'needs_relink' && a.kind !== 'share');
-  const account = { user, plantCount: me ? (me.plants || []).length : null, alert: loginDead, onSettings: () => go('prefs'), active: isSettings(tab) };
+  const account = { user, plantCount: me ? (me.plants || []).length : null, alert: AT.accountAlert(acct, loginDead), onSettings: () => go('prefs'), active: isSettings(tab) };
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync}
                                accounts={links.accounts} onStopped={() => openSettings('connection')} />;
   // A page's section, from Billing's Reconnect: openSettings; otherwise the page itself
@@ -1812,6 +1821,8 @@ function SignedIn() {
     window.addEventListener('ps-account', on);
     return () => window.removeEventListener('ps-account', on);
   }, []);
+  // an unpaid renewal's screens change on their own: read again while they may (link.jsx)
+  window.useAccountWatch(acct);
   if (pages === 'failed') return <div className="login-fine">The app didn’t load. Check your connection and reload.</div>;
   if (!checked) return <BootShell />;
   return (

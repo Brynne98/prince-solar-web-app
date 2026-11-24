@@ -132,7 +132,8 @@ const AT = window.AccountText;
 // and tells them (ps-account). useAccount(): null until the first read lands.
 let acctNow = null, acctLoad = null;
 window.reloadAccount = () => acctLoad || (acctLoad = window.fetchAccountState()
-  .then(a => { acctNow = a; window.dispatchEvent(new Event('ps-account')); return a; })
+  // _got: when it landed, so a timer set from the server's clock (a.at) can allow for the trip
+  .then(a => { if (a) a._got = Date.now(); acctNow = a; window.dispatchEvent(new Event('ps-account')); return a; })
   .finally(() => { acctLoad = null; }));
 window.accountNow = () => acctNow;
 // the read on its way, if any (it may have started before a change the caller knows about)
@@ -148,6 +149,42 @@ window.useAccount = function useAccount() {
   return a;
 };
 window.sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') acctNow = null; });
+// A read started now, not one already on its way (it may have started before a change).
+const freshAccount = async () => { await acctLoad?.catch(() => {}); return window.reloadAccount(); };
+
+// An unpaid renewal (SOLAR-644): the account is read again, signed in on any page, while its
+// screens can change without the owner doing anything. A hidden tab asks nothing and reads
+// again on coming back; a failed read is tried again on the next tick.
+//   - a renewal payment may still land (renewal_in_flight, or Billing's checking note): every 15 s;
+//   - after the cutoff, a card page Paystack hasn't answered (held_reference): asked once a
+//     minute, and the account read at once when it settles;
+//   - past due: when the plan's end passes (from the server's clock), then every 60 s until a
+//     read says it ended, so no page keeps a pay button after readings stop.
+const inFlight = (a) => !!a && (a.renewal_in_flight || (a.state === 'past_due' && a.past_due_reason === 'checking'));
+window.useAccountWatch = function useAccountWatch(acct) {
+  const fast = inFlight(acct), held = acct?.state === 'ended' && acct.renewal_in_flight ? acct.held_reference : null;
+  const pastDue = acct?.state === 'past_due' && acct.plan_ends_at;
+  React.useEffect(() => {
+    if (!fast && !held && !pastDue) return;
+    const on = () => { if (!document.hidden) freshAccount().catch(() => {}); };
+    document.addEventListener('visibilitychange', on);
+    const t = fast && setInterval(on, 15000);
+    const h = held && setInterval(() => {
+      if (document.hidden) return;
+      billingCall('verify', { reference: held }).then(v => {
+        if (!['applied', 'failed', 'void', 'refund'].includes(v.status)) return;
+        if (v.status === 'applied') renewalPaid(held, v);
+        freshAccount().catch(() => {});
+      }).catch(() => {});
+    }, 60000);
+    let c = null;
+    if (pastDue) {
+      const left = Date.parse(acct.plan_ends_at) - Date.parse(acct.at || new Date().toISOString()) - (Date.now() - (acct._got || Date.now()));
+      c = setTimeout(on, left > 0 ? left + 1000 : 60000);
+    }
+    return () => { document.removeEventListener('visibilitychange', on); clearInterval(t); clearInterval(h); clearTimeout(c); };
+  }, [fast, held, pastDue, acct]);
+};
 
 // Paystack (the billing function). A saved card is charged at once; otherwise, or after the
 // saved card is declined, Paystack's card page opens and comes back with ?reference=, which
@@ -324,6 +361,11 @@ window.startPlan = async function startPlan(acct, plan, interval, plants, { newC
       window.track('checkout_opened', { plan, period: interval });
       try { paidEvent ? sessionStorage.setItem(PAID_EVENT, JSON.stringify(paidEvent)) : sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
       openCardPage(r);
+    } else if (r.status === 'applied' && r.renewal) {
+      // a renewal paid before the plan ended landed: the plan is back, nothing new started
+      const a = await freshAccount().catch(() => null);
+      renewalPaid(r.reference, { plan: a?.plan, period: a?.interval });
+      billingPaid();
     } else if (r.status === 'applied') {
       window.track(q.kind === 'upgrade' ? 'upgrade_done' : 'plan_start_done', { plan, period: interval });
       if (paidEvent) window.track(paidEvent.name, paidEvent.props);
@@ -331,22 +373,39 @@ window.startPlan = async function startPlan(acct, plan, interval, plants, { newC
     } else if (r.status === 'refund') window.toast(AT.pay.refund, { error: true });
     else window.toast(AT.pay.pending, { info: true });
   } catch (e) {
-    payFailed(e);
+    if (!(await inProgress(e))) payFailed(e);
   } finally {
     paying = false;
   }
 };
 
-// Pay a failed renewal with another card.
-window.settlePayment = async function settlePayment() {
+// Billing's Plan section, from any page: the address, so the page that opens it reads it.
+const toBilling = () => { if (new URLSearchParams(location.search).get('tab') !== 'billing') location.assign(planUrl()); };
+// The server's "a payment is already in progress" (409): a renewal the bank is still answering
+// shows its note in Billing; anything else says so here. True when it was that refusal.
+const inProgress = async (e) => {
+  if (!/already in progress/i.test(e?.message || '')) return false;
+  const a = await freshAccount().catch(() => null);
+  if (inFlight(a)) toBilling(); else window.toast(AT.pay.inProgress, { error: true });
+  return true;
+};
+// Pay an unpaid renewal with another card. bill: the bill an email names, else the one due now.
+window.settlePayment = async function settlePayment(bill) {
+  if (paying) return;
+  paying = true;
   const stop = working(AT.pay.opening);
   try {
     // another card: the saved one is not charged again (it just failed)
-    const r = await billingCall('pay', { settle: true, newCard: true });
+    const r = await billingCall('pay', { settle: true, newCard: true, ...(bill ? { bill } : {}) });
     if (r.url) openCardPage(r); else { stop(); if (r.status === 'applied') billingPaid(); else window.toast(AT.pay.pending, { info: true }); }
   } catch (e) {
     stop();
+    if (await inProgress(e)) return;
     payFailed(e);
+    // paid already or no longer due: Billing shows how things stand
+    if (/already been made|no longer due/i.test(e?.message || '')) { freshAccount().catch(() => {}); toBilling(); }
+  } finally {
+    paying = false;
   }
 };
 
@@ -382,15 +441,31 @@ window.bookChange = async function bookChange(body, event) {
 // plan, the plants and the pay screen, so a paid one shows on this load, not after a
 // second (SOLAR-579). Once per page; null when there is none.
 let returnCheck = null;
+// A payment's end: kept until then, so a reload checks it again.
+const SETTLED = ['applied', 'failed', 'void', 'refund'];
+const checkRef = async (ref) => {
+  const v = await billingCall('verify', { reference: ref }).catch(() => ({ status: 'error' }));
+  try { if (SETTLED.includes(v.status)) sessionStorage.removeItem(OPEN_REF); else sessionStorage.setItem(OPEN_REF, ref); } catch (e) {}
+  return { ...v, reference: ref };
+};
 window.checkReturn = () => returnCheck || (returnCheck = (async () => {
   const q = new URLSearchParams(location.search);
   let open = null;
-  try { open = sessionStorage.getItem(OPEN_REF); sessionStorage.removeItem(OPEN_REF); } catch (e) {}
+  try { open = sessionStorage.getItem(OPEN_REF); } catch (e) {}
   const ref = q.get('reference') || (!q.get('billing') && !q.get('pay') ? open : null);
-  return ref ? billingCall('verify', { reference: ref }).catch(() => ({ status: 'error' })) : null;
+  return ref ? checkRef(ref) : null;
 })());
-const paidNow = () => {
-  window.toast(AT.pay.received);
+// renewal_paid_done (SOLAR-644): once per payment, whichever check saw it applied first.
+const PAID_REFS = 'ps.renewalPaid';
+const renewalPaid = (ref, v) => {
+  let seen = [];
+  try { seen = JSON.parse(localStorage.getItem(PAID_REFS)) || []; } catch (e) {}
+  if (!ref || seen.includes(ref)) return;
+  try { localStorage.setItem(PAID_REFS, JSON.stringify([...seen, ref].slice(-20))); } catch (e) {}
+  window.track('renewal_paid_done', { plan: v?.plan ?? null, period: v?.period ?? null });
+};
+const paidNow = (text = AT.pay.received) => {
+  window.toast(text);
   // a bigger plan may have places open for locked plants: PickAfterPay asks which are read
   window.pickAsked = true; window.dispatchEvent(new Event('ps-pick'));
 };
@@ -406,33 +481,49 @@ window.billingReturn = async function billingReturn(acct) {
   if (!check && !done && !pay) return;
   if (q.get('reference') || done || pay) history.replaceState(null, '', planUrl());
   if (pay) {
-    if (acct?.state === 'past_due') await window.settlePayment();
+    // an email's bill (?pay=<bill id>); an older email's ?pay=1 just opens Billing. A renewal the
+    // bank is still answering shows its note here instead.
+    const bill = /^[0-9a-f-]{36}$/i.test(pay) ? pay : null;
+    if (bill && !inFlight(acct) && (acct?.state === 'past_due' || acct?.state === 'active')) await window.settlePayment(bill);
     return;
   }
   if (done === 'paid') return paidNow();
   // The event a card-page payment was opened with: sent only if it was paid.
   let paidEvent = null;
   try { paidEvent = JSON.parse(sessionStorage.getItem(PAID_EVENT)); sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
-  try {
-    const { status, kind } = check;
-    if (status === 'error') throw new Error();
-    // A card change changes no plan: the caller re-reads the card ('card').
-    if (status === 'applied' && kind === 'card_check') {
-      window.track('card_change_done');
-      window.toast(AT.pay.cardChanged);
-      return 'card';
-    }
-    if (status === 'applied') {
-      if (paidEvent) window.track(paidEvent.name, paidEvent.props);
-      window.track(kind === 'upgrade' ? 'upgrade_done' : 'plan_start_done', {});
-      return paidNow();
-    }
-    if (status === 'refund') return window.toast(AT.pay.refund, { error: true });
-    window.toast(status === 'failed' ? AT.pay.failed : AT.pay.pending, status === 'failed' ? { error: true } : { info: true });
-  } catch {
-    window.toast(AT.pay.checkFailed, { error: true });
-  }
+  return payResult(check, paidEvent);
 };
+// What a checked card-page payment says. Still being checked: asked again every 5 s for a
+// minute, then a Check again button; no answer from Paystack: Check again too.
+async function payResult(v, paidEvent = null, polled = false) {
+  const { status, kind } = v;
+  const again = () => { window.toast(AT.pay.pending, { info: true, sticky: true }); checkRef(v.reference).then(r => payResult(r, paidEvent, true)); };
+  // A card change changes no plan: the caller re-reads the card ('card').
+  if (status === 'applied' && kind === 'card_check') {
+    window.track('card_change_done');
+    window.toast(AT.pay.cardChanged);
+    return 'card';
+  }
+  if (status === 'applied') {
+    if (paidEvent) window.track(paidEvent.name, paidEvent.props);
+    if (kind === 'renewal') renewalPaid(v.reference, v);
+    else window.track(kind === 'upgrade' ? 'upgrade_done' : 'plan_start_done', {});
+    freshAccount().catch(() => {});   // Billing's red note goes
+    return paidNow(AT.paidText(v));
+  }
+  if (status === 'refund') return window.toast(AT.pay.refund, { error: true });
+  if (status === 'failed') return window.toast(AT.pay.failed, { error: true });
+  if (status === 'void') return window.toast(AT.pay.void, { info: true });
+  if (status === 'error') return window.toast(AT.pay.checkFailed, { error: true, action: { label: AT.pay.checkAgain, onClick: again } });
+  if (polled) return window.toast(AT.pay.pending, { info: true, action: { label: AT.pay.checkAgain, onClick: again } });
+  window.toast(AT.pay.pending, { info: true, sticky: true });
+  for (let i = 0; i < 12; i++) {
+    await new Promise(res => setTimeout(res, 5000));
+    const r = await checkRef(v.reference);
+    if (r.status !== 'pending') return payResult(r, paidEvent, true);
+  }
+  return payResult({ ...v, status: 'pending' }, paidEvent, true);
+}
 
 // From the website's pricing: ?plan=home&period=yearly. Sign-in drops the query, so it is kept
 // for a day; once signed in with no running plan, the plans pop-up opens on that plan, which

@@ -308,12 +308,14 @@ export function outboxMail(m: TextMail, unsub?: string): Email {
     if ("pair" in x) return { pair: [x.pair[0], esc(x.pair[1])] };
     if ("note" in x) return { note: esc(x.note) };
     if ("steps" in x) return { box: { steps: x.steps } };
-    if ("button" in x) return { button: { label: x.button.label, href: page[x.button.page] } };
+    // a pay button names its bill (?pay=<bill id>), so the app pays that bill or says why not
+    if ("button" in x) return { button: { label: x.button.label,
+      href: x.button.page === "pay" && x.button.bill ? `${PLAN}&pay=${encodeURIComponent(x.button.bill)}` : page[x.button.page] } };
     return { box: { hero: x.hero,
       rows: x.rows.map(([k, v]) => [k, k === "Reference" ? ref(v) : esc(v)] as [string, string]) } };
   });
   const footer = m.reminder && unsub ? OFFER_FOOTER("you have an account with us", unsub) : BILL_FOOTER;
-  return make(m.subject, { title: m.title, parts, footer });
+  return make(m.subject, { title: m.title, sub: m.sub, parts, footer });
 }
 
 // ---------------------------------------------------------------- account mail

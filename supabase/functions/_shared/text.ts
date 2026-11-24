@@ -43,6 +43,12 @@ export type AccountState = {
   if_cancelled_delete_at: Iso | null; history_kept_until: Iso | null; history_purged: boolean;
   /** When the state was read. */
   at?: Iso;
+  /** An unpaid renewal (0248): why it is unpaid, the next try's day (a plain date), when an open
+   *  screen reads again, the bill to pay, and whether a renewal payment may still land. */
+  past_due_reason?: "refused" | "no_card" | "retrying" | "last_try_failed" | "checking" | null;
+  next_try_on?: string | null; retry_window_ends_at?: Iso | null;
+  due_bill?: { id: string; plan: string; plan_name: string; interval: string; amount_minor: number; currency: string } | null;
+  renewal_in_flight?: boolean; held_reference?: string | null;
   plants: PlantState[]; prices: PriceRow[]; logins: Login[]; bills: Bill[];
 };
 export type Quote = {
@@ -70,6 +76,8 @@ const dtf = (s: AccountState | { time_zone: string; locale?: string }, o: Intl.D
 /** "3 Dec 2026" in the account's time zone. */
 export const day = (s: { time_zone: string }, iso: Iso | null | undefined): string =>
   iso ? dtf(s, { day: "numeric", month: "short", year: "numeric" }).format(new Date(iso)).replace(/\bSept\b/, "Sep") : "";
+/** "27 Nov 2026" for a plain date ("2026-11-27"), with no time zone to shift it. */
+const dateOnly = (d: string | null | undefined): string => day({ time_zone: "UTC" }, d);
 /** "Friday 4 Dec" for a date this week or next. */
 export const weekday = (s: { time_zone: string }, iso: Iso | null | undefined): string =>
   iso ? dtf(s, { weekday: "long", day: "numeric", month: "short" }).format(new Date(iso)).replace(/\bSept\b/, "Sep") : "";
@@ -85,6 +93,7 @@ const plantsWord = (n: number) => forms(n, { one: "1 plant", many: "{n} plants" 
 /** The plan's name, or what the account has instead. */
 export function planTitle(s: AccountState): string {
   if (s.plan_name) return s.plan_name;
+  if (s.state === "ended" && s.renewal_in_flight && s.last_plan_name) return s.last_plan_name;
   if (s.state === "trialing") return "Free week";
   if (s.state === "active") return "Plan from us";          // a grant: places with no billing
   return "No plan";
@@ -100,13 +109,45 @@ export function planStatus(s: AccountState): string | null {
       if (s.cancel_at) return `Ends on ${day(s, s.cancel_at)}`;
       return s.next_charge_at ? `Renews on ${day(s, s.next_charge_at)}` : null;
     case "past_due":
-      return [`Payment of ${money(s.amount_due_minor, s.currency, s.locale)} failed.`,
-        s.next_retry_at ? `Next try ${day(s, s.next_retry_at)}.` : null,
-        `Ends on ${day(s, s.plan_ends_at)} if unpaid.`].filter(Boolean).join(" ");
+      return pastDueNote(s).text;
     case "ended":
+      if (s.renewal_in_flight) return pausedLine(s);
       return s.access_ended_at ? `${s.grant_ended ? "Plan from us ended" : s.had_plan ? `${s.last_plan_name} ended` : "Free week ended"} on ${day(s, s.access_ended_at)}` : null;
     default: return null;
   }
+}
+
+/** An unpaid renewal: what is paid (the open renewal bill: a booked downgrade bills the smaller
+ *  plan) and what ends at the cutoff (the plan running now). */
+function due(s: AccountState) {
+  const b = s.due_bill;
+  return { amount: money(b?.amount_minor ?? s.amount_due_minor, b?.currency ?? s.currency, s.locale),
+    plan: b?.plan_name ?? s.plan_name ?? s.last_plan_name ?? "", ends: s.plan_name ?? s.last_plan_name ?? "",
+    by: day(s, s.plan_ends_at) };
+}
+/** Billing's red note on an unpaid renewal, by why it is unpaid. button: null while the bank
+ *  is still answering (paying again could pay twice). */
+export function pastDueNote(s: AccountState): { text: string; button: string | null } {
+  const d = due(s), what = `${d.amount} for ${d.plan}`, end = `Pay by ${d.by} or ${d.ends} ends and readings stop.`;
+  const text = (t: string) => ({ text: t, button: billing.payOther });
+  switch (s.past_due_reason) {
+    case "checking": return { text: `We're still checking your ${d.amount} payment for ${d.plan} with your bank.`, button: null };
+    case "refused": return text(`${what} didn't go through and your card was removed. ${end}`);
+    case "no_card": return text(`${what} is due. ${end}`);
+    case "retrying": return text(`${what} didn't go through. We'll try your card again on ${dateOnly(s.next_try_on)}. ${end}`);
+    case "last_try_failed": return text(`${what} didn't go through. We won't try your card again. ${end}`);
+    default: return text(`Your ${d.amount} payment for ${d.plan} is overdue. ${end}`);
+  }
+}
+/** Ended while a renewal payment made before the cutoff is still being checked. */
+export const pausedLine = (s: AccountState) => `Readings are paused while we check your ${due(s).plan} payment.`;
+/** The account menu's word under the name, and its dot's label: a payment to make, a login to
+ *  reconnect, or both. A payment the bank is still answering needs nothing. */
+export function accountAlert(s: AccountState | null, reconnect: boolean): string | null {
+  const pay = s?.state === "past_due" && s.past_due_reason !== "checking";
+  if (pay && reconnect) return "Needs attention";
+  if (pay) return s!.past_due_reason === "no_card" || !s!.past_due_reason ? "Payment due" : "Payment failed";
+  return reconnect ? "Reconnect a login" : null;
 }
 
 /** Chosen plants out of the places: counts are chosen plants, zero included. */
@@ -172,7 +213,7 @@ export const billing = {
   title: "Billing",
   planHead: "Plan",
   cardHead: "Card",
-  billsHead: "Payments",
+  billsHead: "Payment history",
   cancelHead: "Cancellation",
   cancelButton: "Cancel",
   noBills: "No payments yet.",
@@ -205,7 +246,7 @@ export const cancelDialog = (s: AccountState) => ({
 export function deleteBlocked(s: AccountState): { title: string; text: string; action: string | null; to: "billing" | "cancel" | "mail" | null } | null {
   if (s.may_delete) return null;
   if (s.dispute_open) return { title: "A payment is in dispute", text: "You can delete your account once it's settled.", action: null, to: null };
-  if (s.state === "past_due") return { title: "Pay the failed payment first", text: "Pay it in Billing, then you can delete your account.", action: "Go to Billing", to: "billing" };
+  if (s.state === "past_due") return { title: "Pay the overdue payment first", text: "Pay it in Billing, then you can delete your account.", action: "Go to Billing", to: "billing" };
   if (s.owed_minor > 0) return { title: `${money(s.owed_minor, s.currency, s.locale)} is owed`, text: "Email us to settle it, then you can delete your account.", action: "Email us", to: "mail" };
   if (s.cancel_at) return { title: `${s.plan_name} ends on ${day(s, s.cancel_at)}`, text: "You can delete your account after that.", action: null, to: null };
   if (s.plan_name) return { title: "Cancel your plan first", text: `Your ${s.plan_name} plan is still running. Cancel it in Billing, then you can delete your account.`, action: "Go to cancel plan", to: "cancel" };
@@ -342,7 +383,10 @@ export function chosenToast(s: AccountState, coming: number[], going: number[]):
 }
 /** A refused save or change, from the database's refusal. */
 export function refused(msg: string): string {
-  if (/past_due|failed payment|pay it first|pay the failed/i.test(msg)) return "Pay the failed payment first.";
+  if (/already in progress/i.test(msg)) return pay.inProgress;
+  if (/already been made/i.test(msg)) return "This payment has already been made.";
+  if (/no longer due/i.test(msg)) return "This payment is no longer due.";
+  if (/past_due|failed payment|pay it first|pay the failed/i.test(msg)) return "Pay the overdue payment first.";
   if (/already had its free week/.test(msg)) return "A plant you ticked has had its free week. Untick it.";
   if (/free week reads up to|plan has \d+ places|that plan has/.test(msg)) return "That is more plants than your plan reads.";
   if (/pick the plants to drop|more plants to drop/.test(msg)) return "Choose the plants to keep first.";
@@ -355,7 +399,7 @@ export function refused(msg: string): string {
 /** Payment steps: what the small working pop-up and the toasts say. */
 export const pay = {
   checking: "Checking the price…",
-  opening: "Opening the card page…",
+  opening: "Opening Paystack…",
   taking: "Taking payment…",
   dueToday: "Due today",
   card: "Card",
@@ -363,15 +407,22 @@ export const pay = {
   received: "Payment received.",
   declined: "Your saved card was declined. Enter another card.",
   refund: "Your plan changed while you paid. The payment will be refunded.",
-  pending: "Your payment is still being checked. Look again in a minute.",
-  failed: "The payment didn't go through. Nothing was charged.",
-  checkFailed: "Couldn't check the payment. Look again in a minute.",
+  pending: "We're still checking your payment.",
+  failed: "The payment didn't go through.",
+  void: "Payment not completed.",
+  checkFailed: "Couldn't check your payment.",
+  checkAgain: "Check again",
+  inProgress: "A payment is already in progress.",
   startFailed: "Couldn't start the payment. Try again.",
-  cardFailed: "Couldn't open the card page. Try again.",
+  cardFailed: "Couldn't open Paystack. Try again.",
   cardChanged: "Card changed.",
   undone: "Your plan carries on as before.",
   booked: "Booked.",
 };
+/** Paid: a renewal names the plan that carries on (or the smaller one it moved to). */
+export const paidText = (v: { kind?: string | null; plan_name?: string | null; changed?: boolean } | null) =>
+  v?.kind === "renewal" && v.plan_name
+    ? `${pay.received} ${v.changed ? `${v.plan_name} is now your plan.` : `${v.plan_name} carries on.`}` : pay.received;
 
 export const logins = {
   addLogin: "Add login",
@@ -405,6 +456,8 @@ export function removeLogin(s: AccountState, loginId: string, shared = false) {
 
 export function payScreen(s: AccountState) {
   const ended = s.state === "ended";
+  // a renewal paid before the cutoff may still land: no ended words, no plans
+  if (ended && s.renewal_in_flight) return { title: planTitle(s), body: pausedLine(s), button: null };
   const title = !ended ? null
     : s.grant_ended ? "Your plan from us has ended"
     : s.had_plan ? `Your ${s.last_plan_name} plan has ended`
@@ -432,10 +485,11 @@ export function fitLine(s: AccountState): string | null {
 export function notices(s: AccountState): Notice[] {
   const out: Notice[] = [];
   const fit = fitLine(s);
-  if (s.state === "past_due") {
-    out.push({ kind: "past_due", tone: "bad", title: `Payment of ${money(s.amount_due_minor, s.currency, s.locale)} failed`,
-      short: "Payment failed", body: planStatus(s)?.replace(/^Payment of \S+ failed\. /, "") ?? null,
-      bodyShort: `Ends on ${day(s, s.plan_ends_at)} if unpaid.`, button: billing.pay, action: "pay" });
+  if (s.state === "past_due" && s.past_due_reason !== "checking") {
+    const d = due(s), word = !s.past_due_reason ? "overdue" : s.past_due_reason === "no_card" ? "due" : "failed";
+    const body = `Pay ${d.amount} by ${d.by} or readings stop.`;
+    out.push({ kind: "past_due", tone: "bad", title: `${d.plan} payment ${word}`, short: `Payment ${word === "failed" ? "failed" : "due"}`,
+      body, bodyShort: body, button: billing.payOther, action: "pay" });
   }
   const mc = mustChoose(s);
   if (mc) out.push({ kind: "must_choose", tone: "warn", title: mc.title, short: mc.title, body: mc.body, bodyShort: null, button: mc.button, action: "choose" });
@@ -463,8 +517,9 @@ export type MailPart =
   | { steps: [string, string][] }
   | { pair: [string, string] }
   | { note: string }
-  | { button: { label: string; page: "billing" | "plans" | "pay" | "card" | "cancel" } };
-export type Mail = { subject: string; title: string; parts: MailPart[]; reminder?: boolean };
+  | { button: { label: string; page: "billing" | "plans" | "pay" | "card" | "cancel"; bill?: string } };
+/** sub: the line straight under the title. */
+export type Mail = { subject: string; title: string; sub?: string; parts: MailPart[]; reminder?: boolean };
 export type MailInput = {
   key: string; state: AccountState;
   bill?: { kind: string; plan: string; plan_name: string; interval: "month" | "year"; amount_minor: number; currency: string;
@@ -474,6 +529,8 @@ export type MailInput = {
     card_type: string | null; last4: string | null } | null;
   event?: { kind: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null } | null;
   plant?: { id: number; name: string | null } | null;
+  /** plan_ended: that ending's date, why, and whether a renewal card page never got a final answer. */
+  ended?: { ended_at: Iso | null; reason: string | null; paid_unknown: boolean } | null;
 };
 
 /** The chosen plants waiting to be deleted, grouped by their delete date, earliest first. A date
@@ -521,15 +578,22 @@ export function mail(m: MailInput): Mail | null {
         parts: [{ hero: { label: "Paid", value: $(b.amount_minor, b.currency), sub: day(s, b.paid_at) }, rows }, { button: { label: "See your plan", page: "billing" } }] };
     }
     case "payment_failed":
-      return { subject: `Your payment of ${$(s.amount_due_minor)} didn't go through`, title: "Your payment didn't go through",
-        parts: [{ pair: [`We couldn't take ${$(s.amount_due_minor)} for ${s.plan_name}`, s.next_retry_at ? `We'll try your card again on ${day(s, s.next_retry_at)}.` : "That was our last try."] },
-          { pair: [`Pay by ${day(s, s.plan_ends_at)}`, `If it isn't paid by then, ${s.plan_name} ends and readings stop.`] },
-          { button: { label: billing.payOther, page: "pay" } }] };
     case "card_update":
-      return { subject: "Your card can't be charged", title: "Your card can't be charged",
-        parts: [{ lead: `Your bank declined the card for ${s.plan_name} and it won't be tried again.` },
-          { pair: [`Add a card by ${day(s, s.plan_ends_at)}`, `If it isn't paid by then, ${s.plan_name} ends and readings stop.`] },
-          { button: { label: billing.payOther, page: "pay" } }] };
+    case "payment_due": {
+      // what is paid: the bill the row is about (a booked downgrade bills the smaller plan); what ends: the running plan
+      const b = m.bill, plan = b?.plan_name ?? due(s).plan, ends = due(s).ends;
+      const amount = b ? $(b.amount_minor, b.currency) : due(s).amount;
+      const title = `Pay ${amount}${plan !== ends ? ` for ${plan}` : ""} by ${day(s, s.plan_ends_at)}`;
+      const then = `If it isn't paid by then, ${ends} ends and readings stop.`;
+      const button: MailPart = { button: { label: billing.payOther, page: "pay", bill: s.due_bill?.id } };
+      if (m.key === "payment_failed") return { subject: `Your ${plan} payment didn't go through`, title, sub: then,
+        parts: [{ lead: `We couldn't charge your card for ${plan}. ${s.next_try_on ? `We'll try it again on ${dateOnly(s.next_try_on)}.` : "We won't try it again."}` }, button] };
+      if (m.key === "card_update") return { subject: `Your ${plan} payment didn't go through`, title,
+        parts: [{ lead: `We couldn't charge your ${card(b?.card_type, b?.last4) ?? "saved card"} for ${plan}, so we've removed it from your account. We won't try it again.` },
+          { note: then }, button] };
+      return { subject: `Your ${plan} payment is due`, title,
+        parts: [{ lead: `There's no card saved to pay for ${plan}.` }, { note: then }, button] };
+    }
     case "refund": {
       const r = m.refund; if (!r) return null;
       const rows: [string, string][] = [["Paid on", day(s, r.paid_at)], ["Arrives in", "3 to 10 working days"], ["Reference", r.reference]];
@@ -541,9 +605,15 @@ export function mail(m: MailInput): Mail | null {
           { hero: { label: "Refund", value: $(r.amount_minor, r.currency), sub: r.last4 ? `back to ${card(r.card_type, r.last4)}` : "back to your card" }, rows },
           { note: "Paystack, who handles our payments, emails you about it too." }] };
     }
-    case "plan_ended":
-      return { subject: `Your ${s.last_plan_name} plan has ended`, title: `Your ${s.last_plan_name} plan has ended`,
-        parts: [{ lead: ["Readings have stopped.", kept].filter(Boolean).join(" ") }, { button: { label: billing.seePlans, page: "plans" } }] };
+    case "plan_ended": {
+      const e = m.ended, at = e?.ended_at ?? s.access_ended_at;
+      // "It wasn't paid" only when no renewal payment made before the end is still unanswered
+      const unpaid = e?.reason === "unpaid" && !e.paid_unknown;
+      return { subject: `Your ${s.last_plan_name} plan has ended`,
+        title: at ? `${s.last_plan_name} ended on ${day(s, at)}` : `Your ${s.last_plan_name} plan has ended`,
+        parts: [{ lead: [unpaid ? "It wasn't paid, so readings have stopped." : "Readings have stopped.", kept].filter(Boolean).join(" ") },
+          { button: { label: billing.seePlans, page: "plans" } }] };
+    }
     case "change_booked": {
       const e = m.event; if (!e) return null;
       if (e.kind === "cancel") return { subject: `${s.plan_name} ends on ${day(s, s.cancel_at)}`, title: `${s.plan_name} ends on ${day(s, s.cancel_at)}`,
@@ -607,6 +677,6 @@ export function mail(m: MailInput): Mail | null {
 
 export const AccountText = {
   money, day, weekday, forms, names, plantName, planTitle, planPrice, planStatus, placesLine, mustChoose, bookedChange,
-  cardLine, cardSub, billRow, billing, cancelDialog, deleteBlocked, plans, planCard, quoteReview, checkoutPick, keepPick, weekPick, chosenToast, refused, pay,
+  cardLine, cardSub, billRow, billing, pastDueNote, pausedLine, accountAlert, paidText, cancelDialog, deleteBlocked, plans, planCard, quoteReview, checkoutPick, keepPick, weekPick, chosenToast, refused, pay,
   choosePlants, switchConfirm, plantTag, plantKept, logins, removeLogin, payScreen, fitLine, notices, mail,
 };
