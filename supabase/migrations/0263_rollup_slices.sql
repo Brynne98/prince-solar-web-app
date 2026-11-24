@@ -25,14 +25,17 @@
 --      marked plant is rolled up again from its flipped raw rows before the drop.
 --      5-minute rows of days dropped before a flip keep the old sign, as before.
 --   5. The drop happens only once every slice and redo is done. If the locks are
---      busy it backs off (10 tries, 200 ms apart) and the next run tries again. A
---      finished partition still not dropped after 24 h fails the run, so the cron
---      failure check alerts.
---   6. Cron: every 5 minutes 05:00-07:55 UTC (was once at 04:30).
+--      busy it backs off (10 tries, 200 ms apart) and the next run tries again.
+--   6. Two alarms fail the run, so the cron failure check alerts with nobody watching:
+--      a day registered over 24 h ago and still not dropped (the nights fall behind,
+--      or a drop never gets its locks), and a 300 s slice that held the key over 2 s
+--      (plants are near the limit below; SOLAR-659 is the follow-up).
+--   7. Cron: every 5 minutes 05:00-07:55 UTC (was once at 04:30).
 --
 -- Limit: the smallest slice is 300 s of every plant, ~1.2 ms a plant cold (0.35 s a
--- plant-day / 288). Past ~2,500 plants it takes over 3 s, past ~6,500 over the 8 s a
--- history delete from the app may wait; then a 300 s slice also needs a split by plant.
+-- plant-day / 288): over 2 s from ~1,700 plants. A history delete from the app waits for
+-- it inside an 8 s request that also does the delete itself, so "remove plant" may fail
+-- from ~3,500 plants, or sooner for a plant with years of history (SOLAR-659).
 -- A night (36 runs of 60 s) rolls ~6,000 cold plant-days; the rest carries over.
 -- Bulk test, local, 2,000 plants (3.3M minute rows, 6.6M string rows): matches the
 -- one-shot rollup row for row, including stopped, killed and cancelled runs.
@@ -55,7 +58,6 @@ create table if not exists private.rollup_progress (
   attempt_qstart timestamptz,
   rows_in        bigint not null default 0,
   rows_out       bigint not null default 0,
-  done_at        timestamptz,
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
@@ -352,8 +354,10 @@ revoke all on function private.rollup_part_ok(oid, text, text, bigint, bigint) f
 
 drop procedure if exists private.rollup_old_days(integer);
 drop procedure if exists private.rollup_old_days(integer, interval, integer);
+drop procedure if exists private.rollup_old_days(integer, interval, integer, interval);
 create procedure private.rollup_old_days(p_days integer default 31,
-  p_cap interval default interval '60 seconds', p_target_rows integer default 25000)
+  p_cap interval default interval '60 seconds', p_target_rows integer default 25000,
+  p_slow interval default interval '2 seconds')
 language plpgsql
 as $$
 declare
@@ -365,6 +369,7 @@ declare
   c record; pr record;
   est double precision; w integer; t_to bigint; n_in bigint; n_out bigint;
   p bigint; live boolean; got boolean;
+  t_key timestamptz; slow_ms integer := 0; slow_part text;
 begin
   if p_days is null or p_days < 1 then
     raise exception 'rollup_old_days: p_days must be 1 or more, got %', p_days;
@@ -450,6 +455,7 @@ begin
         commit;
         exit work;
       end if;
+      t_key := clock_timestamp();
       select * into pr from private.rollup_progress where part_oid = pr.part_oid;
       if not found or pr.attempt_pid is distinct from my_pid or pr.attempt_qstart is distinct from my_qs then
         commit; continue;
@@ -468,10 +474,14 @@ begin
       n_out := private.rollup_partition(pr.parent, pr.part_name, pr.next_ts, t_to);
       update private.rollup_progress
          set next_ts = t_to, rows_in = rows_in + n_in, rows_out = rows_out + n_out,
-             attempt_width = null, attempt_pid = null, attempt_qstart = null,
-             done_at = case when t_to >= hi then now() end, updated_at = now()
+             attempt_width = null, attempt_pid = null, attempt_qstart = null, updated_at = now()
        where part_oid = pr.part_oid;
       commit;
+      -- the slowest slice that can't get narrower: the early warning for SOLAR-659
+      if pr.width = 300 and extract(epoch from clock_timestamp() - t_key) * 1000 > slow_ms then
+        slow_ms := (extract(epoch from clock_timestamp() - t_key) * 1000)::integer;
+        slow_part := pr.part_name;
+      end if;
 
     elsif cardinality(pr.redo) > 0 then
       -- ── one plant again, from raw rows its sign check flipped (readings only) ──
@@ -527,12 +537,17 @@ begin
   perform private.ensure_partitions();
   commit;
 
-  if exists (select 1 from private.rollup_progress where done_at < now() - interval '24 hours') then
-    raise exception 'rollup_old_days: % finished more than 24 h ago and still not dropped',
-      (select string_agg(part_name, ', ') from private.rollup_progress where done_at < now() - interval '24 hours');
+  if exists (select 1 from private.rollup_progress where created_at < now() - interval '24 hours') then
+    raise exception 'rollup_old_days: % waiting over 24 h, not yet rolled up and dropped',
+      (select string_agg(part_name, ', ' order by lo, parent) from private.rollup_progress
+        where created_at < now() - interval '24 hours');
+  end if;
+  if slow_ms > extract(epoch from p_slow) * 1000 then
+    raise exception 'rollup_old_days: a 300 s slice of % held the rollup key % ms (over % ms); plants are near the limit, see SOLAR-659',
+      slow_part, slow_ms, (extract(epoch from p_slow) * 1000)::integer;
   end if;
 end $$;
-revoke all on procedure private.rollup_old_days(integer, interval, integer) from public, anon, authenticated;
+revoke all on procedure private.rollup_old_days(integer, interval, integer, interval) from public, anon, authenticated;
 
 -- ── 6. cron ─────────────────────────────────────────────────────────────────
 do $$
