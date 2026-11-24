@@ -25,6 +25,7 @@ select pg_sleep(0.002);
 commit;
 EOF
 
+"$BIN/psql" "$DB" -qc "delete from private.sunsynk_calls where kind like 'tt\\_%'" >/dev/null
 "$BIN/pgbench" -n -c 8 -j 8 -t "$TX" -f "$DIR/a.sql" -f "$DIR/b.sql" "$DB" > "$DIR/out.txt" 2>&1 || { tail -5 "$DIR/out.txt"; echo "FAIL: a call failed"; exit 1; }
 # every call counted: 8 clients x 400 calls, one per key each
 "$BIN/psql" "$DB" -v ON_ERROR_STOP=1 -qAt -c "do \$\$ begin

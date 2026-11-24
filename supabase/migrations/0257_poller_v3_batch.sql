@@ -26,6 +26,13 @@
 --                               batch rolls back and the caller saves login by login.
 --   public.sunsynk_tally        rows summed per key and written in key order: concurrent
 --                               callers no longer deadlock (0178).
+--
+-- Left as they are (the caller retries a deadlock once, then saves login by login):
+--   account_mark's trigger, account_upsert and api_link_remove take plant and inverter
+--   locks in their own order, as they do against poll_commit_v2 today; three or more
+--   batches replacing the same reading at once; poll_commit_v2 and a batch saving the
+--   same login in the same minute (only while switching paths). Another login's
+--   last_ok_at is skipped while its row is locked, so it cannot close a cycle.
 -- ============================================================================
 
 create function private.read_second(p_key text)
@@ -38,7 +45,8 @@ $$;
 -- are account_status's, line for line: the latest plan begun by `at`, then grants, then
 -- the free week. live = trialing, active or past_due.
 -- ends_at: the earliest future time at which the clock alone may end the account's
--- reading. It may be early (a grant ending can leave the plan running); never late.
+-- reading or put it over its places. It may be early (a grant ending can leave the plan
+-- running); never late.
 -- ---------------------------------------------------------------------------
 create function billing.accounts_live(p_accounts uuid[], p_at timestamptz)
 returns table (account uuid, live boolean, must_choose boolean, ends_at timestamptz)
@@ -53,6 +61,11 @@ language sql stable set search_path = billing, pg_temp as $$
       from billing.subscriptions s
      where s.account = any (p_accounts) and s.started_at <= p_at
      order by s.account, s.started_at desc
+  ), nxt as (
+    select s.account, min(s.started_at) as next_sub   -- a plan booked to start later
+      from billing.subscriptions s
+     where s.account = any (p_accounts) and s.started_at > p_at
+     group by s.account
   ), g as (
     select g.account,
            coalesce(sum(g.places) filter (where g.starts_at <= p_at and (g.ends_at is null or g.ends_at > p_at)), 0) as places,
@@ -61,18 +74,21 @@ language sql stable set search_path = billing, pg_temp as $$
      where g.account = any (p_accounts)
      group by g.account
   ), se as (
-    select se.account, count(*) as chosen
+    select se.account,
+           count(*) filter (where se.chosen_at <= p_at) as chosen,
+           min(se.chosen_at) filter (where se.chosen_at > p_at) as next_seat   -- may put it over its places
       from billing.seats se
-     where se.account = any (p_accounts) and se.chosen_at <= p_at and (se.closed_at is null or se.closed_at > p_at)
+     where se.account = any (p_accounts) and (se.closed_at is null or se.closed_at > p_at)
      group by se.account
   ), x as (
     select a.*, s.id as sub, s.status, s.ended_at, s.cancel_at_period_end, s.period_end, s.extra_places, s.plan,
            case when s.status = 'past_due' then s.past_due_since end as pds,
-           coalesce(g.places, 0) as grant_places, g.next_end as grant_end, coalesce(se.chosen, 0) as chosen
+           coalesce(g.places, 0) as grant_places, g.next_end as grant_end, coalesce(se.chosen, 0) as chosen, se.next_seat, nxt.next_sub
       from a
       left join s on s.account = a.id
       left join g on g.account = a.id
       left join se on se.account = a.id
+      left join nxt on nxt.account = a.id
   ), y as (
     select x.*, billing.past_due_cutoff(x.pds, x.retry_days, x.tz) as cutoff from x
   ), z as (
@@ -115,7 +131,9 @@ language sql stable set search_path = billing, pg_temp as $$
                          case when st.pds is not null and st.cutoff <= p_at then st.cutoff + interval '24 hours' end)
                  end,
                  case when st.state = 'trialing' then st.trial_ends_at end,
-                 st.grant_end)
+                 st.grant_end,
+                 st.next_seat,
+                 st.next_sub)
          end
     from st
 $$;
@@ -228,12 +246,13 @@ declare
   accts uuid[];
   x uuid;
   t text;
+  pl record;
 begin
   if not billing.is_live() then
     raise exception 'poll_commit_batch needs billing live (0252)' using errcode = '55000';
   end if;
   -- a second batch in one transaction: the first one's tables are still there
-  foreach t in array array['_bin', '_bok', '_brd', '_brw', '_bst', '_bsw', '_bag', '_bgap'] loop
+  foreach t in array array['_bin', '_bok', '_brd', '_brw', '_bst', '_bsw', '_bme', '_bag', '_bgap'] loop
     if to_regclass('pg_temp.' || t) is not null then execute format('drop table pg_temp.%I', t); end if;
   end loop;
 
@@ -266,15 +285,34 @@ begin
            order by b.account, b.expires desc nulls last, b.i desc) t
    where sa.id = t.account;
 
-  -- 2. plants for share in id order, then the version each read started on and read_now
-  perform 1 from billing.plants bp
-   where bp.id in (select k::bigint from _bin b cross join jsonb_object_keys(b.versions) k)
-   order by bp.id for share;
+  -- 2. plants in id order, for share; a plant whose history was deleted for no key update,
+  -- since step 8 updates it (two batches holding it for share would deadlock there). Then
+  -- the version each read started on (looked up under the plant's own id, as write_allowed
+  -- does) and read_now.
+  for pl in select bp.id, bp.history_purged_at is not null as purged from billing.plants bp
+            where bp.id in (select k::bigint from _bin b cross join jsonb_object_keys(b.versions) k)
+            order by bp.id loop
+    if pl.purged then
+      perform 1 from billing.plants where id = pl.id for no key update;
+    else
+      perform 1 from billing.plants where id = pl.id for share;
+    end if;
+  end loop;
   create temp table _bok on commit drop as
-    with v as (select b.i, k.key::bigint as plant, k.value as version from _bin b cross join jsonb_each_text(b.versions) k)
+    with v as (select distinct b.i, k::bigint as plant, b.versions->>(k::bigint::text) as version
+                 from _bin b cross join jsonb_object_keys(b.versions) k)
     select v.i, v.plant from v
      where v.plant in (select pr from billing.plants_read_now(array(select distinct plant from v), p_at) pr)
-       and v.version::bigint = (select bp.version from billing.plants bp where bp.id = v.plant);
+       and exists (select 1 from billing.plants bp where bp.id = v.plant and bp.version = v.version::bigint);
+  -- one object sending an inverter twice fails in poll_commit_v2 (on conflict cannot update a
+  -- row twice); here too, so the caller's login-by-login save fails that login alone
+  if exists (select 1 from _bin b cross join jsonb_array_elements(b.inverters) e
+              group by b.i, e->>'sn' having count(*) > 1)
+     or exists (select 1 from _bin b cross join jsonb_array_elements(b.meta) e
+                 where (e->>'plant_id')::bigint in (select o.plant from _bok o where o.i = b.i)
+                 group by b.i, e->>'sn' having count(*) > 1) then
+    raise exception 'poll_commit_batch: an inverter twice in one row' using errcode = '21000';
+  end if;
 
   perform set_config('billing.guarded', 'on', true);
 
@@ -302,24 +340,59 @@ begin
    where m.sn in (select (t.rw).sn from _bst t
                   union select e->>'sn' from _bin b cross join jsonb_array_elements(b.meta) e)
    order by m.sn for no key update;
+  -- poll_commit_v2 updates an inverter's string records only once its meta row exists: from the
+  -- batch's start (avail 0), or from the object after the first one that sent its meta
+  create temp table _bme on commit drop as
+    select m.sn, 0 as avail from private.meta m where m.sn in (select (t.rw).sn from _bst t);
+  insert into _bme
+  select e->>'sn', min(b.i) + 1 from _bin b cross join jsonb_array_elements(b.meta) e
+   where (e->>'plant_id')::bigint in (select o.plant from _bok o where o.i = b.i)
+     and e->>'sn' in (select (t.rw).sn from _bst t) and e->>'sn' not in (select sn from _bme)
+   group by e->>'sn';
+  -- meta (only plants written), the last object winning, in sn order; ord and status: the last sent
+  perform public.meta_upsert(coalesce((
+    select jsonb_agg(m.v || jsonb_build_object('ord', m.ord, 'status', m.status) order by m.sn)
+      from (select distinct on (q.v->>'sn') q.v->>'sn' as sn, q.v,
+                   (select r.v->>'ord' from (select b2.i, e2.n, e2.v from _bin b2 cross join jsonb_array_elements(b2.meta) with ordinality e2 (v, n)) r
+                     where r.v->>'sn' = q.v->>'sn' and nullif(r.v->>'ord', '') is not null
+                       and (r.v->>'plant_id')::bigint in (select o.plant from _bok o where o.i = r.i)
+                     order by r.i desc, r.n desc limit 1) as ord,
+                   (select r.v->>'status' from (select b2.i, e2.n, e2.v from _bin b2 cross join jsonb_array_elements(b2.meta) with ordinality e2 (v, n)) r
+                     where r.v->>'sn' = q.v->>'sn' and nullif(r.v->>'status', '') is not null
+                       and (r.v->>'plant_id')::bigint in (select o.plant from _bok o where o.i = r.i)
+                     order by r.i desc, r.n desc limit 1) as status
+              from (select b.i, e.n, e.v from _bin b cross join jsonb_array_elements(b.meta) with ordinality e (v, n)
+                     where (e.v->>'plant_id')::bigint in (select o.plant from _bok o where o.i = b.i)) q
+             order by q.v->>'sn', q.i desc, q.n desc) m), '[]'));
+  -- the input count of the last object that sent the inverter once its meta row existed
+  update private.meta m set string_slots = c.n
+    from (select distinct on (q.sn) q.sn, q.n from
+            (select (t.rw).sn as sn, t.i, count(*)::int as n from _bst t
+              where t.i >= (select x.avail from _bme x where x.sn = (t.rw).sn) group by 1, 2) q
+           order by q.sn, q.i desc) c
+   where m.sn = c.sn and m.string_slots is distinct from c.n;
+  -- unused inputs dropped as poll_commit_v2 does object by object: a dead input stays only when
+  -- used before the batch, or live in this or an earlier object once the meta row existed
+  delete from _bst t
+   where not private.string_live((t.rw).volt_v, (t.rw).current_a, (t.rw).power_w, (t.rw).today_kwh)
+     and not exists (select 1 from private.meta m join _bme x on x.sn = m.sn
+                      where m.sn = (t.rw).sn and x.avail <= t.i
+                        and ((t.rw).no = any (m.used_strings)
+                             or exists (select 1 from _bst t2
+                                         where (t2.rw).sn = (t.rw).sn and (t2.rw).no = (t.rw).no
+                                           and t2.i between x.avail and t.i
+                                           and private.string_live((t2.rw).volt_v, (t2.rw).current_a,
+                                                                   (t2.rw).power_w, (t2.rw).today_kwh))));
   update private.meta m
      set used_strings = (select array_agg(distinct y order by y)
                            from unnest(m.used_strings || array(
                              select (t.rw).no from _bst t
-                              where (t.rw).sn = m.sn
+                              where (t.rw).sn = m.sn and t.i >= (select x.avail from _bme x where x.sn = m.sn)
                                 and private.string_live((t.rw).volt_v, (t.rw).current_a, (t.rw).power_w, (t.rw).today_kwh))) y)
    where exists (select 1 from _bst t
                   where (t.rw).sn = m.sn and not ((t.rw).no = any (m.used_strings))
+                    and t.i >= (select x.avail from _bme x where x.sn = m.sn)
                     and private.string_live((t.rw).volt_v, (t.rw).current_a, (t.rw).power_w, (t.rw).today_kwh));
-  -- the input count of the last object that sent the inverter
-  update private.meta m set string_slots = c.n
-    from (select distinct on (q.sn) q.sn, q.n from
-            (select (t.rw).sn as sn, t.i, count(*)::int as n from _bst t group by 1, 2) q
-           order by q.sn, q.i desc) c
-   where m.sn = c.sn and m.string_slots is distinct from c.n;
-  delete from _bst t
-   where not private.string_live((t.rw).volt_v, (t.rw).current_a, (t.rw).power_w, (t.rw).today_kwh)
-     and not exists (select 1 from private.meta m where m.sn = (t.rw).sn and (t.rw).no = any (m.used_strings));
   create temp table _bsw on commit drop as
     select distinct on ((d.rw).ts, (d.rw).sn, (d.rw).no) d.rw from _bst d
      order by (d.rw).ts, (d.rw).sn, (d.rw).no, case when (d.rw).ts = p_ts then -d.i else d.i end, d.n;
@@ -357,21 +430,7 @@ begin
     from _bag g order by g.plant, g.i, g.n
   on conflict (plant_id, ts) do nothing;
 
-  -- 6. meta (only plants written) and inverters (all), the last object winning, in sn order
-  perform public.meta_upsert(coalesce((
-    select jsonb_agg(m.v || jsonb_build_object('ord', m.ord, 'status', m.status) order by m.sn)
-      from (select distinct on (q.v->>'sn') q.v->>'sn' as sn, q.v,
-                   (select r.v->>'ord' from (select b2.i, e2.n, e2.v from _bin b2 cross join jsonb_array_elements(b2.meta) with ordinality e2 (v, n)) r
-                     where r.v->>'sn' = q.v->>'sn' and nullif(r.v->>'ord', '') is not null
-                       and (r.v->>'plant_id')::bigint in (select o.plant from _bok o where o.i = r.i)
-                     order by r.i desc, r.n desc limit 1) as ord,
-                   (select r.v->>'status' from (select b2.i, e2.n, e2.v from _bin b2 cross join jsonb_array_elements(b2.meta) with ordinality e2 (v, n)) r
-                     where r.v->>'sn' = q.v->>'sn' and nullif(r.v->>'status', '') is not null
-                       and (r.v->>'plant_id')::bigint in (select o.plant from _bok o where o.i = r.i)
-                     order by r.i desc, r.n desc limit 1) as status
-              from (select b.i, e.n, e.v from _bin b cross join jsonb_array_elements(b.meta) with ordinality e (v, n)
-                     where (e.v->>'plant_id')::bigint in (select o.plant from _bok o where o.i = b.i)) q
-             order by q.v->>'sn', q.i desc, q.n desc) m), '[]'));
+  -- 6. inverters (all), the last object winning, in sn order
   perform public.inverters_seed(coalesce((
     select jsonb_agg(m.v order by m.sn)
       from (select distinct on (e.v->>'sn') e.v->>'sn' as sn, e.v

@@ -106,8 +106,10 @@ begin
       end if;
       if random() < 0.9 and not exists (select 1 from billing.seats s where s.account = a and s.plant = p) then
         insert into billing.seats (account, plant, chosen_at, closed_at, close_reason)
-        select a, p, t0 - interval '2 days', c, case when c is not null then 'switched' end
-          from (select case when random() < 0.1 then t0 + random() * interval '10 days' end as c) x;
+        select a, p, ch, c, case when c is not null then 'switched' end
+          from (select ch, case when random() < 0.1 then greatest(ch, t0) + random() * interval '10 days' end as c
+                  from (select case when random() < 0.15 then t0 + random() * interval '10 days'   -- chosen later
+                                    else t0 - interval '2 days' end as ch) y) x;
       end if;
     end loop;
   end loop;
@@ -139,22 +141,27 @@ select pg_temp.ok('the random fleet covers every state',
 select pg_temp.ok('some unpaid plans are held past their pay-by date',
   exists (select 1 from acc cross join lateral billing.account_status(acc.id, now()) st
            where st.state = 'past_due' and st.plan_ends_at <= now()));
--- ends_at is never late: an account reading now has stopped (or is over its places) no
--- earlier than ends_at, at every later time on the grid
-select pg_temp.eq('ends_at never late',
-  (select count(*) from cmp n join cmp l on l.account = n.account and l.t > n.t
-    where n.t = now() and n.live and not n.must_choose and (not l.want_live or l.want_must)
-      and (n.ends_at is null or n.ends_at > l.t)), 0::bigint);
+-- ends_at is never late: from every time on the grid, an account reading then has stopped (or
+-- is over its places) no earlier than ends_at, at every later time on the grid
+create temp table stops as select account, t from cmp where not want_live or want_must;
+create index on stops (account, t);
+analyze stops;
+select pg_temp.eq('ends_at never late, from every start time',
+  (select count(*) from cmp n
+    cross join lateral (select min(st.t) as first_stop from stops st where st.account = n.account and st.t > n.t) f
+    where n.live and not n.must_choose and f.first_stop is not null
+      and (n.ends_at is null or n.ends_at > f.first_stop)), 0::bigint);
 -- ends_at may be early (a plan ending onto a grant or a week, a payment holding past the
 -- pay-by date): the lane then waits for the next list. A plain free week ends exactly.
 select pg_temp.ok('a free week alone: ends_at = its end, and reading stops then',
-  (select count(*) > 10 and bool_and(n.ends_at = a.trial_ends_at
+  (select count(*) >= 5 and bool_and(n.ends_at = a.trial_ends_at
                                      and not coalesce((select st.state in ('trialing', 'active', 'past_due')
                                                          from billing.account_status(n.account, a.trial_ends_at) st), false))
      from cmp n join billing.accounts a on a.id = n.account
     where n.t = now() and n.live
       and not exists (select 1 from billing.subscriptions s where s.account = n.account)
-      and not exists (select 1 from billing.grants g where g.account = n.account)));
+      and not exists (select 1 from billing.grants g where g.account = n.account)
+      and not exists (select 1 from billing.seats se where se.account = n.account and se.chosen_at > now())));
 select pg_temp.ok('ends_at early for under half of the accounts that end in the next 39 days',
   (select count(*) filter (where not stops) * 2 < count(*) from (
      select exists (select 1 from cmp l where l.account = n.account and l.t >= n.ends_at
@@ -229,13 +236,14 @@ select pg_temp.eq('poll_routes over all 60 seconds = poll_jobs_v2: plant, login,
 select pg_temp.eq('poll_routes by second: each plant on exactly one second',
   (select count(*) from generate_series(0, 59) s cross join lateral public.poll_routes(array[s], now())),
   (select count(*) from pr));
-select pg_temp.ok('a login reads on the second of its id',
-  not exists (select 1 from pr join private.sunsynk_accounts sa on sa.id = pr.account_id
-               where sa.kind = 'login' and pr.account_id not in (select l.id from billing.logins l where l.username = 'v3-h1')
-                 and pr.read_second <> private.read_second(pr.account_id::text)));
+create temp table lane_inv as
+  select pr.account_id, count(i.sn) as n from pr left join private.inverters i on i.plant_id = pr.plant_id group by 1;
+select pg_temp.ok('a login reading up to 10 inverters reads on the second of its id',
+  not exists (select 1 from pr join private.sunsynk_accounts sa on sa.id = pr.account_id join lane_inv li using (account_id)
+               where sa.kind = 'login' and li.n <= 10 and pr.read_second <> private.read_second(pr.account_id::text)));
 select pg_temp.ok('the share login and a login over 10 inverters: each plant on its own second',
-  not exists (select 1 from pr join private.sunsynk_accounts sa on sa.id = pr.account_id
-               where (sa.kind = 'share' or sa.sunsynk_username = 'v3-h1')
+  not exists (select 1 from pr join private.sunsynk_accounts sa on sa.id = pr.account_id join lane_inv li using (account_id)
+               where (sa.kind = 'share' or li.n > 10)
                  and pr.read_second <> private.read_second(pr.plant_id::text))
   and (select count(distinct read_second) > 3 from pr where plant_id between 972000101 and 972000112)
   and (select count(distinct read_second) = 1 from pr where plant_id between 972000201 and 972000203));
@@ -313,7 +321,10 @@ select 1, jsonb_build_object(
      jsonb_build_object('ts', ts, 'sn', 'S1', 'no', 1, 'plant_id', 973000001, 'volt_v', 300, 'power_w', 50),
      jsonb_build_object('ts', ts, 'sn', 'S1', 'no', 2, 'plant_id', 973000001, 'volt_v', 0),   -- never used: dropped
      jsonb_build_object('ts', ts, 'sn', 'S1', 'no', 3, 'plant_id', 973000001, 'volt_v', 0),   -- used before: kept
-     jsonb_build_object('ts', ts, 'sn', 'S2', 'no', 1, 'plant_id', 973000002, 'volt_v', 310)),
+     jsonb_build_object('ts', ts, 'sn', 'S1', 'no', 5, 'plant_id', 973000001, 'volt_v', 0),   -- live only in a later row: dropped here
+     jsonb_build_object('ts', ts - 120, 'sn', 'S1', 'no', 6, 'plant_id', 973000001, 'volt_v', 0),
+     jsonb_build_object('ts', ts, 'sn', 'S2', 'no', 1, 'plant_id', 973000002, 'volt_v', 310),
+     jsonb_build_object('ts', ts, 'sn', 'S8', 'no', 1, 'plant_id', 973000001, 'volt_v', 320)),   -- S8 has no meta row yet
   'agg', jsonb_build_array(
      jsonb_build_object('plant_id', 973000001, 'pv_w', 100, 'load_w', '', 'soc', 50),
      jsonb_build_object('plant_id', 973000002, 'pv_w', 200, 'partial', true),
@@ -321,6 +332,7 @@ select 1, jsonb_build_object(
   'meta', jsonb_build_array(
      jsonb_build_object('sn', 'S1', 'plant_id', 973000001, 'alias', 'first', 'ord', 2, 'status', 1),
      jsonb_build_object('sn', 'S2', 'plant_id', 973000002, 'alias', 'two'),
+     jsonb_build_object('sn', 'S8', 'plant_id', 973000001, 'alias', 'new'),          -- made here, after its strings
      jsonb_build_object('sn', 'S7', 'plant_id', 973000007, 'alias', 'stale')),
   'inverters', jsonb_build_array(
      jsonb_build_object('sn', 'S1', 'plant_id', 973000001, 'account_id', '00000000-0000-4000-8000-000000000001'),
@@ -353,7 +365,11 @@ select 4, jsonb_build_object(
      jsonb_build_object('carried', false, 'ts', ts - 120, 'sn', 'S1', 'plant_id', 973000001, 'pv_w', 2)),
   'strings', jsonb_build_array(
      jsonb_build_object('ts', ts, 'sn', 'S1', 'no', 1, 'plant_id', 973000001, 'volt_v', 301, 'power_w', 51),
-     jsonb_build_object('ts', ts, 'sn', 'S1', 'no', 4, 'plant_id', 973000001, 'volt_v', 5)),
+     jsonb_build_object('ts', ts, 'sn', 'S1', 'no', 4, 'plant_id', 973000001, 'volt_v', 5),
+     jsonb_build_object('ts', ts, 'sn', 'S1', 'no', 5, 'plant_id', 973000001, 'volt_v', 8),
+     jsonb_build_object('ts', ts - 120, 'sn', 'S1', 'no', 6, 'plant_id', 973000001, 'volt_v', 9),
+     jsonb_build_object('ts', ts, 'sn', 'S8', 'no', 1, 'plant_id', 973000001, 'volt_v', 321),
+     jsonb_build_object('ts', ts, 'sn', 'S8', 'no', 2, 'plant_id', 973000001, 'volt_v', 0)),
   'agg', jsonb_build_array(jsonb_build_object('plant_id', 973000001, 'pv_w', 150)),  -- the first agg wins
   'meta', jsonb_build_array(jsonb_build_object('sn', 'S1', 'plant_id', 973000001, 'alias', 'second')),
   'inverters', jsonb_build_array(
@@ -367,6 +383,14 @@ select 5, jsonb_build_object(
   'readings', jsonb_build_array(jsonb_build_object('carried', false, 'ts', ts, 'sn', 'S5', 'plant_id', 973000005, 'pv_w', 500)),
   'agg', jsonb_build_array(jsonb_build_object('plant_id', 973000005, 'pv_w', 500)),
   'access', 'new-5', 'expires', 1900000900)
+from k;
+-- a version under a key that is not the plant's own id ("0973000001"): refused, as write_allowed reads "973000001"
+insert into inp
+select 6, jsonb_build_object(
+  'account', '00000000-0000-4000-8000-000000000001',
+  'versions', jsonb_build_object('0973000001', (select version from billing.plants where id = 973000001)),
+  'readings', jsonb_build_array(jsonb_build_object('carried', false, 'ts', ts, 'sn', 'S1', 'plant_id', 973000001, 'pv_w', 777)),
+  'agg', jsonb_build_array(jsonb_build_object('plant_id', 973000001, 'pv_w', 777)))
 from k;
 -- the login breaks while the read is in flight (poll's account_mark): plant 5's version moves
 select public.account_mark('00000000-0000-4000-8000-000000000005', 'needs_relink', 'test');
@@ -393,8 +417,8 @@ create function pg_temp.snap() returns jsonb language sql as $$
     'agg',      (select jsonb_agg(to_jsonb(a) order by a.plant_id, a.ts) from public.agg_minute a where a.plant_id between 973000000 and 973000099),
     'gaps',     (select jsonb_agg(to_jsonb(g) order by g.plant_id, g.from_ts) from private.gaps g where g.plant_id between 973000000 and 973000099),
     'refill',   (select jsonb_agg(to_jsonb(q) order by q.plant_id) from private.refill_queue q where q.plant_id between 973000000 and 973000099),
-    'meta',     (select jsonb_agg(to_jsonb(m) order by m.sn) from private.meta m where m.sn in ('S1', 'S2', 'S3', 'S4', 'S5', 'S7')),
-    'inverters',(select jsonb_agg(to_jsonb(i) order by i.sn) from private.inverters i where i.sn in ('S1', 'S2', 'S3', 'S4', 'S5', 'S7')),
+    'meta',     (select jsonb_agg(to_jsonb(m) order by m.sn) from private.meta m where m.sn in ('S1', 'S2', 'S3', 'S4', 'S5', 'S7', 'S8')),
+    'inverters',(select jsonb_agg(to_jsonb(i) order by i.sn) from private.inverters i where i.sn in ('S1', 'S2', 'S3', 'S4', 'S5', 'S7', 'S8')),
     'logins',   (select jsonb_agg(jsonb_build_object('u', sa.sunsynk_username, 'tok', sa.access_token, 'exp', sa.access_expires_at,
                                                      'ok', sa.last_ok_at, 'err', sa.last_error, 'st', sa.status) order by sa.sunsynk_username)
                    from private.sunsynk_accounts sa where sa.sunsynk_username like 'v3-c%'),
@@ -418,10 +442,13 @@ select pg_temp.eq('S1 a minute back: the stored row stays', (select pv_w from pu
 select pg_temp.eq('S1 two minutes back: the first login''s row', (select pv_w from public.readings where sn = 'S1' and ts = (select ts - 120 from k)), 2::float8);
 select pg_temp.eq('plant 1 minute: the first login''s', (select pv_w from public.agg_minute where plant_id = 973000001 and ts = (select ts from k)), 100);
 select pg_temp.eq('plant 2 minute partial', (select source from public.agg_minute where plant_id = 973000002 and ts = (select ts from k)), 'poller_partial');
-select pg_temp.eq('strings kept: S1 inputs 1, 3, 4 (2 never used)',
-  (select array_agg(no order by no) from public.strings where sn = 'S1' and ts = (select ts from k)), '{1,3,4}'::int[]);
+select pg_temp.eq('strings kept: S1 inputs 1, 3, 4, 5 (2 never used)',
+  (select array_agg(no order by no) from public.strings where sn = 'S1' and ts = (select ts from k)), '{1,3,4,5}'::int[]);
+select pg_temp.eq('S1 input 6 two minutes back: the live row', (select volt_v from public.strings where sn = 'S1' and no = 6 and ts = (select ts - 120 from k)), 9::float8);
+select pg_temp.eq('string counts: inputs dropped row by row', (select jsonb_agg(e->'strings') from jsonb_array_elements(:'res_b'::jsonb) e), '[4, 0, 0, 5, 0, 0]'::jsonb);
 select pg_temp.eq('S1 input 1: the later login''s', (select volt_v from public.strings where sn = 'S1' and no = 1 and ts = (select ts from k)), 301::float8);
-select pg_temp.eq('used_strings and string_slots', (select (used_strings, string_slots)::text from private.meta where sn = 'S1'), '("{1,3,4}",2)');
+select pg_temp.eq('used_strings and string_slots', (select (used_strings, string_slots)::text from private.meta where sn = 'S1'), '("{1,3,4,5,6}",4)');
+select pg_temp.eq('a new inverter: strings counted from the row after its meta', (select (used_strings, string_slots)::text from private.meta where sn = 'S8'), '({1},2)');
 select pg_temp.eq('meta: last alias, last ord sent', (select (alias, ord, status)::text from private.meta where sn = 'S1'), '(second,2,1)');
 select pg_temp.eq('inverters: the last login''s', (select account_id from private.inverters where sn = 'S1'), '00000000-0000-4000-8000-000000000004'::uuid);
 select pg_temp.ok('no rows for refused plants',
@@ -429,7 +456,7 @@ select pg_temp.ok('no rows for refused plants',
   and not exists (select 1 from public.agg_minute where plant_id in (973000004, 973000005, 973000007))
   and not exists (select 1 from private.meta where sn = 'S7'));
 select pg_temp.eq('refused lists', (select jsonb_agg(e->'refused') from jsonb_array_elements(:'res_b'::jsonb) e),
-                  '[[973000007, 973000099], [], [973000004], [], [973000005]]'::jsonb);
+                  '[[973000007, 973000099], [], [973000004], [], [973000005], [973000001]]'::jsonb);
 select pg_temp.eq('gap and refill for plant 3', (select (count(*), max(to_ts - from_ts))::text from private.gaps where plant_id = 973000003), '(1,1200)');
 select pg_temp.ok('plant 3 queued for refill', exists (select 1 from private.refill_queue where plant_id = 973000003));
 select pg_temp.eq('history deleted mark cleared', (select history_purged_at from billing.plants where id = 973000003), null::timestamptz);
@@ -473,8 +500,26 @@ begin
     end;
   end loop;
 end $$;
-select pg_temp.eq('login by login: only the poison row fails', (select array_agg(i order by i) from split where not ok), '{6}'::int[]);
+select pg_temp.eq('login by login: only the poison row fails', (select array_agg(i order by i) from split where not ok), '{7}'::int[]);
 select pg_temp.eq('login by login: the other logins saved', (select pv_w from public.readings where sn = 'S1' and ts = (select ts from k)), 150::float8);
+
+-- one object sending an inverter twice fails, in poll_commit_v2 and in the batch
+do $$
+declare r jsonb := jsonb_build_object('account', '00000000-0000-4000-8000-000000000002',
+  'inverters', jsonb_build_array(jsonb_build_object('sn', 'S9', 'plant_id', 973000003), jsonb_build_object('sn', 'S9', 'plant_id', 973000003)));
+begin
+  begin
+    perform public.poll_commit_v2('{}', '00000000-0000-4000-8000-000000000002', (select ts from k), null, null, null, null, r->'inverters', null, null);
+    raise exception 'FAIL poll_commit_v2 took an inverter twice';
+  exception when cardinality_violation then null;
+  end;
+  begin
+    perform public.poll_commit_batch((select ts from k), jsonb_build_array(r));
+    raise exception 'FAIL the batch took an inverter twice';
+  exception when cardinality_violation then null;
+  end;
+  raise notice 'PASS  an inverter twice in one row fails in both';
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- e. a free week that ends by the clock, nothing written: ends_at stops it
@@ -512,6 +557,16 @@ select pg_temp.eq('poll_commit_v2 refuses it too',
     '00000000-0000-4000-8000-000000000006', (select ts from k) + 120, null, null,
     jsonb_build_array(jsonb_build_object('plant_id', 973000006, 'pv_w', 1)), null, null, null, null,
     now() + interval '91 seconds')->'refused', '[973000006]'::jsonb);
+
+-- ---------------------------------------------------------------------------
+-- f. sunsynk_tally: the same key twice in one call is summed (0178 failed on it)
+-- ---------------------------------------------------------------------------
+select public.sunsynk_tally('[{"kind":"tt_dup","result":"ok","calls":2,"ms":10,"ms_max":7},
+                              {"kind":"tt_dup","result":"ok","calls":3,"ms":5,"ms_max":4}]', 9, 100, 4);
+select pg_temp.eq('tally: same key twice summed',
+  (select (calls, ms_total, ms_max)::text from private.sunsynk_calls where kind = 'tt_dup'), '(5,15,7)');
+select pg_temp.eq('tally: poll_run row', (select (calls, ms_total, plants)::text from private.sunsynk_calls
+                                           where kind = 'poll_run' and result = 's9' and day = (now() at time zone 'Africa/Johannesburg')::date), '(1,100,4)');
 
 rollback;
 \o
