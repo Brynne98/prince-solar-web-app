@@ -63,13 +63,11 @@ import {
   saveCallTally,
 } from "../_shared/sunsynk.ts";
 import { holdLastGood } from "./hold.mts";
-
-// The inverter and plant lists change rarely, so they are re-read from SunSynk only
-// on minutes divisible by these and served from private.inverters/meta (0031)
-// otherwise. The inverter list every 10 minutes (fleet composition, the online
-// badge); the plant list hourly (a plant added at SunSynk after linking).
-const REFRESH_EVERY_MIN = 10;
-const PLANTS_EVERY_MIN = 60;
+// The inverter and plant lists change rarely, so they are re-read from SunSynk only on
+// the login's own minutes (SOLAR-650) and served from private.inverters/meta (0031)
+// otherwise. The inverter list every 10 minutes (fleet composition, the online badge);
+// the plant list hourly (a plant added at SunSynk after linking).
+import { isListMinute, isPlantsMinute } from "./minutes.mts";
 
 /** epoch seconds for the current minute — the dedup key for a sample */
 const nowMinuteEpoch = () => Math.floor(Date.now() / 60000) * 60;
@@ -108,6 +106,8 @@ type AccountResult = {
   listCalls: number;
   /** SunSynk requests this account cost this minute, retries included */
   apiCalls: number;
+  /** ms after the minute that poll_commit_v2 answered: when the readings became visible */
+  commitMs?: number;
   error?: string;
   needsRelink?: boolean;
   signInFailed?: boolean;
@@ -380,8 +380,8 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
   // also takes the live list: meta is written only on a fresh minute, and a slave
   // that uploads off the refresh minute would otherwise read status 0 for good
   // (SOLAR-168).
-  const refreshMinute = (ts / 60) % REFRESH_EVERY_MIN === 0;
-  const plantsMinute = (ts / 60) % PLANTS_EVERY_MIN === 0;
+  const refreshMinute = isListMinute(acc.id, ts);
+  const plantsMinute = isPlantsMinute(acc.id, ts);
   const cached = await getInvertersCached(acc);
   const noStatus = cached.some((c) => c.status == null && wanted.has(Number(c.plantId)));
   let all = cached;
@@ -515,6 +515,7 @@ async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<
     p_access: acc.access_token,
     p_expires: acc.access_expires_at,
   }) as { readings: number; strings: number; plants: number[]; gaps: number[]; refused?: number[] };
+  result.commitMs = Date.now() - ts * 1000;
   if (committed.refused?.length) result.refused = committed.refused;
   result.readings = committed.readings;
   result.strings = committed.strings;
@@ -598,6 +599,29 @@ async function tallyCalls(spec: ShardSpec, runMs: number, plants: number, ts: nu
   }
 }
 
+// SOLAR-650: one run-log row per shard run (0251). Never fails the poll.
+type RunTimes = { scheduled: number; started: number; jobsRead?: number; plants: number };
+async function logRun(spec: ShardSpec, ts: number, t: RunTimes, results: AccountResult[], error?: string): Promise<void> {
+  if (spec.account) return;
+  const failed = results.filter((r) => r.error).length;
+  try {
+    await rpc("poll_run_log", { p: {
+      ts, shard: spec.shard, shards: spec.shards,
+      scheduled_ms: t.scheduled, started_ms: t.started, jobs_read_ms: t.jobsRead ?? null,
+      finished_ms: Date.now(), plants: t.plants,
+      inverters: results.reduce((n, r) => n + r.inverters, 0),
+      logins: results.map((r) => ({
+        account: r.account, commit_ms: r.commitMs ?? null, plants: r.plants.length,
+        inverters: r.inverters, error: r.error?.slice(0, 300) ?? null,
+      })),
+      error: error ?? (failed ? `${failed} of ${results.length} logins failed` : null),
+    } });
+  } catch (e) {
+    console.warn("poll_run_log:", e instanceof Error ? e.message : e);
+    noteError("run_log_failed", e, { hourly: true });
+  }
+}
+
 // Work that may finish after the response; the runtime keeps the isolate for it.
 const background = (p: Promise<unknown>) => (globalThis as any).EdgeRuntime?.waitUntil?.(p);
 
@@ -628,11 +652,15 @@ async function retryShareLogin() {
 serve("poll", async (req) => {
   const denied = denyUnlessServer(req);
   if (denied) return denied;
+  let spec: ShardSpec | undefined;
+  let ts = 0;
+  let times: RunTimes | undefined;
+  let logged = false;
   try {
-    const spec = await shardSpec(req);
+    spec = await shardSpec(req);
     // The minute this invocation is logging — fixed before the stagger delay so
     // a shard that waits 20 s still stamps the minute the cron tick was for.
-    const ts = nowMinuteEpoch();
+    ts = nowMinuteEpoch();
 
     // Only this shard's plants; the shard hash (first 8 hex digits of the account
     // uuid, mod shards) runs in SQL.
@@ -641,6 +669,12 @@ serve("poll", async (req) => {
     // minute on one shard, so a missed minute only delays it a minute. Runs beside the
     // poll, not before it.
     if (spec.shard === 0 && !spec.account) background(retryShareLogin());
+
+    // Wait first, then read the jobs, so tokens and plant versions are as they are when
+    // the shard starts, not 20 s old (SOLAR-650).
+    times = { scheduled: ts * 1000 + spec.delayMs, started: 0, plants: 0 };
+    if (spec.delayMs > 0) await sleep(spec.delayMs);
+    times.started = Date.now();
 
     let jobs = await pollJobs(spec.shard, spec.shards, spec.account);
     if (!jobs.length) {
@@ -655,7 +689,9 @@ serve("poll", async (req) => {
         }
       }
       if (!jobs.length) {
-        await tallyCalls(spec, 0, 0, ts);
+        times.jobsRead = Date.now();
+        logged = true;
+        await Promise.all([tallyCalls(spec, 0, 0, ts), logRun(spec, ts, times, [])]);
         return json({ ok: true, ts, ...spec, accounts: 0, note: "no accounts in this shard" });
       }
     }
@@ -668,8 +704,8 @@ serve("poll", async (req) => {
       byAccount.set(j.account.id, entry);
     }
     const mine = [...byAccount.values()];
-
-    if (spec.delayMs > 0) await sleep(spec.delayMs);
+    times.jobsRead = Date.now();
+    times.plants = jobs.length;
     const runStart = Date.now();
 
     // Accounts are independent; one dying must not stop the others.
@@ -703,11 +739,13 @@ serve("poll", async (req) => {
       outcome: r.error ? (/^[a-z_]+: /.test(r.error) ? "ours" : "sunsynk")
              : r.inverters > 0 && r.readings === 0 ? "sunsynk" : "ok",
     }));
+    logged = true;
     const [stepped] = await Promise.all([
       rpc("email_poll_step", {
         p_ts: ts, p_outcomes: outcomes, p_plants: [...new Set(results.flatMap((r) => r.plants))],
       }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) })),
       tallyCalls(spec, Date.now() - runStart, jobs.length, ts),
+      logRun(spec, ts, times, results),
     ]);
     if ((stepped as any)?.error || (stepped as any)?.failed?.length) {
       console.warn("email_poll_step:", JSON.stringify(stepped));
@@ -728,6 +766,7 @@ serve("poll", async (req) => {
     }, ok.length > 0 ? 200 : 502);
   } catch (e) {
     await reportError("poll", e);
+    if (spec && times && !logged) await logRun(spec, ts, times, [], String(e instanceof Error ? e.message : e));
     console.error("poll failed:", e);
     return json({ error: String(e instanceof Error ? e.message : e) }, 500);
   }
