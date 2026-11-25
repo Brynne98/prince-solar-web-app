@@ -210,7 +210,7 @@ drive.ts). First minute of each run left out (inverter lists are read then).
 | database locked 30 s (min 3) | 3,000 + share | lanes, 38 | 6 | 2,249 (10.5%) | 7.1 / 22.3 | 26 | 0.77 |
 | poison row (min 2-3) | 500 | lanes, 2 | 5 | 2 (the poison login's 2 minutes) | 3.3 / 6.3 | 20 | 1.36 |
 | billing ends by the clock | 3,000 + share | lanes, 38 | 7 | 2,664 (10.8%) | 6.3 / 11.0 | 23 | 0.79 |
-| soak 2 h | 3,000 + share | lanes, 38 | SOAK_MINUTES | SOAK_LOST | SOAK_SAVE | SOAK_CONN | SOAK_CPU |
+| soak 2 h | 3,000 + share | lanes, 38 | 119 | 48,783 (11.5%); 99 of 119 minutes lost some, 48 over 100 | 6.9 / 11.2 | 28 | 0.78 |
 
 3,000 fleet = 3,575 plants, 6,500 inverters (the share login's 500 plants included), about
 28,000 SunSynk calls a minute (~4.3 per inverter). 1,000 fleet: ~8,600 a minute.
@@ -241,6 +241,9 @@ lanes; seen in every run with 6 or more lanes. The old way loses whole shards th
   0.8-1.6 ms, lower at scale as fixed costs spread).
 - Slow and outage minutes are lost as designed (deadline, recover refills them); p95 save in
   the slow run was 25.2 s, at the 25 s line.
+
+Soak: hourly plant sync and 10-minute temperatures ran (3.9 M temperature rows banked);
+45,982 gaps logged, all from the killed workers. No deadlocks, no splits, 35 single reads failed.
 
 ## Switch point (from the numbers)
 
