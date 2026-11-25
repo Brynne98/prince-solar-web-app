@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0268 — email backlog alert reads msg.outbox (SOLAR-667).
+-- 0272 — email backlog alert reads msg.outbox (SOLAR-667).
 --
 -- billing.alerts' outbox_backlog email line counted public.email_queue rows still 'queued'.
 -- Since 0261-0265 those rows are events (status 'outbox') and emails wait in msg.outbox, so
@@ -19,7 +19,7 @@ returns jsonb language sql stable security definer set search_path = billing, pg
     select jsonb_build_object('kind', 'refund_failed', 'ref', r.reference, 'tries', r.tries, 'error', r.last_error)
       from billing.refunds r where r.status = 'failed'
     union all
-    -- 0268: emails wait in msg.outbox (both lanes). Late is from the event's due_at: a retry
+    -- 0272: emails wait in msg.outbox (both lanes). Late is from the event's due_at: a retry
     -- moves not_before on, so a row that keeps failing would never look an hour late. A "back"
     -- held for its "down" is not stuck; a stuck "down" counts on its own. Leased rows count.
     select jsonb_build_object('kind', 'outbox_backlog', 'ref', 'msg_email', 'waiting', count(*), 'oldest_due', min(q.due_at))

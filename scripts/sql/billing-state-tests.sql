@@ -1855,7 +1855,7 @@ begin
   perform pg_temp.ok('R6 failed refund: alert', pg_temp.alert('refund_failed', 'R6-REF', pg_temp.t(2)));
   perform pg_temp.eq('R6 a billing email waiting over an hour: one more in the alert',
     pg_temp.waiting('billing_outbox', pg_temp.t(2))::text, (w + 1)::text);
-  -- emails wait in msg.outbox (0268): a "down" an hour late counts, its "back" waits for it
+  -- emails wait in msg.outbox (0272): a "down" an hour late counts, its "back" waits for it
   u := (select user_id from billing.accounts where id = g);
   w := pg_temp.waiting('msg_email', pg_temp.t(2));
   w0 := pg_temp.waiting('msg_email', pg_temp.t(0) + interval '59 minutes');
