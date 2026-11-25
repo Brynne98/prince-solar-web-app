@@ -323,6 +323,15 @@ test('emails: soft, refused, no card; the pay-by line under the title; the butto
   const down = T().mail({ key: 'payment_due', state: unpaid(), bill: { ...bill, plan_name: 'Home', amount_minor: 4900 } });
   eq([down.subject, down.title], ['Your Home payment is due', 'Pay R49 for Home by 8 Dec 2026 to keep your readings']);
 });
+test('reminder 3 days before an unpaid plan ends: title and button only (SOLAR-654)', () => {
+  const bill = { kind: 'renewal', plan: 'family', plan_name: 'Family', interval: 'month', amount_minor: 9900, currency: 'ZAR', card_type: 'visa', last4: '4081' };
+  const r = T().mail({ key: 'payment_reminder', state: unpaid({ past_due_reason: 'refused' }), bill });
+  eq([r.subject, r.title, r.sub], ['Your Family payment is still due', 'Pay R99 by 8 Dec 2026 to keep your readings', undefined]);
+  eq(r.parts.map((p) => Object.keys(p)[0]), ['button', 'note']);
+  eq(r.parts[0].button, { label: 'Pay with another card', page: 'pay', bill: '11111111-2222-3333-4444-555555555555' });
+  const down = T().mail({ key: 'payment_reminder', state: unpaid({ past_due_reason: 'no_card' }), bill: { ...bill, plan_name: 'Home', amount_minor: 4900 } });
+  eq([down.subject, down.title], ['Your Home payment is still due', 'Pay R49 for Home by 8 Dec 2026 to keep your readings']);
+});
 test('plan ended: unpaid says so, unless a payment is still unanswered (SOLAR-644 §1d)', () => {
   const s = unpaid({ state: 'ended', plan_name: null, last_plan_name: 'Family', history_kept_until: null, plants: [] });
   const m = (ended) => T().mail({ key: 'plan_ended', state: s, ended });
