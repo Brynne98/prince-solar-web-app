@@ -1470,6 +1470,27 @@ begin
   update billing.offers set max_members = 100 where code = 'launch';
 end $$;
 
+-- F12b a test account's launch plan and open checkout hold no place (SOLAR-674)
+do $$
+declare t uuid := pg_temp.acct('f12bt'); c uuid := pg_temp.acct('f12bc'); a uuid := pg_temp.acct('f12ba'); members int;
+begin
+  update billing.payment_attempts set status = 'void' where status in ('created', 'pending', 'unknown')
+     and invoice in (select id from billing.invoices where kind = 'purchase' and status = 'open');
+  insert into private.test_users (user_id) select user_id from billing.accounts where id in (t, c);
+  members := (select count(distinct account) from billing.subscriptions where offer = 'launch');
+  update billing.offers set max_members = members + 1 where code = 'launch';
+  perform pg_temp.link(t, 'f12bt', '{990021211}', pg_temp.t(0));
+  perform pg_temp.link(c, 'f12bc', '{990021212}', pg_temp.t(0));
+  perform pg_temp.link(a, 'f12ba', '{990021213}', pg_temp.t(0));
+  perform pg_temp.pay(t, 'home', 'month', pg_temp.t(100), 'launch');
+  -- day 300: F12's checkouts at day 200 still hold their hour there
+  perform pg_temp.eq('F12b test account checkout: launch price',
+    billing.start_checkout(c, 'home', 'month', 0, '{990021212}', pg_temp.t(300))->>'amount_minor', '4900');
+  perform pg_temp.eq('F12b last place still free after a test plan and a test checkout',
+    billing.start_checkout(a, 'home', 'month', 0, '{990021213}', pg_temp.t(300))->>'amount_minor', '4900');
+  update billing.offers set max_members = 100 where code = 'launch';
+end $$;
+
 -- F13 refund events out of order: processed stays processed
 do $$
 declare a uuid := pg_temp.acct('f13'); inv uuid; ref text; rf uuid;
