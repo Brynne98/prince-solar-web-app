@@ -476,3 +476,4 @@ export function handle({ method, path, query: q, auth = "", body = "", idOffset 
   return fail(404, `mock: no route for ${path}`);
 }
 export const LOGINS = Object.keys(ACCOUNTS);
+export { PLANTS, ACCOUNTS };   // the load test adds its fleet (load-test/v3/sunsynk.mjs)

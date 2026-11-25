@@ -5,6 +5,24 @@ Design only. No code or prod change until Brynne says yes. Follows SOLAR-650 (de
 being removed). v3.0 went to the council (Neon, Sol, Astra, Fable): all four said "go with
 changes". v3.1 takes their changes, checked against the code; see "Council" at the end.
 
+## Decision 2026-11-25: stage 1 dropped
+
+- Stage 1 edge lanes failed the load test: 8-25% of plant-minutes lost above 500 logins
+  (table below). Edge workers are stopped at their CPU or wall-clock limit while lanes
+  still read in the background; every lost minute lines up with one.
+- Council (Neon, Sol, Astra, Fable), all four: drop lanes, no edge-only shape holds,
+  a hosted shadow day can't show it at 15 logins. Build the worker (stage 2).
+- Brynne chose: keep today's poller (safe to ~500 logins locally; 3.5% lost at 1,000), build
+  the worker when logins near 300. Worker: two small Fly.io machines in Frankfurt
+  (database is eu-central-1), one active, one fenced standby.
+- Kept in `main`: `readAccount` split, `accountFailed`/`emailOutcome`, `_shared/pgdb.ts`
+  (+ parity test), fleet cap and call listener in `sunsynk.ts`, 0268 batch save, 0269
+  `inverters_cached_many`, the load-test harness (today's shards only).
+- Dropped: `poll-lane`, `private.poll_mode`, `poll_lane_routes`, the lanes cron and the
+  chore jobs (share retry and call report stay in `poll`). Code in git history at 907bb50.
+- Ask SunSynk too: does the limit count per IP? One worker sends every call from one address.
+- The sections below are the v3.1 design as tested; stage 1 parts are history.
+
 ## Target and stages
 
 10,000 logins / 20,000 inverters is the design target (~10x a good 1-2 year outcome). Built in
@@ -188,6 +206,82 @@ Local edge does not enforce the 2 s CPU limit, so CPU per call is measured and K
   asks, peak DB connections, CPU per call, lane CPU, memory, errors by kind.
 - Pass: run 1 loses 0; run 2 under 0.5% with p95 under 25 s; run 4 writes 0; run 6 loses one
   login only; run 7 writes nothing from the paused copy.
+
+## Load test results (stage 1 lanes, 2026-11-24/25)
+
+Local stack `solar-v3-lanes` (ports 5652x, Supavisor transaction pool), edge runtime 1.79.3,
+fake SunSynk `load-test/v3/sunsynk.mjs` with production's timings (lognormal ~1 s mean, 9.5 s
+cap, 0.1% 504 after 10-11 s). Harness: `load-test/v3/` (fleet.mjs, fleet.sql, load.ts,
+drive.ts). First minute of each run left out (inverter lists are read then).
+"Lost" = plant-minutes due (poll_routes each minute) with no agg_minute row.
+
+| Run | Fleet | Path, K | Minutes | Lost | Save p50 / p95 (s from read second) | Peak DB conns | CPU ms / call |
+|---|---|---|---|---|---|---|---|
+| normal | 500 | old way | 7 | 2 (0.06%) | 3.3 / 5.6 | 13 | 1.22 |
+| normal | 500 | lanes, 2 | 7 | 0 | 3.3 / 6.2 | 9 | 1.64 |
+| normal (after review fixes) | 500 | lanes, 6 | 7 | 680 (19.4%) | 3.4 / 6.2 | 12 | 1.30 |
+| normal | 1,000 | old way | 7 | 243 (3.5%) | 3.7 / 6.1 | 14 | 1.04 |
+| normal | 1,000 | lanes, 12 | 7 | 567 (8.1%) | 4.2 / 7.1 | 24 | 1.26 |
+| fallback lanes > edge (min 3) > lanes (min 6) | 1,000 | 12 | 9 | 775 (8.6%), 774 of it in one minute back on lanes | 4.1 / 7.1 | 26 | 1.03 |
+| slow: 5% 10-20 s, 5% 429 | 3,000 + share | lanes, 38 | 9 | 7,899 (24.6%) | 8.9 / 25.2 | 32 | 0.85 |
+| SunSynk 503 for 2 min | 3,000 + share | lanes, 38 | 7 | 11,029 (44%), 7,123 of it the 2 outage minutes | 6.9 / 11.0 | 27 | 0.91 |
+| database locked 30 s (min 3) | 3,000 + share | lanes, 38 | 6 | 2,249 (10.5%) | 7.1 / 22.3 | 26 | 0.77 |
+| poison row (min 2-3) | 500 | lanes, 2 | 5 | 2 (the poison login's 2 minutes) | 3.3 / 6.3 | 20 | 1.36 |
+| billing ends by the clock | 3,000 + share | lanes, 38 | 7 | 2,664 (10.8%) | 6.3 / 11.0 | 23 | 0.79 |
+| soak 2 h | 3,000 + share | lanes, 38 | 119 | 48,783 (11.5%); 99 of 119 minutes lost some, 48 over 100 | 6.9 / 11.2 | 28 | 0.78 |
+
+3,000 fleet = 3,575 plants, 6,500 inverters (the share login's 500 plants included), about
+28,000 SunSynk calls a minute (~4.3 per inverter). 1,000 fleet: ~8,600 a minute.
+
+What passed:
+- **Billing ends (run 4): pass.** 20 free weeks and 50 seats ended by the clock at a whole
+  minute with no row written; 70 plants: 0 readings or agg rows at or after the end, 0 SunSynk
+  calls for their inverters after it. 20 logins switched to needs_reconnect: 0 rows from 60 s
+  after the switch.
+- **Poison row (run 6): pass.** The batch failed (`strings.no` out of range), was saved login by
+  login (2 splits), and only the poison login lost its 2 minutes.
+- **Fallback (run 8):** the mode is read once a minute (one cron statement), so the switch to
+  `edge` and back took effect at the next minute each time; the 3 edge minutes lost 1
+  plant-minute. The minute lost after switching back is the worker-kill problem below.
+- Peak database connections stayed at 32 or under with 38 lanes (one per lane via the pooler,
+  plus PostgREST and the harness).
+
+What failed, and why: **edge workers are killed under the lanes.** The local runtime enforces
+the hosted limits after all: 1 s CPU soft / 2 s hard and 400 s wall clock per worker
+(`SUPABASE_INTERNAL_WALLCLOCK_LIMIT_SEC`, `cpuTimeSoftLimitMs = 1000`, `cpuTimeHardLimitMs =
+2000` in the CLI's main service). Workers serve several lane calls (`per_worker`), and a
+lane's reads run in the background for ~110 s. Every lost minute in the lanes runs lines up
+with a "CPU time hard limit reached" or "early termination" (wall clock) on a worker; all the
+reads in that worker die with it, and the lane logs nothing. Not seen at 500 logins with 2
+lanes; seen in every run with 6 or more lanes. The old way loses whole shards the same way at
+1,000 (minute 4: 242).
+- CPU per SunSynk call, whole edge container: **0.8-1.3 ms** (old way 1.0-1.2 ms; lanes
+  0.8-1.6 ms, lower at scale as fixed costs spread).
+- Slow and outage minutes are lost as designed (deadline, recover refills them); p95 save in
+  the slow run was 25.2 s, at the 25 s line.
+
+Soak: hourly plant sync and 10-minute temperatures ran (3.9 M temperature rows banked);
+45,982 gaps logged, all from the killed workers. No deadlocks, no splits, 35 single reads failed.
+
+## Switch point (from the numbers)
+
+- CPU alone: 2 s per lane at 60% = 1.2 s, at ~1 ms a call = ~1,200 calls per lane-minute,
+  ~280 inverters. Rule 1 (over 30 lanes) is reached at ~36,000 calls a minute: about **3,500
+  logins** of today's mix (2 inverters each).
+- But rule 4 (lost not caused by SunSynk over 0.1%) is already broken at **1,000 logins** with
+  12 lanes, by worker kills, not by load on SunSynk or the database. At 500 logins with 2 lanes
+  it holds.
+- So stage 1 as built (long background lanes) is not safe above a few hundred logins until
+  the worker-kill problem is solved. Options, for Brynne to choose:
+  A. Short lanes: each call reads only a 10 s slice and answers when its reads are saved
+     (no background work), so no call outlives its worker's limits. Needs 6x the posts a
+     minute, which brings back pg_net's batch wait (design "What breaks" 1).
+  B. Go to stage 2 (one always-on worker) now; stage 1 lanes stay as its way back at small
+     scale only.
+  C. Keep today's poller to ~500 logins (it loses whole shards at 1,000 too) and build stage 2
+     before then.
+- Not settled here: whether hosted workers share lane calls the way local ones do. Shadow
+  mode in prod (order of work step 4) would show it in a day, reading only.
 
 ## Order of work
 

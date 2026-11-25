@@ -25,7 +25,9 @@ import {
   getInvertersCached,
   isShareAccount,
   type PlantJob,
+  RelinkNeeded,
   shareSync,
+  SignInFailed,
   syncPlants,
 } from "./sunsynk.ts";
 import { holdLastGood } from "../poll/hold.mts";
@@ -71,6 +73,41 @@ export const emptyResult = (acc: Account): AccountResult => ({
   account: acc.id, inverters: 0, readings: 0, strings: 0, plants: [], gapRecorded: [],
   listRefreshed: false, listCalls: 0, apiCalls: 0,
 });
+
+/**
+ * A login whose read or save threw: marked on its row (needs_relink when its refresh token is
+ * dead), logged, and noted for PostHog unless the owner must fix it. Returns its result.
+ */
+export async function accountFailed(acc: Account, jobs: { plantId: number }[], e: unknown): Promise<AccountResult> {
+  const msg = e instanceof Error ? e.message : String(e);
+  const needsRelink = e instanceof RelinkNeeded;
+  await rpc("account_mark", {
+    p_account: acc.id, p_status: needsRelink ? "needs_relink" : "active", p_error: msg,
+  }).catch(() => {});
+  console.error(`poll: account ${acc.id} failed:`, msg);
+  // A dead login is the owner's to fix and is mailed to them; the rest are ours or SunSynk's.
+  if (!needsRelink) {
+    const kind = e instanceof SignInFailed ? "sign_in" : /^[a-z_]+: /.test(msg) ? "ours" : "sunsynk";
+    for (const j of jobs) noteError(`account_failed_${kind}`, e, { user: acc.user_id, plant: j.plantId, hourly: true });
+  }
+  return { ...emptyResult(acc), error: msg, ...(needsRelink ? { needsRelink } : {}),
+    ...(e instanceof SignInFailed ? { signInFailed: true } : {}) };
+}
+
+/**
+ * How a login's minute went, for email_poll_step (0102), or null to leave it out. SunSynk's
+ * fault and ours are told apart so our own outage is never mailed as SunSynk's: our errors
+ * are rpc failures ("fn: message"); a dead login is left out, and so is one we could not
+ * sign in (SOLAR-451): no read was made, so it says nothing about the inverter.
+ */
+export function emailOutcome(r: AccountResult): { account: string; outcome: string } | null {
+  if (r.needsRelink || r.signInFailed) return null;
+  return {
+    account: r.account,
+    outcome: r.error ? (/^[a-z_]+: /.test(r.error) ? "ours" : "sunsynk")
+           : r.inverters > 0 && r.readings === 0 ? "sunsynk" : "ok",
+  };
+}
 
 /** SunSynk requests made for this account since `since`. */
 const callsSince = (acc: Account, since: number) => (apiCallCounts.get(acc.id) ?? 0) - since;
@@ -319,8 +356,60 @@ export function readingRow(f: Fetched, ts: number, tz: string): Record<string, u
   return row;
 }
 
+/** One login's minute as poll_commit_batch takes it (0268); poll_commit_v2 takes the same as p_*. */
+export type CommitRow = {
+  account: string;
+  versions: Record<string, number | null>;
+  readings: Record<string, unknown>[];
+  strings: Record<string, unknown>[];
+  agg: Record<string, unknown>[];
+  meta: unknown[];
+  inverters: { sn: string; plant_id: number | null; account_id: string }[];
+  access: string | null;
+  expires: number | null;
+};
+/** What the save answered for one login. */
+export type Committed = { readings: number; strings: number; plants: number[]; gaps: number[]; refused?: number[] };
+
+/**
+ * A read minute: the result so far, the row to save (null: nothing to save, `result` is
+ * final) and `finish`, which takes the save's answer and runs what follows a save (plant
+ * detection on refresh minutes, today's temperatures).
+ */
+export type ReadMinute = { result: AccountResult; row: CommitRow | null; finish: (c: Committed) => Promise<AccountResult> };
+
+export type ReadOptions = {
+  /** the login's cached inverters, read beforehand for many logins at once (inverters_cached_many) */
+  cached?: InverterInfo[];
+  /**
+   * false: another read of the same login this minute does the plant sync (a login read
+   * plant by plant on several seconds, 0268's read_second). Default true.
+   */
+  lead?: boolean;
+  /** the login's live inverter list, shared by its reads this minute (default getInverters) */
+  liveList?: () => Promise<InverterInfo[]>;
+};
+
+/** Read one login's plants for one minute and save it with poll_commit_v2. */
 export async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): Promise<AccountResult> {
+  const read = await readAccount(acc, jobs, ts);
+  if (!read.row) return read.result;
+  const r = read.row;
+  // The whole minute in one transaction (migration 0030): readings and strings
+  // last-write-wins, agg_minute first-write-wins with gap detection, meta, the
+  // inverter mirror and the account's token.
+  const committed = await rpc<Committed>("poll_commit_v2", {
+    p_versions: r.versions, p_account: r.account, p_ts: ts, p_readings: r.readings, p_strings: r.strings,
+    p_agg: r.agg, p_meta: r.meta, p_inverters: r.inverters, p_access: r.access, p_expires: r.expires,
+  });
+  return read.finish(committed);
+}
+
+/** Read every inverter of a login's plants for one minute; the save is the caller's. */
+export async function readAccount(acc: Account, jobs: PlantJob[], ts: number, opts: ReadOptions = {}): Promise<ReadMinute> {
   const result = emptyResult(acc);
+  const done = (): ReadMinute => ({ result, row: null, finish: async () => result });
+  const lead = opts.lead ?? true;
   const callsAtStart = apiCallCounts.get(acc.id) ?? 0;
   const wanted = new Set(jobs.map((j) => j.plantId));
 
@@ -334,14 +423,14 @@ export async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): P
   // that uploads off the refresh minute would otherwise read status 0 for good
   // (SOLAR-168).
   const refreshMinute = isListMinute(acc.id, ts);
-  const plantsMinute = isPlantsMinute(acc.id, ts);
-  const cached = await getInvertersCached(acc);
+  const plantsMinute = lead && isPlantsMinute(acc.id, ts);
+  const cached = opts.cached ?? await getInvertersCached(acc);
   const noStatus = cached.some((c) => c.status == null && wanted.has(Number(c.plantId)));
   let all = cached;
   if (refreshMinute || noStatus || !cached.length) {
     result.listRefreshed = true;
     const bySn = new Map(cached.map((c) => [c.sn, c]));
-    all = (await getInverters(acc)).map((inv) => {
+    all = (await (opts.liveList ?? (() => getInverters(acc)))()).map((inv) => {
       const c = bySn.get(inv.sn);
       return c ? { ...inv, lastReading: c.lastReading, carriedRun: c.carriedRun, uploadS: c.uploadS } : inv;
     });
@@ -356,7 +445,7 @@ export async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): P
         noteError("share_sync_failed", e, { hourly: true });
       }
     }
-  } else if (plantsMinute || !cached.length) {
+  } else if (plantsMinute || (lead && !cached.length)) {
     // Since the billing switch-over (0246) only chosen plants are read: a plant new on the
     // login waits to be chosen. Before it (no versions), it is read from this minute on.
     try {
@@ -372,7 +461,7 @@ export async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): P
   const skipped = all.filter((inv) => !inverters.includes(inv)).map((inv) => inv.sn);
   if (skipped.length) result.skipped = skipped;
   result.apiCalls = callsSince(acc, callsAtStart);
-  if (!inverters.length) return result;
+  if (!inverters.length) return done();
   result.inverters = inverters.length;
 
   // Battery sign per plant (0041): the plant's own answer, or the fleet default
@@ -422,7 +511,10 @@ export async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): P
   if (noData.length) result.noData = noData;
   // Every inverter silent: nothing to commit, and no agg row either. The minute is
   // left absent so recover can bank it from the cloud later.
-  if (!usable.length) return result;
+  if (!usable.length) {
+    result.apiCalls = callsSince(acc, callsAtStart);
+    return done();
+  }
 
   // A row that mixes two uploads keeps the last balanced row's power figures (SOLAR-551).
   const readings = usable.map((f) => {
@@ -452,62 +544,61 @@ export async function pollAccount(acc: Account, jobs: PlantJob[], ts: number): P
     partial: short.has(Number(plantId)),
   }));
 
-  // The whole minute in one transaction (migration 0030): readings and strings
-  // last-write-wins, agg_minute first-write-wins with gap detection, meta, the
-  // inverter mirror and the account's token. fetchInverter may have refreshed
-  // the token, so read it off `acc` here rather than from the row we started with.
-  const committed = await rpc("poll_commit_v2", {
-    p_versions: Object.fromEntries(jobs.map((j) => [String(j.plantId), j.version])),
-    p_account: acc.id,
-    p_ts: ts,
-    p_readings: readings,
-    p_strings: strings,
-    p_agg: agg,
-    p_meta: meta,
-    p_inverters: inverters.map((i) => ({ sn: i.sn, plant_id: i.plantId ?? null, account_id: acc.id })),
-    p_access: acc.access_token,
-    p_expires: acc.access_expires_at,
-  }) as { readings: number; strings: number; plants: number[]; gaps: number[]; refused?: number[] };
-  result.commitMs = Date.now() - ts * 1000;
-  if (committed.refused?.length) result.refused = committed.refused;
-  result.readings = committed.readings;
-  result.strings = committed.strings;
-  result.plants = committed.plants;
-  result.gapRecorded = committed.gaps;
+  // fetchInverter may have refreshed the token, so read it off `acc` here rather than from
+  // the row we started with.
+  const row: CommitRow = {
+    account: acc.id,
+    versions: Object.fromEntries(jobs.map((j) => [String(j.plantId), j.version])),
+    readings, strings, agg, meta,
+    inverters: inverters.map((i) => ({ sn: i.sn, plant_id: i.plantId ?? null, account_id: acc.id })),
+    access: acc.access_token,
+    expires: acc.access_expires_at,
+  };
+  result.apiCalls = callsSince(acc, callsAtStart);
+  return { result, row, finish: (committed) => afterCommit(committed) };
 
-  // Plants still on the fleet default: let the database try to settle the battery
-  // sign from what has been stored so far. Cheap, and only on refresh minutes.
-  if (refreshMinute) {
-    for (const pid of plantIds) {
-      // Battery present? Grid present? Decided from the first day of readings (0042).
-      try {
-        const f = await rpc("plant_features_detect", { p_plant: pid }) as Record<string, unknown>;
-        if (f?.decided) console.log(`features for plant ${pid}:`, JSON.stringify(f));
-      } catch (e) {
-        console.warn(`plant_features_detect ${pid}:`, e instanceof Error ? e.message : e);
-      }
-      // One battery pack or one per inverter? Decided from matching charge and voltage (0065).
-      try {
-        const b = await rpc("battery_banks_detect", { p_plant: pid }) as Record<string, unknown>;
-        if (b?.decided && b.detected !== b.was) console.log(`battery banks for plant ${pid}:`, JSON.stringify(b));
-      } catch (e) {
-        console.warn(`battery_banks_detect ${pid}:`, e instanceof Error ? e.message : e);
-      }
-      if (signOf.get(pid) != null) continue;
-      try {
-        const d = await rpc("batt_sign_detect", { p_plant: pid, p_default: DEFAULT_BATT_POSITIVE_MEANS }) as Record<string, unknown>;
-        if (d?.decided) console.log(`batt sign for plant ${pid}:`, JSON.stringify(d));
-      } catch (e) {
-        console.warn(`batt_sign_detect ${pid}:`, e instanceof Error ? e.message : e);
+  async function afterCommit(committed: Committed): Promise<AccountResult> {
+    result.commitMs = Date.now() - ts * 1000;
+    if (committed.refused?.length) result.refused = committed.refused;
+    result.readings = committed.readings;
+    result.strings = committed.strings;
+    result.plants = committed.plants;
+    result.gapRecorded = committed.gaps;
+
+    // Plants still on the fleet default: let the database try to settle the battery
+    // sign from what has been stored so far. Cheap, and only on refresh minutes.
+    if (refreshMinute) {
+      for (const pid of plantIds) {
+        // Battery present? Grid present? Decided from the first day of readings (0042).
+        try {
+          const f = await rpc("plant_features_detect", { p_plant: pid }) as Record<string, unknown>;
+          if (f?.decided) console.log(`features for plant ${pid}:`, JSON.stringify(f));
+        } catch (e) {
+          console.warn(`plant_features_detect ${pid}:`, e instanceof Error ? e.message : e);
+        }
+        // One battery pack or one per inverter? Decided from matching charge and voltage (0065).
+        try {
+          const b = await rpc("battery_banks_detect", { p_plant: pid }) as Record<string, unknown>;
+          if (b?.decided && b.detected !== b.was) console.log(`battery banks for plant ${pid}:`, JSON.stringify(b));
+        } catch (e) {
+          console.warn(`battery_banks_detect ${pid}:`, e instanceof Error ? e.message : e);
+        }
+        if (signOf.get(pid) != null) continue;
+        try {
+          const d = await rpc("batt_sign_detect", { p_plant: pid, p_default: DEFAULT_BATT_POSITIVE_MEANS }) as Record<string, unknown>;
+          if (d?.decided) console.log(`batt sign for plant ${pid}:`, JSON.stringify(d));
+        } catch (e) {
+          console.warn(`batt_sign_detect ${pid}:`, e instanceof Error ? e.message : e);
+        }
       }
     }
-  }
 
-  if (due.length) {
-    const got = await tempsDone;
-    result.temps = Object.fromEntries(due.map((inv, i) => [inv.sn, got[i].status === "fulfilled"
-      ? (got[i] as PromiseFulfilledResult<number>).value : String((got[i] as PromiseRejectedResult).reason)]));
+    if (due.length) {
+      const got = await tempsDone;
+      result.temps = Object.fromEntries(due.map((inv, i) => [inv.sn, got[i].status === "fulfilled"
+        ? (got[i] as PromiseFulfilledResult<number>).value : String((got[i] as PromiseRejectedResult).reason)]));
+    }
+    result.apiCalls = callsSince(acc, callsAtStart);
+    return result;
   }
-  result.apiCalls = callsSince(acc, callsAtStart);
-  return result;
 }

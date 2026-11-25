@@ -38,12 +38,10 @@ import {
   type PlantJob,
   plantsToPoll,
   pollJobs,
-  RelinkNeeded,
-  SignInFailed,
   shareAccount,
   saveCallTally,
 } from "../_shared/sunsynk.ts";
-import { type AccountResult, emptyResult, pollAccount } from "../_shared/poller.ts";
+import { accountFailed, type AccountResult, emailOutcome, pollAccount } from "../_shared/poller.ts";
 
 /** epoch seconds for the current minute — the dedup key for a sample */
 const nowMinuteEpoch = () => Math.floor(Date.now() / 60000) * 60;
@@ -203,36 +201,11 @@ serve("poll", async (req) => {
     const runStart = Date.now();
 
     // Accounts are independent; one dying must not stop the others.
-    const results = await Promise.all(mine.map(async ({ acc, jobs }): Promise<AccountResult> => {
-      try {
-        return await pollAccount(acc, jobs, ts);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const needsRelink = e instanceof RelinkNeeded;
-        await rpc("account_mark", {
-          p_account: acc.id, p_status: needsRelink ? "needs_relink" : "active", p_error: msg,
-        }).catch(() => {});
-        console.error(`poll: account ${acc.id} failed:`, msg);
-        // A dead login is the owner's to fix and is mailed to them; the rest are ours or SunSynk's.
-        if (!needsRelink) {
-          const kind = e instanceof SignInFailed ? "sign_in" : /^[a-z_]+: /.test(msg) ? "ours" : "sunsynk";
-          for (const j of jobs) noteError(`account_failed_${kind}`, e, { user: acc.user_id, plant: j.plantId, hourly: true });
-        }
-        return { ...emptyResult(acc), error: msg, ...(needsRelink ? { needsRelink } : {}),
-          ...(e instanceof SignInFailed ? { signInFailed: true } : {}) };
-      }
-    }));
+    const results = await Promise.all(mine.map(({ acc, jobs }) =>
+      pollAccount(acc, jobs, ts).catch((e) => accountFailed(acc, jobs, e))));
 
     // Email state (0102): how each login went, then step the plants just written.
-    // SunSynk's fault and ours are told apart so our own outage is never mailed as
-    // SunSynk's: our errors are rpc failures ("fn: message"); a dead login is left out,
-    // and so is one we could not sign in (SOLAR-451): no read was made, so it says
-    // nothing about the inverter.
-    const outcomes = results.filter((r) => !r.needsRelink && !r.signInFailed).map((r) => ({
-      account: r.account,
-      outcome: r.error ? (/^[a-z_]+: /.test(r.error) ? "ours" : "sunsynk")
-             : r.inverters > 0 && r.readings === 0 ? "sunsynk" : "ok",
-    }));
+    const outcomes = results.map(emailOutcome).filter((o) => o !== null);
     logged = true;
     const [stepped] = await Promise.all([
       rpc("email_poll_step", {
