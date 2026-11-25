@@ -2865,6 +2865,7 @@ end $$;
 --     queues one share_removed; back in the list, it waits for its owner to claim it again
 -- SH2 the share login in Logins lists only the caller's plants; removing it keeps the share
 --     login, and a user with no claim on it may not remove it (42501)
+-- SH3 a lapsed share claim is taken over by another user
 do $$
 declare a uuid := pg_temp.acct('sh1a'); b uuid := pg_temp.acct('sh1b'); ua uuid; ub uuid; sh uuid; err text;
 begin
@@ -2900,6 +2901,7 @@ begin
   perform pg_temp.ok('SH1 ... live again', (select share_gone_at is null and share_missing_at is null
                                                  from public.plant_users where plant_id = 990092001 and user_id = ub));
   perform pg_temp.eq('SH1 ... and read', pg_temp.lane_of(990092001, now()), sh::text);
+  perform pg_temp.eq('SH1 claiming it again while live: yours', public.share_claim_live(ub, sh, 990092001, 'Shared'), 'yours');
 
   -- SH2: A claims another plant on the same share login; B sees only B's
   perform pg_temp.eq('SH2 A claims another plant', public.share_claim_live(ua, sh, 990092002, 'Other'), 'claimed');
@@ -2921,7 +2923,16 @@ begin
   end;
   perform pg_temp.eq('SH2 no claim: removing the share login refused', err, '42501');
   perform set_config('request.jwt.claims', '', true);
-exception when others then perform set_config('request.jwt.claims', '', true); perform pg_temp.ok('SH1 runs', false, sqlerrm);
+
+  -- SH3 A's claim lapses (share removed); B takes it over: A's row goes, one live claim
+  update public.plant_users set share_missing_at = now() - interval '1 hour' where plant_id = 990092002 and user_id = ua;
+  perform public.share_sync(sh, '{}');
+  perform pg_temp.ok('SH3 A''s claim lapsed', (select share_gone_at is not null from public.plant_users where plant_id = 990092002 and user_id = ua));
+  perform pg_temp.eq('SH3 B claims the lapsed share', public.share_claim_live(ub, sh, 990092002, 'Other'), 'claimed');
+  perform pg_temp.eq('SH3 ... A''s row goes', (select count(*)::text from public.plant_users where plant_id = 990092002 and user_id = ua), '0');
+  perform pg_temp.eq('SH3 ... one live claim', (select count(*)::text from public.plant_users
+                                                  where plant_id = 990092002 and via_share and share_gone_at is null), '1');
+exception when others then perform set_config('request.jwt.claims', '', true); perform pg_temp.ok('SH1-SH3 runs', false, sqlerrm);
 end $$;
 
 -- FR7 removing a login or a claim deletes the history nothing keeps, at once
