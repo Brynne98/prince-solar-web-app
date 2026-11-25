@@ -1,9 +1,11 @@
 -- ============================================================================
 -- 0273 — one reminder 3 days before an unpaid plan ends (SOLAR-654).
 --
--- A refused card, no card, or a last try that failed sends one email on the day, then nothing
--- until the plan ends (up to 15 days). This adds payment_reminder: always sent (not a
--- reminders-setting email, like the other payment emails), once per unpaid renewal bill.
+-- A refused card or no card sends one email on the day, then nothing until the plan ends (up
+-- to 15 days). This adds payment_reminder: always sent (not a reminders-setting email, like
+-- the other payment emails), once per unpaid renewal bill. A soft decline gets no reminder in
+-- practice: a try is still coming when the 3 days begin, and the last try's own email goes the
+-- day before the cutoff. Only if that last try never ran (a skipped run) does the reminder go.
 --
 --   When     from 08:00 local time, 3 days before the pay-by day (cutoff 8 Dec: from 5 Dec
 --            08:00), until the cutoff. The account's time zone, as the cutoff uses.
@@ -14,7 +16,8 @@
 --            land: a saved-card try or verified card page unanswered (renewal_hold), a card page
 --            opened in the last hour, another payment email for the bill still queued, or a
 --            saved card during the daily billing run (04:00-06:05 UTC).
---   Drops    at send time when any "only if" stops holding (outbox_guard).
+--   Drops    at send time when any "only if" stops holding (outbox_guard). No stored expiry:
+--            the check reads the cutoff at send time, so a time zone change moves it too.
 --
 -- billing.payment_reminder_check holds both lists; outbox_sweep (queue), outbox_guard (drop)
 -- and outbox_take (hold) call it. Bodies: outbox_sweep 0247, outbox_guard and outbox_take
@@ -87,7 +90,7 @@ begin
   if inv is null then return; end if;
   select * into c from billing.payment_reminder_check(p_account, inv, p_at);
   if c.stop is null and c.wait is null then
-    perform billing.outbox_put(p_account, 'payment_reminder', inv, null, 'payment_reminder:' || inv, p_at, st.plan_ends_at, p_at);
+    perform billing.outbox_put(p_account, 'payment_reminder', inv, null, 'payment_reminder:' || inv, p_at, null, p_at);
   end if;
 end $$;
 revoke all on function billing.payment_reminder_put(uuid, billing.status, timestamptz) from public, anon, authenticated;

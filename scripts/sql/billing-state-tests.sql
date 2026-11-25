@@ -3488,7 +3488,8 @@ begin
   perform billing.outbox_sweep(w);
   o := pg_temp.ob(a, 'payment_reminder');
   perform pg_temp.ok('R1 queued at 08:00 for the open renewal bill', o.invoice = pg_temp.due(a) and o.not_before = w and o.status = 'queued');
-  perform pg_temp.eqt('R1 ... expires at the cutoff', o.expires_at::text, pg_temp.cut(pe));
+  perform pg_temp.ok('R1 ... no stored expiry: the check reads the cutoff at send time', o.expires_at is null);
+  perform pg_temp.eq('R1 ... dropped once past the cutoff', pg_temp.guard(a, 'payment_reminder', pg_temp.cut(pe)), 'not past due');
   perform pg_temp.ok('R1 ... always sent (not a reminders-setting email)', not (select reminder from billing.outbox_kinds where key = 'payment_reminder'));
   perform billing.outbox_sweep(w + interval '1 hour');
   perform pg_temp.eq('R1 queued once per bill', (select count(*)::text from billing.outbox where account = a and key = 'payment_reminder'), '1');
@@ -3553,7 +3554,7 @@ begin
   perform pg_temp.eq('R3 ... then goes', pg_temp.rem(a, ((last at time zone 'UTC')::date + time '06:06') at time zone 'UTC'), 'go');
   perform pg_temp.sent(a, 'payment_failed', last + interval '1 minute');
   perform pg_temp.eq('R3 the last try failed and its email went: not sent', pg_temp.rem(a, last + interval '3 hours'), 'payment email sent');
-  perform pg_temp.ok('R3 after the cutoff: never', pg_temp.rem(a, pg_temp.cut(pe) + interval '1 minute') in ('past the pay-by date', 'not past due'));
+  perform pg_temp.eq('R3 after the cutoff: never', pg_temp.rem(a, pg_temp.cut(pe) + interval '1 minute'), 'not past due');
 exception when others then perform pg_temp.ok('R3 runs', false, sqlerrm);
 end $$;
 
