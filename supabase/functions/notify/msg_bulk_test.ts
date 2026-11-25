@@ -96,5 +96,7 @@ Deno.test("PostHog: need a hand counted after it went, keyed on the event row, w
   await trackSent(r("need_a_hand", { choose: true }), send);
   await trackSent(r("welcome"), send);
   await trackSent(r("account_deleted", {}, null), send);
-  assertEquals(sent, [["need_a_hand_email_sent_done", "u-1", "77", { choose: true }]]);
+  await trackSent(r("add_plant_reminder"), send);
+  assertEquals(sent, [["need_a_hand_email_sent_done", "u-1", "77", { choose: true }],
+    ["add_plant_reminder_email_sent_done", "u-1", "77", {}]]);
 });

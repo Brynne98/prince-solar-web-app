@@ -117,7 +117,7 @@ begin
     (pg_temp.ob(s)).not_before = now() + interval '24 hours' and (pg_temp.ob(s)).expires_at = now() + interval '3 days');
   perform pg_temp.ok('R6 the bulk kinds, each with its expiry',
     (select string_agg(kind || '=' || ttl, ',' order by kind) from msg.kinds where channel = 'email' and lane = 'bulk' and route = 'outbox')
-    = 'account_deleted=2 days,feedback=7 days,history=1 day,need_a_hand=2 days,plant_off_login=2 days,report_month=3 days,'
+    = 'account_deleted=2 days,add_plant_reminder=2 days,feedback=7 days,history=1 day,need_a_hand=2 days,plant_off_login=2 days,report_month=3 days,'
       'report_week=3 days,report_year=3 days,share_removed=2 days,welcome=2 days');
   perform pg_temp.ok('R7 no pop-up row for a bulk kind', not exists (select 1 from msg.outbox where event_id = q and channel = 'push'));
 end $$;
@@ -360,6 +360,52 @@ begin
     and not has_function_privilege('authenticated', 'public.msg_email_take(int, text)', 'execute')
     and has_function_privilege('service_role', 'public.msg_email_done(uuid, jsonb)', 'execute')
     and not has_function_privilege('authenticated', 'public.msg_email_done(uuid, jsonb)', 'execute'));
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- P: add your plant, 7 days after sign-up (SOLAR-474, 0272)
+-- ---------------------------------------------------------------------------
+do $$
+declare v uuid := gen_random_uuid(); w uuid := gen_random_uuid(); x uuid := gen_random_uuid();
+        u uuid := pg_temp.owner('a2', '{990068091}'); sl uuid; ev bigint; e2 bigint; e3 bigint; n int;
+begin
+  -- confirmed at sign-up: queued with welcome and need a hand, due in 7 days
+  insert into auth.users (id, email, created_at, email_confirmed_at) values (v, 'a1@msgb.test', now(), now());
+  select id into ev from public.email_queue where user_id = v and kind = 'add_plant_reminder';
+  perform pg_temp.ok('P1 confirm queues it: through the outbox, bulk, due in 7 days, 2 days after',
+    (select status from public.email_queue where id = ev) = 'outbox'
+    and (pg_temp.ob(ev)).lane = 'bulk' and (pg_temp.ob(ev)).not_before = now() + interval '7 days'
+    and (pg_temp.ob(ev)).expires_at = now() + interval '9 days', row_to_json(pg_temp.ob(ev))::text);
+  update auth.users set email_confirmed_at = null where id = v;
+  update auth.users set email_confirmed_at = now() where id = v;
+  perform pg_temp.ok('P2 confirming again: still one per account',
+    (select count(*) from public.email_queue where user_id = v and kind = 'add_plant_reminder') = 1);
+  perform pg_temp.ok('P3 an account confirmed before this gets none',
+    not exists (select 1 from public.email_queue q join auth.users au on au.id = q.user_id
+                 where q.kind = 'add_plant_reminder' and au.email not like '%@msgb.test'));
+  n := pg_temp.btake();
+  perform pg_temp.ok('P4 not taken before day 7', not pg_temp.taken(ev));
+  -- day 7: the dates moved back
+  update msg.outbox set not_before = now() - interval '1 minute', expires_at = now() + interval '2 days'
+   where dedupe_key = ev || ':email';
+  -- a login linked by then; a claimed shared plant and no login of its own
+  insert into auth.users (id, email, created_at) values (w, 'a3@msgb.test', now());
+  select id into sl from private.sunsynk_accounts where kind = 'share';
+  if sl is null then
+    insert into auth.users (id, email, created_at) values (x, 'share@msgb.test', now());
+    insert into private.sunsynk_accounts (user_id, sunsynk_username, status, kind) values (x, 'share@msgb.test', 'active', 'share')
+    returning id into sl;
+  end if;
+  insert into public.plant_users (plant_id, user_id, account_id, plant_name, via_share)
+  values (990068092, w, sl, 'Plant 990068092', true);
+  e2 := pg_temp.bev(u, null, 'add_plant_reminder', 'a2:add');
+  e3 := pg_temp.bev(w, null, 'add_plant_reminder', 'a3:add');
+  n := pg_temp.btake();
+  perform pg_temp.ok('P5 day 7, no login and no plant: goes, from the queue row',
+    pg_temp.taken(ev) and (select kind from t_take where event_id = ev) = 'add_plant_reminder'
+    and (select to_email from t_take where event_id = ev) = 'a1@msgb.test', (pg_temp.ob(ev)).drop_reason);
+  perform pg_temp.ok('P6 a login added by then: dropped', (pg_temp.ob(e2)).drop_reason = 'plant added', (pg_temp.ob(e2)).drop_reason);
+  perform pg_temp.ok('P7 a shared plant claimed, no login: dropped', (pg_temp.ob(e3)).drop_reason = 'plant added', (pg_temp.ob(e3)).drop_reason);
 end $$;
 
 -- ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { noteError, reportError, serve, track } from "../_shared/errors.ts";
 import {
   accountDeleted, type Email, type History, historySynced, type Period, plantEvent, type PlantEvent, loginEvent,
-  REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, needAHand, feedback, APP,
+  REPLY_TO, report, type Report, senderFor, sunsynkBack, sunsynkDown, welcome, needAHand, addPlantReminder, feedback, APP,
 } from "../_shared/email.ts";
 import { outboxMail, FROM_BILLING, FROM_HELLO } from "../_shared/email.ts";
 import { msgKey, type Post, sendOutboxOne } from "../_shared/outbox.ts";
@@ -290,6 +290,7 @@ async function build(r: Row): Promise<Email | null> {
     }
     case "account_deleted": return accountDeleted(r.to_email);
     case "need_a_hand": return needAHand(d.choose === true);
+    case "add_plant_reminder": return addPlantReminder();
     case "feedback":
       return feedback({ email: String(d.email ?? ""), message: String(d.message ?? ""), page: String(d.page ?? ""),
         version: String(d.version ?? ""), user: String(d.user ?? ""), image: !!d.image });
@@ -663,6 +664,8 @@ export async function trackSent(row: Row, send = track) {
   if (row.kind.startsWith("unpaid_")) await send(`${row.kind}_email_sent_done`, row.user_id, id, at, {});
   // SOLAR-319
   if (row.kind === "need_a_hand") await send("need_a_hand_email_sent_done", row.user_id, id, at, { choose: row.data?.choose === true });
+  // SOLAR-474
+  if (row.kind === "add_plant_reminder") await send("add_plant_reminder_email_sent_done", row.user_id, id, at, {});
 }
 
 /** What only the clock can tell: no readings, SunSynk, reports. */
@@ -703,7 +706,7 @@ async function renderAll(plantId: number, today?: string) {
   if (!pu) throw new Error(`no users on plant ${plantId}`);
   const p: Plant = { id: plantId, name: pu.plant_name || "your plant", tz: await rpc<string>("plant_tz", { p_plant: plantId }) };
   const now = Math.floor(Date.now() / 1000);
-  const out: Record<string, Email> = { welcome: welcome(), "need-a-hand-choose": needAHand(true), "account-deleted": accountDeleted("you@example.com") };
+  const out: Record<string, Email> = { welcome: welcome(), "need-a-hand-choose": needAHand(true), "add-plant-reminder": addPlantReminder(), "account-deleted": accountDeleted("you@example.com") };
   const h = await buildHistory(p);
   if (h) out["history-synced"] = historySynced(h);
   today ??= local(p.tz).date;
