@@ -1,8 +1,9 @@
 -- SOLAR-641 state test: every walk-through in reports/billing-redesign-2026-11-22.md,
 -- run against billing.account_state / plant_state with a moved clock (each call takes `at`).
--- Run by scripts/billing-state-test.mjs inside one transaction that is rolled back.
+-- Run by scripts/billing-state-test.mjs inside one transaction that is rolled back, on a
+-- database at the newest migration (switched over: 0252 marks a new database live).
 -- S1-S13 write subscription rows directly (pg_temp.pay) to walk the states; the P
--- blocks after S14 go through the real payment commands and the daily job.
+-- blocks after them go through the real payment commands and the daily job.
 
 set client_min_messages = notice;
 
@@ -34,9 +35,14 @@ begin
   insert into t_results (label, pass, detail) values (p_label, false, 'no error');
 end $$;
 
--- the clock: day 0 is 1 Dec 2026, 10:00 in Johannesburg
-create function pg_temp.t(p_days numeric) returns timestamptz language sql immutable as $$
-  select '2026-12-01 10:00+02'::timestamptz + p_days * interval '1 day'
+-- the clock: day 0 is 1 Dec of pg_temp.y(), 10:00 in Johannesburg. y is at least two years
+-- ahead, so the moved clock stays after now() (the delete and send paths read the real clock),
+-- and is 2 more than a leap year, as 2026 was, so the month ends fall the same way.
+create function pg_temp.y() returns int language sql stable as $$
+  select y + (6 - y % 4) % 4 from (select extract(year from now())::int + 2 as y) s
+$$;
+create function pg_temp.t(p_days numeric) returns timestamptz language sql stable as $$
+  select make_timestamptz(pg_temp.y(), 12, 1, 10, 0, 0, '+02') + p_days * interval '1 day'
 $$;
 -- an unpaid plan's end (0248): the last millisecond of the local day p_days days after p
 create function pg_temp.cut(p timestamptz, p_days int default 15) returns timestamptz language sql immutable as $$
@@ -98,6 +104,8 @@ create function pg_temp.fail_renewal(p_sub uuid, p_at timestamptz) returns void 
   update billing.subscriptions set status = 'past_due', past_due_since = p_at where id = p_sub
 $$;
 
+savepoint phase1;
+
 -- ---------------------------------------------------------------------------
 -- L1 (final re-score, Sol) the link and claim writes and the account delete wait for a
 --    billing run, which the copy holds exclusive, so none of them runs across the copy.
@@ -125,8 +133,8 @@ begin
 end $$;
 
 do $$
-declare a uuid := pg_temp.acct('l1'); u uuid; sh uuid; su uuid := gen_random_uuid(); r jsonb;
-        pre text; pre_both boolean; pre_err text; live text; live_ok boolean; err text;
+declare a uuid := pg_temp.acct('l1'); d uuid := pg_temp.acct('l1d'); u uuid; ud uuid; sh uuid; su uuid := gen_random_uuid(); r jsonb;
+        live text; live_ok boolean; err text;
 begin
   select user_id into u from billing.accounts where id = a;
   perform pg_temp.pay(a, 'home', 'month', now());
@@ -134,8 +142,9 @@ begin
   perform pg_temp.eq('L1 a link or claim write waits for a billing run',
     pg_temp.run_lock_of(format('select public.billing_links(%L, %L)', 'claim_plant',
                                jsonb_build_object('user', u, 'plant', 990150001, 'name', 'L1'))), 'ShareLock');
-  perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
-  perform pg_temp.eq('L1 the account delete (old or new) waits for a billing run',
+  select user_id into ud from billing.accounts where id = d;
+  perform set_config('request.jwt.claims', json_build_object('sub', ud, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('L1 the account delete waits for a billing run',
     pg_temp.run_lock_of('select public.api_account_delete()'), 'ShareLock');
   perform set_config('request.jwt.claims', '', true);
 
@@ -148,25 +157,17 @@ begin
       returning id into sh;
     end if;
     update private.sunsynk_accounts set status = 'active' where id = sh;
-    r := public.share_claim_any(u, sh, 990150002, 'L1 shared');
-    pre := r->>'result'; pre_err := r->>'copy_error';
-    pre_both := exists (select 1 from public.plant_users where plant_id = 990150002 and user_id = u and via_share)
-            and exists (select 1 from billing.plant_claims where plant = 990150002 and account = a);
-    -- switched: billing decides with the link row (share_claim_live), no old tick is written
-    insert into billing.switch_over (switched_at) values (now());
     r := public.share_claim_any(u, sh, 990150003, 'L1 live');
     live := r->>'result';
     live_ok := exists (select 1 from billing.plant_claims where plant = 990150003 and account = a)
-           and not exists (select 1 from private.plant_picks where user_id = u and plant_id = 990150003);
+           and exists (select 1 from public.plant_users where plant_id = 990150003 and user_id = u and via_share);
     raise exception 'L1: undo';
   exception when others then
     if sqlerrm <> 'L1: undo' then err := sqlerrm; end if;
   end;
   perform pg_temp.ok('L1 share claims run', err is null, err);
-  perform pg_temp.ok('L1 before the switch: claimed', pre in ('claimed', 'claimed_paused'), pre);
-  perform pg_temp.ok('L1 ... the old row and the billing claim in the same call', pre_both, pre_err);
-  perform pg_temp.eq('L1 switched: claimed by the live rules', live, 'claimed');
-  perform pg_temp.ok('L1 ... billing claim written, no old tick', live_ok);
+  perform pg_temp.eq('L1 a share claim: claimed by the live rules', live, 'claimed');
+  perform pg_temp.ok('L1 ... the billing claim and the link row written together', live_ok);
 exception when others then perform set_config('request.jwt.claims', '', true); perform pg_temp.ok('L1 runs', false, sqlerrm);
 end $$;
 
@@ -267,7 +268,7 @@ begin
   perform pg_temp.eq('S3 still ended (week used)', r->>'state', 'ended');
   perform pg_temp.eq('S3 nothing linked', r->>'linked', '0');
   perform pg_temp.eq('S3 nothing chosen', r->>'chosen', '0');
-  perform pg_temp.eqt('S3 history deleted at once', pg_temp.ps(990000301, pg_temp.t(10), 'delete_at'), pg_temp.t(10));
+  perform pg_temp.eq('S3 history deleted at once', pg_temp.ps(990000301, pg_temp.t(10), 'purged'), 'true');
   perform pg_temp.ok('S3 seats closed as login_removed',
     (select count(*) = 2 from billing.seats where account = a and close_reason = 'login_removed' and closed_at = pg_temp.t(10)));
   perform pg_temp.fails('S3 no new login without a plan',
@@ -358,7 +359,7 @@ begin
   perform pg_temp.eq('S7 past due, no card: no retry date', pg_temp.st(a, p + interval '1 day', 'next_retry_at'), null);
   perform pg_temp.eq('S7 past due, no card: no charge date', pg_temp.st(a, p + interval '1 day', 'next_charge_at'), null);
   insert into billing.payment_methods (account, provider, auth_ref, reusable, last4, exp_month, exp_year, active, created_at)
-  values (a, 'paystack', 'AUTH_s7', true, '0007', 12, 2030, true, pg_temp.t(0));
+  values (a, 'paystack', 'AUTH_s7', true, '0007', 12, pg_temp.y() + 4, true, pg_temp.t(0));
   r := billing.account_state(a, p + interval '1 day');
   perform pg_temp.eq('S7 day 1: past_due', r->>'state', 'past_due');
   perform pg_temp.eqt('S7 day 0 is the due date', r->>'past_due_since', p);
@@ -437,7 +438,7 @@ begin
   r := pg_temp.choose(a, '{990000901,990000902}', pg_temp.t(3));
   perform pg_temp.eq('S9 picked: must choose cleared', r->>'must_choose', 'false');
   perform pg_temp.eq('S9 picked: read again', pg_temp.pp(a, pg_temp.t(3), 990000901, 'read_now'), 'true');
-  perform pg_temp.eqt('S9 dropped plant: no other holder, delete now', pg_temp.ps(990000904, pg_temp.t(3), 'delete_at'), pg_temp.t(3));
+  perform pg_temp.eq('S9 dropped plant: no other holder, deleted now', pg_temp.ps(990000904, pg_temp.t(3), 'purged'), 'true');
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -548,229 +549,48 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- S14 copying today's tables
+-- End of phase 1: its made-up accounts go (rolled back to the savepoint before L1), so phase 2
+-- starts with empty billing tables; its results are kept.
 -- ---------------------------------------------------------------------------
-do $$
-declare
-  u1 uuid := gen_random_uuid(); u2 uuid := gen_random_uuid(); lg uuid := gen_random_uuid(); sec uuid := gen_random_uuid();
-  u3 uuid := gen_random_uuid(); lg3 uuid := gen_random_uuid();
-  u4 uuid := gen_random_uuid(); lg4 uuid := gen_random_uuid(); u5 uuid := gen_random_uuid(); lg5 uuid := gen_random_uuid();
-  u6 uuid := gen_random_uuid(); lg6 uuid := gen_random_uuid();
-  a1 uuid; a2 uuid; a3 uuid; r jsonb;
-begin
-  set local session_replication_role = replica;   -- old tables' triggers off while making rows
-  insert into auth.users (id, email, created_at) values (u1, 'copy1@state.test', '2026-11-10'), (u2, 'copy2@state.test', '2026-11-10');
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, refresh_secret_id, status, kind)
-  values (lg, u1, 'copy1', sec, 'active', 'login');
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused) values
-    (990001401, u1, lg, 'House', false), (990001402, u1, lg, 'Flat', false), (990001403, u1, lg, 'Shed', true);
-  insert into private.plant_picks (user_id, plant_id, held, picked_at) values
-    (u1, 990001401, true, '2026-11-10 12:00+02'), (u1, 990001402, false, '2026-11-10 12:00+02'), (u1, 990001403, true, '2026-11-10 12:00+02');
-  insert into private.free_week_logins (sunsynk_username, user_id, started_at, over_at, over_why)
-  values ('copy1', u1, '2026-11-10 12:00+02', '2026-11-12 09:00+02', 'plan');
-  insert into private.plant_week (plant_id, started_at) values (990001401, '2026-11-10 12:00+02');
-  insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at, offer_id, card, card_email)
-  values (u1, 'home', 'monthly', 12, '2026-12-12', 'active', '2026-11-12 09:00+02', 'launch',
-          '{"authorization_code":"AUTH_copy1","last4":"4081","exp_month":"12","exp_year":"2030","reusable":true,"card_type":"visa "}', 'copy1@state.test');
-  insert into public.plant_users (plant_id, user_id, plant_name, via_share) values (990001404, u2, 'Farm', true);
-  insert into private.plant_picks (user_id, plant_id, held, picked_at) values (u2, 990001404, true, '2026-11-10 12:00+02');
-  insert into private.billing (user_id, plan, comped, created_at) values (u2, 'family', true, '2026-11-10');
-  -- review fix 14: a failed card mid-window, a downgrade booked with one plant to drop, a card saved with no email
-  insert into auth.users (id, email, created_at) values (u3, 'copy3@state.test', '2026-10-01');
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values (lg3, u3, 'copy3', 'active', 'login');
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused) values
-    (990001411, u3, lg3, 'A', false), (990001412, u3, lg3, 'B', false), (990001413, u3, lg3, 'C', false);
-  insert into private.plant_picks (user_id, plant_id, held, picked_at) values
-    (u3, 990001411, true, '2026-10-01'), (u3, 990001412, true, '2026-10-01'), (u3, 990001413, true, '2026-10-01');
-  insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, past_due_since, next_plan,
-                               plants_to_remove, created_at, card)
-  -- as the old billing writes it: billing_renew moved the date on to 20 Dec, then the 20 Nov charge failed
-  values (u3, 'family', 'monthly', 20, '2026-12-20', 'past_due', '2026-11-20', 'home', '{990001413}', '2026-10-01',
-          '{"authorization_code":"AUTH_copy3","last4":"0003","exp_month":"12","exp_year":"2030","reusable":true}');
-  -- phase 3 fix 28: u4 an old removal list with nothing booked; u5 fewer extra places booked, too many plants
-  insert into auth.users (id, email, created_at) values (u4, 'copy4@state.test', '2026-10-01'), (u5, 'copy5@state.test', '2026-10-01');
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values
-    (lg4, u4, 'copy4', 'active', 'login'), (lg5, u5, 'copy5', 'active', 'login');
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused) values
-    (990001421, u4, lg4, 'A', false), (990001422, u4, lg4, 'B', false);
-  insert into private.plant_picks (user_id, plant_id, held, picked_at) values
-    (u4, 990001421, true, '2026-10-01'), (u4, 990001422, true, '2026-10-01');
-  insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, plants_to_remove, created_at)
-  values (u4, 'home', 'monthly', 20, '2026-12-20', 'active', '{990001422}', '2026-10-01');
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused)
-  select 990001430 + x, u5, lg5, 'P' || x, false from generate_series(1, 6) x;
-  insert into private.plant_picks (user_id, plant_id, held, picked_at)
-  select u5, 990001430 + x, true, '2026-10-01' from generate_series(1, 6) x;
-  insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, extra_plants, next_extra_plants, created_at)
-  values (u5, 'family', 'monthly', 20, '2026-12-20', 'active', 1, 0, '2026-10-01');
-  -- final review (Neon): a downgrade booked on the old screens keeps its list of plants to
-  -- keep (next_keep) and leaves plants_to_remove empty; the third plant is the one that stops
-  insert into auth.users (id, email, created_at) values (u6, 'copy6b@state.test', '2026-10-01');
-  insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values (lg6, u6, 'copy6b', 'active', 'login');
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused, linked_at) values
-    (990001441, u6, lg6, 'A', false, '2026-10-01'), (990001442, u6, lg6, 'B', false, '2026-10-01'), (990001443, u6, lg6, 'C', false, '2026-10-01');
-  insert into private.plant_picks (user_id, plant_id, held, picked_at) values
-    (u6, 990001441, true, '2026-10-01'), (u6, 990001442, true, '2026-10-01'), (u6, 990001443, true, '2026-10-01');
-  insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, next_plan, next_keep, plants_to_remove, created_at)
-  values (u6, 'family', 'monthly', 20, '2026-12-20', 'active', 'home', '{990001443,990001441}', '{}', '2026-10-01');
-  set local session_replication_role = origin;
-
-  insert into billing.refunds (reference, reason, status, created_at, updated_at) values ('S14-REF', 'manual', 'processed', now(), now());
-  perform pg_temp.fails('S14 copy refused once a refund is recorded', 'select billing.copy_from_old()', 'already hold payments');
-  delete from billing.refunds where reference = 'S14-REF';
-  -- a rerun clears only what the copy wrote: the poller's and the commands' events stay
-  perform billing.copy_from_old();
-  -- the copy holds the billing-run lock the poller's share update and the link and claim writes
-  -- wait on: a share removed while it copies cannot leave its claim behind (final review, Sol)
-  perform pg_temp.ok('S14 the copy holds the billing-run lock', exists (select 1 from pg_locks where locktype = 'advisory'
-    and classid = 3 and objid = 0 and objsubid = 2 and mode = 'ExclusiveLock' and pid = pg_backend_pid() and granted));
-  insert into billing.account_events (account, at, actor, kind)
-  select id, now(), 'copy', 'copy_needs_review' from billing.accounts where user_id = u1
-  union all select id, now(), 'poller', 'login_seen' from billing.accounts where user_id = u1;
-  a3 := (select id from billing.accounts where user_id = u1);
-  perform billing.copy_from_old();
-  perform pg_temp.ok('S14 rerun keeps the account id', a3 is not null and (select id from billing.accounts where user_id = u1) = a3);
-  perform pg_temp.ok('S14 poller and command events kept', exists (select 1 from billing.account_events
-    where account = a3 and actor = 'poller' and kind = 'login_seen'));
-  perform pg_temp.ok('S14 the copy''s own events cleared', not exists (select 1 from billing.account_events
-    where account = a3 and actor = 'copy'));
-  a3 := (select id from billing.accounts where user_id = u3);
-  perform pg_temp.ok('S14 past due copied with its failed day-0 try', exists (select 1 from billing.payment_attempts pa
-    join billing.invoices i on i.id = pa.invoice where i.account = a3 and i.kind = 'renewal' and pa.channel = 'none'
-     and pa.status = 'failed' and pa.created_at = '2026-11-20 00:00+02'));
-  perform pg_temp.ok('S14 so day 0 is not charged again', not exists (select 1 from jsonb_array_elements(billing.run('2026-11-21 10:00+02')->'charges') x
-    where (select account from billing.invoices where id = (x->>'invoice')::uuid) = a3));
-  perform pg_temp.ok('S14 card with no saved email takes the sign-in email', exists (select 1 from billing.payment_methods
-    where account = a3 and auth_ref = 'AUTH_copy3' and auth_email = 'copy3@state.test'));
-  perform pg_temp.ok('S14 the plant picked to go is marked to drop', (select array_agg(plant) = '{990001413}' from billing.seats
-    where account = a3 and drop_at_period_end));
-  perform pg_temp.ok('S14 kept plants fit Home: no review', not exists (select 1 from billing.account_events where account = a3));
-  perform pg_temp.ok('S14 removal list with nothing booked: no plant marked to drop', not exists (select 1 from billing.seats se
-    join billing.accounts a on a.id = se.account where a.user_id = u4 and se.drop_at_period_end));
-  perform pg_temp.ok('S14 downgrade booked with a keep list: the plant not kept is marked to drop',
-    (select array_agg(se.plant order by se.plant) = '{990001442}' from billing.seats se join billing.accounts a on a.id = se.account
-      where a.user_id = u6 and se.drop_at_period_end));
-  perform pg_temp.ok('S14 ... so it is not flagged for review', not exists (select 1 from billing.account_events e
-    join billing.accounts a on a.id = e.account where a.user_id = u6 and e.kind = 'copy_needs_review'));
-  -- the old run would drop the plant over the next places itself (private.billing_drops): marked to drop, no review
-  perform pg_temp.ok('S14 fewer extra places booked, too many plants: the one over marked to drop', (select count(*) = 1
-    from billing.seats se join billing.accounts a on a.id = se.account where a.user_id = u5 and se.drop_at_period_end)
-    and not exists (select 1 from billing.account_events e join billing.accounts a on a.id = e.account
-                     where a.user_id = u5 and e.kind = 'copy_needs_review'));
-  perform pg_temp.ok('S14 past due: the unpaid period is 20 Oct to 20 Nov', (select period_start = '2026-10-20 00:00+02'
-    and period_end = '2026-11-20 00:00+02' from billing.subscriptions where account = a3));
-  -- this test's accounts only: a local database may hold other old billing rows, copied too
-  delete from billing.payment_attempts where gateway_response is distinct from 'copied: past due at the switch-over'
-     and invoice in (select i.id from billing.invoices i join billing.accounts a on a.id = i.account
-                      where a.user_id in (u1, u2, u3, u4, u5));
-  update private.billing set plants_to_remove = '{}' where user_id = u3;
-  -- the old day-1 retry of the 20 Nov renewal, sent and not answered
-  set local session_replication_role = replica;
-  insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, claimed_at, tried_on)
-  values ('psh_s14retry', u3, 'renewal', 'family', 'monthly', 199, 'pending', '2026-11-20', '2026-11-21', '2026-11-21 08:00+02',
-          '2026-11-21 08:00+02', '2026-11-21');
-  set local session_replication_role = origin;
-  a1 := (select id from billing.accounts where user_id = u1);
-  a2 := (select id from billing.accounts where user_id = u2);
-  perform pg_temp.ok('S14 login keeps its id and vault id', exists (select 1 from billing.logins where id = lg and account = a1 and secret_ref = sec and status = 'ok'));
-  perform pg_temp.ok('S14 three login plants', (select count(*) = 3 from billing.login_plants where login = lg));
-  perform pg_temp.ok('S14 seat only for the held pick that is not paused',
-    (select array_agg(plant) = '{990001401}' from billing.seats where account = a1 and closed_at is null));
-  perform pg_temp.ok('S14 week from free_week_logins',
-    (select trial_started_at = '2026-11-10 12:00+02' and trial_ends_at = '2026-11-12 09:00+02' from billing.accounts where id = a1));
-  perform pg_temp.ok('S14 plant week used by the account', (select trial_used_by = a1 from billing.plants where id = 990001401));
-  perform pg_temp.ok('S14 subscription copied',
-    exists (select 1 from billing.subscriptions where account = a1 and plan = 'home' and interval = 'month' and amount_minor = 4900
-              and offer = 'launch' and status = 'active' and billing_day = 12 and period_end = '2026-12-12 00:00+02'));
-  r := billing.account_state(a1, '2026-11-22 12:00+02');
-  perform pg_temp.eq('S14 state active', r->>'state', 'active');
-  perform pg_temp.eq('S14 places 2', r->>'places', '2');
-  perform pg_temp.eq('S14 chosen 1', r->>'chosen', '1');
-  perform pg_temp.eqt('S14 next charge', r->>'next_charge_at', '2026-12-12 00:00+02');
-  perform pg_temp.ok('S14 saved card copied', exists (select 1 from billing.payment_methods
-    where account = a1 and auth_ref = 'AUTH_copy1' and auth_email = 'copy1@state.test' and active and last4 = '4081'));
-  -- Paystack sends the brand with a space ("visa ", seen 2026-11-23): stored without it
-  perform pg_temp.eq('S14 copied card brand trimmed', (select card_type from billing.payment_methods where account = a1 and auth_ref = 'AUTH_copy1'), 'visa');
-  perform pg_temp.ok('S14 share claim copied', exists (select 1 from billing.plant_claims where plant = 990001404 and account = a2));
-  perform pg_temp.eq('S14 comped: grant of 5', pg_temp.st(a2, '2026-11-22 12:00+02', 'places'), '5');
-  perform pg_temp.eq('S14 shared plant read', pg_temp.pp(a2, '2026-11-22 12:00+02', 990001404, 'read_now'), 'true');
-  r := billing.copy_from_old();
-  perform pg_temp.eq('S14 rerun with the seed tries is allowed; plants over the next places marked, none left for review', r->>'needs_review', '0');
-  perform pg_temp.ok('S14 the open old retry is a try on the 20 Nov renewal bill', exists (select 1 from billing.payment_attempts pa
-    join billing.invoices i on i.id = pa.invoice join billing.subscriptions s on s.id = i.subscription
-    where pa.reference = 'psh_s14retry' and pa.status = 'unknown' and i.kind = 'renewal' and i.period_start = '2026-11-20 00:00+02'
-      and s.account = (select id from billing.accounts where user_id = u3)));
-  perform pg_temp.ok('S14 second run copies fresh, no duplicates',
-    (select count(*) = 1 from billing.seats s join billing.accounts a on a.id = s.account where a.user_id = u1)
-    and (select count(*) = 1 from billing.subscriptions s join billing.accounts a on a.id = s.account where a.user_id = u1));
-end $$;
+select coalesce(json_agg(r order by n), '[]') as phase1 from t_results r \gset
+rollback to savepoint phase1;
+delete from t_results;
+insert into t_results (label, pass, detail)
+select label, pass, detail from json_populate_recordset(null::t_results, :'phase1') order by n;
 
 -- ---------------------------------------------------------------------------
--- S15 old charges copied: a Paystack answer after the switch finds its reference.
--- Runs in a block that is rolled back, so phase 2 starts as S14 left it.
+-- S15 payments from before the switch-over, kept only as references (billing.old_references):
+--     a Paystack answer on a paid one refunds nothing; a dispute on one brings its bill and try
+--     back, so an open dispute blocks the delete and a lost one is owed. Rolled back.
 -- ---------------------------------------------------------------------------
 do $$
-declare
-  u6 uuid := gen_random_uuid(); lg6 uuid := gen_random_uuid(); u7 uuid := gen_random_uuid(); lg7 uuid := gen_random_uuid();
-  a6 uuid; a7 uuid; r jsonb; res jsonb := '[]'; x jsonb;
-  d0 date := current_date - 2; nb date;
+declare a uuid; r jsonb; res jsonb := '[]'; x jsonb;
 begin
   begin
-    nb := public.billing_step(d0, 'monthly', extract(day from d0)::int, 1);
-    set local session_replication_role = replica;
-    insert into auth.users (id, email, created_at) values (u6, 'copy6@state.test', now() - interval '3 days'),
-                                                          (u7, 'copy7@state.test', now() - interval '90 days');
-    insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values
-      (lg6, u6, 'copy6', 'active', 'login'), (lg7, u7, 'copy7', 'active', 'login');
-    insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused) values
-      (990001501, u6, lg6, 'A', false), (990001511, u7, lg7, 'B', false);
-    insert into private.plant_picks (user_id, plant_id, held, picked_at) values
-      (u6, 990001501, true, now() - interval '3 days'), (u7, 990001511, true, now() - interval '90 days');
-    insert into private.free_week_logins (sunsynk_username, user_id, started_at) values ('copy6', u6, now() - interval '3 days');
-    -- u6: on the card page for Home when the old payments stopped
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, plants)
-    values ('psh_s15start', u6, 'start', 'home', 'monthly', 99, 'pending', current_date, current_date, now() - interval '10 minutes', '{990001501}');
-    -- u7: Home monthly; the old run moved the billing date on and the renewal charge is open;
-    -- last month's renewal was paid
-    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at, card)
-    values (u7, 'home', 'monthly', extract(day from d0)::int, nb, 'active', now() - interval '90 days',
-            '{"authorization_code":"AUTH_copy7","last4":"0007","exp_month":"12","exp_year":"2030","reusable":true}');
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at) values
-      ('psh_s15renew', u7, 'renewal', 'home', 'monthly', 99, 'pending', d0, d0, now() - interval '1 hour', null),
-      ('psh_s15paid', u7, 'renewal', 'home', 'monthly', 99, 'paid', public.billing_step(d0, 'monthly', extract(day from d0)::int, -1),
-       d0 - 30, now() - interval '30 days', now() - interval '30 days');
-    set local session_replication_role = origin;
-
-    perform billing.copy_from_old();
-    perform billing.copy_from_old();                     -- step 6 copies again: the old charges allow it
-    insert into billing.switch_over (switched_at) values (now());
-    a6 := (select id from billing.accounts where user_id = u6);
-    a7 := (select id from billing.accounts where user_id = u7);
-
-    r := billing.apply_payment('psh_s15start', jsonb_build_object('status', 'success', 'reference', 'psh_s15start',
-           'amount', 9900, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now(),
-           'authorization', jsonb_build_object('authorization_code', 'AUTH_copy6', 'reusable', true, 'last4', '0006',
-                                               'exp_month', '12', 'exp_year', '2030', 'card_type', 'visa', 'signature', 'SIG_copy6'),
-           'customer', jsonb_build_object('email', 'copy6@state.test', 'customer_code', 'CUS_copy6')), now());
-    res := res || jsonb_build_object('l', 'S15 an old open start, paid after the switch: applied, not refunded',
-                                     'p', r->>'action' = 'applied' and r->>'kind' = 'purchase', 'd', r::text);
-    res := res || jsonb_build_object('l', 'S15 ... and the plan runs with its plant',
-      'p', exists (select 1 from billing.subscriptions where account = a6 and plan = 'home' and status = 'active')
-           and exists (select 1 from billing.seats where account = a6 and plant = 990001501 and closed_at is null));
-
-    r := billing.apply_payment('psh_s15renew', jsonb_build_object('status', 'success', 'reference', 'psh_s15renew',
-           'amount', 9900, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
-    res := res || jsonb_build_object('l', 'S15 an old open renewal, paid after the switch: applied to its own period',
-      'p', r->>'action' = 'applied' and r->>'kind' = 'renewal'
-           and exists (select 1 from billing.subscriptions where account = a7 and status = 'active'
-                          and period_start = d0::timestamp at time zone 'Africa/Johannesburg'
-                          and period_end = nb::timestamp at time zone 'Africa/Johannesburg'), 'd', r::text);
-
+    a := pg_temp.acct('s15');
+    insert into billing.old_references (reference, account, status, settled_at, kind, plan, interval, amount_minor) values
+      ('psh_s15paid', a, 'paid', now() - interval '30 days', 'renewal', 'home', 'month', 9900),
+      ('psh_s15old', a, 'paid', now() - interval '200 days', 'renewal', 'home', 'month', 9900);
     r := billing.apply_payment('psh_s15paid', jsonb_build_object('status', 'success', 'reference', 'psh_s15paid',
            'amount', 9900, 'currency', 'ZAR', 'gateway_response', 'Approved'), now());
     res := res || jsonb_build_object('l', 'S15 an old paid charge answered again: nothing refunded', 'p', r->>'action' = 'again', 'd', r::text);
-    res := res || jsonb_build_object('l', 'S15 no refund for any old reference',
+    res := res || jsonb_build_object('l', 'S15 no refund for an old reference',
       'p', not exists (select 1 from billing.refunds where reference like 'psh_s15%'));
+    r := billing.record_dispute('psh_s15old', 'charge.dispute.create', 'awaiting-merchant-feedback', false, null, now(), 'D_s15');
+    res := res || jsonb_build_object('l', 'S15 an old paid reference disputed: its bill and try come back',
+      'p', r->>'action' = 'recorded' and exists (select 1 from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
+             where pa.reference = 'psh_s15old' and pa.dispute_open and i.account = a and i.status = 'paid' and i.amount_minor = 9900),
+      'd', r::text);
+    begin
+      perform billing.delete_account(a, now());
+      res := res || jsonb_build_object('l', 'S15 ... the open dispute blocks the delete', 'p', false, 'd', 'deleted');
+    exception when others then
+      res := res || jsonb_build_object('l', 'S15 ... the open dispute blocks the delete', 'p', sqlerrm like '%dispute is open%', 'd', sqlerrm);
+    end;
+    r := billing.record_dispute('psh_s15old', 'charge.dispute.resolve', 'resolved', true, 9900, now(), 'D_s15');
+    res := res || jsonb_build_object('l', 'S15 ... lost: the amount is owed',
+      'p', r->>'action' = 'owed' and (select i.amount_owed_minor = 9900 from billing.invoices i join billing.payment_attempts pa
+             on pa.invoice = i.id where pa.reference = 'psh_s15old'), 'd', r::text);
     raise exception 's15 undo';
   exception when others then
     if sqlerrm <> 's15 undo' then res := res || jsonb_build_object('l', 'S15 runs', 'p', false, 'd', sqlerrm); end if;
@@ -780,578 +600,18 @@ begin
   end loop;
 end $$;
 
--- ---------------------------------------------------------------------------
--- S16 copy: what the old billing really writes (verify fixes 5-11). Rolled back like S15.
---   u8  past due: the old run moved next_billing_date on, then the renewal failed; a settle
---       page is open for it (fix 7)
---   u9  billing day 31, next date 30 Apr: the period starts 31 Mar (fix 8)
---   u10 last renewal paid, then reversed after the switch: that period ends (fix 6)
---   u11 two open upgrades to Family adding plant C: one bill; seats A, B and C (fixes 9, 10)
---   u12 an open switch to yearly on Home; u13 an open upgrade Home monthly -> Family yearly (fix 11)
---   u14 an old refund owed, an open dispute, a lost dispute owed, a stuck card-check refund (fix 5)
--- ---------------------------------------------------------------------------
-do $$
-declare
-  tz constant text := 'Africa/Johannesburg';
-  u8 uuid := gen_random_uuid(); u9 uuid := gen_random_uuid(); u10 uuid := gen_random_uuid(); u11 uuid := gen_random_uuid();
-  u12 uuid := gen_random_uuid(); u13 uuid := gen_random_uuid(); u14 uuid := gen_random_uuid();
-  l11 uuid := gen_random_uuid();
-  a uuid; s billing.subscriptions; bi billing.invoices; r jsonb; res jsonb := '[]'; x jsonb;
-  d8 date := current_date - 3; nb10 date := current_date + 20; nb12 date := current_date + 10;
-  old timestamptz := now() - interval '200 days';
-begin
-  begin
-    set local session_replication_role = replica;
-    insert into auth.users (id, email, created_at)
-    select u, 'copy-s16-' || n || '@state.test', now() - interval '300 days'
-      from unnest(array[u8, u9, u10, u11, u12, u13, u14]) with ordinality t (u, n);
-    -- u8: renewal due d8 failed; billing_renew had moved the date a month on first
-    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, past_due_since, created_at, card)
-    values (u8, 'home', 'monthly', extract(day from d8)::int, public.billing_step(d8, 'monthly', extract(day from d8)::int, 1),
-            'past_due', d8, old, '{"authorization_code":"AUTH_s16u8","last4":"0008","exp_month":"12","exp_year":"2030","reusable":true}');
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, error, due_on, created_on, created_at, settled_at, tried_on) values
-      ('psh_s16u8fail', u8, 'renewal', 'home', 'monthly', 99, 'failed', 'Insufficient Funds', d8, d8, now() - interval '3 days', now() - interval '3 days', d8),
-      ('psh_s16u8settle', u8, 'settle', 'home', 'monthly', 99, 'pending', null, d8, current_date, now() - interval '5 minutes', null, null);
-    -- u9: month end
-    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at)
-    values (u9, 'home', 'monthly', 31, '2027-04-30', 'active', old);
-    -- u10: paid renewal for the current period
-    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at)
-    values (u10, 'home', 'monthly', extract(day from nb10)::int, nb10, 'active', old);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at, tried_on)
-    values ('psh_s16u10', u10, 'renewal', 'home', 'monthly', 99, 'paid',
-            public.billing_step(nb10, 'monthly', extract(day from nb10)::int, -1), current_date - 10, now() - interval '10 days',
-            now() - interval '10 days', current_date - 10);
-    -- u11: Home with A and B read, C stopped; two card pages for Family adding C
-    insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values (l11, u11, 's16u11', 'active', 'login');
-    insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused) values
-      (990001611, u11, l11, 'A', false), (990001612, u11, l11, 'B', false), (990001613, u11, l11, 'C', true);
-    insert into private.plant_picks (user_id, plant_id, held, picked_at) values
-      (u11, 990001611, true, old), (u11, 990001612, true, old), (u11, 990001613, false, old);
-    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at)
-    values (u11, 'home', 'monthly', extract(day from nb12)::int, nb12, 'active', old);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, added, extra_plants, plants, amount, status, due_on, created_on, created_at, billing_date) values
-      ('psh_s16u11a', u11, 'upgrade', 'family', 'monthly', 0, 0, '{990001613}', 30, 'pending', current_date, current_date, now() - interval '20 minutes', nb12),
-      ('psh_s16u11b', u11, 'upgrade', 'family', 'monthly', 0, 0, '{990001613}', 30, 'pending', current_date, current_date, now() - interval '10 minutes', nb12);
-    -- u12: Home monthly, a year of Home bought from the billing date (0138's switch)
-    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at)
-    values (u12, 'home', 'monthly', extract(day from nb12)::int, nb12, 'active', old),
-           (u13, 'home', 'monthly', extract(day from nb12)::int, nb12, 'active', old);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, added, extra_plants, amount, status, due_on, created_on, created_at, billing_date) values
-      ('psh_s16u12', u12, 'switch', 'home', 'yearly', 0, 0, 990, 'pending', current_date, current_date, now() - interval '10 minutes', nb12),
-      -- u13: Family yearly from today, the unused month taken off (SOLAR-364)
-      ('psh_s16u13', u13, 'upgrade', 'family', 'yearly', 0, 0, 1960, 'pending', current_date, current_date, now() - interval '10 minutes', nb12);
-    -- u14: old charges, settled long ago, still open in some way
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, error, due_on, created_on, created_at, settled_at,
-                                         refund_status, refund_tries, refund_alerted, refunded_cents, dispute, dispute_lost, dispute_owed) values
-      ('psh_s16r1', u14, 'start', 'home', 'monthly', 99, 'paid', 'refund: paid after the account changed (stale; free, active)',
-       old::date, old::date, old, old, 'failed', 2, false, null, null, false, false),
-      ('psh_s16r2', u14, 'renewal', 'home', 'monthly', 99, 'paid', null, old::date, old::date, old, old,
-       null, 0, false, null, 'awaiting-merchant-feedback', false, false),
-      ('psh_s16r3', u14, 'renewal', 'home', 'monthly', 99, 'paid', null, old::date, old::date, old, old,
-       'done', 0, false, 9900, 'lost', true, true),
-      ('psh_s16r4', u14, 'card', 'home', 'monthly', 1, 'paid', 'refund failed: x', old::date, old::date, old, old,
-       'failed', 7, true, null, null, false, false),
-      ('psh_s16r5', u14, 'renewal', 'home', 'monthly', 99, 'paid', null, old::date, old::date, old, old,
-       null, 0, false, null, 'resolved', false, false);
-    set local session_replication_role = origin;
-
-    perform billing.copy_from_old();
-    perform billing.copy_from_old();                     -- a rerun: the copied refunds allow it
-    insert into billing.switch_over (switched_at) values (now());
-
-    -- fix 7
-    a := (select id from billing.accounts where user_id = u8);
-    s := pg_temp.sub(a);
-    res := res || jsonb_build_object('l', 'S16 past due: the unpaid period ends at past_due_since',
-      'p', s.status = 'past_due' and s.period_end = d8::timestamp at time zone tz
-           and s.period_start = public.billing_step(d8, 'monthly', extract(day from d8)::int, -1)::timestamp at time zone tz,
-      'd', s.period_start || ' to ' || s.period_end);
-    select inv.* into bi from billing.invoices inv join billing.payment_attempts pa on pa.invoice = inv.id where pa.reference = 'psh_s16u8settle';
-    res := res || jsonb_build_object('l', 'S16 ... the open settle page pays that period''s renewal bill',
-      'p', bi.kind = 'renewal' and bi.subscription = s.id and bi.period_start = s.period_end and bi.status = 'open'
-           and exists (select 1 from billing.payment_attempts where invoice = bi.id and gateway_response = 'copied: past due at the switch-over'),
-      'd', bi.kind || ' ' || coalesce(bi.period_start::text, 'no period'));
-    r := billing.apply_payment('psh_s16u8settle', jsonb_build_object('status', 'success', 'reference', 'psh_s16u8settle',
-           'amount', 9900, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
-    s := pg_temp.sub(a);
-    res := res || jsonb_build_object('l', 'S16 ... paid after the switch: active, the next date where the old billing had it',
-      'p', r->>'action' = 'applied' and s.status = 'active'
-           and s.period_end = public.billing_step(d8, 'monthly', extract(day from d8)::int, 1)::timestamp at time zone tz, 'd', r::text);
-    -- fix 8
-    s := pg_temp.sub((select id from billing.accounts where user_id = u9));
-    res := res || jsonb_build_object('l', 'S16 billing day 31: the period before 30 Apr starts 31 Mar',
-      'p', s.period_start = '2027-03-31 00:00+02' and s.period_end = '2027-04-30 00:00+02', 'd', s.period_start::text);
-    -- fix 6
-    a := (select id from billing.accounts where user_id = u10);
-    r := billing.apply_payment('psh_s16u10', jsonb_build_object('status', 'reversed', 'reference', 'psh_s16u10'), now());
-    res := res || jsonb_build_object('l', 'S16 an old paid renewal reversed after the switch: its period ends',
-      'p', r->>'action' = 'plan_ended' and (pg_temp.sub(a)).status = 'ended', 'd', r::text);
-    -- fixes 9, 10
-    a := (select id from billing.accounts where user_id = u11);
-    res := res || jsonb_build_object('l', 'S16 two open upgrades to the same plan: one bill',
-      'p', (select count(distinct invoice) = 1 and count(*) = 2 from billing.payment_attempts where reference like 'psh_s16u11%'));
-    res := res || jsonb_build_object('l', 'S16 ... with the seats open now and the plant it adds',
-      'p', (select plants = '{990001611,990001612,990001613}' from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id
-             where pa.reference = 'psh_s16u11b'));
-    r := billing.apply_payment('psh_s16u11b', jsonb_build_object('status', 'success', 'reference', 'psh_s16u11b',
-           'amount', 3000, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
-    res := res || jsonb_build_object('l', 'S16 ... paid: A and B still read, C starts',
-      'p', r->>'action' = 'applied' and (select array_agg(plant order by plant) = '{990001611,990001612,990001613}'
-                                          from billing.seats where account = a and closed_at is null), 'd', r::text);
-    -- fix 11
-    a := (select id from billing.accounts where user_id = u12);
-    s := pg_temp.sub(a);
-    res := res || jsonb_build_object('l', 'S16 an open switch to yearly: a yearly bill, never a yearly amount on a monthly one',
-      'p', not exists (select 1 from billing.invoices where kind = 'upgrade' and interval = 'month' and amount_minor >= 99000)
-           and (select i.interval = 'year' and i.amount_minor = 99000 from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id
-                 where pa.reference = 'psh_s16u12'));
-    r := billing.apply_payment('psh_s16u12', jsonb_build_object('status', 'success', 'reference', 'psh_s16u12',
-           'amount', 99000, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
-    res := res || jsonb_build_object('l', 'S16 ... paid: Home yearly, to a year after its billing date',
-      'p', r->>'action' = 'applied' and (pg_temp.sub(a)).interval = 'year' and (pg_temp.sub(a)).plan = 'home'
-           and (pg_temp.sub(a)).period_end = (public.billing_step(nb12, 'yearly', extract(day from nb12)::int, 1))::timestamp at time zone tz
-           and (pg_temp.sub(a)).billing_day = s.billing_day, 'd', r::text || ' ' || (pg_temp.sub(a)).period_end);
-    a := (select id from billing.accounts where user_id = u13);
-    r := billing.apply_payment('psh_s16u13', jsonb_build_object('status', 'success', 'reference', 'psh_s16u13',
-           'amount', 196000, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
-    s := pg_temp.sub(a);
-    res := res || jsonb_build_object('l', 'S16 an open upgrade to Family yearly, paid: Family yearly from the payment',
-      'p', r->>'action' = 'applied' and s.plan = 'family' and s.interval = 'year' and s.period_start = now()
-           and s.period_end = billing.add_period(now(), 'year', extract(day from now() at time zone tz)::int, tz)
-           and s.amount_minor = 199000, 'd', r::text || ' ' || s.interval || ' ' || s.period_end);
-    -- fix 5
-    a := (select id from billing.accounts where user_id = u14);
-    res := res || jsonb_build_object('l', 'S16 an old refund not done: owed again, retried',
-      'p', exists (select 1 from billing.refunds where reference = 'psh_s16r1' and reason = 'stale' and status = 'due' and account = a)
-           and billing.run(now())->'refunds' @> (select jsonb_build_array(jsonb_build_object('reference', 'psh_s16r1'))));
-    res := res || jsonb_build_object('l', 'S16 a refund failed 7 times: left for hello@, not sent',
-      'p', exists (select 1 from billing.refunds where reference = 'psh_s16r4' and reason = 'manual' and status = 'failed'));
-    res := res || jsonb_build_object('l', 'S16 an open dispute, at any age: open on its try',
-      'p', (select dispute_open from billing.payment_attempts where reference = 'psh_s16r2')
-           and not exists (select 1 from billing.payment_attempts where reference = 'psh_s16r5'));   -- resolved, old: not copied
-    res := res || jsonb_build_object('l', 'S16 a lost dispute still owed: owed on its bill',
-      'p', (select amount_owed_minor = 9900 from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s16r3'));
-    res := res || jsonb_build_object('l', 'S16 ... so the account may not be deleted',
-      'p', pg_temp.st(a, now(), 'may_delete') = 'false' and pg_temp.st(a, now(), 'owed_minor') = '9900');
-    res := res || jsonb_build_object('l', 'S16 no email for what the old billing already handled',
-      'p', not exists (select 1 from billing.outbox o join billing.accounts ac on ac.id = o.account where ac.user_id = u14));
-    raise exception 's16 undo';
-  exception when others then
-    if sqlerrm <> 's16 undo' then res := res || jsonb_build_object('l', 'S16 runs', 'p', false, 'd', sqlerrm); end if;
-  end;
-  for x in select * from jsonb_array_elements(res) loop
-    perform pg_temp.ok(x->>'l', (x->>'p')::boolean, x->>'d');
-  end loop;
-end $$;
-
--- ---------------------------------------------------------------------------
--- S17 copy: verify 2 fixes, from what the old billing really writes. Rolled back like S15.
---   w1  plan ended (plan free, ended_at), a restart's card page still open; w1b ended on day 15
---       with its last saved-card renewal never answered (fix 1)
---   w2  a switch to yearly already paid (0138: next_period yearly, prepaid_on = next date);
---       w2c the same with a cancel booked in the paid year (fix 2)
---   w6  open upgrades monthly -> yearly: Family yearly (w6), Home yearly (w6b) (fix 6)
---   w7  a start Paystack refunded while still pending (0197) (fix 7)
---   w8  a renewal paid 200 days ago (fix 8)
---   w9  two open upgrades to Family with different plants and amounts (fix 9)
---   w14 past due with a failed renewal: the copy's counts (fix 14)
--- ---------------------------------------------------------------------------
-do $$
-declare
-  tz constant text := 'Africa/Johannesburg';
-  w1 uuid := gen_random_uuid(); w2 uuid := gen_random_uuid(); w2c uuid := gen_random_uuid(); w6 uuid := gen_random_uuid();
-  w6b uuid := gen_random_uuid(); w7 uuid := gen_random_uuid(); w8 uuid := gen_random_uuid(); w9 uuid := gen_random_uuid();
-  w14 uuid := gen_random_uuid(); w1b uuid := gen_random_uuid(); l1 uuid := gen_random_uuid(); l9 uuid := gen_random_uuid(); l7 uuid := gen_random_uuid();
-  a uuid; s billing.subscriptions; bi billing.invoices; r jsonb; cp jsonb; res jsonb := '[]'; x jsonb;
-  nb date := current_date + 10; bd int := extract(day from current_date + 10)::int; d14 date := current_date - 3;
-  old timestamptz := now() - interval '300 days';
-begin
-  begin
-    set local session_replication_role = replica;
-    insert into auth.users (id, email, created_at)
-    select u, 'copy-s17-' || n || '@state.test', old
-      from unnest(array[w1, w2, w2c, w6, w6b, w7, w8, w9, w14, w1b]) with ordinality t (u, n);
-    insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind) values
-      (l1, w1, 's17w1', 'active', 'login'), (l9, w9, 's17w9', 'active', 'login'), (l7, w7, 's17w7', 'active', 'login');
-    insert into public.plant_users (plant_id, user_id, account_id, plant_name, paused) values
-      (990001701, w1, l1, 'W1', true), (990001771, w7, l7, 'W7', false),
-      (990001791, w9, l9, 'A', false), (990001792, w9, l9, 'B', false), (990001793, w9, l9, 'C', true), (990001794, w9, l9, 'D', true);
-    insert into private.plant_picks (user_id, plant_id, held, picked_at) values
-      (w9, 990001791, true, old), (w9, 990001792, true, old), (w9, 990001793, false, old), (w9, 990001794, false, old);
-    -- w1: Home ended 10 days ago (0212: plan free, ended_at); its last renewal paid; a restart page open
-    insert into private.billing (user_id, plan, state, ended_at, created_at) values (w1, 'free', 'active', now() - interval '10 days', old);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at, plants) values
-      ('psh_s17w1paid', w1, 'renewal', 'home', 'monthly', 99, 'paid', current_date - 40, current_date - 40, now() - interval '40 days', now() - interval '40 days', null),
-      ('psh_s17w1start', w1, 'start', 'home', 'monthly', 99, 'pending', current_date, current_date, now() - interval '10 minutes', null, '{990001701}');
-    insert into private.billing (user_id, plan, state, ended_at, created_at) values (w1b, 'free', 'active', now() - interval '2 days', old);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at, tried_on) values
-      ('psh_s17w1bpaid', w1b, 'renewal', 'home', 'monthly', 99, 'paid', current_date - 47, current_date - 47, now() - interval '47 days', now() - interval '47 days', current_date - 47),
-      ('psh_s17w1bren', w1b, 'renewal', 'home', 'monthly', 99, 'pending', current_date - 17, current_date - 3, now() - interval '3 days', null, current_date - 3);
-    -- w2, w2c: Home monthly, the yearly switch paid (0145's switch branch); w2c cancelled in the paid year
-    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, next_period, next_plan, prepaid_on, state, created_at) values
-      (w2, 'home', 'monthly', bd, nb, 'yearly', null, nb, 'active', old),
-      (w2c, 'home', 'monthly', bd, nb, 'yearly', 'free', nb, 'active', old);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, added, extra_plants, amount, status, due_on, created_on, created_at, settled_at, billing_date) values
-      ('psh_s17w2sw', w2, 'switch', 'home', 'yearly', 0, 0, 990, 'paid', current_date - 5, current_date - 5, now() - interval '5 days', now() - interval '5 days', nb),
-      ('psh_s17w2csw', w2c, 'switch', 'home', 'yearly', 0, 0, 990, 'paid', current_date - 5, current_date - 5, now() - interval '5 days', now() - interval '5 days', nb);
-    -- w6: an open upgrade to Family yearly; w6b: an open switch to Home yearly
-    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at) values
-      (w6, 'home', 'monthly', bd, nb, 'active', old), (w6b, 'home', 'monthly', bd, nb, 'active', old),
-      (w9, 'home', 'monthly', bd, nb, 'active', old);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, added, extra_plants, amount, status, due_on, created_on, created_at, billing_date) values
-      ('psh_s17w6', w6, 'upgrade', 'family', 'yearly', 0, 0, 1960, 'pending', current_date, current_date, now() - interval '10 minutes', nb),
-      ('psh_s17w6b', w6b, 'switch', 'home', 'yearly', 0, 0, 990, 'pending', current_date, current_date, now() - interval '10 minutes', nb);
-    -- w7: a start page Paystack refunded before it reported the payment (billing_charge_refund_event)
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, plants,
-                                         refunds, refund_status, refunded_at, refunded_cents) values
-      ('psh_s17w7', w7, 'start', 'home', 'monthly', 99, 'pending', current_date, current_date, now() - interval '30 minutes', '{990001771}',
-       '{"RF_s17w7": 9900}', 'done', now() - interval '5 minutes', 9900);
-    -- w8: a renewal settled long ago
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at) values
-      ('psh_s17w8', w8, 'renewal', 'home', 'monthly', 99, 'paid', (now() - interval '200 days')::date, (now() - interval '200 days')::date,
-       now() - interval '200 days', now() - interval '200 days');
-    -- w9: Home with A, B read; a Family page adding C, then one adding C and D a day's proration later
-    insert into private.billing_charges (reference, user_id, kind, plan, period, added, extra_plants, plants, amount, status, due_on, created_on, created_at, billing_date) values
-      ('psh_s17w9a', w9, 'upgrade', 'family', 'monthly', 0, 0, '{990001793}', 30, 'pending', current_date, current_date, now() - interval '20 minutes', nb),
-      ('psh_s17w9b', w9, 'upgrade', 'family', 'monthly', 0, 0, '{990001793,990001794}', 28, 'pending', current_date, current_date, now() - interval '10 minutes', nb);
-    -- w14: past due (the old run moved the date on), its renewal failed
-    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, past_due_since, created_at)
-    values (w14, 'home', 'monthly', extract(day from d14)::int, public.billing_step(d14, 'monthly', extract(day from d14)::int, 1), 'past_due', d14, old);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, error, due_on, created_on, created_at, settled_at, tried_on) values
-      ('psh_s17w14', w14, 'renewal', 'home', 'monthly', 99, 'failed', 'Insufficient Funds', d14, d14, now() - interval '3 days', now() - interval '3 days', d14);
-    set local session_replication_role = origin;
-
-    perform billing.copy_from_old();
-    cp := billing.copy_from_old();
-    insert into billing.switch_over (switched_at) values (now());
-
-    -- fix 14 (before any payment moves a try)
-    res := res || jsonb_build_object('l', 'S17 the copy counts its own past-due tries apart from failed old charges',
-      'p', (cp->>'past_due_seeded')::int = (select count(*) from billing.subscriptions where status = 'past_due')
-           and (cp->>'old_charges')::int + (cp->>'past_due_seeded')::int = (select count(*) from billing.payment_attempts),
-      'd', cp::text);
-    -- fix 1
-    a := (select id from billing.accounts where user_id = w1);
-    res := res || jsonb_build_object('l', 'S17 plan ended, a restart page open: copied, its plan row ended',
-      'p', (pg_temp.sub(a)).status = 'ended');
-    r := billing.apply_payment('psh_s17w1start', jsonb_build_object('status', 'success', 'reference', 'psh_s17w1start',
-           'amount', 9900, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
-    res := res || jsonb_build_object('l', 'S17 ... paid after the switch: Home again',
-      'p', r->>'action' = 'applied' and r->>'kind' = 'purchase' and (pg_temp.sub(a)).status = 'active', 'd', r::text);
-    a := (select id from billing.accounts where user_id = w1b);
-    r := billing.apply_payment('psh_s17w1bren', jsonb_build_object('status', 'success', 'reference', 'psh_s17w1bren',
-           'amount', 9900, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
-    res := res || jsonb_build_object('l', 'S17 an ended plan''s open renewal: copied, paid after the switch is refunded',
-      'p', (pg_temp.sub(a)).status = 'ended' and r->>'action' = 'refund', 'd', r::text);
-    -- fix 2
-    a := (select id from billing.accounts where user_id = w2);
-    s := pg_temp.sub(a);
-    res := res || jsonb_build_object('l', 'S17 a paid switch to yearly: Home yearly to a year after the billing date',
-      'p', s.status = 'active' and s.interval = 'year' and s.plan = 'home'
-           and s.period_end = public.billing_step(nb, 'yearly', bd, 1)::timestamp at time zone tz
-           and (select interval = 'year' and amount_minor = s.amount_minor from billing.prices where id = s.price)
-           and s.next_price is null and not s.cancel_at_period_end,
-      'd', s.interval || ' ' || s.period_end || ' ' || coalesce(s.next_price::text, 'no next'));
-    a := (select id from billing.accounts where user_id = w2c);
-    s := pg_temp.sub(a);
-    res := res || jsonb_build_object('l', 'S17 ... a cancel booked in the paid year ends at the year''s end',
-      'p', s.interval = 'year' and s.cancel_at_period_end and s.next_price is null
-           and s.period_end = public.billing_step(nb, 'yearly', bd, 1)::timestamp at time zone tz,
-      'd', s.interval || ' ' || s.period_end);
-    -- fix 6
-    a := (select id from billing.accounts where user_id = w6);
-    r := billing.apply_payment('psh_s17w6', jsonb_build_object('status', 'success', 'reference', 'psh_s17w6',
-           'amount', 196000, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
-    s := pg_temp.sub(a);
-    select i.* into bi from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s17w6';
-    res := res || jsonb_build_object('l', 'S17 a copied upgrade to Family yearly: its bill names the yearly period',
-      'p', r->>'action' = 'applied' and s.interval = 'year' and bi.period_start = s.period_start and bi.period_end = s.period_end,
-      'd', bi.period_start || ' to ' || bi.period_end || ' vs ' || s.period_start || ' to ' || s.period_end);
-    a := (select id from billing.accounts where user_id = w6b);
-    r := billing.apply_payment('psh_s17w6b', jsonb_build_object('status', 'success', 'reference', 'psh_s17w6b',
-           'amount', 99000, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
-    s := pg_temp.sub(a);
-    select i.* into bi from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s17w6b';
-    res := res || jsonb_build_object('l', 'S17 ... a copied switch to Home yearly: the same',
-      'p', r->>'action' = 'applied' and s.interval = 'year' and bi.period_start = s.period_start and bi.period_end = s.period_end,
-      'd', bi.period_start || ' to ' || bi.period_end || ' vs ' || s.period_start || ' to ' || s.period_end);
-    -- fix 7
-    a := (select id from billing.accounts where user_id = w7);
-    res := res || jsonb_build_object('l', 'S17 a refund on a still-pending old charge is copied',
-      'p', exists (select 1 from billing.refunds where reference = 'psh_s17w7' and status = 'processed'));
-    r := billing.apply_payment('psh_s17w7', jsonb_build_object('status', 'success', 'reference', 'psh_s17w7',
-           'amount', 9900, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
-    res := res || jsonb_build_object('l', 'S17 ... the success that follows is not applied, and no second refund',
-      'p', r->>'action' = 'refund' and r->>'reason' = 'stale' and not exists (select 1 from billing.subscriptions where account = a)
-           and (select count(*) = 1 from billing.refunds where reference = 'psh_s17w7'), 'd', r::text);
-    -- verify 3 fix 2: the refund already on record is not handed back, so nothing is sent again
-    res := res || jsonb_build_object('l', 'S17 ... and no refund id back to send', 'p', r ? 'refund' and r->'refund' = 'null', 'd', r::text);
-    -- fix 8
-    r := billing.apply_payment('psh_s17w8', jsonb_build_object('status', 'success', 'reference', 'psh_s17w8',
-           'amount', 9900, 'currency', 'ZAR', 'gateway_response', 'Approved'), now());
-    res := res || jsonb_build_object('l', 'S17 an old paid reference past 120 days sent again: already applied, not refunded',
-      'p', r->>'action' = 'again' and not exists (select 1 from billing.refunds where reference = 'psh_s17w8'), 'd', r::text);
-    -- fix 9
-    a := (select id from billing.accounts where user_id = w9);
-    res := res || jsonb_build_object('l', 'S17 two open upgrades that differ: the older bill void, the newer open',
-      'p', (select i.status = 'void' from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s17w9a')
-           and (select i.status = 'open' and i.amount_minor = 2800 and i.plants = '{990001791,990001792,990001793,990001794}'
-                  from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s17w9b'));
-    r := billing.apply_payment('psh_s17w9a', jsonb_build_object('status', 'success', 'reference', 'psh_s17w9a',
-           'amount', 3000, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
-    res := res || jsonb_build_object('l', 'S17 ... the older page paid: refunded', 'p', r->>'action' = 'refund', 'd', r::text);
-    r := billing.apply_payment('psh_s17w9b', jsonb_build_object('status', 'success', 'reference', 'psh_s17w9b',
-           'amount', 2800, 'currency', 'ZAR', 'gateway_response', 'Approved', 'paid_at', now()), now());
-    res := res || jsonb_build_object('l', 'S17 ... the newer page paid: Family with A, B, C and D',
-      'p', r->>'action' = 'applied' and (pg_temp.sub(a)).plan = 'family'
-           and (select array_agg(plant order by plant) = '{990001791,990001792,990001793,990001794}'
-                  from billing.seats where account = a and closed_at is null), 'd', r::text);
-    -- fix 2: nothing is charged on the billing date of the paid year
-    r := billing.run((nb + 1)::timestamp at time zone tz + interval '10 hours');
-    res := res || jsonb_build_object('l', 'S17 the paid year: no charge on its billing date',
-      'p', not exists (select 1 from jsonb_array_elements(r->'charges') c join billing.invoices i on i.id = (c->>'invoice')::uuid
-                        join billing.accounts ac on ac.id = i.account where ac.user_id in (w2, w2c)), 'd', r::text);
-    raise exception 's17 undo';
-  exception when others then
-    if sqlerrm <> 's17 undo' then res := res || jsonb_build_object('l', 'S17 runs', 'p', false, 'd', sqlerrm); end if;
-  end;
-  for x in select * from jsonb_array_elements(res) loop
-    perform pg_temp.ok(x->>'l', (x->>'p')::boolean, x->>'d');
-  end loop;
-end $$;
-
--- ---------------------------------------------------------------------------
--- S18 copy: verify 3 fixes 4-6. Rolled back like S15.
---   y4  a failed refund with no error text on a paid start: by hand, never sent automatically (fix 4)
---   y5  a paid switch to yearly: the year starts on its billing date; an upgrade now charges
---       that year's difference, no more (fix 5)
---   y6  the same, its switch payment disputed and lost after the switch: the paid year ends (fix 6)
---   y6b a renewal paid 200 days ago (kept only as a reference) disputed after the switch: the
---       open dispute blocks the delete, a lost one is owed (fix 6)
--- ---------------------------------------------------------------------------
-do $$
-declare
-  tz constant text := 'Africa/Johannesburg';
-  y4 uuid := gen_random_uuid(); y5 uuid := gen_random_uuid(); y6 uuid := gen_random_uuid(); y6b uuid := gen_random_uuid();
-  a uuid; s billing.subscriptions; bi billing.invoices; r jsonb; res jsonb := '[]'; x jsonb; hy int; fy int;
-  nb date := current_date + 10; bd int := extract(day from current_date + 10)::int;
-  old timestamptz := now() - interval '300 days';
-begin
-  begin
-    set local session_replication_role = replica;
-    insert into auth.users (id, email, created_at)
-    select u, 'copy-s18-' || n || '@state.test', old from unnest(array[y4, y5, y6, y6b]) with ordinality t (u, n);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at,
-                                         refund_status, refund_tries) values
-      ('psh_s18y4', y4, 'start', 'home', 'monthly', 99, 'paid', current_date - 5, current_date - 5, now() - interval '5 days',
-       now() - interval '5 days', 'failed', 1);
-    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, next_period, prepaid_on, state, created_at) values
-      (y5, 'home', 'monthly', bd, nb, 'yearly', nb, 'active', old), (y6, 'home', 'monthly', bd, nb, 'yearly', nb, 'active', old);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, added, extra_plants, amount, status, due_on, created_on, created_at, settled_at, billing_date) values
-      ('psh_s18y5sw', y5, 'switch', 'home', 'yearly', 0, 0, 990, 'paid', current_date - 5, current_date - 5, now() - interval '5 days', now() - interval '5 days', nb),
-      ('psh_s18y6sw', y6, 'switch', 'home', 'yearly', 0, 0, 990, 'paid', current_date - 5, current_date - 5, now() - interval '5 days', now() - interval '5 days', nb);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at) values
-      ('psh_s18y6b', y6b, 'renewal', 'home', 'monthly', 99, 'paid', (now() - interval '200 days')::date, (now() - interval '200 days')::date,
-       now() - interval '200 days', now() - interval '200 days');
-    set local session_replication_role = origin;
-
-    perform billing.copy_from_old();
-    insert into billing.switch_over (switched_at) values (now()) on conflict do nothing;
-
-    -- fix 4
-    res := res || jsonb_build_object('l', 'S18 a failed refund with no error text: by hand, not sent',
-      'p', (select reason = 'manual' and status = 'failed' from billing.refunds where reference = 'psh_s18y4'),
-      'd', (select reason || ' ' || status from billing.refunds where reference = 'psh_s18y4'));
-    -- fix 5
-    a := (select id from billing.accounts where user_id = y5);
-    s := pg_temp.sub(a);
-    res := res || jsonb_build_object('l', 'S18 a paid year starts on its billing date and ends a year later',
-      'p', s.period_start = nb::timestamp at time zone tz
-           and s.period_end = public.billing_step(nb, 'yearly', bd, 1)::timestamp at time zone tz,
-      'd', s.period_start || ' to ' || s.period_end);
-    hy := (select amount_minor from billing.prices where id = s.price);
-    fy := (billing.price_keeping_offer('family', 'ZA', 'year', s.offer, now())).amount_minor;
-    r := billing.upgrade(a, 'family', 0, '{}', now());
-    res := res || jsonb_build_object('l', 'S18 ... an upgrade before it starts charges that year''s difference, no more',
-      'p', (r->>'amount_minor')::int = fy - hy, 'd', r::text || ' want ' || (fy - hy));
-    -- fix 6
-    a := (select id from billing.accounts where user_id = y6);
-    select i.* into bi from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s18y6sw';
-    res := res || jsonb_build_object('l', 'S18 the paid switch''s bill is the paid year',
-      'p', bi.subscription = (pg_temp.sub(a)).id and bi.period_start = (pg_temp.sub(a)).period_start
-           and bi.period_end = (pg_temp.sub(a)).period_end, 'd', coalesce(bi.period_start::text, 'no period'));
-    r := billing.record_dispute('psh_s18y6sw', 'charge.dispute.resolve', 'resolved', true, 99000, now(), 'D_s18y6');
-    res := res || jsonb_build_object('l', 'S18 ... lost after the switch: the paid year ends',
-      'p', r->>'action' = 'plan_ended' and (pg_temp.sub(a)).status = 'ended', 'd', r::text);
-    a := (select id from billing.accounts where user_id = y6b);
-    r := billing.record_dispute('psh_s18y6b', 'charge.dispute.create', 'awaiting-merchant-feedback', false, null, now(), 'D_s18y6b');
-    res := res || jsonb_build_object('l', 'S18 an old paid reference disputed: its bill and try come back',
-      'p', r->>'action' = 'recorded' and exists (select 1 from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
-             where pa.reference = 'psh_s18y6b' and pa.dispute_open and i.account = a and i.status = 'paid' and i.amount_minor = 9900),
-      'd', r::text);
-    begin
-      perform billing.delete_account(a, now());
-      res := res || jsonb_build_object('l', 'S18 ... the open dispute blocks the delete', 'p', false, 'd', 'deleted');
-    exception when others then
-      res := res || jsonb_build_object('l', 'S18 ... the open dispute blocks the delete', 'p', sqlerrm like '%dispute is open%', 'd', sqlerrm);
-    end;
-    r := billing.record_dispute('psh_s18y6b', 'charge.dispute.resolve', 'resolved', true, 9900, now(), 'D_s18y6b');
-    res := res || jsonb_build_object('l', 'S18 ... lost: the amount is owed',
-      'p', r->>'action' = 'owed' and (select i.amount_owed_minor = 9900 from billing.invoices i join billing.payment_attempts pa
-             on pa.invoice = i.id where pa.reference = 'psh_s18y6b'), 'd', r::text);
-    raise exception 's18 undo';
-  exception when others then
-    if sqlerrm <> 's18 undo' then res := res || jsonb_build_object('l', 'S18 runs', 'p', false, 'd', sqlerrm); end if;
-  end;
-  for x in select * from jsonb_array_elements(res) loop
-    perform pg_temp.ok(x->>'l', (x->>'p')::boolean, x->>'d');
-  end loop;
-end $$;
-
--- ---------------------------------------------------------------------------
--- S19 copy: verify 4 fix 1. Rolled back like S15.
---   z1  a yearly plan whose renewal was paid 200 days ago: copied, on that plan and year;
---       lost in a dispute after the switch, the year ends
---   z2  a yearly Family plan upgraded 150 days ago: the upgrade is on that year; reversed, it ends
---   z3  a refund asked 200 days ago on a renewal, no error text: copied, still asked
--- ---------------------------------------------------------------------------
-do $$
-declare
-  tz constant text := 'Africa/Johannesburg';
-  z1 uuid := gen_random_uuid(); z2 uuid := gen_random_uuid(); z3 uuid := gen_random_uuid();
-  a uuid; bi billing.invoices; r jsonb; res jsonb := '[]'; x jsonb;
-  nb date := current_date + 165; bd int := extract(day from current_date + 165)::int;
-  ys date := public.billing_step(current_date + 165, 'yearly', extract(day from current_date + 165)::int, -1);
-  old timestamptz := now() - interval '400 days';
-begin
-  begin
-    set local session_replication_role = replica;
-    insert into auth.users (id, email, created_at)
-    select u, 'copy-s19-' || n || '@state.test', old from unnest(array[z1, z2, z3]) with ordinality t (u, n);
-    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at) values
-      (z1, 'home', 'yearly', bd, nb, 'active', old), (z2, 'family', 'yearly', bd, nb, 'active', old);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at) values
-      ('psh_s19z1', z1, 'renewal', 'home', 'yearly', 990, 'paid', ys, ys, ys::timestamp at time zone tz + interval '1 hour',
-       ys::timestamp at time zone tz + interval '1 hour'),
-      ('psh_s19z2', z2, 'upgrade', 'family', 'yearly', 500, 'paid', current_date - 150, current_date - 150,
-       now() - interval '150 days', now() - interval '150 days');
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at,
-                                         refund_status) values
-      ('psh_s19z3', z3, 'renewal', 'home', 'monthly', 99, 'paid', (now() - interval '200 days')::date, (now() - interval '200 days')::date,
-       now() - interval '200 days', now() - interval '200 days', 'asked');
-    set local session_replication_role = origin;
-
-    perform billing.copy_from_old();
-    insert into billing.switch_over (switched_at) values (now()) on conflict do nothing;
-
-    a := (select id from billing.accounts where user_id = z1);
-    select i.* into bi from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s19z1';
-    res := res || jsonb_build_object('l', 'S19 a yearly renewal paid 200 days ago: on that plan and year',
-      'p', bi.subscription = (pg_temp.sub(a)).id and bi.period_start = (pg_temp.sub(a)).period_start
-           and bi.period_end = (pg_temp.sub(a)).period_end, 'd', coalesce(bi.period_start::text, 'not copied'));
-    r := billing.record_dispute('psh_s19z1', 'charge.dispute.resolve', 'resolved', true, 99000, now(), 'D_s19z1');
-    res := res || jsonb_build_object('l', 'S19 ... lost in a dispute: the year ends',
-      'p', r->>'action' = 'plan_ended' and (pg_temp.sub(a)).status = 'ended', 'd', r::text);
-    a := (select id from billing.accounts where user_id = z2);
-    select i.* into bi from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s19z2';
-    res := res || jsonb_build_object('l', 'S19 an upgrade paid 150 days into a yearly plan: on that year',
-      'p', bi.subscription = (pg_temp.sub(a)).id and bi.period_start = (pg_temp.sub(a)).period_start,
-      'd', coalesce(bi.period_start::text, 'not copied'));
-    r := billing.apply_payment('psh_s19z2', jsonb_build_object('status', 'reversed', 'reference', 'psh_s19z2'), now());
-    res := res || jsonb_build_object('l', 'S19 ... reversed: the year ends',
-      'p', r->>'action' = 'plan_ended' and (pg_temp.sub(a)).status = 'ended', 'd', r::text);
-    res := res || jsonb_build_object('l', 'S19 a refund asked 200 days ago, no error text: copied, still asked',
-      'p', (select status = 'pending' from billing.refunds where reference = 'psh_s19z3'),
-      'd', coalesce((select reason || ' ' || status from billing.refunds where reference = 'psh_s19z3'), 'not copied'));
-    raise exception 's19 undo';
-  exception when others then
-    if sqlerrm <> 's19 undo' then res := res || jsonb_build_object('l', 'S19 runs', 'p', false, 'd', sqlerrm); end if;
-  end;
-  for x in select * from jsonb_array_elements(res) loop
-    perform pg_temp.ok(x->>'l', (x->>'p')::boolean, x->>'d');
-  end loop;
-end $$;
-
--- ---------------------------------------------------------------------------
--- S20 copy: verify 5 fixes 1, 3, 5. Rolled back like S15.
---   v1  a yearly start paid 200 days ago, its card page opened at 23:58 and paid at 00:02:
---       the year starts the day it was paid; copied, on that plan and year (fix 1)
---   v3  a yearly renewal pending at the freeze: the renewal paid a year before it is copied (fix 3)
---   v5  a monthly-to-yearly switch paid 200 days ago, on its billing date: copied, on that year (fix 5)
--- ---------------------------------------------------------------------------
-do $$
-declare
-  tz constant text := 'Africa/Johannesburg';
-  v1 uuid := gen_random_uuid(); v3 uuid := gen_random_uuid(); v5 uuid := gen_random_uuid();
-  a uuid; bi billing.invoices; res jsonb := '[]'; x jsonb;
-  paid_day date := current_date - 200;                       -- the day after the page opened
-  nb1 date := public.billing_step(current_date - 200, 'yearly', extract(day from current_date - 200)::int, 1);
-  due3 date := current_date - 2;                             -- the pending renewal
-  ys5 date := current_date - 200; nb5 date := public.billing_step(current_date - 200, 'yearly', extract(day from current_date - 200)::int, 1);
-  old timestamptz := now() - interval '500 days';
-begin
-  begin
-    set local session_replication_role = replica;
-    insert into auth.users (id, email, created_at)
-    select u, 'copy-s20-' || n || '@state.test', old from unnest(array[v1, v3, v5]) with ordinality t (u, n);
-    insert into private.billing (user_id, plan, period, billing_day, next_billing_date, state, created_at) values
-      (v1, 'home', 'yearly', extract(day from paid_day)::int, nb1, 'active', old),
-      (v3, 'home', 'yearly', extract(day from due3)::int,
-       public.billing_step(due3, 'yearly', extract(day from due3)::int, 1), 'active', old),
-      (v5, 'home', 'yearly', extract(day from ys5)::int, nb5, 'active', old);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at, billing_date) values
-      ('psh_s20v1', v1, 'start', 'home', 'yearly', 990, 'paid', paid_day - 1, paid_day - 1,
-       (paid_day - 1)::timestamp at time zone tz + interval '23 hours 58 minutes',
-       paid_day::timestamp at time zone tz + interval '2 minutes', null),
-      ('psh_s20v3old', v3, 'renewal', 'home', 'yearly', 990, 'paid', (due3 - interval '1 year')::date, (due3 - interval '1 year')::date,
-       (due3 - interval '1 year')::timestamp at time zone tz + interval '1 hour',
-       (due3 - interval '1 year')::timestamp at time zone tz + interval '1 hour', null),
-      ('psh_s20v5', v5, 'switch', 'home', 'yearly', 990, 'paid', ys5 - 10, ys5 - 10,
-       (ys5 - 10)::timestamp at time zone tz + interval '9 hours', (ys5 - 10)::timestamp at time zone tz + interval '9 hours', ys5);
-    insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at) values
-      ('psh_s20v3', v3, 'renewal', 'home', 'yearly', 990, 'pending', due3, due3, due3::timestamp at time zone tz + interval '1 hour');
-    set local session_replication_role = origin;
-
-    perform billing.copy_from_old();
-    insert into billing.switch_over (switched_at) values (now()) on conflict do nothing;
-
-    a := (select id from billing.accounts where user_id = v1);
-    select i.* into bi from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s20v1';
-    res := res || jsonb_build_object('l', 'S20 a yearly start paid across midnight 200 days ago: on that plan and year',
-      'p', bi.subscription = (pg_temp.sub(a)).id and bi.period_start = (pg_temp.sub(a)).period_start
-           and bi.period_start = paid_day::timestamp at time zone tz and bi.period_end = (pg_temp.sub(a)).period_end,
-      'd', coalesce(bi.period_start::text || ' to ' || bi.period_end::text, 'not copied'));
-    res := res || jsonb_build_object('l', 'S20 a yearly renewal pending at the freeze: the one paid a year before is copied',
-      'p', exists (select 1 from billing.payment_attempts where reference = 'psh_s20v3old' and status = 'success'),
-      'd', coalesce((select status from billing.payment_attempts where reference = 'psh_s20v3old'), 'not copied'));
-    a := (select id from billing.accounts where user_id = v5);
-    select i.* into bi from billing.invoices i join billing.payment_attempts pa on pa.invoice = i.id where pa.reference = 'psh_s20v5';
-    res := res || jsonb_build_object('l', 'S20 a switch to yearly paid 200 days ago: on that plan and year',
-      'p', bi.subscription = (pg_temp.sub(a)).id and bi.period_start = (pg_temp.sub(a)).period_start
-           and bi.period_end = (pg_temp.sub(a)).period_end,
-      'd', coalesce(bi.period_start::text, 'not copied'));
-    raise exception 's20 undo';
-  exception when others then
-    if sqlerrm <> 's20 undo' then res := res || jsonb_build_object('l', 'S20 runs', 'p', false, 'd', sqlerrm); end if;
-  end;
-  for x in select * from jsonb_array_elements(res) loop
-    perform pg_temp.ok(x->>'l', (x->>'p')::boolean, x->>'d');
-  end loop;
-end $$;
 
 -- ===========================================================================
 -- Phase 2: money paths, through the real commands. No network: Paystack's answers
 -- are made here (pg_temp.tx_ok and pg_temp.answer) and handed to apply_payment.
--- Runs after S14, which empties the billing tables (copy_from_old refuses once
--- billing.invoices has rows).
+-- Phase 1's rows are rolled back before it, so the billing tables start empty.
 -- ===========================================================================
 create function pg_temp.tx_ok(p_ref text, p_card text default 'AUTH_main', p_amount bigint default null,
                               p_currency text default 'ZAR') returns jsonb language sql as $$
   select jsonb_build_object('status', 'success', 'reference', p_ref, 'currency', p_currency, 'gateway_response', 'Approved',
     'amount', coalesce(p_amount, (select amount_minor from billing.payment_attempts where reference = p_ref)),
     'authorization', jsonb_build_object('authorization_code', p_card, 'reusable', true, 'last4', right(p_card, 4),
-                                        'exp_month', '12', 'exp_year', '2030', 'card_type', 'visa', 'signature', 'SIG_' || p_card),
+                                        'exp_month', '12', 'exp_year', (pg_temp.y() + 4)::text, 'card_type', 'visa', 'signature', 'SIG_' || p_card),
     'customer', jsonb_build_object('email', 'owner@state.test', 'customer_code', 'CUS_' || p_card))
 $$;
 create function pg_temp.answer(p_ref text, p_how text, p_at timestamptz, p_card text default 'AUTH_main') returns jsonb language sql as $$
@@ -1736,14 +996,14 @@ begin
   perform pg_temp.eqt('P8 leap year: 31 Jan -> 29 Feb', billing.add_period('2028-01-31 10:00+02', 'month', 31, 'Africa/Johannesburg')::text, '2028-02-29 10:00+02');
   perform pg_temp.eqt('P8 yearly 29 Feb -> 28 Feb', billing.add_period('2028-02-29 10:00+02', 'year', 29, 'Africa/Johannesburg')::text, '2029-02-28 10:00+02');
   perform pg_temp.eqt('P8 local day, not UTC: 1 Mar 00:30 local', billing.add_period('2027-03-01 00:30+02', 'month', 1, 'Africa/Johannesburg')::text, '2027-04-01 00:30+02');
-  perform pg_temp.link(a, 'p8', '{990010801}', '2027-01-31 10:00+02');
-  perform pg_temp.buy(a, 'home', 'month', '{990010801}', '2027-01-31 10:00+02', 'AUTH_p8');
+  perform pg_temp.link(a, 'p8', '{990010801}', (pg_temp.y() + 1 || '-01-31 10:00+02')::timestamptz);
+  perform pg_temp.buy(a, 'home', 'month', '{990010801}', (pg_temp.y() + 1 || '-01-31 10:00+02')::timestamptz, 'AUTH_p8');
   s := pg_temp.sub(a);
-  perform pg_temp.ok('P8 bought 31 Jan: billing day 31, due 28 Feb', s.billing_day = 31 and s.period_end = '2027-02-28 10:00+02');
-  perform pg_temp.job(a, '2027-02-28 10:05+02', 'ok');
-  perform pg_temp.ok('P8 renewed: due 31 Mar', (pg_temp.sub(a)).period_end = '2027-03-31 10:00+02');
-  perform pg_temp.job(a, '2027-03-31 10:05+02', 'ok');
-  perform pg_temp.ok('P8 renewed: due 30 Apr', (pg_temp.sub(a)).period_end = '2027-04-30 10:00+02');
+  perform pg_temp.ok('P8 bought 31 Jan: billing day 31, due 28 Feb', s.billing_day = 31 and s.period_end = (pg_temp.y() + 1 || '-02-28 10:00+02')::timestamptz);
+  perform pg_temp.job(a, (pg_temp.y() + 1 || '-02-28 10:05+02')::timestamptz, 'ok');
+  perform pg_temp.ok('P8 renewed: due 31 Mar', (pg_temp.sub(a)).period_end = (pg_temp.y() + 1 || '-03-31 10:00+02')::timestamptz);
+  perform pg_temp.job(a, (pg_temp.y() + 1 || '-03-31 10:05+02')::timestamptz, 'ok');
+  perform pg_temp.ok('P8 renewed: due 30 Apr', (pg_temp.sub(a)).period_end = (pg_temp.y() + 1 || '-04-30 10:00+02')::timestamptz);
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1953,7 +1213,7 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- P14 paying in the free week ends the week; copy refuses once payments exist
+-- P14 paying in the free week ends the week
 -- ---------------------------------------------------------------------------
 do $$
 declare a uuid := pg_temp.acct('p14'); r jsonb;
@@ -1965,7 +1225,6 @@ begin
   perform pg_temp.eq('P14 paid in the week: active', r->>'state', 'active');
   perform pg_temp.eqt('P14 week ends on payment', r->>'trial_ends_at', pg_temp.t(2));
   perform pg_temp.eq('P14 second plant seated with the payment', r->>'chosen', '2');
-  perform pg_temp.fails('P14 copy refuses once payments exist', 'select billing.copy_from_old()', 'already hold payments');
 end $$;
 
 
@@ -1989,6 +1248,8 @@ begin
     not has_function_privilege('authenticated', 'public.billing_v2(text, jsonb)', 'execute')
     and not has_function_privilege('anon', 'public.billing_v2(text, jsonb)', 'execute')
     and not has_function_privilege('authenticated', 'billing.apply_payment(text, jsonb, timestamptz)', 'execute'));
+  perform pg_temp.ok('P15 the billing function (service_role) may call it',
+    has_function_privilege('service_role', 'public.billing_v2(text, jsonb)', 'execute'));
 end $$;
 
 -- ===========================================================================
@@ -2303,11 +1564,18 @@ $$;
 create function pg_temp.alert(p_kind text, p_ref text, p_at timestamptz) returns boolean language sql as $$
   select exists (select 1 from jsonb_array_elements(billing.alerts(p_at)) a where a->>'kind' = p_kind and a->>'ref' = p_ref)
 $$;
+-- the backlog alert's waiting count for one queue; no alert reads 0
+create function pg_temp.waiting(p_ref text, p_at timestamptz) returns int language sql as $$
+  select coalesce((select (a->>'waiting')::int from jsonb_array_elements(billing.alerts(p_at)) a
+                    where a->>'kind' = 'outbox_backlog' and a->>'ref' = p_ref), 0)
+$$;
 
 do $$
 begin
-  perform billing.switch_on(pg_temp.t(0));
-  -- earlier blocks queued fetches with no stored login behind them: start clean
+  perform pg_temp.ok('R0 the switch row is there (0252)', exists (select 1 from billing.switch_over));
+  update billing.switch_over set switched_at = pg_temp.t(0);
+  -- earlier blocks queued billing emails and fetches with no stored login behind them: start clean
+  update billing.outbox set status = 'dropped', drop_reason = 'test reset' where status = 'queued';
   update billing.history_fetches set status = 'dropped', drop_reason = 'replaced', finished_at = pg_temp.t(0)
    where status in ('queued', 'running');
   perform pg_temp.ok('R0 switched on', billing.is_live());
@@ -2426,9 +1694,6 @@ begin
 
   -- the late payment lands: the plan restarts, the kept plant is fetched again
   uid := (select user_id from billing.accounts where id = c);
-  insert into public.email_queue (user_id, kind, key, due_at) values (uid, 'winback', 'winback:state-test-late:' || uid, pg_temp.t(37));
-  perform pg_temp.ok('O0 after the switch an old billing email is not queued',
-    not exists (select 1 from public.email_queue where key = 'winback:state-test-late:' || uid));
   -- one sent before the switch
   set local session_replication_role = replica;
   insert into public.email_queue (user_id, kind, key, due_at) values (uid, 'winback', 'winback:state-test:' || uid, pg_temp.t(37));
@@ -2568,7 +1833,7 @@ end $$;
 -- R6 the poller's plant list; the alert list; heartbeats; the door's rights
 -- ---------------------------------------------------------------------------
 do $$
-declare g uuid := pg_temp.acct('r6'); l uuid; r jsonb; v bigint;
+declare g uuid := pg_temp.acct('r6'); l uuid; r jsonb; v bigint; w int;
 begin
   l := pg_temp.link(g, 'r6', '{990030601,990030602}', pg_temp.t(0));
   perform pg_temp.choose(g, '{990030601,990030602}', pg_temp.t(0));
@@ -2585,9 +1850,12 @@ begin
 
   insert into billing.refunds (reference, reason, status, tries, last_error, created_at, updated_at)
   values ('R6-REF', 'stale', 'failed', 3, 'boom', pg_temp.t(1), pg_temp.t(1));
-  insert into public.email_queue (to_email, kind, key, due_at) values ('late@state.test', 'test', 'r6-late', pg_temp.t(0));
+  w := pg_temp.waiting('billing_outbox', pg_temp.t(2));
+  insert into billing.outbox (account, key, dedupe_key, not_before, created_at)
+  values (g, (select key from billing.outbox_kinds limit 1), 'r6-late', pg_temp.t(0), pg_temp.t(0));
   perform pg_temp.ok('R6 failed refund: alert', pg_temp.alert('refund_failed', 'R6-REF', pg_temp.t(2)));
-  perform pg_temp.ok('R6 email waiting over an hour: alert', pg_temp.alert('outbox_backlog', 'email_queue', pg_temp.t(2)));
+  perform pg_temp.eq('R6 a billing email waiting over an hour: one more in the alert',
+    pg_temp.waiting('billing_outbox', pg_temp.t(2))::text, (w + 1)::text);
   perform pg_temp.ok('R6 billing run never seen: quiet after 26 h', pg_temp.alert('job_quiet', 'billing-run', pg_temp.t(2)));
   perform public.billing_jobs('heartbeat', jsonb_build_object('job', 'billing-run', 'result', '{}'::jsonb));
   perform pg_temp.ok('R6 heartbeat through the door', exists (select 1 from billing.job_heartbeats where job = 'billing-run'));
@@ -2713,60 +1981,6 @@ begin
   perform pg_temp.ok('RQ24 not within the hour', not pg_temp.alert('history_unprotected', '990062401', pg_temp.t(36.1) + interval '30 minutes'));
   perform pg_temp.ok('RQ24 history with no seat for over an hour: alert',
     pg_temp.alert('history_unprotected', '990062401', pg_temp.t(36.1) + interval '2 hours'));
-end $$;
-
--- ---------------------------------------------------------------------------
--- SW phase 3 review fixes (switch-over)
--- ---------------------------------------------------------------------------
-do $$
-begin
-  perform pg_temp.fails('SW27 switch_on refuses an empty copy', 'delete from billing.accounts; select billing.switch_on()', 'run billing.copy_from_old');
-end $$;
--- 25 (phase 4 fix 22: behaviour, not the function's text): pg_cron is made inside the rolled-back test
-do $$
-begin
-  execute 'create extension if not exists pg_cron';
-  perform billing.switch_on(pg_temp.t(0));
-  perform pg_temp.ok('SW25 switch_on schedules the daily billing run',
-    exists (select 1 from cron.job where jobname = 'billing-run' and command like '%billing/run%'));
-  perform pg_temp.ok('SW25 ... and the history job', exists (select 1 from cron.job where jobname = 'billing-history'));
-  -- the delete job waits for step 7, when the switch can no longer be undone (go-live review, Sol)
-  perform pg_temp.ok('SW25 no delete job until start_delete_job', not exists (select 1 from cron.job where jobname = 'billing-delete'));
-  perform billing.start_delete_job();
-  perform pg_temp.ok('SW25 start_delete_job schedules it', exists (select 1 from cron.job where jobname = 'billing-delete'));
-  -- an app tab opened before the switch: its old billing writes would land in tables nothing
-  -- reads (a cancel there, then charged anyway): refused once switched (final review, Neon)
-  perform pg_temp.ok('SW25 old billing writes closed to signed-in users',
-    not has_function_privilege('authenticated', 'public.api_billing_change(text,text,bigint[])', 'execute')
-    and not has_function_privilege('authenticated', 'public.api_billing_extras(integer,bigint[])', 'execute')
-    and not has_function_privilege('authenticated', 'public.api_billing_keep(bigint)', 'execute')
-    and not has_function_privilege('authenticated', 'public.api_billing_keep_set(bigint[])', 'execute')
-    and not has_function_privilege('authenticated', 'public.api_billing_start_keep(bigint[])', 'execute')
-    and not has_function_privilege('authenticated', 'public.api_plant_pick(bigint[])', 'execute'));
-exception when others then perform pg_temp.ok('SW25 runs', false, sqlerrm);
-end $$;
--- 26: the win-back lookup reads the old charges before the switch and the new tables after it
-do $$
-declare a uuid := pg_temp.acct('sw26'); u uuid; sw timestamptz; ref text; r record; mail bigint;
-begin
-  u := (select user_id from billing.accounts where id = a);
-  select switched_at into sw from billing.switch_over;
-  delete from billing.switch_over;                                         -- before the switch
-  insert into public.email_queue (user_id, to_email, kind, key, status, sent_at)
-  values (u, 'sw26@state.test', 'winback', 'winback:sw26', 'sent', pg_temp.t(1)) returning id into mail;
-  insert into private.billing_charges (reference, user_id, kind, plan, period, amount, status, due_on, created_on, created_at, settled_at)
-  values ('old_sw26', u, 'start', 'home', 'monthly', 4900, 'paid', pg_temp.t(2)::date, pg_temp.t(2)::date, pg_temp.t(2), pg_temp.t(2));
-  select * into r from public.winback_return('old_sw26');
-  perform pg_temp.eq('SW26 before the switch: from the old charges', r.email_id::text, mail::text);
-  insert into billing.switch_over (switched_at) values (sw);               -- after it
-  perform pg_temp.ok('SW26 after the switch: the old charges are not read', not exists (select 1 from public.winback_return('old_sw26')));
-  perform pg_temp.link(a, 'sw26', '{990072601}', pg_temp.t(3));
-  perform pg_temp.buy(a, 'home', 'month', '{990072601}', pg_temp.t(3));
-  ref := (select pa.reference from billing.payment_attempts pa join billing.invoices i on i.id = pa.invoice
-           where i.account = a and pa.status = 'success' limit 1);
-  select * into r from public.winback_return(ref);
-  perform pg_temp.eq('SW26 after the switch: from the new tables', r.email_id::text, mail::text);
-exception when others then perform pg_temp.ok('SW26 runs', false, sqlerrm);
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -2947,7 +2161,6 @@ begin
   perform pg_temp.eq('O5 delete-soon on day 14', pg_temp.guard(a, 'history_delete_soon', pe + interval '14 days 2 hours'), 'send');
   perform pg_temp.eqt('O5 it names the delete date', to_timestamp((pg_temp.ob(a, 'history_delete_soon')).ref::bigint)::text,
     pe + interval '30 days');
-  perform billing.switch_on(pg_temp.t(0));
   update billing.plants set history_purged_at = pe + interval '30 days 1 hour' where id = 990040501;
   perform pg_temp.eq('O5 history deleted email', pg_temp.guard(a, 'history_deleted', pe + interval '30 days 2 hours'), 'send');
   perform pg_temp.buy(a, 'home', 'month', '{990040501}', pe + interval '30 days 3 hours');
@@ -3015,9 +2228,8 @@ begin
   perform pg_temp.ok('O10 nothing chosen: the need-a-hand choose email waits', private.pick_waiting(u));
   perform pg_temp.ok('O10 a second login in none: refused', not public.link_login_allowed(u, 'o10-other'));
   perform pg_temp.ok('O10 the same login again: allowed', public.link_login_allowed(u, 'O10'));
-  perform pg_temp.ok('O10 the old halves are not callable from the app',
-    not has_function_privilege('authenticated', 'public.api_account_delete_old()', 'execute')
-    and not has_function_privilege('authenticated', 'public.link_login_allowed_old(uuid, text)', 'execute'));
+  perform pg_temp.ok('O10 the old halves are gone',
+    to_regprocedure('public.api_account_delete_old()') is null and to_regprocedure('public.link_login_allowed_old(uuid, text)') is null);
 end $$;
 
 -- O8 the sender's batch: every queued row either goes or is dropped with a reason
@@ -3132,7 +2344,7 @@ begin
   perform pg_temp.eq('U2 no card: payment due email queued', pg_temp.guard(d, 'payment_due', pe + interval '1 hour'), 'send');
   perform pg_temp.ok('U2 no card: no "last try" email', pg_temp.ob(d, 'payment_failed') is null);
   insert into billing.payment_methods (account, provider, auth_ref, reusable, last4, exp_month, exp_year, active, created_at)
-  values (d, 'paystack', 'AUTH_u2d_new', true, '0204', 12, 2030, true, pe + interval '2 hours');
+  values (d, 'paystack', 'AUTH_u2d_new', true, '0204', 12, pg_temp.y() + 4, true, pe + interval '2 hours');
   perform pg_temp.eq('U2 a card saved since: the due email drops', pg_temp.guard(d, 'payment_due', pe + interval '3 hours'), 'card replaced');
 exception when others then perform pg_temp.ok('U2 runs', false, sqlerrm);
 end $$;
@@ -3330,7 +2542,7 @@ end $$;
 -- P4 phase 4 review fixes. Each block records its own failure (also an error), so a run
 -- against the code before the fixes lists every one of them.
 -- ---------------------------------------------------------------------------
--- 2: the edge functions read the chosen plants from the database (0260 drops plant_users.paused)
+-- 2: the edge functions read the chosen plants from the database (0252 dropped plant_users.paused)
 do $$
 declare a uuid := pg_temp.acct('p402'); u uuid;
 begin
@@ -3681,33 +2893,8 @@ begin
 exception when others then perform pg_temp.ok('FR11 runs', false, sqlerrm);
 end $$;
 
--- FR17 the switch-over pause: first no new old payment, then no old billing write at all
-do $$
-declare ok boolean := true;
-begin
-  perform billing.pause_old('new_payments');
-  perform pg_temp.fails('FR17 new_payments: no old payment starts',
-    'insert into private.billing_charges (reference) values (''psh_paused'')', 'paused for an update');
-  begin
-    update private.billing_charges set status = status where false;      -- settling open ones goes on
-  exception when others then ok := false;
-  end;
-  perform pg_temp.ok('FR17 new_payments: open payments can still be settled', ok);
-  perform billing.pause_old('all');
-  perform pg_temp.fails('FR17 all: no old billing write', 'update private.billing set plan = plan where false', 'paused for an update');
-  perform pg_temp.fails('FR17 all: no old plant pick', 'delete from private.plant_picks where false', 'paused for an update');
-  perform billing.resume_old();
-  ok := true;
-  begin
-    update private.billing set plan = plan where false;
-  exception when others then ok := false;
-  end;
-  perform pg_temp.ok('FR17 resumed: old writes go through', ok);
-exception when others then perform pg_temp.ok('FR17 runs', false, sqlerrm);
-end $$;
-
 -- ===========================================================================
--- Verify review fixes (each block fails without its fix; S14-S16 hold the copy's)
+-- Verify review fixes (each block fails without its fix)
 -- ===========================================================================
 -- V1 a replaced card page Paystack still calls pending after 24 h stays pending and blocks
 --    the saved-card charge (fix 1)
@@ -3728,36 +2915,6 @@ begin
   perform pg_temp.ok('V1 Paystack says abandoned: the saved card is charged',
     billing.begin_attempt(i2, 'saved_card', pg_temp.t(5) + interval '26 hours') ? 'reference');
 exception when others then perform pg_temp.ok('V1 runs', false, sqlerrm);
-end $$;
-
--- V3 an old write holds the freeze lock to its commit; pause_old takes it exclusive, so it
---    waits for writes under way (fix 3). V4 the pause check needs no right on billing (fix 4)
-do $$
-declare ok boolean := true; held text;
-begin
-  update private.plant_week set started_at = started_at where false;
-  select string_agg(mode, ',') into held from pg_locks where locktype = 'advisory' and pid = pg_backend_pid()
-     and classid = 7 and objid = 641 and granted;
-  perform pg_temp.ok('V3 an old write takes the shared freeze lock', held like '%ShareLock%', held);
-  perform billing.pause_old('new_payments');
-  perform pg_temp.ok('V3 pause_old takes it exclusive', exists (select 1 from pg_locks where locktype = 'advisory'
-    and pid = pg_backend_pid() and classid = 7 and objid = 641 and mode = 'ExclusiveLock' and granted));
-  perform billing.resume_old();
-  perform pg_temp.ok('V4 the pause check runs as its owner, with an empty search path',
-    (select prosecdef and proconfig = array['search_path=""'] from pg_proc where oid = 'private.old_billing_paused()'::regprocedure));
-  perform pg_temp.ok('V4 billing.old_pause closed to the app roles',
-    not has_table_privilege('authenticated', 'billing.old_pause', 'select') and not has_table_privilege('anon', 'billing.old_pause', 'select')
-    and not has_table_privilege('public', 'billing.old_pause', 'select'));
-  revoke all on table billing.old_pause from service_role;
-  grant usage on schema private to service_role;                         -- as an edge function's write would have it
-  set local role service_role;
-  begin
-    update private.plant_week set started_at = started_at where false;
-  exception when others then ok := false; held := sqlerrm;
-  end;
-  reset role;
-  perform pg_temp.ok('V4 service_role writes an old table while nothing is paused', ok, held);
-exception when others then reset role; perform pg_temp.ok('V3 runs', false, sqlerrm);
 end $$;
 
 -- V12 a share removed in the inverter cloud: reading stops, the seat and the history stay (fix 12)
@@ -3839,7 +2996,7 @@ exception when others then perform pg_temp.ok('V17 runs', false, sqlerrm);
 end $$;
 
 -- ===========================================================================
--- Verify 2 fixes (each block fails without its fix; S17 holds the copy's)
+-- Verify 2 fixes (each block fails without its fix)
 -- ===========================================================================
 -- W3 a share removed: the plant leaves what the user sees and what the emails read; it
 --    comes back with the share (fix 3). W4 it keeps its name and may stay chosen (fix 4)
@@ -3939,73 +3096,68 @@ exception when others then perform pg_temp.ok('W13 runs', false, sqlerrm);
 end $$;
 
 -- X1 after the switch the old plant wipe does nothing: a plant another account holds, or one
---    with a payment on its way, keeps its history through a share release and a relink (verify 3 fix 1)
+--    with a payment on its way, keeps its history through a share release and a relink (verify 3 fix 1).
+--    The direct releases run in a block that is rolled back; then the owners remove the share
+--    through the app (api_link_remove): their seats close and the history still stays.
 do $$
 declare a uuid := pg_temp.acct('x1a'); b uuid := pg_temp.acct('x1b'); c uuid := pg_temp.acct('x1c');
-        ua uuid; uc uuid; sh uuid; lb uuid; inv uuid;
+        ua uuid; uc uuid; sh uuid; lb uuid; inv uuid; res jsonb := '[]'; x jsonb;
 begin
   select user_id into ua from billing.accounts where id = a;
   select user_id into uc from billing.accounts where id = c;
   sh := pg_temp.share_login();
-  -- 990120101: shared to A; B holds it through its own login and plan (no plant_users row of B's)
+  -- 990120101: shared to A, who chooses it; B holds it through its own login and plan (no plant_users row of B's)
   perform public.share_claim_live(ua, sh, 990120101, 'Gran');
+  perform pg_temp.choose(a, '{990120101}', now() - interval '2 days');
   lb := pg_temp.link(b, 'x1b', '{990120101}', now() - interval '2 days');
   perform pg_temp.stored(lb);
   perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
   perform pg_temp.choose(b, '{990120101}', now() - interval '1 day');
   perform pg_temp.agg(990120101, now() - interval '1 hour');
-  -- 990120102: shared to C, who is paying for it now (card page open)
+  -- 990120102: shared to C, who chooses it and is paying for it now (card page open)
   perform public.share_claim_live(uc, sh, 990120102, 'Aunt');
+  perform pg_temp.choose(c, '{990120102}', now() - interval '2 days');
   perform pg_temp.agg(990120102, now() - interval '1 hour');
   inv := (billing.start_checkout(c, 'home', 'month', 0, '{990120102}', now())->>'invoice')::uuid;
   perform billing.begin_attempt(inv, 'card_page', now());
   perform pg_temp.ok('X1 protected by B', (billing.plant_state(990120101, now())->>'protected')::boolean);
+  perform pg_temp.ok('X1 A and C each hold a seat on their shared plant', (select count(*) = 2 from billing.seats
+    where (account, plant) in ((a, 990120101), (c, 990120102)) and closed_at is null));
 
-  perform private.share_release(sh, ua);
-  perform private.share_release(sh, uc);
-  perform pg_temp.ok('X1 share release queues no old wipe',
-    not exists (select 1 from private.plant_purge where plant_id in (990120101, 990120102)));
-  -- a tombstone left from before the switch is not acted on either
-  insert into private.plant_purge (plant_id) values (990120101), (990120102) on conflict do nothing;
+  begin
+    perform private.share_release(sh, ua);
+    perform private.share_release(sh, uc);
+    res := res || jsonb_build_object('l', 'X1 share release queues no old wipe',
+      'p', not exists (select 1 from private.plant_purge where plant_id in (990120101, 990120102)));
+    -- a tombstone left from before the switch is not acted on either
+    insert into private.plant_purge (plant_id) values (990120101), (990120102) on conflict do nothing;
+    perform public.plant_users_upsert((select user_id from billing.accounts where id = b), lb,
+      '[{"plant_id": 990120101, "plant_name": "Gran"}, {"plant_id": 990120102, "plant_name": "Aunt"}]');
+    res := res || jsonb_build_object('l', 'X1 relink: B''s plant keeps its history', 'p', pg_temp.has_agg(990120101));
+    res := res || jsonb_build_object('l', 'X1 relink: the plant being paid for keeps its history', 'p', pg_temp.has_agg(990120102));
+    res := res || jsonb_build_object('l', 'X1 the old purge does nothing',
+      'p', private.purge_plant(990120102) is null and pg_temp.has_agg(990120102));
+    raise exception 'x1 undo';
+  exception when others then
+    if sqlerrm <> 'x1 undo' then res := res || jsonb_build_object('l', 'X1 direct releases run', 'p', false, 'd', sqlerrm); end if;
+  end;
+  for x in select * from jsonb_array_elements(res) loop
+    perform pg_temp.ok(x->>'l', (x->>'p')::boolean, x->>'d');
+  end loop;
+
+  perform set_config('request.jwt.claims', json_build_object('sub', ua, 'role', 'authenticated')::text, true);
+  perform public.api_link_remove(sh);
+  perform set_config('request.jwt.claims', json_build_object('sub', uc, 'role', 'authenticated')::text, true);
+  perform public.api_link_remove(sh);
+  perform set_config('request.jwt.claims', '', true);
+  perform pg_temp.ok('X1 removed in the app: both seats closed as login_removed', (select count(*) = 2 from billing.seats
+    where (account, plant) in ((a, 990120101), (c, 990120102)) and close_reason = 'login_removed' and closed_at is not null));
+  perform pg_temp.ok('X1 ... B''s plant keeps its history', pg_temp.has_agg(990120101));
+  perform pg_temp.ok('X1 ... the plant being paid for keeps its history', pg_temp.has_agg(990120102));
   perform public.plant_users_upsert((select user_id from billing.accounts where id = b), lb,
     '[{"plant_id": 990120101, "plant_name": "Gran"}, {"plant_id": 990120102, "plant_name": "Aunt"}]');
-  perform pg_temp.ok('X1 relink: B''s plant keeps its history', pg_temp.has_agg(990120101));
-  perform pg_temp.ok('X1 relink: the plant being paid for keeps its history', pg_temp.has_agg(990120102));
-  perform pg_temp.ok('X1 the old purge does nothing', private.purge_plant(990120102) is null and pg_temp.has_agg(990120102));
-exception when others then perform pg_temp.ok('X1 runs', false, sqlerrm);
-end $$;
-
--- X2 the other old delete paths stand down after the switch (sweep): the stop wipe, the
---    day-37 unpaid delete, the old run's drop; switch_on turns their jobs off
-do $$
-declare a uuid := pg_temp.acct('x2'); ua uuid; l uuid; r jsonb;
-begin
-  select user_id into ua from billing.accounts where id = a;
-  l := pg_temp.link(a, 'x2', '{990120201}', now() - interval '2 days');
-  perform pg_temp.stored(l);
-  insert into public.plant_users (plant_id, user_id, account_id, plant_name) values (990120201, ua, l, 'X2');
-  perform pg_temp.agg(990120201, now() - interval '1 hour');
-  update public.plant_users set paused = true where plant_id = 990120201;
-  perform pg_temp.ok('X2 stop wipe does nothing', private.plant_wipe_readings(990120201) = 0 and pg_temp.has_agg(990120201));
-  r := private.unpaid_delete();
-  perform pg_temp.ok('X2 unpaid delete does nothing', r = '{"live": true}' and pg_temp.has_agg(990120201), r::text);
-  perform private.billing_drop_plant(ua, 990120201);
-  perform pg_temp.ok('X2 old drop keeps the link and the login',
-    exists (select 1 from public.plant_users where plant_id = 990120201 and user_id = ua)
-    and exists (select 1 from private.sunsynk_accounts where id = l));
-exception when others then perform pg_temp.ok('X2 runs', false, sqlerrm);
-end $$;
-do $$
-declare j text;
-begin
-  execute 'create extension if not exists pg_cron';
-  foreach j in array array['plant-purge', 'plant-wipe', 'unpaid-delete', 'free-trim', 'free-week-mail', 'offer-end-mail', 'card-expiry-mail'] loop
-    perform cron.schedule(j, '0 3 * * *', 'select 1');
-  end loop;
-  perform billing.switch_on(pg_temp.t(0));
-  perform pg_temp.eq('X2 switch_on turns the old jobs off', (select string_agg(jobname, ',') from cron.job
-    where jobname in ('plant-purge', 'plant-wipe', 'unpaid-delete', 'free-trim', 'free-week-mail', 'offer-end-mail', 'card-expiry-mail')), null);
-exception when others then perform pg_temp.ok('X2 jobs runs', false, sqlerrm);
+  perform pg_temp.ok('X1 ... and after B relinks', pg_temp.has_agg(990120101) and pg_temp.has_agg(990120102));
+exception when others then perform set_config('request.jwt.claims', '', true); perform pg_temp.ok('X1 runs', false, sqlerrm);
 end $$;
 
 -- X3 a report on a plant the account no longer reaches (share removed) is not queued; one it
@@ -4084,8 +3236,16 @@ begin
 exception when others then perform pg_temp.ok('X9 runs', false, sqlerrm);
 end $$;
 
--- Y2 a queued report is checked again when sent: a plant let go, a plant gone from its
---    login, then the plan ended: those reports are dropped, the rest go (verify 4 fix 2)
+-- the sender's drops for these keys, as key=reason
+create function pg_temp.dropped(p_user uuid, p_keys text[]) returns text language sql as $$
+  select string_agg(q.key || '=' || o.drop_reason, ',' order by q.key) from msg.outbox o join public.email_queue q on q.id = o.event_id
+   where q.user_id = p_user and q.key = any (p_keys) and o.status = 'dropped'
+$$;
+
+-- Y2 a queued report is checked again when sent (msg_email_take, bulk lane): a plant let go, a
+--    plant gone from its login, then the plan ended: those reports are dropped with a reason, the
+--    rest go (verify 4 fix 2). Fresh rows for each take: a taken row is leased, so a second take
+--    would miss it either way.
 do $$
 declare b uuid := pg_temp.acct('y2'); ub uuid; l uuid; got text;
 begin
@@ -4098,13 +3258,21 @@ begin
   insert into public.email_queue (user_id, plant_id, kind, key) values
     (ub, 990130201, 'report_week', 'report_week:y2a'), (ub, 990130202, 'report_week', 'report_week:y2b'),
     (ub, 990130203, 'report_week', 'report_week:y2c'), (ub, null, 'report_month', 'report_month:y2');
+  perform pg_temp.eq('Y2 the reports wait in the bulk lane', (select count(*)::text from msg.outbox o join public.email_queue q
+    on q.id = o.event_id where q.user_id = ub and o.lane = 'bulk' and o.status = 'queued' and o.not_before <= now()), '4');
   update billing.seats set closed_at = now(), close_reason = 'switched' where account = b and plant = 990130202;
   update billing.login_plants set gone_at = now() where login = l and plant = 990130203;
-  select string_agg(c.key, ',' order by c.key) into got from public.email_claim(100000, true) c where c.user_id = ub;
+  select string_agg(t.key, ',' order by t.key) into got from public.msg_email_take(100000, 'bulk') t where t.user_id = ub;
   perform pg_temp.eq('Y2 let go and gone from its login: dropped when sent', got, 'report_month:y2,report_week:y2a');
+  perform pg_temp.eq('Y2 ... each with its reason', pg_temp.dropped(ub, '{report_week:y2b,report_week:y2c}'),
+    'report_week:y2b=report not wanted,report_week:y2c=report not wanted');
+  insert into public.email_queue (user_id, plant_id, kind, key) values
+    (ub, 990130201, 'report_week', 'report_week:y2d'), (ub, null, 'report_month', 'report_month:y2e');
   perform billing.end_sub((pg_temp.sub(b)).id, now(), 'test', now(), 'test');
-  select string_agg(c.key, ',' order by c.key) into got from public.email_claim(100000, true) c where c.user_id = ub;
+  select string_agg(t.key, ',' order by t.key) into got from public.msg_email_take(100000, 'bulk') t where t.user_id = ub;
   perform pg_temp.eq('Y2 plan ended: no report sent', got, null);
+  perform pg_temp.eq('Y2 ... both dropped as not wanted', pg_temp.dropped(ub, '{report_month:y2e,report_week:y2d}'),
+    'report_month:y2e=report not wanted,report_week:y2d=report not wanted');
 exception when others then perform pg_temp.ok('Y2 runs', false, sqlerrm);
 end $$;
 
@@ -4159,22 +3327,17 @@ begin
 exception when others then perform pg_temp.ok('Y8 runs', false, sqlerrm);
 end $$;
 
--- Z2 an old billing email queued before the switch never goes after it; a report queued
---    before it goes without its free-week line (verify 5 fix 2)
+-- Z2 a report goes without its free-week line: stored with it, sent without it (verify 5 fix 2)
 do $$
-declare b uuid := pg_temp.acct('z2'); ub uuid; sw timestamptz; got text; d jsonb;
+declare b uuid := pg_temp.acct('z2'); ub uuid; q bigint; d jsonb;
 begin
   select user_id into ub from billing.accounts where id = b;
   perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
-  select switched_at into sw from billing.switch_over;
-  delete from billing.switch_over;                                         -- before the switch
-  insert into public.email_queue (user_id, kind, key, data) values
-    (ub, 'bill_failed', 'bill_failed:z2', '{}'), (ub, 'report_month', 'report_month:z2', '{"freeWeekEnds": true}');
-  insert into billing.switch_over (switched_at) values (sw);               -- after it
-  select string_agg(c.key, ',' order by c.key) into got from public.email_claim(100000, true) c where c.user_id = ub;
-  perform pg_temp.eq('Z2 a failed-card email queued before the switch: skipped when sent', got, 'report_month:z2');
-  select c.data into d from public.email_claim(100000, true) c where c.user_id = ub and c.key = 'report_month:z2';
-  perform pg_temp.ok('Z2 a report queued before the switch: no free-week line', not (d ? 'freeWeekEnds'), coalesce(d::text, 'none'));
+  insert into public.email_queue (user_id, kind, key, data) values (ub, 'report_month', 'report_month:z2', '{"freeWeekEnds": true}')
+  returning id into q;
+  perform pg_temp.ok('Z2 the stored report has its free-week line', (select data ? 'freeWeekEnds' from public.email_queue where id = q));
+  select t.data into d from public.msg_email_take(100000, 'bulk') t where t.event_id = q;
+  perform pg_temp.ok('Z2 ... sent without it', d is not null and not (d ? 'freeWeekEnds'), coalesce(d::text, 'not sent'));
 exception when others then perform pg_temp.ok('Z2 runs', false, sqlerrm);
 end $$;
 
@@ -4196,7 +3359,7 @@ end $$;
 do $$
 declare a uuid := pg_temp.acct('z7'); pm uuid;
 begin
-  pm := billing.save_method(a, '{"customer":{"email":"z7@state.test"},"authorization":{"authorization_code":"AUTH_z7","reusable":true,"card_type":"visa ","last4":"4081","exp_month":"12","exp_year":"2030"}}'::jsonb, now());
+  pm := billing.save_method(a, ('{"customer":{"email":"z7@state.test"},"authorization":{"authorization_code":"AUTH_z7","reusable":true,"card_type":"visa ","last4":"4081","exp_month":"12","exp_year":"' || (pg_temp.y() + 4) || '"}}')::jsonb, now());
   perform pg_temp.eq('Z7 saved card brand trimmed', (select card_type from billing.payment_methods where id = pm), 'visa');
 exception when others then perform pg_temp.ok('Z7 runs', false, sqlerrm);
 end $$;
@@ -4246,86 +3409,52 @@ begin
 exception when others then perform pg_temp.ok('Z9 runs', false, sqlerrm);
 end $$;
 
--- Z10 the way back (DEPLOY.md, go-live review): switch_off refuses once a payment has landed
--- since the switch; before that it puts the old jobs and the old screens' calls back, stops the
--- new jobs and turns the switch off. Then on again, for the drop of the old billing after.
+-- Z10 the payments pause (billing.payments_pause, go-live review): while it is set the daily run
+--    charges nothing and no try, Paystack notice or payment goes through, so they come again later
 do $$
 begin
-  execute 'create extension if not exists pg_cron';
-  perform cron.schedule('free-trim', '0 3 * * *', 'select 2');
-  perform billing.switch_on(now());
-  perform pg_temp.ok('Z10 switch_on keeps the old job it stops', exists (select 1 from billing.old_jobs
-    where jobname = 'free-trim' and schedule = '0 3 * * *' and command = 'select 2')
-    and not exists (select 1 from cron.job where jobname = 'free-trim'));
-  perform pg_temp.fails('Z10 not before pause_payments', 'select billing.switch_off()', 'pause_payments');
-  -- a try under way holds the pause's share lock from before its check, so pause_payments waits
-  -- for it and switch_off then sees it (go-live review, Astra)
+  -- a try under way holds the pause's share lock from before its check, so a pause waits for it
+  -- (go-live review, Astra)
   perform pg_temp.ok('Z10 begin_attempt and run lock the pause before reading it', (
     select bool_and(strpos(prosrc, 'lock table billing.payments_pause in share mode') between 1
                     and strpos(prosrc, 'exists (select 1 from billing.payments_pause)'))
       from pg_proc where oid in ('billing.begin_attempt(uuid,text,timestamptz,uuid)'::regprocedure, 'billing.run(timestamptz)'::regprocedure)));
-  perform billing.pause_payments();
+  insert into billing.payments_pause default values;
   perform pg_temp.eq('Z10 paused: the daily run charges nothing', billing.run()->>'busy', 'true');
   perform pg_temp.fails('Z10 paused: no new try starts', $q$select billing.begin_attempt(
     (select id from billing.invoices where status = 'open' limit 1), 'card_page')$q$, 'on hold');
-  -- paused: a Paystack notice and a card page's return are refused, so they come again later
   perform pg_temp.fails('Z10 paused: a Paystack notice is refused', $q$select billing.event_begin('paystack', 'charge.success', 'psh_z10', 'success', '{}')$q$, 'on hold');
   perform pg_temp.fails('Z10 paused: a payment is not applied', $q$select billing.apply_payment('psh_z10', '{"status": "success"}')$q$, 'on hold');
-  -- given up (fix forward): payments start again
-  perform billing.resume_payments();
-  perform pg_temp.ok('Z10 resume_payments lifts the pause', not exists (select 1 from billing.payments_pause));
-  perform billing.pause_payments();
-  -- every earlier test's payment is after this switch time: refused
-  update billing.switch_over set switched_at = now() - interval '100 years';
-  perform pg_temp.fails('Z10 a payment since the switch: refused', 'select billing.switch_off()', 'fix forward');
-  -- a try since the switch still open, nothing paid since: refused (go-live review, Astra)
-  update billing.switch_over set switched_at = (select max(coalesce(settled_at, created_at)) from billing.payment_attempts
-                                                 where status = 'success') + interval '1 second';
-  insert into billing.payment_attempts (invoice, reference, provider, channel, amount_minor, currency, status, created_at)
-  select id, 'psh_z10open', 'paystack', 'saved_card', amount_minor, currency, 'pending',
-         (select switched_at from billing.switch_over) + interval '1 second'
-    from billing.invoices where status = 'open' limit 1;
-  perform pg_temp.fails('Z10 a try since the switch still open: refused', 'select billing.switch_off()', 'still open');
-  delete from billing.payment_attempts where reference = 'psh_z10open';
-  -- a Paystack notice received since the switch: refused (go-live review, Neon)
-  insert into billing.payment_events (provider, event_type, entity_id, status, received_at)
-  values ('paystack', 'refund.processed', 'z10-refund', 'processed', (select switched_at from billing.switch_over) + interval '1 second');
-  perform pg_temp.fails('Z10 a Paystack notice since the switch: refused', 'select billing.switch_off()', 'fix forward');
-  delete from billing.payment_events where entity_id = 'z10-refund';
-  -- a cancel (or another booked change) since the switch: the old run would charge anyway (go-live confirm, Sol)
-  insert into billing.account_events (account, at, actor, kind)
-  select id, (select switched_at from billing.switch_over) + interval '1 second', 'owner', 'cancel' from billing.accounts limit 1;
-  perform pg_temp.fails('Z10 a cancel booked since the switch: refused', 'select billing.switch_off()', 'fix forward');
-  delete from billing.account_events where kind = 'cancel' and at = (select switched_at from billing.switch_over) + interval '1 second';
-  -- a refund the daily run handed out since the switch (marked sending in the same transaction,
-  -- under the pause lock): refused, even before Paystack answers (go-live confirm, Astra)
-  insert into billing.refunds (reference, reason, status, created_at, updated_at)
-  values ('psh_z10refund', 'stale', 'sending', now() - interval '200 years', (select switched_at from billing.switch_over) + interval '1 second');
-  perform pg_temp.fails('Z10 a refund handed out since the switch: refused', 'select billing.switch_off()', 'fix forward');
-  delete from billing.refunds where reference = 'psh_z10refund';
-  -- none since: allowed
-  update billing.switch_over set switched_at = now() + interval '100 years';
-  insert into billing.old_jobs (jobname, schedule, command) values ('plant-wipe', '*/7 * * * *', 'select 1')
-  on conflict (jobname) do update set schedule = excluded.schedule, command = excluded.command;
-  insert into billing.logins (account, brand, username, status, created_at)
-  select id, 'sunsynk', 'z10-after-switch', 'ok', now() + interval '101 years' from billing.accounts limit 1;
-  update billing.switch_over set switched_at = now() + interval '100 years';
-  -- DEPLOY step 6.2 copies and switches in one transaction: the copy's own refunds carry the
-  -- switch time and do not count (go-live confirm, Neon)
-  insert into billing.refunds (reference, reason, status, last_error, created_at, updated_at)
-  select 'psh_z10copied', 'manual', 'processed', 'copied: done before the switch-over', switched_at, switched_at from billing.switch_over;
-  perform pg_temp.ok('Z10 lists a login made since the switch', billing.switch_off()->'since_switch'->'logins' @> '[{"login": "z10-after-switch"}]');
-  perform pg_temp.ok('Z10 switched off', not billing.is_live());
-  perform pg_temp.ok('Z10 the old job is back as it was', exists (select 1 from cron.job where jobname = 'plant-wipe'
-    and schedule = '*/7 * * * *' and command = 'select 1'));
-  perform pg_temp.ok('Z10 the new delete and history jobs and the daily run stopped', not exists (select 1 from cron.job
-    where jobname in ('billing-delete', 'billing-history', 'billing-run')));
-  perform pg_temp.ok('Z10 the old screens may call their billing changes again',
-    has_function_privilege('authenticated', 'public.api_billing_change(text,text,bigint[])', 'execute')
-    and has_function_privilege('authenticated', 'public.api_plant_pick(bigint[])', 'execute'));
-  perform billing.switch_on(now());   -- on again for the drop of the old billing below
-  perform pg_temp.ok('Z10 switched on again: payments no longer paused', not exists (select 1 from billing.payments_pause));
+  delete from billing.payments_pause;
 exception when others then perform pg_temp.ok('Z10 runs', false, sqlerrm);
+end $$;
+
+-- Z11 the account delete takes the writers' locks in their order before the account (final
+--     review, Astra; billing-lock-test.mjs races it): read from the function the database runs
+do $$
+declare body text := pg_get_functiondef('public.api_account_delete()'::regprocedure); at int[]; l text;
+begin
+  foreach l in array array['pg_advisory_xact_lock_shared(3, 0)', 'union select account_id from public.plant_users',
+    'pg_advisory_xact_lock(1, hashtext(acc.id::text))', 'where user_id = uid order by plant_id for update', 'billing.delete_account('] loop
+    at := at || strpos(body, l);
+  end loop;
+  perform pg_temp.ok('Z11 api_account_delete takes each lock, in order, before the account',
+    0 <> all (at) and at = (select array_agg(x order by x) from unnest(at) x), at::text);
+end $$;
+
+-- Z12 the website's prices (api_offer, anon): the launch offer and the list prices (final fix 13)
+do $$
+declare o jsonb;
+begin
+  update billing.offers set max_members = null where code = 'launch';
+  o := public.api_offer();
+  perform pg_temp.ok('Z12 the website may read the prices', has_function_privilege('anon', 'public.api_offer()', 'execute'));
+  perform pg_temp.eq('Z12 the launch offer', o->'offer'->>'id', 'launch');
+  perform pg_temp.eq('Z12 Home monthly at launch', (o->'prices'->'monthly'->>'home')::numeric::text, '49');
+  perform pg_temp.eq('Z12 Home monthly list', (o->'listPrices'->'monthly'->>'home')::numeric::text, '99');
+  perform pg_temp.eq('Z12 Family yearly at launch', (o->'prices'->'yearly'->>'family')::numeric::text, '990');
+  perform pg_temp.eq('Z12 Family yearly list', (o->'listPrices'->'yearly'->>'family')::numeric::text, '1990');
+exception when others then perform pg_temp.ok('Z12 runs', false, sqlerrm);
 end $$;
 
 -- ---------------------------------------------------------------------------
