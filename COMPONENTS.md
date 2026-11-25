@@ -74,6 +74,12 @@ code (SOLAR-641; `npm test` refuses the old billing reads, `PLAN_NAME` and hand-
 | `outboxMail(m, unsub)` | An outbox email (`AccountText.mail`) laid out in `_shared/email.ts`'s look. |
 | `alertLine(row)`, `alertPush(kind, line, plant, plants)`, `alertMail(event, plant, on)` | Every alert's words (SOLAR-645): the bell list's title, body, time and page from an `api_alerts` item's facts (`data`, `created`, `tz`), the pop-up's title and body, and the alert and login emails' parts. The database sends facts only (0264). `alertEmail(m, plantId)` in `_shared/email.ts` lays an email out; `popup(r)` in `notify/index.ts` builds a pop-up. Tested in `_shared/alerts_test.ts`. |
 
+## Fake SunSynk (`supabase/functions/_shared/mock-fetch.mts`)
+
+| Name | Use it for |
+|---|---|
+| `mockFetch(base, idOffset, url, init)` | Answers a fake (`@mock`) SunSynk call inside the function, with no network call. `_shared/sunsynk.ts` uses it for every fake call in production (SOLAR-637). |
+
 ## Forms and sign-in (`auth.jsx`)
 
 | Name | Use it for |
