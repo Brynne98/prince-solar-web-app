@@ -20,12 +20,12 @@
 //     HTTP 200, msg "Success", empty data. Check data.access_token, never msg.
 //   * the access token (stateless JWT) keeps working until its own expiry
 //   * there is no read-only scope; every token is scope=all
-import { createClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { createHash, createHmac } from "node:crypto";
 import { type InverterInfo, num, pick } from "./extract.ts";
 import { noteError } from "./errors.ts";
 import { slot } from "./limit.mts";
 import { fakeSunsynk } from "./gate.ts";
+import { db, dbHandle, rpc } from "./db.ts";
 
 const API_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? "https://openapi.sunsynk.net";
 // Fake logins (name@mock, SOLAR-270) go to the mock: locally the mock server is API_BASE
@@ -44,10 +44,9 @@ if (!APP_KEY || !APP_SECRET) {
   console.warn("SUNSYNK_APP_KEY / SUNSYNK_APP_SECRET not set — every request will fail");
 }
 
-export const db = createClient(
-  Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-);
+// PostgREST, for the callers that use it directly. The reading path goes through the
+// handle in db.ts (SOLAR-656).
+export { db };
 
 // The gateway's verify_jwt lets through the publishable key and any user's
 // session, so poll / recover / sync-plant-energy check the caller themselves.
@@ -77,6 +76,8 @@ export type Account = {
   sunsynk_username: string;
   access_token: string | null;
   access_expires_at: number | null;
+  /** aborted: the read this login is in was dropped (poll lanes): no more calls start for it */
+  signal?: AbortSignal;
 };
 
 export type TokenSet = { access_token: string; refresh_token: string; expires_in: number };
@@ -219,12 +220,6 @@ const expiresAt = (expiresIn: number) => Date.now() + Math.max(60, expiresIn - E
 // Per-account token management
 // ---------------------------------------------------------------------------
 
-async function rpc<T = any>(fn: string, args: Record<string, unknown>): Promise<T> {
-  const { data, error } = await db.rpc(fn, args);
-  if (error) throw new Error(`${fn}: ${error.message}`);
-  return data as T;
-}
-
 // One sign-in renewal per login at a time: a plant's inverters are read in parallel, and
 // each used to renew on its own when the token was stale or a 401 came back (Review K item 7).
 const renewing = new Map<string, Promise<string>>();
@@ -329,12 +324,13 @@ export async function saveCallTally(run?: { shard: number; ms: number; plants: n
   const rows = [...callTally.values()];
   callTally.clear();
   if (!rows.length && !run) return;
-  const { error } = await db.rpc("sunsynk_tally", {
-    p_rows: rows, p_shard: run?.shard ?? null, p_run_ms: run?.ms ?? 0, p_plants: run?.plants ?? 0,
-  });
-  if (error) {
+  try {
+    await rpc("sunsynk_tally", {
+      p_rows: rows, p_shard: run?.shard ?? null, p_run_ms: run?.ms ?? 0, p_plants: run?.plants ?? 0,
+    });
+  } catch (e) {
     rows.forEach(addTally);
-    console.warn("sunsynk_tally:", error.message);
+    console.warn(e instanceof Error ? e.message : e);
   }
 }
 
@@ -347,31 +343,62 @@ export async function saveCallTally(run?: { shard: number; ms: number; plants: n
 const MAX_IN_FLIGHT = 10;
 const MAX_WAIT_MS = 15_000;
 
+// Poller v3 (SOLAR-656): a cap on calls in flight across every login in this isolate, set by
+// the host that reads many logins at once (a lane sizes it from calls/s x p99 latency).
+// Infinity = no cap (today's poller). `onCall` hears every call's time and result.
+let fleetCap = Infinity;
+export const setFleetCap = (n: number) => { fleetCap = Math.max(1, n); };
+let onCall: ((ms: number, result: string) => void) | null = null;
+export const watchCalls = (f: typeof onCall) => { onCall = f; };
+
+// A 429 makes every call of that login wait out the backoff, not only the one that got it:
+// the rate limit is per login (2026-11-10).
+const backoffUntil = new Map<string, number>();
+
 /** GET a resource for one account and return body.data. */
 export async function apiGet(pathname: string, acc: Account): Promise<any> {
   const share = isShareAccount(acc);
   // the token is read once the call has its place: one renewed while it waited is used
-  const doFetch = async (force = false) => {
+  const doFetch = async (force = false): Promise<Response> => {
+    for (let until; (until = backoffUntil.get(acc.id) ?? 0) > Date.now();) await wait(until - Date.now());
+    acc.signal?.throwIfAborted();
     const done = await slot(acc.id, MAX_IN_FLIGHT, MAX_WAIT_MS);
+    const fleetDone = Number.isFinite(fleetCap)
+      ? await slot("*fleet", fleetCap, MAX_WAIT_MS).catch((e) => {
+        done();
+        throw new Error(`fleet_cap: ${e instanceof Error ? e.message : e}`);   // ours, not SunSynk's
+      })
+      : () => {};
+    // a 429 on this login while the call waited for its place, or the read was dropped
+    if ((backoffUntil.get(acc.id) ?? 0) > Date.now() || acc.signal?.aborted) {
+      fleetDone();
+      done();
+      return doFetch(force);
+    }
     try {
       const tok = await accessTokenFor(acc, force);
       countCall(acc);
       const t0 = Date.now();
       try {
         const go = () => fetch(`${baseFor(tok)}${pathname}`, {
-          headers: signedHeaders("GET", pathname, undefined, tok), signal: AbortSignal.timeout(API_TIMEOUT_MS),
+          headers: signedHeaders("GET", pathname, undefined, tok),
+          signal: acc.signal ? AbortSignal.any([AbortSignal.timeout(API_TIMEOUT_MS), acc.signal]) : AbortSignal.timeout(API_TIMEOUT_MS),
         });
         // About a quarter of production's calls to the fake SunSynk fail in 1-2 ms and never
         // reach it (2026-11-10, SOLAR-477); one more try gets them through. Real calls don't retry here.
         const res = await go().catch((e) => (isFake(tok) ? go() : Promise.reject(e)));
         tallyCall(tok, pathname, resultOf(res), Date.now() - t0, share);
+        onCall?.(Date.now() - t0, resultOf(res));
         return res;
       } catch (e) {
+        if (acc.signal?.aborted) throw e;   // dropped by us: not SunSynk's failure
         tallyCall(tok, pathname, failResult(e), Date.now() - t0, share);
+        onCall?.(Date.now() - t0, failResult(e));
         sunsynkFailed(tok, pathname, failResult(e), e);
         throw e;
       }
     } finally {
+      fleetDone();
       done();
     }
   };
@@ -381,6 +408,7 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
 
   for (let attempt = 1; throttled(res) && attempt <= RATE_LIMIT_RETRIES; attempt++) {
     await res.body?.cancel();
+    backoffUntil.set(acc.id, Math.max(backoffUntil.get(acc.id) ?? 0, Date.now() + RATE_LIMIT_BACKOFF_MS * attempt));
     await wait(RATE_LIMIT_BACKOFF_MS * attempt);
     res = await doFetch();
   }
@@ -634,10 +662,7 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
       }
     }
   }
-  const { data: seeded, error } = await db.from("plant_config").select("plant_id")
-    .in("plant_id", all.map((p) => p.id));
-  if (error) throw new Error(`plant_config: ${error.message}`);
-  const have = new Set((seeded ?? []).map((r: any) => Number(r.plant_id)));
+  const have = new Set(await dbHandle().configuredPlants(all.map((p) => p.id)));
   const missing = all.filter((p) => !have.has(p.id));
   const details = await Promise.allSettled(missing.map((p) => getPlantDetail(acc, p.id)));
   const rows = details
@@ -654,10 +679,11 @@ export async function seedPlants(acc: Account, all: PlantInfo[], paused: Set<num
     const live = await livePlants();
     const cut = activeRows.map((r) => r.plant_id).filter((id) => !live.has(id));
     if (cut.length) {
-      const { error } = await db.from("plant_config").update({ backfill_next: null, backfill_until: null, temp_next: null }).in("plant_id", cut);
-      if (error) {
-        console.warn(`free bookmarks ${cut.join(",")}: ${error.message}`);
-        noteError("free_bookmarks_failed", new Error(`free bookmarks ${cut.join(",")}: ${error.message}`), { hourly: true });
+      try { await dbHandle().clearBookmarks(cut); }
+      catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`free bookmarks ${cut.join(",")}: ${msg}`);
+        noteError("free_bookmarks_failed", new Error(`free bookmarks ${cut.join(",")}: ${msg}`), { hourly: true });
       }
     }
   }

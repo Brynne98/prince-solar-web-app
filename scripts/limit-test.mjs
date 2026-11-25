@@ -34,4 +34,21 @@ await assert.rejects(slot('d', 1, 30), /waited 30 ms/);
 hold();
 const again = await Promise.race([slot('d', 1, 100), new Promise((_, no) => setTimeout(() => no(new Error('d stuck')), 200))]);
 again();
+// the cap changes under load (poll lanes): a smaller one retires places, a larger one lets waiters in
+{
+  let inF = 0, top = 0;
+  const run = async (max, ms) => { const done = await slot('e', max); inF++; top = Math.max(top, inF); await new Promise((r) => setTimeout(r, ms)); inF--; done(); };
+  const first = [...Array(20)].map(() => run(10, 20));
+  await tick();
+  const later = [...Array(20)].map(() => run(4, 20));   // cap down to 4 while 10 run and 10 wait
+  await Promise.all(first);
+  top = 0;
+  await Promise.all(later);
+  assert.ok(top <= 4, 'after the cap fell to 4, peak was ' + top);
+  const held = await slot('f', 1);
+  const waiting = [slot('f', 1), slot('f', 1)];
+  const grown = await Promise.race([slot('f', 4), new Promise((_, no) => setTimeout(() => no(new Error('f stuck')), 200))]);
+  const both = await Promise.race([Promise.all(waiting), new Promise((_, no) => setTimeout(() => no(new Error('waiters left behind')), 200))]);
+  [held, grown, ...both].forEach((d) => d());
+}
 console.log('limit-test: ok');

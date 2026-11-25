@@ -74,6 +74,19 @@ code (SOLAR-641; `npm test` refuses the old billing reads, `PLAN_NAME` and hand-
 | `outboxMail(m, unsub)` | An outbox email (`AccountText.mail`) laid out in `_shared/email.ts`'s look. |
 | `alertLine(row)`, `alertPush(kind, line, plant, plants)`, `alertMail(event, plant, on)` | Every alert's words (SOLAR-645): the bell list's title, body, time and page from an `api_alerts` item's facts (`data`, `created`, `tz`), the pop-up's title and body, and the alert and login emails' parts. The database sends facts only (0264). `alertEmail(m, plantId)` in `_shared/email.ts` lays an email out; `popup(r)` in `notify/index.ts` builds a pop-up. Tested in `_shared/alerts_test.ts`. |
 
+## Reading inverters (`supabase/functions/_shared/poller.ts`, `_shared/db.ts`)
+
+The per-minute reading of a login, for any host that runs the poller (SOLAR-656).
+
+| Name | Use it for |
+|---|---|
+| `pollAccount(acc, jobs, ts)` | Read every inverter of a login's plants for one minute and save it (`poll_commit_v2`). `fetchInverter`, `readingRow`, `carryAllowed`, `canCarry`, `uploadNotDue`, `wantEndpoints`, `fetchInto`, `bankTodayTemps` are its steps. |
+| `readAccount(acc, jobs, ts, opts)` | The read half of `pollAccount`: the row to save (`CommitRow`, `poll_commit_batch`'s shape) and `finish(committed)` for what follows the save. `opts.cached` takes inverters read for many logins at once; `opts.lead: false` leaves the list refresh and plant sync to another read of the login. |
+| `accountFailed(acc, jobs, e)`, `emailOutcome(result)` | A login whose read or save threw (marked, noted), and how a login's minute counts for `email_poll_step`. |
+| `rpc(fn, args)`, `dbHandle()`, `useDb(handle)` | The database the SunSynk and reading code use: PostgREST (`postgrest`) unless a host gives its own `Db` once at start. `db` (supabase-js) stays for the callers outside the reading path. |
+| `directDb(url)` (`_shared/pgdb.ts`) | A `Db` over one direct Postgres connection, answering as PostgREST does. For the always-on poller (stage 2); nothing uses it yet. |
+| `setFleetCap(n)`, `watchCalls(f)` (`_shared/sunsynk.ts`) | A cap on SunSynk calls in flight across logins, and a listener on every call's time and result. |
+
 ## Forms and sign-in (`auth.jsx`)
 
 | Name | Use it for |
