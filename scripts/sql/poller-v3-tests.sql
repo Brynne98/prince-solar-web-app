@@ -138,9 +138,10 @@ select pg_temp.eq('accounts_live: must_choose = account_status',
                   (select count(*) from cmp where must_choose <> want_must), 0::bigint);
 select pg_temp.ok('the random fleet covers every state',
   (select count(distinct st.state) = 5 from acc cross join lateral billing.account_status(acc.id, now()) st));
+-- on some time of the grid: at some hours of the day the random fleet has none held right now
 select pg_temp.ok('some unpaid plans are held past their pay-by date',
-  exists (select 1 from acc cross join lateral billing.account_status(acc.id, now()) st
-           where st.state = 'past_due' and st.plan_ends_at <= now()));
+  exists (select 1 from acc cross join grid g cross join lateral billing.account_status(acc.id, g.t) st
+           where st.state = 'past_due' and st.plan_ends_at <= g.t));
 -- ends_at is never late: from every time on the grid, an account reading then has stopped (or
 -- is over its places) no earlier than ends_at, at every later time on the grid
 create temp table stops as select account, t from cmp where not want_live or want_must;
