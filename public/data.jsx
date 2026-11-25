@@ -423,6 +423,7 @@ const fetchAccountState = () => must(window.sb.rpc('api_account_state'), null, '
 // The whole list of chosen plants; the server checks the places, the free week and the plan.
 const saveChosenPlants = (ids) => must(window.sb.rpc('api_choose_plants', { p_plants: ids }), null, 'RPC api_choose_plants failed')
   .then(a => { if (a) window.reloadAccount(); return a; });
+const saveLinkRemove = (account) => must(window.sb.rpc('api_link_remove', { p_account: account }), null, 'RPC api_link_remove failed');
 // What a plan would charge now and next (a first plan, an upgrade, a booked change).
 const fetchPlanQuote = (plan, interval) => must(window.sb.rpc('api_plan_quote', { p_plan: plan, p_interval: interval }), null, 'RPC api_plan_quote failed');
 // SOLAR-428: image is a JPEG as base64, or null. Refusals come back as 22023 (see 0179).
@@ -578,6 +579,6 @@ function emptyText(days, fallback) {
 
 Object.assign(window, {
   fetchSnapshot, fetchDay, dayFor, realPoints, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth, fetchGridToday,
-  fetchMe, fetchAccountState, saveChosenPlants, fetchPlanQuote, savePrefs, sendFeedback, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount,
+  fetchMe, fetchAccountState, saveChosenPlants, saveLinkRemove, fetchPlanQuote, savePrefs, sendFeedback, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount,
   fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, EMAIL_KINDS, PUSH_KINDS, pushSupport, pushState, pushTurnOn, pushTurnOff, pushResync, emptyText, syncProgress, firstLoadSync, BATT_MAX_KW, TYPICAL_DAYS,
 });
