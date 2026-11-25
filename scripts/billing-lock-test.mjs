@@ -9,11 +9,11 @@
 // first and removed at the end. Exit 0: no deadlock. Exit 1: a deadlock or a broken run.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { DB, ENV, PSQL, psql } from './local-db.mjs';
+import { DB_ARGS, ENV, PSQL, psql } from './local-db.mjs';
 
 const sql = (q) => psql(q, ['-At']);
 const run = (q) => new Promise((done) => {
-  const p = spawn(PSQL, ['-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', DB], { env: ENV });
+  const p = spawn(PSQL, ['-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', ...DB_ARGS], { env: ENV });
   let err = '', out = '';
   p.stderr.on('data', (d) => { err += d; });
   p.stdout.on('data', (d) => { out += d; });

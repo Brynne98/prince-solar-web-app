@@ -108,11 +108,9 @@ savepoint phase1;
 
 -- ---------------------------------------------------------------------------
 -- L1 (final re-score, Sol) the link and claim writes and the account delete wait for a
---    billing run, which the copy holds exclusive, so none of them runs across the copy.
---    A share claim before the switch writes the old row and its billing claim in one
---    transaction, and reads the switch under that lock. First in the file, while this
---    transaction holds no billing-run lock yet: each call runs in a block that is rolled
---    back, which lets go of the locks it took.
+--    billing run (they take its lock shared), and a share claim writes the billing claim and
+--    the link row together. First in the file, while this transaction holds no billing-run
+--    lock yet: each call runs in a block that is rolled back, which lets go of the locks it took.
 -- ---------------------------------------------------------------------------
 create function pg_temp.run_lock_held() returns text language sql as $$
   select string_agg(mode, ',' order by mode) from pg_locks where locktype = 'advisory'
@@ -145,7 +143,8 @@ begin
   select user_id into ud from billing.accounts where id = d;
   perform set_config('request.jwt.claims', json_build_object('sub', ud, 'role', 'authenticated')::text, true);
   perform pg_temp.eq('L1 the account delete waits for a billing run',
-    pg_temp.run_lock_of('select public.api_account_delete()'), 'ShareLock');
+    pg_temp.run_lock_of($q$do $d$ begin if public.api_account_delete()->>'deleted' is distinct from 'true' then
+      raise exception 'not deleted'; end if; end $d$ $q$), 'ShareLock');
   perform set_config('request.jwt.claims', '', true);
 
   begin
@@ -268,7 +267,7 @@ begin
   perform pg_temp.eq('S3 still ended (week used)', r->>'state', 'ended');
   perform pg_temp.eq('S3 nothing linked', r->>'linked', '0');
   perform pg_temp.eq('S3 nothing chosen', r->>'chosen', '0');
-  perform pg_temp.eq('S3 history deleted at once', pg_temp.ps(990000301, pg_temp.t(10), 'purged'), 'true');
+  perform pg_temp.eqt('S3 history deleted at once', (select history_purged_at::text from billing.plants where id = 990000301), pg_temp.t(10));
   perform pg_temp.ok('S3 seats closed as login_removed',
     (select count(*) = 2 from billing.seats where account = a and close_reason = 'login_removed' and closed_at = pg_temp.t(10)));
   perform pg_temp.fails('S3 no new login without a plan',
@@ -438,7 +437,7 @@ begin
   r := pg_temp.choose(a, '{990000901,990000902}', pg_temp.t(3));
   perform pg_temp.eq('S9 picked: must choose cleared', r->>'must_choose', 'false');
   perform pg_temp.eq('S9 picked: read again', pg_temp.pp(a, pg_temp.t(3), 990000901, 'read_now'), 'true');
-  perform pg_temp.eq('S9 dropped plant: no other holder, deleted now', pg_temp.ps(990000904, pg_temp.t(3), 'purged'), 'true');
+  perform pg_temp.eqt('S9 dropped plant: no other holder, deleted now', (select history_purged_at::text from billing.plants where id = 990000904), pg_temp.t(3));
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1522,7 +1521,7 @@ end $$;
 -- Phase 3: reading, deleting and history fetches (0246). No network: the poller's
 -- and recover's writes are called directly with made-up rows; the clock moves.
 -- ===========================================================================
--- the stored inverter-cloud login behind a billing login (same id, as copy_from_old keeps)
+-- the stored inverter-cloud login behind a billing login (same id)
 create function pg_temp.stored(p_login uuid) returns uuid language sql as $$
   insert into private.sunsynk_accounts (id, user_id, sunsynk_username, status, kind)
   select l.id, a.user_id, 'stored-' || l.id, 'active', 'login'
@@ -1852,7 +1851,7 @@ begin
   values ('R6-REF', 'stale', 'failed', 3, 'boom', pg_temp.t(1), pg_temp.t(1));
   w := pg_temp.waiting('billing_outbox', pg_temp.t(2));
   insert into billing.outbox (account, key, dedupe_key, not_before, created_at)
-  values (g, (select key from billing.outbox_kinds limit 1), 'r6-late', pg_temp.t(0), pg_temp.t(0));
+  values (g, 'receipt', 'r6-late', pg_temp.t(0), pg_temp.t(0));
   perform pg_temp.ok('R6 failed refund: alert', pg_temp.alert('refund_failed', 'R6-REF', pg_temp.t(2)));
   perform pg_temp.eq('R6 a billing email waiting over an hour: one more in the alert',
     pg_temp.waiting('billing_outbox', pg_temp.t(2))::text, (w + 1)::text);
@@ -2228,8 +2227,6 @@ begin
   perform pg_temp.ok('O10 nothing chosen: the need-a-hand choose email waits', private.pick_waiting(u));
   perform pg_temp.ok('O10 a second login in none: refused', not public.link_login_allowed(u, 'o10-other'));
   perform pg_temp.ok('O10 the same login again: allowed', public.link_login_allowed(u, 'O10'));
-  perform pg_temp.ok('O10 the old halves are gone',
-    to_regprocedure('public.api_account_delete_old()') is null and to_regprocedure('public.link_login_allowed_old(uuid, text)') is null);
 end $$;
 
 -- O8 the sender's batch: every queued row either goes or is dropped with a reason
@@ -3120,7 +3117,6 @@ begin
   perform pg_temp.agg(990120102, now() - interval '1 hour');
   inv := (billing.start_checkout(c, 'home', 'month', 0, '{990120102}', now())->>'invoice')::uuid;
   perform billing.begin_attempt(inv, 'card_page', now());
-  perform pg_temp.ok('X1 protected by B', (billing.plant_state(990120101, now())->>'protected')::boolean);
   perform pg_temp.ok('X1 A and C each hold a seat on their shared plant', (select count(*) = 2 from billing.seats
     where (account, plant) in ((a, 990120101), (c, 990120102)) and closed_at is null));
 
@@ -3152,16 +3148,19 @@ begin
   perform set_config('request.jwt.claims', '', true);
   perform pg_temp.ok('X1 removed in the app: both seats closed as login_removed', (select count(*) = 2 from billing.seats
     where (account, plant) in ((a, 990120101), (c, 990120102)) and close_reason = 'login_removed' and closed_at is not null));
+  perform pg_temp.ok('X1 ... B''s plant is still protected, by B alone', (billing.plant_state(990120101, now())->>'protected')::boolean);
   perform pg_temp.ok('X1 ... B''s plant keeps its history', pg_temp.has_agg(990120101));
   perform pg_temp.ok('X1 ... the plant being paid for keeps its history', pg_temp.has_agg(990120102));
   perform public.plant_users_upsert((select user_id from billing.accounts where id = b), lb,
     '[{"plant_id": 990120101, "plant_name": "Gran"}, {"plant_id": 990120102, "plant_name": "Aunt"}]');
-  perform pg_temp.ok('X1 ... and after B relinks', pg_temp.has_agg(990120101) and pg_temp.has_agg(990120102));
+  perform pg_temp.ok('X1 ... B relinks both plants', (select count(*) = 2 from public.plant_users where account_id = lb
+    and user_id = (select user_id from billing.accounts where id = b) and plant_id in (990120101, 990120102)));
+  perform pg_temp.ok('X1 ... and both keep their history', pg_temp.has_agg(990120101) and pg_temp.has_agg(990120102));
 exception when others then perform set_config('request.jwt.claims', '', true); perform pg_temp.ok('X1 runs', false, sqlerrm);
 end $$;
 
 -- X3 a report on a plant the account no longer reaches (share removed) is not queued; one it
---    reaches is (verify 3 fix 3). pg_temp.x3 runs again after the drop of the old billing.
+--    reaches is (verify 3 fix 3).
 create function pg_temp.x3(p_tag text) returns text language plpgsql as $$
 declare b uuid := pg_temp.acct('x3' || p_tag); ub uuid; sh uuid; p bigint := 990120300 + length(p_tag); out text := '';
 begin
@@ -3333,11 +3332,11 @@ declare b uuid := pg_temp.acct('z2'); ub uuid; q bigint; d jsonb;
 begin
   select user_id into ub from billing.accounts where id = b;
   perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
-  insert into public.email_queue (user_id, kind, key, data) values (ub, 'report_month', 'report_month:z2', '{"freeWeekEnds": true}')
+  insert into public.email_queue (user_id, kind, key, data) values (ub, 'report_month', 'report_month:z2', '{"freeWeekEnds": true, "month": "z2"}')
   returning id into q;
   perform pg_temp.ok('Z2 the stored report has its free-week line', (select data ? 'freeWeekEnds' from public.email_queue where id = q));
   select t.data into d from public.msg_email_take(100000, 'bulk') t where t.event_id = q;
-  perform pg_temp.ok('Z2 ... sent without it', d is not null and not (d ? 'freeWeekEnds'), coalesce(d::text, 'not sent'));
+  perform pg_temp.eq('Z2 ... sent without it, the rest as stored', d::text, '{"month": "z2"}');
 exception when others then perform pg_temp.ok('Z2 runs', false, sqlerrm);
 end $$;
 

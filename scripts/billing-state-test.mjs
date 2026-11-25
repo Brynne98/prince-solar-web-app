@@ -21,4 +21,5 @@ const sql = ['begin;', readFileSync(path.join(REPO, 'scripts/sql/billing-state-t
 const r = psql(sql);
 const lines = (r.stderr || '').split('\n').filter((l) => /FAIL|checks,|ERROR|failed|CONTEXT|LINE|line /.test(l));
 console.log(lines.join('\n') || (r.error ? String(r.error) : '(no output)'));
-process.exit(r.status === 0 ? 0 : 1);
+// psql's status, and the summary line: a file cut short before it would exit 0 with no checks
+process.exit(r.status === 0 && /\d+ checks, 0 failed/.test(r.stderr) ? 0 : 1);
