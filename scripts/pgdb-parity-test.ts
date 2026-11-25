@@ -21,7 +21,6 @@ const both = async (label: string, fn: string, args: Record<string, unknown>) =>
 const someAccount = (await direct.rpc<any[]>("poll_routes", { p_seconds: Array.from({ length: 60 }, (_, i) => i) }))?.[0]?.account_id
   ?? "00000000-0000-4000-8000-000000000000";
 await both("set of rows (poll_routes)", "poll_routes", { p_seconds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] });
-await both("set of rows, default left out (poll_lane_routes)", "poll_lane_routes", { p_seconds: [10, 11, 12] });
 await both("set of rows, uuid[] and bigint[] arguments", "inverters_cached_many", { p_accounts: [someAccount], p_plants: null });
 await both("set of scalars (live_plants)", "live_plants", {});
 await both("scalar text, null answer (account_refresh_get)", "account_refresh_get", { p_account: someAccount });

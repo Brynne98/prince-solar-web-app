@@ -275,18 +275,18 @@ for (const f of jsx) {
 
 // ---- 2i. one reading path (SOLAR-656) ----
 // The per-inverter reading lives in _shared/poller.ts and saves through the handle in
-// _shared/db.ts, so another host can run it. poll/index.ts and poll-lane call it and keep no copy, and
+// _shared/db.ts, so another host can run it. poll/index.ts calls it and keeps no copy, and
 // neither poller.ts nor sunsynk.ts calls PostgREST's rpc around the handle.
 {
   const FN = path.join(PUB, '..', 'supabase', 'functions');
   const fnRead = (f) => fs.readFileSync(path.join(FN, f), 'utf8');
   const shared = fnRead('_shared/poller.ts');
-  for (const host of ['poll/index.ts', 'poll-lane/index.ts']) {
+  for (const host of ['poll/index.ts']) {
     const code = fnRead(host);
     for (const m of shared.matchAll(/^export (?:async )?(?:function|const|type) ([A-Za-z_$][\w$]*)/gm))
       if (new RegExp(`^(?:export )?(?:async )?(?:function|const|let|type) ${m[1]}\\b`, 'm').test(code)) problems.push(`${host} declares ${m[1]} again: import it from _shared/poller.ts`);
   }
-  for (const f of ['_shared/poller.ts', '_shared/sunsynk.ts', 'poll-lane/index.ts'])
+  for (const f of ['_shared/poller.ts', '_shared/sunsynk.ts'])
     if (/\bdb\s*\.\s*rpc\s*(?:<[^>]*>)?\s*\(|\bdb\s*\.\s*from\s*\(\s*["'`]plant_config["'`]/.test(fnRead(f))) problems.push(`${f}: a database call around the handle: use rpc() or dbHandle() from _shared/db.ts`);
 }
 

@@ -5,6 +5,24 @@ Design only. No code or prod change until Brynne says yes. Follows SOLAR-650 (de
 being removed). v3.0 went to the council (Neon, Sol, Astra, Fable): all four said "go with
 changes". v3.1 takes their changes, checked against the code; see "Council" at the end.
 
+## Decision 2026-11-25: stage 1 dropped
+
+- Stage 1 edge lanes failed the load test: 8-25% of plant-minutes lost above 500 logins
+  (table below). Edge workers are stopped at their CPU or wall-clock limit while lanes
+  still read in the background; every lost minute lines up with one.
+- Council (Neon, Sol, Astra, Fable), all four: drop lanes, no edge-only shape holds,
+  a hosted shadow day can't show it at 15 logins. Build the worker (stage 2).
+- Brynne chose: keep today's poller (safe to ~500 logins locally; 3.5% lost at 1,000), build
+  the worker when logins near 300. Worker: two small Fly.io machines in Frankfurt
+  (database is eu-central-1), one active, one fenced standby.
+- Kept in `main`: `readAccount` split, `accountFailed`/`emailOutcome`, `_shared/pgdb.ts`
+  (+ parity test), fleet cap and call listener in `sunsynk.ts`, 0268 batch save, 0269
+  `inverters_cached_many`, the load-test harness (today's shards only).
+- Dropped: `poll-lane`, `private.poll_mode`, `poll_lane_routes`, the lanes cron and the
+  chore jobs (share retry and call report stay in `poll`). Code in git history at 907bb50.
+- Ask SunSynk too: does the limit count per IP? One worker sends every call from one address.
+- The sections below are the v3.1 design as tested; stage 1 parts are history.
+
 ## Target and stages
 
 10,000 logins / 20,000 inverters is the design target (~10x a good 1-2 year outcome). Built in

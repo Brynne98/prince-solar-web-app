@@ -356,7 +356,7 @@ export function readingRow(f: Fetched, ts: number, tz: string): Record<string, u
   return row;
 }
 
-/** One login's minute as poll_commit_batch takes it (0258); poll_commit_v2 takes the same as p_*. */
+/** One login's minute as poll_commit_batch takes it (0268); poll_commit_v2 takes the same as p_*. */
 export type CommitRow = {
   account: string;
   versions: Record<string, number | null>;
@@ -383,7 +383,7 @@ export type ReadOptions = {
   cached?: InverterInfo[];
   /**
    * false: another read of the same login this minute does the plant sync (a login read
-   * plant by plant on several seconds, 0258's read_second). Default true.
+   * plant by plant on several seconds, 0268's read_second). Default true.
    */
   lead?: boolean;
   /** the login's live inverter list, shared by its reads this minute (default getInverters) */

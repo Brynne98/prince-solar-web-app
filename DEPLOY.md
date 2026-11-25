@@ -93,18 +93,6 @@ supabase functions deploy poll                    # only what changed
 supabase functions deploy alerts-due recover sync-plant-energy
 ```
 
-**Poller v3 lanes (0259, SOLAR-656): function first, then migration, then poll.** 0259's
-cron jobs call `poll-lane` for the chores (share login retry, call report) from the start,
-and the new `poll` no longer runs them. Set `POLLER_DB_URL` to the pooler's transaction
-address (port 6543) first; without it the lanes use `SUPABASE_DB_URL`, the direct one.
-
-```bash
-supabase secrets set POLLER_DB_URL=...            # pooler, port 6543
-supabase functions deploy poll-lane
-supabase db push --linked                         # 0259: mode stays 'edge'
-supabase functions deploy poll
-```
-
 **New tables, sequences and functions get no access by default** (0108, SOLAR-145).
 Since 0108, and on Supabase from 2026-10-30, a new object in `public` is open to no
 one but its owner, and service_role for functions. The migration that creates it grants
