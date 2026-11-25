@@ -98,7 +98,7 @@ Functions (`track()` in `_shared/errors.ts`): `payment_failed`, `plan_cancelled`
 holds, the sign of an account deleted and made again), `plan_started_done` (SOLAR-584: a first
 payment applied; `returning`: the account paid before and that plan ended, `days_since_plan`), `winback_resubscribed_done`, `winback_email_sent_done`, `need_a_hand_login_linked_done`,
 `need_a_hand_email_sent_done` (`choose`: true for the SOLAR-567 version to a login whose plants
-all wait to be chosen), `free_week_ended_email_sent_done` (SOLAR-475: the day-7 report that says the
+all wait to be chosen), `add_plant_reminder_email_sent_done` (SOLAR-474: the day-7 email to an account with no SunSynk login and no plant went out), `free_week_ended_email_sent_done` (SOLAR-475: the day-7 report that says the
 free week has ended went out), `unpaid_reminder_email_sent_done` and `unpaid_last_email_sent_done`
 (SOLAR-552: the two emails to an account with no plan, 14 and 27 days after its free week or
 paid time ended, went out), `unpaid_deleted_email_sent_done` (SOLAR-559: the email after its

@@ -18,7 +18,7 @@ import type { Email } from "../supabase/functions/_shared/email.ts";
 const copy = join(mkdtempSync(join(tmpdir(), "email-")), "email.mts");
 copyFileSync(new URL("../supabase/functions/_shared/email.ts", import.meta.url), copy);
 const {
-  accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_HELLO, FROM_REPORTS, REPLY_TO, historySynced, needAHand,
+  accountDeleted, confirmSignup, FROM_ACCOUNT, FROM_ALERTS, FROM_HELLO, FROM_REPORTS, REPLY_TO, historySynced, needAHand, addPlantReminder,
   passwordChanged, plantEvent, loginEvent, renderAuthTemplates, report, resetPassword, APP, sunsynkBack, sunsynkDown, welcome,
 }: typeof import("../supabase/functions/_shared/email.ts") = await import(copy);
 
@@ -101,6 +101,7 @@ const mails: Record<string, [from: string, mail: Email]> = {
     daily: { from: "Jan", to: "Dec", values: [1040, 930, 890, 720, 610, 520, 560, 680, 790, 880, 920, 880], labels: ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"] },
   })],
   "need-a-hand": [FROM_HELLO, needAHand()],
+  "add-plant-reminder": [FROM_HELLO, addPlantReminder()],
   "event-grid-down": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "grid_down", at: "14:32", chargePct: 62 })],
   "event-grid-down-in-gap": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "grid_down", from: "13:53", at: "14:55", chargePct: 95 })],
   "event-grid-back": [FROM_ALERTS, plantEvent(PLANT, PLANT_ID, { kind: "grid_back", since: "14:32", at: "16:05", lasted: "1h 33m", chargePct: 41 })],

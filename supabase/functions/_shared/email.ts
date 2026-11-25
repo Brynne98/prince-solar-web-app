@@ -36,7 +36,7 @@ export const REPLY_TO = "hello@princesolarhub.co.za";
 export const senderFor = (kind: string) =>
   kind === "account_deleted" ? FROM_ACCOUNT
     : kind.startsWith("report_") ? FROM_REPORTS
-    : kind === "welcome" || kind === "history" || kind === "need_a_hand" ? FROM_HELLO
+    : kind === "welcome" || kind === "history" || kind === "need_a_hand" || kind === "add_plant_reminder" ? FROM_HELLO
     : FROM_ALERTS;
 // Supabase's link lifetime (Auth -> mailer OTP expiry): 24 hours since SOLAR-196.
 const LINK_LIFE = "The link works once, for 24 hours.";
@@ -440,6 +440,16 @@ export const needAHand = (choose = false) => choose
   : make("Need a hand adding your plant?", {
     title: "Need a hand adding your plant?",
     parts: [{ lead: "Your plant isn't added yet. It takes about a minute." }, ADD_STEPS,
+      { button: { label: "Add your plant", href: ADD_PLANT } }],
+    footer: [HELP],
+  });
+
+// 7 days after sign-up, only if the account still has no SunSynk login and no plant
+// (SOLAR-474). Informs, no pressure; the welcome email's steps again.
+export const addPlantReminder = () =>
+  make("Add your plant when you're ready", {
+    title: "Add your plant when you're ready",
+    parts: [{ lead: "Your account is set up. Your plant isn't added yet." }, ADD_STEPS,
       { button: { label: "Add your plant", href: ADD_PLANT } }],
     footer: [HELP],
   });
