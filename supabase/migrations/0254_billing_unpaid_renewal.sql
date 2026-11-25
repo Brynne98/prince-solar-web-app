@@ -47,7 +47,7 @@ returns timestamptz language sql stable set search_path = billing, pg_temp as $$
 $$;
 
 -- The daily job's next run at or after p_from: cron billing-run, '*/5 4-5 * * *' UTC
--- (0246 switch_on). Change both together.
+-- (0271). Change both together.
 create function billing.next_run_at(p_from timestamptz)
 returns timestamptz language sql immutable set search_path = billing, pg_temp as $$
   select case when (p_from at time zone 'UTC')::time < time '04:00'
