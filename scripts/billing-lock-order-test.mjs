@@ -1,20 +1,17 @@
 #!/usr/bin/env node
-// SOLAR-642 lock-order races. LOCAL database only (STATE_DB_URL to change). Each race calls
+// SOLAR-642 lock-order races. LOCAL database only, at the newest migration (STATE_DB_URL, local-db.mjs). Each race calls
 // the real functions in two connections. A third connection (the gate) holds one lock for
 // 2 s, so both writers are part-way in, each holding its first locks, when it lets go. With
 // the locks taken in two orders Postgres finds a deadlock and cancels one; 0271 puts them in
 // one order. Every race rolls back; the rows it races on are made first and removed at the end.
 // Exit 0: no deadlock. Exit 1: a deadlock or a broken run.
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { DB_ARGS, ENV, PSQL, psql } from './local-db.mjs';
 
-const DB = process.env.STATE_DB_URL || 'postgresql://postgres:postgres@127.0.0.1:55322/postgres';
-if (!/@(127\.0\.0\.1|localhost)[:/]/.test(DB)) { console.error('refusing to run: not the local database'); process.exit(1); }
-const PSQL = process.env.PSQL || ['/opt/homebrew/opt/libpq/bin/psql', '/usr/local/opt/libpq/bin/psql'].find(existsSync) || 'psql';
-const sql = (q) => spawnSync(PSQL, ['-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', DB], { input: q, encoding: 'utf8' });
+const sql = (q) => psql(q, ['-At']);
 const run = (q) => new Promise((done) => {
-  const p = spawn(PSQL, ['-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', DB]);
+  const p = spawn(PSQL, ['-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', ...DB_ARGS], { env: ENV });
   let err = '';
   p.stderr.on('data', (d) => { err += d; });
   p.on('close', (code) => done({ code, err }));
