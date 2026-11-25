@@ -4,7 +4,8 @@
 // last 7 days (2026-11-17..24): about 1 s on average, 11 s at most, about 0.1% a 504 after
 // about 10 s. LOCAL only.
 //   node load-test/v3/sunsynk.mjs <shape> [port]       shape: 500, 1000 or 3000
-//   POST /__knobs {slow, slowMs:[lo,hi], r429, outage, scale}   slow/r429 = share of calls
+//   POST /__knobs {slow, slowMs:[lo,hi], r429, outage, scale, poison:[sn]}   slow/r429 = share of calls;
+//        poison: those serials answer a string number too big for strings.no (a row the save refuses)
 //   GET  /__stats   calls, results, in flight now and at peak; ?reset=1 starts again
 //   GET  /__last?since=<ms>   serials called since then
 import http from "node:http";
@@ -28,7 +29,7 @@ if (f.share) {
   ACCOUNTS[f.share.username] = { plants: f.share.plants.map((p) => p.id), pageSize: 50 };
 }
 
-let knobs = { slow: 0, slowMs: [10000, 20000], r429: 0, outage: false, scale: 1 };
+let knobs = { slow: 0, slowMs: [10000, 20000], r429: 0, outage: false, scale: 1, poison: [] };
 const stats = { calls: 0, results: {}, inFlight: 0, peak: 0, since: Date.now() };
 const lastCall = new Map();   // sn -> ms
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -70,5 +71,6 @@ http.createServer(async (req, res) => {
   const slow = r < 0.001 + knobs.r429 + knobs.slow;
   await sleep(slow ? knobs.slowMs[0] + Math.random() * (knobs.slowMs[1] - knobs.slowMs[0]) : latency());
   const out = handle({ method: req.method, path: url.pathname, query: url.searchParams, auth: req.headers.authorization || "", body });
+  if (sn && knobs.poison.includes(sn) && out.json?.data?.pvIV) out.json.data.pvIV[0].pvNo = 3000000000;
   done(out.status, out.json, slow ? "slow" : String(out.status));
 }).listen(PORT, () => console.log(`fake SunSynk :${PORT}, fleet ${shape}: ${f.logins.length} logins${f.share ? " + share" : ""}`));
