@@ -232,6 +232,9 @@ filter that id out of sales numbers.
 
 ## Billing switch-over (SOLAR-641)
 
+Done on production 2026-11-23. History only: 0268 (SOLAR-666) dropped `billing.switch_on` and
+`billing.start_delete_job` and makes the billing cron jobs itself.
+
 The new `billing` schema (migrations 0240 on) ships empty and unused. Backend first,
 frontend second, in this order:
 

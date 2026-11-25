@@ -5,8 +5,9 @@
 -- (0246). On a database built from migrations 0252 switches billing on without them, so those
 -- two jobs never existed there. Production got them from the real switch-over.
 --   1. billing-run, billing-history, billing-delete: a matching job is left alone, a changed
---      one is set back in place (same job id: job_check_inputs joins run history on it,
---      0180), a missing one is made. No change on production.
+--      schedule or command is set back in place (same job id: job_check_inputs joins run
+--      history on it, 0180; a paused job stays paused), a missing one is made. No change
+--      on production.
 --   2. switch_on and start_delete_job go: one-off switch-over steps, done; switch_on writes
 --      billing.old_jobs, which 0252 dropped. delete_due writes the first 'delete' heartbeat.
 -- ============================================================================
@@ -31,12 +32,12 @@ begin
       raise notice 'pg_net not enabled here - skipping %', j.name;
       continue;
     end if;
-    select jobid into id from cron.job where jobname = j.name;
+    select jobid into id from cron.job where jobname = j.name and username = current_user;
     if id is null then
       perform cron.schedule(j.name, j.schedule, j.command);
-    elsif not exists (select 1 from cron.job where jobid = id and schedule = j.schedule
-                                                and command = j.command and active) then
-      perform cron.alter_job(job_id := id, schedule := j.schedule, command := j.command, active := true);
+    elsif not exists (select 1 from cron.job where jobid = id and schedule = j.schedule and command = j.command) then
+      -- a job paused by hand stays paused
+      perform cron.alter_job(job_id := id, schedule := j.schedule, command := j.command);
     end if;
   end loop;
 end $$;
