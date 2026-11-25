@@ -1832,7 +1832,7 @@ end $$;
 -- R6 the poller's plant list; the alert list; heartbeats; the door's rights
 -- ---------------------------------------------------------------------------
 do $$
-declare g uuid := pg_temp.acct('r6'); l uuid; r jsonb; v bigint; w int; u uuid;
+declare g uuid := pg_temp.acct('r6'); l uuid; r jsonb; v bigint; w int; w0 int; u uuid;
 begin
   l := pg_temp.link(g, 'r6', '{990030601,990030602}', pg_temp.t(0));
   perform pg_temp.choose(g, '{990030601,990030602}', pg_temp.t(0));
@@ -1858,12 +1858,16 @@ begin
   -- emails wait in msg.outbox (0268): a "down" an hour late counts, its "back" waits for it
   u := (select user_id from billing.accounts where id = g);
   w := pg_temp.waiting('msg_email', pg_temp.t(2));
+  w0 := pg_temp.waiting('msg_email', pg_temp.t(0) + interval '59 minutes');
   insert into public.email_queue (user_id, kind, key, due_at) values (u, 'grid_down', 'r6:down', pg_temp.t(0)) returning id into v;
   insert into public.email_queue (user_id, kind, key, pair_key, due_at) values (u, 'grid_back', 'r6:back', 'r6:down', pg_temp.t(0));
   perform pg_temp.eq('R6 an email an hour late in the outbox: one more in the alert',
     pg_temp.waiting('msg_email', pg_temp.t(2))::text, (w + 1)::text);
   perform pg_temp.eq('R6 an email due under an hour ago: not in the alert',
-    pg_temp.waiting('msg_email', pg_temp.t(0) + interval '59 minutes')::text, w::text);
+    pg_temp.waiting('msg_email', pg_temp.t(0) + interval '59 minutes')::text, w0::text);
+  update msg.outbox set not_before = pg_temp.t(2) - interval '10 minutes' where dedupe_key = v || ':email';
+  perform pg_temp.eq('R6 a retry moves the next try on: still late from its due time',
+    pg_temp.waiting('msg_email', pg_temp.t(2))::text, (w + 1)::text);
   update msg.outbox set status = 'sent', done_at = pg_temp.t(1) where dedupe_key = v || ':email';
   perform pg_temp.eq('R6 down sent: it leaves the alert, its late back joins',
     pg_temp.waiting('msg_email', pg_temp.t(2))::text, (w + 1)::text);

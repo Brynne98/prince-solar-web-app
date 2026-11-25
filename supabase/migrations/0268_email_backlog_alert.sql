@@ -3,7 +3,8 @@
 --
 -- billing.alerts' outbox_backlog email line counted public.email_queue rows still 'queued'.
 -- Since 0261-0265 those rows are events (status 'outbox') and emails wait in msg.outbox, so
--- the line never fired. It now counts msg.outbox email rows due over an hour, ref 'msg_email'.
+-- the line never fired. It now counts msg.outbox email rows whose event was due over an hour
+-- ago, ref 'msg_email'.
 --
 -- Body: 0246; only the lines marked 0268 change. No rows are written.
 -- ============================================================================
@@ -18,14 +19,13 @@ returns jsonb language sql stable security definer set search_path = billing, pg
     select jsonb_build_object('kind', 'refund_failed', 'ref', r.reference, 'tries', r.tries, 'error', r.last_error)
       from billing.refunds r where r.status = 'failed'
     union all
-    -- 0268: emails wait in msg.outbox (both lanes). A "back" held for its "down" is not stuck;
-    -- a stuck "down" counts on its own. Leased rows count: an hour late is late either way.
-    select jsonb_build_object('kind', 'outbox_backlog', 'ref', 'msg_email', 'waiting', count(*), 'oldest_due', min(o.not_before))
-      from msg.outbox o
-     where o.channel = 'email' and o.status = 'queued' and o.not_before <= p_at - interval '1 hour'
-       and not exists (select 1 from public.email_queue q
-                        where q.id = o.event_id and q.pair_key is not null
-                          and msg.email_down_state(q.user_id, q.pair_key) = 'wait')
+    -- 0268: emails wait in msg.outbox (both lanes). Late is from the event's due_at: a retry
+    -- moves not_before on, so a row that keeps failing would never look an hour late. A "back"
+    -- held for its "down" is not stuck; a stuck "down" counts on its own. Leased rows count.
+    select jsonb_build_object('kind', 'outbox_backlog', 'ref', 'msg_email', 'waiting', count(*), 'oldest_due', min(q.due_at))
+      from msg.outbox o join public.email_queue q on q.id = o.event_id
+     where o.channel = 'email' and o.status = 'queued' and q.due_at <= p_at - interval '1 hour'
+       and (q.pair_key is null or msg.email_down_state(q.user_id, q.pair_key) is distinct from 'wait')
     having count(*) > 0
     union all
     select jsonb_build_object('kind', 'outbox_backlog', 'ref', 'billing_outbox', 'waiting', count(*), 'oldest_due', min(o.not_before))
