@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0272 — "Add your plant when you're ready" 7 days after sign-up (SOLAR-474).
+-- 0274 — "Add your plant when you're ready" 7 days after sign-up (SOLAR-474).
 --
 -- Welcome and need a hand (+24 h, 0147) were all an account with no plant got. This queues a
 -- third email with them when the address is confirmed, due 7 days later. unique (user_id, key):
@@ -43,5 +43,5 @@ begin
            when q.kind = 'add_plant_reminder'
                 and (exists (select 1 from private.sunsynk_accounts a where a.user_id = q.user_id)
                      or exists (select 1 from public.plant_users pu where pu.user_id = q.user_id))
-             then 'plant added'$n$);
+             then 'login or plant added'$n$);
 end $$;

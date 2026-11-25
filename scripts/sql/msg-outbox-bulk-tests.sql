@@ -363,11 +363,11 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- P: add your plant, 7 days after sign-up (SOLAR-474, 0272)
+-- P: add your plant, 7 days after sign-up (SOLAR-474, 0274)
 -- ---------------------------------------------------------------------------
 do $$
-declare v uuid := gen_random_uuid(); w uuid := gen_random_uuid(); x uuid := gen_random_uuid();
-        u uuid := pg_temp.owner('a2', '{990068091}'); sl uuid; ev bigint; e2 bigint; e3 bigint; n int;
+declare v uuid := gen_random_uuid(); w uuid := gen_random_uuid(); x uuid := gen_random_uuid(); y uuid := gen_random_uuid();
+        u uuid := pg_temp.picker('a2', '{990068091}'); sl uuid; ev bigint; e2 bigint; e3 bigint; n int;
 begin
   -- confirmed at sign-up: queued with welcome and need a hand, due in 7 days
   insert into auth.users (id, email, created_at, email_confirmed_at) values (v, 'a1@msgb.test', now(), now());
@@ -380,9 +380,12 @@ begin
   update auth.users set email_confirmed_at = now() where id = v;
   perform pg_temp.ok('P2 confirming again: still one per account',
     (select count(*) from public.email_queue where user_id = v and kind = 'add_plant_reminder') = 1);
+  -- confirmed before 0274: its rows gone, as if queued before; any later change queues none
+  insert into auth.users (id, email, created_at, email_confirmed_at) values (x, 'a0@msgb.test', now(), now());
+  delete from public.email_queue where user_id = x;
+  update auth.users set email = 'a0b@msgb.test', email_confirmed_at = now() where id = x;
   perform pg_temp.ok('P3 an account confirmed before this gets none',
-    not exists (select 1 from public.email_queue q join auth.users au on au.id = q.user_id
-                 where q.kind = 'add_plant_reminder' and au.email not like '%@msgb.test'));
+    not exists (select 1 from public.email_queue where user_id = x));
   n := pg_temp.btake();
   perform pg_temp.ok('P4 not taken before day 7', not pg_temp.taken(ev));
   -- day 7: the dates moved back
@@ -392,8 +395,8 @@ begin
   insert into auth.users (id, email, created_at) values (w, 'a3@msgb.test', now());
   select id into sl from private.sunsynk_accounts where kind = 'share';
   if sl is null then
-    insert into auth.users (id, email, created_at) values (x, 'share@msgb.test', now());
-    insert into private.sunsynk_accounts (user_id, sunsynk_username, status, kind) values (x, 'share@msgb.test', 'active', 'share')
+    insert into auth.users (id, email, created_at) values (y, 'share@msgb.test', now());
+    insert into private.sunsynk_accounts (user_id, sunsynk_username, status, kind) values (y, 'share@msgb.test', 'active', 'share')
     returning id into sl;
   end if;
   insert into public.plant_users (plant_id, user_id, account_id, plant_name, via_share)
@@ -404,8 +407,8 @@ begin
   perform pg_temp.ok('P5 day 7, no login and no plant: goes, from the queue row',
     pg_temp.taken(ev) and (select kind from t_take where event_id = ev) = 'add_plant_reminder'
     and (select to_email from t_take where event_id = ev) = 'a1@msgb.test', (pg_temp.ob(ev)).drop_reason);
-  perform pg_temp.ok('P6 a login added by then: dropped', (pg_temp.ob(e2)).drop_reason = 'plant added', (pg_temp.ob(e2)).drop_reason);
-  perform pg_temp.ok('P7 a shared plant claimed, no login: dropped', (pg_temp.ob(e3)).drop_reason = 'plant added', (pg_temp.ob(e3)).drop_reason);
+  perform pg_temp.ok('P6 a login added by then, no plant: dropped', (pg_temp.ob(e2)).drop_reason = 'login or plant added', (pg_temp.ob(e2)).drop_reason);
+  perform pg_temp.ok('P7 a shared plant claimed, no login: dropped', (pg_temp.ob(e3)).drop_reason = 'login or plant added', (pg_temp.ob(e3)).drop_reason);
 end $$;
 
 -- ---------------------------------------------------------------------------
