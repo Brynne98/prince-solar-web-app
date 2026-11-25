@@ -87,6 +87,12 @@ The per-minute reading of a login, for any host that runs the poller (SOLAR-656)
 | `directDb(url)` (`_shared/pgdb.ts`) | A `Db` over one direct Postgres connection, answering as PostgREST does. For the always-on poller (stage 2); nothing uses it yet. |
 | `setFleetCap(n)`, `watchCalls(f)` (`_shared/sunsynk.ts`) | A cap on SunSynk calls in flight across logins, and a listener on every call's time and result. |
 
+## Fake SunSynk (`supabase/functions/_shared/mock-fetch.mts`)
+
+| Name | Use it for |
+|---|---|
+| `mockFetch(base, idOffset, url, init)` | Answers a fake (`@mock`) SunSynk call inside the function, with no network call. `_shared/sunsynk.ts` uses it for every fake call in production (SOLAR-637). |
+
 ## Forms and sign-in (`auth.jsx`)
 
 | Name | Use it for |

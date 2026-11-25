@@ -7,19 +7,17 @@
 // then the lapsed link row). The delete must take the same order, or Postgres finds a deadlock
 // and cancels one of them. Each race runs in transactions that roll back; the account it races on is made
 // first and removed at the end. Exit 0: no deadlock. Exit 1: a deadlock or a broken run.
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { DB_ARGS, ENV, PSQL, psql } from './local-db.mjs';
 
-const DB = process.env.STATE_DB_URL || 'postgresql://postgres:postgres@127.0.0.1:55322/postgres';
-if (!/@(127\.0\.0\.1|localhost)[:/]/.test(DB)) { console.error('refusing to run: not the local database'); process.exit(1); }
-const PSQL = process.env.PSQL || ['/opt/homebrew/opt/libpq/bin/psql', '/usr/local/opt/libpq/bin/psql'].find(existsSync) || 'psql';
-const sql = (q) => spawnSync(PSQL, ['-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', DB], { input: q, encoding: 'utf8' });
+const sql = (q) => psql(q, ['-At']);
 const run = (q) => new Promise((done) => {
-  const p = spawn(PSQL, ['-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', DB]);
-  let err = '';
+  const p = spawn(PSQL, ['-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1', ...DB_ARGS], { env: ENV });
+  let err = '', out = '';
   p.stderr.on('data', (d) => { err += d; });
-  p.on('close', (code) => done({ code, err }));
+  p.stdout.on('data', (d) => { out += d; });
+  p.on('close', (code) => done({ code, err, out }));
   p.stdin.end(q);
 });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -42,11 +40,10 @@ const made = sql(`begin;
 commit;`);
 if (made.status !== 0) { console.error('setup failed:', made.stderr); process.exit(1); }
 
-// the delete as the user, once the switch is on (only inside its own transaction)
+// the delete as the user (rolled back); it must really delete, not refuse
 const del = `begin;
-  insert into billing.switch_over (switched_at) values (now()) on conflict do nothing;
-  select set_config('request.jwt.claims', json_build_object('sub', '${u}', 'role', 'authenticated')::text, true);
-  select public.api_account_delete();
+  select set_config('request.jwt.claims', json_build_object('sub', '${u}', 'role', 'authenticated')::text, true) is null;
+  select 'deleted=' || (public.api_account_delete()->>'deleted');
 rollback;`;
 const races = {
   // share_sync's order: the link row, then the account
@@ -85,7 +82,8 @@ try {
     await wait(500);                  // the writer holds its first lock; the delete starts
     const [a, b] = await Promise.all([w, run(del)]);
     const dead = /deadlock detected/.test(a.err + b.err);
-    const broke = !dead && (a.code !== 0 || b.code !== 0);
+    const broke = !dead && (a.code !== 0 || b.code !== 0 || !/^deleted=true$/m.test(b.out));
+    if (broke && !(a.err + b.err)) b.err = `the delete did not delete: ${b.out.trim()}`;
     if (dead || broke) failed++;
     console.log(`${dead ? 'FAIL' : broke ? 'FAIL' : 'ok  '}  ${name}${dead ? ': deadlock' : broke ? ': ' + (a.err + b.err).split('\n')[0] : ''}`);
   }

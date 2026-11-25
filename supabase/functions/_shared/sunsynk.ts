@@ -24,7 +24,8 @@ import { createHash, createHmac } from "node:crypto";
 import { type InverterInfo, num, pick } from "./extract.ts";
 import { noteError } from "./errors.ts";
 import { slot } from "./limit.mts";
-import { fakeSunsynk } from "./gate.ts";
+import { fakeSunsynk, MOCK_PLANT_OFFSET } from "./gate.ts";
+import { mockFetch } from "./mock-fetch.mts";
 import { db, dbHandle, rpc } from "./db.ts";
 
 const API_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? "https://openapi.sunsynk.net";
@@ -34,6 +35,9 @@ const API_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? "https://openapi.sunsynk.ne
 const MOCK_BASE = Deno.env.get("SUNSYNK_API_BASE") ?? `${Deno.env.get("SUPABASE_URL")}/functions/v1/mock-sunsynk`;
 const baseFor = (loginOrToken: string) => (loginOrToken.endsWith("@mock") ? MOCK_BASE : API_BASE);
 const isFake = (loginOrToken: string) => fakeSunsynk(loginOrToken, API_BASE, MOCK_BASE);
+// A fake login in production is answered in this function, not over the network (SOLAR-637).
+const sunsynkFetch = (who: string, url: string, init: RequestInit) =>
+  isFake(who) ? mockFetch(MOCK_BASE, MOCK_PLANT_OFFSET, url, init) : fetch(url, init);
 const APP_KEY = Deno.env.get("SUNSYNK_APP_KEY") ?? "";
 const APP_SECRET = Deno.env.get("SUNSYNK_APP_SECRET") ?? "";
 const CLIENT_ID = "openapi";
@@ -162,7 +166,7 @@ async function postToken(payload: Record<string, string>): Promise<any> {
   const who = payload.username ?? payload.refresh_token ?? "";
   let res: Response;
   try {
-    res = await fetch(`${baseFor(who)}/oauth/token`, {
+    res = await sunsynkFetch(who, `${baseFor(who)}/oauth/token`, {
       method: "POST",
       headers: signedHeaders("POST", "/oauth/token", body),
       body,
@@ -312,8 +316,11 @@ const tallyCall = (who: string, pathname: string, result: string, ms: number, sh
   isFake(who) || addTally({ kind: (share ? "share:" : "") + kindOf(pathname), result, calls: 1, ms, ms_max: ms });
 // A SunSynk call that failed for good (after the retries), as one PostHog issue per data
 // type and result, sent at most once an hour (SOLAR-336). The full counts are in the tally.
+// A failed fake call goes to the function log only (SOLAR-637).
 const sunsynkFailed = (who: string, pathname: string, result: string, e: unknown) =>
-  isFake(who) || noteError(`sunsynk_${result}:${kindOf(pathname)}`, e, { hourly: true });
+  isFake(who)
+    ? console.warn(`fake sunsynk ${result}:${kindOf(pathname)}: ${e instanceof Error ? e.message : e}`)
+    : noteError(`sunsynk_${result}:${kindOf(pathname)}`, e, { hourly: true });
 
 /**
  * Adds the counts since the last save to private.sunsynk_calls in one write (0178). A poll
@@ -380,13 +387,10 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
       countCall(acc);
       const t0 = Date.now();
       try {
-        const go = () => fetch(`${baseFor(tok)}${pathname}`, {
+        const res = await sunsynkFetch(tok, `${baseFor(tok)}${pathname}`, {
           headers: signedHeaders("GET", pathname, undefined, tok),
           signal: acc.signal ? AbortSignal.any([AbortSignal.timeout(API_TIMEOUT_MS), acc.signal]) : AbortSignal.timeout(API_TIMEOUT_MS),
         });
-        // About a quarter of production's calls to the fake SunSynk fail in 1-2 ms and never
-        // reach it (2026-11-10, SOLAR-477); one more try gets them through. Real calls don't retry here.
-        const res = await go().catch((e) => (isFake(tok) ? go() : Promise.reject(e)));
         tallyCall(tok, pathname, resultOf(res), Date.now() - t0, share);
         onCall?.(Date.now() - t0, resultOf(res));
         return res;
