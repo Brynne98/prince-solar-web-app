@@ -2,7 +2,7 @@
 // SOLAR-642 lock-order races. LOCAL database only, at the newest migration (STATE_DB_URL, local-db.mjs). Each race calls
 // the real functions in two connections. A third connection (the gate) holds one lock for
 // 2 s, so both writers are part-way in, each holding its first locks, when it lets go. With
-// the locks taken in two orders Postgres finds a deadlock and cancels one; 0271 puts them in
+// the locks taken in two orders Postgres finds a deadlock and cancels one; 0273 puts them in
 // one order. Every race rolls back; the rows it races on are made first and removed at the end.
 // Exit 0: no deadlock. Exit 1: a deadlock or a broken run.
 import { spawn } from 'node:child_process';

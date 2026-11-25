@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0271 — billing lock order (SOLAR-642). Every writer below takes its locks in one order:
+-- 0273 — billing lock order (SOLAR-642). Every writer below takes its locks in one order:
 --   billing-run lock (3,0) shared, login locks (1, hashtext(login id)) in id order, plant
 --   locks (plant id) in id order, link rows (plant_users), billing accounts in id order,
 --   billing plants in id order, then the rows it writes.
