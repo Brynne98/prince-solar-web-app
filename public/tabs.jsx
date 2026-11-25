@@ -2651,8 +2651,8 @@ function SunSynkConnectionSection({ onChanged, links, acct, head }) {
     setConfirming(null);
     setBusy(acc.account_id);
     try {
-      const { error } = await window.sb.rpc('api_link_remove', { p_account: acc.account_id });
-      if (error) throw error;
+      const { error, status } = await window.sb.rpc('api_link_remove', { p_account: acc.account_id });
+      if (error) { window.reportServerError?.('api_link_remove', error, status); throw error; }
       window.track('login_remove_done');
       window.reloadAccount().catch(() => {});
       // The last login: re-reading the list leaves no plant, so the app turns to its empty
