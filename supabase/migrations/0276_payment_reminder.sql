@@ -1,5 +1,5 @@
 -- ============================================================================
--- 0273 — one reminder 3 days before an unpaid plan ends (SOLAR-654).
+-- 0276 — one reminder 3 days before an unpaid plan ends (SOLAR-654).
 --
 -- A refused card or no card sends one email on the day, then nothing until the plan ends (up
 -- to 15 days). This adds payment_reminder: always sent (not a reminders-setting email, like
@@ -21,7 +21,7 @@
 --
 -- billing.payment_reminder_check holds both lists; outbox_sweep (queue), outbox_guard (drop)
 -- and outbox_take (hold) call it. Bodies: outbox_sweep 0247, outbox_guard and outbox_take
--- 0254; only the lines marked 0273 change.
+-- 0254; only the lines marked 0276 change.
 --
 -- Deploy order: notify first (it learns the email's words), then this migration. A row
 -- notify has no words for fails for good ("nothing to say") and its key is used up.
@@ -104,13 +104,13 @@ begin
   old := $o$    elsif st.state = 'active' and st.sub is not null and st.cancel_at is null then$o$;
   if position(old in d) = 0 then raise exception 'outbox_sweep changed since 0247: edit it by hand'; end if;
   execute replace(d, old, $n$    elsif st.state = 'past_due' then
-      perform billing.payment_reminder_put(a.id, st, p_at);                                    -- 0273
+      perform billing.payment_reminder_put(a.id, st, p_at);                                    -- 0276
 $n$ || old);
 
   d := pg_get_functiondef('billing.outbox_guard(billing.outbox, timestamptz)'::regprocedure);
   old := $o$    when 'refund' then$o$;
   if position(old in d) = 0 then raise exception 'outbox_guard changed since 0254: edit it by hand'; end if;
-  execute replace(d, old, $n$    when 'payment_reminder' then                                                  -- 0273
+  execute replace(d, old, $n$    when 'payment_reminder' then                                                  -- 0276
       return (billing.payment_reminder_check(o.account, o.invoice, p_at)).stop;
 $n$ || old);
 
@@ -118,7 +118,7 @@ $n$ || old);
   old := $o$then billing.plan_ended_held(account, ref, p_at) else false end$o$;
   if position(old in d) = 0 then raise exception 'outbox_take changed since 0254: edit it by hand'; end if;
   execute replace(d, old, $n$then billing.plan_ended_held(account, ref, p_at)
-                              when key = 'payment_reminder' then                                 -- 0273
+                              when key = 'payment_reminder' then                                 -- 0276
                                 (select c.stop is null and c.wait is not null
                                    from billing.payment_reminder_check(account, invoice, p_at) c)
                               else false end$n$);

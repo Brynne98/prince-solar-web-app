@@ -3457,7 +3457,7 @@ exception when others then perform pg_temp.ok('Z12 runs', false, sqlerrm);
 end $$;
 
 -- ---------------------------------------------------------------------------
--- R the reminder 3 days before an unpaid plan ends (0273, SOLAR-654): from 08:00 local on the
+-- R the reminder 3 days before an unpaid plan ends (0276, SOLAR-654): from 08:00 local on the
 -- third day before the pay-by day, once per bill, only with no try left and no other payment
 -- email for the bill in the last 3 days; waits while a payment may land or another email is
 -- queued. Each block records its own failure.
