@@ -57,5 +57,6 @@ end $$;
 select step, got, want, case when got is not distinct from want then 'ok' else 'WRONG' end as result from t;
 do $$ begin
   if exists (select 1 from t where got is distinct from want) then raise exception 'inverters-cached tests failed'; end if;
+  raise notice 'all % checks passed', (select count(*) from t);
 end $$;
 rollback;

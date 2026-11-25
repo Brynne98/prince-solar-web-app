@@ -7,13 +7,6 @@
 \set QUIET on
 \set ON_ERROR_STOP on
 begin;
--- Fixture links are ticked in link order while the plan has places (0197).
-create function pg_temp.tick() returns trigger language plpgsql as $$
-begin
-  if not new.paused then perform private.plant_pick_add(new.user_id, new.plant_id, new.plant_name); end if;
-  return new;
-end $$;
-create trigger a_test_tick before insert on public.plant_users for each row execute function pg_temp.tick();
 
 -- Never on a live database: email_sweep locks and steps every plant. A login that polled
 -- in the last hour means a poller is running here. A local poller only reads the mock
@@ -26,10 +19,13 @@ do $$ begin
   end if;
 end $$;
 
+-- passed checks, counted for the closing "all N checks passed" (GAP lines are not checks)
+create temp table t_passed (n serial);
 create function pg_temp.eq(label text, got anyelement, want anyelement) returns void language plpgsql as $$
 begin
   if got is distinct from want then raise exception 'FAIL %: got %, want %', label, got, want; end if;
-  raise notice 'PASS  %', label;
+  insert into pg_temp.t_passed default values;
+  raise notice 'ok    %', label;
 end $$;
 create function pg_temp.gap(label text, ok boolean, why text) returns void language plpgsql as $$
 begin
@@ -65,20 +61,37 @@ returns void language sql as $$
   update private.sunsynk_accounts set last_try = outcome, last_try_at = at, last_ok_at = ok_at where sunsynk_username like who
 $$;
 
--- One owner and login per plant: a locked plant gets no email. Users first: plant_row_guard drops rows of an ownerless plant.
+-- One owner and login per plant: a plant not chosen or not paid for gets no email (0252).
+-- Users first: plant_row_guard drops rows of an ownerless plant.
 insert into auth.users (id, email)
   select ('00000000-0000-0000-0000-00000000' || p)::uuid, p || '@t.test' from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
--- On a plan: a plant nobody pays for gets no alert (0206).
-insert into private.billing (user_id, plan, period, billing_day, next_billing_date)
-  select ('00000000-0000-0000-0000-00000000' || p)::uuid, 'home', 'monthly', 1, current_date + 20 from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
 insert into private.sunsynk_accounts (id, user_id, sunsynk_username, last_try, last_try_at)
   select ('00000000-0000-0000-0000-0000000a' || p)::uuid, ('00000000-0000-0000-0000-00000000' || p)::uuid, 'w' || p, 'ok', now()
     from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
-insert into public.plant_users (plant_id, user_id, account_id)
-  select p, ('00000000-0000-0000-0000-00000000' || p)::uuid, ('00000000-0000-0000-0000-0000000a' || p)::uuid
-    from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
 insert into public.plant_config (plant_id, has_battery, battery_banks)
   select p, true, 'shared' from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
+-- The billing account: login linked, plant chosen and a Home plan paid, all a day back, so
+-- the 30 minutes "No readings" waits after reading starts (0256) are long over.
+create function pg_temp.owner(p bigint) returns uuid language plpgsql as $$
+declare
+  u uuid := ('00000000-0000-0000-0000-00000000' || p)::uuid; l uuid := ('00000000-0000-0000-0000-0000000a' || p)::uuid;
+  at timestamptz := now() - interval '1 day'; a uuid; pr billing.prices;
+begin
+  insert into billing.accounts (user_id, market, created_at) values (u, 'ZA', at) returning id into a;
+  perform billing.link_login(a, 'sunsynk', 'w' || p, null, jsonb_build_array(jsonb_build_object('id', p, 'name', 'Plant ' || p)), at, 'owner', l);
+  perform billing.set_chosen_plants(a, array[p], at);
+  select * into pr from billing.prices where plan = 'home' and market = 'ZA' and interval = 'month' and offer is null and active_until is null;
+  insert into billing.subscriptions (account, price, plan, currency, interval, amount_minor, extra_place_minor,
+                                     status, started_at, billing_day, period_start, period_end)
+  values (a, pr.id, 'home', 'ZAR', 'month', pr.amount_minor, pr.extra_place_minor, 'active', at,
+          extract(day from at at time zone 'Africa/Johannesburg'), at, at + interval '1 month');
+  update billing.accounts set trial_ends_at = least(trial_ends_at, at) where id = a and trial_started_at is not null;
+  return a;
+end $$;
+select pg_temp.owner(p) from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p \g /dev/null
+insert into public.plant_users (plant_id, user_id, account_id, linked_at)
+  select p, ('00000000-0000-0000-0000-00000000' || p)::uuid, ('00000000-0000-0000-0000-0000000a' || p)::uuid, now() - interval '1 day'
+    from unnest(array[9001, 9002, 9003, 9004, 9005, 9006, 9007]) p;
 
 -- ---- Grid (plant 9001: master M, slave S, both sense mains) ----------------------------
 -- Minutes 0-4 grid on (the first state is taken silently), 5-6 off (a 2-minute dip,
@@ -336,16 +349,18 @@ select pg_temp.eq('no readings: a whole plant back for 15 minutes sends one Read
      from public.email_queue where plant_id = 9007), '1/1');
 select pg_temp.eq('no readings: Readings back says when the readings came back',
   (select (data->>'at')::bigint = pg_temp.now_k(0) - 20 from public.email_queue where plant_id = 9001 and kind = 'logger_back'), true);
--- SOLAR-458: plant 9006 collected until 2 hours ago, then was stopped. Stopping keeps its
--- newest reading time. Started again, it waits 30 minutes from the start for readings,
--- the same as a new link, before No readings.
-update public.plant_users set paused = true where plant_id = 9006;
+-- SOLAR-458: plant 9006 collected until 2 hours ago, then was stopped (no longer chosen).
+-- Stopping keeps its newest reading time. Chosen again, it waits 30 minutes from the start
+-- for readings, the same as a new link, before No readings (billing.readings_start, 0256).
+select billing.set_chosen_plants((select id from billing.accounts where user_id = '00000000-0000-0000-0000-000000009006'),
+                                 '{}', now() - interval '2 hours') \g /dev/null
 update private.plant_alert_state set last_dev = pg_temp.now_k(120), stale = false where plant_id = 9006;
 insert into private.inverter_alert_state (plant_id, sn, last_dev) values (9006, '9006M', pg_temp.now_k(120)), (9006, '9006S', pg_temp.now_k(120))
   on conflict (plant_id, sn) do update set last_dev = excluded.last_dev, stale = false;
-select set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000009006","role":"authenticated"}', true);
-select public.api_plant_pick(array[9006]::bigint[]);
-select set_config('request.jwt.claims', '', true);
+select billing.set_chosen_plants((select id from billing.accounts where user_id = '00000000-0000-0000-0000-000000009006'),
+                                 '{9006}', now()) \g /dev/null
+select pg_temp.eq('no readings: choosing the plant again starts its wait now',
+  (select started_at from private.plant_alert_state where plant_id = 9006), extract(epoch from now())::bigint);
 select pg_temp.logins('ok', now(), now());
 select public.email_sweep();
 select pg_temp.eq('no readings: a plant started a minute ago sends nothing', pg_temp.sent(9006, 'logger_stale'), 0);
@@ -383,4 +398,5 @@ select pg_temp.eq('SunSynk down: one of two logins failing is not SunSynk down',
 select pg_temp.eq('SunSynk down: one SunSynk is back to the owner told it was down',
   (select count(*)::int from public.email_queue where kind = 'sunsynk_back' and user_id = '00000000-0000-0000-0000-000000009001'), 1);
 
+do $$ begin raise notice 'all % checks passed', (select count(*) from pg_temp.t_passed); end $$;
 rollback;

@@ -2860,6 +2860,70 @@ begin
 exception when others then perform pg_temp.ok('FR5 runs', false, sqlerrm);
 end $$;
 
+-- SH1 a share missing from the share login's list (from share-tests.sql, SOLAR-673): one
+--     miss is forgiven and the plant is still read; a second miss an hour on stops it and
+--     queues one share_removed; back in the list, it waits for its owner to claim it again
+-- SH2 the share login in Logins lists only the caller's plants; removing it keeps the share
+--     login, and a user with no claim on it may not remove it (42501)
+do $$
+declare a uuid := pg_temp.acct('sh1a'); b uuid := pg_temp.acct('sh1b'); ua uuid; ub uuid; sh uuid; err text;
+begin
+  select user_id into ua from billing.accounts where id = a;
+  select user_id into ub from billing.accounts where id = b;
+  sh := pg_temp.share_login();
+  perform pg_temp.eq('SH1 claimed', public.share_claim_live(ub, sh, 990092001, 'Shared'), 'claimed');
+  perform pg_temp.pay(b, 'home', 'month', now() - interval '1 day');
+  perform pg_temp.choose(b, '{990092001}', now() - interval '1 day');
+  perform pg_temp.eq('SH1 read through the share login', pg_temp.lane_of(990092001, now()), sh::text);
+
+  perform public.share_sync(sh, '{}');
+  perform pg_temp.ok('SH1 first miss: noted', (select share_missing_at is not null and share_gone_at is null
+                                                 from public.plant_users where plant_id = 990092001 and user_id = ub));
+  perform pg_temp.eq('SH1 ... and still read', pg_temp.lane_of(990092001, now()), sh::text);
+  perform public.share_sync(sh, '{}');
+  perform pg_temp.ok('SH1 a second miss within the hour: still read', (select share_gone_at is null
+                                                 from public.plant_users where plant_id = 990092001 and user_id = ub));
+
+  update public.plant_users set share_missing_at = now() - interval '1 hour' where plant_id = 990092001 and user_id = ub;
+  perform public.share_sync(sh, '{}');
+  perform pg_temp.ok('SH1 missing an hour: stopped', (select share_gone_at is not null
+                                                 from public.plant_users where plant_id = 990092001 and user_id = ub));
+  perform pg_temp.eq('SH1 ... one share_removed queued',
+    (select count(*)::text from public.email_queue where kind = 'share_removed' and plant_id = 990092001 and user_id = ub), '1');
+  perform pg_temp.eq('SH1 ... and not read', pg_temp.lane_of(990092001, now()), '<not read>');
+
+  perform public.share_sync(sh, '{990092001}');
+  perform pg_temp.ok('SH1 back in the list: waits for a claim', (select share_gone_at is not null
+                                                 from public.plant_users where plant_id = 990092001 and user_id = ub));
+  perform pg_temp.eq('SH1 ... still not read', pg_temp.lane_of(990092001, now()), '<not read>');
+  perform pg_temp.eq('SH1 claimed again', public.share_claim_live(ub, sh, 990092001, 'Shared'), 'claimed');
+  perform pg_temp.ok('SH1 ... live again', (select share_gone_at is null and share_missing_at is null
+                                                 from public.plant_users where plant_id = 990092001 and user_id = ub));
+  perform pg_temp.eq('SH1 ... and read', pg_temp.lane_of(990092001, now()), sh::text);
+
+  -- SH2: A claims another plant on the same share login; B sees only B's
+  perform pg_temp.eq('SH2 A claims another plant', public.share_claim_live(ua, sh, 990092002, 'Other'), 'claimed');
+  perform set_config('request.jwt.claims', json_build_object('sub', ub, 'role', 'authenticated')::text, true);
+  perform pg_temp.eq('SH2 B''s Logins: the share login, B''s plant only',
+    (select l.kind || ':' || (select string_agg(x->>'plant_id', ',') from jsonb_array_elements(l.plants) x)
+       from public.api_logins() l where l.account_id = sh), 'share:990092001');
+  perform public.api_link_remove(sh);
+  perform pg_temp.eq('SH2 B removed it: B''s link row goes',
+    (select count(*)::text from public.plant_users where plant_id = 990092001), '0');
+  perform pg_temp.ok('SH2 ... the share login stays', exists (select 1 from private.sunsynk_accounts where id = sh));
+  perform pg_temp.eq('SH2 ... A''s claim stays',
+    (select count(*)::text from public.plant_users where plant_id = 990092002 and user_id = ua), '1');
+  -- B holds no claim on the share login now: removing it again is refused
+  begin
+    perform public.api_link_remove(sh);
+    err := 'no error';
+  exception when others then err := sqlstate;
+  end;
+  perform pg_temp.eq('SH2 no claim: removing the share login refused', err, '42501');
+  perform set_config('request.jwt.claims', '', true);
+exception when others then perform set_config('request.jwt.claims', '', true); perform pg_temp.ok('SH1 runs', false, sqlerrm);
+end $$;
+
 -- FR7 removing a login or a claim deletes the history nothing keeps, at once
 do $$
 declare a uuid := pg_temp.acct('fr7'); b uuid := pg_temp.acct('fr7b'); l uuid;
