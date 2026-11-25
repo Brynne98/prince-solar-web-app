@@ -14,9 +14,10 @@
 --   2. private.plant_readings_delete writes that row. Same deletes, same return value.
 --   3. Cron history-delete-slow every 15 min: drops old rows, commits, then fails when in
 --      the last 24 h one delete took over 3 s, or the deletes of one app request
---      (authenticated) added up to over 3 s. The cron failure check (0180) alerts.
--- A delete stopped by the 8 s timeout rolls back its own row; the app reports that error
--- to PostHog (reportServerError) from both screens.
+--      (authenticated or service_role) added up to over 3 s. The cron failure check (0180)
+--      alerts. Background deletes (billing.delete_due) count singly: a canary.
+-- A delete stopped by the 8 s timeout rolls back its own row; it writes the same split to the
+-- server log (LOG level), and the app reports the error to PostHog from both screens.
 -- Body: plant_readings_delete 0266; only the lines marked 0270 change.
 -- ============================================================================
 
@@ -49,6 +50,7 @@ declare
   t1 timestamptz;                                                         -- 0270
   t2 timestamptz;                                                         -- 0270
 begin
+  begin                                                                   -- 0270
   -- waits for a running rollup slice (SOLAR-651), so the slice cannot write back what this deletes
   perform pg_advisory_xact_lock_shared(8, 651);
   t1 := clock_timestamp();                                                -- 0270
@@ -65,6 +67,14 @@ begin
   delete from public.grid_off            where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('grid_off', n);
   delete from private.gaps               where plant_id = p_plant; get diagnostics n = row_count; out := out || jsonb_build_object('gaps', n);
   delete from private.grid_off_progress  where plant_id = p_plant;
+  exception when query_canceled then                                     -- 0270
+    -- the timeout rolls back the log row below; the split goes to the server log instead
+    raise log 'plant_readings_delete canceled: plant % wait % ms, raw % ms, rest % ms', p_plant,
+      round(extract(epoch from coalesce(t1, clock_timestamp()) - t0) * 1000),
+      round(extract(epoch from coalesce(t2, clock_timestamp()) - coalesce(t1, clock_timestamp())) * 1000),
+      round(extract(epoch from clock_timestamp() - coalesce(t2, clock_timestamp())) * 1000);
+    raise;
+  end;
   insert into private.history_delete_log                                 -- 0270
     (plant_id, caller, timeout, wait_ms, raw_ms, rest_ms, counts)
   values (p_plant,
@@ -92,12 +102,12 @@ begin
       from private.history_delete_log where at > now() - interval '24 hours'
     union all
     select count(*) || ' plants', min(caller), sum(wait_ms + raw_ms + rest_ms), sum(wait_ms), sum(raw_ms), sum(rest_ms)
-      from private.history_delete_log where at > now() - interval '24 hours' and caller = 'authenticated'
+      from private.history_delete_log where at > now() - interval '24 hours' and caller in ('authenticated', 'service_role')
      group by xid having count(*) > 1
   ) t where ms > p_slow_ms order by ms desc limit 1;
   if found then
-    raise exception 'history delete over 3 s in 24 h: % % % ms (wait %, raw %, rest %), see SOLAR-659',
-      w.what, w.caller, w.ms, w.wait_ms, w.raw_ms, w.rest_ms;
+    raise exception 'history delete over % ms in 24 h: % % % ms (wait %, raw %, rest %), see SOLAR-659',
+      p_slow_ms, w.what, w.caller, w.ms, w.wait_ms, w.raw_ms, w.rest_ms;
   end if;
 end $$;
 revoke all on procedure private.history_delete_check(integer) from public, anon, authenticated;
