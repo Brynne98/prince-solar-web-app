@@ -6,7 +6,7 @@
 -- the line never fired. It now counts msg.outbox email rows whose event was due over an hour
 -- ago, ref 'msg_email'.
 --
--- Body: 0246; only the lines marked 0268 change. No rows are written.
+-- Body: 0246; only the lines marked 0272 change. No rows are written.
 -- ============================================================================
 
 create or replace function billing.alerts(p_at timestamptz default now())
