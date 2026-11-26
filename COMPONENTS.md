@@ -180,7 +180,7 @@ and the sign-in screens already call it; it drops refusals and offline).
 | `DaysPanel` | The per-day bars with retry and the free-week lock. |
 | `TabSkeleton` | A whole tab while it loads. |
 | `ConfirmCard` | Any "are you sure". Inline or `modal`; `danger`, `busy`. Use instead of `confirm()`. |
-| `KeepPicker` | A pick of plants, grouped by login (`acctLogins`): circles for exactly 1, else tick boxes; `ask` above, `full` when past `room`; `min={0}` lets the last tick go (link.jsx). Inside `ChooseDialog`. `tag(p)`: a word on a plant's row (`Free week used`, SOLAR-572). |
+| `KeepPicker` | A pick of plants, grouped by login (`acctLogins`): circles for exactly 1, else tick boxes; `ask` above, `full` when past `room`; `min={0}` lets the last tick go (link.jsx). Inside `ChooseDialog`. `tag(p)`: a word on a plant's row (`Free week used`, SOLAR-572). `lock(p)`: that row can't be ticked (`Deleting history`, SOLAR-659). |
 | `PlanCard`, `PlanNote` | A card in Billing's Plan section (name and price top left, control top right); a tinted note in it with its buttons right (failed payment, plants to choose, a booked change and its undo) (SOLAR-512). |
 | `SettingsSection` | A Settings card with title, note and an `action`. `head`: the section is the whole page, its title the page's. |
 | `SettingRow` | One row in a Settings card: `label`, `note`, `action`, `lead`. |

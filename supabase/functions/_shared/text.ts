@@ -12,7 +12,7 @@
 export type Iso = string;
 export type PlantState = {
   plant: number; name: string | null; chosen: boolean; locked: boolean; read_now: boolean;
-  needs_reconnect: boolean; trial_used_elsewhere: boolean; delete_at: Iso | null; purged: boolean;
+  needs_reconnect: boolean; trial_used_elsewhere: boolean; delete_at: Iso | null; purged: boolean; deleting: boolean;
   kept_elsewhere: boolean; payment_hold: boolean; drop_at_period_end: boolean; logins: string[]; gone_logins: string[]; claimed: boolean; shared: boolean;
 };
 export type PriceRow = {
@@ -341,6 +341,9 @@ export const weekPick = (s: AccountState) => ({
   button: "Start free week",
 });
 
+/** A plant whose old history is still being deleted (SOLAR-659): Choose plants, Plants, the header menu. */
+export const deletingWord = "Deleting history";
+
 /** The Choose plants pop-up on the Plants page. */
 export const choosePlants = (s: AccountState) => ({
   title: "Choose plants",
@@ -374,7 +377,7 @@ export function switchConfirm(s: AccountState, goingIds: number[], comingIds: nu
 
 /** A plant's word on the Plants page. */
 export const plantTag = (s: AccountState, p: PlantState): string | null =>
-  p.needs_reconnect ? "Reconnect" : p.chosen && p.read_now ? null : p.chosen ? (s.state === "ended" ? "Not read" : null)
+  p.deleting ? deletingWord : p.needs_reconnect ? "Reconnect" : p.chosen && p.read_now ? null : p.chosen ? (s.state === "ended" ? "Not read" : null)
     : p.trial_used_elsewhere && (s.state === "trialing" || s.state === "none") ? "Free week used" : "Locked";
 /** A plant's "kept until", only when it has a delete date. */
 export const plantKept = (s: AccountState, p: PlantState) =>
@@ -393,6 +396,7 @@ export function refused(msg: string): string {
   if (/already been made/i.test(msg)) return "This payment has already been made.";
   if (/no longer due/i.test(msg)) return "This payment is no longer due.";
   if (/past_due|failed payment|pay it first|pay the failed/i.test(msg)) return "Pay the overdue payment first.";
+  if (/still being deleted/.test(msg)) return "A plant's old history is still being deleted. Try again in a minute.";
   if (/already had its free week/.test(msg)) return "A plant you ticked has had its free week. Untick it.";
   if (/free week reads up to|plan has \d+ places|that plan has/.test(msg)) return "That is more plants than your plan reads.";
   if (/pick the plants to drop|more plants to drop/.test(msg)) return "Choose the plants to keep first.";
@@ -956,6 +960,6 @@ export function alertMail(e: AlertEvent, plant: string, on = "today"): AlertMail
 export const AccountText = {
   money, day, weekday, forms, names, plantName, planTitle, planPrice, planStatus, placesLine, mustChoose, bookedChange,
   cardLine, cardSub, billRow, billing, pastDueNote, accountAlert, paidText, cancelDialog, deleteBlocked, plans, planCard, quoteReview, checkoutPick, keepPick, weekPick, chosenToast, refused, pay,
-  choosePlants, switchConfirm, plantTag, plantKept, logins, removeLogin, payScreen, fitLine, notices, mail,
+  choosePlants, deletingWord, switchConfirm, plantTag, plantKept, logins, removeLogin, payScreen, fitLine, notices, mail,
   alertLine, alertPush,
 };
