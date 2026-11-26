@@ -584,7 +584,8 @@ export function mail(m: MailInput): Mail | null {
     }
     case "payment_failed":
     case "card_update":
-    case "payment_due": {
+    case "payment_due":
+    case "payment_reminder": {
       // what is paid: the bill the row is about (a booked downgrade bills the smaller plan); what ends: the running plan
       const b = m.bill, plan = b?.plan_name ?? due(s).plan, ends = due(s).ends;
       const amount = b ? $(b.amount_minor, b.currency) : due(s).amount;
@@ -596,6 +597,8 @@ export function mail(m: MailInput): Mail | null {
         parts: [{ lead: `We couldn't charge your ${saved}. ${s.next_try_on ? `We'll try again on ${dateOnly(s.next_try_on)}.` : "We won't try again."}` }, ...pay] };
       if (m.key === "card_update") return { subject: `Your ${plan} payment didn't go through`, title,
         parts: [{ lead: `We couldn't charge your ${saved}. We won't try this card again.` }, ...pay] };
+      // 3 days before the plan ends, when no try is left (SOLAR-654): the title says it all
+      if (m.key === "payment_reminder") return { subject: `Your ${plan} payment is still due`, title, parts: pay };
       return { subject: `Your ${plan} payment is due`, title,
         parts: [{ lead: "There's no card saved, so nothing was charged." }, ...pay] };
     }

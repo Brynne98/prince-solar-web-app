@@ -1470,6 +1470,27 @@ begin
   update billing.offers set max_members = 100 where code = 'launch';
 end $$;
 
+-- F12b a test account's launch plan and open checkout hold no place (SOLAR-674)
+do $$
+declare t uuid := pg_temp.acct('f12bt'); c uuid := pg_temp.acct('f12bc'); a uuid := pg_temp.acct('f12ba'); members int;
+begin
+  update billing.payment_attempts set status = 'void' where status in ('created', 'pending', 'unknown')
+     and invoice in (select id from billing.invoices where kind = 'purchase' and status = 'open');
+  insert into private.test_users (user_id) select user_id from billing.accounts where id in (t, c);
+  members := (select count(distinct account) from billing.subscriptions where offer = 'launch');
+  update billing.offers set max_members = members + 1 where code = 'launch';
+  perform pg_temp.link(t, 'f12bt', '{990021211}', pg_temp.t(0));
+  perform pg_temp.link(c, 'f12bc', '{990021212}', pg_temp.t(0));
+  perform pg_temp.link(a, 'f12ba', '{990021213}', pg_temp.t(0));
+  perform pg_temp.pay(t, 'home', 'month', pg_temp.t(100), 'launch');
+  -- day 300: F12's checkouts at day 200 still hold their hour there
+  perform pg_temp.eq('F12b test account checkout: launch price',
+    billing.start_checkout(c, 'home', 'month', 0, '{990021212}', pg_temp.t(300))->>'amount_minor', '4900');
+  perform pg_temp.eq('F12b last place still free after a test plan and a test checkout',
+    billing.start_checkout(a, 'home', 'month', 0, '{990021213}', pg_temp.t(300))->>'amount_minor', '4900');
+  update billing.offers set max_members = 100 where code = 'launch';
+end $$;
+
 -- F13 refund events out of order: processed stays processed
 do $$
 declare a uuid := pg_temp.acct('f13'); inv uuid; ref text; rf uuid;
@@ -3551,6 +3572,108 @@ begin
   perform pg_temp.eq('Z12 Family yearly at launch', (o->'prices'->'yearly'->>'family')::numeric::text, '990');
   perform pg_temp.eq('Z12 Family yearly list', (o->'listPrices'->'yearly'->>'family')::numeric::text, '1990');
 exception when others then perform pg_temp.ok('Z12 runs', false, sqlerrm);
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- R the reminder 3 days before an unpaid plan ends (0276, SOLAR-654): from 08:00 local on the
+-- third day before the pay-by day, once per bill, only with no try left and no other payment
+-- email for the bill in the last 3 days; waits while a payment may land or another email is
+-- queued. Each block records its own failure.
+-- ---------------------------------------------------------------------------
+-- from when it may go: 08:00 local, 3 days before the pay-by day
+create function pg_temp.rem_from(pe timestamptz) returns timestamptz language sql immutable as $$
+  select (((pg_temp.cut(pe) at time zone 'Africa/Johannesburg')::date - 3) + time '08:00') at time zone 'Africa/Johannesburg'
+$$;
+create function pg_temp.rem(p_acc uuid, p_at timestamptz) returns text language sql as $$
+  select coalesce(c.stop, c.wait, 'go') from billing.payment_reminder_check(p_acc, pg_temp.due(p_acc), p_at) c
+$$;
+create function pg_temp.sent(p_acc uuid, p_key text, p_at timestamptz) returns void language sql as $$
+  update billing.outbox set status = 'sent', sent_at = p_at where account = p_acc and key = p_key
+$$;
+
+-- R1 refused card: queued once from 08:00 local, held while a card page is open, dropped once paid
+do $$
+declare a uuid := pg_temp.acct('r1a'); pe timestamptz; w timestamptz; o billing.outbox; pref text;
+begin
+  pe := pg_temp.member(a, 'r1a', 990170101);
+  perform pg_temp.job(a, pe, 'hard');
+  perform pg_temp.sent(a, 'card_update', pe + interval '1 minute');
+  w := pg_temp.rem_from(pe);
+  perform pg_temp.eqt('R1 from 08:00 local, 3 days before the pay-by day', w::text, pg_temp.cut(pe) - interval '3 days' - interval '16 hours' + interval '1 millisecond');
+  perform pg_temp.eq('R1 a minute before: too early', pg_temp.rem(a, w - interval '1 minute'), 'too early');
+  perform billing.outbox_sweep(w - interval '1 minute');
+  perform pg_temp.ok('R1 ... nothing queued', pg_temp.ob(a, 'payment_reminder') is null);
+  perform billing.outbox_sweep(w);
+  o := pg_temp.ob(a, 'payment_reminder');
+  perform pg_temp.ok('R1 queued at 08:00 for the open renewal bill', o.invoice = pg_temp.due(a) and o.not_before = w and o.status = 'queued');
+  perform pg_temp.ok('R1 ... no stored expiry: the check reads the cutoff at send time', o.expires_at is null);
+  perform pg_temp.eq('R1 ... dropped once past the cutoff', pg_temp.guard(a, 'payment_reminder', pg_temp.cut(pe)), 'not past due');
+  perform pg_temp.ok('R1 ... always sent (not a reminders-setting email)', not (select reminder from billing.outbox_kinds where key = 'payment_reminder'));
+  perform billing.outbox_sweep(w + interval '1 hour');
+  perform pg_temp.eq('R1 queued once per bill', (select count(*)::text from billing.outbox where account = a and key = 'payment_reminder'), '1');
+  perform pg_temp.eq('R1 sends', pg_temp.guard(a, 'payment_reminder', w), 'send');
+  perform pg_temp.ok('R1 taken', o.id = any (pg_temp.taken(w)));
+  pref := billing.begin_attempt(pg_temp.due(a), 'card_page', w + interval '10 minutes', a)->>'reference';
+  perform pg_temp.eq('R1 a card page open: waits', pg_temp.rem(a, w + interval '15 minutes'), 'payment under way');
+  perform pg_temp.ok('R1 ... held, not taken, not dropped', not o.id = any (pg_temp.taken(w + interval '15 minutes'))
+    and (pg_temp.ob(a, 'payment_reminder')).status = 'queued');
+  perform pg_temp.answer(pref, 'fail', w + interval '20 minutes');
+  perform pg_temp.ok('R1 the page failed: taken again', o.id = any (pg_temp.taken(w + interval '25 minutes')));
+  pref := billing.begin_attempt(pg_temp.due(a), 'card_page', w + interval '30 minutes', a)->>'reference';
+  perform pg_temp.answer(pref, 'ok', w + interval '31 minutes');
+  perform pg_temp.eq('R1 paid: dropped', pg_temp.guard(a, 'payment_reminder', w + interval '32 minutes'), 'bill settled');
+  perform pg_temp.ok('R1 not callable by signed-in users',
+    not has_function_privilege('authenticated', 'billing.payment_reminder_check(uuid, uuid, timestamptz)', 'execute'));
+exception when others then perform pg_temp.ok('R1 runs', false, sqlerrm);
+end $$;
+
+-- R2 no card: waits while the due email is queued; goes once that email failed. Sent: none for 3 days
+do $$
+declare a uuid := pg_temp.acct('r2a'); b uuid := pg_temp.acct('r2b'); pe timestamptz; w timestamptz;
+begin
+  pe := pg_temp.member(a, 'r2a', 990170201);
+  update billing.payment_methods set active = false, disabled_reason = 'replaced' where account = a;
+  perform pg_temp.job(a, pe);
+  w := pg_temp.rem_from(pe);
+  perform pg_temp.eq('R2 the due email still queued: waits', pg_temp.rem(a, w), 'payment email waiting');
+  perform billing.outbox_sweep(w);
+  perform pg_temp.ok('R2 ... nothing queued', pg_temp.ob(a, 'payment_reminder') is null);
+  update billing.outbox set status = 'failed' where account = a and key = 'payment_due';
+  perform billing.outbox_sweep(w + interval '1 minute');
+  perform pg_temp.ok('R2 the due email failed: queued', (pg_temp.ob(a, 'payment_reminder')).status = 'queued');
+
+  pe := pg_temp.member(b, 'r2b', 990170202);
+  update billing.payment_methods set active = false, disabled_reason = 'replaced' where account = b;
+  perform pg_temp.job(b, pe);
+  w := pg_temp.rem_from(pe);
+  perform pg_temp.sent(b, 'payment_due', w - interval '1 day');
+  perform pg_temp.eq('R2 a payment email sent a day before: not sent', pg_temp.rem(b, w), 'payment email sent');
+  perform pg_temp.eq('R2 ... 3 days after it: goes', pg_temp.rem(b, w + interval '2 days 1 minute'), 'go');
+exception when others then perform pg_temp.ok('R2 runs', false, sqlerrm);
+end $$;
+
+-- R3 soft decline: a try is coming, so no reminder; after the last try its own email covers it
+do $$
+declare a uuid := pg_temp.acct('r3a'); pe timestamptz; w timestamptz; last timestamptz;
+begin
+  pe := pg_temp.member(a, 'r3a', 990170301);
+  perform pg_temp.job(a, pe, 'fail');
+  perform pg_temp.job(a, billing.next_run_at(pe + interval '3 days'), 'fail');
+  perform pg_temp.job(a, billing.next_run_at(pe + interval '7 days'), 'fail');
+  w := pg_temp.rem_from(pe);
+  perform pg_temp.eq('R3 retrying: a try is coming', pg_temp.rem(a, w), 'a try is coming');
+  perform billing.outbox_sweep(w);
+  perform pg_temp.ok('R3 ... nothing queued', pg_temp.ob(a, 'payment_reminder') is null);
+  last := billing.next_run_at(pe + interval '14 days');
+  perform pg_temp.job(a, last, 'fail');
+  update billing.outbox set status = 'failed' where account = a and key = 'payment_failed';
+  perform pg_temp.eq('R3 last try failed, card kept, its email failed: waits out the billing run',
+    pg_temp.rem(a, ((last at time zone 'UTC')::date + time '06:02') at time zone 'UTC'), 'billing run');
+  perform pg_temp.eq('R3 ... then goes', pg_temp.rem(a, ((last at time zone 'UTC')::date + time '06:06') at time zone 'UTC'), 'go');
+  perform pg_temp.sent(a, 'payment_failed', last + interval '1 minute');
+  perform pg_temp.eq('R3 the last try failed and its email went: not sent', pg_temp.rem(a, last + interval '3 hours'), 'payment email sent');
+  perform pg_temp.eq('R3 after the cutoff: never', pg_temp.rem(a, pg_temp.cut(pe) + interval '1 minute'), 'not past due');
+exception when others then perform pg_temp.ok('R3 runs', false, sqlerrm);
 end $$;
 
 -- ---------------------------------------------------------------------------
