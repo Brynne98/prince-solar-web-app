@@ -319,8 +319,9 @@ for (const f of jsx) {
 
 // ---- 5. market and vendor names stay in their own files (SOLAR-679 F20) ----
 // A new place that names the time zone, the currency or a vendor makes the next market or
-// vendor harder. Code only: app scripts, edge functions (not tests), function files and
-// migrations after 0279. Uses that were there on 2026-11-26 are in known-vendor-strings.json,
+// vendor harder. Code only: app scripts, edge functions (not tests) and the function files
+// (a migration repeats a whole function, so its file is what counts). Uses that were there on
+// 2026-11-26 are in known-vendor-strings.json,
 // per file and name; a file may not go above its count. When a step removes some, lower the
 // counts with `node scripts/reuse-check.mjs --shrink` (it never raises one).
 {
@@ -335,7 +336,6 @@ for (const f of jsx) {
     ...fs.readdirSync(PUB).filter(f => /\.(jsx|js)$/.test(f)).map(f => `public/${f}`),
     ...walk('supabase/functions').filter(f => /\.(ts|mts|mjs)$/.test(f) && !/_test\.ts$/.test(f)),
     ...walk('supabase/schemas').filter(f => f.endsWith('.sql')),
-    ...walk('supabase/migrations').filter(f => /\/(\d{4})_.*\.sql$/.test(f) && Number(f.match(/\/(\d{4})_/)[1]) > 279),
   ];
   const now = {};
   for (const f of files) {

@@ -41,6 +41,9 @@
  "supabase/functions/_shared/cors.ts": {
   "sunsynk": 1
  },
+ "supabase/functions/_shared/database.types.ts": {
+  "sunsynk": 11
+ },
  "supabase/functions/_shared/db.ts": {
   "sunsynk": 2
  },
@@ -110,10 +113,6 @@
  "supabase/functions/link-sunsynk/index.ts": {
   "sunsynk": 20
  },
- "supabase/functions/notify/index.ts": {
-  "sunsynk": 15,
-  "resend": 27
- },
  "supabase/functions/notify-email/index.ts": {
   "sunsynk": 1,
   "resend": 5
@@ -121,6 +120,10 @@
  "supabase/functions/notify-push/index.ts": {
   "sunsynk": 1,
   "resend": 1
+ },
+ "supabase/functions/notify/index.ts": {
+  "sunsynk": 15,
+  "resend": 27
  },
  "supabase/functions/poll/hold.mts": {
   "sunsynk": 2
@@ -244,6 +247,9 @@
  },
  "supabase/schemas/functions/private/refresh_store.sql": {
   "sunsynk": 5
+ },
+ "supabase/schemas/functions/private/schedule_jobs.sql": {
+  "sunsynk": 3
  },
  "supabase/schemas/functions/private/share_release.sql": {
   "sunsynk": 1
@@ -391,8 +397,5 @@
  "supabase/schemas/functions/public/sunsynk_tally.sql": {
   "Africa/Johannesburg": 1,
   "sunsynk": 2
- },
- "supabase/functions/_shared/database.types.ts": {
-  "sunsynk": 11
  }
 }
