@@ -5,8 +5,6 @@
  *  1. Dead CSS: a class in index.html's <style> that no .jsx, .js or .html under public/ uses.
  *     Classes the code builds at run time ('status-' + s.status) count as used by their prefix.
  *  2. Rebuilt components: markup or helpers that already exist in the shared set, made again.
- *  3. One global scope: every public/*.jsx shares it, so a second top-level `function x` or
- *     `const x` silently replaces the first. Two files may not declare the same name.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -144,7 +142,7 @@ for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
 for (const f of jsx) {
   read(f).split('\n').forEach((line, i) => {
     if (/reuse-check: allow/.test(line) || /^\s*(\/\/|\*|\/\*)/.test(line) || f === 'components.jsx' && /^\s+(pv|batt|grid|load|soc):/.test(line)) return;
-    if (ROLE_HEX.test(line) || ROLE_RGB.test(line)) problems.push(`${f}:${i + 1} a raw power or status colour: use window.COLORS or var(--…)`);
+    if (ROLE_HEX.test(line) || ROLE_RGB.test(line)) problems.push(`${f}:${i + 1} a raw power or status colour: use COLORS (components.jsx) or var(--…)`);
     if (RAW_TINT.test(line)) problems.push(`${f}:${i + 1} a raw white or black tint: use rgba(var(--ink-rgb), a)`);
   });
 }
@@ -290,16 +288,6 @@ for (const f of jsx) {
   }
   for (const f of ['_shared/poller.ts', '_shared/sunsynk.ts'])
     if (/\bdb\s*\.\s*rpc\s*(?:<[^>]*>)?\s*\(|\bdb\s*\.\s*from\s*\(\s*["'`]plant_config["'`]/.test(fnRead(f))) problems.push(`${f}: a database call around the handle: use rpc() or dbHandle() from _shared/db.ts`);
-}
-
-// ---- 3. one global scope ----
-const seen = new Map();
-for (const f of jsx) {
-  for (const m of read(f).matchAll(/^(?:function\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=)/gm)) {
-    const name = m[1] || m[2];
-    if (seen.has(name) && seen.get(name) !== f) problems.push(`${f}: ${name} is also declared at the top of ${seen.get(name)}: one global scope, rename or share it`);
-    else seen.set(name, f);
-  }
 }
 
 // ---- 4. no migration patches function text (SOLAR-679 F7) ----

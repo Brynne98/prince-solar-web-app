@@ -1,32 +1,28 @@
 // Warning tests (SOLAR-231): does each warning the app shows fire on a real problem and stay
-// quiet on real normal data? Runs the built app code (public/build/, `npm run build` first)
+// quiet on real normal data? Runs the app's modules (scripts/app-modules.mjs)
 // against api_overview answers recorded from production, changed one fact at a time.
 //   node scripts/warning-tests.mjs        exit 1 on any failure
 // A case marked `gap` is a known wrong answer, kept so the fix can be proven: its body
 // returns whether the answer is right; false prints GAP and does not fail the run, true
 // prints FIXED (drop its mark then). A gap case that throws is a failure like any other.
 import { readFileSync } from 'node:fs';
-import { createContext, runInContext } from 'node:vm';
+import { browser, loadApp, closeApp } from './app-modules.mjs';
 
 const root = new URL('..', import.meta.url);
 const fixture = name => JSON.parse(readFileSync(new URL('scripts/fixtures/warnings/' + name + '.json', root), 'utf8'));
 
-// The page's globals, enough for the data and check code to load. auth.js and link.js need a real
-// Supabase client and hold no warning, so they are left out.
-const stub = () => new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => '' : stub()), apply: () => stub(), construct: () => stub() });
-const ctx = { console, setTimeout, clearTimeout, setInterval, clearInterval, URL, URLSearchParams, Intl };
-Object.assign(ctx, { window: ctx, React: stub(), ReactDOM: stub(), document: stub(), localStorage: stub(), sessionStorage: stub(),
-  navigator: stub(), supabase: stub(), sb: stub(), posthog: stub(), fetch: () => new Promise(() => {}), addEventListener() {}, removeEventListener() {},
-  location: { search: '', hostname: 'localhost', href: 'http://localhost/' }, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) });
-createContext(ctx);
-for (const f of ['config.js', 'build/data.js', 'build/components.js', 'build/app.js', 'build/flow.js', 'build/chart.js', 'build/tabs.js'])
-  runInContext(readFileSync(new URL('public/' + f, root), 'utf8'), ctx, { filename: f });
+// The app's modules with a stub browser and a stub Supabase client whose api_overview answer
+// each case sets.
+browser();
+let answer = null;
+globalThis.sbStub = { rpc: async () => ({ data: answer, error: null }) };
+const ctx = await loadApp();
 
 // One recorded answer, changed by `edit`, through the page's own snapshot code.
 async function snap(name, edit = () => {}) {
   const api = fixture(name);
   edit(api, Object.fromEntries(api.inverters.map(i => [i.sn, i])));
-  ctx.getJSON = async () => api;
+  answer = api;
   return ctx.fetchSnapshot();
 }
 const at = s => new Date(s.updated).getTime(); // judge as of the recorded answer

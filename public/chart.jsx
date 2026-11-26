@@ -12,7 +12,12 @@
 // Measure WIDTH ONLY; height is fixed (derived from width). Measuring height and
 // feeding it back into the SVG creates a ResizeObserver loop that makes the chart
 // (and the page) creep larger on every interaction — so we never do that.
-function useChartSize(heights) {
+import React from 'react';
+import { usePopover } from './app.jsx';
+import { COLORS, LegendChip, Skeleton, Tip, TipRow, battShown, dayText, fmtDuration, fmtPower, plantDateStr, shiftDate } from './components.jsx';
+import { dayFor, emptyText, fetchDataDays, fetchDay, fetchEarliest, fetchGridToday, fetchInverterHistory, plantNow } from './data.jsx';
+import { invName } from './tabs.jsx';
+export function useChartSize(heights) {
   const ref = React.useRef(null);
   const [w, setW] = React.useState(360);
   React.useLayoutEffect(() => {
@@ -26,11 +31,11 @@ function useChartSize(heights) {
   return [ref, w, height];
 }
 
-const HM = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+export const HM = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
 // "Nice" y-axis scale: zero-anchored, round step sizes (1/2/2.5/5 ×10ⁿ) so the
 // tick labels come out clean and 0 is always a gridline.
-function niceScale(min, max, targetTicks) {
+export function niceScale(min, max, targetTicks) {
   min = Math.min(0, min);
   max = Math.max(0, max);
   if (max - min === 0) max = 1000;
@@ -60,7 +65,7 @@ const DAY_FLOOR_DAYS = 60; // what SunSynk's per-inverter history keeps
 /** Selected day + the arrows' bounds. `earliest` may be null (no lower bound). `today` is the
  *  plant's own date; left out, it is read from the current plant's zone (SOLAR-446). `want` ({date}) moves
  *  it to a day from outside: an alert opened from Notifications (SOLAR-244). */
-function useDayPicker(earliest, today, want) {
+export function useDayPicker(earliest, today, want) {
   // back on screen, look at the clock again: the day may have turned while it was away
   const [, bump] = React.useReducer(n => n + 1, 0);
   React.useEffect(() => {
@@ -68,7 +73,7 @@ function useDayPicker(earliest, today, want) {
     document.addEventListener('visibilitychange', back);
     return () => document.removeEventListener('visibilitychange', back);
   }, []);
-  const todayStr = today || plantDateStr(window.PLANT_TZ);
+  const todayStr = today || plantDateStr(plantNow.tz);
   const [date, setDate] = React.useState(want?.date && want.date <= todayStr ? want.date : todayStr);
   React.useEffect(() => { if (want?.date && want.date <= todayStr) setDate(want.date); }, [want]);
   // The day turned while today was on screen: follow it to the new today. A day picked by
@@ -86,6 +91,7 @@ function useDayPicker(earliest, today, want) {
     canPrev: !earliest || date > earliest, canNext: date < todayStr,
   };
 }
+useDayPicker.sent = false; // past_day_viewed goes once per page load
 
 // "Fri 2 Oct", and the year too when it is not this year: the phone's face for the date.
 function dayFace(s, todayStr) {
@@ -150,15 +156,15 @@ function CalendarPop({ date, todayStr, earliest, latest = todayStr, days, allDay
 // (on a phone they sit at the card's two ends, SOLAR-27). Today sits inside the box on a phone.
 // The arrows, the calendar and Today reach only days with data (SOLAR-175): ‹ › jump to the
 // nearest one and grey out when there is none. The list is asked again when the calendar opens.
-function DateBar({ pick, earliest, locked, children }) {
+export function DateBar({ pick, earliest, locked, children }) {
   const { date, setDate, todayStr } = pick;
   const [open, setOpen, box] = usePopover();
   const close = React.useCallback(() => setOpen(false), []);
   const [days, setDays] = React.useState(null);
   const plant = window.CURRENT_PLANT;
   // the newest reading's day: when it turns, the list is asked again for the new day (SOLAR-648)
-  const readDay = window.LAST_READ_DAY;
-  React.useEffect(() => { let alive = true; window.fetchDataDays(open).then(d => { if (alive) setDays(d); }); return () => { alive = false; }; }, [open, plant, date, readDay]);
+  const readDay = plantNow.lastReadDay;
+  React.useEffect(() => { let alive = true; fetchDataDays(open).then(d => { if (alive) setDays(d); }); return () => { alive = false; }; }, [open, plant, date, readDay]);
   const list = React.useMemo(() => days ? [...days].filter(k => k <= todayStr && (!earliest || k >= earliest)).sort() : [], [days, todayStr, earliest]);
   // locked: the app is still loading, so the picker shows today and goes nowhere
   const prevDay = locked ? null : list.filter(k => k < date).pop(), nextDay = locked ? null : list.find(k => k > date);
@@ -186,7 +192,7 @@ function DateBar({ pick, earliest, locked, children }) {
 }
 
 /** Both day charts span the whole day, 288 five-minute buckets; today fills in from the left. */
-const DAY_LAST = 287;
+export const DAY_LAST = 287;
 /** x ticks in minutes-of-day across the whole day, 00:00 to 24:00: 6 h apart on phones, 3 h on desktop. */
 function xTicksFor(mobile) {
   const ticks = [];
@@ -201,7 +207,7 @@ const idxFromPointer = (clientX, el, m, innerW, lastIdx) => {
 };
 /** Runs of 30 min or more with no reading, as [from, to] buckets: the last reading before
  *  to the first after. They get a striped band; shorter holes are just the break in the line. */
-function gapRuns(from, to, missing) {
+export function gapRuns(from, to, missing) {
   const gaps = [];
   for (let i = from, a = -1; i <= to + 1; i++) {
     const miss = i <= to && missing(i);
@@ -211,13 +217,13 @@ function gapRuns(from, to, missing) {
   return gaps;
 }
 /** The stripes for a gap band; goes in the chart's <defs>, filled as url(#gaphatch). */
-const GapHatch = () => (
+export const GapHatch = () => (
   <pattern id="gaphatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
     <line x1="0" y1="0" x2="0" y2="7" stroke="rgba(var(--ink-rgb),0.07)" strokeWidth="3" />
   </pattern>
 );
 /** Tooltip left edge: beside the crosshair, flipped near the right edge, never off either end. */
-const tipLeftFor = (px, width, tipW = 190, gap = 16) =>
+export const tipLeftFor = (px, width, tipW = 190, gap = 16) =>
   Math.max(8, Math.min(width - tipW - 8, px + gap + tipW <= width - 8 ? px + gap : px - gap - tipW));
 /** Axis fitted to the data (not zero-anchored): 40–60 °C or 230 V should fill the plot. */
 function fitScale(lo, hi, unit) {
@@ -243,15 +249,15 @@ function fitScale(lo, hi, unit) {
 // that day and draws no date arrows of its own, only its lag and outage notes.
 // An inverter is hot above these (°C, the limits pvbiz alerts on). The Temperature chart
 // draws a line red above its limit; Equipment's Inverters card and problem cards use them too.
-const EQ_HOT_AC = 60, EQ_HOT_DC = 75;
+export const EQ_HOT_AC = 60, EQ_HOT_DC = 75;
 // One grey per inverter: a reading that is no power series takes grey, never a sixth hue (SOLAR-392).
 const INV_COLORS = ['var(--text)', 'var(--muted)', 'rgba(var(--ink-rgb),0.42)', 'rgba(var(--ink-rgb),0.78)', 'rgba(var(--ink-rgb),0.3)', 'rgba(var(--ink-rgb),0.66)']; // greys, on Equipment only
 // A temperature line shades with heat (SOLAR-396): its inverter's grey until 20 °C under the
 // hot limit, this warm orange halfway, the warning red at the limit and above.
-const HEAT_WARM = '#f0884a'; // temperature only; reuse-check: allow
+export const HEAT_WARM = '#f0884a'; // temperature only; reuse-check: allow
 // Outage: runs of 5-minute buckets, [first, last], where any inverter's grid (or output) read
 // 0 Hz, or its terminal 0 V. The Grid tab's day chart shades the same runs (SOLAR-125).
-function outageRuns(invs, fKey, lastIdx) {
+export function outageRuns(invs, fKey, lastIdx) {
   const runs = [];
   let run = null;
   for (let i = 0; i <= lastIdx; i++) {
@@ -260,14 +266,14 @@ function outageRuns(invs, fKey, lastIdx) {
   }
   return runs;
 }
-const outageMinutes = runs => runs.reduce((n, r) => n + (r[1] - r[0] + 1) * 5, 0);
+export const outageMinutes = runs => runs.reduce((n, r) => n + (r[1] - r[0] + 1) * 5, 0);
 // A day's off minutes from api_grid_today, still counting while the grid is off now (SOLAR-430).
-const gridOffMinutes = (gd, offNow) => gd && gd.offMinutes != null
+export const gridOffMinutes = (gd, offNow) => gd && gd.offMinutes != null
   ? Number(gd.offMinutes) + (offNow && gd.asOf ? Math.max(0, Math.floor((Date.now() / 1000 - gd.asOf) / 60)) : 0) : null;
 // Today's grid-off runs (SOLAR-421). SunSynk's history (`runs`) lands every 6 hours, so it is
 // joined with our own minute readings (`buckets` from api_grid_today, {i, off}) and, while
 // the grid is off now, every slot from `liveFrom` to `nowIdx`: the band grows until it is back.
-function gridOffRuns(runs, buckets, liveFrom, nowIdx) {
+export function gridOffRuns(runs, buckets, liveFrom, nowIdx) {
   const off = new Set();
   (runs || []).forEach(([a, b]) => { for (let i = a; i <= b; i++) off.add(i); });
   (buckets || []).forEach(b => { if (b.off) off.add(b.i); });
@@ -278,7 +284,7 @@ function gridOffRuns(runs, buckets, liveFrom, nowIdx) {
 }
 // The slot the grid has been off since, as this page knows it: the last of our readings'
 // buckets when they already end off, else the first slot the live check said off. null while on.
-function useLiveOffFrom(offNow, buckets, nowIdx) {
+export function useLiveOffFrom(offNow, buckets, nowIdx) {
   const ref = React.useRef(null);
   const plant = window.CURRENT_PLANT;
   if (!offNow || nowIdx == null) { ref.current = null; return null; }
@@ -290,15 +296,15 @@ function useLiveOffFrom(offNow, buckets, nowIdx) {
   return ref.current.from;
 }
 // The last 5-minute slot of `points` with a value in `field`: where today's line ends.
-const lastSlot = (points, field) => { for (let i = points.length - 1; i >= 0; i--) if (points[i][field] != null) return Math.round(points[i].t / 5); return null; };
+export const lastSlot = (points, field) => { for (let i = points.length - 1; i >= 0; i--) if (points[i][field] != null) return Math.round(points[i].t / 5); return null; };
 // The run holding bucket i as "10:25–19:30", for the hover card; null outside every run.
-function outageAt(runs, i) {
+export function outageAt(runs, i) {
   const r = runs.find(([a, b]) => i >= a && i <= b);
   return r ? HM(r[0] * 5) + '–' + HM(Math.min(1440, (r[1] + 1) * 5)) : null;
 }
 // "Grid off 9h" by the date; its square is the band's red, so it names the shading.
-function OutagePill({ mins, what }) {
-  return mins > 0 ? <window.Tip className="hv-gap" text={what === 'Grid' ? 'How long the grid was off.' : 'When the ' + what.toLowerCase() + ' was off, to the nearest 5 minutes.'}><i className="hv-gap-sq" />{what} off {window.fmtDuration(mins)}</window.Tip> : null;
+export function OutagePill({ mins, what }) {
+  return mins > 0 ? <Tip className="hv-gap" text={what === 'Grid' ? 'How long the grid was off.' : 'When the ' + what.toLowerCase() + ' was off, to the nearest 5 minutes.'}><i className="hv-gap-sq" />{what} off {fmtDuration(mins)}</Tip> : null;
 }
 // A series from index `from` to `to` as an SVG path: x(i) across, yAt(i) down, which is null
 // where there is no reading, so the line breaks there rather than bridging the gap.
@@ -326,15 +332,15 @@ function seriesArea(from, to, x, yAt, base) {
 }
 // A day chart with nothing to draw: a shimmer at its height while it loads, else why it's empty.
 function ChartPlaceholder({ height, loading, text }) {
-  return loading ? <window.Skeleton h={height} r={12} /> : <div className="chart-empty" style={{ height }}>{text}</div>;
+  return loading ? <Skeleton h={height} r={12} /> : <div className="chart-empty" style={{ height }}>{text}</div>;
 }
 // The hover card's row for a bucket inside a run, in the band's red.
-function OutageTipRow({ span, what }) {
-  return span ? <window.TipRow sq color="var(--bad)" label={what + ' off'}>{span}</window.TipRow> : null;
+export function OutageTipRow({ span, what }) {
+  return span ? <TipRow sq color="var(--bad)" label={what + ' off'}>{span}</TipRow> : null;
 }
 function InverterHistoryChart({ kind, refreshKey, dayPick }) {
-  const C = window.COLORS;
-  const earliest = shiftDate(plantDateStr(window.PLANT_TZ), -DAY_FLOOR_DAYS);
+  const C = COLORS;
+  const earliest = shiftDate(plantDateStr(plantNow.tz), -DAY_FLOOR_DAYS);
   const ownPick = useDayPicker(earliest);
   const pick = dayPick || ownPick;
   const { date, isToday } = pick;
@@ -347,7 +353,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   React.useEffect(() => {
     let alive = true;
     setInvs(null); setHover(null);
-    window.fetchInverterHistory(date, refreshKey)
+    fetchInverterHistory(date, refreshKey)
       .then(r => { if (alive) setInvs(r); })
       .catch(() => { if (alive) setInvs([]); });
     return () => { alive = false; };
@@ -357,7 +363,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   React.useEffect(() => {
     let alive = true;
     setGridMin(null);
-    if (kind === 'ac') window.fetchGridToday(refreshKey, isToday ? null : date)
+    if (kind === 'ac') fetchGridToday(refreshKey, isToday ? null : date)
       .then(r => { if (alive && r && r.offMinutes != null) setGridMin(Number(r.offMinutes)); }).catch(() => {});
     return () => { alive = false; };
   }, [kind, date, isToday, refreshKey]);
@@ -456,7 +462,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
       <div className="chart-tip" style={{ left: tipLeftFor(px, width), top: 24 }}>
         <div className="tip-time">{HM(hp * 5)}</div>
         {rows.map(([l, v, c]) => (
-          <window.TipRow key={l} color={c} label={l}>{v == null ? '—' : v}</window.TipRow>
+          <TipRow key={l} color={c} label={l}>{v == null ? '—' : v}</TipRow>
         ))}
         <OutageTipRow span={outageAt(outages, hp)} what={offWord} />
       </div>
@@ -464,7 +470,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
   };
 
   // A past day can be empty for three reasons; say which (0048).
-  const sync = window.SYNC;
+  const sync = plantNow.sync;
   const emptyMsg = invs == null ? '' : isToday
     ? 'Today’s readings arrive every six hours.'
     : sync && sync.invPending && sync.tempNext && date >= sync.tempNext
@@ -478,7 +484,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
     <div className="hv-root" data-today={isToday || undefined}>
       {(() => {
         const notes = <>
-          {lagNote && <window.Tip className="hv-lag mono" text="From SunSynk's history, fetched every six hours; the live numbers above run ahead of it">{lagNote}</window.Tip>}
+          {lagNote && <Tip className="hv-lag mono" text="From SunSynk's history, fetched every six hours; the live numbers above run ahead of it">{lagNote}</Tip>}
           <OutagePill mins={outageMin} what={offWord} />
         </>;
         return dayPick
@@ -489,13 +495,13 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
         {/* an unseen chip holds the row's height until the inverters land (SOLAR-221) */}
         {invs == null && <span className="legend-chip" style={{ visibility: 'hidden' }} aria-hidden="true">{' '}</span>}
         {shown.map((inv, k) => (
-          <window.LegendChip key={inv.sn} color={color(k)} label={nInv > 1 ? name(inv) : (isTemp ? 'AC side' : 'Voltage')}
+          <LegendChip key={inv.sn} color={color(k)} label={nInv > 1 ? name(inv) : (isTemp ? 'AC side' : 'Voltage')}
             value={isTemp ? fmtC(valAt(inv, 'ac')) : fmtV(valAt(inv, 'v'))} active />
         ))}
         {isTemp && shown.filter(i => !i.dcFlat).map((inv, k) => (
-          <window.LegendChip key={inv.sn + 'dc'} color={color(shown.indexOf(inv))} label={(nInv > 1 ? name(inv) + ', ' : '') + 'DC side'} value={fmtC(valAt(inv, 'dc'))} active />
+          <LegendChip key={inv.sn + 'dc'} color={color(shown.indexOf(inv))} label={(nInv > 1 ? name(inv) + ', ' : '') + 'DC side'} value={fmtC(valAt(inv, 'dc'))} active />
         ))}
-        {!isTemp && fInv && <window.LegendChip color={fColor} label={freqLabel} value={fmtHz(fVal)} active />}
+        {!isTemp && fInv && <LegendChip color={fColor} label={freqLabel} value={fmtHz(fVal)} active />}
       </div>
       {/* today before the first six-hourly fetch: a short note, not a chart-high empty box (SOLAR-411) */}
       <div className="chart-area" ref={ref} style={{ position: 'relative', height: nInv === 0 && invs != null && isToday ? 120 : height }}>
@@ -506,7 +512,7 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
             onTouchMove={e => e.touches[0] && setHover(idxFromPointer(e.touches[0].clientX, e.currentTarget, m, innerW, lastIdx))}>
             {isTemp && hasV && (
               <defs>
-                {shown.flatMap((inv, k) => [['ac', EQ_HOT_AC], ['dc', EQ_HOT_DC]].map(([kind, lim]) => (
+                {shown.flatMap((inv, k) => /** @type {[string, number][]} */ ([['ac', EQ_HOT_AC], ['dc', EQ_HOT_DC]]).map(([kind, lim]) => (
                   <linearGradient key={kind + k} id={gradId + kind + k} gradientUnits="userSpaceOnUse" x1={0} x2={0} y1={y(lim)} y2={y(lim - 20)}>
                     <stop offset="0" style={{ stopColor: 'var(--bad)' }} />
                     <stop offset="0.5" style={{ stopColor: HEAT_WARM }} />
@@ -560,11 +566,11 @@ function InverterHistoryChart({ kind, refreshKey, dayPick }) {
     </div>
   );
 }
-window.InverterHistoryChart = InverterHistoryChart;
+export { InverterHistoryChart };
 
 // hasBatt / hasGrid: a plant without one has no chip, line or tooltip row for it (SOLAR-411)
 function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGrid = true }) {
-  const C = window.COLORS;
+  const C = COLORS;
   const [vis, setVis] = React.useState({ pv: true, batt: hasBatt, load: true, grid: hasGrid, soc: hasBatt });
   const has = k => (k === 'batt' || k === 'soc' ? hasBatt : k === 'grid' ? hasGrid : true);
   // another plant may have what this one lacks: its series come back on with it
@@ -582,14 +588,14 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
   const mobile = width < 560;
 
   // lower bound for the picker (≈ commission date)
-  React.useEffect(() => { window.fetchEarliest().then(setEarliest); }, []);
+  React.useEffect(() => { fetchEarliest().then(setEarliest); }, []);
 
   // Fetch a past day's series. `silent` keeps the current chart on screen while
   // refetching (used by the Refresh button) instead of flashing the loader.
   const loadDay = React.useCallback((d, silent) => {
     if (!silent) { setLoading(true); setPastDay(null); setHover(null); }
     let alive = true;
-    window.fetchDay(d)
+    fetchDay(d)
       .then(r => { if (alive) { setPastDay(r); setLoading(false); } })
       .catch(() => { if (alive) { setPastDay({ points: [], totals: {} }); setLoading(false); } });
     return () => { alive = false; };
@@ -615,10 +621,10 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
   const innerW = Math.max(40, width - m.l - m.r);
   const innerH = height - m.t - m.b;
 
-  const dayData = isToday ? window.dayFor(today, todayStr) : pastDay;
+  const dayData = isToday ? dayFor(today, todayStr) : pastDay;
   const raw = (dayData && dayData.points) || [];
   // The battery series is + = the house is using it, − = charging; idle reads 0. Gaps stay null.
-  const pts = React.useMemo(() => raw.map(p => (p.batt == null ? p : { ...p, batt: window.battShown(p.batt) })),
+  const pts = React.useMemo(() => raw.map(p => (p.batt == null ? p : { ...p, batt: battShown(p.batt) })),
     [dayData]); // eslint-disable-line react-hooks/exhaustive-deps
   const real = pts.filter(p => p.pv != null); // anything with data (est = cloud-sourced, drawn dotted)
   const hasData = real.length > 1;
@@ -633,7 +639,7 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
     if (!cur) return (loading || (isToday && !dayData)) ? <span style={{ visibility: 'hidden' }}>{k === 'soc' ? '00%' : '000 W'}</span> : null;
     if (k === 'soc') return cur.soc != null ? cur.soc + '%' : null;
     const v = cur[k];
-    return v != null ? window.fmtPower(v) : null;
+    return v != null ? fmtPower(v) : null;
   };
 
   // ---------------------------- DAY (power) ----------------------------
@@ -788,7 +794,7 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
             marks them in the data if that ever wants surfacing again */}
         <div className="tip-time">{HM(p.t)}</div>
         {rows.map(([l, v, c, u]) => (
-          <window.TipRow key={l} color={c} label={l}>{u === 'W' ? window.fmtPower(v) : v + ' ' + u}</window.TipRow>
+          <TipRow key={l} color={c} label={l}>{u === 'W' ? fmtPower(v) : v + ' ' + u}</TipRow>
         ))}
       </div>
     );
@@ -809,18 +815,18 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
       const bt = p.batt || 0; if (bt < 0) bChg += -bt / 1000 * dt; else bDis += bt / 1000 * dt; // chart: −batt = charging
     }
     const t0 = pts[a].t, t1 = pts[b].t, mins = t1 - t0;
-    const dur = window.fmtDuration(mins);
+    const dur = fmtDuration(mins);
     const soc0 = pts[a].soc, soc1 = pts[b].soc;
     const dSoc = (soc0 != null && soc1 != null) ? soc1 - soc0 : null;
     const f = v => v.toFixed(2);
     return (
       <div className="chart-range">
         <div className="cr-head"><span className="tip-time">{HM(t0)} – {HM(t1)} · {dur}</span><button className="cr-x" onClick={() => setSel(null)} aria-label="Clear">×</button></div>
-        <window.TipRow color={C.pv} label="Generated">{f(gen)} kWh</window.TipRow>
-        <window.TipRow color={C.load} label="Home">{f(cons)} kWh</window.TipRow>
-        {hasGrid && <window.TipRow color={C.grid} label="Grid in / out">{f(gImp)} / {f(gExp)} kWh</window.TipRow>}
-        {hasBatt && <window.TipRow color={C.batt} label="Batt chg / dis">{f(bChg)} / {f(bDis)} kWh</window.TipRow>}
-        {hasBatt && dSoc != null && <window.TipRow color={C.soc} label="Charge">{soc0}% → {soc1}% ({dSoc >= 0 ? '+' : ''}{dSoc}%)</window.TipRow>}
+        <TipRow color={C.pv} label="Generated">{f(gen)} kWh</TipRow>
+        <TipRow color={C.load} label="Home">{f(cons)} kWh</TipRow>
+        {hasGrid && <TipRow color={C.grid} label="Grid in / out">{f(gImp)} / {f(gExp)} kWh</TipRow>}
+        {hasBatt && <TipRow color={C.batt} label="Batt chg / dis">{f(bChg)} / {f(bDis)} kWh</TipRow>}
+        {hasBatt && dSoc != null && <TipRow color={C.soc} label="Charge">{soc0}% → {soc1}% ({dSoc >= 0 ? '+' : ''}{dSoc}%)</TipRow>}
       </div>
     );
   }
@@ -832,7 +838,7 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
   // 60 days the fetch reaches, or a real gap. Say which.
   // While the first load runs (today, back through two weeks, then back to
   // backfillNext, SOLAR-171), any empty day from backfillNext on may still come.
-  const sync = window.SYNC;
+  const sync = plantNow.sync;
   const pastMsg = sync && sync.spinePending && sync.backfillNext && date >= sync.backfillNext
     ? 'Not fetched yet.'
     : sync && sync.spinePending && date < shiftDate(todayStr, -DAY_FLOOR_DAYS) ? 'Older than 60 days, so not available.'
@@ -840,7 +846,7 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
   const emptyMsg = loading ? 'Loading…'
     : isToday && silent ? 'No readings today.'
     : isToday && (dayData?.approx || real.length === 1) ? 'Collecting today’s first readings.'
-    : isToday ? window.emptyText(window.PLANT_DAYS, 'Loading today’s data…') : pastMsg;
+    : isToday ? emptyText(plantNow.days, 'Loading today’s data…') : pastMsg;
 
   return (
     <div className="hv-root" data-today={isToday || undefined}>
@@ -849,7 +855,7 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
           the graph cannot show, and a hole long enough to matter already breaks the lines. */}
 
       <div className="legend-row">
-        {legend.map(([k, l, c]) => <window.LegendChip key={k} color={c} label={l} value={chipVal(k)} active={vis[k]} onClick={() => toggle(k)} />)}
+        {legend.map(([k, l, c]) => <LegendChip key={k} color={c} label={l} value={chipVal(k)} active={vis[k]} onClick={() => toggle(k)} />)}
       </div>
 
       <div className="chart-area" ref={ref} style={{ position: 'relative', height: height }}>
@@ -863,5 +869,5 @@ function HistoryView({ today, refreshKey, locked, silent, hasBatt = true, hasGri
   );
 }
 
-window.HistoryView = HistoryView;
-Object.assign(window, { CalendarPop, CalIcon, dayFace, seriesPath, seriesArea }); // Your data's From and To (tabs.js)
+export { HistoryView };
+export { CalendarPop, CalIcon, dayFace, seriesPath, seriesArea }; // Your data's From and To (tabs.js)

@@ -8,8 +8,9 @@ each waiting for the one before and stopping on red:
 2. **Database**: the `functions_url` Vault secret if missing, `supabase db push`, then every live
    function compared with its file (`node scripts/db-files.mjs --live`).
 3. **Functions**: `supabase functions deploy` for all of them; unchanged ones are skipped.
-4. **Frontend**: `npm ci && npm run build`, `public/` uploaded to Cloudflare Pages, then the live
-   `config.js` must show the version asked for.
+4. **Frontend**: `npm ci && npm run build` with source maps, the maps sent to PostHog and
+   deleted, `public/` uploaded to Cloudflare Pages, then the live `config.js` must show the
+   version asked for and `/build/*.js.map` must answer 404 (F19).
 
 Backend before frontend: new UI must never call an RPC that isn't there yet. Migrations and
 functions stay backward-compatible with the frontend still live.
@@ -44,8 +45,9 @@ GitHub > Actions > Release > Run workflow, branch `main`, version `v1.2.3`. Bryn
 `production` environment when asked. Or: `gh workflow run release.yml -f version=v1.2.3`.
 
 The `production` environment holds `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`,
-`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and the variable `SUPABASE_PROJECT_REF`, with
-Brynne as required reviewer.
+`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `POSTHOG_CLI_TOKEN` (a PostHog personal API key
+that can write error tracking) and the variables `SUPABASE_PROJECT_REF` and
+`POSTHOG_CLI_PROJECT_ID`, with Brynne as required reviewer.
 
 **Cloudflare does not build on push** (F2): in the Pages project (Settings > Builds > Branch
 control), automatic production deployments are off, so a red push never reaches the site. Only

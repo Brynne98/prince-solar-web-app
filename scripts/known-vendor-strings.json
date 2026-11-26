@@ -4,7 +4,6 @@
   "paystack": 2
  },
  "public/auth.jsx": {
-  "sunsynk": 3,
   "resend": 17,
   "infobip": 1
  },
@@ -397,5 +396,8 @@
  "supabase/schemas/functions/public/sunsynk_tally.sql": {
   "Africa/Johannesburg": 1,
   "sunsynk": 2
+ },
+ "public/sb.js": {
+  "sunsynk": 3
  }
 }

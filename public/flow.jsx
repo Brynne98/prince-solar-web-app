@@ -8,7 +8,10 @@
 // Today column side by side, so tablets get the stacked layout.
 // Fullscreen zooms either layout to fit, so there the screen's shape decides, not its
 // width: upright is stacked, sideways is wide (SOLAR-550).
-function useFlowMobile(wall) {
+import React from 'react';
+import { useChartSize } from './chart.jsx';
+import { COLORS, COLORS_TEXT, Tip, battShown, fmtEnergyParts, fmtPower, fmtPowerParts } from './components.jsx';
+export function useFlowMobile(wall) {
   const q = wall ? '(orientation:portrait)' : '(max-width:900px)';
   const [mobile, setMobile] = React.useState(
     () => typeof window !== 'undefined' && window.matchMedia(q).matches
@@ -32,7 +35,7 @@ function flowAlpha(color, a) {
 function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, typicalHour, features, wall, silentSince, pausedSince, waiting }) {
   // no reading yet (SOLAR-623): dashes, as on a silent plant, and no sentence
   const blank = !!silentSince || !!waiting;
-  const C = window.COLORS, T = window.COLORS_TEXT;
+  const C = COLORS, T = COLORS_TEXT;
   const mobile = useFlowMobile(wall);
   // The boxes stretch with the card (SOLAR-39); its width only decides the lane's.
   const [wrapRef, wrapW] = useChartSize();
@@ -91,7 +94,7 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
       today: today(['Made', agg.pvToday]) },
     // w stays the magnitude (animation, stroke). The box prints no sign: the state line
     // (Full in, Empty in) says which way it flows (SOLAR-91).
-    bat: hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: Math.abs(window.battShown(agg.battOut)),
+    bat: hasBatt && { key: 'bat', label: 'Battery', color: C.batt, w: agg.battPower, val: Math.abs(battShown(agg.battOut)),
       icon: 'battery', soc: agg.battSoc, reverse: charging, state: battState, charge: agg.battSoc,
       today: today(['Charged', agg.battChgToday], ['Discharged', agg.battDischgToday]) },
     // flows both ways: an export runs the animation back towards the grid and prints
@@ -117,7 +120,7 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
     w: 0, dash: true, state: null, split: null, charge: null, soc: null, known: false, off: false, reverse: false }));
 
   const CEIL = 8000;
-  const pw = w => window.fmtPowerParts(w);
+  const pw = w => fmtPowerParts(w);
 
   // One look for every line, desktop and phone: a soft band with dots moving along it,
   // faster with more power. `fixed` is the phone: widths stay in screen pixels where the
@@ -223,10 +226,10 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
           {n.split && splitFoot(n.split)}
           {n.charge != null && (
             // the charge on a row above the bar, so the bar sits on the same line as Solar's and Home's
-            <window.Tip as="div" className="fbox-foot fbox-charge" text={usualTitle}>
+            <Tip as="div" className="fbox-foot fbox-charge" text={usualTitle}>
               <div className="fbox-charge-row"><em>Charge</em><b style={{ color: n.color }}>{n.charge}%</b></div>
               <div className="fbox-bar"><i style={{ width: Math.max(0, Math.min(100, n.charge)) + '%', background: n.color }} /></div>
-            </window.Tip>
+            </Tip>
           )}
           {/* mains there or gone: a status, never green-tinted like solar's power */}
           {n.known && !n.idle && <div className={'fbox-foot fbox-grid' + (n.off ? ' off' : '')}><i />{n.off ? 'Grid off' : 'Grid on'}</div>}
@@ -234,7 +237,7 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
         {n.today.length > 0 && (
           <div className="fbox-today">
             <div className="fbox-today-h">Today</div>
-            {n.today.map(([k, kwh]) => <div key={k}><span>{k}</span><b>{window.fmtEnergyParts(Number(kwh))[0]}<span className="u">{window.fmtEnergyParts(Number(kwh))[1]}</span></b></div>)}
+            {n.today.map(([k, kwh]) => <div key={k}><span>{k}</span><b>{fmtEnergyParts(Number(kwh))[0]}<span className="u">{fmtEnergyParts(Number(kwh))[1]}</span></b></div>)}
           </div>
         )}
       </div>
@@ -359,13 +362,13 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
   // Solar is only named when it is making something; a battery can export after dark (SOLAR-63).
   // any export is named, as the Grid box shows it (no deadband; SOLAR-628)
   else if (gridExport > 0) {
-    const sending = <>sending <b style={{ color: T.grid }}>{window.fmtPower(gridExport)}</b> to the grid</>;
+    const sending = <>sending <b style={{ color: T.grid }}>{fmtPower(gridExport)}</b> to the grid</>;
     const sun = agg.pvNow > 50;
     narrative = sun && battIn > 50
       ? <><b style={{ color: T.pv }}>Solar</b> and your <b style={{ color: T.batt }}>battery</b> are powering the home and {sending}.</>
       : sun ? <><b style={{ color: T.pv }}>Solar</b> is covering the home{hasBatt && charging ? ', charging the battery' : ''} and {sending}.</>
       : battIn > 50 ? <>Your <b style={{ color: T.batt }}>battery</b> is powering the home and {sending}.</>
-      : <>Sending <b style={{ color: T.grid }}>{window.fmtPower(gridExport)}</b> to the grid.</>;
+      : <>Sending <b style={{ color: T.grid }}>{fmtPower(gridExport)}</b> to the grid.</>;
   }
   // >= home - 50, not > home + 50: a home drawing exactly what the panels make is the
   // commonest sunny-afternoon state and fell through to the vague fallback.
@@ -375,7 +378,7 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
   else if (hasBatt && agg.battPower > 5 && !charging && gridImport < 50) narrative = agg.pvNow > 50
     ? <><b style={{ color: T.pv }}>Solar</b> and your <b style={{ color: T.batt }}>battery</b> are powering the home.</>
     : <>Your <b style={{ color: T.batt }}>battery</b> is powering the home.</>;
-  else if (gridImport > 50) narrative = <>Using <b style={{ color: T.grid }}>{window.fmtPower(gridImport)}</b> from the grid.</>;
+  else if (gridImport > 50) narrative = <>Using <b style={{ color: T.grid }}>{fmtPower(gridImport)}</b> from the grid.</>;
   else if (!hasGrid && agg.pvNow < 50) narrative = <>Your <b style={{ color: T.batt }}>battery</b> is powering the home.</>;
   else if (!hasBatt) narrative = <><b style={{ color: T.pv }}>Solar</b> covers what it can; the grid covers the rest.</>;
   else narrative = <>Solar, battery and grid are <b>all powering the home</b>.</>;
@@ -392,4 +395,4 @@ function PowerFlow({ agg, inverters, total, battInfo, onBattInfo, typicalSoc, ty
   );
 }
 
-window.PowerFlow = PowerFlow;
+export { PowerFlow };

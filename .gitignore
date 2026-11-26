@@ -19,5 +19,5 @@ graphify-out/
 # stray Deno lockfile from running `deno check` at the root; the functions bundle without it
 deno.lock
 
-# compiled from public/*.jsx by `npm run build` (SOLAR-131)
+# bundled from public/*.jsx by `npm run build` (Vite, SOLAR-679 F15)
 public/build/

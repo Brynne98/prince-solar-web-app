@@ -1,21 +1,17 @@
 // Plant switch (SOLAR-646): an answer asked for before a switch must not land after it.
-// Runs the built data code (public/build/data.js, `npm run build` first) with a Supabase stub
+// Runs the app's modules (scripts/app-modules.mjs) with a Supabase stub
 // whose replies come back only when the test lets them.
 //   node scripts/plant-switch-test.mjs    exit 1 on any failure
-import { readFileSync } from 'node:fs';
-import { createContext, runInContext } from 'node:vm';
+import { browser, loadApp } from './app-modules.mjs';
 
-const root = new URL('..', import.meta.url);
 const pending = [];
-const sb = {
-  auth: { onAuthStateChange() {} },
+browser();
+globalThis.sbStub = {
+  auth: { onAuthStateChange() { return { data: { subscription: { unsubscribe() {} } } }; } },
   // each reply waits until release() and answers with the plant it was asked for
   rpc: (fn, params) => new Promise((res) => pending.push(() => res({ data: { plant: params.p_plant, days: params.p_plant }, error: null }))),
 };
-const ctx = { console, setTimeout, clearTimeout, URL, URLSearchParams, Intl, sb };
-ctx.window = ctx;
-createContext(ctx);
-runInContext(readFileSync(new URL('public/build/data.js', root), 'utf8'), ctx, { filename: 'data.js' });
+const ctx = await loadApp();
 const release = async (i) => { pending[i](); await new Promise(r => setTimeout(r, 0)); };
 const settle = (p) => p.then(v => ({ ok: v }), e => ({ stale: ctx.isStale(e), e }));
 

@@ -30,27 +30,11 @@
 // is blocked, the card says so and email sign-in still works.
 // ============================================================================
 
-window.sb = window.supabase.createClient(
-  window.SUNSYNK_CONFIG.url,
-  window.SUNSYNK_CONFIG.key,
-  { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'synsynk.auth' },
-    global: { fetch: fetchWithRefreshCutoff } }
-);
-
-// supabase-js renews an expired sign-in before any other request goes out, holding a
-// lock until the renewal answers, and sends it with no time limit. A tablet waking up
-// can send it on a connection that died while asleep, so it never answers and every
-// read waits behind it ("Couldn't check your SunSynk logins — timed out", SOLAR-21).
-// Cut the renewal off after 5 s; supabase-js counts that as a network failure and
-// sends it again, on a fresh connection. Only the renewal: sign-up and other calls
-// can rightly take longer.
-function fetchWithRefreshCutoff(url, opts) {
-  if (!String(url).includes('grant_type=refresh_token') || (opts && opts.signal)) return fetch(url, opts);
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 5000);
-  return fetch(url, { ...opts, signal: ctl.signal }).finally(() => clearTimeout(timer));
-}
-
+import React from 'react';
+import { SaveToast, toast } from './app.jsx';
+import { BusyButton } from './components.jsx';
+import { pushTurnOff } from './data.jsx';
+import { sb } from './sb.js';
 // Where emailed links (confirmation, password reset) bring the user back to.
 const SITE_URL = location.origin + location.pathname.replace(/\/[^/]*$/, '/');
 // Reset links come back tagged, so an expired one can be told from a confirmation (SOLAR-198).
@@ -82,14 +66,14 @@ if (resetPending) {
   history.replaceState(null, '', u.pathname + u.search + u.hash);
 }
 // Takes those params (and the #section, with hash) out of the address, leaving the rest.
-const dropFromAddress = (keys, hash = false) => {
+export const dropFromAddress = (keys, hash = false) => {
   const u = new URL(location.href);
   keys.forEach(k => u.searchParams.delete(k));
   if (hash) u.hash = '';
   if (u.href !== location.href) history.replaceState(null, '', u.pathname + u.search + u.hash);
 };
-window.resetAsked = () => resetPending;
-window.takeResetAsk = () => { const r = resetPending; resetPending = false; return r; };
+export const resetAsked = () => resetPending;
+export const takeResetAsk = () => { const r = resetPending; resetPending = false; return r; };
 
 // An email's link to a page (SOLAR-473): ?tab, ?section, ?plant, ?pay, ?add. Signing in with
 // Google or an emailed link comes back to the bare address, so the link is kept a day and
@@ -108,22 +92,22 @@ const restoreDeepLink = () => {
   new URLSearchParams(kept.q).forEach((v, k) => u.searchParams.set(k, v));
   if (u.href !== location.href) history.replaceState(null, '', u.pathname + u.search + u.hash);
 };
-window.sb.auth.onAuthStateChange((event, session) => { if (session) restoreDeepLink(); });
+sb.auth.onAuthStateChange((event, session) => { if (session) restoreDeepLink(); });
 
 // Resolves once the initial session lookup is done, so the first render doesn't
 // flash the login form at an already-signed-in user. `recovering` is true from the
 // moment a reset link lands until the user sets a new password.
-window.useSession = function useSession() {
+export function useSession() {
   const { useState, useEffect } = React;
   const [state, setState] = useState({ loading: true, session: null, recovering: false });
 
   useEffect(() => {
     let alive = true;
-    window.sb.auth.getSession().then(({ data }) => {
+    sb.auth.getSession().then(({ data }) => {
       if (data.session) { restoreDeepLink(); window.identifyUser(data.session.user.id); }
       if (alive) setState(s => ({ ...s, loading: false, session: data.session || null }));
     });
-    const { data: sub } = window.sb.auth.onAuthStateChange((event, session) => {
+    const { data: sub } = sb.auth.onAuthStateChange((event, session) => {
       // A first sign-in is a sign-up: email confirmed (or Google account made) and signed in
       // in the same minute, and that minute is now (SOLAR-85).
       if (event === 'SIGNED_IN' && session) {
@@ -153,8 +137,7 @@ window.useSession = function useSession() {
         dropFromAddress(['tab', 'plant', 'section', 'pay', 'add'], true);
         setState({ loading: false, session: null, recovering: false });
       }
-      else setState(s => ({ ...s, loading: false, session: session || null,
-                              recovering: event === 'SIGNED_OUT' ? false : s.recovering }));
+      else setState(s => ({ ...s, loading: false, session: session || null }));
     });
     return () => { alive = false; sub.subscription.unsubscribe(); };
   }, []);
@@ -225,7 +208,7 @@ function GoogleSignIn({ onStart, onDone }) {
         auto_select: false,
         callback: async ({ credential }) => {
           cbs.current.onStart();
-          const { error } = await window.sb.auth.signInWithIdToken({ provider: 'google', token: credential, nonce: raw });
+          const { error } = await sb.auth.signInWithIdToken({ provider: 'google', token: credential, nonce: raw });
           if (!error) window.track('sign_in_done', { method: 'google' });
           cbs.current.onDone(error);
         },
@@ -271,7 +254,7 @@ function BotCheck({ hold, quiet }) {
     let alive = true, tries = 0, id = null, token = null, waiting = null, off = false;
     const got = (t) => { token = t; if (waiting) { waiting(t); waiting = null; } };
     // Cloudflare's script loads only where a check is shown. No integrity hash: Cloudflare updates it in place.
-    let s = document.getElementById('cf-turnstile');
+    let s = /** @type {HTMLScriptElement} */ (document.getElementById('cf-turnstile'));
     if (!s) {
       s = document.createElement('script');
       s.id = 'cf-turnstile'; s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; s.async = true;
@@ -422,7 +405,7 @@ function explain(ex) {
 
 /** A problem that isn't about one field: a red toast at the foot of the screen (SOLAR-163).
  *  `action` is a follow-up link in the toast, e.g. { label: 'Sign in', onClick }. */
-const sayError = (text, action) => window.toast?.(text, { error: true, action });
+const sayError = (text, action) => toast?.(text, { error: true, action });
 
 // Supabase refuses a second email to one address within 60 s.
 const RESEND_WAIT = 60;
@@ -447,12 +430,12 @@ function InboxCard({ kind, email, onBack, onSignIn }) {
     const { error } = await (async () => {
       const captchaToken = await bot.current?.();
       return kind === 'reset'
-        ? window.sb.auth.resetPasswordForEmail(email, { redirectTo: RESET_URL, captchaToken })
-        : window.sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: SITE_URL, captchaToken } });
+        ? sb.auth.resetPasswordForEmail(email, { redirectTo: RESET_URL, captchaToken })
+        : sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: SITE_URL, captchaToken } });
     })().catch(e => ({ error: e }));
     setBusy(false);
     if (error) sayError(explain(error).text);
-    else { window.track('email_resend_done', { kind }); window.toast?.('Email sent again.'); setWait(RESEND_WAIT); }
+    else { window.track('email_resend_done', { kind }); toast?.('Email sent again.'); setWait(RESEND_WAIT); }
   };
   return (
     <AuthCard title="Check your inbox" sub={<>We sent a link to <b>{email}</b>. Tap it to carry on.</>} onSubmit={resend} busy={busy}>
@@ -485,7 +468,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   const [sent, setSent] = useState(null);
   const bot = React.useRef(null);
   // Signed out, the app frame (and its toast) isn't mounted, so each screen mounts it (SOLAR-163).
-  const toastHost = window.SaveToast ? <window.SaveToast /> : null;
+  const toastHost = SaveToast ? <SaveToast /> : null;
   const showError = (error) => {
     const e = explain(error);
     if (e.field) flag({ [e.field]: e.text });
@@ -496,7 +479,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
   // Supabase answers the same for unknown and already-confirmed emails, so this always moves on.
   const resend = async (addr) => {
     const captchaToken = await bot.current?.();
-    const { error } = await window.sb.auth.resend({ type: 'signup', email: addr, options: { emailRedirectTo: SITE_URL, captchaToken } });
+    const { error } = await sb.auth.resend({ type: 'signup', email: addr, options: { emailRedirectTo: SITE_URL, captchaToken } });
     if (error) throw error;
     window.track('email_resend_done', { kind: 'signup', from: 'expired_link' });
     setSent({ to: addr, kind: 'signup', from: mode }); go('inbox');
@@ -552,7 +535,7 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
     const link = pendingLink;
     pendingLink = null;
     setBusy('form');
-    const { error } = await window.sb.auth.verifyOtp(link).catch(e => ({ error: e }));
+    const { error } = await sb.auth.verifyOtp(link).catch(e => ({ error: e }));
     if (!error) return window.track('email_link_done', { kind: link.type });
     setBusy(false);
     // not spent (offline, busy server): put it back so the button works again
@@ -572,11 +555,11 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
       // recovery has no check: updateUser needs none
       const captchaToken = mode === 'expired' ? undefined : await bot.current?.();
       if (mode === 'signin') {
-        const { error } = await window.sb.auth.signInWithPassword({ email: addr, password, options: { captchaToken } });
+        const { error } = await sb.auth.signInWithPassword({ email: addr, password, options: { captchaToken } });
         if (error) throw error;
         window.track('sign_in_done', { method: 'password' });
       } else if (mode === 'signup') {
-        const { data, error } = await window.sb.auth.signUp({ email: addr, password, options: { emailRedirectTo: SITE_URL, captchaToken } });
+        const { data, error } = await sb.auth.signUp({ email: addr, password, options: { emailRedirectTo: SITE_URL, captchaToken } });
         if (error) throw error;
         // An email that already has an account gets a fake user with no identities and no
         // email, so the inbox card would wait for nothing (SOLAR-266).
@@ -584,14 +567,14 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
         // With email confirmation on, signUp returns a user but no session.
         if (!data.session) { setSent({ to: addr, kind: 'signup', from: mode }); go('inbox'); }
       } else if (mode === 'forgot') {
-        const { error } = await window.sb.auth.resetPasswordForEmail(addr, { redirectTo: RESET_URL, captchaToken });
+        const { error } = await sb.auth.resetPasswordForEmail(addr, { redirectTo: RESET_URL, captchaToken });
         if (error) throw error;
         window.track('password_reset_sent_done');
         setSent({ to: addr, kind: 'reset', from: mode }); go('inbox');
       } else if (mode === 'expired') {
         await resend(addr);
       } else if (mode === 'recovery') {
-        const { error } = await window.sb.auth.updateUser({ password });
+        const { error } = await sb.auth.updateUser({ password });
         if (error) throw error;
         window.track('password_reset_done');
         onRecovered && onRecovered();
@@ -697,8 +680,8 @@ function AuthScreen({ initialMode = 'signin', onRecovered }) {
 }
 
 /** Renders children only when signed in and not mid-password-reset. */
-window.AuthGate = function AuthGate({ children, fallback = null }) {
-  const { loading, session, recovering, doneRecovering } = window.useSession();
+export function AuthGate({ children, fallback = null }) {
+  const { loading, session, recovering, doneRecovering } = useSession();
   // A stored session will almost always come back signed in, so show the dashboard's
   // shape; with none, the sign-in screen is a moment away and a skeleton would mislead.
   if (loading) return localStorage.getItem('synsynk.auth') ? fallback : null;
@@ -707,22 +690,20 @@ window.AuthGate = function AuthGate({ children, fallback = null }) {
   if (recovering) return <AuthScreen key="recovery" initialMode="recovery" onRecovered={doneRecovering} />;
   // ?signup (the showcase's Try it free and plan buttons) opens Create an account
   // A confirm or reset link shows its button even over another signed-in account (SOLAR-586).
-  if (!session || pendingLink) return <AuthScreen key="signin" initialMode={pendingLink ? 'link' : window.takeResetAsk() ? 'forgot' : new URLSearchParams(location.search).has('signup') ? 'signup' : 'signin'} />;
+  if (!session || pendingLink) return <AuthScreen key="signin" initialMode={pendingLink ? 'link' : takeResetAsk() ? 'forgot' : new URLSearchParams(location.search).has('signup') ? 'signup' : 'signin'} />;
   return children;
 };
 
 // Signs out this device only: the wall tablet stays signed in when a phone signs out.
-// supabase-js 2.58 keeps the session when that call fails (offline, a 5xx). Newer
-// releases clear it locally then; _removeSession is that same step (storage, then
-// SIGNED_OUT to every tab), safe to call on the pinned build. SIGNED_OUT is what turns
+// supabase-js clears the session here even when the call fails (offline, a 5xx): storage,
+// then SIGNED_OUT to every tab. SIGNED_OUT is what turns
 // AuthGate to the sign-in screen, so nothing after this should reload the page: a reload
 // blanks it and draws sign-in a second time (SOLAR-98).
 async function signOutHere() {
   // pop-ups stop on this browser with the session (SOLAR-244)
-  await window.pushTurnOff?.('sign_out').catch(() => {});
+  await pushTurnOff?.('sign_out').catch(() => {});
   window.track('sign_out_done');
-  const { error } = await window.sb.auth.signOut({ scope: 'local' }).catch(e => ({ error: e }));
-  if (error) await window.sb.auth._removeSession();
+  await sb.auth.signOut({ scope: 'local' }).catch(() => {});
 }
 
 // A tab moves to sign-in only when SIGNED_OUT reaches it. A tab asleep when another tab
@@ -732,14 +713,16 @@ async function signOutHere() {
 // so tell this tab only; an account that is gone ends the session for this browser.
 // A failed lookup (no connection) changes nothing.
 let signedIn = false, checking = null;
-window.sb.auth.onAuthStateChange((event, session) => { signedIn = !!session; });
+sb.auth.onAuthStateChange((event, session) => { signedIn = !!session; });
 function checkSession() {
   if (!signedIn || checking) return checking;
   checking = (async () => {
-    const { data, error } = await window.sb.auth.getSession();
+    const { data, error } = await sb.auth.getSession();
     if (error) return;
-    if (!data.session) { if (signedIn) await window.sb.auth._notifyAllSubscribers('SIGNED_OUT', null, false); }
-    else if ((await window.sb.auth.getUser()).error?.code === 'user_not_found' && signedIn) await window.sb.auth._removeSession();
+    // signOut with no stored session sends this tab SIGNED_OUT; with one, it clears it even
+    // when the server refuses the gone user
+    if (!data.session) { if (signedIn) await sb.auth.signOut({ scope: 'local' }); }
+    else if ((await sb.auth.getUser()).error?.code === 'user_not_found' && signedIn) await sb.auth.signOut({ scope: 'local' });
   })().catch(() => {}).finally(() => { checking = null; });
   return checking;
 }
@@ -750,7 +733,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) chec
 function SignOutButton({ className, children = 'Sign out', busyText = 'Signing out…' }) {
   const [busy, setBusy] = React.useState(false);
   const click = async () => { setBusy(true); await signOutHere(); };
-  return <window.BusyButton className={className} onClick={click} busy={busy} busyText={busyText}>{children}</window.BusyButton>;
+  return <BusyButton className={className} onClick={click} busy={busy} busyText={busyText}>{children}</BusyButton>;
 }
 // Shared with the Connect screen so it looks like the same product.
-Object.assign(window, { EyeIcon, EyeOffIcon, AuthBrand, AuthCard, BotCheck, PasswordInput, PasswordField, FieldLabel, useFieldErrors, invalidProps, SignOutButton, signOutHere, checkSession, explainAuthError: explain });
+export { EyeIcon, EyeOffIcon, AuthBrand, AuthCard, BotCheck, PasswordInput, PasswordField, FieldLabel, useFieldErrors, invalidProps, SignOutButton, signOutHere, checkSession, explain as explainAuthError };
