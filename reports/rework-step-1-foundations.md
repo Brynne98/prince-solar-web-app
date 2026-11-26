@@ -72,11 +72,12 @@ is a launch requirement (SOLAR-678): it goes in before sign-ups open.
 
 **Knowing when it breaks**
 
-- **F12. A stopped reader or a failed job pages Brynne's phone within 5 minutes.**
+- **F12. A stopped reader or a failed job alerts Brynne within 5 minutes, by email to admin@.**
   Better Stack heartbeats on the reader, `job-check` and the billing clock; uptime check on
-  `health`. The 30-minute GitHub check stays as a backup.
-  *Check:* send a test heartbeat miss from production (no real outage needed); the phone
-  alert arrives.
+  `health`. The 30-minute GitHub check stays as a backup. Decided 2026-11-26: email only for now
+  (Better Stack free plan has no push, SMS or call). Paid phone paging is a launch item (SOLAR-678).
+  *Check:* send a test heartbeat failure from production; the alert email reaches admin@ within
+  5 minutes.
 - **F13. Bounced and spam-flagged mail is recorded and not sent again.** Resend webhook
   for bounced, complained and suppressed; the address is marked and skipped.
   *Check:* send to Resend's bounce test address on staging; the next send to it is skipped.
@@ -123,7 +124,7 @@ is a launch requirement (SOLAR-678): it goes in before sign-ups open.
 | Item | Cost a month |
 |---|---|
 | Staging Supabase project | $0 now (local); about $10 from launch (assumed; confirm before creating) |
-| Better Stack | $0 (free plan: 10 monitors, 10 heartbeats) |
+| Better Stack | $0 (free plan: 10 monitors, 10 heartbeats, email alerts only) |
 | GitHub Actions | $0 at this size (assumed) |
 | Vite, type-check | $0 |
 
