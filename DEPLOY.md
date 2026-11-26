@@ -61,6 +61,21 @@ curl -s -X POST https://pmakzojwhouamawgszrc.supabase.co/rest/v1/rpc/api_health 
 # expect {"stale": false}: the logger survived
 ```
 
+## Paging
+
+Better Stack (free plan) pages Brynne's phone (SOLAR-679 F12). The 30-minute GitHub check
+(`.github/workflows/health.yml`) stays as a backup.
+
+| Monitor | Kind | Period, grace | Sent by |
+|---|---|---|---|
+| reader | heartbeat | 1 min, 3 min | `poll`, shard 0, after a login was read |
+| job_check | heartbeat | 5 min, 3 min | `job-check` every run; `/fail` while any check fails |
+| billing_run | heartbeat | 1 day, 2 h | `billing/run`, the daily billing clock |
+| health | uptime | 3 min | Better Stack calls `https://<ref>.supabase.co/functions/v1/health` |
+
+Each heartbeat URL is a function secret, `HEARTBEAT_URL_READER`, `HEARTBEAT_URL_JOB_CHECK`,
+`HEARTBEAT_URL_BILLING_RUN` (`supabase secrets set`, pasted by Brynne). Unset, nothing is sent.
+
 ## Database changes
 
 **What goes where in a database change** (SOLAR-679 F5–F9). Numbered migrations in

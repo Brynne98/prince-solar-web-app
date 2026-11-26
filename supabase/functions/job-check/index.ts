@@ -2,6 +2,7 @@
 // judges each check, saves the ones whose state flipped and sends PostHog
 // job_check_failed / job_check_recovered for them, distinct id edge:<job>. Each run also
 // sends job_check_ran, so a PostHog alert hears when the check itself stops.
+import { heartbeat } from "../_shared/heartbeat.ts";
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { noteError, serve, track } from "../_shared/errors.ts";
 
@@ -220,6 +221,8 @@ if (import.meta.main) serve("job-check", async (req) => {
       failing: verdicts.filter((v) => v.failing ?? i.checks[v.name]?.failing).map((v) => v.name),
       $process_person_profile: false }),
   ]);
+  // F12: a check failing now pages through job-check's heartbeat; no beat at all pages too
+  await heartbeat("job_check", !verdicts.some((v) => v.failing ?? i.checks[v.name]?.failing));
   return new Response(JSON.stringify({ changes: changes.map((v) => ({ name: v.name, failing: v.failing })) }),
                       { headers: { "Content-Type": "application/json" } });
 });
