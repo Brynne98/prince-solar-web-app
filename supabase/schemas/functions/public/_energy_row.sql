@@ -7,9 +7,7 @@ AS $function$
     'pv', p_pv, 'load', p_load, 'imp', p_imp, 'exp', p_exp,
     'chg', p_chg, 'dischg', p_dischg,
     -- self-sufficiency: share of load not met by imported grid energy
-    'selfSuff', case when coalesce(p_load, 0) > 0
-                     then greatest(0, least(100, round(((p_load - coalesce(p_imp, 0)) / p_load) * 100)))
-                     else 0 end)
+    'selfSuff', round(public.independence_pct(p_load, p_imp)))   -- R23: the one independence
   || case when p_bucket = 'day' then
        jsonb_build_object(
          'time', to_char(p_period, 'YYYY-MM-DD'),

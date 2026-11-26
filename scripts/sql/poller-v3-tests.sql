@@ -630,7 +630,7 @@ begin
        where g.gap is not null
       having count(*) = 2) ug on true
    where i.account_id = p_account
-      or i.plant_id in (select pu.plant_id from plants.user_plants pu where pu.account_id = p_account)
+      or i.plant_id in (select lp.plant from plants.login_plants lp where lp.login = p_account)   -- a plant on two logins: on both (SOLAR-681)
    order by coalesce(m.ord, 9999), i.sn;
 end $$;
 create temp table ic_one as

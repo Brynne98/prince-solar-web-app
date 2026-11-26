@@ -1851,6 +1851,30 @@ AS $function$
     left join public.email_queue q on q.id = p_o.event_id
 $function$;
 
+CREATE OR REPLACE FUNCTION private.alerts_minute()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare
+  last_done bigint := (select c.value::bigint from public.app_config c where c.key = 'ALERTS_DONE_TS');
+  upto bigint := (floor(extract(epoch from now()) / 60) * 60)::bigint - 60;   -- the minute just over
+  m bigint;
+  n int := 0;
+begin
+  if not pg_try_advisory_xact_lock(hashtext('private.alerts_minute')) then return jsonb_build_object('busy', true); end if;
+  m := greatest(coalesce(last_done, upto - 60), upto - 600) + 60;
+  while m <= upto loop
+    perform public.email_poll_step(m, array(select distinct a.plant_id from public.agg_minute a where a.ts = m order by 1), '[]'::jsonb);
+    insert into public.app_config (key, value, note) values ('ALERTS_DONE_TS', m, 'the last minute the alert step ran for (private.alerts_minute)')
+    on conflict (key) do update set value = excluded.value;
+    n := n + 1;
+    m := m + 60;
+  end loop;
+  return jsonb_build_object('minutes', n, 'upto', upto);
+end $function$;
+
 CREATE OR REPLACE FUNCTION private.email_enqueue_plant(p_plant bigint, p_kind text, p_key text, p_data jsonb, p_pair_key text DEFAULT NULL::text, p_priority smallint DEFAULT 0)
  RETURNS void
  LANGUAGE sql
@@ -2061,6 +2085,30 @@ begin
                               || coalesce(p_plants, '{}'));
 end $function$;
 
+CREATE OR REPLACE FUNCTION private.plant_checks()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare
+  p bigint;
+  n int := 0;
+  sign text;
+begin
+  for p in select x from public.live_plants() x
+            where x % 10 = (floor(extract(epoch from now()) / 60))::bigint % 10 order by x loop
+    begin perform public.plant_features_detect(p); exception when others then raise warning 'plant_features_detect %: %', p, sqlerrm; end;
+    begin perform public.battery_banks_detect(p); exception when others then raise warning 'battery_banks_detect %: %', p, sqlerrm; end;
+    if (select c.batt_positive_means from public.plant_config c where c.plant_id = p) is null then
+      sign := (select b.batt_positive_means from plants.brands b where b.code = plants.brand_of(p));
+      begin perform public.batt_sign_detect(p, coalesce(sign, 'discharging')); exception when others then raise warning 'batt_sign_detect %: %', p, sqlerrm; end;
+    end if;
+    n := n + 1;
+  end loop;
+  return jsonb_build_object('plants', n);
+end $function$;
+
 CREATE OR REPLACE FUNCTION private.plant_start_fill(p_plant bigint)
  RETURNS void
  LANGUAGE plpgsql
@@ -2106,7 +2154,9 @@ AS $function$
       from plants.logins
      where status = 'ok'
   )
-  select s.i, n.shards, (s.i % 3) * 10000
+  -- 0, 2 or 4 s past the minute (SOLAR-681 R21): spread enough for the start, and every
+  -- reading saved before its page asks at 12-42 s (it was 0/10/20 s)
+  select s.i, n.shards, (s.i % 3) * 2000
     from n, generate_series(0, n.shards - 1) as s(i)
 $function$;
 
@@ -3011,7 +3061,7 @@ begin
     from unnest(p_accounts) a(id)
     join private.inverters i
       on (i.account_id = a.id
-          or i.plant_id in (select pu.plant_id from plants.user_plants pu where pu.account_id = a.id))
+          or i.plant_id in (select lp.plant from plants.login_plants lp where lp.login = a.id))
      and (p_plants is null or i.plant_id = any (p_plants))
     left join private.meta m on m.sn = i.sn
     left join lateral (
@@ -3082,6 +3132,17 @@ begin
   perform public.account_refresh_set(login, p_refresh);
   return login;
 end
+$function$;
+
+CREATE OR REPLACE FUNCTION public.login_outcomes(p_outcomes jsonb)
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  update plants.logins a set last_try_at = now(), last_try = o.outcome
+    from jsonb_to_recordset(coalesce(p_outcomes, '[]'::jsonb)) as o(account uuid, outcome text)
+   where a.id = o.account and o.outcome in ('ok', 'vendor', 'ours')
 $function$;
 
 CREATE OR REPLACE FUNCTION public.msg_email_take(p_limit integer DEFAULT 50, p_lane text DEFAULT 'urgent'::text)
@@ -3951,65 +4012,6 @@ AS $function$
                     where e.account_id = a.id and e.event = 'died'), '-infinity') < now() - interval '55 minutes'
 $function$;
 
-CREATE OR REPLACE FUNCTION private.alerts_minute()
- RETURNS jsonb
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO ''
-AS $function$
-declare
-  last_done bigint := (select c.value::bigint from public.app_config c where c.key = 'ALERTS_DONE_TS');
-  upto bigint := (floor(extract(epoch from now()) / 60) * 60)::bigint - 60;   -- the minute just over
-  m bigint;
-  n int := 0;
-begin
-  if not pg_try_advisory_xact_lock(hashtext('private.alerts_minute')) then return jsonb_build_object('busy', true); end if;
-  m := greatest(coalesce(last_done, upto - 60), upto - 600) + 60;
-  while m <= upto loop
-    perform public.email_poll_step(m, array(select distinct a.plant_id from public.agg_minute a where a.ts = m order by 1), '[]'::jsonb);
-    insert into public.app_config (key, value, note) values ('ALERTS_DONE_TS', m, 'the last minute the alert step ran for (private.alerts_minute)')
-    on conflict (key) do update set value = excluded.value;
-    n := n + 1;
-    m := m + 60;
-  end loop;
-  return jsonb_build_object('minutes', n, 'upto', upto);
-end $function$;
-
-CREATE OR REPLACE FUNCTION private.plant_checks()
- RETURNS jsonb
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO ''
-AS $function$
-declare
-  p bigint;
-  n int := 0;
-  sign text;
-begin
-  for p in select x from public.live_plants() x
-            where x % 10 = (floor(extract(epoch from now()) / 60))::bigint % 10 order by x loop
-    begin perform public.plant_features_detect(p); exception when others then raise warning 'plant_features_detect %: %', p, sqlerrm; end;
-    begin perform public.battery_banks_detect(p); exception when others then raise warning 'battery_banks_detect %: %', p, sqlerrm; end;
-    if (select c.batt_positive_means from public.plant_config c where c.plant_id = p) is null then
-      sign := (select b.batt_positive_means from plants.brands b where b.code = plants.brand_of(p));
-      begin perform public.batt_sign_detect(p, coalesce(sign, 'discharging')); exception when others then raise warning 'batt_sign_detect %: %', p, sqlerrm; end;
-    end if;
-    n := n + 1;
-  end loop;
-  return jsonb_build_object('plants', n);
-end $function$;
-
-CREATE OR REPLACE FUNCTION public.login_outcomes(p_outcomes jsonb)
- RETURNS void
- LANGUAGE sql
- SECURITY DEFINER
- SET search_path TO ''
-AS $function$
-  update plants.logins a set last_try_at = now(), last_try = o.outcome
-    from jsonb_to_recordset(coalesce(p_outcomes, '[]'::jsonb)) as o(account uuid, outcome text)
-   where a.id = o.account and o.outcome in ('ok', 'vendor', 'ours')
-$function$;
-
 -- ---------------------------------------------------------------------------
 -- the old copies go (R3, R7, R24)
 drop function billing.link_login(uuid, text, text, uuid, jsonb, timestamptz, text, uuid);
@@ -4722,7 +4724,7 @@ create or replace function plants.logins_served(p_plants bigint[], p_except uuid
   update plants.logins s set last_ok_at = now()
    where s.id in (select o.id from plants.logins o
                    where o.status = 'ok' and o.id <> all (coalesce(p_except, '{}'))
-                     and exists (select 1 from plants.user_plants pu where pu.account_id = o.id and pu.plant_id = any (coalesce(p_plants, '{}')))
+                     and exists (select 1 from plants.login_plants lp where lp.login = o.id and lp.plant = any (coalesce(p_plants, '{}')))
                    order by o.id for no key update skip locked)
 $$;
 -- every login of a user whose account goes
@@ -4732,6 +4734,62 @@ create or replace function plants.user_logins_delete(p_user uuid) returns void
 $$;
 revoke all on function plants.tokens_saved(jsonb), plants.logins_served(bigint[], uuid[]), plants.user_logins_delete(uuid)
   from public, anon, authenticated;
+
+-- R21: shards start 0, 2 or 4 s past the minute
+CREATE OR REPLACE FUNCTION private.poll_shards(p_per_shard integer DEFAULT 10)
+ RETURNS TABLE(shard integer, shards integer, delay_ms integer)
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'pg_temp'
+AS $function$
+  with n as (
+    select greatest(1, ceil(count(*)::numeric / greatest(p_per_shard, 1)))::int as shards
+      from plants.logins
+     where status = 'ok'
+  )
+  -- 0, 2 or 4 s past the minute (SOLAR-681 R21): spread enough for the start, and every
+  -- reading saved before its page asks at 12-42 s (it was 0/10/20 s)
+  select s.i, n.shards, (s.i % 3) * 2000
+    from n, generate_series(0, n.shards - 1) as s(i)
+$function$;
+
+-- ---------------------------------------------------------------------------
+-- SOLAR-681 R23: a plant figure worked out in two places gets one function; app and mail
+-- both call it.
+
+-- Independence: the share of the home's use not bought from the grid, 0-100, not rounded
+-- (the app rounds to whole %, mail to its own format). Was _energy_row's selfSuff and notify's
+-- independence().
+create or replace function public.independence_pct(p_home double precision, p_import double precision)
+  returns double precision language sql immutable set search_path to '' as $$
+  select case when coalesce(p_home, 0) > 0
+              then greatest(0, least(100, ((p_home - coalesce(p_import, 0)) / p_home) * 100)) else 0 end
+$$;
+
+-- A span's totals, from the one day-energy function: made, home, bought, independence.
+create or replace function public.span_figures(p_plant bigint, p_from date, p_to date)
+  returns jsonb language sql stable security definer set search_path to '' as $$
+  select jsonb_build_object(
+           'made_kwh', coalesce(sum(e.pv_kwh), 0), 'home_kwh', coalesce(sum(e.load_kwh), 0),
+           'import_kwh', coalesce(sum(e.imp_kwh), 0),
+           'independence_pct', public.independence_pct(coalesce(sum(e.load_kwh), 0), coalesce(sum(e.imp_kwh), 0)))
+    from public._plant_day_energy(p_plant, p_from, p_to) e
+   -- a day of zeros is the brand's filler for a day with no readings (notify hasData)
+   where coalesce(e.load_kwh, 0) > 0 or coalesce(e.pv_kwh, 0) > 0
+$$;
+revoke all on function public.span_figures(bigint, date, date) from public, anon, authenticated;
+grant execute on function public.span_figures(bigint, date, date) to service_role;
+
+-- Battery % at an instant: the newest minute with a charge in the 10 minutes up to it. Was
+-- email_plant_events' chargePct and notify's socAt().
+create or replace function public.soc_at(p_plant bigint, p_at bigint)
+  returns integer language sql stable security definer set search_path to '' as $$
+  select round(a.soc)::int from public.agg_minute a
+   where a.plant_id = p_plant and a.ts between p_at - 600 and p_at and a.soc is not null
+   order by a.ts desc limit 1
+$$;
+revoke all on function public.soc_at(bigint, bigint) from public, anon, authenticated;
+grant execute on function public.soc_at(bigint, bigint) to service_role;
 
 -- ---------------------------------------------------------------------------
 -- the latest bodies of the functions the parts above made again
@@ -5209,4 +5267,146 @@ begin
     from tot, pl;
   return out;
 end $function$;
+
+CREATE OR REPLACE FUNCTION public._energy_row(p_bucket text, p_period date, p_pv double precision, p_load double precision, p_imp double precision, p_exp double precision, p_chg double precision, p_dischg double precision)
+ RETURNS jsonb
+ LANGUAGE sql
+ IMMUTABLE PARALLEL SAFE
+AS $function$
+  select jsonb_build_object(
+    'pv', p_pv, 'load', p_load, 'imp', p_imp, 'exp', p_exp,
+    'chg', p_chg, 'dischg', p_dischg,
+    -- self-sufficiency: share of load not met by imported grid energy
+    'selfSuff', round(public.independence_pct(p_load, p_imp)))   -- R23: the one independence
+  || case when p_bucket = 'day' then
+       jsonb_build_object(
+         'time', to_char(p_period, 'YYYY-MM-DD'),
+         'date', to_char(p_period, 'YYYY-MM-DD'),
+         'day', extract(day from p_period)::int,
+         'dow', extract(dow from p_period)::int,
+         'label', to_char(p_period, 'Dy'),
+         'monthLabel', to_char(p_period, 'Mon'))
+     else
+       -- SunSynk's year endpoint returns zero-padded month numbers ("05"), and the
+       -- charts key off this string, so pad rather than emitting "5"
+       jsonb_build_object(
+         'time', to_char(p_period, 'MM'),
+         'date', to_char(p_period, 'MM'),
+         'day', to_char(p_period, 'Mon'),
+         'label', to_char(p_period, 'Mon'),
+         'monthLabel', to_char(p_period, 'Mon'))
+     end
+$function$;
+
+CREATE OR REPLACE FUNCTION public.email_plant_events(p_plant bigint)
+ RETURNS TABLE(kind text, key text, data jsonb)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+  with
+  pz as (select public.plant_tz(p_plant) as tz),
+  now_s as (select extract(epoch from now())::bigint as t),
+  cfg as (select coalesce((select has_grid from public.plant_config where plant_id = p_plant), true) as has_grid,
+                 coalesce((select has_battery from public.plant_config where plant_id = p_plant), true) as has_battery,
+                 (select battery_banks from public.plant_config where plant_id = p_plant) as banks),
+  loc as (select public.today_tz((select tz from pz)) as day,
+                 extract(hour from timezone((select tz from pz), now()))::int as hour),
+  day_lo as (select public.day_start_epoch_tz((select day from loc), (select tz from pz)) as lo),
+
+  -- Grid. Minutes where presence is unknown are skipped, as in 0057.
+  grid_known as (
+    select r.ts, public.q_grid_present(p_plant, r.ts) as present
+      from (select distinct ts from public.readings, now_s where plant_id = p_plant and ts >= now_s.t - 1800) r
+  ),
+  gk as (select ts, present from grid_known where present is not null),
+  grid as (
+    select (select count(*) = 3 and bool_and(not present) from (select present from gk order by ts desc limit 3) x) as down,
+           (select count(*) = 2 and bool_and(present) from (select present from gk order by ts desc limit 2) x) as up,
+           (select max(ts) from gk where present) as last_on,
+           (select max(ts) from gk where not present) as last_off
+  ),
+
+  -- Battery temperature: the hottest inverter at the newest reading.
+  hot as (
+    select r.ts, r.batt_temp_c as temp from public.readings r, now_s
+     where r.plant_id = p_plant and r.ts >= now_s.t - 600 and r.batt_temp_c > 0 and r.batt_temp_c < 80
+     order by r.ts desc, r.batt_temp_c desc limit 1
+  ),
+
+  -- Charge spread between inverters' batteries, minute by minute, over the last hour.
+  bank as (
+    select r.ts, max(r.batt_soc) - min(r.batt_soc) as spread
+      from public.readings r, now_s
+     where r.plant_id = p_plant and r.ts >= now_s.t - 3600 and r.batt_soc between 1 and 100
+     group by r.ts
+    having count(distinct r.sn) >= 2
+  ),
+  drift as (select count(*) >= 30 and max(ts) - min(ts) >= 3300 and min(spread) >= 10 as drifting, max(ts) as ts from bank),
+
+  -- Strings: 0057's dead_held, bounded to the window.
+  str_latest as (select max(ts) as ts from public.strings, now_s where plant_id = p_plant and ts >= now_s.t - 900),
+  dead_held as (
+    select s.sn, s.no from public.strings s, loc, now_s
+     where s.plant_id = p_plant and loc.hour between 11 and 14 and s.ts >= now_s.t - 900
+       and coalesce(s.volt_v, 0) < 1.5 and coalesce(s.power_w, 0) < 5
+       and exists (select 1 from public.strings o where o.plant_id = p_plant and o.ts = s.ts and o.sn = s.sn and o.no is distinct from s.no and coalesce(o.power_w, 0) > 200)
+     group by s.sn, s.no
+    having count(*) >= 12
+       and exists (select 1 from public.strings cur, str_latest where cur.plant_id = p_plant and cur.ts = str_latest.ts and cur.sn = s.sn and cur.no = s.no and coalesce(cur.volt_v, 0) < 1.5 and coalesce(cur.power_w, 0) < 5)
+  ),
+  dead1 as (
+    select d.sn, d.no, coalesce(nullif(m.alias, ''), 'Inverter ' || d.sn) as inverter
+      from dead_held d left join private.meta m on m.sn = d.sn
+     order by m.ord nulls last, d.sn, d.no limit 1
+  ),
+
+  -- SunSynk's own clock: the newest device_time across the plant, read only from
+  -- rows our polls wrote in the last 3 minutes. No such rows: our polls are failing,
+  -- which is not the inverter going quiet, so no logger row at all.
+  dev as (
+    select max(extract(epoch from (r.device_time::timestamp at time zone (select tz from pz))))::bigint as last_dev
+      from public.readings r, now_s
+     where r.plant_id = p_plant and r.ts >= now_s.t - 180
+       and r.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+  )
+
+  select 'grid_down', 'grid_down:' || p_plant || ':' || x.since,
+         jsonb_build_object('since', x.since, 'chargePct', x.soc)
+    from (select (select min(ts) from gk where not present and ts > coalesce(grid.last_on, 0)) as since,
+                 (select public.soc_at(p_plant, now_s.t) from now_s) as soc   -- R23: the one battery %
+            from grid where grid.down) x, cfg
+   where cfg.has_grid
+  union all
+  select 'grid_on', 'grid_on:' || p_plant,
+         jsonb_build_object('since', (select min(ts) from gk where present and ts > coalesce(grid.last_off, 0)))
+    from grid, cfg where grid.up and cfg.has_grid
+  union all
+  select 'batt_hot', 'batt_hot:' || p_plant || ':' || (select day from loc),
+         jsonb_build_object('at', hot.ts, 'tempC', round(hot.temp)::int)
+    from hot, cfg where hot.temp > 40 and cfg.has_battery
+  union all
+  select 'bank_drift', 'bank_drift:' || p_plant || ':' || (select day from loc),
+         jsonb_build_object('banks', (
+           select jsonb_agg(jsonb_build_object('name', coalesce(nullif(m.alias, ''), 'Inverter ' || r.sn), 'chargePct', round(r.batt_soc)::int)
+                            order by m.ord nulls last, r.sn)
+             from public.readings r left join private.meta m on m.sn = r.sn
+            where r.plant_id = p_plant and r.ts = drift.ts and r.batt_soc between 1 and 100))
+    from drift, cfg where drift.drifting and cfg.has_battery and cfg.banks is distinct from 'shared'
+  union all
+  select 'string_dead', 'string_dead:' || p_plant || ':' || (select day from loc),
+         jsonb_build_object('string', 'String ' || dead1.no, 'inverter', dead1.inverter,
+           -- the minute after it last had voltage today; 15 min ago when it never did
+           'since', coalesce((select max(s.ts) + 60 from public.strings s, day_lo
+                               where s.plant_id = p_plant and s.sn = dead1.sn and s.no = dead1.no
+                                 and s.ts >= day_lo.lo and coalesce(s.volt_v, 0) >= 1.5),
+                             (select t - 900 from now_s)))
+    from dead1
+  union all
+  select 'logger_stale', 'logger_stale:' || p_plant || ':' || dev.last_dev, jsonb_build_object('since', dev.last_dev)
+    from dev, now_s where now_s.t - dev.last_dev > 900
+  union all
+  select 'logger_ok', 'logger_ok:' || p_plant, jsonb_build_object('at', dev.last_dev)
+    from dev, now_s where now_s.t - dev.last_dev <= 900
+$function$;
 

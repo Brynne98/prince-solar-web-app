@@ -618,6 +618,9 @@ export type Database = {
               "from_ts": number,"plant_id": number,"to_ts": number
             }[]
                            },
+"independence_pct":
+{ Args: { "p_home": number,"p_import": number }; Returns: number
+                           },
 "inverters_cached":
 { Args: { "p_account": string }; Returns: {
               "alias": string,"carried_run": number,"comm_type": string,"gsn": string,"hmi_ver": string,"last_reading": Json,"model": string,"ord": number,"plant_id": number,"plant_name": string,"sn": string,"soft_ver": string,"status": number,"upload_s": number
@@ -859,6 +862,12 @@ export type Database = {
                            },
 "share_retry_due":
 { Args: Record<PropertyKey, never>; Returns: string
+                           },
+"soc_at":
+{ Args: { "p_at": number,"p_plant": number }; Returns: number
+                           },
+"span_figures":
+{ Args: { "p_from": string,"p_plant": number,"p_to": string }; Returns: Json
                            },
 "today_tz":
 { Args: { "tz": string }; Returns: string

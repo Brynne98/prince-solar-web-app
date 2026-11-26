@@ -648,7 +648,9 @@
     "supabase/schemas/functions/public/brand_tally.sql",
     "supabase/schemas/functions/public/brand_calls_report.sql",
     "supabase/schemas/functions/public/login_outcomes.sql",
-    "supabase/schemas/functions/private/plant_checks.sql"
+    "supabase/schemas/functions/private/plant_checks.sql",
+    "supabase/schemas/functions/public/inverters_cached_many.sql",
+    "supabase/schemas/functions/public/inverters_cached.sql"
    ],
    "readers": {
     "plants.logins": [

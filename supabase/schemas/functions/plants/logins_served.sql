@@ -7,6 +7,6 @@ AS $function$
   update plants.logins s set last_ok_at = now()
    where s.id in (select o.id from plants.logins o
                    where o.status = 'ok' and o.id <> all (coalesce(p_except, '{}'))
-                     and exists (select 1 from plants.user_plants pu where pu.account_id = o.id and pu.plant_id = any (coalesce(p_plants, '{}')))
+                     and exists (select 1 from plants.login_plants lp where lp.login = o.id and lp.plant = any (coalesce(p_plants, '{}')))
                    order by o.id for no key update skip locked)
 $function$;

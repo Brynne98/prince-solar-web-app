@@ -82,6 +82,27 @@ begin
   perform pg_temp.ok('R26 plant_tz as authenticated', err is null and z is not null, err);
 end $$;
 
+-- R23: app and mail read the same figure
+do $$
+declare p bigint := plants.plant_for('sunsynk', 'r23-1'); d date := public.today_tz(plants.tz(p));
+        t0 bigint := public.day_start_epoch_tz(d, plants.tz(p)); app jsonb; mail jsonb; i int;
+begin
+  perform set_config('billing.guarded', 'on', true);   -- as the reader's save: no seat needed here
+  for i in 0..59 loop   -- an hour: 3 kW solar, 2 kW home, 400 W bought, battery 40 -> 59 %
+    insert into public.agg_minute (ts, plant_id, pv_w, load_w, batt_w, grid_w, soc, source)
+    values (t0 + 3600 + i * 60, p, 3000, 2000, -1400, 400, 40 + (i * 0.33), 'poller');
+  end loop;
+  select public._energy_row('day', e.period, e.pv_kwh, e.load_kwh, e.imp_kwh, e.exp_kwh, e.chg_kwh, e.dischg_kwh) into app
+    from public._plant_day_energy(p, d, d) e;
+  mail := public.span_figures(p, d, d);
+  perform pg_temp.ok('R23 independence: the app''s day = the mail''s',
+    (app->>'selfSuff')::numeric = round((mail->>'independence_pct')::numeric), format('%s %s', app->>'selfSuff', mail->>'independence_pct'));
+  perform pg_temp.ok('R23 solar kWh: the app''s day = the mail''s', (app->>'pv')::numeric = (mail->>'made_kwh')::numeric,
+    format('%s %s', app->>'pv', mail->>'made_kwh'));
+  perform pg_temp.ok('R23 battery %: the newest minute in the 10 up to the time',
+    public.soc_at(p, t0 + 3600 + 59 * 60) = round(40 + 59 * 0.33) and public.soc_at(p, t0 + 3600 + 59 * 60 + 601) is null);
+end $$;
+
 -- ---------------------------------------------------------------------------
 do $$
 declare r record; bad int := 0;

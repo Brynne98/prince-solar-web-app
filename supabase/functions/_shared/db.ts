@@ -26,9 +26,17 @@ export type Db = {
   clearBookmarks(ids: number[]): Promise<void>;
 };
 
+// Reads the reader makes every minute: a gateway that answered 502/503/504 is asked once more,
+// so one hiccup does not cost the minute (SOLAR-681 R22: 4 plant-minutes in 14,500 were lost to
+// "invalid response from the upstream server"). Writes are not retried here.
+const READS = new Set(["inverters_cached", "inverters_cached_many", "poll_jobs_v2", "plants_of_login", "plant_vendor",
+  "account_refresh_get"]);
+const gatewayFailed = (status: number) => status === 502 || status === 503 || status === 504;
+
 export const postgrest: Db = {
   async rpc(fn, args) {
-    const { data, error } = await db.rpc(fn, args);
+    let { data, error, status } = await db.rpc(fn, args);
+    if (error && READS.has(fn) && gatewayFailed(status)) ({ data, error } = await db.rpc(fn, args));
     if (error) throw new Error(`${fn}: ${error.message}`);
     return data;
   },

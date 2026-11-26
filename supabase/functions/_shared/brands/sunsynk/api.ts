@@ -364,6 +364,12 @@ export async function apiGet(pathname: string, acc: Account): Promise<any> {
 
   let res = await doFetch();
   if (res.status === 401) res = await doFetch(true);
+  // A 5xx is the gateway giving up (about 0.1% of calls, a 504 after ~10 s): one more try, so
+  // the minute is not missed for it (SOLAR-681 R22)
+  if (res.status >= 500 && !acc.signal?.aborted) {
+    await res.body?.cancel();
+    res = await doFetch();
+  }
 
   for (let attempt = 1; throttled(res) && attempt <= RATE_LIMIT_RETRIES; attempt++) {
     await res.body?.cancel();

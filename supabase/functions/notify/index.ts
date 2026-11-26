@@ -70,11 +70,7 @@ function dayOf(epoch: number, tz: string): string {
 }
 /** Battery % at an instant: the newest reading in the 10 minutes before it, as grid_down's
  *  chargePct (0151). Null when none. */
-async function socAt(plant: number, at: number): Promise<number | null> {
-  const { data } = await db.from("agg_minute").select("soc").eq("plant_id", plant).gte("ts", at - 600).lte("ts", at)
-    .not("soc", "is", null).order("ts", { ascending: false }).limit(1).maybeSingle();
-  return data?.soc == null ? null : Math.round(data.soc);
-}
+const socAt = (plant: number, at: number) => rpc<number | null>("soc_at", { p_plant: plant, p_at: at });   // R23
 
 // ------------------------------------------------------------------- energy
 
@@ -85,7 +81,10 @@ const sum = (rows: DayRow[], k: keyof DayRow) => rows.reduce((n, r) => n + (Numb
 // A house always uses something; a day of zeros is SunSynk's filler for a day with no readings.
 const hasData = (r: DayRow) => (Number(r.load_kwh) || 0) > 0 || (Number(r.pv_kwh) || 0) > 0;
 const pct = (cur: number, prev: number) => (prev > 0 ? ((cur - prev) / prev) * 100 : undefined);
-const independence = (home: number, imp: number) => (home > 0 ? Math.max(0, Math.min(100, ((home - imp) / home) * 100)) : 0);
+// A span's made, home, bought and independence: the app's figures, from the database (R23)
+type Span = { made_kwh: number; home_kwh: number; import_kwh: number; independence_pct: number };
+const spanFigures = (plant: number, from: string, to: string) =>
+  rpc<Span>("span_figures", { p_plant: plant, p_from: from, p_to: to });
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
 /** One value per day from `from` to `to`; null where SunSynk had nothing. */
@@ -116,12 +115,13 @@ async function buildHistory(p: Plant): Promise<History | null> {
   const bestDay = best(rows, "pv_kwh", (d) => fmtDay(d, { day: "numeric", month: "short" }));
   if (!bestDay) return null;
   const { hasGrid } = await plantCfg(p.id);
-  const home = sum(rows, "load_kwh"), imp = sum(rows, "imp_kwh");
+  const fig = await spanFigures(p.id, addDays(today, -60), to);
+  const home = fig.home_kwh, imp = fig.import_kwh;
   const short = (d: string) => fmtDay(d, { day: "numeric", month: "short" });
   return {
     plant: p.name, plantId: p.id, days: Math.round((Date.parse(to) - Date.parse(from)) / 86400e3) + 1, from: short(from), to: short(to),
-    daily: perDay(rows, from, to, "pv_kwh"), madeKwh: sum(rows, "pv_kwh"), homeKwh: home,
-    independencePct: independence(home, imp), importKwh: hasGrid ? imp : null,
+    daily: perDay(rows, from, to, "pv_kwh"), madeKwh: fig.made_kwh, homeKwh: home,
+    independencePct: fig.independence_pct, importKwh: hasGrid ? imp : null,
     bestDay, highestUse: best(rows, "load_kwh", short),
   };
 }
@@ -151,8 +151,10 @@ async function buildReport(p: Plant, period: Period, today: string, linkedOn?: s
   const prev = start > from ? [] : all.filter((r) => r.period <= pTo && hasData(r));
   if (!cur.length) return null;
   const { tariff, hasGrid } = await plantCfg(p.id);
-  const made = sum(cur, "pv_kwh"), home = sum(cur, "load_kwh"), imp = sum(cur, "imp_kwh");
-  const pMade = sum(prev, "pv_kwh"), pHome = sum(prev, "load_kwh"), pImp = sum(prev, "imp_kwh");
+  const fig = await spanFigures(p.id, start, to);
+  const pfig = prev.length ? await spanFigures(p.id, pFrom, pTo) : { made_kwh: 0, home_kwh: 0, import_kwh: 0, independence_pct: 0 };
+  const made = fig.made_kwh, home = fig.home_kwh, imp = fig.import_kwh;
+  const pMade = pfig.made_kwh, pHome = pfig.home_kwh, pImp = pfig.import_kwh;
   const saved = (h: number, i: number) => Math.max(0, h - i) * tariff;
   const dayLabel = (d: string) => fmtDay(d, period === "week" ? { weekday: "short", day: "numeric", month: "short" } : { day: "numeric", month: "short" });
   const days = perDay(cur, from, to, "pv_kwh");
@@ -175,13 +177,13 @@ async function buildReport(p: Plant, period: Period, today: string, linkedOn?: s
     ...(first > from ? { partialFrom: fmtDay(first, { day: "numeric", month: "short" }), partialWhy: start > from ? "added" as const : "history" as const } : {}),
     plantId: p.id, period, label, prevLabel, plant: p.name,
     madeKwh: made, homeKwh: home, importKwh: hasGrid ? imp : null, exportKwh: null,
-    independencePct: independence(home, imp), savedRand: tariff > 0 ? saved(home, imp) : null,
+    independencePct: fig.independence_pct, savedRand: tariff > 0 ? saved(home, imp) : null,
     change: hasPrev ? {
       made: pct(made, pMade), home: pct(home, pHome), import: pct(imp, pImp),
-      independence: pct(independence(home, imp), independence(pHome, pImp)),
+      independence: pct(fig.independence_pct, pfig.independence_pct),
       ...(tariff > 0 ? { saved: pct(saved(home, imp), saved(pHome, pImp)) } : {}),
     } : {},
-    ...(hasPrev ? { was: { made: pMade, home: pHome, import: pImp, independence: independence(pHome, pImp),
+    ...(hasPrev ? { was: { made: pMade, home: pHome, import: pImp, independence: pfig.independence_pct,
                            ...(tariff > 0 ? { saved: saved(pHome, pImp) } : {}) } } : {}),
     bestDay: best(cur, "pv_kwh", dayLabel), highestUse: best(cur, "load_kwh", dayLabel), daily,
   };

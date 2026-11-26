@@ -74,8 +74,7 @@ AS $function$
   select 'grid_down', 'grid_down:' || p_plant || ':' || x.since,
          jsonb_build_object('since', x.since, 'chargePct', x.soc)
     from (select (select min(ts) from gk where not present and ts > coalesce(grid.last_on, 0)) as since,
-                 (select round(soc)::int from public.agg_minute a, now_s
-                   where a.plant_id = p_plant and a.ts >= now_s.t - 600 and a.soc is not null order by a.ts desc limit 1) as soc
+                 (select public.soc_at(p_plant, now_s.t) from now_s) as soc   -- R23: the one battery %
             from grid where grid.down) x, cfg
    where cfg.has_grid
   union all

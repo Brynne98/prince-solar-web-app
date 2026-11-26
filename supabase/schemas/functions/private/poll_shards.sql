@@ -9,6 +9,8 @@ AS $function$
       from plants.logins
      where status = 'ok'
   )
-  select s.i, n.shards, (s.i % 3) * 10000
+  -- 0, 2 or 4 s past the minute (SOLAR-681 R21): spread enough for the start, and every
+  -- reading saved before its page asks at 12-42 s (it was 0/10/20 s)
+  select s.i, n.shards, (s.i % 3) * 2000
     from n, generate_series(0, n.shards - 1) as s(i)
 $function$;
