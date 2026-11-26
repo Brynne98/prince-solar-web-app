@@ -169,6 +169,8 @@ const readNow = () => { if (!document.hidden) freshAccount().catch(() => {}); };
 window.useAccountWatch = function useAccountWatch(acct) {
   const fast = inFlight(acct), held = acct?.held_reference || null;
   const pastDue = acct?.state === 'past_due' && !!acct.plan_ends_at;
+  // a plant's old history being deleted: read again each minute until it's gone (SOLAR-659)
+  const deleting = !!acct?.plants?.some(p => p.deleting);
   React.useEffect(() => {
     if (!fast && !held && !pastDue) return;
     document.addEventListener('visibilitychange', readNow);
@@ -188,6 +190,11 @@ window.useAccountWatch = function useAccountWatch(acct) {
     }, 60000);
     return () => clearInterval(h);
   }, [held]);
+  React.useEffect(() => {
+    if (!deleting) return;
+    const d = setInterval(readNow, 60000);
+    return () => clearInterval(d);
+  }, [deleting]);
   // set again from each read: the time left comes from the server's clock, so a new read only corrects it
   React.useEffect(() => {
     if (!pastDue) return;
@@ -598,7 +605,7 @@ const NO_PLANT_TEXT = 'has no plant shared with it yet. Your login is saved.';
 // Two uses. The plants a cancel or smaller plan keeps (SOLAR-496): links, plan, keep (the
 // label and undo of "keep the plan as it is"). The plants a login adds (SOLAR-537): logins
 // (the plants to choose from), ask and full (its two lines), min 0, verb 'Add'.
-function KeepPicker({ room, value, onChange, logins, ask, full, min = 1, verb = 'Keep', tag, count }) {
+function KeepPicker({ room, value, onChange, logins, ask, full, min = 1, verb = 'Keep', tag, count, lock }) {
   const [say, setSay] = React.useState(null); // 'last' | 'full'
   const one = room === 1 && min > 0;
   const tick = (id) => {
@@ -615,12 +622,12 @@ function KeepPicker({ room, value, onChange, logins, ask, full, min = 1, verb = 
         <div key={acc.account_id} className="login-grp plant-logins">
           <div className="login-line"><div className="login-who"><span className="login-email">{acc.kind === 'share' ? 'Shared plants' : acc.sunsynk_username}</span></div></div>
           {acc.plants.map(p => {
-            const name = window.plantLabel(p), on = value.includes(p.plant_id);
+            const name = window.plantLabel(p), on = value.includes(p.plant_id), shut = !!(lock && lock(p));
             return (
               <label key={p.plant_id} className={'login-plant keep-row' + (on ? '' : ' off')}>
                 <span className="conn-user plant-nm">{name}</span>
                 {tag && tag(p) && <span className="keep-tag">{tag(p)}</span>}
-                <input type={one ? 'radio' : 'checkbox'} name="keep-pick" checked={on} aria-label={verb + ' ' + name} onChange={() => tick(p.plant_id)} />{/* reuse-check: allow: tick boxes, not switches, for the keep pick (SOLAR-486) */}
+                <input type={one ? 'radio' : 'checkbox'} name="keep-pick" checked={on} disabled={shut} aria-label={verb + ' ' + name} onChange={() => tick(p.plant_id)} />{/* reuse-check: allow: tick boxes, not switches, for the keep pick (SOLAR-486) */}
               </label>
             );
           })}
@@ -699,10 +706,12 @@ function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', pre
     : acct.state === 'none' ? { ...AT.choosePlants(acct), ...AT.weekPick(acct) } : AT.choosePlants(acct);
   const room = mode === 'choose' ? (trial ? acct.trial_places : acct.places) : plan.places;
   const logins = pickLogins(acct, mode);
-  const all = logins.flatMap(g => g.plants.map(x => x.plant_id));
+  // a plant whose old history is still being deleted can't be picked until it's gone (SOLAR-659)
+  const deleting = (id) => !chosen.includes(id) && !!acct.plants.find(x => x.plant === id)?.deleting;
+  const all = logins.flatMap(g => g.plants.map(x => x.plant_id)).filter(id => !deleting(id));
   // choose: as chosen now, plus a new login's plants; checkout: every plant that fits, chosen
   // ones first; keep: the chosen ones that fit
-  const start = mode === 'choose' ? [...new Set([...chosen, ...prefill])].slice(0, room)
+  const start = mode === 'choose' ? [...new Set([...chosen, ...prefill.filter(id => !deleting(id))])].slice(0, room)
     : mode === 'checkout' ? [...new Set([...chosen, ...all])].slice(0, room) : chosen.slice(0, room);
   const [picked, setPicked] = useState(start);
   const [confirm, setConfirm] = useState(false);
@@ -710,6 +719,7 @@ function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', pre
   const going = chosen.filter(id => !picked.includes(id)), coming = picked.filter(id => !chosen.includes(id));
   const tag = (p) => {
     const s = acct.plants.find(x => x.plant === p.plant_id);
+    if (deleting(p.plant_id)) return t.deleting;
     return s && trial && mode === 'choose' && s.trial_used_elsewhere ? t.usedElsewhere : null;
   };
   const save = async () => {
@@ -740,7 +750,7 @@ function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', pre
       {/* pick-steady: the line under the rows keeps two lines' height, so the pop-up does not jump (SOLAR-572) */}
       <div className="pick-steady">
         <KeepPicker logins={logins} room={room} value={picked} onChange={setPicked} min={mode === 'choose' ? 0 : 1}
-          verb={mode === 'keep' ? 'Keep' : 'Read'} tag={tag} ask={t.note} full={t.tooMany} />
+          verb={mode === 'keep' ? 'Keep' : 'Read'} tag={tag} lock={p => deleting(p.plant_id)} ask={t.note} full={t.tooMany} />
       </div>
       <div className="conn-form-actions">
         <button type="button" className="ghost-btn" onClick={() => onDone(null)} disabled={busy}>{AT.pay.cancel}</button>

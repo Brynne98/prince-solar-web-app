@@ -175,7 +175,7 @@ begin
            'trial_used_elsewhere', pl.trial_used_at is not null and pl.trial_used_by is distinct from p_account,
            'delete_at', ps->'delete_at',
            'purged', ps->'purged',
-           'deleting', ps->'deleting')                                                       -- 0277 order by x.plant), '[]'::jsonb)
+           'deleting', ps->'deleting') order by x.plant), '[]'::jsonb)          -- 0277: deleting
     into plants
     from (select y.plant, exists (select 1 from billing.seats se where se.account = p_account and se.plant = y.plant
                                      and se.chosen_at <= p_at and (se.closed_at is null or se.closed_at > p_at)) as chosen
@@ -448,6 +448,8 @@ begin
   select count(*) into n from del;
   return n;
 end $function$;
+-- recover calls it as service_role, which has no use of schema private: run as the owner
+alter function public.q_prune_inverter_history(bigint, integer) security definer;
 
 CREATE OR REPLACE FUNCTION private.grid_off_update(p_plant bigint, p_to bigint DEFAULT NULL::bigint)
  RETURNS integer
