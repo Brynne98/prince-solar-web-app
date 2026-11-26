@@ -86,6 +86,8 @@ const rules = [
   [/className=\{?["']meter\b/, 'a hand-made progress bar: use Meter (components.jsx)', 'components.jsx'],
   [/className=["']login-card["']/, 'a hand-made sign-in card: use AuthCard (auth.jsx)', 'auth.jsx'],
   [/Promise\.race\(/, 'a hand-made timeout: use withTimeout (link.jsx)', 'link.jsx'],
+  // SOLAR-676: the 5-minute points are averages; their top is not the day's peak
+  [/\(!pk \|\| p\.\w+ > pk\.\w+\)/, 'a peak taken from the 5-minute points: use dayPeak (data.jsx)', 'data.jsx'],
   [/getItem\(['"]synsynk\.tab/, 'reading the saved tab by hand: use savedTab (app.jsx)', 'app.jsx'],
   // SOLAR-641: account, plan, price and history lines come from the text catalog, filled from
   // api_account_state; the old billing reads worked them out on each screen

@@ -35,6 +35,18 @@ begin
   insert into t_results (label, pass, detail) values (p_label, false, 'no error');
 end $$;
 
+-- SOLAR-659 (0277): a removed plant's rows go in a background run (private.history_delete_run),
+-- which commits, so it can't run inside this transaction. Here it finishes at once, as the
+-- delete did before; the H block turns this off to test the wait.
+create function private.t659_drain() returns trigger language plpgsql as $$
+begin
+  perform private.plant_readings_delete(new.plant_id);
+  delete from private.history_delete_queue where plant_id = new.plant_id;
+  return null;
+end $$;
+create trigger t659_drain after insert on private.history_delete_queue
+  for each row execute function private.t659_drain();
+
 -- the clock: day 0 is 1 Dec of pg_temp.y(), 10:00 in Johannesburg. y is at least two years
 -- ahead, so the moved clock stays after now() (the delete and send paths read the real clock),
 -- and is 2 more than a leap year, as 2026 was, so the month ends fall the same way.
@@ -1179,7 +1191,7 @@ begin
   perform pg_temp.answer(ref, 'ok', pg_temp.t(10), 'AUTH_p9d');
   perform pg_temp.ok('P9c the given monthly replaces the booked yearly', (pg_temp.sub(c)).plan = 'family'
     and (pg_temp.sub(c)).interval = 'month' and (pg_temp.sub(c)).next_price is null);
-  -- the same with no interval given: the booked yearly carries over, as before 0278
+  -- the same with no interval given: the booked yearly carries over, as before 0279
   perform pg_temp.link(d, 'p9e', '{990010981,990010982,990010983}', pg_temp.t(0));
   perform pg_temp.buy(d, 'home', 'month', '{990010981,990010982}', pg_temp.t(0), 'AUTH_p9e');
   perform billing.switch_interval(d, 'year', pg_temp.t(5));
@@ -3809,6 +3821,50 @@ begin
   perform pg_temp.eq('R3 the last try failed and its email went: not sent', pg_temp.rem(a, last + interval '3 hours'), 'payment email sent');
   perform pg_temp.eq('R3 after the cutoff: never', pg_temp.rem(a, pg_temp.cut(pe) + interval '1 minute'), 'not past due');
 exception when others then perform pg_temp.ok('R3 runs', false, sqlerrm);
+end $$;
+
+-- ===========================================================================
+-- SOLAR-659 (0277): a removed plant waits on the delete list
+-- ===========================================================================
+do $$
+declare a uuid := pg_temp.acct('h659'); u uuid; l uuid; r jsonb;
+begin
+  alter table private.history_delete_queue disable trigger t659_drain;
+  select user_id into u from billing.accounts where id = a;
+  l := pg_temp.link(a, 'h659', '{990065901,990065902}', pg_temp.t(40)); perform pg_temp.stored(l);
+  perform pg_temp.pay(a, 'home', 'month', pg_temp.t(40));
+  perform pg_temp.choose(a, '{990065901}', pg_temp.t(40));
+  perform pg_temp.agg(990065901, pg_temp.t(40));
+  perform pg_temp.ok('H1 read before', (billing.plant_state(990065901, pg_temp.t(40))->>'read_now')::boolean);
+  r := pg_temp.choose(a, '{990065902}', pg_temp.t(40.1));
+  perform pg_temp.ok('H1 switched out: listed, rows not gone in the request',
+    private.history_deleting(990065901) and pg_temp.has_agg(990065901));
+  perform pg_temp.ok('H1 ... marked deleted at once', (select history_purged_at is not null from billing.plants where id = 990065901));
+  perform pg_temp.eq('H1 ... the account state says deleting',
+    (select x->>'deleting' from jsonb_array_elements(r->'plants') x where (x->>'plant')::bigint = 990065901), 'true');
+  perform pg_temp.fails('H2 switching straight back: refused',
+    format('select billing.set_chosen_plants(%L, ''{990065901}'', %L)', a, pg_temp.t(40.2)), 'still being deleted');
+  perform pg_temp.fails('H2 picking it for a bill: refused',
+    format('select billing.final_choice(%L, ''{990065901}'', 2)', a), 'still being deleted');
+  -- a paid restart reopens the seat (write_seats): not refused, but not read, written or shown
+  insert into billing.seats (account, plant, chosen_at) values (a, 990065901, pg_temp.t(40.3));
+  update billing.plants set history_purged_at = null where id = 990065901;
+  perform pg_temp.ok('H3 seat open while listed: not read', not (billing.plant_state(990065901, pg_temp.t(40.4))->>'read_now')::boolean);
+  perform pg_temp.ok('H3 ... no history fetch step', not billing.reads_plant(a, 990065901, pg_temp.t(40.4)));
+  perform pg_temp.ok('H3 ... a poll write refused', cardinality(billing.write_allowed_set(
+    jsonb_build_object('990065901', (select version from billing.plants where id = 990065901)), pg_temp.t(40.4))) = 0);
+  perform pg_temp.ok('H3 ... not read by the poller', not exists (select 1 from billing.plants_read_now('{990065901}', pg_temp.t(40.4))));
+  perform pg_temp.ok('H3 ... the inverter prune skips it', public.q_prune_inverter_history(990065901) = 0);
+  perform set_config('request.jwt.claims', json_build_object('sub', u, 'role', 'authenticated')::text, true);
+  perform pg_temp.ok('H3 ... its old rows not shown', 990065901 not in (select public.my_plant_ids()));
+  -- the run finishes
+  perform private.plant_readings_delete(990065901);
+  delete from private.history_delete_queue where plant_id = 990065901;
+  perform pg_temp.ok('H4 off the list: read again', (billing.plant_state(990065901, pg_temp.t(40.5))->>'read_now')::boolean);
+  perform pg_temp.ok('H4 ... shown again', 990065901 in (select public.my_plant_ids()));
+  perform set_config('request.jwt.claims', '', true);
+  alter table private.history_delete_queue enable trigger t659_drain;
+exception when others then perform pg_temp.ok('H runs', false, sqlerrm);
 end $$;
 
 -- Z11 receipts of a move with an interval (SOLAR-675): monthly to yearly says the year it

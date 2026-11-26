@@ -151,7 +151,7 @@ declare
 $o$;
 begin
   if position(old in d) = 0 then raise exception 'apply_upgrade changed since 0245: edit it by hand'; end if;
-  d := replace(d, old, $n$  -- the interval the move was made at, from the billing date (0278): it wins over a switch
+  d := replace(d, old, $n$  -- the interval the move was made at, from the billing date (0279): it wins over a switch
   -- booked earlier
   if p_inv.next_interval is not null and p_inv.interval = s.interval then
     update billing.subscriptions
@@ -160,7 +160,7 @@ begin
      where id = s.id;
   end if;
   -- another interval now: an old monthly-to-yearly charge (copy_from_old) pays the same plan a
-  -- year past its billing date; a bigger plan monthly to yearly (0278, and copy_from_old) runs
+  -- year past its billing date; a bigger plan monthly to yearly (0279, and copy_from_old) runs
   -- yearly from the payment, on a new billing day
 $n$);
   execute d;
@@ -267,7 +267,7 @@ begin
   select * into pl from billing.plans where code = p_plan;
   if not found then raise exception 'no such plan' using errcode = '22023'; end if;
   if st.sub is null then
-    -- a first plan is monthly unless asked (api_plan_quote passes null through since 0278)
+    -- a first plan is monthly unless asked (api_plan_quote passes null through since 0279)
     p_interval := coalesce(p_interval, 'month');
     pr := billing.price_shown(p_account, p_plan, p_interval, p_at);
     return jsonb_build_object('kind', 'purchase', 'plan', p_plan, 'plan_name', pl.name, 'places', pl.places,
