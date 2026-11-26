@@ -25,8 +25,7 @@ begin
      where e.user_id = uid
        and (e.plant_id in (select lp.plant from plants.login_plants lp where lp.login = p_account) and e.kind not like 'sunsynk_%'
             or e.key like 'needs_relink:' || p_account || ':%');
-    update private.inverters set account_id = null where account_id = p_account;
-    perform plants.remove_login(acc, p_account);
+    perform plants.remove_login(acc, p_account);   -- private.inverters.account_id clears by its key
   end if;
   return jsonb_build_object('result', 'removed');
 end

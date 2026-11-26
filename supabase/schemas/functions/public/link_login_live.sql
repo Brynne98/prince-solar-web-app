@@ -13,7 +13,8 @@ begin
   -- the login's lock, then the account, then the plants (R19); every copy of the username too
   mine := private.username_logins(p_user, p_username);
   perform private.login_lock(mine, 'ok', p_user,
-    array(select lp.plant from plants.login_plants lp where lp.login = any (mine)));
+    array(select lp.plant from plants.login_plants lp where lp.login = any (mine)
+          union select (x->>'id')::bigint from jsonb_array_elements(plants.list_ids(plants.default_brand(), p_plants)) x));
   if not plants.link_allowed(p_user, plants.default_brand(), p_username) then
     raise exception 'one login' using errcode = '22023';
   end if;

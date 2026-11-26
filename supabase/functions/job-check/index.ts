@@ -13,7 +13,7 @@ type Inputs = {
   shards: { shard: number; last_at: string | null }[];
   jobs: Job[];
   calls?: Call[];
-  sunsynk: { calls: number; failed: number; since: string | null };
+  vendor: { calls: number; failed: number; since: string | null };
   email: { waiting: number; oldest_due: string | null };
   checks: Record<string, { failing: boolean; since: string }>;
   signin?: Record<string, number> | null;
@@ -127,11 +127,11 @@ export function judge(i: Inputs): Verdict[] {
                detail: { result: c.result, last_call: c.last_call, failed_last_hour: c.failed_1h,
                          ...(c.failing && c.error ? { error: c.error } : {}) } });
   }
-  const { calls, failed } = i.sunsynk;
+  const { calls, failed } = i.vendor;
   const share = calls > 0 ? failed / calls : 0;
   // Under 20 calls the share says little: the state stays as it was.
-  out.push({ name: "sunsynk", job: "sunsynk", failing: calls < 20 ? null : share >= 0.2 ? true : share < 0.1 ? false : null,
-             detail: { calls, failed, failed_share: Math.round(share * 1000) / 1000, since: i.sunsynk.since } });
+  out.push({ name: "vendor", job: "vendor", failing: calls < 20 ? null : share >= 0.2 ? true : share < 0.1 ? false : null,
+             detail: { calls, failed, failed_share: Math.round(share * 1000) / 1000, since: i.vendor.since } });
   // Failing while a sign-in email sent in the last hour bounced or was refused. Infobip not
   // answering (i.signin null) keeps the state.
   if (i.signin) {

@@ -202,6 +202,19 @@
     "supabase/schemas/functions/public/msg_push_take.sql"
    ]
   },
+  "plants.brand_calls": {
+   "part": "plants",
+   "writers": [
+    "supabase/schemas/functions/public/brand_calls_report.sql",
+    "supabase/schemas/functions/public/brand_tally.sql"
+   ]
+  },
+  "plants.brand_state": {
+   "part": "alerts",
+   "writers": [
+    "supabase/schemas/functions/public/email_sweep.sql"
+   ]
+  },
   "plants.brands": {
    "part": "plants",
    "writers": []
@@ -256,12 +269,6 @@
   "private.admins": {
    "part": "accounts",
    "writers": []
-  },
-  "private.email_system_state": {
-   "part": "alerts",
-   "writers": [
-    "supabase/schemas/functions/public/email_sweep.sql"
-   ]
   },
   "private.feedback": {
    "part": "accounts",
@@ -319,8 +326,6 @@
    "part": "plants",
    "writers": [
     "supabase/schemas/functions/private/purge_plant.sql",
-    "supabase/schemas/functions/public/api_account_delete.sql",
-    "supabase/schemas/functions/public/api_link_remove.sql",
     "supabase/schemas/functions/public/inverters_seed.sql"
    ]
   },
@@ -433,13 +438,6 @@
    "writers": [
     "supabase/schemas/functions/private/purge_plant.sql",
     "supabase/schemas/functions/public/email_poll_step.sql"
-   ]
-  },
-  "private.sunsynk_calls": {
-   "part": "plants",
-   "writers": [
-    "supabase/schemas/functions/public/sunsynk_calls_report.sql",
-    "supabase/schemas/functions/public/sunsynk_tally.sql"
    ]
   },
   "private.test_users": {
@@ -645,7 +643,9 @@
     "supabase/schemas/functions/private/refresh_store.sql",
     "supabase/schemas/functions/private/username_logins.sql",
     "supabase/schemas/functions/private/login_copies.sql",
-    "supabase/schemas/functions/private/login_lock.sql"
+    "supabase/schemas/functions/private/login_lock.sql",
+    "supabase/schemas/functions/public/brand_tally.sql",
+    "supabase/schemas/functions/public/brand_calls_report.sql"
    ],
    "readers": {
     "plants.logins": [
@@ -787,10 +787,6 @@
      "supabase/schemas/functions/public/inverters_list.sql",
      "supabase/schemas/functions/public/plant_inverters.sql",
      "supabase/schemas/functions/public/poll_routes.sql"
-    ],
-    "private.sunsynk_calls": [
-     "supabase/schemas/functions/public/job_check_inputs.sql",
-     "supabase/schemas/functions/public/sunsynk_calls_report.sql"
     ],
     "private.link_attempts": [
      "supabase/schemas/functions/public/link_attempt.sql",

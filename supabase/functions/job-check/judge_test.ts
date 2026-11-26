@@ -1,7 +1,7 @@
 // deno test -A --node-modules-dir=none job-check/judge_test.ts (SOLAR-469, SOLAR-472, 0249)
 import { judge } from "./index.ts";
 
-const base = { now: "2026-11-10T21:00:00Z", shards: [], jobs: [], sunsynk: { calls: 0, failed: 0, since: null },
+const base = { now: "2026-11-10T21:00:00Z", shards: [], jobs: [], vendor: { calls: 0, failed: 0, since: null },
                email: { waiting: 0, oldest_due: null }, checks: {} };
 const pick = (v: ReturnType<typeof judge>, n: string) => v.find((x) => x.name === n);
 const eq = (a: unknown, b: unknown, what: string) => { if (a !== b) throw new Error(`${what}: ${a} !== ${b}`); };

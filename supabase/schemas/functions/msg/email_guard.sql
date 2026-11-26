@@ -11,7 +11,7 @@ AS $function$
            when q.kind in ('batt_hot_back', 'bank_drift_back') then 'no email for this kind'
            when q.user_id is not null and private.email_switch_of(q.kind, q.data) is not null
                 and not public.email_wanted(q.user_id, private.email_switch_of(q.kind, q.data)) then 'switched off'
-           when q.plant_id is not null and q.user_id is not null and q.kind <> 'needs_relink'
+           when q.plant_id is not null and q.user_id is not null and q.kind not in ('needs_relink', 'share_removed', 'plant_off_login')
                 and not exists (select 1 from plants.user_plants pu where pu.user_id = q.user_id and pu.plant_id = q.plant_id)
              then 'plant removed'
            -- plan, chosen plant, still reached: asked again when sent (email_claim 0247)

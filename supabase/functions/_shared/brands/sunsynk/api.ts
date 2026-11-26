@@ -287,7 +287,7 @@ export async function saveCallTally(run?: { shard: number; ms: number; plants: n
   callTally.clear();
   if (!rows.length && !run) return;
   try {
-    await rpc("sunsynk_tally", {
+    await rpc("brand_tally", { p_brand: "sunsynk",
       p_rows: rows, p_shard: run?.shard ?? null, p_run_ms: run?.ms ?? 0, p_plants: run?.plants ?? 0,
     });
   } catch (e) {

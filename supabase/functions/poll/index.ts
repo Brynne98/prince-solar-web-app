@@ -76,10 +76,10 @@ async function tallyCalls(spec: ShardSpec, runMs: number, plants: number, ts: nu
   const saMinute = Math.floor((ts + 2 * 3600) / 60) % 1440;
   if (spec.shard !== 0 || ![5, 10, 15].includes(saMinute)) return;
   try {
-    const day = (await rpc("sunsynk_calls_report", {})) as Record<string, unknown> | null;
-    if (day) await track("sunsynk_calls_counted", "edge:poll", String(day.day), `${day.day}T23:59:00+02:00`, { ...day, $process_person_profile: false });
+    const day = (await rpc("brand_calls_report", {})) as Record<string, unknown> | null;
+    if (day) await track("sunsynk_calls_counted", "edge:poll" /* reuse-check: allow (PostHog event name kept for its dashboards) */, String(day.day), `${day.day}T23:59:00+02:00`, { ...day, $process_person_profile: false });
   } catch (e) {
-    console.warn("sunsynk_calls_report:", e instanceof Error ? e.message : e);
+    console.warn("brand_calls_report:", e instanceof Error ? e.message : e);
     noteError("calls_report_failed", e, { hourly: true });
   }
 }

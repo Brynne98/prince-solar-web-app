@@ -182,7 +182,7 @@ begin
                      or (pu.share_gone_at is null) <> (lp.gone_at is null))) then
     raise exception 'plants.login_plants: differs from plant_users';
   end if;
-  if exists (select 1 from public.plant_users pu where pu.via_share
+  if exists (select 1 from public.plant_users pu where pu.via_share and pu.share_gone_at is null
               and not exists (select 1 from plants.claims c join billing.accounts a on a.id = c.account
                                where c.plant = pu.plant_id and a.user_id = pu.user_id)) then
     raise exception 'plants.claims: a share row of plant_users has no claim';
@@ -197,16 +197,20 @@ on conflict (login, plant) do nothing;
 
 -- plant_users' shape, for the readers (R2); writes go to login_plants and claims
 create view plants.user_plants with (security_barrier) as
-  select lp.plant as plant_id, l.user_id, l.id as account_id, lp.plant_name, lp.linked_at,
-         false as via_share, lp.missing_since as share_missing_at, lp.gone_at as share_gone_at
-    from plants.login_plants lp join plants.logins l on l.id = lp.login
-   where l.kind = 'login'
-  union all
-  select c.plant, a.user_id, s.id, c.plant_name, c.claimed_at, true, sl.missing_since, sl.gone_at
-    from plants.claims c
-    join billing.accounts a on a.id = c.account
-    join plants.logins s on s.kind = 'share' and s.brand = (select p.brand from plants.plants p where p.id = c.plant)
-    left join plants.login_plants sl on sl.login = s.id and sl.plant = c.plant;
+  -- one row per user and plant, as plant_users had (its key): a live row before a gone one,
+  -- an own login before a share
+  select distinct on (u.plant_id, u.user_id) u.*
+    from (select lp.plant as plant_id, l.user_id, l.id as account_id, lp.plant_name, lp.linked_at,
+                 false as via_share, lp.missing_since as share_missing_at, lp.gone_at as share_gone_at
+            from plants.login_plants lp join plants.logins l on l.id = lp.login
+           where l.kind = 'login'
+          union all
+          select c.plant, a.user_id, s.id, c.plant_name, c.claimed_at, true, sl.missing_since, sl.gone_at
+            from plants.claims c
+            join billing.accounts a on a.id = c.account
+            join plants.logins s on s.kind = 'share' and s.brand = (select p.brand from plants.plants p where p.id = c.plant)
+            left join plants.login_plants sl on sl.login = s.id and sl.plant = c.plant) u
+   order by u.plant_id, u.user_id, u.share_gone_at is not null, u.via_share, u.linked_at, u.account_id;
 revoke all on plants.user_plants from public, anon, authenticated;
 
 -- every table in schema plants: no browser access
@@ -1760,7 +1764,7 @@ AS $function$
            when q.kind in ('batt_hot_back', 'bank_drift_back') then 'no email for this kind'
            when q.user_id is not null and private.email_switch_of(q.kind, q.data) is not null
                 and not public.email_wanted(q.user_id, private.email_switch_of(q.kind, q.data)) then 'switched off'
-           when q.plant_id is not null and q.user_id is not null and q.kind <> 'needs_relink'
+           when q.plant_id is not null and q.user_id is not null and q.kind not in ('needs_relink', 'share_removed', 'plant_off_login')
                 and not exists (select 1 from plants.user_plants pu where pu.user_id = q.user_id and pu.plant_id = q.plant_id)
              then 'plant removed'
            -- plan, chosen plant, still reached: asked again when sent (email_claim 0247)
@@ -2354,15 +2358,17 @@ begin
   end loop;
   perform 1 from plants.login_plants lp join plants.logins l on l.id = lp.login
    where l.user_id = uid order by lp.login, lp.plant for update of lp;
+  -- the logins' secrets first: billing.delete_account's cascade takes the login rows with it
+  for acc in select id, refresh_secret_id from plants.logins where user_id = uid order by id loop
+    if acc.refresh_secret_id is not null
+       and not exists (select 1 from plants.logins o where o.refresh_secret_id = acc.refresh_secret_id and o.user_id <> uid) then
+      delete from vault.secrets s where s.id = acc.refresh_secret_id;
+    end if;
+  end loop;
   gone := case when exists (select 1 from billing.accounts where user_id = uid)
                then billing.delete_account((select id from billing.accounts where user_id = uid))
                else jsonb_build_object('unprotected', '[]'::jsonb) end;
   orphans := array(select (x)::bigint from jsonb_array_elements_text(gone->'unprotected') x);
-  for acc in select id, refresh_secret_id from plants.logins where user_id = uid order by id loop
-    perform pg_advisory_xact_lock(1, hashtext(acc.id::text));
-    if acc.refresh_secret_id is not null then delete from vault.secrets where id = acc.refresh_secret_id; end if;
-    update private.inverters set account_id = null where account_id = acc.id;
-  end loop;
   delete from plants.logins where user_id = uid;   -- its lists and events go with it; claims went with the account
   insert into public.email_queue (to_email, kind, key, priority)
   select email, 'account_deleted', 'account_deleted:' || uid, 1 from auth.users where id = uid and email is not null
@@ -2504,8 +2510,7 @@ begin
      where e.user_id = uid
        and (e.plant_id in (select lp.plant from plants.login_plants lp where lp.login = p_account) and e.kind not like 'sunsynk_%'
             or e.key like 'needs_relink:' || p_account || ':%');
-    update private.inverters set account_id = null where account_id = p_account;
-    perform plants.remove_login(acc, p_account);
+    perform plants.remove_login(acc, p_account);   -- private.inverters.account_id clears by its key
   end if;
   return jsonb_build_object('result', 'removed');
 end
@@ -2964,341 +2969,6 @@ begin
   end;
 end $function$;
 
-CREATE OR REPLACE FUNCTION public.email_poll_step(p_ts bigint, p_outcomes jsonb, p_plants bigint[])
- RETURNS jsonb
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'private', 'pg_temp'
-AS $function$
-declare
-  todo bigint[];
-  r record;
-  clr bigint;
-  failed jsonb := '[]'::jsonb;
-begin
-  update plants.logins a set last_try_at = now(), last_try = o.outcome
-    from jsonb_to_recordset(coalesce(p_outcomes, '[]'::jsonb)) as o(account uuid, outcome text)
-   where a.id = o.account and o.outcome in ('ok', 'sunsynk', 'ours');
-
-  -- Plants with config (purged ones have none) not already stepped for this minute.
-  -- The rows stay locked to the end, so a link kick polling the same account in the
-  -- same minute waits here and then finds them stepped: strings are counted once.
-  insert into private.plant_alert_state (plant_id)
-  select c.plant_id from public.plant_config c where c.plant_id = any (coalesce(p_plants, '{}')) order by 1
-  on conflict do nothing;
-  select coalesce(array_agg(x.plant_id), '{}') into todo
-    from (select s.plant_id from private.plant_alert_state s
-           where s.plant_id = any (coalesce(p_plants, '{}')) and (s.stepped_ts is null or s.stepped_ts < p_ts)
-           order by s.plant_id for update) x;
-
-  -- Strings, all plants at once: a string with voltage is alive; one under 1.5 V and
-  -- 5 W while another string on the plant makes over 200 W counts a dead sample, but
-  -- only once the string itself has made over 200 W (an input with no panels never
-  -- has; SOLAR-188). A string on another inverter counts only when both inverters
-  -- reported in the last 10 min (poll carries an inverter's strings for 5 runs), so an
-  -- inverter's only used string can stop and be seen (0231, SOLAR-613). A dead string
-  -- stays dead until it has had voltage for 15 min with no dead sample (clear_at, 0151).
-  insert into private.string_alert_state as st (plant_id, sn, no, last_alive, dead_n, made_power)
-  with fresh as (
-    select x.plant_id, x.sn
-      from public.readings x join public.plant_config c on c.plant_id = x.plant_id
-     where x.plant_id = any (todo) and x.ts = p_ts and x.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
-     group by x.plant_id, x.sn
-    having max(extract(epoch from (x.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint) >= p_ts - 600
-  )
-  select x.plant_id, x.sn, x.no, case when x.alive then p_ts end, 0, x.made
-    from (select s.plant_id, s.sn, s.no, coalesce(s.volt_v, 0) >= 1.5 as alive,
-                 coalesce(s.power_w, 0) > 200 as made,
-                 coalesce(s.volt_v, 0) < 1.5 and coalesce(s.power_w, 0) < 5
-                   and exists (select 1 from public.strings o where o.plant_id = s.plant_id and o.ts = p_ts
-                                  and (o.sn, o.no) <> (s.sn, s.no) and coalesce(o.power_w, 0) > 200
-                                  and (o.sn = s.sn
-                                       or (exists (select 1 from fresh f where f.plant_id = s.plant_id and f.sn = s.sn)
-                                           and exists (select 1 from fresh f where f.plant_id = o.plant_id and f.sn = o.sn)))) as dead_in_sun
-            from public.strings s
-           where s.plant_id = any (todo) and s.ts = p_ts) x
-   where x.alive or x.dead_in_sun
-  on conflict (plant_id, sn, no) do update set
-    last_alive = coalesce(excluded.last_alive, st.last_alive),
-    made_power = st.made_power or excluded.made_power,
-    dead_n     = case when excluded.last_alive is not null or not st.made_power then 0
-                      when st.dead then st.dead_n else st.dead_n + 1 end,
-    clear_at   = case when st.dead and excluded.last_alive is not null then coalesce(st.clear_at, excluded.last_alive) end;
-  -- Strings dead in the sun for 12 samples: one email each. When every string that has
-  -- made power on an inverter stops in the same minute, that is one email for the
-  -- inverter ("Strings 1 and 2"), kept on its lowest string; the others are marked with
-  -- group_no and come back without an email of their own (0231).
-  for r in
-    with due as (
-      select a.plant_id, a.sn, a.no, coalesce(a.last_alive + 60, p_ts - 900) as since
-        from private.string_alert_state a
-       where a.plant_id = any (todo) and not a.dead and a.dead_n >= 12
-    ), inv as (
-      select d.plant_id, d.sn, min(d.no) as first_no, count(*) as n,
-             array_agg(d.no order by d.no) as nos
-        from due d group by d.plant_id, d.sn
-    ), whole as (
-      select i.* from inv i
-       where i.n >= 2
-         and i.n = (select count(*) from private.string_alert_state a
-                     where a.plant_id = i.plant_id and a.sn = i.sn and a.made_power and not a.dead)
-    )
-    select d.plant_id, d.sn, d.no, d.since, w.first_no, w.nos,
-           coalesce(nullif(m.alias, ''), 'Inverter ' || d.sn) as inverter
-      from due d left join whole w on w.plant_id = d.plant_id and w.sn = d.sn
-      left join private.meta m on m.sn = d.sn
-     order by d.plant_id, m.ord nulls last, d.sn, d.no
-  loop
-    if r.first_no is null or r.first_no = r.no then
-      -- strings left pointing here by an older email are free of it now
-      update private.string_alert_state set group_no = null
-       where plant_id = r.plant_id and sn = r.sn and group_no = r.no and no <> r.no and not dead;
-    end if;
-    update private.string_alert_state set dead = true, dead_since = r.since, sent_at = now(), n = 1, clear_at = null,
-                                          group_no = r.first_no
-     where plant_id = r.plant_id and sn = r.sn and no = r.no;
-    if r.first_no is null or r.first_no = r.no then
-      perform private.email_enqueue_plant(r.plant_id, 'string_dead',
-        'string_dead:' || r.plant_id || ':' || r.sn || ':' || r.no || ':' || r.since || ':1',
-        jsonb_build_object('string', private.string_names(coalesce(r.nos, array[r.no])), 'inverter', r.inverter, 'since', r.since));
-    end if;
-  end loop;
-  -- Dead strings with voltage for 15 min: one "back" each. It goes on a minute with
-  -- voltage, so one stray sample before nightfall cannot send it overnight. A string
-  -- that went in another string's email comes back quietly; the one that held the
-  -- email waits for all of them, then names every one (0231).
-  for r in
-    select a.plant_id, a.sn, a.no, a.dead_since, a.clear_at, a.group_no,
-           (select array_agg(g.no order by g.no) from private.string_alert_state g
-             where g.plant_id = a.plant_id and g.sn = a.sn and g.group_no = a.no) as nos,
-           coalesce(nullif(m.alias, ''), 'Inverter ' || a.sn) as inverter
-      from private.string_alert_state a left join private.meta m on m.sn = a.sn
-     where a.plant_id = any (todo) and a.dead and p_ts - a.clear_at >= 900 and a.last_alive = p_ts
-       -- an email's holder waits until every string in it is back (0231)
-       and not exists (select 1 from private.string_alert_state g
-                        where g.plant_id = a.plant_id and g.sn = a.sn and g.group_no = a.no and g.no <> a.no and g.dead
-                          and not (p_ts - g.clear_at >= 900 and g.last_alive = p_ts))
-     order by a.plant_id, m.ord nulls last, a.sn, a.no
-  loop
-    -- a string that went in another's email keeps group_no while that one is still
-    -- off, so its "back" names this string too
-    update private.string_alert_state a
-       set dead = false, dead_n = 0, clear_at = null,
-           group_no = case when a.group_no <> a.no and exists (
-                             select 1 from private.string_alert_state h
-                              where h.plant_id = a.plant_id and h.sn = a.sn and h.no = a.group_no and h.dead)
-                           then a.group_no end
-     where a.plant_id = r.plant_id and a.sn = r.sn and a.no = r.no;
-    if r.group_no is null or r.group_no = r.no then
-      update private.string_alert_state set group_no = null
-       where plant_id = r.plant_id and sn = r.sn and group_no = r.no and not dead;
-      perform private.email_enqueue_plant(r.plant_id, 'string_back',
-        'string_back:' || r.plant_id || ':' || r.sn || ':' || r.no || ':' || r.dead_since,
-        jsonb_build_object('string', private.string_names(coalesce(r.nos, array[r.no])), 'inverter', r.inverter,
-                           'since', r.dead_since, 'at', r.clear_at),
-        'string_dead:' || r.plant_id || ':' || r.sn || ':' || r.no || ':' || r.dead_since || ':1');
-    end if;
-  end loop;
-
-  -- Each inverter's own newest reading (0119). One that was quiet gets its Readings
-  -- back once it has reported for 15 min with no gap over 10 min (0151).
-  for r in
-    with d as (
-      select x.plant_id, x.sn,
-             max(extract(epoch from (x.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint) as dev
-        from public.readings x join public.plant_config c on c.plant_id = x.plant_id
-       where x.plant_id = any (todo) and x.ts = p_ts and x.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
-       group by x.plant_id, x.sn
-    )
-    select d.plant_id, d.sn, d.dev, s.last_dev as prev, s.stale, s.stale_key, s.clear_at
-      from d left join private.inverter_alert_state s on s.plant_id = d.plant_id and s.sn = d.sn
-  loop
-    if r.prev is null then
-      insert into private.inverter_alert_state as s (plant_id, sn, last_dev) values (r.plant_id, r.sn, r.dev)
-      on conflict (plant_id, sn) do update set last_dev = greatest(s.last_dev, excluded.last_dev);
-    elsif r.dev > r.prev then
-      clr := case when r.stale then case when r.clear_at is null or r.dev - r.prev > 600 then r.dev else r.clear_at end end;
-      if r.stale and extract(epoch from now()) - r.dev <= 900 and r.dev - clr >= 900 then
-        perform private.email_enqueue_plant(r.plant_id, 'logger_back', 'logger_back:' || substr(r.stale_key, 14),
-          jsonb_build_object('since', split_part(r.stale_key, ':', 4)::bigint, 'at', clr,
-                             'inverter', coalesce((select nullif(m.alias, '') from private.meta m where m.sn = r.sn), 'Inverter ' || r.sn)),
-          r.stale_key);
-        update private.inverter_alert_state set last_dev = r.dev, stale = false, stale_key = null, clear_at = null
-         where plant_id = r.plant_id and sn = r.sn;
-      else
-        update private.inverter_alert_state set last_dev = r.dev, clear_at = clr where plant_id = r.plant_id and sn = r.sn;
-      end if;
-    end if;
-  end loop;
-
-  -- Everything else from one read of the minute's readings. Grid present is
-  -- q_grid_present's rule (0055): over 100 V among the rows with the newest
-  -- device_time; null when nobody reported a voltage.
-  for r in
-    with rd as (
-      select x.plant_id, x.sn, x.device_time, x.grid_volt_v, x.batt_temp_c, x.batt_soc
-        from public.readings x where x.plant_id = any (todo) and x.ts = p_ts
-    ), newest as (
-      select plant_id, max(device_time) as dt from rd where grid_volt_v is not null group by plant_id
-    )
-    select c.plant_id, jsonb_build_object(
-             'present', case when count(rd.grid_volt_v) = 0 then null
-                             else coalesce(bool_or(rd.grid_volt_v > 100) filter (
-                                    where rd.grid_volt_v is not null and rd.device_time is not distinct from n.dt), false) end,
-             'dev', max(case when rd.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
-                             then extract(epoch from (rd.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint end),
-             'temp', max(rd.batt_temp_c) filter (where rd.batt_temp_c > 0 and rd.batt_temp_c < 80),
-             'spread', case when count(distinct rd.sn) filter (where rd.batt_soc between 1 and 100) >= 2
-                            then max(rd.batt_soc) filter (where rd.batt_soc between 1 and 100)
-                               - min(rd.batt_soc) filter (where rd.batt_soc between 1 and 100) end,
-             'has_batt', coalesce(c.has_battery, true),
-             'shared', coalesce(c.battery_banks = 'shared', false)) as f
-      from public.plant_config c
-      join rd on rd.plant_id = c.plant_id
-      left join newest n on n.plant_id = c.plant_id
-     where c.plant_id = any (todo)
-     group by c.plant_id, c.has_battery, c.battery_banks
-  loop
-    begin
-      perform private.email_plant_apply(r.plant_id, p_ts, r.f);
-    exception when others then
-      failed := failed || jsonb_build_object('plant', r.plant_id, 'error', sqlerrm);
-    end;
-  end loop;
-  return jsonb_build_object('plants', coalesce(array_length(todo, 1), 0), 'failed', failed);
-end $function$;
-
-CREATE OR REPLACE FUNCTION public.email_sweep()
- RETURNS jsonb
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'private', 'pg_temp'
-AS $function$
-declare
-  now_s bigint := extract(epoch from now())::bigint;
-  sys private.email_system_state;
-  tried int;
-  failing int;
-  down boolean;
-  r record;
-  n_stale int := 0;
-  n_rep int := 0;
-begin
-  select * into sys from private.email_system_state where id = 1 for update;
-
-  -- SunSynk itself. A login counts when poll tried it in the last 10 minutes; it is
-  -- failing when its last try was SunSynk's fault and nothing good came for 10 min.
-  -- Down: over half failing, and at least 3 of them, or all of them when fewer than 3
-  -- were tried (0119). Back once not down for 15 min (0151).
-  select count(*) filter (where a.last_try_at > now() - interval '10 minutes'),
-         count(*) filter (where a.last_try_at > now() - interval '3 minutes' and a.last_try = 'sunsynk'
-                            and coalesce(a.last_ok_at, a.linked_at) < now() - interval '10 minutes')
-    into tried, failing
-    from plants.logins a where a.status = 'ok';
-  down := failing >= least(3, tried) and failing > 0 and failing * 2 > tried;
-
-  if down and not sys.sunsynk_down then
-    sys.sunsynk_down := true; sys.outage_id := sys.outage_id + 1; sys.clear_since := null;
-    sys.down_since := (select extract(epoch from min(coalesce(a.last_ok_at, a.linked_at)))::bigint
-                         from plants.logins a
-                        where a.status = 'ok' and a.last_try = 'sunsynk' and a.last_try_at > now() - interval '3 minutes'
-                          and coalesce(a.last_ok_at, a.linked_at) < now() - interval '10 minutes');
-  elsif down then
-    sys.clear_since := null;
-  elsif sys.sunsynk_down then
-    sys.clear_since := coalesce(sys.clear_since, now());
-    if sys.clear_since <= now() - interval '15 minutes' then
-      -- Back: everyone told it was down hears it is back.
-      insert into public.email_queue (user_id, plant_id, kind, key, pair_key, data, priority)
-      select q.user_id, q.plant_id, 'sunsynk_back', 'sunsynk_back:' || sys.outage_id, q.key,
-             jsonb_build_object('since', sys.down_since, 'at', extract(epoch from sys.clear_since)::bigint), 0
-        from public.email_queue q
-       where q.key = 'sunsynk_down:' || sys.outage_id
-      on conflict do nothing;
-      sys.sunsynk_down := false; sys.up_at := now(); sys.clear_since := null;
-    end if;
-  end if;
-  if sys.sunsynk_down then
-    -- Users on a failing login; one email each, about their first plant on it.
-    -- Run every minute of the outage, so a login that fails later is told too.
-    insert into public.email_queue (user_id, plant_id, kind, key, data, priority)
-    select distinct on (pu.user_id) pu.user_id, pu.plant_id, 'sunsynk_down', 'sunsynk_down:' || sys.outage_id,
-           jsonb_build_object('since', sys.down_since), 0
-      from plants.logins a join plants.user_plants pu on pu.account_id = a.id
-     where a.status = 'ok' and a.last_try = 'sunsynk' and a.last_try_at > now() - interval '3 minutes'
-       and coalesce(a.last_ok_at, a.linked_at) < now() - interval '10 minutes'
-       and private.plant_live(pu.user_id, pu.plant_id)                          -- 0256
-     order by pu.user_id, pu.linked_at
-    on conflict do nothing;
-  end if;
-  update private.email_system_state set sunsynk_down = sys.sunsynk_down, outage_id = sys.outage_id, down_since = sys.down_since,
-         up_at = sys.up_at, clear_since = sys.clear_since
-   where id = 1;
-
-  -- No readings: 30 min since SunSynk's newest reading for the plant, while poll
-  -- still tries a login on it (ours not running is not the inverter going quiet),
-  -- and not during a SunSynk outage (that has its own email) nor in the 15 min
-  -- after one, while readings that the outage held up come back. A plant started
-  -- again gets 30 min from the start, as a new link does (0174).
-  if not sys.sunsynk_down and (sys.up_at is null or sys.up_at < now() - interval '15 minutes') then
-    for r in
-      select s.plant_id, s.last_dev from private.plant_alert_state s
-       where not s.stale and s.last_dev < now_s - 1800 and not coalesce(s.started_at between now_s - 1800 and now_s, false)   -- 0174
-         and exists (select 1 from plants.user_plants pu join plants.logins a on a.id = pu.account_id
-                      where pu.plant_id = s.plant_id and a.status = 'ok' and a.last_try in ('ok', 'sunsynk')
-                        and a.last_try_at > now() - interval '3 minutes')
-       for update of s skip locked
-    loop
-      update private.plant_alert_state set stale = true, stale_key = 'logger_stale:' || r.plant_id || ':' || r.last_dev,
-             stale_clear_at = null
-       where plant_id = r.plant_id;
-      perform private.email_enqueue_plant(r.plant_id, 'logger_stale', 'logger_stale:' || r.plant_id || ':' || r.last_dev,
-        jsonb_build_object('since', r.last_dev));
-      n_stale := n_stale + 1;
-    end loop;
-    -- One inverter quiet for 30 min while another on the plant still reports (0119).
-    -- An inverter no longer on the plant is left alone.
-    for r in
-      select i.plant_id, i.sn, i.last_dev, coalesce(nullif(m.alias, ''), 'Inverter ' || i.sn) as inverter
-        from private.inverter_alert_state i
-        join private.plant_alert_state s on s.plant_id = i.plant_id
-        left join private.meta m on m.sn = i.sn
-       where not i.stale and i.last_dev < now_s - 1800 and not coalesce(s.started_at between now_s - 1800 and now_s, false)   -- 0174
-         and not s.stale and s.last_dev >= now_s - 900
-         and exists (select 1 from private.inverters v where v.sn = i.sn and v.plant_id = i.plant_id)
-         and exists (select 1 from plants.user_plants pu join plants.logins a on a.id = pu.account_id
-                      where pu.plant_id = i.plant_id and a.status = 'ok' and a.last_try in ('ok', 'sunsynk')
-                        and a.last_try_at > now() - interval '3 minutes')
-       for update of i skip locked
-    loop
-      update private.inverter_alert_state set stale = true, stale_key = 'logger_stale:' || r.plant_id || ':' || r.sn || ':' || r.last_dev,
-             clear_at = null
-       where plant_id = r.plant_id and sn = r.sn;
-      perform private.email_enqueue_plant(r.plant_id, 'logger_stale', 'logger_stale:' || r.plant_id || ':' || r.sn || ':' || r.last_dev,
-        jsonb_build_object('since', r.last_dev, 'inverter', r.inverter));
-      n_stale := n_stale + 1;
-    end loop;
-  end if;
-
-  -- No once-a-day repeat while battery hot, uneven charge or panels stopped last: each
-  -- has its "back" note now (0151).
-
-  -- Reports from 07:00 local: weekly on Monday, monthly on the 1st, yearly on 1 January,
-  -- for plants linked by the first day of the period they cover (private.reports_due).
-  with ins as (
-    insert into public.email_queue (user_id, plant_id, kind, key, data, priority)
-    select user_id, plant_id, 'report_' || period, 'report_' || period || ':' || plant_id || ':' || d,
-           jsonb_build_object('today', d), 2
-      from private.reports_due(now())
-    on conflict do nothing
-    returning 1
-  )
-  select count(*) into n_rep from ins;
-
-  return jsonb_build_object('sunsynkDown', sys.sunsynk_down, 'tried', tried, 'failing', failing,
-                            'stale', n_stale, 'reports', n_rep);
-end $function$;
-
 CREATE OR REPLACE FUNCTION public.inverters_cached_many(p_accounts uuid[], p_plants bigint[] DEFAULT NULL::bigint[])
  RETURNS TABLE(account_id uuid, sn text, plant_id bigint, alias text, model text, soft_ver text, hmi_ver text, gsn text, comm_type text, plant_name text, ord integer, status integer, last_reading jsonb, carried_run integer, upload_s integer)
  LANGUAGE plpgsql
@@ -3375,7 +3045,8 @@ begin
   -- the login's lock, then the account, then the plants (R19); every copy of the username too
   mine := private.username_logins(p_user, p_username);
   perform private.login_lock(mine, 'ok', p_user,
-    array(select lp.plant from plants.login_plants lp where lp.login = any (mine)));
+    array(select lp.plant from plants.login_plants lp where lp.login = any (mine)
+          union select (x->>'id')::bigint from jsonb_array_elements(plants.list_ids(plants.default_brand(), p_plants)) x));
   if not plants.link_allowed(p_user, plants.default_brand(), p_username) then
     raise exception 'one login' using errcode = '22023';
   end if;
@@ -3691,7 +3362,8 @@ AS $function$
          case when not paused then (now() at time zone tz)::date - 14 end,
          case when not paused then (now() at time zone tz)::date - 60 end
     from jsonb_array_elements(p_rows) r,
-         lateral (select plants.tz((r->>'plant_id')::bigint) as tz,
+         lateral (select case when plants.tz_valid(nullif(r->>'timezone', '')) then r->>'timezone'
+                              else plants.tz((r->>'plant_id')::bigint) end as tz,
                          coalesce((r->>'paused')::boolean, false) as paused) z
   on conflict (plant_id) do nothing
 $function$;
@@ -4294,3 +3966,566 @@ drop function private.email_on_plant_user();
 drop table private.sunsynk_accounts;
 drop function billing.login_status_follow();
 drop function private.plants_tombstone(bigint[]);
+
+-- SOLAR-681 R17: a brand's outage and its call counts are its own. One brand's cloud going
+-- down no longer mutes another brand's plants' alerts (email_system_state was one row, 0174:126).
+--   plants.brand_state  per brand: down, outage id, since, up at (was private.email_system_state)
+--   plants.brand_calls  per brand and day (was private.sunsynk_calls); brand '' holds the
+--                       reader's own run log (kind poll_run)
+--   last_try 'sunsynk' -> 'vendor': the brand's fault, whatever the brand
+-- One transaction, compared before the old ones go (R25).
+
+create function plants.market_tz() returns text
+  language sql stable set search_path to '' as $$
+  select m.default_time_zone from billing.markets m order by m.code limit 1
+$$;
+
+create sequence plants.outage_id_seq;
+create table plants.brand_state (
+  brand       text primary key references plants.brands (code),
+  down        boolean not null default false,
+  outage_id   bigint not null default 0,
+  down_since  bigint,
+  up_at       timestamptz,
+  clear_since timestamptz
+);
+insert into plants.brand_state (brand, down, outage_id, down_since, up_at, clear_since)
+select plants.default_brand(), s.sunsynk_down, s.outage_id, s.down_since, s.up_at, s.clear_since
+  from private.email_system_state s where s.id = 1;
+insert into plants.brand_state (brand) select code from plants.brands on conflict do nothing;
+select setval('plants.outage_id_seq', greatest(1, (select max(outage_id) from plants.brand_state)));
+do $$
+begin
+  if exists (select 1 from private.email_system_state s left join plants.brand_state b on b.brand = plants.default_brand()
+              where (s.sunsynk_down, s.outage_id, s.down_since, s.up_at, s.clear_since)
+                    is distinct from (b.down, b.outage_id, b.down_since, b.up_at, b.clear_since)) then
+    raise exception 'brand_state: copy differs from email_system_state';
+  end if;
+end $$;
+
+alter table private.sunsynk_calls set schema plants;
+alter table plants.sunsynk_calls rename to brand_calls;
+alter table plants.brand_calls add column brand text not null default '';
+update plants.brand_calls set brand = plants.default_brand() where kind <> 'poll_run';
+alter table plants.brand_calls drop constraint sunsynk_calls_pkey,
+  add constraint brand_calls_pkey primary key (day, brand, kind, result);
+
+alter table plants.logins drop constraint logins_last_try_check;
+update plants.logins set last_try = 'vendor' where last_try = 'sunsynk';
+alter table plants.logins add constraint logins_last_try_check check (last_try in ('ok', 'vendor', 'ours'));
+
+delete from private.job_checks where name = 'sunsynk';   -- the check is "vendor" now
+
+do $$
+declare t text;
+begin
+  foreach t in array array['brand_state', 'brand_calls'] loop
+    execute format('alter table plants.%I enable row level security', t);
+    execute format('revoke all on table plants.%I from public, anon, authenticated', t);
+  end loop;
+end $$;
+revoke all on function plants.market_tz() from public, anon, authenticated;
+
+-- doors for other parts (R2)
+create function plants.brand_of(p_plant bigint) returns text
+  language sql stable security definer set search_path to '' as $$
+  select p.brand from plants.plants p where p.id = p_plant
+$$;
+-- brand calls on a day, and how many of them failed on the brand's side
+create function plants.calls_on(p_day date) returns table (calls bigint, failed bigint)
+  language sql stable security definer set search_path to '' as $$
+  select coalesce(sum(k.calls), 0)::bigint,
+         coalesce(sum(k.calls) filter (where k.result in ('429', '403_throttle', '5xx', 'network', 'timeout')), 0)::bigint
+    from plants.brand_calls k where k.day = p_day and k.brand <> ''
+$$;
+-- the reader's shard's last run since a day (its run log rows, brand '')
+create function plants.run_last_at(p_shard integer, p_since date) returns timestamptz
+  language sql stable security definer set search_path to '' as $$
+  select max(k.last_at) from plants.brand_calls k
+   where k.brand = '' and k.kind = 'poll_run' and k.result = 's' || p_shard and k.day >= p_since
+$$;
+revoke all on function plants.brand_of(bigint), plants.calls_on(date), plants.run_last_at(integer, date) from public, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.email_sweep()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+declare
+  now_s bigint := extract(epoch from now())::bigint;
+  b plants.brand_state;
+  tried int;
+  failing int;
+  t_all int := 0;
+  f_all int := 0;
+  down boolean;
+  r record;
+  n_stale int := 0;
+  n_rep int := 0;
+begin
+  -- Each brand's cloud on its own (R17): one brand's outage never mutes another's alerts. A
+  -- login counts when poll tried it in the last 10 minutes; it is failing when its last try
+  -- was the brand's fault and nothing good came for 10 min. Down: over half failing, and at
+  -- least 3 of them, or all of them when fewer than 3 were tried (0119). Back once not down
+  -- for 15 min (0151). Outage ids come from one sequence, so mail keys never meet across brands.
+  for b in select * from plants.brand_state order by brand for update loop
+    select count(*) filter (where a.last_try_at > now() - interval '10 minutes'),
+           count(*) filter (where a.last_try_at > now() - interval '3 minutes' and a.last_try = 'vendor'
+                              and coalesce(a.last_ok_at, a.linked_at) < now() - interval '10 minutes')
+      into tried, failing
+      from plants.logins a where a.status = 'ok' and a.brand = b.brand;
+    t_all := t_all + tried; f_all := f_all + failing;
+    down := failing >= least(3, tried) and failing > 0 and failing * 2 > tried;
+
+    if down and not b.down then
+      b.down := true; b.outage_id := nextval('plants.outage_id_seq'); b.clear_since := null;
+      b.down_since := (select extract(epoch from min(coalesce(a.last_ok_at, a.linked_at)))::bigint
+                         from plants.logins a
+                        where a.status = 'ok' and a.brand = b.brand and a.last_try = 'vendor'
+                          and a.last_try_at > now() - interval '3 minutes'
+                          and coalesce(a.last_ok_at, a.linked_at) < now() - interval '10 minutes');
+    elsif down then
+      b.clear_since := null;
+    elsif b.down then
+      b.clear_since := coalesce(b.clear_since, now());
+      if b.clear_since <= now() - interval '15 minutes' then
+        -- Back: everyone told it was down hears it is back.
+        insert into public.email_queue (user_id, plant_id, kind, key, pair_key, data, priority)
+        select q.user_id, q.plant_id, 'sunsynk_back', 'sunsynk_back:' || b.outage_id, q.key,
+               jsonb_build_object('since', b.down_since, 'at', extract(epoch from b.clear_since)::bigint), 0
+          from public.email_queue q
+         where q.key = 'sunsynk_down:' || b.outage_id
+        on conflict do nothing;
+        b.down := false; b.up_at := now(); b.clear_since := null;
+      end if;
+    end if;
+    if b.down then
+      -- Users on a failing login; one email each, about their first plant on it.
+      -- Run every minute of the outage, so a login that fails later is told too.
+      insert into public.email_queue (user_id, plant_id, kind, key, data, priority)
+      select distinct on (pu.user_id) pu.user_id, pu.plant_id, 'sunsynk_down', 'sunsynk_down:' || b.outage_id,
+             jsonb_build_object('since', b.down_since), 0
+        from plants.logins a join plants.user_plants pu on pu.account_id = a.id
+       where a.status = 'ok' and a.brand = b.brand and a.last_try = 'vendor' and a.last_try_at > now() - interval '3 minutes'
+         and coalesce(a.last_ok_at, a.linked_at) < now() - interval '10 minutes'
+         and private.plant_live(pu.user_id, pu.plant_id)                          -- 0256
+       order by pu.user_id, pu.linked_at
+      on conflict do nothing;
+    end if;
+    update plants.brand_state set down = b.down, outage_id = b.outage_id, down_since = b.down_since,
+           up_at = b.up_at, clear_since = b.clear_since
+     where brand = b.brand;
+  end loop;
+
+  -- No readings: 30 min since the brand's newest reading for the plant, while poll
+  -- still tries a login on it (ours not running is not the inverter going quiet),
+  -- and not during an outage of the plant's brand (that has its own email) nor in the
+  -- 15 min after one, while readings that the outage held up come back. A plant started
+  -- again gets 30 min from the start, as a new link does (0174).
+  begin
+    for r in
+      select s.plant_id, s.last_dev from private.plant_alert_state s
+       where not s.stale and s.last_dev < now_s - 1800 and not coalesce(s.started_at between now_s - 1800 and now_s, false)   -- 0174
+         and exists (select 1 from plants.brand_state bs
+                      where bs.brand = plants.brand_of(s.plant_id) and not bs.down and (bs.up_at is null or bs.up_at < now() - interval '15 minutes'))
+         and exists (select 1 from plants.user_plants pu join plants.logins a on a.id = pu.account_id
+                      where pu.plant_id = s.plant_id and a.status = 'ok' and a.last_try in ('ok', 'vendor')
+                        and a.last_try_at > now() - interval '3 minutes')
+       for update of s skip locked
+    loop
+      update private.plant_alert_state set stale = true, stale_key = 'logger_stale:' || r.plant_id || ':' || r.last_dev,
+             stale_clear_at = null
+       where plant_id = r.plant_id;
+      perform private.email_enqueue_plant(r.plant_id, 'logger_stale', 'logger_stale:' || r.plant_id || ':' || r.last_dev,
+        jsonb_build_object('since', r.last_dev));
+      n_stale := n_stale + 1;
+    end loop;
+    -- One inverter quiet for 30 min while another on the plant still reports (0119).
+    -- An inverter no longer on the plant is left alone.
+    for r in
+      select i.plant_id, i.sn, i.last_dev, coalesce(nullif(m.alias, ''), 'Inverter ' || i.sn) as inverter
+        from private.inverter_alert_state i
+        join private.plant_alert_state s on s.plant_id = i.plant_id
+        left join private.meta m on m.sn = i.sn
+       where not i.stale and i.last_dev < now_s - 1800 and not coalesce(s.started_at between now_s - 1800 and now_s, false)   -- 0174
+         and not s.stale and s.last_dev >= now_s - 900
+         and exists (select 1 from private.inverters v where v.sn = i.sn and v.plant_id = i.plant_id)
+         and exists (select 1 from plants.brand_state bs
+                      where bs.brand = plants.brand_of(i.plant_id) and not bs.down and (bs.up_at is null or bs.up_at < now() - interval '15 minutes'))
+         and exists (select 1 from plants.user_plants pu join plants.logins a on a.id = pu.account_id
+                      where pu.plant_id = i.plant_id and a.status = 'ok' and a.last_try in ('ok', 'vendor')
+                        and a.last_try_at > now() - interval '3 minutes')
+       for update of i skip locked
+    loop
+      update private.inverter_alert_state set stale = true, stale_key = 'logger_stale:' || r.plant_id || ':' || r.sn || ':' || r.last_dev,
+             clear_at = null
+       where plant_id = r.plant_id and sn = r.sn;
+      perform private.email_enqueue_plant(r.plant_id, 'logger_stale', 'logger_stale:' || r.plant_id || ':' || r.sn || ':' || r.last_dev,
+        jsonb_build_object('since', r.last_dev, 'inverter', r.inverter));
+      n_stale := n_stale + 1;
+    end loop;
+  end;
+
+  -- No once-a-day repeat while battery hot, uneven charge or panels stopped last: each
+  -- has its "back" note now (0151).
+
+  -- Reports from 07:00 local: weekly on Monday, monthly on the 1st, yearly on 1 January,
+  -- for plants linked by the first day of the period they cover (private.reports_due).
+  with ins as (
+    insert into public.email_queue (user_id, plant_id, kind, key, data, priority)
+    select user_id, plant_id, 'report_' || period, 'report_' || period || ':' || plant_id || ':' || d,
+           jsonb_build_object('today', d), 2
+      from private.reports_due(now())
+    on conflict do nothing
+    returning 1
+  )
+  select count(*) into n_rep from ins;
+
+  return jsonb_build_object('down', (select coalesce(jsonb_agg(x.brand order by x.brand), '[]') from plants.brand_state x where x.down),
+                            'tried', t_all, 'failing', f_all,
+                            'stale', n_stale, 'reports', n_rep);
+end $function$;
+
+CREATE OR REPLACE FUNCTION public.email_poll_step(p_ts bigint, p_outcomes jsonb, p_plants bigint[])
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+declare
+  todo bigint[];
+  r record;
+  clr bigint;
+  failed jsonb := '[]'::jsonb;
+begin
+  update plants.logins a set last_try_at = now(), last_try = o.outcome
+    from jsonb_to_recordset(coalesce(p_outcomes, '[]'::jsonb)) as o(account uuid, outcome text)
+   where a.id = o.account and o.outcome in ('ok', 'vendor', 'ours');
+
+  -- Plants with config (purged ones have none) not already stepped for this minute.
+  -- The rows stay locked to the end, so a link kick polling the same account in the
+  -- same minute waits here and then finds them stepped: strings are counted once.
+  insert into private.plant_alert_state (plant_id)
+  select c.plant_id from public.plant_config c where c.plant_id = any (coalesce(p_plants, '{}')) order by 1
+  on conflict do nothing;
+  select coalesce(array_agg(x.plant_id), '{}') into todo
+    from (select s.plant_id from private.plant_alert_state s
+           where s.plant_id = any (coalesce(p_plants, '{}')) and (s.stepped_ts is null or s.stepped_ts < p_ts)
+           order by s.plant_id for update) x;
+
+  -- Strings, all plants at once: a string with voltage is alive; one under 1.5 V and
+  -- 5 W while another string on the plant makes over 200 W counts a dead sample, but
+  -- only once the string itself has made over 200 W (an input with no panels never
+  -- has; SOLAR-188). A string on another inverter counts only when both inverters
+  -- reported in the last 10 min (poll carries an inverter's strings for 5 runs), so an
+  -- inverter's only used string can stop and be seen (0231, SOLAR-613). A dead string
+  -- stays dead until it has had voltage for 15 min with no dead sample (clear_at, 0151).
+  insert into private.string_alert_state as st (plant_id, sn, no, last_alive, dead_n, made_power)
+  with fresh as (
+    select x.plant_id, x.sn
+      from public.readings x join public.plant_config c on c.plant_id = x.plant_id
+     where x.plant_id = any (todo) and x.ts = p_ts and x.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+     group by x.plant_id, x.sn
+    having max(extract(epoch from (x.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint) >= p_ts - 600
+  )
+  select x.plant_id, x.sn, x.no, case when x.alive then p_ts end, 0, x.made
+    from (select s.plant_id, s.sn, s.no, coalesce(s.volt_v, 0) >= 1.5 as alive,
+                 coalesce(s.power_w, 0) > 200 as made,
+                 coalesce(s.volt_v, 0) < 1.5 and coalesce(s.power_w, 0) < 5
+                   and exists (select 1 from public.strings o where o.plant_id = s.plant_id and o.ts = p_ts
+                                  and (o.sn, o.no) <> (s.sn, s.no) and coalesce(o.power_w, 0) > 200
+                                  and (o.sn = s.sn
+                                       or (exists (select 1 from fresh f where f.plant_id = s.plant_id and f.sn = s.sn)
+                                           and exists (select 1 from fresh f where f.plant_id = o.plant_id and f.sn = o.sn)))) as dead_in_sun
+            from public.strings s
+           where s.plant_id = any (todo) and s.ts = p_ts) x
+   where x.alive or x.dead_in_sun
+  on conflict (plant_id, sn, no) do update set
+    last_alive = coalesce(excluded.last_alive, st.last_alive),
+    made_power = st.made_power or excluded.made_power,
+    dead_n     = case when excluded.last_alive is not null or not st.made_power then 0
+                      when st.dead then st.dead_n else st.dead_n + 1 end,
+    clear_at   = case when st.dead and excluded.last_alive is not null then coalesce(st.clear_at, excluded.last_alive) end;
+  -- Strings dead in the sun for 12 samples: one email each. When every string that has
+  -- made power on an inverter stops in the same minute, that is one email for the
+  -- inverter ("Strings 1 and 2"), kept on its lowest string; the others are marked with
+  -- group_no and come back without an email of their own (0231).
+  for r in
+    with due as (
+      select a.plant_id, a.sn, a.no, coalesce(a.last_alive + 60, p_ts - 900) as since
+        from private.string_alert_state a
+       where a.plant_id = any (todo) and not a.dead and a.dead_n >= 12
+    ), inv as (
+      select d.plant_id, d.sn, min(d.no) as first_no, count(*) as n,
+             array_agg(d.no order by d.no) as nos
+        from due d group by d.plant_id, d.sn
+    ), whole as (
+      select i.* from inv i
+       where i.n >= 2
+         and i.n = (select count(*) from private.string_alert_state a
+                     where a.plant_id = i.plant_id and a.sn = i.sn and a.made_power and not a.dead)
+    )
+    select d.plant_id, d.sn, d.no, d.since, w.first_no, w.nos,
+           coalesce(nullif(m.alias, ''), 'Inverter ' || d.sn) as inverter
+      from due d left join whole w on w.plant_id = d.plant_id and w.sn = d.sn
+      left join private.meta m on m.sn = d.sn
+     order by d.plant_id, m.ord nulls last, d.sn, d.no
+  loop
+    if r.first_no is null or r.first_no = r.no then
+      -- strings left pointing here by an older email are free of it now
+      update private.string_alert_state set group_no = null
+       where plant_id = r.plant_id and sn = r.sn and group_no = r.no and no <> r.no and not dead;
+    end if;
+    update private.string_alert_state set dead = true, dead_since = r.since, sent_at = now(), n = 1, clear_at = null,
+                                          group_no = r.first_no
+     where plant_id = r.plant_id and sn = r.sn and no = r.no;
+    if r.first_no is null or r.first_no = r.no then
+      perform private.email_enqueue_plant(r.plant_id, 'string_dead',
+        'string_dead:' || r.plant_id || ':' || r.sn || ':' || r.no || ':' || r.since || ':1',
+        jsonb_build_object('string', private.string_names(coalesce(r.nos, array[r.no])), 'inverter', r.inverter, 'since', r.since));
+    end if;
+  end loop;
+  -- Dead strings with voltage for 15 min: one "back" each. It goes on a minute with
+  -- voltage, so one stray sample before nightfall cannot send it overnight. A string
+  -- that went in another string's email comes back quietly; the one that held the
+  -- email waits for all of them, then names every one (0231).
+  for r in
+    select a.plant_id, a.sn, a.no, a.dead_since, a.clear_at, a.group_no,
+           (select array_agg(g.no order by g.no) from private.string_alert_state g
+             where g.plant_id = a.plant_id and g.sn = a.sn and g.group_no = a.no) as nos,
+           coalesce(nullif(m.alias, ''), 'Inverter ' || a.sn) as inverter
+      from private.string_alert_state a left join private.meta m on m.sn = a.sn
+     where a.plant_id = any (todo) and a.dead and p_ts - a.clear_at >= 900 and a.last_alive = p_ts
+       -- an email's holder waits until every string in it is back (0231)
+       and not exists (select 1 from private.string_alert_state g
+                        where g.plant_id = a.plant_id and g.sn = a.sn and g.group_no = a.no and g.no <> a.no and g.dead
+                          and not (p_ts - g.clear_at >= 900 and g.last_alive = p_ts))
+     order by a.plant_id, m.ord nulls last, a.sn, a.no
+  loop
+    -- a string that went in another's email keeps group_no while that one is still
+    -- off, so its "back" names this string too
+    update private.string_alert_state a
+       set dead = false, dead_n = 0, clear_at = null,
+           group_no = case when a.group_no <> a.no and exists (
+                             select 1 from private.string_alert_state h
+                              where h.plant_id = a.plant_id and h.sn = a.sn and h.no = a.group_no and h.dead)
+                           then a.group_no end
+     where a.plant_id = r.plant_id and a.sn = r.sn and a.no = r.no;
+    if r.group_no is null or r.group_no = r.no then
+      update private.string_alert_state set group_no = null
+       where plant_id = r.plant_id and sn = r.sn and group_no = r.no and not dead;
+      perform private.email_enqueue_plant(r.plant_id, 'string_back',
+        'string_back:' || r.plant_id || ':' || r.sn || ':' || r.no || ':' || r.dead_since,
+        jsonb_build_object('string', private.string_names(coalesce(r.nos, array[r.no])), 'inverter', r.inverter,
+                           'since', r.dead_since, 'at', r.clear_at),
+        'string_dead:' || r.plant_id || ':' || r.sn || ':' || r.no || ':' || r.dead_since || ':1');
+    end if;
+  end loop;
+
+  -- Each inverter's own newest reading (0119). One that was quiet gets its Readings
+  -- back once it has reported for 15 min with no gap over 10 min (0151).
+  for r in
+    with d as (
+      select x.plant_id, x.sn,
+             max(extract(epoch from (x.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint) as dev
+        from public.readings x join public.plant_config c on c.plant_id = x.plant_id
+       where x.plant_id = any (todo) and x.ts = p_ts and x.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+       group by x.plant_id, x.sn
+    )
+    select d.plant_id, d.sn, d.dev, s.last_dev as prev, s.stale, s.stale_key, s.clear_at
+      from d left join private.inverter_alert_state s on s.plant_id = d.plant_id and s.sn = d.sn
+  loop
+    if r.prev is null then
+      insert into private.inverter_alert_state as s (plant_id, sn, last_dev) values (r.plant_id, r.sn, r.dev)
+      on conflict (plant_id, sn) do update set last_dev = greatest(s.last_dev, excluded.last_dev);
+    elsif r.dev > r.prev then
+      clr := case when r.stale then case when r.clear_at is null or r.dev - r.prev > 600 then r.dev else r.clear_at end end;
+      if r.stale and extract(epoch from now()) - r.dev <= 900 and r.dev - clr >= 900 then
+        perform private.email_enqueue_plant(r.plant_id, 'logger_back', 'logger_back:' || substr(r.stale_key, 14),
+          jsonb_build_object('since', split_part(r.stale_key, ':', 4)::bigint, 'at', clr,
+                             'inverter', coalesce((select nullif(m.alias, '') from private.meta m where m.sn = r.sn), 'Inverter ' || r.sn)),
+          r.stale_key);
+        update private.inverter_alert_state set last_dev = r.dev, stale = false, stale_key = null, clear_at = null
+         where plant_id = r.plant_id and sn = r.sn;
+      else
+        update private.inverter_alert_state set last_dev = r.dev, clear_at = clr where plant_id = r.plant_id and sn = r.sn;
+      end if;
+    end if;
+  end loop;
+
+  -- Everything else from one read of the minute's readings. Grid present is
+  -- q_grid_present's rule (0055): over 100 V among the rows with the newest
+  -- device_time; null when nobody reported a voltage.
+  for r in
+    with rd as (
+      select x.plant_id, x.sn, x.device_time, x.grid_volt_v, x.batt_temp_c, x.batt_soc
+        from public.readings x where x.plant_id = any (todo) and x.ts = p_ts
+    ), newest as (
+      select plant_id, max(device_time) as dt from rd where grid_volt_v is not null group by plant_id
+    )
+    select c.plant_id, jsonb_build_object(
+             'present', case when count(rd.grid_volt_v) = 0 then null
+                             else coalesce(bool_or(rd.grid_volt_v > 100) filter (
+                                    where rd.grid_volt_v is not null and rd.device_time is not distinct from n.dt), false) end,
+             'dev', max(case when rd.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+                             then extract(epoch from (rd.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint end),
+             'temp', max(rd.batt_temp_c) filter (where rd.batt_temp_c > 0 and rd.batt_temp_c < 80),
+             'spread', case when count(distinct rd.sn) filter (where rd.batt_soc between 1 and 100) >= 2
+                            then max(rd.batt_soc) filter (where rd.batt_soc between 1 and 100)
+                               - min(rd.batt_soc) filter (where rd.batt_soc between 1 and 100) end,
+             'has_batt', coalesce(c.has_battery, true),
+             'shared', coalesce(c.battery_banks = 'shared', false)) as f
+      from public.plant_config c
+      join rd on rd.plant_id = c.plant_id
+      left join newest n on n.plant_id = c.plant_id
+     where c.plant_id = any (todo)
+     group by c.plant_id, c.has_battery, c.battery_banks
+  loop
+    begin
+      perform private.email_plant_apply(r.plant_id, p_ts, r.f);
+    exception when others then
+      failed := failed || jsonb_build_object('plant', r.plant_id, 'error', sqlerrm);
+    end;
+  end loop;
+  return jsonb_build_object('plants', coalesce(array_length(todo, 1), 0), 'failed', failed);
+end $function$;
+
+CREATE OR REPLACE FUNCTION public.brand_tally(p_brand text, p_rows jsonb, p_shard integer, p_run_ms integer, p_plants integer)
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+  insert into plants.brand_calls as t (day, brand, kind, result, calls, ms_total, ms_max, plants, last_at)
+  select (now() at time zone plants.market_tz())::date, x.brand, x.kind, x.result,
+         sum(x.calls), sum(x.ms), max(x.ms_max), sum(x.plants), now()
+    from (select coalesce(p_brand, '') as brand, r.kind, r.result, r.calls, r.ms, r.ms_max, 0::bigint as plants
+            from jsonb_to_recordset(coalesce(p_rows, '[]')) as r(kind text, result text, calls bigint, ms bigint, ms_max int)
+           where r.kind is not null and r.result is not null
+          union all
+          select '', 'poll_run', 's' || p_shard, 1, p_run_ms, p_run_ms, p_plants
+           where p_shard is not null) x
+   group by x.brand, x.kind, x.result
+   order by x.brand, x.kind, x.result
+  on conflict (day, brand, kind, result) do update set
+    calls    = t.calls + excluded.calls,
+    ms_total = t.ms_total + excluded.ms_total,
+    ms_max   = greatest(t.ms_max, excluded.ms_max),
+    plants   = t.plants + excluded.plants,
+    last_at  = excluded.last_at;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.brand_calls_report()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+declare
+  d date := (now() at time zone plants.market_tz())::date - 1;
+  out jsonb;
+begin
+  delete from plants.brand_calls where day < d - 400;
+  if not exists (select 1 from plants.brand_calls where day = d) then return null; end if;
+
+  with c as (select * from plants.brand_calls where day = d and kind <> 'poll_run'),
+       r as (select * from plants.brand_calls where day = d and kind = 'poll_run'),
+       tot as (
+         select coalesce(sum(calls), 0) as calls,
+                coalesce(sum(calls) filter (where result in ('429', '403_throttle', '5xx', 'network', 'timeout')), 0) as failed,
+                coalesce(sum(ms_total), 0) as ms
+           from c),
+       pl as (select coalesce(sum(plants::numeric / nullif(calls, 0)), 0) as plants,
+                     coalesce(sum(calls), 0) as runs,
+                     coalesce(max(ms_max), 0) as slowest_ms
+                from r)
+  select jsonb_build_object(
+           'day', d,
+           'calls', tot.calls,
+           'failed', tot.failed,
+           'error_rate', round(tot.failed::numeric / nullif(tot.calls, 0), 4),
+           'avg_call_ms', round(tot.ms::numeric / nullif(tot.calls, 0)),
+           'plants', round(pl.plants, 1),
+           'calls_per_plant', round(tot.calls / nullif(pl.plants, 0)),
+           'poll_runs', pl.runs,
+           'slowest_run_ms', pl.slowest_ms,
+           'by_result', (select coalesce(jsonb_object_agg(result, n), '{}') from
+                           (select result, sum(calls) as n from c group by result) x),
+           'by_kind', (select coalesce(jsonb_object_agg(kind, n), '{}') from
+                         (select kind, sum(calls) as n from c group by kind) y))
+    into out
+    from tot, pl;
+  return out;
+end $function$;
+
+CREATE OR REPLACE FUNCTION public.job_check_inputs()
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'private', 'pg_temp'
+AS $function$
+declare
+  d    date := (now() at time zone plants.market_tz())::date;
+  m    private.job_check_mark;
+  c    bigint; f bigint;
+  jobs jsonb := '[]';
+  fn_calls_state jsonb := '[]';
+begin
+  select x.calls, x.failed into c, f from plants.calls_on(d) x;
+  select * into m from private.job_check_mark for update;
+  insert into private.job_check_mark as t values (true, now(), d, c, f)
+    on conflict (id) do update set at = excluded.at, day = excluded.day, calls = excluded.calls, failed = excluded.failed;
+
+  if to_regclass('cron.job') is not null then
+    with starts as (                                                     -- 0234
+      select r.jobid, max(r.start_time) as last_start from cron.job_run_details r group by r.jobid
+    ), ends as (                                                         -- 0234
+      select distinct on (r.jobid) r.jobid, r.status, r.end_time, r.return_message
+        from cron.job_run_details r
+       where r.status in ('succeeded', 'failed')
+       order by r.jobid, r.start_time desc
+    )
+    select coalesce(jsonb_agg(jsonb_build_object(
+             'job', j.jobname, 'schedule', j.schedule, 'active', j.active,
+             'last_start', s.last_start,                                 -- 0234
+             'last_status', l.status,
+             'last_end', l.end_time,
+             'message', left(regexp_replace(coalesce(l.return_message, ''), '[^\s"''<>@]+@[^\s"''<>@]+\.[a-z]{2,}', '[email]', 'gi'), 200))
+             order by j.jobname), '[]')
+      into jobs
+      from cron.job j
+      left join starts s on s.jobid = j.jobid                            -- 0234
+      left join ends l on l.jobid = j.jobid;                             -- 0234
+  end if;
+
+  delete from private.fn_calls where at < now() - interval '2 days';
+  if to_regclass('net._http_response') is not null then
+    fn_calls_state := private.fn_call_states();
+  end if;
+
+  return jsonb_build_object(
+    'now', now(),
+    'shards', (select coalesce(jsonb_agg(jsonb_build_object('shard', s.shard,
+                 'last_at', plants.run_last_at(s.shard, d - 1))
+                 order by s.shard), '[]')
+                 from private.poll_shards() s),
+    'jobs', jobs,
+    'calls', fn_calls_state,
+    'vendor', jsonb_build_object(
+      'calls', case when m.day = d then c - m.calls else c end,
+      'failed', case when m.day = d then f - m.failed else f end,
+      'since', m.at),
+    'email', (select jsonb_build_object('waiting', count(*), 'oldest_due', min(due_at))
+                from public.email_queue where status = 'queued' and due_at <= now() - interval '10 minutes'),
+    'checks', (select coalesce(jsonb_object_agg(name, jsonb_build_object('failing', failing, 'since', since)), '{}')
+                 from private.job_checks));
+end $function$;
+
+revoke all on function public.brand_tally(text, jsonb, integer, integer, integer) from public, anon, authenticated;
+grant execute on function public.brand_tally(text, jsonb, integer, integer, integer) to service_role;
+revoke all on function public.brand_calls_report() from public, anon, authenticated;
+grant execute on function public.brand_calls_report() to service_role;
+drop function public.sunsynk_tally(jsonb, integer, integer, integer);
+drop function public.sunsynk_calls_report();
+drop table private.email_system_state;

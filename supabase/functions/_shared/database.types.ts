@@ -558,6 +558,12 @@ export type Database = {
 "billing_v2":
 { Args: { "p_args"?: Json,"p_cmd": string }; Returns: Json
                            },
+"brand_calls_report":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"brand_tally":
+{ Args: { "p_brand": string,"p_plants": number,"p_rows": Json,"p_run_ms": number,"p_shard": number }; Returns: undefined
+                           },
 "calibration_plant":
 { Args: Record<PropertyKey, never>; Returns: number
                            },
@@ -850,12 +856,6 @@ export type Database = {
                            },
 "share_retry_due":
 { Args: Record<PropertyKey, never>; Returns: string
-                           },
-"sunsynk_calls_report":
-{ Args: Record<PropertyKey, never>; Returns: Json
-                           },
-"sunsynk_tally":
-{ Args: { "p_plants": number,"p_rows": Json,"p_run_ms": number,"p_shard": number }; Returns: undefined
                            },
 "today_tz":
 { Args: { "tz": string }; Returns: string

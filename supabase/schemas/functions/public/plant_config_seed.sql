@@ -21,7 +21,8 @@ AS $function$
          case when not paused then (now() at time zone tz)::date - 14 end,
          case when not paused then (now() at time zone tz)::date - 60 end
     from jsonb_array_elements(p_rows) r,
-         lateral (select plants.tz((r->>'plant_id')::bigint) as tz,
+         lateral (select case when plants.tz_valid(nullif(r->>'timezone', '')) then r->>'timezone'
+                              else plants.tz((r->>'plant_id')::bigint) end as tz,
                          coalesce((r->>'paused')::boolean, false) as paused) z
   on conflict (plant_id) do nothing
 $function$;

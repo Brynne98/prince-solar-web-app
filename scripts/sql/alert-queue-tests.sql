@@ -171,7 +171,7 @@ begin
   perform billing.set_chosen_plants(a, pg_temp.pids('{990064702}'), pg_temp.ago('2 days'));
   -- every login fails on SunSynk's side: only this test's logins are tried
   update plants.logins set last_try_at = pg_temp.ago('1 hour') where id <> pg_temp.login(a);
-  update plants.logins set last_try = 'sunsynk', last_try_at = now(), last_ok_at = pg_temp.ago('1 hour')
+  update plants.logins set last_try = 'vendor', last_try_at = now(), last_ok_at = pg_temp.ago('1 hour')
    where id = pg_temp.login(a);
   perform public.email_sweep();
   select * into r from public.email_queue where user_id = u and kind = 'sunsynk_down';

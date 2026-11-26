@@ -562,14 +562,14 @@ select pg_temp.eq('poll_commit_v2 refuses it too',
     now() + interval '91 seconds')->'refused', '[973000006]'::jsonb);
 
 -- ---------------------------------------------------------------------------
--- f. sunsynk_tally: the same key twice in one call is summed (0178 failed on it)
+-- f. brand_tally: the same key twice in one call is summed (0178 failed on it)
 -- ---------------------------------------------------------------------------
-select public.sunsynk_tally('[{"kind":"tt_dup","result":"ok","calls":2,"ms":10,"ms_max":7},
+select public.brand_tally('sunsynk', '[{"kind":"tt_dup","result":"ok","calls":2,"ms":10,"ms_max":7},
                               {"kind":"tt_dup","result":"ok","calls":3,"ms":5,"ms_max":4}]', 9, 100, 4);
 select pg_temp.eq('tally: same key twice summed',
-  (select (calls, ms_total, ms_max)::text from private.sunsynk_calls where kind = 'tt_dup'), '(5,15,7)');
-select pg_temp.eq('tally: poll_run row', (select (calls, ms_total, plants)::text from private.sunsynk_calls
-                                           where kind = 'poll_run' and result = 's9' and day = (now() at time zone 'Africa/Johannesburg')::date), '(1,100,4)');
+  (select (calls, ms_total, ms_max)::text from plants.brand_calls where kind = 'tt_dup'), '(5,15,7)');
+select pg_temp.eq('tally: poll_run row', (select (calls, ms_total, plants)::text from plants.brand_calls
+                                           where kind = 'poll_run' and result = 's9' and day = (now() at time zone plants.market_tz())::date), '(1,100,4)');
 
 -- ---------------------------------------------------------------------------
 -- g. 0269: cached inverters for many logins

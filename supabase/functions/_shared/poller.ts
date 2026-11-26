@@ -83,8 +83,8 @@ export function emailOutcome(r: AccountResult): { account: string; outcome: stri
   if (r.needsRelink || r.signInFailed) return null;
   return {
     account: r.account,
-    outcome: r.error ? (r.fault === "vendor" ? "sunsynk" : "ours")
-           : r.inverters > 0 && r.readings === 0 ? "sunsynk" : "ok",
+    outcome: r.error ? (r.fault === "vendor" ? "vendor" : "ours")
+           : r.inverters > 0 && r.readings === 0 ? "vendor" : "ok",
   };
 }
 

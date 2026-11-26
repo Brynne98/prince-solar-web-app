@@ -287,9 +287,9 @@ select pg_temp.gap('strings: an input broken before it ever made power is report
   'by design since SOLAR-188: an input that never made 200 W is never checked');
 
 -- ---- No readings (logger_stale, email_sweep) --------------------------------------------
--- The local database may be in a SunSynk outage left by an earlier run (email_system_state):
+-- The local database may be in an outage left by an earlier run (plants.brand_state):
 -- email_sweep sends no No readings during one, nor for 15 minutes after. Start from none.
-update private.email_system_state set sunsynk_down = false, up_at = null, clear_since = null where id = 1;
+update plants.brand_state set down = false, up_at = null, clear_since = null;
 -- The inverters SunSynk lists for each plant (an inverter no longer listed is left alone).
 insert into private.inverters (sn, plant_id, account_id)
   select p || x, pg_temp.pid(p), ('00000000-0000-0000-0000-0000000a' || p)::uuid from unnest(array[9001, 9006, 9007]) p, unnest(array['M', 'S']) x;
@@ -385,18 +385,18 @@ select pg_temp.eq('no readings: a plant quiet 31 minutes after the start sends o
 -- ---- SunSynk down -----------------------------------------------------------------------
 -- One login, failing for 20 minutes; the others not tried (as with two users, one down).
 select pg_temp.logins('ok', now() - interval '1 hour', now() - interval '1 hour', '%');  -- every local login, rolled back
-select pg_temp.logins('sunsynk', now(), now() - interval '20 minutes', 'w9001');
+select pg_temp.logins('vendor', now(), now() - interval '20 minutes', 'w9001');
 select public.email_sweep();
-select pg_temp.eq('SunSynk down: the only login failing for 20 minutes is reported', (select sunsynk_down from private.email_system_state), true);
+select pg_temp.eq('SunSynk down: the only login failing for 20 minutes is reported', (select down from plants.brand_state where brand = 'sunsynk'), true);
 -- Two logins tried, one failing: that login's trouble, not SunSynk's.
 select pg_temp.logins('ok', now(), now(), 'w9002');
 select public.email_sweep();
 select pg_temp.eq('SunSynk down: one of two logins failing is no back note before 15 minutes',
-  (select sunsynk_down and clear_since is not null from private.email_system_state), true);
+  (select down and clear_since is not null from plants.brand_state where brand = 'sunsynk'), true);
 -- 15 minutes not down: back. (now() is fixed in a transaction, so the hold is back-dated.)
-update private.email_system_state set clear_since = now() - interval '15 minutes';
+update plants.brand_state set clear_since = now() - interval '15 minutes' where brand = 'sunsynk';
 select public.email_sweep();
-select pg_temp.eq('SunSynk down: one of two logins failing is not SunSynk down', (select sunsynk_down from private.email_system_state), false);
+select pg_temp.eq('SunSynk down: one of two logins failing is not SunSynk down', (select down from plants.brand_state where brand = 'sunsynk'), false);
 select pg_temp.eq('SunSynk down: one SunSynk is back to the owner told it was down',
   (select count(*)::int from public.email_queue where kind = 'sunsynk_back' and user_id = '00000000-0000-0000-0000-000000009001'), 1);
 

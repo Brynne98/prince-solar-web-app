@@ -1,18 +1,18 @@
-CREATE OR REPLACE FUNCTION public.sunsynk_calls_report()
+CREATE OR REPLACE FUNCTION public.brand_calls_report()
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'private', 'pg_temp'
 AS $function$
 declare
-  d date := (now() at time zone 'Africa/Johannesburg')::date - 1;
+  d date := (now() at time zone plants.market_tz())::date - 1;
   out jsonb;
 begin
-  delete from private.sunsynk_calls where day < d - 400;
-  if not exists (select 1 from private.sunsynk_calls where day = d) then return null; end if;
+  delete from plants.brand_calls where day < d - 400;
+  if not exists (select 1 from plants.brand_calls where day = d) then return null; end if;
 
-  with c as (select * from private.sunsynk_calls where day = d and kind <> 'poll_run'),
-       r as (select * from private.sunsynk_calls where day = d and kind = 'poll_run'),
+  with c as (select * from plants.brand_calls where day = d and kind <> 'poll_run'),
+       r as (select * from plants.brand_calls where day = d and kind = 'poll_run'),
        tot as (
          select coalesce(sum(calls), 0) as calls,
                 coalesce(sum(calls) filter (where result in ('429', '403_throttle', '5xx', 'network', 'timeout')), 0) as failed,

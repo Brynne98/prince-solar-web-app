@@ -23,15 +23,17 @@ begin
   end loop;
   perform 1 from plants.login_plants lp join plants.logins l on l.id = lp.login
    where l.user_id = uid order by lp.login, lp.plant for update of lp;
+  -- the logins' secrets first: billing.delete_account's cascade takes the login rows with it
+  for acc in select id, refresh_secret_id from plants.logins where user_id = uid order by id loop
+    if acc.refresh_secret_id is not null
+       and not exists (select 1 from plants.logins o where o.refresh_secret_id = acc.refresh_secret_id and o.user_id <> uid) then
+      delete from vault.secrets s where s.id = acc.refresh_secret_id;
+    end if;
+  end loop;
   gone := case when exists (select 1 from billing.accounts where user_id = uid)
                then billing.delete_account((select id from billing.accounts where user_id = uid))
                else jsonb_build_object('unprotected', '[]'::jsonb) end;
   orphans := array(select (x)::bigint from jsonb_array_elements_text(gone->'unprotected') x);
-  for acc in select id, refresh_secret_id from plants.logins where user_id = uid order by id loop
-    perform pg_advisory_xact_lock(1, hashtext(acc.id::text));
-    if acc.refresh_secret_id is not null then delete from vault.secrets where id = acc.refresh_secret_id; end if;
-    update private.inverters set account_id = null where account_id = acc.id;
-  end loop;
   delete from plants.logins where user_id = uid;   -- its lists and events go with it; claims went with the account
   insert into public.email_queue (to_email, kind, key, priority)
   select email, 'account_deleted', 'account_deleted:' || uid, 1 from auth.users where id = uid and email is not null

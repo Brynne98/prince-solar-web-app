@@ -22,7 +22,7 @@ begin
   delete from billing.accounts where user_id in (select id from auth.users where email like '%@lt3.invalid');
   delete from auth.users where email like '%@lt3.invalid';
   delete from private.poll_runs;
-  delete from private.sunsynk_calls;
+  delete from plants.brand_calls;
   delete from private.gaps where plant_id >= 980000000 and plant_id < 990000000;
 end $$;
 

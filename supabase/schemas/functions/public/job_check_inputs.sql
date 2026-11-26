@@ -5,16 +5,13 @@ CREATE OR REPLACE FUNCTION public.job_check_inputs()
  SET search_path TO 'public', 'private', 'pg_temp'
 AS $function$
 declare
-  d    date := (now() at time zone 'Africa/Johannesburg')::date;
+  d    date := (now() at time zone plants.market_tz())::date;
   m    private.job_check_mark;
   c    bigint; f bigint;
   jobs jsonb := '[]';
   fn_calls_state jsonb := '[]';
 begin
-  select coalesce(sum(calls), 0),
-         coalesce(sum(calls) filter (where result in ('429', '403_throttle', '5xx', 'network', 'timeout')), 0)
-    into c, f
-    from private.sunsynk_calls where day = d and kind <> 'poll_run';
+  select x.calls, x.failed into c, f from plants.calls_on(d) x;
   select * into m from private.job_check_mark for update;
   insert into private.job_check_mark as t values (true, now(), d, c, f)
     on conflict (id) do update set at = excluded.at, day = excluded.day, calls = excluded.calls, failed = excluded.failed;
@@ -49,13 +46,12 @@ begin
   return jsonb_build_object(
     'now', now(),
     'shards', (select coalesce(jsonb_agg(jsonb_build_object('shard', s.shard,
-                 'last_at', (select max(last_at) from private.sunsynk_calls k
-                              where k.kind = 'poll_run' and k.result = 's' || s.shard and k.day >= d - 1))
+                 'last_at', plants.run_last_at(s.shard, d - 1))
                  order by s.shard), '[]')
                  from private.poll_shards() s),
     'jobs', jobs,
     'calls', fn_calls_state,
-    'sunsynk', jsonb_build_object(
+    'vendor', jsonb_build_object(
       'calls', case when m.day = d then c - m.calls else c end,
       'failed', case when m.day = d then f - m.failed else f end,
       'since', m.at),
