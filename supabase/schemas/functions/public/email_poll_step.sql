@@ -16,7 +16,7 @@ begin
   -- The rows stay locked to the end, so a link kick polling the same account in the
   -- same minute waits here and then finds them stepped: strings are counted once.
   insert into private.plant_alert_state (plant_id)
-  select c.plant_id from public.plant_config c where c.plant_id = any (coalesce(p_plants, '{}')) order by 1
+  select c.plant_id from plants.settings c where c.plant_id = any (coalesce(p_plants, '{}')) order by 1
   on conflict do nothing;
   select coalesce(array_agg(x.plant_id), '{}') into todo
     from (select s.plant_id from private.plant_alert_state s
@@ -33,7 +33,7 @@ begin
   insert into private.string_alert_state as st (plant_id, sn, no, last_alive, dead_n, made_power)
   with fresh as (
     select x.plant_id, x.sn
-      from public.readings x join public.plant_config c on c.plant_id = x.plant_id
+      from public.readings x join plants.settings c on c.plant_id = x.plant_id
      where x.plant_id = any (todo) and x.ts = p_ts and x.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
      group by x.plant_id, x.sn
     having max(extract(epoch from (x.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint) >= p_ts - 600
@@ -78,7 +78,7 @@ begin
     select d.plant_id, d.sn, d.no, d.since, w.first_no, w.nos,
            coalesce(nullif(m.alias, ''), 'Inverter ' || d.sn) as inverter
       from due d left join whole w on w.plant_id = d.plant_id and w.sn = d.sn
-      left join private.meta m on m.sn = d.sn
+      left join plants.meta_info m on m.sn = d.sn
      order by d.plant_id, m.ord nulls last, d.sn, d.no
   loop
     if r.first_no is null or r.first_no = r.no then
@@ -104,7 +104,7 @@ begin
            (select array_agg(g.no order by g.no) from private.string_alert_state g
              where g.plant_id = a.plant_id and g.sn = a.sn and g.group_no = a.no) as nos,
            coalesce(nullif(m.alias, ''), 'Inverter ' || a.sn) as inverter
-      from private.string_alert_state a left join private.meta m on m.sn = a.sn
+      from private.string_alert_state a left join plants.meta_info m on m.sn = a.sn
      where a.plant_id = any (todo) and a.dead and p_ts - a.clear_at >= 900 and a.last_alive = p_ts
        -- an email's holder waits until every string in it is back (0231)
        and not exists (select 1 from private.string_alert_state g
@@ -138,7 +138,7 @@ begin
     with d as (
       select x.plant_id, x.sn,
              max(extract(epoch from (x.device_time::timestamp at time zone plants.tz(c.plant_id)))::bigint) as dev
-        from public.readings x join public.plant_config c on c.plant_id = x.plant_id
+        from public.readings x join plants.settings c on c.plant_id = x.plant_id
        where x.plant_id = any (todo) and x.ts = p_ts and x.device_time ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
        group by x.plant_id, x.sn
     )
@@ -153,7 +153,7 @@ begin
       if r.stale and extract(epoch from now()) - r.dev <= 900 and r.dev - clr >= 900 then
         perform private.email_enqueue_plant(r.plant_id, 'logger_back', 'logger_back:' || substr(r.stale_key, 14),
           jsonb_build_object('since', split_part(r.stale_key, ':', 4)::bigint, 'at', clr,
-                             'inverter', coalesce((select nullif(m.alias, '') from private.meta m where m.sn = r.sn), 'Inverter ' || r.sn)),
+                             'inverter', coalesce((select nullif(m.alias, '') from plants.meta_info m where m.sn = r.sn), 'Inverter ' || r.sn)),
           r.stale_key);
         update private.inverter_alert_state set last_dev = r.dev, stale = false, stale_key = null, clear_at = null
          where plant_id = r.plant_id and sn = r.sn;
@@ -185,7 +185,7 @@ begin
                                - min(rd.batt_soc) filter (where rd.batt_soc between 1 and 100) end,
              'has_batt', coalesce(c.has_battery, true),
              'shared', coalesce(c.battery_banks = 'shared', false)) as f
-      from public.plant_config c
+      from plants.settings c
       join rd on rd.plant_id = c.plant_id
       left join newest n on n.plant_id = c.plant_id
      where c.plant_id = any (todo)

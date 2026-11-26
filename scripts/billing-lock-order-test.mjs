@@ -86,6 +86,10 @@ const poll = (login) => `select public.poll_commit_v2('{"${P2}": ${version}}'::j
   '[]', '[]', '[{"plant_id": ${P2}, "pv_w": 1}]', '[]', '[]', 'lock-access', 4102444800);`;
 const reconnect = `select public.link_login_live('${u1}', '${name}', 'lock-access', 4102444800, 'lock-refresh', '[{"id": ${V2}}]');`;
 const tx = (body) => `begin;\n${body}\nrollback;`;
+// the batch save (0268) of one login's minute, as the reader sends it
+const batch = (login) => `select public.poll_commit_batch(extract(epoch from date_trunc('minute', now()))::bigint, jsonb_build_array(jsonb_build_object(
+  'account', '${login}', 'versions', '{"${P2}": ${version}}'::jsonb, 'readings', '[]'::jsonb, 'strings', '[]'::jsonb,
+  'agg', '[{"plant_id": ${P2}, "pv_w": 1}]'::jsonb, 'meta', '[]'::jsonb, 'inverters', '[]'::jsonb, 'access', 'lock-access', 'expires', 4102444800)));`;
 
 // gate: what it holds for 2 s; first: starts at 0.3 s; second: at 0.8 s
 const races = [
@@ -117,12 +121,21 @@ const races = [
       do $$ begin if billing.run() ? 'busy' then raise exception 'billing.run is busy: nothing raced'; end if; end $$;`),
     second: tx(`select plants.list_seen('${share}', '[]'::jsonb, now(), 'sync');`),
     secondAt: 300 },
+  // SOLAR-681 R19: one lock order for every writer, logins then accounts then plants
+  { name: '5. batch save vs remove of the same login', repeat: 20,
+    gate: `select 1 from billing.accounts where id = '${a1}' for update;`,
+    first: tx(`select plants.remove_login('${a1}', '${l1}');`),
+    second: tx(batch(l1)) },
+  { name: '6. relink vs batch save vs a broken mark', repeat: 20,
+    gate: `select 1 from plants.plants where id = ${P2} for update;`,
+    first: tx(reconnect),
+    second: tx(`${batch(l1)} select public.account_mark('${l2}', 'needs_reconnect', 'lock test');`) },
 ];
 
 let failed = 0;
 const picked = races.filter((x) => !process.env.ONLY || x.name.startsWith(process.env.ONLY));
 try {
-  for (const r of picked) {
+  for (const r of picked.flatMap((x) => Array.from({ length: x.repeat ?? 1 }, () => x))) {
     if (r.before) must(sql(r.before), `${r.name}: before`);
     const g = run(tx(`${r.gate} select pg_sleep(2);`));
     await wait(300);
@@ -141,5 +154,6 @@ try {
 } finally {
   clean();
 }
-console.log(`${picked.length} lock-order races, ${failed} failed`);
+const runs = picked.reduce((n, x) => n + (x.repeat ?? 1), 0);
+console.log(`${runs} lock-order races, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -11,5 +11,5 @@ AS $function$
                  and coalesce(c.battery_reserve_pct, 20) = 20 then 'reserve' end,
            case when not coalesce(c.system_kwp > 0, false) then 'panels' end], null)
     from (select 1) one
-    left join public.plant_config c on c.plant_id = p_plant
+    left join plants.settings c on c.plant_id = p_plant
 $function$;

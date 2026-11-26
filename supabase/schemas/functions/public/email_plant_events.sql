@@ -7,9 +7,9 @@ AS $function$
   with
   pz as (select public.plant_tz(p_plant) as tz),
   now_s as (select extract(epoch from now())::bigint as t),
-  cfg as (select coalesce((select has_grid from public.plant_config where plant_id = p_plant), true) as has_grid,
-                 coalesce((select has_battery from public.plant_config where plant_id = p_plant), true) as has_battery,
-                 (select battery_banks from public.plant_config where plant_id = p_plant) as banks),
+  cfg as (select coalesce((select has_grid from plants.settings where plant_id = p_plant), true) as has_grid,
+                 coalesce((select has_battery from plants.settings where plant_id = p_plant), true) as has_battery,
+                 (select battery_banks from plants.settings where plant_id = p_plant) as banks),
   loc as (select public.today_tz((select tz from pz)) as day,
                  extract(hour from timezone((select tz from pz), now()))::int as hour),
   day_lo as (select public.day_start_epoch_tz((select day from loc), (select tz from pz)) as lo),
@@ -57,7 +57,7 @@ AS $function$
   ),
   dead1 as (
     select d.sn, d.no, coalesce(nullif(m.alias, ''), 'Inverter ' || d.sn) as inverter
-      from dead_held d left join private.meta m on m.sn = d.sn
+      from dead_held d left join plants.meta_info m on m.sn = d.sn
      order by m.ord nulls last, d.sn, d.no limit 1
   ),
 
@@ -90,7 +90,7 @@ AS $function$
          jsonb_build_object('banks', (
            select jsonb_agg(jsonb_build_object('name', coalesce(nullif(m.alias, ''), 'Inverter ' || r.sn), 'chargePct', round(r.batt_soc)::int)
                             order by m.ord nulls last, r.sn)
-             from public.readings r left join private.meta m on m.sn = r.sn
+             from public.readings r left join plants.meta_info m on m.sn = r.sn
             where r.plant_id = p_plant and r.ts = drift.ts and r.batt_soc between 1 and 100))
     from drift, cfg where drift.drifting and cfg.has_battery and cfg.banks is distinct from 'shared'
   union all

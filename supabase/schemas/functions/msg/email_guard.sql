@@ -29,11 +29,11 @@ AS $function$
                 and not private.plant_live(q.user_id, q.plant_id) then 'plant not live'
            when q.kind = 'welcome' and exists (select 1 from plants.user_plants pu where pu.user_id = q.user_id)
              then 'plant linked'
-           when q.kind = 'need_a_hand' and exists (select 1 from plants.logins a where a.user_id = q.user_id)
+           when q.kind = 'need_a_hand' and exists (select 1 from plants.login_info a where a.user_id = q.user_id)
                 and not private.pick_waiting(q.user_id)
              then 'login added'
            when q.kind = 'add_plant_reminder'
-                and (exists (select 1 from plants.logins a where a.user_id = q.user_id)
+                and (exists (select 1 from plants.login_info a where a.user_id = q.user_id)
                      or exists (select 1 from plants.user_plants pu where pu.user_id = q.user_id))
              then 'login or plant added'
            when coalesce(q.to_email, (select u.email::text from auth.users u where u.id = q.user_id), p_o.to_email) is null

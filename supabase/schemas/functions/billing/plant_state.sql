@@ -14,7 +14,7 @@ declare
   seat_count int := 0;
   delete_at timestamptz;
 begin
-  if not exists (select 1 from plants.plants where id = p_plant) then return null; end if;
+  if not exists (select 1 from plants.plant_info where id = p_plant) then return null; end if;
   purged := exists (select 1 from billing.plant_facts f where f.plant = p_plant and f.history_purged_at is not null);
   for se in select s.account from billing.seats s
              where s.plant = p_plant and s.chosen_at <= p_at and (s.closed_at is null or s.closed_at > p_at)

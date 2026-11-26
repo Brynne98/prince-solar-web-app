@@ -103,6 +103,24 @@ begin
     public.soc_at(p, t0 + 3600 + 59 * 60) = round(40 + 59 * 0.33) and public.soc_at(p, t0 + 3600 + 59 * 60 + 601) is null);
 end $$;
 
+-- R20: a save checks the route on the database's clock, not the time the caller sends
+do $$
+declare u uuid := gen_random_uuid(); a uuid; l uuid; p bigint; r jsonb; v bigint;
+begin
+  insert into auth.users (id, email, created_at, email_confirmed_at) values (u, 'r20@x.test', now() - interval '2 days', now() - interval '2 days');
+  insert into billing.accounts (user_id, market, created_at) values (u, 'ZA', now() - interval '2 days') returning id into a;
+  l := plants.link_login(a, 'sunsynk', 'r20@x.test', '[{"vendor_id":"r20-1","name":"R20"}]', now() - interval '2 days');
+  p := plants.plant_for('sunsynk', 'r20-1');
+  perform billing.set_chosen_plants(a, array[p], now() - interval '2 days');
+  v := (select version from plants.plants where id = p);
+  update billing.seats set closed_at = now() - interval '1 second', close_reason = 'switched' where plant = p and closed_at is null;
+  -- the read started a minute ago, when the seat was open; it arrives now, after it closed
+  r := public.poll_commit_v2(jsonb_build_object(p::text, v), l, (extract(epoch from now())::bigint / 60) * 60 - 60,
+         '[]', '[]', jsonb_build_array(jsonb_build_object('plant_id', p, 'pv_w', 5)), '[]', '[]', null, null, now() - interval '1 minute');
+  perform pg_temp.ok('R20 a save after the route ended, with an old time, is refused', r->'refused' = jsonb_build_array(p), r::text);
+  perform pg_temp.ok('R20 ... and writes nothing', not exists (select 1 from public.agg_minute where plant_id = p));
+end $$;
+
 -- ---------------------------------------------------------------------------
 do $$
 declare r record; bad int := 0;

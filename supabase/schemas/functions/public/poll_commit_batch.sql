@@ -37,7 +37,7 @@ begin
   foreach x in array accts loop
     perform pg_advisory_xact_lock(1, hashtext(x::text));
   end loop;
-  perform 1 from plants.logins sa where sa.id = any (accts) order by sa.id for update;
+  perform 1 from plants.login_info sa where sa.id = any (accts) order by sa.id for update;
   -- the newer token wins (0250): the last object with the latest expiry, when not older than the stored one
   perform plants.tokens_saved((select coalesce(jsonb_agg(jsonb_build_object('account', t.account, 'access', t.access, 'expires', t.expires)), '[]'::jsonb)
                                  from (select distinct on (b.account) b.account, b.access, b.expires from _bin b
@@ -47,13 +47,13 @@ begin
   -- since step 8 updates it (two batches holding it for share would deadlock there). Then
   -- the version each read started on (looked up under the plant's own id, as write_allowed
   -- does) and read_now.
-  for pl in select bp.id, (select f.history_purged_at from billing.plant_facts f where f.plant = bp.id) is not null as purged from plants.plants bp
+  for pl in select bp.id, (select f.history_purged_at from billing.plant_facts f where f.plant = bp.id) is not null as purged from plants.plant_info bp
             where bp.id in (select k::bigint from _bin b cross join jsonb_object_keys(b.versions) k)
             order by bp.id loop
     if pl.purged then
-      perform 1 from plants.plants where id = pl.id for no key update;
+      perform 1 from plants.plant_info where id = pl.id for no key update;
     else
-      perform 1 from plants.plants where id = pl.id for share;
+      perform 1 from plants.plant_info where id = pl.id for share;
     end if;
   end loop;
   create temp table _bok on commit drop as
@@ -61,7 +61,7 @@ begin
                  from _bin b cross join jsonb_object_keys(b.versions) k)
     select v.i, v.plant from v
      where v.plant in (select pr from billing.plants_read_now(array(select distinct plant from v), greatest(p_at, clock_timestamp())) pr)   -- R20: the database's clock, after the locks
-       and exists (select 1 from plants.plants bp where bp.id = v.plant and bp.version = v.version::bigint);
+       and exists (select 1 from plants.plant_info bp where bp.id = v.plant and bp.version = v.version::bigint);
   -- one object sending an inverter twice fails in poll_commit_v2 (on conflict cannot update a
   -- row twice); here too, so the caller's login-by-login save fails that login alone
   if exists (select 1 from _bin b cross join jsonb_array_elements(b.inverters) e
@@ -94,14 +94,14 @@ begin
       from _bin b cross join jsonb_array_elements(b.strings) with ordinality e (v, n)
      where (e.v->>'plant_id')::bigint in (select o.plant from _bok o where o.i = b.i);
   delete from _bst where (rw).plant_id is null;
-  perform 1 from private.meta m
+  perform 1 from plants.meta_info m
    where m.sn in (select (t.rw).sn from _bst t
                   union select e->>'sn' from _bin b cross join jsonb_array_elements(b.meta) e)
    order by m.sn for no key update;
   -- poll_commit_v2 updates an inverter's string records only once its meta row exists: from the
   -- batch's start (avail 0), or from the object after the first one that sent its meta
   create temp table _bme on commit drop as
-    select m.sn, 0 as avail from private.meta m where m.sn in (select (t.rw).sn from _bst t);
+    select m.sn, 0 as avail from plants.meta_info m where m.sn in (select (t.rw).sn from _bst t);
   insert into _bme
   select e->>'sn', min(b.i) + 1 from _bin b cross join jsonb_array_elements(b.meta) e
    where (e->>'plant_id')::bigint in (select o.plant from _bok o where o.i = b.i)
@@ -133,7 +133,7 @@ begin
   -- used before the batch, or live in this or an earlier object once the meta row existed
   delete from _bst t
    where not private.string_live((t.rw).volt_v, (t.rw).current_a, (t.rw).power_w, (t.rw).today_kwh)
-     and not exists (select 1 from private.meta m join _bme x on x.sn = m.sn
+     and not exists (select 1 from plants.meta_info m join _bme x on x.sn = m.sn
                       where m.sn = (t.rw).sn and x.avail <= t.i
                         and ((t.rw).no = any (m.used_strings)
                              or exists (select 1 from _bst t2

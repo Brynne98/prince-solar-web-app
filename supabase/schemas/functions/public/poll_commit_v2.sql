@@ -13,13 +13,13 @@ begin
     return public.poll_commit(p_account, p_ts, p_readings, p_strings, p_agg, p_meta, p_inverters, p_access, p_expires);
   end if;
   perform pg_advisory_xact_lock(1, hashtext(p_account::text));
-  for pl in select bp.id, (select f.history_purged_at from billing.plant_facts f where f.plant = bp.id) is not null as purged from plants.plants bp
+  for pl in select bp.id, (select f.history_purged_at from billing.plant_facts f where f.plant = bp.id) is not null as purged from plants.plant_info bp
              where bp.id in (select k::bigint from jsonb_object_keys(coalesce(p_versions, '{}')) k)
              order by bp.id loop
     if pl.purged then
-      perform 1 from plants.plants where id = pl.id for no key update;
+      perform 1 from plants.plant_info where id = pl.id for no key update;
     else
-      perform 1 from plants.plants where id = pl.id for share;
+      perform 1 from plants.plant_info where id = pl.id for share;
     end if;
   end loop;
   ok := billing.write_allowed(p_versions, greatest(p_at, clock_timestamp()));   -- R20: the database's clock, after the locks

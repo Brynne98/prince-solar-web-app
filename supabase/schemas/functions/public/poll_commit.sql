@@ -42,7 +42,7 @@ begin
    where m.sn = c.sn and m.string_slots is distinct from c.n;
   delete from _st t
    where not private.string_live(t.volt_v, t.current_a, t.power_w, t.today_kwh)
-     and not exists (select 1 from private.meta m where m.sn = t.sn and t.no = any(m.used_strings));
+     and not exists (select 1 from plants.meta_info m where m.sn = t.sn and t.no = any(m.used_strings));
   delete from public.strings s using _st where s.ts = p_ts and s.ts = _st.ts and s.sn = _st.sn and s.no = _st.no;
   insert into public.strings select * from _st on conflict do nothing;
   select count(*) into n_strings from _st;

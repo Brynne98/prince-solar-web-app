@@ -28,7 +28,7 @@ AS $function$
      where h.plant_id = p_plant
        and h.ts >= p_from and h.ts < p_to
        and h.grid_fac_hz is not null
-       and coalesce((select c.has_grid from public.plant_config c where c.plant_id = p_plant), true)
+       and coalesce((select c.has_grid from plants.settings c where c.plant_id = p_plant), true)
      group by 1
   )
   select o.ts, o.present from ours o

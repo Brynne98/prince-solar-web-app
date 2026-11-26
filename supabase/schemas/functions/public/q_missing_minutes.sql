@@ -7,7 +7,7 @@ AS $function$
   with b as (
     select (select min(a.ts) from public.agg_minute a where a.plant_id = p_plant) as first_ts,
            (select public.day_start_epoch_tz(c.backfill_next, public.plant_tz(p_plant))
-              from public.plant_config c where c.plant_id = p_plant and c.backfill_next is not null) as bf_ts,
+              from plants.settings c where c.plant_id = p_plant and c.backfill_next is not null) as bf_ts,
            public.day_start_epoch_tz(p_day, public.plant_tz(p_plant))            as day_start,
            extract(epoch from now())::bigint                                    as now_ts
   ),

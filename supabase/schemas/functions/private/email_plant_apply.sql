@@ -95,7 +95,7 @@ begin
         s.drift_clear_at := null;
         s.drift_banks := (select jsonb_agg(jsonb_build_object('name', coalesce(nullif(m.alias, ''), 'Inverter ' || r.sn),
                                                               'chargePct', round(r.batt_soc)::int) order by m.ord nulls last, r.sn)
-                            from public.readings r left join private.meta m on m.sn = r.sn
+                            from public.readings r left join plants.meta_info m on m.sn = r.sn
                            where r.plant_id = p_plant and r.ts = p_ts and r.batt_soc between 1 and 100);
         if not s.drift and p_ts - s.drift_run_start >= 3600 then
           s.drift := true; s.drift_since := s.drift_run_start; s.drift_n := 1; s.drift_sent_at := now();
@@ -111,7 +111,7 @@ begin
               jsonb_build_object('since', s.drift_since, 'at', s.drift_clear_at,
                 'banks', (select jsonb_agg(jsonb_build_object('name', coalesce(nullif(m.alias, ''), 'Inverter ' || r.sn),
                                                               'chargePct', round(r.batt_soc)::int) order by m.ord nulls last, r.sn)
-                            from public.readings r left join private.meta m on m.sn = r.sn
+                            from public.readings r left join plants.meta_info m on m.sn = r.sn
                            where r.plant_id = p_plant and r.ts = p_ts and r.batt_soc between 1 and 100)),
               'bank_drift:' || p_plant || ':' || s.drift_since || ':1');
             s.drift := false; s.drift_clear_at := null;

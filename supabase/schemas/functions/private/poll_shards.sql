@@ -6,7 +6,7 @@ CREATE OR REPLACE FUNCTION private.poll_shards(p_per_shard integer DEFAULT 10)
 AS $function$
   with n as (
     select greatest(1, ceil(count(*)::numeric / greatest(p_per_shard, 1)))::int as shards
-      from plants.logins
+      from plants.login_info
      where status = 'ok'
   )
   -- 0, 2 or 4 s past the minute (SOLAR-681 R21): spread enough for the start, and every

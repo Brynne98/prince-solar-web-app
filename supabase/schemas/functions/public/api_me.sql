@@ -13,6 +13,6 @@ AS $function$
                'config', (to_jsonb(c) - 'plant_id' - 'updated_by') || jsonb_build_object('timezone', plants.tz(pu.plant_id)))
              order by pu.linked_at, pu.plant_id)
         from plants.user_plants pu
-        left join public.plant_config c on c.plant_id = pu.plant_id
+        left join plants.settings c on c.plant_id = pu.plant_id
        where pu.user_id = auth.uid() and pu.plant_id in (select public.my_plant_ids())), '[]'::jsonb))
 $function$;

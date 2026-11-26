@@ -24,17 +24,17 @@ begin
   -- the smallest plan that fits every linked plant; null when none does
   select p.code into fit from billing.plans p where p.places >= st.linked order by p.places limit 1;
 
-  login_count := (select count(*) from plants.logins l where l.account = p_account);
+  login_count := (select count(*) from plants.login_info l where l.account = p_account);
 
   select coalesce(jsonb_agg(jsonb_build_object(
            'plant', x.plant,
-           'name', coalesce((select lp.plant_name from plants.login_plants lp join plants.logins l on l.id = lp.login
+           'name', coalesce((select lp.plant_name from plants.list_info lp join plants.login_info l on l.id = lp.login
                               where l.account = p_account and lp.plant = x.plant and lp.plant_name is not null limit 1),
-                            (select c.plant_name from plants.claims c where c.account = p_account and c.plant = x.plant),
+                            (select c.plant_name from plants.claim_info c where c.account = p_account and c.plant = x.plant),
                             -- a share removed (no claim left): the name it had
                             (select pu.plant_name from plants.user_plants pu where pu.user_id = (select ac.user_id from billing.accounts ac where ac.id = p_account)
                                 and pu.plant_id = x.plant and pu.plant_name is not null limit 1),
-                            (select lp.plant_name from plants.login_plants lp join plants.logins s on s.id = lp.login and s.kind = 'share'
+                            (select lp.plant_name from plants.list_info lp join plants.login_info s on s.id = lp.login and s.kind = 'share'
                               where lp.plant = x.plant and lp.plant_name is not null limit 1)),
            'chosen', x.chosen,
            'locked', not x.chosen,

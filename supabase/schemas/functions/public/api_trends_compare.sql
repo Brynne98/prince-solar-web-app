@@ -91,7 +91,7 @@ AS $function$
   -- before the moment, from readings, else the 5-minute history (counters as at the
   -- bucket's end). One index probe per inverter per pair.
   inv as (
-    select i.sn from private.inverters i
+    select i.sn from plants.inverter_info i
      where i.plant_id = (select id from pl)
        and exists (select 1 from public.readings r
                     where r.sn = i.sn and r.plant_id = i.plant_id

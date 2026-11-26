@@ -35,7 +35,7 @@ AS $function$
   ),
   sns as (
     select r.sn, coalesce(nullif(m.alias, ''), r.sn) as alias
-      from (select distinct sn from b) r left join private.meta m on m.sn = r.sn
+      from (select distinct sn from b) r left join plants.meta_info m on m.sn = r.sn
   )
   select jsonb_build_object(
     'date', (select day from d)::text,

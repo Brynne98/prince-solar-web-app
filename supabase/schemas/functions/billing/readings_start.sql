@@ -5,7 +5,7 @@ CREATE OR REPLACE FUNCTION billing.readings_start(p_account uuid, p_plants bigin
  SET search_path TO ''
 AS $function$
   insert into private.plant_alert_state (plant_id, started_at)
-  select c.plant_id, extract(epoch from p_at)::bigint from public.plant_config c
+  select c.plant_id, extract(epoch from p_at)::bigint from plants.settings c
    where c.plant_id = any (p_plants)
      and not exists (select 1 from billing.seats s where s.plant = c.plant_id and s.account <> p_account
                         and s.closed_at is null and billing.reads_plant(s.account, c.plant_id, p_at))

@@ -47,15 +47,15 @@ begin
                                              where se.account = p_account and se.plant = (p->>'plant')::bigint
                                                and se.closed_at is null), false),
            -- the logins that list it now, and the ones it went from (removing the last route deletes it)
-           'logins', coalesce((select jsonb_agg(l.id order by l.linked_at) from plants.logins l
-                                 join plants.login_plants lp on lp.login = l.id
+           'logins', coalesce((select jsonb_agg(l.id order by l.linked_at) from plants.login_info l
+                                 join plants.list_info lp on lp.login = l.id
                                 where l.account = p_account and lp.plant = (p->>'plant')::bigint and lp.gone_at is null), '[]'::jsonb),
-           'gone_logins', coalesce((select jsonb_agg(l.id order by l.linked_at) from plants.logins l
-                                      join plants.login_plants lp on lp.login = l.id
+           'gone_logins', coalesce((select jsonb_agg(l.id order by l.linked_at) from plants.login_info l
+                                      join plants.list_info lp on lp.login = l.id
                                      where l.account = p_account and lp.plant = (p->>'plant')::bigint and lp.gone_at is not null), '[]'::jsonb),
-           'claimed', exists (select 1 from plants.claims c where c.account = p_account and c.plant = (p->>'plant')::bigint),
+           'claimed', exists (select 1 from plants.claim_info c where c.account = p_account and c.plant = (p->>'plant')::bigint),
            -- it came through the share: removing the shared group lets it go (api_link_remove)
-           'shared', exists (select 1 from plants.user_plants pu join plants.logins sa on sa.id = pu.account_id
+           'shared', exists (select 1 from plants.user_plants pu join plants.login_info sa on sa.id = pu.account_id
                               where sa.kind = 'share' and pu.plant_id = (p->>'plant')::bigint
                                 and pu.user_id = a.user_id))
          order by (p->>'plant')::bigint), '[]'::jsonb)
@@ -97,7 +97,7 @@ begin
     'prices', prices,
     'logins', coalesce((select jsonb_agg(jsonb_build_object('id', l.id, 'brand', l.brand, 'username', l.username,
                           'status', l.status) order by l.linked_at)
-                          from plants.logins l where l.account = p_account), '[]'::jsonb),
+                          from plants.login_info l where l.account = p_account), '[]'::jsonb),
     'bills', coalesce((select jsonb_agg(b order by b->>'paid_at' desc) from (
                 select jsonb_build_object('id', i.id, 'kind', i.kind, 'plan', i.plan,
                          'plan_name', i.plan_name, 'interval', i.interval,

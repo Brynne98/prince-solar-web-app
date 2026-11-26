@@ -30,7 +30,7 @@ begin
     v_from := least(v_floor, v_lo);
     select count(*), count(*) filter (where x.ts = v_ts and x.status::text in ('1', 'online', 'true'))
       into v_total, v_on
-      from private.inverters i
+      from plants.inverter_info i
       cross join lateral (select rd.ts, rd.status from public.readings rd
                            where rd.sn = i.sn and rd.plant_id = p.plant_id and rd.ts >= v_from and rd.ts <= v_ts
                            order by rd.ts desc limit 1) x
@@ -57,7 +57,7 @@ begin
                    pc.backfill_next, pc.backfill_until, pc.temp_next,
                    public.today_tz(plants.tz(pc.plant_id)) as today,
                    plants.tz(pc.plant_id) as tz
-              from public.plant_config pc where pc.plant_id = p.plant_id) s;
+              from plants.settings pc where pc.plant_id = p.plant_id) s;
 
     v_out := v_out || jsonb_build_array(jsonb_build_object(
       'id', p.plant_id, 'lastTs', v_ts, 'inverters', v_total, 'online', v_on, 'sync', v_sync));

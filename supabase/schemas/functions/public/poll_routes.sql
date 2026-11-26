@@ -9,21 +9,21 @@ AS $function$
       from billing.reading_routes_set(p_at) r
      order by r.plant, r.via_share, r.since, r.lane
   ), pk as (
-    select p.plant, p.lane, p.ends_at, bp.version from pick p join plants.plants bp on bp.id = p.plant
+    select p.plant, p.lane, p.ends_at, bp.version from pick p join plants.plant_info bp on bp.id = p.plant
   ), lane_inv as (
     select pk.lane, count(i.sn) as n
-      from pk left join private.inverters i on i.plant_id = pk.plant
+      from pk left join plants.inverter_info i on i.plant_id = pk.plant
      group by pk.lane
   ), sec as (
     select pk.*, case when sa.kind = 'share' or li.n > 10 then private.read_second(pk.plant::text)
                       else private.read_second(pk.lane::text) end as s
       from pk
-      join plants.logins sa on sa.id = pk.lane
+      join plants.login_info sa on sa.id = pk.lane
       join lane_inv li on li.lane = pk.lane
   )
   select sec.plant, sec.lane, sec.version, plants.tz(sec.plant), c.batt_positive_means,
          c.has_grid, sec.ends_at, sec.s
-    from sec left join public.plant_config c on c.plant_id = sec.plant
+    from sec left join plants.settings c on c.plant_id = sec.plant
    where sec.s = any (p_seconds)
    order by sec.plant
 $function$;

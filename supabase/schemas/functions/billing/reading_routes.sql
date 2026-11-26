@@ -14,12 +14,12 @@ AS $function$
   )
   select se.plant, se.account, l.id, false, l.linked_at
     from seat se join live using (account)
-    join plants.logins l on l.account = se.account and l.status = 'ok'
-    join plants.login_plants lp on lp.login = l.id and lp.plant = se.plant and lp.gone_at is null
-    join plants.logins sa on sa.id = l.id and sa.status = 'ok'
+    join plants.login_info l on l.account = se.account and l.status = 'ok'
+    join plants.list_info lp on lp.login = l.id and lp.plant = se.plant and lp.gone_at is null
+    join plants.login_info sa on sa.id = l.id and sa.status = 'ok'
   union all
   select se.plant, se.account, sa.id, true, c.claimed_at
     from seat se join live using (account)
-    join plants.claims c on c.plant = se.plant and c.account = se.account
-    join plants.logins sa on sa.kind = 'share' and sa.status = 'ok' and sa.brand = plants.brand_of(c.plant)
+    join plants.claim_info c on c.plant = se.plant and c.account = se.account
+    join plants.login_info sa on sa.kind = 'share' and sa.status = 'ok' and sa.brand = plants.brand_of(c.plant)
 $function$;

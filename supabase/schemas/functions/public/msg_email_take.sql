@@ -80,7 +80,7 @@ begin
          q.kind, q.key,
          -- email_claim's per-kind data (0247): need a hand with a login names choosing plants;
          -- a report has no free-week wording since billing went live
-         case when q.kind = 'need_a_hand' and exists (select 1 from plants.logins a where a.user_id = q.user_id)
+         case when q.kind = 'need_a_hand' and exists (select 1 from plants.login_info a where a.user_id = q.user_id)
                 then coalesce(q.data, '{}'::jsonb) || '{"choose": true}'::jsonb
               when q.kind like 'report\_%' then q.data - 'freeWeekEnds'
               else q.data end,

@@ -11,7 +11,7 @@ AS $function$
   -- comes from pl and the planner can't use the index to stop early (SOLAR-35)
   latest_ts as (select (select ts from public.readings where plant_id = (select id from pl) and batt_soc is not null order by ts desc limit 1) as ts),
   -- one shared pack counts as one bank however many inverters read it (0042)
-  nbanks as (select case when (select battery_banks from public.plant_config where plant_id = (select id from pl)) = 'shared' then least(1, count(distinct r.sn)) else count(distinct r.sn) end as n
+  nbanks as (select case when (select battery_banks from plants.settings where plant_id = (select id from pl)) = 'shared' then least(1, count(distinct r.sn)) else count(distinct r.sn) end as n
                from public.readings r, latest_ts where r.plant_id = (select id from pl) and r.ts = latest_ts.ts and r.batt_soc between 1 and 100),
   bal as (
     select r.ts, max(r.batt_soc) - min(r.batt_soc) as socspread, max(r.batt_voltage_v) - min(r.batt_voltage_v) as vspread

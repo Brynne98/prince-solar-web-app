@@ -16,17 +16,17 @@ begin
   -- the other way round deadlocks (scripts/billing-lock-test.mjs)
   perform pg_advisory_xact_lock_shared(3, 0);
   if uid is null then raise exception 'not signed in' using errcode = '42501'; end if;
-  for acc in select x.id from (select id from plants.logins where user_id = uid
+  for acc in select x.id from (select id from plants.login_info where user_id = uid
                                union select account_id from plants.user_plants where user_id = uid and account_id is not null) x
               order by x.id loop
     perform pg_advisory_xact_lock(1, hashtext(acc.id::text));
   end loop;
-  perform 1 from plants.login_plants lp join plants.logins l on l.id = lp.login
+  perform 1 from plants.list_info lp join plants.login_info l on l.id = lp.login
    where l.user_id = uid order by lp.login, lp.plant for update of lp;
   -- the logins' secrets first: billing.delete_account's cascade takes the login rows with it
-  for acc in select id, refresh_secret_id from plants.logins where user_id = uid order by id loop
+  for acc in select id, refresh_secret_id from plants.login_info where user_id = uid order by id loop
     if acc.refresh_secret_id is not null
-       and not exists (select 1 from plants.logins o where o.refresh_secret_id = acc.refresh_secret_id and o.user_id <> uid) then
+       and not exists (select 1 from plants.login_info o where o.refresh_secret_id = acc.refresh_secret_id and o.user_id <> uid) then
       delete from vault.secrets s where s.id = acc.refresh_secret_id;
     end if;
   end loop;

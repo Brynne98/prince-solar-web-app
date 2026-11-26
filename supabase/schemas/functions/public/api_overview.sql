@@ -34,7 +34,7 @@ begin
   -- variables, not a join to a CTE, so each probe opens only the window's partitions
   -- (sn_ts index).
   r as (
-    select x.*, x.ts >= v_lo as is_today from private.inverters i
+    select x.*, x.ts >= v_lo as is_today from plants.inverter_info i
       cross join lateral (select rd.* from public.readings rd
                            where rd.sn = i.sn and rd.plant_id = v_plant and rd.ts >= v_from and rd.ts <= v_ts
                            order by rd.ts desc limit 1) x
@@ -89,7 +89,7 @@ begin
            case when r.is_today then r.grid_export_today_kwh else 0 end as grid_export_today_kwh,
            r.grid_volt_v, r.grid_volt_l2_v, r.grid_volt_l3_v,
            coalesce(m.ord, 9999) as ord
-      from r left join private.meta m on m.sn = r.sn left join st on st.sn = r.sn
+      from r left join plants.meta_info m on m.sn = r.sn left join st on st.sn = r.sn
   ),
   -- live figures from the inverters in the newest minute only; day counters from every row
   totals as (
@@ -145,7 +145,7 @@ begin
                    pc.backfill_next, pc.backfill_until, pc.temp_next,
                    public.today_tz(plants.tz(v_plant)) as today,
                    plants.tz(v_plant) as tz
-              from public.plant_config pc, cfg c where pc.plant_id = v_plant) s
+              from plants.settings pc, cfg c where pc.plant_id = v_plant) s
   ),
   plant as (select pu.plant_id as id, pu.plant_name as name from plants.user_plants pu
              where pu.plant_id = v_plant and pu.user_id = auth.uid() limit 1)

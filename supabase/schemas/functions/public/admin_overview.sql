@@ -26,7 +26,7 @@ begin
                'name', pu.plant_name,
                'email', u.email,
                'linkedAt', pu.linked_at,
-               'inverters', (select count(*) from private.meta m where m.plant_id = pu.plant_id),
+               'inverters', (select count(*) from plants.meta_info m where m.plant_id = pu.plant_id),
                'lastTs', (select a.ts from public.agg_minute a
                            where a.plant_id = pu.plant_id order by a.ts desc limit 1)
              ) order by u.email, pu.plant_id), '[]'::jsonb)
@@ -41,7 +41,7 @@ begin
                'lastOkAt', s.last_ok_at,
                'lastError', left(s.last_error, 300)
              ) order by u.email, s.linked_at), '[]'::jsonb)
-        from plants.logins s
+        from plants.login_info s
         join auth.users u on u.id = s.user_id),
     'errors', (
       select coalesce(jsonb_agg(jsonb_build_object(

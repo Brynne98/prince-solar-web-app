@@ -9,7 +9,7 @@ begin
   -- After a wipe that is running now, never under it.
   perform pg_advisory_xact_lock(p_plant);
   delete from private.plant_wipe where plant_id = p_plant;
-  if not exists (select 1 from public.plant_config where plant_id = p_plant) then
+  if not exists (select 1 from plants.settings where plant_id = p_plant) then
     -- Linked stopped, so never seeded (sunsynk.ts syncPlants). South Africa only;
     -- the seed sets the 60-day bookmarks.
     perform public.plant_config_seed(jsonb_build_array(jsonb_build_object('plant_id', p_plant)));

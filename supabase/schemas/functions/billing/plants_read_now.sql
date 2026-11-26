@@ -13,7 +13,7 @@ AS $function$
   )
   select distinct se.plant
     from se join st on st.account = se.account and st.live and not st.must_choose
-   where exists (select 1 from plants.logins l join plants.login_plants lp on lp.login = l.id
+   where exists (select 1 from plants.login_info l join plants.list_info lp on lp.login = l.id
                   where l.account = se.account and lp.plant = se.plant and lp.gone_at is null and l.status = 'ok')
-      or exists (select 1 from plants.claims c where c.account = se.account and c.plant = se.plant)
+      or exists (select 1 from plants.claim_info c where c.account = se.account and c.plant = se.plant)
 $function$;

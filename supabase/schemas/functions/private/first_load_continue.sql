@@ -19,7 +19,7 @@ begin
     )
     select plant_id from taken
     union
-    select pc.plant_id from public.plant_config pc
+    select pc.plant_id from plants.settings pc
      where pc.backfill_next is not null
         or (pc.temp_next is not null and pc.temp_next < public.today_tz(plants.tz(pc.plant_id)) - 1)
   loop
