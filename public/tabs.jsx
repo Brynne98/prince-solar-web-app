@@ -1180,15 +1180,11 @@ function SolarTab({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const ps = window.plantStatus(snap, Date.now());
   const silent = ps.status === 'offline' || !!snap.loginCut; // a dead login: dashes now (SOLAR-386)
   const noReadings = dayProblem(view, day, points, silent) || (day && gapDay ? 'Readings are missing for most of this day.' : null);
-  const peakOf = (pts) => {
-    let pk = null;
-    (pts || []).forEach(p => { if (p.pv != null && (!pk || p.pv > pk.pv)) pk = p; });
-    return pk && pk.pv > 20 ? pk : null;
-  };
-  const peak = peakOf(points);
+  const peakOf = (d) => { const pk = window.dayPeak(d, 'pv'); return pk && pk.pv > 20 ? pk : null; };
+  const peak = peakOf(day);
   // the Today tile always shows today's peak, whichever day the chart is on, so the tiles
   // keep their height and a scroll to the chart lands where it aimed
-  const todayPeak = peakOf(window.dayFor(today, plantToday) && !today.approx ? today.points : null);
+  const todayPeak = peakOf(window.dayFor(today, plantToday) && !today.approx ? today : null);
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
   // A destination is shown only once it holds something: a 0.0 kWh column would be a
   // zero-width segment under a full-width label, and "the battery got none of it" is said
@@ -1301,19 +1297,15 @@ function HomeTab({ snap, energy, onNeedEnergy, today, refreshKey }) {
   const ps = window.plantStatus(snap, Date.now());
   const silent = ps.status === 'offline' || !!snap.loginCut; // a dead login: dashes now (SOLAR-386)
   const solarNow = a.loadNow > 50 ? Math.round(Math.min(a.loadNow, Math.max(0, a.pvNow || 0)) / a.loadNow * 100) : null;
-  const peakOf = (pts) => {
-    let pk = null;
-    (pts || []).forEach(p => { if (p.load != null && (!pk || p.load > pk.load)) pk = p; });
-    return pk && pk.load > 20 ? pk : null;
-  };
-  const todayPeak = peakOf(window.dayFor(today, plantToday) && !today.approx ? today.points : null);
+  const peakOf = (d) => { const pk = window.dayPeak(d, 'load'); return pk && pk.load > 20 ? pk : null; };
+  const todayPeak = peakOf(window.dayFor(today, plantToday) && !today.approx ? today : null);
 
   // ---- the day on the chart ----
   const [daily, loadDaily] = useDaily(refreshKey);
   const pick = useDayPicker(earliest, plantToday);
   const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
   const noReadings = dayProblem(view, day, points, silent);
-  const peak = peakOf(points);
+  const peak = peakOf(day);
 
   // ---- where it came from: the same flows Solar and Grid show (SOLAR-332) ----
   const flows = React.useMemo(() => dayFlows(points), [day]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1441,12 +1433,8 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const nowSub = a.gridPresent === false ? <span style={{ color: 'var(--bad)' }}>The grid is off</span>
     : exporting ? 'Exporting'
     : a.gridPower > 0 ? 'Importing' : 'Not importing';
-  const importPeak = (pts) => {
-    let pk = null;
-    (pts || []).forEach(p => { if (p.grid != null && p.grid > 50 && (!pk || p.grid > pk.grid)) pk = p; });
-    return pk;
-  };
-  const todayPeak = importPeak(window.dayFor(today, plantToday) && !today.approx ? today.points : null);
+  const importPeak = (d) => { const pk = window.dayPeak(d, 'grid'); return pk && pk.grid > 50 ? pk : null; };
+  const todayPeak = importPeak(window.dayFor(today, plantToday) && !today.approx ? today : null);
   // A silent plant's last figures aren't now: a dash and when they were read.
   const ps = window.plantStatus(snap, Date.now());
   const silent = ps.status === 'offline' || !!snap.loginCut; // a dead login: dashes now (SOLAR-386)
@@ -1455,7 +1443,7 @@ function GridBody({ snap, energy, onNeedEnergy, today, refreshKey, onOpenSetting
   const pick = useDayPicker(earliest, plantToday, alertDay);
   const { view, dim, day, points, dayWord } = useShownDay(pick, today, refreshKey);
   const noReadings = dayProblem(view, day, points, silent);
-  const peak = importPeak(points);
+  const peak = importPeak(day);
   // grid-down runs for the day, from the same history Equipment's supply chart shades
   const [histRuns, setHistRuns] = React.useState(null); // null until the history answers
   const [gridDay, setGridDay] = React.useState(null); // the day's minute readings, as Equipment's Grid tile

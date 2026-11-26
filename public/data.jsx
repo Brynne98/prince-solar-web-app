@@ -302,6 +302,7 @@ async function fetchDay(date) {
     points,
     approx: !!api.approx, // pre-logging day: the whole day is SunSynk's feed (calibrated scale)
     recoveredMinutes: api.recoveredMinutes || 0, // minutes recovered from SunSynk's cloud
+    peak: api.peak || null, // the day's top minute per series (SOLAR-676), see dayPeak
     totals: {
       pv: +pvK.toFixed(1), load: +loadK.toFixed(1),
       chg: +chg.toFixed(1), dischg: +dischg.toFixed(1), imp: +imp.toFixed(1),
@@ -313,6 +314,15 @@ async function fetchDay(date) {
 // still be yesterday's (SOLAR-648). null otherwise.
 const dayFor = (day, date) => (day && (!day.date || day.date === date) ? day : null);
 // How many buckets of a day series hold a reading; a line needs two.
+// The day's top `key` reading ('pv', 'load' or 'grid') as { t, [key] }, or null: the top minute
+// from the server (SOLAR-676); the top 5-minute point for an answer sent without one.
+const dayPeak = (day, key) => {
+  const s = day && day.peak && day.peak[key];
+  if (s) { const tm = s.time.split(':'); return { t: tm[0] * 60 + +tm[1], [key]: s.w }; }
+  let pk = null;
+  ((day && day.points) || []).forEach(p => { if (p[key] != null && (!pk || p[key] > pk[key])) pk = p; });
+  return pk;
+};
 const realPoints = (day) => ((day && day.points) || []).filter(p => p.pv != null).length;
 
 // Earliest date with data (≈ commission date). Bounds the day picker; null if
@@ -578,7 +588,7 @@ function emptyText(days, fallback) {
 }
 
 Object.assign(window, {
-  fetchSnapshot, fetchDay, dayFor, realPoints, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth, fetchGridToday,
+  fetchSnapshot, fetchDay, dayFor, dayPeak, realPoints, fetchEarliest, fetchDataDays, fetchInverterHistory, fetchEnergy, fetchHourly, fetchPlantDays, fetchPlantStates, fetchTrendDaily, fetchCompare, fetchStringHealth, fetchGridToday,
   fetchMe, fetchAccountState, saveChosenPlants, saveLinkRemove, fetchPlanQuote, savePrefs, sendFeedback, savePlantConfig, fetchEmailPrefs, saveEmailPref, deleteAccount,
   fetchNotifications, readNotifications, fetchPushPrefs, savePushPref, EMAIL_KINDS, PUSH_KINDS, pushSupport, pushState, pushTurnOn, pushTurnOff, pushResync, emptyText, syncProgress, firstLoadSync, BATT_MAX_KW, TYPICAL_DAYS,
 });
