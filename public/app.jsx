@@ -235,7 +235,7 @@ function MenuState({ st, id, cut, now }) {
 // Grouped by SunSynk login (SOLAR-251): each login's email, then its plants. A locked
 // plant (SOLAR-537) has no readings to open; it reads Locked and opens Plants, where it is
 // added or the plan upgraded.
-function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accounts, onStopped }) {
+function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accounts, onStopped, deleting = [] }) {
   const plants = me?.plants || [];
   const current = plants.find(p => p.id === plantId);
   const name = current ? window.plantLabel(current) : (fallback || '');
@@ -275,7 +275,7 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
                     <button key={row.plant_id} type="button" role="menuitem" className="pm-stopped"
                             onClick={() => { setOpen(false); onStopped && onStopped(); }}>
                       <span className="tick" aria-hidden="true" /><span className="nm">{window.plantLabel(row)}</span>
-                      <span className="pm-state">Locked</span>
+                      <span className="pm-state">{deleting.includes(row.plant_id) ? AT.deletingWord : 'Locked'}</span>
                     </button>
                   );
                 }
@@ -1746,7 +1746,8 @@ function App({ links }) {
   const loginDead = links.accounts.some(a => a.status === 'needs_relink' && a.kind !== 'share');
   const account = { user, plantCount: me ? (me.plants || []).length : null, alert: AT.accountAlert(acct, loginDead), onSettings: () => go('prefs'), active: isSettings(tab) };
   const plantMenu = <PlantMenu me={me} plantId={plantId} onPlant={switchPlant} fallback={snap?.plant?.name} cutOff={loginsCut} currentSync={snap?.sync}
-                               accounts={links.accounts} onStopped={() => openSettings('connection')} />;
+                               accounts={links.accounts} onStopped={() => openSettings('connection')}
+                               deleting={(acct?.plants || []).filter(p => p.deleting).map(p => p.plant)} />;
   // A page's section, from Billing's Reconnect: openSettings; otherwise the page itself
   // key: the loading and loaded pages put it at different child positions; without it the
   // first reading remounted it and Billing's Plan drew its outline twice (SOLAR-281).
