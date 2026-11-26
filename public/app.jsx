@@ -3,7 +3,16 @@
 // Fetches /api/overview (live snapshot) on a 60s tick, /api/history
 // (today's chart) every 5 min, and lazily loads /api/energy per period on demand.
 // ============================================================================
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { AuthGate, FieldLabel, SignOutButton, invalidProps, resetAsked, useFieldErrors } from './auth.jsx';
+import { BusyButton, Segmented, Skeleton, Tip, dayText, fmtTime, localDateStr, moneySymbol, plantDateStr, plantHour, plantLabel, shiftDate } from './components.jsx';
+import { READ_FRESH_MS, dayFor, fetchDay, fetchEnergy, fetchMe, fetchNotifications, fetchPlantDays, fetchPlantStates, fetchSnapshot, firstLoadSync, isStale, plantNow, pushResync, readNotifications, realPoints, savePlantConfig, savePrefs, sendFeedback, setCurrentPlant, syncProgress } from './data.jsx';
+import { AT, Dialog, LinkDialog, LinkForm, LinkGate, accountNow, addAsked, billingReturn, checkReturn, hasActivePlant, mountNode, reloadAccount, settlePayment, takeAddAsk, useAccount, useAccountWatch } from './link.jsx';
+import { sb } from './sb.js';
 const { useState, useEffect, useRef, useCallback } = React;
+
+export const TrashIcon = () => <svg className="ico ico-sm" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.6 9h6.8l.6-9M6.75 7v4M9.25 7v4" /></svg>;
 
 // Every page always shows and battery power always reads + = the house is using it; the
 // old per-user switches for both are gone (SOLAR-71), so drop what they left behind.
@@ -21,14 +30,14 @@ function fmtAgo(d, now) {
 }
 // How long ago a reading was, the way the cards say it: the time, and the date once it is over a day and a half old.
 const readAgo = (t, now) => now - t > 36 * 3600e3
-  ? new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: window.PLANT_TZ || undefined }) + ', ' + window.fmtTime(new Date(t))
-  : window.fmtTime(new Date(t));
+  ? new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: plantNow.tz || undefined }) + ', ' + fmtTime(new Date(t))
+  : fmtTime(new Date(t));
 function useNow(ms) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), ms); return () => clearInterval(t); }, [ms]);
   return now;
 }
-Object.assign(window, { fmtAgo, readAgo, useNow, plantStatus }); // Equipment's reading ages; Solar and Grid's silent plant
+export { fmtAgo, readAgo, useNow, plantStatus }; // Equipment's reading ages; Solar and Grid's silent plant
 
 // Header status: one word, coloured. Live = fresh data and every inverter up;
 // Stale = the poller is behind (> 3 min) or an inverter is down; Offline = no data
@@ -47,7 +56,7 @@ function plantStatus(snap, now) {
   // A plant's first 60 days are still loading (SOLAR-167): its newest stored day is
   // the load's, not the inverters', and a slow second inverter isn't news yet.
   // Say it's loading instead of Offline or Stale; "Fetching history" sits beside it.
-  const loading = window.syncProgress(snap.sync) != null;
+  const loading = syncProgress(snap.sync) != null;
   const status = none || (loading && bad !== 'live') ? 'loading' : bad;
   // fresh readings with an inverter silent: the word names it, so the header needs no strip (SOLAR-384)
   const named = status === 'stale' && ageS <= 180 && offline > 0;
@@ -79,13 +88,13 @@ const StatusBits = ({ word, children }) => <><span className="status-word">{word
 function WallStatus({ snap }) {
   const s = plantStatus(snap, useNow(15000));
   return (
-    <window.Tip className={'wall-status below status-' + s.tone} text={s.last ? 'Last reading ' + window.fmtTime(s.last) : null}>
+    <Tip className={'wall-status below status-' + s.tone} text={s.last ? 'Last reading ' + fmtTime(s.last) : null}>
       {/* the word already names the silent inverter: no detail to repeat it */}
       <StatusBits word={s.word}>{!s.named && s.detail && <span className="status-detail">{s.detail}</span>}</StatusBits>
-    </window.Tip>
+    </Tip>
   );
 }
-window.WallStatus = WallStatus;
+export { WallStatus };
 
 // ---- the frame (SOLAR-13) ---------------------------------------------------
 // A sidebar of pages with the account at its foot, a header with the plant and its
@@ -122,7 +131,7 @@ const NAV_ICONS = {
   panel: '<path d="M5 4h14l2 11H3z"/><path d="M4 9.5h16M9.7 4l-.7 11M14.3 4l.7 11M12 15v5M8 20h8"/>',
 };
 // fixed strings from the table above, never data
-const Icon = ({ id, className }) => <svg className={'ico' + (className ? ' ' + className : '')} viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: NAV_ICONS[id] }} />;
+export const Icon = ({ id, className }) => <svg className={'ico' + (className ? ' ' + className : '')} viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: NAV_ICONS[id] }} />;
 
 // While on, Escape anywhere on the page calls onEscape (the latest one passed).
 function useEscape(on, onEscape) {
@@ -138,7 +147,7 @@ function useEscape(on, onEscape) {
 
 // A motion step from :root in ms (SOLAR-351); 0 under reduced motion.
 const motionMs = (name) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
-window.motionMs = motionMs;
+export { motionMs };
 // [shown, leaving] for a pop-up that is `on`: once off it stays shown for --dur-fast with
 // leaving true, so its CSS can play it out (pop-out, sheet-out).
 function useExit(on) {
@@ -154,7 +163,7 @@ function useExit(on) {
 // An open menu closes on a click elsewhere or Escape (focus goes back to its button), and
 // takes the arrow keys while focus is inside it. No keyboard shortcuts beyond that, by decision.
 // The open state it hands back stays true while the menu leaves; its box gets [data-leaving].
-function usePopover() {
+export function usePopover() {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -168,7 +177,7 @@ function usePopover() {
   React.useLayoutEffect(() => { ref.current?.toggleAttribute('data-leaving', leaving); }, [leaving]);
   return [shown, setOpen, ref];
 }
-function MenuList({ className, label, children }) {
+export function MenuList({ className, label, children }) {
   const ref = useRef(null);
   useEffect(() => { (ref.current.querySelector('[aria-checked="true"]') || ref.current.querySelector('button'))?.focus(); }, []);
   const keys = e => {
@@ -181,7 +190,7 @@ function MenuList({ className, label, children }) {
 }
 // A choice in a form: a field-sized button that opens a MenuList, the chosen row ticked.
 // The app's own, never the browser's <select>, so it looks the same everywhere.
-function PickMenu({ id, label, value, options, onPick }) {
+export function PickMenu({ id, label, value, options, onPick }) {
   const [open, setOpen, ref] = usePopover();
   const cur = options.find(o => o.value === value);
   return (
@@ -205,9 +214,10 @@ function PickMenu({ id, label, value, options, onPick }) {
 
 // One menu row's state, by the header's rules (SOLAR-182): a dead login reads Login stopped.
 // The plant on screen also takes the header's reconnect and failed refresh (SOLAR-625, SOLAR-606),
-// from window.CURRENT_LIVE, which App sets each render.
-function MenuState({ st, id, cut, now }) {
-  const cur = window.CURRENT_LIVE;
+// from currentLive, which App sets each render.
+let currentLive = null;
+export function MenuState({ st, id, cut, now }) {
+  const cur = currentLive;
   const mine = !!cur && String(cur.plantId) === String(id);
   if (cut) return <span className="pm-state status-offline">Login stopped</span>;
   if (!st || st.lastTs == null) return null;
@@ -216,7 +226,7 @@ function MenuState({ st, id, cut, now }) {
     lastReading: new Date(st.lastTs * 1000), updated: new Date(now), sync: st.sync,
     relinkedAt: mine ? cur.relinkedAt : null, fetchFailed: mine && cur.fetchFailed,
   }, now);
-  const p = window.syncProgress(st.sync);
+  const p = syncProgress(st.sync);
   // still on its first load: Setting up, even when its readings are live
   // the colour is the header's tone: Couldn't refresh is amber, Reconnected grey (SOLAR-625)
   const status = p != null ? 'loading' : s.tone, word = p != null ? 'Setting up' : s.word;
@@ -225,7 +235,7 @@ function MenuState({ st, id, cut, now }) {
       {p != null && <span className="sync-arc" aria-hidden="true" />}{word}
       {p != null && <span className="mono pm-pct">{Math.round(100 * p)}%</span>}
       {/* the last reading's time only when it is old: "1 of 2 offline" has a fresh one (SOLAR-558) */}
-      {status === 'stale' && s.old && <span className="mono pm-pct">{window.fmtTime(s.last)}</span>}
+      {status === 'stale' && s.old && <span className="mono pm-pct">{fmtTime(s.last)}</span>}
     </span>
   );
 }
@@ -238,13 +248,13 @@ function MenuState({ st, id, cut, now }) {
 function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accounts, onStopped, deleting = [] }) {
   const plants = me?.plants || [];
   const current = plants.find(p => p.id === plantId);
-  const name = current ? window.plantLabel(current) : (fallback || '');
+  const name = current ? plantLabel(current) : (fallback || '');
   const [open, setOpen, ref] = usePopover();
   const [states, setStates] = useState({});
   useEffect(() => {
     if (!open) return;
     let alive = true;
-    window.fetchPlantStates().then(rows => {
+    fetchPlantStates().then(rows => {
       if (alive) setStates({ at: Date.now(), ...Object.fromEntries(rows.map(r => [r.id, r])) });
     }).catch(() => {});
     return () => { alive = false; };
@@ -274,17 +284,17 @@ function PlantMenu({ me, plantId, onPlant, fallback, cutOff, currentSync, accoun
                   return (
                     <button key={row.plant_id} type="button" role="menuitem" className="pm-stopped"
                             onClick={() => { setOpen(false); onStopped && onStopped(); }}>
-                      <span className="tick" aria-hidden="true" /><span className="nm">{window.plantLabel(row)}</span>
+                      <span className="tick" aria-hidden="true" /><span className="nm">{plantLabel(row)}</span>
                       <span className="pm-state">{deleting.includes(row.plant_id) ? AT.deletingWord : 'Locked'}</span>
                     </button>
                   );
                 }
                 // the plant on screen takes the header's progress, so the two % always match
-                const st = states[p.id] && { ...states[p.id], sync: p.id === plantId && currentSync ? currentSync : window.firstLoadSync(states[p.id].sync, p.linkedAt) };
+                const st = states[p.id] && { ...states[p.id], sync: p.id === plantId && currentSync ? currentSync : firstLoadSync(states[p.id].sync, p.linkedAt) };
                 return (
                   <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === plantId}
                           onClick={() => { setOpen(false); if (p.id !== plantId) onPlant(p.id); }}>
-                    <span className="tick" aria-hidden="true">{p.id === plantId ? '✓' : ''}</span><span className="nm">{window.plantLabel(p)}</span>
+                    <span className="tick" aria-hidden="true">{p.id === plantId ? '✓' : ''}</span><span className="nm">{plantLabel(p)}</span>
                     <MenuState st={st} id={p.id} cut={cutOff && cutOff(p.id)} now={states.at || Date.now()} />
                   </button>
                 );
@@ -310,7 +320,7 @@ function AccountMenu({ user, plantCount, paused, alert, onSettings, active, vari
               aria-current={active ? 'page' : undefined} onClick={() => setOpen(o => !o)}
               aria-label={'Account menu' + (alert ? '. ' + alert : '')}>
         <span className="avatar" aria-hidden="true">{user.initials}</span>
-        {variant === 'rail' && <span className="who" aria-hidden="true"><b>{user.name}</b><span className={alert ? 'bad' : ''} style={sub ? undefined : { position: 'relative' }}>{sub || <>{'\u00a0'}<window.Skeleton as="span" w={52} h={11} r={6} style={{ position: 'absolute', left: 0, top: 2 }} /></>}</span></span>}
+        {variant === 'rail' && <span className="who" aria-hidden="true"><b>{user.name}</b><span className={alert ? 'bad' : ''} style={sub ? undefined : { position: 'relative' }}>{sub || <>{'\u00a0'}<Skeleton as="span" w={52} h={11} r={6} style={{ position: 'absolute', left: 0, top: 2 }} /></>}</span></span>}
       </button>
       {open && (
         <MenuList className="acct-menu" label="Account">
@@ -325,7 +335,7 @@ function AccountMenu({ user, plantCount, paused, alert, onSettings, active, vari
             <Icon id="feedback" />Send feedback
           </button>
           <hr />
-          <window.SignOutButton className="menu-signout"><Icon id="signout" />Sign out</window.SignOutButton>
+          <SignOutButton className="menu-signout"><Icon id="signout" />Sign out</SignOutButton>
         </MenuList>
       )}
     </div>
@@ -359,7 +369,7 @@ function FeedbackDialog({ onClose }) {
   const [shot, setShot] = useState(null); // { name, data }
   const [busy, setBusy] = useState(false);
   const fileRef = React.useRef(null);
-  const { bad, flag, edited } = window.useFieldErrors();
+  const { bad, flag, edited } = useFieldErrors();
   const pick = async (e) => {
     const f = e.target.files?.[0];
     e.target.value = '';
@@ -373,24 +383,24 @@ function FeedbackDialog({ onClose }) {
     setBusy(true);
     try {
       const page = new URLSearchParams(location.search).get('tab') || 'home';
-      await window.sendFeedback(msg, page, shot?.data ?? null);
+      await sendFeedback(msg, page, shot?.data ?? null);
       window.track('feedback_sent_done', { page, image: !!shot });
       onClose();
-      window.toast('Feedback sent');
+      toast('Feedback sent');
     } catch (ex) {
-      window.toast(/feedback limit/.test(ex.message) ? 'You’ve sent 10 today. Try again tomorrow.' : 'Not sent. Try again.', { error: true });
+      toast(/feedback limit/.test(ex.message) ? 'You’ve sent 10 today. Try again tomorrow.' : 'Not sent. Try again.', { error: true });
     } finally {
       setBusy(false);
     }
   };
   return (
-    <window.Dialog keep busy={busy} label="Send feedback" onClose={onClose}>
+    <Dialog keep busy={busy} label="Send feedback" onClose={onClose}>
       <div className="confirm-title">Send feedback</div>
       <form className="conn-form link-form" onSubmit={submit} noValidate aria-busy={busy}>
         <div className="field">
-          <window.FieldLabel id="fb-msg" label="Message" error={bad['fb-msg']} />
+          <FieldLabel id="fb-msg" label="Message" error={bad['fb-msg']} />
           <textarea id="fb-msg" className="input fb-msg" rows={5} maxLength={4000} autoFocus value={msg}
-                    onChange={(e) => { setMsg(e.target.value); edited('fb-msg'); }} {...window.invalidProps('fb-msg', bad['fb-msg'])} />
+                    onChange={(e) => { setMsg(e.target.value); edited('fb-msg'); }} {...invalidProps('fb-msg', bad['fb-msg'])} />
         </div>
         <div className="field fb-shot">
           {shot
@@ -401,10 +411,10 @@ function FeedbackDialog({ onClose }) {
         </div>
         <div className="conn-form-actions">
           <button type="button" className="ghost-btn" onClick={onClose} disabled={busy}>Cancel</button>
-          <window.BusyButton type="submit" className="save-btn" busy={busy} busyText="Sending…">Send</window.BusyButton>
+          <BusyButton type="submit" className="save-btn" busy={busy} busyText="Sending…">Send</BusyButton>
         </div>
       </form>
-    </window.Dialog>
+    </Dialog>
   );
 }
 
@@ -484,10 +494,10 @@ function PhoneBar({ tabs, tab, onTab }) {
 const NOTIF_GLYPH = { grid: 'grid', battery: 'battery', panels: 'solar', readings: 'live', sunsynk: 'live' };
 
 function notifDay(day) {
-  const today = window.localDateStr();
+  const today = localDateStr();
   if (day === today) return 'Today';
-  if (day === window.shiftDate(today, -1)) return 'Yesterday';
-  return window.dayText(day);
+  if (day === shiftDate(today, -1)) return 'Yesterday';
+  return dayText(day);
 }
 
 // Account notices (SOLAR-641): AccountText.notices from the account's state, the same words as
@@ -518,7 +528,7 @@ function NoticeCard({ tone, title, short, body, bodyShort, button, onClick, onCl
     </div>
   );
 }
-window.NoticeCard = NoticeCard;
+export { NoticeCard };
 
 // The billing cards, at the top of Live only (SOLAR-212, SOLAR-577); the bell lists them on every
 // page. A card's close is kept on this device, for that one deletion date.
@@ -588,7 +598,7 @@ function NotifBell({ data, pinned = [], multi, onOpen, onOpenAlert, onSeen, onRe
               <b>No notifications</b>
             </div>
           )}
-          {items && items.length > 0 && <NotifRows items={items} multi={multi} onOpen={it => { close(); onOpenAlert(it); }} from={pinned.length ? window.localDateStr() : null} />}
+          {items && items.length > 0 && <NotifRows items={items} multi={multi} onOpen={it => { close(); onOpenAlert(it); }} from={pinned.length ? localDateStr() : null} />}
           </div>
         </div>
       )}
@@ -653,23 +663,23 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord, err, onReconnect }) {
     const tone = err ? 'offline' : 'idle';
     return (
       <>
-        <window.Tip as="div" className={'status below status-' + tone} text={err ? 'Can’t reach the server. Retrying every minute.' : null} role="status">
+        <Tip as="div" className={'status below status-' + tone} text={err ? 'Can’t reach the server. Retrying every minute.' : null} role="status">
           <StatusBits word={err ? 'No connection' : idleWord} />
-        </window.Tip>
+        </Tip>
         <button type="button" className={'refresh' + (err ? ' refresh-offline' : '') + (busy ? ' busy' : '')} aria-label="Refresh" disabled><Icon id="refresh" /></button>
       </>
     );
   }
   const s = plantStatus(snap, now);
-  const sync = window.syncProgress(snap.sync), pct = sync == null ? null : Math.round(100 * sync);
+  const sync = syncProgress(snap.sync), pct = sync == null ? null : Math.round(100 * sync);
   // Reconnected, Couldn't refresh and Login stopped come from plantStatus, so fullscreen and the menu say the same
   const { tone, word, waiting } = s;
   const a = snap.aggregate || {};
   const gridOff = a.gridPresent === false && snap.features?.hasGrid !== false;
   return (
     <>
-      <window.Tip as="div" className={'status below status-' + tone + (sync != null ? ' fetching' : '') + (snap.loginCut ? ' cut' : '')}
-        text={s.none ? null : (snap.fetchFailed ? 'Showing the last good reading. ' : '') + 'Last reading ' + window.fmtTime(s.last)} role="status">
+      <Tip as="div" className={'status below status-' + tone + (sync != null ? ' fetching' : '') + (snap.loginCut ? ' cut' : '')}
+        text={s.none ? null : (snap.fetchFailed ? 'Showing the last good reading. ' : '') + 'Last reading ' + fmtTime(s.last)} role="status">
         <StatusBits word={word} />
         {/* an old reading's date shows from tablet width up; a phone keeps the room for the plant name */}
         {s.old && !waiting && (() => { const p = fmtAgo(s.last, now).replace(' ago', '').split(', ');
@@ -682,7 +692,7 @@ function HeaderStatus({ snap, onRefresh, busy, idleWord, err, onReconnect }) {
             <span className="sync-pct mono">{pct}%</span>
           </span>
         )}
-      </window.Tip>
+      </Tip>
       {/* stale readings can still say the grid is off, so it is a tag beside the status (SOLAR-374) */}
       {gridOff && <span className="grid-tag" role="status">Grid off</span>}
       {/* a dead login: Refresh can't help, Reconnect can (SOLAR-385) */}
@@ -709,7 +719,7 @@ const STEPS = {
   panels: { title: 'Solar panels', how: 'All your panels’ watts added up. Shows how much of that the sun gets out of them.' },
 };
 // Settings shows the same titles and lines; empty boxes show the number's shape, not a sample (SOLAR-400)
-window.STEPS = STEPS;
+export { STEPS };
 // The marks hold the plant's linkedAt (0097): a plant removed and added again keeps its id
 // but gets a new link, so marks from before the re-add are dropped and it starts fresh.
 const stepMarks = (me, plant) => {
@@ -732,15 +742,15 @@ function firstSteps(me, plantId) {
   ].filter(Boolean);
   return { cfg: c, mine, steps, left: steps.filter(s => !s.done) };
 }
-window.firstSteps = firstSteps;
+export { firstSteps };
 // prefs merge one key deep, so the whole firstSteps object goes back with this plant's change
 const saveFirstSteps = (me, plantId, patch) => {
   const plant = (me.plants || []).find(p => p.id === plantId) || { id: plantId };
-  return window.savePrefs({
+  return savePrefs({
     firstSteps: { ...(me.prefs?.firstSteps || {}), [plantId]: { ...stepMarks(me, plant), ...patch, at: plant.linkedAt ?? undefined } },
   });
 };
-window.saveFirstSteps = saveFirstSteps;
+export { saveFirstSteps };
 
 // Battery size and panels share one box (SumBox): a total, or count × size rows that add up.
 const STEP_SUMS = {
@@ -770,7 +780,7 @@ const sumPatch = (kind, now, mode) => {
   return { [s.total]: kind === 'size' ? +now.value.toFixed(3) : now.value,
     [s.list]: mode === 'total' ? null : now.filled.map(r => ({ count: stepNum(r.c), [s.key]: stepNum(r.e) })) };
 };
-Object.assign(window, { stepNum, wholeNum, cfgFields, sumPatch });
+export { stepNum, wholeNum, cfgFields, sumPatch };
 
 // What a sum box holds now: its value, whether it can be saved, and (By size) the rows
 // typed. A row counts once its size is typed; a fresh "1 ×" row on its own changes nothing.
@@ -787,7 +797,7 @@ function sumOf(kind, mode, tot, rows) {
   const value = filled.length && ok ? filled.reduce((t, r) => t + stepNum(r.c) * stepNum(r.e), 0) / sum.per : NaN;
   return { empty: !filled.length, ok, value, filled };
 }
-window.sumOf = sumOf;
+export { sumOf };
 // The large field the steps use: a unit before or after, a numeric keyboard, typed as text.
 function StepField({ id, value, onChange, label, pre, unit, inputMode, ph, invalid, describedBy }) {
   return (
@@ -799,11 +809,11 @@ function StepField({ id, value, onChange, label, pre, unit, inputMode, ph, inval
     </div>
   );
 }
-window.StepField = StepField;
+export { StepField };
 // Battery size and panels: Total or By size, the value on the switch's line in its own place,
 // so nothing moves as it changes. Controlled: the caller holds mode, total and rows.
 const SUM_MODES = [{ value: 'total', label: 'Total' }, { value: 'rows', label: 'By size' }];
-window.SUM_MODES = SUM_MODES;
+export { SUM_MODES };
 function SumBox({ kind, mode, onMode, tot, onTot, rows, onRows, label }) {
   const sum = STEP_SUMS[kind];
   const now = sumOf(kind, mode, tot, rows);
@@ -811,7 +821,7 @@ function SumBox({ kind, mode, onMode, tot, onTot, rows, onRows, label }) {
   return (
     <div className="fs-sum">
       <div className="fs-sumhead">
-        <window.Segmented size="sm" label="How to enter it" value={mode} onChange={onMode} options={SUM_MODES} />
+        <Segmented size="sm" label="How to enter it" value={mode} onChange={onMode} options={SUM_MODES} />
         <b className={'fs-val mono' + (now.value > 0 ? ' ' + kind : '')} aria-live="polite">{now.value > 0 ? stepFix(now.value) : '—'}<small>{sum.unit}</small></b>
       </div>
       {mode === 'total' ? <StepField value={tot} onChange={onTot} label={label + ' in total'} unit={sum.unit} inputMode="decimal" ph={sum.totPh} invalid={!now.ok} /> : (
@@ -834,10 +844,10 @@ function SumBox({ kind, mode, onMode, tot, onTot, rows, onRows, label }) {
     </div>
   );
 }
-window.SumBox = SumBox;
+export { SumBox };
 // the rows a saved plant opens on: its panel groups, or one empty row
 const rowsFrom = (groups, key = 'watts') => Array.isArray(groups) && groups.length ? groups.map(g => ({ c: String(g.count), e: String(g[key]) })) : [{ c: '1', e: '' }];
-window.rowsFrom = rowsFrom;
+export { rowsFrom };
 
 // One step's boxes. Save stays off until the value is one the database takes. A step opened
 // again (Back, or a step bar) starts from what is saved.
@@ -860,7 +870,7 @@ function StepForm({ id, cfg, busy, onSave, onSkip }) {
     onSave(id === 'rate' ? { tariff_import: stepNum(v) } : id === 'reserve' ? { battery_reserve_pct: stepNum(v) }
       : sumPatch(id, now, mode));
   };
-  const sym = window.moneySymbol ? window.moneySymbol() : 'R';
+  const sym = moneySymbol ? moneySymbol() : 'R';
   return (
     <form className="fs-form" onSubmit={save} ref={box}>
       {id === 'rate' && <StepField value={v} onChange={setV} label={STEPS.rate.title} pre={sym} unit="/unit" inputMode="decimal" ph={STEPS.rate.ph} />}
@@ -868,7 +878,7 @@ function StepForm({ id, cfg, busy, onSave, onSkip }) {
       {sum && <SumBox kind={id} mode={mode} onMode={setMode} tot={v} onTot={setV} rows={rows} onRows={setRows} label={STEPS[id].title} />}
       <div className="fs-actions">
         <button type="button" className="ghost-btn" onClick={onSkip} disabled={busy}>Skip</button>
-        <window.BusyButton type="submit" className="save-btn" busy={busy} busyText="Saving…" disabled={!ok}>Save</window.BusyButton>
+        <BusyButton type="submit" className="save-btn" busy={busy} busyText="Saving…" disabled={!ok}>Save</BusyButton>
       </div>
     </form>
   );
@@ -918,7 +928,7 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
     setGone(true); setOpen(false);
     // A failed hide brings the card back, and the red toast says so (SOLAR-166)
     saveFirstSteps(me, plantId, { hidden: true }).then(() => { window.track('first_steps_hidden_done'); return onSaved(); })
-      .catch(() => { setGone(false); window.toast('Couldn’t hide First steps. Try again.', { error: true }); });
+      .catch(() => { setGone(false); toast('Couldn’t hide First steps. Try again.', { error: true }); });
   };
   // Skip leaves the step for later; past the last one it comes round again.
   const skip = () => {
@@ -932,11 +942,11 @@ function FirstSteps({ me, plantId, onSaved, variant }) {
     setBusy(true);
     try {
       // Save on the reserve confirms it for everyone on the plant (SOLAR-247)
-      await window.savePlantConfig(plantId, stepId === 'reserve' ? { ...patch, battery_reserve_confirmed: true } : patch);
+      await savePlantConfig(plantId, stepId === 'reserve' ? { ...patch, battery_reserve_confirmed: true } : patch);
       await onSaved();
       const left = fs.left.filter(s => s.id !== stepId);
       if (!left.length) setOpen(false); else setCur(nextOf(left, skipped, stepId));
-    } catch (e) { window.toast('Couldn’t save. Try again.', { error: true }); }
+    } catch (e) { toast('Couldn’t save. Try again.', { error: true }); }
     finally { setBusy(false); }
   };
   const toggle = () => { if (!open) setCur(null); setOpen(o => !o); };
@@ -1032,7 +1042,7 @@ const tabAlias = (id) => TAB_ALIAS[id] || id;
 const TAB_KEY = 'synsynk.tab';
 const savedTab = (ok) => {
   const q = new URLSearchParams(location.search), sectionPage = SECTION_PAGE[URL_SECTION[q.get('section')]];
-  const t = window.resetAsked() ? 'account'
+  const t = resetAsked() ? 'account'
     : sectionPage && ok(sectionPage) ? sectionPage
     : tabAlias(q.get('tab') || localStorage.getItem(TAB_KEY) || '');
   return ok(t) ? t : 'live';
@@ -1134,17 +1144,17 @@ function Frame({ tabs, tab, onTab, head, account, busy, steps, children }) {
 }
 
 // What a save did, one line at the foot of the screen for 5 s (SOLAR-166, SOLAR-479):
-// window.toast('Saved: rate R3.45 a unit.'). A new one replaces the last. Every failure
-// that isn't one box's typing mistake is window.toast(text, { error: true, action:
+// toast('Saved: rate R3.45 a unit.'). A new one replaces the last. Every failure
+// that isn't one box's typing mistake is toast(text, { error: true, action:
 // { label, onClick } }): red, at most one link. A note that is neither (still
 // being checked, not open yet) is { info: true }: no tick (SOLAR-384). A toast with a link
 // stays until closed (×, Esc, or a click on it); one without goes after 5 s or on a click. Frame mounts the host; the
-// signed-out screens mount their own (window.SaveToast).
+// signed-out screens mount their own (SaveToast).
 // A toast sent as its host goes (signing out swaps the frame for the sign-in screen in the
 // same render, as after Delete account, SOLAR-359) moves to the next host.
 let toastShow = null;
 let toastLast = null;
-window.toast = (text, opts = {}) => {
+export const toast = (text, opts = {}) => {
   toastLast = { text, ...opts, at: Date.now() };
   if (toastShow) toastShow(toastLast);
 };
@@ -1195,7 +1205,7 @@ function SaveToast() {
     </div>
   );
 }
-window.SaveToast = SaveToast;
+export { SaveToast };
 
 // Shown while the session and the SunSynk link are still being checked, before App
 // mounts. Same frame as App's own not-yet-loaded gate, so the hand-over does not flash.
@@ -1210,7 +1220,7 @@ function BootShell() {
     <Frame tabs={TABS} tab={tab} busy account={{ user, plantCount: null, onSettings: () => {} }}
       head={<><PlantMenu fallback="Connecting to SunSynk…" /><HeaderStatus idleWord="Connecting" /><NotifBell disabled /></>}>
       {/* TabSkeleton is in tabs.js, which loads after sign-in (SOLAR-143) */}
-      {!isSettings(tab) && tab !== 'system' && window.TabSkeleton && <window.TabSkeleton tab={tab} />}
+      {!isSettings(tab) && tab !== 'system' && pages.TabSkeleton && <pages.TabSkeleton tab={tab} />}
     </Frame>
   );
 }
@@ -1222,7 +1232,7 @@ function useUser() {
   const [user, setUserState] = useState(lastUser);
   const setUser = (u) => { lastUser = u; setUserState(u); };
   useEffect(() => {
-    window.sb.auth.getSession().then(({ data }) => {
+    sb.auth.getSession().then(({ data }) => {
       const u = data?.session?.user; if (!u) return;
       const email = u.email || '';
       const name = u.user_metadata?.full_name || u.user_metadata?.name || email.split('@')[0];
@@ -1252,7 +1262,7 @@ function Setup({ links, acct }) {
   const [connecting, setConnecting] = useState(false);
   // Billing's Plan says when the free week ends; it runs from the first plant added.
   const [me, setMe] = useState(null);
-  useEffect(() => { window.fetchMe().then(setMe).catch(() => {}); }, []);
+  useEffect(() => { fetchMe().then(setMe).catch(() => {}); }, []);
   const go = (id) => { setTab(id); setConnecting(false); toTop(); if (location.hash) history.replaceState(history.state, '', location.pathname + location.search); };
   // No plant is on screen here: a ?plant= left from App (its login removed, its plant
   // stopped) leaves the address. linked() sets it again for the plant a login brings.
@@ -1270,7 +1280,7 @@ function Setup({ links, acct }) {
   const connect = () => { if (isSettings(tab)) setTab('live'); setConnecting(true); };
   useEscape(connecting, () => setConnecting(false));
   // An email's Add your plant (?add=plant, link.jsx): the form, as the card's button opens it.
-  useEffect(() => { if (window.takeAddAsk()) connect(); }, []);
+  useEffect(() => { if (takeAddAsk()) connect(); }, []);
   // An email's ?section= opens its Settings page here too, as in App; Plant settings waits for a plant.
   useEffect(() => {
     const url = new URL(location.href), section = URL_SECTION[url.searchParams.get('section')];
@@ -1304,7 +1314,7 @@ function Setup({ links, acct }) {
   const addedFromHead = (r) => {
     const on = comingOn(r).length, n = (r?.plants || []).length;
     if (on) setTab('live');
-    else if (n) window.toast(n === 1 ? `${window.plantLabel(r.plants[0])} added. It’s locked.` : `${n} plants added. They’re locked.`);
+    else if (n) toast(n === 1 ? `${plantLabel(r.plants[0])} added. It’s locked.` : `${n} plants added. They’re locked.`);
     if (on || n) setAdding(false);
     return linked(r);
   };
@@ -1331,7 +1341,7 @@ function Setup({ links, acct }) {
     </div>
   ) : connecting ? (
     <div className="setup-form">
-      <window.LinkForm relink={relink} onLinked={linked} onCancel={() => setConnecting(false)}
+      <LinkForm relink={relink} onLinked={linked} onCancel={() => setConnecting(false)}
                        initialUsername={relink ? dead[0].sunsynk_username : undefined} />
     </div>
   ) : plantsOff ? (
@@ -1352,7 +1362,7 @@ function Setup({ links, acct }) {
   );
   const stage = (
     <div className="setup-stage">
-      <div className="setup-outline" aria-hidden="true" inert=""><window.TabSkeleton tab={tab} /></div>
+      <div className="setup-outline" aria-hidden="true" inert=""><pages.TabSkeleton tab={tab} /></div>
       <div className="setup-empty">{card}</div>
     </div>
   );
@@ -1363,10 +1373,10 @@ function Setup({ links, acct }) {
         {!connecting && !wall && (plantsOff
           ? <span className="setup-head-btns">{turnOnBtn('setup-head-btn')}{connectBtn('setup-head-btn', () => setAdding(true))}</span>
           : connectBtn('setup-head-btn'))}</>}>
-      {isSettings(tab) ? <window.SettingsArea page={tab} onPage={(p, section) => { if (section) setFlash(section); go(p); }} me={me} links={links} onPlantConfigSaved={linked}
+      {isSettings(tab) ? <pages.SettingsArea page={tab} onPage={(p, section) => { if (section) setFlash(section); go(p); }} me={me} links={links} onPlantConfigSaved={linked}
                                               flash={flash} onFlashed={() => setFlash(null)} /> : stage}
       {adding && (
-        <window.LinkDialog title="Add plant" onLinked={addedFromHead} onCancel={() => setAdding(false)} />
+        <LinkDialog title="Add plant" onLinked={addedFromHead} onCancel={() => setAdding(false)} />
       )}
     </Frame>
   );
@@ -1399,9 +1409,9 @@ function App({ links }) {
   const relinkedAt = relinked?.plantId === plantId ? relinked.at : null;
   // a failed refresh and a fresh reconnect ride on the snapshot, so every status line reads them (SOLAR-603, SOLAR-606)
   const snap = React.useMemo(() => (!rawSnap ? rawSnap : loginCut ? { ...rawSnap, sync: null, loginCut: true, fetchFailed: !!err }
-    : { ...rawSnap, sync: window.firstLoadSync(rawSnap.sync, linkedAt), fetchFailed: !!err, relinkedAt }), [rawSnap, loginCut, linkedAt, err, relinkedAt]);
+    : { ...rawSnap, sync: firstLoadSync(rawSnap.sync, linkedAt), fetchFailed: !!err, relinkedAt }), [rawSnap, loginCut, linkedAt, err, relinkedAt]);
   // the menu and Settings > Plants read the plant on screen's reconnect and failed refresh from here
-  window.CURRENT_LIVE = { plantId, relinkedAt, fetchFailed: !!err };
+  currentLive = { plantId, relinkedAt, fetchFailed: !!err };
   // Readings starting or stopping can mean a login came back or died: read the logins
   // again at once, so the sidebar's "Reconnect a login" turns with the header instead of
   // on the next minute's read (SOLAR-389).
@@ -1421,7 +1431,7 @@ function App({ links }) {
   });
   const [notifs, setNotifs] = useState(null);
   // The account's state: the notices on Live and in the bell come from it (SOLAR-641).
-  const acct = window.useAccount();
+  const acct = useAccount();
   // "Set your rate", "Set pack size", Reconnect: open the page that holds that section
   // (SECTION_PAGE) and flash it once; the section scrolls itself into view.
   // The address keeps it as #section, so a reload scrolls back to it (SOLAR-165).
@@ -1446,12 +1456,12 @@ function App({ links }) {
 
   useEffect(() => { window.track('screen_viewed', { stage: 'dashboard', screen: tab }); }, [tab]);
   // Back from Paystack's card page without paying, on a page outside Settings (which checks it itself).
-  useEffect(() => { if (!isSettings(tab)) window.billingReturn(); }, []);
+  useEffect(() => { if (!isSettings(tab)) billingReturn(); }, []);
 
   // notifsTried: the first answer (or failure) is in. Live draws nothing below the header until
   // then, so its cards are there on the first frame and don't push the page down (SOLAR-577).
   const [notifsTried, setNotifsTried] = useState(false);
-  const loadNotifs = useCallback(() => { window.fetchNotifications().then(setNotifs).catch(() => {}).finally(() => setNotifsTried(true)); }, []);
+  const loadNotifs = useCallback(() => { fetchNotifications().then(setNotifs).catch(() => {}).finally(() => setNotifsTried(true)); }, []);
   // ?day= and ?opened= (a pop-up's tap) are read once, then leave the address, as ?section= does.
   useEffect(() => {
     const url = new URL(location.href);
@@ -1461,7 +1471,7 @@ function App({ links }) {
     history.replaceState(history.state, '', url);
     if (opened) {
       window.track('notification_opened', { source: 'push' });
-      window.readNotifications([opened]).then(loadNotifs).catch(() => {});
+      readNotifications([opened]).then(loadNotifs).catch(() => {});
     }
   }, []);
 
@@ -1483,25 +1493,25 @@ function App({ links }) {
     if (spin) setBusy(b => b + 1);
     clearTimeout(liveRetry.current);
     try {
-      const s = await window.fetchSnapshot();
+      const s = await fetchSnapshot();
       setSnap(s); setErr(null); liveFails.current = 0;
       // Just past the plant's midnight the minute's reading can land after this ask, which then
       // has none for today: ask again shortly, a few times, while the plant is still sending.
       // A plant quiet since yesterday keeps its dash (SOLAR-348, SOLAR-648).
       // by the server's clock: a device running fast would ask again at 23:59 for nothing
       const tz = s.config?.timezone, last = s.lastReading, at = s.updated;
-      const behind = !!last && at - last < READ_FRESH_MS
-        && window.plantDateStr(tz, last) !== window.plantDateStr(tz, at);
+      const behind = !!last && +at - +last < READ_FRESH_MS
+        && plantDateStr(tz, last) !== plantDateStr(tz, at);
       if (!behind) dayRetries.current = 0;
       else if (dayRetries.current < 3) {
         dayRetries.current += 1;
         liveRetry.current = setTimeout(() => { if (document.visibilityState === 'visible') loadLive(false); }, 8000);
       }
       // for the offline page (offline.js, SOLAR-592)
-      if (s.lastReading) try { localStorage.setItem('ps.lastReading', JSON.stringify({ t: s.lastReading.getTime(), tz: window.PLANT_TZ || null })); } catch (e) {}
+      if (s.lastReading) try { localStorage.setItem('ps.lastReading', JSON.stringify({ t: s.lastReading.getTime(), tz: plantNow.tz || null })); } catch (e) {}
     }
     catch (e) {
-      if (window.isStale(e)) return;
+      if (isStale(e)) return;
       liveFails.current += 1;
       if (spin || liveFails.current >= 2) setErr(e.message);
       if (liveFails.current <= 3) liveRetry.current = setTimeout(() => { if (document.visibilityState === 'visible') loadLive(false); }, 10000);
@@ -1509,15 +1519,15 @@ function App({ links }) {
     finally { if (spin) setTimeout(() => setBusy(b => b - 1), Math.ceil((Date.now() - t0) / 800) * 800 - (Date.now() - t0)); }
   }, []);
   const loadToday = useCallback(async () => {
-    try { setToday(await window.fetchDay()); } catch (e) { /* chart shows its own placeholder */ }
+    try { setToday(await fetchDay()); } catch (e) { /* chart shows its own placeholder */ }
   }, []);
   // today has no line yet (under two readings, or the day just turned), or the plant is still
   // on its first load (SOLAR-181, SOLAR-648)
   const todayThin = useRef(true);
   // A quiet plant adds nothing to ask for each minute: its chart waits for the 5th minute.
   const sending = !!snap?.lastReading && Date.now() - snap.lastReading.getTime() < READ_FRESH_MS;
-  todayThin.current = (sending && (window.realPoints(today) < 2 || !!today.approx
-    || !window.dayFor(today, window.plantDateStr(snap?.config?.timezone)))) || window.syncProgress(snap?.sync) != null;
+  todayThin.current = (sending && (realPoints(today) < 2 || !!today.approx
+    || !dayFor(today, plantDateStr(snap?.config?.timezone)))) || syncProgress(snap?.sync) != null;
   // Week to Lifetime are finished days plus today, and the pages add today from the live
   // reading, so the rows change only when the plant's date turns and when the 04:15 sync
   // swaps the finished day in (0058). Asked again then, or on a manual refresh (SOLAR-140).
@@ -1526,7 +1536,7 @@ function App({ links }) {
   const energyStampRef = useRef(null);
   const energyStamp = () => {
     const tz = snapRef.current?.config?.timezone, d = new Date();
-    return window.plantDateStr(tz, d) + (window.plantHour(tz, d) >= 5 ? 'b' : 'a');
+    return plantDateStr(tz, d) + (plantHour(tz, d) >= 5 ? 'b' : 'a');
   };
   const onNeedEnergy = useCallback((period) => {
     if (energyRef.current[period] || inflight.current[period]) return;
@@ -1534,7 +1544,7 @@ function App({ links }) {
     // a switch clears the flags; a reply for the last plant must not clear the new plant's
     const mine = {};
     inflight.current[period] = mine;
-    window.fetchEnergy(period)
+    fetchEnergy(period)
       .then(rows => setEnergy(e => ({ ...e, [period]: rows })))
       .catch(() => {})
       .finally(() => { if (inflight.current[period] === mine) delete inflight.current[period]; });
@@ -1547,16 +1557,16 @@ function App({ links }) {
     if (!force && stamp === energyStampRef.current) return;
     energyStampRef.current = stamp;
     Object.keys(energyRef.current).forEach((period) => {
-      window.fetchEnergy(period).then(rows => setEnergy(e => ({ ...e, [period]: rows }))).catch(() => {});
+      fetchEnergy(period).then(rows => setEnergy(e => ({ ...e, [period]: rows }))).catch(() => {});
     });
   }, []);
 
   const loadMe = useCallback(async () => {
     try {
-      const m = await window.fetchMe();
+      const m = await fetchMe();
       // The free week or the plan ended with the app open: SignedIn reads the account again and
       // shows the pay screen.
-      const a = await window.reloadAccount().catch(() => null);
+      const a = await reloadAccount().catch(() => null);
       if (a && a.state === 'ended') { location.reload(); return; }
       setMe(m);
       const ids = (m.plants || []).map(p => p.id);
@@ -1568,22 +1578,22 @@ function App({ links }) {
       // A report or alert footer adds section=notifications: open Notifications.
       // A payment email or Paystack's return adds section=plan: Billing. Update card adds section=payments.
       // An email's Add your plant (?add=plant, link.jsx): Plants, where the section opens Add plant.
-      const section = window.addAsked() ? 'connection'
+      const section = addAsked() ? 'connection'
         : URL_SECTION[url.searchParams.get('section')];
       if (url.searchParams.has('section')) {
         url.searchParams.delete('section'); history.replaceState(history.state, '', url);
       }
       if (section) openSettings(section, true);
-      if (ids.includes(linked)) window.savePrefs({ lastPlant: linked }).catch(() => {});
+      if (ids.includes(linked)) savePrefs({ lastPlant: linked }).catch(() => {});
       const wanted = ids.includes(linked) ? linked
         : m.prefs && ids.includes(Number(m.prefs.lastPlant)) ? Number(m.prefs.lastPlant) : (ids[0] ?? null);
       const cfg = (m.plants || []).find(p => p.id === wanted)?.config;
       // The plant on screen stopped (SOLAR-251): clear its readings, as a switch does.
       if (shownPlant.current != null && wanted !== shownPlant.current) clearPlant();
-      window.setCurrentPlant(wanted, cfg?.currency, cfg?.timezone);
+      setCurrentPlant(wanted, cfg?.currency, cfg?.timezone);
       setPlantId(wanted);
       // how much history this plant has — drives the "collecting your first day" copy
-      window.fetchPlantDays().then(d => { window.PLANT_DAYS = d; }).catch(() => {});
+      fetchPlantDays().then(d => { plantNow.days = d; }).catch(() => {});
     } catch (e) { setErr(e.message); }
   }, []);
   // Name of the plant just switched to, shown in the status pill until the new
@@ -1600,34 +1610,34 @@ function App({ links }) {
   // Off with the last plant's readings, before the next plant's load.
   const clearPlant = () => {
     setEnergy({}); energyRef.current = {}; inflight.current = {}; setSnap(null); setToday(null);
-    window.PLANT_DAYS = null; window.SYNC = null; syncDaysRef.current = null;
+    plantNow.days = null; plantNow.sync = null; syncDaysRef.current = null;
   };
   const switchPlant = (id) => {
     if (tab === 'system' && settingsDirty.current) { setSwitchBlocked(n => n + 1); return; }
     const plant = (me?.plants || []).find(p => p.id === Number(id));
     const cfg = plant?.config;
-    window.setCurrentPlant(id, cfg?.currency, cfg?.timezone);
+    setCurrentPlant(id, cfg?.currency, cfg?.timezone);
     window.track('plant_switched');
     setPlantId(Number(id));
-    setNotice(window.plantLabel(plant || { id }));
-    window.savePrefs({ lastPlant: Number(id) }).catch(() => {});
+    setNotice(plantLabel(plant || { id }));
+    savePrefs({ lastPlant: Number(id) }).catch(() => {});
     clearPlant();
     // how much history THIS plant has — the empty-state copy reads it
-    window.fetchPlantDays().then(d => { window.PLANT_DAYS = d; }).catch(() => {});
+    fetchPlantDays().then(d => { plantNow.days = d; }).catch(() => {});
     loadLive(); loadToday(); setRefreshKey(k => k + 1);
   };
   // Fresh-link sync state (0048) rides on every snapshot; the empty-state copy reads
-  // it from window.SYNC during render, so it is assigned here in the render path,
+  // it from plantNow.sync during render, so it is assigned here in the render path,
   // before any child renders (an effect would run after they had already painted
   // with the previous value). When the walk lands more days, the logged-days count
   // that drives "only N days so far" is refreshed too, so it does not stick at 2.
-  window.SYNC = snap?.sync ?? null;
+  plantNow.sync = snap?.sync ?? null;
   const syncDaysRef = useRef(null);
   useEffect(() => {
     const sync = snap?.sync ?? null;
     if (!sync) return;
     if (syncDaysRef.current != null && sync.days !== syncDaysRef.current) {
-      window.fetchPlantDays().then(d => { window.PLANT_DAYS = d; }).catch(() => {});
+      fetchPlantDays().then(d => { plantNow.days = d; }).catch(() => {});
     }
     syncDaysRef.current = sync.days;
   }, [snap]);
@@ -1650,7 +1660,7 @@ function App({ links }) {
   };
 
   // initial load: who am I and which plant, then the data
-  useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); loadNotifs(); window.pushResync().catch(() => {}); }); }, []);
+  useEffect(() => { loadMe().then(() => { loadLive(); loadToday(); loadNotifs(); pushResync().catch(() => {}); }); }, []);
   // auto refresh: live every minute (matches SunSynk's cadence), today and energy every
   // 5th minute. On the clock, not from page load, so devices side by side show the same
   // numbers (SOLAR-33). The second past the minute is the plant's own, 12–42 s, so every
@@ -1722,11 +1732,11 @@ function App({ links }) {
   const readNotifs = (ids) => {
     if (!ids) setNotifs(n => n && ({ ...n, unread: 0, items: n.items.map(x => ({ ...x, read: true })),
       pinned: n.pinned.map(x => ({ ...x, read: true })) }));
-    window.readNotifications(ids).then(loadNotifs).catch(() => {});
+    readNotifications(ids).then(loadNotifs).catch(() => {});
   };
   // Account notices (SOLAR-641): what each one's button opens.
   const noticeAct = {
-    pay: () => window.settlePayment(acct?.due_bill?.id),
+    pay: () => settlePayment(acct?.due_bill?.id),
     plans: () => go('plans'),
     choose: () => openSettings('connection'),
     billing: () => openSettings('plan'),
@@ -1753,9 +1763,9 @@ function App({ links }) {
   // first reading remounted it and Billing's Plan drew its outline twice (SOLAR-281).
   // Plant settings draws from api_me, not the snapshot, so it shares the slot with Settings.
   const settingsPage = tab === 'system'
-    ? <window.PlantSettings key="system" me={me} plantId={plantId} onSaved={reloadPlantConfig}
+    ? <pages.PlantSettings key="system" me={me} plantId={plantId} onSaved={reloadPlantConfig}
         flash={flashSection} onFlashed={() => setFlashSection(null)} onDirty={d => { settingsDirty.current = d; }} switchBlocked={switchBlocked} />
-    : <window.SettingsArea key="settings" page={tab} onPage={(p, section) => (section ? openSettings(section) : go(p))}
+    : <pages.SettingsArea key="settings" page={tab} onPage={(p, section) => (section ? openSettings(section) : go(p))}
         me={me} plantId={plantId} onPlantConfigSaved={reloadPlantConfig} links={links}
         flash={flashSection} onFlashed={() => setFlashSection(null)} />;
   const steps = me && ((v) => <FirstSteps me={me} plantId={plantId} onSaved={reloadPlantConfig} variant={v} />);
@@ -1776,7 +1786,7 @@ function App({ links }) {
             it (the Plan section flashed back to its outline). */}
         <div className="page">
           {!dataPage && settingsPage}
-          {dataPage && (tab !== 'live' || notifsTried) && <window.TabSkeleton tab={tab} cfg={(me?.plants || []).find(p => p.id === plantId)?.config} />}
+          {dataPage && (tab !== 'live' || notifsTried) && <pages.TabSkeleton tab={tab} cfg={(me?.plants || []).find(p => p.id === plantId)?.config} />}
         </div>
       </Frame>
     );
@@ -1789,12 +1799,12 @@ function App({ links }) {
       <BillCards notices={cards} tab={tab} />
       <div className={'page' + (old ? ' old' : '')}>
         {!dataPage && settingsPage}
-        {tab === 'live' && <window.LiveTab snap={snap} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
+        {tab === 'live' && <pages.LiveTab snap={snap} today={today} energy={energy} onNeedEnergy={onNeedEnergy} refreshKey={refreshKey}
           onOpenSettings={openSettings} />}
-        {tab === 'solar' && <window.SolarTab alertDay={openDay} snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
-        {tab === 'home' && <window.HomeTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} />}
-        {tab === 'grid' && <window.GridTab alertDay={openDay} snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
-        {tab === 'inverters' && <window.InvertersTab snap={snap} today={today} refreshKey={refreshKey} />}
+        {tab === 'solar' && <pages.SolarTab alertDay={openDay} snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
+        {tab === 'home' && <pages.HomeTab snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} />}
+        {tab === 'grid' && <pages.GridTab alertDay={openDay} snap={snap} energy={energy} onNeedEnergy={onNeedEnergy} today={today} refreshKey={refreshKey} onOpenSettings={openSettings} />}
+        {tab === 'inverters' && <pages.InvertersTab snap={snap} today={today} refreshKey={refreshKey} />}
       </div>
     </Frame>
   );
@@ -1807,25 +1817,20 @@ if (legalPage === 'terms' || legalPage === 'privacy') {
 } else {
   // The worker (sw.js) shows the offline page when a page load fails (SOLAR-592).
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-  ReactDOM.createRoot(document.getElementById('root')).render(
-    <window.AuthGate fallback={<BootShell />}><SignedIn /></window.AuthGate>
+  createRoot(document.getElementById('root')).render(
+    <AuthGate fallback={<BootShell />}><SignedIn /></AuthGate>
   );
 }
 
-// flow.js, chart.js and tabs.js (listed in index.html's #pages) load once someone is signed
-// in, while LinkGate fetches their logins, so the sign-in screen draws without them (SOLAR-143).
-// Once per page: signing out and in again reuses the first load.
-let pagesLoad = null;
-const loadPages = () => pagesLoad || (pagesLoad = Promise.all(
-  JSON.parse(document.getElementById('pages').textContent).map(src => new Promise((ok, fail) => {
-    const s = document.createElement('script');
-    s.src = src; s.async = false; // fetched together, run in list order
-    s.onload = ok; s.onerror = () => fail(new Error('Could not load ' + src));
-    document.body.appendChild(s);
-  }))
-));
+// The pages (tabs.jsx, with flow.jsx and chart.jsx) load once someone is signed in, while
+// LinkGate fetches their logins, so the sign-in screen draws without them (SOLAR-143).
+// Once per page: signing out and in again reuses the first load. A failed load is tried again
+// on the next sign-in.
+let pages = {}, pagesLoad = null;
+const loadPages = () => pagesLoad || (pagesLoad = import('./tabs.jsx').then(m => { pages = m; },
+  (e) => { pagesLoad = null; throw e; }));
 
-function SignedIn() {
+export function SignedIn() {
   const [pages, setPages] = useState('loading'); // loading | ready | failed
   useEffect(() => { loadPages().then(() => setPages('ready'), () => setPages('failed')); }, []);
   // The account's state, read before the first screen: undefined until it answers. Back from a
@@ -1834,25 +1839,25 @@ function SignedIn() {
   const [checked, setChecked] = useState(false);
   const [acct, setAcct] = useState(undefined);
   useEffect(() => {
-    window.checkReturn().then(() => { setChecked(true); return window.reloadAccount(); })
+    checkReturn().then(() => { setChecked(true); return reloadAccount(); })
       .then(a => setAcct(a || null), () => setAcct(null));
   }, []);
   // Read again whenever the account is (a login linked, a plan ended): a login whose plants
   // already had their week turns the account ended, and the pay screen shows.
   useEffect(() => {
-    const on = () => setAcct(window.accountNow());
+    const on = () => setAcct(accountNow());
     window.addEventListener('ps-account', on);
     return () => window.removeEventListener('ps-account', on);
   }, []);
   // an unpaid renewal's screens change on their own: read again while they may (link.jsx)
-  window.useAccountWatch(acct);
+  useAccountWatch(acct);
   if (pages === 'failed') return <div className="login-fine">The app didn’t load. Check your connection and reload.</div>;
   if (!checked) return <BootShell />;
   return (
-    <window.LinkGate fallback={<BootShell />}>
+    <LinkGate fallback={<BootShell />}>
       {(links) => (pages !== 'ready' || acct === undefined ? <BootShell />
         : acct && acct.state === 'ended' ? <Setup links={links} acct={acct} />
-        : window.hasActivePlant(links.accounts) ? <App links={links} /> : <Setup links={links} acct={acct} />)}
-    </window.LinkGate>
+        : hasActivePlant(links.accounts) ? <App links={links} /> : <Setup links={links} acct={acct} />)}
+    </LinkGate>
   );
 }

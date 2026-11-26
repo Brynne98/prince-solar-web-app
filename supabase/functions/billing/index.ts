@@ -25,6 +25,7 @@
 //
 // verify_jwt is off: Paystack has no Supabase session. Each route checks its caller.
 // Secret: PAYSTACK_SECRET_KEY.
+import { heartbeat } from "../_shared/heartbeat.ts";
 import { db, denyUnlessServer } from "../_shared/sunsynk.ts";
 import { noteError, serve, track } from "../_shared/errors.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
@@ -277,6 +278,7 @@ serve("billing", async (req) => {
     // the daily job's heartbeat (0246): billing.alerts lists it once it goes quiet
     await bill("heartbeat", { job: "billing-run", result: { ...out, steps: r.steps } }, "billing_jobs")
       .catch((e) => noteError("billing_heartbeat_failed", e, { hourly: true }));
+    await heartbeat("billing_run");   // F12: the billing clock, daily
     return json({ ...out, steps: r.steps }, 200);
   }
 

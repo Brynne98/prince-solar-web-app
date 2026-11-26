@@ -2,8 +2,11 @@
 // A fake plant's note stays in the log; a real plant's note, or one naming both, goes to PostHog.
 Deno.env.set("POSTHOG_URL", "http://posthog.test/e/");
 Deno.env.set("TESTER_USERS", "tester-1");
+const supabaseUrl = Deno.env.get("SUPABASE_URL");
 Deno.env.delete("SUPABASE_URL");
 const { noteError, flushErrors } = await import("./errors.ts");
+// one deno test process loads every *_test.ts: put it back for the files after this one
+if (supabaseUrl) Deno.env.set("SUPABASE_URL", supabaseUrl);
 
 const sent: string[] = [];
 globalThis.fetch = (_url: string | URL | Request, init?: RequestInit) => {

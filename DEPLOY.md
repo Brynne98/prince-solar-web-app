@@ -1,8 +1,22 @@
 # Deploying
 
-Runbook for shipping this project. Two independent halves — the frontend goes out via
-Cloudflare Pages (app.princesolarhub.com; showcase at princesolarhub.com), the backend via the Supabase CLI — and **they do
-not deploy together**.
+Production ships only through `npm run release` (`scripts/release.mjs`, SOLAR-679 F2, F3), run
+from Brynne's Mac on his say-so. Decided 2026-11-26: he is the only developer, so no production
+key lives in GitHub; GitHub runs the tests only. Revisit when more developers join. The script
+takes one commit through four stages and stops at the first failure:
+
+1. **Checks**: on `main`, clean tree, HEAD equals `origin/main`, and every GitHub check for that
+   commit green (node, deno, sql, staging).
+2. **Database**: the `functions_url` Vault secret if missing; every live function compared with
+   its file, except those the pending migrations change; `supabase db push`.
+3. **Functions**: `supabase functions deploy` (unchanged ones are skipped), then every live
+   database function compared with its file (`node scripts/db-files.mjs --live`).
+4. **Frontend**: built from a clean copy of the commit with content-named files and source
+   maps; the maps go to PostHog and are deleted; `wrangler pages deploy`; then the live
+   `config.js` must show the version and every `/build/*.js.map` must answer 404 (F19).
+
+Backend before frontend: new UI must never call an RPC that isn't there yet. Migrations and
+functions stay backward-compatible with the frontend still live.
 
 > The deploy thread ships and verifies. It does not write feature code. Broken builds,
 > leftover debug code, uncommitted work or migration drift get reported, not fixed.
@@ -10,88 +24,100 @@ not deploy together**.
 
 ---
 
-## Order
+## Before a release
 
-**Backend first, frontend second.** New UI must never call an RPC that isn't there yet.
-Migrations and Edge Functions are backward-compatible with the old frontend; the reverse
-is not true.
+**Version.** Ask which number to use (semver). Set it in `public/config.js`
+(`window.APP_VERSION`) and in `supabase/functions/_shared/errors.ts` (`APP_VERSION`); `npm test`
+fails while they differ. Commit, push to main, wait for the checks.
 
----
+**Backup**, before any release with a migration: Supabase keeps daily backups (Pro). Also dump
+to this Mac, outside the repo (it is public): `supabase db dump --remote=<ref> -f <dir>/schema.sql`
+and `supabase db dump --remote=<ref> --data-only -f <dir>/data.sql`.
 
-## 1. Pre-flight
-
-Supabase CLI v3 (Homebrew): database commands aim at the local stack unless given `--linked`.
-Function deploys use the linked project on their own.
-
-```bash
-git status --short                  # must be clean at the end, not the start
-git log --oneline origin/main..HEAD # anything unpushed?
-supabase migration list --linked    # Local and Remote columns must match
-grep -rn "TEMPORARY\|console.log\|debugger" public/ supabase/functions/
-```
-
-Then build and test. `npm test` runs `npm run build`, which compiles `public/*.jsx` into
-`public/build/*.js` with the same Babel settings the browser used to apply (SOLAR-131), then
-the warning tests and the reuse check. The reuse check fails when the functions' `APP_VERSION`
-differs from `config.js`. Any failure exits 1; Cloudflare runs only the build and keeps the
-last good deploy live if it fails:
+## Running it
 
 ```bash
-npm test
+npm run release
 ```
 
-A missing function or bad reference will NOT be caught by that — it is a syntax check,
-not a correctness one. Load the page and click through the affected tabs.
+Logins it uses, all on this Mac, none in a file:
 
-## 2. Version
+- Supabase CLI: its stored login (keychain).
+- Cloudflare: `npx wrangler@4.20.0 login`, once.
+- PostHog source maps: a personal API key in the keychain,
+  `security add-generic-password -s prince-solar-posthog-cli -a admin -w`. Missing: the maps are
+  not uploaded (a warning), and still never published.
 
-Ask which number to use. Semver: patch for fixes, minor for features, major for a
-rewrite. Then edit the one line:
+**Cloudflare does not build on push** (F2): in the Pages project, automatic production
+deployments are off, so a push never publishes the site; only the release uploads.
+`.github/workflows/secrets-guard.yml` still scans every push to main for secrets.
 
-```js
-// public/config.js
-window.APP_VERSION = 'v1.2.3';
-```
-
-Set the same number in `supabase/functions/_shared/errors.ts` (`APP_VERSION`): it is the
-release on the functions' errors and events. `npm test` fails while the two differ.
-
-Backend-only deploys need no bump — `APP_VERSION` tracks the web app, and bumping it
-would drag a Pages rebuild along for nothing.
-
-## 3. Backend
-
-> **Releasing the official-API / multi-tenant change (migrations 0024–0025):**
-> set secrets **before** `db push`, because the first `poll` after the migration
-> bootstraps your plant from them. `0024` re-keys `agg_minute`, drops `private.auth`
-> and moves tokens into Vault — **there is no rollback short of a database restore.**
-> Take a backup first. `link-sunsynk` is new and must be deployed. `api_health()`
-> keeps its global no-argument behaviour, so the health workflow is unchanged.
->
-> ```bash
-> supabase secrets set SUNSYNK_APP_KEY=… SUNSYNK_APP_SECRET=… BOOTSTRAP_USER_EMAIL=brynneprince98@gmail.com
-> supabase db push
-> supabase functions deploy poll link-sunsynk recover sync-plant-energy
-> ```
-
-> **Releasing the sharded poller (migration 0030):** push the migration **before**
-> deploying `poll`. The new function calls `poll_commit()`, which does not exist
-> until `0030` lands; the old function ignores the shard body the new cron job
-> sends, so the reverse order is the only one that stops the logger. `0030` also
-> reschedules `sunsynk-poll` with a 55 s pg_net timeout. Nothing is dropped and
-> the old accessor RPCs stay in place, so rolling back is redeploying the previous
-> `poll`.
->
-> ```bash
-> supabase db push
-> supabase functions deploy poll
-> ```
+## After it
 
 ```bash
-supabase db push --linked                         # pending migrations
-supabase functions deploy poll                    # only what changed
-supabase functions deploy recover sync-plant-energy
+curl -s -X POST https://pmakzojwhouamawgszrc.supabase.co/rest/v1/rpc/api_health \
+  -H "apikey: sb_publishable_PTYy9-EiqSFUVaFMLlCMnQ_DejfmixB" \
+  -H 'Content-Type: application/json' -d '{}'
+# expect {"stale": false}: the logger survived
 ```
+
+## Paging
+
+Better Stack (free plan) pages Brynne's phone (SOLAR-679 F12). The 30-minute GitHub check
+(`.github/workflows/health.yml`) stays as a backup.
+
+| Monitor | Kind | Period, grace | Sent by |
+|---|---|---|---|
+| reader | heartbeat | 1 min, 3 min | `poll`, shard 0, after a login was read |
+| job_check | heartbeat | 5 min, 3 min | `job-check` every run; `/fail` while any check fails |
+| billing_run | heartbeat | 1 day, 2 h | `billing/run`, the daily billing clock |
+| health | uptime | 3 min | Better Stack calls `https://<ref>.supabase.co/functions/v1/health` |
+
+Each heartbeat URL is a function secret, `HEARTBEAT_URL_READER`, `HEARTBEAT_URL_JOB_CHECK`,
+`HEARTBEAT_URL_BILLING_RUN` (`supabase secrets set`, pasted by Brynne). Unset, nothing is sent.
+
+## Database changes
+
+**What goes where in a database change** (SOLAR-679 F5–F9). Numbered migrations in
+`supabase/migrations/` are the only thing applied, locally and live.
+
+| Change | Where |
+|---|---|
+| A function: new, changed, dropped | A migration with the whole `create or replace` (or `drop`), and its file `supabase/schemas/functions/<schema>/<name>.sql`, in one commit. Never `pg_get_functiondef` + `replace` (`npm test` fails). |
+| Tables, columns, indexes, grants, policies, partitions, cron, triggers | A migration only. Supabase's diff does not track partitions or column grants, so these are not kept as declarative files. |
+| Anything in `public` the app calls | Also `supabase/functions/_shared/database.types.ts`. |
+
+After applying the migration to your own local database:
+
+```bash
+STATE_DB_URL=postgresql://postgres:postgres@127.0.0.1:<port>/postgres node scripts/db-files.mjs --write
+```
+
+`npm run test:state` (and CI on every push) runs `node scripts/db-files.mjs` without `--write`
+on a database built from every migration. It fails when a function differs from its file, a
+file has no function, or the types are stale. So a table-only migration changes no function
+file, and a function changed in a migration but not in its file turns the run red. `create or
+replace` cannot change a function's return type or argument names: drop it first in the
+same migration. No two functions may share a name (one file each).
+
+**Staging is local** (SOLAR-679 F10, F11; decided 2026-11-26: no paid staging project until
+sign-ups open). `scripts/staging-local.sh [<folder holding supabase/>]` starts a fresh local
+stack from every migration, turns on cron and pg_net, points the Vault secret `functions_url` at
+the stack's own gateway, schedules the jobs (`private.schedule_jobs()`), starts the fake SunSynk
+on :4400 and serves the functions. It takes `PAYSTACK_SECRET_KEY` (test keys only) and, to send
+mail, `RESEND_API_KEY` with `NOTIFY_LIVE=1`. `scripts/staging-check.mjs` then signs up, links a
+fake plant and checks cron called only this stack; CI runs both on every push.
+
+- Pay with a test card in the app: Paystack's checkout page, option Success. Paystack refuses a
+  `.test` email, so sign up with an `@example.com` one.
+- Paystack's webhook needs a public address; the return to the app calls `/billing/verify`, so
+  most runs need none. When one does: `cloudflared tunnel --url http://127.0.0.1:<api port>` and
+  set the test webhook URL in Paystack to `<tunnel>/functions/v1/billing/webhook`.
+- To rehearse a data move, copy production into a local stack of its own, never the other way:
+  `supabase db dump --linked --data-only -f <scratch>/prod.sql`, then load it with psql. Delete
+  the copy afterwards.
+- Beside another local stack: copy `supabase/` to a folder of its own and give it its own
+  `project_id` and ports in `config.toml` first.
 
 **New tables, sequences and functions get no access by default** (0108, SOLAR-145).
 Since 0108, and on Supabase from 2026-10-30, a new object in `public` is open to no
@@ -113,69 +139,6 @@ grant execute on function public.api_foo() to authenticated;   -- anon only if s
 anon gets nothing unless a signed-out page needs it. A local `supabase db reset` replays
 migrations the same way (`auto_expose_new_tables = false`), so a missing grant shows up
 there as "permission denied" before it reaches production.
-
-**"Only what changed" includes `_shared/`.** Every function bundles the files it
-imports from `supabase/functions/_shared/` at deploy time, so a change there is a
-change to every importer — even if the importer's own `index.ts` is untouched.
-`git log -- supabase/functions/<name>` will say the function is current when it is
-not. Check the shared files too:
-
-```bash
-git log --name-only --since="<last deploy time>" -- supabase/functions/_shared
-```
-
-Then redeploy everything that imports a file in that list. When in doubt, deploy
-all five; the CLI skips any whose bundle is unchanged ("No change found in
-Function"), so over-deploying costs nothing. It also means `UPDATED_AT` in
-`supabase functions list` is not proof a function is stale — a deploy from an
-uncommitted working tree can land before the commit.
-
-```bash
-supabase functions deploy poll recover link-sunsynk sync-plant-energy
-```
-
-After deploying `poll`, confirm the logger survived:
-
-```bash
-curl -s -X POST https://pmakzojwhouamawgszrc.supabase.co/rest/v1/rpc/api_health \
-  -H "apikey: sb_publishable_PTYy9-EiqSFUVaFMLlCMnQ_DejfmixB" \
-  -H 'Content-Type: application/json' -d '{}'
-# expect {"stale": false}
-```
-
-## 4. Frontend
-
-```bash
-git add -A && git commit && git push origin main
-```
-
-Cloudflare Pages rebuilds from `main` on every push: build command `npm ci && npm run build`,
-output directory `public`. Its build settings live in the Cloudflare dashboard, not in this
-repo. `public/build/` is not in git; the build makes it.
-
-`.github/workflows/secrets-guard.yml` scans the whole repo and its history for secrets with
-gitleaks (`.gitleaks.toml`) on every push to main; GitHub's secret scanning and push
-protection are also on in the repo settings.
-A failed check does not stop Cloudflare; read the run. GitHub Pages is switched off
-(SOLAR-110).
-
-## 5. Verify — do not assume
-
-```bash
-until curl -s "https://app.princesolarhub.com/config.js?v=$(date +%s)" \
-  | grep -q "v1.2.3"; do sleep 20; done
-```
-
-Typically 1–2 minutes. If it doesn't land, check the run:
-
-```bash
-curl -s "https://api.github.com/repos/Brynne98/prince-solar-web-app/actions/runs?per_page=5"
-```
-
-Logs need authentication, so an unauthenticated fetch gets 403 — read the failure in the
-Actions tab instead.
-
----
 
 ## Things that have actually gone wrong
 
@@ -199,6 +162,20 @@ a temporary branch inside `poll`. Grep before committing.
 onto today; that must stay local.
 
 ---
+
+## Bounce webhook (SOLAR-679 F13)
+
+Mail to an address that bounced for good, was marked as spam or is on Resend's block list is
+dropped ("address blocked", 0281). Resend tells us through `resend-webhook`. Set up once, after
+0281 is pushed:
+
+1. `supabase functions deploy resend-webhook` (verify_jwt is off in `config.toml`).
+2. Resend → Webhooks → Add: URL `https://pmakzojwhouamawgszrc.supabase.co/functions/v1/resend-webhook`,
+   events `email.bounced`, `email.complained`, `email.suppressed`.
+3. Copy its signing secret (`whsec_...`) and `supabase secrets set RESEND_WEBHOOK_SECRET=<it>`
+   (paste it yourself). Without it every call gets 503 and Resend retries for a day.
+
+Let an address through again: `delete from private.mail_blocked where email = '<lower case>'`.
 
 ## Going live
 

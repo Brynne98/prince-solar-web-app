@@ -1,6 +1,6 @@
 // Every line about accounts, logins, chosen plants, plans, prices, billing, the free week
-// and history kept or deleted (SOLAR-641). Screens (public/build/text.js, made from this
-// file by scripts/build-jsx.js) and emails (notify) both read it. Slots come only from
+// and history kept or deleted (SOLAR-641). Screens (public/*.jsx import it, bundled by Vite)
+// and emails (notify) both read it. Slots come only from
 // billing.screen_state (0247), as the app gets it from api_account_state: no count,
 // price, plan name or date is worked out anywhere else. Money from amount_minor +
 // currency + locale; dates in the account's time zone.

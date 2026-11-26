@@ -21,7 +21,7 @@ import {
 import { outboxMail, FROM_BILLING, FROM_HELLO } from "../_shared/email.ts";
 import { msgKey, type Post, sendOutboxOne } from "../_shared/outbox.ts";
 import { alertLine, alertPush, clock as hhmm, lasted, mail as accountMail, type MailInput } from "../_shared/text.ts";
-import { Pacer, retryAfterMs } from "../_shared/pace.ts";
+import { Pacer, readRate, retryAfterMs } from "../_shared/pace.ts";
 import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
 export const LIVE = Deno.env.get("NOTIFY_LIVE") === "1";
@@ -30,8 +30,8 @@ export const RESEND_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const RESEND_URL = Deno.env.get("RESEND_URL") ?? "https://api.resend.com/emails";
 // The cron call times out at 55 s; stop taking before that, the rest goes next minute.
 export const BUDGET_MS = 40_000;
-// Resend's default limit is 2 calls a second.
-const PACE_MS = 550;
+// The gap before the first reply's rate-limit headers set it (SOLAR-679 F14).
+const START_GAP_MS = 550;
 // exportVapidKeys() JSON: {publicKey, privateKey} as JWKs. The public half is VAPID_PUBLIC in public/config.js.
 export const VAPID_KEYS = Deno.env.get("VAPID_KEYS") ?? "";
 // Pop-ups sent at once; a stage change can queue thousands in one minute.
@@ -314,7 +314,7 @@ const payload = (o: Out) => {
            ...(fb(o) && o.row.data.image ? { attachments: [{ filename: "screenshot.jpg", content: o.row.data.image }] } : {}) };
 };
 
-async function post(url: string, body: unknown, key: string): Promise<{ status: number; error?: string; retryAfter?: string | null }> {
+async function post(url: string, body: unknown, key: string): ReturnType<Post> {
   // A network failure comes back as a status too, so the rows are retried.
   try {
     const res = await fetch(url, {
@@ -322,8 +322,9 @@ async function post(url: string, body: unknown, key: string): Promise<{ status: 
       headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json", "Idempotency-Key": key },
       body: JSON.stringify(body),
     });
-    return res.ok ? { status: res.status } : { status: res.status, error: `resend ${res.status}: ${(await res.text()).slice(0, 200)}`,
-                                               retryAfter: res.headers.get("Retry-After") };
+    const rate = readRate(res.headers);
+    return res.ok ? { status: res.status, rate } : { status: res.status, error: `resend ${res.status}: ${(await res.text()).slice(0, 200)}`,
+                                                     retryAfter: res.headers.get("Retry-After"), rate };
   } catch (e) {
     return { status: 0, error: `resend: ${e instanceof Error ? e.message : e}` };
   }
@@ -331,7 +332,16 @@ async function post(url: string, body: unknown, key: string): Promise<{ status: 
 
 // Resend allows a few calls a second; batches of up to 100 keep a burst inside it. One pace
 // for every Resend call in a run; a 429 holds them all until its Retry-After (SOLAR-645).
-const pacer = new Pacer(PACE_MS);
+const pacer = new Pacer(START_GAP_MS);
+
+/** One call under the run's pace: each reply's rate-limit headers set the gap to the next
+ *  call (F14); a 429 holds every lane until its Retry-After. */
+async function paced(postFn: Post, url: string, o: { id: number; payload: unknown }, key?: string) {
+  const out = await sendOutboxOne(postFn, url, o, key);
+  pacer.learn(out.rate);
+  if (out.status === 429) pacer.hold(out.retryAfter);
+  return out;
+}
 
 // ------------------------------------------------------------------- pop-ups
 
@@ -453,9 +463,8 @@ export async function outboxPass(until: number, deadline = until) {
       // left leased: sent on a later pass. No slot (a 429 held past the deadline): take no more.
       if (stop) break;
       if (!await pacer.slot(deadline)) { stop = true; break; }
-      const res = await sendOutboxOne(post, RESEND_URL, { id: o.row.id, payload: o.payload });
+      const res = await paced(post, RESEND_URL, { id: o.row.id, payload: o.payload });
       const limited = res.status === 429;
-      if (limited) pacer.hold(res.retryAfter);
       const ok = !res.error;
       // Resend refused the email itself (400, 422): given up; a 429 after its Retry-After, not
       // counted as a try (0257); anything else in 5 minutes
@@ -523,15 +532,13 @@ export const bulkHold: Hold = async (row) => {
   return null;
 };
 
-/** One Resend answer for the rows of one call. A 429 holds the pace; Resend in trouble (not a
+/** One Resend answer for the rows of one call (paced() has held the pace on a 429). Resend in trouble (not a
  *  refusal, nor a 409 still in progress) stops the pass. keep: the call may have gone. */
 function answer(ctx: Ctx, ids: number[], out: Awaited<ReturnType<Post>>, keep: boolean, what: string,
                 user: string | null = null): MsgResult[] {
   if (!out.error) return ids.map((id) => ({ id, code: out.status }));
-  if (out.status === 429) {
-    pacer.hold(out.retryAfter);
-    noteError("resend_429", new Error(out.error), { hourly: true });
-  } else if (refused(out.status)) noteError("email_failed", new Error(`${what}: ${out.error}`), { user, hourly: true });
+  if (out.status === 429) noteError("resend_429", new Error(out.error), { hourly: true });
+  else if (refused(out.status)) noteError("email_failed", new Error(`${what}: ${out.error}`), { user, hourly: true });
   else noteError(`resend_${out.status || "network"}`, new Error(out.error), { hourly: true });
   if (!refused(out.status) && out.status !== 409) ctx.stop = true;
   const retry_s = out.retryAfter ? Math.ceil(retryAfterMs(out.retryAfter, Date.now()) / 1000) : undefined;
@@ -542,7 +549,7 @@ function answer(ctx: Ctx, ids: number[], out: Awaited<ReturnType<Post>>, keep: b
 /** A row alone, under ms-<id>. */
 async function sendAlone(ctx: Ctx, b: Built): Promise<MsgResult> {
   if (ctx.stop || !await pacer.slot(ctx.deadline)) { ctx.stop = true; return { id: b.m.id, untried: true }; }
-  const out = await sendOutboxOne(ctx.postFn, RESEND_URL, { id: b.m.id, payload: payload(b) }, msgKey(b.m.id));
+  const out = await paced(ctx.postFn, RESEND_URL, { id: b.m.id, payload: payload(b) }, msgKey(b.m.id));
   return answer(ctx, [b.m.id], out, false, `${b.m.kind} outbox ${b.m.id}`, b.m.user_id)[0];
 }
 
@@ -593,7 +600,7 @@ async function sendGroup(ctx: Ctx, g: MsgEmail[], key: string | null): Promise<M
       return [...res, ...back(built.map((b) => b.m))];
     }
   }
-  const out = await sendOutboxOne(ctx.postFn, `${RESEND_URL}/batch`, { id: ids[0], payload: built.map(payload) }, k);
+  const out = await paced(ctx.postFn, `${RESEND_URL}/batch`, { id: ids[0], payload: built.map(payload) }, k);
   // Refused: Resend sent none of them. Each alone, so a bad address fails only itself.
   if (refused(out.status)) {
     const one: MsgResult[] = [];

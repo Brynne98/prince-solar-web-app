@@ -8,7 +8,7 @@
 // always have; only when that fails is a page load answered with offline.html. The app,
 // its scripts, Supabase and every other request are never touched.
 // OFFLINE is the kept copy's name. Cloudflare's build stamps it with a hash of the three
-// files (scripts/build-jsx.js), so a change to any of them changes this file, the browser
+// files (vite.config.mjs), so a change to any of them changes this file, the browser
 // installs the new worker, and activate drops the old copy.
 const OFFLINE = 'offline-dev';
 const OFFLINE_FILES = ['/offline.html', '/offline.js', '/theme.js'];

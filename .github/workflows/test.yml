@@ -1,0 +1,84 @@
+# Every push runs every test (SOLAR-679 F1). npm run release refuses a commit whose checks here
+# are not all green (F2).
+#   node:  npm test (app tests and the guardrails in scripts/reuse-check.mjs)
+#   deno:  every supabase/functions/**/*_test.ts
+#   sql:   npm run test:state on a fresh local Supabase built from every migration
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  deno:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm run test:deno
+
+  sql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.3.0
+      - name: Fresh local database from every migration
+        run: supabase start -x studio,imgproxy,vector,logflare,supavisor,storage-api,realtime,postgres-meta,edge-runtime
+      - name: SQL state tests
+        env:
+          STATE_DB_URL: postgresql://postgres:postgres@127.0.0.1:55322/postgres
+          PSQL: psql
+        run: npm run test:state
+
+  staging:
+    # Local staging (F10, F11): cron on and calling this stack's own functions, the fake SunSynk.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.3.0
+      - name: Start local staging
+        run: STAGING_DIR="$RUNNER_TEMP/staging" scripts/staging-local.sh
+      - name: Sign up, link a fake plant, cron calls only this stack
+        env:
+          PSQL: psql
+        run: |
+          eval "$(supabase status -o env 2>/dev/null | grep -E '^(API_URL|ANON_KEY|DB_URL)=')"
+          API_URL="$API_URL" ANON_KEY="$ANON_KEY" DB_URL="$DB_URL" node scripts/staging-check.mjs
+      - name: Function log
+        if: failure()
+        run: tail -100 "$RUNNER_TEMP/staging/functions.log"

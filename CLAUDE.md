@@ -11,8 +11,8 @@
   the app at app.princesolarhub.co.za, the showcase at princesolarhub.co.za (a Cloudflare
   URL rewrite serves `/welcome` for `/`; www redirects to the apex). Since 2026-10-26
   (SOLAR-190) every princesolarhub.com address 301s to the same path on .co.za; keep
-  .com renewing. .co.za is registered at xneelo (company account), DNS on Cloudflare. Rebuilt from GitHub `main` on every push (seen 2026-10-18: v0.28.63 was live
-  20 s after the push). Its settings are in the Cloudflare dashboard, not this repo.
+  .com renewing. .co.za is registered at xneelo (company account), DNS on Cloudflare. Published only by `npm run release` (SOLAR-679; build on push is off).
+  Its settings are in the Cloudflare dashboard, not this repo.
   Build command `npm ci && npm run build` compiles `public/*.jsx` into `public/build/` (not in
   git; SOLAR-131). GitHub Pages is off
   (SOLAR-110); the old `brynne98.github.io/prince-solar-web-app` address is a 404.
@@ -23,24 +23,17 @@
 
 ## Releasing
 
-Two halves that do not ship together. Backend first, frontend second. The full
-runbook, including pre-flight checks and the version bump, is in `DEPLOY.md`.
+One command, from this Mac, after the commit is on main and its GitHub checks are green:
 
-- **Push the code (also ships the frontend):**
+```bash
+npm run release
+```
 
-  ```bash
-  git push origin main
-  ```
+It ships the database, then the functions, then the frontend, and stops at the first failure.
+A push to main publishes nothing (Cloudflare's build on push is off). Runbook: `DEPLOY.md`.
 
-- **Ship the backend, only what changed:**
-
-  ```bash
-  supabase db push --linked
-  supabase functions deploy poll
-  ```
-
-Nothing here is permission to run those. Commit, push and deploy only on
-Brynne's explicit say-so, every time.
+Nothing here is permission to run it. Push to main and release only on Brynne's explicit
+say-so, every time.
 
 ## Reuse before you build
 

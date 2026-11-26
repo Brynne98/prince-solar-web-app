@@ -5,8 +5,6 @@
  *  1. Dead CSS: a class in index.html's <style> that no .jsx, .js or .html under public/ uses.
  *     Classes the code builds at run time ('status-' + s.status) count as used by their prefix.
  *  2. Rebuilt components: markup or helpers that already exist in the shared set, made again.
- *  3. One global scope: every public/*.jsx shares it, so a second top-level `function x` or
- *     `const x` silently replaces the first. Two files may not declare the same name.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -144,7 +142,7 @@ for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
 for (const f of jsx) {
   read(f).split('\n').forEach((line, i) => {
     if (/reuse-check: allow/.test(line) || /^\s*(\/\/|\*|\/\*)/.test(line) || f === 'components.jsx' && /^\s+(pv|batt|grid|load|soc):/.test(line)) return;
-    if (ROLE_HEX.test(line) || ROLE_RGB.test(line)) problems.push(`${f}:${i + 1} a raw power or status colour: use window.COLORS or var(--…)`);
+    if (ROLE_HEX.test(line) || ROLE_RGB.test(line)) problems.push(`${f}:${i + 1} a raw power or status colour: use COLORS (components.jsx) or var(--…)`);
     if (RAW_TINT.test(line)) problems.push(`${f}:${i + 1} a raw white or black tint: use rgba(var(--ink-rgb), a)`);
   });
 }
@@ -292,13 +290,65 @@ for (const f of jsx) {
     if (/\bdb\s*\.\s*rpc\s*(?:<[^>]*>)?\s*\(|\bdb\s*\.\s*from\s*\(\s*["'`]plant_config["'`]/.test(fnRead(f))) problems.push(`${f}: a database call around the handle: use rpc() or dbHandle() from _shared/db.ts`);
 }
 
-// ---- 3. one global scope ----
-const seen = new Map();
-for (const f of jsx) {
-  for (const m of read(f).matchAll(/^(?:function\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=)/gm)) {
-    const name = m[1] || m[2];
-    if (seen.has(name) && seen.get(name) !== f) problems.push(`${f}: ${name} is also declared at the top of ${seen.get(name)}: one global scope, rename or share it`);
-    else seen.set(name, f);
+// ---- 4. no migration patches function text (SOLAR-679 F7) ----
+// pg_get_functiondef() + replace() edits a live body no file shows. A changed function is
+// written whole (create or replace) from its file under supabase/schemas/functions/.
+// These migrations did it before the rule and stay as they are.
+{
+  const MIG = path.join(PUB, '..', 'supabase', 'migrations');
+  const before = new Set(['0252_billing_drop_old.sql', '0256_alert_queue_fixes.sql', '0257_notify_workers.sql',
+    '0258_no_readings_future_start.sql', '0261_msg_outbox_push.sql', '0262_msg_outbox_email.sql',
+    '0264_one_set_of_alert_words.sql', '0273_billing_lock_order.sql', '0274_add_plant_reminder.sql',
+    '0276_payment_reminder.sql', '0279_plan_move_with_interval.sql']);
+  for (const f of fs.readdirSync(MIG).filter(f => f.endsWith('.sql') && !before.has(f)))
+    if (/pg_get_functiondef/i.test(fs.readFileSync(path.join(MIG, f), 'utf8').replace(/--[^\n]*/g, '')))
+      problems.push(`supabase/migrations/${f}: pg_get_functiondef patches a function's text: write the whole function (supabase/schemas/functions/)`);
+}
+
+// ---- 5. market and vendor names stay in their own files (SOLAR-679 F20) ----
+// A new place that names the time zone, the currency or a vendor makes the next market or
+// vendor harder. Code only: app scripts, edge functions (not tests) and the function files
+// (a migration repeats a whole function, so its file is what counts). Uses that were there on
+// 2026-11-26 are in known-vendor-strings.json,
+// per file and name; a file may not go above its count. When a step removes some, lower the
+// counts with `node scripts/reuse-check.mjs --shrink` (it never raises one).
+{
+  const ROOT = path.join(PUB, '..');
+  const NAMES = { 'Africa/Johannesburg': /Africa\/Johannesburg/g, ZAR: /\bZAR\b/g, sunsynk: /sunsynk/gi,
+    paystack: /paystack/gi, resend: /\bresend/gi, infobip: /infobip/gi };
+  // a vendor's own files: its adapter and its stand-in
+  const OWN = { sunsynk: ['supabase/functions/_shared/sunsynk.ts', 'supabase/functions/_shared/mock-sunsynk.mjs',
+    'supabase/functions/mock-sunsynk/index.ts'],
+    resend: ['supabase/functions/resend-webhook/index.ts'] };
+  const walk = (d) => fs.existsSync(path.join(ROOT, d)) ? fs.readdirSync(path.join(ROOT, d), { recursive: true }).map(f => path.join(d, String(f))) : [];
+  const files = [
+    ...fs.readdirSync(PUB).filter(f => /\.(jsx|js)$/.test(f)).map(f => `public/${f}`),
+    ...walk('supabase/functions').filter(f => /\.(ts|mts|mjs)$/.test(f) && !/_test\.ts$/.test(f)),
+    ...walk('supabase/schemas').filter(f => f.endsWith('.sql')),
+  ];
+  const now = {};
+  for (const f of files) {
+    const text = fs.readFileSync(path.join(ROOT, f), 'utf8').split('\n').filter(l => !/reuse-check: allow/.test(l)).join('\n');
+    for (const [name, re] of Object.entries(NAMES)) {
+      if (OWN[name]?.includes(f)) continue;
+      const n = (text.match(re) || []).length;
+      if (n) (now[f] ||= {})[name] = n;
+    }
+  }
+  const KNOWN = path.join(ROOT, 'scripts', 'known-vendor-strings.json');
+  const known = JSON.parse(fs.readFileSync(KNOWN, 'utf8'));
+  if (process.argv.includes('--shrink')) {
+    const less = {};
+    for (const [f, names] of Object.entries(known)) for (const [name, n] of Object.entries(names)) {
+      const m = Math.min(n, now[f]?.[name] || 0);
+      if (m) (less[f] ||= {})[name] = m;
+    }
+    fs.writeFileSync(KNOWN, JSON.stringify(less, null, 1) + '\n');
+    console.log('known-vendor-strings.json: counts lowered to what the code has now');
+  }
+  for (const [f, names] of Object.entries(now)) for (const [name, n] of Object.entries(names)) {
+    const k = known[f]?.[name] || 0;
+    if (n > k) problems.push(`${f}: names ${name} ${n} time${n === 1 ? '' : 's'}, ${k} known: read it from settings or the vendor's own file, not a new hard-coded use`);
   }
 }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SOLAR-665: the message outbox, alert and notify SQL tests; SOLAR-673 adds the inverter list,
-// silent inverter and warning email ones; SOLAR-676 the day's peak. On a local database at the newest migration
+// silent inverter and warning email ones; SOLAR-676 the day's peak; SOLAR-679 F13 blocked mail addresses. On a local database at the newest migration
 // (scripts/local-db.mjs). Each file opens its own transaction and rolls it back;
 // AUTOCOMMIT=off keeps an edit that drops the begin, or adds SQL after the rollback, from
 // saving rows. Exit 0: every file ran to its "all N checks passed" line. Exit 1: any did not.
@@ -8,7 +8,7 @@ import path from 'node:path';
 import { REPO, psql } from './local-db.mjs';
 
 const FILES = ['msg-outbox-tests', 'msg-outbox-email-tests', 'msg-outbox-bulk-tests', 'alert-queue-tests', 'notify-lanes-tests',
-  'inverters-cached-tests', 'silent-inverter-tests', 'warning-tests', 'day-peak-tests'];
+  'inverters-cached-tests', 'silent-inverter-tests', 'warning-tests', 'day-peak-tests', 'mail-blocked-tests'];
 
 let failed = 0;
 for (const f of FILES) {

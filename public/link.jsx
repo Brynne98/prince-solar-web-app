@@ -14,11 +14,19 @@
 // ============================================================================
 
 // A database call that takes longer than ms ends as a 'timed out' error, so nothing waits forever.
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { AccountText } from '../supabase/functions/_shared/text.ts';
+import { Icon, motionMs, toast } from './app.jsx';
+import { AuthCard, FieldLabel, PasswordInput, SignOutButton, checkSession, dropFromAddress, invalidProps, useFieldErrors } from './auth.jsx';
+import { BusyButton, Segmented, plantLabel } from './components.jsx';
+import { fetchAccountState, fetchPlanQuote, saveChosenPlants } from './data.jsx';
+import { sb } from './sb.js';
 const withTimeout = (call, ms) => Promise.race([call,
   new Promise(r => setTimeout(() => r({ data: null, error: { message: 'timed out' } }), ms))]);
 // A POST to one of our Edge Functions as the signed-in user: [response, its JSON or {}].
 const edgePost = async (path, body, signal) => {
-  const { data: { session } } = await window.sb.auth.getSession();
+  const { data: { session } } = await sb.auth.getSession();
   if (!session) throw new Error('Your session ended. Sign in again.');
   const res = await fetch(`${window.SUNSYNK_CONFIG.url}/functions/v1/${path}`, {
     method: 'POST',
@@ -29,9 +37,9 @@ const edgePost = async (path, body, signal) => {
   return [res, await res.json().catch(() => ({}))];
 };
 // Draws node in a root of its own on the body, outside the app; returns the function that removes it.
-const mountNode = (node) => {
+export const mountNode = (node) => {
   const el = document.body.appendChild(document.createElement('div'));
-  const root = ReactDOM.createRoot(el);
+  const root = createRoot(el);
   root.render(node);
   return () => { root.unmount(); el.remove(); };
 };
@@ -42,7 +50,7 @@ const mountNode = (node) => {
  * busy until the list it changed is back on screen. `loading` is only the first read: a
  * re-read never blanks the list.
  */
-window.useLinkStatus = function useLinkStatus() {
+export function useLinkStatus() {
   const { useState, useEffect, useRef, useCallback } = React;
   const [state, setState] = useState({ loading: true, accounts: [], error: null });
   const latest = useRef(null);
@@ -51,7 +59,7 @@ window.useLinkStatus = function useLinkStatus() {
     // Ten seconds, then it counts as a failed read. Raced here rather than with an abort
     // signal: supabase-js waits on the stored session before the request even starts, and
     // a stall there never reaches the signal.
-    const attempt = () => withTimeout(window.sb.rpc('api_logins'), 10000).catch(e => ({ data: null, error: e }));
+    const attempt = () => withTimeout(sb.rpc('api_logins'), 10000).catch(e => ({ data: null, error: e }));
     // One quiet second try: a phone opening the app can stall or fail the first read
     // while its network and stored session wake up, and a retry then loads (SOLAR-21).
     const read = attempt().then(r => (r.error ? attempt() : r)).then(({ data, error }) => {
@@ -62,7 +70,7 @@ window.useLinkStatus = function useLinkStatus() {
       // come back empty, not refused, so a tab left on screen would never look (SOLAR-526).
       if (!error && read === latest.current) {
         const some = (data || []).length > 0;
-        if (hadLogins.current && !some) window.checkSession();
+        if (hadLogins.current && !some) checkSession();
         hadLogins.current = some;
       }
       if (read === latest.current) setState(s => ({ loading: false, accounts: error ? s.accounts : (data || []), error: error ? (error.message || 'failed') : null }));
@@ -87,7 +95,7 @@ window.useLinkStatus = function useLinkStatus() {
   return { ...state, refresh };
 };
 
-window.linkSunsynk = async function linkSunsynk(username, password) {
+export async function linkSunsynk(username, password) {
   const [res, body] = await edgePost('link-sunsynk', { username, password });
   if (!res.ok) throw new Error(LINK_ERRORS[body.error] || 'Couldn’t connect to SunSynk. Check the login and try again.');
   window.track('plant_linked');
@@ -98,7 +106,7 @@ window.linkSunsynk = async function linkSunsynk(username, password) {
 const SHARE_TO = 'admin@princesolarhub.co.za';
 // A plant shared to us: plantId or an inverter serial. Resolves like linkSunsynk, so the
 // screens that take a login take this too; a claimed plant throws with .taken = what was typed.
-window.claimShare = async function claimShare(ref) {
+export async function claimShare(ref) {
   const [res, body] = await edgePost('claim-share', { ref });
   window.track('share_check_done', { result: body.result || body.error || String(res.status) });
   if (body.error === 'taken') throw Object.assign(new Error('taken'), { taken: ref });
@@ -116,41 +124,41 @@ const LINK_ERRORS = {
   'session invalid': 'Your session ended. Sign in again.',
   'too many attempts': 'Too many tries. Try again in an hour.',
   // one SunSynk login with no plan (0203)
-  'one login': window.AccountText.logins.oneLogin,
-  'no plan': window.AccountText.logins.noLoginEnded,
+  'one login': AccountText.logins.oneLogin,
+  'no plan': AccountText.logins.noLoginEnded,
 };
 
 
 // ---- Account and billing (SOLAR-641) -------------------------------------------
 // Every line about plans, chosen plants, prices, billing, the free week and history comes
-// from the text catalog (window.AccountText, made from supabase/functions/_shared/text.ts),
+// from the text catalog (AccountText, supabase/functions/_shared/text.ts),
 // filled from the account's state (api_account_state, 0247). Nothing here works out a count,
 // a price, a plan name or a date. AT is shared with the later files (one global scope).
-const AT = window.AccountText;
+export const AT = AccountText;
 
 // The account's state, read once and shared by every screen. reloadAccount() reads it again
 // and tells them (ps-account). useAccount(): null until the first read lands.
 let acctNow = null, acctLoad = null;
-window.reloadAccount = () => acctLoad || (acctLoad = window.fetchAccountState()
+export const reloadAccount = () => acctLoad || (acctLoad = fetchAccountState()
   // _got: when it landed, so a timer set from the server's clock (a.at) can allow for the trip
   .then(a => { if (a) a._got = Date.now(); acctNow = a; window.dispatchEvent(new Event('ps-account')); return a; })
   .finally(() => { acctLoad = null; }));
-window.accountNow = () => acctNow;
+export const accountNow = () => acctNow;
 // the read on its way, if any (it may have started before a change the caller knows about)
-window.accountLoading = () => acctLoad;
-window.useAccount = function useAccount() {
+export const accountLoading = () => acctLoad;
+export function useAccount() {
   const [a, setA] = React.useState(acctNow);
   React.useEffect(() => {
     const on = () => setA(acctNow);
     window.addEventListener('ps-account', on);
-    if (acctNow) setA(acctNow); else window.reloadAccount().catch(() => {});
+    if (acctNow) setA(acctNow); else reloadAccount().catch(() => {});
     return () => window.removeEventListener('ps-account', on);
   }, []);
   return a;
 };
-window.sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') acctNow = null; });
+sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') acctNow = null; });
 // A read started now, not one already on its way (it may have started before a change).
-const freshAccount = async () => { await acctLoad?.catch(() => {}); return window.reloadAccount(); };
+const freshAccount = async () => { await acctLoad?.catch(() => {}); return reloadAccount(); };
 
 // An unpaid renewal (SOLAR-644): the account is read again, signed in on any page, while its
 // screens can change without the owner doing anything. A hidden tab asks nothing and reads
@@ -166,7 +174,7 @@ const inFlight = (a) => !!a && (a.renewal_in_flight || (a.state === 'past_due' &
 // the cutoff a card page still being answered changes no screen: Pay reopens it.)
 const heldNote = (a) => !!a && a.state === 'past_due' && a.past_due_reason === 'checking';
 const readNow = () => { if (!document.hidden) freshAccount().catch(() => {}); };
-window.useAccountWatch = function useAccountWatch(acct) {
+export function useAccountWatch(acct) {
   const fast = inFlight(acct), held = acct?.held_reference || null;
   const pastDue = acct?.state === 'past_due' && !!acct.plan_ends_at;
   // a plant's old history being deleted: read again each minute until it's gone (SOLAR-659)
@@ -216,7 +224,7 @@ const billingCall = async (route, body, ms = 30000) => {
   if (!res.ok) throw new Error(out.error || 'payment failed');
   return out;
 };
-window.billingCall = billingCall;
+export { billingCall };
 // Billing's Plan section, on the plant the user was looking at.
 const planUrl = (extra = '') => {
   const plant = new URLSearchParams(location.search).get('plant');
@@ -226,9 +234,9 @@ const billingPaid = () => location.assign(planUrl('&billing=paid'));
 // The toast for a payment or a change that failed, in the catalog's words.
 const payFailed = (e, fallback = AT.pay.startFailed) => {
   const t = AT.refused(e?.message || '');
-  window.toast(t === AT.refused('') ? fallback : t, /open soon/.test(e?.message || '') ? { info: true } : { error: true });
+  toast(t === AT.refused('') ? fallback : t, /open soon/.test(e?.message || '') ? { info: true } : { error: true });
 };
-window.payFailed = payFailed;
+export { payFailed };
 // A saved card's charge: the billing function gives Paystack 30 s to charge and 30 s more to
 // check, so the page waits past both (SOLAR-363).
 const PAY_WAIT = 70000;
@@ -239,7 +247,7 @@ const payLanded = async (beforeP) => {
   const was = acctSig(await beforeP);
   for (let i = 0; was && i < 12; i++) {
     await new Promise(res => setTimeout(res, 5000));
-    const a = await window.fetchAccountState().catch(() => null);
+    const a = await fetchAccountState().catch(() => null);
     if (a && acctSig(a) !== was) return { status: 'applied' };
   }
   return { status: 'pending' };
@@ -301,7 +309,7 @@ function Dialog({ label, onClose, keep = false, busy = false, size = null, child
   // Closing (SOLAR-351): the dialog goes with whatever held it, so its content moves to a
   // copy that fades out on top for --dur-fast. Runs before React removes the dialog.
   React.useLayoutEffect(() => () => {
-    const d = ref.current, ms = window.motionMs('--dur-fast');
+    const d = ref.current, ms = motionMs('--dur-fast');
     if (!ms || !d?.open || !d.showPopover) return;
     const g = document.createElement('div');
     g.className = d.className + ' leaving';
@@ -322,7 +330,7 @@ function Dialog({ label, onClose, keep = false, busy = false, size = null, child
     </dialog>
   );
 }
-window.Dialog = Dialog;
+export { Dialog };
 
 // The saved card is charged without Paystack's page, so the amount, the next bill and the
 // card are shown first (SOLAR-276). r: AccountText.quoteReview's lines; card: the saved card.
@@ -342,7 +350,7 @@ function PayReview({ r, card, onDone }) {
     </Dialog>
   );
 }
-window.PayReview = PayReview;
+export { PayReview };
 // Shown over the page; true: go on.
 const askReview = (r, card) => new Promise(resolve => {
   let close;
@@ -353,13 +361,13 @@ const askReview = (r, card) => new Promise(resolve => {
 // A first plan, a restart or an upgrade. plants: the final choice (the checkout asked for it
 // first). The price comes from the server's quote; with a saved card it is shown before the
 // charge. paidEvent: sent once paid.
-window.startPlan = async function startPlan(acct, plan, interval, plants, { newCard = false, paidEvent = null } = {}) {
+export async function startPlan(acct, plan, interval, plants, { newCard = false, paidEvent = null } = {}) {
   if (paying) return;
   paying = true;
   try {
     const stop0 = working(AT.pay.checking);
     let q;
-    try { q = await window.fetchPlanQuote(plan, interval); } finally { stop0(); }
+    try { q = await fetchPlanQuote(plan, interval); } finally { stop0(); }
     const saved = !!acct.card && !newCard;
     if (saved) {
       const ok = await askReview(AT.quoteReview(acct, q), AT.cardLine(acct));
@@ -367,13 +375,13 @@ window.startPlan = async function startPlan(acct, plan, interval, plants, { newC
       if (!ok) return;
     }
     const stop = working(saved ? AT.pay.taking : AT.pay.opening);
-    const before = window.fetchAccountState().catch(() => null);
+    const before = fetchAccountState().catch(() => null);
     let r;
     try {
       r = await billingCall('pay', { plan, period: interval, plants, newCard: !saved }, PAY_WAIT)
         .catch(e => (e.message === 'timed out' ? payLanded(before) : Promise.reject(e)));
       if (r.status === 'failed') {
-        window.toast(AT.pay.declined, { error: true });
+        toast(AT.pay.declined, { error: true });
         r = await billingCall('pay', { plan, period: interval, plants, newCard: true });
       }
     } finally { if (!r?.url && r?.status !== 'applied') stop(); }   // a new page is on its way: keep it up
@@ -390,8 +398,8 @@ window.startPlan = async function startPlan(acct, plan, interval, plants, { newC
       window.track(q.kind === 'upgrade' ? 'upgrade_done' : 'plan_start_done', { plan, period: interval });
       if (paidEvent) window.track(paidEvent.name, paidEvent.props);
       billingPaid();
-    } else if (r.status === 'refund') window.toast(AT.pay.refund, { error: true });
-    else window.toast(AT.pay.pending, { info: true });
+    } else if (r.status === 'refund') toast(AT.pay.refund, { error: true });
+    else toast(AT.pay.pending, { info: true });
   } catch (e) {
     if (!(await inProgress(e))) payFailed(e);
   } finally {
@@ -403,7 +411,7 @@ window.startPlan = async function startPlan(acct, plan, interval, plants, { newC
 // text: a toast to show there; a page load would drop it, so it is kept for that load.
 const CARRY_TOAST = 'ps.carryToast';
 const toBilling = (text) => {
-  if (new URLSearchParams(location.search).get('tab') === 'billing') { if (text) window.toast(text, { error: true }); return; }
+  if (new URLSearchParams(location.search).get('tab') === 'billing') { if (text) toast(text, { error: true }); return; }
   try { if (text) sessionStorage.setItem(CARRY_TOAST, text); } catch (e) {}
   location.assign(planUrl());
 };
@@ -412,18 +420,18 @@ const toBilling = (text) => {
 const inProgress = async (e) => {
   if (!/already in progress/i.test(e?.message || '')) return false;
   const a = await freshAccount().catch(() => null);
-  if (heldNote(a)) toBilling(); else window.toast(AT.pay.inProgress, { error: true });
+  if (heldNote(a)) toBilling(); else toast(AT.pay.inProgress, { error: true });
   return true;
 };
 // Pay an unpaid renewal with another card. bill: the bill an email names, else the one due now.
-window.settlePayment = async function settlePayment(bill) {
+export async function settlePayment(bill) {
   if (paying) return;
   paying = true;
   const stop = working(AT.pay.opening);
   try {
     // another card: the saved one is not charged again (it just failed)
     const r = await billingCall('pay', { settle: true, newCard: true, ...(bill ? { bill } : {}) });
-    if (r.url) openCardPage(r); else { stop(); if (r.status === 'applied') billingPaid(); else window.toast(AT.pay.pending, { info: true }); }
+    if (r.url) openCardPage(r); else { stop(); if (r.status === 'applied') billingPaid(); else toast(AT.pay.pending, { info: true }); }
   } catch (e) {
     stop();
     if (await inProgress(e)) return;
@@ -437,7 +445,7 @@ window.settlePayment = async function settlePayment(bill) {
 
 // Change the saved card (SOLAR-238): the market's smallest charge on Paystack's card page,
 // refunded once the card is saved. Comes back through billingReturn like any card-page payment.
-window.changeCard = async function changeCard() {
+export async function changeCard() {
   const stop = working(AT.pay.opening);
   try {
     const r = await billingCall('pay', { card: true });
@@ -450,14 +458,14 @@ window.changeCard = async function changeCard() {
 
 // A change booked for the billing date (downgrade, interval, cancel) or its undo, through the
 // billing function. Answers the new state, or null after a toast.
-window.bookChange = async function bookChange(body, event) {
+export async function bookChange(body, event) {
   try {
     await billingCall('change', body);
     if (event) window.track(event.name, event.props);
-    return await window.reloadAccount();
+    return await reloadAccount();
   } catch (e) {
     payFailed(e, AT.refused(''));
-    window.reloadAccount().catch(() => {});
+    reloadAccount().catch(() => {});
     return null;
   }
 };
@@ -480,7 +488,7 @@ const checkRef = async (ref) => {
   } catch (e) {}
   return { ...v, reference: ref };
 };
-window.checkReturn = () => returnCheck || (returnCheck = (async () => {
+export const checkReturn = () => returnCheck || (returnCheck = (async () => {
   const q = new URLSearchParams(location.search);
   let open = null;
   try { open = sessionStorage.getItem(OPEN_REF); } catch (e) {}
@@ -496,20 +504,22 @@ const renewalPaid = (ref, v) => {
   try { localStorage.setItem(PAID_REFS, JSON.stringify([...seen, ref].slice(-200))); } catch (e) {}
   window.track('renewal_paid_done', { plan: v?.plan ?? null, period: v?.period ?? null });
 };
+// set by a payment, read once by PickAfterPay
+let pickAsked = false;
 const paidNow = (text = AT.pay.received) => {
-  window.toast(text);
+  toast(text);
   // a bigger plan may have places open for locked plants: PickAfterPay asks which are read
-  window.pickAsked = true; window.dispatchEvent(new Event('ps-pick'));
+  pickAsked = true; window.dispatchEvent(new Event('ps-pick'));
 };
 
 // Once, when Settings opens: back from Paystack's card page (?reference=), after a
 // payment (?billing=paid), or from the "Pay with another card" email (?pay=1). Also once
 // on any other page, for a card page closed without paying (OPEN_REF).
-window.billingReturn = async function billingReturn(acct) {
+export async function billingReturn(acct) {
   const q = new URLSearchParams(location.search);
   const done = q.get('billing'), pay = q.get('pay');
-  try { const t = sessionStorage.getItem(CARRY_TOAST); sessionStorage.removeItem(CARRY_TOAST); if (t) window.toast(t, { error: true }); } catch (e) {}
-  const check = await window.checkReturn();
+  try { const t = sessionStorage.getItem(CARRY_TOAST); sessionStorage.removeItem(CARRY_TOAST); if (t) toast(t, { error: true }); } catch (e) {}
+  const check = await checkReturn();
   returnCheck = Promise.resolve(null);
   if (!check && !done && !pay) return;
   if (q.get('reference') || done || pay) history.replaceState(null, '', planUrl());
@@ -518,7 +528,7 @@ window.billingReturn = async function billingReturn(acct) {
     // bank is still answering shows its note here instead.
     const bill = /^[0-9a-f-]{36}$/i.test(pay) ? pay : null;
     // the server says if it is paid or no longer due
-    if (bill && !heldNote(acct)) await window.settlePayment(bill);
+    if (bill && !heldNote(acct)) await settlePayment(bill);
     return;
   }
   if (done === 'paid') return paidNow();
@@ -533,12 +543,12 @@ window.billingReturn = async function billingReturn(acct) {
 async function payResult(v, paidEvent = null, polled = false) {
   const { status, kind } = v;
   if (SETTLED.includes(status)) try { sessionStorage.removeItem(PAID_EVENT); } catch (e) {}
-  const again = () => { window.toast(AT.pay.pending, { info: true, sticky: true }); checkRef(v.reference).then(r => payResult(r, paidEvent, true)); };
+  const again = () => { toast(AT.pay.pending, { info: true, sticky: true }); checkRef(v.reference).then(r => payResult(r, paidEvent, true)); };
   // A card change changes no plan: the caller re-reads the card ('card').
   if (status === 'unknown') return;
   if (status === 'applied' && kind === 'card_check') {
     window.track('card_change_done');
-    window.toast(AT.pay.cardChanged);
+    toast(AT.pay.cardChanged);
     if (polled) freshAccount().catch(() => {});   // the first check's caller reads the card itself
     return 'card';
   }
@@ -549,12 +559,12 @@ async function payResult(v, paidEvent = null, polled = false) {
     freshAccount().catch(() => {});   // Billing's red note goes
     return paidNow(AT.paidText(v));
   }
-  if (status === 'refund') return window.toast(AT.pay.refund, { error: true });
-  if (status === 'failed') return window.toast(AT.pay.failed, { error: true });
-  if (status === 'void') return window.toast(AT.pay.void, { info: true });
-  if (status === 'error') return window.toast(AT.pay.checkFailed, { error: true, action: { label: AT.pay.checkAgain, onClick: again } });
-  if (polled) return window.toast(AT.pay.pending, { info: true, action: { label: AT.pay.checkAgain, onClick: again } });
-  window.toast(AT.pay.pending, { info: true, sticky: true });
+  if (status === 'refund') return toast(AT.pay.refund, { error: true });
+  if (status === 'failed') return toast(AT.pay.failed, { error: true });
+  if (status === 'void') return toast(AT.pay.void, { info: true });
+  if (status === 'error') return toast(AT.pay.checkFailed, { error: true, action: { label: AT.pay.checkAgain, onClick: again } });
+  if (polled) return toast(AT.pay.pending, { info: true, action: { label: AT.pay.checkAgain, onClick: again } });
+  toast(AT.pay.pending, { info: true, sticky: true });
   // one loop per payment, a minute long; a hidden tab waits
   if (polling.has(v.reference)) return;
   polling.add(v.reference);
@@ -582,7 +592,7 @@ const polling = new Set();
   history.replaceState(null, '', location.pathname + (q.toString() ? `?${q}` : '') + location.hash);
 })();
 // The website's plan, once: { plan, period } or null.
-window.takeWantPlan = () => {
+export const takeWantPlan = () => {
   let want = null;
   try { want = JSON.parse(localStorage.getItem('ps.wantPlan')); localStorage.removeItem('ps.wantPlan'); } catch (e) {}
   return want && Date.now() - want.at < 86400000 ? want : null;
@@ -591,8 +601,8 @@ window.takeWantPlan = () => {
 // "Add your plant" in the emails: ?add=plant (SOLAR-473), kept through sign-in with the
 // rest of an email's link (auth.jsx). Setup opens its Add plant form, App its Billing Plants
 // section with Add plant open; whichever opens it takes it out of the address, so it opens once.
-window.addAsked = () => new URLSearchParams(location.search).get('add') === 'plant';
-window.takeAddAsk = () => { const r = window.addAsked(); if (r) dropFromAddress(['add']); return r; };
+export const addAsked = () => new URLSearchParams(location.search).get('add') === 'plant';
+export const takeAddAsk = () => { const r = addAsked(); if (r) dropFromAddress(['add']); return r; };
 
 // The same moment on the Connect screen and inside Settings; one wording for both.
 const NO_PLANT_TEXT = 'has no plant shared with it yet. Your login is saved.';
@@ -622,7 +632,7 @@ function KeepPicker({ room, value, onChange, logins, ask, full, min = 1, verb = 
         <div key={acc.account_id} className="login-grp plant-logins">
           <div className="login-line"><div className="login-who"><span className="login-email">{acc.kind === 'share' ? 'Shared plants' : acc.sunsynk_username}</span></div></div>
           {acc.plants.map(p => {
-            const name = window.plantLabel(p), on = value.includes(p.plant_id), shut = !!(lock && lock(p));
+            const name = plantLabel(p), on = value.includes(p.plant_id), shut = !!(lock && lock(p));
             return (
               <label key={p.plant_id} className={'login-plant keep-row' + (on ? '' : ' off')}>
                 <span className="conn-user plant-nm">{name}</span>
@@ -642,6 +652,7 @@ function KeepPicker({ room, value, onChange, logins, ask, full, min = 1, verb = 
 
 // The account's plants under their logins, in KeepPicker's shape. A plant two logins reach
 // goes under the first; a claimed one under "Shared plants". keep(p): which plants to list.
+/** @param {any} a @param {(p: any) => boolean} [keep] */
 const acctLogins = (a, keep = () => true) => {
   const seen = new Set(), groups = [];
   const put = (id, kind, name, p) => {
@@ -658,19 +669,19 @@ const acctLogins = (a, keep = () => true) => {
   }
   return groups;
 };
-window.acctLogins = acctLogins;
+export { acctLogins };
 // The plants a pick lists: every plant the account reaches, a deleted one too (it starts again
 // with no history); a keep pick, only the chosen ones.
 const pickLogins = (a, mode) => acctLogins(a, p => mode !== 'keep' || p.chosen);
-window.pickLogins = pickLogins;
+export { pickLogins };
 // The pick's button: 'close' (nothing changed), 'confirm' (SwitchConfirm first: any change of
 // the plants read now, or a chosen plant going in the checkout pick), else 'done'.
 const pickNext = (mode, going, coming) => mode === 'choose' ? (going.length || coming.length ? 'confirm' : 'close')
   : mode === 'checkout' && going.length ? 'confirm' : 'done';
-window.pickNext = pickNext;
+export { pickNext };
 // After a payment: a place open and a plant not read yet.
 const pickWaiting = (a) => !!a && a.may_choose && a.open > 0 && a.plants.some(p => !p.chosen);
-window.pickWaiting = pickWaiting;
+export { pickWaiting };
 
 // Every change of chosen plants is confirmed here (pickNext): it names the plants that go and
 // says whether each one's history is deleted now or kept by another account, the plants that
@@ -683,7 +694,7 @@ function SwitchConfirm({ acct, going, coming, atPayment = false, busy, onConfirm
       {t.lines.map(l => <div key={l} className="confirm-text">{l}</div>)}
       <div className="conn-form-actions">
         <button type="button" className="ghost-btn" onClick={onCancel} disabled={busy}>{AT.pay.cancel}</button>
-        <window.BusyButton className={t.danger ? 'danger-btn' : 'save-btn'} onClick={onConfirm} busy={busy}>{t.button}</window.BusyButton>
+        <BusyButton className={t.danger ? 'danger-btn' : 'save-btn'} onClick={onConfirm} busy={busy}>{t.button}</BusyButton>
       </div>
     </Dialog>
   );
@@ -701,6 +712,7 @@ function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', pre
   const { useState } = React;
   const trial = acct.state === 'trialing' || acct.state === 'none';
   const chosen = acct.plants.filter(p => p.chosen).map(p => p.plant);
+  /** @type {any} */
   const t = mode === 'checkout' ? AT.checkoutPick(acct, plan.name, plan.places)
     : mode === 'keep' ? AT.keepPick(acct, plan.name, plan.places)
     : acct.state === 'none' ? { ...AT.choosePlants(acct), ...AT.weekPick(acct) } : AT.choosePlants(acct);
@@ -725,13 +737,13 @@ function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', pre
   const save = async () => {
     setBusy(true);
     try {
-      const a = await window.saveChosenPlants(picked);
+      const a = await saveChosenPlants(picked);
       window.track('plant_switch_done', { from, going: going.length, coming: coming.length, state: acct.state });
-      window.toast(AT.chosenToast(acct, coming, going));
+      toast(AT.chosenToast(acct, coming, going));
       onDone(picked);
       return a;
     } catch (e) {
-      window.toast(AT.refused(e?.message || ''), { error: true });
+      toast(AT.refused(e?.message || ''), { error: true });
       setBusy(false); setConfirm(false);
     }
   };
@@ -754,30 +766,30 @@ function ChooseDialog({ acct, mode = 'choose', plan = null, from = 'plants', pre
       </div>
       <div className="conn-form-actions">
         <button type="button" className="ghost-btn" onClick={() => onDone(null)} disabled={busy}>{AT.pay.cancel}</button>
-        <window.BusyButton className="save-btn" onClick={next} busy={busy} disabled={mode !== 'choose' && !picked.length}>{t.button}</window.BusyButton>
+        <BusyButton className="save-btn" onClick={next} busy={busy} disabled={mode !== 'choose' && !picked.length}>{t.button}</BusyButton>
       </div>
     </Dialog>
   );
 }
-window.ChooseDialog = ChooseDialog;
+export { ChooseDialog };
 
 // After a payment (billingReturn): the pick pop-up when the plan has places open and a plant
 // waits. Nothing to choose: nothing shows. onDone(ids): the plants read now.
 function PickAfterPay({ onDone }) {
-  const acct = window.useAccount();
-  const [ask, setAsk] = React.useState(() => !!window.pickAsked);
+  const acct = useAccount();
+  const [ask, setAsk] = React.useState(() => !!pickAsked);
   React.useEffect(() => {
-    const on = () => { setAsk(true); window.reloadAccount().catch(() => {}); };
+    const on = () => { setAsk(true); reloadAccount().catch(() => {}); };
     window.addEventListener('ps-pick', on);
     return () => window.removeEventListener('ps-pick', on);
   }, []);
-  const close = () => { window.pickAsked = false; setAsk(false); };
+  const close = () => { pickAsked = false; setAsk(false); };
   const waiting = pickWaiting(acct);
   React.useEffect(() => { if (ask && acct && !waiting) close(); });
   if (!ask || !waiting) return null;
   return <ChooseDialog acct={acct} from="upgrade" onDone={(ids) => { close(); if (ids) onDone({ plants: ids.map(id => ({ id })), paused: [] }); }} />;
 }
-window.PickAfterPay = PickAfterPay;
+export { PickAfterPay };
 
 // Connect card that opens in place on a page with no inverter yet (Setup), with its title.
 // Either way: one line on which login, the two fields, a note, then Cancel and the green
@@ -795,7 +807,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
   useEffect(() => {
     if (initialUsername) return;
     let alive = true;
-    window.sb.auth.getSession().then(({ data }) => {
+    sb.auth.getSession().then(({ data }) => {
       const email = data.session?.user?.email;
       if (!alive || !email) return;
       setOwnEmail(email);
@@ -804,10 +816,10 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
     return () => { alive = false; };
   }, []);
   // A failure that isn't one box's is the red toast (SOLAR-166); a box's stays on its label.
-  const fail = (text) => window.toast(text, { error: true });
+  const fail = (text) => toast(text, { error: true });
   const [noPlants, setNoPlants] = useState(false);
   // Field id → message, shown on the label line.
-  const { bad, setBad, flag, edited } = window.useFieldErrors();
+  const { bad, setBad, flag, edited } = useFieldErrors();
   // 'share': no password, the owner shares the plant to us in SunSynk (SOLAR-310).
   const [mode, setMode] = useState('login');
   const [ref, setRef] = useState('');
@@ -821,7 +833,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
   // places open. Not after Reconnect or a new password: no login was added.
   const linked = async (r) => {
     const fresh = relink ? [] : (r.plants || []).map(p => Number(p.id ?? p.plantId)).filter(Boolean);
-    const acct = await window.reloadAccount().catch(() => null);
+    const acct = await reloadAccount().catch(() => null);
     const waiting = acct && acct.may_choose && acct.plants.filter(p => fresh.includes(p.plant) && !p.chosen).map(p => p.plant);
     if (!waiting || !waiting.length || !(acct.state === 'none' || acct.state === 'trialing' ? acct.trial_places > acct.chosen : acct.open > 0)) return onLinked(r);
     const on = await new Promise(done => setPick({ acct, prefill: waiting, done }));
@@ -833,7 +845,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
     if (!ref.trim()) return flag({ 'ss-ref': 'Enter a plant ID or serial' });
     setBusy(true); setBad({}); setTaken(null);
     try {
-      await linked(await window.claimShare(ref.trim()));
+      await linked(await claimShare(ref.trim()));
     } catch (ex) {
       if (ex.taken) setTaken(ex.taken);
       else if (ex.field) flag({ 'ss-ref': ex.message });
@@ -853,7 +865,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
     setBusy(true); setBad({});
     findTimer.current = setTimeout(() => setFinding(true), 2500);
     try {
-      const r = await window.linkSunsynk(username.trim(), password);
+      const r = await linkSunsynk(username.trim(), password);
       // No plant yet. Nothing on the server looks at this login again, so Retry has to
       // ask SunSynk afresh: the password stays in memory while the form is up, no longer.
       if (r.warning) {
@@ -872,7 +884,7 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
     }
   };
 
-  const invalid = (id) => window.invalidProps(id, bad[id]);
+  const invalid = (id) => invalidProps(id, bad[id]);
   const green = share ? (busy ? 'Checking…' : 'Check') : noPlants ? (busy ? 'Checking…' : 'Retry now')
     : busy ? (finding ? 'Finding your plant…' : 'Checking your login…')
     : relink ? (changing ? 'Save password' : 'Reconnect') : compact ? 'Add plant' : 'Connect';
@@ -882,14 +894,14 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
       {pick && <ChooseDialog acct={pick.acct} prefill={pick.prefill} from="link" onDone={pick.done} />}
       {!compact && <h2 className="sset-title">{noPlants ? 'Connected, but no plant yet' : relink ? 'Reconnect SunSynk' : 'Add your plant'}</h2>}
       {!relink && !noPlants && (
-        <window.Segmented block label="How to add it" className="link-mode" value={mode}
+        <Segmented block label="How to add it" className="link-mode" value={mode}
           onChange={(m) => { setMode(m); setBad({}); setTaken(null); window.track('link_mode_picked', { mode: m }); }}
           options={[{ value: 'login', label: 'SunSynk login' }, { value: 'share', label: 'Share plant' }]} />
       )}
       {share ? (<>
         <p className="sset-note">No password needed. In the SunSynk Connect app, share your plant with <b>{SHARE_TO}</b> as Visitor.</p>
         <div className="field link-last">
-          <window.FieldLabel id="ss-ref" label="Plant ID or inverter serial" error={bad['ss-ref']} />
+          <FieldLabel id="ss-ref" label="Plant ID or inverter serial" error={bad['ss-ref']} />
           <input id="ss-ref" className="input" type="text" inputMode="text" autoComplete="off" placeholder="123456" value={ref}
                  onChange={(e) => { setRef(e.target.value); edited('ss-ref'); setTaken(null); }} {...invalid('ss-ref')} />
         </div>
@@ -915,13 +927,13 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
             stacks them. On the Connect card they stack. */}
         <div className={compact ? 'field-row' : undefined}>
           <div className="field">
-            <window.FieldLabel id="ss-user" label="SunSynk email" error={bad['ss-user']} hint={ownEmail && username === ownEmail ? 'Your account email' : null} />
+            <FieldLabel id="ss-user" label="SunSynk email" error={bad['ss-user']} hint={ownEmail && username === ownEmail ? 'Your account email' : null} />
             <input id="ss-user" className="input" type="text" placeholder="you@example.com" value={username} autoComplete="off"
                    readOnly={!!relink} onChange={(e) => { setUsername(e.target.value); edited('ss-user'); }} {...invalid('ss-user')} />
           </div>
           <div className="field link-last">
-            <window.FieldLabel id="ss-pass" label="SunSynk password" error={bad['ss-pass']} />
-            <window.PasswordInput id="ss-pass" className="input" value={password} onChange={(v) => { setPassword(v); edited('ss-pass'); }} aria={invalid('ss-pass')} />
+            <FieldLabel id="ss-pass" label="SunSynk password" error={bad['ss-pass']} />
+            <PasswordInput id="ss-pass" className="input" value={password} onChange={(v) => { setPassword(v); edited('ss-pass'); }} aria={invalid('ss-pass')} />
           </div>
         </div>
         {!compact && <div className="field-note link-note">Disconnect any time in Plants.</div>}
@@ -930,25 +942,25 @@ function LinkForm({ relink, changing, onLinked, compact, onCancel, initialUserna
         {noPlants
           ? <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setNoPlants(false); setPassword(''); }}>Use a different login</button>
           : onCancel && <button type="button" className="ghost-btn" onClick={onCancel} disabled={busy}>Cancel</button>}
-        <window.BusyButton type="submit" className="save-btn" busy={busy}>{green}</window.BusyButton>
+        <BusyButton type="submit" className="save-btn" busy={busy}>{green}</BusyButton>
       </div>
     </form>
   );
 }
-window.LinkForm = LinkForm;
+export { LinkForm };
 
 // The link form over the page, as Add plant and Reconnect open it. Closing it is
 // its Cancel. note: a line above the form.
 function LinkDialog({ title, note, onCancel, ...form }) {
   return (
-    <window.Dialog keep label={title} onClose={onCancel}>
+    <Dialog keep label={title} onClose={onCancel}>
       <div className="confirm-title">{title}</div>
       {note && <div className="confirm-text">{note}</div>}
       <LinkForm compact onCancel={onCancel} {...form} />
-    </window.Dialog>
+    </Dialog>
   );
 }
-window.LinkDialog = LinkDialog;
+export { LinkDialog };
 /**
  * Sits inside AuthGate. Hands the login list to its child, which shows the dashboard
  * when a login lists a plant and the Setup frame (Connect on Live) when none does.
@@ -959,16 +971,16 @@ window.LinkDialog = LinkDialog;
  */
 // A plant to show: on some login, and not paused (SOLAR-208). Paused plants are listed
 // in Account only, so an account with nothing else stays on the Connect screen.
-window.hasActivePlant = (accounts) => accounts.some(a => (a.plants || []).some(p => !p.paused));
+export const hasActivePlant = (accounts) => accounts.some(a => (a.plants || []).some(p => !p.paused));
 
-window.LinkGate = function LinkGate({ children, fallback = null }) {
+export function LinkGate({ children, fallback = null }) {
   const [checking, setChecking] = React.useState(false);
-  const { loading, accounts, error, refresh } = window.useLinkStatus();
+  const { loading, accounts, error, refresh } = useLinkStatus();
   // The wall tablet's connection drops for minutes at a time, and Chrome on iPad reloads
   // the page now and then; a reload inside a drop fails both tries and used to sit on
   // "Couldn't check" until someone tapped it (SOLAR-21). Keep checking while stuck there:
   // every 15 s, and the moment the tablet is back online or on screen.
-  const stuck = !loading && !!error && !window.hasActivePlant(accounts);
+  const stuck = !loading && !!error && !hasActivePlant(accounts);
   React.useEffect(() => {
     if (!stuck) return;
     // One read at a time: a read inside a drop can take its full 20 s.
@@ -988,18 +1000,18 @@ window.LinkGate = function LinkGate({ children, fallback = null }) {
   // A read that failed says nothing about the logins, so it must not ask for one: a
   // household with plants would land on Connect, and a login that just connected would
   // be asked for again.
-  if (!window.hasActivePlant(accounts)) {
+  if (!hasActivePlant(accounts)) {
     if (error) {
       const retry = async (e) => { e.preventDefault(); setChecking(true); await refresh(); setChecking(false); };
       return (
         <div className="login-wrap">
           {/* the device's own connection first, else it is us: not the SunSynk logins (SOLAR-604) */}
-          <window.AuthCard title={navigator.onLine === false ? 'You’re offline' : 'Can’t reach Prince Solar Hub'}
+          <AuthCard title={navigator.onLine === false ? 'You’re offline' : 'Can’t reach Prince Solar Hub'}
             sub={navigator.onLine === false ? 'Check your internet, then try again.' : 'Try again in a minute.'} onSubmit={retry} busy={checking}>
-            <window.BusyButton type="submit" busy={checking} busyText="Checking…">Try again</window.BusyButton>
+            <BusyButton type="submit" busy={checking} busyText="Checking…">Try again</BusyButton>
             {/* No server text on screen (SOLAR-163). */}
-            <div className="login-links"><window.SignOutButton className="login-link quiet" /></div>
-          </window.AuthCard>
+            <div className="login-links"><SignOutButton className="login-link quiet" /></div>
+          </AuthCard>
         </div>
       );
     }

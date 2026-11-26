@@ -7,18 +7,26 @@
   "scripts": {
     "start": "node server.js",
     "check": "node scripts/integrity-check.js",
-    "build": "node scripts/build-jsx.js",
-    "test": "node scripts/build-jsx.js && node scripts/warning-tests.mjs && node scripts/plant-switch-test.mjs && node scripts/report-scrub-test.mjs && node scripts/power-hold-test.mjs && node scripts/newday-test.mjs && node scripts/poll-minutes-test.mjs && node scripts/limit-test.mjs && node scripts/mock-fetch-test.mjs && node scripts/billing-screen-test.mjs && node scripts/reuse-check.mjs",
-    "test:state": "node scripts/billing-state-test.mjs && node scripts/msg-state-test.mjs && node scripts/billing-lock-test.mjs && node scripts/billing-lock-order-test.mjs && node scripts/history-delete-run-test.mjs"
+    "build": "vite build",
+    "test": "vite build && tsc -p jsconfig.json && node scripts/warning-tests.mjs && node scripts/plant-switch-test.mjs && node scripts/report-scrub-test.mjs && node scripts/power-hold-test.mjs && node scripts/newday-test.mjs && node scripts/poll-minutes-test.mjs && node scripts/limit-test.mjs && node scripts/mock-fetch-test.mjs && node scripts/billing-screen-test.mjs && node scripts/reuse-check.mjs",
+    "test:deno": "cd supabase/functions && SUPABASE_URL=http://127.0.0.1:9 SUPABASE_SERVICE_ROLE_KEY=test npx -y deno@2.5.6 test -A --node-modules-dir=none",
+    "test:state": "node scripts/db-files.mjs && node scripts/billing-state-test.mjs && node scripts/msg-state-test.mjs && node scripts/billing-lock-test.mjs && node scripts/billing-lock-order-test.mjs && node scripts/history-delete-run-test.mjs",
+    "dev": "node scripts/dev.mjs",
+    "release": "node scripts/release.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19"
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.118.0",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "posthog-js": "1.438.12",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
-    "@babel/standalone": "7.29.0"
+    "typescript": "7.0.2",
+    "vite": "8.3.8"
   }
 }

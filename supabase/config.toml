@@ -63,6 +63,9 @@ max_client_conn = 100
 enabled = true
 # Specifies an ordered list of schema files that describe your database.
 # Supports glob patterns relative to supabase directory: "./schemas/*.sql"
+# Left empty on purpose (SOLAR-679 F8): supabase/schemas/functions/ holds functions only, and the
+# CLI's declarative sync needs every table too (it refuses a functions-only tree). Migrations stay
+# the one thing applied; scripts/db-files.mjs checks the function files match them.
 schema_paths = []
 
 [db.seed]
@@ -414,6 +417,10 @@ verify_jwt = false
 
 [functions.health]
 # Outside uptime check (SOLAR-469): no session; answers only ok and minutes.
+verify_jwt = false
+
+[functions.resend-webhook]
+# Resend's bounce and complaint webhook (SOLAR-679 F13): no session; checks the Svix signature.
 verify_jwt = false
 
 [functions.mock-sunsynk]

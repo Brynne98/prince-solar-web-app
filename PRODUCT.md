@@ -79,9 +79,8 @@ Confirmed functionality:
 
 Technical constraints:
 
-- React 18 from a CDN. JSX compiled by `npm run build` (Babel, on Cloudflare at deploy); no bundler (SOLAR-131).
-  A syntax error blanks the page silently, so every `.jsx` is checked with esbuild before
-  a deploy.
+- React 18 from npm, bundled by Vite (`npm run build`, SOLAR-679 F15); no runtime scripts from a CDN.
+  `npm test` builds and type-checks every `.jsx` before a deploy.
 - Frontend is static on Cloudflare Pages (app at app.princesolarhub.com, showcase at princesolarhub.com); backend is Supabase (Postgres, Edge Functions,
   pg_cron). The two ship separately, backend first.
 - Cost per customer is real: ~450 MB per inverter per year, one SunSynk poll per minute

@@ -29,6 +29,7 @@
 // Deliberately NOT ported: the gzipped `raw` payload table. It was 46 MB of the
 // 96 MB SQLite file, has no dashboard consumer, and may embed account identifiers.
 import { flushErrors, noteError, reportError, serve, track } from "../_shared/errors.ts";
+import { heartbeat } from "../_shared/heartbeat.ts";
 import { rpc } from "../_shared/db.ts";
 import {
   type Account,
@@ -183,7 +184,8 @@ serve("poll", async (req) => {
       if (!jobs.length) {
         times.jobsRead = Date.now();
         logged = true;
-        await Promise.all([tallyCalls(spec, 0, 0, ts), logRun(spec, ts, times, [])]);
+        await Promise.all([tallyCalls(spec, 0, 0, ts), logRun(spec, ts, times, []),
+          spec.shard === 0 && !spec.account ? heartbeat("reader") : null]);
         return json({ ok: true, ts, ...spec, accounts: 0, note: "no accounts in this shard" });
       }
     }
@@ -220,6 +222,8 @@ serve("poll", async (req) => {
     }
 
     const ok = results.filter((r) => !r.error);
+    // F12: the reader's heartbeat, once a minute from shard 0 when a login was read
+    if (spec.shard === 0 && !spec.account && ok.length > 0) await heartbeat("reader");
     return json({
       ok: ok.length > 0,
       ts,
