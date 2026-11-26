@@ -139,5 +139,260 @@
  },
  "supabase/functions/sync-plant-energy/index.ts": {
   "sunsynk": 4
+ },
+ "supabase/schemas/functions/billing/apply_payment.sql": {
+  "paystack": 11
+ },
+ "supabase/schemas/functions/billing/apply_purchase.sql": {
+  "paystack": 2
+ },
+ "supabase/schemas/functions/billing/begin_attempt.sql": {
+  "paystack": 2
+ },
+ "supabase/schemas/functions/billing/claim_plant.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/billing/copy_funds_period.sql": {
+  "Africa/Johannesburg": 5
+ },
+ "supabase/schemas/functions/billing/event_begin.sql": {
+  "paystack": 1
+ },
+ "supabase/schemas/functions/billing/fetch_lane.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/billing/history_take.sql": {
+  "Africa/Johannesburg": 2,
+  "sunsynk": 4
+ },
+ "supabase/schemas/functions/billing/link_login.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/billing/money_back.sql": {
+  "paystack": 2
+ },
+ "supabase/schemas/functions/billing/reading_routes.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/billing/reading_routes_set.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/billing/record_dispute.sql": {
+  "ZAR": 2,
+  "paystack": 2
+ },
+ "supabase/schemas/functions/billing/run.sql": {
+  "paystack": 3
+ },
+ "supabase/schemas/functions/billing/run_one.sql": {
+  "paystack": 2
+ },
+ "supabase/schemas/functions/billing/save_method.sql": {
+  "paystack": 1
+ },
+ "supabase/schemas/functions/billing/screen_state.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/msg/email_guard.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/msg/push_guard.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/private/alert_back_kind.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/private/alert_group.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/private/billing_drop_plant.sql": {
+  "sunsynk": 3
+ },
+ "supabase/schemas/functions/private/email_plant_apply.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/private/email_switch.sql": {
+  "sunsynk": 3
+ },
+ "supabase/schemas/functions/private/first_load_continue.sql": {
+  "Africa/Johannesburg": 1
+ },
+ "supabase/schemas/functions/private/grid_minutes.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/private/history_done.sql": {
+  "Africa/Johannesburg": 1
+ },
+ "supabase/schemas/functions/private/is_alert.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/private/login_copies.sql": {
+  "sunsynk": 4
+ },
+ "supabase/schemas/functions/private/login_lock.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/private/plant_start_fill.sql": {
+  "Africa/Johannesburg": 1,
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/private/poll_shards.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/private/push_wanted.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/private/refresh_store.sql": {
+  "sunsynk": 5
+ },
+ "supabase/schemas/functions/private/share_release.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/private/username_logins.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/public/_energy_row.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/public/account_access_set.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/public/account_by_username.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/public/account_disable.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/public/account_mark.sql": {
+  "sunsynk": 4
+ },
+ "supabase/schemas/functions/public/account_refresh_get.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/public/account_upsert.sql": {
+  "sunsynk": 11
+ },
+ "supabase/schemas/functions/public/admin_overview.sql": {
+  "sunsynk": 3
+ },
+ "supabase/schemas/functions/public/api_account_delete.sql": {
+  "sunsynk": 3
+ },
+ "supabase/schemas/functions/public/api_grid_today.sql": {
+  "Africa/Johannesburg": 1
+ },
+ "supabase/schemas/functions/public/api_link_disconnect.sql": {
+  "sunsynk": 4
+ },
+ "supabase/schemas/functions/public/api_link_remove.sql": {
+  "sunsynk": 3
+ },
+ "supabase/schemas/functions/public/api_logins.sql": {
+  "sunsynk": 3
+ },
+ "supabase/schemas/functions/public/api_overview.sql": {
+  "Africa/Johannesburg": 3
+ },
+ "supabase/schemas/functions/public/api_plant_states.sql": {
+  "Africa/Johannesburg": 3
+ },
+ "supabase/schemas/functions/public/billing_links.sql": {
+  "sunsynk": 3
+ },
+ "supabase/schemas/functions/public/day_start_epoch.sql": {
+  "Africa/Johannesburg": 1
+ },
+ "supabase/schemas/functions/public/email_plant_events.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/public/email_poll_step.sql": {
+  "Africa/Johannesburg": 3,
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/public/email_sweep.sql": {
+  "sunsynk": 29
+ },
+ "supabase/schemas/functions/public/email_unsubscribe.sql": {
+  "sunsynk": 4
+ },
+ "supabase/schemas/functions/public/email_wanted.sql": {
+  "sunsynk": 3
+ },
+ "supabase/schemas/functions/public/job_check_inputs.sql": {
+  "Africa/Johannesburg": 1,
+  "sunsynk": 3
+ },
+ "supabase/schemas/functions/public/local_day.sql": {
+  "Africa/Johannesburg": 1
+ },
+ "supabase/schemas/functions/public/local_hour.sql": {
+  "Africa/Johannesburg": 1
+ },
+ "supabase/schemas/functions/public/local_minute.sql": {
+  "Africa/Johannesburg": 1
+ },
+ "supabase/schemas/functions/public/local_ts.sql": {
+  "Africa/Johannesburg": 1
+ },
+ "supabase/schemas/functions/public/msg_email_done.sql": {
+  "resend": 2
+ },
+ "supabase/schemas/functions/public/msg_email_take.sql": {
+  "Africa/Johannesburg": 1,
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/public/plant_cfg.sql": {
+  "Africa/Johannesburg": 1,
+  "ZAR": 1
+ },
+ "supabase/schemas/functions/public/plant_config_seed.sql": {
+  "Africa/Johannesburg": 1,
+  "ZAR": 1
+ },
+ "supabase/schemas/functions/public/plant_tz.sql": {
+  "Africa/Johannesburg": 1
+ },
+ "supabase/schemas/functions/public/plant_users_upsert.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/public/poll_commit.sql": {
+  "sunsynk": 3
+ },
+ "supabase/schemas/functions/public/poll_commit_batch.sql": {
+  "sunsynk": 4
+ },
+ "supabase/schemas/functions/public/poll_jobs_v2.sql": {
+  "Africa/Johannesburg": 1,
+  "sunsynk": 3
+ },
+ "supabase/schemas/functions/public/poll_routes.sql": {
+  "Africa/Johannesburg": 1,
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/public/share_account_get.sql": {
+  "sunsynk": 3
+ },
+ "supabase/schemas/functions/public/share_account_set.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/public/share_claim.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/public/share_claim_live.sql": {
+  "sunsynk": 1
+ },
+ "supabase/schemas/functions/public/share_retry_due.sql": {
+  "sunsynk": 2
+ },
+ "supabase/schemas/functions/public/sunsynk_calls_report.sql": {
+  "Africa/Johannesburg": 1,
+  "sunsynk": 5
+ },
+ "supabase/schemas/functions/public/sunsynk_tally.sql": {
+  "Africa/Johannesburg": 1,
+  "sunsynk": 2
+ },
+ "supabase/functions/_shared/database.types.ts": {
+  "sunsynk": 11
  }
 }

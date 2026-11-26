@@ -93,6 +93,28 @@ supabase functions deploy poll                    # only what changed
 supabase functions deploy recover sync-plant-energy
 ```
 
+**What goes where in a database change** (SOLAR-679 F5–F9). Numbered migrations in
+`supabase/migrations/` are the only thing applied, locally and live.
+
+| Change | Where |
+|---|---|
+| A function: new, changed, dropped | A migration with the whole `create or replace` (or `drop`), and its file `supabase/schemas/functions/<schema>/<name>.sql`, in one commit. Never `pg_get_functiondef` + `replace` (`npm test` fails). |
+| Tables, columns, indexes, grants, policies, partitions, cron, triggers | A migration only. Supabase's diff does not track partitions or column grants, so these are not kept as declarative files. |
+| Anything in `public` the app calls | Also `supabase/functions/_shared/database.types.ts`. |
+
+After applying the migration to your own local database:
+
+```bash
+STATE_DB_URL=postgresql://postgres:postgres@127.0.0.1:<port>/postgres node scripts/db-files.mjs --write
+```
+
+`npm run test:state` (and CI on every push) runs `node scripts/db-files.mjs` without `--write`
+on a database built from every migration. It fails when a function differs from its file, a
+file has no function, or the types are stale. So a table-only migration changes no function
+file, and a function changed in a migration but not in its file turns the run red. `create or
+replace` cannot change a function's return type or argument names: drop it first in the
+same migration. No two functions may share a name (one file each).
+
 **New tables, sequences and functions get no access by default** (0108, SOLAR-145).
 Since 0108, and on Supabase from 2026-10-30, a new object in `public` is open to no
 one but its owner, and service_role for functions. The migration that creates it grants
