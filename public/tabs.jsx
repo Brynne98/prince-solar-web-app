@@ -2483,11 +2483,11 @@ function CancelSection({ acct }) {
   );
 }
 
-// The plans the pop-up shows for the monthly/yearly switch. A running plan: its own plan at the
-// switch (the interval change), every other plan at the plan's own interval, since an upgrade
-// or a downgrade keeps the interval.
+// The plans the pop-up shows for the monthly/yearly switch: every plan at the switch's interval.
+// A move takes that interval with it (SOLAR-675): a bigger plan monthly to yearly starts the year
+// at the payment, yearly to monthly turns monthly at the billing date; a smaller plan books both.
 const planRunning = (a) => !!a && (a.state === 'active' || a.state === 'past_due') && !!a.plan;
-const planRows = (a, view) => a.prices.filter(p => p.interval === (planRunning(a) && p.plan !== a.plan ? a.interval : view));
+const planRows = (a, view) => a.prices.filter(p => p.interval === view);
 window.planRows = planRows;
 // What a plan's button does first: 'interval' (the same plan, the other interval), 'keep' (a
 // smaller plan: which plants stay) or 'checkout' (the final pick, then pay). pick false: the
@@ -2547,7 +2547,7 @@ function PlansDialog({ acct, onClose }) {
     if (mode === 'keep') {
       setBusy(true);
       const drop = acct.plants.filter(p => p.chosen && !ids.includes(p.plant)).map(p => p.plant);
-      const a = await window.bookChange({ action: 'downgrade', plan: row.plan, drop }, { name: 'downgrade_done', props: { plan: row.plan, drop: drop.length } });
+      const a = await window.bookChange({ action: 'downgrade', plan: row.plan, drop, period: row.interval }, { name: 'downgrade_done', props: { plan: row.plan, drop: drop.length, interval: row.interval } });
       setBusy(false);
       if (a) { window.toast(AT.pay.booked); onClose(); }
       return;

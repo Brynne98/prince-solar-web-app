@@ -4,7 +4,7 @@
 //
 //   POST /billing/pay      the signed-in user, { plan, period?, extras?, plants, newCard? }:
 //                          a first plan or a restart (start_checkout) when no plan runs, else
-//                          an upgrade. A restart first asks Paystack about card pages on the last
+//                          an upgrade (at period: monthly to yearly starts the year now). A restart first asks Paystack about card pages on the last
 //                          renewal: one paid before the plan ended brings it back instead (SOLAR-644).
 //                          { settle: true } pays the open renewal bill now ({ bill } from an
 //                          email link: that bill, if it is still the owner's to pay);
@@ -311,7 +311,7 @@ serve("billing", async (req) => {
     const action = String(body.action ?? "");
     try {
       const state = action === "downgrade"
-        ? await bill("downgrade", { user: user.id, plan: body.plan, extras: body.extras ?? null, drop: ids(body.drop) ?? [] })
+        ? await bill("downgrade", { user: user.id, plan: body.plan, extras: body.extras ?? null, drop: ids(body.drop) ?? [], interval: interval(body.period) })
         : action === "interval" ? await bill("switch_interval", { user: user.id, interval: interval(body.period) })
         : action === "cancel" ? await bill("cancel", { user: user.id })
         : action === "undo_cancel" ? await bill("undo_cancel", { user: user.id })
@@ -339,7 +339,8 @@ serve("billing", async (req) => {
     else {
       const st = await bill<{ state: string; plan: string | null }>("account_state", { user: user.id });
       const args = { user: user.id, plan: String(body.plan ?? ""), extras: Number.isSafeInteger(body.extras) ? body.extras : 0, plants: ids(body.plants) };
-      if (st.plan && (st.state === "active" || st.state === "past_due")) inv = await bill("upgrade", args);
+      // the interval the plans pop-up showed: monthly to yearly starts the year now (SOLAR-675)
+      if (st.plan && (st.state === "active" || st.state === "past_due")) inv = await bill("upgrade", { ...args, interval: interval(body.period) });
       else {
         // A renewal card page paid just before the plan ended may only now be answered: asked
         // first, lease or not. Paid: the plan is back, no restart. Still processing or no answer:

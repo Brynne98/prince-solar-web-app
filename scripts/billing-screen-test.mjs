@@ -72,10 +72,18 @@ test('the confirm for a plant coming says it starts', () => {
   eq([t.title, t.button], ['Read Plant 2?', 'Read']);
 });
 
-// ---- 13: a running plan changes plan at its own interval ---------------------------------
-test('running monthly plan, yearly view: other plans stay monthly (fix 13)', () => {
+// ---- 13: the switch decides every row; a move takes its interval (SOLAR-675) -------------
+test('running monthly plan, yearly view: every plan yearly (SOLAR-675)', () => {
   const rows = ctx.planRows(acct(), 'year');
-  eq(rows.map(r => r.plan + ':' + r.interval), ['home:year', 'family:month']);
+  eq(rows.map(r => r.plan + ':' + r.interval), ['home:year', 'family:year']);
+});
+test('a move monthly to yearly says the year starts now; yearly to monthly says monthly later (SOLAR-675)', () => {
+  const s = { ...acct(), time_zone: 'Africa/Johannesburg', locale: 'en-ZA' };
+  const q = { kind: 'upgrade', plan: 'family', plan_name: 'Family', places: 5, currency: 'ZAR', offer: 'launch' };
+  eq(ctx.AccountText.quoteReview(s, { ...q, interval: 'year', starts_now: true, due_minor: 95681, next_amount_minor: 99000,
+    next_at: '2027-12-11T08:00:00Z' }).lines, ['A year from today, less the unused days of your plan.', 'Then R990 a year from 11 Dec 2027.']);
+  eq(ctx.AccountText.quoteReview(s, { ...q, interval: 'month', starts_now: false, due_minor: 36301, next_amount_minor: 9900,
+    next_at: '2027-12-01T08:00:00Z' }).lines, ['For the days left until your next payment.', 'Then R99 a month from 1 Dec 2027.']);
 });
 test('no plan running: the view decides every row', () => {
   eq(ctx.planRows(acct({ state: 'ended', plan: null }), 'year').map(r => r.plan + ':' + r.interval), ['home:year', 'family:year']);

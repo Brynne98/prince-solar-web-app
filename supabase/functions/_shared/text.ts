@@ -57,6 +57,8 @@ export type Quote = {
   kind: "purchase" | "upgrade" | "downgrade" | "interval"; plan: string; plan_name: string; places: number;
   interval: "month" | "year"; due_minor: number; next_amount_minor: number; next_at: Iso; currency: string;
   offer: string | null; drop?: number;
+  /** upgrade: the new period starts at the payment (monthly to yearly, SOLAR-675) */
+  starts_now?: boolean;
 };
 /** Forms for zero, one and many. zero falls back to many. */
 export type Forms = { zero?: string; one: string; many: string };
@@ -298,7 +300,8 @@ export function quoteReview(s: AccountState, q: Quote) {
     };
     case "upgrade": return {
       title: `Move to ${q.plan_name}`, due: m(q.due_minor),
-      lines: [q.due_minor ? "For the days left until your next payment." : "Nothing to pay for the days left.",
+      lines: [q.starts_now ? "A year from today, less the unused days of your plan."
+        : q.due_minor ? "For the days left until your next payment." : "Nothing to pay for the days left.",
         `Then ${m(q.next_amount_minor)} ${per(q.interval)} from ${day(s, q.next_at)}.`],
       button: q.due_minor ? "Pay" : `Move to ${q.plan_name}`,
     };
@@ -529,7 +532,9 @@ export type MailInput = {
   key: string; state: AccountState;
   bill?: { kind: string; plan: string; plan_name: string; interval: "month" | "year"; amount_minor: number; currency: string;
     next_amount_minor: number; period_start: Iso | null; period_end: Iso | null; paid_at: Iso | null; reference: string | null;
-    card_type: string | null; last4: string | null } | null;
+    card_type: string | null; last4: string | null;
+    /** an upgrade that bought a new period at the payment (monthly to yearly, SOLAR-675) */
+    starts_now?: boolean } | null;
   refund?: { amount_minor: number; currency: string; reference: string; reason: string; paid_at: Iso | null; paid_minor: number;
     card_type: string | null; last4: string | null } | null;
   event?: { kind: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null } | null;
@@ -575,7 +580,7 @@ export function mail(m: MailInput): Mail | null {
     case "receipt": {
       const b = m.bill; if (!b) return null;
       const rows: [string, string][] = [
-        ["For", `${b.plan_name}, ${b.kind === "upgrade" ? "the days left" : b.interval === "year" ? "yearly" : "monthly"}${b.period_start && b.period_end ? `, ${day(s, b.period_start)} to ${day(s, b.period_end)}` : ""}`]];
+        ["For", `${b.plan_name}, ${b.kind === "upgrade" && !b.starts_now ? "the days left" : b.interval === "year" ? "yearly" : "monthly"}${b.period_start && b.period_end ? `, ${day(s, b.period_start)} to ${day(s, b.period_end)}` : ""}`]];
       const c = card(b.card_type, b.last4); if (c) rows.push(["Card", c]);
       if (b.reference) rows.push(["Reference", b.reference]);
       if (b.period_end) rows.push(["Next payment", `${$(b.next_amount_minor, b.currency)} on ${day(s, b.period_end)}`]);

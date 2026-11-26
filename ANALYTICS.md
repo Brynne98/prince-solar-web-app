@@ -73,7 +73,7 @@ Web (`public/*.jsx`):
 | `theme_changed` | Theme picked |
 | `data_download_done` | CSV downloaded |
 | `plan_page_shown`, `offer_pick_done`, `checkout_opened`, `pay_review_done`, `upgrade_done` | Choosing and paying for a plan |
-| `downgrade_done`, `plan_change_undone`, `extra_plants_done`, `yearly_switch_done` | Plan changes (`downgrade_done`: `plan`, `drop`; `yearly_switch_done`: `plan`, `interval`; `extra_plants_done` not sent since SOLAR-641) |
+| `downgrade_done`, `plan_change_undone`, `extra_plants_done`, `yearly_switch_done` | Plan changes (`downgrade_done`: `plan`, `drop`, `interval` (SOLAR-675); `yearly_switch_done`: `plan`, `interval`; `extra_plants_done` not sent since SOLAR-641) |
 | `start_keep_done` | The plants to keep ticked before a first plan with fewer places is paid (`plan`, `kept`; SOLAR-552). Not sent since SOLAR-641 |
 | `pay_first_shown` | Cancel or downgrade asked for while a payment has failed: the pay-first pop-up (`plan`, `want`: cancel or downgrade). Not sent since SOLAR-641 |
 | `keep_pick_done` | Keep pick saved in Billing's Choose plant(s) pop-up while a cancel or smaller plan is booked (`plan`, `room`). Not sent since SOLAR-641 |

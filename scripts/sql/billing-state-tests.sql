@@ -1050,6 +1050,67 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- P9b a move to a bigger plan takes the monthly/yearly choice (SOLAR-675). Monthly to yearly:
+--     the year in full less the unused days, the year from the payment. Yearly to monthly: the
+--     days left of the year now, monthly from the billing date. quote and the bill agree.
+-- ---------------------------------------------------------------------------
+do $$
+declare a uuid := pg_temp.acct('p9b'); b uuid := pg_temp.acct('p9c'); q jsonb; r jsonb; r2 jsonb; ref text;
+        s billing.subscriptions; pe timestamptz; inv billing.invoices;
+begin
+  -- Home monthly (launch R49), 1 Dec; Family yearly (launch R990) on day 10: 21 of 31 days unused
+  perform pg_temp.link(a, 'p9b', '{990010951,990010952,990010953}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', '{990010951,990010952}', pg_temp.t(0), 'AUTH_p9b');
+  q := billing.quote(a, 'family', 'year', pg_temp.t(10));
+  perform pg_temp.eq('P9b quote: 99000 less 21/31 of 4900', q->>'due_minor', '95681');
+  perform pg_temp.ok('P9b quote: yearly from today', q->>'interval' = 'year' and (q->>'starts_now')::boolean
+    and (q->>'next_amount_minor')::int = 99000 and (q->>'next_at')::timestamptz = pg_temp.t(10) + interval '1 year');
+  r := billing.upgrade(a, 'family', 0, '{990010951,990010952,990010953}', pg_temp.t(10));
+  r2 := billing.upgrade(a, 'family', 0, '{990010951,990010952,990010953}', pg_temp.t(10), p_interval => 'year');
+  perform pg_temp.ok('P9b another interval: a new bill, the monthly one void', r2->>'invoice' <> r->>'invoice'
+    and (select status from billing.invoices where id = (r->>'invoice')::uuid) = 'void');
+  perform pg_temp.eq('P9b bill = quote', r2->>'amount_minor', q->>'due_minor');
+  perform pg_temp.eq('P9b the same move again: the same bill',
+    billing.upgrade(a, 'family', 0, '{990010951,990010952,990010953}', pg_temp.t(10), p_interval => 'year')->>'invoice', r2->>'invoice');
+  perform pg_temp.eq('P9b still Home monthly until paid', pg_temp.st(a, pg_temp.t(10), 'interval'), 'month');
+  ref := billing.begin_attempt((r2->>'invoice')::uuid, 'saved_card', pg_temp.t(10))->>'reference';
+  perform pg_temp.eq('P9b paid', pg_temp.answer(ref, 'ok', pg_temp.t(10), 'AUTH_p9b')->>'action', 'applied');
+  s := pg_temp.sub(a);
+  perform pg_temp.ok('P9b Family yearly at launch, the year from the payment, billing day 11',
+    s.plan = 'family' and s.interval = 'year' and s.amount_minor = 99000 and s.offer = 'launch' and s.billing_day = 11
+    and s.period_start = pg_temp.t(10) and s.period_end = pg_temp.t(10) + interval '1 year' and s.next_price is null);
+  select * into inv from billing.invoices where id = (r2->>'invoice')::uuid;
+  perform pg_temp.ok('P9b the bill names the year it bought', inv.interval = 'year'
+    and inv.period_start = pg_temp.t(10) and inv.period_end = pg_temp.t(10) + interval '1 year');
+  perform pg_temp.eq('P9b all three plants read', pg_temp.st(a, pg_temp.t(10), 'chosen'), '3');
+
+  -- Home yearly (R490), 1 Dec; Family on the Monthly view on day 100: 265 of 365 days left
+  perform pg_temp.link(b, 'p9c', '{990010961,990010962,990010963}', pg_temp.t(0));
+  perform pg_temp.buy(b, 'home', 'year', '{990010961,990010962}', pg_temp.t(0), 'AUTH_p9c');
+  pe := (pg_temp.sub(b)).period_end;
+  q := billing.quote(b, 'family', 'month', pg_temp.t(100));
+  perform pg_temp.eq('P9b yearly to monthly: 265/365 of (99000 - 49000) now', q->>'due_minor', '36301');
+  perform pg_temp.ok('P9b yearly to monthly: R99 a month from the billing date', q->>'interval' = 'month'
+    and not (q->>'starts_now')::boolean and (q->>'next_amount_minor')::int = 9900 and (q->>'next_at')::timestamptz = pe);
+  r := billing.upgrade(b, 'family', 0, '{990010961,990010962,990010963}', pg_temp.t(100), p_interval => 'month');
+  perform pg_temp.eq('P9b yearly to monthly: bill = quote', r->>'amount_minor', q->>'due_minor');
+  ref := billing.begin_attempt((r->>'invoice')::uuid, 'saved_card', pg_temp.t(100))->>'reference';
+  perform pg_temp.eq('P9b yearly to monthly: paid', pg_temp.answer(ref, 'ok', pg_temp.t(100), 'AUTH_p9c')->>'action', 'applied');
+  s := pg_temp.sub(b);
+  perform pg_temp.ok('P9b Family yearly now, the year and billing day kept', s.plan = 'family' and s.interval = 'year'
+    and s.amount_minor = 99000 and s.period_end = pe and s.billing_day = 1);
+  r := billing.account_state(b, pg_temp.t(100));
+  perform pg_temp.ok('P9b monthly booked for the billing date', r->>'next_interval' = 'month'
+    and (r->>'next_amount_minor')::int = 9900 and r->>'next_plan' = 'family');
+
+  perform pg_temp.fails('P9b a made-up interval refused',
+    format('select billing.upgrade(%L, ''family'', 0, ''{990010951}'', %L, p_interval => ''week'')', a, pg_temp.t(20)), 'monthly or yearly');
+  perform pg_temp.ok('P9b billing_v2 passes the interval to upgrade and downgrade',
+    (select count(*) = 2 from regexp_matches(pg_get_functiondef('public.billing_v2(text, jsonb)'::regprocedure),
+                                             'p_interval => p_args->>''interval''', 'g')));
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- P10 downgrade needs the plants to drop; interval switch at the next billing date;
 --     the offer stays on both
 -- ---------------------------------------------------------------------------
@@ -1091,6 +1152,23 @@ begin
   perform billing.switch_interval(a, 'month', pe + interval '1 day');
   r := billing.switch_interval(a, 'year', pe + interval '1 day');
   perform pg_temp.ok('P10 switching back clears the booking', (pg_temp.sub(a)).next_price is null);
+end $$;
+
+-- P10b a smaller plan on the other interval: both booked for the billing date in one call (SOLAR-675)
+do $$
+declare a uuid := pg_temp.acct('p10b'); r jsonb;
+begin
+  perform pg_temp.link(a, 'p10b', '{990011051,990011052,990011053}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'family', 'month', '{990011051,990011052,990011053}', pg_temp.t(0), 'AUTH_p10b');
+  r := billing.quote(a, 'home', 'year', pg_temp.t(5));
+  perform pg_temp.ok('P10b quote: Home yearly from the billing date, nothing now', r->>'kind' = 'downgrade'
+    and r->>'interval' = 'year' and (r->>'next_amount_minor')::int = 49000 and (r->>'due_minor')::int = 0);
+  r := billing.downgrade(a, 'home', 0, '{990011053}', pg_temp.t(5), p_interval => 'year');
+  perform pg_temp.ok('P10b Home yearly booked', r->>'next_plan' = 'home' and r->>'next_interval' = 'year'
+    and (r->>'next_amount_minor')::int = 49000 and r->>'plan' = 'family' and r->>'interval' = 'month');
+  -- the same plan as now with an interval: only the interval stays booked
+  r := billing.downgrade(a, 'family', null, '{}', pg_temp.t(6), p_interval => 'year');
+  perform pg_temp.ok('P10b undo keeps the yearly switch', r->>'next_plan' = 'family' and r->>'next_interval' = 'year');
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -3674,6 +3752,34 @@ begin
   perform pg_temp.eq('R3 the last try failed and its email went: not sent', pg_temp.rem(a, last + interval '3 hours'), 'payment email sent');
   perform pg_temp.eq('R3 after the cutoff: never', pg_temp.rem(a, pg_temp.cut(pe) + interval '1 minute'), 'not past due');
 exception when others then perform pg_temp.ok('R3 runs', false, sqlerrm);
+end $$;
+
+-- Z11 receipts of a move with an interval (SOLAR-675): monthly to yearly says the year it
+--     bought; yearly to monthly names the monthly amount as the next payment. Last, as it
+--     takes the whole outbox.
+do $$
+declare a uuid := pg_temp.acct('z11'); b uuid := pg_temp.acct('z11b'); r jsonb; ref text; x jsonb;
+begin
+  perform pg_temp.link(a, 'z11', '{990141101,990141102,990141103}', pg_temp.t(0));
+  perform pg_temp.buy(a, 'home', 'month', '{990141101,990141102}', pg_temp.t(0), 'AUTH_z11');
+  r := billing.upgrade(a, 'family', 0, '{990141101,990141102,990141103}', pg_temp.t(10), p_interval => 'year');
+  ref := billing.begin_attempt((r->>'invoice')::uuid, 'saved_card', pg_temp.t(10))->>'reference';
+  perform pg_temp.answer(ref, 'ok', pg_temp.t(10), 'AUTH_z11');
+  select e into x from jsonb_array_elements(billing.outbox_take(5000, pg_temp.t(10.01))) e
+   where e->>'key' = 'receipt' and e->'bill'->>'kind' = 'upgrade' and e->>'user' = (select user_id::text from billing.accounts where id = a);
+  perform pg_temp.ok('Z11 monthly to yearly receipt: a new year, R990 next', (x->'bill'->>'starts_now')::boolean
+    and (x->'bill'->>'next_amount_minor')::int = 99000 and (x->'bill'->>'period_start')::timestamptz = pg_temp.t(10),
+    coalesce(x->>'bill', 'none'));
+  perform pg_temp.link(b, 'z11b', '{990141111,990141112,990141113}', pg_temp.t(0));
+  perform pg_temp.buy(b, 'home', 'year', '{990141111,990141112}', pg_temp.t(0), 'AUTH_z11b');
+  r := billing.upgrade(b, 'family', 0, '{990141111,990141112,990141113}', pg_temp.t(100), p_interval => 'month');
+  ref := billing.begin_attempt((r->>'invoice')::uuid, 'saved_card', pg_temp.t(100))->>'reference';
+  perform pg_temp.answer(ref, 'ok', pg_temp.t(100), 'AUTH_z11b');
+  select e into x from jsonb_array_elements(billing.outbox_take(5000, pg_temp.t(100.01))) e
+   where e->>'key' = 'receipt' and e->'bill'->>'kind' = 'upgrade' and e->>'user' = (select user_id::text from billing.accounts where id = b);
+  perform pg_temp.ok('Z11 yearly to monthly receipt: the days left, R99 next', not (x->'bill'->>'starts_now')::boolean
+    and (x->'bill'->>'next_amount_minor')::int = 9900, coalesce(x->>'bill', 'none'));
+exception when others then perform pg_temp.ok('Z11 runs', false, sqlerrm);
 end $$;
 
 -- ---------------------------------------------------------------------------
