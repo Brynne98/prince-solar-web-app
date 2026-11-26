@@ -13,8 +13,8 @@
 -- called here where pg_cron is on (production: the same 17 jobs, updated in place by name),
 -- and by the local staging setup. A cron change edits it and calls it from a migration.
 --
--- Release order: the 'functions_url' secret must exist before this lands, or every call_fn
--- job fails until it does. The release workflow sets it first.
+-- Release order: the 'functions_url' secret must exist before this lands. Where pg_cron is on,
+-- the migration raises without it and rolls back. The release workflow sets it first.
 -- ============================================================================
 
 create or replace function private.functions_url()
@@ -150,6 +150,10 @@ create or replace function private.schedule_jobs()
 as $function$
 declare j record;
 begin
+  -- pg_cron keys a job by name and user: run as anyone else, every job would be made twice
+  if current_user <> 'postgres' then
+    raise exception 'run private.schedule_jobs() as postgres, not %', current_user using errcode = '42501';
+  end if;
   for j in select * from (values
     ('agg-minute-rollup',    '40 4 * * *',         $c$select private.agg_minute_rollup(31)$c$),
     ('billing-delete',       '*/5 * * * *',        $c$select billing.delete_due()$c$),
@@ -177,6 +181,8 @@ revoke all on function private.schedule_jobs() from public, anon, authenticated;
 do $$
 begin
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    -- a database that runs jobs must know where its functions are: no secret, no migration
+    perform private.functions_url();
     perform private.schedule_jobs();
   end if;
 end $$;

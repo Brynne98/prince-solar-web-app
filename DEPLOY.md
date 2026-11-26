@@ -5,9 +5,10 @@ F3). It is started by hand, and only on Brynne's say-so. It takes one commit thr
 each waiting for the one before and stopping on red:
 
 1. **Tests**: everything `.github/workflows/test.yml` runs on every push.
-2. **Database**: the `functions_url` Vault secret if missing, `supabase db push`, then every live
-   function compared with its file (`node scripts/db-files.mjs --live`).
-3. **Functions**: `supabase functions deploy` for all of them; unchanged ones are skipped.
+2. **Database**: the `functions_url` Vault secret if missing, then `supabase db push`. Runs only
+   for a release started on `main`.
+3. **Functions**: `supabase functions deploy` for all of them (unchanged ones are skipped), then
+   every live database function compared with its file (`node scripts/db-files.mjs --live`).
 4. **Frontend**: `npm ci && npm run build` with source maps, the maps sent to PostHog and
    deleted, `public/` uploaded to Cloudflare Pages, then the live `config.js` must show the
    version asked for and `/build/*.js.map` must answer 404 (F19).
@@ -47,7 +48,7 @@ GitHub > Actions > Release > Run workflow, branch `main`, version `v1.2.3`. Bryn
 The `production` environment holds `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`,
 `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `POSTHOG_CLI_TOKEN` (a PostHog personal API key
 that can write error tracking) and the variables `SUPABASE_PROJECT_REF` and
-`POSTHOG_CLI_PROJECT_ID`, with Brynne as required reviewer.
+`POSTHOG_CLI_PROJECT_ID`, with Brynne as required reviewer. The three production stages each ask for approval: approve them one after another, since the database stays ahead of the functions while one waits.
 
 **Cloudflare does not build on push** (F2): in the Pages project (Settings > Builds > Branch
 control), automatic production deployments are off, so a red push never reaches the site. Only

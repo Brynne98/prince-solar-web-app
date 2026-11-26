@@ -5,6 +5,10 @@ CREATE OR REPLACE FUNCTION private.schedule_jobs()
 AS $function$
 declare j record;
 begin
+  -- pg_cron keys a job by name and user: run as anyone else, every job would be made twice
+  if current_user <> 'postgres' then
+    raise exception 'run private.schedule_jobs() as postgres, not %', current_user using errcode = '42501';
+  end if;
   for j in select * from (values
     ('agg-minute-rollup',    '40 4 * * *',         $c$select private.agg_minute_rollup(31)$c$),
     ('billing-delete',       '*/5 * * * *',        $c$select billing.delete_due()$c$),

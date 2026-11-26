@@ -55,7 +55,7 @@ for (const f of fns) {
   want.set(rel, f.def.trimEnd() + ';\n');
 }
 const have = new Map();
-for (const s of fs.existsSync(DIR) ? fs.readdirSync(DIR) : [])
+for (const s of fs.existsSync(DIR) ? fs.readdirSync(DIR).filter((d) => fs.statSync(path.join(DIR, d)).isDirectory()) : [])
   for (const f of fs.readdirSync(path.join(DIR, s)).filter((f) => f.endsWith('.sql')))
     have.set(`${s}/${f}`, fs.readFileSync(path.join(DIR, s, f), 'utf8'));
 

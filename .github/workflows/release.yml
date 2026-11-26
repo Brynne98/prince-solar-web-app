@@ -32,6 +32,8 @@ jobs:
 
   database:
     needs: tests
+    # production takes main only: a branch's migrations would sit live with no file on main
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 20
@@ -60,10 +62,6 @@ jobs:
               where not exists (select 1 from vault.secrets where name = 'functions_url')"
       - name: Migrations
         run: supabase db push --remote
-      - name: Live functions match their files
-        env:
-          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
-        run: node scripts/db-files.mjs --live
 
   functions:
     needs: database
@@ -72,6 +70,7 @@ jobs:
     timeout-minutes: 20
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       REF: ${{ vars.SUPABASE_PROJECT_REF }}
       SUPABASE_YES: '1'
     steps:
@@ -83,6 +82,12 @@ jobs:
           version: 3.3.0
       - name: Deploy every function (unchanged ones are skipped)
         run: supabase functions deploy --remote="$REF" --use-api --jobs 4
+      # After the functions, so old drift found here holds back only the frontend, which works
+      # with the new backend; the database and functions are already in step.
+      - name: Live database functions match their files
+        env:
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: node scripts/db-files.mjs --live
 
   frontend:
     needs: functions
@@ -101,7 +106,9 @@ jobs:
         env:
           SOURCEMAPS: '1'
       # Source maps go to PostHog only, so its error stacks show the source; the site serves none (F19).
-      - name: Source maps to PostHog, then out of public/
+      - name: Source maps to PostHog
+        # a PostHog outage must not hold back a frontend whose backend is already live
+        continue-on-error: true
         env:
           POSTHOG_CLI_API_KEY: ${{ secrets.POSTHOG_CLI_TOKEN }}
           POSTHOG_CLI_PROJECT_ID: ${{ vars.POSTHOG_CLI_PROJECT_ID }}
@@ -110,6 +117,8 @@ jobs:
           ph="npx -y @posthog/cli@0.19.4 --host https://eu.posthog.com sourcemap"
           $ph inject -d public/build --release-name prince-solar-hub --release-version "$VERSION"
           $ph upload -d public/build --release-name prince-solar-hub --release-version "$VERSION" --delete-after
+      - name: No source map left in public/
+        run: |
           find public -name '*.map' -delete
           if [ -n "$(find public -name '*.map')" ]; then echo "::error::source maps left in public/"; exit 1; fi
       - name: Upload public/ to Cloudflare Pages
